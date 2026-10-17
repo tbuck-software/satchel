@@ -38,7 +38,7 @@ postroom-imap = { git = "https://github.com/tbuck-software/postroom.git", rev = 
 # binary to shell out to, and vendoring pins the library so the crypto does not
 # change with whatever OpenSSL a desktop happens to have installed. This does
 # not touch TLS — reqwest, sqlx and lettre stay rustls-only.
-openssl = { version = "=0.10.73", features = ["vendored"] }
+openssl = { version = "=0.10.81", features = ["vendored"] }
 pgp = "0.20"
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
