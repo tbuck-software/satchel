@@ -62,7 +62,7 @@ hickory-resolver = "0.26"
 # to `satchel-core` with the modules that use them.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 wasmtime = { version = "36.0.18", features = ["component-model"] }
-wasmtime-wasi = "36.0.18"
+wasmtime-wasi = "44.0.3"
 tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-autostart = "2"
 # Releases use raw NSIS/AppImage payloads. Legacy ZIP support adds an unused,
