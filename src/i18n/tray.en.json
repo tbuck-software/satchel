@@ -1,0 +1,60 @@
+{
+  "backend": {
+    "errors": {
+      "calendarPersistenceFailed": "Calendar data is currently unavailable. Please try again.",
+      "trayDestinationInvalid": "This tray destination is not available.",
+      "trayMessageNotFound": "This email is no longer available.",
+      "trayThreadInvalid": "This tray email reference is invalid.",
+      "unexpected": "An unexpected backend error occurred."
+    }
+  },
+  "common": {
+    "retry": "Try again",
+    "today": "Today",
+    "tomorrow": "Tomorrow"
+  },
+  "tray": {
+    "actionFailed": "Action failed: {detail}",
+    "allClear": {
+      "description": "Nothing new has arrived since you last looked.",
+      "title": "All clear"
+    },
+    "allDay": "All day",
+    "briefing": "Satchel briefing",
+    "calendar": "Calendar",
+    "calendarSettings": "Calendar settings",
+    "demo": {
+      "projectMeeting": "Project meeting",
+      "releaseApproval": "Sign-off for the next Satchel release",
+      "workshopNotes": "Notes from the customer workshop"
+    },
+    "event": {
+      "inDays": "in {count} days",
+      "inHours": "in {count} hrs",
+      "inMinutes": "in {count} min",
+      "runningHours": "Running · {count} hrs left",
+      "runningMinutes": "Running · {count} min left",
+      "runningUntil": "Running · ends {day}",
+      "tomorrow": "tomorrow"
+    },
+    "inbox": "Inbox",
+    "loading": "Loading the briefing",
+    "markDone": "Mark as done",
+    "newMail": "Just arrived",
+    "newMessage": "New message",
+    "noEvents": "No upcoming events found.",
+    "noSubject": "(no subject)",
+    "openApp": "Open Satchel",
+    "read": "Read",
+    "time": {
+      "hoursAgo": "{count} hrs ago",
+      "justNow": "just now",
+      "minutesAgo": "{count} min ago"
+    },
+    "unavailable": "Briefing unavailable",
+    "unknownSender": "Unknown sender",
+    "unread": "Unread",
+    "upNext": "Up next",
+    "waitForReply": "Wait for a reply"
+  }
+}

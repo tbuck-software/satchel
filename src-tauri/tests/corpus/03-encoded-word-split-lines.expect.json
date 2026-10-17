@@ -1,0 +1,10 @@
+{
+  "subject": "Zusammenfassung der Maßnahmen zur Qualitätssicherung im März",
+  "charset": "utf-8",
+  "body_contains": [
+    "Maßnahmen",
+    "Qualitätssicherung",
+    "Prüfprotokolle"
+  ],
+  "allow_replacement": false
+}

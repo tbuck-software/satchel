@@ -1,0 +1,22 @@
+[net]
+git-fetch-with-cli = true
+
+# Android 15 and newer run with 16 KB memory pages. A shared library whose LOAD
+# segments are aligned to the old 4 KB page size cannot be mapped there, and the
+# OS says so on every launch ("Diese App ist nicht mit 16 KB kompatibel") — Play
+# Store submissions are rejected outright.
+#
+# The NDK aligns its own output, but the Rust linker invocation needs telling.
+# Verify with:
+#   llvm-readelf -l libsatchel_lib.so | grep LOAD    # alignment must read 0x4000
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.armv7-linux-androideabi]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.i686-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]

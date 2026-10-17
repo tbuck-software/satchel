@@ -1,0 +1,7 @@
+packages:
+  - "."
+
+# Forward-compatible with pnpm 10's build-script approval; esbuild is the one
+# dependency that ships a postinstall we actually need.
+onlyBuiltDependencies:
+  - esbuild

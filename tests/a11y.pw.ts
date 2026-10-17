@@ -1,0 +1,134 @@
+import { expect, test, type Page } from './mock-contract.fixture';
+
+async function openInbox(page: Page) {
+  await page.goto('/');
+  await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();
+}
+
+async function switchToListMode(page: Page) {
+  await page.getByRole('button', { name: 'View' }).click();
+  await page.getByRole('menuitemradio', { name: 'List', exact: true }).click();
+}
+
+/**
+ * Elements inside a listbox that are neither an option nor inside one. A
+ * listbox owns options only; anything else is flattened or skipped by screen
+ * readers.
+ */
+function listboxStrays(page: Page) {
+  return page.evaluate(() => Array.from(document.querySelectorAll('[role="listbox"]')).flatMap((box) =>
+    Array.from(box.querySelectorAll('*'))
+      .filter((node) => {
+        const role = node.getAttribute('role');
+        if (role === 'option' || role === 'presentation' || node.closest('[role="option"]')) return false;
+        return role !== null || ['A', 'ARTICLE', 'BUTTON', 'H2', 'H3', 'H4', 'SECTION'].includes(node.tagName);
+      })
+      .map((node) => `${box.getAttribute('aria-label')}: ${node.tagName.toLowerCase()}${node.getAttribute('role') ? `[role=${node.getAttribute('role')}]` : ''}`)));
+}
+
+test.describe('smart view', () => {
+  test.beforeEach(async ({ page }) => {
+    await openInbox(page);
+  });
+
+  test('keeps cards, headers and buttons out of every listbox', async ({ page }) => {
+    const list = page.getByRole('group', { name: 'Message list' });
+    await expect(list.getByRole('option').first()).toBeVisible();
+
+    expect(await listboxStrays(page)).toEqual([]);
+  });
+
+  test('exposes the priority rows as their own listbox', async ({ page }) => {
+    const priority = page
+      .getByRole('group', { name: 'Message list' })
+      .getByRole('listbox', { name: 'Priority' });
+
+    await expect(priority).toHaveAttribute('aria-multiselectable', 'true');
+    await expect(priority.getByRole('option').first()).toBeVisible();
+    // The card header stays reachable as a button beside the listbox.
+    await expect(page.getByRole('button', { name: /^Priority \d+$/ })).toBeVisible();
+  });
+});
+
+/**
+ * The thread list is where the app is used 90 % of the time. It used to expose
+ * every row as `role="button" tabindex="0"`, which made tabbing past the list
+ * impossible and left read/unread encoded purely in font weight.
+ */
+test.describe('list view', () => {
+  test.beforeEach(async ({ page }) => {
+    await openInbox(page);
+    await switchToListMode(page);
+  });
+
+  test('exposes the thread rows as listboxes', async ({ page }) => {
+    const list = page.getByRole('group', { name: 'Message list' });
+    const firstBox = list.getByRole('listbox').first();
+    await expect(firstBox).toBeVisible();
+    await expect(firstBox).toHaveAttribute('aria-multiselectable', 'true');
+    await expect(firstBox.getByRole('option').first()).toBeVisible();
+    expect(await listboxStrays(page)).toEqual([]);
+  });
+
+  test('announces read state, sender and subject per row', async ({ page }) => {
+    const firstRow = page.getByRole('group', { name: 'Message list' }).getByRole('option').first();
+    const label = await firstRow.getAttribute('aria-label');
+
+    expect(label).toBeTruthy();
+    // Read state must be in the accessible name, not only in the styling.
+    expect(label).toMatch(/^(Unread|Read), /);
+  });
+
+  test('keeps exactly one row in the tab order (roving tabindex)', async ({ page }) => {
+    const list = page.getByRole('group', { name: 'Message list' });
+    await expect(list.getByRole('option')).not.toHaveCount(0);
+
+    const tabbable = list.locator('[role="option"][tabindex="0"]');
+    await expect(tabbable).toHaveCount(1);
+  });
+
+  test('reports each row position against its whole listbox, not the rendered window', async ({ page }) => {
+    const box = page.getByRole('group', { name: 'Message list' }).getByRole('listbox').first();
+    const firstRow = box.getByRole('option').first();
+
+    const posInSet = await firstRow.getAttribute('aria-posinset');
+    const setSize = await firstRow.getAttribute('aria-setsize');
+    const renderedCount = await box.getByRole('option').count();
+
+    expect(Number(posInSet)).toBeGreaterThan(0);
+    expect(Number(setSize)).toBeGreaterThanOrEqual(renderedCount);
+  });
+
+  test('marks selection with aria-selected rather than colour alone', async ({ page }) => {
+    const firstRow = page.getByRole('group', { name: 'Message list' }).getByRole('option').first();
+    await firstRow.click();
+    await expect(firstRow).toHaveAttribute('aria-selected', 'true');
+  });
+});
+
+/**
+ * Icon buttons are 26-38px. On a touch screen the hit area grows to 44px
+ * around the icon without moving anything.
+ */
+test.describe('touch targets', () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+
+  test('lets a finger hit the calendar icon buttons 21px off centre', async ({ page }) => {
+    await page.goto('/calendar');
+    const buttons = ['Menu', 'Back (←)', 'Forward (→)'].map((name) => page.getByRole('button', { name, exact: true }));
+    for (const button of buttons) await expect(button).toBeVisible();
+
+    for (const button of buttons) {
+      const box = await button.boundingBox();
+      expect(box!.width).toBeLessThan(44);
+      const hits = await button.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        return [[0, -21], [0, 21], [-21, 0], [21, 0]].map(([dx, dy]) =>
+          document.elementFromPoint(x + dx!, y + dy!)?.closest('.icon-button') === element);
+      });
+      expect(hits).toEqual([true, true, true, true]);
+    }
+  });
+});

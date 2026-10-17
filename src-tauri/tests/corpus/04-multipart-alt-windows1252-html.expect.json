@@ -1,0 +1,10 @@
+{
+  "subject": "Rechnung 2025-0042 – fällig 31. März",
+  "body_contains": [
+    "Fällig: 31. März 2025",
+    "030 / 123 456",
+    "1.249,00 €",
+    "030 – 123 456"
+  ],
+  "allow_replacement": false
+}

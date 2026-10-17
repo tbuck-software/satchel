@@ -1,0 +1,10 @@
+{
+  "subject": "Wöchentliches Update",
+  "charset": "utf-8",
+  "body_contains": [
+    "wöchentliche Update",
+    "Änderungen",
+    "Grüße"
+  ],
+  "allow_replacement": false
+}

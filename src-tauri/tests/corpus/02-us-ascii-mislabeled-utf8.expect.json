@@ -1,0 +1,9 @@
+{
+  "charset": "us-ascii",
+  "body_contains": [
+    "spätestens",
+    "früh",
+    "Grüße"
+  ],
+  "allow_replacement": false
+}

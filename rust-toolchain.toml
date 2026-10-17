@@ -1,0 +1,15 @@
+# Pins the Rust toolchain for every machine that checks this repo out, CI
+# included.
+#
+# Without this, CI resolved "stable" at run time while local installs lagged
+# behind, so `clippy -D warnings` passed locally and failed in CI on lints that
+# did not exist in the older version — with no code change to explain it.
+#
+# Raising this is a deliberate commit: bump the channel, run `make check`, and
+# fix whatever the newer clippy has learned to complain about.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
+# The WASM plugin components are built from this workspace, and the runtime
+# tests refuse to run without them.
+targets = ["wasm32-wasip2"]

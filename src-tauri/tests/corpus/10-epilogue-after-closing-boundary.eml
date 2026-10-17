@@ -1,0 +1,21 @@
+From: Liste <liste@example.com>
+To: empfang@example.de
+Subject: Nachwort nach der Schlussgrenze
+Date: Tue, 04 Mar 2025 12:00:00 +0100
+Message-ID: <corpus-10-epilogue@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="=_e_1"
+
+--=_e_1
+Content-Type: text/plain; charset=UTF-8
+
+-- 
+Im Zitat stand: --=_e_1-- und danach ging es weiter.
+
+--=_e_1
+Content-Type: application/octet-stream; name="anhang.bin"
+Content-Disposition: attachment; filename="anhang.bin"
+
+ANHANGSINHALT
+--=_e_1--
+Nachwort, das kein Teil der Nachricht ist.

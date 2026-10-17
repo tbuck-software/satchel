@@ -1,0 +1,25 @@
+From: Buchhaltung <rechnung@example.de>
+To: kunde@example.de
+Subject: =?UTF-8?B?UmVjaG51bmcgMjAyNS0wMDQyIOKAkyBmw6RsbGlnIDMxLiBNw6Ryeg==?=
+Date: Fri, 07 Mar 2025 11:45:20 +0100
+Message-ID: <corpus-04-multipart-alt@example.de>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="----=_Part_4711_corpus"
+
+------=_Part_4711_corpus
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Rechnung 2025-0042
+
+Betrag: 1.249,00 EUR
+FÃ¤llig: 31. MÃ¤rz 2025
+
+Bei RÃ¼ckfragen erreichen Sie uns unter 030 / 123 456.
+
+------=_Part_4711_corpus
+Content-Type: text/html; charset=windows-1252
+Content-Transfer-Encoding: 8bit
+
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1252"></head><body><h1>Rechnung 2025-0042</h1><p>Betrag: <strong>1.249,00 €</strong></p><p>Fällig: 31. März 2025</p><p>Bei Rückfragen erreichen Sie uns unter 030 – 123 456.</p></body></html>
+------=_Part_4711_corpus--

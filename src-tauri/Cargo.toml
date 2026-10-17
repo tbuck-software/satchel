@@ -1,0 +1,100 @@
+[package]
+license = "MIT"
+publish = false
+name = "satchel"
+version = "0.1.0"
+description = "Satchel desktop client"
+authors = ["Satchel"]
+edition = "2021"
+default-run = "satchel"
+
+[lib]
+name = "satchel_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# DTO exports only; normal builds carry no generator.
+ipc-types = ["dep:ts-rs", "satchel-core/ipc-types"]
+
+[dependencies]
+async-trait = "0.1"
+satchel-core = { path = "../crates/satchel-core" }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
+futures = "0.3"
+icalendar = "0.16"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp", "ico"] }
+postroom = { git = "https://github.com/tbuck-software/postroom.git", rev = "0a670a2b709d3ae2ed62a1ba2a3090b2a0748b58" }
+md-5 = "0.10"
+msg_parser = "0.3.6"
+rand = "0.8"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+ring = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hmac = "0.12"
+sha2 = "0.10"
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls"] }
+tauri = { version = "2", features = [] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "chrono"] }
+tracing-appender = "0.2"
+tempfile = "3"
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time", "net", "io-util"] }
+ts-rs = { version = "=12.0.1", optional = true, features = ["serde-json-impl", "chrono-impl"] }
+toml = "0.8"
+uuid = { version = "1", features = ["v4", "serde"] }
+webbrowser = "1.2.2"
+scraper = "0.27.0"
+dns-lookup = "3.0.1"
+hickory-resolver = "0.26"
+
+# Desktop-only. The tray, autostart and single-instance plugins have no mobile
+# implementation, and the WASM plugin runtime would drag wasmtime onto a phone
+# for a feature the mobile UI does not expose. TLS roots and the keyring moved
+# to `satchel-core` with the modules that use them.
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+wasmtime = { version = "36.0.18", features = ["component-model"] }
+wasmtime-wasi = "36.0.18"
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-autostart = "2"
+# Releases use raw NSIS/AppImage payloads. Legacy ZIP support adds an unused,
+# vulnerable ZIP extractor; macOS tar support is unconditional in the plugin.
+tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls"] }
+tauri-plugin-single-instance = "2"
+
+# The Android side of `rustls-platform-verifier` needs a JNI init call from the
+# notification worker; the trust store itself is configured in `satchel-core`.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+rustls-platform-verifier = "=0.6.2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.21", default-features = false }
+ndk-context = "0.1"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = { version = "0.6.3", features = ["exception"] }
+objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSResponder"] }
+objc2-contacts = "0.3.2"
+objc2-foundation = "0.3.2"
+objc2-user-notifications = "0.3.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Globalization"] }
+
+[dev-dependencies]
+satchel-core = { path = "../crates/satchel-core", features = ["test-support"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

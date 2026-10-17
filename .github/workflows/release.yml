@@ -1,0 +1,254 @@
+name: Desktop releases
+
+on:
+  schedule:
+    - cron: '14 3 * * *'
+    - cron: '14 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel built from main
+        type: choice
+        options: [nightly, stable]
+        default: nightly
+      force:
+        description: Build even when main has not changed
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 2
+
+jobs:
+  prepare:
+    if: github.repository == 'tbuck-software/satchel' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Prepare release version and source
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHANNEL: ${{ github.event.schedule == '14 6 * * 1' && 'stable' || inputs.channel || 'nightly' }}
+          RELEASE_FORCE: ${{ inputs.force }}
+        run: node scripts/prepare-release.mjs
+      - uses: actions/upload-artifact@v4
+        if: steps.plan.outputs.build == 'true'
+        with:
+          name: release-plan
+          path: output/release-plan.json
+          retention-days: 3
+
+  secrets:
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
+    uses: ./.github/workflows/secret-scan.yml
+
+  verify:
+    needs: [prepare, secrets]
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install Linux prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev libdbus-1-dev gnupg
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          cache: false
+          build-warnings: ''
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium webkit
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2
+      - run: pnpm run plugins:build
+      - name: Check the complete source before packaging
+        env:
+          SATCHEL_REQUIRE_PLUGIN_ARTIFACTS: '1'
+        run: |
+          make check
+          pnpm audit --audit-level=moderate
+          python3 scripts/check-rust-audit-exceptions.py
+          cargo audit --file Cargo.lock
+          cargo deny --locked check licenses sources
+          cargo fmt --all --check
+          cargo clippy -p satchel -p satchel-core --all-targets -- -D warnings
+
+  build:
+    needs: [prepare, verify]
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            bundles: app,dmg
+          - target: x86_64-apple-darwin
+            runner: macos-15
+            bundles: app,dmg
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            bundles: appimage
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            bundles: nsis
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+          path: output
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install Linux prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev libdbus-1-dev patchelf
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          cache: false
+          build-warnings: ''
+          target: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - run: pnpm install --frozen-lockfile
+      - name: Require updater signing key
+        shell: bash
+        env:
+          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: test "$HAS_KEY" = true
+      - name: Configure release and notices
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          node scripts/configure-release.mjs
+          node scripts/third-party-notices.mjs
+          node -e 'const fs = require("node:fs"); const p = JSON.parse(fs.readFileSync("output/release-plan.json", "utf8")); fs.appendFileSync(process.env.GITHUB_ENV, `SATCHEL_RELEASE_CHANNEL=${p.channel}\n`);'
+      - name: Import Apple distribution certificate
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          HAS_NOTARIZATION: ${{ secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            if [ "$REPOSITORY_PRIVATE" != true ]; then
+              echo '::error::Public macOS releases require Developer ID signing and notarization.'
+              exit 1
+            fi
+            echo 'Private build: using ad-hoc macOS signing and the independent updater signature.'
+            exit 0
+          fi
+          test -n "$APPLE_CERTIFICATE_PASSWORD"
+          test "$HAS_NOTARIZATION" = true
+          umask 077
+          cert="$RUNNER_TEMP/satchel-distribution.p12"
+          keychain="$RUNNER_TEMP/satchel-release.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$cert"
+          keychain_password="$(openssl rand -hex 32)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$cert" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+      - run: pnpm run plugins:build
+      - name: Build signed desktop artifacts
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          SATCHEL_GMAIL_CLIENT_ID: ${{ vars.SATCHEL_GMAIL_CLIENT_ID }}
+          SATCHEL_GMAIL_REDIRECT_URI: ${{ vars.SATCHEL_GMAIL_REDIRECT_URI }}
+          SATCHEL_OUTLOOK_CLIENT_ID: ${{ vars.SATCHEL_OUTLOOK_CLIENT_ID }}
+          SATCHEL_OUTLOOK_REDIRECT_URI: ${{ vars.SATCHEL_OUTLOOK_REDIRECT_URI }}
+        run: |
+          for variable in APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_SIGNING_IDENTITY; do
+            if [ -z "${!variable}" ]; then unset "$variable"; fi
+          done
+          pnpm exec tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config output/release-config.json
+      - run: node scripts/collect-release.mjs ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}
+          path: output/release-artifacts/${{ matrix.target }}/
+          retention-days: 3
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, verify, build]
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+          path: output
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: output/release-assets
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/build-release-installer.mjs
+      - name: Publish only the complete verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/publish-release.mjs

@@ -1,0 +1,89 @@
+<script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
+import AppButton from '@/components/ui/AppButton.vue';
+
+/*
+ * The foot of the reader: who you would be answering, as whom, and one way
+ * in. Not a composer — drafts, signatures, attachments, scheduling and send
+ * live in ComposerHost, and a second text field here would either duplicate
+ * that or quietly lose what you typed into it on the way over. The bar shows
+ * the two things you would otherwise open the composer to find out.
+ */
+defineProps<{
+  recipient: string;
+  identity: string;
+  identityColor?: string | null;
+}>();
+
+defineEmits<{
+  reply: [];
+}>();
+</script>
+
+<template>
+  <div class="reply-bar">
+    <CardButton class="reply-bar__field" @click="$emit('reply')">
+      <span class="reply-bar__placeholder">{{ $t('thread.reply.to', { name: recipient }) }}</span>
+      <span class="reply-bar__identity">
+        <span
+          v-if="identityColor"
+          class="reply-bar__dot"
+          :style="{ background: identityColor }"
+          aria-hidden="true"
+        />
+        {{ $t('thread.reply.as', { identity }) }}
+      </span>
+    </CardButton>
+    <AppButton variant="primary" size="sm" @click="$emit('reply')">
+      <template #icon>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 3L1 8l5 5" />
+          <path d="M1 8h9a5 5 0 0 1 5 5" />
+        </svg>
+      </template>
+      {{ $t('common.reply') }}
+    </AppButton>
+  </div>
+</template>
+
+<style scoped>
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.reply-bar__field {
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: var(--space-md);
+}
+
+.reply-bar__placeholder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-md);
+}
+
+.reply-bar__identity {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-2xs);
+}
+
+.reply-bar__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+}
+</style>

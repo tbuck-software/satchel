@@ -1,0 +1,26 @@
+From: Bounce Generator <mailer@example.com>
+To: empfang@example.de
+Subject: Leeres Segment im Content-Type
+Date: Tue, 04 Mar 2025 10:00:00 +0100
+Message-ID: <corpus-08-empty-segment@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; ; boundary="x"
+
+--x
+Content-Type: text/plain; charset=UTF-8
+
+Der Bericht liegt bei.
+
+--x
+Content-Type: application/octet-stream; name="erster.bin"
+Content-Disposition: attachment; filename="erster.bin"
+Content-Transfer-Encoding: base64
+
+RXJzdGVyIEFuaGFuZ0Vyc3RlciBBbmhhbmdFcnN0ZXIgQW5oYW5n
+--x
+Content-Type: application/octet-stream; name="zweiter.bin"
+Content-Disposition: attachment; filename="zweiter.bin"
+Content-Transfer-Encoding: base64
+
+WndlaXRlciBBbmhhbmdad2VpdGVyIEFuaGFuZw==
+--x--

@@ -1,0 +1,112 @@
+@layer base {
+  :root {
+    /*
+     * One source of truth for hardware cutouts and system UI. `viewport-fit`
+     * in index.html lets iOS and edge-to-edge Android populate these values;
+     * desktop and an ordinary browser resolve them to zero.
+     */
+    --satchel-safe-area-top: env(safe-area-inset-top, 0px);
+    --satchel-safe-area-right: env(safe-area-inset-right, 0px);
+    --satchel-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --satchel-safe-area-left: env(safe-area-inset-left, 0px);
+    --satchel-window-chrome-height: 38px;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html,
+  body,
+  #app {
+    width: 100%;
+    height: 100%;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: var(--font-size-md);
+    color: var(--text-primary);
+    background: var(--bg-base);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* These regions exist only inside a native desktop window. Responsive web
+     previews and mobile Tauri shells must not reserve titlebar space. */
+  html:not([data-window-chrome='true']) .desktop-window-chrome {
+    display: none !important;
+  }
+
+  /* Thin custom scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-tertiary);
+  }
+
+  /* Form resets */
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  a:focus-visible {
+    outline: var(--border-focus);
+    outline-offset: var(--focus-outline-offset);
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--accent-primary) 30%, transparent);
+  }
+}
+
+/*
+ * The system switch, honoured once for everything.
+ *
+ * 65 files animate; 25 of them had thought to ask. Deliberately unlayered and
+ * !important so a component-local duration cannot outrank it, and deliberately
+ * 1ms rather than 0: a transition that never runs never fires `transitionend`,
+ * and several rows wait for it. The 25 local rules stay — they replace motion
+ * with something else (UndoFab turns its countdown ring into a number) instead
+ * of only shortening it, and they sit inside the same media query, so they win
+ * on specificity where they need to.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

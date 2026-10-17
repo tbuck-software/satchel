@@ -1,0 +1,17 @@
+{
+  "subject": "Nachwort nach der Schlussgrenze",
+  "body_contains": [
+    "Im Zitat stand",
+    "danach ging es weiter"
+  ],
+  "body_excludes": [
+    "Nachwort, das kein Teil"
+  ],
+  "allow_replacement": false,
+  "attachments": [
+    {
+      "filename": "anhang.bin",
+      "size": 13
+    }
+  ]
+}

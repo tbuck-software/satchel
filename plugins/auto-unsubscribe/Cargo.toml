@@ -1,0 +1,21 @@
+[package]
+license = "MIT"
+publish = false
+name = "satchel-plugin-auto-unsubscribe"
+version = "0.1.0"
+edition = "2021"
+
+[package.metadata.satchel]
+api_version = "1.0"
+capabilities = ["read_threads"]
+events = ["message.received"]
+trust = "local_unsigned"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+test = false
+doctest = false
+
+[dependencies]
+satchel-plugin-sdk = { path = "../../plugin-sdk" }
+wit-bindgen = "0.53.1"

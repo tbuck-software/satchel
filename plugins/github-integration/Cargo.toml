@@ -1,0 +1,22 @@
+[package]
+license = "MIT"
+publish = false
+name = "satchel-plugin-github-integration"
+version = "0.1.0"
+edition = "2021"
+
+[package.metadata.satchel]
+api_version = "1.0"
+capabilities = ["read_threads", "network_access"]
+events = ["thread.updated", "workflow.transitioned"]
+ui_slots = ["thread_view_panel", "assistant_context_panel"]
+trust = "local_unsigned"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+test = false
+doctest = false
+
+[dependencies]
+satchel-plugin-sdk = { path = "../../plugin-sdk" }
+wit-bindgen = "0.53.1"

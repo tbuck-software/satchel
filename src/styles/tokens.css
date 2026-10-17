@@ -1,0 +1,268 @@
+:root {
+  /*
+   * Three pane depths: warm paper in light mode, cool charcoal in dark mode.
+   * The sidebar sits back, the list steps forward, and the reader is the
+   * brightest surface. Dark neutrals have a slight blue bias, never olive.
+   */
+  --bg-base: #111214;
+  --bg-list: #17181b;
+  --bg-sidebar: #111214;
+  --bg-surface: #1c1d21;
+  --bg-raised: #24262b;
+  /* Collections have a quiet fill of their own, separate from row hover. */
+  --bg-stack: #1a1b1f;
+  --bg-stack-hover: #22242a;
+  --action-neutral: #e9edf3;
+  --action-neutral-ink: #111214;
+  --bg-overlay: #2e3137;
+  --bg-backdrop: rgba(5, 7, 11, 0.55);
+  --bg-hover: #23252a;
+  --bg-active: #213247;
+  --bg-active-hover: #2b405a;
+
+  /* A well *below* the pane: code blocks, swipe tracks, skeleton bars. Not the
+     reading canvas — that is --bg-surface, the brightest step, in both themes. */
+  --bg-inset: #0c0d0f;
+
+  /* Text */
+  --text-primary: #e9edf3;
+  --text-secondary: #a6aebc;
+  /* 4.5:1 on --bg-active and --bg-overlay too, the darkest surfaces it sits on. */
+  --text-tertiary: #939cab;
+  --text-inverse: #111214;
+
+  /* Petrol from the reference. Both fills retain contrast with white ink. */
+  --accent-primary: #277e8b;
+  --accent-green: #3fb950;
+  --accent-amber: #d29922;
+  --accent-red: #f85149;
+  --accent-purple: #a371f7;
+  --accent-cyan: #39d2c0;
+  --accent-pink: #f778ba;
+  --accent-orange: #db6d28;
+  --accent-yellow: #fbbf24;
+
+  /* Softer accents: readable as body text on a neutral surface, where the
+     saturated accent above vibrates. */
+  --accent-red-soft: #ff8b8b;
+  --accent-amber-soft: #f3bf5b;
+
+  /* Hover fills for the saturated accents. The direction is the point: a
+     component that mixed toward white got a *paler* primary button on hover in
+     the light theme, so the feedback ran backwards. Mixed here, where literals
+     belong, and overridden below for the light theme.
+
+     Danger is the exception and does not turn: --text-on-accent is white, and
+     white on a lightened #f85149 measures 2.91:1. Darkening by the same 16% in
+     both themes keeps it at 4.59:1. */
+  --accent-primary-hover: color-mix(in srgb, var(--accent-primary) 98%, white);
+  --accent-red-hover: color-mix(in srgb, var(--accent-red) 84%, black);
+
+  /* Fills that must not follow the theme. Text sitting on a saturated accent
+     stays white (dark amber-brown on amber) in both themes, and the canvas
+     behind a mail is paper — the message brings its own colours. */
+  --text-on-accent: #ffffff;
+  --text-on-amber: #17130c;
+  --email-canvas: #ffffff;
+
+  /* The image lightbox. A picture viewer is dark in both themes — that is the
+     point of it — and --bg-backdrop (35% ink in the light theme) does not
+     carry a photograph. Documented in STYLEGUIDE.md rather than left as seven
+     rgb() literals in the component. */
+  --lightbox-scrim: rgb(8 10 14 / 88%);
+  --lightbox-chrome: rgb(35 38 45 / 88%);
+  --lightbox-ink: rgb(242 244 248 / 88%);
+  --lightbox-shadow: 0 20px 70px rgb(0 0 0 / 45%);
+
+  /* Swipe-action tracks. Read underneath a moving row rather than on a pane,
+     so they keep one value across both themes. */
+  --swipe-blue: #1688ee;
+  --swipe-green: #82cc31;
+  --swipe-amber: #c98516;
+  --swipe-cyan: #188fa3;
+  --swipe-red: #dc4545;
+
+  /* Semantic workflow states */
+  --state-inbox: var(--accent-primary);
+  --state-todo: var(--accent-amber);
+  --state-waiting: var(--accent-cyan);
+  --state-done: var(--accent-green);
+  --state-snoozed: var(--accent-purple);
+
+  /* Priority */
+  --priority-high: var(--accent-red);
+  --priority-medium: var(--accent-amber);
+  --priority-low: var(--accent-primary);
+
+  /* Typography */
+  --font-sans: 'Figtree', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Fira Code', 'SF Mono', monospace;
+  --font-size-3xs: 10px;
+  --font-size-2xs: 11px;
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 15px;
+  --font-size-xl: 17px;
+  --font-size-2xl: 22px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  /* Figtree is variable. List titles and small caps labels sit between the two
+     neighbours on purpose; the step has a name so it is not reinvented as 650,
+     680 and 620 in three files. */
+  --weight-strong: 650;
+  --weight-bold: 700;
+
+  /* Spacing: a 2px grid. Named where the rung has a role, numbered (the
+     Tailwind rung) where it is the half step between two of them. */
+  --space-2xs: 2px;
+  --space-xs: 4px;
+  --space-1-5: 6px;
+  --space-sm: 8px;
+  --space-2-5: 10px;
+  --space-md: 12px;
+  --space-3-5: 14px;
+  --space-lg: 16px;
+  --space-5: 20px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+
+  /* Borders */
+  --border-color: #30333a;
+  --border-color-muted: #272a30;
+  --border-default: 1px solid var(--border-color);
+  --border-muted: 1px solid var(--border-color-muted);
+
+  /* Focus. Two shapes, no third: `--border-focus` plus `--focus-outline-offset`
+     is the ring, and `--focus-ring` is the same ring drawn as a shadow, for the
+     places where the focused element is not the painted one (a hidden input
+     next to its track) or where an outline would be clipped. Both resolve
+     through --accent-primary, which is one value in both themes. */
+  --border-focus: 2px solid var(--accent-primary);
+  --focus-outline-offset: 1px;
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 40%, transparent);
+
+  /* Radius */
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-full: 999px;
+
+  /* Shadows */
+  /* --shadow-sm carries a hairline of its own: a white sheet on pale paper is
+     only a 1.07:1 step, and the drop shadow alone leaves its top edge open. */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 0 20px rgba(39, 126, 139, 0.15);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-fast: 100ms;
+  --duration-normal: 180ms;
+  --duration-slow: 280ms;
+  /* One step past --duration-slow, for a large spatial move whose path has to
+     stay legible — docking the composer. Not a general-purpose step. */
+  --duration-spatial: 320ms;
+
+  /* Legacy compatibility */
+  --bg-primary: var(--bg-base);
+  --bg-secondary: var(--bg-surface);
+  --bg-tertiary: var(--bg-raised);
+  --bg-selected: var(--bg-active);
+  --border-subtle: var(--border-default);
+  --shadow-card: var(--shadow-md);
+  --shadow-dropdown: var(--shadow-lg);
+  --transition-fast: var(--duration-fast) var(--ease-out);
+  --transition-normal: var(--duration-normal) var(--ease-out);
+}
+
+[data-theme='light'] {
+  --bg-base: #f4f2ed;
+  --bg-list: #faf9f6;
+  --bg-sidebar: #f4f2ed;
+  --bg-surface: #ffffff;
+  --bg-raised: #ebe8e1;
+  --bg-stack: #f1eee8;
+  --bg-stack-hover: #e9e5dc;
+  --action-neutral: #1c1b19;
+  --action-neutral-ink: #ffffff;
+  --bg-overlay: #ffffff;
+  --bg-backdrop: rgba(28, 27, 25, 0.35);
+  --bg-hover: #efece6;
+  --bg-active: #dcecef;
+  --bg-active-hover: #cce2e6;
+  --bg-inset: #ebe8e1;
+
+  --text-primary: #1c1b19;
+  --text-secondary: #4f4b44;
+  /* Snippets and timestamps are text, so 4.5:1 on every surface a row can
+     take (designSystem.test.ts). The drawing's #8a857b managed 3:1. */
+  --text-tertiary: #6a655b;
+  --text-inverse: #faf9f6;
+
+  /* #e6e2db is the hairline the drawing uses, and it reads — but a card edge
+     on --bg-base measures 1.15:1 there, under the 1.2:1 the surface test
+     asks for. The visible border takes the darker step; the muted one keeps
+     the drawing's value for separators inside a pane. */
+  --border-color: #ddd8cd;
+  --border-color-muted: #e6e2db;
+
+  /* The state hues turn warm with the paper: the GitHub-bright set from the
+     dark palette sits on this page like stickers. Dark keeps its own — those
+     values carry on a near-black and were measured there. */
+  --accent-primary: #17707f;
+  --accent-green: #2f7d3b;
+  --accent-amber: #b7791f;
+  --accent-red: #c0392f;
+  --accent-purple: #7c4dab;
+  --accent-cyan: #10707c;
+  --accent-pink: #b4485d;
+  --accent-orange: #b5551d;
+  --accent-yellow: #b7791f;
+
+  /* Darkened so they still carry as text on a white pane. */
+  --accent-red-soft: #a5302a;
+  --accent-amber-soft: #7d5310;
+
+  /* Darker than the resting fill, not lighter: on a pale page a paler hover
+     reads as the button going away. */
+  --accent-primary-hover: color-mix(in srgb, var(--accent-primary) 88%, black);
+
+  /* A sheet on paper, not a card in a room: shadow plus the hairline the
+     shadow cannot draw along a top edge. All three carry the ring — a menu
+     opens over the reading canvas, which is white, and a soft drop shadow
+     alone leaves it without an edge there. */
+  --shadow-sm: 0 1px 3px rgba(28, 27, 25, 0.1), 0 0 0 1px rgba(28, 27, 25, 0.05);
+  --shadow-md: 0 8px 24px rgba(28, 27, 25, 0.1), 0 0 0 1px rgba(28, 27, 25, 0.07);
+  --shadow-lg: 0 16px 48px rgba(28, 27, 25, 0.14), 0 0 0 1px rgba(28, 27, 25, 0.08);
+  --shadow-glow: 0 0 20px rgba(18, 99, 199, 0.1);
+}
+
+/*
+ * Phone-sized type.
+ *
+ * The scale above is drawn for a pointer at desk distance: 13px body, 11px
+ * labels. Held at arm's length on a 411px-wide screen that is simply too
+ * small — both platforms put body text at 16px and neither is being generous.
+ *
+ * Lifted at the same breakpoint that splits list from detail, so a narrow
+ * window on a desktop reads like the phone rather than staying desk-sized
+ * while the layout has already changed underneath it.
+ */
+@media (max-width: 1020px) {
+  :root {
+    --font-size-3xs: 12px;
+    --font-size-2xs: 12px;
+    --font-size-xs: 13px;
+    --font-size-sm: 15px;
+    --font-size-md: 16px;
+    --font-size-lg: 17px;
+    --font-size-xl: 20px;
+    --font-size-2xl: 26px;
+  }
+}

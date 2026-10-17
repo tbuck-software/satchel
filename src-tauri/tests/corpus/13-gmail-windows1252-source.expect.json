@@ -1,0 +1,6 @@
+{
+  "subject": "Legacy charset source",
+  "body_contains": ["Freundliche Grüße", "Telefon – Büro — Ende", "Literal =DE and Ã¶"],
+  "body_excludes": ["GrÃ¼ÃŸe", "â€”"],
+  "allow_replacement": false
+}

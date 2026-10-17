@@ -1,0 +1,46 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "Least-privilege capability for Satchel mobile",
+  "windows": [
+    "main"
+  ],
+  "platforms": [
+    "android",
+    "iOS"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:event:default",
+    "notification:default",
+    "notification:allow-notify",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-remove",
+    "deep-link:default",
+    "opener:allow-open-url",
+    "allow-app-commands",
+    "fs:deny-default",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        "$APPDATA/satchel/attachments/**",
+        "$APPCACHE/satchel-transfer-*"
+      ],
+      "deny": [
+        "$APPDATA/satchel/.env",
+        "$APPDATA/satchel/pgp-master-key-v1",
+        "$APPDATA/satchel/crypto/**",
+        "$APPDATA/satchel/satchel.db*",
+        "$APPDATA/satchel/plugins/**",
+        "$APPCACHE/satchel/wasmtime/**"
+      ]
+    }
+  ]
+}

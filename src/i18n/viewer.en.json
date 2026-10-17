@@ -1,0 +1,326 @@
+{
+  "backend": {
+    "errors": {
+      "mailActionFailed": "The mail action could not be saved. Please try again.",
+      "notAMessageFile": "Only .eml and .msg files can be opened this way.",
+      "revealTargetBlocked": "This target cannot be opened in the file manager.",
+      "unexpected": "An unexpected backend error occurred."
+    }
+  },
+  "common": {
+    "cancel": "Cancel",
+    "date": "Date",
+    "from": "From",
+    "to": "To"
+  },
+  "compose": {
+    "title": {
+      "new": "New message",
+      "resend": "Send again"
+    }
+  },
+  "errors": {
+    "inlineImageUnavailable": "Image unavailable"
+  },
+  "mail": {
+    "attachment": {
+      "attachment": "Attachment",
+      "chooseFile": "Choose a file",
+      "dropHere": "Drop attachments here or",
+      "executableBody": "This is a program (.{extension}), not a document. Opening it hands it to the operating system, which will run it.",
+      "executableConfirm": "Open anyway",
+      "executableDisguisedBody": "This reads as a document but ends in .{extension}, which the operating system runs. Check the full name below before you decide.",
+      "executableTitle": "Run this attachment?",
+      "fallbackName": "Attachment",
+      "folderFailed": "Could not open the folder: {error}",
+      "inline": "Inline",
+      "insertAtCursor": "Insert image at the cursor position",
+      "loading": "Loading attachment…",
+      "moreFiles": "+ More files",
+      "openFailed": "Could not open the attachment: {error}",
+      "openInWindow": "Open in a separate window",
+      "openMessageFailed": "Could not open the message: {error}",
+      "openWithDefault": "Open with default app",
+      "openWithDefaultNamed": "Open {filename} with the default app",
+      "pdfFailed": "This PDF could not be displayed.",
+      "pdfPreview": "PDF preview",
+      "previewLabel": "Attachment preview",
+      "previewUnavailable": "No preview available for {mime}.",
+      "quickLookFailed": "Could not open Quick Look: {error}",
+      "readFailed": "“{name}” could not be read.",
+      "save": "Save attachment",
+      "saveEllipsis": "Save…",
+      "saveFailed": "Could not save the attachment: {error}",
+      "saved": "{filename} saved.",
+      "showInFolder": "Show in folder",
+      "tooLarge": "“{name}” is larger than {limit}.",
+      "totalExceeded": "Total size exceeded: “{name}” no longer fits the {limit} budget ({used} already in use).",
+      "useAsAttachment": "Send image as a regular attachment",
+      "viewInSatchel": "View in Satchel",
+      "viewInSatchelNamed": "View {filename} in Satchel"
+    },
+    "document": {
+      "frameTitle": "Message content"
+    },
+    "externalLink": {
+      "actualTarget": "Actual destination",
+      "description": "This address is outside Satchel and will open in your browser.",
+      "descriptionRisky": "This address has traits worth checking before you open it.",
+      "dialogLabel": "Open external link",
+      "displayed": "Shown as",
+      "kicker": "External link",
+      "kickerRisky": "External destination",
+      "open": "Open",
+      "openAnyway": "Open anyway",
+      "risk": {
+        "displayHostMismatch": "The shown domain and the actual domain do not match.",
+        "embeddedCredentials": "The address carries embedded credentials.",
+        "insecureHttp": "The connection is not encrypted (HTTP).",
+        "ipAddress": "The destination uses an IP address instead of a domain.",
+        "localHostname": "The destination points at this computer.",
+        "punycodeHostname": "The domain uses an internationalised punycode spelling.",
+        "unusualPort": "The destination uses an unusual network port."
+      },
+      "sheetLabel": "Check external link",
+      "title": "Open external link?",
+      "titleRisky": "Check the link before opening",
+      "trustDomain": "Open links to {domain} and its subdomains without asking from now on"
+    },
+    "imagePolicy": {
+      "allowDomain": "Allow domain {'@'}{domain}",
+      "allowDomainTitle": "Always load images from authenticated senders at {domain}",
+      "allowSender": "Allow sender",
+      "allowSenderTitle": "Always load images from {email}",
+      "blocked": "{count} external image blocked | {count} external images blocked",
+      "shieldTitle": "Tracking-pixel protection: external images load only once you allow them",
+      "showOnce": "Show",
+      "showOnceTitle": "Load external images in this message only"
+    },
+    "link": {
+      "browserFailed": "Could not open the browser",
+      "checkTarget": "Check the destination",
+      "newEmail": "New email",
+      "warningLabel": "Check the destination before opening"
+    },
+    "markdown": {
+      "closeImagePreview": "Close image preview",
+      "enlargeImage": "Enlarge image",
+      "enlargeImageNamed": "Enlarge image {description}",
+      "imageBlocked": "Image blocked: {alt}",
+      "imageLoadFailed": "Image could not be loaded",
+      "imagePreview": "Image preview",
+      "imagesBlockedTitle": "Markdown images are not loaded, to guard against tracking"
+    },
+    "pgpBlock": {
+      "decryptAction": "Decrypt this block",
+      "decryptedPgp": "Decrypted OpenPGP block",
+      "decryptedSmime": "Decrypted S/MIME block",
+      "encryptedHint": "This block can be decrypted with your private key.",
+      "encryptedPgp": "Encrypted OpenPGP block"
+    },
+    "quotes": {
+      "count": "{count} earlier message | {count} earlier messages",
+      "duplicates": "{count} identical sections",
+      "fallbackLabel": "Quoted message {index}",
+      "show": "Show {count} earlier message | Show {count} earlier messages",
+      "timelineLabel": "Quoted history"
+    },
+    "viewMode": {
+      "autoDark": "Auto-dark",
+      "autoDarkTitle": "Colours adapted to the dark theme",
+      "label": "Message rendering",
+      "markdown": "Markdown",
+      "markdownTitle": "Text with formatting",
+      "original": "Original",
+      "originalTitle": "HTML view as sent",
+      "text": "Text",
+      "textTitle": "Plain text"
+    }
+  },
+  "shortcuts": {
+    "actions": {
+      "addToTopic": {
+        "keywords": "topic",
+        "label": "Add to a topic"
+      },
+      "archive": {
+        "keywords": "archive",
+        "label": "Archive"
+      },
+      "clearSelection": {
+        "keywords": "clear selection",
+        "label": "Clear selection"
+      },
+      "compose": {
+        "keywords": "new compose write",
+        "label": "Compose new email"
+      },
+      "copyLink": {
+        "keywords": "link url share",
+        "label": "Copy link to this email"
+      },
+      "forward": {
+        "keywords": "forward",
+        "label": "Forward"
+      },
+      "goCalendar": {
+        "keywords": "go calendar",
+        "label": "Go to calendar"
+      },
+      "goContacts": {
+        "keywords": "go people contacts",
+        "label": "Go to contacts"
+      },
+      "goDrafts": {
+        "keywords": "go drafts",
+        "label": "Go to drafts"
+      },
+      "goFollowUps": {
+        "keywords": "go followups reminder",
+        "label": "Go to follow-ups"
+      },
+      "goInbox": {
+        "keywords": "go inbox",
+        "label": "Go to inbox"
+      },
+      "goOutbox": {
+        "keywords": "go outbox",
+        "label": "Go to outbox"
+      },
+      "help": {
+        "keywords": "help shortcuts keys",
+        "label": "Show keyboard help"
+      },
+      "leaveItem": {
+        "keywords": "back escape",
+        "label": "Go back one level"
+      },
+      "markDone": {
+        "keywords": "done archive",
+        "label": "Mark as done"
+      },
+      "markSpam": {
+        "keywords": "spam junk",
+        "label": "Mark as spam"
+      },
+      "moveInbox": {
+        "keywords": "move inbox",
+        "label": "Move to inbox"
+      },
+      "moveSnoozed": {
+        "keywords": "reminder snooze later",
+        "label": "Reminder / snooze"
+      },
+      "moveWaiting": {
+        "keywords": "waiting reply",
+        "label": "Wait for a reply"
+      },
+      "nextThread": {
+        "keywords": "next down",
+        "label": "Next item"
+      },
+      "openCommandPalette": {
+        "keywords": "command palette search",
+        "label": "Open search & commands"
+      },
+      "openItem": {
+        "keywords": "open enter",
+        "label": "Open the focused item"
+      },
+      "pin": {
+        "keywords": "pin star",
+        "label": "Pin / unpin"
+      },
+      "prevThread": {
+        "keywords": "previous up back",
+        "label": "Previous item"
+      },
+      "previewAttachment": {
+        "keywords": "attachment preview quick look",
+        "label": "Preview the focused attachment"
+      },
+      "print": {
+        "keywords": "print paper pdf",
+        "label": "Print conversation"
+      },
+      "reply": {
+        "keywords": "reply",
+        "label": "Reply"
+      },
+      "replyAll": {
+        "keywords": "reply all",
+        "label": "Reply all"
+      },
+      "selectAll": {
+        "keywords": "select all",
+        "label": "Select all visible emails"
+      },
+      "setAside": {
+        "keywords": "aside later",
+        "label": "Set aside"
+      },
+      "toggleAllMessages": {
+        "keywords": "all messages collapse expand",
+        "label": "Expand / collapse all messages"
+      },
+      "toggleMessage": {
+        "keywords": "message open collapse expand",
+        "label": "Expand / collapse the focused message"
+      },
+      "toggleMute": {
+        "keywords": "mute silence notifications",
+        "label": "Mute / unmute conversation"
+      },
+      "toggleRead": {
+        "keywords": "read unread",
+        "label": "Toggle read / unread"
+      },
+      "toggleSelection": {
+        "keywords": "select toggle",
+        "label": "Toggle selection"
+      },
+      "trash": {
+        "keywords": "delete trash",
+        "label": "Delete"
+      },
+      "undo": {
+        "keywords": "undo revert",
+        "label": "Undo the last action"
+      }
+    },
+    "contexts": {
+      "global": "Always",
+      "mail": "Email focused",
+      "mailbox": "Mailbox focused",
+      "navigation": "Navigation"
+    }
+  },
+  "swipe": {
+    "aside": "Set aside",
+    "done": "Done",
+    "none": "No action",
+    "pin": "Pin",
+    "toggleRead": "Read / unread",
+    "trash": "Delete"
+  },
+  "ui": {
+    "dismissToast": "Dismiss message",
+    "toastQueue": "{count} undo actions – show the previous one",
+    "undoAnnouncement": "{label}. Press {key} to undo."
+  },
+  "viewer": {
+    "alreadyImported": "The message was already in the account.",
+    "attachments": "Attachment | Attachments",
+    "cc": "Cc",
+    "import": "Import into account",
+    "importAccount": "Account to import into",
+    "importFailed": "Import failed: {error}",
+    "importTitle": "Take this message into an account",
+    "imported": "Message imported.",
+    "importing": "Importing…",
+    "loading": "Reading message…",
+    "noPath": "No file path was passed.",
+    "openFailed": "The message could not be read.",
+    "untitled": "Message"
+  }
+}

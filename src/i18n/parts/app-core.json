@@ -1,0 +1,576 @@
+{
+  "en": {
+    "errors": {
+      "attachmentEmpty": "The attachment came back without any data.",
+      "backendUnknown": "Unknown backend error",
+      "banner": {
+        "retrying": "Trying again …",
+        "passwordRejected": "{account} did not accept the password.",
+        "updatePassword": "Update password",
+        "serverResponse": "Server response"
+      },
+      "inlineImageUnavailable": "Image unavailable",
+      "messageLoadFailed": "The message could not be loaded.",
+      "messageLoadTimeout": "Loading the message took too long.",
+      "oauth": {
+        "invalidGrant": "Google no longer accepts the stored sign-in (expired or revoked). Please sign in again.",
+        "missingConfig": "OAuth configuration is missing. Please reinstall Satchel or check the local .env file."
+      },
+      "source": {
+        "accounts": "Your accounts could not be loaded",
+        "connection": "Satchel cannot reach its backend",
+        "mailboxes": "Your mailboxes could not be loaded",
+        "messages": "The messages could not be loaded",
+        "outbox": "The outbox could not be loaded",
+        "sync": "Mail sync failed",
+        "threads": "The conversations could not be loaded",
+        "unknown": "Something in Satchel stopped working"
+      },
+      "unsupportedRuntime": {
+        "android": "On Android you update the engine via <strong>Android System WebView</strong> in the Play Store. Restarting Satchel afterwards is enough.",
+        "body": "Satchel needs a newer browser engine than the one on this device. Without it colours and controls are never painted — buttons would be invisible rather than merely different.",
+        "title": "This version is too old for Satchel"
+      },
+      "technicalDetails": "Technical details",
+      "transport": {
+        "appPasswordRequired": "This account needs an app password instead of your normal one. Create one in your provider's security settings and paste it in here.",
+        "connectionRefused": "The server refused the connection. Check the host name and the port.",
+        "credentialsRejected": "The server rejected this user name and password. Check both — some providers expect the full email address as the user name.",
+        "dns": "The server name could not be resolved. Check the host name and your network connection.",
+        "genericProvider": "The mail server",
+        "oauthCancelled": "The sign-in was closed before it finished. Start it again to connect the account.",
+        "oauthExpired": "The stored sign-in is no longer accepted. Please sign in again.",
+        "offline": "No connection to the server. Satchel will try again as soon as the network is back.",
+        "quota": "This account's quota is used up. It resumes as soon as the provider allows it again.",
+        "rateLimit": "{provider} is turning requests away right now. Please try again in a few minutes.",
+        "recipientRejected": "The server rejected a recipient. Please check the addresses.",
+        "tls": "The encrypted connection could not be established. Check the port and whether the server's certificate is valid."
+      }
+    },
+    "folders": {
+      "allAccounts": "All accounts",
+      "allMail": "All mail",
+      "archive": "Archived",
+      "aside": "Set aside",
+      "blocked": "Blocked",
+      "draft": "Draft",
+      "drafts": "Drafts",
+      "inbox": "Inbox",
+      "notifications": "Notifications",
+      "sent": "Sent",
+      "snoozed": "Snoozed",
+      "snoozedLong": "Snoozed",
+      "spam": "Spam",
+      "todo": "Todo",
+      "trash": "Trash",
+      "waiting": "Waiting",
+      "waitingForReply": "Waiting for a reply"
+    },
+    "inbox": {
+      "allAccounts": "All",
+      "bundleDone": "Check all off",
+      "bundleDoneTitle": "Check off every message and go back",
+      "category": {
+        "personal": "Personal",
+        "promotions": "Promotions",
+        "social": "Social",
+        "updates": "Updates"
+      },
+      "classifiedToast": "{count} message filed | {count} messages filed",
+      "classify": "File",
+      "classifyAs": "File as",
+      "conversationCount": "{count} conversation | {count} conversations",
+      "filterStrip": "Filter the list",
+      "mailCount": "{count} message | {count} messages",
+      "markedReadToast": "{count} message marked as read | {count} messages marked as read",
+      "newsletter": "Newsletter",
+      "rememberSender": "Remember sender",
+      "resizeList": "Adjust the message list width",
+      "searchPlaceholder": "Search",
+      "searchTitle": "Search (/)",
+      "smartFolder": "Smart folder",
+      "snooze": "Snooze",
+      "topics": {
+        "createFailed": "The topic could not be created.",
+        "due": "Due",
+        "empty": "No topics yet — create one with “+”.",
+        "items": "{count} entry | {count} entries",
+        "new": "New topic",
+        "newName": "New topic",
+        "notes": "{count} note | {count} notes",
+        "title": "Topics"
+      },
+      "view": "View",
+      "viewGrouped": "Grouped",
+      "viewList": "List"
+    },
+    "newSenders": {
+      "allow": "Allow sender",
+      "allowDomain": "Allow all mail from {'@'}{domain}",
+      "backToInbox": "← Inbox",
+      "block": "Block sender",
+      "blockAndMoveConfirm": "Block {email} and move to abuse/spam?",
+      "blockConfirm": "Block sender {email}? Existing and future messages are removed from the inbox and moved to abuse or spam.",
+      "blockFailed": "Could not block {email}. The sender is still in the review list.",
+      "bulk": {
+        "acceptAll": "Allow all",
+        "acceptExisting": "Adopt {count} existing sender | Adopt {count} existing senders",
+        "existingHint": "New senders will still be reviewed one at a time.",
+        "existingTitle": "Adopt existing senders with one click",
+        "manyHint": "Blocking stays a deliberate, individual decision.",
+        "manyTitle": "Allow several senders at once"
+      },
+      "domainAllowedToast": "All senders from {'@'}{domain} allowed",
+      "empty": "Every new sender has been handled.",
+      "eyebrow": "Review",
+      "title": "New senders"
+    },
+    "nativeUi": {
+      "composeWindowTitle": "New message — Satchel",
+      "dock": {
+        "calendar": "Open calendar",
+        "closeOtherWindows": "Close all other windows",
+        "compose": "New email",
+        "settings": "Settings…",
+        "sync": "Sync email"
+      },
+      "notifications": {
+        "actionFailedMessage": "{action} was saved locally. Server sync will keep trying.",
+        "actionFailedTitle": "Action could not be completed",
+        "actionNotAppliedMessage": "{action} was not applied. Please open Satchel and try again.",
+        "archive": "Archive",
+        "backgroundSyncChannel": "Background sync",
+        "backgroundSyncDescription": "Keeps the connection open for new email",
+        "backgroundSyncText": "Checking for new email in the background",
+        "channelDescription": "Notifications about new email",
+        "channelName": "New email",
+        "followUpDue": "Follow-up due",
+        "newMessage": "New message",
+        "noSubject": "(no subject)",
+        "read": "Mark as read",
+        "reply": "Reply",
+        "sendFailed": "Email could not be sent",
+        "summary": "{count} new emails",
+        "syncing": "Syncing content",
+        "syncFailed": "Remote sync failed",
+        "trash": "Delete"
+      },
+      "oauth": {
+        "cancelledMessage": "The provider did not complete sign-in.",
+        "cancelledTitle": "OAuth cancelled",
+        "closeHint": "You can close this window now.",
+        "connectedMessage": "{provider} is now connected to Satchel.",
+        "connectedTitle": "Satchel connected",
+        "failedMessage": "Satchel could not save the token.",
+        "failedTitle": "OAuth failed",
+        "invalidCallback": "Satchel could not process the callback.",
+        "invalidState": "Satchel received an invalid state value.",
+        "invalidTitle": "Invalid OAuth callback",
+        "missingCode": "The provider did not return an authorization code.",
+        "providerFallback": "The account"
+      },
+      "tray": {
+        "briefing": "Satchel Briefing",
+        "hide": "Hide",
+        "quit": "Quit",
+        "show": "Open Satchel"
+      }
+    },
+    "notifications": {
+      "actions": {
+        "archive": "Archive",
+        "markRead": "Mark as read",
+        "trash": "Delete"
+      },
+      "newMail": {
+        "body": "{from}: {subject}",
+        "title": "New mail"
+      },
+      "newMailMany": {
+        "body": "in {account}",
+        "title": "{count} new message | {count} new messages"
+      }
+    },
+    "search": {
+      "accountScope": "Account: {account}",
+      "detail": {
+        "description": "Pick a result on the left to read the conversation here.",
+        "title": "No result selected"
+      },
+      "failed": "Search failed.",
+      "hints": {
+        "subject": "subject:invoice",
+        "tag": "tag:important"
+      },
+      "hitCount": "{count} result | {count} results",
+      "intro": {
+        "description": "Searches subject, sender and the full message text. Operators such as from: or has:attachment can be combined.",
+        "title": "Search all messages"
+      },
+      "noResults": {
+        "description": "No subject, sender or message text matches this search.",
+        "title": "No results"
+      },
+      "noSubject": "(no subject)",
+      "pendingHits": "{count} new result – refresh | {count} new results – refresh",
+      "placeholder": "Search all messages …",
+      "queryLabel": "Search term",
+      "removeAccountFilter": "Remove account filter",
+      "running": "Searching",
+      "searchAllAccounts": "Search across all accounts",
+      "server": {
+        "action": "Search on the server",
+        "failed": "Server search failed. Check the connection and the sign-in.",
+        "fetchFailed": "The message could not be loaded from the server.",
+        "fetching": "Loading …",
+        "hitCount": "{count} server result | {count} server results",
+        "hint": "Finds mail that has not been synced locally yet.",
+        "noMore": "No further results on the server.",
+        "note": "Only on the server – click to download the message.",
+        "results": "Server results",
+        "running": "Searching the server …",
+        "failedCause": "Server search failed: {cause}",
+        "fetchFailedCause": "The message could not be loaded from the server: {cause}"
+      },
+      "title": "Search",
+      "warning": {
+        "date": "“{operator}:{value}” is ignored – give the date as YYYY-MM-DD or relative (7d, 2w, yesterday).",
+        "unknown": "“{operator}:{value}” is ignored – unknown value."
+      },
+      "loadedHitCount": "{count} result loaded | {count} results loaded",
+      "loadMore": "Load more results",
+      "loadingMore": "Loading results…"
+    },
+    "tray": {
+      "actionFailed": "Action failed: {detail}",
+      "allClear": {
+        "description": "Nothing new has arrived since you last looked.",
+        "title": "All clear"
+      },
+      "allDay": "All day",
+      "briefing": "Satchel briefing",
+      "calendar": "Calendar",
+      "calendarSettings": "Calendar settings",
+      "demo": {
+        "projectMeeting": "Project meeting",
+        "releaseApproval": "Sign-off for the next Satchel release",
+        "workshopNotes": "Notes from the customer workshop"
+      },
+      "event": {
+        "inDays": "in {count} days",
+        "inHours": "in {count} hrs",
+        "inMinutes": "in {count} min",
+        "runningHours": "Running · {count} hrs left",
+        "runningMinutes": "Running · {count} min left",
+        "runningUntil": "Running · ends {day}",
+        "tomorrow": "tomorrow"
+      },
+      "inbox": "Inbox",
+      "loading": "Loading the briefing",
+      "markDone": "Mark as done",
+      "newMail": "Just arrived",
+      "newMessage": "New message",
+      "noSubject": "(no subject)",
+      "noEvents": "No upcoming events found.",
+      "openApp": "Open Satchel",
+      "read": "Read",
+      "time": {
+        "hoursAgo": "{count} hrs ago",
+        "justNow": "just now",
+        "minutesAgo": "{count} min ago"
+      },
+      "unavailable": "Briefing unavailable",
+      "unread": "Unread",
+      "unknownSender": "Unknown sender",
+      "upNext": "Up next",
+      "waitForReply": "Wait for a reply"
+    }
+  },
+  "de": {
+    "errors": {
+      "attachmentEmpty": "Der Anhang kam ohne Daten zurück.",
+      "backendUnknown": "Unbekannter Backend-Fehler",
+      "banner": {
+        "retrying": "Wird wiederholt …",
+        "passwordRejected": "{account} hat das Passwort nicht angenommen.",
+        "updatePassword": "Passwort ändern",
+        "serverResponse": "Antwort des Servers"
+      },
+      "inlineImageUnavailable": "Bild nicht verfügbar",
+      "messageLoadFailed": "Die Nachricht konnte nicht geladen werden.",
+      "messageLoadTimeout": "Das Nachladen der Nachricht hat zu lange gedauert.",
+      "oauth": {
+        "invalidGrant": "Google akzeptiert den gespeicherten Login nicht mehr (abgelaufen oder widerrufen). Bitte erneut anmelden.",
+        "missingConfig": "OAuth-Konfiguration fehlt. Bitte Satchel neu installieren oder die lokale .env prüfen."
+      },
+      "source": {
+        "accounts": "Deine Konten konnten nicht geladen werden",
+        "connection": "Satchel erreicht sein Backend nicht",
+        "mailboxes": "Deine Postfächer konnten nicht geladen werden",
+        "messages": "Die Nachrichten konnten nicht geladen werden",
+        "outbox": "Der Postausgang konnte nicht geladen werden",
+        "sync": "Der Mail-Abgleich ist fehlgeschlagen",
+        "threads": "Die Konversationen konnten nicht geladen werden",
+        "unknown": "In Satchel hat etwas aufgehört zu funktionieren"
+      },
+      "unsupportedRuntime": {
+        "android": "Auf Android aktualisierst du die Engine über <strong>Android System WebView</strong> im Play Store. Danach reicht ein Neustart von Satchel.",
+        "body": "Satchel braucht eine neuere Browser-Engine, als auf diesem Gerät läuft. Ohne sie werden Farben und Bedienelemente nicht gezeichnet — Schaltflächen wären unsichtbar statt nur anders.",
+        "title": "Diese Version ist zu alt für Satchel"
+      },
+      "technicalDetails": "Technische Details",
+      "transport": {
+        "appPasswordRequired": "Dieses Konto braucht ein App-Passwort statt des normalen. Erzeuge eines in den Sicherheitseinstellungen deines Anbieters und trage es hier ein.",
+        "connectionRefused": "Der Server hat die Verbindung abgewiesen. Hostnamen und Port prüfen.",
+        "credentialsRejected": "Der Server hat Benutzernamen und Passwort abgelehnt. Beides prüfen — manche Anbieter erwarten die vollständige E-Mail-Adresse als Benutzernamen.",
+        "dns": "Der Servername ließ sich nicht auflösen. Hostnamen und Netzverbindung prüfen.",
+        "genericProvider": "Der Mailserver",
+        "oauthCancelled": "Die Anmeldung wurde vor dem Abschluss geschlossen. Starte sie erneut, um das Konto zu verbinden.",
+        "oauthExpired": "Der gespeicherte Login wird nicht mehr akzeptiert. Bitte erneut anmelden.",
+        "offline": "Keine Verbindung zum Server. Satchel versucht es erneut, sobald das Netz wieder da ist.",
+        "quota": "Das Kontingent dieses Kontos ist aufgebraucht. Es geht weiter, sobald der Anbieter es wieder zulässt.",
+        "rateLimit": "{provider} weist gerade Anfragen ab. Bitte in ein paar Minuten erneut versuchen.",
+        "recipientRejected": "Der Server hat einen Empfänger abgelehnt. Bitte die Adressen prüfen.",
+        "tls": "Die verschlüsselte Verbindung kam nicht zustande. Port prüfen und ob das Zertifikat des Servers gültig ist."
+      }
+    },
+    "folders": {
+      "allAccounts": "Alle Konten",
+      "allMail": "All Mail",
+      "archive": "Archiviert",
+      "aside": "Beiseitegelegt",
+      "blocked": "Blockiert",
+      "draft": "Entwurf",
+      "drafts": "Entwürfe",
+      "inbox": "Inbox",
+      "notifications": "Benachrichtigungen",
+      "sent": "Gesendet",
+      "snoozed": "Wiedervorlage",
+      "snoozedLong": "Auf Wiedervorlage",
+      "spam": "Spam",
+      "todo": "Todo",
+      "trash": "Papierkorb",
+      "waiting": "Wartet",
+      "waitingForReply": "Warten auf Antwort"
+    },
+    "inbox": {
+      "allAccounts": "Alle",
+      "bundleDone": "Alle abhaken",
+      "bundleDoneTitle": "Alle Mails abhaken und zurück",
+      "category": {
+        "personal": "Persönlich",
+        "promotions": "Werbung",
+        "social": "Social",
+        "updates": "Updates"
+      },
+      "classifiedToast": "{count} Mail eingeordnet | {count} Mails eingeordnet",
+      "classify": "Einordnen",
+      "classifyAs": "Einordnen als",
+      "conversationCount": "{count} Konversation | {count} Konversationen",
+      "filterStrip": "Liste filtern",
+      "mailCount": "{count} Mail | {count} Mails",
+      "markedReadToast": "{count} Mail gelesen | {count} Mails gelesen",
+      "newsletter": "Newsletter",
+      "rememberSender": "Absender merken",
+      "resizeList": "Breite der Nachrichtenliste anpassen",
+      "searchPlaceholder": "Suchen",
+      "searchTitle": "Suchen (/)",
+      "smartFolder": "Smart Folder",
+      "snooze": "Auf Wiedervorlage",
+      "topics": {
+        "createFailed": "Thema konnte nicht erstellt werden.",
+        "due": "Fällig",
+        "empty": "Noch keine Themen — leg mit „+\" eins an.",
+        "items": "{count} Eintrag | {count} Einträge",
+        "new": "Neues Thema",
+        "newName": "Neues Thema",
+        "notes": "{count} Notiz | {count} Notizen",
+        "title": "Themen"
+      },
+      "view": "Ansicht",
+      "viewGrouped": "Gruppiert",
+      "viewList": "Liste"
+    },
+    "newSenders": {
+      "allow": "Absender zulassen",
+      "allowDomain": "Alle Mails von {'@'}{domain} zulassen",
+      "backToInbox": "← Inbox",
+      "block": "Absender blockieren",
+      "blockAndMoveConfirm": "{email} blockieren und nach Abuse/Spam verschieben?",
+      "blockConfirm": "Absender {email} blockieren? Bestehende und zukünftige Mails werden aus der Inbox entfernt und nach Abuse oder Spam verschoben.",
+      "blockFailed": "{email} konnte nicht blockiert werden. Der Absender bleibt in der Prüfliste.",
+      "bulk": {
+        "acceptAll": "Alle zulassen",
+        "acceptExisting": "{count} bestehenden Absender übernehmen | {count} bestehende Absender übernehmen",
+        "existingHint": "Künftige neue Absender werden weiterhin einzeln geprüft.",
+        "existingTitle": "Bisherige Absender mit einem Klick übernehmen",
+        "manyHint": "Blockieren bleibt weiterhin eine bewusste Einzelentscheidung.",
+        "manyTitle": "Mehrere Absender auf einmal zulassen"
+      },
+      "domainAllowedToast": "Alle Absender von {'@'}{domain} zugelassen",
+      "empty": "Alle neuen Absender wurden bearbeitet.",
+      "eyebrow": "Prüfen",
+      "title": "Neue Absender"
+    },
+    "nativeUi": {
+      "composeWindowTitle": "Neue Nachricht — Satchel",
+      "dock": {
+        "calendar": "Kalender öffnen",
+        "closeOtherWindows": "Alle weiteren Fenster schließen",
+        "compose": "Neue E-Mail",
+        "settings": "Einstellungen…",
+        "sync": "E-Mails synchronisieren"
+      },
+      "notifications": {
+        "actionFailedMessage": "{action} wurde lokal gespeichert. Der Serverabgleich wird weiter versucht.",
+        "actionFailedTitle": "Aktion konnte nicht ausgeführt werden",
+        "actionNotAppliedMessage": "{action} wurde nicht ausgeführt. Bitte Satchel öffnen und erneut versuchen.",
+        "archive": "Erledigt",
+        "backgroundSyncChannel": "Hintergrund-Synchronisierung",
+        "backgroundSyncDescription": "Hält die Verbindung für neue E-Mails offen",
+        "backgroundSyncText": "Neue E-Mails werden im Hintergrund abgerufen",
+        "channelDescription": "Benachrichtigungen über neue E-Mails",
+        "channelName": "Neue E-Mails",
+        "followUpDue": "Follow-up fällig",
+        "newMessage": "Neue Nachricht",
+        "noSubject": "(ohne Betreff)",
+        "read": "Gelesen",
+        "reply": "Antworten",
+        "sendFailed": "Mail konnte nicht gesendet werden",
+        "summary": "{count} neue E-Mails",
+        "syncing": "Inhalte werden synchronisiert",
+        "syncFailed": "Remote-Abgleich fehlgeschlagen",
+        "trash": "Löschen"
+      },
+      "oauth": {
+        "cancelledMessage": "Die Anmeldung wurde vom Anbieter nicht abgeschlossen.",
+        "cancelledTitle": "OAuth abgebrochen",
+        "closeHint": "Du kannst dieses Fenster jetzt schließen.",
+        "connectedMessage": "{provider} ist jetzt mit Satchel verbunden.",
+        "connectedTitle": "Satchel verbunden",
+        "failedMessage": "Satchel konnte das Token nicht speichern.",
+        "failedTitle": "OAuth fehlgeschlagen",
+        "invalidCallback": "Satchel konnte die Rückleitung nicht verarbeiten.",
+        "invalidState": "Satchel hat einen ungültigen Statuswert erhalten.",
+        "invalidTitle": "OAuth-Rückruf ungültig",
+        "missingCode": "Der Anbieter hat keinen Autorisierungscode geliefert.",
+        "providerFallback": "Das Konto"
+      },
+      "tray": {
+        "briefing": "Satchel Briefing",
+        "hide": "Ausblenden",
+        "quit": "Beenden",
+        "show": "Satchel öffnen"
+      }
+    },
+    "notifications": {
+      "actions": {
+        "archive": "Erledigt",
+        "markRead": "Gelesen",
+        "trash": "Löschen"
+      },
+      "newMail": {
+        "body": "{from}: {subject}",
+        "title": "Neue E-Mail"
+      },
+      "newMailMany": {
+        "body": "in {account}",
+        "title": "{count} neue E-Mail | {count} neue E-Mails"
+      }
+    },
+    "search": {
+      "accountScope": "Konto: {account}",
+      "detail": {
+        "description": "Wähle links ein Suchergebnis, um die Konversation hier zu lesen.",
+        "title": "Kein Treffer ausgewählt"
+      },
+      "failed": "Suche fehlgeschlagen.",
+      "hints": {
+        "subject": "subject:Rechnung",
+        "tag": "tag:wichtig"
+      },
+      "hitCount": "{count} Treffer | {count} Treffer",
+      "intro": {
+        "description": "Durchsucht Betreff, Absender und den vollständigen Nachrichtentext. Operatoren wie from: oder has:attachment lassen sich kombinieren.",
+        "title": "Alle Nachrichten durchsuchen"
+      },
+      "noResults": {
+        "description": "Kein Betreff, Absender oder Nachrichtentext passt zu dieser Suche.",
+        "title": "Keine Treffer"
+      },
+      "noSubject": "(kein Betreff)",
+      "pendingHits": "{count} neuer Treffer – aktualisieren | {count} neue Treffer – aktualisieren",
+      "placeholder": "Alle Nachrichten durchsuchen …",
+      "queryLabel": "Suchbegriff",
+      "removeAccountFilter": "Kontofilter entfernen",
+      "running": "Suche läuft",
+      "searchAllAccounts": "In allen Konten suchen",
+      "server": {
+        "action": "Auf dem Server suchen",
+        "failed": "Server-Suche fehlgeschlagen. Verbindung und Anmeldung prüfen.",
+        "fetchFailed": "Nachricht konnte nicht vom Server geladen werden.",
+        "fetching": "Wird geladen …",
+        "hitCount": "{count} Server-Treffer | {count} Server-Treffer",
+        "hint": "Findet Mails, die noch nicht lokal synchronisiert sind.",
+        "noMore": "Keine weiteren Treffer auf dem Server.",
+        "note": "Nur auf dem Server – Klick lädt die Nachricht herunter.",
+        "results": "Server-Treffer",
+        "running": "Server-Suche läuft …",
+        "failedCause": "Server-Suche fehlgeschlagen: {cause}",
+        "fetchFailedCause": "Nachricht konnte nicht vom Server geladen werden: {cause}"
+      },
+      "title": "Suche",
+      "warning": {
+        "date": "„{operator}:{value}\" wird ignoriert – Datum bitte als JJJJ-MM-TT oder relativ (7d, 2w, gestern).",
+        "unknown": "„{operator}:{value}\" wird ignoriert – unbekannter Wert."
+      },
+      "loadedHitCount": "{count} Treffer geladen | {count} Treffer geladen",
+      "loadMore": "Weitere Treffer laden",
+      "loadingMore": "Treffer werden geladen…"
+    },
+    "tray": {
+      "actionFailed": "Aktion fehlgeschlagen: {detail}",
+      "allClear": {
+        "description": "Seit deinem letzten Öffnen ist nichts Neues angekommen.",
+        "title": "Alles im Blick"
+      },
+      "allDay": "Ganztägig",
+      "briefing": "Satchel Briefing",
+      "calendar": "Kalender",
+      "calendarSettings": "Kalender-Einstellungen",
+      "demo": {
+        "projectMeeting": "Projektbesprechung",
+        "releaseApproval": "Freigabe für die nächste Satchel-Version",
+        "workshopNotes": "Notizen aus dem Kundenworkshop"
+      },
+      "event": {
+        "inDays": "in {count} Tagen",
+        "inHours": "in {count} Std.",
+        "inMinutes": "in {count} Min.",
+        "runningHours": "Läuft · noch {count} Std.",
+        "runningMinutes": "Läuft · noch {count} Min.",
+        "runningUntil": "Läuft · endet {day}",
+        "tomorrow": "morgen"
+      },
+      "inbox": "Posteingang",
+      "loading": "Briefing wird geladen",
+      "markDone": "Erledigen",
+      "newMail": "Neu angekommen",
+      "newMessage": "Neue Mail",
+      "noSubject": "(kein Betreff)",
+      "noEvents": "Keine kommenden Termine gefunden.",
+      "openApp": "Satchel öffnen",
+      "read": "Gelesen",
+      "time": {
+        "hoursAgo": "vor {count} Std.",
+        "justNow": "gerade eben",
+        "minutesAgo": "vor {count} Min."
+      },
+      "unavailable": "Briefing nicht verfügbar",
+      "unread": "Ungelesen",
+      "unknownSender": "Unbekannter Absender",
+      "upNext": "Als Nächstes",
+      "waitForReply": "Auf Antwort warten"
+    }
+  }
+}

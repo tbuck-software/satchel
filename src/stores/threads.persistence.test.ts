@@ -1,0 +1,217 @@
+import { createPinia, setActivePinia } from 'pinia';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  backendGetSenderPreference,
+  backendListThreads,
+  backendSetThreadTags,
+  backendUpdateThreadOrganization,
+} from '@/services/backend';
+import { useThreadsStore } from './threads';
+
+vi.mock('@/services/backend', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/backend')>();
+  return {
+    ...actual,
+    backendGetSenderPreference: vi.fn(),
+    backendListThreads: vi.fn(),
+    backendSetThreadTags: vi.fn(),
+    backendUpdateThreadOrganization: vi.fn(),
+  };
+});
+
+const listThreadsMock = vi.mocked(backendListThreads);
+const getSenderPreferenceMock = vi.mocked(backendGetSenderPreference);
+const setTagsMock = vi.mocked(backendSetThreadTags);
+const updateOrganizationMock = vi.mocked(backendUpdateThreadOrganization);
+
+function backendThread(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'thread-persisted',
+    account_id: 'acc-work',
+    subject: 'Persisted',
+    normalized_subject: 'Persisted',
+    snippet: 'Metadata',
+    last_message_date: '2026-07-16T10:00:00Z',
+    message_count: 1,
+    workflow_state: 'inbox' as const,
+    unread_count: 0,
+    has_attachments: false,
+    priority: 1,
+    board_position: 12.5,
+    tags: ['rechnung'],
+    assignee: 'Alex',
+    shared_with: ['a@example.com'],
+    participants: '[{"name":"Alice","email":"alice@example.com"}]',
+    mailbox_names: '["INBOX"]',
+    ...overrides,
+  };
+}
+
+describe('thread organization persistence', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    listThreadsMock.mockReset().mockResolvedValue({
+      threads: [backendThread()],
+      next_cursor: null,
+      has_more: false,
+    });
+    getSenderPreferenceMock.mockReset();
+    setTagsMock.mockReset().mockResolvedValue();
+    updateOrganizationMock.mockReset().mockResolvedValue();
+  });
+
+  it('hydrates persisted metadata from the backend DTO', async () => {
+    const store = useThreadsStore();
+    await store.load();
+    expect(store.threads[0]).toMatchObject({
+      id: 'thread-persisted',
+      boardPosition: 12.5,
+      tags: ['rechnung'],
+      assignee: 'Alex',
+      sharedWith: ['a@example.com'],
+    });
+  });
+
+  it('normalizes sender addresses before reading their shared preference', async () => {
+    getSenderPreferenceMock.mockResolvedValue({
+      sender_email: 'mike@example.com',
+      category: 'updates',
+      is_priority: true,
+    });
+    const store = useThreadsStore();
+
+    await expect(store.getSenderPreference('  Mike@Example.COM ')).resolves.toEqual({
+      sender_email: 'mike@example.com',
+      category: 'updates',
+      is_priority: true,
+    });
+    expect(getSenderPreferenceMock).toHaveBeenCalledWith('mike@example.com');
+  });
+
+  it('rolls an optimistic organization change back when persistence fails', async () => {
+    const store = useThreadsStore();
+    await store.load();
+    updateOrganizationMock.mockRejectedValueOnce(new Error('offline'));
+    await expect(store.setAssignee('thread-persisted', 'Neu')).rejects.toThrow('offline');
+    expect(store.threads[0]!.assignee).toBe('Alex');
+  });
+
+  // The tag editor in ThreadView is the only writer; it sends the whole list.
+  it('normalizes the tags it persists for a thread', async () => {
+    const store = useThreadsStore();
+    await store.load();
+    await store.setTagsForThread('thread-persisted', ['rechnung', ' Wichtig ', 'RECHNUNG']);
+    expect(setTagsMock).toHaveBeenCalledWith(['thread-persisted'], ['rechnung', 'wichtig']);
+    expect(store.threads[0]!.tags).toEqual(['rechnung', 'wichtig']);
+  });
+
+  it('rolls the tags back when the write fails', async () => {
+    const store = useThreadsStore();
+    await store.load();
+    setTagsMock.mockRejectedValueOnce(new Error('offline'));
+    await expect(store.setTagsForThread('thread-persisted', ['wichtig'])).rejects.toThrow('offline');
+    expect(store.threads[0]!.tags).toEqual(['rechnung']);
+  });
+});
+
+describe('thread pagination', () => {
+  function page(ids: string[], nextCursor: { last_message_date: string; id: string } | null) {
+    return {
+      threads: ids.map((id) => backendThread({ id })),
+      next_cursor: nextCursor,
+      has_more: nextCursor !== null,
+    };
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    listThreadsMock.mockReset();
+  });
+
+  it('appends the next page instead of replacing the list', async () => {
+    listThreadsMock.mockResolvedValueOnce(page(['a', 'b'], { last_message_date: 'd', id: 'b' }));
+    const store = useThreadsStore();
+    await store.load();
+    expect(store.threads.map((t) => t.id)).toEqual(['a', 'b']);
+    expect(store.hasMoreThreads).toBe(true);
+
+    listThreadsMock.mockResolvedValueOnce(page(['c'], null));
+    await store.loadMore();
+
+    expect(store.threads.map((t) => t.id)).toEqual(['a', 'b', 'c']);
+    expect(store.hasMoreThreads).toBe(false);
+  });
+
+  it('passes the cursor from the previous page', async () => {
+    const cursor = { last_message_date: '2026-01-01T00:00:00Z', id: 'b' };
+    listThreadsMock.mockResolvedValueOnce(page(['a', 'b'], cursor));
+    const store = useThreadsStore();
+    await store.load();
+
+    listThreadsMock.mockResolvedValueOnce(page(['c'], null));
+    await store.loadMore();
+
+    expect(listThreadsMock).toHaveBeenLastCalledWith(expect.objectContaining({ cursor }));
+  });
+
+  it('does nothing when there is no further page', async () => {
+    listThreadsMock.mockResolvedValueOnce(page(['a'], null));
+    const store = useThreadsStore();
+    await store.load();
+    listThreadsMock.mockClear();
+
+    await store.loadMore();
+
+    expect(listThreadsMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the cursor after a failed page and pages again only on retry', async () => {
+    const cursor = { last_message_date: 'd', id: 'b' };
+    listThreadsMock.mockResolvedValueOnce(page(['a', 'b'], cursor));
+    const store = useThreadsStore();
+    await store.load();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    listThreadsMock.mockRejectedValueOnce(new Error('database locked'));
+    await store.loadMore();
+
+    expect(store.loadMoreFailed).toBe(true);
+    expect(store.hasMoreThreads).toBe(true);
+    // Scrolling on does not hammer the failing cursor.
+    listThreadsMock.mockClear();
+    await store.loadMore();
+    expect(listThreadsMock).not.toHaveBeenCalled();
+
+    listThreadsMock.mockResolvedValueOnce(page(['c'], null));
+    await store.retryLoadMore();
+
+    expect(listThreadsMock).toHaveBeenLastCalledWith(expect.objectContaining({ cursor }));
+    expect(store.loadMoreFailed).toBe(false);
+    expect(store.threads.map((t) => t.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('drops duplicates when a sync shifts rows between pages', async () => {
+    listThreadsMock.mockResolvedValueOnce(page(['a', 'b'], { last_message_date: 'd', id: 'b' }));
+    const store = useThreadsStore();
+    await store.load();
+
+    // 'b' reappears because a concurrent sync moved it.
+    listThreadsMock.mockResolvedValueOnce(page(['b', 'c'], null));
+    await store.loadMore();
+
+    expect(store.threads.map((t) => t.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('resets paging state on a fresh load', async () => {
+    listThreadsMock.mockResolvedValueOnce(page(['a'], { last_message_date: 'd', id: 'a' }));
+    const store = useThreadsStore();
+    await store.load();
+    expect(store.hasMoreThreads).toBe(true);
+
+    listThreadsMock.mockResolvedValueOnce(page(['z'], null));
+    await store.load();
+
+    expect(store.threads.map((t) => t.id)).toEqual(['z']);
+    expect(store.hasMoreThreads).toBe(false);
+  });
+});

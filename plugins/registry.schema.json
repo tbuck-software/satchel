@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://satchel.local/schemas/plugin-registry.schema.json",
+  "title": "Satchel Plugin Registry",
+  "type": "object",
+  "required": ["schema_version", "plugins"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "version", "source", "sha256", "api_version"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^satchel-plugin-[a-z0-9-]+$" },
+          "version": { "type": "string" },
+          "source": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+          "api_version": { "type": "string" },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "read_threads",
+                "write_threads",
+                "write_tags",
+                "workflow_transition",
+                "send_mail",
+                "read_contacts",
+                "network_access",
+                "filesystem_access"
+              ]
+            }
+          },
+          "trust": { "enum": ["verified", "community", "local_unsigned"] }
+        }
+      }
+    }
+  }
+}

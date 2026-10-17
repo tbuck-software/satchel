@@ -1,0 +1,46 @@
+[package]
+license = "MIT"
+name = "satchel-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+satchel-core = { path = "../crates/satchel-core" }
+scraper = "0.27.0"
+tokio = { version = "1", features = ["rt", "io-util"] }
+
+[patch.crates-io]
+lettre = { path = "../vendor/lettre" }
+
+[[bin]]
+name = "sanitizer"
+path = "fuzz_targets/sanitizer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mime_body"
+path = "fuzz_targets/mime_body.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ics"
+path = "fuzz_targets/ics.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mbox_import"
+path = "fuzz_targets/mbox_import.rs"
+test = false
+doc = false
+bench = false

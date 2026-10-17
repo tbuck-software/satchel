@@ -1,0 +1,76 @@
+name: iOS simulator
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'crates/satchel-core/**'
+      - 'src-tauri/**'
+      - 'src/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/ios.yml'
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_BUILD_JOBS: 2
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator-build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust with the iOS simulator target
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          cache: false
+          build-warnings: ''
+          target: aarch64-apple-ios-sim
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Initialize the generated iOS project
+        run: pnpm tauri ios init --ci
+
+      - name: Apply the native notification integration
+        run: node scripts/apply-ios-integration.mjs
+
+      - name: Verify generated Apple integration contracts
+        run: |
+          pnpm exec vitest run src/utils/iosBackgroundIntegration.test.ts src/services/backend.runtime.test.ts
+          node --test tests/ios-integration-generator.node.mjs
+
+      - name: Build for the Apple Silicon iOS simulator through Tauri
+        run: pnpm tauri ios build --debug --target aarch64-sim --ci

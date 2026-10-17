@@ -1,0 +1,13 @@
+[package]
+license = "MIT"
+publish = false
+name = "satchel-plugin-sdk"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "satchel_plugin_sdk"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+wit-bindgen = "0.53.1"

@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "message-viewer",
+  "description": "Standalone .eml/.msg viewer windows. Narrower than the main capability: these windows read one file, save its attachments, offer to file it into an account, and nothing else. The command list below is the boundary \u2014 create_backup, add_account and the rest are unreachable from here.",
+  "windows": [
+    "message-file-*"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "dialog:allow-save",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
+    "fs:allow-write-file",
+    "allow-open-message-file",
+    "allow-read-message-file-attachment",
+    "allow-list-accounts",
+    "allow-import-mbox",
+    "allow-open-external-url",
+    "allow-record-frontend-diagnostic",
+    "allow-show-in-folder"
+  ]
+}

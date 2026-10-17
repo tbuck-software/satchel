@@ -1,0 +1,19 @@
+From: Sender <sender@example.test>
+To: Recipient <recipient@example.test>
+Subject: Legacy charset source
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary=charset-test
+
+--charset-test
+Content-Type: text/plain; charset=Windows-1252
+Content-Transfer-Encoding: quoted-printable
+
+Freundliche Gr=FC=DFe
+Telefon =96 B=FCro =97 Ende
+Literal =3DDE and =C3=B6
+--charset-test
+Content-Type: text/html; charset=Windows-1252
+Content-Transfer-Encoding: quoted-printable
+
+<p>Freundliche Gr=FC=DFe<br>Telefon =96 B=FCro =97 Ende</p><pre>Literal =3DDE and =C3=B6</pre>
+--charset-test--

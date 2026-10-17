@@ -1,0 +1,27 @@
+From: reviewer@example.test
+To: recipient@example.test
+Subject: Review with code and emoji
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="review-case"
+
+--review-case
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+=F0=9F=A7=B9=20Nitpick=20comments=20=C2=B7=20=F0=9F=A4=96=20Review=20prompt=
+s=20=C2=B7=20=F0=9F=AA=84=20Autofix=20=C2=B7=20=E2=84=B9=EF=B8=8F=20Review=
+=20info
+const=20project=20=3D
+=20=20source;
+https://example.test/review?token=3DAB123
+--review-case
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<p>=F0=9F=A7=B9=20Nitpick=20comments=20=C2=B7=20=F0=9F=A4=96=20Review=20pro=
+mpts=20=C2=B7=20=F0=9F=AA=84=20Autofix=20=C2=B7=20=E2=84=B9=EF=B8=8F=20Revi=
+ew=20info</p>
+<pre>const=20project=20=3D
+=20=20source;</pre>
+<a=20href=3D"https://example.test/review?token=3DAB123">Review</a>
+--review-case--

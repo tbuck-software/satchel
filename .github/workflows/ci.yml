@@ -1,0 +1,244 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  migrations:
+    name: Migration versions
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Check additive migration versions against main
+        env:
+          PUSH_BASE: ${{ github.event.before }}
+        run: |
+          git fetch origin main
+          base=origin/main
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ -n "$PUSH_BASE" ] && [ "$PUSH_BASE" != 0000000000000000000000000000000000000000 ]; then
+            base="$PUSH_BASE"
+          fi
+          node scripts/check-migrations.mjs "$base"
+
+  frontend:
+    name: Frontend (types, unit, smoke)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Isolate Playwright browser cache
+        # Other jobs on this runner may install a different Playwright version.
+        # Set this for all later steps so their cleanup cannot remove our browsers.
+        run: echo "PLAYWRIGHT_BROWSERS_PATH=${RUNNER_TEMP}/satchel-playwright-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit JavaScript dependencies
+        # package.json ignores GHSA-vfj7-8cjw-p6xm (braces <=3.0.3, no patched release):
+        # build-time only, via @intlify/unplugin-vue-i18n. Review by 2026-11-13.
+        run: pnpm audit --audit-level=moderate
+
+      # Catches hard-coded UI copy: every user-visible string goes through t().
+      - name: i18n
+        run: pnpm run i18n:check
+
+      - name: Correctness lint
+        run: pnpm run lint
+
+      - name: Script implicit-any budget
+        run: pnpm run scripts:any:check
+
+      - name: Typecheck
+        run: pnpm exec vue-tsc -b
+
+      # vue-tsc does not parse SFC templates: an unbalanced tag typechecks
+      # fine and only fails when the compiler runs.
+      - name: Build
+        run: pnpm exec vite build
+
+      - name: Viewer and tray bundle budgets
+        run: pnpm run bundle:check
+
+      - name: Unit tests
+        run: pnpm exec vitest run
+
+      - name: Install Playwright browsers
+        # WebKit as well: the mail renderer is covered in both engines because
+        # the app ships on WKWebView, where listeners inside the scriptless
+        # sandboxed mail frame never fire.
+        run: pnpm exec playwright install --with-deps chromium webkit
+
+      - name: Choose isolated Playwright ports
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const net = require('node:net');
+          const servers = [];
+          const reserve = () => new Promise((resolve, reject) => {
+            const server = net.createServer();
+            server.once('error', reject);
+            server.listen(0, '127.0.0.1', () => resolve(server));
+          });
+          (async () => {
+            try {
+              servers.push(await reserve());
+              servers.push(await reserve());
+              const [smoke, csp] = servers.map((server) => server.address().port);
+              fs.appendFileSync(process.env.GITHUB_ENV,
+                `SATCHEL_SMOKE_PORT=${smoke}\nSATCHEL_CSP_PORT=${csp}\n`);
+            } finally {
+              await Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))));
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Smoke tests
+        run: pnpm run test:smoke
+
+      # Verifies the production CSP against the real build. A policy that
+      # blocks the app's own assets otherwise only shows up in the desktop app.
+      - name: CSP tests
+        run: pnpm run test:csp
+
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            test-results/
+            output/playwright/
+          # Failure output is useful immediately, but keeping it longer adds
+          # little value and consumes the account-wide Actions storage quota.
+          retention-days: 1
+
+  backend-portability:
+    name: Native compile (${{ matrix.platform }})
+    env:
+      CARGO_BUILD_JOBS: 2
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Linux
+            runner: [ubuntu-24.04]
+          - platform: Windows
+            runner: [windows-latest]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
+            build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev libdbus-1-dev
+      - name: Install the pinned Rust toolchain (Linux)
+        if: matrix.platform == 'Linux'
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          cache: false
+          build-warnings: ''
+      - name: Verify the pinned Rust toolchain
+        run: rustc --version
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+      # Compile native event handlers on both platforms, even when the full
+      # backend test job runs on macOS.
+      - name: Check native targets
+        run: cargo check -p satchel -p satchel-core --all-targets --locked
+
+  backend:
+    name: Backend (fmt, clippy, tests)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          cache: false
+          build-warnings: ''
+
+      # The postroom crates are a public repository, so cargo clones them with
+      # no credential of its own. This step used to inject one; if it ever comes
+      # back, the cause will be postroom turning private again.
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Install dependencies for IPC generation
+        run: pnpm install --frozen-lockfile
+
+      - name: Generated IPC contract
+        run: node scripts/ipc-generate.mjs --check
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        # Named crates rather than --workspace: the plugin crates are
+        # `wasm32-wasip2` components and do not link for the host.
+        run: cargo clippy -p satchel -p satchel-core -p satchel-ipc-manifest --all-targets -- -D warnings
+
+      # Required by the plugin runtime tests: they load these components through
+      # wasmtime. Without them the WASM assertions would silently skip.
+      - name: Build plugin components
+        run: node ./scripts/build-plugins.mjs --release
+
+      - name: Require GnuPG interoperability path
+        run: |
+          command -v gpg || brew install gnupg
+          if gpg --version | grep -q 'libgcrypt 1.12.0'; then brew upgrade libgcrypt; fi
+          gpg --version
+
+      - name: Tests
+        env:
+          SATCHEL_REQUIRE_PLUGIN_ARTIFACTS: '1'
+          SATCHEL_GPG_BIN: gpg
+        run: cargo test -p satchel -p satchel-core -p satchel-ipc-manifest
+
+      # The only test that watches the app write mail onto a socket. Its own
+      # step so it stays visible: nothing else covers the far side of the send
+      # path, and a browser suite never can (see docs/E2E.md).
+      - name: Outgoing mail over a real socket
+        run: cargo test -p satchel-core --test smtp_submission

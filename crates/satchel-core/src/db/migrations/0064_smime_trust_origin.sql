@@ -1,0 +1,12 @@
+-- Where a certificate came from decides which one we encrypt to.
+--
+-- A certificate harvested from an incoming signed message must never outrank
+-- one the user imported by hand: otherwise a signed mail carrying a fresh
+-- certificate for a known address silently redirects the next encryption.
+--
+-- Existing rows are backfilled to 'manual' through the column default. They
+-- predate the distinction, so their true origin is unknown; treating them as
+-- manual keeps today's encryption targets stable, and a stale auto-import
+-- among them is still bounded by the sender-identity check the import now
+-- requires.
+ALTER TABLE smime_certificates ADD COLUMN trust_origin TEXT NOT NULL DEFAULT 'manual';

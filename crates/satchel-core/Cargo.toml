@@ -1,0 +1,101 @@
+[package]
+license = "MIT"
+name = "satchel-core"
+version = "0.1.0"
+description = "Satchel domain: database, sync, providers, MIME and crypto"
+authors = ["Satchel"]
+edition = "2021"
+publish = false
+
+[lib]
+name = "satchel_core"
+
+[features]
+# DTO exports only; normal builds carry no generator.
+ipc-types = ["dep:ts-rs"]
+# A fixed master key for tests of crates that depend on this one.
+test-support = []
+
+[dependencies]
+aes-gcm = "0.10"
+ammonia = "4.2.4"
+argon2 = "0.5"
+async-imap = { version = "0.11.2", default-features = false, features = ["runtime-tokio"] }
+async-trait = "0.1"
+base64 = "0.22"
+# MIME boundary search: the byte-at-a-time scan was quadratic per nesting level.
+memchr = "2"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+encoding_rs = "0.8"
+futures = "0.3"
+icalendar = "0.16"
+lettre = { version = "0.11", default-features = false, features = ["builder", "ring", "smtp-transport", "tokio1-rustls"] }
+postroom = { git = "https://github.com/tbuck-software/postroom.git", rev = "0a670a2b709d3ae2ed62a1ba2a3090b2a0748b58" }
+postroom-rfc5322 = { git = "https://github.com/tbuck-software/postroom.git", rev = "0a670a2b709d3ae2ed62a1ba2a3090b2a0748b58" }
+postroom-imap = { git = "https://github.com/tbuck-software/postroom.git", rev = "0a670a2b709d3ae2ed62a1ba2a3090b2a0748b58" }
+# S/MIME runs in-process on every platform: Android and iOS ship no `openssl`
+# binary to shell out to, and vendoring pins the library so the crypto does not
+# change with whatever OpenSSL a desktop happens to have installed. This does
+# not touch TLS — reqwest, sqlx and lettre stay rustls-only.
+openssl = { version = "=0.10.73", features = ["vendored"] }
+pgp = "0.20"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
+ring = "0.17"
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pki-types = "1"
+scraper = "0.27.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+socket2 = "0.6"
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls"] }
+tempfile = "3"
+thiserror = "2"
+tnef = "0.1.1"
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time", "net", "io-util"] }
+ts-rs = { version = "=12.0.1", optional = true, features = ["serde-json-impl", "chrono-impl"] }
+tokio-rustls = "0.26"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Desktop trusts a bundled root list; the app crate owns the platform plugins.
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent", "crypto-rust"] }
+lettre = { version = "0.11", default-features = false, features = ["webpki-roots"] }
+webpki-roots = "1"
+
+# Mobile verifies TLS against the OS trust store rather than a bundled root
+# list: both platforms let the user (and an MDM profile) install CAs, and mail
+# servers behind a corporate proxy depend on exactly that.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+keyring-core = "1"
+lettre = { version = "0.11", default-features = false, features = ["rustls-platform-verifier"] }
+rustls-platform-verifier = "=0.6.2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-native-keyring-store = "1"
+jni = { version = "0.21", default-features = false }
+libc = "0.2"
+# Android's portable S/MIME verifier supplements exported CA files with whole
+# root certificates. Apple and Windows use native policy evaluation instead.
+webpki-root-certs = "1"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["protected"] }
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+core-foundation = "0.10"
+security-framework = "3.7"
+security-framework-sys = "2.17"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# Exercise the Android flock implementation on Unix hosts as well.
+libc = "0.2"
+
+[dev-dependencies]
+proptest = "1"

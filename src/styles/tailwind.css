@@ -1,0 +1,126 @@
+@import "tailwindcss" source("../");
+
+/*
+ * Bridge existing design tokens (tokens.css :root custom properties)
+ * into Tailwind's theme system.
+ *
+ * @theme inline ensures utilities reference var() directly,
+ * so dark/light theme switching via [data-theme] keeps working.
+ *
+ * Usage examples:
+ *   bg-base, bg-surface, bg-raised, bg-overlay, bg-hover, bg-active
+ *   text-primary, text-secondary, text-tertiary
+ *   text-accent-primary, bg-accent-primary, border-accent-primary
+ *   border-border, border-border-muted
+ *   rounded-sm, rounded-md, rounded-lg
+ *   shadow-sm, shadow-md, shadow-lg
+ */
+@theme inline {
+  /* Surfaces */
+  --color-base: var(--bg-base);
+  --color-inset: var(--bg-inset);
+  --color-list: var(--bg-list);
+  --color-sidebar: var(--bg-sidebar);
+  --color-surface: var(--bg-surface);
+  --color-raised: var(--bg-raised);
+  --color-stack: var(--bg-stack);
+  --color-stack-hover: var(--bg-stack-hover);
+  --color-overlay: var(--bg-overlay);
+  --color-hover: var(--bg-hover);
+  --color-active: var(--bg-active);
+  --color-active-hover: var(--bg-active-hover);
+
+  /* Text */
+  --color-primary: var(--text-primary);
+  --color-secondary: var(--text-secondary);
+  --color-tertiary: var(--text-tertiary);
+  --color-inverse: var(--text-inverse);
+  --color-on-accent: var(--text-on-accent);
+
+  /* Accents */
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-green: var(--accent-green);
+  --color-accent-amber: var(--accent-amber);
+  --color-accent-red: var(--accent-red);
+  --color-accent-purple: var(--accent-purple);
+  --color-accent-cyan: var(--accent-cyan);
+  --color-accent-pink: var(--accent-pink);
+  --color-accent-orange: var(--accent-orange);
+
+  /* Workflow states */
+  --color-state-inbox: var(--state-inbox);
+  --color-state-todo: var(--state-todo);
+  --color-state-waiting: var(--state-waiting);
+  --color-state-done: var(--state-done);
+  --color-state-snoozed: var(--state-snoozed);
+
+  /* Borders */
+  --color-border: var(--border-color);
+  --color-border-muted: var(--border-color-muted);
+
+  /* Typography */
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  /*
+   * The type scale, so `text-sm` and var(--font-size-sm) are one value and not
+   * two. Without this bridge Tailwind answered with its own defaults, and — the
+   * part that showed on a phone — the lift in tokens.css under 1020px never
+   * reached a utility class, because it only moves the custom properties.
+   *
+   * The line heights that ship with Tailwind's own steps are cleared: only five
+   * of the eight steps have one, so keeping them would make the scale behave
+   * differently depending on which rung you stand on. Line height is set where
+   * it matters, next to the text.
+   */
+  --text-3xs: var(--font-size-3xs);
+  --text-2xs: var(--font-size-2xs);
+  --text-xs: var(--font-size-xs);
+  --text-sm: var(--font-size-sm);
+  --text-md: var(--font-size-md);
+  --text-lg: var(--font-size-lg);
+  --text-xl: var(--font-size-xl);
+  --text-2xl: var(--font-size-2xl);
+  --text-xs--line-height: initial;
+  --text-sm--line-height: initial;
+  --text-lg--line-height: initial;
+  --text-xl--line-height: initial;
+  --text-2xl--line-height: initial;
+
+  /*
+   * Spacing. Tailwind multiplies this one number, so the two scales line up
+   * step for step and nothing has to be mapped by hand:
+   *
+   *   --space-2xs  2px   0.5      --space-lg  16px   4
+   *   --space-xs   4px   1        --space-xl  24px   6
+   *   --space-sm   8px   2        --space-2xl 32px   8
+   *   --space-md  12px   3        --space-5   20px   5
+   *   --space-1-5  6px   1.5      --space-2-5 10px   2.5
+   *   --space-3-5 14px   3.5
+   *
+   * Pinned in px rather than left at Tailwind's 0.25rem: the token scale is in
+   * px, and a rem base would make `gap-3` and --space-md drift apart the moment
+   * the root font size is not 16px.
+   */
+  --spacing: 4px;
+
+  /* Weights. Tailwind's own names match the tokens except the half step. */
+  --font-weight-normal: var(--weight-regular);
+  --font-weight-medium: var(--weight-medium);
+  --font-weight-semibold: var(--weight-semibold);
+  --font-weight-strong: var(--weight-strong);
+  --font-weight-bold: var(--weight-bold);
+
+  /* Border radius */
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-full: var(--radius-full);
+
+  /* Shadows */
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-glow: var(--shadow-glow);
+}

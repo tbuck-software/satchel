@@ -1,0 +1,32 @@
+// Generated from Rust. Run pnpm ipc:generate.
+export type MessageDto = {
+    id: string;
+    thread_id: string;
+    subject: string;
+    snippet: string;
+    from_address: string;
+    from_name: string;
+    to_addresses: Array<string>;
+    cc_addresses: Array<string>;
+    reply_to: string | null;
+    date: string;
+    body_text: string;
+    body_html: string | null;
+    body_loaded: boolean;
+    is_read: boolean;
+    is_draft: boolean;
+    pgp_state: string | null;
+    pgp_error_detail: string | null;
+    pgp_signer_name: string | null;
+    pgp_signer_fingerprint: string | null;
+    smime_state: string | null;
+    smime_signer_email: string | null;
+    smime_signer_cn: string | null;
+    smime_error_detail: string | null;
+    list_unsubscribe: string | null;
+    list_unsubscribe_post: string | null;
+    auth_spf: string | null;
+    auth_dkim: string | null;
+    auth_dmarc: string | null;
+    source_payload: string | null;
+};

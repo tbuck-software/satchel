@@ -1,0 +1,11 @@
+{
+  "subject": "Verschachtelte Grenzen",
+  "body_contains": [
+    "Die Textfassung der Einladung."
+  ],
+  "body_excludes": [
+    "=_b_12",
+    "Content-Type: text/html"
+  ],
+  "allow_replacement": false
+}

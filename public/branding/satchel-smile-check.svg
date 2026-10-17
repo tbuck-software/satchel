@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-labelledby="title">
+  <title id="title">Satchel</title>
+
+  <!-- Remove this rectangle to use the mark on another background. -->
+  <rect id="background" width="1024" height="1024" rx="224" fill="#277E8B" />
+
+  <!-- Closed envelope: a geometric squircle widening gently at the bottom. -->
+  <path
+    id="envelope"
+    fill="#FFFFFF"
+    d="M 300 312
+       H 724
+       C 767 312 793 337 800 384
+       L 835 605
+       C 844 670 813 712 742 712
+       H 282
+       C 211 712 180 670 189 605
+       L 224 384
+       C 231 337 257 312 300 312
+       Z"
+  />
+
+  <!-- The low point at (450, 582) sits left of center.
+       Endpoint tangents point toward the two upper envelope corners. -->
+  <path
+    id="smile-check"
+    d="M 318 482
+       C 345 526 412 582 450 582
+       C 512 582 676 490 712 442"
+    fill="none"
+    stroke="#277E8B"
+    stroke-width="40"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

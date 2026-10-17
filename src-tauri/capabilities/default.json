@@ -1,0 +1,56 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for Satchel desktop",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-unminimize",
+    "core:window:allow-start-dragging",
+    "core:event:default",
+    "core:tray:default",
+    "core:menu:default",
+    "notification:default",
+    "notification:allow-notify",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "dialog:default",
+    "dialog:allow-open",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-write-text-file",
+    "autostart:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled",
+    "deep-link:default",
+    "allow-app-commands",
+    "fs:deny-default",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        "$APPDATA/satchel/attachments/**",
+        "$APPCACHE/satchel-transfer-*"
+      ],
+      "deny": [
+        "$APPDATA/satchel/.env",
+        "$APPDATA/satchel/pgp-master-key-v1",
+        "$APPDATA/satchel/crypto/**",
+        "$APPDATA/satchel/satchel.db*",
+        "$APPDATA/satchel/plugins/**",
+        "$APPCACHE/satchel/wasmtime/**"
+      ]
+    }
+  ],
+  "platforms": [
+    "linux",
+    "macOS",
+    "windows"
+  ]
+}

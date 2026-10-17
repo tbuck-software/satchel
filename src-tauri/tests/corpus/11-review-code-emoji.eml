@@ -1,0 +1,23 @@
+From: reviewer@example.test
+To: recipient@example.test
+Subject: Review with code and emoji
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="review-case"
+
+--review-case
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+🧹 Nitpick comments · 🤖 Review prompts · 🪄 Autofix · ℹ️ Review info
+const project =
+  source;
+https://example.test/review?token=AB123
+--review-case
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+<p>🧹 Nitpick comments · 🤖 Review prompts · 🪄 Autofix · ℹ️ Review info</p>
+<pre>const project =
+  source;</pre>
+<a href="https://example.test/review?token=AB123">Review</a>
+--review-case--

@@ -1,0 +1,581 @@
+//! Durable mail actions shared by command and notification adapters.
+//!
+//! Queue intent and local presentation commit together. Confirmed provider
+//! identities never change before the queued move has been reconciled.
+
+use std::collections::HashMap;
+
+use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
+
+use crate::db::threads::refresh_thread_projection_tx;
+use crate::providers::{folder_mapping::provisioned_remote_folder, traits::MessageRef};
+use crate::sync::{
+    queue::{QueuedAction, SyncQueue},
+    remote_mutations::{
+        remote_move_thread_id_from_json, PreparedWorkflowMove, RemoteMutationPayload,
+        ACTION_REMOTE_MUTATION,
+    },
+};
+
+pub enum MoveTarget<'a> {
+    Folder(&'a str),
+    Archive,
+    Trash,
+    Spam,
+}
+
+#[derive(FromRow)]
+struct Message {
+    id: String,
+    remote_id: Option<String>,
+    source_folder: String,
+    source_uidvalidity: Option<i64>,
+    folder_type: String,
+}
+
+impl Message {
+    fn remote_ref(&self) -> Option<MessageRef> {
+        self.remote_id
+            .as_ref()
+            .filter(|id| !id.trim().is_empty())
+            .map(|id| MessageRef {
+                remote_id: id.clone(),
+                source_folder: Some(self.source_folder.clone()),
+                source_uidvalidity: self.source_uidvalidity.and_then(|n| u32::try_from(n).ok()),
+            })
+    }
+}
+
+/// A pending move owns the source identity until its destination is confirmed.
+/// Call under the same write reservation used to resolve and enqueue new refs.
+pub async fn ensure_no_pending_move(
+    tx: &mut Transaction<'_, Sqlite>,
+    thread_ids: &[String],
+) -> Result<(), String> {
+    reconcile_legacy_pop3_moves(tx, Some(thread_ids)).await?;
+    let payloads = sqlx::query_scalar::<_, String>(
+        "SELECT payload FROM sync_queue WHERE action_type = 'remote_mutation'
+         AND status IN ('pending', 'scheduled', 'sending', 'failed')",
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    if payloads
+        .iter()
+        .filter_map(|p| remote_move_thread_id_from_json(p))
+        .any(|id| thread_ids.contains(&id))
+    {
+        return Err("backend.errors.mailMovePending".into());
+    }
+    Ok(())
+}
+
+/// Discard a failed move and its unconfirmed destination under one write lock.
+pub async fn discard_failed_move(pool: &SqlitePool, id: &str) -> Result<bool, String> {
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|e| e.to_string())?;
+    let row: Option<(String, String)> = sqlx::query_as(
+        "DELETE FROM sync_queue WHERE id = ? AND action_type = 'remote_mutation' AND status = 'failed'
+         AND json_valid(payload) AND json_extract(payload, '$.kind') IN ('workflow_move', 'blocked_move') RETURNING account_id, payload",
+    ).bind(id).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())?;
+    let Some((account_id, payload)) = row else {
+        return Ok(false);
+    };
+    let thread_id =
+        remote_move_thread_id_from_json(&payload).ok_or("backend.errors.mailMovePending")?;
+    sqlx::query(
+        "UPDATE messages SET pending_folder_id = NULL WHERE thread_id = ? AND account_id = ?",
+    )
+    .bind(&thread_id)
+    .bind(account_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    crate::db::threads::refresh_thread_projections_tx(&mut tx, &[thread_id])
+        .await
+        .map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// Older versions queued POP3 moves that the provider cannot perform. Finish
+/// their local destination and discard the impossible operation atomically.
+pub async fn reconcile_all_legacy_pop3_moves(pool: &SqlitePool) -> Result<usize, String> {
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|e| e.to_string())?;
+    let count = reconcile_legacy_pop3_moves(&mut tx, None).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
+async fn reconcile_legacy_pop3_moves(
+    tx: &mut Transaction<'_, Sqlite>,
+    thread_ids: Option<&[String]>,
+) -> Result<usize, String> {
+    let actions = sqlx::query_as::<_, (String, String)>(
+        "SELECT q.id, q.payload FROM sync_queue q
+         JOIN accounts a ON a.id = q.account_id
+         WHERE LOWER(a.provider) = 'pop3' AND q.action_type = 'remote_mutation'
+           AND q.status IN ('pending', 'scheduled', 'sending', 'failed')",
+    )
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut repaired = 0;
+    for (action_id, payload) in actions {
+        let Some(thread_id) = remote_move_thread_id_from_json(&payload) else {
+            continue;
+        };
+        if let Some(thread_ids) = thread_ids {
+            if !thread_ids.contains(&thread_id) {
+                continue;
+            }
+        }
+        sqlx::query("UPDATE messages SET folder_id = pending_folder_id, pending_folder_id = NULL, updated_at = ? WHERE thread_id = ? AND pending_folder_id IS NOT NULL")
+            .bind(&now).bind(&thread_id).execute(&mut **tx).await.map_err(|e| e.to_string())?;
+        sqlx::query("DELETE FROM sync_queue WHERE id = ?")
+            .bind(&action_id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM threads WHERE id = ?)")
+            .bind(&thread_id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        if exists {
+            refresh_thread_projection_tx(tx, &thread_id, &now)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        repaired += 1;
+    }
+    Ok(repaired)
+}
+
+async fn messages(
+    tx: &mut Transaction<'_, Sqlite>,
+    thread_id: &str,
+) -> Result<Vec<Message>, String> {
+    sqlx::query_as(
+        "SELECT m.id, CASE WHEN a.kind = 'email' THEN m.remote_id ELSE NULL END AS remote_id, COALESCE(f.remote_id, f.full_path) AS source_folder,
+        f.uidvalidity AS source_uidvalidity, f.folder_type
+        FROM messages m JOIN folders f ON f.id = m.folder_id JOIN accounts a ON a.id = m.account_id WHERE m.thread_id = ?",
+    )
+    .bind(thread_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| e.to_string())
+}
+
+async fn enqueue(
+    tx: &mut Transaction<'_, Sqlite>,
+    queue: &SyncQueue,
+    account: &str,
+    payload: RemoteMutationPayload,
+    prefix: Option<&str>,
+) -> Result<String, String> {
+    let mut action = QueuedAction::new(
+        account.into(),
+        ACTION_REMOTE_MUTATION,
+        serde_json::to_value(payload).map_err(|e| e.to_string())?,
+    );
+    if let Some(prefix) = prefix {
+        action.id = crate::sync::remote_mutations::stable_queue_id(prefix, "flags", account);
+    }
+    queue.enqueue_in_transaction(tx, &action).await?;
+    Ok(action.id)
+}
+
+/// Local flags and their durable provider intent either both commit or neither.
+pub async fn set_flags(
+    pool: &SqlitePool,
+    queue: &SyncQueue,
+    ids: &[String],
+    read: Option<bool>,
+    starred: Option<bool>,
+    prefix: Option<&str>,
+) -> Result<Vec<String>, String> {
+    if ids.is_empty() || (read.is_none() && starred.is_none()) {
+        return Ok(Vec::new());
+    }
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|e| e.to_string())?;
+    let queued = set_flags_in_transaction(&mut tx, queue, ids, read, starred, prefix).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    queue.wake_worker();
+    Ok(queued)
+}
+
+/// Compose flags with another mail action under the same write reservation.
+/// Queue flags before a move, while their folder-scoped UIDs still name the source.
+pub async fn set_flags_in_transaction(
+    tx: &mut Transaction<'_, Sqlite>,
+    queue: &SyncQueue,
+    ids: &[String],
+    read: Option<bool>,
+    starred: Option<bool>,
+    prefix: Option<&str>,
+) -> Result<Vec<String>, String> {
+    ensure_no_pending_move(tx, ids).await?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut groups = HashMap::<String, Vec<MessageRef>>::new();
+    let mut seen = std::collections::HashSet::new();
+    for id in ids.iter().filter(|id| seen.insert(id.as_str())) {
+        let (account, provider): (String, String) = sqlx::query_as(
+            "SELECT t.account_id, a.provider FROM threads t JOIN accounts a ON a.id = t.account_id WHERE t.id = ?",
+        )
+            .bind(id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        let rows = messages(tx, id).await?;
+        if !provider.eq_ignore_ascii_case("pop3") {
+            groups
+                .entry(account)
+                .or_default()
+                .extend(rows.iter().filter_map(Message::remote_ref));
+        }
+        sqlx::query("UPDATE messages SET is_read = COALESCE(?, is_read), is_starred = COALESCE(?, is_starred), updated_at = ? WHERE thread_id = ?")
+            .bind(read).bind(starred).bind(&now).bind(id).execute(&mut **tx).await.map_err(|e| e.to_string())?;
+        if rows.is_empty() {
+            sqlx::query("UPDATE threads SET is_starred = COALESCE(?, is_starred), unread_count = CASE WHEN ? = 1 THEN 0 WHEN ? = 0 THEN MAX(1, unread_count) ELSE unread_count END, updated_at = ? WHERE id = ?")
+                .bind(starred).bind(read).bind(read).bind(&now).bind(id).execute(&mut **tx).await.map_err(|e| e.to_string())?;
+        } else {
+            refresh_thread_projection_tx(tx, id, &now)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    let mut queued = Vec::new();
+    for (account, refs) in groups {
+        if !refs.is_empty() {
+            queued.push(
+                enqueue(
+                    tx,
+                    queue,
+                    &account,
+                    RemoteMutationPayload::Flags {
+                        refs,
+                        read,
+                        starred,
+                    },
+                    prefix,
+                )
+                .await?,
+            );
+        }
+    }
+    Ok(queued)
+}
+
+pub async fn move_threads(
+    pool: &SqlitePool,
+    queue: &SyncQueue,
+    ids: &[String],
+    target: MoveTarget<'_>,
+) -> Result<Vec<String>, String> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|e| e.to_string())?;
+    ensure_no_pending_move(&mut tx, ids).await?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut queued = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for id in ids.iter().filter(|id| seen.insert(id.as_str())) {
+        let (account, provider): (String, String) = sqlx::query_as(
+            "SELECT t.account_id, a.provider FROM threads t JOIN accounts a ON a.id = t.account_id WHERE t.id = ?")
+            .bind(id).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+        let rows = messages(&mut tx, id).await?;
+        let permanent = matches!(target, MoveTarget::Trash)
+            && !rows.is_empty()
+            && rows.iter().all(|m| m.folder_type == "trash");
+        if permanent {
+            let refs = rows
+                .iter()
+                .filter_map(Message::remote_ref)
+                .collect::<Vec<_>>();
+            if !refs.is_empty() {
+                queued.push(
+                    enqueue(
+                        &mut tx,
+                        queue,
+                        &account,
+                        RemoteMutationPayload::Delete { refs },
+                        None,
+                    )
+                    .await?,
+                );
+            }
+            sqlx::query("DELETE FROM attachments WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)")
+                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            sqlx::query("DELETE FROM messages WHERE thread_id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            refresh_thread_projection_tx(&mut tx, id, &now)
+                .await
+                .map_err(|e| e.to_string())?;
+            continue;
+        }
+        let (folder_id, remote, kind) =
+            resolve_target(&mut tx, &account, &provider, &target, &now).await?;
+        let rows = rows
+            .into_iter()
+            .filter(|m| m.source_folder != remote)
+            .filter(|m| {
+                !matches!(target, MoveTarget::Archive)
+                    || !matches!(
+                        m.folder_type.as_str(),
+                        "sent" | "drafts" | "trash" | "archive"
+                    )
+            })
+            .collect::<Vec<_>>();
+        let refs = rows
+            .iter()
+            .filter_map(Message::remote_ref)
+            .collect::<Vec<_>>();
+        if matches!(target, MoveTarget::Archive | MoveTarget::Spam) {
+            if !provider.eq_ignore_ascii_case("pop3") && !refs.is_empty() {
+                queued.push(
+                    enqueue(
+                        &mut tx,
+                        queue,
+                        &account,
+                        RemoteMutationPayload::Flags {
+                            refs: refs.clone(),
+                            read: Some(true),
+                            starred: None,
+                        },
+                        None,
+                    )
+                    .await?,
+                );
+            }
+            for message in &rows {
+                sqlx::query("UPDATE messages SET is_read = 1 WHERE id = ?")
+                    .bind(&message.id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        if !provider.eq_ignore_ascii_case("pop3") && !refs.is_empty() {
+            // Reuse the existing crash recovery and exact IMAP target reconciliation.
+            let mut action = PreparedWorkflowMove {
+                account_id: account.clone(),
+                source_folder_type: "folder".into(),
+                target_folder_type: kind,
+                refs,
+                target_remote_folder_id: remote,
+            }
+            .into_action(id, chrono::Utc::now())?;
+            action.status = "pending".into();
+            action.scheduled_for = None;
+            queue.enqueue_in_transaction(&mut tx, &action).await?;
+            queued.push(action.id);
+        }
+        for message in rows {
+            if !provider.eq_ignore_ascii_case("pop3") && message.remote_ref().is_some() {
+                sqlx::query(
+                    "UPDATE messages SET pending_folder_id = ?, updated_at = ? WHERE id = ?",
+                )
+                .bind(&folder_id)
+                .bind(&now)
+                .bind(&message.id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            } else {
+                sqlx::query("UPDATE messages SET folder_id = ?, pending_folder_id = NULL, updated_at = ? WHERE id = ?")
+                    .bind(&folder_id).bind(&now).bind(&message.id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            }
+        }
+        if !matches!(target, MoveTarget::Folder(_)) {
+            sqlx::query("UPDATE threads SET workflow_state = 'done', board_column = 'done', workflow_changed_at = ?, updated_at = ? WHERE id = ?")
+                .bind(&now).bind(&now).bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+        }
+        refresh_thread_projection_tx(&mut tx, id, &now)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    queue.wake_worker();
+    Ok(queued)
+}
+
+async fn resolve_target(
+    tx: &mut Transaction<'_, Sqlite>,
+    account: &str,
+    provider: &str,
+    target: &MoveTarget<'_>,
+    now: &str,
+) -> Result<(String, String, String), String> {
+    if let MoveTarget::Folder(id) = target {
+        return sqlx::query_as("SELECT id, COALESCE(remote_id, full_path), folder_type FROM folders WHERE id = ? AND account_id = ?")
+            .bind(id).bind(account).fetch_optional(&mut **tx).await.map_err(|e| e.to_string())?
+            .ok_or_else(|| "backend.errors.folderAccountMismatch".into());
+    }
+    let kind = match target {
+        MoveTarget::Archive => "archive",
+        MoveTarget::Trash => "trash",
+        MoveTarget::Spam => "spam",
+        MoveTarget::Folder(_) => unreachable!(),
+    };
+    if let Some(row) = sqlx::query_as("SELECT id, COALESCE(remote_id, full_path), folder_type FROM folders WHERE account_id = ? AND folder_type = ? LIMIT 1")
+        .bind(account).bind(kind).fetch_optional(&mut **tx).await.map_err(|e| e.to_string())? {
+        return Ok(row);
+    }
+    let remote = provisioned_remote_folder(provider, kind).to_string();
+    let id = crate::db::folders::folder_db_id(account, &remote);
+    let (name, path) = match (provider, kind) {
+        (_, "archive") => ("Archiviert", "Archive"),
+        ("outlook", "trash") => ("Papierkorb", "Deleted Items"),
+        (_, "trash") => ("Papierkorb", "Trash"),
+        _ => (remote.as_str(), remote.as_str()),
+    };
+    sqlx::query("INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING")
+        .bind(&id).bind(account).bind(name).bind(path).bind(kind).bind(&remote).bind(now).bind(now)
+        .execute(&mut **tx).await.map_err(|e| e.to_string())?;
+    // A row for the remote folder may already exist under another type.
+    let id: String = sqlx::query_scalar(
+        "SELECT id FROM folders WHERE account_id = ? AND COALESCE(remote_id, full_path) = ?",
+    )
+    .bind(account)
+    .bind(&remote)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok((id, remote, kind.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn pop3_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory pool");
+        crate::db::init(&pool).await.expect("migrations");
+        sqlx::query("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at) VALUES ('acc', 'POP3', 'me@example.test', 'pop3', '{}', '', '2026-01-01', '2026-01-01')")
+            .execute(&pool).await.expect("account");
+        sqlx::query("INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at) VALUES ('inbox', 'acc', 'Inbox', 'INBOX', 'inbox', 'INBOX', '2026-01-01', '2026-01-01')")
+            .execute(&pool).await.expect("folder");
+        sqlx::query("INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at) VALUES ('custom', 'acc', 'Local', 'Local', 'custom', 'Local', '2026-01-01', '2026-01-01')")
+            .execute(&pool).await.expect("custom folder");
+        sqlx::query("INSERT INTO threads (id, account_id, subject, last_message_date, created_at, updated_at) VALUES ('thread', 'acc', 'Subject', '2026-01-01', '2026-01-01', '2026-01-01')")
+            .execute(&pool).await.expect("thread");
+        sqlx::query("INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, date, remote_id, created_at, updated_at) VALUES ('message', 'acc', 'inbox', 'thread', 'sender@example.test', '[]', '2026-01-01', 'UIDL-1', '2026-01-01', '2026-01-01')")
+            .execute(&pool).await.expect("message");
+        pool
+    }
+
+    #[tokio::test]
+    async fn pop3_archive_and_trash_complete_locally_without_remote_moves() {
+        let pool = pop3_pool().await;
+        let queue = SyncQueue::new();
+        let ids = vec!["thread".to_string()];
+
+        assert!(
+            move_threads(&pool, &queue, &ids, MoveTarget::Folder("custom"))
+                .await
+                .expect("local folder move")
+                .is_empty()
+        );
+        let folder_id: String =
+            sqlx::query_scalar("SELECT folder_id FROM messages WHERE id = 'message'")
+                .fetch_one(&pool)
+                .await
+                .expect("moved message");
+        assert_eq!(folder_id, "custom");
+
+        assert!(move_threads(&pool, &queue, &ids, MoveTarget::Archive)
+            .await
+            .expect("archive")
+            .is_empty());
+        let (folder_type, pending): (String, Option<String>) = sqlx::query_as("SELECT f.folder_type, m.pending_folder_id FROM messages m JOIN folders f ON f.id = m.folder_id WHERE m.id = 'message'")
+            .fetch_one(&pool).await.expect("archived message");
+        assert_eq!(folder_type, "archive");
+        assert!(pending.is_none());
+
+        set_flags(&pool, &queue, &ids, Some(true), None, None)
+            .await
+            .expect("follow-up flags");
+        assert!(move_threads(&pool, &queue, &ids, MoveTarget::Trash)
+            .await
+            .expect("trash")
+            .is_empty());
+        let (folder_type, pending): (String, Option<String>) = sqlx::query_as("SELECT f.folder_type, m.pending_folder_id FROM messages m JOIN folders f ON f.id = m.folder_id WHERE m.id = 'message'")
+            .fetch_one(&pool).await.expect("trashed message");
+        assert_eq!(folder_type, "trash");
+        assert!(pending.is_none());
+        let moves: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_move'")
+            .fetch_one(&pool).await.expect("move count");
+        assert_eq!(moves, 0);
+    }
+
+    #[tokio::test]
+    async fn failed_legacy_pop3_move_is_reconciled_on_startup() {
+        let pool = pop3_pool().await;
+        let queue = SyncQueue::new();
+        let ids = vec!["thread".to_string()];
+        let now = "2026-01-01";
+        let (archive, _, _) = {
+            let mut tx = pool.begin().await.expect("transaction");
+            let target = resolve_target(&mut tx, "acc", "pop3", &MoveTarget::Archive, now)
+                .await
+                .expect("archive target");
+            tx.commit().await.expect("target commit");
+            target
+        };
+        sqlx::query("UPDATE messages SET pending_folder_id = ? WHERE id = 'message'")
+            .bind(&archive)
+            .execute(&pool)
+            .await
+            .expect("pending move");
+        let mut stale = QueuedAction::new(
+            "acc".into(),
+            ACTION_REMOTE_MUTATION,
+            serde_json::json!({"kind":"workflow_move","workflow_thread_id":"thread"}),
+        );
+        stale.status = "failed".into();
+        queue.enqueue(&pool, stale).await.expect("stale move");
+
+        assert_eq!(
+            reconcile_all_legacy_pop3_moves(&pool)
+                .await
+                .expect("recovery"),
+            1
+        );
+        set_flags(&pool, &queue, &ids, Some(true), None, None)
+            .await
+            .expect("flag after obsolete POP3 move");
+        let (folder_id, pending): (String, Option<String>) = sqlx::query_as(
+            "SELECT folder_id, pending_folder_id FROM messages WHERE id = 'message'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("message state");
+        assert_eq!(folder_id, archive);
+        assert!(pending.is_none());
+        let moves: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_move'")
+            .fetch_one(&pool).await.expect("move count");
+        assert_eq!(moves, 0);
+    }
+}

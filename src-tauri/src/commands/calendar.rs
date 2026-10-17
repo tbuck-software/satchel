@@ -1,0 +1,861 @@
+use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
+use std::{future::Future, pin::Pin};
+
+use crate::commands::error::{CommandError, CommandResult};
+use crate::commands::messages::{OutgoingAttachmentInput, OutgoingMessageInput};
+use crate::db::accounts::AccountRepository;
+use crate::db::calendar::{CalendarError, CalendarEventWrite, CalendarRepository};
+pub use crate::db::calendar::{
+    CalendarEventRecord as CalendarEventDto, CalendarInviteRecord as CalendarInviteDto,
+    CalendarSourceRecord as CalendarSourceDto,
+};
+use crate::email::calendar::{build_invite_reply_ics, extract_ics_block, parse_invite};
+use crate::sync::outbox::{build_idempotent_send_action, build_send_action};
+use crate::AppState;
+
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/calendar/", optional_fields = nullable))]
+pub struct CalendarEventInput {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub account_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub location: Option<String>,
+    pub starts_at: String,
+    pub ends_at: String,
+    #[serde(default)]
+    pub all_day: bool,
+    #[serde(default)]
+    pub attendees: Vec<String>,
+    #[serde(default)]
+    pub send_invites: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/calendar/", optional_fields = nullable))]
+pub struct InviteResponse {
+    pub invite_id: String,
+    /// "accepted" | "declined" | "tentative"
+    pub response: String,
+    #[serde(default)]
+    pub comment: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/calendar/", optional_fields = nullable))]
+pub struct ImportIcsInput {
+    /// Optional account_id to anchor the invite to. If omitted, the first active
+    /// account is used (works fine for the common single-account case).
+    #[serde(default)]
+    pub account_id: Option<String>,
+    /// Either the raw ICS text or a base64-encoded file content.
+    pub raw: String,
+    #[serde(default)]
+    pub source_filename: Option<String>,
+}
+
+impl From<CalendarError> for CommandError {
+    fn from(error: CalendarError) -> Self {
+        let key = match error {
+            CalendarError::InviteNotFound => "backend.errors.calendarInviteNotFound",
+            CalendarError::EventOwnership => "backend.errors.calendarEventOwnership",
+            CalendarError::EventNotFound => "backend.errors.calendarEventNotFound",
+            CalendarError::Persistence(error) => {
+                tracing::error!(%error, "calendar persistence failed");
+                "backend.errors.calendarPersistenceFailed"
+            }
+        };
+        Self::new(key)
+    }
+}
+
+#[tauri::command]
+pub async fn import_ics(
+    pool: tauri::State<'_, SqlitePool>,
+    input: ImportIcsInput,
+) -> CommandResult<CalendarInviteDto> {
+    let raw = decode_ics_payload(&input.raw)?;
+    let block = extract_ics_block(Some(&raw), None)
+        .ok_or_else(|| CommandError::new("backend.errors.calendarPayloadInvalid"))?;
+    let parsed = parse_invite(&block)
+        .ok_or_else(|| CommandError::new("backend.errors.calendarPayloadInvalid"))?;
+
+    let account_id = match input.account_id.as_deref() {
+        Some(id) if !id.is_empty() => id.to_string(),
+        _ => AccountRepository::new(pool.inner())
+            .first_active_id()
+            .await?
+            .ok_or_else(|| CommandError::new("backend.errors.noActiveAccount"))?,
+    };
+
+    let dto = CalendarRepository::new(pool.inner())
+        .upsert_invite(&account_id, None, &parsed)
+        .await?;
+
+    Ok(with_current_recurrence_metadata(dto))
+}
+
+fn decode_ics_payload(raw: &str) -> CommandResult<String> {
+    let trimmed = raw.trim();
+    if trimmed.starts_with("BEGIN:VCALENDAR") || trimmed.contains("\nBEGIN:VCALENDAR") {
+        return Ok(trimmed.to_string());
+    }
+    // Fall back to base64 decode (drag-drop / file-import payloads).
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(trimmed.as_bytes())
+        .map_err(|_| CommandError::new("backend.errors.calendarPayloadInvalid"))?;
+    String::from_utf8(bytes).map_err(|_| CommandError::new("backend.errors.calendarPayloadInvalid"))
+}
+
+#[tauri::command]
+pub async fn import_ics_path(
+    pool: tauri::State<'_, SqlitePool>,
+    path: String,
+) -> CommandResult<CalendarInviteDto> {
+    crate::commands::file_limits::guard_import_size(std::path::Path::new(&path)).await?;
+    let bytes = tokio::fs::read(&path).await.map_err(|error| {
+        tracing::warn!(%error, %path, "calendar file could not be read");
+        CommandError::new("backend.errors.calendarFileReadFailed")
+    })?;
+    let raw = String::from_utf8(bytes)
+        .map_err(|_| CommandError::new("backend.errors.calendarPayloadInvalid"))?;
+    import_ics(
+        pool,
+        ImportIcsInput {
+            account_id: None,
+            raw,
+            source_filename: Some(path),
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn list_invites(
+    pool: tauri::State<'_, crate::db::ReadPool>,
+    account_id: Option<String>,
+) -> CommandResult<Vec<CalendarInviteDto>> {
+    let rows = CalendarRepository::new(pool.inner().as_ref())
+        .list_invites(account_id.as_deref())
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(with_current_recurrence_metadata)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn list_calendar_events(
+    pool: tauri::State<'_, crate::db::ReadPool>,
+    account_id: Option<String>,
+) -> CommandResult<Vec<CalendarEventDto>> {
+    CalendarRepository::new(pool.inner().as_ref())
+        .list_events(account_id.as_deref())
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn list_calendar_sources(
+    pool: tauri::State<'_, crate::db::ReadPool>,
+    account_id: Option<String>,
+) -> CommandResult<Vec<CalendarSourceDto>> {
+    CalendarRepository::new(pool.inner().as_ref())
+        .list_sources(account_id.as_deref())
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn create_calendar_event(
+    state: tauri::State<'_, AppState>,
+    pool: tauri::State<'_, SqlitePool>,
+    input: CalendarEventInput,
+) -> CommandResult<CalendarEventDto> {
+    let starts_at = parse_calendar_time(&input.starts_at, "starts_at")?;
+    let ends_at = parse_calendar_time(&input.ends_at, "ends_at")?;
+    if ends_at <= starts_at {
+        return Err(CommandError::new("backend.errors.calendarEventEndInvalid"));
+    }
+    let title = input.title.trim();
+    if title.is_empty() {
+        return Err(CommandError::new("backend.errors.calendarTitleRequired"));
+    }
+
+    let account = AccountRepository::new(pool.inner())
+        .calendar_connection(&input.account_id)
+        .await?;
+
+    let id = input
+        .id
+        .clone()
+        .unwrap_or_else(|| format!("cal-{}", uuid::Uuid::new_v4()));
+    let repository = CalendarRepository::new(pool.inner());
+    let existing = repository.event_sync_state(&input.account_id, &id).await?;
+    let uid = existing
+        .as_ref()
+        .map(|row| row.uid.clone())
+        .unwrap_or_else(|| format!("{}@satchel.local", uuid::Uuid::new_v4()));
+    let attendees = normalize_attendees(&input.attendees);
+    let server_attendees: &[String] = if input.send_invites { &attendees } else { &[] };
+    let ics = build_request_ics(
+        &uid,
+        title,
+        input.description.as_deref(),
+        input.location.as_deref(),
+        starts_at,
+        ends_at,
+        input.all_day,
+        &account.email,
+        account.display_name.as_deref(),
+        server_attendees,
+    );
+    let existing_remote = existing.as_ref().filter(|row| row.source == "caldav");
+    let remote = crate::providers::dav::put_calendar_event(
+        &account.config,
+        &uid,
+        &ics,
+        existing_remote.and_then(|row| row.remote_href.as_deref()),
+        existing_remote.and_then(|row| row.remote_etag.as_deref()),
+    )
+    .await
+    .map_err(|error| {
+        tracing::warn!(%error, account_id = %input.account_id, "CalDAV event write failed");
+        CommandError::new("backend.errors.groupwareCalendarSyncFailed")
+    })?;
+    let source = if remote.is_some() { "caldav" } else { "local" };
+    let stored_attendees = if remote.is_some() {
+        server_attendees
+    } else {
+        attendees.as_slice()
+    };
+    let attendees_json =
+        serde_json::to_string(stored_attendees).unwrap_or_else(|_| "[]".to_string());
+
+    let starts_at_text = starts_at.to_rfc3339();
+    let ends_at_text = ends_at.to_rfc3339();
+    let event = repository
+        .upsert_event(CalendarEventWrite {
+            id: &id,
+            account_id: &input.account_id,
+            uid: &uid,
+            title,
+            description: input.description.as_deref(),
+            location: input.location.as_deref(),
+            starts_at: &starts_at_text,
+            ends_at: &ends_at_text,
+            all_day: input.all_day,
+            attendees_json: &attendees_json,
+            source,
+            remote_href: remote.as_ref().map(|value| value.href.as_str()),
+            remote_etag: remote.as_ref().and_then(|value| value.etag.as_deref()),
+            collection_href: remote.as_ref().map(|value| value.collection_href.as_str()),
+            raw_ics: Some(&ics),
+        })
+        .await?;
+
+    if remote.is_none() && input.send_invites && !attendees.is_empty() {
+        let ics_b64 =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, ics.as_bytes());
+        let outgoing_input = OutgoingMessageInput {
+            to: attendees.clone(),
+            subject: title.to_string(),
+            body: input
+                .description
+                .clone()
+                .unwrap_or_else(|| title.to_string()),
+            attachments: vec![OutgoingAttachmentInput {
+                filename: "invite.ics".into(),
+                mime_type: "text/calendar; method=REQUEST; charset=UTF-8".into(),
+                content_base64: ics_b64,
+                content_id: None,
+                inline: false,
+            }],
+            ..Default::default()
+        };
+        let mut action = build_send_action(input.account_id.clone(), outgoing_input, None)
+            .map_err(|error| {
+                tracing::error!(%error, "calendar invitation could not be queued");
+                CommandError::new("backend.errors.calendarPersistenceFailed")
+            })?;
+        // This path persists and returns; it does not execute immediate sends
+        // inline like send_message does. The worker must be able to claim it.
+        action.status = "pending".into();
+        state
+            .queue
+            .enqueue(pool.inner(), action)
+            .await
+            .map_err(|error| {
+                tracing::error!(%error, "calendar invitation queue write failed");
+                CommandError::new("backend.errors.calendarPersistenceFailed")
+            })?;
+    }
+
+    Ok(event)
+}
+
+#[tauri::command]
+pub async fn delete_calendar_event(
+    pool: tauri::State<'_, SqlitePool>,
+    id: String,
+) -> CommandResult<()> {
+    let repository = CalendarRepository::new(pool.inner());
+    let remote = repository
+        .event_sync_state_by_id(&id)
+        .await?
+        .ok_or(CalendarError::EventNotFound)?;
+    if remote.source == "caldav" {
+        if let Some(href) = remote.remote_href.as_deref() {
+            let account = AccountRepository::new(pool.inner())
+                .calendar_connection(&remote.account_id)
+                .await?;
+            crate::providers::dav::delete_calendar_event_remote(
+                &account.config,
+                href,
+                remote.remote_etag.as_deref(),
+            )
+            .await
+            .map_err(|error| {
+                tracing::warn!(%error, account_id = %remote.account_id, "CalDAV event deletion failed");
+                CommandError::new("backend.errors.groupwareCalendarSyncFailed")
+            })?;
+        }
+    }
+    repository.delete_event(&remote.account_id, &id).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn respond_to_invite(
+    state: tauri::State<'_, AppState>,
+    pool: tauri::State<'_, SqlitePool>,
+    input: InviteResponse,
+) -> CommandResult<()> {
+    queue_invite_response(state.inner(), pool.inner(), input).await
+}
+
+/// Persist one logical RSVP for background delivery. The deterministic queue
+/// id and Message-ID make duplicate UI events, retries and restarts harmless.
+pub async fn queue_invite_response(
+    state: &AppState,
+    pool: &SqlitePool,
+    input: InviteResponse,
+) -> CommandResult<()> {
+    let repository = CalendarRepository::new(pool);
+    let invite = repository.get_invite(&input.invite_id).await?;
+
+    let normalized = match input.response.as_str() {
+        "accepted" | "yes" | "ACCEPTED" => "ACCEPTED",
+        "declined" | "no" | "DECLINED" => "DECLINED",
+        "tentative" | "maybe" | "TENTATIVE" => "TENTATIVE",
+        _ => return Err(CommandError::new("backend.errors.calendarResponseInvalid")),
+    };
+
+    if invite.cancelled == 1 {
+        return Err(CommandError::new("backend.errors.calendarInviteCancelled"));
+    }
+
+    let rsvp_string = match normalized {
+        "ACCEPTED" => "accepted",
+        "DECLINED" => "declined",
+        "TENTATIVE" => "tentative",
+        _ => "needs-action",
+    };
+    if invite.rsvp_status == rsvp_string {
+        return Ok(());
+    }
+
+    let parsed = parse_invite(&invite.raw_ics)
+        .ok_or_else(|| CommandError::new("backend.errors.calendarInviteInvalid"))?;
+    if parsed.uid != invite.uid {
+        return Err(CommandError::new("backend.errors.calendarInviteInvalid"));
+    }
+
+    let account = AccountRepository::new(pool)
+        .identity(&invite.account_id)
+        .await?;
+
+    let reply_ics = build_invite_reply_ics(
+        &parsed,
+        &account.email,
+        account.display_name.as_deref(),
+        normalized,
+    )
+    .map_err(|error| {
+        tracing::warn!(%error, invite_id = %invite.id, "calendar reply could not be built");
+        CommandError::new("backend.errors.calendarInviteInvalid")
+    })?;
+
+    let organizer = invite
+        .organizer_email
+        .clone()
+        .ok_or_else(|| CommandError::new("backend.errors.calendarOrganizerMissing"))?;
+
+    let summary = invite
+        .summary
+        .clone()
+        .unwrap_or_else(|| "Calendar Invitation".to_string());
+
+    let prefix = match normalized {
+        "ACCEPTED" => "Accepted",
+        "DECLINED" => "Declined",
+        "TENTATIVE" => "Tentatively Accepted",
+        _ => "Replied",
+    };
+
+    let body = format!(
+        "{prefix}: {summary}\n\n{}",
+        input.comment.unwrap_or_default()
+    );
+    let ics_b64 = base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        reply_ics.as_bytes(),
+    );
+
+    let outgoing_input = OutgoingMessageInput {
+        to: vec![organizer],
+        subject: format!("{prefix}: {summary}"),
+        body,
+        attachments: vec![OutgoingAttachmentInput {
+            filename: "invite.ics".into(),
+            mime_type: "text/calendar; method=REPLY; charset=UTF-8".into(),
+            content_base64: ics_b64,
+            content_id: None,
+            inline: false,
+        }],
+        ..Default::default()
+    };
+
+    let idempotency_key = format!(
+        "calendar-rsvp|{}|{}|{}|{}|{}",
+        invite.account_id,
+        invite.uid,
+        parsed.recurrence_id.as_deref().unwrap_or("master"),
+        invite.sequence.unwrap_or(0),
+        normalized,
+    );
+    let action =
+        build_idempotent_send_action(invite.account_id.clone(), outgoing_input, &idempotency_key)
+            .map_err(|error| {
+            tracing::error!(%error, invite_id = %invite.id, "calendar reply could not be queued");
+            CommandError::new("backend.errors.calendarPersistenceFailed")
+        })?;
+    state.queue.enqueue(pool, action).await.map_err(|error| {
+        tracing::error!(%error, invite_id = %invite.id, "calendar reply queue write failed");
+        CommandError::new("backend.errors.calendarPersistenceFailed")
+    })?;
+
+    repository
+        .update_rsvp_status(&input.invite_id, rsvp_string)
+        .await?;
+
+    Ok(())
+}
+
+fn with_current_recurrence_metadata(mut invite: CalendarInviteDto) -> CalendarInviteDto {
+    if let Some(parsed) = parse_invite(&invite.raw_ics) {
+        invite.recurrence_id = parsed.recurrence_id;
+        invite.recurring = if parsed.recurring { 1 } else { 0 };
+        invite.recurrence_unbounded = if parsed.recurrence_unbounded { 1 } else { 0 };
+    }
+    invite
+}
+
+#[cfg(test)]
+fn build_reply_ics(
+    invite: &CalendarInviteDto,
+    account_email: &str,
+    account_name: Option<&str>,
+    partstat: &str,
+) -> Result<String, String> {
+    let parsed = parse_invite(&invite.raw_ics)
+        .ok_or_else(|| "stored invitation no longer contains a VEVENT".to_string())?;
+    build_invite_reply_ics(&parsed, account_email, account_name, partstat)
+}
+
+fn parse_calendar_time(raw: &str, _field: &str) -> CommandResult<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .map_err(|_| CommandError::new("backend.errors.calendarTimeInvalid"))
+}
+
+fn normalize_attendees(input: &[String]) -> Vec<String> {
+    let mut out = input
+        .iter()
+        .map(|value| value.trim().trim_matches(['<', '>']).to_ascii_lowercase())
+        .filter(|value| value.contains('@'))
+        .collect::<Vec<_>>();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn build_request_ics(
+    uid: &str,
+    title: &str,
+    description: Option<&str>,
+    location: Option<&str>,
+    starts_at: chrono::DateTime<chrono::Utc>,
+    ends_at: chrono::DateTime<chrono::Utc>,
+    all_day: bool,
+    organizer_email: &str,
+    organizer_name: Option<&str>,
+    attendees: &[String],
+) -> String {
+    let dtstamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+    let mut ics = String::new();
+    ics.push_str("BEGIN:VCALENDAR\r\n");
+    ics.push_str("PRODID:-//Satchel//EN\r\n");
+    ics.push_str("VERSION:2.0\r\n");
+    ics.push_str("METHOD:REQUEST\r\n");
+    ics.push_str("BEGIN:VEVENT\r\n");
+    ics.push_str(&format!("UID:{}\r\n", escape_ics(uid)));
+    ics.push_str(&format!("DTSTAMP:{dtstamp}\r\n"));
+    if all_day {
+        ics.push_str(&format!(
+            "DTSTART;VALUE=DATE:{}\r\n",
+            starts_at.format("%Y%m%d")
+        ));
+        ics.push_str(&format!(
+            "DTEND;VALUE=DATE:{}\r\n",
+            ends_at.format("%Y%m%d")
+        ));
+    } else {
+        ics.push_str(&format!(
+            "DTSTART:{}\r\n",
+            starts_at.format("%Y%m%dT%H%M%SZ")
+        ));
+        ics.push_str(&format!("DTEND:{}\r\n", ends_at.format("%Y%m%dT%H%M%SZ")));
+    }
+    ics.push_str(&format!("SUMMARY:{}\r\n", escape_ics(title)));
+    if let Some(description) = description.filter(|value| !value.trim().is_empty()) {
+        ics.push_str(&format!("DESCRIPTION:{}\r\n", escape_ics(description)));
+    }
+    if let Some(location) = location.filter(|value| !value.trim().is_empty()) {
+        ics.push_str(&format!("LOCATION:{}\r\n", escape_ics(location)));
+    }
+    let cn = organizer_name.unwrap_or(organizer_email);
+    ics.push_str(&format!(
+        "ORGANIZER;CN={}:mailto:{}\r\n",
+        escape_ics(cn),
+        organizer_email
+    ));
+    for attendee in attendees {
+        ics.push_str(&format!(
+            "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:{}\r\n",
+            attendee
+        ));
+    }
+    ics.push_str("END:VEVENT\r\n");
+    ics.push_str("END:VCALENDAR\r\n");
+    ics
+}
+
+fn escape_ics(input: &str) -> String {
+    input
+        .replace('\\', "\\\\")
+        .replace(';', "\\;")
+        .replace(',', "\\,")
+        .replace('\n', "\\n")
+        .replace('\r', "")
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/calendar/")
+)]
+pub struct GoogleCalendarSyncSummary {
+    pub accounts_checked: usize,
+    pub events_synced: usize,
+    pub errors: Vec<String>,
+}
+
+/// Mirror the visible Google calendars of every active Gmail account (or one
+/// account) into `calendar_events`. Per-account failures land in `errors`
+/// instead of aborting the rest — one revoked token must not hide the other
+/// accounts' calendars.
+#[tauri::command]
+pub async fn sync_google_calendar(
+    pool: tauri::State<'_, SqlitePool>,
+    account_id: Option<String>,
+) -> CommandResult<GoogleCalendarSyncSummary> {
+    sync_google_calendar_with(
+        pool.inner(),
+        account_id.as_deref(),
+        |pool, account_id, config| {
+            Box::pin(crate::providers::google_calendar::sync_account(
+                pool, account_id, config,
+            ))
+        },
+    )
+    .await
+}
+
+type CalendarSyncFuture<'a> = Pin<Box<dyn Future<Output = Result<usize, String>> + Send + 'a>>;
+
+async fn sync_google_calendar_with<F>(
+    pool: &SqlitePool,
+    account_id: Option<&str>,
+    sync_account: F,
+) -> CommandResult<GoogleCalendarSyncSummary>
+where
+    F: for<'a> Fn(
+        &'a SqlitePool,
+        &'a str,
+        &'a crate::commands::accounts::AccountConfig,
+    ) -> CalendarSyncFuture<'a>,
+{
+    let accounts = AccountRepository::new(pool)
+        .list_active_gmail_calendar_accounts(account_id)
+        .await?;
+
+    let mut summary = GoogleCalendarSyncSummary::default();
+    for account in accounts {
+        summary.accounts_checked += 1;
+        let config = match AccountRepository::new(pool)
+            .load_provider_config(&account.id)
+            .await
+        {
+            Ok(Some(config)) => config.config,
+            Ok(None) => {
+                tracing::warn!(account_id = %account.id, "google calendar account disappeared before sync");
+                summary
+                    .errors
+                    .push(google_calendar_sync_error(&account.email));
+                continue;
+            }
+            Err(error) => {
+                tracing::warn!(account_id = %account.id, %error, "google calendar credentials could not be loaded");
+                summary
+                    .errors
+                    .push(google_calendar_sync_error(&account.email));
+                continue;
+            }
+        };
+        match sync_account(pool, &account.id, &config).await {
+            Ok(count) => summary.events_synced += count,
+            Err(error) => {
+                tracing::warn!(account_id = %account.id, %error, "google calendar sync failed");
+                summary
+                    .errors
+                    .push(google_calendar_sync_error(&account.email));
+            }
+        }
+    }
+    Ok(summary)
+}
+
+fn google_calendar_sync_error(account: &str) -> String {
+    CommandError::new("backend.errors.googleCalendarSyncFailed")
+        .with_param("account", account)
+        .encoded()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use icalendar::Calendar;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    fn invite() -> CalendarInviteDto {
+        CalendarInviteDto {
+            id: "inv-1".into(),
+            message_id: Some("m-1".into()),
+            account_id: "acc".into(),
+            uid: "abc-123@example.com".into(),
+            organizer_email: Some("alice@example.com".into()),
+            organizer_name: Some("Alice".into()),
+            summary: Some("Wochenplanung".into()),
+            description: None,
+            location: None,
+            starts_at: Some("2026-03-15T13:30:00Z".into()),
+            ends_at: Some("2026-03-15T14:00:00Z".into()),
+            all_day: 0,
+            rsvp_status: "needs-action".into(),
+            raw_ics: "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:abc-123@example.com\r\nORGANIZER;CN=Alice:mailto:alice@example.com\r\nSUMMARY:Wochenplanung\r\nDTSTART:20260315T133000Z\r\nDTEND:20260315T140000Z\r\nSEQUENCE:0\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n".into(),
+            sequence: Some(0),
+            method: Some("REQUEST".into()),
+            cancelled: 0,
+            recurrence_id: None,
+            recurring: 0,
+            recurrence_unbounded: 0,
+            created_at: "2026-03-01T00:00:00Z".into(),
+            updated_at: "2026-03-01T00:00:00Z".into(),
+        }
+    }
+
+    /// Undo RFC 5545 §3.1 line folding, which splits long properties across
+    /// physical lines with a leading space.
+    fn unfold(ics: &str) -> String {
+        let mut out = String::with_capacity(ics.len());
+        for line in ics.lines() {
+            if line.starts_with(' ') || line.starts_with('\t') {
+                out.push_str(&line[1..]);
+            } else {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(line);
+            }
+        }
+        out
+    }
+
+    /// The attendee line used to be built with ":" between parameters, making
+    /// the whole string the property value. Organizers could not match the
+    /// attendee, so every acceptance and decline was silently discarded.
+    #[test]
+    fn reply_puts_partstat_in_a_parameter_not_the_value() {
+        let raw = build_reply_ics(&invite(), "me@example.com", Some("Me"), "ACCEPTED")
+            .expect("builds reply");
+        let ics = unfold(&raw);
+
+        let attendee = ics
+            .lines()
+            .find(|line| line.starts_with("ATTENDEE"))
+            .expect("reply contains an ATTENDEE line");
+
+        let (params, value) = attendee.split_once(':').expect("attendee has a value");
+        assert!(
+            params.contains("PARTSTAT=ACCEPTED"),
+            "PARTSTAT must be a parameter, got: {attendee}"
+        );
+        assert!(
+            params.contains("CN=Me"),
+            "CN must be a parameter: {attendee}"
+        );
+        assert_eq!(
+            value, "mailto:me@example.com",
+            "the property value must be the bare mailto URI"
+        );
+    }
+
+    #[test]
+    fn reply_is_a_well_formed_reply_calendar() {
+        let raw =
+            build_reply_ics(&invite(), "me@example.com", None, "DECLINED").expect("builds reply");
+        let ics = unfold(&raw);
+
+        assert!(ics.contains("METHOD:REPLY"));
+        assert!(ics.contains("UID:abc-123@example.com"));
+        let organizer = ics
+            .lines()
+            .find(|line| line.starts_with("ORGANIZER"))
+            .expect("reply contains an ORGANIZER line");
+        assert_eq!(
+            organizer.split_once(':').map(|(_, value)| value),
+            Some("mailto:alice@example.com")
+        );
+        // DTSTAMP is mandatory in an iTIP REPLY.
+        assert!(ics.contains("DTSTAMP:"), "reply must carry DTSTAMP");
+        assert!(raw.parse::<Calendar>().is_ok(), "reply must re-parse");
+    }
+
+    #[test]
+    fn reply_round_trips_each_participation_status() {
+        for status in ["ACCEPTED", "DECLINED", "TENTATIVE"] {
+            let ics = unfold(
+                &build_reply_ics(&invite(), "me@example.com", None, status).expect("builds reply"),
+            );
+            assert!(
+                ics.contains(&format!("PARTSTAT={status}")),
+                "missing PARTSTAT={status}"
+            );
+        }
+    }
+
+    #[test]
+    fn persistence_errors_use_a_stable_redacted_key() {
+        let detail = "no such table: calendar_events";
+        let error = CommandError::from(CalendarError::Persistence(sqlx::Error::Protocol(
+            detail.into(),
+        )));
+        let serialized = serde_json::to_string(&error).unwrap();
+
+        assert_eq!(error.key, "backend.errors.calendarPersistenceFailed");
+        assert!(!serialized.contains(detail));
+    }
+
+    #[tokio::test]
+    async fn google_sync_continues_after_one_account_config_cannot_be_decrypted() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        for (id, email, config, created_at) in [
+            (
+                "broken",
+                "broken@example.test",
+                "enc:v1:not-valid-ciphertext",
+                "2026-01-01",
+            ),
+            (
+                "working",
+                "working@example.test",
+                r#"{"oauth":{"access_token":"test"}}"#,
+                "2026-01-02",
+            ),
+        ] {
+            satchel_core::utils::crypto::seed_master_key_for_tests();
+            let config = if config.starts_with("enc:") {
+                config.to_string()
+            } else {
+                crate::commands::accounts::encrypt_account_config(id, config).unwrap()
+            };
+            sqlx::query(
+                "INSERT INTO accounts
+                    (id, display_name, email, provider, config, credentials_ref, sync_state,
+                     color, is_active, created_at, updated_at)
+                 VALUES (?, ?, ?, 'gmail', ?, '', '{}', '#123456', 1, ?, ?)",
+            )
+            .bind(id)
+            .bind(id)
+            .bind(email)
+            .bind(config)
+            .bind(created_at)
+            .bind(created_at)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let attempts_for_sync = Arc::clone(&attempts);
+        let summary = sync_google_calendar_with(&pool, None, move |_pool, account_id, config| {
+            let attempts = Arc::clone(&attempts_for_sync);
+            let account_id = account_id.to_string();
+            let config = config.to_string();
+            Box::pin(async move {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(account_id, "working");
+                assert!(config.contains("access_token"));
+                Ok(7)
+            })
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        assert_eq!(summary.accounts_checked, 2);
+        assert_eq!(summary.events_synced, 7);
+        assert_eq!(summary.errors.len(), 1);
+        assert!(summary.errors[0].contains("backend.errors.googleCalendarSyncFailed"));
+        assert!(!summary.errors[0].contains("ciphertext"));
+    }
+}

@@ -1,0 +1,60 @@
+{
+  "backend": {
+    "errors": {
+      "calendarPersistenceFailed": "Kalenderdaten sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "trayDestinationInvalid": "Dieses Tray-Ziel ist nicht verfügbar.",
+      "trayMessageNotFound": "Diese E-Mail ist nicht mehr verfügbar.",
+      "trayThreadInvalid": "Diese Tray-E-Mail-Referenz ist ungültig.",
+      "unexpected": "Ein unerwarteter Backend-Fehler ist aufgetreten."
+    }
+  },
+  "common": {
+    "retry": "Erneut versuchen",
+    "today": "Heute",
+    "tomorrow": "Morgen"
+  },
+  "tray": {
+    "actionFailed": "Aktion fehlgeschlagen: {detail}",
+    "allClear": {
+      "description": "Seit deinem letzten Öffnen ist nichts Neues angekommen.",
+      "title": "Alles im Blick"
+    },
+    "allDay": "Ganztägig",
+    "briefing": "Satchel Briefing",
+    "calendar": "Kalender",
+    "calendarSettings": "Kalender-Einstellungen",
+    "demo": {
+      "projectMeeting": "Projektbesprechung",
+      "releaseApproval": "Freigabe für die nächste Satchel-Version",
+      "workshopNotes": "Notizen aus dem Kundenworkshop"
+    },
+    "event": {
+      "inDays": "in {count} Tagen",
+      "inHours": "in {count} Std.",
+      "inMinutes": "in {count} Min.",
+      "runningHours": "Läuft · noch {count} Std.",
+      "runningMinutes": "Läuft · noch {count} Min.",
+      "runningUntil": "Läuft · endet {day}",
+      "tomorrow": "morgen"
+    },
+    "inbox": "Posteingang",
+    "loading": "Briefing wird geladen",
+    "markDone": "Erledigen",
+    "newMail": "Neu angekommen",
+    "newMessage": "Neue Mail",
+    "noEvents": "Keine kommenden Termine gefunden.",
+    "noSubject": "(kein Betreff)",
+    "openApp": "Satchel öffnen",
+    "read": "Gelesen",
+    "time": {
+      "hoursAgo": "vor {count} Std.",
+      "justNow": "gerade eben",
+      "minutesAgo": "vor {count} Min."
+    },
+    "unavailable": "Briefing nicht verfügbar",
+    "unknownSender": "Unbekannter Absender",
+    "unread": "Ungelesen",
+    "upNext": "Als Nächstes",
+    "waitForReply": "Auf Antwort warten"
+  }
+}

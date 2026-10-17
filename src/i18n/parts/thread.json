@@ -1,0 +1,452 @@
+{
+  "en": {
+    "thread": {
+      "actions": {
+        "addToTopic": "Add to topic …",
+        "aside": "Aside",
+        "blockSender": "Block sender",
+        "inbox": "Inbox",
+        "markRead": "Mark as read",
+        "markUnread": "Mark as unread",
+        "moveToInbox": "Back to the inbox",
+        "mute": "Mute conversation",
+        "none": "No action",
+        "pin": "Pin",
+        "priority": "Priority",
+        "read": "Read",
+        "setAside": "Set aside",
+        "snooze": "Snooze",
+        "undo": "Undo",
+        "unmute": "Unmute",
+        "unpin": "Unpin",
+        "unpinMenu": "Remove pin",
+        "unread": "Unread"
+      },
+      "attachments": {
+        "filenameFallback": "attachment",
+        "openFolder": "Open folder",
+        "saveFailed": "Attachments could not be saved: {error}",
+        "saveFailedAll": "No attachment could be saved.",
+        "saved": "{count} attachment saved. | {count} attachments saved.",
+        "savedPartial": "{saved} saved, {failed} failed: {names}",
+        "unnamed": "unnamed"
+      },
+      "block": {
+        "confirmAddress": "Block sender {address}? Future mail lands in Abuse or Spam automatically.",
+        "confirmDomain": "Block the domain {domain}? Future mail lands in Abuse or Spam automatically.",
+        "domainBlocked": "Domain {domain} blocked.",
+        "failed": "Blocking failed: {error}",
+        "senderBlocked": "{address} blocked."
+      },
+      "bucket": {
+        "invitations": "Events",
+        "newsletter": "Newsletters",
+        "notifications": "Notifications",
+        "other": "More",
+        "personal": "Personal",
+        "pinned": "Pinned",
+        "priority": "Priority"
+      },
+      "bundle": {
+        "checkAllAria": "Check off all {count} emails in this stack",
+        "checkAllTitle": "Check off all {count} emails",
+        "label": "{count} email bundled | {count} emails bundled",
+        "ciProject": "{project} · CI"
+      },
+      "detail": {
+        "backToInbox": "Back to the inbox",
+        "unavailable": "This conversation is no longer available."
+      },
+      "export": {
+        "copiedConversation": "Conversation copied as Markdown.",
+        "copiedLatest": "Latest email copied as Markdown.",
+        "copyFailed": "Copying failed: {error}",
+        "exported": "{filename} exported.",
+        "failed": "Export failed: {error}",
+        "filenameFallback": "Email"
+      },
+      "followUp": {
+        "done": "Follow-up done",
+        "due": "Follow-up due",
+        "on": "Follow up {date}",
+        "change": "Change follow-up …",
+        "failed": "Follow-up could not be saved: {detail}",
+        "scheduled": "Follow-up set for {date}",
+        "set": "Follow up …"
+      },
+      "link": {
+        "copied": "Link copied.",
+        "copy": "Copy link",
+        "copyFailed": "Link could not be copied: {error}",
+        "notFound": "Satchel does not have this email."
+      },
+      "list": {
+        "ariaLabel": "Message list",
+        "checkAll": "Check all off",
+        "checkAllInSection": "Check off every email in “{label}”",
+        "emptyGroup": "No threads in this group.",
+        "emptyView": "No threads in this view.",
+        "folderAria": "{label}, {count} email | {label}, {count} emails",
+        "folderMore": "+{count}",
+        "loadFailed": "Your mail could not be loaded.",
+        "loadMoreFailed": "Older mail could not be loaded, so the list ends here.",
+        "loadPrevious": "Load newer messages",
+        "loadPreviousFailed": "Newer mail could not be loaded.",
+        "loading": "Loading emails",
+        "markAllRead": "Mark all read",
+        "morePriority": "+{count} more email | +{count} more emails",
+        "showAllPriority": "Show all priority emails",
+        "smartGroups": "Smart inbox groups",
+        "backfill": "Loading your mailbox — {done} of {total}",
+        "backfillPlain": "Loading your mailbox — {remaining} left"
+      },
+      "move": {
+        "failed": "Moving failed: {error}",
+        "fallbackFolder": "folder",
+        "moved": "Moved to “{folder}”."
+      },
+      "newSenders": {
+        "acceptExisting": "Accept existing",
+        "acceptExistingTitle": "Treat every sender so far as known",
+        "allow": "Allow",
+        "allowDomain": "Allow everything from {'@'}{domain}",
+        "allowDomainTitle": "Allow all past and future mail from {'@'}{domain}",
+        "allowTitle": "Allow this sender from now on",
+        "moreSenders": "+{count} more sender | +{count} more senders",
+        "senderCount": "{count} sender | {count} senders",
+        "showAll": "Show all new senders",
+        "title": "New senders"
+      },
+      "organize": {
+        "assigneePrompt": "Assignee (name or email):",
+        "saveFailed": "Organisation could not be saved: {error}",
+        "saved": "Organisation saved.",
+        "sharingPrompt": "Shared with (email addresses, comma separated):",
+        "tagsPrompt": "Tags (comma separated):"
+      },
+      "print": {
+        "failed": "Printing could not be started."
+      },
+      "reply": {
+        "as": "as {identity}",
+        "to": "Reply to {name}…"
+      },
+      "result": {
+        "addToTopicFailed": "Assigning failed.",
+        "addedToTopic": "Thread added to topic “{topic}” | {count} threads added to topic “{topic}”",
+        "aside": "Email set aside | {count} emails set aside",
+        "done": "Email done | {count} emails done",
+        "fallback": "{label} | {count} emails → {label}",
+        "inbox": "Email in the inbox | {count} emails in the inbox",
+        "pinFailed": "Pinning failed.",
+        "priorityFailed": "Changing the priority failed.",
+        "removeFromTopicFailed": "Removing failed.",
+        "removedFromTopic": "Removed from topic “{topic}”",
+        "restoreFailed": "Restoring failed.",
+        "snoozed": "Email snoozed | {count} emails snoozed",
+        "trashFailed": "Deleting failed.",
+        "trashed": "Thread deleted | Threads deleted",
+        "waiting": "Email waiting for a reply | {count} emails waiting for a reply",
+        "restoreEmpty": "No conversations could be restored."
+      },
+      "row": {
+        "draftPrefix": "Draft,",
+        "hasAttachment": "with attachment",
+        "hasDraft": "draft saved",
+        "menuLabel": "Actions for this email",
+        "messages": "{count} message | {count} messages",
+        "noSubject": "(no subject)",
+        "pinned": "pinned",
+        "sender": "Sender",
+        "senderMenuLabel": "File sender {email}",
+        "senderToRecipient": "{sender} to {recipient}"
+      },
+      "state": {
+        "aside": "Set aside",
+        "done": "Done",
+        "inbox": "Inbox",
+        "snoozed": "Snoozed",
+        "todo": "Task",
+        "waiting": "Waiting"
+      },
+      "toolbar": {
+        "allActions": "All actions",
+        "blockAddress": "This address",
+        "blockDomain": "Whole domain",
+        "changeAssignee": "Change assignee",
+        "changeSharing": "Change sharing",
+        "conversationMarkdown": "Conversation as Markdown",
+        "conversationText": "Conversation as text",
+        "copyConversation": "Copy conversation",
+        "copyLatest": "Copy latest email",
+        "copyMarkdown": "Copy as Markdown",
+        "currentSender": "Current sender",
+        "decreaseText": "Decrease text size",
+        "editTags": "Edit tags",
+        "exportTo": "Export to",
+        "increaseText": "Increase text size",
+        "larger": "Larger",
+        "latestMessage": "Latest email",
+        "latestMessageOnly": "Latest email only",
+        "markSpam": "Mark as spam",
+        "moreActions": "More actions",
+        "move": "Move",
+        "moveToFolder": "Move to folder",
+        "next": "Next conversation",
+        "noOtherFolders": "No other folders available",
+        "organize": "Organise",
+        "position": "{position} of {total}",
+        "previous": "Previous conversation",
+        "print": "Print",
+        "resend": "Send again",
+        "resetTextSize": "Reset text size",
+        "saveAllAttachments": "Save all attachments ({count})",
+        "setReminder": "Set reminder",
+        "smaller": "Smaller",
+        "textSize": "Text size",
+        "wholeConversation": "Whole conversation"
+      },
+      "view": {
+        "draftDivider": "Draft · not sent | Drafts · not sent",
+        "empty": "Pick a conversation",
+        "loadFailed": "This conversation could not be loaded.",
+        "loading": "Loading conversation",
+        "showEarlier": "Show {count} earlier message | Show {count} earlier messages",
+        "unsentDrafts": "Unsent drafts"
+      },
+      "workflow": {
+        "failedMany": "Could not mark {count} emails as “{label}”: {detail}",
+        "failedOne": "{label} failed: {detail}",
+        "readFailed": "Email {state}, but not marked as read: {detail} | {count} emails {state}, but not marked as read: {detail}"
+      }
+    },
+    "time": {
+      "lastWeek": "Last week"
+    }
+  },
+  "de": {
+    "thread": {
+      "actions": {
+        "addToTopic": "Zu Thema hinzufügen …",
+        "aside": "Beiseite",
+        "blockSender": "Absender blockieren",
+        "inbox": "Posteingang",
+        "markRead": "Als gelesen markieren",
+        "markUnread": "Als ungelesen markieren",
+        "moveToInbox": "Zurück in den Posteingang",
+        "mute": "Thread stummschalten",
+        "none": "Keine Aktion",
+        "pin": "Anheften",
+        "priority": "Priorität",
+        "read": "Gelesen",
+        "setAside": "Beiseitelegen",
+        "snooze": "Auf Wiedervorlage",
+        "undo": "Rückgängig",
+        "unmute": "Stummschaltung aufheben",
+        "unpin": "Lösen",
+        "unpinMenu": "Nicht mehr anheften",
+        "unread": "Ungelesen"
+      },
+      "attachments": {
+        "filenameFallback": "anhang",
+        "openFolder": "Ordner öffnen",
+        "saveFailed": "Anhänge konnten nicht gespeichert werden: {error}",
+        "saveFailedAll": "Kein Anhang konnte gespeichert werden.",
+        "saved": "{count} Anhang gespeichert. | {count} Anhänge gespeichert.",
+        "savedPartial": "{saved} gespeichert, {failed} fehlgeschlagen: {names}",
+        "unnamed": "unbenannt"
+      },
+      "block": {
+        "confirmAddress": "Absender {address} blockieren? Zukünftige Mails landen automatisch in Abuse oder Spam.",
+        "confirmDomain": "Die Domain {domain} blockieren? Zukünftige Mails landen automatisch in Abuse oder Spam.",
+        "domainBlocked": "Domain {domain} blockiert.",
+        "failed": "Blockieren fehlgeschlagen: {error}",
+        "senderBlocked": "{address} blockiert."
+      },
+      "bucket": {
+        "invitations": "Termine",
+        "newsletter": "Newsletter",
+        "notifications": "Benachrichtigungen",
+        "other": "Weitere",
+        "personal": "Persönlich",
+        "pinned": "Angeheftet",
+        "priority": "Priorität"
+      },
+      "bundle": {
+        "checkAllAria": "Alle {count} Mails in diesem Stack abhaken",
+        "checkAllTitle": "Alle {count} Mails abhaken",
+        "label": "{count} Mail gebündelt | {count} Mails gebündelt",
+        "ciProject": "{project} · CI"
+      },
+      "detail": {
+        "backToInbox": "Zurück zum Posteingang",
+        "unavailable": "Diese Konversation ist nicht mehr verfügbar."
+      },
+      "export": {
+        "copiedConversation": "Unterhaltung als Markdown kopiert.",
+        "copiedLatest": "Letzte E-Mail als Markdown kopiert.",
+        "copyFailed": "Kopieren fehlgeschlagen: {error}",
+        "exported": "{filename} exportiert.",
+        "failed": "Export fehlgeschlagen: {error}",
+        "filenameFallback": "E-Mail"
+      },
+      "followUp": {
+        "done": "Nachfassen erledigt",
+        "due": "Nachfassen fällig",
+        "on": "Nachfassen {date}",
+        "change": "Nachfassen ändern …",
+        "failed": "Nachfassen konnte nicht gespeichert werden: {detail}",
+        "scheduled": "Nachfassen für {date} gesetzt",
+        "set": "Nachfassen …"
+      },
+      "link": {
+        "copied": "Link kopiert.",
+        "copy": "Link kopieren",
+        "copyFailed": "Link konnte nicht kopiert werden: {error}",
+        "notFound": "Diese E-Mail liegt nicht in Satchel."
+      },
+      "list": {
+        "ariaLabel": "Nachrichtenliste",
+        "checkAll": "Alle abhaken",
+        "checkAllInSection": "Alle E-Mails aus „{label}“ abhaken",
+        "emptyGroup": "Keine Threads in dieser Gruppe.",
+        "emptyView": "Keine Threads in dieser Ansicht.",
+        "folderAria": "{label}, {count} Mail | {label}, {count} Mails",
+        "folderMore": "+{count}",
+        "loadFailed": "Die E-Mails konnten nicht geladen werden.",
+        "loadMoreFailed": "Ältere E-Mails konnten nicht geladen werden, die Liste endet deshalb hier.",
+        "loadPrevious": "Neuere E-Mails laden",
+        "loadPreviousFailed": "Neuere E-Mails konnten nicht geladen werden.",
+        "loading": "E-Mails werden geladen",
+        "markAllRead": "Alle gelesen",
+        "morePriority": "+{count} weitere E-Mail | +{count} weitere E-Mails",
+        "showAllPriority": "Alle Prioritäts-E-Mails anzeigen",
+        "smartGroups": "Smart Inbox Gruppen",
+        "backfill": "Postfach wird geladen — {done} von {total}",
+        "backfillPlain": "Postfach wird geladen — noch {remaining}"
+      },
+      "move": {
+        "failed": "Verschieben fehlgeschlagen: {error}",
+        "fallbackFolder": "Ordner",
+        "moved": "Nach „{folder}“ verschoben."
+      },
+      "newSenders": {
+        "acceptExisting": "Bestand übernehmen",
+        "acceptExistingTitle": "Alle bisherigen Absender als bekannt übernehmen",
+        "allow": "Zulassen",
+        "allowDomain": "Alle von {'@'}{domain} zulassen",
+        "allowDomainTitle": "Alle bisherigen und künftigen Mails von {'@'}{domain} zulassen",
+        "allowTitle": "Absender künftig zulassen",
+        "moreSenders": "+{count} weiterer Absender | +{count} weitere Absender",
+        "senderCount": "{count} Absender | {count} Absender",
+        "showAll": "Alle neuen Absender anzeigen",
+        "title": "Neue Absender"
+      },
+      "organize": {
+        "assigneePrompt": "Zuweisung (Name oder E-Mail):",
+        "saveFailed": "Organisation konnte nicht gespeichert werden: {error}",
+        "saved": "Organisation gespeichert.",
+        "sharingPrompt": "Freigaben (E-Mail-Adressen, durch Kommas getrennt):",
+        "tagsPrompt": "Tags (durch Kommas getrennt):"
+      },
+      "print": {
+        "failed": "Drucken konnte nicht gestartet werden."
+      },
+      "reply": {
+        "as": "als {identity}",
+        "to": "An {name} antworten …"
+      },
+      "result": {
+        "addToTopicFailed": "Zuordnung fehlgeschlagen.",
+        "addedToTopic": "Thread zu Thema „{topic}“ hinzugefügt | {count} Threads zu Thema „{topic}“ hinzugefügt",
+        "aside": "E-Mail beiseitegelegt | {count} E-Mails beiseitegelegt",
+        "done": "E-Mail erledigt | {count} E-Mails erledigt",
+        "fallback": "{label} | {count} E-Mails → {label}",
+        "inbox": "E-Mail im Posteingang | {count} E-Mails im Posteingang",
+        "pinFailed": "Anheften fehlgeschlagen.",
+        "priorityFailed": "Priorität konnte nicht geändert werden.",
+        "removeFromTopicFailed": "Entfernen fehlgeschlagen.",
+        "removedFromTopic": "Aus Thema „{topic}“ entfernt",
+        "restoreFailed": "Wiederherstellen fehlgeschlagen.",
+        "snoozed": "E-Mail auf Wiedervorlage | {count} E-Mails auf Wiedervorlage",
+        "trashFailed": "Löschen fehlgeschlagen.",
+        "trashed": "Thread gelöscht | Threads gelöscht",
+        "waiting": "E-Mail wartet auf Antwort | {count} E-Mails warten auf Antwort",
+        "restoreEmpty": "Keine Konversation konnte wiederhergestellt werden."
+      },
+      "row": {
+        "draftPrefix": "Entwurf,",
+        "hasAttachment": "mit Anhang",
+        "hasDraft": "Entwurf vorhanden",
+        "menuLabel": "Aktionen für diese Mail",
+        "messages": "{count} Nachricht | {count} Nachrichten",
+        "noSubject": "(kein Betreff)",
+        "pinned": "angeheftet",
+        "sender": "Absender",
+        "senderMenuLabel": "Absender {email} einordnen",
+        "senderToRecipient": "{sender} an {recipient}"
+      },
+      "state": {
+        "aside": "Beiseitegelegt",
+        "done": "Erledigt",
+        "inbox": "Posteingang",
+        "snoozed": "Wiedervorlage",
+        "todo": "Aufgabe",
+        "waiting": "Wartet"
+      },
+      "toolbar": {
+        "allActions": "Alle Aktionen",
+        "blockAddress": "Diese Adresse",
+        "blockDomain": "Ganze Domain",
+        "changeAssignee": "Zuweisung ändern",
+        "changeSharing": "Freigaben ändern",
+        "conversationMarkdown": "Unterhaltung als Markdown",
+        "conversationText": "Unterhaltung als Text",
+        "copyConversation": "Unterhaltung kopieren",
+        "copyLatest": "Letzte E-Mail kopieren",
+        "copyMarkdown": "Als Markdown kopieren",
+        "currentSender": "Aktueller Absender",
+        "decreaseText": "Text verkleinern",
+        "editTags": "Tags bearbeiten",
+        "exportTo": "Exportieren nach",
+        "increaseText": "Text vergrößern",
+        "larger": "Größer",
+        "latestMessage": "Letzte E-Mail",
+        "latestMessageOnly": "Nur die letzte E-Mail",
+        "markSpam": "Als Spam markieren",
+        "moreActions": "Weitere Aktionen",
+        "move": "Bewegen",
+        "moveToFolder": "In Ordner bewegen",
+        "next": "Nächste Unterhaltung",
+        "noOtherFolders": "Keine anderen Ordner verfügbar",
+        "organize": "Organisieren",
+        "position": "{position} von {total}",
+        "previous": "Vorige Unterhaltung",
+        "print": "Drucken",
+        "resend": "Erneut senden",
+        "resetTextSize": "Textgröße zurücksetzen",
+        "saveAllAttachments": "Alle Anhänge speichern ({count})",
+        "setReminder": "Reminder setzen",
+        "smaller": "Kleiner",
+        "textSize": "Textgröße",
+        "wholeConversation": "Ganze Unterhaltung"
+      },
+      "view": {
+        "draftDivider": "Entwurf · nicht gesendet | Entwürfe · nicht gesendet",
+        "empty": "Wähle eine Konversation",
+        "loadFailed": "Diese Konversation konnte nicht geladen werden.",
+        "loading": "Konversation wird geladen",
+        "showEarlier": "{count} frühere Nachricht anzeigen | {count} frühere Nachrichten anzeigen",
+        "unsentDrafts": "Nicht gesendete Entwürfe"
+      },
+      "workflow": {
+        "failedMany": "{count} E-Mails konnten nicht als „{label}“ markiert werden: {detail}",
+        "failedOne": "{label} fehlgeschlagen: {detail}",
+        "readFailed": "E-Mail {state}, aber nicht als gelesen markiert: {detail} | {count} E-Mails {state}, aber nicht als gelesen markiert: {detail}"
+      }
+    },
+    "time": {
+      "lastWeek": "Letzte Woche"
+    }
+  }
+}

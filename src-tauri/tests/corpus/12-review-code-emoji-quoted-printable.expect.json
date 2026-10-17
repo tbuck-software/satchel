@@ -1,0 +1,7 @@
+{
+  "subject": "Review with code and emoji",
+  "body_contains": ["🧹 Nitpick comments", "🪄 Autofix", "ℹ️ Review info", "token=AB123"],
+  "body_excludes": ["ðŸ", "â„¹"],
+  "charset": "utf-8",
+  "allow_replacement": false
+}

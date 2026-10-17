@@ -1,0 +1,24 @@
+{
+  "en": {
+    "settings": {
+      "language": {
+        "label": "Language",
+        "hint": "Follows the system by default. Takes effect immediately.",
+        "system": "System",
+        "en": "English",
+        "de": "Deutsch"
+      }
+    }
+  },
+  "de": {
+    "settings": {
+      "language": {
+        "label": "Sprache",
+        "hint": "Folgt standardmäßig dem System. Wirkt sofort.",
+        "system": "System",
+        "en": "English",
+        "de": "Deutsch"
+      }
+    }
+  }
+}

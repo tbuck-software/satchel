@@ -1,0 +1,900 @@
+{
+  "en": {
+    "app": {
+      "crash": {
+        "copied": "Crash report copied",
+        "copyFailed": "Crash report could not be copied",
+        "copyReport": "Copy report",
+        "crashed": "Satchel crashed during the last start.",
+        "notResponding": "Satchel stopped responding during the last run."
+      },
+      "errors": {
+        "showDiagnostics": "Diagnostics",
+        "unexpected": "Something went wrong. The details are in the log."
+      },
+      "followUps": {
+        "due": "{count} follow-up due | {count} follow-ups due"
+      },
+      "ics": {
+        "fileFailed": "{name}: {error}",
+        "imported": "Event imported: {name}",
+        "importFailed": "ICS import failed: {error}"
+      },
+      "language": {
+        "nativeUpdateFailed": "System menus and notifications could not be updated.",
+        "nativeUpdateRolledBack": "The language could not be applied to system menus and notifications. The previous language was restored."
+      },
+      "mail": {
+        "cancelFailed": "Could not cancel: {error}",
+        "sendCancelled": "Sending cancelled.",
+        "sent": "Mail sent.",
+        "undo": "Undo",
+        "undoWindow": "Sending in {seconds}s — you can still undo"
+      },
+      "notifications": {
+        "read": "Read",
+        "replyPlaceholder": "Write a reply …"
+      },
+      "outbox": {
+        "sendFailed": "{count} email could not be sent. | {count} emails could not be sent."
+      },
+      "signatures": {
+        "discovered": "Found {count} signature in your sent mail. | Found {count} signatures in your sent mail."
+      },
+      "dataRepair": {
+        "running": "Satchel is tidying up stored mail in the background. Everything keeps working meanwhile."
+      },
+      "plugins": {
+        "autoDisabled": "The plugin {plugin} kept timing out and was switched off. You can switch it back on under Settings → Integrations."
+      },
+      "sync": {
+        "mutationsFailed": "{count} change could not be synced to the server. | {count} changes could not be synced to the server.",
+        "retryFailed": "Re-sync failed: {error}",
+        "retryQueued": "{count} change is being synced again. | {count} changes are being synced again.",
+        "status": {
+          "lastSynced": "Last synced {time}",
+          "never": "Not synced yet",
+          "offline": "Offline — no connection",
+          "syncing": "Syncing …"
+        }
+      },
+      "update": {
+        "available": "Update available",
+        "downloading": "Downloading {progress}%",
+        "failedRetry": "Update failed, retry",
+        "restart": "Restart to update",
+        "version": "Version {version}",
+        "check": "Check for updates",
+        "checking": "Checking for updates…",
+        "upToDate": "You are up to date.",
+        "sourceBuild": "This build is updated from source."
+      }
+    },
+    "commands": {
+      "addToTopic": "Add to a topic …",
+      "compose": "Compose new email",
+      "copyLink": "Copy link to this email",
+      "editShortcuts": "Edit keyboard shortcuts",
+      "keywords": {
+        "addToTopic": "topic organize",
+        "compose": "compose new mail write",
+        "copyLink": "link url share satchel",
+        "editShortcuts": "keybindings shortcuts customize",
+        "forward": "forward",
+        "markDone": "archive done",
+        "moveToInbox": "move inbox",
+        "oauthGmail": "oauth google sign in login",
+        "oauthOutlook": "oauth microsoft sign in login",
+        "openCalendar": "calendar events",
+        "openFollowUps": "followups reminder",
+        "openInbox": "inbox list",
+        "pin": "pin flag star",
+        "reply": "reply",
+        "replyAll": "reply all",
+        "setAside": "set aside later",
+        "showShortcuts": "shortcuts keyboard help",
+        "snooze": "remi remind reminder snooze later",
+        "syncMail": "sync refresh fetch",
+        "toggleRead": "mark read unread",
+        "toggleTheme": "theme toggle dark light",
+        "trash": "trash delete bin",
+        "waiting": "waiting reply response",
+        "block": "block sender domain",
+        "print": "print paper pdf",
+        "export": "export save download eml markdown text",
+        "moveToFolder": "move folder file",
+        "mute": "mute silence notifications",
+        "spam": "spam junk",
+        "undo": "undo revert",
+        "openSettingsSection": "settings preferences options"
+      },
+      "markDone": "Mark as done",
+      "markDoneMany": "Mark {count} emails as done",
+      "markRead": "Mark as read",
+      "markUnread": "Mark as unread",
+      "moveToInbox": "Move to inbox",
+      "noEmailAccount": "No email account set up.",
+      "oauthFailed": "{provider} sign-in could not be started.",
+      "oauthGmail": "Start OAuth (Gmail)",
+      "oauthOpened": "{provider} sign-in opened in the browser.",
+      "oauthOutlook": "Start OAuth (Outlook)",
+      "oauthStarted": "{provider} sign-in started: {url}",
+      "openCalendar": "Open calendar",
+      "openFollowUps": "Open follow-ups",
+      "openInbox": "Open inbox",
+      "pin": "Pin or unpin",
+      "setAside": "Set aside",
+      "showShortcuts": "Show keyboard shortcuts",
+      "snooze": "Snooze …",
+      "syncDone": "Sync finished.",
+      "syncFailed": "Sync failed.",
+      "syncMail": "Sync email",
+      "toggleTheme": "Switch theme (light/dark)",
+      "trashMany": "Delete {count} emails",
+      "waiting": "Wait for a reply",
+      "oauthFailedCause": "{provider} sign-in could not be started: {cause}",
+      "syncFailedCause": "Sync failed: {cause}",
+      "blockAddress": "Block this sender",
+      "blockDomain": "Block the sender's whole domain",
+      "printConversation": "Print conversation",
+      "printLatest": "Print latest email",
+      "exportEml": "Export latest email as EML",
+      "exportMarkdown": "Export conversation as Markdown",
+      "exportText": "Export conversation as text",
+      "moveToFolder": "Move to {folder}",
+      "undo": "Undo: {label}",
+      "openSettingsSection": "Settings: {section}"
+    },
+    "nav": {
+      "agenda": {
+        "more": "+{count} more",
+        "title": "Today"
+      },
+      "backToMail": "Back to mail",
+      "calendar": "Calendar",
+      "composeMessage": "Write a new message",
+      "mailboxFilter": "Filter mailboxes",
+      "composeNewWindow": "New email (Shift-click for a separate window)",
+      "contactLabel": "{name}, {count} conversations",
+      "contactPinned": "Pinned",
+      "contactSummary": "{name} <{email}> · {count} conversations",
+      "contacts": "Contacts",
+      "feedsAndSources": "Feeds & sources",
+      "folderBrowser": {
+        "addFavorite": "Add to favourites",
+        "close": "Close folder picker",
+        "confirmDelete": "Really delete the folder “{name}”?",
+        "created": "Folder “{name}” created.",
+        "deleted": "Folder “{name}” deleted.",
+        "hint": "Favourite folders show up in the sidebar on the left. System labels such as Gmail categories and markers stay hidden.",
+        "nameLabel": "Name of the new folder",
+        "namePlaceholder": "Folder name",
+        "newFolder": "Create a new folder",
+        "newFolderShort": "+ Folder",
+        "removeFavorite": "Remove from favourites",
+        "renameLabel": "New folder name",
+        "renamed": "Folder renamed.",
+        "title": "Favourites from all folders"
+      },
+      "folders": {
+        "aside": "Set aside",
+        "blocked": "Blocked",
+        "done": "Done",
+        "drafts": "Drafts",
+        "inbox": "Inbox",
+        "notifications": "Notifications",
+        "outbox": "Outbox",
+        "sent": "Sent",
+        "snoozed": "Snoozed",
+        "spam": "Spam",
+        "title": "Folders",
+        "trash": "Trash",
+        "waiting": "Waiting for a reply"
+      },
+      "frequent": "Frequent",
+      "modules": "Areas",
+      "omni": {
+        "activateAccount": "Switch to account",
+        "ariaLabel": "Search and commands",
+        "groups": {
+          "accounts": "Accounts",
+          "app": "App",
+          "commands": "Commands",
+          "contacts": "Contacts",
+          "mailActions": "Mail actions",
+          "mailActionsFor": "Mail actions · {subject}",
+          "mails": "Mail",
+          "navigation": "Navigation",
+          "recent": "Recent searches",
+          "reminder": "Set a reminder",
+          "reminderForMany": "Reminder for {count} emails",
+          "recentCommands": "Recently used"
+        },
+        "hint": "Searches mail, contacts and commands. Operators such as from: or has:attachment can be combined.",
+        "hints": {
+          "allHits": "All hits",
+          "group": "Group",
+          "navigate": "Navigate"
+        },
+        "noReminderDate": "Date not recognised. Try “tomorrow 9”, “next Friday 2pm” or “in 3 hours”.",
+        "noResults": "No hits found.",
+        "placeholder": "Search or type a command … (from:, subject:, has:attachment)",
+        "queryLabel": "Search term",
+        "reminderPlaceholder": "When? e.g. tomorrow 9, tomorrow 4pm, in 2 hours …",
+        "removeRecent": "Remove from recent searches",
+        "removeRecentNamed": "Remove “{query}” from recent searches",
+        "results": "Search results",
+        "searching": "Searching",
+        "searchingState": "Searching …",
+        "showAll": "Show all hits"
+      },
+      "pinContact": "Pin contact",
+      "pinContactNamed": "Pin {name}",
+      "smartFolders": "Smart folders",
+      "snooze": {
+        "manual": "Custom",
+        "nextMonth": "Next month",
+        "nextWeek": "Next week",
+        "recent": "Recently used",
+        "title": "Snooze",
+        "today14": "Today 14:00",
+        "tomorrow14": "Tomorrow 14:00",
+        "tomorrow8": "Tomorrow 08:00"
+      },
+      "toggleSection": "Toggle {name}",
+      "unpinContact": "Unpin contact",
+      "unpinContactNamed": "Unpin {name}"
+    },
+    "shortcuts": {
+      "actions": {
+        "addToTopic": {
+          "keywords": "topic",
+          "label": "Add to a topic"
+        },
+        "archive": {
+          "keywords": "archive",
+          "label": "Archive"
+        },
+        "clearSelection": {
+          "keywords": "clear selection",
+          "label": "Clear selection"
+        },
+        "compose": {
+          "keywords": "new compose write",
+          "label": "Compose new email"
+        },
+        "copyLink": {
+          "keywords": "link url share",
+          "label": "Copy link to this email"
+        },
+        "forward": {
+          "keywords": "forward",
+          "label": "Forward"
+        },
+        "goCalendar": {
+          "keywords": "go calendar",
+          "label": "Go to calendar"
+        },
+        "goContacts": {
+          "keywords": "go people contacts",
+          "label": "Go to contacts"
+        },
+        "goDrafts": {
+          "keywords": "go drafts",
+          "label": "Go to drafts"
+        },
+        "goFollowUps": {
+          "keywords": "go followups reminder",
+          "label": "Go to follow-ups"
+        },
+        "goInbox": {
+          "keywords": "go inbox",
+          "label": "Go to inbox"
+        },
+        "goOutbox": {
+          "keywords": "go outbox",
+          "label": "Go to outbox"
+        },
+        "help": {
+          "keywords": "help shortcuts keys",
+          "label": "Show keyboard help"
+        },
+        "leaveItem": {
+          "keywords": "back escape",
+          "label": "Go back one level"
+        },
+        "markDone": {
+          "keywords": "done archive",
+          "label": "Mark as done"
+        },
+        "markSpam": {
+          "keywords": "spam junk",
+          "label": "Mark as spam"
+        },
+        "moveInbox": {
+          "keywords": "move inbox",
+          "label": "Move to inbox"
+        },
+        "moveSnoozed": {
+          "keywords": "reminder snooze later",
+          "label": "Reminder / snooze"
+        },
+        "moveWaiting": {
+          "keywords": "waiting reply",
+          "label": "Wait for a reply"
+        },
+        "nextThread": {
+          "keywords": "next down",
+          "label": "Next item"
+        },
+        "openCommandPalette": {
+          "keywords": "command palette search",
+          "label": "Open search & commands"
+        },
+        "openItem": {
+          "keywords": "open enter",
+          "label": "Open the focused item"
+        },
+        "pin": {
+          "keywords": "pin star",
+          "label": "Pin / unpin"
+        },
+        "prevThread": {
+          "keywords": "previous up back",
+          "label": "Previous item"
+        },
+        "previewAttachment": {
+          "keywords": "attachment preview quick look",
+          "label": "Preview the focused attachment"
+        },
+        "print": {
+          "keywords": "print paper pdf",
+          "label": "Print conversation"
+        },
+        "reply": {
+          "keywords": "reply",
+          "label": "Reply"
+        },
+        "replyAll": {
+          "keywords": "reply all",
+          "label": "Reply all"
+        },
+        "selectAll": {
+          "keywords": "select all",
+          "label": "Select all visible emails"
+        },
+        "setAside": {
+          "keywords": "aside later",
+          "label": "Set aside"
+        },
+        "toggleAllMessages": {
+          "keywords": "all messages collapse expand",
+          "label": "Expand / collapse all messages"
+        },
+        "toggleMessage": {
+          "keywords": "message open collapse expand",
+          "label": "Expand / collapse the focused message"
+        },
+        "toggleMute": {
+          "keywords": "mute silence notifications",
+          "label": "Mute / unmute conversation"
+        },
+        "toggleRead": {
+          "keywords": "read unread",
+          "label": "Toggle read / unread"
+        },
+        "toggleSelection": {
+          "keywords": "select toggle",
+          "label": "Toggle selection"
+        },
+        "trash": {
+          "keywords": "delete trash",
+          "label": "Delete"
+        },
+        "undo": {
+          "keywords": "undo revert",
+          "label": "Undo the last action"
+        }
+      },
+      "close": "Close keyboard shortcuts",
+      "contexts": {
+        "global": "Always",
+        "mail": "Email focused",
+        "mailbox": "Mailbox focused",
+        "navigation": "Navigation"
+      },
+      "editBindings": "Edit shortcuts",
+      "footerHint": "shows actions for the focused email right in the command palette.",
+      "groups": {
+        "compose": "Compose",
+        "more": "Fixed combinations",
+        "navigation": "Navigation",
+        "search": "Search & commands",
+        "triage": "Triage"
+      },
+      "helper": {
+        "insertTemplate": "Insert a template",
+        "moveThroughMail": "Move through mail and folders",
+        "moveThroughMessages": "Move through messages and drafts",
+        "newMail": "New email",
+        "prevNextThread": "Previous / next thread",
+        "selectRange": "Select a range"
+      },
+      "keys": {
+        "inReader": "in the reader",
+        "or": "or"
+      },
+      "sequence": {
+        "calendar": "C Calendar",
+        "contacts": "P Contacts",
+        "drafts": "D Drafts",
+        "followUps": "F Follow-ups",
+        "inbox": "I Inbox",
+        "outbox": "O Outbox"
+      },
+      "subtitle": "Everything that matters stays under your fingers.",
+      "title": "Keyboard shortcuts"
+    },
+    "ui": {
+      "dismissToast": "Dismiss message",
+      "resizeList": "Resize the list",
+      "resizeSidebar": "Resize the sidebar",
+      "send": "Send",
+      "undoTitle": "{label} · Undo ({seconds}s)",
+      "undoAria": "{label} — undo, {seconds} seconds remaining",
+      "toastQueueAria": "{count} undo actions, show the previous one",
+      "toastQueue": "{count} undo actions – show the previous one",
+      "undoAnnouncement": "{label}. Press {key} to undo.",
+      "undoKeyHint": "{key} to undo"
+    }
+  },
+  "de": {
+    "app": {
+      "crash": {
+        "copied": "Absturzbericht kopiert",
+        "copyFailed": "Absturzbericht konnte nicht kopiert werden",
+        "copyReport": "Bericht kopieren",
+        "crashed": "Satchel ist beim letzten Start abgestürzt.",
+        "notResponding": "Satchel hat beim letzten Lauf nicht reagiert."
+      },
+      "errors": {
+        "showDiagnostics": "Diagnose",
+        "unexpected": "Etwas ist schiefgelaufen. Die Details stehen im Log."
+      },
+      "followUps": {
+        "due": "{count} Nachfassen fällig | {count} Nachfassen fällig"
+      },
+      "ics": {
+        "fileFailed": "{name}: {error}",
+        "imported": "Termin importiert: {name}",
+        "importFailed": "ICS-Import fehlgeschlagen: {error}"
+      },
+      "language": {
+        "nativeUpdateFailed": "Systemmenüs und Benachrichtigungen konnten nicht aktualisiert werden.",
+        "nativeUpdateRolledBack": "Die Sprache konnte nicht auf Systemmenüs und Benachrichtigungen angewendet werden. Die vorherige Sprache wurde wiederhergestellt."
+      },
+      "mail": {
+        "cancelFailed": "Abbrechen fehlgeschlagen: {error}",
+        "sendCancelled": "Senden abgebrochen.",
+        "sent": "Mail gesendet.",
+        "undo": "Rückgängig",
+        "undoWindow": "Sende in {seconds}s — Rückgängig möglich"
+      },
+      "notifications": {
+        "read": "Gelesen",
+        "replyPlaceholder": "Antwort schreiben …"
+      },
+      "outbox": {
+        "sendFailed": "{count} E-Mail konnte nicht gesendet werden. | {count} E-Mails konnten nicht gesendet werden."
+      },
+      "signatures": {
+        "discovered": "{count} Signatur in gesendeten Nachrichten gefunden. | {count} Signaturen in gesendeten Nachrichten gefunden."
+      },
+      "dataRepair": {
+        "running": "Satchel räumt gespeicherte Mails im Hintergrund auf. Alles bleibt dabei benutzbar."
+      },
+      "plugins": {
+        "autoDisabled": "Das Plugin {plugin} lief wiederholt in Zeitüberschreitungen und wurde abgeschaltet. Unter Einstellungen → Integrationen lässt es sich wieder einschalten."
+      },
+      "sync": {
+        "mutationsFailed": "{count} Änderung konnte nicht mit dem Server abgeglichen werden. | {count} Änderungen konnten nicht mit dem Server abgeglichen werden.",
+        "retryFailed": "Erneuter Abgleich fehlgeschlagen: {error}",
+        "retryQueued": "{count} Änderung wird erneut abgeglichen. | {count} Änderungen werden erneut abgeglichen.",
+        "status": {
+          "lastSynced": "Zuletzt synchronisiert {time}",
+          "never": "Noch nicht synchronisiert",
+          "offline": "Offline — keine Verbindung",
+          "syncing": "Wird synchronisiert …"
+        }
+      },
+      "update": {
+        "available": "Update verfügbar",
+        "downloading": "Wird heruntergeladen: {progress}%",
+        "failedRetry": "Update fehlgeschlagen, erneut versuchen",
+        "restart": "Zum Aktualisieren neu starten",
+        "version": "Version {version}",
+        "check": "Nach Updates suchen",
+        "checking": "Updates werden gesucht…",
+        "upToDate": "Du nutzt die aktuelle Version.",
+        "sourceBuild": "Dieser Build wird aus dem Quellcode aktualisiert."
+      }
+    },
+    "commands": {
+      "addToTopic": "Zu einem Thema hinzufügen …",
+      "compose": "Neue E-Mail verfassen",
+      "copyLink": "Link zu dieser E-Mail kopieren",
+      "editShortcuts": "Tastenkürzel bearbeiten",
+      "keywords": {
+        "addToTopic": "topic thema organize",
+        "compose": "compose new mail schreiben",
+        "copyLink": "link url teilen satchel",
+        "editShortcuts": "keybindings shortcuts customize anpassen belegen",
+        "forward": "forward weiterleiten",
+        "markDone": "archive done erledigt",
+        "moveToInbox": "move inbox postfach",
+        "oauthGmail": "oauth google anmelden login",
+        "oauthOutlook": "oauth microsoft anmelden login",
+        "openCalendar": "calendar termine",
+        "openFollowUps": "followups wiedervorlage",
+        "openInbox": "inbox liste list",
+        "pin": "pin flag anheften lösen",
+        "reply": "reply antwort",
+        "replyAll": "reply all allen antworten",
+        "setAside": "set aside beiseite",
+        "showShortcuts": "shortcuts keyboard help hilfe tastatur",
+        "snooze": "remi remind reminder snooze later später erinnerung wiedervorlage",
+        "syncMail": "sync refresh abrufen",
+        "toggleRead": "mark read unread gelesen ungelesen",
+        "toggleTheme": "theme toggle dark light",
+        "trash": "trash delete löschen papierkorb",
+        "waiting": "waiting reply response warten antwort",
+        "block": "blockieren block absender domain",
+        "print": "drucken print pdf",
+        "export": "exportieren export speichern eml markdown text",
+        "moveToFolder": "bewegen verschieben ordner move folder",
+        "mute": "stumm stummschalten mute",
+        "spam": "spam junk werbung",
+        "undo": "rückgängig undo",
+        "openSettingsSection": "settings einstellungen optionen"
+      },
+      "markDone": "Als erledigt markieren",
+      "markDoneMany": "{count} E-Mails erledigen",
+      "markRead": "Als gelesen markieren",
+      "markUnread": "Als ungelesen markieren",
+      "moveToInbox": "In den Posteingang verschieben",
+      "noEmailAccount": "Kein E-Mail-Konto vorhanden.",
+      "oauthFailed": "{provider}-Anmeldung konnte nicht gestartet werden.",
+      "oauthGmail": "OAuth starten (Gmail)",
+      "oauthOpened": "{provider}-Anmeldung im Browser geöffnet.",
+      "oauthOutlook": "OAuth starten (Outlook)",
+      "oauthStarted": "{provider}-Anmeldung gestartet: {url}",
+      "openCalendar": "Kalender öffnen",
+      "openFollowUps": "Follow-ups öffnen",
+      "openInbox": "Posteingang öffnen",
+      "pin": "Anheften oder lösen",
+      "setAside": "Beiseitelegen",
+      "showShortcuts": "Tastenkürzel anzeigen",
+      "snooze": "Reminder / Wiedervorlage setzen …",
+      "syncDone": "Synchronisierung abgeschlossen.",
+      "syncFailed": "Synchronisierung fehlgeschlagen.",
+      "syncMail": "E-Mails synchronisieren",
+      "toggleTheme": "Design wechseln (hell/dunkel)",
+      "trashMany": "{count} E-Mails löschen",
+      "waiting": "Auf Antwort warten",
+      "oauthFailedCause": "{provider}-Anmeldung konnte nicht gestartet werden: {cause}",
+      "syncFailedCause": "Synchronisierung fehlgeschlagen: {cause}",
+      "blockAddress": "Diesen Absender blockieren",
+      "blockDomain": "Ganze Domain des Absenders blockieren",
+      "printConversation": "Unterhaltung drucken",
+      "printLatest": "Letzte E-Mail drucken",
+      "exportEml": "Letzte E-Mail als EML exportieren",
+      "exportMarkdown": "Unterhaltung als Markdown exportieren",
+      "exportText": "Unterhaltung als Text exportieren",
+      "moveToFolder": "Nach {folder} bewegen",
+      "undo": "Rückgängig: {label}",
+      "openSettingsSection": "Einstellungen: {section}"
+    },
+    "nav": {
+      "agenda": {
+        "more": "+{count} weitere",
+        "title": "Heute"
+      },
+      "backToMail": "Zurück zu Mail",
+      "calendar": "Kalender",
+      "composeMessage": "Neue Nachricht schreiben",
+      "mailboxFilter": "Postfächer filtern",
+      "composeNewWindow": "Neue E-Mail (Shift+Klick für eigenes Fenster)",
+      "contactLabel": "{name}, {count} Konversationen",
+      "contactPinned": "Angepinnt",
+      "contactSummary": "{name} <{email}> · {count} Konversationen",
+      "contacts": "Kontakte",
+      "feedsAndSources": "Feeds & Quellen",
+      "folderBrowser": {
+        "addFavorite": "Zu Favoriten hinzufügen",
+        "close": "Ordnerauswahl schließen",
+        "confirmDelete": "Ordner „{name}\" wirklich löschen?",
+        "created": "Ordner „{name}\" angelegt.",
+        "deleted": "Ordner „{name}\" gelöscht.",
+        "hint": "Favorisierte Ordner erscheinen links in der Sidebar. Systemlabels wie Gmail-Kategorien und Marker bleiben ausgeblendet.",
+        "nameLabel": "Name des neuen Ordners",
+        "namePlaceholder": "Ordnername",
+        "newFolder": "Neuen Ordner anlegen",
+        "newFolderShort": "+ Ordner",
+        "removeFavorite": "Aus Favoriten entfernen",
+        "renameLabel": "Neuer Ordnername",
+        "renamed": "Ordner umbenannt.",
+        "title": "Favoriten aus allen Ordnern"
+      },
+      "folders": {
+        "aside": "Beiseitegelegt",
+        "blocked": "Blockiert",
+        "done": "Erledigt",
+        "drafts": "Entwürfe",
+        "inbox": "Inbox",
+        "notifications": "Benachrichtigungen",
+        "outbox": "Postausgang",
+        "sent": "Gesendet",
+        "snoozed": "Auf Wiedervorlage",
+        "spam": "Spam",
+        "title": "Ordner",
+        "trash": "Papierkorb",
+        "waiting": "Warten auf Antwort"
+      },
+      "frequent": "Häufig",
+      "modules": "Bereiche",
+      "omni": {
+        "activateAccount": "Konto aktivieren",
+        "ariaLabel": "Suche und Befehle",
+        "groups": {
+          "accounts": "Konten",
+          "app": "App",
+          "commands": "Befehle",
+          "contacts": "Kontakte",
+          "mailActions": "E-Mail-Aktionen",
+          "mailActionsFor": "E-Mail-Aktionen · {subject}",
+          "mails": "Mails",
+          "navigation": "Navigation",
+          "recent": "Letzte Suchen",
+          "reminder": "Reminder setzen",
+          "reminderForMany": "Reminder für {count} E-Mails",
+          "recentCommands": "Zuletzt verwendet"
+        },
+        "hint": "Durchsucht Mails, Kontakte und Befehle. Operatoren wie from: oder has:attachment lassen sich kombinieren.",
+        "hints": {
+          "allHits": "Alle Treffer",
+          "group": "Gruppe",
+          "navigate": "Navigieren"
+        },
+        "noReminderDate": "Datum nicht erkannt. Versuche „morgen 9“, „next Friday 2pm“ oder „in 3 Stunden“.",
+        "noResults": "Keine Treffer gefunden.",
+        "placeholder": "Suchen oder Befehl eingeben … (from:, subject:, has:attachment)",
+        "queryLabel": "Suchbegriff",
+        "reminderPlaceholder": "Wann? z. B. morgen 9, tomorrow 4pm, in 2 Stunden …",
+        "removeRecent": "Aus letzten Suchen entfernen",
+        "removeRecentNamed": "„{query}“ aus letzten Suchen entfernen",
+        "results": "Suchergebnisse",
+        "searching": "Suche läuft",
+        "searchingState": "Suche läuft …",
+        "showAll": "Alle Treffer anzeigen"
+      },
+      "pinContact": "Kontakt anpinnen",
+      "pinContactNamed": "{name} anpinnen",
+      "smartFolders": "Smart Folders",
+      "snooze": {
+        "manual": "Manuell",
+        "nextMonth": "Nächsten Monat",
+        "nextWeek": "Nächste Woche",
+        "recent": "Zuletzt genutzt",
+        "title": "Auf Wiedervorlage",
+        "today14": "Heute 14:00",
+        "tomorrow14": "Morgen 14:00",
+        "tomorrow8": "Morgen 08:00"
+      },
+      "toggleSection": "{name} auf- oder zuklappen",
+      "unpinContact": "Kontakt loslösen",
+      "unpinContactNamed": "{name} loslösen"
+    },
+    "shortcuts": {
+      "actions": {
+        "addToTopic": {
+          "keywords": "topic thema",
+          "label": "Zu einem Thema hinzufügen"
+        },
+        "archive": {
+          "keywords": "archive archivieren",
+          "label": "Archivieren"
+        },
+        "clearSelection": {
+          "keywords": "clear selection leeren",
+          "label": "Auswahl aufheben"
+        },
+        "compose": {
+          "keywords": "new compose schreiben",
+          "label": "Neue E-Mail verfassen"
+        },
+        "copyLink": {
+          "keywords": "link url teilen",
+          "label": "Link zu dieser E-Mail kopieren"
+        },
+        "forward": {
+          "keywords": "forward weiterleiten",
+          "label": "Weiterleiten"
+        },
+        "goCalendar": {
+          "keywords": "go calendar kalender",
+          "label": "Zum Kalender"
+        },
+        "goContacts": {
+          "keywords": "go people contacts kontakte",
+          "label": "Zu Kontakten"
+        },
+        "goDrafts": {
+          "keywords": "go drafts entwuerfe entwürfe",
+          "label": "Zu Entwürfen"
+        },
+        "goFollowUps": {
+          "keywords": "go followups reminder wiedervorlage",
+          "label": "Zu Follow-ups"
+        },
+        "goInbox": {
+          "keywords": "go inbox posteingang",
+          "label": "Zum Posteingang"
+        },
+        "goOutbox": {
+          "keywords": "go outbox ausgang",
+          "label": "Zur Outbox"
+        },
+        "help": {
+          "keywords": "help shortcuts hilfe",
+          "label": "Tastaturhilfe anzeigen"
+        },
+        "leaveItem": {
+          "keywords": "back escape zurück",
+          "label": "Eine Ebene zurück"
+        },
+        "markDone": {
+          "keywords": "done archive erledigt",
+          "label": "Als erledigt markieren"
+        },
+        "markSpam": {
+          "keywords": "spam junk werbung",
+          "label": "Als Spam markieren"
+        },
+        "moveInbox": {
+          "keywords": "move inbox posteingang",
+          "label": "In den Posteingang verschieben"
+        },
+        "moveSnoozed": {
+          "keywords": "reminder snooze wiedervorlage",
+          "label": "Reminder / Wiedervorlage"
+        },
+        "moveWaiting": {
+          "keywords": "waiting warten",
+          "label": "Auf Antwort warten"
+        },
+        "nextThread": {
+          "keywords": "next down weiter",
+          "label": "Nächster Eintrag"
+        },
+        "openCommandPalette": {
+          "keywords": "command palette search suche",
+          "label": "Suche & Befehle öffnen"
+        },
+        "openItem": {
+          "keywords": "open enter öffnen",
+          "label": "Fokussiertes Element öffnen"
+        },
+        "pin": {
+          "keywords": "pin star anheften",
+          "label": "Anheften / lösen"
+        },
+        "prevThread": {
+          "keywords": "previous up zurück",
+          "label": "Vorheriger Eintrag"
+        },
+        "previewAttachment": {
+          "keywords": "attachment preview quick look anhang vorschau schnellansicht",
+          "label": "Fokussierten Anhang ansehen"
+        },
+        "print": {
+          "keywords": "drucken print pdf",
+          "label": "Unterhaltung drucken"
+        },
+        "reply": {
+          "keywords": "reply antwort",
+          "label": "Antworten"
+        },
+        "replyAll": {
+          "keywords": "reply all allen antworten",
+          "label": "Allen antworten"
+        },
+        "selectAll": {
+          "keywords": "select all alle",
+          "label": "Alle sichtbaren E-Mails auswählen"
+        },
+        "setAside": {
+          "keywords": "aside beiseite",
+          "label": "Beiseitelegen"
+        },
+        "toggleAllMessages": {
+          "keywords": "all messages collapse expand alle nachrichten klappen",
+          "label": "Alle Nachrichten ein- / ausklappen"
+        },
+        "toggleMessage": {
+          "keywords": "message open collapse expand nachricht klappen",
+          "label": "Fokussierte Nachricht ein- / ausklappen"
+        },
+        "toggleMute": {
+          "keywords": "stumm stummschalten mute",
+          "label": "Unterhaltung stummschalten / wieder laut"
+        },
+        "toggleRead": {
+          "keywords": "read unread gelesen ungelesen",
+          "label": "Gelesen / ungelesen umschalten"
+        },
+        "toggleSelection": {
+          "keywords": "select toggle auswählen",
+          "label": "Auswahl umschalten"
+        },
+        "trash": {
+          "keywords": "delete trash löschen",
+          "label": "Löschen"
+        },
+        "undo": {
+          "keywords": "rückgängig undo",
+          "label": "Letzte Aktion rückgängig machen"
+        }
+      },
+      "close": "Tastenkürzel schließen",
+      "contexts": {
+        "global": "Immer",
+        "mail": "E-Mail fokussiert",
+        "mailbox": "Mailbox fokussiert",
+        "navigation": "Navigation"
+      },
+      "editBindings": "Kürzel bearbeiten",
+      "footerHint": "zeigt Aktionen für die fokussierte E-Mail direkt in der Befehlspalette.",
+      "groups": {
+        "compose": "Verfassen",
+        "more": "Feste Kombinationen",
+        "navigation": "Navigation",
+        "search": "Suche & Befehle",
+        "triage": "Triage"
+      },
+      "helper": {
+        "insertTemplate": "Vorlage einfügen",
+        "moveThroughMail": "Durch Mails und Ordner bewegen",
+        "moveThroughMessages": "Durch Nachrichten und Entwürfe bewegen",
+        "newMail": "Neue Mail",
+        "prevNextThread": "Vorheriger / nächster Thread",
+        "selectRange": "Bereich auswählen"
+      },
+      "keys": {
+        "inReader": "im Reader",
+        "or": "oder"
+      },
+      "sequence": {
+        "calendar": "C Kalender",
+        "contacts": "P Kontakte",
+        "drafts": "D Entwürfe",
+        "followUps": "F Follow-ups",
+        "inbox": "I Posteingang",
+        "outbox": "O Outbox"
+      },
+      "subtitle": "Alles Wichtige bleibt direkt unter den Fingern.",
+      "title": "Tastenkürzel"
+    },
+    "ui": {
+      "dismissToast": "Meldung schließen",
+      "resizeList": "Listenbreite ändern",
+      "resizeSidebar": "Seitenleistenbreite ändern",
+      "send": "Senden",
+      "undoTitle": "{label} · Rückgängig ({seconds}s)",
+      "undoAria": "{label} — Rückgängig machen, {seconds} Sekunden verbleiben",
+      "toastQueueAria": "{count} Rückgängig-Aktionen, vorherige anzeigen",
+      "toastQueue": "{count} Rückgängig-Aktionen – vorherige anzeigen",
+      "undoAnnouncement": "{label}. Mit {key} rückgängig machen.",
+      "undoKeyHint": "{key} macht rückgängig"
+    }
+  }
+}

@@ -1,0 +1,119 @@
+name: Security audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/Cargo.toml'
+      - Cargo.lock
+      - .cargo/audit.toml
+      - .cargo/lettre-upstream-exception.json
+      - deny.toml
+      - 'vendor/lettre/**'
+      - crates/satchel-core/tests/vendor_lettre.rs
+      - .github/workflows/security-audit.yml
+      - scripts/check-rust-audit-exceptions.py
+  pull_request:
+    paths:
+      - '**/Cargo.toml'
+      - Cargo.lock
+      - .cargo/audit.toml
+      - .cargo/lettre-upstream-exception.json
+      - deny.toml
+      - 'vendor/lettre/**'
+      - crates/satchel-core/tests/vendor_lettre.rs
+      - .github/workflows/security-audit.yml
+      - scripts/check-rust-audit-exceptions.py
+  workflow_dispatch:
+  schedule:
+    # Mondays 06:20 UTC — off the top of the hour to reduce load spikes.
+    - cron: "20 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cargo-audit:
+    name: cargo-audit (${{ matrix.workspace }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # The root lockfile covers the whole workspace (src-tauri is a
+        # member, not a standalone workspace with its own Cargo.lock).
+        include:
+          - workspace: root
+            directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          cache: false
+          build-warnings: ''
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check advisory exception deadlines
+        run: python3 scripts/check-rust-audit-exceptions.py
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      # Lockfile-only scan: no compile, so it stays cheap and catches advisory
+      # matches in exactly the versions CI installs.
+      - name: Audit ${{ matrix.workspace }} lockfile
+        working-directory: ${{ matrix.directory }}
+        run: cargo audit --file Cargo.lock
+
+  vendor-lettre:
+    name: vendored lettre against upstream
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          cache: false
+          build-warnings: ''
+
+      # `cargo audit` reports advisories; it says nothing about correctness
+      # fixes, and `cargo update` never touches a patched path. This is the only
+      # thing that notices a new lettre release.
+      - name: Compare the vendored fork against crates.io
+        env:
+          SATCHEL_VENDOR_UPSTREAM_CHECK: "1"
+        run: cargo test -p satchel-core --test vendor_lettre -- --nocapture
+
+  cargo-deny:
+    name: Dependency licenses and sources
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          cache: false
+          build-warnings: ''
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2
+      - name: Check dependency policy
+        run: cargo deny --locked check licenses sources

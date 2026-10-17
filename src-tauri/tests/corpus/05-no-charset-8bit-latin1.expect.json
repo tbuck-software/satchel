@@ -1,0 +1,7 @@
+{
+  "subject": "Hausordnung geändert",
+  "body_contains": [
+    "Hausordnung"
+  ],
+  "allow_replacement": false
+}

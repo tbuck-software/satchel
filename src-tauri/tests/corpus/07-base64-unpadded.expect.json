@@ -1,0 +1,13 @@
+{
+  "subject": "Rechnung ohne Padding",
+  "body_contains": [
+    "Hallo Welt, das ist ein Body."
+  ],
+  "allow_replacement": false,
+  "attachments": [
+    {
+      "filename": "rechnung.pdf",
+      "size": 133
+    }
+  ]
+}

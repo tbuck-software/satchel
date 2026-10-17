@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "tray-popover",
+  "description": "Compact menu-bar briefing. It can read its bounded snapshot, run its two explicit mail actions and hide itself \u2014 the four commands below, and no others.",
+  "windows": [
+    "tray-popover"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "allow-tray-snapshot",
+    "allow-open-tray-thread",
+    "allow-act-on-tray-thread",
+    "allow-open-tray-destination"
+  ],
+  "platforms": [
+    "linux",
+    "macOS",
+    "windows"
+  ]
+}

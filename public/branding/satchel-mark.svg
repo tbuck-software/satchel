@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="180 300 666 424" role="img" aria-labelledby="title">
+  <title id="title">Satchel</title>
+  <!-- Transparent version of satchel-smile-check.svg for the sidebar.
+       The smile is cut out so the mark works on either theme. -->
+  <defs>
+    <mask id="smile-cutout" maskUnits="userSpaceOnUse" x="180" y="300" width="666" height="424">
+      <rect x="180" y="300" width="666" height="424" fill="white" />
+      <path
+        d="M 318 482
+           C 345 526 412 582 450 582
+           C 512 582 676 490 712 442"
+        fill="none"
+        stroke="black"
+        stroke-width="40"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </mask>
+  </defs>
+  <path
+    fill="white"
+    mask="url(#smile-cutout)"
+    d="M 300 312
+       H 724
+       C 767 312 793 337 800 384
+       L 835 605
+       C 844 670 813 712 742 712
+       H 282
+       C 211 712 180 670 189 605
+       L 224 384
+       C 231 337 257 312 300 312
+       Z"
+  />
+</svg>

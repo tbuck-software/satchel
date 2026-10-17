@@ -1,0 +1,90 @@
+name: Bug report
+description: Something in Satchel is broken, crashed or behaves differently than it should.
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One problem per report. Search the existing issues first.
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Press …
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the exact text of any error message or toast.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Android
+        - iOS
+    validations:
+      required: true
+
+  - type: dropdown
+    id: account
+    attributes:
+      label: Account type
+      description: The account the problem happens with, if any.
+      multiple: true
+      options:
+        - Gmail (OAuth)
+        - Microsoft 365 / Outlook (OAuth)
+        - IMAP/SMTP
+        - POP3
+        - CalDAV / CardDAV
+        - Not account-related
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        In Satchel, open Settings → Diagnostics, click "Copy diagnostics (redacted)" and paste the result here.
+        It contains the version, the commit, the sync state and the latest warnings and errors. Email addresses,
+        tokens, private server names and mail content are removed before it reaches the clipboard. Read it once
+        before you submit anyway.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: crash
+    attributes:
+      label: Crash report
+      description: If Satchel showed "Satchel crashed during the last start", click "Copy report" and paste it here.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or other context
+      description: |
+        Screenshots help. Raw log files from "Open logs folder" are not redacted: attach one only after
+        checking it, or quote the relevant lines instead.

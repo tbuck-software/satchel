@@ -1,0 +1,202 @@
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createPinia, setActivePinia } from 'pinia';
+import { flushPromises, mount } from '@vue/test-utils';
+
+const composeWindow = vi.hoisted(() => ({
+  open: vi.fn(),
+  openNative: vi.fn(),
+  supportsNative: vi.fn(() => true),
+}));
+
+const composeView = vi.hoisted(() => ({
+  persistDraft: vi.fn(async () => 'draft-1' as string | null),
+  shouldConfirmClose: vi.fn(() => false),
+  closeWithoutSaving: vi.fn(async () => undefined),
+  currentDraftId: vi.fn(() => null as string | null),
+}));
+
+const confirm = vi.hoisted(() => ({ ask: vi.fn(async () => true) }));
+
+const toast = vi.hoisted(() => ({
+  error: vi.fn(),
+  info: vi.fn(),
+  success: vi.fn(),
+  warning: vi.fn(),
+}));
+
+vi.mock('@/composables/useToast', () => ({ useToast: () => toast }));
+vi.mock('@/composables/useConfirm', () => ({ useConfirm: () => confirm }));
+
+vi.mock('@/composables/useComposeWindow', () => ({
+  useComposeWindow: () => composeWindow,
+}));
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: vi.fn(), resolve: vi.fn(() => ({ href: '/compose' })) }),
+}));
+
+vi.mock('@/views/ComposeView.vue', () => ({
+  default: {
+    setup(_props: unknown, { expose }: { expose: (handle: unknown) => void }) {
+      expose({
+        persistDraft: composeView.persistDraft,
+        shouldConfirmClose: composeView.shouldConfirmClose,
+        closeWithoutSaving: composeView.closeWithoutSaving,
+        currentDraftId: composeView.currentDraftId,
+      });
+      return () => undefined;
+    },
+  },
+}));
+
+import ComposerHost from './ComposerHost.vue';
+import { useComposerStore } from '@/stores/composer';
+
+async function mountOpenComposer() {
+  const wrapper = mount(ComposerHost, { attachTo: document.body });
+  useComposerStore().openNew();
+  await flushPromises();
+  return wrapper;
+}
+
+beforeEach(() => {
+  setActivePinia(createPinia());
+  vi.clearAllMocks();
+  composeWindow.supportsNative.mockReturnValue(true);
+  composeView.persistDraft.mockResolvedValue('draft-1');
+  composeView.shouldConfirmClose.mockReturnValue(false);
+  composeView.currentDraftId.mockReturnValue(null);
+  confirm.ask.mockResolvedValue(true);
+});
+
+describe('composer popout', () => {
+  it('opens an empty composer without creating a draft', async () => {
+    composeView.persistDraft.mockResolvedValue(null);
+    const wrapper = await mountOpenComposer();
+
+    await wrapper.get('button[title="Open in its own window"]').trigger('click');
+    await flushPromises();
+
+    expect(composeWindow.open).toHaveBeenCalledWith(null);
+    expect(useComposerStore().isOpen).toBe(false);
+  });
+
+  it('keeps a nonempty composer open when its draft cannot be saved', async () => {
+    composeView.shouldConfirmClose.mockReturnValue(true);
+    composeView.persistDraft.mockResolvedValue(null);
+    const wrapper = await mountOpenComposer();
+
+    await wrapper.get('button[title="Open in its own window"]').trigger('click');
+    await flushPromises();
+
+    expect(composeWindow.open).not.toHaveBeenCalled();
+    expect(useComposerStore().isOpen).toBe(true);
+    expect(wrapper.get('.composer-error').text()).toBe('The draft could not be saved. The composer stays open.');
+  });
+
+  it('keeps the composer open and reports the failure when the popout fails', async () => {
+    composeWindow.open.mockRejectedValue(new Error('no window'));
+    const wrapper = await mountOpenComposer();
+
+    await wrapper.get('button[title="Open in its own window"]').trigger('click');
+    await flushPromises();
+
+    expect(useComposerStore().isOpen).toBe(true);
+    expect(wrapper.get('.composer-error').text()).toContain('no window');
+  });
+
+  it('closes the composer once the popout succeeded', async () => {
+    composeWindow.open.mockResolvedValue(undefined);
+    const wrapper = await mountOpenComposer();
+
+    await wrapper.get('button[title="Open in its own window"]').trigger('click');
+    await flushPromises();
+
+    expect(composeWindow.open).toHaveBeenCalledWith('draft-1');
+    // The popout owns the draft now: no closing save may race its first edit.
+    expect(composeView.closeWithoutSaving).toHaveBeenCalled();
+    expect(composeWindow.open.mock.invocationCallOrder[0]!)
+      .toBeLessThan(composeView.closeWithoutSaving.mock.invocationCallOrder[0]!);
+    expect(useComposerStore().isOpen).toBe(false);
+    expect(wrapper.find('.composer-error').exists()).toBe(false);
+  });
+});
+
+describe('a second composer request while one is open', () => {
+  it('replaces an untouched composer without asking', async () => {
+    await mountOpenComposer();
+
+    await useComposerStore().openReply('thread-1');
+    await flushPromises();
+
+    expect(confirm.ask).not.toHaveBeenCalled();
+    expect(composeView.closeWithoutSaving).toHaveBeenCalled();
+    expect(useComposerStore().request?.mode).toBe('reply');
+  });
+
+  it('asks first and keeps the composer when the user declines', async () => {
+    composeView.shouldConfirmClose.mockReturnValue(true);
+    confirm.ask.mockResolvedValue(false);
+    await mountOpenComposer();
+
+    await expect(useComposerStore().openReply('thread-1')).resolves.toBe(false);
+
+    expect(confirm.ask).toHaveBeenCalledTimes(1);
+    expect(composeView.persistDraft).not.toHaveBeenCalled();
+    expect(useComposerStore().request?.mode).toBe('new');
+  });
+
+  it('saves before replacing and keeps the composer when that save fails', async () => {
+    composeView.shouldConfirmClose.mockReturnValue(true);
+    composeView.persistDraft.mockResolvedValue(null);
+    const wrapper = await mountOpenComposer();
+
+    await expect(useComposerStore().openEmail(['mara@example.com'])).resolves.toBe(false);
+    await flushPromises();
+
+    expect(useComposerStore().request?.to).toEqual([]);
+    expect(wrapper.get('.composer-error').text()).toBe('The draft could not be saved. The composer stays open.');
+
+    composeView.persistDraft.mockResolvedValue('draft-1');
+    await expect(useComposerStore().openEmail(['mara@example.com'])).resolves.toBe(true);
+    expect(useComposerStore().request?.to).toEqual(['mara@example.com']);
+  });
+
+  it('keeps the composer when the same draft is opened again', async () => {
+    composeView.currentDraftId.mockReturnValue('draft-7');
+    await mountOpenComposer();
+    const instance = useComposerStore().instance;
+
+    await expect(useComposerStore().openDraft('draft-7')).resolves.toBe(false);
+
+    expect(useComposerStore().instance).toBe(instance);
+  });
+});
+
+/**
+ * A draft that cannot be written is the one case where the window must stay
+ * open — and it was also the case with the quietest sign: one thin line under
+ * the title bar, which reads as a broken close button.
+ */
+describe('a close that cannot save the draft', () => {
+  it('keeps the window, announces the failure and offers the retry', async () => {
+    composeView.shouldConfirmClose.mockReturnValue(true);
+    composeView.persistDraft.mockResolvedValue(null);
+    const wrapper = await mountOpenComposer();
+
+    await wrapper.get('button[title="Close composer"]').trigger('click');
+    await flushPromises();
+
+    expect(useComposerStore().isOpen).toBe(true);
+    expect(wrapper.get('.composer-error').attributes('role')).toBe('alert');
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error.mock.calls[0]?.[1]?.action?.label).toBe('Try again');
+
+    // The retry runs the same close, so a save that now works closes the window.
+    composeView.persistDraft.mockResolvedValue('draft-2');
+    await toast.error.mock.calls[0]?.[1]?.action?.handler();
+    await flushPromises();
+    expect(useComposerStore().isOpen).toBe(false);
+  });
+});

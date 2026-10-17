@@ -1,0 +1,30 @@
+From: Newsletter <news@example.com>
+To: empfang@example.de
+Subject: Verschachtelte Grenzen
+Date: Tue, 04 Mar 2025 11:00:00 +0100
+Message-ID: <corpus-09-nested@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="=_b_1"
+
+--=_b_1
+Content-Type: multipart/alternative; boundary="=_b_12"
+
+--=_b_12
+Content-Type: text/plain; charset=UTF-8
+
+Die Textfassung der Einladung.
+
+--=_b_12
+Content-Type: text/html; charset=UTF-8
+
+<html><body><p>Die HTML-Fassung der Einladung.</p></body></html>
+
+--=_b_12--
+
+--=_b_1
+Content-Type: text/calendar; charset=UTF-8; method=REQUEST
+
+BEGIN:VCALENDAR
+END:VCALENDAR
+
+--=_b_1--

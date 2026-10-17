@@ -1,0 +1,17 @@
+{
+  "subject": "Leeres Segment im Content-Type",
+  "body_contains": [
+    "Der Bericht liegt bei."
+  ],
+  "allow_replacement": false,
+  "attachments": [
+    {
+      "filename": "erster.bin",
+      "size": 39
+    },
+    {
+      "filename": "zweiter.bin",
+      "size": 28
+    }
+  ]
+}

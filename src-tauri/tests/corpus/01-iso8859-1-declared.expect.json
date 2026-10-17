@@ -1,0 +1,10 @@
+{
+  "subject": "Angebot für die Büromöbel",
+  "charset": "iso-8859-1",
+  "body_contains": [
+    "Büromöbel",
+    "Größe der Schränke",
+    "Grüßen"
+  ],
+  "allow_replacement": false
+}

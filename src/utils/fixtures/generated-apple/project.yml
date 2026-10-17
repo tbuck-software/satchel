@@ -1,0 +1,21 @@
+name: satchel
+options:
+  bundleIdPrefix: de.tbuck.satchel
+  deploymentTarget:
+    iOS: 15.0
+targets:
+  satchel_iOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    info:
+      path: satchel_iOS/Info.plist
+      properties:
+        LSRequiresIPhoneOS: true
+        CFBundleShortVersionString: 0.1.0
+    entitlements:
+      path: satchel_iOS/satchel_iOS.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.tbuck.satchel

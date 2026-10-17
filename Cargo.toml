@@ -1,0 +1,41 @@
+[workspace]
+members = [
+  "tooling/ipc-manifest",
+  "crates/satchel-core",
+  "src-tauri",
+  "plugin-sdk",
+  "plugins/github-integration",
+  "plugins/calendar-sync",
+  "plugins/auto-unsubscribe",
+  "plugins/pgp-support"
+]
+exclude = ["fuzz"]
+resolver = "2"
+
+# Full debug info made target/debug grow back to 8.6 GB after every `make check`
+# — on a full disk that took the machine down with it. Line tables keep
+# backtraces pointing at file and line, which is what the tests and panics
+# actually need; only stepping through variables in a debugger needs more.
+#
+# Cargo honours profiles from the workspace root only, so this belongs here
+# rather than in src-tauri/Cargo.toml.
+[profile.dev]
+debug = "line-tables-only"
+
+# Dependencies dominated the rest: 4.5 GB of the 6.0 GB sat in target/debug/deps.
+# Their debug info buys nothing here — a backtrace through a third-party frame
+# still carries the function name, and stepping into tokio internals is not how
+# this codebase gets debugged. Our own crates keep their line tables above.
+[profile.dev.package."*"]
+debug = 0
+
+[patch.crates-io]
+lettre = { path = "vendor/lettre" }
+
+# rustc 1.97.1 on macOS 27 mislinks sqlx-macros without debug line tables.
+# Apply this to local gates and CI alike, overriding the dependency wildcard.
+[profile.dev.package.sqlx-macros]
+debug = "line-tables-only"
+
+[profile.test.package.sqlx-macros]
+debug = "line-tables-only"

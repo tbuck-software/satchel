@@ -1,0 +1,65 @@
+name: Parser fuzzing
+
+on:
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: parser-fuzzing
+  cancel-in-progress: false
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Install Core build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends build-essential pkg-config clang libdbus-1-dev libssl-dev
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          toolchain: nightly
+          cache: false
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+          key: nightly-fuzz
+      - uses: actions/cache@v4
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --locked
+      - name: Stabilize optional Core build input
+        run: |
+          # Cargo rebuilds a watched file on every invocation when it is absent.
+          # Parser jobs need no baked OAuth identity.
+          test -e .env || touch .env
+      - name: Seed parser corpus
+        run: node scripts/seed-fuzz-corpus.mjs
+      - name: Fuzz each parser for five minutes
+        run: |
+          failed=0
+          for target in sanitizer mime_body ics mbox_import; do
+            cargo +nightly fuzz run "$target" -- -max_total_time=300 -timeout=15 -max_len=262144 || failed=1
+          done
+          exit "$failed"
+      - name: Save crash reproducers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: fuzz/artifacts
+          retention-days: 14

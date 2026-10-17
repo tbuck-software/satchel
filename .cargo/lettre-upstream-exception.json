@@ -1,0 +1,6 @@
+{
+  "pinned": "0.11.19",
+  "reviewed_upstream": "0.11.23",
+  "review_by": "2026-11-12",
+  "reason": "The Android verifier patch requires rustls-platform-verifier 0.6.2. Review remaining upstream changes and the mobile 0.7 upgrade by this date. The SMTP response-buffer fix is tracked in #173."
+}

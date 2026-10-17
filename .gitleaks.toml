@@ -1,0 +1,38 @@
+title = "Satchel secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Documented, generated OpenPGP fixture keys; never used for real mail."
+paths = [
+  '''^crates/satchel-core/tests/corpus/pgp/gpg-private\.asc$''',
+  '''^crates/satchel-core/tests/corpus/pgp/rpgp-cv25519-import\.sec\.asc$''',
+]
+
+[[allowlists]]
+description = "Upstream lettre DKIM test/example keys, distributed by lettre itself."
+paths = ['''^vendor/lettre/src/message/(dkim|mod)\.rs$''']
+
+[[allowlists]]
+description = "Key markers inside source strings are not complete private keys."
+regexTarget = "match"
+regexes = ['''^-----BEGIN[ A-Z0-9_-]*PRIVATE KEY(?: BLOCK)?-----["']''']
+
+[[allowlists]]
+description = "Synthetic profile path hashes identify keychain entries, not key material."
+condition = "AND"
+paths = ['''^tests/fixtures/profile-keyring-accounts\.json$''']
+regexTarget = "match"
+regexes = ['''pgp-master-key-v1:[0-9a-f]{64}''']
+
+[[allowlists]]
+description = "Deliberately fake tokens in the credential redaction regression test."
+condition = "AND"
+paths = ['''^src-tauri/src/utils/redact\.rs$''']
+regexTarget = "line"
+regexes = [
+  '''let jwt = "eyJhbGciOiJSUzI1NiJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.c2lnbmF0dXJlLXNpZ24";''',
+  '''refresh_token=1//0gAbCdEfGhIjKlMnOpQrStUv''',
+  '''token rejected: ya29A0AfH6SMBxQ9vZt7kLmNoPqRsTuVwXyZ012345''',
+]

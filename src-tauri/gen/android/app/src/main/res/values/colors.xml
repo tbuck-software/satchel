@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="satchel_blue">#FF1677F2</color>
+    <color name="satchel_blue_dark">#FF0B315A</color>
+    <color name="satchel_icon_background">#FF081D33</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>

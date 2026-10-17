@@ -1,0 +1,660 @@
+{
+  "en": {
+    "compose": {
+      "title": {
+        "new": "New message",
+        "resend": "Send again"
+      },
+      "noSubject": "(No subject)",
+      "send": "Send",
+      "sending": "Sending…",
+      "discardDraft": "Discard draft",
+      "sender": "Sender",
+      "identityAlias": "{email} (alias)",
+      "window": {
+        "ariaLabel": "Compose email",
+        "maximize": "Maximise composer",
+        "restore": "Restore window",
+        "popOut": "Open in its own window",
+        "popOutFailed": "Could not open a separate window: {error}",
+        "close": "Close composer"
+      },
+      "draft": {
+        "saveFailedStaysOpen": "The draft could not be saved. The composer stays open.",
+        "savedAsDraft": "Saved as draft.",
+        "discarded": "Draft discarded.",
+        "discardFailed": "Could not discard the draft: {error}",
+        "openElsewhere": "This draft is already open in another window."
+      },
+      "status": {
+        "draftSaved": "Draft saved.",
+        "draftSavedRemotePending": "Draft saved. Sync with the server is still pending: {error}",
+        "saveFailed": "Saving failed: {error}",
+        "sentFrom": "Sent from {address}.",
+        "sentLocalSaveFailed": "The message was sent, but Satchel could not save its local Sent record. Details are in the outbox.",
+        "scheduledFor": "Scheduled for {time}.",
+        "queued": "Queued in the outbox in the background.",
+        "sendFailed": "Sending failed: {error}",
+        "technical": "Technical details"
+      },
+      "recipients": {
+        "toPlaceholder": "recipient{'@'}example.com",
+        "ccPlaceholder": "cc{'@'}example.com",
+        "bccPlaceholder": "bcc{'@'}example.com",
+        "ccBcc": "Cc/Bcc",
+        "showCcBcc": "Show Cc and Bcc",
+        "collapseCcBcc": "Collapse Cc and Bcc",
+        "invalid": "This is not a valid email address."
+      },
+      "body": {
+        "plainAriaLabel": "Message (plain text)"
+      },
+      "schedule": {
+        "scheduled": "Scheduled: {time}",
+        "followUp": "Follow-up: {time}",
+        "remove": "remove",
+        "submit": "Schedule",
+        "editCancelled": "Sending was cancelled so you can edit this draft. Choose Send later again to schedule the revised message."
+      },
+      "toolbar": {
+        "attach": "Attach file",
+        "template": "Use template",
+        "more": "More options"
+      },
+      "options": {
+        "priority": "Priority",
+        "priorityAriaLabel": "Message priority",
+        "format": "Format",
+        "plainText": "Plain text (no HTML)",
+        "followUp": "Follow up",
+        "followUpAriaLabel": "Follow up on",
+        "followUpNote": "Reminds you if no reply has arrived by then.",
+        "security": "Security",
+        "securityAriaLabel": "Sign and encrypt"
+      },
+      "priority": {
+        "high": "High",
+        "normal": "Normal",
+        "low": "Low"
+      },
+      "crypto": {
+        "pgpUnavailable": "The selected PGP engine is unavailable.",
+        "sign": "Sign",
+        "encrypt": "Encrypt for all recipients",
+        "noSmimeCertificate": "No private S/MIME certificate for this sender address.",
+        "addRecipientsFirst": "Add recipients before encrypting.",
+        "missingSmimeCertificates": "No certificate for: {recipients}",
+        "noPgpKey": "No unlocked private key (Settings → OpenPGP).",
+        "missingPgpKeys": "No public key for: {recipients}"
+      },
+      "templates": {
+        "button": "Template…",
+        "title": "Insert template",
+        "searchPlaceholder": "Search templates…",
+        "empty": "No templates yet. Create them under Settings > Templates."
+      },
+      "sendLater": {
+        "title": "Send later",
+        "tomorrowAt": "Tomorrow {time}",
+        "mondayAt": "Monday {time}",
+        "custom": "Custom time",
+        "clear": "Remove schedule",
+        "confirm": "Set"
+      },
+      "signature": {
+        "title": "Signature",
+        "none": "No signature",
+        "customized": "Customised",
+        "customizedTitle": "Changed for this email only",
+        "resetTitle": "Discard the signature changes",
+        "switch": "Switch signature",
+        "variant": "Variant",
+        "variants": {
+          "auto": "Automatic: long first, short afterwards",
+          "long": "Long version",
+          "short": "Short version"
+        },
+        "loading": "Loading signature…",
+        "willSendWithout": "This email will be sent without a signature.",
+        "editAriaLabel": "Edit the signature for this email"
+      },
+      "context": {
+        "included": "History is included",
+        "remove": "Remove quoted history from this message",
+        "hide": "Hide history",
+        "show": "Show history | Show history (1 message) | Show history ({count} messages)",
+        "loading": "Loading history…",
+        "empty": "No messages in this conversation.",
+        "noTextContent": "(No text content)"
+      },
+      "editor": {
+        "placeholder": "Write your message…",
+        "blockStyle": "Text style",
+        "paragraph": "Text",
+        "heading1": "Heading 1",
+        "heading2": "Heading 2",
+        "heading3": "Heading 3",
+        "bold": "Bold (⌘B)",
+        "italic": "Italic (⌘I)",
+        "strike": "Strikethrough",
+        "bulletList": "Bulleted list",
+        "orderedList": "Numbered list",
+        "link": "Link",
+        "textColor": "Text colour",
+        "customColor": "Pick a custom colour",
+        "customColorLabel": "Custom colour",
+        "defaultColor": "Default colour",
+        "colors": {
+          "black": "Black",
+          "gray": "Grey",
+          "red": "Red",
+          "orange": "Orange",
+          "green": "Green",
+          "blue": "Blue",
+          "purple": "Purple",
+          "magenta": "Magenta"
+        },
+        "image": {
+          "fallbackName": "Image",
+          "small": "Small",
+          "medium": "Medium",
+          "large": "Large",
+          "original": "Original size",
+          "alignLeft": "Align left",
+          "alignCenter": "Centre",
+          "alignRight": "Align right",
+          "wrapLeft": "Wrap text on the right",
+          "wrapRight": "Wrap text on the left",
+          "asAttachment": "Use as attachment"
+        },
+        "linkDialog": {
+          "title": "Insert link",
+          "text": "Text (optional)",
+          "textPlaceholder": "Link text",
+          "insert": "Insert"
+        }
+      },
+      "subject": {
+        "replyFallback": "Reply",
+        "forwardFallback": "Forwarded message"
+      },
+      "reply": {
+        "intro": "On {date}, {sender} wrote:"
+      },
+      "forward": {
+        "separator": "---------- Forwarded message ----------",
+        "from": "From: {value}",
+        "date": "Date: {value}",
+        "subject": "Subject: {value}",
+        "to": "To: {value}",
+        "cc": "Cc: {value}"
+      },
+      "unsaved": {
+        "title": "Not saved",
+        "conflictTitle": "Not saved: this draft changed in another window",
+        "saveAsNew": "Save as new draft",
+        "discardMine": "Discard my changes"
+      },
+      "setup": {
+        "failed": "Some options could not be loaded. Writing and saving still work.",
+        "parts": {
+          "accounts": "accounts",
+          "signatures": "signatures",
+          "aliases": "sender addresses",
+          "templates": "templates",
+          "security": "certificates and keys"
+        }
+      },
+      "backup": {
+        "title": "Unsaved text from {time} was kept on this device.",
+        "detail": "Attachments are not part of this copy.",
+        "restore": "Restore"
+      },
+      "replace": {
+        "title": "Start a new message?",
+        "body": "The message you are writing will be saved as a draft and closed.",
+        "confirm": "Save and continue"
+      },
+      "afterSend": {
+        "sendingIn": "Sending in {seconds} second… | Sending in {seconds} seconds…",
+        "undoHint": "This window closes when the message goes out."
+      },
+      "quit": {
+        "blocked": "Satchel stayed open: a draft could not be saved."
+      }
+    },
+    "drafts": {
+      "title": "Drafts",
+      "newMail": "New email",
+      "subtitle": {
+        "nothing": "Nothing started",
+        "waiting": "Waiting for you",
+        "scheduled": "1 goes out automatically | {count} go out automatically"
+      },
+      "empty": {
+        "title": "No drafts",
+        "description": "Write a new email — it is saved automatically every 10 seconds.",
+        "action": "Write a new email"
+      },
+      "groups": {
+        "scheduled": "Scheduled"
+      },
+      "participantLine": "Draft, {names}",
+      "noRecipients": "Draft, no recipients",
+      "goesOut": "Goes out: {time}",
+      "goesOutAutomatically": "Goes out automatically: {time}",
+      "lastSaved": "Last saved: {time}",
+      "noContent": "Nothing written yet.",
+      "withAttachment": "Has attachment",
+      "editDraft": "Edit draft",
+      "deleteDraft": "Delete draft",
+      "restored": "Draft restored.",
+      "restoreFailed": "Could not restore the draft: {error}",
+      "deleted": "Draft deleted.",
+      "deleteFailed": "Could not delete the draft: {error}",
+      "undo": "Undo",
+      "detail": {
+        "emptyTitle": "No draft selected",
+        "emptyDescription": "Pick a draft on the left to read it here — a double-click opens it for editing."
+      }
+    },
+    "outbox": {
+      "title": "Outbox",
+      "subtitle": {
+        "empty": "All emails have been sent",
+        "failed": "1 needs attention | {count} need attention",
+        "sending": "Satchel is sending in the background"
+      },
+      "empty": {
+        "title": "The outbox is empty",
+        "description": "Emails still being sent or requiring attention show up here."
+      },
+      "loadFailed": "The outbox could not be loaded.",
+      "overdue": "Overdue",
+      "recipients": "To {recipients}",
+      "recipientsMore": "To {recipients} +{count}",
+      "attempts": "{count} attempt | {count} attempts",
+      "retried": "Queued again.",
+      "retryFailed": "Could not queue it again: {error}",
+      "cancelled": "Discarded from the outbox.",
+      "dismiss": "Close warning",
+      "dismissed": "Warning closed.",
+      "cancelFailed": "Could not discard it: {error}",
+      "status": {
+        "delivered": "Sent · local save failed",
+        "deliveryUnknown": "Delivery status uncertain",
+        "failed": "Failed",
+        "sending": "Sending",
+        "scheduled": "Scheduled",
+        "pending": "Queued"
+      },
+      "action": {
+        "label": "Action",
+        "sendMessage": "Send",
+        "remoteMutation": "Server sync"
+      },
+      "retry": {
+        "again": "Send again",
+        "now": "Send now"
+      },
+      "time": {
+        "queued": "Queued",
+        "delivered": "Sent",
+        "lastAttempt": "Last send attempt",
+        "started": "Started",
+        "scheduledFor": "Scheduled for",
+        "nextRetry": "Next attempt",
+        "overdueSince": "Overdue since"
+      },
+      "attemptCount": "Attempts",
+      "error": {
+        "heading": "What happened",
+        "technical": "Technical details",
+        "rateLimit": "{provider} is not accepting more mail right now (send limit). Satchel will retry automatically.",
+        "quota": "This account's send quota is used up. It resumes as soon as the provider allows it again.",
+        "auth": "This account's sign-in has expired. Please reconnect the account in the settings.",
+        "network": "No connection to the mail server. Satchel will retry as soon as the network is back.",
+        "recipientRejected": "The server rejected a recipient. Please check the addresses.",
+        "genericProvider": "The mail server"
+      },
+      "detail": {
+        "emptyTitle": "No entry selected",
+        "emptyDescription": "Pick an entry on the left to see its status and details."
+      },
+      "reopen": {
+        "attachmentsDropped": "The draft is open. 1 attachment was not kept — add it again. | The draft is open. {count} attachments were not kept — add them again."
+      },
+      "openAsDraft": "Open as draft",
+      "moveDiscardHint": "Discard stops retrying this move and returns the conversation to its last confirmed folder. It does not delete any email."
+    }
+  },
+  "de": {
+    "compose": {
+      "title": {
+        "new": "Neue Nachricht",
+        "resend": "Erneut senden"
+      },
+      "noSubject": "(Ohne Betreff)",
+      "send": "Senden",
+      "sending": "Sende…",
+      "discardDraft": "Entwurf verwerfen",
+      "sender": "Absender",
+      "identityAlias": "{email} (Alias)",
+      "window": {
+        "ariaLabel": "E-Mail verfassen",
+        "maximize": "Composer maximieren",
+        "restore": "Fenster verkleinern",
+        "popOut": "In eigenem Fenster öffnen",
+        "popOutFailed": "Eigenes Fenster konnte nicht geöffnet werden: {error}",
+        "close": "Composer schließen"
+      },
+      "draft": {
+        "saveFailedStaysOpen": "Der Entwurf konnte nicht gespeichert werden. Der Composer bleibt geöffnet.",
+        "savedAsDraft": "Als Entwurf gespeichert.",
+        "discarded": "Entwurf verworfen.",
+        "discardFailed": "Entwurf konnte nicht verworfen werden: {error}",
+        "openElsewhere": "Dieser Entwurf ist bereits in einem anderen Fenster geöffnet."
+      },
+      "status": {
+        "draftSaved": "Entwurf gespeichert.",
+        "draftSavedRemotePending": "Entwurf gespeichert. Abgleich mit dem Server steht aus: {error}",
+        "saveFailed": "Speichern fehlgeschlagen: {error}",
+        "sentFrom": "Gesendet von {address}.",
+        "sentLocalSaveFailed": "Die Nachricht wurde gesendet, aber Satchel konnte den lokalen Gesendet-Eintrag nicht speichern. Details stehen im Postausgang.",
+        "scheduledFor": "Eingeplant für {time}.",
+        "queued": "Im Hintergrund in den Postausgang eingereiht.",
+        "sendFailed": "Senden fehlgeschlagen: {error}",
+        "technical": "Technische Details"
+      },
+      "recipients": {
+        "toPlaceholder": "empfänger{'@'}example.com",
+        "ccPlaceholder": "cc{'@'}example.com",
+        "bccPlaceholder": "bcc{'@'}example.com",
+        "ccBcc": "Cc/Bcc",
+        "showCcBcc": "Cc und Bcc anzeigen",
+        "collapseCcBcc": "Cc und Bcc einklappen",
+        "invalid": "Das ist keine gültige E-Mail-Adresse."
+      },
+      "body": {
+        "plainAriaLabel": "Nachricht (Nur-Text)"
+      },
+      "schedule": {
+        "scheduled": "Geplant: {time}",
+        "followUp": "Follow-up: {time}",
+        "remove": "entfernen",
+        "submit": "Einplanen",
+        "editCancelled": "Der Versand wurde abgebrochen, damit du diesen Entwurf bearbeiten kannst. Wähle erneut Später senden, um die überarbeitete Nachricht zu planen."
+      },
+      "toolbar": {
+        "attach": "Datei anhängen",
+        "template": "Vorlage verwenden",
+        "more": "Weitere Optionen"
+      },
+      "options": {
+        "priority": "Priorität",
+        "priorityAriaLabel": "Priorität der Nachricht",
+        "format": "Format",
+        "plainText": "Nur Text (kein HTML)",
+        "followUp": "Nachfassen",
+        "followUpAriaLabel": "Nachfassen am",
+        "followUpNote": "Erinnert, wenn bis dahin keine Antwort eingeht.",
+        "security": "Sicherheit",
+        "securityAriaLabel": "Signieren und Verschlüsseln"
+      },
+      "priority": {
+        "high": "Hoch",
+        "normal": "Normal",
+        "low": "Niedrig"
+      },
+      "crypto": {
+        "pgpUnavailable": "Die ausgewählte PGP-Engine ist nicht verfügbar.",
+        "sign": "Signieren",
+        "encrypt": "Für alle Empfänger verschlüsseln",
+        "noSmimeCertificate": "Kein privates S/MIME-Zertifikat für diese Absenderadresse.",
+        "addRecipientsFirst": "Zum Verschlüsseln zuerst Empfänger hinzufügen.",
+        "missingSmimeCertificates": "Kein Zertifikat für: {recipients}",
+        "noPgpKey": "Kein entsperrter privater Schlüssel (Einstellungen → OpenPGP).",
+        "missingPgpKeys": "Kein öffentlicher Schlüssel für: {recipients}"
+      },
+      "templates": {
+        "button": "Vorlage…",
+        "title": "Vorlage einfügen",
+        "searchPlaceholder": "Vorlage suchen…",
+        "empty": "Keine Vorlagen vorhanden. Lege welche unter Settings > Vorlagen an."
+      },
+      "sendLater": {
+        "title": "Später senden",
+        "tomorrowAt": "Morgen {time}",
+        "mondayAt": "Montag {time}",
+        "custom": "Eigener Zeitpunkt",
+        "clear": "Plan entfernen",
+        "confirm": "Festlegen"
+      },
+      "signature": {
+        "title": "Signatur",
+        "none": "Keine Signatur",
+        "customized": "Angepasst",
+        "customizedTitle": "Nur für diese E-Mail geändert",
+        "resetTitle": "Änderungen an der Signatur verwerfen",
+        "switch": "Signatur wechseln",
+        "variant": "Variante",
+        "variants": {
+          "auto": "Automatisch: zuerst lang, danach kurz",
+          "long": "Lange Version",
+          "short": "Kurze Version"
+        },
+        "loading": "Signatur wird geladen…",
+        "willSendWithout": "Diese E-Mail wird ohne Signatur gesendet.",
+        "editAriaLabel": "Signatur für diese E-Mail bearbeiten"
+      },
+      "context": {
+        "included": "Verlauf wird mitgesendet",
+        "remove": "Zitierten Verlauf aus dieser Nachricht entfernen",
+        "hide": "Verlauf ausblenden",
+        "show": "Verlauf anzeigen | Verlauf anzeigen (1 Nachricht) | Verlauf anzeigen ({count} Nachrichten)",
+        "loading": "Verlauf wird geladen…",
+        "empty": "Keine Nachrichten im Verlauf.",
+        "noTextContent": "(Kein Textinhalt)"
+      },
+      "editor": {
+        "placeholder": "Nachricht verfassen…",
+        "blockStyle": "Textstil",
+        "paragraph": "Text",
+        "heading1": "Überschrift 1",
+        "heading2": "Überschrift 2",
+        "heading3": "Überschrift 3",
+        "bold": "Fett (⌘B)",
+        "italic": "Kursiv (⌘I)",
+        "strike": "Durchgestrichen",
+        "bulletList": "Aufzählung",
+        "orderedList": "Nummerierte Liste",
+        "link": "Link",
+        "textColor": "Textfarbe",
+        "customColor": "Eigene Farbe wählen",
+        "customColorLabel": "Eigene Farbe",
+        "defaultColor": "Standardfarbe",
+        "colors": {
+          "black": "Schwarz",
+          "gray": "Grau",
+          "red": "Rot",
+          "orange": "Orange",
+          "green": "Grün",
+          "blue": "Blau",
+          "purple": "Violett",
+          "magenta": "Magenta"
+        },
+        "image": {
+          "fallbackName": "Bild",
+          "small": "Klein",
+          "medium": "Mittel",
+          "large": "Groß",
+          "original": "Originalgröße",
+          "alignLeft": "Links ausrichten",
+          "alignCenter": "Zentrieren",
+          "alignRight": "Rechts ausrichten",
+          "wrapLeft": "Text rechts umfließen lassen",
+          "wrapRight": "Text links umfließen lassen",
+          "asAttachment": "Als Anhang verwenden"
+        },
+        "linkDialog": {
+          "title": "Link einfügen",
+          "text": "Text (optional)",
+          "textPlaceholder": "Linktext",
+          "insert": "Einfügen"
+        }
+      },
+      "subject": {
+        "replyFallback": "Antwort",
+        "forwardFallback": "Weitergeleitete Nachricht"
+      },
+      "reply": {
+        "intro": "Am {date} schrieb {sender}:"
+      },
+      "forward": {
+        "separator": "---------- Weitergeleitete Nachricht ----------",
+        "from": "Von: {value}",
+        "date": "Datum: {value}",
+        "subject": "Betreff: {value}",
+        "to": "An: {value}",
+        "cc": "Cc: {value}"
+      },
+      "unsaved": {
+        "title": "Nicht gespeichert",
+        "conflictTitle": "Nicht gespeichert: Der Entwurf wurde in einem anderen Fenster geändert",
+        "saveAsNew": "Als neuen Entwurf speichern",
+        "discardMine": "Meine Änderungen verwerfen"
+      },
+      "setup": {
+        "failed": "Einige Optionen konnten nicht geladen werden. Schreiben und Speichern funktionieren weiter.",
+        "parts": {
+          "accounts": "Konten",
+          "signatures": "Signaturen",
+          "aliases": "Absenderadressen",
+          "templates": "Vorlagen",
+          "security": "Zertifikate und Schlüssel"
+        }
+      },
+      "backup": {
+        "title": "Ungespeicherter Text von {time} wurde auf diesem Gerät aufbewahrt.",
+        "detail": "Anhänge sind in dieser Kopie nicht enthalten.",
+        "restore": "Wiederherstellen"
+      },
+      "replace": {
+        "title": "Neue Nachricht beginnen?",
+        "body": "Die Nachricht, an der du schreibst, wird als Entwurf gespeichert und geschlossen.",
+        "confirm": "Speichern und fortfahren"
+      },
+      "afterSend": {
+        "sendingIn": "Wird in {seconds} Sekunde gesendet … | Wird in {seconds} Sekunden gesendet …",
+        "undoHint": "Dieses Fenster schließt sich, sobald die Nachricht rausgeht."
+      },
+      "quit": {
+        "blocked": "Satchel bleibt geöffnet: Ein Entwurf konnte nicht gespeichert werden."
+      }
+    },
+    "drafts": {
+      "title": "Entwürfe",
+      "newMail": "Neue Mail",
+      "subtitle": {
+        "nothing": "Nichts angefangen",
+        "waiting": "Warten auf dich",
+        "scheduled": "1 geht automatisch raus | {count} gehen automatisch raus"
+      },
+      "empty": {
+        "title": "Keine Entwürfe",
+        "description": "Schreib eine neue Mail — sie wird alle 10 Sekunden automatisch gesichert.",
+        "action": "Neue Mail schreiben"
+      },
+      "groups": {
+        "scheduled": "Geplant"
+      },
+      "participantLine": "Entwurf, {names}",
+      "noRecipients": "Entwurf, ohne Empfänger",
+      "goesOut": "Geht raus: {time}",
+      "goesOutAutomatically": "Geht automatisch raus: {time}",
+      "lastSaved": "Zuletzt gesichert: {time}",
+      "noContent": "Noch kein Inhalt.",
+      "withAttachment": "Mit Anhang",
+      "editDraft": "Entwurf bearbeiten",
+      "deleteDraft": "Entwurf löschen",
+      "restored": "Entwurf wiederhergestellt.",
+      "restoreFailed": "Entwurf konnte nicht wiederhergestellt werden: {error}",
+      "deleted": "Entwurf gelöscht.",
+      "deleteFailed": "Entwurf konnte nicht gelöscht werden: {error}",
+      "undo": "Rückgängig",
+      "detail": {
+        "emptyTitle": "Kein Entwurf ausgewählt",
+        "emptyDescription": "Wähle links einen Entwurf, um ihn hier zu lesen — Doppelklick öffnet ihn direkt zum Bearbeiten."
+      }
+    },
+    "outbox": {
+      "title": "Postausgang",
+      "subtitle": {
+        "empty": "Alle E-Mails wurden versendet",
+        "failed": "1 Eintrag braucht Aufmerksamkeit | {count} Einträge brauchen Aufmerksamkeit",
+        "sending": "Satchel sendet im Hintergrund"
+      },
+      "empty": {
+        "title": "Postausgang ist leer",
+        "description": "Hier erscheinen E-Mails, die noch gesendet werden oder Aufmerksamkeit brauchen."
+      },
+      "loadFailed": "Der Postausgang konnte nicht geladen werden.",
+      "overdue": "Überfällig",
+      "recipients": "An {recipients}",
+      "recipientsMore": "An {recipients} +{count}",
+      "attempts": "{count} Versuch | {count} Versuche",
+      "retried": "Erneut eingereiht.",
+      "retryFailed": "Konnte nicht erneut eingereiht werden: {error}",
+      "cancelled": "Aus dem Postausgang verworfen.",
+      "dismiss": "Hinweis schließen",
+      "dismissed": "Hinweis geschlossen.",
+      "cancelFailed": "Konnte nicht verworfen werden: {error}",
+      "status": {
+        "delivered": "Gesendet · lokal nicht gespeichert",
+        "deliveryUnknown": "Zustellung unklar",
+        "failed": "Fehlgeschlagen",
+        "sending": "Wird gesendet",
+        "scheduled": "Geplant",
+        "pending": "In der Warteschlange"
+      },
+      "action": {
+        "label": "Aktion",
+        "sendMessage": "Senden",
+        "remoteMutation": "Serverabgleich"
+      },
+      "retry": {
+        "again": "Erneut senden",
+        "now": "Jetzt senden"
+      },
+      "time": {
+        "queued": "Eingereiht",
+        "delivered": "Gesendet",
+        "lastAttempt": "Letzter Sendeversuch",
+        "started": "Gestartet",
+        "scheduledFor": "Geplant für",
+        "nextRetry": "Nächster Versuch",
+        "overdueSince": "Überfällig seit"
+      },
+      "attemptCount": "Versuche",
+      "error": {
+        "heading": "Was passiert ist",
+        "technical": "Technische Details",
+        "rateLimit": "{provider} nimmt gerade keine weiteren Mails an (Sendelimit). Satchel versucht es automatisch erneut.",
+        "quota": "Das Sendekontingent dieses Kontos ist aufgebraucht. Es geht weiter, sobald der Anbieter wieder freigibt.",
+        "auth": "Die Anmeldung dieses Kontos ist abgelaufen. Bitte das Konto in den Einstellungen neu verbinden.",
+        "network": "Keine Verbindung zum Mailserver. Satchel versucht es erneut, sobald das Netz wieder da ist.",
+        "recipientRejected": "Der Server hat einen Empfänger abgelehnt. Bitte die Adressen prüfen.",
+        "genericProvider": "Der Mailserver"
+      },
+      "detail": {
+        "emptyTitle": "Kein Eintrag ausgewählt",
+        "emptyDescription": "Wähle links einen Eintrag, um Status und Details zu sehen."
+      },
+      "reopen": {
+        "attachmentsDropped": "Der Entwurf ist offen. 1 Anhang wurde nicht übernommen — füge ihn erneut hinzu. | Der Entwurf ist offen. {count} Anhänge wurden nicht übernommen — füge sie erneut hinzu."
+      },
+      "openAsDraft": "Als Entwurf öffnen",
+      "moveDiscardHint": "Verwerfen beendet die Wiederholungen dieses Verschiebens und zeigt die Unterhaltung im zuletzt bestätigten Ordner. Es löscht keine E-Mails."
+    }
+  }
+}

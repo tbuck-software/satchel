@@ -1,0 +1,9 @@
+package satchel:plugin;
+
+interface plugin {
+  run-command: func(command-id: string, payload: string) -> result<string, string>;
+}
+
+world satchel-plugin {
+  export plugin;
+}

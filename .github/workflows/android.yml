@@ -1,0 +1,123 @@
+name: Android
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'crates/satchel-core/**'
+      - 'src-tauri/**'
+      - 'src/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/android.yml'
+  schedule:
+    - cron: "35 2 * * *"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_BUILD_JOBS: 2
+
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Enable KVM for the Android emulator
+        if: github.event_name != 'pull_request'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install Android command-line tools
+        uses: android-actions/setup-android@v3
+        with:
+          # The default also requests the retired `tools` package, which sdkmanager rejects.
+          packages: platform-tools
+
+      - name: Install Android SDK and NDK
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0" "ndk;27.2.12479018"
+
+      - name: Install Rust Android targets
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          cache: false
+          build-warnings: ''
+          target: aarch64-linux-android,x86_64-linux-android
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build x86_64 debug APK
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+          RANLIB_x86_64_linux_android: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib
+          CARGO_BUILD_JOBS: 2
+          GRADLE_OPTS: >-
+            -Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m
+            -Dkotlin.daemon.jvm.options=-Xmx384m
+            -Dorg.gradle.workers.max=2 -Dorg.gradle.daemon=false
+        run: pnpm tauri android build --debug --apk --target x86_64 --ci
+
+      - name: Reclaim build disk before emulator
+        if: github.event_name != 'pull_request'
+        run: |
+          rm -rf src-tauri/target target
+          rm -rf "$ANDROID_HOME/ndk"
+          rm -rf ~/.cargo/registry ~/.cargo/git ~/.gradle/caches
+          df -h /
+
+      - name: Install and launch APK on Android 8
+        if: github.event_name != 'pull_request'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 26
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            adb install --no-streaming -r src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+            adb shell am force-stop de.tbuck.satchel
+            adb shell am start -W -n de.tbuck.satchel/.MainActivity
+            adb shell pidof de.tbuck.satchel
+            adb shell dumpsys activity activities | grep -F 'de.tbuck.satchel/.MainActivity'
+            adb shell am start -W -a android.intent.action.VIEW -c android.intent.category.BROWSABLE -d 'de.tbuck.satchel://oauth/callback?state=ci-invalid' de.tbuck.satchel
+            adb shell pidof de.tbuck.satchel

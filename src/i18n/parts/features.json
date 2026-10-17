@@ -1,0 +1,766 @@
+{
+  "en": {
+    "calendar": {
+      "title": "Calendar",
+      "importIcs": "Import .ics…",
+      "newEvent": "New event",
+      "hint": "Clicking an empty day or time slot creates an event. Events from mails with an {ics} attachment are detected automatically.",
+      "more": "+{count} more",
+      "view": {
+        "label": "Calendar view",
+        "month": "Month",
+        "week": "Week",
+        "day": "Day",
+        "monthTitle": "Month view (1)",
+        "weekTitle": "Week view (2)",
+        "dayTitle": "Day view (3)",
+        "monthGrid": "Month view",
+        "openDay": "Open day view"
+      },
+      "nav": {
+        "previous": "Back (←)",
+        "next": "Forward (→)",
+        "today": "Today (t)",
+        "previousMonth": "Previous month",
+        "nextMonth": "Next month"
+      },
+      "event": {
+        "untitled": "(no title)",
+        "allDay": "All day",
+        "title": "Title",
+        "start": "Start",
+        "end": "End",
+        "location": "Location",
+        "organizer": "Organizer",
+        "attendees": "Attendees",
+        "edit": "Edit event",
+        "delete": "Delete event",
+        "details": "Event details"
+      },
+      "rsvp": {
+        "accept": "Accept",
+        "decline": "Decline",
+        "maybe": "Maybe"
+      },
+      "status": {
+        "accepted": "Accepted",
+        "declined": "Declined",
+        "tentative": "Maybe",
+        "needsAction": "Awaiting reply",
+        "cancelled": "Cancelled by organizer",
+        "ownEvent": "Own event",
+        "googleCalendar": "Google Calendar"
+      },
+      "source": {
+        "heading": "Calendars",
+        "local": "Local",
+        "invites": "Invitations",
+        "googlePrimary": "Main calendar",
+        "show": "Show",
+        "hide": "Hide"
+      },
+      "undated": {
+        "heading": "Invitations without a date:"
+      },
+      "editor": {
+        "newTitle": "New event",
+        "editTitle": "Edit event",
+        "titlePlaceholder": "Event title",
+        "locationPlaceholder": "Location or video link",
+        "descriptionPlaceholder": "Notes, agenda, …",
+        "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
+        "sendInvites": "Send ICS invitations by mail",
+        "submit": "Create event",
+        "errors": {
+          "titleRequired": "Please enter a title.",
+          "invalidDates": "Start and end do not contain a valid date.",
+          "endBeforeStart": "The end must be after the start."
+        }
+      },
+      "quick": {
+        "create": "Create event",
+        "titlePlaceholder": "Add a title",
+        "moreOptions": "More options…"
+      },
+      "range": {
+        "allDaySingle": "{day}, all day",
+        "allDayMulti": "{start} – {end}, all day",
+        "sameDay": "{day}, {start}–{end}",
+        "dayTime": "{day}, {time}",
+        "span": "{start} – {end}",
+        "weekSameMonth": "{first}–{last} {monthYear}"
+      },
+      "toast": {
+        "accepted": "Acceptance sent.",
+        "declined": "Decline sent.",
+        "tentative": "“Maybe” reply sent.",
+        "rsvpSent": "RSVP sent.",
+        "rsvpFailed": "RSVP failed: {error}",
+        "eventDeleted": "Event deleted.",
+        "deleteFailed": "Deleting failed: {error}",
+        "noAccount": "No account available.",
+        "eventCreated": "Event created.",
+        "eventUpdated": "Event updated.",
+        "saveFailed": "Saving failed: {error}",
+        "imported": "Imported: {name}",
+        "importFailed": "Import failed: {error}"
+      },
+      "reminder": {
+        "set": "Set reminder",
+        "thisAfternoon": "This afternoon",
+        "tomorrowMorning": "Tomorrow morning",
+        "nextWeek": "Next week",
+        "nextMonth": "Next month"
+      }
+    },
+    "contacts": {
+      "title": "Contacts",
+      "views": "Views",
+      "sections": {
+        "all": {
+          "title": "All contacts",
+          "subtitle": "Address book and correspondents in one place",
+          "empty": "No contacts found yet."
+        },
+        "addressBook": {
+          "title": "Address book",
+          "subtitle": "Synced CardDAV and local contacts",
+          "empty": "No address book contacts synced yet."
+        },
+        "frequent": {
+          "title": "Frequently contacted",
+          "subtitle": "Correspondents from your mail conversations",
+          "empty": "No frequent contacts found yet."
+        },
+        "pinned": {
+          "title": "Pinned",
+          "subtitle": "Your contacts for quick access",
+          "empty": "No contacts pinned yet."
+        }
+      },
+      "loadFailed": "The address book could not be loaded.",
+      "meta": {
+        "addressBook": "Address book",
+        "pinned": "Pinned",
+        "conversations": "{count} conversation | {count} conversations"
+      },
+      "profile": {
+        "label": "Person details",
+        "messages": "{count} message | {count} messages",
+        "allMail": "All emails",
+        "pin": "Pin",
+        "unpin": "Unpin",
+        "notesHeading": "Personal notes",
+        "notesHint": "Stored in Satchel",
+        "notesPlaceholder": "For example: we are on first-name terms, prefers short check-ins …",
+        "saveNote": "Save note",
+        "savingNote": "Saving …",
+        "noteSaveFailed": "The note could not be saved.",
+        "recentMail": "Recent conversations",
+        "noSubject": "(no subject)",
+        "blockConfirm": "Really block {email}?",
+        "delete": "Delete contact",
+        "deleteConfirm": "Delete the stored contact for {email}? Notes and the pinned avatar go with it. The mail stays.",
+        "deleteFailed": "The contact could not be deleted: {error}"
+      }
+    },
+    "topics": {
+      "title": "Topics",
+      "card": {
+        "empty": "No topics yet — add one with “+”.",
+        "new": "New topic",
+        "unread": "{name} — {count} unread",
+        "label": "Topics, {count} topics, {unread} unread"
+      },
+      "chip": {
+        "open": "Open topic “{name}”",
+        "remove": "Remove from topic “{name}”"
+      },
+      "picker": {
+        "title": "Add to topic",
+        "titleMessage": "Add message to topic",
+        "searchPlaceholder": "Search topics or create a new one …",
+        "searchLabel": "Search topics",
+        "createRow": "Create new topic “{name}”",
+        "empty": "No topics yet — just type a name.",
+        "hintSelect": "↑↓ select",
+        "hintAssign": "↵ assign/remove",
+        "hintClose": "Esc close",
+        "createFailed": "The topic could not be created.",
+        "messageRemoved": "Message removed from topic “{name}”",
+        "messageAdded": "Message added to topic “{name}”",
+        "assignFailed": "Assignment failed."
+      },
+      "detail": {
+        "jumpToTop": "Jump to title, description and attachments",
+        "entries": "{count} entry | {count} entries",
+        "attachmentsCount": "{count} attachment | {count} attachments",
+        "iconLabel": "Topic symbol",
+        "iconTitle": "Customize the symbol — without one the topic shows the last sender",
+        "nameLabel": "Topic name",
+        "rename": "Rename topic",
+        "dueSet": "Follow-up: {date}",
+        "dueAdd": "Set follow-up",
+        "dueClear": "Remove follow-up",
+        "copyMarkdown": "Copy as Markdown",
+        "confirmDelete": "Really delete?",
+        "delete": "Delete topic",
+        "stateOpen": "Active",
+        "participants": "Participants",
+        "filterParticipantOff": "Remove filter for {name}",
+        "filterParticipantOn": "Show mail from {name} only",
+        "filterLabel": "Filter history",
+        "filterMail": "Emails",
+        "filterNotes": "Notes",
+        "descriptionPlaceholder": "What is this topic about?",
+        "descriptionLabel": "Topic description",
+        "attachments": "Attachments ({count})",
+        "addFile": "Add file",
+        "fileInputLabel": "Add files to the topic",
+        "saveFile": "Save file",
+        "deleteFile": "Delete file from topic",
+        "emptyTitle": "No entries yet",
+        "emptyDescription": "Add conversations via the ⋯ menu, the context menu or the ‘t’ key — or jot down a note below.",
+        "notePlaceholder": "Jot down a note … (e.g. from calls or chats)",
+        "noteLabel": "New note",
+        "reopen": "Reopen",
+        "markDone": "Mark topic done",
+        "addNote": "Add note",
+        "notFoundTitle": "Topic not found",
+        "notFoundDescription": "The topic was deleted or does not exist yet.",
+        "markdown": {
+          "note": "Note",
+          "attachments": "Attachments"
+        }
+      },
+      "feed": {
+        "note": "Note",
+        "editNote": "Edit note",
+        "deleteNote": "Delete note",
+        "notePlaceholder": "Note…",
+        "showGist": "Show summary",
+        "showOriginal": "Show original",
+        "openInInbox": "Open in inbox",
+        "removeThread": "Remove conversation from topic",
+        "removeMessage": "Remove message from topic",
+        "remove": "Remove from topic",
+        "noTextContent": "(no text content)",
+        "attachments": "{count} attachment | {count} attachments",
+        "thread": "Conversation",
+        "message": "Message",
+        "noSubject": "(no subject)"
+      },
+      "toast": {
+        "fileAdded": "File added.",
+        "filesAdded": "{count} files added.",
+        "fileSaveFailed": "The file could not be saved: {error}",
+        "fileDeleteFailed": "The file could not be deleted.",
+        "renameFailed": "The topic could not be renamed.",
+        "iconFailed": "The symbol could not be saved.",
+        "descriptionFailed": "The description could not be saved.",
+        "done": "Topic done.",
+        "reopened": "Topic reopened.",
+        "statusFailed": "The status could not be changed.",
+        "deleted": "Topic deleted. Linked conversations remain.",
+        "deleteFailed": "The topic could not be deleted.",
+        "noteSaveFailed": "The note could not be saved.",
+        "noteDeleteFailed": "The note could not be deleted.",
+        "itemRemoved": "Removed from topic.",
+        "undo": "Undo",
+        "itemRemoveFailed": "The entry could not be removed.",
+        "dueSet": "Follow-up set.",
+        "dueCleared": "Follow-up removed.",
+        "dueFailed": "The follow-up could not be saved.",
+        "markdownCopied": "Topic copied as Markdown.",
+        "copyFailed": "Copying failed."
+      }
+    },
+    "onboarding": {
+      "setupTitle": "Set up Satchel",
+      "addAccountTitle": "Add email account",
+      "closeSetup": "Close account setup",
+      "stepsLabel": "Setup steps",
+      "steps": {
+        "account": "Account",
+        "connection": "Connection",
+        "preferences": "How you work",
+        "done": "Done"
+      },
+      "privacyNote": "Connections are checked over encrypted channels. Your password never leaves the app.",
+      "account": {
+        "heading": "Connect account",
+        "emailLabel": "Email address",
+        "emailPlaceholder": "name{'@'}company.com",
+        "googleDetected": "Google sign-in detected",
+        "microsoftDetected": "Microsoft sign-in detected",
+        "customDomain": "Own domain · {domain}",
+        "passwordLabel": "Password",
+        "passwordPlaceholder": "Your mail password",
+        "passwordHint": "Applies to inbox, outbox, calendar and contacts.",
+        "otherMethod": "Different sign-in method?",
+        "nameLabel": "Account name",
+        "namePlaceholder": "Work, Personal, …",
+        "later": "Later",
+        "connectAuto": "Connect automatically",
+        "signInSecurely": "Sign in securely",
+        "workspaceDetected": "{domain} receives mail through Google Workspace",
+        "microsoft365Detected": "{domain} receives mail through Microsoft 365"
+      },
+      "connection": {
+        "checking": "Checking {domain}",
+        "fallbackDomain": "account",
+        "missing": "One detail is missing",
+        "ready": "Connection established",
+        "missingCopy": "The detected values are kept. Just fill in the missing part.",
+        "stateChecking": "checking …",
+        "stateConnected": "connected",
+        "stateNotOffered": "not offered",
+        "stateNeedsInput": "Input required",
+        "manualHeading": "Add server details",
+        "manualHint": "Values already detected are prefilled.",
+        "username": "Username",
+        "imapHost": "IMAP server",
+        "smtpHost": "SMTP server",
+        "port": "Port",
+        "changeCredentials": "Change credentials",
+        "recheck": "Check again",
+        "enterServerData": "Enter server details",
+        "resuming": "Continuing the sign-in you started earlier.",
+        "test": "Test connection",
+        "testing": "Testing …",
+        "testSucceeded": "Connection works — {count} folders found."
+      },
+      "services": {
+        "mail": "Receive email",
+        "smtp": "Send email",
+        "calendar": "Calendar",
+        "contacts": "Contacts",
+        "secureSignIn": "Secure sign-in",
+        "mailAndCalendar": "Email & calendar"
+      },
+      "preferences": {
+        "heading": "How you work",
+        "copy": "Both can be changed later in the settings.",
+        "appearance": "Appearance",
+        "dark": "Dark",
+        "light": "Light",
+        "keyboardNav": "Keyboard navigation",
+        "keyboardNavHint": "Navigate with {j} and {k}, sort with a single keystroke.",
+        "singleKeyShortcuts": "Single-key shortcuts",
+        "singleKeyShortcutsHint": "Navigate with {j} and {k}, sort with a single keystroke. The command palette and the shortcut help stay on either way."
+      },
+      "ready": {
+        "accountTitle": "Account set up",
+        "title": "Satchel is ready",
+        "accountCopy": "The first sync is running in the background.",
+        "copy": "You can add an account in the settings at any time.",
+        "toAccounts": "To the account overview",
+        "openSatchel": "Open Satchel",
+        "importingPhotos": "Importing contact photos …",
+        "importPhotos": "Optional: import contact photos",
+        "photosImported": "{count} contact photos imported.",
+        "photosFailed": "Contact photos could not be imported."
+      },
+      "summary": {
+        "secureSignedIn": "Signed in securely",
+        "connected": "Connected",
+        "services": "{count} service connected | {count} services connected"
+      },
+      "errors": {
+        "cancelled": "The sign-in was cancelled.",
+        "timeout": "The sign-in took too long. Please try again.",
+        "smtpNeedsHelp": "The outgoing mail server still needs your help."
+      },
+      "oauth": {
+        "manualHeading": "Finish the sign-in by hand",
+        "manualHint": "The browser never reached Satchel. Its address bar still holds the state and code — paste both here.",
+        "stateLabel": "State",
+        "codeLabel": "Code",
+        "codePlaceholder": "The code= value from the address bar",
+        "complete": "Complete sign-in"
+      }
+    }
+  },
+  "de": {
+    "calendar": {
+      "title": "Kalender",
+      "importIcs": ".ics importieren…",
+      "newEvent": "Neuer Termin",
+      "hint": "Klick auf einen freien Tag oder eine freie Uhrzeit legt einen Termin an. Auto-erkannt werden Termine aus Mails mit {ics}-Anhang.",
+      "more": "+{count} weitere",
+      "view": {
+        "label": "Kalenderansicht",
+        "month": "Monat",
+        "week": "Woche",
+        "day": "Tag",
+        "monthTitle": "Monatsansicht (1)",
+        "weekTitle": "Wochenansicht (2)",
+        "dayTitle": "Tagesansicht (3)",
+        "monthGrid": "Monatsansicht",
+        "openDay": "Tagesansicht öffnen"
+      },
+      "nav": {
+        "previous": "Zurück (←)",
+        "next": "Weiter (→)",
+        "today": "Heute (t)",
+        "previousMonth": "Voriger Monat",
+        "nextMonth": "Nächster Monat"
+      },
+      "event": {
+        "untitled": "(ohne Titel)",
+        "allDay": "Ganztägig",
+        "title": "Titel",
+        "start": "Start",
+        "end": "Ende",
+        "location": "Ort",
+        "organizer": "Organisator",
+        "attendees": "Teilnehmer",
+        "edit": "Termin bearbeiten",
+        "delete": "Termin löschen",
+        "details": "Termindetails"
+      },
+      "rsvp": {
+        "accept": "Zusagen",
+        "decline": "Absagen",
+        "maybe": "Vielleicht"
+      },
+      "status": {
+        "accepted": "Zugesagt",
+        "declined": "Abgesagt",
+        "tentative": "Vielleicht",
+        "needsAction": "Antwort offen",
+        "cancelled": "Vom Organisator abgesagt",
+        "ownEvent": "Eigener Termin",
+        "googleCalendar": "Google Kalender"
+      },
+      "source": {
+        "heading": "Kalender",
+        "local": "Lokal",
+        "invites": "Einladungen",
+        "googlePrimary": "Hauptkalender",
+        "show": "Einblenden",
+        "hide": "Ausblenden"
+      },
+      "undated": {
+        "heading": "Einladungen ohne Datum:"
+      },
+      "editor": {
+        "newTitle": "Neuer Termin",
+        "editTitle": "Termin bearbeiten",
+        "titlePlaceholder": "Titel des Termins",
+        "locationPlaceholder": "Ort oder Videolink",
+        "descriptionPlaceholder": "Notizen, Agenda, …",
+        "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
+        "sendInvites": "ICS-Einladungen per Mail senden",
+        "submit": "Termin erstellen",
+        "errors": {
+          "titleRequired": "Bitte einen Titel angeben.",
+          "invalidDates": "Start und Ende enthalten kein gültiges Datum.",
+          "endBeforeStart": "Das Ende muss nach dem Start liegen."
+        }
+      },
+      "quick": {
+        "create": "Termin anlegen",
+        "titlePlaceholder": "Titel hinzufügen",
+        "moreOptions": "Mehr Optionen…"
+      },
+      "range": {
+        "allDaySingle": "{day}, ganztägig",
+        "allDayMulti": "{start} – {end}, ganztägig",
+        "sameDay": "{day}, {start}–{end} Uhr",
+        "dayTime": "{day}, {time} Uhr",
+        "span": "{start} – {end}",
+        "weekSameMonth": "{first}.–{last}. {monthYear}"
+      },
+      "toast": {
+        "accepted": "Zusage gesendet.",
+        "declined": "Absage gesendet.",
+        "tentative": "Antwort „Vielleicht“ gesendet.",
+        "rsvpSent": "RSVP gesendet.",
+        "rsvpFailed": "RSVP fehlgeschlagen: {error}",
+        "eventDeleted": "Termin gelöscht.",
+        "deleteFailed": "Löschen fehlgeschlagen: {error}",
+        "noAccount": "Kein Account verfügbar.",
+        "eventCreated": "Termin erstellt.",
+        "eventUpdated": "Termin aktualisiert.",
+        "saveFailed": "Speichern fehlgeschlagen: {error}",
+        "imported": "Importiert: {name}",
+        "importFailed": "Import fehlgeschlagen: {error}"
+      },
+      "reminder": {
+        "set": "Reminder setzen",
+        "thisAfternoon": "Heute Nachmittag",
+        "tomorrowMorning": "Morgen früh",
+        "nextWeek": "Nächste Woche",
+        "nextMonth": "Nächsten Monat"
+      }
+    },
+    "contacts": {
+      "title": "Kontakte",
+      "views": "Ansichten",
+      "sections": {
+        "all": {
+          "title": "Alle Kontakte",
+          "subtitle": "Adressbuch und Gesprächspartner an einem Ort",
+          "empty": "Noch keine Kontakte gefunden."
+        },
+        "addressBook": {
+          "title": "Adressbuch",
+          "subtitle": "Synchronisierte CardDAV- und lokale Kontakte",
+          "empty": "Noch keine Adressbuchkontakte synchronisiert."
+        },
+        "frequent": {
+          "title": "Häufig kontaktiert",
+          "subtitle": "Gesprächspartner aus deinen Mail-Konversationen",
+          "empty": "Noch keine häufigen Kontakte gefunden."
+        },
+        "pinned": {
+          "title": "Angepinnt",
+          "subtitle": "Deine Kontakte für den schnellen Zugriff",
+          "empty": "Noch keine Kontakte angepinnt."
+        }
+      },
+      "loadFailed": "Das Adressbuch konnte nicht geladen werden.",
+      "meta": {
+        "addressBook": "Adressbuch",
+        "pinned": "Angepinnt",
+        "conversations": "{count} Konversation | {count} Konversationen"
+      },
+      "profile": {
+        "label": "Personendetails",
+        "messages": "{count} Nachricht | {count} Nachrichten",
+        "allMail": "Alle E-Mails",
+        "pin": "Anpinnen",
+        "unpin": "Loslösen",
+        "notesHeading": "Persönliche Notizen",
+        "notesHint": "In Satchel gespeichert",
+        "notesPlaceholder": "Zum Beispiel: Wir duzen uns, bevorzugt kurze Abstimmungen …",
+        "saveNote": "Notiz speichern",
+        "savingNote": "Speichert …",
+        "noteSaveFailed": "Die Notiz konnte nicht gespeichert werden.",
+        "recentMail": "Letzte Konversationen",
+        "noSubject": "(kein Betreff)",
+        "blockConfirm": "{email} wirklich blockieren?",
+        "delete": "Kontakt löschen",
+        "deleteConfirm": "Gespeicherten Kontakt für {email} löschen? Notizen und das festgelegte Bild verschwinden mit. Die Mail bleibt.",
+        "deleteFailed": "Der Kontakt konnte nicht gelöscht werden: {error}"
+      }
+    },
+    "topics": {
+      "title": "Themen",
+      "card": {
+        "empty": "Noch keine Themen — leg mit „+\" eins an.",
+        "new": "Neues Thema",
+        "unread": "{name} — {count} ungelesen",
+        "label": "Themen, {count} Themen, {unread} ungelesen"
+      },
+      "chip": {
+        "open": "Thema „{name}“ öffnen",
+        "remove": "Aus Thema „{name}“ entfernen"
+      },
+      "picker": {
+        "title": "Zu Thema hinzufügen",
+        "titleMessage": "Nachricht zu Thema hinzufügen",
+        "searchPlaceholder": "Thema suchen oder neu anlegen …",
+        "searchLabel": "Thema suchen",
+        "createRow": "Neues Thema „{name}“ erstellen",
+        "empty": "Noch keine Themen — einfach einen Namen eintippen.",
+        "hintSelect": "↑↓ wählen",
+        "hintAssign": "↵ zuweisen/entfernen",
+        "hintClose": "Esc schließen",
+        "createFailed": "Thema konnte nicht erstellt werden.",
+        "messageRemoved": "Nachricht aus Thema „{name}“ entfernt",
+        "messageAdded": "Nachricht zu Thema „{name}“ hinzugefügt",
+        "assignFailed": "Zuordnung fehlgeschlagen."
+      },
+      "detail": {
+        "jumpToTop": "Zu Titel, Beschreibung und Anhängen springen",
+        "entries": "{count} Eintrag | {count} Einträge",
+        "attachmentsCount": "{count} Anhang | {count} Anhänge",
+        "iconLabel": "Symbol des Themas",
+        "iconTitle": "Symbol anpassen — ohne Symbol zeigt das Thema den letzten Absender",
+        "nameLabel": "Name des Themas",
+        "rename": "Thema umbenennen",
+        "dueSet": "Wiedervorlage: {date}",
+        "dueAdd": "Wiedervorlage setzen",
+        "dueClear": "Wiedervorlage entfernen",
+        "copyMarkdown": "Als Markdown kopieren",
+        "confirmDelete": "Wirklich löschen?",
+        "delete": "Thema löschen",
+        "stateOpen": "Aktiv",
+        "participants": "Beteiligte",
+        "filterParticipantOff": "Filter für {name} entfernen",
+        "filterParticipantOn": "Nur Mails von {name} zeigen",
+        "filterLabel": "Verlauf filtern",
+        "filterMail": "E-Mails",
+        "filterNotes": "Notizen",
+        "descriptionPlaceholder": "Worum geht es bei diesem Thema?",
+        "descriptionLabel": "Beschreibung des Themas",
+        "attachments": "Anhänge ({count})",
+        "addFile": "Datei hinzufügen",
+        "fileInputLabel": "Dateien zum Thema hinzufügen",
+        "saveFile": "Datei speichern",
+        "deleteFile": "Datei aus Thema löschen",
+        "emptyTitle": "Noch keine Einträge",
+        "emptyDescription": "Füge Konversationen über das ⋯-Menü, das Kontextmenü oder die Taste ‚t' hinzu — oder halte unten eine Notiz fest.",
+        "notePlaceholder": "Notiz festhalten … (z. B. Infos aus Telefonaten oder Chats)",
+        "noteLabel": "Neue Notiz",
+        "reopen": "Wieder öffnen",
+        "markDone": "Thema erledigen",
+        "addNote": "Notiz hinzufügen",
+        "notFoundTitle": "Thema nicht gefunden",
+        "notFoundDescription": "Das Thema wurde gelöscht oder existiert noch nicht.",
+        "markdown": {
+          "note": "Notiz",
+          "attachments": "Anhänge"
+        }
+      },
+      "feed": {
+        "note": "Notiz",
+        "editNote": "Notiz bearbeiten",
+        "deleteNote": "Notiz löschen",
+        "notePlaceholder": "Notiz…",
+        "showGist": "Kurzfassung anzeigen",
+        "showOriginal": "Original anzeigen",
+        "openInInbox": "Im Posteingang öffnen",
+        "removeThread": "Konversation aus Thema entfernen",
+        "removeMessage": "Nachricht aus Thema entfernen",
+        "remove": "Aus Thema entfernen",
+        "noTextContent": "(kein Textinhalt)",
+        "attachments": "{count} Anhang | {count} Anhänge",
+        "thread": "Konversation",
+        "message": "Nachricht",
+        "noSubject": "(ohne Betreff)"
+      },
+      "toast": {
+        "fileAdded": "Datei hinzugefügt.",
+        "filesAdded": "{count} Dateien hinzugefügt.",
+        "fileSaveFailed": "Datei konnte nicht gespeichert werden: {error}",
+        "fileDeleteFailed": "Datei konnte nicht gelöscht werden.",
+        "renameFailed": "Thema konnte nicht umbenannt werden.",
+        "iconFailed": "Symbol konnte nicht gespeichert werden.",
+        "descriptionFailed": "Beschreibung konnte nicht gespeichert werden.",
+        "done": "Thema erledigt.",
+        "reopened": "Thema wieder geöffnet.",
+        "statusFailed": "Status konnte nicht geändert werden.",
+        "deleted": "Thema gelöscht. Verknüpfte Konversationen bleiben erhalten.",
+        "deleteFailed": "Thema konnte nicht gelöscht werden.",
+        "noteSaveFailed": "Notiz konnte nicht gespeichert werden.",
+        "noteDeleteFailed": "Notiz konnte nicht gelöscht werden.",
+        "itemRemoved": "Aus Thema entfernt.",
+        "undo": "Rückgängig",
+        "itemRemoveFailed": "Eintrag konnte nicht entfernt werden.",
+        "dueSet": "Wiedervorlage gesetzt.",
+        "dueCleared": "Wiedervorlage entfernt.",
+        "dueFailed": "Wiedervorlage konnte nicht gespeichert werden.",
+        "markdownCopied": "Thema als Markdown kopiert.",
+        "copyFailed": "Kopieren fehlgeschlagen."
+      }
+    },
+    "onboarding": {
+      "setupTitle": "Satchel einrichten",
+      "addAccountTitle": "E-Mail-Konto hinzufügen",
+      "closeSetup": "Kontoeinrichtung schließen",
+      "stepsLabel": "Einrichtungsschritte",
+      "steps": {
+        "account": "Konto",
+        "connection": "Verbindung",
+        "preferences": "Arbeitsweise",
+        "done": "Fertig"
+      },
+      "privacyNote": "Verbindungen werden verschlüsselt geprüft. Dein Passwort verlässt nicht die App.",
+      "account": {
+        "heading": "Konto verbinden",
+        "emailLabel": "E-Mail-Adresse",
+        "emailPlaceholder": "name{'@'}unternehmen.de",
+        "googleDetected": "Google-Anmeldung erkannt",
+        "microsoftDetected": "Microsoft-Anmeldung erkannt",
+        "customDomain": "Eigene Domain · {domain}",
+        "passwordLabel": "Passwort",
+        "passwordPlaceholder": "Dein Mail-Passwort",
+        "passwordHint": "Gilt für Posteingang, Postausgang, Kalender und Kontakte.",
+        "otherMethod": "Andere Anmeldeart?",
+        "nameLabel": "Kontoname",
+        "namePlaceholder": "Arbeit, Privat, …",
+        "later": "Später",
+        "connectAuto": "Automatisch verbinden",
+        "signInSecurely": "Sicher anmelden",
+        "workspaceDetected": "{domain} empfängt Mail über Google Workspace",
+        "microsoft365Detected": "{domain} empfängt Mail über Microsoft 365"
+      },
+      "connection": {
+        "checking": "{domain} wird geprüft",
+        "fallbackDomain": "Konto",
+        "missing": "Eine Angabe fehlt",
+        "ready": "Verbindung steht",
+        "missingCopy": "Die erkannten Werte bleiben erhalten. Ergänze nur den fehlenden Teil.",
+        "stateChecking": "wird geprüft …",
+        "stateConnected": "verbunden",
+        "stateNotOffered": "nicht angeboten",
+        "stateNeedsInput": "Angabe erforderlich",
+        "manualHeading": "Serverdaten ergänzen",
+        "manualHint": "Bereits erkannte Werte sind vorausgefüllt.",
+        "username": "Benutzername",
+        "imapHost": "IMAP-Server",
+        "smtpHost": "SMTP-Server",
+        "port": "Port",
+        "changeCredentials": "Zugangsdaten ändern",
+        "recheck": "Erneut prüfen",
+        "enterServerData": "Serverdaten eingeben",
+        "resuming": "Die zuvor begonnene Anmeldung wird fortgesetzt.",
+        "test": "Verbindung testen",
+        "testing": "Wird getestet …",
+        "testSucceeded": "Verbindung steht — {count} Ordner gefunden."
+      },
+      "services": {
+        "mail": "E-Mail empfangen",
+        "smtp": "E-Mail senden",
+        "calendar": "Kalender",
+        "contacts": "Kontakte",
+        "secureSignIn": "Sichere Anmeldung",
+        "mailAndCalendar": "E-Mail & Kalender"
+      },
+      "preferences": {
+        "heading": "Arbeitsweise",
+        "copy": "Beides lässt sich später in den Einstellungen ändern.",
+        "appearance": "Erscheinungsbild",
+        "dark": "Dunkel",
+        "light": "Hell",
+        "keyboardNav": "Tastatur-Navigation",
+        "keyboardNavHint": "Mit {j} und {k} navigieren, mit einem Tastendruck sortieren.",
+        "singleKeyShortcuts": "Einzeltasten-Shortcuts",
+        "singleKeyShortcutsHint": "Mit {j} und {k} navigieren, mit einem Tastendruck sortieren. Kommandopalette und Tastaturhilfe bleiben in jedem Fall aktiv."
+      },
+      "ready": {
+        "accountTitle": "Konto eingerichtet",
+        "title": "Satchel ist bereit",
+        "accountCopy": "Die erste Synchronisierung läuft im Hintergrund.",
+        "copy": "Du kannst jederzeit in den Einstellungen ein Konto hinzufügen.",
+        "toAccounts": "Zur Kontenübersicht",
+        "openSatchel": "Satchel öffnen",
+        "importingPhotos": "Kontaktfotos werden importiert …",
+        "importPhotos": "Optional: Kontaktfotos importieren",
+        "photosImported": "{count} Kontaktfotos importiert.",
+        "photosFailed": "Kontaktfotos konnten nicht importiert werden."
+      },
+      "summary": {
+        "secureSignedIn": "Sicher angemeldet",
+        "connected": "Verbunden",
+        "services": "{count} Dienst verbunden | {count} Dienste verbunden"
+      },
+      "errors": {
+        "cancelled": "Die Anmeldung wurde abgebrochen.",
+        "timeout": "Die Anmeldung hat zu lange gedauert. Bitte versuche es erneut.",
+        "smtpNeedsHelp": "Der Postausgangsserver braucht noch deine Hilfe."
+      },
+      "oauth": {
+        "manualHeading": "Anmeldung von Hand abschließen",
+        "manualHint": "Der Browser hat Satchel nicht erreicht. In seiner Adresszeile stehen state und code noch — beides hier einfügen.",
+        "stateLabel": "State",
+        "codeLabel": "Code",
+        "codePlaceholder": "Der Wert von code= aus der Adresszeile",
+        "complete": "Anmeldung abschließen"
+      }
+    }
+  }
+}

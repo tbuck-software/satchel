@@ -1,0 +1,14 @@
+[
+  {
+    "path": "/Users/example/Library/Application Support/de.tbuck.satchel/satchel",
+    "account": "pgp-master-key-v1:b5bb2ffca4c1904637be63a9a138654acecf03f03bc7b4503e0eb0385738462a"
+  },
+  {
+    "path": "/Users/example/Library/Application Support/de.tbuck.satchel.daily/satchel",
+    "account": "pgp-master-key-v1:9f0b1f2884b2d321c6d40a12a33396bd8826ed04b8fb62d9c73ffddad4a11ce7"
+  },
+  {
+    "path": "/tmp/Satchel Grüße/資料/satchel",
+    "account": "pgp-master-key-v1:69ab04e9940de8a7f5e5fdb358f3bcf5d6cd2563285a6f7d0b6a77ef36f90298"
+  }
+]

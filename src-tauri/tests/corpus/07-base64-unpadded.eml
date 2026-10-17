@@ -1,0 +1,22 @@
+From: Bounce Generator <mailer@example.com>
+To: empfang@example.de
+Subject: Rechnung ohne Padding
+Date: Tue, 04 Mar 2025 09:12:44 +0100
+Message-ID: <corpus-07-unpadded@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="=_pad_1"
+
+--=_pad_1
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+SGFsbG8gV2VsdCwgZGFzIGlzdCBlaW4gQm9keS4
+--=_pad_1
+Content-Type: application/pdf; name="rechnung.pdf"
+Content-Disposition: attachment; filename="rechnung.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJSBlaW4gd2luemlnZXMgRG9rdW1lbnQKJVBERi0xLjQKJSBlaW4gd2luemlnZXMg
+RG9rdW1lbnQKJVBERi0xLjQKJSBlaW4gd2luemlnZXMgRG9rdW1lbnQKJVBERi0xLjQKJSBlaW4g
+d2luemlnZXMgRG9rdW1lbnQKJQ
+--=_pad_1--
