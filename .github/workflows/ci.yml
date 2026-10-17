@@ -48,7 +48,7 @@ jobs:
         # Set this for all later steps so their cleanup cannot remove our browsers.
         run: echo "PLAYWRIGHT_BROWSERS_PATH=${RUNNER_TEMP}/satchel-playwright-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v4
         with:
@@ -204,7 +204,7 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
       - name: Install dependencies for IPC generation
         run: pnpm install --frozen-lockfile
