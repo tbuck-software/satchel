@@ -29,7 +29,7 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 encoding_rs = "0.8"
 futures = "0.3"
-icalendar = "0.16"
+icalendar = "0.17"
 lettre = { version = "0.11", default-features = false, features = ["builder", "ring", "smtp-transport", "tokio1-rustls"] }
 postroom = { git = "https://github.com/tbuck-software/postroom.git", rev = "0a670a2b709d3ae2ed62a1ba2a3090b2a0748b58" }
 postroom-rfc5322 = { git = "https://github.com/tbuck-software/postroom.git", rev = "0a670a2b709d3ae2ed62a1ba2a3090b2a0748b58" }
