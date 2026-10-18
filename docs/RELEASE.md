@@ -169,15 +169,25 @@ pnpm run install:stable    # Satchel.app, stable profile
 # Also available as make nightly / make stable.
 ```
 
-No checkout is needed for the standalone installer, only Node 22 and your
-existing GitHub CLI login:
+No checkout or GitHub login is needed for the public standalone installer,
+only Node 22 or later:
+
+```sh
+curl -fLsS https://github.com/tbuck-software/satchel/releases/latest/download/install-satchel.mjs | node --input-type=module - --channel stable --open
+```
+
+For Satchel Daily, download the installer from the latest versioned nightly
+prerelease on the [releases page](https://github.com/tbuck-software/satchel/releases)
+and run it with `--channel nightly --open`. From a checkout, use
+`pnpm run install:nightly`.
+
+The GitHub CLI command remains available for authenticated downloads:
 
 ```sh
 gh release download --repo tbuck-software/satchel --pattern install-satchel.mjs --output - | node --input-type=module - --channel stable --open
 ```
 
-Use `--channel nightly` for Satchel Daily. The bootstrapper
-is bundled from the same source and carries its MIT license and updater public
+The bootstrapper is bundled from the same source and carries its MIT license and updater public
 key. It has no npm dependency or access token of its own.
 
 The installer downloads a prebuilt app, verifies its Tauri/minisign signature

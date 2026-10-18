@@ -48,12 +48,24 @@ their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Install and update
 
-Desktop releases are built automatically from `main`: nightly every day and
-stable every Monday. On macOS, install or update with `pnpm run install:nightly`
-for Satchel Daily or `pnpm run install:stable` for Satchel. Each command downloads
-a signed prebuilt app, verifies it, and backs up existing data before installation.
-Private downloads use your GitHub CLI login. Packaged apps offer signed in-app
-updates once their release feed is publicly available.
+Download a macOS DMG, Windows installer, or Linux AppImage from
+[Releases](https://github.com/tbuck-software/satchel/releases/latest).
+macOS builds are signed and notarized. Windows installers currently have no
+Authenticode signature and may show an unknown-publisher warning.
+
+On macOS, the standalone installer also backs up your existing database and
+credential key before updating. It needs Node 22 or later, with no checkout or
+GitHub login:
+
+```sh
+curl -fLsS https://github.com/tbuck-software/satchel/releases/latest/download/install-satchel.mjs | node --input-type=module - --channel stable --open
+```
+
+Desktop releases are built from `main`: nightly every day and stable every
+Monday. Satchel uses the stable channel; Satchel Daily has a separate profile.
+Packaged apps check for signed updates and offer installation with a restart.
+From a checkout, `pnpm run install:stable` and `pnpm run install:nightly` use
+the same verified installer.
 
 See [docs/RELEASE.md](docs/RELEASE.md) for installers, release channels, signing,
 and distribution. [SECURITY.md](SECURITY.md) explains how to report vulnerabilities.
