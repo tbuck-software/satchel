@@ -246,11 +246,11 @@ jobs:
           if [ -n "${APPLE_API_KEY_PATH:-}" ]; then
             unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
           fi
-          build_args=(exec tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config output/release-config.json)
+          build_args=(--ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config output/release-config.json)
           if [ "$RUNNER_OS" = macOS ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
-            bash scripts/build-notarized-macos.sh "target/${{ matrix.target }}/release/bundle/macos" pnpm "${build_args[@]}"
+            bash scripts/build-notarized-macos.sh "target/${{ matrix.target }}/release/bundle/macos" "${build_args[@]}"
           else
-            pnpm "${build_args[@]}"
+            pnpm exec tauri build "${build_args[@]}"
           fi
       - name: Verify macOS code signature and notarization ticket
         if: runner.os == 'macOS'

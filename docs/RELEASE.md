@@ -123,7 +123,8 @@ See the [Wasmtime platform discussion](https://github.com/bytecodealliance/wasmt
 
 The macOS build validates the stapled notarization ticket after packaging. If
 Tauri reports success without attaching a valid ticket, the workflow repeats
-the complete bundle command up to three times, reusing the compiled binary.
+the bundle command up to three times, reusing the compiled binary. Retries use
+`tauri bundle`, so they do not rebuild the frontend or recompile Rust.
 This also recreates the DMG and updater archive from the stapled app. Compile
 and notarization errors stop immediately; a missing ticket after the third
 build blocks publication. CI also extracts the updater archive and mounts the
