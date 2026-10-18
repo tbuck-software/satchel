@@ -42,8 +42,12 @@ The daily channel is the intended dogfood build: it is compiled as a release
 binary, installed into `/Applications`, and has its own AppData directory. The
 installer copies the local `.env` into that channel's AppData directory, but
 release binaries ignore that runtime file. Public OAuth client IDs and redirect
-URIs are compiled from the build environment or the build-time `.env`; client
-secrets are never embedded. Use public-client registrations for release builds.
+URIs are compiled from the build environment or the build-time `.env`. Google's
+Desktop app registration also requires its installed-app `client_secret`, carried
+as `SATCHEL_GMAIL_DESKTOP_CLIENT_SECRET`. This is public client metadata, as
+[Google documents](https://developers.google.com/identity/protocols/oauth2/#installed).
+Confidential Web application client secrets must never be shipped. Generic
+`SATCHEL_*_CLIENT_SECRET` inputs remain development-only.
 The installer makes a consistent SQLite `.backup` snapshot before replacing the
 app. It also saves the credential master key in a separate Keychain item and
 writes its account name to `master-key.keychain` in the backup directory.
@@ -278,8 +282,15 @@ an unknown publisher, and Windows policies can block unsigned apps. See
 [Microsoft's signing guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)
 before adding a Windows code-signing service or certificate.
 
-Use repository variables for the public Gmail/Outlook client IDs and optional
-redirect URIs listed in `.env.example`. Client secrets are never release inputs.
+Download the Google OAuth **Desktop app** client JSON and store it in the
+repository secret `SATCHEL_GMAIL_DESKTOP_CLIENT_CONFIG`. The workflow validates
+the `installed` client type and Google token endpoint before exporting the client
+ID and public desktop credential to the Rust build. Web client JSON fails closed.
+Desktop Google authorization uses an ephemeral loopback port and PKCE S256.
+Use repository variables for the public Outlook client ID and optional redirect
+URI listed in `.env.example`. Outlook client secrets are never release inputs.
+Google app branding and scope verification are separate provider-side steps;
+publishing the GitHub repository does not complete them.
 
 Generated dependency notices, font notices, the project license, and bundled
 WASM components are included as app resources. Each release includes its

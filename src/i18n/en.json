@@ -1308,7 +1308,7 @@
       "closeHint": "You can close this window now.",
       "connectedMessage": "{provider} is now connected to Satchel.",
       "connectedTitle": "Satchel connected",
-      "failedMessage": "Satchel could not save the token.",
+      "failedMessage": "Satchel could not complete sign-in. Return to the app for details.",
       "failedTitle": "OAuth failed",
       "invalidCallback": "Satchel could not process the callback.",
       "invalidState": "Satchel received an invalid state value.",

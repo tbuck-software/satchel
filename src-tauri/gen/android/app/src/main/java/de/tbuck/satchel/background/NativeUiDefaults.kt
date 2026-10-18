@@ -43,7 +43,7 @@ object NativeUiDefaults {
     "oauth_connected_title" to "Satchel connected",
     "oauth_connected_message" to "{provider} is now connected to Satchel.",
     "oauth_failed_title" to "OAuth failed",
-    "oauth_failed_message" to "Satchel could not save the token.",
+    "oauth_failed_message" to "Satchel could not complete sign-in. Return to the app for details.",
     "oauth_close_hint" to "You can close this window now.",
     "oauth_provider_fallback" to "The account",
   )
@@ -86,7 +86,7 @@ object NativeUiDefaults {
     "oauth_connected_title" to "Satchel verbunden",
     "oauth_connected_message" to "{provider} ist jetzt mit Satchel verbunden.",
     "oauth_failed_title" to "OAuth fehlgeschlagen",
-    "oauth_failed_message" to "Satchel konnte das Token nicht speichern.",
+    "oauth_failed_message" to "Satchel konnte die Anmeldung nicht abschließen. Details findest du in der App.",
     "oauth_close_hint" to "Du kannst dieses Fenster jetzt schließen.",
     "oauth_provider_fallback" to "Das Konto",
   )

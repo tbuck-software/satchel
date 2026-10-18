@@ -109,7 +109,8 @@ impl OAuthProvider {
         match self {
             Self::Gmail => Ok(self.build_config(
                 required_env("SATCHEL_GMAIL_CLIENT_ID")?,
-                optional_env("SATCHEL_GMAIL_CLIENT_SECRET"),
+                optional_env("SATCHEL_GMAIL_DESKTOP_CLIENT_SECRET")
+                    .or_else(|| optional_env("SATCHEL_GMAIL_CLIENT_SECRET")),
                 optional_env("SATCHEL_GMAIL_REDIRECT_URI").unwrap_or_else(default_redirect_uri),
             )),
             Self::Outlook => Ok(self.build_config(
@@ -146,7 +147,13 @@ impl OAuthProvider {
             .filter(|value| !value.is_empty())
             .map(str::to_string)
             .or_else(|| match self {
-                Self::Gmail => optional_env("SATCHEL_GMAIL_CLIENT_SECRET"),
+                Self::Gmail => optional_env("SATCHEL_GMAIL_CLIENT_SECRET").or_else(|| {
+                    // Existing refresh tokens belong to their original client.
+                    // Never attach a replacement registration's credential.
+                    (optional_env("SATCHEL_GMAIL_CLIENT_ID").as_deref() == Some(client_id.as_str()))
+                        .then(|| optional_env("SATCHEL_GMAIL_DESKTOP_CLIENT_SECRET"))
+                        .flatten()
+                }),
                 Self::Outlook => optional_env("SATCHEL_OUTLOOK_CLIENT_SECRET"),
             });
 
@@ -231,6 +238,7 @@ fn optional_env(key: &str) -> Option<String> {
 fn compiled_env(key: &str) -> Option<&'static str> {
     match key {
         "SATCHEL_GMAIL_CLIENT_ID" => option_env!("SATCHEL_GMAIL_CLIENT_ID"),
+        "SATCHEL_GMAIL_DESKTOP_CLIENT_SECRET" => option_env!("SATCHEL_GMAIL_DESKTOP_CLIENT_SECRET"),
         "SATCHEL_GMAIL_REDIRECT_URI" => option_env!("SATCHEL_GMAIL_REDIRECT_URI"),
         "SATCHEL_OUTLOOK_CLIENT_ID" => option_env!("SATCHEL_OUTLOOK_CLIENT_ID"),
         "SATCHEL_OUTLOOK_REDIRECT_URI" => option_env!("SATCHEL_OUTLOOK_REDIRECT_URI"),
@@ -664,6 +672,71 @@ fn oauth_token_is_fresh(stored: &StoredOAuthConfig) -> bool {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn google_desktop_credential_reaches_code_exchange_and_token_refresh() {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for grant in ["authorization_code", "refresh_token"] {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut stream = tokio::io::BufReader::new(socket);
+                let mut headers = String::new();
+                while !headers.ends_with("\r\n\r\n") {
+                    assert!(stream.read_line(&mut headers).await.unwrap() > 0);
+                }
+                let length = headers
+                    .to_ascii_lowercase()
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length: "))
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap();
+                let mut body = vec![0; length];
+                stream.read_exact(&mut body).await.unwrap();
+                let form: std::collections::HashMap<_, _> = reqwest::Url::parse(&format!(
+                    "http://localhost/?{}",
+                    String::from_utf8(body).unwrap()
+                ))
+                .unwrap()
+                .query_pairs()
+                .into_owned()
+                .collect();
+                assert_eq!(form["client_id"], "desktop-client");
+                assert_eq!(form["client_secret"], "desktop-fixture");
+                assert_eq!(form["grant_type"], grant);
+                if grant == "authorization_code" {
+                    assert_eq!(form["code_verifier"], "fixture-verifier");
+                } else {
+                    assert_eq!(form["refresh_token"], "retained-refresh");
+                }
+                let body =
+                    r#"{"access_token":"fresh-access","token_type":"Bearer","expires_in":3600}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let mut config = OAuthProvider::Gmail.build_config(
+            "desktop-client".into(),
+            Some("desktop-fixture".into()),
+            loopback_redirect_uri(49152),
+        );
+        config.token_url = format!("http://{address}");
+        let token = exchange_code_for_token(&config, "fixture-code", "fixture-verifier")
+            .await
+            .unwrap();
+        assert_eq!(token.access_token, "fresh-access");
+        let token = refresh_access_token(&config, "retained-refresh")
+            .await
+            .unwrap();
+        assert_eq!(token.refresh_token.as_deref(), Some("retained-refresh"));
+        server.await.unwrap();
+    }
+
     #[test]
     fn stored_oauth_config_supplies_client_details_without_process_env() {
         let stored = StoredOAuthConfig {
@@ -689,13 +762,10 @@ mod tests {
         assert_eq!(config.token_url, "https://oauth2.googleapis.com/token");
     }
 
-    /// No client secret is compiled into the binary.
-    ///
-    /// `strings` on a release build used to find the `GOCSPX-` prefix, and the
-    /// same secret was copied into every account row from there. The
-    /// runtime configuration supplies any secret required by the registration.
+    /// Confidential web-client secrets must never be distributed. Google's
+    /// installed desktop credential uses a separate, explicit build input.
     #[test]
-    fn no_client_secret_is_baked_into_the_binary() {
+    fn confidential_client_secrets_are_not_baked_into_the_binary() {
         let build_rs = include_str!("../../build.rs");
         let baked_keys = build_rs
             .split_once("const BAKED_KEYS")

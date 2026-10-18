@@ -54,7 +54,8 @@ fn english() -> UiStrings {
         oauth_connected_title: "Satchel connected".into(),
         oauth_connected_message: "{provider} is now connected to Satchel.".into(),
         oauth_failed_title: "OAuth failed".into(),
-        oauth_failed_message: "Satchel could not save the token.".into(),
+        oauth_failed_message: "Satchel could not complete sign-in. Return to the app for details."
+            .into(),
         oauth_close_hint: "You can close this window now.".into(),
         oauth_provider_fallback: "The account".into(),
     }
@@ -105,7 +106,8 @@ fn german() -> UiStrings {
         oauth_connected_title: "Satchel verbunden".into(),
         oauth_connected_message: "{provider} ist jetzt mit Satchel verbunden.".into(),
         oauth_failed_title: "OAuth fehlgeschlagen".into(),
-        oauth_failed_message: "Satchel konnte das Token nicht speichern.".into(),
+        oauth_failed_message:
+            "Satchel konnte die Anmeldung nicht abschließen. Details findest du in der App.".into(),
         oauth_close_hint: "Du kannst dieses Fenster jetzt schließen.".into(),
         oauth_provider_fallback: "Das Konto".into(),
     }

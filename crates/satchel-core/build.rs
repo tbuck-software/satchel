@@ -5,10 +5,12 @@ use std::path::PathBuf;
 /// Redirect URIs are included as well: mobile has no process environment, and
 /// an explicitly registered loopback URI must keep its configured port instead
 /// of being replaced with an unregistered ephemeral one.
-/// Client secrets are deliberately absent: a shipped binary cannot keep one.
-/// Registrations that require one supply it through runtime configuration.
+/// Google's desktop client credential is public installed-app metadata, despite
+/// its `client_secret` name. Confidential web-client secrets remain excluded.
+/// https://developers.google.com/identity/protocols/oauth2/#installed
 const BAKED_KEYS: &[&str] = &[
     "SATCHEL_GMAIL_CLIENT_ID",
+    "SATCHEL_GMAIL_DESKTOP_CLIENT_SECRET",
     "SATCHEL_GMAIL_REDIRECT_URI",
     "SATCHEL_OUTLOOK_CLIENT_ID",
     "SATCHEL_OUTLOOK_REDIRECT_URI",
@@ -47,7 +49,8 @@ fn declare_platform_cfgs() {
 /// but a path that could not be configured at all.
 ///
 /// Reading the file at build time is how an installed app is meant to carry its
-/// client identity. Client secrets are never included in the baked keys.
+/// client identity. Only Google's public desktop credential is included; generic
+/// Gmail and Outlook client secrets remain development-only runtime inputs.
 fn bake_oauth_client_identity() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default());
     let repo_root = manifest

@@ -1,22 +1,37 @@
-# 013 OAuth Provider Setup (Spaeter erledigen)
+# OAuth provider setup
 
-Status: offen  
-Prioritaet: mittel
+This is configuration guidance, not a live task status. Release configuration is
+documented in [RELEASE.md](../RELEASE.md).
 
-## Ziel
-Google- und/oder Microsoft-OAuth in produktionsnaher Form konfigurieren und in Satchel `.env` eintragen.
+## Google desktop
 
-## Checklist
-- [ ] Google Cloud: OAuth Client fuer Web App erstellen.
-- [ ] Gmail API im selben Projekt aktivieren.
-- [x] Google Auth Platform: App-Zielgruppe nach dem Test auf `In production` veroeffentlichen. Im Status `Testing` laufen Refresh-Tokens bei Gmail-/Contacts-Scopes nach sieben Tagen ab. (2026-07-17)
-- [ ] Redirect URI in Google setzen (dev: `http://127.0.0.1:8765/oauth/callback`).
-- [ ] `SATCHEL_GMAIL_CLIENT_ID` und optional `SATCHEL_GMAIL_CLIENT_SECRET` in `.env` setzen.
-- [ ] Microsoft Entra: App registrieren.
-- [ ] Redirect URI fuer Web setzen (dev: `http://127.0.0.1:8765/oauth/callback`).
-- [ ] `SATCHEL_OUTLOOK_CLIENT_ID` und optional `SATCHEL_OUTLOOK_CLIENT_SECRET` in `.env` setzen.
-- [ ] In Satchel OAuth-Start fuer den gewuenschten Provider testen.
+1. In Google Auth Platform, create an OAuth client of type **Desktop app**.
+   A Web application client is unsuitable for the distributed native app.
+2. Enable the Gmail, People and Calendar APIs used by Satchel in that project.
+3. Download the desktop client JSON and store it in the GitHub repository secret
+   `SATCHEL_GMAIL_DESKTOP_CLIENT_CONFIG`. The release workflow rejects web clients.
+4. For local builds, set `SATCHEL_GMAIL_CLIENT_ID` and
+   `SATCHEL_GMAIL_DESKTOP_CLIENT_SECRET` in an untracked `.env`.
+5. Leave the desktop redirect URI unset. Satchel uses an ephemeral loopback
+   listener and PKCE S256.
+6. Configure consent-screen branding for Satchel and complete Google's required
+   scope verification separately. Publishing source or binaries does not remove
+   the unverified-app screen. In Testing mode, Google refresh tokens for these
+   scopes expire after seven days.
 
-## Hinweise
-- Bundle-Identifier (`de.tbuck.satchel`) ist getrennt von OAuth Client ID/Secret.
-- Wenn spaeter `https://satchel.tbuck.de/...` als Redirect genutzt wird, muss diese URI exakt im Provider eingetragen sein.
+Google's desktop `client_secret` is public installed-app metadata, as described
+in [Google's OAuth overview](https://developers.google.com/identity/protocols/oauth2/#installed).
+It is still needed by registrations that require it for code exchange and refresh.
+PKCE does not make it universally optional. Confidential web-client secrets must
+never be embedded in Satchel.
+
+The app bundle identifier `de.tbuck.satchel` is separate from the OAuth client ID.
+Replacing an OAuth client requires reconnecting affected accounts in Satchel;
+refresh tokens cannot be transferred to a different client ID.
+
+## Microsoft desktop
+
+Register a public native client in Microsoft Entra and configure its loopback
+redirect. Set `SATCHEL_OUTLOOK_CLIENT_ID` and, only when required by the
+registration, `SATCHEL_OUTLOOK_REDIRECT_URI`. Release builds do not embed Outlook
+client secrets.
