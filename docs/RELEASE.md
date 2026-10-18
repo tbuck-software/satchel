@@ -168,6 +168,13 @@ base; build jobs update them and the app's Cargo lock entry in their disposable
 checkout. Stable tags are immutable. The rolling `nightly` prerelease contains
 only a channel manifest pointing to immutable versioned, signed assets.
 
+Preparation reserves the source tag before the long build. Publication checks
+that tag against the verified source and uses the existing tag without asking
+GitHub to tag an older workflow commit. A failed build can leave a tag without
+a release; the next stable build of another commit takes the next free patch
+version. Reserved tags are never moved. Only a complete verified release can
+change an update feed.
+
 ## Install a released build
 
 On macOS:

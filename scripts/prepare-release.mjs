@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { RELEASE_REPOSITORY, releaseVersion } from './release-model.mjs';
+import { reserveReleaseTags } from './release-tags.mjs';
 
 const channel = process.env.RELEASE_CHANNEL;
 if (channel !== 'stable' && channel !== 'nightly') throw new Error('Expected stable or nightly channel');
@@ -30,9 +31,10 @@ if (!build) {
 } else {
   const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
   const version = releaseVersion(pkg.version, stable?.tag_name ?? null, channel, Number(process.env.GITHUB_RUN_NUMBER));
-  const plan = { channel, version, tag: `v${version}`, source, published: new Date().toISOString() };
+  const reserved = reserveReleaseTags({ channel, version, source });
+  const plan = { channel, ...reserved, source, published: new Date().toISOString() };
   mkdirSync('output', { recursive: true });
   writeFileSync('output/release-plan.json', JSON.stringify(plan, null, 2) + '\n');
-  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
-  console.log(`Prepared ${channel} ${version} from ${source}`);
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `version=${plan.version}\n`);
+  console.log(`Prepared ${channel} ${plan.version} from ${source}`);
 }

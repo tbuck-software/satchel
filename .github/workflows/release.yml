@@ -32,6 +32,8 @@ jobs:
     if: github.repository == 'tbuck-software/satchel' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: write
     outputs:
       build: ${{ steps.plan.outputs.build }}
     steps:

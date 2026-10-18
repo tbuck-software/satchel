@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PLATFORMS, RELEASE_REPOSITORY } from './release-model.mjs';
+import { requireReleaseTag } from './release-tags.mjs';
 
 if (process.env.GITHUB_REPOSITORY !== RELEASE_REPOSITORY || process.env.GITHUB_REF !== 'refs/heads/main') {
   throw new Error('Only the upstream main workflow may publish releases');
@@ -36,7 +37,8 @@ function gh(args) {
 }
 
 // Publish only after every desktop platform and the verification job succeeded.
-gh(['release', 'create', plan.tag, '--target', plan.source, '--title', `Satchel ${plan.version}`, '--draft', '--notes-file', 'output/release-notes.md', ...(plan.channel === 'nightly' ? ['--prerelease'] : [])]);
+requireReleaseTag(plan.tag, plan.source);
+gh(['release', 'create', plan.tag, '--verify-tag', '--title', `Satchel ${plan.version}`, '--draft', '--notes-file', 'output/release-notes.md', ...(plan.channel === 'nightly' ? ['--prerelease'] : [])]);
 const assets = readdirSync(folder).filter(name => !Object.values(PLATFORMS).some(platform => name === platform.platform + '.json'));
 gh(['release', 'upload', plan.tag, ...assets.map(name => join(folder, name))]);
 gh(['release', 'edit', plan.tag, '--draft=false', ...(plan.channel === 'stable' ? ['--latest'] : [])]);
@@ -45,8 +47,8 @@ if (plan.channel === 'nightly') {
   try {
     execFileSync('gh', ['release', 'view', 'nightly', '--repo', RELEASE_REPOSITORY], { stdio: 'ignore' });
   } catch { exists = false; }
-  if (!exists) gh(['release', 'create', 'nightly', '--target', plan.source, '--title', 'Satchel Nightly', '--prerelease', '--notes-file', 'output/release-notes.md']);
-  // The channel manifest points at immutable, signed versioned assets. Replacing it is atomic.
+  if (!exists) gh(['release', 'create', 'nightly', '--verify-tag', '--title', 'Satchel Nightly', '--prerelease', '--notes-file', 'output/release-notes.md']);
+  // Expose the channel manifest only after the immutable, signed versioned assets exist.
   gh(['release', 'upload', 'nightly', join(folder, 'latest.json'), '--clobber']);
   gh(['release', 'edit', 'nightly', '--notes-file', 'output/release-notes.md']);
 }
