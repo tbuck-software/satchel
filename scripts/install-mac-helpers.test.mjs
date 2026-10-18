@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { processListContainsApp, stableInstallProblem, versionTagProblem } from './install-mac-helpers.mjs';
 
 describe('processListContainsApp', () => {
+  it('recognizes a translocated app without confusing stable, daily, or helper processes', () => {
+    const root = '/private/var/folders/ab/example/T/AppTranslocation/UUID/d/';
+    const process = `${root}Satchel.app/Contents/MacOS/satchel --example`;
+    expect(processListContainsApp(process, '/Applications/Satchel.app', 'satchel')).toBe(true);
+    expect(processListContainsApp(process, '/Applications/Satchel Daily.app', 'satchel')).toBe(false);
+    expect(processListContainsApp(`${root}Satchel.app/Contents/MacOS/satchel-helper`, '/Applications/Satchel.app', 'satchel')).toBe(false);
+    expect(processListContainsApp(`/bin/cat ${process}`, '/Applications/Satchel.app', 'satchel')).toBe(false);
+  });
   const app = '/Applications/Satchel Daily.app';
 
   it('recognizes the desktop process even when the app path contains spaces', () => {

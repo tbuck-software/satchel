@@ -642,6 +642,13 @@ where
                 continue;
             }
         };
+        if crate::utils::oauth::google_scope_granted(
+            &config,
+            crate::utils::oauth::GOOGLE_CALENDAR_SCOPE,
+        ) == Some(false)
+        {
+            continue;
+        }
         match sync_account(pool, &account.id, &config).await {
             Ok(count) => summary.events_synced += count,
             Err(error) => {
@@ -791,7 +798,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn google_sync_continues_after_one_account_config_cannot_be_decrypted() {
+    async fn google_sync_skips_ungranted_accounts_and_continues_after_bad_credentials() {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
@@ -810,6 +817,12 @@ mod tests {
                 "working@example.test",
                 r#"{"oauth":{"access_token":"test"}}"#,
                 "2026-01-02",
+            ),
+            (
+                "mail-only",
+                "mail@example.test",
+                r#"{"oauth":{"access_token":"mail", "scope":"https://www.googleapis.com/auth/gmail.modify"}}"#,
+                "2026-01-03",
             ),
         ] {
             satchel_core::utils::crypto::seed_master_key_for_tests();
@@ -852,7 +865,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
-        assert_eq!(summary.accounts_checked, 2);
+        assert_eq!(summary.accounts_checked, 3);
         assert_eq!(summary.events_synced, 7);
         assert_eq!(summary.errors.len(), 1);
         assert!(summary.errors[0].contains("backend.errors.googleCalendarSyncFailed"));

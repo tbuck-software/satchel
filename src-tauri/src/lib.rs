@@ -44,6 +44,7 @@ pub enum OAuthFlowResult {
         connected: bool,
         has_refresh_token: bool,
         expires_at: Option<String>,
+        granted_scopes: Option<Vec<String>>,
     },
     Failed(String),
 }

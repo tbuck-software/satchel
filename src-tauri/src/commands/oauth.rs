@@ -33,6 +33,7 @@ const CALLBACK_PLATFORM: oauth::OAuthPlatform = oauth::OAuthPlatform::Mobile;
 pub struct StartOAuthInput {
     pub account_id: String,
     pub provider: String,
+    pub purpose: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -89,6 +90,7 @@ pub struct OAuthStatus {
     pub connected: bool,
     pub has_refresh_token: bool,
     pub expires_at: Option<String>,
+    pub granted_scopes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,6 +110,7 @@ impl From<OAuthAccountStatus> for OAuthStatus {
             connected: status.connected,
             has_refresh_token: status.has_refresh_token,
             expires_at: status.expires_at,
+            granted_scopes: status.granted_scopes,
         }
     }
 }
@@ -143,6 +146,8 @@ pub async fn start_oauth_flow(
     let mut provider_config = provider
         .load_config()
         .map_err(|error| oauth_configuration_error("could not load OAuth provider", error))?;
+    let purpose = oauth::OAuthPurpose::parse(input.purpose.as_deref())
+        .map_err(|error| oauth_configuration_error("invalid OAuth purpose", error))?;
     if !AccountRepository::new(pool.inner())
         .exists(&input.account_id)
         .await
@@ -150,6 +155,29 @@ pub async fn start_oauth_flow(
     {
         return Err(CommandError::new("backend.errors.accountNotFound"));
     }
+
+    if matches!(provider, oauth::OAuthProvider::Gmail) {
+        let account_config = AccountRepository::new(pool.inner())
+            .load_provider_config(&input.account_id)
+            .await
+            .map_err(CommandError::from)?;
+        let previous = account_config
+            .as_ref()
+            .and_then(|account| oauth::load_stored_oauth(&account.config).ok());
+        oauth::configure_google_grants(&mut provider_config, purpose, previous.as_ref());
+    } else if purpose != oauth::OAuthPurpose::Mail {
+        return Err(CommandError::new(
+            "backend.errors.oauthConfigurationInvalid",
+        ));
+    }
+    let authorization_context = oauth::OAuthGrantRequest {
+        purpose,
+        scopes: provider_config
+            .scopes
+            .iter()
+            .map(|scope| (*scope).to_owned())
+            .collect(),
+    };
 
     let configured_redirect_uri = provider.configured_redirect_uri();
 
@@ -191,6 +219,7 @@ pub async fn start_oauth_flow(
             created_at,
             expires_at,
             redirect_uri,
+            authorization_context: Some(authorization_context),
         })
         .await
         .map_err(oauth_flow_command_error)?;
@@ -305,6 +334,7 @@ fn poll_response_from_memory(stored: OAuthFlowResult) -> OAuthFlowPollResponse {
             connected,
             has_refresh_token,
             expires_at,
+            granted_scopes,
         } => OAuthFlowPollResponse {
             status: "completed".to_string(),
             result: Some(OAuthStatus {
@@ -313,6 +343,7 @@ fn poll_response_from_memory(stored: OAuthFlowResult) -> OAuthFlowPollResponse {
                 connected,
                 has_refresh_token,
                 expires_at,
+                granted_scopes,
             }),
             error: None,
         },
@@ -423,13 +454,29 @@ async fn complete_oauth_flow_inner(
     if let Some(redirect_uri) = session.redirect_uri.clone() {
         provider_config.redirect_uri = redirect_uri;
     }
-    let token =
+    let mut token =
         oauth::exchange_code_for_token(&provider_config, &input.code, &session.code_verifier)
             .await
             .map_err(|error| oauth_provider_error("OAuth token exchange failed", error))?;
+    if matches!(provider, oauth::OAuthProvider::Gmail) {
+        if let Some(request) = session.authorization_context.as_ref() {
+            oauth::validate_google_grant(&mut token, request).map_err(CommandError::new)?;
+        }
+    }
     let identity = oauth::fetch_identity(provider, &token.access_token)
         .await
         .map_err(|error| oauth_provider_error("OAuth identity lookup failed", error))?;
+    if session
+        .authorization_context
+        .as_ref()
+        .is_some_and(|request| request.purpose != oauth::OAuthPurpose::Mail)
+        && !AccountRepository::new(pool)
+            .owns_primary_identity(&session.account_id, &identity.email.trim().to_lowercase())
+            .await
+            .map_err(CommandError::from)?
+    {
+        return Err(CommandError::new("backend.errors.oauthAccountMismatch"));
+    }
     let now = chrono::Utc::now().to_rfc3339();
     let target_account = AccountRepository::new(pool)
         .connect_oauth(
@@ -448,6 +495,7 @@ async fn complete_oauth_flow_inner(
         connected: true,
         has_refresh_token: target_account.has_refresh_token,
         expires_at: target_account.expires_at,
+        granted_scopes: oauth::granted_scopes(token.scope.as_deref()),
     };
     restart_account_poller(state, &status.account_id);
     mark_oauth_completed(state, &flow_state, &status).await;
@@ -800,6 +848,7 @@ async fn mark_oauth_completed(state: &AppState, flow_state: &str, status: &OAuth
             connected: status.connected,
             has_refresh_token: status.has_refresh_token,
             expires_at: status.expires_at.clone(),
+            granted_scopes: status.granted_scopes.clone(),
         },
     );
 }

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createPinia, setActivePinia } from 'pinia';
 
 const invites = vi.hoisted(() => ({
   items: [],
@@ -20,6 +21,7 @@ vi.mock('@/stores/calendarUi', () => ({
 import CalendarSettings from './CalendarSettings.vue';
 
 beforeEach(() => {
+  setActivePinia(createPinia());
   vi.clearAllMocks();
   invites.syncRemote.mockResolvedValue([]);
 });

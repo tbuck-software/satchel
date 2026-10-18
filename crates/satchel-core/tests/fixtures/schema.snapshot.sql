@@ -101,7 +101,7 @@ table messages_fts: CREATE VIRTUAL TABLE messages_fts USING fts5( subject, body_
 table messages_prefix_fts: CREATE VIRTUAL TABLE messages_prefix_fts USING fts5( subject, body_text, from_name, from_address, to_addresses, content='messages', content_rowid='rowid', tokenize='unicode61 remove_diacritics 2', prefix='2 3' )
 table notification_outbox (message_id TEXT PK1, state TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL, dispatch_token TEXT, dispatch_at TEXT, delivered_at TEXT, last_error TEXT)
 table oauth_flow_outcomes (state TEXT PK1, account_id TEXT NOT NULL, provider TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, error_key TEXT)
-table oauth_flow_sessions (state TEXT PK1, account_id TEXT NOT NULL, provider TEXT NOT NULL, encrypted_code_verifier TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, redirect_uri TEXT)
+table oauth_flow_sessions (state TEXT PK1, account_id TEXT NOT NULL, provider TEXT NOT NULL, encrypted_code_verifier TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, redirect_uri TEXT, authorization_context TEXT)
 table pgp_keys (id TEXT PK1, label TEXT NOT NULL, key_type TEXT NOT NULL, fingerprint TEXT NOT NULL, armored_key TEXT NOT NULL, passphrase TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)
 table plugin_permissions (plugin_id TEXT NOT NULL PK1, capability TEXT NOT NULL PK2, granted INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL)
 table plugin_state (plugin_id TEXT NOT NULL PK1, key TEXT NOT NULL PK2, value TEXT)

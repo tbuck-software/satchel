@@ -160,12 +160,16 @@ Example account `config`:
   - easiest for local dev: create `.env` in repo root (see `.env.example`)
   - debug builds load `.env` at runtime, including the app-private file provisioned by the Android debug installer
   - release builds use the public client IDs and redirect URIs compiled from the build configuration; they ignore runtime `.env` files and development overrides
-  - client secrets are never compiled into the binary; release builds require a public OAuth client registration
+  - confidential client secrets are never compiled into the binary; Google Desktop registrations include a public desktop credential, which is compiled with the public client ID
   - `SATCHEL_GMAIL_CLIENT_ID`, optional `SATCHEL_GMAIL_CLIENT_SECRET`, optional `SATCHEL_GMAIL_REDIRECT_URI`
   - `SATCHEL_OUTLOOK_CLIENT_ID`, optional `SATCHEL_OUTLOOK_CLIENT_SECRET`, optional `SATCHEL_OUTLOOK_REDIRECT_URI`
 - Add the account through the setup wizard (`Settings` -> `Accounts` -> `Add account`)
   and pick Google or Microsoft. Satchel opens the browser and takes the callback
   on a loopback listener; there is no separate OAuth pane.
+- Gmail sign-in initially asks only for mail access. Connect optional Google Calendar
+  access under `Settings` -> `Calendar`, and Google Contacts photos under
+  `Settings` -> `Profile pictures`. Reconnecting preserves the account's existing
+  optional grants when they belong to the same OAuth client.
 - If the browser cannot reach that listener (firewall, remote desktop, no default
   browser), the wizard waits two minutes and then offers `Finish the sign-in by
   hand`: copy `state` and `code` out of the browser's address bar and paste them

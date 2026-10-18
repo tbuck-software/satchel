@@ -2,6 +2,9 @@
 
 use super::error::CommandResult;
 
+#[cfg(any(target_os = "macos", all(test, unix)))]
+mod macos;
+
 #[cfg(desktop)]
 use std::sync::{atomic::AtomicU8, Mutex};
 #[cfg(desktop)]
@@ -31,6 +34,9 @@ pub struct UpdateState {
 struct PendingUpdate {
     update: tauri_plugin_updater::Update,
     bytes: Option<Vec<u8>>,
+    installed: bool,
+    #[cfg(target_os = "macos")]
+    installed_bundle: Option<std::path::PathBuf>,
 }
 
 #[cfg(desktop)]
@@ -135,6 +141,9 @@ pub async fn check_app_update(app: tauri::AppHandle) -> CommandResult<AppUpdateC
         *pending = update.map(|update| PendingUpdate {
             update,
             bytes: None,
+            installed: false,
+            #[cfg(target_os = "macos")]
+            installed_bundle: None,
         });
         Ok(AppUpdateCheck {
             channel: Some(channel.into()),
@@ -175,7 +184,7 @@ pub async fn download_app_update(app: tauri::AppHandle) -> CommandResult<()> {
         let state = app.state::<UpdateState>();
         let mut pending = state.pending.lock().await;
         let pending = pending.as_mut().ok_or("backend.errors.updateUnavailable")?;
-        if pending.bytes.is_some() {
+        if pending.bytes.is_some() || pending.installed {
             return Ok(());
         }
         state.progress.store(0, Relaxed);
@@ -276,16 +285,41 @@ pub async fn install_app_update(app: tauri::AppHandle) -> CommandResult<()> {
         let state = app.state::<UpdateState>();
         let mut pending = state.pending.lock().await;
         let pending = pending.as_mut().ok_or("backend.errors.updateUnavailable")?;
-        let bytes = pending
-            .bytes
-            .as_ref()
-            .ok_or("backend.errors.updateUnavailable")?;
         flush_composers(&app, &state).await?;
-        pending.update.install(bytes).map_err(|error| {
-            tracing::warn!(%error, "signed update installation failed");
-            "backend.errors.updateInstallFailed"
+        if !pending.installed {
+            let bytes = pending
+                .bytes
+                .as_ref()
+                .ok_or("backend.errors.updateUnavailable")?;
+            #[cfg(target_os = "macos")]
+            let bundle = tauri::utils::platform::current_exe()
+                .and_then(|executable| macos::own_bundle_path(&executable))
+                .map_err(|error| {
+                    tracing::warn!(%error, "update requires a normally installed app bundle");
+                    "backend.errors.updateInstallLocationRequired"
+                })?;
+            pending.update.install(bytes).map_err(|error| {
+                tracing::warn!(%error, "signed update installation failed");
+                "backend.errors.updateInstallFailed"
+            })?;
+            pending.installed = true;
+            pending.bytes = None;
+            #[cfg(target_os = "macos")]
+            {
+                pending.installed_bundle = Some(bundle);
+            }
+        }
+        #[cfg(target_os = "macos")]
+        macos::clear_update_quarantine(
+            pending
+                .installed_bundle
+                .as_deref()
+                .expect("installed bundle"),
+        )
+        .map_err(|error| {
+            tracing::warn!(%error, "verified update installed but quarantine cleanup failed");
+            "backend.errors.updateRestartPreparationFailed"
         })?;
-        pending.bytes = None;
         app.request_restart();
         Ok(())
     }

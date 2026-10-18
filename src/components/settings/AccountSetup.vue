@@ -13,17 +13,13 @@ import {
   backendSupportsNativeCommands,
   backendConfigureGroupware,
   backendOauthStatus,
-  backendPollOauthFlow,
   backendRunImapSync,
-  backendStartOauthFlow,
-  backendSyncGoogleCalendar,
   backendSyncGroupware,
   backendTestImapAccountConnection,
   backendUpdateAccountPassword,
   translateBackendError,
 } from '@/services/backend';
 import { useConfirm } from '@/composables/useConfirm';
-import { openOAuthAuthorizationUrl } from '@/utils/mobileOAuth';
 import { transportErrorLabel, transportErrorText } from '@/utils/transportLabels';
 import AppButton from '@/components/ui/AppButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
@@ -402,50 +398,13 @@ async function checkStatus(accountId: string, provider: string) {
 
 const reauthBusyId = ref('');
 
-/**
- * Re-run the OAuth consent for an existing account. Needed whenever the app
- * gains a scope (calendar.readonly) that older tokens do not carry — the
- * backend opens the browser, we only wait for the callback.
- */
 async function reconnectOauth(account: (typeof accounts.accounts)[number]) {
   if (!oauthAvailable || reauthBusyId.value) return;
   reauthBusyId.value = account.id;
   statusText.value = t('settings.accounts.reconnect.browserOpened', { email: account.email });
   try {
-    const flow = await backendStartOauthFlow({
-      accountId: account.id,
-      provider: account.provider as 'gmail' | 'outlook',
-    });
-    // A phone has no desktop session for the Rust opener; open it from the shell.
-    if (!flow.browser_opened) await openOAuthAuthorizationUrl(flow.authorization_url);
-    const deadline = Date.now() + 2 * 60_000;
-    for (;;) {
-      if (Date.now() >= deadline) {
-        throw new Error(t('settings.accounts.reconnect.timeout'));
-      }
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 900));
-      const poll = await backendPollOauthFlow(flow.state);
-      if (poll.status === 'completed') break;
-      if (poll.status === 'failed') {
-        throw new Error(
-          translateBackendError(poll.error) || t('settings.accounts.reconnect.cancelled'),
-        );
-      }
-    }
-    await accounts.load();
+    await accounts.startReauth(account.id);
     statusText.value = t('settings.accounts.reconnect.done', { email: account.email });
-    if (account.provider === 'gmail') {
-      const summary = await backendSyncGoogleCalendar(account.id);
-      statusText.value = summary.errors.length
-        ? t('settings.accounts.reconnect.doneCalendarError', {
-            email: account.email,
-            error: translateBackendError(summary.errors[0]) ?? summary.errors[0],
-          })
-        : t('settings.accounts.reconnect.doneCalendar', {
-            email: account.email,
-            count: summary.events_synced,
-          });
-    }
   } catch (error) {
     reportFailure('settings.accounts.reconnect.failed', error);
   } finally {

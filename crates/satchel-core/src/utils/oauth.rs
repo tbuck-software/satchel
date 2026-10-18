@@ -4,6 +4,105 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+pub const GOOGLE_MAIL_SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify";
+pub const GOOGLE_CONTACTS_SCOPE: &str = "https://www.googleapis.com/auth/contacts.readonly";
+pub const GOOGLE_OTHER_CONTACTS_SCOPE: &str =
+    "https://www.googleapis.com/auth/contacts.other.readonly";
+pub const GOOGLE_CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar.readonly";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OAuthPurpose {
+    #[default]
+    Mail,
+    Contacts,
+    Calendar,
+}
+
+impl OAuthPurpose {
+    pub fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value.unwrap_or("mail") {
+            "mail" => Ok(Self::Mail),
+            "contacts" => Ok(Self::Contacts),
+            "calendar" => Ok(Self::Calendar),
+            _ => Err("unsupported OAuth purpose".into()),
+        }
+    }
+}
+
+/// The authorization request must survive a process exit alongside its PKCE verifier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OAuthGrantRequest {
+    pub purpose: OAuthPurpose,
+    pub scopes: Vec<String>,
+}
+
+/// Native Google clients cannot use incremental authorization. Repeat the mail
+/// permission and existing optional grants explicitly, then add the chosen feature.
+pub fn configure_google_grants(
+    config: &mut OAuthClientConfig,
+    purpose: OAuthPurpose,
+    previous: Option<&StoredOAuthConfig>,
+) {
+    config.scopes = vec![GOOGLE_MAIL_SCOPE];
+    let previous_scopes = previous
+        .filter(|stored| stored.client_id.as_deref() == Some(&config.client_id))
+        .and_then(|stored| stored.scope.as_deref())
+        .unwrap_or_default();
+    for scope in [
+        GOOGLE_CONTACTS_SCOPE,
+        GOOGLE_OTHER_CONTACTS_SCOPE,
+        GOOGLE_CALENDAR_SCOPE,
+    ] {
+        if previous_scopes
+            .split_whitespace()
+            .any(|granted| granted == scope)
+            || matches!(
+                (purpose, scope),
+                (OAuthPurpose::Contacts, GOOGLE_CONTACTS_SCOPE)
+                    | (OAuthPurpose::Calendar, GOOGLE_CALENDAR_SCOPE)
+            )
+        {
+            config.scopes.push(scope);
+        }
+    }
+}
+
+pub fn granted_scopes(scope: Option<&str>) -> Option<Vec<String>> {
+    scope.map(|scopes| scopes.split_whitespace().map(str::to_owned).collect())
+}
+
+/// None means an older token did not record its grants; Some(false) is a known denial.
+pub fn google_scope_granted(config_json: &str, required: &str) -> Option<bool> {
+    let stored = load_stored_oauth(config_json).ok()?;
+    let scopes = stored.scope?;
+    Some(scopes.split_whitespace().any(|scope| scope == required))
+}
+
+/// A token response may omit scope only when it equals the authorization request.
+pub fn validate_google_grant(
+    token: &mut OAuthTokenPayload,
+    request: &OAuthGrantRequest,
+) -> Result<(), &'static str> {
+    if token.scope.is_none() {
+        token.scope = Some(request.scopes.join(" "));
+    }
+    let scopes = token.scope.as_deref().unwrap_or_default();
+    let has = |required| scopes.split_whitespace().any(|scope| scope == required);
+    if !has(GOOGLE_MAIL_SCOPE) && !has("https://mail.google.com/") {
+        return Err("backend.errors.oauthMailPermissionRequired");
+    }
+    match request.purpose {
+        OAuthPurpose::Contacts if !has(GOOGLE_CONTACTS_SCOPE) => {
+            Err("backend.errors.oauthContactsPermissionRequired")
+        }
+        OAuthPurpose::Calendar if !has(GOOGLE_CALENDAR_SCOPE) => {
+            Err("backend.errors.oauthCalendarPermissionRequired")
+        }
+        _ => Ok(()),
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum OAuthProvider {
     Gmail,
@@ -46,9 +145,9 @@ struct OAuthTokenResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct GoogleUserInfoResponse {
+struct GoogleMailProfileResponse {
+    #[serde(rename = "emailAddress")]
     email: Option<String>,
-    name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -186,18 +285,7 @@ impl OAuthProvider {
                 redirect_uri,
                 auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
                 token_url: "https://oauth2.googleapis.com/token".into(),
-                scopes: vec![
-                    "openid",
-                    "email",
-                    "profile",
-                    "https://www.googleapis.com/auth/contacts.readonly",
-                    "https://www.googleapis.com/auth/contacts.other.readonly",
-                    "https://www.googleapis.com/auth/gmail.modify",
-                    "https://www.googleapis.com/auth/gmail.send",
-                    // Read-only calendar sync; accounts connected before this
-                    // scope existed must re-run the OAuth flow to grant it.
-                    "https://www.googleapis.com/auth/calendar.readonly",
-                ],
+                scopes: vec![GOOGLE_MAIL_SCOPE],
             },
             Self::Outlook => OAuthClientConfig {
                 provider: self,
@@ -419,7 +507,7 @@ pub async fn fetch_identity(
     match provider {
         OAuthProvider::Gmail => {
             let response = client
-                .get("https://openidconnect.googleapis.com/v1/userinfo")
+                .get("https://gmail.googleapis.com/gmail/v1/users/me/profile")
                 .bearer_auth(access_token)
                 .send()
                 .await
@@ -433,7 +521,7 @@ pub async fn fetch_identity(
                 ));
             }
 
-            let payload: GoogleUserInfoResponse = response
+            let payload: GoogleMailProfileResponse = response
                 .json()
                 .await
                 .map_err(|err| format!("gmail userinfo parse failed: {err}"))?;
@@ -446,7 +534,7 @@ pub async fn fetch_identity(
 
             Ok(OAuthIdentity {
                 email,
-                display_name: payload.name.filter(|value| !value.trim().is_empty()),
+                display_name: None,
             })
         }
         OAuthProvider::Outlook => {
@@ -580,11 +668,17 @@ pub fn merge_authorized_token_into_config(
     }
 
     let stored = load_stored_oauth(config_json).ok();
-    let refresh_token = token.refresh_token.clone().or_else(|| {
-        stored
-            .filter(|oauth| oauth.client_id.as_deref() == Some(client.client_id.as_str()))
-            .and_then(|oauth| oauth.refresh_token)
-    });
+    let same_client = stored
+        .as_ref()
+        .filter(|oauth| oauth.client_id.as_deref() == Some(client.client_id.as_str()));
+    let refresh_token = token
+        .refresh_token
+        .clone()
+        .or_else(|| same_client.and_then(|oauth| oauth.refresh_token.clone()));
+    let scope = token
+        .scope
+        .clone()
+        .or_else(|| same_client.and_then(|oauth| oauth.scope.clone()));
     // No `client_secret`: it would ride along into every backup and platform
     // export. The provider config still carries one where a deployment set it.
     config["oauth"] = serde_json::json!({
@@ -594,7 +688,7 @@ pub fn merge_authorized_token_into_config(
         "access_token": token.access_token,
         "refresh_token": refresh_token,
         "token_type": token.token_type,
-        "scope": token.scope,
+        "scope": scope,
         "expires_at": token.expires_at,
         "connected_at": chrono::Utc::now().to_rfc3339()
     });
@@ -683,6 +777,108 @@ fn oauth_token_is_fresh(stored: &StoredOAuthConfig) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gmail_sign_in_requests_one_mail_permission_without_identity_scopes() {
+        let config = OAuthProvider::Gmail.build_config(
+            "desktop-client".into(),
+            None,
+            loopback_redirect_uri(49152),
+        );
+        let url =
+            Url::parse(&build_authorization_url(&config, "state", "challenge").unwrap()).unwrap();
+        let scopes = url
+            .query_pairs()
+            .find(|(key, _)| key == "scope")
+            .unwrap()
+            .1
+            .into_owned();
+        assert_eq!(scopes, "https://www.googleapis.com/auth/gmail.modify");
+    }
+
+    #[test]
+    fn optional_google_grants_preserve_same_client_features_without_requesting_identity() {
+        let mut client =
+            OAuthProvider::Gmail.build_config("desktop".into(), None, loopback_redirect_uri(1));
+        let stored = load_stored_oauth(&serde_json::json!({"oauth": {
+            "client_id": "desktop", "scope": format!("openid email profile {GOOGLE_MAIL_SCOPE} {GOOGLE_CALENDAR_SCOPE}")
+        }}).to_string()).unwrap();
+        configure_google_grants(&mut client, OAuthPurpose::Contacts, Some(&stored));
+        assert_eq!(
+            client.scopes,
+            [
+                GOOGLE_MAIL_SCOPE,
+                GOOGLE_CONTACTS_SCOPE,
+                GOOGLE_CALENDAR_SCOPE
+            ]
+        );
+        let url = build_authorization_url(&client, "state", "challenge").unwrap();
+        assert!(!url.contains("include_granted_scopes"));
+        configure_google_grants(&mut client, OAuthPurpose::Mail, Some(&stored));
+        assert_eq!(client.scopes, [GOOGLE_MAIL_SCOPE, GOOGLE_CALENDAR_SCOPE]);
+        client.client_id = "replacement".into();
+        configure_google_grants(&mut client, OAuthPurpose::Contacts, Some(&stored));
+        assert_eq!(client.scopes, [GOOGLE_MAIL_SCOPE, GOOGLE_CONTACTS_SCOPE]);
+    }
+
+    #[test]
+    fn partial_google_consent_requires_mail_and_the_selected_feature() {
+        let request = OAuthGrantRequest {
+            purpose: OAuthPurpose::Calendar,
+            scopes: vec![GOOGLE_MAIL_SCOPE.into(), GOOGLE_CALENDAR_SCOPE.into()],
+        };
+        let mut token = OAuthTokenPayload {
+            access_token: "access".into(),
+            refresh_token: None,
+            token_type: None,
+            scope: Some(GOOGLE_CALENDAR_SCOPE.into()),
+            expires_at: None,
+        };
+        assert_eq!(
+            validate_google_grant(&mut token, &request),
+            Err("backend.errors.oauthMailPermissionRequired")
+        );
+        token.scope = Some(GOOGLE_MAIL_SCOPE.into());
+        assert_eq!(
+            validate_google_grant(&mut token, &request),
+            Err("backend.errors.oauthCalendarPermissionRequired")
+        );
+        token.scope = None;
+        assert_eq!(validate_google_grant(&mut token, &request), Ok(()));
+        assert_eq!(token.scope, Some(request.scopes.join(" ")));
+        // Retained optional permissions can be declined without breaking mail.
+        let mail = OAuthGrantRequest {
+            purpose: OAuthPurpose::Mail,
+            ..request
+        };
+        token.scope = Some(GOOGLE_MAIL_SCOPE.into());
+        assert_eq!(validate_google_grant(&mut token, &mail), Ok(()));
+    }
+
+    #[test]
+    fn refresh_keeps_recorded_grants_but_replacement_clients_do_not_inherit_them() {
+        let original = serde_json::json!({"oauth": { "client_id": "desktop",
+            "refresh_token": "refresh", "scope": GOOGLE_MAIL_SCOPE }})
+        .to_string();
+        let mut client =
+            OAuthProvider::Gmail.build_config("desktop".into(), None, loopback_redirect_uri(1));
+        let token = OAuthTokenPayload {
+            access_token: "fresh".into(),
+            refresh_token: None,
+            token_type: None,
+            scope: None,
+            expires_at: None,
+        };
+        let merged = merge_authorized_token_into_config(&original, &client, &token).unwrap();
+        assert_eq!(google_scope_granted(&merged, GOOGLE_MAIL_SCOPE), Some(true));
+        assert_eq!(
+            google_scope_granted(&merged, GOOGLE_CALENDAR_SCOPE),
+            Some(false)
+        );
+        client.client_id = "replacement".into();
+        let merged = merge_authorized_token_into_config(&original, &client, &token).unwrap();
+        assert_eq!(google_scope_granted(&merged, GOOGLE_MAIL_SCOPE), None);
+    }
 
     #[tokio::test]
     async fn google_desktop_credential_reaches_code_exchange_and_token_refresh() {

@@ -261,6 +261,15 @@ pub async fn sync_contact_avatars_inner(
             }
         };
 
+        if matches!(provider, OAuthProvider::Gmail)
+            && crate::utils::oauth::google_scope_granted(
+                &account.config,
+                crate::utils::oauth::GOOGLE_CONTACTS_SCOPE,
+            ) == Some(false)
+        {
+            continue;
+        }
+
         let token = match access_token_from_account_config(provider, &account.config).await {
             Ok(token) => token,
             Err(error) => {
@@ -277,7 +286,17 @@ pub async fn sync_contact_avatars_inner(
         };
 
         let contacts = match provider {
-            OAuthProvider::Gmail => fetch_google_contact_photos(&client, &token).await,
+            OAuthProvider::Gmail => {
+                fetch_google_contact_photos(
+                    &client,
+                    &token,
+                    crate::utils::oauth::google_scope_granted(
+                        &account.config,
+                        crate::utils::oauth::GOOGLE_OTHER_CONTACTS_SCOPE,
+                    ) == Some(true),
+                )
+                .await
+            }
             OAuthProvider::Outlook => fetch_graph_contact_photos(&client, &token).await,
         };
 
@@ -569,6 +588,7 @@ async fn upsert_contact_avatar(
 async fn fetch_google_contact_photos(
     client: &reqwest::Client,
     token: &str,
+    include_other_contacts: bool,
 ) -> Result<Vec<ProviderContactPhoto>, String> {
     let mut contacts = Vec::new();
     fetch_google_people_page(
@@ -580,20 +600,15 @@ async fn fetch_google_contact_photos(
     )
     .await?;
 
-    // This requires contacts.other.readonly. Older tokens may not have it; keep
-    // normal contacts useful even when the extra scope is missing.
-    if let Err(err) = fetch_google_people_page(
-        client,
-        token,
-        "https://people.googleapis.com/v1/otherContacts",
-        "otherContacts",
-        &mut contacts,
-    )
-    .await
-    {
-        if !err.contains("403") && !err.contains("insufficient") {
-            return Err(err);
-        }
+    if include_other_contacts {
+        fetch_google_people_page(
+            client,
+            token,
+            "https://people.googleapis.com/v1/otherContacts",
+            "otherContacts",
+            &mut contacts,
+        )
+        .await?;
     }
 
     Ok(contacts)

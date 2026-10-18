@@ -20,7 +20,7 @@ export type BackendDiscoveredService = OptionalWireFields<WireDiscoveredService,
 export type BackendAccountDiscovery = ProjectedWireFields<WireAccountDiscoveryDto, { config: Record<string, unknown> }>;
 
 
-export type BackendOauthStatus = OptionalWireFields<WireOAuthStatus, 'expires_at'>;
+export type BackendOauthStatus = OptionalWireFields<WireOAuthStatus, 'expires_at' | 'granted_scopes'>;
 
 
 export type BackendOauthStartResult = OptionalWireFields<WireStartOAuthResponse, 'browser_error'>;
@@ -190,11 +190,13 @@ export async function backendTestImapConnection(payload: {
 export async function backendStartOauthFlow(payload: {
   accountId: string;
   provider: 'gmail' | 'outlook';
+  purpose?: 'mail' | 'contacts' | 'calendar';
 }): Promise<BackendOauthStartResult> {
   return invoke('start_oauth_flow', {
     input: {
       account_id: payload.accountId,
       provider: payload.provider,
+      purpose: payload.purpose ?? null,
     },
   });
 }

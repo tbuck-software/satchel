@@ -3,8 +3,6 @@ import { mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const backend = vi.hoisted(() => ({
-  backendStartOauthFlow: vi.fn(),
-  backendPollOauthFlow: vi.fn(),
   backendSyncGoogleCalendar: vi.fn(),
 }));
 vi.mock('@/services/backend', async (importOriginal) => ({
@@ -30,6 +28,7 @@ const accounts = vi.hoisted(() => {
     emailAccounts: [account],
     activeAccountId: 'gmail-account',
     load: vi.fn(),
+    startReauth: vi.fn(),
   };
 });
 vi.mock('@/stores/accounts', () => ({ useAccountsStore: () => accounts }));
@@ -46,37 +45,16 @@ import AccountSetup from './AccountSetup.vue';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  backend.backendStartOauthFlow.mockResolvedValue({ state: 'flow', browser_opened: true });
-  backend.backendPollOauthFlow.mockResolvedValue({ status: 'completed' });
-  accounts.load.mockResolvedValue(undefined);
-  vi.spyOn(window, 'setTimeout').mockImplementation((callback: TimerHandler) => {
-    if (typeof callback === 'function') callback();
-    return 1 as never;
-  });
 });
 
-describe('Google Calendar reconnect errors', () => {
-  it('translates an encoded backend error instead of displaying its JSON', async () => {
-    const encoded = JSON.stringify({
-      key: 'backend.errors.googleCalendarSyncFailed',
-      params: { account: accounts.account.email },
-    });
-    backend.backendSyncGoogleCalendar.mockResolvedValue({
-      accounts_checked: 1,
-      events_synced: 0,
-      errors: [encoded],
-    });
+describe('Mail reconnect', () => {
+  it('uses shared account recovery without requesting calendar access', async () => {
+    accounts.startReauth.mockResolvedValue(undefined);
     const wrapper = mount(AccountSetup);
-
     const reconnect = wrapper.findAll('button.icon-button')[0];
-    expect(reconnect).toBeDefined();
     await reconnect!.trigger('click');
-
-    await vi.waitFor(() =>
-      expect(wrapper.get('.status-msg').text()).toContain(
-        `Google Calendar for ${accounts.account.email} could not be synchronized.`,
-      ),
-    );
-    expect(wrapper.get('.status-msg').text()).not.toContain('{"key"');
+    await vi.waitFor(() => expect(accounts.startReauth).toHaveBeenCalledWith(accounts.account.id));
+    expect(backend.backendSyncGoogleCalendar).not.toHaveBeenCalled();
+    expect(wrapper.get('.status-msg').text()).toContain(accounts.account.email);
   });
 });

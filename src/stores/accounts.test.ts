@@ -5,6 +5,8 @@ import {
   backendGetSourceCapabilities,
   backendListAccounts,
   backendCommandsAvailable,
+  backendStartOauthFlow,
+  backendPollOauthFlow,
 } from '@/services/backend';
 import { useAccountsStore } from './accounts';
 import { useConnectionStore } from './connection';
@@ -162,5 +164,35 @@ describe('credential lock', () => {
     await store.loadCredentialLock();
 
     expect(store.credentialLock).toBeNull();
+  });
+});
+
+describe('OAuth recovery', () => {
+  it.each(['gmail', 'other'])('retries sync and removes only the recovered account failure (%s)', async (recoveredAccountId) => {
+    setActivePinia(createPinia());
+    vi.useFakeTimers();
+    vi.stubGlobal('window', { setTimeout: globalThis.setTimeout });
+    try {
+      vi.mocked(backendCommandsAvailable).mockReturnValue(true);
+      listAccounts.mockResolvedValue([{ id: 'gmail', email: 'mail@example.test', provider: 'gmail' }] as never);
+      getCapabilities.mockResolvedValue({});
+      vi.mocked(backendStartOauthFlow).mockResolvedValue({ state: 'flow', browser_opened: true } as never);
+      vi.mocked(backendPollOauthFlow).mockResolvedValue({ status: 'completed', result: { account_id: recoveredAccountId } } as never);
+      const accounts = useAccountsStore();
+      const connection = useConnectionStore();
+      await accounts.load();
+      const failure = (accountId: string) => JSON.stringify({
+        key: 'backend.errors.accountSyncFailed', params: { accountId, account: accountId, message: 'old credentials' },
+      });
+      connection.reportSyncFailures([failure('gmail'), failure('other')]);
+      const reconnect = accounts.startReauth('gmail');
+      await vi.advanceTimersByTimeAsync(1000);
+      await reconnect;
+      expect(connection.syncFailures).toEqual([failure(recoveredAccountId === 'gmail' ? 'other' : 'gmail')]);
+      expect(connection.retryToken).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
   });
 });

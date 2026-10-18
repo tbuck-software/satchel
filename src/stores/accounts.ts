@@ -167,16 +167,18 @@ export const useAccountsStore = defineStore('accounts', () => {
     accounts.value.filter((a) => a.lastOauthError && a.lastOauthError.trim().length > 0),
   );
 
-  async function startReauth(accountId: string) {
+  async function startReauth(accountId: string, purpose?: 'contacts' | 'calendar') {
     const account = accounts.value.find((a) => a.id === accountId);
     if (!account) return;
     if (account.provider !== 'gmail' && account.provider !== 'outlook') {
       return;
     }
-    const flow = await backendStartOauthFlow({ accountId, provider: account.provider });
+    const flow = await backendStartOauthFlow({ accountId, provider: account.provider, ...(purpose ? { purpose } : {}) });
     // A phone has no desktop session for the Rust opener; open it from the shell.
     if (!flow.browser_opened) await openOAuthAuthorizationUrl(flow.authorization_url);
-    await waitForOAuthCompletion(flow.state);
+    const recoveredAccountId = await waitForOAuthCompletion(flow.state);
+    if (recoveredAccountId) connectionStore.clearAccountSyncFailure(recoveredAccountId);
+    connectionStore.requestRetry();
     await load();
   }
 
@@ -188,7 +190,7 @@ export const useAccountsStore = defineStore('accounts', () => {
       });
       const result = await backendPollOauthFlow(state);
       if (result.status === 'completed') {
-        return;
+        return result.result?.account_id;
       }
       if (result.status === 'failed') {
         throw new Error(t('settings.accounts.reauth.failed', {

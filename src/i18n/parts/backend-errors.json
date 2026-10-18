@@ -216,7 +216,13 @@
         "updateUnavailable": "No update is available for this build.",
         "updateDownloadFailed": "The update could not be downloaded or its signature is invalid. Try again.",
         "updateInstallFailed": "The update could not be installed. Try again.",
-        "updateDraftsUnsaved": "The update was stopped because an open draft could not be saved. Save it and try again."
+        "updateDraftsUnsaved": "The update was stopped because an open draft could not be saved. Save it and try again.",
+        "oauthMailPermissionRequired": "Gmail access was not granted. Please connect again and allow mail access. Your existing account has not been changed.",
+        "oauthContactsPermissionRequired": "Google Contacts access was not granted. Please allow contact access to use contact photos.",
+        "oauthCalendarPermissionRequired": "Google Calendar access was not granted. Please allow calendar access to synchronize calendars.",
+        "oauthAccountMismatch": "Please choose the Google account you are connecting. Your existing account has not been changed.",
+        "updateInstallLocationRequired": "Open Satchel from Applications before installing an update.",
+        "updateRestartPreparationFailed": "The verified update is installed, but macOS could not prepare it for restart. Try again."
       }
     }
   },
@@ -437,7 +443,13 @@
         "updateUnavailable": "Für diesen Build ist kein Update verfügbar.",
         "updateDownloadFailed": "Das Update konnte nicht geladen werden oder seine Signatur ist ungültig. Versuche es erneut.",
         "updateInstallFailed": "Das Update konnte nicht installiert werden. Versuche es erneut.",
-        "updateDraftsUnsaved": "Das Update wurde angehalten, weil ein offener Entwurf nicht gespeichert werden konnte. Speichere ihn und versuche es erneut."
+        "updateDraftsUnsaved": "Das Update wurde angehalten, weil ein offener Entwurf nicht gespeichert werden konnte. Speichere ihn und versuche es erneut.",
+        "oauthMailPermissionRequired": "Der Gmail-Zugriff wurde nicht freigegeben. Bitte verbinde das Konto erneut und erlaube den Mail-Zugriff. Dein bestehendes Konto wurde nicht verändert.",
+        "oauthContactsPermissionRequired": "Der Zugriff auf Google Kontakte wurde nicht freigegeben. Bitte erlaube den Kontakte-Zugriff, um Profilbilder zu verwenden.",
+        "oauthCalendarPermissionRequired": "Der Zugriff auf Google Kalender wurde nicht freigegeben. Bitte erlaube den Kalender-Zugriff, um Kalender zu synchronisieren.",
+        "oauthAccountMismatch": "Bitte wähle das Google-Konto aus, das du verbinden möchtest. Dein bestehendes Konto wurde nicht verändert.",
+        "updateInstallLocationRequired": "Öffne Satchel aus dem Programme-Ordner, bevor du ein Update installierst.",
+        "updateRestartPreparationFailed": "Das geprüfte Update ist installiert, aber macOS konnte den Neustart nicht vorbereiten. Versuche es erneut."
       }
     }
   }

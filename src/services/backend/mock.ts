@@ -361,7 +361,37 @@ function byDateDesc(a: Thread, b: Thread): number {
 /* Command table                                                              */
 /* -------------------------------------------------------------------------- */
 
+const googleMailScope = 'https://www.googleapis.com/auth/gmail.modify';
+const oauthScopes = new Map<string, string[]>();
+const oauthFlows = new Map<string, { accountId: string; scopes: string[] }>();
+function oauthStatus(accountId: string) {
+  const account = accounts.find((item) => item.id === accountId);
+  return { account_id: accountId, provider: account?.provider ?? 'gmail', connected: true,
+    has_refresh_token: true, expires_at: null, granted_scopes: oauthScopes.get(accountId) ?? [googleMailScope] };
+}
+
 const handlers: Record<string, Handler> = {
+  oauth_status: (payload) => oauthStatus(String(payload.accountId)),
+  start_oauth_flow: (payload) => {
+    const input = payload.input as { account_id: string; purpose?: string | null };
+    const scopes = [...(oauthScopes.get(input.account_id) ?? [googleMailScope])];
+    const optional = input.purpose === 'calendar' ? 'https://www.googleapis.com/auth/calendar.readonly'
+      : input.purpose === 'contacts' ? 'https://www.googleapis.com/auth/contacts.readonly' : null;
+    if (optional && !scopes.includes(optional)) scopes.push(optional);
+    const state = `flow-${oauthFlows.size + 1}`;
+    oauthFlows.set(state, { accountId: input.account_id, scopes });
+    return { state, authorization_url: 'https://accounts.google.com/o/oauth2/v2/auth',
+      expires_at: new Date(Date.now() + 900_000).toISOString(), browser_opened: true, browser_error: null };
+  },
+  poll_oauth_flow: (payload) => {
+    const input = payload.input as { state: string };
+    const flow = oauthFlows.get(input.state);
+    if (!flow) return { status: 'failed', result: null, error: 'backend.errors.oauthFlowNotFound' };
+    oauthScopes.set(flow.accountId, flow.scopes);
+    return { status: 'completed', result: oauthStatus(flow.accountId), error: null };
+  },
+  sync_google_calendar: () => ({ accounts_checked: accounts.filter((account) => account.provider === 'gmail').length,
+    events_synced: 0, errors: [] }),
   check_app_update: () => ({ channel: null, version: null }),
   download_app_update: () => null,
   app_update_progress: () => 100,

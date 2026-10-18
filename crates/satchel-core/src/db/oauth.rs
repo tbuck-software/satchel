@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{FromRow, SqlitePool};
 use thiserror::Error;
 
-use crate::utils::crypto;
+use crate::utils::{crypto, oauth::OAuthGrantRequest};
 
 #[derive(Clone)]
 pub struct NewOAuthFlowSession {
@@ -19,6 +19,7 @@ pub struct NewOAuthFlowSession {
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub redirect_uri: String,
+    pub authorization_context: Option<OAuthGrantRequest>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -28,6 +29,7 @@ pub struct OAuthFlowSession {
     pub code_verifier: String,
     pub created_at: DateTime<Utc>,
     pub redirect_uri: Option<String>,
+    pub authorization_context: Option<OAuthGrantRequest>,
 }
 
 /// How far an authorization flow got, as far as the database can tell.
@@ -64,6 +66,7 @@ struct StoredOAuthFlowSession {
     created_at: String,
     expires_at: String,
     redirect_uri: Option<String>,
+    authorization_context: Option<String>,
 }
 
 #[derive(FromRow)]
@@ -106,6 +109,14 @@ impl<'a> OAuthFlowRepository<'a> {
     /// Prune expired flows and persist a fresh encrypted PKCE verifier as one
     /// transaction. A verifier is never written in plaintext.
     pub async fn create(&self, session: NewOAuthFlowSession) -> Result<(), OAuthFlowError> {
+        let authorization_context = session
+            .authorization_context
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| OAuthFlowError::InvalidSession {
+                detail: error.to_string(),
+            })?;
         let encrypted_code_verifier = crypto::encrypt_secret(
             &session.code_verifier,
             crypto::SecretContext::oauth_code_verifier(&session.state),
@@ -126,8 +137,8 @@ impl<'a> OAuthFlowRepository<'a> {
         sqlx::query(
             "INSERT INTO oauth_flow_sessions
              (state, account_id, provider, encrypted_code_verifier, created_at, expires_at,
-              redirect_uri)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+              redirect_uri, authorization_context)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(session.state)
         .bind(session.account_id)
@@ -136,6 +147,7 @@ impl<'a> OAuthFlowRepository<'a> {
         .bind(session.created_at.to_rfc3339())
         .bind(session.expires_at.to_rfc3339())
         .bind(session.redirect_uri)
+        .bind(authorization_context)
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
@@ -158,7 +170,7 @@ impl<'a> OAuthFlowRepository<'a> {
             "DELETE FROM oauth_flow_sessions
              WHERE state = ? AND expires_at > ?
              RETURNING account_id, provider, encrypted_code_verifier, created_at, expires_at,
-                       redirect_uri",
+                       redirect_uri, authorization_context",
         )
         .bind(state)
         .bind(now.to_rfc3339())
@@ -202,6 +214,14 @@ impl<'a> OAuthFlowRepository<'a> {
             code_verifier,
             created_at,
             redirect_uri: stored.redirect_uri,
+            authorization_context: stored
+                .authorization_context
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(|error| OAuthFlowError::InvalidSession {
+                    detail: error.to_string(),
+                })?,
         })
     }
 
@@ -401,6 +421,13 @@ mod tests {
             created_at: now,
             expires_at: now + chrono::Duration::minutes(15),
             redirect_uri: "http://127.0.0.1:1234/oauth/callback".into(),
+            authorization_context: Some(OAuthGrantRequest {
+                purpose: crate::utils::oauth::OAuthPurpose::Calendar,
+                scopes: vec![
+                    crate::utils::oauth::GOOGLE_MAIL_SCOPE.into(),
+                    crate::utils::oauth::GOOGLE_CALENDAR_SCOPE.into(),
+                ],
+            }),
         }
     }
 
@@ -427,6 +454,10 @@ mod tests {
         let restarted_repository = OAuthFlowRepository::new(&pool);
         let consumed = restarted_repository.consume("state", now).await.unwrap();
         assert_eq!(consumed.code_verifier, "pkce-secret");
+        assert_eq!(
+            consumed.authorization_context,
+            new_session(now).authorization_context
+        );
         assert_eq!(
             consumed.redirect_uri.as_deref(),
             Some("http://127.0.0.1:1234/oauth/callback")

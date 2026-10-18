@@ -250,6 +250,13 @@ then asks every composer window to save before installation. A failed save or
 an unresponsive window cancels the update. Source builds and mobile apps do
 not use this updater. Mobile apps are distributed through their app stores.
 
+On macOS, the verified replacement bundle has its quarantine attribute removed
+before restart. Quarantine remains enabled for mail attachments. If an older
+release already runs in App Translocation, reinstall with the standalone
+installer from your Mac's Terminal once. The installer recognizes the
+translocated process and closes it before replacing the app and reopening it
+from Applications.
+
 Nightly uses the existing Satchel Daily identifier and profile so the two
 channels remain separate. A nightly never replaces stable or shares its data.
 The existing local source-build commands remain available as `make daily` and
@@ -294,6 +301,12 @@ repository secret `SATCHEL_GMAIL_DESKTOP_CLIENT_CONFIG`. The workflow validates
 the `installed` client type and Google token endpoint before exporting the client
 ID and public desktop credential to the Rust build. Web client JSON fails closed.
 Desktop Google authorization uses an ephemeral loopback port and PKCE S256.
+Initial Gmail sign-in requests only `gmail.modify`, with account identity read
+from Gmail's `users.getProfile`. Contacts and Calendar connect separately in
+settings. Native Google clients do not support incremental authorization, so
+feature connections explicitly repeat mail access and the same client's
+previous optional grants. Granted scopes and the durable flow request are
+checked before replacing account credentials.
 Use repository variables for the public Outlook client ID and optional redirect
 URI listed in `.env.example`. Outlook client secrets are never release inputs.
 Google app branding and scope verification are separate provider-side steps;

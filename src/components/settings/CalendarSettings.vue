@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import AppButton from '@/components/ui/AppButton.vue';
 import NavItem from '@/components/ui/NavItem.vue';
+import GoogleConnections from '@/components/settings/GoogleConnections.vue';
 import { useCalendarUiStore } from '@/stores/calendarUi';
 import { useInvitesStore } from '@/stores/invites';
 import { translateBackendError } from '@/services/backend';
@@ -59,6 +60,8 @@ async function syncNow() {
       <h3>{{ $t('settings.sections.calendar.label') }}</h3>
       <p>{{ $t('settings.calendar.description') }}</p>
     </header>
+
+    <GoogleConnections purpose="calendar" @connected="syncNow" />
 
     <div class="source-panel">
       <div class="source-panel__heading">

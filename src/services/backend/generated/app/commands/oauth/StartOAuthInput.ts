@@ -2,4 +2,5 @@
 export type StartOAuthInput = {
     account_id: string;
     provider: string;
+    purpose?: string | null;
 };

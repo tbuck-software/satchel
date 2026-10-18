@@ -8,11 +8,14 @@ Modified builds and third-party plugins can behave differently.
 
 ## Your accounts and Google data
 
-When you connect Google, Satchel requests your email address and basic profile
-to identify the account. It requests Gmail access to synchronize and display
-messages, manage labels and message state, and send messages you compose. It
-reads Google contacts, including other contacts, for contact lists and recipient
-completion. Calendar access is read-only and supports calendar synchronization.
+When you connect Google, Satchel requests Gmail access to identify the account,
+synchronize and display messages, manage labels and message state, and send
+messages you compose. The initial sign-in requests only mail access. Google
+Contacts access for contact photos and read-only Google Calendar access are
+requested separately when you connect those features in settings. Reconnecting
+an account also requests its previously granted optional permissions to keep
+those features working. Existing grants for other contacts remain supported;
+new connections do not request that additional permission.
 
 Authorization happens in your browser. Satchel receives OAuth tokens rather than
 your Google password. You can refuse consent or revoke access through

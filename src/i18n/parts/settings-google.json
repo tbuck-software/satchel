@@ -1,0 +1,30 @@
+{
+  "en": {
+    "settings": {
+      "google": {
+        "calendarTitle": "Google Calendar",
+        "contactsTitle": "Google Contacts",
+        "calendarHint": "Connect a Google account to read its calendars. Mail works without calendar access.",
+        "contactsHint": "Connect Google Contacts to use contact photos. Mail works without contact access.",
+        "checking": "Checking…",
+        "authorizing": "Complete sign-in in your browser…",
+        "connected": "Connected",
+        "connect": "Connect"
+      }
+    }
+  },
+  "de": {
+    "settings": {
+      "google": {
+        "calendarTitle": "Google Kalender",
+        "contactsTitle": "Google Kontakte",
+        "calendarHint": "Verbinde ein Google-Konto, um seine Kalender zu lesen. Mail funktioniert auch ohne Kalender-Zugriff.",
+        "contactsHint": "Verbinde Google Kontakte, um Profilbilder zu verwenden. Mail funktioniert auch ohne Kontakte-Zugriff.",
+        "checking": "Wird geprüft…",
+        "authorizing": "Anmeldung im Browser abschließen…",
+        "connected": "Verbunden",
+        "connect": "Verbinden"
+      }
+    }
+  }
+}

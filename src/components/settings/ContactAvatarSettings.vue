@@ -8,6 +8,7 @@ import { useToast } from '@/composables/useToast';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import AppButton from '@/components/ui/AppButton.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
+import GoogleConnections from '@/components/settings/GoogleConnections.vue';
 import { useSettingsStore } from '@/stores/settings';
 
 const { t } = useI18n();
@@ -190,6 +191,8 @@ async function clearAvatar(contact: BackendContact, locked: boolean) {
         </p>
       </div>
     </div>
+
+    <GoogleConnections purpose="contacts" @connected="importAvatars" />
 
     <div class="third-party-setting">
       <ToggleSwitch v-model="settings.thirdPartyContactAvatars" :label="t('settings.contacts.thirdPartyLabel')">

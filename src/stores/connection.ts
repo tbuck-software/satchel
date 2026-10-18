@@ -7,6 +7,7 @@ import {
   type BackendConnectionState,
 } from '@/services/backend';
 import { t } from '@/i18n/runtime';
+import { backendErrorKey, backendErrorStringParam } from '@/utils/backendErrors';
 
 /** Offline is a state, not a failure — only `error` belongs to the banner. */
 export type SyncStatus = 'error' | 'offline' | 'syncing' | 'idle';
@@ -94,6 +95,15 @@ export const useConnectionStore = defineStore('connection', () => {
     const next = { ...backendErrors.value };
     delete next[source];
     backendErrors.value = next;
+  }
+
+  function clearAccountSyncFailure(accountId: string) {
+    if (!syncFailures.value.some((failure) =>
+      backendErrorKey(failure) === 'backend.errors.accountSyncFailed'
+      && backendErrorStringParam(failure, 'accountId') === accountId)) return;
+    reportSyncFailures(syncFailures.value.filter((failure) =>
+      backendErrorKey(failure) !== 'backend.errors.accountSyncFailed'
+      || backendErrorStringParam(failure, 'accountId') !== accountId));
   }
 
   function requestRetry() {
@@ -230,6 +240,7 @@ export const useConnectionStore = defineStore('connection', () => {
     reportBackendError,
     reportSyncFailures,
     clearBackendError,
+    clearAccountSyncFailure,
     requestRetry,
     refresh,
     start,

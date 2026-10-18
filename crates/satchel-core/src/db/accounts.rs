@@ -80,6 +80,7 @@ pub struct OAuthAccountStatus {
     pub connected: bool,
     pub has_refresh_token: bool,
     pub expires_at: Option<String>,
+    pub granted_scopes: Option<Vec<String>>,
     /// When the stored credentials were established, if the account has been
     /// connected since that field was introduced.
     pub connected_at: Option<String>,
@@ -163,6 +164,7 @@ struct StoredOAuthData {
     refresh_token: Option<String>,
     expires_at: Option<String>,
     connected_at: Option<String>,
+    scope: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -601,6 +603,12 @@ impl<'a> AccountRepository<'a> {
                 .oauth
                 .as_ref()
                 .and_then(|oauth| oauth.connected_at.clone()),
+            granted_scopes: oauth::granted_scopes(
+                snapshot
+                    .oauth
+                    .as_ref()
+                    .and_then(|oauth| oauth.scope.as_deref()),
+            ),
             expires_at: snapshot.oauth.and_then(|oauth| oauth.expires_at),
         })
     }
