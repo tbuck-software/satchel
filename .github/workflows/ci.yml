@@ -84,6 +84,14 @@ jobs:
       - name: Viewer and tray bundle budgets
         run: pnpm run bundle:check
 
+      # The OAuth release regression test compiles the actual Rust build script.
+      # Install its toolchain before Vitest starts its per-test timeout.
+      - name: Install the pinned Rust toolchain for build-script tests
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+        with:
+          cache: false
+          build-warnings: ''
+
       - name: Unit tests
         run: pnpm exec vitest run
 
