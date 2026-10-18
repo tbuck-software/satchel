@@ -69,6 +69,7 @@ the same verified installer.
 
 See [docs/RELEASE.md](docs/RELEASE.md) for installers, release channels, signing,
 and distribution. [SECURITY.md](SECURITY.md) explains how to report vulnerabilities.
+[PRIVACY.md](PRIVACY.md) describes account data, local storage and network access.
 
 ## Development
 

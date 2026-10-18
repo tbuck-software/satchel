@@ -432,7 +432,13 @@ async fn complete_oauth_flow_inner(
         .map_err(|error| oauth_provider_error("OAuth identity lookup failed", error))?;
     let now = chrono::Utc::now().to_rfc3339();
     let target_account = AccountRepository::new(pool)
-        .connect_oauth(&session.account_id, provider, &token, &identity, &now)
+        .connect_oauth(
+            &session.account_id,
+            &provider_config,
+            &token,
+            &identity,
+            &now,
+        )
         .await
         .map_err(CommandError::from)?;
 

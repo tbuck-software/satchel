@@ -558,6 +558,21 @@ pub fn merge_token_into_config(
     provider: OAuthProvider,
     token: &OAuthTokenPayload,
 ) -> Result<String, String> {
+    let stored = load_stored_oauth(config_json).ok();
+    let client = match stored.as_ref() {
+        Some(stored) => provider.load_config_for_stored(stored)?,
+        None => provider.load_config()?,
+    };
+    merge_authorized_token_into_config(config_json, &client, token)
+}
+
+/// Save tokens against the client that actually authorized them. Refresh uses
+/// the stored client; reconnect uses the current flow's client configuration.
+pub fn merge_authorized_token_into_config(
+    config_json: &str,
+    client: &OAuthClientConfig,
+    token: &OAuthTokenPayload,
+) -> Result<String, String> {
     let mut config = serde_json::from_str::<Value>(config_json)
         .unwrap_or_else(|_| Value::Object(Default::default()));
     if !config.is_object() {
@@ -565,20 +580,17 @@ pub fn merge_token_into_config(
     }
 
     let stored = load_stored_oauth(config_json).ok();
-    let provider_config = match stored.as_ref() {
-        Some(stored) => provider.load_config_for_stored(stored)?,
-        None => provider.load_config()?,
-    };
-    let refresh_token = token
-        .refresh_token
-        .clone()
-        .or_else(|| stored.and_then(|oauth| oauth.refresh_token));
+    let refresh_token = token.refresh_token.clone().or_else(|| {
+        stored
+            .filter(|oauth| oauth.client_id.as_deref() == Some(client.client_id.as_str()))
+            .and_then(|oauth| oauth.refresh_token)
+    });
     // No `client_secret`: it would ride along into every backup and platform
     // export. The provider config still carries one where a deployment set it.
     config["oauth"] = serde_json::json!({
-        "provider": provider.as_str(),
-        "client_id": provider_config.client_id,
-        "redirect_uri": provider_config.redirect_uri,
+        "provider": client.provider.as_str(),
+        "client_id": client.client_id,
+        "redirect_uri": client.redirect_uri,
         "access_token": token.access_token,
         "refresh_token": refresh_token,
         "token_type": token.token_type,
@@ -791,6 +803,37 @@ mod tests {
     }
 
     /// The secret must not ride along into backups and platform exports.
+    #[test]
+    fn reconnect_does_not_transfer_a_refresh_token_between_client_ids() {
+        let original = serde_json::json!({
+            "custom_setting": "keep",
+            "oauth": {
+                "client_id": "old-client",
+                "refresh_token": "old-client-refresh",
+                "client_secret": "old-confidential-secret"
+            }
+        });
+        let client = OAuthProvider::Gmail.build_config(
+            "desktop-client".into(),
+            Some("public-desktop-credential".into()),
+            loopback_redirect_uri(49152),
+        );
+        let token = OAuthTokenPayload {
+            access_token: "new-access".into(),
+            refresh_token: None,
+            token_type: Some("Bearer".into()),
+            scope: None,
+            expires_at: None,
+        };
+        let merged =
+            merge_authorized_token_into_config(&original.to_string(), &client, &token).unwrap();
+        let value: Value = serde_json::from_str(&merged).unwrap();
+        assert_eq!(value["oauth"]["client_id"], "desktop-client");
+        assert!(value["oauth"]["refresh_token"].is_null());
+        assert!(value["oauth"].get("client_secret").is_none());
+        assert_eq!(value["custom_setting"], "keep");
+    }
+
     #[test]
     fn merge_token_into_config_omits_the_client_secret() {
         let stored = serde_json::json!({

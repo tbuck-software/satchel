@@ -612,11 +612,12 @@ impl<'a> AccountRepository<'a> {
     pub async fn connect_oauth(
         &self,
         session_account_id: &str,
-        provider: OAuthProvider,
+        client: &oauth::OAuthClientConfig,
         token: &OAuthTokenPayload,
         identity: &OAuthIdentity,
         now: &str,
     ) -> Result<OAuthAccountConnection, AccountError> {
+        let provider = client.provider;
         let normalized_email = identity.email.trim().to_lowercase();
         if normalized_email.is_empty() {
             return Err(AccountError::OAuthIdentityMissing);
@@ -653,7 +654,7 @@ impl<'a> AccountRepository<'a> {
             let connection = update_oauth_account(
                 &mut transaction,
                 existing,
-                provider,
+                client,
                 token,
                 identity,
                 &normalized_email,
@@ -673,7 +674,7 @@ impl<'a> AccountRepository<'a> {
             update_oauth_account(
                 &mut transaction,
                 session_account,
-                provider,
+                client,
                 token,
                 identity,
                 &normalized_email,
@@ -684,7 +685,7 @@ impl<'a> AccountRepository<'a> {
             let connection = insert_oauth_account(
                 &mut transaction,
                 &session_account,
-                provider,
+                client,
                 token,
                 identity,
                 &normalized_email,
@@ -761,13 +762,14 @@ fn oauth_config_error(detail: String) -> AccountError {
 async fn update_oauth_account(
     transaction: &mut Transaction<'_, Sqlite>,
     account: StoredOAuthAccount,
-    provider: OAuthProvider,
+    client: &oauth::OAuthClientConfig,
     token: &OAuthTokenPayload,
     identity: &OAuthIdentity,
     normalized_email: &str,
     now: &str,
 ) -> Result<OAuthAccountConnection, AccountError> {
-    let config = oauth::merge_token_into_config(&account.config, provider, token)
+    let provider = client.provider;
+    let config = oauth::merge_authorized_token_into_config(&account.config, client, token)
         .map_err(oauth_config_error)?;
     let stored_config = encrypt_oauth_config(&account.id, &config)?;
     let display_name =
@@ -793,15 +795,16 @@ async fn update_oauth_account(
 async fn insert_oauth_account(
     transaction: &mut Transaction<'_, Sqlite>,
     session_account: &StoredOAuthAccount,
-    provider: OAuthProvider,
+    client: &oauth::OAuthClientConfig,
     token: &OAuthTokenPayload,
     identity: &OAuthIdentity,
     normalized_email: &str,
     now: &str,
 ) -> Result<OAuthAccountConnection, AccountError> {
+    let provider = client.provider;
     let id = format!("acc-{}", uuid::Uuid::new_v4());
-    let config =
-        oauth::merge_token_into_config("{}", provider, token).map_err(oauth_config_error)?;
+    let config = oauth::merge_authorized_token_into_config("{}", client, token)
+        .map_err(oauth_config_error)?;
     let stored_config = encrypt_oauth_config(&id, &config)?;
     let display_name =
         resolved_oauth_display_name(identity, &session_account.display_name, normalized_email);
@@ -1593,6 +1596,18 @@ mod tests {
         .to_string()
     }
 
+    fn oauth_client(client_id: &str) -> oauth::OAuthClientConfig {
+        oauth::OAuthClientConfig {
+            provider: OAuthProvider::Gmail,
+            client_id: client_id.into(),
+            client_secret: Some("desktop-fixture".into()),
+            redirect_uri: "http://127.0.0.1:49152/oauth/callback".into(),
+            auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
+            token_url: "https://oauth2.googleapis.com/token".into(),
+            scopes: vec![],
+        }
+    }
+
     fn oauth_token(refresh_token: Option<&str>) -> OAuthTokenPayload {
         OAuthTokenPayload {
             access_token: "new-access".into(),
@@ -1625,6 +1640,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oauth_reconnect_replaces_the_client_without_replacing_the_account() {
+        crate::utils::crypto::seed_master_key_for_tests();
+        let pool = pool().await;
+        insert_oauth_fixture(
+            &pool,
+            "existing",
+            "person@gmail.com",
+            &oauth_config("old-client-refresh", "old-access"),
+        )
+        .await;
+
+        let connection = AccountRepository::new(&pool)
+            .connect_oauth(
+                "existing",
+                &oauth_client("desktop-client"),
+                &oauth_token(Some("desktop-client-refresh")),
+                &oauth_identity("person@gmail.com"),
+                "2026-02-01",
+            )
+            .await
+            .unwrap();
+        assert_eq!(connection.account_id, "existing");
+        let stored: String =
+            sqlx::query_scalar("SELECT config FROM accounts WHERE id = 'existing'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(stored.starts_with("enc:v2:"));
+        let plain = decrypt_account_config("existing", &stored).unwrap();
+        let oauth = oauth::load_stored_oauth(&plain).unwrap();
+        assert_eq!(oauth.client_id.as_deref(), Some("desktop-client"));
+        assert_eq!(
+            oauth.refresh_token.as_deref(),
+            Some("desktop-client-refresh")
+        );
+    }
+
+    #[tokio::test]
     async fn oauth_update_encrypts_config_and_preserves_omitted_refresh_token() {
         crate::utils::crypto::seed_master_key_for_tests();
         let pool = pool().await;
@@ -1639,7 +1692,7 @@ mod tests {
         let connection = AccountRepository::new(&pool)
             .connect_oauth(
                 "existing",
-                OAuthProvider::Gmail,
+                &oauth_client("client"),
                 &oauth_token(None),
                 &oauth_identity("Person@Gmail.com"),
                 "2026-02-01",
@@ -1677,7 +1730,7 @@ mod tests {
         let connection = AccountRepository::new(&pool)
             .connect_oauth(
                 "placeholder",
-                OAuthProvider::Gmail,
+                &oauth_client("client"),
                 &oauth_token(Some("new-refresh")),
                 &oauth_identity("person@gmail.com"),
                 "2026-02-01",
@@ -1713,7 +1766,7 @@ mod tests {
         let result = AccountRepository::new(&pool)
             .connect_oauth(
                 "placeholder",
-                OAuthProvider::Gmail,
+                &oauth_client("client"),
                 &oauth_token(Some("new-refresh")),
                 &oauth_identity("person@gmail.com"),
                 "2026-02-01",
@@ -1743,7 +1796,7 @@ mod tests {
         let result = AccountRepository::new(&pool)
             .connect_oauth(
                 "selected",
-                OAuthProvider::Gmail,
+                &oauth_client("client"),
                 &oauth_token(Some("new-refresh")),
                 &oauth_identity("other@gmail.com"),
                 "2026-02-01",
