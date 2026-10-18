@@ -246,7 +246,12 @@ jobs:
           if [ -n "${APPLE_API_KEY_PATH:-}" ]; then
             unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
           fi
-          pnpm exec tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config output/release-config.json
+          build_args=(exec tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config output/release-config.json)
+          if [ "$RUNNER_OS" = macOS ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            bash scripts/build-notarized-macos.sh "target/${{ matrix.target }}/release/bundle/macos" pnpm "${build_args[@]}"
+          else
+            pnpm "${build_args[@]}"
+          fi
       - name: Verify macOS code signature and notarization ticket
         if: runner.os == 'macOS'
         shell: bash
@@ -261,6 +266,21 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.allow-unsigned-executable-memory' "$RUNNER_TEMP/satchel-entitlements.plist")" = true
           if [ "$HAS_APPLE_CERTIFICATE" = true ]; then
             xcrun stapler validate "${apps[0]}"
+            # Check the shipped copies too: packaging must retain the app ticket.
+            archives=(target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz)
+            images=(target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+            test "${#archives[@]}" -eq 1
+            test "${#images[@]}" -eq 1
+            verify_dir="$(mktemp -d "$RUNNER_TEMP/satchel-packaged-apps.XXXXXX")"
+            mkdir "$verify_dir/update" "$verify_dir/dmg"
+            app_name="${apps[0]##*/}"
+            tar -xzf "${archives[0]}" -C "$verify_dir/update"
+            codesign --verify --deep --strict "$verify_dir/update/$app_name"
+            xcrun stapler validate "$verify_dir/update/$app_name"
+            trap 'hdiutil detach "$verify_dir/dmg" -quiet >/dev/null 2>&1 || true' EXIT
+            hdiutil attach "${images[0]}" -mountpoint "$verify_dir/dmg" -nobrowse -readonly -quiet
+            codesign --verify --deep --strict "$verify_dir/dmg/$app_name"
+            xcrun stapler validate "$verify_dir/dmg/$app_name"
           fi
       - run: node scripts/collect-release.mjs ${{ matrix.target }}
       - uses: actions/upload-artifact@v4

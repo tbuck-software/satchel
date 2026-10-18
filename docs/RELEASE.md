@@ -121,6 +121,14 @@ test with these entitlements and runs a real plugin under Hardened Runtime.
 Release packaging also verifies that the signed app carries the entitlement.
 See the [Wasmtime platform discussion](https://github.com/bytecodealliance/wasmtime/issues/11989).
 
+The macOS build validates the stapled notarization ticket after packaging. If
+Tauri reports success without attaching a valid ticket, the workflow repeats
+the complete bundle command up to three times, reusing the compiled binary.
+This also recreates the DMG and updater archive from the stapled app. Compile
+and notarization errors stop immediately; a missing ticket after the third
+build blocks publication. CI also extracts the updater archive and mounts the
+DMG read-only to verify the shipped app copies' signatures and tickets.
+
 1. Join the Apple Developer Program.
 2. In Xcode: Settings → Accounts → add your Apple ID → Manage Certificates →
    create a *Developer ID Application* certificate.
