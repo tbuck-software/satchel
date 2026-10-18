@@ -140,6 +140,16 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - name: Select native Windows Perl for vendored OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Git Bash puts its reduced MSYS Perl ahead of the native installation.
+          # Resolve Perl from PowerShell and pin openssl-src to that executable.
+          $perl = (Get-Command perl.exe -ErrorAction Stop).Source
+          & $perl -MIPC::Cmd -e 'die "Expected native Windows Perl\n" unless $^O eq "MSWin32"; print "$^X\n";'
+          if ($LASTEXITCODE -ne 0) { throw 'Native Perl cannot configure OpenSSL' }
+          "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install Linux prerequisites
         if: runner.os == 'Linux'
         run: |
