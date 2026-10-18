@@ -99,7 +99,9 @@ jobs:
           make check
           pnpm audit --audit-level=moderate
           python3 scripts/check-rust-audit-exceptions.py
-          cargo audit --file Cargo.lock
+          for lockfile in Cargo.lock fuzz/Cargo.lock; do
+            cargo audit --file "$lockfile"
+          done
           cargo deny --locked check licenses sources
           cargo fmt --all --check
           cargo clippy -p satchel -p satchel-core --all-targets -- -D warnings
@@ -245,6 +247,8 @@ jobs:
           apps=(target/${{ matrix.target }}/release/bundle/macos/*.app)
           test "${#apps[@]}" -eq 1
           codesign --verify --deep --strict "${apps[0]}"
+          codesign --display --entitlements :- "${apps[0]}" > "$RUNNER_TEMP/satchel-entitlements.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.allow-unsigned-executable-memory' "$RUNNER_TEMP/satchel-entitlements.plist")" = true
           if [ "$HAS_APPLE_CERTIFICATE" = true ]; then
             xcrun stapler validate "${apps[0]}"
           fi

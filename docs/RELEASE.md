@@ -113,6 +113,14 @@ the signed-build invocation above.
 
 ## Signing & Notarization (one-time setup)
 
+The macOS bundle enables Hardened Runtime and uses `src-tauri/Entitlements.plist`.
+Wasmtime 36 maps compiled plugin code with `mprotect`, so it needs
+`com.apple.security.cs.allow-unsigned-executable-memory`. `allow-jit` alone
+does not cover that allocation path. CI signs the existing WASM integration
+test with these entitlements and runs a real plugin under Hardened Runtime.
+Release packaging also verifies that the signed app carries the entitlement.
+See the [Wasmtime platform discussion](https://github.com/bytecodealliance/wasmtime/issues/11989).
+
 1. Join the Apple Developer Program.
 2. In Xcode: Settings → Accounts → add your Apple ID → Manage Certificates →
    create a *Developer ID Application* certificate.

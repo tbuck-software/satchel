@@ -65,6 +65,10 @@
     }
   },
   "bundle": {
+    "macOS": {
+      "hardenedRuntime": true,
+      "entitlements": "Entitlements.plist"
+    },
     "active": true,
     "targets": "all",
     "icon": [

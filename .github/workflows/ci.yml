@@ -237,6 +237,24 @@ jobs:
           SATCHEL_GPG_BIN: gpg
         run: cargo test -p satchel -p satchel-core -p satchel-ipc-manifest
 
+      - name: Run a WASM plugin with the macOS release entitlements
+        env:
+          SATCHEL_REQUIRE_PLUGIN_ARTIFACTS: '1'
+        run: |
+          cargo test -p satchel --lib --no-run --message-format=json > "$RUNNER_TEMP/satchel-test-artifacts.jsonl"
+          test_binary="$(node --input-type=module - "$RUNNER_TEMP/satchel-test-artifacts.jsonl" <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const artifacts = readFileSync(process.argv[2], 'utf8').trim().split('\n').map(line => JSON.parse(line));
+          const tests = artifacts.filter(item => item.reason === 'compiler-artifact' && item.target.name === 'satchel_lib' && item.profile.test && item.executable);
+          if (tests.length !== 1) throw new Error('Expected one Satchel library test binary');
+          process.stdout.write(tests[0].executable);
+          NODE
+          )"
+          codesign --force --sign - --options runtime --timestamp=none --entitlements src-tauri/Entitlements.plist "$test_binary"
+          plugin_test=plugins::runtime::tests::loads_and_runs_a_real_component_through_wasmtime
+          "$test_binary" --list | grep -Fx "$plugin_test: test"
+          "$test_binary" --exact "$plugin_test" --nocapture
+
       # The only test that watches the app write mail onto a socket. Its own
       # step so it stays visible: nothing else covers the far side of the send
       # path, and a browser suite never can (see docs/E2E.md).

@@ -6,6 +6,7 @@ on:
     paths:
       - '**/Cargo.toml'
       - Cargo.lock
+      - fuzz/Cargo.lock
       - .cargo/audit.toml
       - .cargo/lettre-upstream-exception.json
       - deny.toml
@@ -17,6 +18,7 @@ on:
     paths:
       - '**/Cargo.toml'
       - Cargo.lock
+      - fuzz/Cargo.lock
       - .cargo/audit.toml
       - .cargo/lettre-upstream-exception.json
       - deny.toml
@@ -47,11 +49,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The root lockfile covers the whole workspace (src-tauri is a
-        # member, not a standalone workspace with its own Cargo.lock).
+        # The app shares the root lockfile. Fuzzing has a separate lockfile.
         include:
           - workspace: root
             directory: .
+          - workspace: fuzz
+            directory: fuzz
     steps:
       - uses: actions/checkout@v4
 
@@ -76,8 +79,7 @@ jobs:
       # Lockfile-only scan: no compile, so it stays cheap and catches advisory
       # matches in exactly the versions CI installs.
       - name: Audit ${{ matrix.workspace }} lockfile
-        working-directory: ${{ matrix.directory }}
-        run: cargo audit --file Cargo.lock
+        run: cargo audit --file "${{ matrix.directory }}/Cargo.lock"
 
   vendor-lettre:
     name: vendored lettre against upstream

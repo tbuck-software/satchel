@@ -534,8 +534,7 @@ fn certificate_email(cert: &X509Ref) -> Option<String> {
     let from_subject = cert
         .subject_name()
         .entries_by_nid(Nid::PKCS9_EMAILADDRESS)
-        .filter_map(|entry| entry.data().as_utf8().ok())
-        .map(|value| value.to_string())
+        .filter_map(|entry| entry.data().to_string().ok())
         .find(|value| value.contains('@'));
     from_subject.or_else(|| {
         cert.subject_alt_names()?
@@ -559,8 +558,7 @@ pub fn certificate_rfc822_identities(pem_certificate: &str) -> Vec<String> {
     let mut identities = cert
         .subject_name()
         .entries_by_nid(Nid::PKCS9_EMAILADDRESS)
-        .filter_map(|entry| entry.data().as_utf8().ok())
-        .map(|value| value.to_string())
+        .filter_map(|entry| entry.data().to_string().ok())
         .collect::<Vec<_>>();
     if let Some(names) = cert.subject_alt_names() {
         identities.extend(
@@ -578,8 +576,7 @@ pub fn certificate_rfc822_identities(pem_certificate: &str) -> Vec<String> {
 /// DN. Keep that pick so metadata written by the CLI engine still matches.
 fn common_name(name: &X509NameRef) -> Option<String> {
     name.entries_by_nid(Nid::COMMONNAME)
-        .filter_map(|entry| entry.data().as_utf8().ok())
-        .map(|value| value.to_string())
+        .filter_map(|entry| entry.data().to_string().ok())
         .filter(|value| !value.is_empty())
         .last()
 }
@@ -1649,6 +1646,23 @@ mod tests {
         assert!(identities.iter().any(|value| value == "board@firma.test"));
         assert!(identities.iter().any(|value| value == "chair@firma.test"));
         assert!(certificate_rfc822_identities("not a certificate").is_empty());
+    }
+
+    #[test]
+    fn certificate_subjects_do_not_truncate_at_embedded_nul() {
+        let cn = "Board\0Untrusted suffix";
+        let email = "board@example.com\0.attacker.test";
+        let identity = issue_self_signed(cn, email);
+
+        assert_eq!(certificate_email(&identity.cert), Some(email.to_string()));
+        assert_eq!(
+            certificate_rfc822_identities(&identity.cert_pem),
+            vec![email.to_string()]
+        );
+        assert_eq!(
+            common_name(identity.cert.subject_name()),
+            Some(cn.to_string())
+        );
     }
 
     #[test]

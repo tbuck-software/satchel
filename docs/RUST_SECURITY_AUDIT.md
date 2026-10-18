@@ -1,8 +1,20 @@
 # Rust dependency audit
 
-CI runs `cargo audit --file Cargo.lock` on dependency changes and every Monday.
-The scan covers the full lockfile, including platform dependencies and plugin
-build dependencies. New RustSec vulnerabilities fail the workflow.
+CI runs `cargo audit` on dependency changes and every Monday. It scans the root
+and fuzzing lockfiles, including platform and plugin
+build dependencies. New RustSec vulnerabilities fail the workflow. Dependabot
+also checks both workspaces against GitHub's advisory database.
+
+OpenSSL 0.10.81 replaces the old 0.10.73 pin in the core,
+and both lockfiles use it. This includes the buffer-sizing fixes through
+[GHSA-phqj-4mhp-q6mq](https://github.com/rust-openssl/rust-openssl/security/advisories/GHSA-phqj-4mhp-q6mq).
+Serde-with 3.21.0 fixes
+[GHSA-7gcf-g7xr-8hxj](https://github.com/jonasbb/serde_with/security/advisories/GHSA-7gcf-g7xr-8hxj).
+
+The obsolete standalone S/MIME harness was removed after the Core split.
+Its RSA-OAEP/SHA-256 interoperability regression is covered by
+`utils::smime_engine::tests::in_process_reads_rsa_oaep_envelopes` in the normal
+Core test suite.
 
 ## Temporary exception: RUSTSEC-2023-0071
 
