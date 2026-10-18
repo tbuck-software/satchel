@@ -201,6 +201,34 @@ impl PluginRegistry {
         Self::discover_from_dir_with(root, allow_unsigned_plugins())
     }
 
+    /// Release packaging gate. This never waives signatures, even in a debug build.
+    /// Check the shipped resource directory, rather than a developer's source tree.
+    pub fn verify_release_packages(root: &Path) -> Result<Vec<String>, String> {
+        let plugins = Self::discover_from_dir_with(root, false)?.list();
+        let expected = [
+            "satchel-plugin-auto-unsubscribe",
+            "satchel-plugin-calendar-sync",
+            "satchel-plugin-github-integration",
+            "satchel-plugin-pgp",
+        ];
+        for id in expected {
+            let plugin = plugins
+                .iter()
+                .find(|plugin| plugin.id == id)
+                .ok_or_else(|| format!("Missing bundled plugin: {id}"))?;
+            if !plugin.enabled || !plugin.signature_verified {
+                return Err(format!(
+                    "Bundled plugin {id} failed release policy: {:?}",
+                    plugin.manifest_errors
+                ));
+            }
+        }
+        if plugins.len() != expected.len() {
+            return Err("Unexpected plugin in release package".to_string());
+        }
+        Ok(plugins.into_iter().map(|plugin| plugin.id).collect())
+    }
+
     /// `allow_unsigned` is a parameter so a debug test build can drive the
     /// release decision without touching the process environment.
     fn discover_from_dir_with(root: &Path, allow_unsigned: bool) -> Result<Self, String> {
@@ -817,6 +845,40 @@ mod tests {
             .manifest_errors
             .iter()
             .any(|error| error.contains("is unsigned")));
+    }
+
+    #[test]
+    fn release_packaging_rejects_unsigned_builtin_plugins_even_in_debug_builds() {
+        let root = tempfile::tempdir().expect("plugin packages");
+        for name in [
+            "auto-unsubscribe",
+            "calendar-sync",
+            "github-integration",
+            "pgp",
+        ] {
+            let folder = root.path().join(name);
+            fs::create_dir_all(folder.join("dist")).expect("plugin folder");
+            fs::write(folder.join("dist/component.wasm"), b"component").expect("component");
+            fs::write(
+                folder.join("Cargo.toml"),
+                format!(
+                    "[package]\nname = \"satchel-plugin-{name}\"\nversion = \"0.1.0\"\n\n\
+                     [package.metadata.satchel]\ntrust = \"local_unsigned\"\n"
+                ),
+            )
+            .expect("manifest");
+        }
+        let error =
+            PluginRegistry::verify_release_packages(root.path()).expect_err("unsigned release");
+        assert!(error.contains("is unsigned"), "{error}");
+    }
+
+    #[test]
+    fn release_packaging_rejects_missing_plugins() {
+        let root = tempfile::tempdir().expect("plugin packages");
+        assert!(PluginRegistry::verify_release_packages(root.path())
+            .expect_err("incomplete release")
+            .contains("Missing bundled plugin"));
     }
 
     #[test]

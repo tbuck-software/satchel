@@ -26,7 +26,7 @@ const config = {
 };
 for (const plugin of readdirSync('plugins', { withFileTypes: true }).filter(entry => entry.isDirectory())) {
   for (const filename of ['Cargo.toml', 'dist/component.wasm']) {
-    config.bundle.resources[`../plugins/${plugin.name}/${filename}`] = `plugins/${plugin.name}/${filename}`;
+    config.bundle.resources[`../output/bundled-plugins/${plugin.name}/${filename}`] = `plugins/${plugin.name}/${filename}`;
   }
 }
 writeFileSync('output/release-config.json', JSON.stringify(config, null, 2) + '\n');

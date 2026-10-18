@@ -31,7 +31,9 @@ describe('release preparation on native checkouts', () => {
           expect(readFileSync(join(root, 'Cargo.lock'), 'utf8')).toBe(`[[package]]${newline}name = "satchel"${newline}version = "${version}"${newline}`);
           const config = JSON.parse(readFileSync(join(root, 'output/release-config.json'), 'utf8'));
           expect(config.version).toBe(version);
-          expect(config.bundle.resources['../plugins/example/dist/component.wasm']).toBe('plugins/example/dist/component.wasm');
+          expect(config.bundle.resources['../output/bundled-plugins/example/dist/component.wasm']).toBe('plugins/example/dist/component.wasm');
+          expect(config.bundle.resources['../output/bundled-plugins/example/Cargo.toml']).toBe('plugins/example/Cargo.toml');
+          expect(Object.keys(config.bundle.resources).some(path => path.startsWith('../plugins/'))).toBe(false);
           if (channel === 'nightly') {
             expect(config.app.windows).toEqual([{ label: 'main', create: false, title: 'Satchel Daily' }]);
           }

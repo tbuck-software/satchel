@@ -161,6 +161,18 @@ The workflow runs the complete check suite before packaging macOS arm64/x64,
 Linux x64 AppImage, and Windows x64 NSIS. It uploads a release only after
 all four desktop targets succeed. An incomplete build publishes no update.
 
+Bundled WASI plugins use a separate Ed25519 plugin signature. The release-only
+secret `SATCHEL_PLUGIN_SIGNING_PRIVATE_KEY` must match the public key pinned in
+`src-tauri/src/plugins/registry.rs`. After building the components,
+`scripts/package-release-plugins.mjs` signs them into `output/bundled-plugins`;
+the unsigned development manifests never enter the release bundle. Local
+packaging can use `SATCHEL_PLUGIN_SIGNING_KEY` pointing to the private PEM file.
+Each native release binary checks these packages with
+`--verify-plugin-packages <directory>`, which rejects unsigned components even
+in debug builds. macOS repeats that check on the app, the extracted updater
+archive and the app inside the mounted DMG. Missing, unsigned or modified
+components stop publication. This check does not start the UI or open a profile.
+
 The next version is the next patch after the higher of the checked-in base
 version and the latest stable release. Nightlies use that version with
 `-nightly.<workflow run number>`. Source version files remain the development
