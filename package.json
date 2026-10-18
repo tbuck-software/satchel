@@ -57,7 +57,7 @@
     "notices:build": "node ./scripts/third-party-notices.mjs"
   },
   "dependencies": {
-    "@tauri-apps/api": "~2.10.0",
+    "@tauri-apps/api": "~2.12.4",
     "@tauri-apps/plugin-deep-link": "^2.4.9",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
@@ -82,7 +82,7 @@
     "@intlify/unplugin-vue-i18n": "^11.0.0",
     "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.2.1",
-    "@tauri-apps/cli": "^2.10.0",
+    "@tauri-apps/cli": "^2.12.3",
     "@types/node": "^22.13.4",
     "@types/punycode": "^2.1.4",
     "@vitejs/plugin-vue": "^5.2.1",

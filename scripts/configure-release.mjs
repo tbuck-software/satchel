@@ -8,7 +8,7 @@ pkg.version = plan.version;
 writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
 for (const file of ['src-tauri/Cargo.toml', 'Cargo.lock']) {
   const text = readFileSync(file, 'utf8');
-  const pattern = file.endsWith('Cargo.toml') ? /^version = "[^"]+"/m : /(\[\[package\]\]\nname = "satchel"\n)version = "[^"]+"/;
+  const pattern = file.endsWith('Cargo.toml') ? /^version = "[^"]+"/m : /(\[\[package\]\]\r?\nname = "satchel"\r?\n)version = "[^"]+"/;
   if (!pattern.test(text)) throw new Error(`Cannot update version in ${file}`);
   writeFileSync(file, text.replace(pattern, file.endsWith('Cargo.toml') ? `version = "${plan.version}"` : `$1version = "${plan.version}"`));
 }
