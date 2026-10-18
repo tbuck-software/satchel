@@ -129,10 +129,17 @@ The macOS build validates the stapled notarization ticket after packaging. If
 Tauri reports success without attaching a valid ticket, the workflow repeats
 the bundle command up to three times, reusing the compiled binary. Retries use
 `tauri bundle`, so they do not rebuild the frontend or recompile Rust.
-This also recreates the DMG and updater archive from the stapled app. Compile
-and notarization errors stop immediately; a missing ticket after the third
-build blocks publication. CI also extracts the updater archive and mounts the
-DMG read-only to verify the shipped app copies' signatures and tickets.
+During packaging, a scoped `xcrun` wrapper retries stapling up to three times
+before Tauri creates the containers. All other `xcrun` commands go directly to
+the original tool. This compensates for the pinned CLI ignoring stapling failures.
+This also recreates the DMG and updater archive from the stapled app. Missing
+signing timestamps and `hdiutil` resource-busy errors receive up to three
+packaging attempts as well. Compiler errors and other packaging errors stop
+immediately. A missing ticket after the third bundle attempt blocks publication.
+CI also extracts the updater archive and mounts the DMG read-only to verify
+the shipped app copies' signatures and tickets. Each final ticket check permits
+three validation attempts to tolerate lost connections to Apple's service;
+publication still requires successful validation.
 
 1. Join the Apple Developer Program.
 2. In Xcode: Settings → Accounts → add your Apple ID → Manage Certificates →

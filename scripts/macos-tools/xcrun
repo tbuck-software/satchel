@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Tauri 2.12.3 discards stapler's exit status. Retry this one operation before
+# Tauri puts the app into its DMG and updater archive; forward everything else.
+if [ "${1-}:${2-}" != 'stapler:staple' ]; then
+  exec "${SATCHEL_REAL_XCRUN:?}" "$@"
+fi
+
+for attempt in 1 2 3; do
+  if "$SATCHEL_REAL_XCRUN" "$@"; then
+    exit 0
+  else
+    status=$?
+  fi
+  printf 'Stapling attempt %s/3 failed with status %s.\n' "$attempt" "$status" >> "${SATCHEL_STAPLER_RETRY_LOG:?}"
+  if [ "$attempt" -lt 3 ]; then
+    sleep "$((attempt * 10))"
+  fi
+done
+exit "$status"

@@ -289,7 +289,7 @@ jobs:
           codesign --display --entitlements :- "${apps[0]}" > "$RUNNER_TEMP/satchel-entitlements.plist"
           test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.allow-unsigned-executable-memory' "$RUNNER_TEMP/satchel-entitlements.plist")" = true
           if [ "$HAS_APPLE_CERTIFICATE" = true ]; then
-            xcrun stapler validate "${apps[0]}"
+            bash scripts/verify-notarization-ticket.sh "${apps[0]}"
             # Check the shipped copies too: packaging must retain the app ticket.
             archives=(target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz)
             images=(target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
@@ -300,12 +300,12 @@ jobs:
             app_name="${apps[0]##*/}"
             tar -xzf "${archives[0]}" -C "$verify_dir/update"
             codesign --verify --deep --strict "$verify_dir/update/$app_name"
-            xcrun stapler validate "$verify_dir/update/$app_name"
+            bash scripts/verify-notarization-ticket.sh "$verify_dir/update/$app_name"
             "$verify_dir/update/$app_name/Contents/MacOS/satchel" --verify-plugin-packages "$verify_dir/update/$app_name/Contents/Resources/plugins"
             trap 'hdiutil detach "$verify_dir/dmg" -quiet >/dev/null 2>&1 || true' EXIT
             hdiutil attach "${images[0]}" -mountpoint "$verify_dir/dmg" -nobrowse -readonly -quiet
             codesign --verify --deep --strict "$verify_dir/dmg/$app_name"
-            xcrun stapler validate "$verify_dir/dmg/$app_name"
+            bash scripts/verify-notarization-ticket.sh "$verify_dir/dmg/$app_name"
             "$verify_dir/dmg/$app_name/Contents/MacOS/satchel" --verify-plugin-packages "$verify_dir/dmg/$app_name/Contents/Resources/plugins"
           fi
       - run: node scripts/collect-release.mjs ${{ matrix.target }}
