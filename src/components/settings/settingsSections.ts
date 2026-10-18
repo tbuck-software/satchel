@@ -9,6 +9,7 @@ import { supportsDesktopBackgroundControls } from '@/utils/runtimeCapabilities';
 
 export type SettingsSection =
   | 'general'
+  | 'about'
   | 'swipes'
   | 'calendar'
   | 'accounts'
@@ -85,6 +86,7 @@ const BASE_GROUPS: SettingsSectionGroupDefinition[] = [
       'notifications',
       'tray',
       'shortcuts',
+      'about',
     ],
   },
   {
@@ -124,6 +126,7 @@ const BASE_GROUPS: SettingsSectionGroupDefinition[] = [
 ];
 
 export const settingsSectionIcons: Record<SettingsSection, string> = {
+  about: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/>',
   general: '<path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/>',
   swipes: '<path d="M5 12h14M8 9l-3 3 3 3M16 9l3 3-3 3"/><path d="M9.5 5.5c1.4-1.2 3.6-1.2 5 0M9.5 18.5c1.4 1.2 3.6 1.2 5 0"/>',
   calendar: '<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',

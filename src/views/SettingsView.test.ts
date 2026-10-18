@@ -35,6 +35,7 @@ vi.mock('@/stores/ui', () => ({
 vi.mock('@/components/settings/settingsSections', () => ({
   settingsSectionIcons: {
     general: '',
+    about: '',
     accounts: '',
     backup: '',
     diagnostics: '',
@@ -87,6 +88,7 @@ function paneStub(name: string) {
 }
 
 const paneStubs = {
+  AboutPane: paneStub('about'),
   AccountSetup: paneStub('accounts'),
   AliasEditor: paneStub('aliases'),
   BackupExport: paneStub('backup'),
@@ -142,6 +144,7 @@ beforeEach(() => {
       title: 'Settings',
       items: [
         { id: 'general', label: 'General' },
+        { id: 'about', label: 'About Satchel' },
         { id: 'accounts', label: 'Accounts' },
         { id: 'backup', label: 'Backup' },
         { id: 'diagnostics', label: 'Diagnostics' },
@@ -154,6 +157,11 @@ beforeEach(() => {
 });
 
 describe('SettingsView', () => {
+  it('opens the dedicated About page from its settings route', () => {
+    const wrapper = mountView({ section: 'about' });
+    expect(wrapper.get('[data-test="settings-pane"]').attributes('data-pane')).toBe('about');
+    expect(wrapper.get('[data-test="pane-header"]').attributes('data-title')).toBe('About Satchel');
+  });
   it('shows the overview in single-pane mode and switches to the detail when mode changes', async () => {
     const wrapper = mountView();
 

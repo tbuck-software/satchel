@@ -8,6 +8,7 @@ import type { SettingsSection } from './settingsSections';
  * `undoLabel` and `undoHint` and leaves the rest of that shared table alone.
  */
 const SECTION_KEYS: Record<SettingsSection, readonly string[]> = {
+  about: ['settings.about', 'app.update'],
   general: ['settings.theme', 'settings.language'],
   swipes: ['settings.swipes', 'swipe.'],
   calendar: ['settings.calendar'],

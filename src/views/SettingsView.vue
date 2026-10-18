@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { useUiStore } from '@/stores/ui';
-import AboutLine from '@/components/settings/AboutLine.vue';
+import AboutPane from '@/components/settings/AboutPane.vue';
 import AccountSetup from '@/components/settings/AccountSetup.vue';
 import AliasEditor from '@/components/settings/AliasEditor.vue';
 import BackupExport from '@/components/settings/BackupExport.vue';
@@ -75,6 +75,7 @@ function sectionDescription(section: SettingsSection): string {
 }
 
 const sectionTones: Record<SettingsSection, string> = {
+  about: 'blue',
   general: 'blue', swipes: 'purple', calendar: 'green', notifications: 'orange',
   'mobile-sync': 'cyan', tray: 'blue', shortcuts: 'purple', accounts: 'blue',
   contacts: 'pink', signatures: 'orange', aliases: 'cyan', smime: 'green', pgp: 'purple',
@@ -172,8 +173,8 @@ onBeforeUnmount(() => unregisterFilter?.());
           <div class="language-setting">
             <LanguageSelector />
           </div>
-          <AboutLine />
         </template>
+        <AboutPane v-else-if="activeSection === 'about'" />
         <SwipeSettings v-else-if="activeSection === 'swipes'" />
         <CalendarSettings
           v-else-if="activeSection === 'calendar'"

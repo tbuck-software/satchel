@@ -12,6 +12,7 @@
           "advanced": { "title": "Advanced" }
         },
         "general": { "label": "General", "description": "Appearance, language and behaviour" },
+        "about": { "label": "About Satchel", "description": "Version, updates and licenses" },
         "swipes": { "label": "Swipe gestures", "description": "Actions for swiping left and right" },
         "calendar": { "label": "Calendar", "description": "Calendars, working hours and invitations" },
         "notifications": { "label": "Notifications", "description": "Alerts, sounds and previews" },
@@ -303,7 +304,19 @@
         }
       },
       "about": {
-        "line": "Satchel {version} ({commit})"
+        "name": "Satchel",
+        "description": "A keyboard-driven, local-first email client.",
+        "version": "Version",
+        "commit": "Build commit",
+        "loading": "Loading version information…",
+        "loadFailed": "Version information could not be loaded.",
+        "updates": "Updates",
+        "openSource": "Open source",
+        "license": "Satchel is free and open-source software under the MIT license.",
+        "sourceCode": "Source code",
+        "readLicense": "MIT license",
+        "thirdParty": "Third-party licenses",
+        "linkFailed": "The link could not be opened."
       },
       "diagnostics": {
         "intro": "Snapshot of the sync state. Read-only — nothing is changed here.",
@@ -477,6 +490,7 @@
           "advanced": { "title": "Erweitert" }
         },
         "general": { "label": "Allgemein", "description": "Darstellung, Sprache und Verhalten" },
+        "about": { "label": "Über Satchel", "description": "Version, Updates und Lizenzen" },
         "swipes": { "label": "Wischgesten", "description": "Aktionen für Wischen nach links und rechts" },
         "calendar": { "label": "Kalender", "description": "Kalender, Arbeitszeiten und Einladungen" },
         "notifications": { "label": "Benachrichtigungen", "description": "Hinweise, Töne und Vorschauen" },
@@ -768,7 +782,19 @@
         }
       },
       "about": {
-        "line": "Satchel {version} ({commit})"
+        "name": "Satchel",
+        "description": "Ein tastaturgesteuerter, local-first Mail-Client.",
+        "version": "Version",
+        "commit": "Build-Commit",
+        "loading": "Versionsinformation wird geladen…",
+        "loadFailed": "Die Versionsinformation konnte nicht geladen werden.",
+        "updates": "Updates",
+        "openSource": "Open Source",
+        "license": "Satchel ist freie Open-Source-Software unter der MIT-Lizenz.",
+        "sourceCode": "Quellcode",
+        "readLicense": "MIT-Lizenz",
+        "thirdParty": "Lizenzen der Abhängigkeiten",
+        "linkFailed": "Der Link konnte nicht geöffnet werden."
       },
       "diagnostics": {
         "intro": "Momentaufnahme des Sync-Zustands. Nur lesend — hier wird nichts verändert.",

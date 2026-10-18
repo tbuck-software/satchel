@@ -1685,7 +1685,19 @@
   },
   "settings": {
     "about": {
-      "line": "Satchel {version} ({commit})"
+      "commit": "Build commit",
+      "description": "A keyboard-driven, local-first email client.",
+      "license": "Satchel is free and open-source software under the MIT license.",
+      "linkFailed": "The link could not be opened.",
+      "loadFailed": "Version information could not be loaded.",
+      "loading": "Loading version information…",
+      "name": "Satchel",
+      "openSource": "Open source",
+      "readLicense": "MIT license",
+      "sourceCode": "Source code",
+      "thirdParty": "Third-party licenses",
+      "updates": "Updates",
+      "version": "Version"
     },
     "accounts": {
       "addAccount": "Add email account",
@@ -2416,6 +2428,10 @@
       "results": "Matching sections"
     },
     "sections": {
+      "about": {
+        "description": "Version, updates and licenses",
+        "label": "About Satchel"
+      },
       "accounts": {
         "description": "Connect and manage mail accounts",
         "label": "Accounts"

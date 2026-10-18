@@ -24,6 +24,10 @@ beforeAll(async () => {
 
 // #164: 26 sections and nothing to filter them by.
 describe('settings search', () => {
+  it('finds About by version or license information in both languages', () => {
+    expect(searchSettings('version', items(), buildSettingsIndex(parts, 'en'))[0]?.id).toBe('about');
+    expect(searchSettings('MIT-Lizenz', items(), buildSettingsIndex(parts, 'de')).map(result => result.id)).toContain('about');
+  });
   it('finds a section by a setting inside it, and says which one', () => {
     const [first] = searchSettings('undo', items(), buildSettingsIndex(parts, 'en'));
     expect(first?.id).toBe('sending');
