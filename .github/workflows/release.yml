@@ -171,7 +171,7 @@ jobs:
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          HAS_NOTARIZATION: ${{ secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
+          HAS_NOTARIZATION: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && ((secrets.APPLE_API_KEY_P8 != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER != '') || (secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '')) }}
           REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
         run: |
           if [ -z "$APPLE_CERTIFICATE" ]; then
@@ -195,6 +195,22 @@ jobs:
           security import "$cert" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
           security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain"
           security list-keychains -d user -s "$keychain"
+      - name: Prepare App Store Connect notarization key
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          if [ -z "$APPLE_API_KEY_P8" ]; then exit 0; fi
+          [[ "$APPLE_API_KEY_ID" =~ ^[A-Z0-9]{10}$ ]]
+          test -n "$APPLE_API_ISSUER"
+          umask 077
+          mkdir -p "$RUNNER_TEMP/satchel-notarization"
+          key_path="$RUNNER_TEMP/satchel-notarization/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_API_KEY_P8" > "$key_path"
+          printf 'APPLE_API_KEY_PATH=%s\n' "$key_path" >> "$GITHUB_ENV"
       - run: pnpm run plugins:build
       - name: Build signed desktop artifacts
         shell: bash
@@ -205,15 +221,33 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           SATCHEL_GMAIL_CLIENT_ID: ${{ vars.SATCHEL_GMAIL_CLIENT_ID }}
           SATCHEL_GMAIL_REDIRECT_URI: ${{ vars.SATCHEL_GMAIL_REDIRECT_URI }}
           SATCHEL_OUTLOOK_CLIENT_ID: ${{ vars.SATCHEL_OUTLOOK_CLIENT_ID }}
           SATCHEL_OUTLOOK_REDIRECT_URI: ${{ vars.SATCHEL_OUTLOOK_REDIRECT_URI }}
         run: |
-          for variable in APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_SIGNING_IDENTITY; do
+          for variable in APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_SIGNING_IDENTITY APPLE_API_KEY APPLE_API_ISSUER; do
             if [ -z "${!variable}" ]; then unset "$variable"; fi
           done
+          if [ -n "${APPLE_API_KEY_PATH:-}" ]; then
+            unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+          fi
           pnpm exec tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config output/release-config.json
+      - name: Verify macOS code signature and notarization ticket
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+        run: |
+          shopt -s nullglob
+          apps=(target/${{ matrix.target }}/release/bundle/macos/*.app)
+          test "${#apps[@]}" -eq 1
+          codesign --verify --deep --strict "${apps[0]}"
+          if [ "$HAS_APPLE_CERTIFICATE" = true ]; then
+            xcrun stapler validate "${apps[0]}"
+          fi
       - run: node scripts/collect-release.mjs ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:

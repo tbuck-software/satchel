@@ -216,7 +216,21 @@ releases fail closed unless Developer ID signing and notarization are configured
 
 - `APPLE_CERTIFICATE`, a base64 PKCS#12 distribution certificate with private key.
 - `APPLE_CERTIFICATE_PASSWORD` and `APPLE_SIGNING_IDENTITY`.
-- `APPLE_ID`, `APPLE_PASSWORD` as an app-specific password, and `APPLE_TEAM_ID`.
+- For notarization, either the App Store Connect API secrets
+  `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER`, or
+  `APPLE_ID`, `APPLE_PASSWORD` as an app-specific password, and `APPLE_TEAM_ID`.
+
+App Store Connect API credentials take precedence when configured. The API key
+uses the Developer role and is written only to an owner-only file in the Mac
+runner's temporary directory. The signing identity and key stay outside the
+source checkout. Neither your Apple account password nor an interactive login
+is needed by a release runner.
+
+Updater signatures are separate from OS publisher signing. Windows NSIS
+installers currently have no Authenticode signature. SmartScreen can warn about
+an unknown publisher, and Windows policies can block unsigned apps. See
+[Microsoft's signing guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)
+before adding a Windows code-signing service or certificate.
 
 Use repository variables for the public Gmail/Outlook client IDs and optional
 redirect URIs listed in `.env.example`. Client secrets are never release inputs.
