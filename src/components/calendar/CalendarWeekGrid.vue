@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   allDayItemsForDay,
@@ -106,8 +107,7 @@ onBeforeUnmount(() => {
     <div class="week__header">
       <div class="week__corner" aria-hidden="true"></div>
       <div v-for="col in columns" :key="col.key" class="week__dayhead">
-        <button
-          type="button"
+        <CardButton
           class="week__daylabel"
           :class="{ 'week__daylabel--today': col.isToday }"
           :disabled="days.length === 1"
@@ -116,7 +116,7 @@ onBeforeUnmount(() => {
         >
           <span class="week__dayname">{{ col.label }}</span>
           <span class="week__daynum">{{ col.day.getDate() }}</span>
-        </button>
+        </CardButton>
         <div v-if="hasAllDayLane" class="week__allday">
           <CalendarEventChip
             v-for="item in col.allDay"
@@ -148,10 +148,9 @@ onBeforeUnmount(() => {
           :style="{ height: `${24 * HOUR_HEIGHT}px` }"
           @click.self="onColumnClick($event, col.day)"
         >
-          <button
+          <CardButton
             v-for="entry in col.positioned"
             :key="entry.item.key"
-            type="button"
             class="week__event"
             :class="[
               `week__event--${entry.item.status}`,
@@ -168,7 +167,7 @@ onBeforeUnmount(() => {
             <span class="week__event-time">
               {{ formatTime(entry.item.start) }}–{{ formatTime(entry.item.end) }}
             </span>
-          </button>
+          </CardButton>
           <div
             v-if="col.isToday"
             class="week__now"

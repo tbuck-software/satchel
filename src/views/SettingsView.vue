@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, onBeforeUnmount, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
@@ -139,10 +140,9 @@ onBeforeUnmount(() => unregisterFilter?.());
       <section v-for="group in overviewGroups" :key="group.title" class="settings-overview__group">
         <h2>{{ group.title }}</h2>
         <div class="settings-overview__list">
-          <button
+          <CardButton
             v-for="section in group.items"
             :key="section.id"
-            type="button"
             @click="openSection(section.id)"
           >
             <span
@@ -158,7 +158,7 @@ onBeforeUnmount(() => unregisterFilter?.());
             <svg class="settings-overview__chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="m6 3 5 5-5 5" />
             </svg>
-          </button>
+          </CardButton>
         </div>
       </section>
     </div>

@@ -30,6 +30,7 @@ mkdirSync(outDir, { recursive: true });
 // License files travel with the redistributed font binaries.
 const FONT_LICENSES = ['figtree', 'firacode'];
 
+/** @param {string | URL} url @param {RequestInit} [init] */
 async function fetchText(url, init) {
   try {
     return await (await fetch(url, init)).text();
@@ -40,6 +41,7 @@ async function fetchText(url, init) {
   }
 }
 
+/** @param {string | URL} url */
 async function fetchBuffer(url) {
   try {
     return Buffer.from(await (await fetch(url)).arrayBuffer());

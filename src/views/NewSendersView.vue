@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import CardButton from '@/components/ui/CardButton.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import DrawerButton from '@/components/layout/DrawerButton.vue';
 import { useRouter } from 'vue-router';
 import { useNewSenderActions } from '@/composables/useNewSenderActions';
@@ -49,7 +52,7 @@ async function block(sender: NewSenderGroup) {
 <template>
   <section class="new-senders-view">
     <header>
-      <button type="button" @click="router.push({ name: 'inbox' })">{{ $t('newSenders.backToInbox') }}</button>
+      <AppButton @click="router.push({ name: 'inbox' })" variant="ghost" size="sm">{{ $t('newSenders.backToInbox') }}</AppButton>
       <div>
         <p>{{ $t('newSenders.eyebrow') }}</p>
         <DrawerButton /><h2>{{ $t('newSenders.title') }}</h2>
@@ -64,32 +67,31 @@ async function block(sender: NewSenderGroup) {
         <span v-if="!settings.senderReviewStartedAt">{{ $t('newSenders.bulk.existingHint') }}</span>
         <span v-else>{{ $t('newSenders.bulk.manyHint') }}</span>
       </div>
-      <button v-if="!settings.senderReviewStartedAt" type="button" class="primary" @click="acceptExisting">
+      <AppButton v-if="!settings.senderReviewStartedAt" class="primary" @click="acceptExisting" variant="primary" size="sm">
         {{ $t('newSenders.bulk.acceptExisting', threads.newSenderStack.count) }}
-      </button>
-      <button v-else type="button" class="primary" @click="acceptAll">{{ $t('newSenders.bulk.acceptAll') }}</button>
+      </AppButton>
+      <AppButton v-else class="primary" @click="acceptAll" variant="primary" size="sm">{{ $t('newSenders.bulk.acceptAll') }}</AppButton>
     </div>
 
     <div v-if="threads.newSenderStack?.senders.length" class="sender-list">
       <article v-for="sender in threads.newSenderStack.senders" :key="sender.id">
         <Avatar :name="sender.senderName" :email="sender.senderEmail" :size="42" />
-        <button class="sender-copy" type="button" @click="threads.selectThread(sender.topThreadId); router.push({ name: 'inbox' })">
+        <CardButton class="sender-copy" @click="threads.selectThread(sender.topThreadId); router.push({ name: 'inbox' })">
           <strong>{{ sender.senderName }}</strong>
           <span>{{ sender.senderEmail }}</span>
           <span v-if="sender.spoofingText" class="spoofing">{{ sender.spoofingText }}</span>
           <span v-else>{{ sender.subject || sender.previewText }}</span>
-        </button>
+        </CardButton>
         <span v-if="sender.count > 1" class="count">{{ sender.count }}</span>
         <div class="actions">
-          <button type="button" class="accept" :title="$t('newSenders.allow')" @click="accept(sender)">✓</button>
-          <button
+          <IconButton class="accept" :title="$t('newSenders.allow')" @click="accept(sender)">✓</IconButton>
+          <IconButton
             v-if="allowableDomain(sender)"
-            type="button"
             class="domain"
             :title="$t('newSenders.allowDomain', { domain: allowableDomain(sender) })"
             @click="acceptDomain(allowableDomain(sender))"
-          >@</button>
-          <button type="button" :title="$t('newSenders.block')" @click="block(sender)">×</button>
+          >@</IconButton>
+          <IconButton :title="$t('newSenders.block')" @click="block(sender)">×</IconButton>
         </div>
       </article>
     </div>

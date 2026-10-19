@@ -9,11 +9,19 @@ const required = [
   'APPLE_SIGNING_IDENTITY',
 ];
 
+/**
+ * @param {string} message
+ */
 function fail(message) {
   console.error(message);
   process.exit(1);
 }
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {Omit<import('node:child_process').SpawnSyncOptionsWithStringEncoding, 'encoding'>} [options]
+ */
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     stdio: 'inherit',
@@ -24,6 +32,7 @@ function run(command, args, options = {}) {
   }
 }
 
+/** @param {string} path */
 function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'));
 }

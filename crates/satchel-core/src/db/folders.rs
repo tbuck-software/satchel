@@ -7,65 +7,32 @@ use crate::sync::{
     remote_mutations::{enqueue_folder_mutation, RemoteMutationPayload, ACTION_REMOTE_MUTATION},
 };
 
-/// The local id of the folder the provider calls `remote_folder_id`.
-///
-/// Every path that creates a folder row for a remote folder uses this, so
-/// a folder first created by a move and later seen by the sync is one row.
+/// Derive a new mail-folder identity without discarding any provider bytes.
+/// The account owns the provider namespace, so every folder creator uses the
+/// same mail namespace even before its remote folders have been listed.
 pub fn folder_db_id(account_id: &str, remote_folder_id: &str) -> String {
-    let sanitize = |value: &str| {
-        value
-            .chars()
-            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
-            .collect::<String>()
-    };
-    format!(
-        "fld-imap-{}-{}",
-        sanitize(account_id),
-        sanitize(remote_folder_id)
+    crate::sync::provider_identity::provider_local_id(
+        "fld",
+        "mail",
+        &[account_id, remote_folder_id],
     )
 }
 
-/// Gives the row for `remote_folder_id` its derived id, if it has another.
-///
-/// Rows created before every path derived the id carry a random one. The sync
-/// upserts by id, so without this it would add a second row for the same
-/// remote folder — or, with the unique index, fail the account run.
-pub async fn adopt_derived_folder_id(
-    pool: &SqlitePool,
+/// Preserve an existing folder's identity, including all persisted references.
+/// Only folders that have never been stored receive a newly derived ID.
+pub async fn resolve_provider_folder_id<'e>(
+    executor: impl Executor<'e, Database = Sqlite>,
     account_id: &str,
     remote_folder_id: &str,
 ) -> Result<String, sqlx::Error> {
-    let derived = folder_db_id(account_id, remote_folder_id);
-    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let existing: Option<String> = sqlx::query_scalar(
         "SELECT id FROM folders WHERE account_id = ? AND COALESCE(remote_id, full_path) = ?",
     )
     .bind(account_id)
     .bind(remote_folder_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(executor)
     .await?;
-    let Some(old) = existing.filter(|old| *old != derived) else {
-        tx.rollback().await?;
-        return Ok(derived);
-    };
-    // The children are repointed in the same transaction; checked at commit.
-    sqlx::query("PRAGMA defer_foreign_keys = ON")
-        .execute(&mut *tx)
-        .await?;
-    for statement in [
-        "UPDATE folders SET id = ?1 WHERE id = ?2",
-        "UPDATE messages SET folder_id = ?1 WHERE folder_id = ?2",
-        "UPDATE messages SET pending_folder_id = ?1 WHERE pending_folder_id = ?2",
-        "UPDATE sync_quarantine SET folder_id = ?1 WHERE folder_id = ?2",
-    ] {
-        sqlx::query(statement)
-            .bind(&derived)
-            .bind(&old)
-            .execute(&mut *tx)
-            .await?;
-    }
-    tx.commit().await?;
-    Ok(derived)
+    Ok(existing.unwrap_or_else(|| folder_db_id(account_id, remote_folder_id)))
 }
 
 const PROTECTED_FOLDER_TYPES: &[&str] = &[

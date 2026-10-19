@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -23,24 +25,24 @@ defineEmits<{
 
 <template>
   <span class="topic-chip" :style="color ? { '--chip-color': color } : undefined">
-    <button
-      type="button"
+    <AppButton
       class="topic-chip__label"
       :title="t('topics.chip.open', { name: label })"
       @click="$emit('click')"
+      variant="link"
+      size="sm"
     >
       {{ label }}
-    </button>
-    <button
+    </AppButton>
+    <IconButton
       v-if="removable"
-      type="button"
       class="topic-chip__remove"
       :title="t('topics.chip.remove', { name: label })"
       :aria-label="t('topics.chip.remove', { name: label })"
       @click.stop="$emit('remove')"
     >
       ×
-    </button>
+    </IconButton>
   </span>
 </template>
 

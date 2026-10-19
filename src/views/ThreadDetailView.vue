@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useThreadsStore } from '@/stores/threads';
@@ -52,7 +53,7 @@ function goBack() {
     <ThreadPaneSkeleton v-else-if="loadingThread" />
     <div v-else class="thread-state">
       <span>{{ $t('thread.detail.unavailable') }}</span>
-      <button type="button" class="thread-back" @click="goBack">{{ $t('thread.detail.backToInbox') }}</button>
+      <AppButton class="thread-back" @click="goBack" variant="link" size="sm">{{ $t('thread.detail.backToInbox') }}</AppButton>
     </div>
   </section>
 </template>
@@ -74,17 +75,6 @@ function goBack() {
   padding: 24px;
   color: var(--text-tertiary);
   text-align: center;
-}
-
-.thread-back {
-  min-height: 40px;
-  border: 0;
-  border-radius: var(--radius-lg);
-  padding: 0 18px;
-  background: var(--bg-raised);
-  color: var(--text-primary);
-  font: inherit;
-  font-weight: var(--weight-strong);
 }
 
 </style>

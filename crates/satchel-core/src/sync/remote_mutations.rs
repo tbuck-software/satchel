@@ -19,6 +19,9 @@ pub const ACTION_REMOTE_MUTATION: &str = "remote_mutation";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RemoteMutationPayload {
+    UndoTrash {
+        receipt_id: String,
+    },
     Move {
         refs: Vec<MessageRef>,
         target_remote_folder_id: String,
@@ -674,6 +677,7 @@ pub async fn execute_remote_mutation(
             }
             Ok(())
         }
+        RemoteMutationPayload::UndoTrash { .. } => Err("backend.errors.mailUndoUnavailable".into()),
         RemoteMutationPayload::Delete { refs } => provider.delete_messages(&refs).await,
         RemoteMutationPayload::Flags {
             refs,
@@ -854,7 +858,9 @@ pub async fn ensure_local_workflow_target_folder(
         return Ok(id);
     }
 
-    let id = crate::db::folders::folder_db_id(account_id, remote_folder_id);
+    let id = crate::db::folders::resolve_provider_folder_id(pool, account_id, remote_folder_id)
+        .await
+        .map_err(|err| err.to_string())?;
     let display_name = match folder_type {
         "archive" => "Archiviert",
         "aside" => crate::workflow::states::ASIDE_FOLDER_NAME,

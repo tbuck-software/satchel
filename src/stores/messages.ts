@@ -38,6 +38,7 @@ import { isOwnEmail } from '@/utils/mailIdentity';
 import { recordFrontendDiagnostic } from '@/utils/diagnostics';
 import { useConnectionStore } from '@/stores/connection';
 import { t } from '@/i18n/runtime';
+import { createCoalescingRunner, type CoalescingRunner } from '@/utils/coalescingRunner';
 
 function normalizeLineBreaks(input: string): string {
   return input.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -364,6 +365,7 @@ export const useMessagesStore = defineStore('messages', () => {
   const loadingThreadIds = ref<string[]>([]);
   const loadingBodyMessageIds = ref<string[]>([]);
   const threadLoadPromises = new Map<string, Promise<void>>();
+  const threadRefreshRunners = new Map<string, CoalescingRunner<void>>();
   const hydratedAttachmentMessageIds = new Set<string>();
   const hydratingAttachmentMessageIds = new Set<string>();
   const retained = new Map<string, RetainedThread>();
@@ -638,6 +640,26 @@ export const useMessagesStore = defineStore('messages', () => {
    * images stay; only messages that are new and visible fetch theirs.
    */
   function refreshThread(threadId: string): Promise<void> {
+    let runner = threadRefreshRunners.get(threadId);
+    if (!runner) {
+      runner = createCoalescingRunner(async () => {
+        // A load may have taken its snapshot before the change that prompted
+        // this refresh. Wait for it, then read again; sharing its promise would
+        // silently acknowledge a change we never fetched.
+        while (threadLoadPromises.has(threadId)) {
+          await threadLoadPromises.get(threadId);
+        }
+        await refreshThreadOnce(threadId);
+      }, () => true);
+      threadRefreshRunners.set(threadId, runner);
+    }
+    const current = runner;
+    return current.run().finally(() => {
+      if (threadRefreshRunners.get(threadId) === current) threadRefreshRunners.delete(threadId);
+    });
+  }
+
+  function refreshThreadOnce(threadId: string): Promise<void> {
     if (!hasThread(threadId)) return loadByThread(threadId);
     return trackLoad(threadId, async () => {
       const version = nextVersion(threadId);

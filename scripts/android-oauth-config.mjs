@@ -11,6 +11,9 @@ const OAUTH_KEYS = [
   'SATCHEL_OUTLOOK_REDIRECT_URI',
 ];
 
+/**
+ * @param {string} repoRoot
+ */
 function oauthEnvFile(repoRoot) {
   const local = join(repoRoot, '.env');
   if (existsSync(local)) return local;
@@ -27,6 +30,12 @@ function oauthEnvFile(repoRoot) {
 }
 
 /** Only personal debug installs receive runtime credentials, never APKs. */
+/**
+ * @param {string} adb
+ * @param {string} serial
+ * @param {string} packageId
+ * @param {string} repoRoot
+ */
 export function provisionAndroidOAuthConfig(adb, serial, packageId, repoRoot) {
   const file = oauthEnvFile(repoRoot);
   const contents = existsSync(file) ? readFileSync(file, 'utf8') : '';

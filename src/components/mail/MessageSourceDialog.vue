@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconButton from '@/components/ui/IconButton.vue';
 import { useDismissable } from '@/composables/useDismissable';
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -121,22 +122,23 @@ useDismissable(() => props.open, () => emit('close'));
               <span v-if="subject" class="subject">{{ subject }}</span>
             </div>
             <span v-if="sizeLabel" class="size">{{ sizeLabel }}</span>
-            <button type="button" class="close" :title="$t('common.close')" @click="emit('close')">✕</button>
+            <IconButton class="close" :title="$t('common.close')" @click="emit('close')">✕</IconButton>
           </header>
 
           <nav v-if="!loading && !errorText" class="tabs" role="tablist">
-            <button
+            <AppButton
               v-for="tab in tabs"
               :key="tab.id"
-              type="button"
               role="tab"
               :aria-selected="activeTab === tab.id"
               :disabled="!tab.available"
               :class="{ active: activeTab === tab.id }"
               @click="activeTab = tab.id"
+              variant="ghost"
+              size="sm"
             >
               {{ tab.label }}
-            </button>
+            </AppButton>
           </nav>
 
           <p v-if="!loading && !errorText && rawSourceNotice" class="source-notice">
@@ -203,21 +205,6 @@ useDismissable(() => props.open, () => emit('close'));
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
-}
-
-.close {
-  border: 0;
-  background: transparent;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-md);
-  cursor: pointer;
-  padding: 4px 6px;
-  border-radius: var(--radius-xs);
-}
-
-.close:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
 }
 
 .tabs {

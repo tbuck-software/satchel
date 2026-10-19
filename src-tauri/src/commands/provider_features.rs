@@ -402,10 +402,10 @@ async fn upsert_provider_label(
     visible: bool,
 ) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
-    let id = format!(
-        "pl-{}-{}",
-        account_id.replace(|ch: char| !ch.is_ascii_alphanumeric(), "-"),
-        remote_id.replace(|ch: char| !ch.is_ascii_alphanumeric(), "-")
+    let id = satchel_core::sync::provider_identity::provider_local_id(
+        "pl",
+        provider,
+        &[account_id, remote_id],
     );
     sqlx::query(
         "INSERT INTO provider_labels (id, account_id, provider, remote_id, name, color, kind, visible, updated_at)
@@ -430,4 +430,42 @@ async fn upsert_provider_label(
     .await
     .map_err(|err| err.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::upsert_provider_label;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn provider_label_ids_preserve_legacy_rows_and_distinguish_remote_punctuation() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::query("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at) VALUES ('account', 'Person', 'person@example.test', 'gmail', '{}', '', '', '')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO provider_labels (id, account_id, provider, remote_id, name, visible, updated_at) VALUES ('pl-legacy', 'account', 'gmail', 'label.1', 'Old name', 1, '')").execute(&pool).await.unwrap();
+        for (remote, name) in [("label.1", "Existing label"), ("label-1", "Another label")] {
+            upsert_provider_label(&pool, "account", "gmail", remote, name, None, None, true)
+                .await
+                .unwrap();
+        }
+        let labels: Vec<(String, String, String)> =
+            sqlx::query_as("SELECT id, remote_id, name FROM provider_labels ORDER BY remote_id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(labels.len(), 2);
+        assert_ne!(labels[0].0, labels[1].0);
+        assert_eq!(
+            labels[1],
+            (
+                "pl-legacy".to_string(),
+                "label.1".to_string(),
+                "Existing label".to_string()
+            )
+        );
+    }
 }

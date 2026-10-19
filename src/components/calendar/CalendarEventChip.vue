@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed } from 'vue';
 import { formatTime, type CalendarItem } from '@/utils/calendarGrid';
 import type { AnchorBox } from '@/utils/popoverPlacement';
@@ -27,8 +28,7 @@ function onClick(event: MouseEvent) {
 </script>
 
 <template>
-  <button
-    type="button"
+  <CardButton
     class="event-chip"
     :class="`event-chip--${item.status}`"
     :style="item.color ? { '--chip-accent': item.color } : undefined"
@@ -37,7 +37,7 @@ function onClick(event: MouseEvent) {
   >
     <span v-if="timeLabel" class="event-chip__time">{{ timeLabel }}</span>
     <span class="event-chip__title">{{ item.title }}</span>
-  </button>
+  </CardButton>
 </template>
 
 <style scoped>

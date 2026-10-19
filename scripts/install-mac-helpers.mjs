@@ -1,3 +1,8 @@
+/**
+ * @param {string} processList
+ * @param {string} targetApp
+ * @param {string} mainBinary
+ */
 export function processListContainsApp(processList, targetApp, mainBinary) {
   const expected = `${targetApp}/Contents/MacOS/${mainBinary}`;
   const translocated = `${targetApp.split('/').at(-1)}/Contents/MacOS/${mainBinary}`;
@@ -14,6 +19,7 @@ export function processListContainsApp(processList, targetApp, mainBinary) {
     });
 }
 
+/** @param {{ channel: string, branch: string, status: string, allowUnstable: boolean }} options */
 export function stableInstallProblem({ channel, branch, status, allowUnstable }) {
   if (channel !== 'stable' || allowUnstable) return null;
   if (branch !== 'main' || status.trim()) {
@@ -22,6 +28,11 @@ export function stableInstallProblem({ channel, branch, status, allowUnstable })
   return null;
 }
 
+/**
+ * @param {string} tag
+ * @param {string} existingRevision
+ * @param {string} revision
+ */
 export function versionTagProblem(tag, existingRevision, revision) {
   return existingRevision && existingRevision !== revision
     ? `${tag} already identifies another commit. Bump the release version before installing; release tags are immutable.`

@@ -25,7 +25,6 @@ vi.mock('@/services/backend', () => ({
   backendSetThreadsStarred: vi.fn(),
   backendSetThreadTags: vi.fn(),
   backendTrashThreads: vi.fn(),
-  backendUpdateThreadState: vi.fn(),
   backendUpdateThreadOrganization: vi.fn(),
 }));
 
@@ -351,7 +350,7 @@ describe('threads.refreshHead', () => {
     let finish!: (rows: never) => void;
     vi.mocked(backendGetThreads).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
     const pending = threads.refreshThreads(['a']);
-    threads.setWorkflowState('a', 'done');
+    threads.applyWorkflowStates([{ threadId: 'a', state: 'done' }]);
     finish([row('a', '2026-08-10')] as never);
     await pending;
     expect(threads.threads[0]?.workflowState).toBe('done');

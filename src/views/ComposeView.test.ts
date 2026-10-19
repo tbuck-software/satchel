@@ -198,8 +198,14 @@ function render(
   });
 }
 
+function sendButton(wrapper: ReturnType<typeof render>) {
+  const button = wrapper.findAll('button').find(candidate => candidate.text() === 'Send');
+  if (!button) throw new Error('Send button is missing');
+  return button;
+}
+
 async function send(wrapper: ReturnType<typeof render>) {
-  await wrapper.get('.primary-btn').trigger('click');
+  await sendButton(wrapper).trigger('click');
   await flushPromises();
 }
 
@@ -436,7 +442,7 @@ describe('composer send guard', () => {
     const wrapper = render(['"Buck']);
     await flushPromises();
 
-    expect(wrapper.get('.primary-btn').attributes('disabled')).toBeDefined();
+    expect(sendButton(wrapper).attributes('disabled')).toBeDefined();
     await send(wrapper);
     expect(harness.sendMessage).not.toHaveBeenCalled();
   });
@@ -450,7 +456,7 @@ describe('composer send guard', () => {
     const wrapper = render(['"Morgan, Alex" <a.morgan@example.com>']);
     await flushPromises();
 
-    expect(wrapper.get('.primary-btn').attributes('disabled')).toBeUndefined();
+    expect(sendButton(wrapper).attributes('disabled')).toBeUndefined();
     await send(wrapper);
     expect(harness.sendMessage).toHaveBeenCalledTimes(1);
   });

@@ -27,10 +27,18 @@ function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, '-');
 }
 
+/**
+ * @param {string} value
+ */
 function sqliteLiteral(value) {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {import('node:child_process').SpawnSyncOptions} [options]
+ */
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     stdio: 'inherit',
@@ -72,6 +80,10 @@ function backupDailyData() {
   return backupDir;
 }
 
+/**
+ * @param {string} source
+ * @param {string} target
+ */
 function copyIfExists(source, target) {
   if (!existsSync(source)) {
     return;

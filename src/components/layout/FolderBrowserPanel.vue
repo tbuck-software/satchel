@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import CardButton from '@/components/ui/CardButton.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -198,11 +201,11 @@ onBeforeUnmount(() => {
       <div>
         <h3>{{ $t('nav.folderBrowser.title') }}</h3>
       </div>
-      <button type="button" class="close-btn" :aria-label="$t('nav.folderBrowser.close')" @click="emit('close')">
+      <IconButton class="close-btn" :aria-label="$t('nav.folderBrowser.close')" @click="emit('close')" :title="$t('nav.folderBrowser.close')">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
           <path d="M3 3l10 10M13 3L3 13" />
         </svg>
-      </button>
+      </IconButton>
     </header>
 
     <p class="panel-copy">
@@ -218,16 +221,17 @@ onBeforeUnmount(() => {
         <header class="account-header">
           <span class="account-email">{{ group.accountEmail }}</span>
           <span class="account-count">{{ group.rows.length }}</span>
-          <button
+          <AppButton
             v-if="canManageFolders"
-            type="button"
             class="manage-btn"
             :title="$t('nav.folderBrowser.newFolder')"
             :disabled="busy"
             @click="startCreate(group.accountId)"
+            variant="ghost"
+            size="sm"
           >
             {{ $t('nav.folderBrowser.newFolderShort') }}
-          </button>
+          </AppButton>
         </header>
 
         <form
@@ -243,8 +247,8 @@ onBeforeUnmount(() => {
             autofocus
             @keydown.esc="creatingFor = null"
           />
-          <button type="submit" class="manage-btn" :disabled="busy || !newFolderName.trim()">{{ $t('common.create') }}</button>
-          <button type="button" class="manage-btn ghost" @click="creatingFor = null">{{ $t('common.cancel') }}</button>
+          <AppButton type="submit" class="manage-btn" :disabled="busy || !newFolderName.trim()" variant="primary" size="sm">{{ $t('common.create') }}</AppButton>
+          <AppButton class="manage-btn ghost" @click="creatingFor = null" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
         </form>
 
         <div class="tree-list">
@@ -254,13 +258,12 @@ onBeforeUnmount(() => {
             :class="{ active: activeFolderId(row.accountId, row.node.path) === row.id }"
             :style="{ '--depth': row.depth }"
           >
-            <button
+            <IconButton
               v-if="row.node.children.length > 0"
-              type="button"
               class="chevron-btn"
               :aria-label="$t('nav.toggleSection', { name: row.node.label })"
               @click="toggleOpen(row.accountId, row.node.path)"
-            >
+             :title="$t('nav.toggleSection', { name: row.node.label })">
               <svg
                 class="chevron"
                 :class="{ open: isOpen(`${row.accountId}:${row.node.path}`, true) }"
@@ -275,10 +278,10 @@ onBeforeUnmount(() => {
               >
                 <path d="M4 2.5L8 6 4 9.5" />
               </svg>
-            </button>
+            </IconButton>
             <span v-else class="chevron-spacer" />
 
-            <button type="button" class="folder-btn" @click="selectFolder(row.accountId, row.node.path)">
+            <CardButton class="folder-btn" @click="selectFolder(row.accountId, row.node.path)">
               <svg
                 class="folder-icon"
                 width="16"
@@ -294,31 +297,32 @@ onBeforeUnmount(() => {
               </svg>
               <span class="folder-label">{{ row.node.label }}</span>
               <span v-if="row.node.unreadCount > 0" class="folder-count">{{ row.node.unreadCount }}</span>
-            </button>
+            </CardButton>
 
             <template v-if="canManageFolders && row.node.folderId && !isProtected(row.node)">
-              <button
-                type="button"
+              <AppButton
                 class="row-action"
                 :title="$t('common.rename')"
                 :disabled="busy"
                 @click="startRename(row.id, row.node.label)"
+                variant="ghost"
+                size="sm"
               >
                 {{ $t('common.rename') }}
-              </button>
-              <button
-                type="button"
+              </AppButton>
+              <AppButton
                 class="row-action danger"
                 :title="$t('common.delete')"
                 :disabled="busy"
                 @click="void removeFolder(row.node.folderId!, row.node.label)"
+                variant="danger"
+                size="sm"
               >
                 {{ $t('common.delete') }}
-              </button>
+              </AppButton>
             </template>
 
-            <button
-              type="button"
+            <IconButton
               class="favorite-btn"
               :class="{ active: mailboxes.isFavoriteFolder(row.accountId, row.node.path) }"
               :title="mailboxes.isFavoriteFolder(row.accountId, row.node.path)
@@ -332,7 +336,7 @@ onBeforeUnmount(() => {
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M8 2.1l1.8 3.6 4 .6-2.9 2.8.7 4L8 11.2 4.4 13l.7-4L2.2 6.3l4-.6L8 2.1Z" />
               </svg>
-            </button>
+            </IconButton>
           </div>
 
           <form
@@ -347,8 +351,8 @@ onBeforeUnmount(() => {
               autofocus
               @keydown.esc="renamingId = null"
             />
-            <button type="submit" class="manage-btn" :disabled="busy || !renameValue.trim()">{{ $t('common.save') }}</button>
-            <button type="button" class="manage-btn ghost" @click="renamingId = null">{{ $t('common.cancel') }}</button>
+            <AppButton type="submit" class="manage-btn" :disabled="busy || !renameValue.trim()" variant="primary" size="sm">{{ $t('common.save') }}</AppButton>
+            <AppButton class="manage-btn ghost" @click="renamingId = null" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
           </form>
           </template>
         </div>
@@ -358,25 +362,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.manage-btn {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-xs);
-  background: transparent;
-  padding: 3px 8px;
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: var(--font-size-2xs);
-  font-weight: var(--weight-semibold);
-  cursor: pointer;
-}
-
-.manage-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.manage-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.manage-btn.ghost { border-color: transparent; }
 
 .folder-form {
   display: flex;
@@ -397,24 +382,6 @@ onBeforeUnmount(() => {
 }
 
 .folder-input:focus { border-color: var(--accent-primary); }
-
-.row-action {
-  border: 0;
-  background: transparent;
-  padding: 2px 6px;
-  border-radius: var(--radius-xs);
-  color: var(--text-tertiary);
-  font: inherit;
-  font-size: var(--font-size-2xs);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-out);
-}
-
-.tree-row:hover .row-action,
-.tree-row:focus-within .row-action { opacity: 1; }
-.row-action:hover { background: var(--bg-hover); color: var(--text-primary); }
-.row-action.danger:hover { color: var(--accent-red); }
 
 .panel {
   position: absolute;

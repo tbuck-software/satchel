@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAccountsStore } from '@/stores/accounts';
@@ -440,13 +442,14 @@ async function onDropToFolder(folderId: string, event: DragEvent) {
       <div class="px-2.5 pt-1">
         <SectionHeading :label="$t('nav.folders.title')">
           <template #trailing>
-            <button
-              type="button"
-              class="rounded-md py-1 px-2 bg-raised text-secondary text-xs font-semibold cursor-pointer hover:bg-overlay hover:text-primary transition-colors"
+            <AppButton
+
               @click="emit('openFoldersPanel')"
+              variant="ghost"
+              size="sm"
             >
               {{ $t('common.more') }}
-            </button>
+            </AppButton>
           </template>
         </SectionHeading>
       </div>
@@ -465,20 +468,19 @@ async function onDropToFolder(folderId: string, event: DragEvent) {
             @dragleave="onDragLeave(`${row.accountId}:${row.node.id}`)"
             @drop.prevent="onDropToFolder(row.node.folderId ?? '', $event)"
           >
-            <button
+            <IconButton
               v-if="row.node.children.length > 0"
-              type="button"
               class="inline-flex items-center justify-center w-4 h-4 rounded-md bg-transparent text-tertiary cursor-pointer hover:bg-hover hover:text-primary transition-colors"
               :aria-label="$t('nav.toggleSection', { name: row.node.label })"
               @click="toggleOpen(`folder:${row.accountId}:${row.node.path}`, true)"
-            >
+             :title="$t('nav.toggleSection', { name: row.node.label })">
               <svg
                 :class="['transition-transform duration-100', isOpen(`folder:${row.accountId}:${row.node.path}`, true) ? 'rotate-90' : '']"
                 width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
               >
                 <path d="M4 2.5L8 6 4 9.5" />
               </svg>
-            </button>
+            </IconButton>
             <span v-else class="inline-flex items-center justify-center w-4 h-4" />
 
             <NavItem

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import MenuItem from '@/components/ui/MenuItem.vue';
 import { useDismissable } from '@/composables/useDismissable';
 import { useUiStore } from '@/stores/ui';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -39,7 +41,7 @@ const { t } = useI18n();
 const menuOpen = ref(false);
 const rootRef = ref<HTMLElement | null>(null);
 const menuRef = ref<HTMLElement | null>(null);
-const switchRef = ref<HTMLElement | null>(null);
+const switchRef = ref<InstanceType<typeof AppButton> | null>(null);
 const ui = useUiStore();
 const editableRef = ref<HTMLElement | null>(null);
 const editing = ref(false);
@@ -65,7 +67,7 @@ const variantOptions = computed(() => [
 function positionMenu() {
   // A sheet is pinned to the bottom edge; there is nothing to place against.
   if (ui.isSinglePane) return;
-  const anchor = switchRef.value?.getBoundingClientRect();
+  const anchor = switchRef.value?.$el.getBoundingClientRect();
   if (!anchor) return;
   menuStyle.value = placePopoverAgainstAnchor(anchor, {
     width: window.innerWidth,
@@ -170,25 +172,27 @@ useDismissable(
       <span class="sig-title">{{ $t('compose.signature.title') }}</span>
       <template v-if="overrideActive">
         <span class="sig-edited" :title="$t('compose.signature.customizedTitle')">{{ $t('compose.signature.customized') }}</span>
-        <button
-          type="button"
+        <AppButton
           class="sig-reset"
           :title="$t('compose.signature.resetTitle')"
           @click="emit('reset')"
+          variant="link"
+          size="sm"
         >
           {{ $t('common.reset') }}
-        </button>
+        </AppButton>
       </template>
       <span class="sig-head-spacer" />
-      <button
+      <AppButton
         ref="switchRef"
-        type="button"
         class="sig-switch-btn"
         :disabled="disabled"
         aria-haspopup="menu"
         :aria-expanded="menuOpen"
         :title="$t('compose.signature.switch')"
         @click="toggleMenu"
+        variant="ghost"
+        size="sm"
       >
         <span class="sig-switch-name">{{ currentName }}</span>
         <svg
@@ -203,7 +207,7 @@ useDismissable(
           stroke-linejoin="round"
           aria-hidden="true"
         ><path d="m3.5 4.5 2.5 2.5 2.5-2.5" /></svg>
-      </button>
+      </AppButton>
 
       <Teleport to="body">
         <div
@@ -215,43 +219,31 @@ useDismissable(
           role="menu"
           :aria-label="$t('compose.signature.switch')"
         >
-          <button
-            type="button"
-            class="sig-menu-item"
-            role="menuitemradio"
-            :aria-checked="selectedId === null"
-            @click="choose(null)"
-          >
-            <span class="sig-menu-check">{{ selectedId === null ? '✓' : '' }}</span>
-            {{ $t('compose.signature.none') }}
-          </button>
-          <button
+          <MenuItem
+            selection="radio"
+            :label="$t('compose.signature.none')"
+            :checked="selectedId === null"
+            @select="choose(null)"
+          />
+          <MenuItem
+            selection="radio"
             v-for="signature in signatures"
             :key="signature.id"
-            type="button"
-            class="sig-menu-item"
-            role="menuitemradio"
-            :aria-checked="signature.id === selectedId"
-            @click="choose(signature.id)"
-          >
-            <span class="sig-menu-check">{{ signature.id === selectedId ? '✓' : '' }}</span>
-            {{ signature.name }}
-          </button>
+            :label="signature.name"
+            :checked="signature.id === selectedId"
+            @select="choose(signature.id)"
+          />
           <template v-if="selectedId">
             <div class="sig-menu-sep" role="separator" />
             <div class="sig-menu-label">{{ $t('compose.signature.variant') }}</div>
-            <button
+            <MenuItem
+            selection="radio"
               v-for="option in variantOptions"
               :key="option.value"
-              type="button"
-              class="sig-menu-item"
-              role="menuitemradio"
-              :aria-checked="variant === option.value"
-              @click="chooseVariant(option.value)"
-            >
-              <span class="sig-menu-check">{{ variant === option.value ? '✓' : '' }}</span>
-              {{ option.label }}
-            </button>
+              :label="option.label"
+              :checked="variant === option.value"
+              @select="chooseVariant(option.value)"
+          />
           </template>
         </div>
       </Teleport>
@@ -321,48 +313,11 @@ useDismissable(
   font-weight: var(--weight-semibold);
 }
 
-.sig-reset {
-  border: 0;
-  padding: 1px 4px;
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  font-size: var(--font-size-3xs);
-}
-
-.sig-reset:hover {
-  color: var(--text-primary);
-  text-decoration: underline;
-}
-
 .sig-head-spacer {
   flex: 1;
 }
 
-.sig-switch-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 220px;
-  padding: 3px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  font-size: var(--font-size-xs);
-}
-
-.sig-switch-btn:hover:not(:disabled) {
-  border-color: var(--border-color);
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-}
-
-.sig-switch-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.sig-switch-btn { max-width:220px; }
 
 .sig-switch-name {
   overflow: hidden;
@@ -409,32 +364,6 @@ useDismissable(
   border-radius: var(--radius-md);
   background: var(--bg-overlay);
   box-shadow: var(--shadow-lg);
-}
-
-.sig-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 7px 9px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-primary);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  text-align: left;
-}
-
-.sig-menu-item:hover {
-  background: var(--bg-hover);
-}
-
-.sig-menu-check {
-  flex: none;
-  width: 14px;
-  color: var(--accent-primary);
-  font-size: var(--font-size-xs);
 }
 
 .sig-menu-sep {

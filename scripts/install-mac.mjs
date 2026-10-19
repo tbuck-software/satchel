@@ -36,6 +36,10 @@ const channels = {
   },
 };
 
+/**
+ * @param {string} name
+ * @param {string} fallback
+ */
 function argValue(name, fallback) {
   const index = process.argv.indexOf(name);
   if (index < 0) return fallback;
@@ -44,13 +48,16 @@ function argValue(name, fallback) {
 
 const channelName = argValue('--channel', 'stable');
 const shouldOpen = process.argv.includes('--open');
-const channel = channels[channelName];
+const channel = Object.entries(channels).find(([name]) => name === channelName)?.[1];
 if (!channel) {
   console.error(`Unknown install channel: ${channelName}`);
   console.error(`Expected one of: ${Object.keys(channels).join(', ')}`);
   process.exit(1);
 }
 
+/**
+ * @param {string[]} args
+ */
 function gitOutput(args) {
   const result = spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8' });
   if (result.status !== 0) {
@@ -104,6 +111,11 @@ const builtAppCandidates = [
   join(repoRoot, 'src-tauri', 'target', 'release', 'bundle', 'macos', `${channel.appName}.app`),
 ];
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {import('node:child_process').SpawnSyncOptions} [options]
+ */
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: repoRoot,
@@ -119,10 +131,16 @@ function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, '-');
 }
 
+/**
+ * @param {string} value
+ */
 function shellQuote(value) {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+/**
+ * @param {number} ms
+ */
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -163,6 +181,9 @@ function quitRunningApp() {
   process.exit(1);
 }
 
+/**
+ * @param {string} appPath
+ */
 function bundleExecutable(appPath) {
   const result = spawnSync(
     'plutil',
@@ -172,6 +193,9 @@ function bundleExecutable(appPath) {
   return result.status === 0 ? result.stdout.trim() : '';
 }
 
+/**
+ * @param {string} appPath
+ */
 function validateBuiltApp(appPath) {
   const executable = bundleExecutable(appPath);
   const binaryPath = join(appPath, 'Contents', 'MacOS', channel.mainBinary);
@@ -217,6 +241,7 @@ function pruneOldBackups() {
   // Sort by the embedded timestamp, not the whole name: "pre-import-…" sorts
   // before "pre-install-…" lexically, so a plain sort would rank a newer
   // import backup below an older install one and delete the wrong files.
+  /** @param {string} name */
   const timestampOf = (name) => name.replace(/^pre-(install|import)-/, '');
   const entries = readdirSync(backupsRoot)
     .filter((name) => name.startsWith('pre-install-') || name.startsWith('pre-import-'))

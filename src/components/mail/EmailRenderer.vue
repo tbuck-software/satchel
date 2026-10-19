@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Attachment, PgpMessageState } from '@/types/mail';
@@ -375,35 +376,38 @@ const hasPgpSegments = computed(() =>
       >
         {{ blockedImagesLabel }}
       </span>
-      <button
-        type="button"
+      <AppButton
         class="image-guard__action image-guard__action--primary"
         :title="$t('mail.imagePolicy.showOnceTitle')"
         @click="showImagesOnce"
+        variant="link"
+        size="sm"
       >
         {{ $t('mail.imagePolicy.showOnce') }}
-      </button>
+      </AppButton>
       <template v-if="props.senderEmail">
         <span class="image-guard__sep" aria-hidden="true">·</span>
-        <button
-          type="button"
+        <AppButton
           class="image-guard__action"
           :title="$t('mail.imagePolicy.allowSenderTitle', { email: props.senderEmail })"
           @click="trustSender"
+          variant="link"
+          size="sm"
         >
           {{ $t('mail.imagePolicy.allowSender') }}
-        </button>
+        </AppButton>
       </template>
       <template v-if="canTrustDomain">
         <span class="image-guard__sep" aria-hidden="true">·</span>
-        <button
-          type="button"
+        <AppButton
           class="image-guard__action"
           :title="$t('mail.imagePolicy.allowDomainTitle', { domain: senderDomainName })"
           @click="trustDomain"
+          variant="link"
+          size="sm"
         >
           {{ $t('mail.imagePolicy.allowDomain', { domain: senderDomainName }) }}
-        </button>
+        </AppButton>
       </template>
     </div>
     <div v-if="isolatedDocument" class="html-document-group">
@@ -475,14 +479,15 @@ const hasPgpSegments = computed(() =>
           <p class="pgp-segment-hint">
             {{ $t('mail.pgpBlock.encryptedHint') }}
           </p>
-          <button
+          <AppButton
             v-if="canRequestUnlock"
-            type="button"
             class="pgp-segment-action"
             @click="emit('request-unlock')"
+            variant="primary"
+            size="sm"
           >
             {{ $t('mail.pgpBlock.decryptAction') }}
-          </button>
+          </AppButton>
           <pre class="pgp-segment-raw">{{ segment.content }}</pre>
         </section>
       </template>
@@ -602,13 +607,11 @@ const hasPgpSegments = computed(() =>
 
 /*
   The frame goes on a phone, the canvas stays.
-  
   This is the second card around a message: the first sat around the whole
   bubble and went with the same reasoning, this one wraps the HTML document
   inside it. A border and a radius separate a document from things beside it,
   and on a phone there is nothing beside it — the message is the screen, and
   the frame only narrows it.
-  
   The background is not decoration and must not go with the rest: mail is
   written against a light canvas and assumes one, so removing it would leave
   dark text on a dark surface for any sender who set a colour and trusted the
@@ -772,17 +775,7 @@ const hasPgpSegments = computed(() =>
   color: var(--text-secondary);
 }
 
-.pgp-segment-action {
-  margin: 10px 10px 0;
-  width: fit-content;
-  border: 0;
-  border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  font-size: var(--font-size-sm);
-  color: var(--text-on-accent);
-  background: var(--accent-primary);
-  cursor: pointer;
-}
+.pgp-segment-action { margin:10px 10px 0; width:fit-content; }
 
 .pgp-segment-raw {
   margin: 10px;
@@ -816,28 +809,6 @@ const hasPgpSegments = computed(() =>
 
 .image-guard__text {
   color: var(--text-secondary);
-}
-
-.image-guard__action {
-  border: 0;
-  padding: 0;
-  background: none;
-  font: inherit;
-  color: var(--text-secondary);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-  text-align: left;
-}
-
-.image-guard__action:hover {
-  color: var(--text-primary);
-}
-
-.image-guard__action--primary {
-  color: var(--accent-primary);
-  font-weight: var(--weight-semibold);
 }
 
 .image-guard__sep {

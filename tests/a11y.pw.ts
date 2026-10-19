@@ -31,6 +31,18 @@ test.describe('smart view', () => {
     await openInbox(page);
   });
 
+  test('preserves contact rows layout and selected appearance through the UI kit', async ({ page }) => {
+    await page.evaluate(() => localStorage.setItem('satchel.pinnedContacts', JSON.stringify(['sarah@app.io'])));
+    await page.reload();
+    const row = page.locator('aside button.card-button').filter({ has: page.locator('.contact-pin') }).first();
+    await expect(row).toBeVisible();
+    await expect(row).toHaveCSS('display', 'grid');
+    await expect(row).toHaveCSS('padding-left', '10px');
+    await row.click();
+    await page.mouse.move(1000, 0);
+    await expect(row).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  });
+
   test('keeps cards, headers and buttons out of every listbox', async ({ page }) => {
     const list = page.getByRole('group', { name: 'Message list' });
     await expect(list.getByRole('option').first()).toBeVisible();

@@ -25,7 +25,7 @@ use super::folder_reconcile::{
     reconcile_imap_folder_snapshot, reconcile_remote_message_removals, reset_local_provider_folder,
 };
 use super::mailbox_sync::stored_body_window_days;
-use super::message_ingest::{upsert_provider_message, PendingFlagLocks};
+use super::message_ingest::upsert_provider_message;
 use super::thread_resolution::refresh_provider_thread_projection;
 use super::workflow_executor::set_workflow_payload_field;
 
@@ -367,7 +367,6 @@ pub(crate) async fn reconcile_exact_imap_workflow_target(
     )
     .await?;
     reconcile_remote_message_removals(pool, account_id, &complete_batch.removals).await?;
-    let flag_locks = PendingFlagLocks::load(pool, account_id).await?;
     for message in complete_batch.messages {
         upsert_provider_message(
             app,
@@ -381,7 +380,6 @@ pub(crate) async fn reconcile_exact_imap_workflow_target(
             target_remote_folder_id,
             target_folder_type,
             &message,
-            &flag_locks,
             Some(&state.events),
         )
         .await?;
@@ -649,16 +647,26 @@ pub(crate) async fn verify_imap_workflow_target_projection(
     refs: &[MessageRef],
     local_target_folder_id: &str,
     eligible_target_remote_ids: Option<&HashSet<String>>,
-) -> Result<(), String> {
+) -> Result<Vec<(String, String)>, String> {
+    let mut replacements = Vec::new();
     let mut matched_target_ids = HashSet::new();
     let mut all_eligible_target_ids = HashSet::new();
     for message in refs {
         let Some(source) = message.source_folder.as_deref() else {
             return Err("IMAP workflow source folder is missing".to_string());
         };
-        let identity =
-            sqlx::query_as::<_, (Option<String>, Option<String>, String, String, Option<i64>)>(
-                "SELECT m.message_id_header, m.subject, m.from_address, m.date, m.raw_size
+        let identity = sqlx::query_as::<
+            _,
+            (
+                Option<String>,
+                Option<String>,
+                String,
+                String,
+                Option<i64>,
+                String,
+            ),
+        >(
+            "SELECT m.message_id_header, m.subject, m.from_address, m.date, m.raw_size, m.id
              FROM messages m
              JOIN folders f ON f.id = m.folder_id
              WHERE m.account_id = ? AND m.remote_id = ? AND (
@@ -666,15 +674,15 @@ pub(crate) async fn verify_imap_workflow_target_projection(
                OR LOWER(TRIM(f.full_path)) = LOWER(TRIM(?))
              )
              LIMIT 1",
-            )
-            .bind(account_id)
-            .bind(&message.remote_id)
-            .bind(source)
-            .bind(source)
-            .fetch_optional(pool)
-            .await
-            .map_err(|err| err.to_string())?
-            .ok_or_else(|| format!("IMAP workflow source {} disappeared", message.remote_id))?;
+        )
+        .bind(account_id)
+        .bind(&message.remote_id)
+        .bind(source)
+        .bind(source)
+        .fetch_optional(pool)
+        .await
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| format!("IMAP workflow source {} disappeared", message.remote_id))?;
 
         let real_message_id = identity
             .0
@@ -739,6 +747,7 @@ pub(crate) async fn verify_imap_workflow_target_projection(
                 message.remote_id
             ));
         };
+        replacements.push((identity.5, target_id.clone()));
         if !matched_target_ids.insert(target_id) {
             return Err("IMAP target reconciliation reused one copy for multiple messages".into());
         }
@@ -753,7 +762,7 @@ pub(crate) async fn verify_imap_workflow_target_projection(
         );
     }
 
-    Ok(())
+    Ok(replacements)
 }
 
 #[cfg(test)]
@@ -816,7 +825,7 @@ pub(crate) async fn finalize_persisted_imap_workflow_target_projection(
         return Ok(());
     }
 
-    verify_imap_workflow_target_projection(
+    let replacements = verify_imap_workflow_target_projection(
         pool,
         account_id,
         thread_id,
@@ -826,13 +835,14 @@ pub(crate) async fn finalize_persisted_imap_workflow_target_projection(
     )
     .await?;
 
-    persist_completed_imap_workflow_projection(
+    persist_completed_imap_workflow_projection_with_replacements(
         pool,
         account_id,
         thread_id,
         refs,
         action_id,
         completed_payload,
+        &replacements,
     )
     .await
 }
@@ -892,12 +902,37 @@ pub(crate) async fn persist_completed_imap_workflow_projection(
     action_id: &str,
     completed_payload: &serde_json::Value,
 ) -> Result<(), String> {
+    persist_completed_imap_workflow_projection_with_replacements(
+        pool,
+        account_id,
+        thread_id,
+        refs,
+        action_id,
+        completed_payload,
+        &[],
+    )
+    .await
+}
+
+async fn persist_completed_imap_workflow_projection_with_replacements(
+    pool: &SqlitePool,
+    account_id: &str,
+    thread_id: &str,
+    refs: &[MessageRef],
+    action_id: &str,
+    completed_payload: &serde_json::Value,
+    replacements: &[(String, String)],
+) -> Result<(), String> {
     let mut projection_payload = completed_payload.clone();
     set_workflow_payload_field(&mut projection_payload, "projection_completed", true.into())?;
     let mut tx = pool
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|err| err.to_string())?;
+    for (source, target) in replacements {
+        satchel_core::mail_actions::undo::remap_message_in_transaction(&mut tx, source, target)
+            .await?;
+    }
     let deleted =
         delete_completed_imap_workflow_sources_in_transaction(&mut tx, account_id, refs).await?;
     if deleted != refs.len() as u64 {

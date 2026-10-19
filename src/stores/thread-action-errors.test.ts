@@ -14,7 +14,6 @@ vi.mock('@/services/backend', async (importOriginal) => ({
   backendSetThreadsRead: vi.fn(),
   backendMarkThreadsSpam: vi.fn(),
   backendSetSenderPreference: vi.fn(),
-  backendUpdateThreadState: vi.fn(),
 }));
 
 beforeEach(() => {
@@ -23,7 +22,7 @@ beforeEach(() => {
   vi.mocked(backend.backendCommandsAvailable).mockReturnValue(true);
   for (const method of [backend.backendSetThreadsStarred, backend.backendSetThreadMuted,
     backend.backendSetThreadCategory, backend.backendSetThreadsRead, backend.backendMarkThreadsSpam,
-    backend.backendSetSenderPreference, backend.backendUpdateThreadState]) {
+    backend.backendSetSenderPreference]) {
     vi.mocked(method).mockReset().mockRejectedValue(new Error('database is locked'));
   }
   useThreadsStore().threads = [{
@@ -86,7 +85,5 @@ describe('thread action failures', () => {
     expect(store.threads[0]?.category).toBe('personal');
   });
 
-  it('propagates workflow persistence errors in the native runtime', async () => {
-    await expect(useThreadsStore().persistWorkflowState('mail', 'done')).rejects.toThrow('database is locked');
-  });
+
 });

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, nextTick, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -379,11 +380,10 @@ function onEnter(event: KeyboardEvent) {
             <div v-else-if="flatItems.length > 0" id="omni-list" class="list" role="listbox" :aria-label="$t('nav.omni.results')">
             <template v-for="group in groups" :key="group.label || 'footer'">
               <SectionHeading v-if="group.label" :label="group.label" role="presentation" class="group-heading" />
-              <button
+              <CardButton
                 v-for="(item, offset) in group.items"
                 :id="`omni-item-${group.start + offset}`"
                 :key="item.id"
-                type="button"
                 role="option"
                 :aria-selected="group.start + offset === activeIndex"
                 :aria-keyshortcuts="item.kind === 'command' ? item.command.shortcut?.aria : undefined"
@@ -473,7 +473,7 @@ function onEnter(event: KeyboardEvent) {
                   <span class="footer-label">{{ $t('nav.omni.showAll') }}</span>
                   <kbd class="footer-kbd">{{ showAllKeyLabel }}</kbd>
                 </template>
-              </button>
+              </CardButton>
             </template>
             </div>
 

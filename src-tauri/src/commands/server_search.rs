@@ -12,8 +12,7 @@ use crate::providers::gmail::GmailProvider;
 use crate::providers::outlook::OutlookProvider;
 use crate::providers::traits::MessageEnvelope;
 use crate::sync::{
-    gmail_reconcile::ensure_gmail_archive_folder,
-    message_ingest::{upsert_provider_message, PendingFlagLocks},
+    gmail_reconcile::ensure_gmail_archive_folder, message_ingest::upsert_provider_message,
 };
 use crate::utils::oauth::{access_token_from_account_config, OAuthProvider};
 
@@ -185,9 +184,6 @@ pub(crate) async fn fetch_server_search_hit_impl(
         &folder_remote_id,
         &folder_type,
         &envelope,
-        // A single targeted download replays nothing the user changed; the
-        // regular sync of that folder is where the guard belongs.
-        &PendingFlagLocks::none(),
         None,
     )
     .await?;

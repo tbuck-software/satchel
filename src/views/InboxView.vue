@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
+import MenuItem from '@/components/ui/MenuItem.vue';
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useNewSenderActions } from '@/composables/useNewSenderActions';
@@ -772,10 +774,9 @@ function acceptExistingSenders() {
         <div class="topics-view row-start-4">
           <!-- Rows share the mail rows' visual language: same avatar footprint,
                unread dot, type scale and compact time. A topic is read like a mail. -->
-          <button
+          <CardButton
             v-for="topic in topicsStore.activeTopics"
             :key="topic.id"
-            type="button"
             class="group relative mb-1 grid h-[72px] w-full cursor-pointer select-none grid-cols-[auto_minmax(0,1fr)] items-center gap-3 overflow-hidden rounded-xl border-0 px-3 text-left transition-colors"
             :class="
               topicsStore.activeTopicId === topic.id
@@ -834,7 +835,7 @@ function acceptExistingSenders() {
                 <CountBadge v-if="topic.item_count > 1" :value="topic.item_count" />
               </span>
             </span>
-          </button>
+          </CardButton>
 
           <p v-if="topicsStore.activeTopics.length === 0" class="topics-view__empty">
             {{ $t('inbox.topics.empty') }}
@@ -842,10 +843,9 @@ function acceptExistingSenders() {
 
           <template v-if="topicsStore.finishedTopics.length > 0">
             <SectionHeading :label="$t('common.done')" :count="topicsStore.finishedTopics.length" class="topics-view__heading" />
-            <button
+            <CardButton
               v-for="topic in topicsStore.finishedTopics"
               :key="topic.id"
-              type="button"
               class="group relative mb-1 grid h-[56px] w-full cursor-pointer select-none grid-cols-[auto_minmax(0,1fr)] items-center gap-3 overflow-hidden rounded-xl border-0 px-3 text-left opacity-75 transition-colors"
               :class="
                 topicsStore.activeTopicId === topic.id
@@ -865,7 +865,7 @@ function acceptExistingSenders() {
                   {{ formatListTime(topic.updated_at) }}
                 </span>
               </span>
-            </button>
+            </CardButton>
           </template>
         </div>
       </template>
@@ -895,30 +895,18 @@ function acceptExistingSenders() {
             <Transition name="menu-pop">
               <div v-if="viewMenuOpen" class="view-menu" role="menu" :aria-label="$t('inbox.view')">
                 <p class="view-menu-label">{{ $t('inbox.view') }}</p>
-                <button
-                  type="button"
-                  class="view-menu-item"
-                  role="menuitemradio"
-                  :aria-checked="settings.inboxGroupingMode === 'smart'"
-                  @click="chooseGroupingMode('smart')"
-                >
-                  <span class="view-menu-check">
-                    <svg v-if="settings.inboxGroupingMode === 'smart'" viewBox="0 0 16 16"><path d="M3.5 8.5l2.6 2.6L12.5 5" /></svg>
-                  </span>
-                  <span>{{ $t('inbox.viewGrouped') }}</span>
-                </button>
-                <button
-                  type="button"
-                  class="view-menu-item"
-                  role="menuitemradio"
-                  :aria-checked="settings.inboxGroupingMode === 'classic'"
-                  @click="chooseGroupingMode('classic')"
-                >
-                  <span class="view-menu-check">
-                    <svg v-if="settings.inboxGroupingMode === 'classic'" viewBox="0 0 16 16"><path d="M3.5 8.5l2.6 2.6L12.5 5" /></svg>
-                  </span>
-                  <span>{{ $t('inbox.viewList') }}</span>
-                </button>
+                <MenuItem
+                  :label="$t('inbox.viewGrouped')"
+                  selection="radio"
+                  :checked="settings.inboxGroupingMode === 'smart'"
+                  @select="chooseGroupingMode('smart')"
+                />
+                <MenuItem
+                  :label="$t('inbox.viewList')"
+                  selection="radio"
+                  :checked="settings.inboxGroupingMode === 'classic'"
+                  @select="chooseGroupingMode('classic')"
+                />
               </div>
             </Transition>
           </div>
@@ -1236,57 +1224,6 @@ function acceptExistingSenders() {
   font-weight: var(--weight-bold);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-}
-
-.view-menu-item {
-  min-width: 0;
-  width: 100%;
-  min-height: 34px;
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: var(--font-size-sm);
-  line-height: 1.25;
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
-}
-
-.view-menu-item:hover {
-  background: var(--accent-primary);
-  color: var(--text-on-accent);
-}
-
-.view-menu-item[aria-checked='true'] {
-  color: var(--text-primary);
-  font-weight: var(--weight-semibold);
-}
-
-.view-menu-item[aria-checked='true']:hover {
-  color: var(--text-on-accent);
-}
-
-.view-menu-check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.view-menu-check svg {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .menu-pop-enter-active,

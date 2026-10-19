@@ -391,31 +391,28 @@ function runExport(format: ExportFormat) {
         <AppIcon :grid="20" class="zoom-row__icon"><circle cx="9" cy="9" r="5" /><path d="M13 13l4 4" /></AppIcon>
         <span>{{ $t('thread.toolbar.textSize') }}</span>
         <span class="zoom-controls">
-          <button
-            type="button"
+          <IconButton
             class="zoom-btn"
             role="menuitem"
             :title="$t('thread.toolbar.smaller')"
             :aria-label="$t('thread.toolbar.decreaseText')"
             @click.stop="emit('zoom', -10)"
-          >−</button>
+          >−</IconButton>
           <span class="zoom-value">{{ props.readerZoom }}%</span>
-          <button
-            type="button"
+          <IconButton
             class="zoom-btn"
             role="menuitem"
             :title="$t('thread.toolbar.larger')"
             :aria-label="$t('thread.toolbar.increaseText')"
             @click.stop="emit('zoom', 10)"
-          >+</button>
-          <button
-            type="button"
+          >+</IconButton>
+          <IconButton
             class="zoom-btn"
             role="menuitem"
             :title="$t('common.reset')"
             :aria-label="$t('thread.toolbar.resetTextSize')"
             @click.stop="emit('zoom', 0)"
-          >⤺</button>
+          >⤺</IconButton>
         </span>
       </div>
     </div>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Thread } from '@/types/mail';
@@ -650,22 +652,23 @@ onBeforeUnmount(() => {
         >
           <SectionHeading :label="stickyHeader.item.label" :count="stickyHeader.item.count > 0 ? stickyHeader.item.count : undefined" class="w-full">
             <template #trailing>
-              <button
+              <AppButton
                 v-if="stickyHeader.item.threadIds.length > 0"
-                type="button"
                 tabindex="-1"
-                class="section-done-button inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-raised px-2 text-2xs font-semibold text-secondary transition-colors hover:bg-hover hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                class="section-done-button"
                 :class="{ 'section-done-button--visible': hoveredSectionId === stickyHeader.item.id }"
                 :title="$t('thread.list.checkAllInSection', { label: stickyHeader.item.label })"
                 :aria-label="$t('thread.list.checkAllInSection', { label: stickyHeader.item.label })"
                 :disabled="props.bulkBusy"
                 @click="emit('dateGroupDone', { groupId: stickyHeader.item.id, threadIds: stickyHeader.item.threadIds })"
+                variant="ghost"
+                size="sm"
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M3.5 8.4l2.5 2.5 6.5-6.8" />
                 </svg>
                 {{ $t('thread.list.checkAll') }}
-              </button>
+              </AppButton>
             </template>
           </SectionHeading>
         </div>
@@ -755,8 +758,7 @@ onBeforeUnmount(() => {
               :aria-label="$t('thread.bucket.priority')"
             >
               <article class="priority-card -mx-3 overflow-hidden rounded-2xl pb-2">
-                <button
-                  type="button"
+                <CardButton
                   class="priority-card__header group/priority relative flex h-[var(--card-header-h)] w-full cursor-pointer items-center gap-[7px] border-0 bg-transparent px-4 text-left"
                   :title="$t('thread.list.showAllPriority')"
                   @click="emit('openBucket', item.bucket.id)"
@@ -769,7 +771,7 @@ onBeforeUnmount(() => {
                   <svg class="shrink-0 text-tertiary opacity-0 transition-opacity group-hover/priority:opacity-100" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M6 3.5L10.5 8 6 12.5" />
                   </svg>
-                </button>
+                </CardButton>
 
                 <div role="listbox" :aria-label="item.bucket.label" aria-multiselectable="true">
                   <div
@@ -795,9 +797,8 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <button
+                <CardButton
                   v-if="item.hiddenCount > 0"
-                  type="button"
                   class="priority-card__more relative mx-2 flex h-[var(--card-header-h)] w-[calc(100%-16px)] cursor-pointer items-center justify-center gap-1.5 rounded-lg border-0 bg-transparent text-xs font-semibold"
                   :class="{ 'list-target--keyboard-focused': props.keyboardNavigationActive && props.focusedTargetKey === `bucket:${item.bucket.id}` }"
                   :data-list-target-key="`bucket:${item.bucket.id}`"
@@ -805,7 +806,7 @@ onBeforeUnmount(() => {
                   @click="emit('openBucket', item.bucket.id)"
                 >
                   {{ $t('thread.list.morePriority', { count: item.hiddenCount }) }}
-                </button>
+                </CardButton>
               </article>
             </section>
 
@@ -815,21 +816,22 @@ onBeforeUnmount(() => {
             >
               <SectionHeading :label="item.label" :count="item.count > 0 ? item.count : undefined" class="w-full">
                 <template #trailing>
-                  <button
+                  <AppButton
                     v-if="item.threadIds.length > 0"
-                    type="button"
-                    class="section-done-button inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-raised px-2 text-2xs font-semibold text-secondary transition-colors hover:bg-hover hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                    class="section-done-button"
                     :class="{ 'section-done-button--visible': hoveredSectionId === item.id }"
                     :title="$t('thread.list.checkAllInSection', { label: item.label })"
                     :aria-label="$t('thread.list.checkAllInSection', { label: item.label })"
                     :disabled="props.bulkBusy"
                     @click="emit('dateGroupDone', { groupId: item.id, threadIds: item.threadIds })"
+                    variant="ghost"
+                    size="sm"
                   >
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M3.5 8.4l2.5 2.5 6.5-6.8" />
                     </svg>
                     {{ $t('thread.list.checkAll') }}
-                  </button>
+                  </AppButton>
                 </template>
               </SectionHeading>
             </div>
@@ -842,8 +844,7 @@ onBeforeUnmount(() => {
             >
               <article class="review-card -mx-3 overflow-hidden rounded-2xl pb-2">
                 <div class="review-card__header relative flex h-[var(--card-header-h)] items-center gap-2 px-4">
-                  <button
-                    type="button"
+                  <CardButton
                     class="group/newsender flex min-w-0 cursor-pointer items-center gap-[7px] border-0 bg-transparent p-0 text-left"
                     :title="$t('thread.newSenders.showAll')"
                     @click="emit('openNewSenders')"
@@ -857,16 +858,17 @@ onBeforeUnmount(() => {
                     <svg class="shrink-0 text-tertiary opacity-0 transition-opacity group-hover/newsender:opacity-100" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M6 3.5L10.5 8 6 12.5" />
                     </svg>
-                  </button>
-                  <button
+                  </CardButton>
+                  <AppButton
                     v-if="!props.senderReviewSetupComplete"
-                    type="button"
-                    class="review-card__setup ml-auto inline-flex h-7 shrink-0 cursor-pointer items-center rounded-md border-0 bg-transparent px-2 text-2xs font-bold transition-colors"
+                    class="review-card__setup ml-auto"
                     :title="$t('thread.newSenders.acceptExistingTitle')"
                     @click="emit('acceptExistingSenders')"
+                    variant="ghost"
+                    size="sm"
                   >
                     {{ $t('thread.newSenders.acceptExisting') }}
-                  </button>
+                  </AppButton>
                   <CountBadge v-else-if="item.stack.unreadCount > 0" class="ml-auto" :value="item.stack.unreadCount" tone="accent" />
                 </div>
 
@@ -901,29 +903,30 @@ onBeforeUnmount(() => {
                     </div>
 
                     <div class="new-sender-actions flex shrink-0 items-center gap-1.5">
-                      <button
-                        type="button"
-                        class="inline-flex h-8 cursor-pointer items-center rounded-full border-0 bg-accent-primary/15 px-3 text-xs font-semibold text-accent-primary transition-colors hover:bg-accent-primary/25"
+                      <AppButton
+
                         :title="$t('thread.newSenders.allowTitle')"
                         @click.stop="emit('newSenderAction', { sender: item.stack.senders[0]!, action: 'accept' })"
+                        variant="primary"
+                        size="sm"
                       >
                         {{ $t('thread.newSenders.allow') }}
-                      </button>
-                      <button
-                        type="button"
-                        class="inline-flex h-8 cursor-pointer items-center rounded-full border-0 bg-[color-mix(in_srgb,var(--text-primary)_7%,transparent)] px-3 text-xs font-semibold text-secondary transition-colors hover:bg-[color-mix(in_srgb,var(--accent-red)_14%,transparent)] hover:text-accent-red"
+                      </AppButton>
+                      <AppButton
+
                         :title="$t('thread.actions.blockSender')"
                         @click.stop="emit('newSenderAction', { sender: item.stack.senders[0]!, action: 'block' })"
+                        variant="danger"
+                        size="sm"
                       >
                         {{ $t('common.block') }}
-                      </button>
+                      </AppButton>
                     </div>
                   </article>
                 </div>
 
-                <button
+                <CardButton
                   v-if="item.stack.domainSuggestion"
-                  type="button"
                   class="review-card__more relative mx-2 flex h-[var(--card-header-h)] w-[calc(100%-16px)] min-w-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border-0 bg-transparent px-3 text-xs font-semibold"
                   :title="$t('thread.newSenders.allowDomainTitle', { domain: item.stack.domainSuggestion.domain })"
                   @click="emit('acceptDomain', item.stack.domainSuggestion)"
@@ -934,15 +937,14 @@ onBeforeUnmount(() => {
                   </svg>
                   <span class="min-w-0 truncate">{{ $t('thread.newSenders.allowDomain', { domain: item.stack.domainSuggestion.domain }) }}</span>
                   <span class="shrink-0 font-medium tabular-nums opacity-70">{{ $t('thread.newSenders.senderCount', { count: item.stack.domainSuggestion.senderCount }) }}</span>
-                </button>
-                <button
+                </CardButton>
+                <CardButton
                   v-else-if="item.stack.count > 1"
-                  type="button"
                   class="review-card__more relative mx-2 flex h-[var(--card-header-h)] w-[calc(100%-16px)] cursor-pointer items-center justify-center gap-1.5 rounded-lg border-0 bg-transparent text-xs font-semibold"
                   @click="emit('openNewSenders')"
                 >
                   {{ $t('thread.newSenders.moreSenders', { count: item.stack.count - 1 }) }}
-                </button>
+                </CardButton>
               </article>
             </section>
 
@@ -974,9 +976,8 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover/bucket:opacity-100 group-focus-within/bucket:opacity-100">
-                <button
-                  type="button"
-                  class="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-list text-secondary hover:bg-hover hover:text-primary"
+                <IconButton
+
                   :title="$t('thread.list.markAllRead')"
                   :aria-label="$t('thread.list.markAllRead')"
                   @click.stop="emit('bucketAction', { threadIds: item.bucket.threadIds, action: 'read' })"
@@ -985,10 +986,9 @@ onBeforeUnmount(() => {
                     <path d="M2.8 5.2L8 8.7l5.2-3.5" />
                     <rect x="2.5" y="4" width="11" height="8.5" rx="1.7" />
                   </svg>
-                </button>
-                <button
-                  type="button"
-                  class="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-list text-secondary hover:bg-hover hover:text-primary"
+                </IconButton>
+                <IconButton
+
                   :title="$t('thread.list.checkAll')"
                   :aria-label="$t('thread.list.checkAll')"
                   @click.stop="emit('bucketAction', { threadIds: item.bucket.threadIds, action: 'done' })"
@@ -996,7 +996,7 @@ onBeforeUnmount(() => {
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M3.5 8.4l2.5 2.5 6.5-6.8" />
                   </svg>
-                </button>
+                </IconButton>
               </div>
 
               <!-- The row opens a page of its own, and says so even at rest. -->

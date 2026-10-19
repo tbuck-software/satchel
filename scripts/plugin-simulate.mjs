@@ -28,6 +28,7 @@ const payload = fixturePath
         preview: 'This is a local plugin simulator payload.',
       },
     });
+/** @param {string} dir */
 function packageName(dir) {
   const manifestPath = join(dir, 'Cargo.toml');
   if (!existsSync(manifestPath)) return null;
@@ -62,6 +63,7 @@ const result = spawnSync('cargo', [
 
 process.exit(result.status ?? 1);
 
+/** @param {string} dir */
 function entryBasename(dir) {
   return dir.split(/[/\\]/).pop();
 }

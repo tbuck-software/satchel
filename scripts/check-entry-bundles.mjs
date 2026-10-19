@@ -11,6 +11,7 @@ if (!existsSync(manifestPath)) {
   throw new Error('dist/.vite/manifest.json is missing; run `pnpm build` first');
 }
 
+/** @type {import("vite").Manifest} */
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 /* Startup includes the chosen catalogue, even though it is a dynamic import.
  * The inactive locale is excluded; measure the larger of the two active paths.
@@ -22,8 +23,13 @@ const budgets = {
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 124 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };
 
+/**
+ * @param {string} entry
+ */
 function staticGraph(entry) {
+  /** @type {Set<string>} */
   const seen = new Set();
+  /** @param {string} key */
   const visit = (key) => {
     if (seen.has(key)) return;
     seen.add(key);
@@ -33,6 +39,9 @@ function staticGraph(entry) {
   return seen;
 }
 
+/**
+ * @param {string} file
+ */
 function gzipBytes(file) {
   return gzipSync(readFileSync(path.join(root, 'dist', file))).byteLength;
 }
@@ -46,6 +55,7 @@ for (const [entry, budget] of Object.entries(budgets)) {
     if (!manifest[locale]?.file) throw new Error(`missing locale chunk: ${locale}`);
     if (graph.has(locale)) throw new Error(`locale must load on demand: ${locale}`);
   }
+  /** @param {Set<string>} keys */
   const graphBytes = keys => [...keys]
     .map(key => manifest[key]?.file)
     .filter(file => file?.endsWith('.js'))

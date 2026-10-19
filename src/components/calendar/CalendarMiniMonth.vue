@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, ref, watch } from 'vue';
 import {
   addMonths,
@@ -73,10 +74,9 @@ const cells = computed(() =>
       <span v-for="(label, index) in weekdayLabels" :key="index">{{ label }}</span>
     </div>
     <div class="mini-month__grid">
-      <button
+      <CardButton
         v-for="cell in cells"
         :key="cell.key"
-        type="button"
         class="mini-month__day"
         :class="{
           'mini-month__day--muted': !cell.inMonth,
@@ -87,7 +87,7 @@ const cells = computed(() =>
         @click="emit('select', cell.day)"
       >
         {{ cell.day.getDate() }}
-      </button>
+      </CardButton>
     </div>
   </div>
 </template>

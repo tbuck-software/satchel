@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import CardButton from '@/components/ui/CardButton.vue';
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSmartFoldersStore } from '@/stores/smartFolders';
@@ -80,14 +82,14 @@ async function remove(id: string) {
 
     <ul v-if="smart.items.length > 0" class="list">
       <li v-for="f in smart.items" :key="f.id">
-        <button type="button" class="row" @click="edit(f.id)">
+        <CardButton class="row" @click="edit(f.id)">
           <span class="ico">{{ f.icon || '🔍' }}</span>
           <span>
             <strong>{{ f.name }}</strong>
             <code class="q">{{ f.query }}</code>
           </span>
-        </button>
-        <button type="button" class="delete" @click="remove(f.id)">{{ $t('common.delete') }}</button>
+        </CardButton>
+        <AppButton class="delete" @click="remove(f.id)" variant="danger" size="sm">{{ $t('common.delete') }}</AppButton>
       </li>
     </ul>
     <p v-else class="empty">{{ $t('settings.smartFolders.empty') }}</p>
@@ -101,8 +103,8 @@ async function remove(id: string) {
         <input v-model="query" :placeholder="$t('settings.smartFolders.queryPlaceholder')" />
       </label>
       <div class="actions">
-        <button v-if="editingId" type="button" class="ghost" @click="reset">{{ $t('common.cancel') }}</button>
-        <button type="button" class="primary" @click="save">{{ $t('common.save') }}</button>
+        <AppButton v-if="editingId" class="ghost" @click="reset" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
+        <AppButton class="primary" @click="save" variant="primary" size="sm">{{ $t('common.save') }}</AppButton>
       </div>
       <p v-if="status" class="status">{{ status }}</p>
     </div>
@@ -120,13 +122,10 @@ code { background: var(--bg-raised); padding: 1px 6px; border-radius: var(--radi
 .row:hover { background: var(--bg-hover); }
 .ico { font-size: 18px; }
 .q { display: block; font-size: var(--font-size-xs); color: var(--text-tertiary); margin-top: 2px; }
-.delete { background: transparent; border: 1px solid var(--border-color-muted); color: var(--text-secondary); padding: 0 12px; border-radius: var(--radius-sm); cursor: pointer; font-size: var(--font-size-xs); }
 .empty { color: var(--text-tertiary); font-size: var(--font-size-sm); margin: 0; }
 .editor { display: grid; gap: 10px; border: 1px solid var(--border-color-muted); border-radius: var(--radius-md); padding: 14px; background: var(--bg-base); }
 .field { display: grid; gap: 4px; font-size: var(--font-size-sm); color: var(--text-secondary); }
 .field input { border: 1px solid var(--border-color); background: var(--bg-raised); border-radius: var(--radius-sm); padding: 8px 10px; color: var(--text-primary); font-family: inherit; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; }
-.primary { background: var(--accent-primary); color: var(--text-on-accent); border: 0; padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; font-weight: var(--weight-semibold); }
-.ghost { background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; }
 .status { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-xs); }
 </style>

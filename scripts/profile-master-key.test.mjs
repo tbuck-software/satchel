@@ -8,10 +8,16 @@ const vectors = JSON.parse(readFileSync(new URL('../tests/fixtures/profile-keyri
 const key = Buffer.alloc(32, 7).toString('base64');
 const oldKey = Buffer.alloc(32, 9).toString('base64');
 
+/** @param {number} status @returns {import('node:child_process').SpawnSyncReturns<string>} */
 function commandResult(status, stdout = '', stderr = '') {
   return { status, stdout, stderr, pid: 0, output: [null, stdout, stderr], signal: null };
 }
 
+/**
+ * @typedef {import('./profile-master-key.mjs').SecurityRunner} SecurityRunner
+ * @typedef {{ source: string, destination: string, store: Map<string, string>, run: import('vitest').Mock<SecurityRunner> }} Fixture
+ * @param {(fixture: Fixture) => void} test
+ */
 function fixture(test) {
   const root = mkdtempSync(join(tmpdir(), 'satchel-key-test-'));
   const source = join(root, 'stable');
@@ -19,9 +25,9 @@ function fixture(test) {
   mkdirSync(source);
   mkdirSync(destination);
   const store = new Map([[profileKeyringAccount(source), key]]);
-  const run = vi.fn((_command, args, options) => {
+  const run = vi.fn(/** @type {SecurityRunner} */ ((_command, args, options) => {
     if (args[0] === '-i') {
-      const match = options.input.match(/^add-generic-password -U -s satchel -a (\S+) -w (\S+)\n$/);
+      const match = String(options.input).match(/^add-generic-password -U -s satchel -a (\S+) -w (\S+)\n$/);
       expect(match).not.toBeNull();
       store.set(match[1], match[2]);
       return commandResult(0);
@@ -31,7 +37,7 @@ function fixture(test) {
       return commandResult(store.delete(account) ? 0 : 44);
     }
     return store.has(account) ? commandResult(0, `${store.get(account)}\n`) : commandResult(44);
-  });
+  }));
   try { test({ source, destination, store, run }); } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
@@ -58,7 +64,7 @@ describe('profile master keys', () => {
     expect(existsSync(join(destination, 'pgp-master-key-v1'))).toBe(false);
     for (const [, args, options] of run.mock.calls) {
       expect(args.join(' ')).not.toContain(key);
-      expect(options.stdio.slice(1)).toEqual(['pipe', 'pipe']);
+      expect((Array.isArray(options.stdio) ? options.stdio.slice(1) : options.stdio)).toEqual(['pipe', 'pipe']);
     }
   }));
 
@@ -121,8 +127,10 @@ describe('profile master keys', () => {
     expect(() => copyProfileMasterKey(source, destination, { run })).toThrow('No master key found');
     expect(() => copyProfileMasterKey(source, destination, { run: () => commandResult(1, '', key) })).toThrow('Could not read');
     store.set(profileKeyringAccount(source), key);
+    /** @type {SecurityRunner} */
     const failingWrite = (command, args, options) => args[0] === '-i' ? commandResult(1, '', key) : run(command, args, options);
     expect(() => copyProfileMasterKey(source, destination, { run: failingWrite })).toThrow('Could not verify');
+    /** @type {SecurityRunner} */
     const mismatch = (command, args, options) => args[0] === '-i' ? commandResult(0, '', key) : run(command, args, options);
     expect(() => copyProfileMasterKey(source, destination, { run: mismatch })).toThrow('Could not verify');
     expect(existsSync(join(destination, 'pgp-master-key-v1'))).toBe(false);

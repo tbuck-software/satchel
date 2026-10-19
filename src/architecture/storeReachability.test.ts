@@ -27,31 +27,8 @@ const MODULE_ROOT = join(STORE_ROOT, 'threads');
  * Methods without a caller today. Each one is a decision someone still owes:
  * wire it up because the UI needs it, or delete it because nobody wants it.
  */
-const KNOWN_UNREACHED: { method: string; reason: string }[] = [
-  {
-    method: 'setSelection',
-    reason: 'Selection is driven by selectFromInteraction/toggleSelectionForThread.',
-  },
-  {
-    method: 'clearContact',
-    reason: 'The contact pane closes by opening another scope, never explicitly.',
-  },
-  {
-    method: 'setWorkflowState',
-    reason: 'PERF-02 moved the UI onto the batch applyWorkflowStates.',
-  },
-  {
-    method: 'addLocalOutgoingThread',
-    reason: 'Local echo for a send path the composer no longer takes.',
-  },
-  {
-    method: 'setSenderPriority',
-    reason: 'The filing menu calls setSenderPriorityByEmail.',
-  },
-];
-
-// Only ever lower this. See KNOWN_UNREACHED.
-const MAX_KNOWN_UNREACHED = 5;
+const KNOWN_UNREACHED: { method: string; reason: string }[] = [];
+const MAX_KNOWN_UNREACHED = 0;
 
 interface ReachabilityInput {
   /** The façade whose returned object is the store's public surface. */

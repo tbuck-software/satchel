@@ -37,6 +37,7 @@ describe('install-mac script', () => {
     // The running app is quit before the backup, so the SQLite backup API
     // never reads a database that is being written concurrently.
     expect(installerCall('quitRunningApp();', 1)).toBeLessThan(backupAt);
+    /** @param {string} needle @param {number} occurrence */
     function installerCall(needle, occurrence) {
       let index = -1;
       for (let i = 0; i < occurrence; i += 1) {

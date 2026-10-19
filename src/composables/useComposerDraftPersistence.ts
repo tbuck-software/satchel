@@ -3,12 +3,11 @@ import {
   ref,
   watch,
   type Ref,
-  type WatchSource,
 } from 'vue';
 import type { BackendDraft, BackendDraftInput } from '@/types/composer';
 import { backendErrorKey, translateBackendError } from '@/utils/backendErrors';
 import { createCoalescingRunner } from '@/utils/coalescingRunner';
-import { normalizeVisibleText } from '@/utils/composerNormalization';
+import { composerDraftInputSnapshot, hasMeaningfulComposerContent } from '@/utils/composerDraftState';
 
 export type ComposerStatusTone = 'info' | 'success' | 'warning' | 'error';
 
@@ -40,7 +39,6 @@ export interface ComposerDraftPersistenceOptions {
   initialized: Ref<boolean>;
   sending: Ref<boolean>;
   status: Ref<ComposerStatus | null>;
-  trackedSources: WatchSource<unknown>[];
   buildInput: () => Omit<BackendDraftInput, 'id' | 'expectedRevision'> | null;
   drafts: ComposerDraftPersistenceAdapter;
   t: ComposerDraftTranslator;
@@ -98,7 +96,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
 
   const runner = createCoalescingRunner(saveOnce, () => dirty.value);
 
-  watch(options.trackedSources, () => {
+  watch(() => composerDraftInputSnapshot(options.buildInput()), () => {
     if (!options.initialized.value) return;
     revision += 1;
     dirty.value = true;
@@ -107,10 +105,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
   function isEmptyNewDraft(input: Omit<BackendDraftInput, 'id' | 'expectedRevision'>) {
     return (
       !draftId.value
-      && (input.to?.length ?? 0) === 0
-      && !normalizeVisibleText(input.subject ?? '')
-      && !normalizeVisibleText(input.body ?? '')
-      && (input.attachments?.length ?? 0) === 0
+      && !hasMeaningfulComposerContent(input)
     );
   }
 

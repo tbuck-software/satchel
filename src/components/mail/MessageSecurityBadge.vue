@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconButton from '@/components/ui/IconButton.vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { PgpIndicatorState, SmimeIndicatorState } from '@/types/mail';
@@ -93,9 +94,8 @@ const badge = computed<{ glyph: Glyph; mark: Mark; tone: Tone; label: string } |
 </script>
 
 <template>
-  <button
+  <IconButton
     v-if="badge"
-    type="button"
     class="security-badge"
     :class="`security-badge--${badge.tone}`"
     aria-haspopup="dialog"
@@ -114,7 +114,7 @@ const badge = computed<{ glyph: Glyph; mark: Mark; tone: Tone; label: string } |
       <path v-else-if="badge.mark === 'cross'" d="m7.2 7.2 5.6 5.6m0-5.6-5.6 5.6" />
       <path v-else d="M10 7.1v4m0 2.2h.01" />
     </svg>
-  </button>
+  </IconButton>
 </template>
 
 <style scoped>

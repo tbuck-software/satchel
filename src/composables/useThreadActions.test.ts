@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const trashMock = vi.fn();
 const readMock = vi.fn();
 const moveMock = vi.fn();
+const undoTrashMock = vi.fn();
 const blockMock = vi.fn();
 const starMock = vi.fn((threadIds: string[], starred: boolean) => {
   for (const thread of threadState.threads) {
@@ -43,7 +44,6 @@ const threadState = {
   clearSelection: vi.fn(),
   focusNeighborThread: vi.fn(),
   setWorkflowState: setWorkflowStateMock,
-  persistWorkflowState: vi.fn(async (id: string, state: string, wake?: string) => setWorkflowStateMock(id, state, wake)),
   applyWorkflowStates: applyWorkflowStatesMock,
   markRead: markReadMock,
   load: loadThreadsMock,
@@ -81,6 +81,7 @@ const toasts: Array<{
 vi.mock('@/services/backend', () => ({
   backendBlockSender: (...args: unknown[]) => blockMock(...args),
   backendMoveThreadsToFolder: (...args: unknown[]) => moveMock(...args),
+  backendUndoTrash: (...args: unknown[]) => undoTrashMock(...args),
   backendCommandsAvailable: () => true,
   backendSupportsNativeCommands: () => true,
 }));
@@ -150,18 +151,19 @@ async function runGroupedUndo() {
 
 describe('useThreadActions', () => {
   beforeEach(() => {
+    undoTrashMock.mockReset();
     setActivePinia(createPinia());
     toasts.length = 0;
     for (const mock of [trashMock, moveMock, blockMock, transitionMock, transitionManyMock, loadThreadsMock, refreshHeadMock, loadMailboxesMock]) {
       mock.mockReset();
       mock.mockResolvedValue(undefined);
     }
+    trashMock.mockResolvedValue({ undo_token: 'receipt-1', undo_thread_ids: ['thread-1'], permanently_deleted: [] });
     // `transition` reports whether the backend accepted the change;
     // `transitionMany` reports the ids it actually changed.
     transitionMock.mockResolvedValue(true);
     transitionManyMock.mockImplementation(async (threadIds: string[]) => [...threadIds]);
     threadState.ensureThreadLoaded.mockReset();
-    threadState.persistWorkflowState.mockClear();
     threadState.clearSelection.mockReset();
     threadState.focusNeighborThread.mockReset();
     // Keeps its store-like implementation; mockReset would drop it.
@@ -362,7 +364,7 @@ describe('useThreadActions', () => {
     expect(toasts.at(-1)?.message).toContain('waiting for a reply');
   });
 
-  it('offers undo after trashing and moves threads back to the inbox folder', async () => {
+  it('offers undo using the backend receipt after trashing', async () => {
     const actions = useThreadActions();
 
     await actions.trash(['thread-1']);
@@ -374,19 +376,37 @@ describe('useThreadActions', () => {
 
     toast!.action!.handler();
     await vi.waitFor(() =>
-      expect(moveMock).toHaveBeenCalledWith({ threadIds: ['thread-1'], targetFolderId: 'folder-inbox' }),
+      expect(undoTrashMock).toHaveBeenCalledWith('receipt-1'),
     );
   });
 
-  it('restores the wake time after undoing trash', async () => {
+  it('leaves workflow restoration to the backend receipt', async () => {
     const wake = '2026-10-10T07:30:00Z';
     threadState.threads = [seedThread({ workflowState: 'snoozed', snoozeUntil: wake })];
     const actions = useThreadActions();
     await actions.trash(['thread-1']);
-    toasts.at(-1)!.action!.handler();
-    await vi.waitFor(() => expect(threadState.persistWorkflowState).toHaveBeenCalledWith(
-      'thread-1', 'snoozed', wake,
-    ));
+    await toasts.at(-1)!.action!.handler();
+    expect(undoTrashMock).toHaveBeenCalledWith('receipt-1');
+    expect(moveMock).not.toHaveBeenCalled();
+    expect(transitionMock).not.toHaveBeenCalled();
+  });
+
+  it('offers no undo for permanent deletion', async () => {
+    trashMock.mockResolvedValueOnce({ undo_token: null, undo_thread_ids: [], permanently_deleted: ['thread-1'] });
+    await useThreadActions().trash(['thread-1']);
+    expect(toasts.at(-1)?.action).toBeUndefined();
+  });
+
+  it('separates permanent deletion from the undoable part of a mixed batch', async () => {
+    threadState.threads.push(seedThread({ id: 'permanent' }));
+    trashMock.mockResolvedValueOnce({ undo_token: 'receipt-1', undo_thread_ids: ['thread-1'], permanently_deleted: ['permanent'] });
+    await useThreadActions().trash(['thread-1', 'permanent']);
+    expect(toasts).toHaveLength(2);
+    expect(toasts[0]?.message).toContain('permanently deleted');
+    expect(toasts[0]?.action).toBeUndefined();
+    expect(toasts[1]?.action?.label).toBe('Undo');
+    await toasts[1]!.action!.handler();
+    expect(undoTrashMock).toHaveBeenCalledWith('receipt-1');
   });
 
   it('moves folders through the remote-first action and refreshes both projections', async () => {
@@ -439,7 +459,7 @@ describe('useThreadActions', () => {
     expect(threadState.focusNeighborThread).not.toHaveBeenCalled();
   });
 
-  it('does not offer a dead undo when no inbox folder is known', async () => {
+  it('uses the backend receipt even when no inbox folder is loaded', async () => {
     mailboxState.mailboxes = [];
     const actions = useThreadActions();
 
@@ -447,7 +467,7 @@ describe('useThreadActions', () => {
 
     const toast = toasts.at(-1);
     expect(toast?.message).toContain('deleted');
-    expect(toast?.action).toBeUndefined();
+    expect(toast?.action?.label).toBe('Undo');
   });
 
   it('surfaces a failed trash instead of claiming success', async () => {

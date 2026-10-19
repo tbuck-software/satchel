@@ -219,7 +219,9 @@ async fn ensure_drafts_folder(
     if let Some(id) = existing {
         return Ok(id);
     }
-    let id = crate::db::folders::folder_db_id(account_id, "Drafts");
+    let id = crate::db::folders::resolve_provider_folder_id(&mut *connection, account_id, "Drafts")
+        .await
+        .map_err(|err| err.to_string())?;
     sqlx::query(
         "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, message_count, unread_count, sync_enabled, sort_order, created_at, updated_at)
          VALUES (?, ?, 'Drafts', 'Drafts', 'drafts', 'Drafts', NULL, 0, 0, 1, 0, ?, ?)
@@ -1257,6 +1259,32 @@ mod tests {
                     ('B', 'B', 'b@example.test', 'imap', '{}', '', '2026-01-01', '2026-01-01');",
         ).execute(&pool).await.expect("accounts");
         pool
+    }
+
+    #[tokio::test]
+    async fn draft_fallback_preserves_an_exact_remote_folder_with_a_legacy_id() {
+        let pool = draft_test_pool().await;
+        sqlx::query("INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, created_at, updated_at) VALUES ('drafts-legacy', 'A', 'Drafts', 'Drafts', 'Drafts', 'custom', '', '')").execute(&pool).await.unwrap();
+        let (draft, _) = save(
+            &pool,
+            &crate::sync::queue::SyncQueue::new(),
+            &draft_input("A", "Body"),
+        )
+        .await
+        .unwrap();
+        let folder: String = sqlx::query_scalar("SELECT folder_id FROM messages WHERE id = ?")
+            .bind(&draft.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(folder, "drafts-legacy");
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM folders WHERE account_id = 'A'")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            1
+        );
     }
 
     #[tokio::test]

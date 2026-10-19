@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useUiStore } from '@/stores/ui';
@@ -199,8 +200,7 @@ async function discardDraft(id: string) {
                   'row--active': draft.id === selectedId,
                 }"
               >
-                <button
-                  type="button"
+                <CardButton
                   class="row__open"
                   @click="selectedId = draft.id"
                   @dblclick="composer.openDraft(draft.id)"
@@ -262,7 +262,7 @@ async function discardDraft(id: string) {
                       </svg>
                     </span>
                   </span>
-                </button>
+                </CardButton>
 
                 <div class="row__actions">
                   <IconButton

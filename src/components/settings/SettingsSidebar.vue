@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NavItem from '@/components/ui/NavItem.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
@@ -102,18 +103,17 @@ function isHighlighted(section: SettingsSection): boolean {
       <h3>{{ group.title }}</h3>
       <ul>
         <li v-for="section in group.items" :key="section.id">
-          <button
-            type="button"
-            :class="{ active: activeSection === section.id, highlighted: isHighlighted(section.id) }"
+          <NavItem :label="section.label" :active="activeSection === section.id"
+            :class="{ highlighted: isHighlighted(section.id) }"
             :aria-current="activeSection === section.id ? 'page' : undefined"
             @click="selectSection(section.id)"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" v-html="settingsSectionIcons[section.id]" />
+            <template #icon><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" v-html="settingsSectionIcons[section.id]" /></template>
             <span class="settings-sidebar__copy">
               <span>{{ section.label }}</span>
               <small v-if="section.hint">{{ section.hint }}</small>
             </span>
-          </button>
+          </NavItem>
         </li>
       </ul>
     </template>
@@ -157,44 +157,7 @@ ul {
   list-style: none;
 }
 
-button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 36px;
-  padding: 8px 11px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: var(--font-size-sm);
-  font-weight: var(--weight-medium);
-  text-align: left;
-  cursor: pointer;
-}
-
-button:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-button.active {
-  background: var(--bg-active);
-  color: var(--text-primary);
-  font-weight: var(--weight-semibold);
-}
-
-button.highlighted {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-button svg {
-  flex: 0 0 auto;
-  opacity: 0.65;
-}
+.highlighted { background: var(--bg-hover); }
 
 .settings-sidebar__copy {
   display: grid;
@@ -260,11 +223,6 @@ button svg {
   margin: 8px 12px;
   color: var(--text-tertiary);
   font-size: var(--font-size-sm);
-}
-
-button.active svg {
-  color: var(--accent-primary);
-  opacity: 1;
 }
 
 @media (max-width: 1020px) {

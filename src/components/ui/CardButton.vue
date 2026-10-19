@@ -41,19 +41,26 @@ defineEmits<{
 </template>
 
 <style scoped>
-.card-button {
-  display: flex;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
+/* Caller utilities own layout and appearance; keep the reset below them. */
+@layer components {
+  .card-button {
+    display: flex;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
 
-.card-button:disabled {
-  cursor: progress;
+  .card-button:disabled {
+    cursor: default;
+  }
+
+  .card-button[aria-busy='true'] {
+    cursor: progress;
+  }
 }
 </style>

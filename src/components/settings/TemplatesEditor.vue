@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useTemplatesStore } from '@/stores/templates';
@@ -134,13 +136,13 @@ function parseAttachmentsJson(value?: string | null): BackendOutgoingAttachment[
 
     <ul v-if="templatesStore.items.length > 0" class="list">
       <li v-for="tpl in templatesStore.items" :key="tpl.id">
-        <button type="button" class="row" @click="edit(tpl.id)">
+        <CardButton class="row" @click="edit(tpl.id)">
           <span class="name">{{ tpl.name }}</span>
           <span v-if="tpl.shortcut" class="shortcut">{{ tpl.shortcut }}</span>
           <span v-if="tpl.subject" class="subject">{{ tpl.subject }}</span>
           <span class="preview">{{ tpl.body_text.slice(0, 80) }}</span>
-        </button>
-        <button type="button" class="delete" @click="remove(tpl.id)">{{ $t('common.delete') }}</button>
+        </CardButton>
+        <AppButton class="delete" @click="remove(tpl.id)" variant="danger" size="sm">{{ $t('common.delete') }}</AppButton>
       </li>
     </ul>
     <p v-else class="empty">{{ $t('settings.templates.empty') }}</p>
@@ -168,8 +170,8 @@ function parseAttachmentsJson(value?: string | null): BackendOutgoingAttachment[
       <AttachmentDropZone v-model="attachments" />
 
       <div class="actions">
-        <button v-if="editingId" type="button" class="ghost" @click="reset">{{ $t('common.cancel') }}</button>
-        <button type="button" class="primary" @click="save">{{ $t('common.save') }}</button>
+        <AppButton v-if="editingId" class="ghost" @click="reset" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
+        <AppButton class="primary" @click="save" variant="primary" size="sm">{{ $t('common.save') }}</AppButton>
       </div>
       <p v-if="status" class="status">{{ status }}</p>
     </div>
@@ -255,15 +257,6 @@ code {
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
 }
-.delete {
-  background: transparent;
-  border: 1px solid var(--border-color-muted);
-  color: var(--text-secondary);
-  border-radius: var(--radius-sm);
-  padding: 0 12px;
-  font-size: var(--font-size-xs);
-  cursor: pointer;
-}
 .empty {
   color: var(--text-tertiary);
   font-size: var(--font-size-sm);
@@ -281,23 +274,6 @@ code {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-.primary {
-  background: var(--accent-primary);
-  color: var(--text-on-accent);
-  border: 0;
-  padding: 8px 16px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-weight: var(--weight-semibold);
-}
-.ghost {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  padding: 8px 16px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
 }
 .status {
   margin: 0;

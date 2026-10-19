@@ -5,8 +5,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+/** @typedef {import('./render-types.mjs').Attachment} Attachment */
+/** @typedef {import('./render-types.mjs').MailAccount} MailAccount */
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+/**
+ * @param {string} name
+ * @param {string | null} [fallback]
+ */
 function argValue(name, fallback = null) {
   const index = process.argv.indexOf(name);
   if (index < 0) return fallback;
@@ -30,19 +36,33 @@ if (!messageId) {
   process.exit(1);
 }
 
+/**
+ * @param {unknown} value
+ */
 function sqlString(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
+/**
+ * @param {string} sql
+ * @template T
+ * @returns {T[]}
+ */
 function query(sql) {
   const raw = execFileSync('sqlite3', ['-json', dbPath, sql], { encoding: 'utf8' }).trim();
   return raw ? JSON.parse(raw) : [];
 }
 
+/**
+ * @param {string} sql
+ */
 function execute(sql) {
   execFileSync('sqlite3', [dbPath, sql], { encoding: 'utf8' });
 }
 
+/**
+ * @param {unknown} value
+ */
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -51,10 +71,16 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;');
 }
 
+/**
+ * @param {unknown} value
+ */
 function cleanCid(value) {
   return String(value ?? '').trim().replace(/^cid:/i, '').replace(/^<|>$/g, '').trim();
 }
 
+/**
+ * @param {string} value
+ */
 function percentEncodeCid(value) {
   return Buffer.from(value)
     .toString('utf8')
@@ -67,7 +93,11 @@ function percentEncodeCid(value) {
     .join('');
 }
 
+/**
+ * @param {Attachment} attachment
+ */
 function candidatesForAttachment(attachment) {
+  /** @type {string[]} */
   const values = [];
   for (const raw of [attachment.content_id, attachment.filename]) {
     const cleaned = cleanCid(raw);
@@ -79,15 +109,27 @@ function candidatesForAttachment(attachment) {
   return values;
 }
 
+/**
+ * @param {string} input
+ * @param {string} needle
+ * @param {string} replacement
+ */
 function replaceAllCaseInsensitive(input, needle, replacement) {
   return input.replace(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), replacement);
 }
 
+/**
+ * @param {unknown} value
+ */
 function safeFilename(value) {
   const sanitized = String(value || 'inline-image').replace(/[^A-Za-z0-9._-]/g, '_');
   return sanitized.replace(/^_+|_+$/g, '') || 'inline-image';
 }
 
+/**
+ * @param {Attachment} attachment
+ * @param {MailAccount} account
+ */
 async function attachmentBytes(attachment, account) {
   if (attachment.cached_path && existsSync(attachment.cached_path)) {
     return readFileSync(attachment.cached_path);
@@ -127,6 +169,7 @@ async function attachmentBytes(attachment, account) {
   return bytes;
 }
 
+/** @type {import('./render-types.mjs').MailMessage[]} */
 const [message] = query(`
   SELECT m.id, m.subject, m.from_address, m.from_name, m.date, m.body_text, m.body_html,
          m.remote_id AS message_remote_id, acc.provider, acc.config
@@ -141,6 +184,7 @@ if (!message) {
   process.exit(1);
 }
 
+/** @type {Attachment[]} */
 const attachments = query(`
   SELECT a.id, a.filename, a.content_type, a.content_id, a.cached_path,
          COALESCE(a.remote_uid, ${sqlString(message.message_remote_id)}) AS remote_uid,

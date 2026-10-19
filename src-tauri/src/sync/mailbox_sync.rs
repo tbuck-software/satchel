@@ -32,9 +32,7 @@ use crate::sync::leases::acquire_mobile_mailbox_work_permit;
 use crate::sync::leases::sync_run_lock;
 #[cfg(target_os = "android")]
 use crate::sync::leases::CrossProcessSyncLease;
-use crate::sync::message_ingest::{
-    replay_ingest_effects, upsert_provider_messages, PendingFlagLocks,
-};
+use crate::sync::message_ingest::{replay_ingest_effects, upsert_provider_messages};
 use crate::sync::outlook_migration::migrate_outlook_remote_ids;
 use crate::sync::queue::{QueuedAction, SyncQueue};
 use crate::sync::remote_mutations::{RemoteMutationPayload, ACTION_REMOTE_MUTATION};
@@ -268,7 +266,6 @@ async fn ingest_messages_into_folder(
     folder_type: &str,
     messages: &[MessageEnvelope],
     quarantine: &FolderQuarantine,
-    flag_locks: &PendingFlagLocks,
     outcome: &mut FolderIngestOutcome,
 ) -> Result<(), String> {
     let account = context.account;
@@ -284,7 +281,6 @@ async fn ingest_messages_into_folder(
         folder_remote_id,
         folder_type,
         messages,
-        flag_locks,
         context.events,
         account.ingest_cutoff.as_deref(),
     )
@@ -328,7 +324,6 @@ async fn ingest_folder_batch(
         .load_folder(&account.id, context.folder_id)
         .await
         .map_err(|error| error.to_string())?;
-    let flag_locks = PendingFlagLocks::load(pool, &account.id).await?;
     let mut outcome = FolderIngestOutcome::default();
     let mut primary = Vec::new();
     let mut archive = Vec::new();
@@ -365,7 +360,6 @@ async fn ingest_folder_batch(
             "archive",
             &archive,
             &quarantine,
-            &flag_locks,
             &mut outcome,
         )
         .await?;
@@ -378,7 +372,6 @@ async fn ingest_folder_batch(
         context.folder_type,
         &primary,
         &quarantine,
-        &flag_locks,
         &mut outcome,
     )
     .await?;
@@ -678,7 +671,7 @@ pub(crate) async fn sync_mailboxes(
 
             let total_folders = folders.len();
             for (folder_index, folder) in folders.into_iter().enumerate() {
-                let folder_id = match satchel_core::db::folders::adopt_derived_folder_id(
+                let folder_id = match satchel_core::db::folders::resolve_provider_folder_id(
                     pool,
                     &account.id,
                     &folder.id,

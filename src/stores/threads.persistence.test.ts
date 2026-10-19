@@ -4,9 +4,12 @@ import {
   backendGetSenderPreference,
   backendListThreads,
   backendSetThreadTags,
+  backendTrashThreads,
+  backendDismissMobileNotifications,
   backendUpdateThreadOrganization,
 } from '@/services/backend';
 import { useThreadsStore } from './threads';
+import { useMailboxesStore } from './mailboxes';
 
 vi.mock('@/services/backend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/backend')>();
@@ -15,6 +18,8 @@ vi.mock('@/services/backend', async (importOriginal) => {
     backendGetSenderPreference: vi.fn(),
     backendListThreads: vi.fn(),
     backendSetThreadTags: vi.fn(),
+    backendTrashThreads: vi.fn(),
+    backendDismissMobileNotifications: vi.fn(),
     backendUpdateThreadOrganization: vi.fn(),
   };
 });
@@ -58,6 +63,18 @@ describe('thread organization persistence', () => {
     getSenderPreferenceMock.mockReset();
     setTagsMock.mockReset().mockResolvedValue();
     updateOrganizationMock.mockReset().mockResolvedValue();
+  });
+
+  it('preserves the committed trash receipt when refreshing mailboxes fails', async () => {
+    const receipt = { undo_token: 'receipt', undo_thread_ids: ['thread-persisted'], permanently_deleted: [] };
+    vi.mocked(backendTrashThreads).mockResolvedValueOnce(receipt);
+    vi.mocked(backendDismissMobileNotifications).mockResolvedValueOnce();
+    const store = useThreadsStore();
+    await store.load();
+    listThreadsMock.mockResolvedValueOnce({ threads: [], next_cursor: null, has_more: false });
+    vi.spyOn(useMailboxesStore(), 'load').mockRejectedValueOnce(new Error('mailboxes unavailable'));
+    await expect(store.trashThreads(['thread-persisted'])).resolves.toEqual(receipt);
+    expect(store.find('thread-persisted')).toBeUndefined();
   });
 
   it('hydrates persisted metadata from the backend DTO', async () => {

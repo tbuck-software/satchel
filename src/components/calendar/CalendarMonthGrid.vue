@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed } from 'vue';
 import {
   isSameDay,
@@ -73,14 +75,13 @@ function createOn(day: Date, event: MouseEvent) {
         role="gridcell"
         @click.self="createOn(cell.day, $event)"
       >
-        <button
-          type="button"
+        <CardButton
           class="month__daynum"
           :title="$t('calendar.view.openDay')"
           @click="emit('openDay', cell.day)"
         >
           {{ cell.day.getDate() }}
-        </button>
+        </CardButton>
         <div class="month__events" @click.self="createOn(cell.day, $event)">
           <CalendarEventChip
             v-for="item in cell.visible"
@@ -89,14 +90,15 @@ function createOn(day: Date, event: MouseEvent) {
             :show-time="!item.allDay && isSameDay(item.start, cell.day)"
             @select="(item, anchor) => emit('select', item, anchor)"
           />
-          <button
+          <AppButton
             v-if="cell.overflow > 0"
-            type="button"
             class="month__more"
             @click="emit('openDay', cell.day)"
+            variant="ghost"
+            size="sm"
           >
             {{ $t('calendar.more', { count: cell.overflow }) }}
-          </button>
+          </AppButton>
         </div>
       </div>
     </div>

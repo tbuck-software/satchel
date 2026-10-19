@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { BackendOutgoingAttachment } from '@/types/composer';
@@ -167,8 +168,6 @@ function moveToAttachment(index: number) {
   emit('move-to-attachment', attachment);
 }
 
-
-
 defineExpose({ openPicker: onPick });
 </script>
 
@@ -183,30 +182,32 @@ defineExpose({ openPicker: onPick });
   >
     <div v-if="visibleAttachments.length === 0" class="empty">
       <span>{{ $t('mail.attachment.dropHere') }}</span>
-      <button type="button" class="link" @click="onPick">{{ $t('mail.attachment.chooseFile') }}</button>
+      <AppButton class="link" @click="onPick" variant="link" size="sm">{{ $t('mail.attachment.chooseFile') }}</AppButton>
     </div>
     <div v-else class="list">
       <div v-for="entry in visibleAttachments" :key="entry.index" class="item">
         <span class="name">{{ entry.attachment.filename }}</span>
         <span class="size">{{ formatBytes(encodedSize(entry.attachment)) }}</span>
         <span v-if="entry.attachment.inline" class="mode">{{ $t('mail.attachment.inline') }}</span>
-        <button
+        <AppButton
           v-if="props.inlineEnabled && entry.attachment.inline"
-          type="button"
           class="inline"
           :title="$t('mail.attachment.useAsAttachment')"
           @click="moveToAttachment(entry.index)"
-        >{{ $t('mail.attachment.attachment') }}</button>
-        <button
+          variant="link"
+          size="sm"
+        >{{ $t('mail.attachment.attachment') }}</AppButton>
+        <AppButton
           v-else-if="props.inlineEnabled && entry.attachment.mime_type.startsWith('image/')"
-          type="button"
           class="inline"
           :title="$t('mail.attachment.insertAtCursor')"
           @click="moveInline(entry.index)"
-        >{{ $t('mail.attachment.inline') }}</button>
-        <button type="button" class="remove" @click="remove(entry.index)">{{ $t('common.remove') }}</button>
+          variant="link"
+          size="sm"
+        >{{ $t('mail.attachment.inline') }}</AppButton>
+        <AppButton class="remove" @click="remove(entry.index)" variant="link" size="sm">{{ $t('common.remove') }}</AppButton>
       </div>
-      <button type="button" class="add" @click="onPick">{{ $t('mail.attachment.moreFiles') }}</button>
+      <AppButton class="add" @click="onPick" variant="link" size="sm">{{ $t('mail.attachment.moreFiles') }}</AppButton>
     </div>
     <p v-if="errorText" class="error">{{ errorText }}</p>
     <input ref="fileInput" type="file" multiple style="display: none" @change="onChange" />
@@ -233,15 +234,6 @@ defineExpose({ openPicker: onPick });
   gap: 6px;
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
-}
-
-.link {
-  background: transparent;
-  border: 0;
-  color: var(--accent-primary);
-  cursor: pointer;
-  font-size: inherit;
-  padding: 0;
 }
 
 .list {
@@ -282,43 +274,7 @@ defineExpose({ openPicker: onPick });
   padding: 0 7px;
 }
 
-.remove {
-  background: transparent;
-  border: 0;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: var(--font-size-xs);
-}
-.inline {
-  border: 0;
-  border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
-  color: var(--accent-primary);
-  cursor: pointer;
-  font-size: var(--font-size-xs);
-  padding: 4px 7px;
-}
-.inline:hover {
-  background: color-mix(in srgb, var(--accent-primary) 20%, transparent);
-}
-.remove:hover {
-  color: var(--accent-red);
-}
-
-.add {
-  background: transparent;
-  border: 1px dashed var(--border-color);
-  color: var(--text-secondary);
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  align-self: flex-start;
-}
-.add:hover {
-  color: var(--text-primary);
-  border-color: var(--text-secondary);
-}
+.add { align-self:flex-start; }
 
 .error {
   margin: 6px 0 0;

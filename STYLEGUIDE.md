@@ -428,7 +428,7 @@ Reusable building blocks — use these instead of hand-rolled buttons/rows:
 | `NavItem`           | Sidebar/tree row: icon or avatar, label, count. Active = a raised sheet (`--bg-surface` + `--shadow-sm`), not an accent pill. Pass `pressed` and the row becomes a toggle that says so. Grows to a 48px touch target below 1020px |
 | `IconButton`        | Icon-only button, sizes sm/md/lg, tones default/accent/danger/warning |
 | `AppIcon`           | The frame for a stroke icon: 16 viewBox, stroke 1.5, round caps, `aria-hidden`. Sizes sm 14 / md 16 / lg 20; `grid="20"` or `"24"` for a glyph drawn on a larger grid. The glyph is the slot |
-| `AppButton`         | Pill text button, variants primary/soft/secondary/ghost/danger, sizes sm/md. `type="submit"` for the button that carries a form's Enter key |
+| `AppButton`         | Text action, pill variants primary/soft/secondary/ghost/danger and inline variant link, sizes sm/md. `type="submit"` for the button that carries a form's Enter key |
 | `CardButton`        | A button that is a *region* — an attachment card, a row, a tile. Contributes the reset and the behaviour, no padding, fill, radius or border: the look stays with the caller |
 | `FilterPill`        | One pill in a filter strip: pressed state, optional identity dot and count. `pressed`, not `active` — a strip is a set of toggles |
 | `SearchField`       | Search entry in the sidebar or mobile list. A button shaped like a field that opens the shared omni search |
@@ -511,6 +511,7 @@ icons, and are listed as such.
 ### Buttons
 - **Primary:** `AppButton variant="primary"` — accent-primary pill, `--text-on-accent`, hover `--accent-primary-hover`
 - **Soft:** `AppButton variant="soft"` — `--bg-raised` pill (e.g. "Antworten", "Weiterleiten")
+- **Inline:** `AppButton variant="link"` inherits the surrounding text metrics for actions inside a sentence or identity.
 - **Ghost/Tool:** `IconButton` — transparent, hover → `--bg-hover`
 - **Danger:** `--accent-red` on hover/active states
 

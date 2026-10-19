@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useToast } from '@/composables/useToast';
@@ -36,10 +37,10 @@ async function unsubscribe() {
   <aside v-if="!dismissed" class="unsub">
     <span>{{ $t('mail.unsubscribe.banner') }}</span>
     <div class="actions">
-      <button type="button" class="primary" :disabled="busy" @click="unsubscribe">
+      <AppButton class="primary" :disabled="busy" @click="unsubscribe" variant="primary" size="sm">
         {{ busy ? $t('mail.unsubscribe.sending') : $t('mail.unsubscribe.action') }}
-      </button>
-      <button type="button" class="ghost" @click="dismissed = true">{{ $t('common.close') }}</button>
+      </AppButton>
+      <AppButton class="ghost" @click="dismissed = true" variant="ghost" size="sm">{{ $t('common.close') }}</AppButton>
     </div>
   </aside>
 </template>
@@ -60,14 +61,4 @@ async function unsubscribe() {
   font-size: var(--font-size-sm);
 }
 .actions { display: flex; gap: 6px; }
-.primary {
-  background: var(--accent-primary); color: var(--text-on-accent); border: 0;
-  padding: 4px 12px; border-radius: var(--radius-sm); cursor: pointer;
-  font-size: var(--font-size-xs); font-weight: var(--weight-semibold);
-}
-.ghost {
-  background: transparent; border: 1px solid var(--border-color);
-  color: var(--text-secondary); padding: 4px 12px; border-radius: var(--radius-sm);
-  cursor: pointer; font-size: var(--font-size-xs);
-}
 </style>

@@ -5,9 +5,14 @@ import { pathToFileURL } from 'node:url';
 
 const directory = 'crates/satchel-core/src/db/migrations';
 
+/**
+ * @param {Record<string, string>} current
+ * @param {Record<string, string>} baseline
+ */
 export function migrationProblems(current, baseline) {
   const problems = [];
   const seen = new Map();
+  /** @param {string} name */
   const version = (name) => {
     const match = /^(\d+)_.*\.sql$/.exec(name);
     if (!match) throw new Error(`Invalid migration filename: ${name}`);
@@ -31,6 +36,7 @@ export function migrationProblems(current, baseline) {
 }
 
 export function checkMigrations(base = 'origin/main') {
+  /** @param {...string} args */
   const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
   const baseline = Object.fromEntries(
     git('ls-tree', '-r', '--name-only', base, directory).split('\n').filter(Boolean)

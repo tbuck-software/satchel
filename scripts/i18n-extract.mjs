@@ -15,6 +15,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { parse } from 'vue/compiler-sfc';
 
+/** @typedef {{ file: string, line: number, kind: string, text: string }} Finding */
+/** @typedef {NonNullable<NonNullable<import('vue/compiler-sfc').SFCDescriptor['template']>['ast']>} RootNode */
+/** @typedef {RootNode['children'][number]} TemplateChildNode */
+/** @typedef {RootNode | TemplateChildNode | Extract<TemplateChildNode, { type: 5 }>['content'] | Extract<TemplateChildNode, { type: 9 }>['branches'][number]} WalkNode */
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const allowlistPath = path.join(root, 'scripts', 'i18n-allowlist.json');
 
@@ -92,6 +96,9 @@ const GERMAN_WORD_RE = new RegExp(
 );
 const UMLAUT_RE = /[äöüÄÖÜß]/;
 
+/**
+ * @param {string} text
+ */
 export function looksGerman(text) {
   const value = text.trim();
   if (value.length < 3) return false;
@@ -100,6 +107,9 @@ export function looksGerman(text) {
 }
 
 /** Text without words — icons, separators, punctuation, class strings. */
+/**
+ * @param {string} text
+ */
 function isMeaningless(text) {
   const value = text.trim();
   if (!value) return true;
@@ -107,8 +117,10 @@ function isMeaningless(text) {
   return value.replace(/[^\p{L}]/gu, '').length < 2;
 }
 
+/** @returns {{ strings: Set<string>, files: string[] }} */
 function loadAllowlist() {
   if (!existsSync(allowlistPath)) return { strings: new Set(), files: [] };
+  /** @type {{ strings?: string[], files?: string[] }} */
   const parsed = JSON.parse(readFileSync(allowlistPath, 'utf8'));
   return {
     strings: new Set((parsed.strings ?? []).map((entry) => entry.trim())),
@@ -116,18 +128,29 @@ function loadAllowlist() {
   };
 }
 
+/**
+ * @param {string} source
+ * @param {number} offset
+ */
 function lineOf(source, offset) {
   return source.slice(0, offset).split('\n').length;
 }
 
+/** @param {WalkNode} node @param {(node: WalkNode) => void} visit */
 function walkTemplate(node, visit) {
   visit(node);
-  for (const child of node.children ?? []) {
+  for (const child of ('children' in node ? node.children : [])) {
     if (typeof child === 'object' && child !== null) walkTemplate(child, visit);
   }
-  for (const branch of node.branches ?? []) walkTemplate(branch, visit);
+  for (const branch of ('branches' in node ? node.branches : [])) walkTemplate(branch, visit);
 }
 
+/**
+ * @param {string} source
+ * @param {import('vue/compiler-sfc').SFCDescriptor} descriptor
+ * @param {Finding[]} findings
+ * @param {string} file
+ */
 function scanTemplate(source, descriptor, findings, file) {
   const template = descriptor.template;
   if (!template?.ast) return;
@@ -181,6 +204,13 @@ function scanTemplate(source, descriptor, findings, file) {
 
 const STRING_RE = /(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/g;
 
+/**
+ * @param {string} expression
+ * @param {number} offset
+ * @param {string} source
+ * @param {Finding[]} findings
+ * @param {string} file
+ */
 function scanTemplateExpression(expression, offset, source, findings, file) {
   for (const match of expression.matchAll(STRING_RE)) {
     const before = expression.slice(0, match.index).trimEnd();
@@ -205,12 +235,21 @@ const MESSAGE_KEY_RE = /^[a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)+$/;
  * Findings for one piece of script source. Exported so the rules can be tested
  * against fixtures instead of against whatever the tree happens to contain.
  */
+/**
+ * @param {string} source
+ */
 export function scriptFindings(source, file = 'src/fixture.ts') {
+  /** @type {Finding[]} */
   const findings = [];
   scanScript(source, findings, file);
   return findings;
 }
 
+/**
+ * @param {string} source
+ * @param {Finding[]} findings
+ * @param {string} file
+ */
 function scanScript(source, findings, file, offsetLine = 0) {
   let inBlockComment = false;
 
@@ -261,12 +300,20 @@ function scanScript(source, findings, file, offsetLine = 0) {
  * file-level allowlist cannot tell them apart from the strings around them.
  * Cutting them out keeps the check pointed at what it is for.
  */
+/**
+ * @param {string} source
+ */
 function withoutTestModules(source) {
   const start = source.search(/^#\[cfg\(test\)\]/m);
   return start === -1 ? source : source.slice(0, start);
 }
 
+/**
+ * @param {string} file
+ * @param {string} source
+ */
 export function scanFile(file, source) {
+  /** @type {Finding[]} */
   const findings = [];
   if (/\.(rs|kt)$/.test(file)) {
     scanScript(withoutTestModules(source), findings, file);
@@ -308,8 +355,10 @@ function main() {
     .filter((file) => !file.endsWith('.d.ts'))
     .filter((file) => !file.endsWith('.test.ts'))
     .filter((file) => !file.startsWith('src/i18n/'))
+    .filter((file) => existsSync(path.join(root, file)))
     .filter((file) => !allowlist.files.some((prefix) => file === prefix || file.startsWith(prefix)));
 
+  /** @type {Finding[]} */
   let findings = [];
   for (const file of files) {
     findings.push(...scanFile(file, readFileSync(path.join(root, file), 'utf8')));
@@ -334,6 +383,7 @@ function main() {
     return;
   }
 
+  /** @type {Map<string, Finding[]>} */
   const byFile = new Map();
   for (const entry of findings) {
     if (!byFile.has(entry.file)) byFile.set(entry.file, []);

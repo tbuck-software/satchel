@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Participant, SmimeDisplayState } from '@/types/mail';
@@ -176,17 +178,18 @@ watch(() => props.from.email, () => {
 </script>
 
 <template>
-  <button
+  <AppButton
     v-if="summary"
-    type="button"
     class="recipient-summary"
     aria-haspopup="dialog"
     :aria-expanded="open"
     @click="openDetails"
+    variant="link"
+    size="sm"
   >
     <span>{{ summary }}</span>
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6 3 3 3-3" /></svg>
-  </button>
+  </AppButton>
 
   <Teleport to="body">
     <BottomSheet
@@ -284,11 +287,11 @@ watch(() => props.from.email, () => {
             <h3>{{ $t('mail.security.route') }}</h3>
             <div class="message-route__row">
               <span class="message-route__label">{{ $t('common.from') }}</span>
-              <button type="button" class="recipient-person recipient-person--interactive" @click="openProfile(props.from)">
+              <CardButton class="recipient-person recipient-person--interactive" @click="openProfile(props.from)">
                 <Avatar :name="senderName" :email="props.from.email" :size="36" />
                 <div><strong>{{ senderName }}</strong><span>{{ props.from.email }}</span></div>
                 <svg class="recipient-person__chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
-              </button>
+              </CardButton>
             </div>
             <div v-if="distinctReplyTo" class="message-route__row">
               <span class="message-route__label">{{ $t('mail.recipients.replyTo') }}</span>
@@ -297,33 +300,31 @@ watch(() => props.from.email, () => {
             <div v-if="props.to.length > 0" class="message-route__row">
               <span class="message-route__label">{{ $t('common.to') }}</span>
               <div class="message-route__people">
-                <button
+                <CardButton
                   v-for="(recipient, index) in props.to"
                   :key="`to-${recipient.email}-${index}`"
-                  type="button"
                   class="recipient-person recipient-person--interactive"
                   @click="openProfile(recipient)"
                 >
                   <Avatar :name="personLabel(recipient)" :email="recipient.email" :size="36" />
                   <div><strong>{{ personLabel(recipient) }}</strong><span>{{ recipient.email }}</span></div>
                   <svg class="recipient-person__chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
-                </button>
+                </CardButton>
               </div>
             </div>
             <div v-if="props.cc.length > 0" class="message-route__row">
               <span class="message-route__label">{{ $t('common.cc') }}</span>
               <div class="message-route__people">
-                <button
+                <CardButton
                   v-for="(recipient, index) in props.cc"
                   :key="`cc-${recipient.email}-${index}`"
-                  type="button"
                   class="recipient-person recipient-person--interactive"
                   @click="openProfile(recipient)"
                 >
                   <Avatar :name="personLabel(recipient)" :email="recipient.email" :size="36" />
                   <div><strong>{{ personLabel(recipient) }}</strong><span>{{ recipient.email }}</span></div>
                   <svg class="recipient-person__chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
-                </button>
+                </CardButton>
               </div>
             </div>
           </section>
@@ -342,18 +343,7 @@ watch(() => props.from.email, () => {
 </template>
 
 <style scoped>
-.recipient-summary {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 2px;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  cursor: pointer;
-}
+.recipient-summary { min-width: 0; }
 
 .recipient-summary span {
   overflow: hidden;
@@ -370,15 +360,6 @@ watch(() => props.from.email, () => {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.5;
-}
-
-.recipient-summary:hover,
-.recipient-summary:focus-visible { color: var(--text-primary); }
-
-.recipient-summary:focus-visible {
-  outline: var(--border-focus);
-  outline-offset: var(--focus-outline-offset);
-  border-radius: var(--radius-xs);
 }
 
 .recipient-details {

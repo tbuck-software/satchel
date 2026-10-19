@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useSettingsStore } from '@/stores/settings';
 import { useAccountsStore } from '@/stores/accounts';
@@ -665,16 +667,15 @@ function finish() {
         :aria-label="isAccountSetup ? $t('onboarding.addAccountTitle') : $t('onboarding.setupTitle')"
         @keydown.tab="trap.onTab"
       >
-        <button
+        <IconButton
           v-if="isAccountSetup"
-          type="button"
           class="wizard-close"
           :aria-label="$t('onboarding.closeSetup')"
           :disabled="busy"
           @click="cancelAccountSetup"
-        >
+         :title="$t('onboarding.closeSetup')">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8" /></svg>
-        </button>
+        </IconButton>
         <aside class="wizard-rail">
           <div class="brand-mark" aria-label="Satchel">
             <span class="brand-glyph">S</span>
@@ -721,10 +722,10 @@ function finish() {
                 </label>
                 <div v-if="validEmail" class="provider-alternatives">
                   <span>{{ $t('onboarding.account.otherMethod') }}</span>
-                  <button v-if="provider !== 'gmail'" type="button" @click="chooseProvider('gmail')">Google</button>
-                  <button v-if="provider !== 'outlook'" type="button" @click="chooseProvider('outlook')">Microsoft</button>
-                  <button v-if="provider !== 'imap'" type="button" @click="chooseProvider('imap')">IMAP</button>
-                  <button v-if="provider !== 'pop3'" type="button" @click="chooseProvider('pop3')">POP3</button>
+                  <AppButton v-if="provider !== 'gmail'" @click="chooseProvider('gmail')" variant="ghost" size="sm">Google</AppButton>
+                  <AppButton v-if="provider !== 'outlook'" @click="chooseProvider('outlook')" variant="ghost" size="sm">Microsoft</AppButton>
+                  <AppButton v-if="provider !== 'imap'" @click="chooseProvider('imap')" variant="ghost" size="sm">IMAP</AppButton>
+                  <AppButton v-if="provider !== 'pop3'" @click="chooseProvider('pop3')" variant="ghost" size="sm">POP3</AppButton>
                 </div>
                 <label class="floating-field optional-field">
                   <span>{{ $t('onboarding.account.nameLabel') }} <em>{{ $t('common.optional') }}</em></span>
@@ -737,11 +738,11 @@ function finish() {
                   <pre>{{ errorDetail }}</pre>
                 </details>
                 <div class="actions-row">
-                  <button v-if="isAccountSetup" type="button" class="text-action" @click="cancelAccountSetup">{{ $t('common.cancel') }}</button>
-                  <button v-if="!isAccountSetup" type="button" class="text-action" @click="skipAccount">{{ $t('onboarding.account.later') }}</button>
-                  <button type="submit" class="primary-action" :disabled="!canStart || busy">
+                  <AppButton v-if="isAccountSetup" class="text-action" @click="cancelAccountSetup" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
+                  <AppButton v-if="!isAccountSetup" class="text-action" @click="skipAccount" variant="ghost" size="sm">{{ $t('onboarding.account.later') }}</AppButton>
+                  <AppButton type="submit" class="primary-action" :disabled="!canStart || busy" variant="primary" size="sm">
                     {{ usesPassword ? $t('onboarding.account.connectAuto') : $t('onboarding.account.signInSecurely') }} <span>→</span>
-                  </button>
+                  </AppButton>
                 </div>
               </form>
             </div>
@@ -803,9 +804,9 @@ function finish() {
               </div>
 
               <div v-if="showAdvanced && !busy" class="manual-card">
-                <button type="button" class="manual-heading" @click="showAdvanced = !showAdvanced">
+                <CardButton class="manual-heading" @click="showAdvanced = !showAdvanced">
                   <span><strong>{{ $t('onboarding.connection.manualHeading') }}</strong><small>{{ $t('onboarding.connection.manualHint') }}</small></span><span>−</span>
-                </button>
+                </CardButton>
                 <div class="manual-grid">
                   <label><span>{{ $t('onboarding.connection.username') }}</span><input v-model="username" autocomplete="username"></label>
                   <span />
@@ -821,7 +822,7 @@ function finish() {
                 </details>
                 <p v-if="testStatus" class="inline-success">{{ testStatus }}</p>
                 <div class="manual-actions">
-                  <button type="button" class="text-action" @click="step = 1">{{ $t('onboarding.connection.changeCredentials') }}</button>
+                  <AppButton class="text-action" @click="step = 1" variant="ghost" size="sm">{{ $t('onboarding.connection.changeCredentials') }}</AppButton>
                   <span class="manual-buttons">
                     <AppButton
                       variant="ghost"
@@ -831,11 +832,11 @@ function finish() {
                     >
                       {{ testBusy ? $t('onboarding.connection.testing') : $t('onboarding.connection.test') }}
                     </AppButton>
-                    <button type="button" class="primary-action compact" @click="runDiscovery(true)">{{ $t('onboarding.connection.recheck') }} <span>↻</span></button>
+                    <AppButton class="primary-action compact" @click="runDiscovery(true)" variant="primary" size="sm">{{ $t('onboarding.connection.recheck') }} <span>↻</span></AppButton>
                   </span>
                 </div>
               </div>
-              <button v-else-if="!busy && failedRequiredServices.length" type="button" class="secondary-action" @click="showAdvanced = true">{{ $t('onboarding.connection.enterServerData') }}</button>
+              <AppButton v-else-if="!busy && failedRequiredServices.length" class="secondary-action" @click="showAdvanced = true" variant="secondary" size="sm">{{ $t('onboarding.connection.enterServerData') }}</AppButton>
             </div>
 
             <div v-else-if="step === 3" key="preferences" class="panel preferences-panel">
@@ -845,12 +846,12 @@ function finish() {
               <div class="preference-section">
                 <span class="section-label">{{ $t('onboarding.preferences.appearance') }}</span>
                 <div class="theme-choice">
-                  <button type="button" :class="{ selected: chosenTheme === 'dark' }" @click="selectTheme('dark')">
+                  <CardButton :class="{ selected: chosenTheme === 'dark' }" @click="selectTheme('dark')">
                     <span class="theme-preview dark"><i/><i/><i/></span><strong>{{ $t('onboarding.preferences.dark') }}</strong>
-                  </button>
-                  <button type="button" :class="{ selected: chosenTheme === 'light' }" @click="selectTheme('light')">
+                  </CardButton>
+                  <CardButton :class="{ selected: chosenTheme === 'light' }" @click="selectTheme('light')">
                     <span class="theme-preview light"><i/><i/><i/></span><strong>{{ $t('onboarding.preferences.light') }}</strong>
-                  </button>
+                  </CardButton>
                 </div>
               </div>
 
@@ -862,7 +863,7 @@ function finish() {
                 />
               </div>
 
-              <div class="actions-row end"><button type="button" class="primary-action" @click="next">{{ $t('common.next') }} <span>→</span></button></div>
+              <div class="actions-row end"><AppButton class="primary-action" @click="next" variant="primary" size="sm">{{ $t('common.next') }} <span>→</span></AppButton></div>
             </div>
 
             <div v-else key="ready" class="panel ready-panel">
@@ -876,10 +877,10 @@ function finish() {
               </div>
 
               <div class="ready-actions">
-                <button type="button" class="primary-action launch" @click="finish">{{ isAccountSetup ? $t('onboarding.ready.toAccounts') : $t('onboarding.ready.openSatchel') }} <span>→</span></button>
-                <button v-if="hasTauri && !isAccountSetup" type="button" class="text-action" :disabled="contacts.avatarSyncRunning" @click="importContactPhotos">
+                <AppButton class="primary-action launch" @click="finish" variant="primary" size="sm">{{ isAccountSetup ? $t('onboarding.ready.toAccounts') : $t('onboarding.ready.openSatchel') }} <span>→</span></AppButton>
+                <AppButton v-if="hasTauri && !isAccountSetup" class="text-action" :disabled="contacts.avatarSyncRunning" @click="importContactPhotos" variant="ghost" size="sm">
                   {{ contacts.avatarSyncRunning ? $t('onboarding.ready.importingPhotos') : $t('onboarding.ready.importPhotos') }}
-                </button>
+                </AppButton>
                 <small v-if="contactImportStatus">{{ contactImportStatus }}</small>
               </div>
             </div>
@@ -995,14 +996,7 @@ h2 { margin: 0; color: var(--text-primary); font-size: 25px; font-weight: var(--
 
 button, input { font-family: inherit; }
 button { color: inherit; }
-.primary-action { display: inline-flex; align-items: center; justify-content: center; gap: 22px; min-height: 44px; padding: 0 18px; border: 1px solid color-mix(in srgb, var(--accent-primary) 76%, white); border-radius: var(--radius-sm); color: var(--text-on-accent); background: linear-gradient(145deg, color-mix(in srgb, var(--accent-primary) 88%, var(--bg-inset)), var(--accent-primary)); box-shadow: 0 9px 24px color-mix(in srgb, var(--accent-primary) 20%, transparent); cursor: pointer; font-size: var(--font-size-xs); font-weight: var(--weight-strong); transition: transform var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out), opacity var(--duration-normal) var(--ease-out); }
-.primary-action:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 12px 30px color-mix(in srgb, var(--accent-primary) 28%, transparent); }
-.primary-action:disabled { opacity: .42; cursor: not-allowed; box-shadow: none; }
 .primary-action span { font-size: 16px; font-weight: var(--weight-regular); }
-.primary-action.compact { min-height: 38px; }
-.text-action, .secondary-action { border: 0; background: none; color: var(--text-tertiary); cursor: pointer; font-size: var(--font-size-2xs); }
-.text-action:hover { color: var(--text-primary); }
-.secondary-action { padding: 9px 12px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
 
 /* The panel copy used to carry this gap; the headline now sits on the form. */
 .identity-form { display: grid; gap: 15px; margin-top: 24px; }

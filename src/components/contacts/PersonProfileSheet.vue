@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import type { Participant, Thread } from '@/types/mail';
@@ -180,10 +181,9 @@ async function blockPerson() {
 
         <section v-if="recentThreads.length" class="person-profile__recent">
           <h3>{{ $t('contacts.profile.recentMail') }}</h3>
-          <button
+          <CardButton
             v-for="thread in recentThreads"
             :key="thread.id"
-            type="button"
             @click="openThread(thread.id)"
           >
             <span>
@@ -191,7 +191,7 @@ async function blockPerson() {
               <small>{{ thread.snippet }}</small>
             </span>
             <time :datetime="thread.lastMessageAt">{{ formatListTime(thread.lastMessageAt) }}</time>
-          </button>
+          </CardButton>
         </section>
       </article>
     </BottomSheet>

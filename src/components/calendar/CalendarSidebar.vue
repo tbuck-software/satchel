@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, onMounted } from 'vue';
 import { useInvitesStore } from '@/stores/invites';
 import { useCalendarUiStore } from '@/stores/calendarUi';
@@ -39,10 +40,9 @@ const sources = computed(() => {
 
     <section v-if="sources.length > 0" class="cal-sidebar__sources">
       <h3 class="cal-sidebar__heading">{{ $t('calendar.source.heading') }}</h3>
-      <button
+      <CardButton
         v-for="source in sources"
         :key="source.key"
-        type="button"
         class="cal-source"
         :class="{ 'cal-source--hidden': calendarUi.isSourceHidden(source.key) }"
         :title="calendarUi.isSourceHidden(source.key) ? t('calendar.source.show') : t('calendar.source.hide')"
@@ -66,7 +66,7 @@ const sources = computed(() => {
         </span>
         <span class="cal-source__label">{{ source.label }}</span>
         <span class="cal-source__count">{{ source.count }}</span>
-      </button>
+      </CardButton>
     </section>
   </div>
 </template>

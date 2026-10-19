@@ -6,11 +6,20 @@ import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from '@playwright/test';
 
+/** @typedef {import('./render-types.mjs').Attachment} Attachment */
+/** @typedef {import('./render-types.mjs').MailMessage} MailMessage */
+/** @typedef {import('./render-types.mjs').FidelityPayload} FidelityPayload */
+/** @typedef {import('./render-types.mjs').SelectedCase} SelectedCase */
+/** @typedef {import('./render-types.mjs').FidelityCase} FidelityCase */
+/** @typedef {import('./render-types.mjs').FidelityResult} FidelityResult */
+/** @typedef {import('./render-types.mjs').FidelityReport} FidelityReport */
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const defaultDb = resolve(
   process.env.HOME ?? '',
   'Library/Application Support/de.tbuck.satchel.daily/satchel/satchel.db',
 );
+
+/** @param {string} name @param {string | null} fallback */
 
 function argValue(name, fallback = null) {
   const index = process.argv.indexOf(name);
@@ -97,9 +106,13 @@ const cases = [
   },
 ];
 
+/** @param {unknown} value */
+
 function sqlString(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
+
+/** @param {string} sql */
 
 function query(sql) {
   const raw = execFileSync('sqlite3', ['-json', dbPath, sql], {
@@ -109,9 +122,13 @@ function query(sql) {
   return raw ? JSON.parse(raw) : [];
 }
 
+/** @param {string} sql */
+
 function execute(sql) {
   execFileSync('sqlite3', [dbPath, sql], { encoding: 'utf8' });
 }
+
+/** @param {string} url */
 
 async function waitForHttp(url, timeoutMs = 30_000) {
   const startedAt = Date.now();
@@ -158,6 +175,8 @@ async function startViteServer() {
   return child;
 }
 
+/** @param {import('node:child_process').ChildProcess | null} child */
+
 async function stopProcess(child) {
   if (!child || child.killed) {
     return;
@@ -167,10 +186,12 @@ async function stopProcess(child) {
     const timeout = setTimeout(resolve, 2_000);
     child.once('exit', () => {
       clearTimeout(timeout);
-      resolve();
+      resolve(undefined);
     });
   });
 }
+
+/** @param {unknown} value */
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -180,12 +201,16 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;');
 }
 
+/** @param {unknown} value */
+
 function safeFilename(value) {
   const sanitized = String(value || 'message')
     .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/^-+|-+$/g, '');
   return sanitized || 'message';
 }
+
+/** @param {unknown} value */
 
 function cleanCid(value) {
   const stripped = String(value ?? '').trim().replace(/^cid:/i, '').replace(/^<|>$/g, '').trim();
@@ -196,7 +221,10 @@ function cleanCid(value) {
   }
 }
 
+/** @param {Pick<Attachment, 'content_id' | 'filename'>} attachment */
+
 function cidCandidates(attachment) {
+  /** @type {Set<string>} */
   const values = new Set();
   for (const raw of [attachment.content_id, attachment.filename]) {
     const cleaned = cleanCid(raw);
@@ -208,14 +236,20 @@ function cidCandidates(attachment) {
   return Array.from(values).filter(Boolean);
 }
 
+/** @param {string} value */
+
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/** @param {unknown} value */
 
 function base64UrlToBuffer(value) {
   const normalized = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
   return Buffer.from(normalized, 'base64');
 }
+
+/** @param {Attachment} attachment @param {MailMessage} message */
 
 async function fetchAndCacheInlineImage(attachment, message) {
   if (!cacheInlineImages || attachment.cached_path) {
@@ -253,6 +287,8 @@ async function fetchAndCacheInlineImage(attachment, message) {
   return { ...attachment, cached_path: cachePath, size: bytes.length };
 }
 
+/** @param {MailMessage} message @param {Attachment[]} attachments */
+
 async function prepareAttachmentsForRender(message, attachments) {
   const prepared = [];
   for (const attachment of attachments) {
@@ -261,6 +297,8 @@ async function prepareAttachmentsForRender(message, attachments) {
   return prepared;
 }
 
+/** @param {Attachment} attachment */
+
 function dataUrlForAttachment(attachment) {
   if (!attachment.cached_path || !existsSync(attachment.cached_path)) {
     return null;
@@ -268,6 +306,8 @@ function dataUrlForAttachment(attachment) {
   const bytes = readFileSync(attachment.cached_path);
   return `data:${attachment.content_type};base64,${bytes.toString('base64')}`;
 }
+
+/** @param {Attachment} attachment */
 
 function rendererAttachment(attachment) {
   const dataUrl = dataUrlForAttachment(attachment);
@@ -282,6 +322,8 @@ function rendererAttachment(attachment) {
     dataUrl,
   };
 }
+
+/** @param {Attachment[]} attachments */
 
 function inlineImageCacheStats(attachments) {
   let cachedInlineImages = 0;
@@ -299,19 +341,23 @@ function inlineImageCacheStats(attachments) {
   return { cachedInlineImages, uncachedInlineImages };
 }
 
+/** @param {string} html @param {import('./render-types.mjs').RendererAttachment[]} attachments */
+
 function inlineCachedCidImages(html, attachments) {
   let output = html;
   for (const attachment of attachments) {
-    const dataUrl = dataUrlForAttachment(attachment);
+    const dataUrl = attachment.dataUrl;
     if (!dataUrl) {
       continue;
     }
-    for (const candidate of cidCandidates(attachment)) {
+    for (const candidate of cidCandidates({ content_id: attachment.contentId, filename: attachment.filename })) {
       output = output.replace(new RegExp(`cid:${escapeRegex(candidate)}`, 'gi'), dataUrl);
     }
   }
   return output;
 }
+
+/** @param {FidelityPayload} payload */
 
 function buildRawReferenceDocument(payload) {
   const remoteSources = allowRemoteImages ? ' http: https:' : '';
@@ -338,7 +384,10 @@ function buildRawReferenceDocument(payload) {
 </html>`;
 }
 
+/** @param {FidelityCase} testCase */
+
 function selectMessage(testCase) {
+  /** @type {MailMessage[]} */
   const rows = query(`
     SELECT m.id, m.thread_id, m.subject, m.from_address, COALESCE(m.from_name, '') AS from_name,
            m.date, COALESCE(m.body_text, '') AS body_text, COALESCE(m.body_html, '') AS body_html,
@@ -353,6 +402,7 @@ function selectMessage(testCase) {
   return rows[0] ?? null;
 }
 
+/** @param {string} messageId @returns {Attachment[]} */
 function attachmentsFor(messageId) {
   return query(`
     SELECT id, filename, content_type, content_id, cached_path, is_inline
@@ -363,6 +413,8 @@ function attachmentsFor(messageId) {
     ORDER BY filename
   `);
 }
+
+/** @param {FidelityCase} testCase @param {MailMessage} message @param {Attachment[]} attachments */
 
 async function payloadForMessage(testCase, message, attachments) {
   const preparedAttachments = await prepareAttachmentsForRender(message, attachments);
@@ -392,6 +444,8 @@ async function payloadForMessage(testCase, message, attachments) {
   };
 }
 
+/** @param {import('@playwright/test').Browser} browser @param {SelectedCase} item */
+
 async function inspectCase(browser, item) {
   const page = await browser.newPage({ viewport: { width: 1160, height: 1200 }, deviceScaleFactor: 1 });
   if (allowRemoteImages && item.payload.fromAddress) {
@@ -407,17 +461,19 @@ async function inspectCase(browser, item) {
   await page.waitForFunction(() => document.documentElement.dataset.renderReady === 'true');
   await page.waitForTimeout(250);
 
+  const issues = [];
   if (item.payload.normalizeQuotes) {
     const quoteSummary = page.locator('summary.quote-summary').first();
     if (await quoteSummary.count() === 0) {
-      await page.close();
-      return { issues: ['quoted-history normalization produced no expandable history'], metrics: {} };
+      issues.push('quoted-history normalization produced no expandable history');
+    } else {
+      await quoteSummary.click();
+      await page.waitForTimeout(250);
     }
-    await quoteSummary.click();
-    await page.waitForTimeout(250);
   }
 
   const inspection = await page.evaluate(() => {
+    /** @param {string} input */
     function parseRgb(input) {
       const match = input.match(/rgba?\(([^)]+)\)/i);
       if (!match) return null;
@@ -425,6 +481,7 @@ async function inspectCase(browser, item) {
       if (parts.length < 3 || parts.slice(0, 3).some(Number.isNaN)) return null;
       return { r: parts[0], g: parts[1], b: parts[2], a: Number.isFinite(parts[3]) ? parts[3] : 1 };
     }
+    /** @param {{ r: number, g: number, b: number }} color */
     function luminance(color) {
       const values = [color.r, color.g, color.b].map((channel) => {
         const value = channel / 255;
@@ -432,11 +489,13 @@ async function inspectCase(browser, item) {
       });
       return 0.2126 * values[0] + 0.7152 * values[1] + 0.0722 * values[2];
     }
+    /** @param {{ r: number, g: number, b: number }} first @param {{ r: number, g: number, b: number }} second */
     function contrast(first, second) {
       const light = Math.max(luminance(first), luminance(second));
       const dark = Math.min(luminance(first), luminance(second));
       return (light + 0.05) / (dark + 0.05);
     }
+    /** @param {Element} element */
     function backgroundFor(element) {
       let current = element;
       while (current) {
@@ -446,6 +505,7 @@ async function inspectCase(browser, item) {
       }
       return { r: 255, g: 255, b: 255, a: 1 };
     }
+    /** @param {Element} element */
     function isVisible(element) {
       const style = getComputedStyle(element);
       if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
@@ -518,7 +578,6 @@ async function inspectCase(browser, item) {
   await page.screenshot({ path: screenshotPath, fullPage: true });
   await page.close();
 
-  const issues = [];
   if (item.payload.bodyHtml && inspection.emailDocumentCount === 0) {
     issues.push('HTML body did not produce an isolated mail document');
   }
@@ -578,6 +637,8 @@ async function inspectCase(browser, item) {
   };
 }
 
+/** @param {import('@playwright/test').Browser} browser @param {SelectedCase} item */
+
 async function screenshotRawReference(browser, item) {
   const page = await browser.newPage({ viewport: { width: 1160, height: 1200 }, deviceScaleFactor: 1 });
   await page.setContent(buildRawReferenceDocument(item.payload), { waitUntil: 'domcontentloaded' });
@@ -590,9 +651,13 @@ async function screenshotRawReference(browser, item) {
   return referencePath;
 }
 
+/** @param {string} fromDir @param {string} targetPath */
+
 function relativeUrl(fromDir, targetPath) {
   return relative(fromDir, targetPath).split('/').map(encodeURIComponent).join('/');
 }
+
+/** @param {Pick<FidelityResult, 'key' | 'screenshot'>} result */
 
 function ensureBaseline(result) {
   const baselineDir = resolve(outDir, 'baseline');
@@ -608,6 +673,8 @@ function ensureBaseline(result) {
     baselineAccepted: accepted,
   };
 }
+
+/** @param {FidelityReport} report @param {string} indexPath */
 
 function writeIndex(report, indexPath) {
   const rows = report.results.map((result) => {
