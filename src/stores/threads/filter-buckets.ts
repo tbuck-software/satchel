@@ -83,7 +83,6 @@ export interface ThreadFilterBucketsSurface {
   openSmartBucket(bucketId: string): void;
   closeSmartBucket(): void;
   openContact(email: string): void;
-  clearContact(): void;
   setMailboxFilter(next: MailboxFilter): void;
 }
 
@@ -458,10 +457,6 @@ export function createThreadFilterBuckets({
     }
   }
 
-  function clearContact() {
-    activeContactEmail.value = '';
-  }
-
   function setMailboxFilter(next: MailboxFilter) {
     activeContactEmail.value = '';
     activeSimilarGroupId.value = '';
@@ -589,7 +584,6 @@ export function createThreadFilterBuckets({
     openSmartBucket,
     closeSmartBucket,
     openContact,
-    clearContact,
     setMailboxFilter,
   };
 

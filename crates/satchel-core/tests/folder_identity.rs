@@ -3,7 +3,7 @@
 //! A move into a folder the sync had not listed yet created a row with a
 //! random id; the next sync upserted by its derived id and added a second one.
 
-use satchel_core::db::folders::{adopt_derived_folder_id, folder_db_id};
+use satchel_core::db::folders::{folder_db_id, resolve_provider_folder_id};
 use satchel_core::mail_actions::{move_threads, MoveTarget};
 use satchel_core::sync::queue::SyncQueue;
 use sqlx::{
@@ -126,7 +126,8 @@ async fn orphaned_messages(pool: &SqlitePool) -> i64 {
 async fn the_migration_merges_duplicates_into_the_derived_row() {
     let pool = pool_before_merge().await;
     seed_account(&pool).await;
-    let derived = folder_db_id("acc", "Archive");
+    // This shipped migration deliberately recognizes its original ID prefix.
+    let derived = "fld-imap-acc-Archive".to_string();
     insert_folder(&pool, "fld-move-1234", "Archive", "archive", "2026-03-01").await;
     insert_folder(&pool, &derived, "Archive", "archive", "2026-02-01").await;
     insert_folder(&pool, "fld-imap-acc-INBOX", "INBOX", "inbox", "2026-01-01").await;
@@ -173,7 +174,7 @@ async fn a_second_row_for_the_same_remote_folder_is_rejected() {
 }
 
 #[tokio::test]
-async fn a_row_with_a_random_id_takes_the_derived_one_with_its_messages() {
+async fn resolving_a_legacy_folder_keeps_its_id_and_all_persisted_references() {
     let pool = migrated_pool().await;
     seed_account(&pool).await;
     insert_folder(
@@ -186,18 +187,83 @@ async fn a_row_with_a_random_id_takes_the_derived_one_with_its_messages() {
     .await;
     insert_message(&pool, "m", "fld-workflow-legacy").await;
 
-    let id = adopt_derived_folder_id(&pool, "acc", "Archive")
+    // Cover references that the old rekey helper either rewrote or omitted.
+    // A missing remote ID exercises the full_path fallback as well.
+    exec(
+        &pool,
+        "UPDATE folders SET remote_id = NULL WHERE id = 'fld-workflow-legacy'",
+    )
+    .await;
+    exec(&pool, "INSERT INTO threads (id, account_id, last_message_date, created_at, updated_at) VALUES ('thread', 'acc', '', '', '')").await;
+    exec(&pool, "UPDATE messages SET pending_folder_id = 'fld-workflow-legacy', thread_id = 'thread' WHERE id = 'm'").await;
+    exec(&pool, "INSERT INTO sync_quarantine (account_id, folder_id, remote_id, first_failed_at, last_failed_at) VALUES ('acc', 'fld-workflow-legacy', '42', '', '')").await;
+    exec(
+        &pool,
+        "INSERT INTO mail_action_receipts (id, created_at) VALUES ('receipt', '')",
+    )
+    .await;
+    exec(&pool, "INSERT INTO mail_action_messages (receipt_id, message_id, original_folder_id, target_folder_id) VALUES ('receipt', 'm', 'fld-workflow-legacy', 'fld-workflow-legacy')").await;
+    let references = |pool: SqlitePool| async move {
+        sqlx::query_as::<_, (String, Option<String>, String, String, String, String)>(
+            "SELECT m.folder_id, m.pending_folder_id, q.folder_id,
+                    r.original_folder_id, r.target_folder_id, tf.folder_id
+             FROM messages m JOIN sync_quarantine q ON q.remote_id = '42'
+             JOIN mail_action_messages r ON r.message_id = m.id
+             JOIN thread_folders tf ON tf.thread_id = m.thread_id
+             WHERE m.id = 'm'",
+        )
+        .fetch_one(&pool)
         .await
-        .expect("adopt");
+        .unwrap()
+    };
+    let before = references(pool.clone()).await;
+    let id = resolve_provider_folder_id(&pool, "acc", "Archive")
+        .await
+        .expect("resolve");
 
-    assert_eq!(id, folder_db_id("acc", "Archive"));
+    assert_eq!(id, "fld-workflow-legacy");
     assert_eq!(folder_ids(&pool).await, std::slice::from_ref(&id));
+    assert_eq!(references(pool.clone()).await, before);
     assert_eq!(orphaned_messages(&pool).await, 0);
     let violations: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pragma_foreign_key_check")
         .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(violations, 0);
+}
+
+#[tokio::test]
+async fn remote_folder_punctuation_does_not_overwrite_another_folder() {
+    let pool = migrated_pool().await;
+    seed_account(&pool).await;
+    for pass in 0..2 {
+        for (remote, message) in [("Projects/2026", "slash"), ("Projects-2026", "dash")] {
+            let id = resolve_provider_folder_id(&pool, "acc", remote)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, created_at, updated_at)
+                 VALUES (?, 'acc', ?, ?, ?, 'custom', '', '')
+                 ON CONFLICT(id) DO UPDATE SET name = excluded.name, full_path = excluded.full_path, remote_id = excluded.remote_id",
+            ).bind(&id).bind(remote).bind(remote).bind(remote).execute(&pool).await.unwrap();
+            if pass == 0 {
+                insert_message(&pool, message, &id).await;
+            }
+        }
+    }
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT m.id, f.id, f.remote_id FROM messages m JOIN folders f ON f.id = m.folder_id ORDER BY m.id",
+    ).fetch_all(&pool).await.unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_ne!(rows[0].1, rows[1].1);
+    assert_eq!(rows[0].2, "Projects-2026");
+    assert_eq!(rows[1].2, "Projects/2026");
+    assert_eq!(folder_ids(&pool).await.len(), 2);
+    assert_ne!(
+        folder_db_id("acc.a", "Remote"),
+        folder_db_id("acc-a", "Remote")
+    );
+    assert_ne!(folder_db_id("a-b", "c"), folder_db_id("a", "b-c"));
 }
 
 /// Archive into a folder the sync never listed, then run the folder upsert the
@@ -235,15 +301,17 @@ async fn archiving_before_the_first_folder_sync_leaves_one_archive_folder() {
     )
     .await
     .expect("archive");
+    let mut expected = vec![folder_db_id("acc", "Archive"), folder_db_id("acc", "INBOX")];
+    expected.sort();
     assert_eq!(
         folder_ids(&pool).await,
-        [folder_db_id("acc", "Archive"), folder_db_id("acc", "INBOX")],
+        expected,
         "the move creates the archive under its derived id"
     );
 
-    let folder_id = adopt_derived_folder_id(&pool, "acc", "Archive")
+    let folder_id = resolve_provider_folder_id(&pool, "acc", "Archive")
         .await
-        .expect("adopt");
+        .expect("resolve");
     sqlx::query(
         "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, message_count, unread_count, sync_enabled, sort_order, created_at, updated_at)
          VALUES (?, 'acc', 'Archive', 'Archive', 'archive', 'Archive', NULL, 0, 0, 1, 0, '', '')

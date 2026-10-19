@@ -3,7 +3,7 @@ import type { ShortcutHint } from '@/types/shortcuts';
 
 const props = withDefaults(
   defineProps<{
-    variant?: 'primary' | 'neutral' | 'soft' | 'secondary' | 'ghost' | 'danger';
+    variant?: 'primary' | 'neutral' | 'soft' | 'secondary' | 'ghost' | 'danger' | 'link';
     size?: 'sm' | 'md';
     // A form with more than one field loses its implicit Enter submission when
     // the submit button is not part of it, so the kit has to be able to be one.
@@ -129,6 +129,23 @@ defineEmits<{
 .app-button--ghost:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+/* Inline actions share the surrounding text metrics and keep the kit's
+   disabled, focus and keyboard behaviour. */
+.app-button--link {
+  height: auto;
+  padding: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  white-space: normal;
+}
+
+.app-button--link:hover:not(:disabled) {
+  text-decoration: underline;
 }
 
 .app-button--danger {

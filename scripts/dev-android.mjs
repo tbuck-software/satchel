@@ -4,6 +4,9 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+/**
+ * @param {string} androidSdk
+ */
 function latestInstalledNdk(androidSdk) {
   const ndkDirectory = join(androidSdk, 'ndk');
   if (!existsSync(ndkDirectory)) return undefined;

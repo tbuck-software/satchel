@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, inject, ref, watch, type Ref } from 'vue';
 import type { SafeMarkdownBlock, SafeMarkdownInline } from '@/utils/safeMarkdown';
 import { assessExternalLink, type LinkInteraction } from '@/utils/externalLinks';
@@ -155,9 +156,8 @@ function requestImagePreview() {
     :aria-label="$t('mail.link.warningLabel')"
   >⚠</span></a>
   <br v-else-if="node.kind === 'break'">
-  <button
+  <CardButton
     v-else-if="node.kind === 'blocked_image' && node.src && allowRemoteImages && !imageFailed"
-    type="button"
     class="md-image-button"
     :style="markdownImageStyle"
     :aria-label="imageDescription ? $t('mail.markdown.enlargeImageNamed', { description: imageDescription }) : $t('mail.markdown.enlargeImage')"
@@ -174,7 +174,7 @@ function requestImagePreview() {
       referrerpolicy="no-referrer"
       @error="imageFailed = true"
     >
-  </button>
+  </CardButton>
   <span
     v-else-if="node.kind === 'blocked_image' && node.src && allowRemoteImages && imageFailed"
     class="md-image-error"

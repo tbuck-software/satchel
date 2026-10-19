@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import CardButton from '@/components/ui/CardButton.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Editor, EditorContent, Mark, mergeAttributes } from '@tiptap/vue-3';
@@ -511,28 +514,27 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
         <option value="heading-3">{{ $t('compose.editor.heading3') }}</option>
       </select>
       <span class="sep" />
-      <button type="button" :class="{ active: ed.isActive('bold') }" :title="$t('compose.editor.bold')" @click="toggle(() => ed?.chain().focus().toggleBold().run())"><b>B</b></button>
-      <button type="button" :class="{ active: ed.isActive('italic') }" :title="$t('compose.editor.italic')" @click="toggle(() => ed?.chain().focus().toggleItalic().run())"><i>I</i></button>
-      <button type="button" :class="{ active: ed.isActive('strike') }" :title="$t('compose.editor.strike')" @click="toggle(() => ed?.chain().focus().toggleStrike().run())"><s>S</s></button>
+      <IconButton :active="ed.isActive('bold')" :title="$t('compose.editor.bold')" @click="toggle(() => ed?.chain().focus().toggleBold().run())"><b>B</b></IconButton>
+      <IconButton :active="ed.isActive('italic')" :title="$t('compose.editor.italic')" @click="toggle(() => ed?.chain().focus().toggleItalic().run())"><i>I</i></IconButton>
+      <IconButton :active="ed.isActive('strike')" :title="$t('compose.editor.strike')" @click="toggle(() => ed?.chain().focus().toggleStrike().run())"><s>S</s></IconButton>
       <span class="sep" />
-      <button type="button" :class="{ active: ed.isActive('bulletList') }" :title="$t('compose.editor.bulletList')" @click="toggle(() => ed?.chain().focus().toggleBulletList().run())">
+      <IconButton :active="ed.isActive('bulletList')" :title="$t('compose.editor.bulletList')" @click="toggle(() => ed?.chain().focus().toggleBulletList().run())">
         <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 4.5h.7M2.6 8h.7M2.6 11.5h.7M6.5 4.5h7M6.5 8h7M6.5 11.5h7" /></svg>
-      </button>
-      <button type="button" :class="{ active: ed.isActive('orderedList') }" :title="$t('compose.editor.orderedList')" @click="toggle(() => ed?.chain().focus().toggleOrderedList().run())">
+      </IconButton>
+      <IconButton :active="ed.isActive('orderedList')" :title="$t('compose.editor.orderedList')" @click="toggle(() => ed?.chain().focus().toggleOrderedList().run())">
         <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
           <path d="M6.5 5h7M6.5 11h7" />
           <text class="icon-numeral" x="1" y="6.9">1</text>
           <text class="icon-numeral" x="1" y="12.9">2</text>
         </svg>
-      </button>
-      <button type="button" :class="{ active: ed.isActive('link') }" :title="$t('compose.editor.link')" :aria-label="$t('compose.editor.link')" @click="openLinkDialog">
+      </IconButton>
+      <IconButton :active="ed.isActive('link')" :title="$t('compose.editor.link')" :aria-label="$t('compose.editor.link')" @click="openLinkDialog">
         <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.9 9.1a2.7 2.7 0 004 .3l1.8-1.8a2.7 2.7 0 00-3.8-3.8l-1 1" /><path d="M9.1 6.9a2.7 2.7 0 00-4-.3L3.3 8.4a2.7 2.7 0 003.8 3.8l1-1" /></svg>
-      </button>
+      </IconButton>
       <span class="sep" />
       <div class="color-control">
-        <button
-          type="button"
-          :class="{ active: colorPickerOpen || currentTextColor !== null }"
+        <IconButton
+          :active="colorPickerOpen || currentTextColor !== null"
           :title="$t('compose.editor.textColor')"
           aria-haspopup="true"
           :aria-expanded="colorPickerOpen"
@@ -546,14 +548,13 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
             :style="{ background: currentTextColor ?? 'currentColor' }"
             aria-hidden="true"
           />
-        </button>
+        </IconButton>
 
         <div v-if="colorPickerOpen" class="color-panel" role="group" :aria-label="$t('compose.editor.textColor')">
           <div class="color-swatches">
-            <button
+            <CardButton
               v-for="color in TEXT_COLORS"
               :key="color.value"
-              type="button"
               class="color-swatch"
               :class="{ chosen: currentTextColor === color.value }"
               :style="{ background: color.value }"
@@ -572,9 +573,9 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
             />
             {{ $t('compose.editor.customColorLabel') }}
           </label>
-          <button type="button" class="color-reset" @click="applyTextColor(null)">
+          <AppButton variant="ghost" size="sm" class="color-reset" @click="applyTextColor(null)">
             {{ $t('compose.editor.defaultColor') }}
-          </button>
+          </AppButton>
         </div>
       </div>
     </BubbleMenu>
@@ -588,38 +589,38 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
       class="image-toolbar"
     >
       <div class="image-control-group image-width-group">
-        <button type="button" :title="$t('compose.editor.image.small')" @click="setSelectedImageWidth(280)">S</button>
-        <button type="button" :title="$t('compose.editor.image.medium')" @click="setSelectedImageWidth(480)">M</button>
-        <button type="button" :title="$t('compose.editor.image.large')" @click="setSelectedImageWidth(720)">L</button>
-        <button type="button" :title="$t('compose.editor.image.original')" :aria-label="$t('compose.editor.image.original')" @click="setSelectedImageWidth(null)">
+        <IconButton :title="$t('compose.editor.image.small')" @click="setSelectedImageWidth(280)">S</IconButton>
+        <IconButton :title="$t('compose.editor.image.medium')" @click="setSelectedImageWidth(480)">M</IconButton>
+        <IconButton :title="$t('compose.editor.image.large')" @click="setSelectedImageWidth(720)">L</IconButton>
+        <IconButton :title="$t('compose.editor.image.original')" :aria-label="$t('compose.editor.image.original')" @click="setSelectedImageWidth(null)">
           <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.3 8a4.7 4.7 0 104.7-4.7 4.7 4.7 0 00-3.7 1.8" /><path d="M3.6 2.7v2.7h2.7" /></svg>
-        </button>
+        </IconButton>
       </div>
       <span class="image-toolbar-separator" />
       <div class="image-control-group">
-        <button type="button" :title="$t('compose.editor.image.alignLeft')" :aria-label="$t('compose.editor.image.alignLeft')" @click="setSelectedImageAlignment('left')">
+        <IconButton :title="$t('compose.editor.image.alignLeft')" :aria-label="$t('compose.editor.image.alignLeft')" @click="setSelectedImageAlignment('left')">
           <svg width="22" height="18" viewBox="0 0 22 18" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2h18M2 16h12"/><rect x="2" y="5" width="11" height="8" rx="1.5"/></svg>
-        </button>
-        <button type="button" :title="$t('compose.editor.image.alignCenter')" :aria-label="$t('compose.editor.image.alignCenter')" @click="setSelectedImageAlignment('center')">
+        </IconButton>
+        <IconButton :title="$t('compose.editor.image.alignCenter')" :aria-label="$t('compose.editor.image.alignCenter')" @click="setSelectedImageAlignment('center')">
           <svg width="22" height="18" viewBox="0 0 22 18" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2h18M4 16h14"/><rect x="5.5" y="5" width="11" height="8" rx="1.5"/></svg>
-        </button>
-        <button type="button" :title="$t('compose.editor.image.alignRight')" :aria-label="$t('compose.editor.image.alignRight')" @click="setSelectedImageAlignment('right')">
+        </IconButton>
+        <IconButton :title="$t('compose.editor.image.alignRight')" :aria-label="$t('compose.editor.image.alignRight')" @click="setSelectedImageAlignment('right')">
           <svg width="22" height="18" viewBox="0 0 22 18" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2h18M8 16h12"/><rect x="9" y="5" width="11" height="8" rx="1.5"/></svg>
-        </button>
+        </IconButton>
       </div>
       <span class="image-toolbar-separator" />
       <div class="image-control-group">
-        <button type="button" :title="$t('compose.editor.image.wrapLeft')" :aria-label="$t('compose.editor.image.wrapLeft')" @click="setSelectedImageAlignment('wrap-left')">
+        <IconButton :title="$t('compose.editor.image.wrapLeft')" :aria-label="$t('compose.editor.image.wrapLeft')" @click="setSelectedImageAlignment('wrap-left')">
           <svg width="24" height="18" viewBox="0 0 24 18" fill="none" stroke="currentColor" stroke-width="1.35"><rect x="2" y="4" width="9" height="10" rx="1.5"/><path d="M14 4h8M14 8h8M14 12h8M2 17h20"/></svg>
-        </button>
-        <button type="button" :title="$t('compose.editor.image.wrapRight')" :aria-label="$t('compose.editor.image.wrapRight')" @click="setSelectedImageAlignment('wrap-right')">
+        </IconButton>
+        <IconButton :title="$t('compose.editor.image.wrapRight')" :aria-label="$t('compose.editor.image.wrapRight')" @click="setSelectedImageAlignment('wrap-right')">
           <svg width="24" height="18" viewBox="0 0 24 18" fill="none" stroke="currentColor" stroke-width="1.35"><rect x="13" y="4" width="9" height="10" rx="1.5"/><path d="M2 4h8M2 8h8M2 12h8M2 17h20"/></svg>
-        </button>
+        </IconButton>
       </div>
       <span class="image-toolbar-separator" />
-      <button type="button" class="image-as-attachment" :title="$t('compose.editor.image.asAttachment')" :aria-label="$t('compose.editor.image.asAttachment')" @click="moveSelectedImageToAttachments">
+      <IconButton class="image-as-attachment" :title="$t('compose.editor.image.asAttachment')" :aria-label="$t('compose.editor.image.asAttachment')" @click="moveSelectedImageToAttachments">
         <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M13.5 7.5l-6.2 6.2a3.5 3.5 0 01-5-5l6.5-6.5a2.5 2.5 0 013.5 3.5L5.8 12.2a1.5 1.5 0 01-2.1-2.1l6.1-6.1"/></svg>
-      </button>
+      </IconButton>
     </BubbleMenu>
 
     <EditorContent
@@ -645,8 +646,8 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
           <input v-model="linkText" type="text" :placeholder="$t('compose.editor.linkDialog.textPlaceholder')" />
         </label>
         <div class="link-actions">
-          <button type="button" class="ghost" @click="showLinkDialog = false">{{ $t('common.cancel') }}</button>
-          <button type="button" class="primary" @click="applyLink">{{ $t('compose.editor.linkDialog.insert') }}</button>
+          <AppButton class="ghost" @click="showLinkDialog = false" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
+          <AppButton class="primary" @click="applyLink" variant="primary" size="sm">{{ $t('compose.editor.linkDialog.insert') }}</AppButton>
         </div>
       </div>
     </ModalShell>
@@ -698,11 +699,11 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
 }
 .selection-toolbar button:hover,
 .selection-toolbar select:hover,
-.selection-toolbar button.active {
+.selection-toolbar .icon-button--active {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
-.selection-toolbar button.active {
+.selection-toolbar .icon-button--active {
   color: var(--accent-primary);
 }
 .selection-toolbar .sep {
@@ -770,13 +771,6 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
   border-radius: var(--radius-sm);
   background: transparent;
   cursor: pointer;
-}
-.selection-toolbar .color-reset {
-  justify-content: flex-start;
-  height: 26px;
-  padding: 0 6px;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
 }
 .image-toolbar {
   display: flex;
@@ -984,22 +978,5 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-.link-actions .ghost {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  padding: 7px 14px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-.link-actions .primary {
-  background: var(--accent-primary);
-  color: var(--text-on-accent);
-  border: 0;
-  padding: 7px 16px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-weight: var(--weight-semibold);
 }
 </style>

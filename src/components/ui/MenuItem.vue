@@ -33,17 +33,19 @@ const props = withDefaults(
      * checkmark instead of the menu carrying a set/clear pair.
      */
     checked?: boolean;
+    selection?: 'checkbox' | 'radio';
+    disabled?: boolean;
     /** Opens a flyout; draws a trailing chevron. */
     submenu?: boolean;
     tone?: 'default' | 'danger';
     expanded?: boolean;
   }>(),
-  { icon: null, checked: undefined, submenu: false, tone: 'default', expanded: false },
+  { icon: null, checked: undefined, selection: 'checkbox', disabled: false, submenu: false, tone: 'default', expanded: false },
 );
 
 defineEmits<{ select: [event: MouseEvent] }>();
 
-const role = computed(() => (props.checked === undefined ? 'menuitem' : 'menuitemcheckbox'));
+const role = computed(() => (props.checked === undefined ? 'menuitem' : `menuitem${props.selection}`));
 </script>
 
 <template>
@@ -57,6 +59,7 @@ const role = computed(() => (props.checked === undefined ? 'menuitem' : 'menuite
     }"
     :role="role"
     :aria-checked="props.checked"
+    :disabled="props.disabled"
     :aria-haspopup="props.submenu ? 'menu' : undefined"
     :aria-expanded="props.submenu ? props.expanded : undefined"
     @click="$emit('select', $event)"
@@ -149,7 +152,9 @@ const role = computed(() => (props.checked === undefined ? 'menuitem' : 'menuite
   color: var(--text-tertiary);
 }
 
-.menu-item:hover,
+.menu-item:disabled { opacity: 0.45; cursor: default; }
+
+.menu-item:hover:not(:disabled),
 .menu-item:focus-visible,
 .menu-item--expanded {
   background: var(--bg-hover);

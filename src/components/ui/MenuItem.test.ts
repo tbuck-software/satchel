@@ -31,7 +31,7 @@ function declarationsFor(selector: string): string[] {
 
 describe('menu item', () => {
   it('draws keyboard focus differently from hover', () => {
-    const hover = declarationsFor('.menu-item:hover');
+    const hover = declarationsFor('.menu-item:hover:not(:disabled)');
     const focus = declarationsFor('.menu-item:focus-visible');
 
     expect(hover.length).toBeGreaterThan(0);

@@ -1,24 +1,17 @@
-import { onBeforeUnmount, watch, type Ref, type WatchSource } from 'vue';
+import { onBeforeUnmount, watch, type Ref } from 'vue';
 import {
   BACKUP_HEARTBEAT_MS,
   composerBackupPersistence,
   type ComposerBackup,
   type ComposerBackupContent,
 } from '@/persistence/composerBackup';
-import { normalizeVisibleText } from '@/utils/composerNormalization';
+import { hasMeaningfulComposerContent } from '@/utils/composerDraftState';
 
 export interface ComposerLocalBackupOptions {
   enabled: Ref<boolean>;
   draftId: Ref<string | null>;
-  trackedSources: WatchSource<unknown>[];
   content: () => ComposerBackupContent;
   debounceMs?: number;
-}
-
-function hasContent(content: ComposerBackupContent): boolean {
-  return content.to.length > 0
-    || Boolean(normalizeVisibleText(content.subject))
-    || Boolean(normalizeVisibleText(content.body));
 }
 
 /**
@@ -40,7 +33,7 @@ export function useComposerLocalBackup(options: ComposerLocalBackupOptions) {
   function writeNow() {
     pending = null;
     const content = options.content();
-    if (!hasContent(content)) {
+    if (!hasMeaningfulComposerContent(content)) {
       clear();
       return;
     }
@@ -85,7 +78,7 @@ export function useComposerLocalBackup(options: ComposerLocalBackupOptions) {
     composerBackupPersistence.remove(backup.key);
   }
 
-  watch(options.trackedSources, () => {
+  watch(() => JSON.stringify(options.content()), () => {
     if (options.enabled.value) schedule();
   });
 

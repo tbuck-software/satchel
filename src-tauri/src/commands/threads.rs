@@ -9,7 +9,7 @@ use crate::db::threads::{
     SmartInboxBucketRecord, SmartInboxPreviewRecord, SmartInboxSummaryRecord,
     ThreadCursor as CoreThreadCursor, ThreadError, ThreadListRequest,
     ThreadOrganizationUpdateRequest, ThreadPageRecord, ThreadRecord, ThreadRepository,
-    ThreadStateUpdateRequest, ThreadTagSetRequest,
+    ThreadTagSetRequest,
 };
 use crate::workflow::states::WorkflowState;
 use crate::AppState;
@@ -48,16 +48,6 @@ pub struct ThreadDto {
     pub has_invite: bool,
     pub invite_status: Option<String>,
     pub invite_cancelled: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/threads/", optional_fields = nullable))]
-pub struct UpdateThreadStateInput {
-    pub thread_id: String,
-    pub next_state: WorkflowState,
-    #[serde(default)]
-    pub snooze_until: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -252,16 +242,6 @@ impl From<SmartInboxSummaryRecord> for SmartInboxSummaryDto {
     }
 }
 
-impl From<UpdateThreadStateInput> for ThreadStateUpdateRequest {
-    fn from(input: UpdateThreadStateInput) -> Self {
-        Self {
-            thread_id: input.thread_id,
-            next_state: input.next_state,
-            snooze_until: input.snooze_until,
-        }
-    }
-}
-
 impl From<UpdateThreadOrganizationInput> for ThreadOrganizationUpdateRequest {
     fn from(input: UpdateThreadOrganizationInput) -> Self {
         Self {
@@ -397,17 +377,6 @@ pub async fn list_smart_inbox_summary(
 }
 
 #[tauri::command]
-pub async fn update_thread_state(
-    pool: tauri::State<'_, SqlitePool>,
-    input: UpdateThreadStateInput,
-) -> CommandResult<ThreadDto> {
-    let record = ThreadRepository::new(pool.inner())
-        .update_state(input.into())
-        .await?;
-    Ok(record.into())
-}
-
-#[tauri::command]
 pub async fn get_thread(
     pool: tauri::State<'_, crate::db::ReadPool>,
     thread_id: String,
@@ -507,14 +476,23 @@ pub async fn trash_threads(
     pool: tauri::State<'_, SqlitePool>,
     state: tauri::State<'_, AppState>,
     input: ThreadIdsInput,
-) -> CommandResult<()> {
-    satchel_core::mail_actions::move_threads(
+) -> CommandResult<satchel_core::mail_actions::TrashReceipt> {
+    satchel_core::mail_actions::trash_threads(
         pool.inner(),
         &state.queue,
         &normalize_thread_ids(input.thread_ids),
-        satchel_core::mail_actions::MoveTarget::Trash,
     )
-    .await?;
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn undo_trash(
+    pool: tauri::State<'_, SqlitePool>,
+    state: tauri::State<'_, AppState>,
+    receipt_id: String,
+) -> CommandResult<()> {
+    satchel_core::mail_actions::undo::undo_trash(pool.inner(), &state.queue, &receipt_id).await?;
     Ok(())
 }
 

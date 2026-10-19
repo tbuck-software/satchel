@@ -9,6 +9,11 @@ const release = process.argv.includes('--release');
 const profile = release ? 'release' : 'debug';
 const wasmTarget = 'wasm32-wasip2';
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {import('node:child_process').SpawnSyncOptions} [options]
+ */
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: repoRoot,
@@ -20,6 +25,9 @@ function run(command, args, options = {}) {
   }
 }
 
+/**
+ * @param {string} manifestPath
+ */
 function parsePackageName(manifestPath) {
   const manifest = readFileSync(manifestPath, 'utf8');
   const match = manifest.match(/^\s*name\s*=\s*"([^"]+)"/m);
@@ -64,6 +72,9 @@ function discoverPlugins() {
     .filter(Boolean);
 }
 
+/**
+ * @param {{ id: string, rootDir: string, manifestPath: string, crateName: string }} plugin
+ */
 function buildPlugin(plugin) {
   const targetDir = join(plugin.rootDir, 'target');
   const distDir = join(plugin.rootDir, 'dist');

@@ -26,6 +26,7 @@ function deferred<T>() {
 function draftState(overrides: Partial<ComposerDraftState> = {}): ComposerDraftState {
   return {
     accountId: 'account-1',
+    fromName: null, threadId: null, replyTo: null, sendOptions: {},
     fromAddress: 'sender@example.com',
     to: [],
     cc: [],

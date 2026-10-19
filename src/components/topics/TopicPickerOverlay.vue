@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useUiStore } from '@/stores/ui';
@@ -181,11 +182,10 @@ function onEnter() {
           </div>
 
           <div v-if="rows.length > 0" id="topic-picker-list" class="list" role="listbox" :aria-label="$t('topics.title')">
-            <button
+            <CardButton
               v-for="(row, index) in rows"
               :id="`topic-picker-item-${index}`"
               :key="row.id"
-              type="button"
               role="option"
               :aria-selected="index === activeIndex"
               class="row"
@@ -212,7 +212,7 @@ function onEnter() {
                 </span>
                 <span class="row-title">{{ $t('topics.picker.createRow', { name: row.name }) }}</span>
               </template>
-            </button>
+            </CardButton>
           </div>
           <p v-else class="empty-hint">{{ $t('topics.picker.empty') }}</p>
 

@@ -322,6 +322,11 @@ async fn transition_thread_configured(
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|err| err.to_string())?;
+    let undo_requested: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM mail_action_threads t JOIN mail_action_receipts r ON r.id = t.receipt_id WHERE t.thread_id = ? AND r.state = 'requested')")
+        .bind(&input.thread_id).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+    if undo_requested {
+        return Err("backend.errors.mailMovePending".into());
+    }
     if workflow_move_reconciliation_in_progress(&mut tx, &input.thread_id).await? {
         return Err("the server move is being finalized; try again shortly".to_string());
     }

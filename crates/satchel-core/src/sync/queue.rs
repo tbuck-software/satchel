@@ -148,6 +148,7 @@ impl SyncQueue {
                 FROM sync_queue
                 WHERE status IN ('pending', 'scheduled') AND id NOT LIKE 'notification:%'
                   AND NOT EXISTS (SELECT 1 FROM accounts WHERE accounts.id = sync_queue.account_id AND is_active = 0)
+                  AND NOT EXISTS (SELECT 1 FROM sync_queue_dependencies d JOIN sync_queue predecessor ON predecessor.id = d.depends_on WHERE d.action_id = sync_queue.id)
                   AND (action_type <> 'send_message' OR
                        (next_retry_at IS NULL OR next_retry_at <= ?)
                        AND (scheduled_for IS NULL OR scheduled_for <= ?))
@@ -310,6 +311,7 @@ impl SyncQueue {
              FROM sync_queue
              WHERE status IN ('pending', 'scheduled')
                AND NOT EXISTS (SELECT 1 FROM accounts WHERE accounts.id = sync_queue.account_id AND is_active = 0)
+               AND NOT EXISTS (SELECT 1 FROM sync_queue_dependencies d JOIN sync_queue predecessor ON predecessor.id = d.depends_on WHERE d.action_id = sync_queue.id)
                AND id NOT LIKE 'notification:%'
                AND (next_retry_at IS NULL OR next_retry_at <= ?)
                AND (scheduled_for IS NULL OR scheduled_for <= ?)
@@ -347,6 +349,7 @@ impl SyncQueue {
              FROM sync_queue
              WHERE id = ?
                AND NOT EXISTS (SELECT 1 FROM accounts WHERE accounts.id = sync_queue.account_id AND is_active = 0)
+               AND NOT EXISTS (SELECT 1 FROM sync_queue_dependencies d JOIN sync_queue predecessor ON predecessor.id = d.depends_on WHERE d.action_id = sync_queue.id)
                AND status IN ('pending', 'scheduled')
                AND (next_retry_at IS NULL OR next_retry_at <= ?)
                AND (scheduled_for IS NULL OR scheduled_for <= ?)
@@ -686,6 +689,7 @@ impl SyncQueue {
              FROM sync_queue
              WHERE status IN ('pending', 'scheduled')
                AND NOT EXISTS (SELECT 1 FROM accounts WHERE accounts.id = sync_queue.account_id AND is_active = 0)
+               AND NOT EXISTS (SELECT 1 FROM sync_queue_dependencies d JOIN sync_queue predecessor ON predecessor.id = d.depends_on WHERE d.action_id = sync_queue.id)
                AND id NOT LIKE 'notification:%'",
         )
         .fetch_optional(pool)

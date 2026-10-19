@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { translateBackendError } from '@/utils/backendErrors';
@@ -211,22 +212,24 @@ const config = computed<StateConfig>(() => {
       </div>
 
       <div v-if="config.primaryLabel || config.secondaryLabel" class="pgp-actions">
-        <button
+        <AppButton
           v-if="config.primaryLabel"
-          type="button"
           class="pgp-btn pgp-btn-primary"
           @click="config.primaryAction?.()"
+          variant="primary"
+          size="sm"
         >
           {{ config.primaryLabel }}
-        </button>
-        <button
+        </AppButton>
+        <AppButton
           v-if="config.secondaryLabel"
-          type="button"
           class="pgp-btn pgp-btn-secondary"
           @click="config.secondaryAction?.()"
+          variant="secondary"
+          size="sm"
         >
           {{ config.secondaryLabel }}
-        </button>
+        </AppButton>
       </div>
     </div>
   </div>
@@ -350,66 +353,6 @@ const config = computed<StateConfig>(() => {
   gap: var(--space-sm);
 }
 
-.pgp-btn {
-  border: 0;
-  border-radius: var(--radius-sm);
-  padding: 6px 14px;
-  font-family: var(--font-sans);
-  font-size: var(--font-size-sm);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-  line-height: 1.4;
-  transition:
-    background var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-out);
-}
-
-.pgp-btn:focus-visible {
-  outline: var(--border-focus);
-  outline-offset: var(--focus-outline-offset);
-}
-
-.pgp-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-  pointer-events: none;
-}
-
-/* Primary — picks up the tone color */
-.pgp-btn-primary {
-  color: var(--text-inverse);
-}
-
-.tone-neutral .pgp-btn-primary { background: var(--accent-primary); }
-.tone-success .pgp-btn-primary { background: var(--accent-green); }
-.tone-warning .pgp-btn-primary { background: var(--accent-amber); }
-.tone-danger  .pgp-btn-primary { background: var(--accent-red); }
-
-.pgp-btn-primary:hover {
-  filter: brightness(1.12);
-  box-shadow: var(--shadow-sm);
-}
-
-.pgp-btn-primary:active {
-  filter: brightness(0.92);
-}
-
-/* Secondary — ghost style */
-.pgp-btn-secondary {
-  background: transparent;
-  color: var(--text-secondary);
-}
-
-.pgp-btn-secondary:hover {
-  background: var(--bg-overlay);
-  color: var(--text-primary);
-}
-
-.pgp-btn-secondary:active {
-  background: color-mix(in srgb, var(--bg-overlay) 80%, transparent);
-}
-
 /* ─── Responsive ─── */
 @media (max-width: 900px) {
   .pgp-card {
@@ -429,10 +372,6 @@ const config = computed<StateConfig>(() => {
 
   .pgp-actions {
     flex-direction: column;
-  }
-
-  .pgp-btn {
-    text-align: center;
   }
 }
 </style>

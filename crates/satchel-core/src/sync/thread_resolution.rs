@@ -10,7 +10,8 @@ use std::collections::{HashMap, HashSet};
 
 use sqlx::{FromRow, SqlitePool};
 
-use crate::db::threads::ThreadRepository;
+use super::provider_identity::provider_local_id;
+use crate::db::threads::{merge_threads_tx, ThreadRepository};
 use crate::providers::traits::MessageEnvelope;
 
 pub async fn refresh_provider_thread_projection(
@@ -39,13 +40,8 @@ pub async fn refresh_provider_thread_projections(
         .map_err(|error| error.to_string())
 }
 
-pub fn sanitize_id(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
-        .collect::<String>()
-}
-
+/// Prefer the provider conversation ID, then Message-ID, then the standalone
+/// identity. An explicitly empty conversation ID deliberately picks standalone.
 pub fn derive_thread_key<'a>(message: &'a MessageEnvelope, standalone: &'a str) -> &'a str {
     message
         .remote_thread_id
@@ -67,7 +63,15 @@ pub fn standalone_thread_key(
         // generation is always known here. Keeping the slot unconditionally
         // means a recycled UID can never alias onto an older message's key.
         let uidvalidity = message.remote_uidvalidity.unwrap_or_default();
-        format!("{folder_remote_id}:{uidvalidity}:{}", message.remote_id)
+        provider_local_id(
+            "standalone",
+            provider_kind,
+            &[
+                folder_remote_id,
+                &uidvalidity.to_string(),
+                &message.remote_id,
+            ],
+        )
     } else {
         message.remote_id.clone()
     }
@@ -90,10 +94,122 @@ pub fn derive_message_id_header(
             let native_id = standalone_thread_key(provider_kind, folder_remote_id, message);
             format!(
                 "<{}@{}.satchel.local>",
-                sanitize_id(&native_id),
-                sanitize_id(provider_kind)
+                provider_local_id("header", provider_kind, &[&native_id]),
+                provider_kind.to_ascii_lowercase()
             )
         })
+}
+
+/// A typed grouping identity keeps provider conversation IDs distinct from
+/// Message-IDs and from folder-scoped standalone messages.
+pub fn provider_thread_db_id(
+    provider: &str,
+    account_id: &str,
+    folder_remote_id: &str,
+    message: &MessageEnvelope,
+) -> String {
+    let standalone = standalone_thread_key(provider, folder_remote_id, message);
+    let key = derive_thread_key(message, &standalone);
+    let kind = match message
+        .remote_thread_id
+        .as_deref()
+        .or(message.message_id_header.as_deref())
+    {
+        Some(value) if !value.trim().is_empty() && message.remote_thread_id.is_some() => {
+            "conversation"
+        }
+        Some(value) if !value.trim().is_empty() => "message-id",
+        _ => "standalone",
+    };
+    provider_local_id("th", provider, &[account_id, kind, key])
+}
+
+/// Resolve exact provider identities under the ingest write lock. Legacy rows
+/// are adopted only through an exact message or Message-ID match, never through
+/// their old punctuation-stripped IDs.
+pub async fn resolve_provider_thread_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    provider: &str,
+    account_id: &str,
+    account_email: &str,
+    folder_remote_id: &str,
+    message: &MessageEnvelope,
+    prior_thread_id: Option<&str>,
+) -> Result<String, String> {
+    let identity = provider_thread_db_id(provider, account_id, folder_remote_id, message);
+    let mapped = sqlx::query_scalar::<_, String>(
+        "SELECT m.thread_id FROM provider_thread_keys k
+         JOIN messages m ON m.id = k.message_id
+         WHERE k.identity = ? AND m.account_id = ?
+           AND NULLIF(TRIM(m.thread_id), '') IS NOT NULL",
+    )
+    .bind(&identity)
+    .bind(account_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    let header_thread = if let Some(header) = message
+        .message_id_header
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        sqlx::query_scalar::<_, String>(
+            "SELECT thread_id FROM messages WHERE account_id = ? AND message_id_header = ?
+             AND NULLIF(TRIM(thread_id), '') IS NOT NULL ORDER BY id LIMIT 1",
+        )
+        .bind(account_id)
+        .bind(header)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|e| e.to_string())?
+    } else {
+        None
+    };
+    let known = prior_thread_id.or(header_thread.as_deref());
+    let mut thread_id = if let Some(known) = known
+        .filter(|known| *known != identity)
+        .filter(|_| mapped.as_deref().is_none_or(|mapped| mapped == identity))
+    {
+        // A new member may have arrived before the first legacy row was
+        // refreshed. Fold that newly generated group into the existing thread
+        // so its workflow, tags, topics and user-visible ID survive the upgrade.
+        merge_threads_tx(tx, &identity, known)
+            .await
+            .map_err(|e| e.to_string())?;
+        known.to_string()
+    } else {
+        mapped
+            .or_else(|| known.map(str::to_string))
+            .unwrap_or(identity)
+    };
+    if message.remote_thread_id.is_none() {
+        if let Some(parent) = resolve_reply_thread_connection(&mut *tx, account_id, message).await?
+        {
+            thread_id = parent;
+        } else if provider.eq_ignore_ascii_case("imap") {
+            if let Some(subject) =
+                resolve_imap_subject_thread_connection(&mut *tx, account_id, account_email, message)
+                    .await?
+            {
+                thread_id = subject;
+            }
+        }
+    }
+    Ok(thread_id)
+}
+
+pub async fn remember_provider_thread_connection(
+    connection: &mut sqlx::SqliteConnection,
+    provider: &str,
+    account_id: &str,
+    folder_remote_id: &str,
+    message: &MessageEnvelope,
+    message_id: &str,
+) -> Result<(), String> {
+    let identity = provider_thread_db_id(provider, account_id, folder_remote_id, message);
+    sqlx::query("INSERT INTO provider_thread_keys (identity, message_id) VALUES (?, ?) ON CONFLICT(identity) DO UPDATE SET message_id = excluded.message_id")
+        .bind(identity).bind(message_id).execute(connection).await.map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Which remote draft this message edits, if any.
@@ -921,6 +1037,19 @@ mod tests {
     }
 
     #[test]
+    fn conversation_and_message_id_namespaces_remain_distinct() {
+        let mut message = envelope("42");
+        message.remote_thread_id = Some("<same@example.com>".to_string());
+        let conversation = super::provider_thread_db_id("imap", "account", "INBOX", &message);
+        message.remote_thread_id = None;
+        message.message_id_header = Some("<same@example.com>".to_string());
+        assert_ne!(
+            conversation,
+            super::provider_thread_db_id("imap", "account", "INBOX", &message)
+        );
+    }
+
+    #[test]
     fn message_id_groups_a_thread_when_the_provider_offers_none() {
         let mut message = envelope("m-1");
         message.message_id_header = Some("<abc@example.com>".to_string());
@@ -1121,7 +1250,12 @@ mod tests {
     fn a_missing_message_id_is_replaced_by_a_recognisably_local_one() {
         let message = envelope("m-1");
         let header = derive_message_id_header("gmail", "INBOX", &message);
-        assert_eq!(header, "<m-1@gmail.satchel.local>");
+        assert!(header.starts_with("<header-gmail-v2-"));
+        assert!(header.ends_with("@gmail.satchel.local>"));
+        assert_ne!(
+            header,
+            derive_message_id_header("gmail", "INBOX", &envelope("m.1"))
+        );
 
         let mut with_header = envelope("m-1");
         with_header.message_id_header = Some("<real@example.com>".to_string());

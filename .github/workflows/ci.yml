@@ -70,7 +70,7 @@ jobs:
       - name: Correctness lint
         run: pnpm run lint
 
-      - name: Script implicit-any budget
+      - name: Script typecheck
         run: pnpm run scripts:any:check
 
       - name: Typecheck

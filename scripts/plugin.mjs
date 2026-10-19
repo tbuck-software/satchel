@@ -6,6 +6,9 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const pluginsRoot = join(repoRoot, 'plugins');
 const [command, arg] = process.argv.slice(2);
 
+/**
+ * @param {string} manifestPath
+ */
 function readPackageName(manifestPath) {
   const manifest = readFileSync(manifestPath, 'utf8');
   return manifest.match(/^\s*name\s*=\s*"([^"]+)"/m)?.[1] ?? null;
@@ -27,6 +30,9 @@ function list() {
   }
 }
 
+/**
+ * @param {string} source
+ */
 function install(source) {
   if (!source) {
     process.stderr.write('Usage: pnpm run plugin -- install /path/to/plugin\n');
@@ -53,6 +59,9 @@ function install(source) {
   process.stdout.write(`Installed ${packageName} -> ${targetDir}\n`);
 }
 
+/**
+ * @param {string} name
+ */
 function remove(name) {
   if (!name) {
     process.stderr.write('Usage: pnpm run plugin -- remove plugin-name\n');

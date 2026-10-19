@@ -68,6 +68,30 @@ fn request(account_id: &str) -> SentMessageWriteRequest {
 }
 
 #[tokio::test]
+async fn sent_fallback_preserves_an_exact_remote_folder_with_a_legacy_id() {
+    let pool = pool().await;
+    seed_account(&pool, "acc-1", "me@example.com").await;
+    sqlx::query("INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, created_at, updated_at) VALUES ('sent-legacy', 'acc-1', 'Sent', 'Sent', 'Sent', 'custom', '', '')").execute(&pool).await.unwrap();
+    let sent = SentMessageRepository::new(&pool)
+        .persist(request("acc-1"))
+        .await
+        .unwrap();
+    let folder: String = sqlx::query_scalar("SELECT folder_id FROM messages WHERE id = ?")
+        .bind(&sent.message_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(folder, "sent-legacy");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM folders")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn persists_new_thread_and_repairs_missing_sent_folder() {
     let pool = pool().await;
     seed_account(&pool, "acc-1", "me@example.com").await;

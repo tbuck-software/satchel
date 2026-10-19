@@ -10,11 +10,19 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageId = 'de.tbuck.satchel';
 const shouldOpen = process.argv.includes('--open');
 
+/**
+ * @param {string} message
+ */
 function fail(message) {
   console.error(message);
   process.exit(1);
 }
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {import('node:child_process').SpawnSyncOptions} [options]
+ */
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: repoRoot,
@@ -25,6 +33,11 @@ function run(command, args, options = {}) {
   return result;
 }
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {Omit<import('node:child_process').SpawnSyncOptionsWithStringEncoding, 'encoding'>} [options]
+ */
 function capture(command, args, options = {}) {
   return spawnSync(command, args, {
     cwd: repoRoot,
@@ -34,6 +47,9 @@ function capture(command, args, options = {}) {
   });
 }
 
+/**
+ * @param {string} androidSdk
+ */
 function latestInstalledNdk(androidSdk) {
   const directory = join(androidSdk, 'ndk');
   if (!existsSync(directory)) return undefined;
@@ -73,6 +89,7 @@ function androidBuildEnv() {
     fail('Could not find the Android NDK llvm-ranlib. Set ANDROID_NDK_HOME and retry.');
   }
 
+  /** @type {NodeJS.ProcessEnv} */
   const env = { ...process.env, ANDROID_HOME: sdk, ANDROID_NDK_HOME: ndkRoot };
   for (const target of [
     'aarch64_linux_android',
@@ -85,6 +102,9 @@ function androidBuildEnv() {
   return env;
 }
 
+/**
+ * @param {string} adb
+ */
 function connectedDevices(adb) {
   const result = capture(adb, ['devices', '-l']);
   if (result.status !== 0) fail(result.stderr.trim() || 'Could not query Android devices.');
@@ -94,6 +114,9 @@ function connectedDevices(adb) {
   });
 }
 
+/**
+ * @param {string} adb
+ */
 function connectDiscoveredDevice(adb) {
   const result = capture(adb, ['mdns', 'services']);
   if (result.status !== 0) return;
@@ -107,6 +130,9 @@ function connectDiscoveredDevice(adb) {
   }
 }
 
+/**
+ * @param {string} adb
+ */
 function selectDevice(adb) {
   let devices = connectedDevices(adb);
   if (devices.length === 0) {
@@ -127,7 +153,11 @@ function selectDevice(adb) {
   return devices[0];
 }
 
+/**
+ * @param {string} abi
+ */
 function tauriTargetForAbi(abi) {
+  /** @type {Record<string, string | undefined>} */
   const targets = {
     'arm64-v8a': 'aarch64',
     'armeabi-v7a': 'armv7',
@@ -137,6 +167,10 @@ function tauriTargetForAbi(abi) {
   return targets[abi];
 }
 
+/**
+ * @param {string} directory
+ * @returns {string[]}
+ */
 function findApks(directory) {
   if (!existsSync(directory)) return [];
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -146,6 +180,11 @@ function findApks(directory) {
   });
 }
 
+/**
+ * @param {string} adb
+ * @param {string} serial
+ * @param {string} packageName
+ */
 function isPackageForeground(adb, serial, packageName) {
   const result = capture(adb, ['-s', serial, 'shell', 'dumpsys', 'activity', 'activities']);
   if (result.status !== 0) return false;
@@ -155,6 +194,11 @@ function isPackageForeground(adb, serial, packageName) {
   ).test(result.stdout);
 }
 
+/**
+ * @param {string} adb
+ * @param {string} serial
+ * @param {string} packageName
+ */
 function waitForPackageRestore(adb, serial, packageName, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   const waiter = new Int32Array(new SharedArrayBuffer(4));

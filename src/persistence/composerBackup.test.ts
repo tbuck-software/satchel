@@ -30,6 +30,9 @@ function backup(overrides: Partial<ComposerBackup> = {}): ComposerBackup {
     aliveAt: NOW,
     content: {
       accountId: 'acc-1',
+      fromName: null, threadId: null, replyTo: null, sendOptions: {},
+      scheduledFor: null, signatureId: null, signatureVariant: 'auto',
+      signatureOverrideText: null, signatureOverrideHtml: null,
       fromAddress: 'me@example.com',
       to: ['mara@example.com'],
       cc: [],

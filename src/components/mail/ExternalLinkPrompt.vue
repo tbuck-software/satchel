@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
 import { computed, nextTick, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
@@ -25,7 +26,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const settings = useSettingsStore();
-const confirmButton = ref<HTMLButtonElement | null>(null);
+const confirmButton = ref<InstanceType<typeof AppButton> | null>(null);
 const trustHost = ref(false);
 
 // A switch rather than a lookup table: the subset builder only sees literal
@@ -70,7 +71,7 @@ watch(
   () => props.assessment,
   () => {
     trustHost.value = false;
-    void nextTick(() => confirmButton.value?.focus());
+    void nextTick(() => confirmButton.value?.$el.focus());
   },
   { immediate: true },
 );
@@ -120,17 +121,18 @@ function confirm() {
     </ToggleSwitch>
 
     <div class="link-prompt-actions">
-      <button type="button" class="dialog-button dialog-button--cancel" @click="emit('cancel')">
+      <AppButton class="dialog-button dialog-button--cancel" @click="emit('cancel')" variant="secondary" size="sm">
         {{ $t('common.cancel') }}
-      </button>
-      <button
+      </AppButton>
+      <AppButton
         ref="confirmButton"
-        type="button"
         :class="['dialog-button', risky ? 'dialog-button--confirm-risky' : 'dialog-button--confirm']"
         @click="confirm"
+        :variant="risky ? 'danger' : 'primary'"
+        size="sm"
       >
         {{ risky ? $t('mail.externalLink.openAnyway') : $t('mail.externalLink.open') }}
-      </button>
+      </AppButton>
     </div>
   </div>
 </template>
@@ -243,36 +245,5 @@ function confirm() {
   gap: 9px;
 }
 
-.dialog-button {
-  flex: 1;
-  min-height: 44px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  padding: 0 14px;
-  font: inherit;
-  font-size: var(--font-size-sm);
-  font-weight: var(--weight-strong);
-  cursor: pointer;
-}
-
-.dialog-button:focus-visible {
-  outline: var(--border-focus);
-  outline-offset: var(--focus-outline-offset);
-}
-
-.dialog-button--cancel {
-  border-color: var(--border-color-muted);
-  background: var(--bg-raised);
-  color: var(--text-secondary);
-}
-
-.dialog-button--confirm {
-  background: var(--accent-primary);
-  color: var(--text-on-accent);
-}
-
-.dialog-button--confirm-risky {
-  background: var(--accent-amber);
-  color: var(--text-on-amber);
-}
+.dialog-button { flex:1; }
 </style>

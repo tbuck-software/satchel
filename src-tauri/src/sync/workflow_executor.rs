@@ -32,6 +32,18 @@ pub(crate) async fn execute_queued_remote_mutation(
     let _work = state.sync_activity.start_work();
     let mutation = serde_json::from_value::<RemoteMutationPayload>(action.payload.clone())
         .map_err(|err| format!("decode remote mutation: {err}"))?;
+    if let RemoteMutationPayload::UndoTrash { receipt_id } = &mutation {
+        satchel_core::mail_actions::undo::execute_queued_undo(pool, &state.queue, receipt_id)
+            .await
+            .map_err(|error| {
+                if error == "backend.errors.mailUndoUnavailable" {
+                    crate::sync::errors::SyncError::Permanent(error)
+                } else {
+                    error.into()
+                }
+            })?;
+        return Ok(());
+    }
     let is_blocked_move = matches!(&mutation, RemoteMutationPayload::BlockedMove { .. });
     let mut workflow_move = match mutation {
         RemoteMutationPayload::WorkflowMove {

@@ -18,14 +18,13 @@ import {
   backendSetThreadsRead,
   backendTrashThreads,
   backendUpdateThreadOrganization,
-  backendUpdateThreadState,
   type BackendListThreadsInput,
   type BackendSenderPreference,
   type BackendThreadCursor,
   type BackendThreadPage,
+  type BackendTrashReceipt,
 } from '@/services/backend';
 import type { Account, Thread } from '@/types/mail';
-import type { WorkflowState } from '@/types/workflow';
 import type { InboxSenderBucket } from '@/stores/settings';
 import type { ThreadCollection } from '@/stores/threads/collection';
 import type { ThreadFilterBuckets } from '@/stores/threads/filter-buckets';
@@ -103,11 +102,6 @@ export interface ThreadPersistenceSurface {
   hasPreviousThreads: Ref<boolean>;
   ensureThreadLoaded(threadId: string, options?: EnsureThreadLoadedOptions): Promise<void>;
   releaseRetainedThread(threadId: string): void;
-  persistWorkflowState(
-    threadId: string,
-    nextState: WorkflowState,
-    snoozeUntil?: string | null,
-  ): Promise<void>;
   setPriority(threadId: string, priority: Thread['priority']): Promise<void>;
   setThreadMuted(threadId: string, muted: boolean): Promise<void>;
   setThreadsStarred(threadIds: string[], starred: boolean): Promise<void>;
@@ -129,10 +123,9 @@ export interface ThreadPersistenceSurface {
     category: NonNullable<Thread['category']>,
     bucket: InboxSenderBucket,
   ): Promise<void>;
-  setSenderPriority(threadId: string, isPriority: boolean): Promise<void>;
   markThreadsSpam(threadIds: string[]): Promise<void>;
   setThreadsRead(threadIds: string[], isRead: boolean): Promise<void>;
-  trashThreads(threadIds: string[]): Promise<void>;
+  trashThreads(threadIds: string[]): Promise<BackendTrashReceipt>;
   setTagsForThread(threadId: string, tags: string[]): Promise<void>;
   setAssignee(threadId: string, assignee?: string): Promise<void>;
   setSharedWith(threadId: string, sharedWith: string[]): Promise<void>;
@@ -294,26 +287,6 @@ export function createThreadPersistence({
     });
   }
 
-  async function persistWorkflowState(
-    threadId: string,
-    nextState: WorkflowState,
-    snoozeUntil?: string | null,
-  ) {
-    try {
-      const updated = await backendUpdateThreadState(threadId, nextState, snoozeUntil);
-      const thread = collection.find(updated.id);
-      if (!thread) {
-        return;
-      }
-      collection.patchRows([{ id: updated.id, values: {
-        workflowState: updated.workflow_state,
-        unreadCount: updated.unread_count,
-        snoozeUntil: updated.snooze_until ?? undefined,
-      } }]);
-    } catch (error) {
-      if (backendCommandsAvailable()) throw error;
-    }
-  }
 
   async function setPriority(threadId: string, priority: Thread['priority']) {
     const thread = collection.find(threadId);
@@ -425,12 +398,6 @@ export function createThreadPersistence({
     }
   }
 
-  async function setSenderPriority(threadId: string, isPriority: boolean) {
-    const thread = collection.find(threadId);
-    if (!thread) return;
-    await setSenderPriorityByEmail(thread.accountId, primarySenderEmail(thread), isPriority);
-  }
-
   async function markThreadsSpam(threadIds: string[]) {
     const targets = new Set(threadIds.map((id) => id.trim()).filter(Boolean));
     const normalized = [...targets];
@@ -539,7 +506,7 @@ export function createThreadPersistence({
     const targets = new Set(threadIds.map((threadId) => threadId.trim()).filter(Boolean));
     const normalized = [...targets];
     if (normalized.length === 0) {
-      return;
+      return { undo_token: null, undo_thread_ids: [], permanently_deleted: [] };
     }
 
     const dismissed = (filter.newSenderStack.value?.senders ?? [])
@@ -553,10 +520,9 @@ export function createThreadPersistence({
 
     const { removed, retained } = partitionThreads(threads.value, targets);
     collection.replaceAll(retained);
+    let receipt: BackendTrashReceipt;
     try {
-      await backendTrashThreads(normalized);
-      await backendDismissMobileNotifications(normalized).catch(() => {});
-      await Promise.all([refreshHead(), reloadMailboxes()]);
+      receipt = await backendTrashThreads(normalized);
     } catch (error) {
       dismissed.forEach((sender) => settings.setDismissedNewSender(sender.email, sender.previous ?? null));
       const restoredIds = new Set(threads.value.map((thread) => thread.id));
@@ -566,6 +532,9 @@ export function createThreadPersistence({
       );
       throw error;
     }
+    // A refresh failure cannot roll back a committed action or lose its Undo receipt.
+    await Promise.allSettled([backendDismissMobileNotifications(normalized), refreshHead(), reloadMailboxes()]);
+    return receipt;
   }
 
   async function setTagsForThread(threadId: string, tags: string[]) {
@@ -1046,7 +1015,6 @@ export function createThreadPersistence({
       hasPreviousThreads,
       ensureThreadLoaded,
       releaseRetainedThread,
-      persistWorkflowState,
       setPriority,
       setThreadMuted,
       setThreadsStarred,
@@ -1055,7 +1023,6 @@ export function createThreadPersistence({
       getSenderPreference,
       setSenderPriorityByEmail,
       setSenderCategory,
-      setSenderPriority,
       markThreadsSpam,
       setThreadsRead,
       trashThreads,

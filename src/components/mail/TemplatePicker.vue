@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import CardButton from '@/components/ui/CardButton.vue';
 import { useDismissable } from '@/composables/useDismissable';
 import { computed, onMounted, ref } from 'vue';
 import { useTemplatesStore } from '@/stores/templates';
@@ -72,18 +74,18 @@ useDismissable(() => true, () => emit('close'));
       </div>
       <ul class="list">
         <li v-for="tpl in filtered" :key="tpl.id">
-          <button type="button" @click="pick(tpl.id)">
+          <CardButton @click="pick(tpl.id)">
             <span class="name">{{ tpl.name }}</span>
             <span v-if="tpl.shortcut" class="shortcut">{{ tpl.shortcut }}</span>
             <span class="preview">{{ tpl.body_text.slice(0, 80) }}</span>
-          </button>
+          </CardButton>
         </li>
         <li v-if="filtered.length === 0" class="empty">
           {{ $t('compose.templates.empty') }}
         </li>
       </ul>
       <div class="actions">
-        <button type="button" class="ghost" @click="emit('close')">{{ $t('common.close') }}</button>
+        <AppButton class="ghost" @click="emit('close')" variant="ghost" size="sm">{{ $t('common.close') }}</AppButton>
       </div>
     </div>
   </ModalShell>
@@ -175,14 +177,5 @@ input {
 .actions {
   display: flex;
   justify-content: flex-end;
-}
-
-.ghost {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  padding: 8px 16px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
 }
 </style>

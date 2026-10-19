@@ -8,6 +8,7 @@ import {
 function state(overrides: Partial<ComposerDraftState> = {}): ComposerDraftState {
   return {
     accountId: 'account-1',
+    fromName: null, threadId: null, replyTo: null, sendOptions: {},
     fromAddress: 'Sender@Example.com',
     to: [],
     cc: [],
@@ -42,6 +43,14 @@ describe('composerDraftSnapshot', () => {
       subject: 'Subject',
       body: 'Body\ntext',
     });
+  });
+
+  it('includes delivery, encryption and signing choices in change detection', () => {
+    const initial = composerDraftSnapshot(state({ body: 'Keep this private' }));
+    expect(composerDraftSnapshot(state({ body: 'Keep this private', sendOptions: { pgp_encrypt_to_recipients: true } }))).not.toBe(initial);
+    expect(composerDraftSnapshot(state({ body: 'Keep this private', sendOptions: { smime_sign_with_cert_id: 'cert' } }))).not.toBe(initial);
+    expect(composerDraftSnapshot(state({ body: 'Keep this private', sendOptions: { priority: 'high' } }))).not.toBe(initial);
+    expect(composerDraftSnapshot(state({ body: 'Keep this private', replyTo: 'other@example.com' }))).not.toBe(initial);
   });
 
   it('captures a bounded attachment digest instead of its full payload', () => {

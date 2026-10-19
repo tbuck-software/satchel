@@ -3,6 +3,8 @@ import type { WorkflowState } from '@/types/workflow';
 import {
   backendBlockSender,
   backendMoveThreadsToFolder,
+  backendUndoTrash,
+  type BackendTrashReceipt,
 } from '@/services/backend';
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { useThreadsStore } from '@/stores/threads';
@@ -18,10 +20,6 @@ interface StateSnapshot {
   snoozeUntil?: string;
   /** State confirmed by the action; used for undo even after row eviction. */
   expectedState?: WorkflowState;
-}
-
-interface TrashSnapshot extends StateSnapshot {
-  accountId: string;
 }
 
 const actionQueues = new WeakMap<ReturnType<typeof useThreadsStore>, ReturnType<typeof createThreadActionQueue>>();
@@ -71,15 +69,6 @@ export function useThreadActions() {
     return threadIds.flatMap((threadId) => {
       const thread = threads.find(threadId);
       return thread ? [{ threadId, previousState: thread.workflowState, snoozeUntil: thread.snoozeUntil }] : [];
-    });
-  }
-
-  function snapshotForTrash(threadIds: string[]): TrashSnapshot[] {
-    return threadIds.flatMap((threadId) => {
-      const thread = threads.find(threadId);
-      return thread
-        ? [{ threadId, previousState: thread.workflowState, snoozeUntil: thread.snoozeUntil, accountId: thread.accountId }]
-        : [];
     });
   }
 
@@ -300,30 +289,26 @@ export function useThreadActions() {
     });
   }
 
-  /**
-   * Trash with undo. Undo moves the threads back into their account's inbox
-   * folder — there is no dedicated untrash command, and restoring the exact
-   * source folder would require per-message bookkeeping the backend does not
-   * expose today.
-   */
+  /** Undo uses the backend receipt, which owns exact source folders and provider delivery state. */
   async function trash(threadIds: string[]): Promise<void> {
     if (threadIds.length === 0) return;
 
-    const knownIds = snapshotForTrash(threadIds).map((entry) => entry.threadId);
+    const knownIds = snapshotStates(threadIds).map((entry) => entry.threadId);
     return queue.run(threadIds, async () => {
       for (const id of knownIds) {
         if (!threads.find(id)) await threads.ensureThreadLoaded(id);
       }
-      const snapshot = snapshotForTrash(threadIds);
+      const snapshot = snapshotStates(threadIds);
       if (snapshot.length === 0) return;
 
       threadIds.forEach((threadId) => threads.focusNeighborThread(threadId));
 
+      let receipt: BackendTrashReceipt;
       try {
         // The store drops the threads from the list first and puts them back if
         // the backend refuses, so a delete is gone from the view immediately
         // instead of after a full reload of a large mailbox.
-        await threads.trashThreads(threadIds);
+        receipt = await threads.trashThreads(threadIds);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t('thread.result.trashFailed'));
         return;
@@ -332,20 +317,13 @@ export function useThreadActions() {
       threads.clearSelection();
       continueTriageAfterFiling(threadIds);
 
-      // Only offer undo when we can actually name a target folder for every
-      // affected account — a dead undo button is worse than none.
-      const inboxByAccount = new Map<string, string>();
-      for (const entry of snapshot) {
-        if (inboxByAccount.has(entry.accountId)) continue;
-        const inbox = mailboxes.mailboxes.find(
-          (mailbox) => mailbox.account_id === entry.accountId && mailbox.mailbox_type === 'inbox',
-        );
-        if (inbox) inboxByAccount.set(entry.accountId, inbox.id);
+      if (receipt.permanently_deleted.length > 0) {
+        toast.info(tc('thread.result.permanentlyDeleted', receipt.permanently_deleted.length));
       }
-      const restorable = snapshot.filter((entry) => inboxByAccount.has(entry.accountId));
-
-      const message = tc('thread.result.trashed', snapshot.length);
-      if (restorable.length !== snapshot.length) {
+      if (receipt.undo_thread_ids.length === 0) return;
+      const message = tc('thread.result.trashed', receipt.undo_thread_ids.length);
+      const undoToken = receipt.undo_token;
+      if (!undoToken) {
         toast.info(message, { timeout: UNDO_TIMEOUT_MS });
         return;
       }
@@ -355,19 +333,9 @@ export function useThreadActions() {
         action: {
           label: t('thread.actions.undo'),
           present: 'fab',
-          handler: () => queue.run(restorable.map((entry) => entry.threadId), async () => {
+          handler: () => queue.run(receipt.undo_thread_ids, async () => {
             try {
-              const byFolder = new Map<string, string[]>();
-              for (const entry of restorable) {
-                const folderId = inboxByAccount.get(entry.accountId)!;
-                byFolder.set(folderId, [...(byFolder.get(folderId) ?? []), entry.threadId]);
-              }
-              for (const [targetFolderId, ids] of byFolder) {
-                await backendMoveThreadsToFolder({ threadIds: ids, targetFolderId });
-              }
-              await Promise.all(restorable.map((entry) => threads.persistWorkflowState(
-                entry.threadId, entry.previousState, entry.snoozeUntil,
-              )));
+              await backendUndoTrash(undoToken);
               await refreshLists();
               return true;
             } catch (err) {

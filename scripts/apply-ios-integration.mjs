@@ -22,14 +22,25 @@ const templatePath = join(
 );
 const expectedBundleId = "de.tbuck.satchel";
 
+/**
+ * @param {string} message
+ */
 function fail(message) {
   throw new Error(`iOS integration: ${message}`);
 }
+/**
+ * @param {string} path
+ */
 function readRequired(path) {
   if (!existsSync(path))
     fail(`missing ${relative(root, path)}; run tauri ios init --ci first`);
   return readFileSync(path, "utf8");
 }
+/**
+ * @param {string} directory
+ * @param {string} filename
+ * @returns {string[]}
+ */
 function filesBelow(directory, filename) {
   const found = [];
   for (const entry of readdirSync(directory)) {
@@ -40,6 +51,12 @@ function filesBelow(directory, filename) {
   }
   return found;
 }
+/**
+ * @param {string} text
+ * @param {string} needle
+ * @param {string} replacement
+ * @param {string} label
+ */
 function replaceOnce(text, needle, replacement, label) {
   const count = text.split(needle).length - 1;
   if (count !== 1) fail(`expected one ${label}, found ${count}`);
@@ -48,6 +65,7 @@ function replaceOnce(text, needle, replacement, label) {
 
 /** The custom URL schemes `plugins.deep-link` registers for mobile. */
 function deepLinkSchemes() {
+  /** @type {{ plugins?: { "deep-link"?: { mobile?: Array<{ scheme?: string | string[] }> } } }} */
   const config = JSON.parse(
     readRequired(join(root, "src-tauri", "tauri.conf.json")),
   );
@@ -66,6 +84,10 @@ function deepLinkSchemes() {
  * plugin writes into the plist directly is gone the next time the project is
  * generated — and without CFBundleURLTypes iOS never hands the callback back
  * to the app, leaving the OAuth flow to time out.
+ */
+/**
+ * @param {string} text
+ * @param {string[]} schemes
  */
 function withUrlTypes(text, schemes) {
   if (text.includes("CFBundleURLTypes")) return text;

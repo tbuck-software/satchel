@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
@@ -854,11 +856,11 @@ function showEntireThread() {
 
     <!-- ═══ MOBILE TOP BAR ═══ -->
     <div v-else class="mobile-top-bar" data-tauri-drag-region>
-      <button type="button" class="mobile-back-btn" :title="$t('common.back')" :aria-label="$t('common.back')" @click="emit('back')">
+      <IconButton class="mobile-back-btn" :title="$t('common.back')" :aria-label="$t('common.back')" @click="emit('back')">
         <svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <path d="M10 3L5 8l5 5"/>
         </svg>
-      </button>
+      </IconButton>
       <div class="mobile-top-meta">
         <span class="mobile-top-count">{{ $t('thread.row.messages', { count: messages.length }) }}</span>
       </div>
@@ -910,13 +912,14 @@ function showEntireThread() {
 
         <!-- Messages -->
         <div v-if="hiddenMessageCount > 0" class="mb-5">
-          <button
-            type="button"
-            class="inline-flex items-center gap-2 rounded-full border border-border bg-raised px-4 py-2 text-sm font-medium text-secondary transition-colors hover:bg-overlay hover:text-primary"
+          <AppButton
+
             @click="showEntireThread"
+            variant="secondary"
+            size="sm"
           >
             {{ $t('thread.view.showEarlier', { count: hiddenMessageCount }) }}
-          </button>
+          </AppButton>
         </div>
 
         <ThreadPaneSkeleton v-if="initialMessagesLoading" compact />
@@ -1012,7 +1015,6 @@ function showEntireThread() {
   padding: 0 calc(var(--space-5) * 2) var(--space-5);
 }
 
-
 .thread-heading-line {
   display: flex;
   flex-wrap: wrap;
@@ -1079,61 +1081,11 @@ function showEntireThread() {
 
 /* ── Desktop reply dock ── */
 
-
-
-
-
-
-
 /* Quote bar */
-
-
-
 
 /* Fields */
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /* ── Mobile reply sheet ── */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 /* ── Drag regions ── */
 [data-tauri-drag-region] {

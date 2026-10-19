@@ -145,6 +145,7 @@
         "restoreFailed": "Restoring failed.",
         "snoozed": "Email snoozed | {count} emails snoozed",
         "trashFailed": "Deleting failed.",
+        "permanentlyDeleted": "Thread permanently deleted | {count} threads permanently deleted",
         "trashed": "Thread deleted | Threads deleted",
         "waiting": "Email waiting for a reply | {count} emails waiting for a reply",
         "restoreEmpty": "No conversations could be restored."
@@ -370,6 +371,7 @@
         "restoreFailed": "Wiederherstellen fehlgeschlagen.",
         "snoozed": "E-Mail auf Wiedervorlage | {count} E-Mails auf Wiedervorlage",
         "trashFailed": "Löschen fehlgeschlagen.",
+        "permanentlyDeleted": "Thread endgültig gelöscht | {count} Threads endgültig gelöscht",
         "trashed": "Thread gelöscht | Threads gelöscht",
         "waiting": "E-Mail wartet auf Antwort | {count} E-Mails warten auf Antwort",
         "restoreEmpty": "Keine Konversation konnte wiederhergestellt werden."

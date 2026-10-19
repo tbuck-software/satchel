@@ -833,98 +833,8 @@ impl<'a> ThreadRepository<'a> {
         if child_thread_id == canonical_thread_id {
             return Ok(0);
         }
-
-        let now = chrono::Utc::now().to_rfc3339();
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-
-        let thread_accounts = sqlx::query_as::<_, (String, String)>(
-            "SELECT id, account_id FROM threads WHERE id IN (?, ?)",
-        )
-        .bind(child_thread_id)
-        .bind(canonical_thread_id)
-        .fetch_all(&mut *tx)
-        .await?;
-        if thread_accounts.len() != 2
-            || thread_accounts
-                .iter()
-                .any(|(_, account_id)| account_id != &thread_accounts[0].1)
-        {
-            return Ok(0);
-        }
-        let account_id = &thread_accounts[0].1;
-
-        let has_cross_account_message = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(
-                SELECT 1 FROM messages
-                WHERE thread_id = ? AND account_id != ?
-             )",
-        )
-        .bind(child_thread_id)
-        .bind(account_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if has_cross_account_message {
-            return Ok(0);
-        }
-
-        if remote_move_queued_for_thread(&mut tx, account_id, child_thread_id).await? {
-            return Ok(0);
-        }
-
-        let moved = sqlx::query(
-            "UPDATE messages SET thread_id = ?, updated_at = ?
-             WHERE thread_id = ? AND account_id = ?",
-        )
-        .bind(canonical_thread_id)
-        .bind(&now)
-        .bind(child_thread_id)
-        .bind(account_id)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        if moved == 0 {
-            return Ok(0);
-        }
-
-        // Existing destination links/tags win; source-only memberships are
-        // inserted before the source rows are removed.
-        TopicRepository::transfer_thread_links_tx(&mut tx, child_thread_id, canonical_thread_id)
-            .await?;
-        sqlx::query(
-            "INSERT OR IGNORE INTO thread_tags (thread_id, tag_id)
-             SELECT ?, tag_id FROM thread_tags WHERE thread_id = ?",
-        )
-        .bind(canonical_thread_id)
-        .bind(child_thread_id)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query("DELETE FROM thread_tags WHERE thread_id = ?")
-            .bind(child_thread_id)
-            .execute(&mut *tx)
-            .await?;
-
-        sqlx::query("UPDATE workflow_events SET thread_id = ? WHERE thread_id = ?")
-            .bind(canonical_thread_id)
-            .bind(child_thread_id)
-            .execute(&mut *tx)
-            .await?;
-        reassign_thread_tx(&mut tx, child_thread_id, canonical_thread_id).await?;
-        sqlx::query("UPDATE ingest_effects SET thread_id = ? WHERE thread_id = ?")
-            .bind(canonical_thread_id)
-            .bind(child_thread_id)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query(
-            "DELETE FROM threads
-             WHERE id = ? AND NOT EXISTS (SELECT 1 FROM messages WHERE thread_id = ?)",
-        )
-        .bind(child_thread_id)
-        .bind(child_thread_id)
-        .execute(&mut *tx)
-        .await?;
-
-        refresh_thread_projection_tx(&mut tx, canonical_thread_id, &now).await?;
-        clear_thread_list_snapshots_tx(&mut tx).await?;
+        let moved = merge_threads_tx(&mut tx, child_thread_id, canonical_thread_id).await?;
         tx.commit().await?;
         Ok(moved)
     }
@@ -1177,6 +1087,108 @@ pub(super) async fn remote_move_queued_for_thread(
         .into_iter()
         .filter_map(|payload| remote_move_thread_id_from_json(&payload))
         .any(|queued_thread_id| queued_thread_id == thread_id))
+}
+
+/// Merge within a caller's write transaction, preserving memberships and actions.
+pub async fn merge_threads_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    child_thread_id: &str,
+    canonical_thread_id: &str,
+) -> Result<u64, ThreadError> {
+    if child_thread_id == canonical_thread_id {
+        return Ok(0);
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let thread_accounts = sqlx::query_as::<_, (String, String)>(
+        "SELECT id, account_id FROM threads WHERE id IN (?, ?)",
+    )
+    .bind(child_thread_id)
+    .bind(canonical_thread_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    if thread_accounts.len() != 2
+        || thread_accounts
+            .iter()
+            .any(|(_, account_id)| account_id != &thread_accounts[0].1)
+    {
+        return Ok(0);
+    }
+    let account_id = &thread_accounts[0].1;
+
+    let has_cross_account_message = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(
+            SELECT 1 FROM messages
+            WHERE thread_id = ? AND account_id != ?
+         )",
+    )
+    .bind(child_thread_id)
+    .bind(account_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if has_cross_account_message {
+        return Ok(0);
+    }
+
+    if remote_move_queued_for_thread(tx, account_id, child_thread_id).await? {
+        return Ok(0);
+    }
+
+    let moved = sqlx::query(
+        "UPDATE messages SET thread_id = ?, updated_at = ?
+         WHERE thread_id = ? AND account_id = ?",
+    )
+    .bind(canonical_thread_id)
+    .bind(&now)
+    .bind(child_thread_id)
+    .bind(account_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    if moved == 0 {
+        return Ok(0);
+    }
+
+    // Existing destination links/tags win; source-only memberships are
+    // inserted before the source rows are removed.
+    TopicRepository::transfer_thread_links_tx(tx, child_thread_id, canonical_thread_id).await?;
+    sqlx::query(
+        "INSERT OR IGNORE INTO thread_tags (thread_id, tag_id)
+         SELECT ?, tag_id FROM thread_tags WHERE thread_id = ?",
+    )
+    .bind(canonical_thread_id)
+    .bind(child_thread_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query("DELETE FROM thread_tags WHERE thread_id = ?")
+        .bind(child_thread_id)
+        .execute(&mut **tx)
+        .await?;
+
+    sqlx::query("UPDATE workflow_events SET thread_id = ? WHERE thread_id = ?")
+        .bind(canonical_thread_id)
+        .bind(child_thread_id)
+        .execute(&mut **tx)
+        .await?;
+    reassign_thread_tx(tx, child_thread_id, canonical_thread_id).await?;
+    sqlx::query("UPDATE ingest_effects SET thread_id = ? WHERE thread_id = ?")
+        .bind(canonical_thread_id)
+        .bind(child_thread_id)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query(
+        "DELETE FROM threads
+         WHERE id = ? AND NOT EXISTS (SELECT 1 FROM messages WHERE thread_id = ?)",
+    )
+    .bind(child_thread_id)
+    .bind(child_thread_id)
+    .execute(&mut **tx)
+    .await?;
+
+    refresh_thread_projection_tx(tx, canonical_thread_id, &now).await?;
+    clear_thread_list_snapshots_tx(tx).await?;
+    Ok(moved)
 }
 
 /// Refresh the aggregate projection for the supplied threads inside a

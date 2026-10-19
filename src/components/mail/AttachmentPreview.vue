@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import { useDismissable } from '@/composables/useDismissable';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -154,27 +156,29 @@ useDismissable(() => true, () => emit('close'));
       <header>
         <span class="title">{{ data?.filename || filename || $t('mail.attachment.fallbackName') }}</span>
         <div class="actions">
-          <button
+          <AppButton
             v-if="nestedMessagePath"
-            type="button"
             class="ghost"
             @click="openInViewer"
+            variant="ghost"
+            size="sm"
           >
             {{ $t('mail.attachment.openInWindow') }}
-          </button>
-          <button
+          </AppButton>
+          <AppButton
             v-if="data"
-            type="button"
             class="ghost"
             :disabled="openingExternal"
             @click="openWithSystem"
+            variant="ghost"
+            size="sm"
           >
             {{ $t('mail.attachment.openWithDefault') }}
-          </button>
-          <button v-if="data" type="button" class="ghost" @click="saveAs">
+          </AppButton>
+          <AppButton v-if="data" class="ghost" @click="saveAs" variant="ghost" size="sm">
             {{ $t('mail.attachment.saveEllipsis') }}
-          </button>
-          <button type="button" class="close" @click="emit('close')">×</button>
+          </AppButton>
+          <IconButton :title="$t('common.close')" class="close" @click="emit('close')">×</IconButton>
         </div>
       </header>
       <div class="content">
@@ -190,26 +194,27 @@ useDismissable(() => true, () => emit('close'));
         />
         <div v-else-if="isPdf" class="state error">
           <p>{{ $t('mail.attachment.pdfFailed') }}</p>
-          <button type="button" class="primary" @click="openWithSystem">
+          <AppButton class="primary" @click="openWithSystem" variant="primary" size="sm">
             {{ $t('mail.attachment.openWithDefault') }}
-          </button>
+          </AppButton>
         </div>
         <pre v-else-if="isText">{{ decodedText }}</pre>
         <div v-else class="state">
           <i18n-t keypath="mail.attachment.previewUnavailable" tag="p">
             <template #mime><code>{{ mime }}</code></template>
           </i18n-t>
-          <button
+          <AppButton
             v-if="nestedMessagePath"
-            type="button"
             class="primary"
             @click="openInViewer"
+            variant="primary"
+            size="sm"
           >
             {{ $t('mail.attachment.openInWindow') }}
-          </button>
-          <button type="button" class="primary" @click="saveAs">
+          </AppButton>
+          <AppButton class="primary" @click="saveAs" variant="primary" size="sm">
             {{ $t('mail.attachment.saveEllipsis') }}
-          </button>
+          </AppButton>
         </div>
       </div>
     </div>
@@ -227,15 +232,6 @@ header {
 }
 .title { color: var(--text-primary); font-weight: var(--weight-medium); }
 .actions { display: flex; gap: 8px; align-items: center; }
-.ghost {
-  background: transparent; border: 1px solid var(--border-color);
-  color: var(--text-primary); padding: 4px 12px; border-radius: var(--radius-sm);
-  cursor: pointer; font-size: var(--font-size-sm);
-}
-.close {
-  background: transparent; border: 0; color: var(--text-secondary);
-  cursor: pointer; font-size: var(--font-size-2xl); line-height: 1; padding: 0 6px;
-}
 .content {
   flex: 1; overflow: auto; background: var(--bg-base);
   display: flex; align-items: center; justify-content: center;
@@ -249,9 +245,5 @@ header {
 }
 .state { color: var(--text-secondary); padding: 32px; text-align: center; }
 .state.error { color: var(--accent-red); }
-.primary {
-  background: var(--accent-primary); color: var(--text-on-accent); border: 0;
-  padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer; font-weight: var(--weight-semibold);
-  margin-top: 12px;
-}
+.primary { margin-top:12px; }
 </style>

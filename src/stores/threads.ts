@@ -100,20 +100,6 @@ export const useThreadsStore = defineStore('threads', () => {
   });
   filterBuckets.onScopeChange(() => void persistence.surface.load());
 
-  function addLocalOutgoingThread(input: {
-    threadId?: string;
-    accountId: string;
-    subject: string;
-    recipients: string[];
-    snippet: string;
-  }): string {
-    const threadId = collection.addLocalOutgoingThread(input);
-    selection.surface.activeThreadId.value = threadId;
-    return threadId;
-  }
-
-  const own = { discardThread, addLocalOutgoingThread };
-
   filterBuckets.startWatching();
   selection.startWatching();
 
@@ -122,7 +108,7 @@ export const useThreadsStore = defineStore('threads', () => {
     ...selection.surface,
     ...filterBuckets.surface,
     ...persistence.surface,
-    ...own,
+    discardThread,
   };
 });
 
@@ -137,7 +123,7 @@ type SurfaceOverlap =
   | Overlap<ThreadFilterBucketsSurface, ThreadPersistenceSurface>
   | Overlap<
     ThreadCollectionSurface & ThreadSelectionSurface & ThreadFilterBucketsSurface & ThreadPersistenceSurface,
-    { discardThread: unknown; addLocalOutgoingThread: unknown }
+    { discardThread: unknown }
   >;
 export const threadsSurfacesAreDisjoint: [SurfaceOverlap] extends [never] ? true : SurfaceOverlap =
   true;

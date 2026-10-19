@@ -31,7 +31,6 @@ vi.mock('@/services/backend', () => ({
   backendSetThreadsStarred: vi.fn(),
   backendSetThreadTags: vi.fn(),
   backendTrashThreads: vi.fn(),
-  backendUpdateThreadState: vi.fn(async () => ({})),
   backendUpdateThreadOrganization: vi.fn(),
   backendDismissMobileNotifications: vi.fn(async () => {}),
 }));

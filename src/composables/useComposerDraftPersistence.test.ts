@@ -3,7 +3,7 @@
 import { defineComponent, h, nextTick, ref } from 'vue';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BackendDraft, BackendDraftInput } from '@/types/composer';
+import type { BackendDraft, BackendDraftInput, BackendDraftSendOptions } from '@/types/composer';
 import {
   flushOpenComposerDrafts,
   useComposerDraftPersistence,
@@ -50,6 +50,7 @@ function createHarness(options: HarnessOptions = {}) {
   const to = ref<string[]>([]);
   const cc = ref<string[]>([]);
   const bcc = ref<string[]>([]);
+  const sendOptions = ref<BackendDraftSendOptions | null>(null);
   const subject = ref('');
   const body = ref('');
   const bodyHtml = ref<string | null>(null);
@@ -57,6 +58,7 @@ function createHarness(options: HarnessOptions = {}) {
   const save = vi.fn(options.save ?? (async (input) => savedDraft(input)));
   const remove = vi.fn(options.remove ?? (async () => undefined));
   const buildInput = vi.fn((): Omit<BackendDraftInput, 'id' | 'expectedRevision'> => ({
+    ...(sendOptions.value ? { sendOptions: sendOptions.value } : {}),
     accountId: 'account-1',
     threadId: 'thread-1',
     to: to.value,
@@ -85,7 +87,6 @@ function createHarness(options: HarnessOptions = {}) {
         initialized,
         sending,
         status,
-        trackedSources: [to, cc, bcc, subject, body, bodyHtml, attachments],
         buildInput,
         drafts: { save, remove },
         t: translate,
@@ -105,6 +106,7 @@ function createHarness(options: HarnessOptions = {}) {
     cc,
     bcc,
     subject,
+    sendOptions,
     body,
     bodyHtml,
     attachments,
@@ -150,6 +152,31 @@ describe('useComposerDraftPersistence', () => {
       subject: '',
       body: '',
     }));
+  });
+
+  it.each(['cc', 'bcc'] as const)('persists a new draft whose only content is %s', async field => {
+    const editor = harness();
+    editor[field].value = ['copy@example.com'];
+    await nextTick();
+    await expect(editor.persistence.persist()).resolves.toBe('draft-stable-id');
+    expect(editor.save).toHaveBeenCalledWith(expect.objectContaining({ [field]: ['copy@example.com'] }));
+  });
+
+  it('autosaves a policy-only edit after the text is already durable', async () => {
+    vi.useFakeTimers();
+    const editor = harness({ intervalMs: 100 });
+    editor.body.value = 'Private message';
+    await nextTick();
+    await editor.persistence.persist();
+    editor.persistence.startAutosave();
+    editor.sendOptions.value = { pgp_encrypt_to_recipients: true, priority: 'high' };
+    await nextTick();
+    expect(editor.persistence.dirty.value).toBe(true);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(editor.save).toHaveBeenLastCalledWith(expect.objectContaining({
+      sendOptions: { pgp_encrypt_to_recipients: true, priority: 'high' },
+    }));
+    expect(editor.persistence.dirty.value).toBe(false);
   });
 
   it('publishes one draft id before saving and forwards every draft field', async () => {

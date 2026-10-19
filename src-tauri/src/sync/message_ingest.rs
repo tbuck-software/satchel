@@ -2,12 +2,12 @@
 
 use std::{collections::HashSet, sync::Arc};
 
-use postroom::{MessageIdentity, SourceId};
 use satchel_core::db::blocked_senders::BlockedSenderRepository;
 use satchel_core::db::sender_preferences::{
     classify_message_with_provider_labels, provider_category, SenderPreferenceRepository,
 };
 use satchel_core::db::threads::{refresh_thread_projections_tx, ThreadRepository};
+use satchel_core::sync::provider_identity::{provider_local_id, provider_message_db_id};
 use satchel_core::sync::queue::SyncQueue;
 use satchel_core::sync::remote_mutations::stable_queue_id;
 use sqlx::{Acquire, SqlitePool};
@@ -19,55 +19,28 @@ use crate::sync::attachment_processing::process_special_attachment;
 use crate::sync::folder_reconcile::{is_snooze_folder, reconcile_external_workflow_states};
 use crate::sync::thread_resolution::{
     deduplicate_spark_draft_versions, derive_message_id_header, derive_remote_draft_id,
-    derive_thread_key, effective_from_name, message_is_sent, reconcile_sent_draft_autosaves,
-    refresh_provider_thread_projections, resolve_imap_subject_thread_connection,
-    resolve_reply_thread_connection, sanitize_id, standalone_thread_key,
-    synthetic_classification_headers,
+    effective_from_name, message_is_sent, reconcile_sent_draft_autosaves,
+    refresh_provider_thread_projections, remember_provider_thread_connection,
+    resolve_provider_thread_tx, synthetic_classification_headers,
 };
 
-/// Grouping key for a message, before it is turned into a thread id.
-///
-/// Preference order is deliberate: the provider's own conversation id is
-/// authoritative where it exists, `Message-ID` is the interoperable fallback,
-/// and only failing both does the message stand alone.
-///
-/// The standalone key is scoped by folder for IMAP because IMAP identifies
-/// messages per folder — the same numeric id means different messages in
-/// different folders, and an unscoped key would merge unrelated mail into one
-/// thread. Providers with account-wide ids need no such scoping.
-///
-/// Note the filter applies after the fallback chain, not within it: a provider
-/// that supplies an empty conversation id drops straight to the standalone key
-/// rather than trying `Message-ID`. Preserved as-is — the tests pin it so a
-/// future change to the chain is a deliberate one.
-///
-/// The result is scoped to this one message and belongs to the caller. A batch
-/// loop decides what a failure means — quarantine and carry on — instead of
-/// letting it end the run. `Ok` means the message is committed locally, which
-/// is the only receipt a provider-side deletion may act on.
-/// The messages whose read and star state a queued `Flags` mutation still owns.
-///
-/// The snapshot path has always consulted the queue before it overwrote local
-/// state; the ingest path did not, so the next provider batch reset a change
-/// the user had made and that was still waiting to be sent.
+/// Read and star values protected by queued mutations in this write transaction.
 #[derive(Debug, Default)]
-pub(crate) struct PendingFlagLocks(HashSet<(String, String)>);
+struct PendingFlagLocks(HashSet<(String, String)>);
 
 impl PendingFlagLocks {
-    /// Read once per folder batch — never per message.
-    pub(crate) async fn load(pool: &SqlitePool, account_id: &str) -> Result<Self, String> {
+    /// Read once per write transaction, after acquiring the ingest lock.
+    async fn load(
+        connection: &mut sqlx::SqliteConnection,
+        account_id: &str,
+    ) -> Result<Self, String> {
         crate::sync::folder_reconcile::pending_remote_message_refs(
-            pool,
+            connection,
             account_id,
             crate::sync::folder_reconcile::PendingMutations::FlagsOnly,
         )
         .await
         .map(Self)
-    }
-
-    /// For callers that ingest outside a folder batch and hold no lock set.
-    pub(crate) fn none() -> Self {
-        Self(HashSet::new())
     }
 
     fn holds(&self, folder_remote_id: &str, remote_id: &str) -> bool {
@@ -89,7 +62,6 @@ pub(crate) async fn upsert_provider_message(
     folder_remote_id: &str,
     folder_type: &str,
     message: &crate::providers::traits::MessageEnvelope,
-    flag_locks: &PendingFlagLocks,
     events: Option<&Arc<EventBus>>,
 ) -> Result<(), String> {
     let cutoff: Option<String> = sqlx::query_scalar(
@@ -107,7 +79,6 @@ pub(crate) async fn upsert_provider_message(
         folder_remote_id,
         folder_type,
         std::slice::from_ref(message),
-        flag_locks,
         events,
         cutoff.as_deref(),
     )
@@ -138,7 +109,6 @@ pub(crate) async fn upsert_provider_messages(
     folder_remote_id: &str,
     folder_type: &str,
     messages: &[MessageEnvelope],
-    flag_locks: &PendingFlagLocks,
     events: Option<&Arc<EventBus>>,
     cutoff: Option<&str>,
 ) -> Result<Vec<Result<(), String>>, String> {
@@ -149,6 +119,7 @@ pub(crate) async fn upsert_provider_messages(
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(|error| error.to_string())?;
+        let flag_locks = PendingFlagLocks::load(&mut tx, account_id).await?;
         let mut stored = Vec::new();
         for (message, body_html) in chunk.iter().zip(&body_html) {
             let mut savepoint = tx.begin().await.map_err(|error| error.to_string())?;
@@ -163,7 +134,7 @@ pub(crate) async fn upsert_provider_messages(
                 folder_type,
                 message,
                 body_html.as_deref(),
-                flag_locks,
+                &flag_locks,
                 cutoff,
             )
             .await;
@@ -312,32 +283,6 @@ async fn persist_provider_message(
 ) -> Result<StoredMessage, String> {
     let flags_locked = flag_locks.holds(folder_remote_id, &message.remote_id);
     let now = chrono::Utc::now().to_rfc3339();
-    let standalone_key = standalone_thread_key(provider_kind, folder_remote_id, message);
-    let mut thread_id = format!(
-        "th-{}-{}-{}",
-        sanitize_id(provider_kind),
-        sanitize_id(account_id),
-        sanitize_id(derive_thread_key(message, &standalone_key))
-    );
-    // Without a provider conversation id the key above is the message's own
-    // Message-ID — which would give every reply a thread of its own. A reply
-    // belongs to its parent's conversation, so resolve via In-Reply-To /
-    // References first. Replies that arrive before their parent are caught
-    // later by `merge_reply_split_threads`.
-    if message.remote_thread_id.is_none() {
-        if let Some(existing) =
-            resolve_reply_thread_connection(&mut *tx, account_id, message).await?
-        {
-            thread_id = existing;
-        } else if provider_kind.eq_ignore_ascii_case("imap") {
-            if let Some(existing) =
-                resolve_imap_subject_thread_connection(&mut *tx, account_id, account_email, message)
-                    .await?
-            {
-                thread_id = existing;
-            }
-        }
-    }
     let message_is_draft = provider_message_is_draft(folder_type, &message.mailbox_ids);
     let remote_draft_id = derive_remote_draft_id(message_is_draft, provider_kind, message);
     let provider_message_row = sqlx::query_as::<_, (String, Option<String>)>(
@@ -351,16 +296,6 @@ async fn persist_provider_message(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
-    if message.remote_thread_id.is_none()
-        && message
-            .message_id_header
-            .as_deref()
-            .is_none_or(|header| header.trim().is_empty())
-    {
-        if let Some(existing) = provider_message_row.as_ref().and_then(|row| row.1.as_ref()) {
-            thread_id = existing.clone();
-        }
-    }
     let provider_message_id = provider_message_row
         .as_ref()
         .map(|row| row.0.clone())
@@ -382,14 +317,45 @@ async fn persist_provider_message(
     } else {
         provider_message_id
     };
-    let prior_thread_id = sqlx::query_scalar::<_, String>(
-        "SELECT thread_id FROM messages WHERE id = ? AND NULLIF(TRIM(thread_id), '') IS NOT NULL",
+    let prior_message = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+        "SELECT thread_id, message_id_header FROM messages WHERE id = ?",
     )
     .bind(&message_id)
     .fetch_optional(&mut **tx)
     .await
-    .map_err(|err| err.to_string())?;
-    let message_id_header = derive_message_id_header(provider_kind, folder_remote_id, message);
+    .map_err(|error| error.to_string())?;
+    let prior_thread_id = prior_message
+        .as_ref()
+        .and_then(|row| row.0.as_deref())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string);
+    let thread_id = resolve_provider_thread_tx(
+        tx,
+        provider_kind,
+        account_id,
+        account_email,
+        folder_remote_id,
+        message,
+        prior_thread_id.as_deref(),
+    )
+    .await?;
+    let message_id_header = if message
+        .message_id_header
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        // Locally composed replies may already reference this synthetic header.
+        prior_message
+            .as_ref()
+            .and_then(|row| row.1.as_deref())
+            .filter(|header| {
+                header.ends_with(".satchel.local>") || header.ends_with(".flowmail.local>")
+            })
+            .map(str::to_string)
+    } else {
+        None
+    }
+    .unwrap_or_else(|| derive_message_id_header(provider_kind, folder_remote_id, message));
 
     // Pre-check whether this message already exists locally — drives whether we
     // fire a "new mail" notification after the upsert succeeds.
@@ -674,6 +640,15 @@ async fn persist_provider_message(
     .await
     .map_err(|err| err.to_string())?;
 
+    remember_provider_thread_connection(
+        &mut *tx,
+        provider_kind,
+        account_id,
+        folder_remote_id,
+        message,
+        &message_id,
+    )
+    .await?;
     // An envelope that lists no attachments carries no statement about them.
     // Deleting on that emptied the stored metadata for every message a provider
     // hands over without its parts — S/MIME, multipart/signed, anything past the
@@ -705,12 +680,11 @@ async fn persist_provider_message(
 
     let mut attachment_ids = Vec::with_capacity(message.attachments.len());
     for attachment in &message.attachments {
-        let attachment_id = format!(
-            "att-{}-{}-{}",
-            sanitize_id(provider_kind),
-            sanitize_id(&message_id),
-            sanitize_id(&attachment.remote_part_id)
-        );
+        let attachment_id = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM attachments WHERE message_id = ? AND remote_part_id = ? ORDER BY id LIMIT 1",
+        ).bind(&message_id).bind(&attachment.remote_part_id)
+            .fetch_optional(&mut **tx).await.map_err(|error| error.to_string())?
+            .unwrap_or_else(|| provider_local_id("att", provider_kind, &[&message_id, &attachment.remote_part_id]));
         sqlx::query(
             "INSERT INTO attachments (id, message_id, filename, content_type, size, content_id, storage_path, is_inline, cached_path, remote_uid, remote_part_id, created_at, content_base64)
              VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?)
@@ -1046,44 +1020,6 @@ async fn persist_blocked_sender_diagnostic(
     }
 }
 
-fn provider_message_identity(
-    provider_kind: &str,
-    account_id: &str,
-    folder_remote_id: &str,
-    remote_message_id: &str,
-) -> MessageIdentity {
-    MessageIdentity::scoped(
-        SourceId::new(format!("email/{provider_kind}/{account_id}")),
-        folder_remote_id,
-        remote_message_id,
-    )
-}
-
-fn provider_message_db_id(
-    provider_kind: &str,
-    account_id: &str,
-    folder_remote_id: &str,
-    message: &MessageEnvelope,
-) -> String {
-    let native_id = if provider_kind.eq_ignore_ascii_case("imap") {
-        // See `standalone_thread_key`: for IMAP the generation is always known
-        // and always part of the identity, so two generations never collide.
-        let uidvalidity = message.remote_uidvalidity.unwrap_or_default();
-        format!("{uidvalidity}/{}", message.remote_id)
-    } else {
-        message.remote_id.clone()
-    };
-    let identity =
-        provider_message_identity(provider_kind, account_id, folder_remote_id, &native_id);
-    format!(
-        "m-{}-{}-{}-{}",
-        sanitize_id(provider_kind),
-        sanitize_id(account_id),
-        sanitize_id(identity.scope().unwrap_or_default()),
-        sanitize_id(identity.native_id())
-    )
-}
-
 fn provider_message_is_draft(folder_type: &str, mailbox_ids: &[String]) -> bool {
     folder_type == "drafts"
         || mailbox_ids
@@ -1094,9 +1030,8 @@ fn provider_message_is_draft(folder_type: &str, mailbox_ids: &[String]) -> bool 
 #[cfg(test)]
 mod tests {
     use super::{
-        persist_blocked_sender_diagnostic, provider_message_db_id, provider_message_identity,
-        provider_message_is_draft, should_check_blocked_sender, upsert_provider_message,
-        PendingFlagLocks,
+        persist_blocked_sender_diagnostic, provider_message_db_id, provider_message_is_draft,
+        should_check_blocked_sender, upsert_provider_message,
     };
     use crate::providers::traits::{MessageEnvelope, RemoteAttachment, RemoteMessageState};
     use crate::sync::folder_reconcile::reconcile_imap_folder_snapshot;
@@ -1296,14 +1231,6 @@ mod tests {
         .expect("folder");
     }
 
-    async fn ingest(
-        pool: &sqlx::SqlitePool,
-        folder_id: &str,
-        message: &MessageEnvelope,
-    ) -> Result<(), String> {
-        ingest_with_locks(pool, folder_id, message, &PendingFlagLocks::none()).await
-    }
-
     async fn ingest_many(
         pool: &sqlx::SqlitePool,
         messages: &[MessageEnvelope],
@@ -1323,7 +1250,6 @@ mod tests {
             "INBOX",
             "inbox",
             messages,
-            &PendingFlagLocks::none(),
             None,
             cutoff.as_deref(),
         )
@@ -1361,7 +1287,6 @@ mod tests {
             "INBOX",
             "inbox",
             &message,
-            &PendingFlagLocks::none(),
             Some(&bus),
         )
         .await
@@ -1436,7 +1361,6 @@ mod tests {
             "INBOX",
             "inbox",
             &[message],
-            &PendingFlagLocks::none(),
             None,
             None,
         )
@@ -1656,7 +1580,7 @@ mod tests {
             "inbox",
             &message,
             None,
-            &PendingFlagLocks::none(),
+            &super::PendingFlagLocks::default(),
             Some("2026-01-01T00:00:00Z"),
         )
         .await
@@ -1774,7 +1698,6 @@ mod tests {
             "INBOX",
             "inbox",
             &messages,
-            &PendingFlagLocks::none(),
             None,
             None,
         )
@@ -1806,11 +1729,10 @@ mod tests {
             .count()
     }
 
-    async fn ingest_with_locks(
+    async fn ingest(
         pool: &sqlx::SqlitePool,
         folder_id: &str,
         message: &MessageEnvelope,
-        flag_locks: &PendingFlagLocks,
     ) -> Result<(), String> {
         upsert_provider_message(
             None,
@@ -1824,7 +1746,6 @@ mod tests {
             "INBOX",
             "inbox",
             message,
-            flag_locks,
             None,
         )
         .await
@@ -1856,10 +1777,7 @@ mod tests {
         message.date_rfc3339 = "2026-01-01T00:00:00Z".to_string();
         message.from_address = "sender@example.com".to_string();
         message.is_read = false;
-        let locks = PendingFlagLocks::load(pool, "account")
-            .await
-            .expect("flag locks");
-        ingest_with_locks(pool, "inbox", &message, &locks)
+        ingest(pool, "inbox", &message)
             .await
             .expect("second ingest");
         sqlx::query_scalar("SELECT is_read FROM messages")
@@ -2131,7 +2049,6 @@ mod tests {
                 "INBOX",
                 "inbox",
                 &message,
-                &PendingFlagLocks::none(),
                 None,
             )
             .await
@@ -2361,7 +2278,6 @@ mod tests {
             "INBOX",
             "inbox",
             &original,
-            &PendingFlagLocks::none(),
             None,
         )
         .await
@@ -2384,7 +2300,6 @@ mod tests {
             "Sent",
             "sent",
             &reply,
-            &PendingFlagLocks::none(),
             None,
         )
         .await
@@ -2415,7 +2330,6 @@ mod tests {
             "INBOX",
             "inbox",
             &independent,
-            &PendingFlagLocks::none(),
             None,
         )
         .await
@@ -2477,7 +2391,6 @@ mod tests {
             "INBOX",
             "inbox",
             &parent,
-            &PendingFlagLocks::none(),
             None,
         )
         .await
@@ -2507,7 +2420,6 @@ mod tests {
                 "Drafts",
                 "drafts",
                 &draft,
-                &PendingFlagLocks::none(),
                 None,
             )
             .await
@@ -2549,7 +2461,6 @@ mod tests {
             "Sent",
             "sent",
             &sent,
-            &PendingFlagLocks::none(),
             None,
         )
         .await
@@ -2573,17 +2484,12 @@ mod tests {
     fn imap_scopes_a_standalone_thread_key_by_folder() {
         let mut message = envelope("1234");
         message.remote_uidvalidity = Some(77);
-        assert_eq!(
+        assert_ne!(
             standalone_thread_key("imap", "INBOX", &message),
-            "INBOX:77:1234"
+            standalone_thread_key("imap", "Archive", &message)
         );
-        assert_eq!(
-            standalone_thread_key("imap", "Archive", &message),
-            "Archive:77:1234"
-        );
-        assert_eq!(
-            provider_message_db_id("imap", "account", "INBOX", &message),
-            "m-imap-account-INBOX-77-1234"
+        assert!(
+            provider_message_db_id("imap", "account", "INBOX", &message).starts_with("m-imap-v2-")
         );
         // Account-wide ids need no scoping.
         assert_eq!(standalone_thread_key("gmail", "INBOX", &message), "1234");
@@ -2598,18 +2504,351 @@ mod tests {
         );
     }
 
-    #[test]
-    fn core_identity_preserves_existing_provider_message_ids() {
-        let identity = provider_message_identity("imap", "account@example.com", "INBOX", "42");
+    async fn ingest_identity_fixture(
+        pool: &sqlx::SqlitePool,
+        provider: &str,
+        folder_id: &str,
+        folder_remote_id: &str,
+        message: &MessageEnvelope,
+    ) {
+        upsert_provider_message(
+            None,
+            pool,
+            provider,
+            "account",
+            "account@example.com",
+            "Account",
+            &crate::commands::accounts::AccountConfig::from_plaintext("{}"),
+            folder_id,
+            folder_remote_id,
+            "inbox",
+            message,
+            None,
+        )
+        .await
+        .unwrap();
+    }
 
-        assert_eq!(identity.source().as_str(), "email/imap/account@example.com");
-        assert_eq!(identity.scope(), Some("INBOX"));
-        assert_eq!(identity.native_id(), "42");
+    #[tokio::test]
+    async fn punctuation_distinguishes_folders_threads_and_attachment_parts() {
+        let pool = ingest_pool().await;
+        for (folder, remote) in [
+            ("project-slash", "Projects/2026"),
+            ("project-dash", "Projects-2026"),
+        ] {
+            sqlx::query("INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, created_at, updated_at) VALUES (?, 'account', ?, ?, ?, 'custom', '', '')")
+                .bind(folder).bind(remote).bind(remote).bind(remote).execute(&pool).await.unwrap();
+        }
+        let mut message = envelope("42");
+        message.remote_uidvalidity = Some(7);
+        message.attachments = ["part.1", "part-1"]
+            .into_iter()
+            .map(|part| RemoteAttachment {
+                remote_part_id: part.to_string(),
+                filename: Some(format!("{part}.txt")),
+                content_type: "text/plain".to_string(),
+                size: Some(1),
+                content_id: None,
+                is_inline: false,
+                content_base64: None,
+            })
+            .collect();
+        for (folder, remote) in [
+            ("project-slash", "Projects/2026"),
+            ("project-dash", "Projects-2026"),
+        ] {
+            ingest_identity_fixture(&pool, "imap", folder, remote, &message).await;
+        }
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM messages")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM threads")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM attachments")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            4
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(DISTINCT message_id_header) FROM messages")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            2
+        );
+
+        let pool = ingest_pool().await;
+        for (remote, header) in [("42", "<a.b@example.com>"), ("43", "<a-b@example.com>")] {
+            let mut message = envelope(remote);
+            message.message_id_header = Some(header.to_string());
+            ingest_identity_fixture(&pool, "imap", "inbox", "INBOX", &message).await;
+        }
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM threads")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_ids_memberships_and_attachment_cache_survive_resync_and_folder_copies() {
+        let pool = ingest_pool().await;
+        sqlx::query("INSERT INTO threads (id, account_id, subject, last_message_date, workflow_state, board_column, category, category_source, priority, priority_source, created_at, updated_at) VALUES ('th-imap-legacy', 'account', 'Legacy', '', 'todo', 'todo', 'personal', 'manual_thread', 3, 'manual_thread', '', '')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, remote_id, from_address, to_addresses, date, created_at, updated_at) VALUES ('m-imap-legacy', 'account', 'inbox', 'th-imap-legacy', '<legacy@example.com>', '42', '', '[]', '', '', '')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO attachments (id, message_id, remote_part_id, remote_uid, content_type, cached_path, created_at) VALUES ('att-legacy', 'm-imap-legacy', 'part.1', '42', 'text/plain', '/legacy-cache', '')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO tags (id, name) VALUES ('tag', 'Tag')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO thread_tags (thread_id, tag_id) VALUES ('th-imap-legacy', 'tag')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO topics (id, name, created_at, updated_at) VALUES ('topic', 'Topic', '', '')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO topic_items (topic_id, item_type, item_id, added_at) VALUES ('topic', 'thread', 'th-imap-legacy', '')").execute(&pool).await.unwrap();
+        let mut message = envelope("42");
+        message.message_id_header = Some("<legacy@example.com>".to_string());
+        message.attachments.push(RemoteAttachment {
+            remote_part_id: "part.1".into(),
+            filename: None,
+            content_type: "text/plain".into(),
+            size: Some(1),
+            content_id: None,
+            is_inline: false,
+            content_base64: None,
+        });
+        ingest_identity_fixture(&pool, "imap", "inbox", "INBOX", &message).await;
+        assert_eq!(
+            sqlx::query_as::<_, (String, String)>("SELECT id, thread_id FROM messages")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            ("m-imap-legacy".into(), "th-imap-legacy".into())
+        );
+        assert_eq!(
+            sqlx::query_as::<_, (String, String)>("SELECT id, cached_path FROM attachments")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            ("att-legacy".into(), "/legacy-cache".into())
+        );
+        let state = sqlx::query_as::<_, (String, i64, String)>(
+            "SELECT workflow_state, priority, category FROM threads",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(state, ("todo".into(), 3, "personal".into()));
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM thread_tags WHERE thread_id = 'th-imap-legacy'"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM topic_items WHERE item_id = 'th-imap-legacy'"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1
+        );
+        sqlx::query("INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, created_at, updated_at) VALUES ('archive', 'account', 'Archive', 'Archive', 'Archive', 'archive', '', '')").execute(&pool).await.unwrap();
+        message.remote_id = "99".into();
+        ingest_identity_fixture(&pool, "imap", "archive", "Archive", &message).await;
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM messages WHERE thread_id = 'th-imap-legacy'"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM threads")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_legacy_synthetic_header_remains_a_valid_local_reply_reference() {
+        let pool = ingest_pool().await;
+        sqlx::query("INSERT INTO threads (id, account_id, last_message_date, created_at, updated_at) VALUES ('th-imap-legacy', 'account', '', '', '')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, remote_id, from_address, to_addresses, date, created_at, updated_at) VALUES ('m-imap-legacy', 'account', 'inbox', 'th-imap-legacy', '<INBOX-42@imap.flowmail.local>', '42', '', '[]', '', '', '')").execute(&pool).await.unwrap();
+        ingest_identity_fixture(&pool, "imap", "inbox", "INBOX", &envelope("42")).await;
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT message_id_header FROM messages")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            "<INBOX-42@imap.flowmail.local>"
+        );
+    }
+
+    #[tokio::test]
+    async fn first_new_conversation_member_is_folded_into_the_later_resynced_legacy_thread() {
+        let pool = ingest_pool().await;
+        sqlx::query("INSERT INTO threads (id, account_id, subject, last_message_date, workflow_state, board_column, created_at, updated_at) VALUES ('th-gmail-legacy', 'account', 'Legacy', '', 'todo', 'todo', '', '')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, remote_id, from_address, to_addresses, date, created_at, updated_at) VALUES ('m-gmail-legacy', 'account', 'inbox', 'th-gmail-legacy', '<legacy@example.com>', '41', '', '[]', '', '', '')").execute(&pool).await.unwrap();
+        let mut message = envelope("42");
+        message.remote_thread_id = Some("conversation/raw-key".into());
+        message.message_id_header = Some("<new@example.com>".into());
+        ingest_identity_fixture(&pool, "gmail", "inbox", "INBOX", &message).await;
+        sqlx::query("INSERT INTO tags (id, name) VALUES ('new-tag', 'New tag')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO thread_tags (thread_id, tag_id) SELECT thread_id, 'new-tag' FROM messages WHERE remote_id = '42'").execute(&pool).await.unwrap();
+        message.remote_id = "41".into();
+        message.message_id_header = Some("<legacy@example.com>".into());
+        ingest_identity_fixture(&pool, "gmail", "inbox", "INBOX", &message).await;
+        message.remote_id = "43".into();
+        message.message_id_header = Some("<newer@example.com>".into());
+        ingest_identity_fixture(&pool, "gmail", "inbox", "INBOX", &message).await;
+        assert_eq!(sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM thread_tags WHERE thread_id = 'th-gmail-legacy' AND tag_id = 'new-tag'").fetch_one(&pool).await.unwrap(), 1);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM threads")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM messages WHERE thread_id = 'th-gmail-legacy'"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            3
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT workflow_state FROM threads")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            "todo"
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_thread_alias_survives_anchor_deletion_until_the_last_member_is_removed() {
+        let pool = ingest_pool().await;
+        sqlx::query("INSERT INTO threads (id, account_id, subject, last_message_date, workflow_state, board_column, created_at, updated_at) VALUES ('th-gmail-legacy', 'account', 'Legacy', '', 'todo', 'todo', '', '')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, remote_id, from_address, to_addresses, date, created_at, updated_at) VALUES ('m-gmail-legacy', 'account', 'inbox', 'th-gmail-legacy', '<legacy@example.com>', '41', '', '[]', '', '', '')").execute(&pool).await.unwrap();
+        let mut message = envelope("41");
+        message.remote_thread_id = Some("conversation/raw-key".into());
+        message.message_id_header = Some("<legacy@example.com>".into());
+        ingest_identity_fixture(&pool, "gmail", "inbox", "INBOX", &message).await;
+        message.remote_id = "42".into();
+        message.message_id_header = Some("<anchor@example.com>".into());
+        ingest_identity_fixture(&pool, "gmail", "inbox", "INBOX", &message).await;
+        let identity = crate::sync::thread_resolution::provider_thread_db_id(
+            "gmail", "account", "INBOX", &message,
+        );
+        let anchor: String =
+            sqlx::query_scalar("SELECT message_id FROM provider_thread_keys WHERE identity = ?")
+                .bind(&identity)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let expected_anchor = provider_message_db_id("gmail", "account", "INBOX", &message);
+        assert_eq!(anchor, expected_anchor);
+        sqlx::query("DELETE FROM messages WHERE id = ?")
+            .bind(&anchor)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let replacement: String =
+            sqlx::query_scalar("SELECT message_id FROM provider_thread_keys WHERE identity = ?")
+                .bind(&identity)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(replacement, "m-gmail-legacy");
+
+        // Neither the provider message ID nor its Message-ID has been seen.
+        // Only the surviving conversation alias can recover the legacy thread.
+        message.remote_id = "43".into();
+        message.message_id_header = Some("<new-member@example.com>".into());
+        ingest_identity_fixture(&pool, "gmail", "inbox", "INBOX", &message).await;
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM messages WHERE thread_id = 'th-gmail-legacy'"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM threads")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT workflow_state FROM threads")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            "todo"
+        );
+
+        // A bulk delete may reanchor repeatedly within the statement. Its last
+        // member must still cascade the alias instead of leaving a dangling key.
+        sqlx::query("DELETE FROM messages WHERE thread_id = 'th-gmail-legacy'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM provider_thread_keys WHERE identity = ?"
+            )
+            .bind(&identity)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn provider_identity_keeps_uidvalidity_and_all_components() {
         let mut message = envelope("42");
         message.remote_uidvalidity = Some(9);
-        assert_eq!(
-            provider_message_db_id("imap", "account@example.com", "INBOX", &message),
-            "m-imap-account-example-com-INBOX-9-42"
+        let id = provider_message_db_id("imap", "account@example.com", "INBOX", &message);
+        assert!(id.starts_with("m-imap-v2-"));
+        message.remote_uidvalidity = Some(10);
+        assert_ne!(
+            id,
+            provider_message_db_id("imap", "account@example.com", "INBOX", &message)
+        );
+        assert_ne!(
+            provider_message_db_id("imap", "account@example.com", "Projects/2026", &message),
+            provider_message_db_id("imap", "account@example.com", "Projects-2026", &message),
         );
     }
 
@@ -2685,7 +2924,6 @@ mod tests {
             "INBOX",
             "inbox",
             &message,
-            &PendingFlagLocks::none(),
             None,
         )
         .await
@@ -2693,7 +2931,7 @@ mod tests {
 
         let thread: (String, String, i64, String) = sqlx::query_as(
             "SELECT category, category_source, priority, priority_source
-             FROM threads WHERE id = 'th-gmail-acc-amazon-thread'",
+             FROM threads WHERE account_id = 'acc'",
         )
         .fetch_one(&pool)
         .await
@@ -2762,7 +3000,6 @@ mod tests {
             "INBOX",
             "inbox",
             &message,
-            &PendingFlagLocks::none(),
             None,
         )
         .await
@@ -2871,7 +3108,6 @@ mod tests {
             "INBOX",
             "inbox",
             &message,
-            &PendingFlagLocks::none(),
             None,
         )
         .await
@@ -2901,7 +3137,6 @@ mod tests {
             "INBOX",
             "inbox",
             &message,
-            &PendingFlagLocks::none(),
             None,
         )
         .await
@@ -2922,7 +3157,9 @@ mod tests {
                 .expect("archive reconcile");
         assert_eq!(
             externally_changed_threads,
-            HashSet::from(["th-gmail-account-gmail-thread".to_string()])
+            HashSet::from([crate::sync::thread_resolution::provider_thread_db_id(
+                "gmail", "account", "INBOX", &message
+            )])
         );
         let archive_folder_id: String = sqlx::query_scalar(
             "SELECT id FROM folders WHERE account_id = 'account' AND folder_type = 'archive'",
@@ -2942,7 +3179,6 @@ mod tests {
             "ARCHIVE",
             "archive",
             &message,
-            &PendingFlagLocks::none(),
             None,
         )
         .await
@@ -3065,7 +3301,6 @@ mod tests {
             "inbox",
             "inbox",
             &message,
-            &PendingFlagLocks::none(),
             None,
         )
         .await
@@ -3166,7 +3401,6 @@ mod tests {
             "DRAFT",
             "drafts",
             &message,
-            &PendingFlagLocks::none(),
             None,
         )
         .await
@@ -3202,7 +3436,6 @@ mod tests {
             "DRAFT",
             "drafts",
             &replacement,
-            &PendingFlagLocks::none(),
             None,
         )
         .await

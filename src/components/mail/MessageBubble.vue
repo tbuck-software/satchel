@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
+import MenuItem from '@/components/ui/MenuItem.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type {
@@ -130,7 +132,6 @@ async function retryInlineImages() {
     inlineImagesBusy.value = false;
   }
 }
-
 
 const fullTimestamp = computed(() => formatMessageTimestamp(props.message.timestamp));
 
@@ -378,9 +379,8 @@ function openSenderDetails() {
     <!-- Header -->
     <div class="message-header flex items-start justify-between">
       <div class="message-sender-group flex min-w-0 items-center gap-3.5">
-        <button
+        <CardButton
           v-if="props.canReply && !ui.isMobile && senderAccountId"
-          type="button"
           class="sender-avatar-trigger"
           :class="{ 'sender-avatar-trigger--open': senderMenuAnchor !== null }"
           :title="$t('mail.message.fileSender', { name: senderName })"
@@ -390,18 +390,19 @@ function openSenderDetails() {
           @click.stop="toggleSenderMenu"
         >
           <Avatar :name="senderName" :email="props.message.from.email" :size="avatarSize" />
-        </button>
+        </CardButton>
         <Avatar v-else :name="senderName" :email="props.message.from.email" :size="avatarSize" />
         <div class="min-w-0">
           <div class="flex items-center gap-2">
-            <button
-              type="button"
+            <AppButton
               class="sender-identity-trigger text-md font-semibold text-primary"
               :aria-label="$t('mail.recipients.showSenderDetails', { name: senderName })"
               @click.stop="openSenderDetails"
+              variant="link"
+              size="sm"
             >
               {{ senderName }}
-            </button>
+            </AppButton>
             <span v-if="props.collapsed && collapsedSnippet" class="message-collapsed-snippet">
               {{ collapsedSnippet }}
             </span>
@@ -423,15 +424,16 @@ function openSenderDetails() {
             </span>
           </div>
           <div class="message-address-line mt-0.5 text-xs text-tertiary">
-            <button
+            <AppButton
               v-if="props.message.from.email"
-              type="button"
               class="message-sender-email sender-identity-trigger"
               :aria-label="$t('mail.recipients.showSenderDetails', { name: senderName })"
               @click.stop="openSenderDetails"
+              variant="link"
+              size="sm"
             >
               {{ props.message.from.email }}
-            </button>
+            </AppButton>
             <span v-if="props.message.from.email && (props.message.to.length || props.message.cc?.length)" class="message-address-separator" aria-hidden="true">&middot;</span>
             <MessageRecipientDetails
               ref="recipientDetailsRef"
@@ -467,9 +469,8 @@ function openSenderDetails() {
         <div class="text-right">
           <div class="text-xs text-tertiary font-medium">{{ fullTimestamp }}</div>
         </div>
-        <button
+        <IconButton
           v-if="!ui.isMobile"
-          type="button"
           class="message-collapse-toggle"
           :title="props.collapsed ? $t('mail.message.expand') : $t('mail.message.collapse')"
           :aria-label="props.collapsed ? $t('mail.message.expand') : $t('mail.message.collapse')"
@@ -478,7 +479,7 @@ function openSenderDetails() {
           <svg viewBox="0 0 16 16" aria-hidden="true">
             <path d="m5 6 3 3 3-3" />
           </svg>
-        </button>
+        </IconButton>
         <IconButton
           v-else
           size="lg"
@@ -708,57 +709,52 @@ function openSenderDetails() {
         :open="messageActionsOpen"
         @dismiss="messageActionsOpen = false"
       >
-        <nav class="message-action-sheet" :aria-label="$t('mail.message.actionsNav')">
+        <nav role="menu" class="message-action-sheet" :aria-label="$t('mail.message.actionsNav')">
           <h2>{{ $t('mail.message.actions') }}</h2>
-          <button
+          <MenuItem label=""
             v-if="props.message.isDraft"
-            type="button"
-            @click="runMessageAction(() => emit('editDraft', props.message.id))"
+            @select="runMessageAction(() => emit('editDraft', props.message.id))"
           >
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13.8 3.2 3 3L7 16l-4 1 1-4z" /><path d="M2.5 18h15" /></svg>
+            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13.8 3.2 3 3L7 16l-4 1 1-4z" /><path d="M2.5 18h15" /></svg></template>
             {{ $t('common.edit') }}
-          </button>
-          <button
+          </MenuItem>
+          <MenuItem label=""
             v-if="props.message.isDraft"
-            type="button"
-            class="message-action-sheet__danger"
+            tone="danger"
             :disabled="props.draftBusy"
-            @click="runMessageAction(() => emit('discardDraft', props.message.id))"
+            @select="runMessageAction(() => emit('discardDraft', props.message.id))"
           >
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h14M7 5V3h6v2M5 5l1 12h8l1-12" /></svg>
+            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h14M7 5V3h6v2M5 5l1 12h8l1-12" /></svg></template>
             {{ $t('common.discard') }}
-          </button>
-          <button
+          </MenuItem>
+          <MenuItem label=""
             v-if="props.canReply && !props.message.isDraft"
-            type="button"
-            @click="runMessageAction(() => emit('reply'))"
+            @select="runMessageAction(() => emit('reply'))"
           >
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 4-5 5 5 5" /><path d="M3 9h9a5 5 0 0 1 5 5" /></svg>
+            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 4-5 5 5 5" /><path d="M3 9h9a5 5 0 0 1 5 5" /></svg></template>
             {{ $t('common.reply') }}
-          </button>
-          <button
+          </MenuItem>
+          <MenuItem label=""
             v-if="props.canReply && !props.message.isDraft"
-            type="button"
-            @click="runMessageAction(() => emit('forward'))"
+            @select="runMessageAction(() => emit('forward'))"
           >
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 4 5 5-5 5" /><path d="M17 9H8a5 5 0 0 0-5 5" /></svg>
+            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 4 5 5-5 5" /><path d="M17 9H8a5 5 0 0 0-5 5" /></svg></template>
             {{ $t('common.forward') }}
-          </button>
-          <button
-            type="button"
-            @click="runMessageAction(() => topicsStore.openPicker({ itemType: 'message', itemIds: [props.message.id] }))"
+          </MenuItem>
+          <MenuItem label=""
+            @select="runMessageAction(() => topicsStore.openPicker({ itemType: 'message', itemIds: [props.message.id] }))"
           >
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5a2 2 0 0 1 2-2h3l2 2h5a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M10 8v6M7 11h6" /></svg>
+            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5a2 2 0 0 1 2-2h3l2 2h5a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M10 8v6M7 11h6" /></svg></template>
             {{ $t('mail.message.addToTopic') }}
-          </button>
-          <button type="button" @click="runMessageAction(() => { sourceDialogOpen = true; })">
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5-4 5 4 5M12 5l4 5-4 5" /></svg>
+          </MenuItem>
+          <MenuItem label="" @select="runMessageAction(() => { sourceDialogOpen = true; })">
+            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5-4 5 4 5M12 5l4 5-4 5" /></svg></template>
             {{ $t('mail.message.showSource') }}
-          </button>
-          <button type="button" @click="runMessageAction(() => emit('toggleCollapsed'))">
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path v-if="props.collapsed" d="m5 8 5 5 5-5" /><path v-else d="m5 12 5-5 5 5" /></svg>
+          </MenuItem>
+          <MenuItem label="" @select="runMessageAction(() => emit('toggleCollapsed'))">
+            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path v-if="props.collapsed" d="m5 8 5 5 5-5" /><path v-else d="m5 12 5-5 5 5" /></svg></template>
             {{ props.collapsed ? $t('mail.message.expand') : $t('mail.message.collapse') }}
-          </button>
+          </MenuItem>
         </nav>
       </BottomSheet>
     </Teleport>
@@ -804,7 +800,6 @@ function openSenderDetails() {
 .sender-avatar-trigger--open {
   box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px color-mix(in srgb, var(--accent-primary) 55%, transparent);
 }
-
 
 /* The body, attachments and banners line up under the sender's name; the
    header keeps the avatar in the margin. 52px = the 40px avatar plus its gap. */
@@ -855,10 +850,7 @@ function openSenderDetails() {
 }
 
 /* The name keeps its width; the snippet is what gives way. */
-.message-surface--collapsed .sender-identity-trigger {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
+.message-surface--collapsed .sender-identity-trigger { flex-shrink: 0; }
 
 .message-collapsed-snippet {
   min-width: 0;
@@ -869,29 +861,7 @@ function openSenderDetails() {
   font-size: var(--font-size-sm);
 }
 
-.sender-identity-trigger {
-  min-width: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  padding: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.sender-identity-trigger:hover {
-  color: var(--text-primary);
-  text-decoration: underline;
-  text-decoration-color: var(--text-tertiary);
-  text-underline-offset: 3px;
-}
-
-.sender-identity-trigger:focus-visible {
-  outline: var(--border-focus);
-  outline-offset: var(--focus-outline-offset);
-}
+.sender-identity-trigger { min-width: 0; }
 
 .message-address-line {
   display: flex;
@@ -918,27 +888,7 @@ function openSenderDetails() {
   }
 }
 
-.message-collapse-toggle {
-  display: grid;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition:
-    background var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out),
-    transform var(--duration-normal) var(--ease-out);
-}
-
-.message-collapse-toggle:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
+.message-collapse-toggle { width: 24px; flex: 0 0 auto; }
 
 .message-collapse-toggle svg {
   width: 14px;
@@ -963,33 +913,7 @@ function openSenderDetails() {
   font-size: var(--font-size-lg);
 }
 
-.message-action-sheet button {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  min-height: 48px;
-  border: 0;
-  border-radius: var(--radius-md);
-  padding: 8px 12px;
-  background: transparent;
-  color: var(--text-primary);
-  font: inherit;
-  font-size: var(--font-size-md);
-  text-align: left;
-}
-
-.message-action-sheet button:active { background: var(--bg-active); }
-.message-action-sheet button:disabled { opacity: 0.45; }
-.message-action-sheet button svg { width: 20px; height: 20px; flex: 0 0 auto; color: var(--text-secondary); }
-.message-action-sheet .message-action-sheet__danger { color: var(--accent-red); }
-.message-action-sheet .message-action-sheet__danger svg { color: var(--accent-red); }
-
-.message-surface:not(.message-surface--collapsed) .message-collapse-toggle {
-  transform: rotate(180deg);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .message-collapse-toggle { transition: none; }
 }
 
 .inline-images-notice {

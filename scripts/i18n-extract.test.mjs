@@ -9,6 +9,7 @@ import { scriptFindings } from './i18n-extract.mjs';
  * so an English literal there is copy the check has to see.
  */
 
+/** @param {string} source */
 const kinds = (source) => scriptFindings(source).map((entry) => `${entry.kind} ${entry.text}`);
 
 describe('i18n extractor: thrown sentences', () => {

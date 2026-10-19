@@ -103,7 +103,8 @@ describe('select-all over a large loaded window', () => {
     const store = useThreadsStore();
     store.threads = seedThreads(5);
 
-    store.setSelection(['th-1', 'th-nope', 'th-3', 'th-1']);
+    store.selectFromInteraction('th-1', { metaKey: false, ctrlKey: false, shiftKey: false }, false);
+    store.toggleSelectionForThread('th-3');
 
     expect(store.selectedThreadIds).toEqual(['th-1', 'th-3']);
   });
@@ -118,7 +119,7 @@ describe('select-all over a large loaded window', () => {
     const linear: number[] = [];
     for (let run = 0; run < 7; run += 1) {
       const startIndexed = performance.now();
-      store.setSelection(order);
+      store.selectAllVisibleThreads();
       const midpoint = performance.now();
       linearSelection(store.threads, order);
       const end = performance.now();

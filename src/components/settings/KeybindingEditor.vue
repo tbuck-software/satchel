@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSettingsStore } from '@/stores/settings';
@@ -109,10 +110,9 @@ function displayStrokes(action: string): string[] {
         <span role="columnheader">{{ $t('common.status') }}</span>
       </div>
 
-      <button
+      <CardButton
         v-for="definition in visibleBindings"
         :key="definition.action"
-        type="button"
         class="binding-row"
         :class="{
           'binding-row--recording': recordingAction === definition.action,
@@ -150,7 +150,7 @@ function displayStrokes(action: string): string[] {
           >{{ $t('settings.shortcuts.custom') }}</span>
           <span v-else class="status">{{ $t('common.default') }}</span>
         </span>
-      </button>
+      </CardButton>
 
       <p v-if="visibleBindings.length === 0" class="empty-state">{{ $t('settings.shortcuts.noMatch') }}</p>
     </div>

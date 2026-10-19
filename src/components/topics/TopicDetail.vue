@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { saveAttachmentWithDialog } from '@/utils/saveAttachment';
@@ -549,7 +550,7 @@ async function copyAsMarkdown() {
 
 <template>
   <section v-if="topic" class="topic-page">
-    <button v-show="scrolledAway" type="button" class="jump-bar" :title="$t('topics.detail.jumpToTop')" @click="scrollToTop">
+    <CardButton v-show="scrolledAway" class="jump-bar" :title="$t('topics.detail.jumpToTop')" @click="scrollToTop">
       <span class="jump-bar__inner">
         <span class="state-dot" :class="isDone ? 'state-dot--done' : 'state-dot--open'" aria-hidden="true" />
         <strong class="jump-bar__name">{{ topic.name }}</strong>
@@ -561,7 +562,7 @@ async function copyAsMarkdown() {
           <path d="M3.5 10L8 5.5L12.5 10" />
         </svg>
       </span>
-    </button>
+    </CardButton>
     <div ref="scrollEl" class="topic-scroll" @scroll.passive="onScroll">
     <div class="topic-issue">
       <!-- Issue head: title, state badge, meta -->
@@ -580,9 +581,8 @@ async function copyAsMarkdown() {
             @keydown.esc="editingIcon = false"
             @blur="saveIcon"
           />
-          <button
+          <CardButton
             v-else
-            type="button"
             class="icon-tile"
             :title="$t('topics.detail.iconTitle')"
             @click="startIconEdit"
@@ -594,7 +594,7 @@ async function copyAsMarkdown() {
               :email="topic.last_sender_email"
               :size="34"
             />
-          </button>
+          </CardButton>
           <input
             v-if="editingTitle"
             ref="titleInput"
@@ -668,13 +668,12 @@ async function copyAsMarkdown() {
               <path d="M8 5.5V8.5L10.2 10" />
             </svg>
             {{ dueLabel }}
-            <button type="button" class="due-chip__clear" :title="$t('topics.detail.dueClear')" @click="void setDueDate(null)">×</button>
+            <IconButton class="due-chip__clear" :title="$t('topics.detail.dueClear')" @click="void setDueDate(null)">×</IconButton>
           </span>
           <div v-if="participants.length > 1" class="participants" role="group" :aria-label="$t('topics.detail.participants')">
-            <button
+            <CardButton
               v-for="person in participants"
               :key="person.email"
-              type="button"
               class="participants__avatar"
               :class="{ 'participants__avatar--active': participantFilter === person.email.toLowerCase() }"
               :title="participantFilter === person.email.toLowerCase()
@@ -683,7 +682,7 @@ async function copyAsMarkdown() {
               @click="toggleParticipant(person.email)"
             >
               <Avatar :name="person.name" :email="person.email" :size="24" />
-            </button>
+            </CardButton>
           </div>
           <span class="issue-spacer" />
           <SegmentedControl
@@ -706,12 +705,12 @@ async function copyAsMarkdown() {
         <div class="attachments">
           <span class="attachments__label">
             {{ $t('topics.detail.attachments', { count: allAttachments.length + topicFiles.length }) }}
-            <button type="button" class="attachments__add" :disabled="uploadingFiles" @click="pickFiles">
+            <AppButton class="attachments__add" :disabled="uploadingFiles" @click="pickFiles" variant="link" size="sm">
               <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
                 <path d="M8 3V13M3 8H13" />
               </svg>
               {{ $t('topics.detail.addFile') }}
-            </button>
+            </AppButton>
             <input ref="fileInput" type="file" multiple class="attachments__input" :aria-label="$t('topics.detail.fileInputLabel')" @change="onFilesPicked" />
           </span>
           <div v-if="allAttachments.length > 0 || topicFiles.length > 0" class="attachments__list">
@@ -919,27 +918,7 @@ async function copyAsMarkdown() {
   gap: 8px;
 }
 
-.attachments__add {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 8px;
-  border: 0;
-  background: transparent;
-  color: var(--accent-primary);
-  font: inherit;
-  font-size: var(--font-size-xs);
-  font-weight: var(--weight-semibold);
-  text-transform: none;
-  letter-spacing: normal;
-  cursor: pointer;
-  padding: 0;
-}
-
-.attachments__add:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
+.attachments__add { margin-left: 8px; }
 
 .attachments__input {
   display: none;

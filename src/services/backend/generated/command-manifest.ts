@@ -2129,6 +2129,17 @@ export default {
                 }
             }
         },
+        "undo_trash": {
+            "kind": "object",
+            "fields": {
+                "receiptId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "unlock_pgp_keys": {
             "kind": "object",
             "fields": {
@@ -2190,18 +2201,6 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "app::commands::threads::UpdateThreadOrganizationInput"
-                    }
-                }
-            }
-        },
-        "update_thread_state": {
-            "kind": "object",
-            "fields": {
-                "input": {
-                    "required": true,
-                    "shape": {
-                        "kind": "ref",
-                        "name": "app::commands::threads::UpdateThreadStateInput"
                     }
                 }
             }
@@ -4265,32 +4264,6 @@ export default {
                     "required": false,
                     "shape": {
                         "kind": "array",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                },
-                "thread_id": {
-                    "required": true,
-                    "shape": {
-                        "kind": "value"
-                    }
-                }
-            }
-        },
-        "app::commands::threads::UpdateThreadStateInput": {
-            "kind": "object",
-            "fields": {
-                "next_state": {
-                    "required": true,
-                    "shape": {
-                        "kind": "value"
-                    }
-                },
-                "snooze_until": {
-                    "required": false,
-                    "shape": {
-                        "kind": "optional",
                         "item": {
                             "kind": "value"
                         }

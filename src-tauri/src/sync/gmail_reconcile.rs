@@ -190,7 +190,9 @@ pub async fn ensure_gmail_archive_folder(
     {
         return Ok(id);
     }
-    let id = satchel_core::db::folders::folder_db_id(account_id, "ARCHIVE");
+    let id = satchel_core::db::folders::resolve_provider_folder_id(pool, account_id, "ARCHIVE")
+        .await
+        .map_err(|err| err.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO folders

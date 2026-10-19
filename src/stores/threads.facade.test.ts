@@ -11,25 +11,25 @@ import { collidingKeys, type Overlap } from './threads/surface';
  * tests hold both ends.
  */
 
-/** Everything the store exposed before the spread, verbatim. */
+/** The supported public interface; unused legacy methods stay private or removed. */
 const STORE_KEYS = [
   'activeContact', 'activeContactEmail', 'activeSimilarGroup', 'activeSimilarGroupId',
   'activeSmartBucket', 'activeSmartBucketId', 'activeThread', 'activeThreadId',
-  'addLocalOutgoingThread', 'allContactSummaries', 'applyWorkflowStates', 'beginThreadLeave',
-  'categoryFilter', 'clearContact', 'clearSelection', 'closeSimilarGroup', 'closeSmartBucket',
+  'allContactSummaries', 'applyWorkflowStates', 'beginThreadLeave',
+  'categoryFilter', 'clearSelection', 'closeSimilarGroup', 'closeSmartBucket',
   'contactSummaries', 'discardThread', 'endThreadLeave', 'ensureThreadLoaded', 'find',
   'focusNeighborThread', 'getSenderPreference', 'hasPreviousThreads', 'hasMoreThreads', 'leavingThreadIds',
   'leavingThreadStates', 'listEntries', 'load', 'loadPrevious', 'loadPreviousFailed', 'loadMore', 'loadMoreFailed', 'loadingMoreThreads',
   'mailboxFilter', 'markRead', 'markThreadsSpam', 'newSenderStack', 'nextThread', 'openContact',
-  'openSimilarGroup', 'openSmartBucket', 'persistWorkflowState', 'pinnedContactSummaries',
+  'openSimilarGroup', 'openSmartBucket', 'pinnedContactSummaries',
   'prevThread', 'refreshHead', 'refreshThreads', 'releaseRetainedThread', 'retryLoadMore',
   'scopedVisibleThreads',
   'selectAllVisibleThreads', 'selectFromInteraction', 'selectThread', 'selectedThreadIds',
-  'selectedThreads', 'setAssignee', 'setMailboxFilter', 'setPriority', 'setSelection',
-  'setSenderCategory', 'setSenderCategoryByEmail', 'setSenderPriority',
+  'selectedThreads', 'setAssignee', 'setMailboxFilter', 'setPriority',
+  'setSenderCategory', 'setSenderCategoryByEmail',
   'setSenderPriorityByEmail', 'setSharedWith', 'setTagsForThread', 'setThreadCategory',
   'setThreadMuted', 'setThreadsRead', 'setThreadsStarred', 'setViewportStart',
-  'setWorkflowState', 'similarThreadGroups', 'smartInboxBuckets', 'smartInboxTotalCount',
+  'similarThreadGroups', 'smartInboxBuckets', 'smartInboxTotalCount',
   'smartListEntries', 'threadLoadInFlight', 'threads', 'toggleSelectionForThread',
   'trashThreads', 'visibleThreadOrder', 'visibleThreads', 'workflowFilter',
 ];
@@ -40,7 +40,7 @@ beforeEach(() => {
 
 describe('threads store façade', () => {
   /** Equivalence with the hand-written list it replaced: nothing lost, nothing internal leaked. */
-  it('exposes exactly what the hand-written façade did', () => {
+  it('exposes only the supported public interface', () => {
     const store = useThreadsStore();
     const exposed = Object.keys(store).filter((key) => !key.startsWith('$') && !key.startsWith('_'));
 

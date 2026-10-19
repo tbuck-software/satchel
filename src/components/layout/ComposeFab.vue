@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import IconButton from '@/components/ui/IconButton.vue';
 import { useUiStore } from '@/stores/ui';
 import { useComposerStore } from '@/stores/composer';
 
@@ -20,12 +21,12 @@ function compose() {
 </script>
 
 <template>
-  <button type="button" class="fab" :aria-label="$t('nav.composeMessage')" @click="compose">
+  <IconButton class="fab" :aria-label="$t('nav.composeMessage')" @click="compose" :title="$t('nav.composeMessage')">
     <svg width="24" height="24" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M12 1.5L14.5 4L5.5 13H3V10.5L12 1.5Z" />
       <path d="M10 3.5L12.5 6" />
     </svg>
-  </button>
+  </IconButton>
 </template>
 
 <style scoped>

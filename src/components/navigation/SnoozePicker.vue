@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import CardButton from '@/components/ui/CardButton.vue';
 import { useDismissable } from '@/composables/useDismissable';
 import { MAX_RECENT_SNOOZE_DATES } from '@/config/historyLimits';
 import { snoozePersistence } from '@/persistence/snooze';
@@ -117,36 +119,34 @@ useDismissable(() => props.open, () => emit('close'));
     <div v-if="props.open" class="picker" @click.stop>
       <h4>{{ $t('nav.snooze.title') }}</h4>
       <div class="presets">
-        <button
+        <CardButton
           v-for="preset in presets"
           :key="preset.id"
-          type="button"
           class="preset"
           @click="chooseDate(preset.date)"
         >
           <span>{{ preset.label }}</span>
           <small>{{ formatDate(preset.date) }}</small>
-        </button>
+        </CardButton>
       </div>
       <div v-if="recentManual.length > 0" class="recent">
         <span class="section-label">{{ $t('nav.snooze.recent') }}</span>
-        <button
+        <CardButton
           v-for="date in recentManual"
           :key="date"
-          type="button"
           class="recent-item"
           @click="chooseDate(date)"
         >
           {{ formatDate(date) }}
-        </button>
+        </CardButton>
       </div>
       <label class="manual">
         <span class="section-label">{{ $t('nav.snooze.manual') }}</span>
         <input v-model="selected" type="datetime-local" :min="minManualValue" />
       </label>
       <div class="actions">
-        <button type="button" @click="emit('close')">{{ $t('common.cancel') }}</button>
-        <button type="button" @click="submit">{{ $t('common.apply') }}</button>
+        <AppButton @click="emit('close')" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
+        <AppButton @click="submit" variant="primary" size="sm">{{ $t('common.apply') }}</AppButton>
       </div>
     </div>
   </Teleport>

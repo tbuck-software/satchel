@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Avatar from '@/components/common/Avatar.vue';
@@ -145,10 +146,9 @@ function openContact(email: string) {
 
     <div class="contacts-view__scroll">
       <div v-if="visibleContacts.length" class="contact-list">
-        <button
+        <CardButton
           v-for="contact in visibleContacts"
           :key="contact.email"
-          type="button"
           @click="openContact(contact.email)"
         >
           <Avatar :name="contact.name" :email="contact.email" :size="42" />
@@ -166,7 +166,7 @@ function openContact(email: string) {
             </svg>
             <span>{{ contact.meta }}</span>
           </span>
-        </button>
+        </CardButton>
       </div>
       <!-- A failed query leaves the list empty. Without this branch the empty
            state claims the address book was never imported. -->

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { SmimeMessageState } from '@/types/mail';
@@ -119,9 +120,9 @@ const config = computed(() => {
       <span>{{ config.description }}</span>
       <code v-if="signerEmail">{{ signerEmail }}</code>
     </div>
-    <button v-if="config.primary" type="button" class="action" @click="config.action?.()">
+    <AppButton v-if="config.primary" class="action" @click="config.action?.()" variant="primary" size="sm">
       {{ config.primary }}
-    </button>
+    </AppButton>
   </div>
 </template>
 
@@ -172,16 +173,5 @@ const config = computed(() => {
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
 }
-.action {
-  margin-left: auto;
-  flex: 0 0 auto;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--accent-primary);
-  color: var(--text-on-accent);
-  padding: 7px 10px;
-  font-size: var(--font-size-xs);
-  font-weight: var(--weight-strong);
-  cursor: pointer;
-}
+.action { margin-left:auto; flex:0 0 auto; }
 </style>

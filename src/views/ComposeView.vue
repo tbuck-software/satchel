@@ -58,8 +58,7 @@ import {
   normalizeOwnedAddresses,
   replyThreadPrefill,
 } from '@/utils/composerThreadPrefill';
-import type { ComposerDraftState } from '@/utils/composerDraftState';
-import { normalizeVisibleText } from '@/utils/composerNormalization';
+import { composerDraftInput, composerDraftSnapshot, composerRecoveryContent, type ComposerDraftState } from '@/utils/composerDraftState';
 import type { ComposerBackup, ComposerBackupContent } from '@/persistence/composerBackup';
 
 const props = withDefaults(defineProps<{
@@ -240,6 +239,26 @@ const {
   transport: composerTransport,
 });
 const {
+  load: loadCrypto,
+  smimeSignCertId,
+  smimeEncrypt,
+  pgpSignKeyId,
+  pgpEncrypt,
+  cryptoMethod,
+  cryptoOptions,
+  canSignSelected,
+  canEncryptSelected,
+  cryptoSign,
+  cryptoEncrypt,
+  cryptoHint,
+} = useComposerCrypto({
+  to,
+  cc,
+  bcc,
+  fromAddress,
+  t,
+});
+const {
   draftId,
   serverRevision: draftRevision,
   saveError,
@@ -255,55 +274,7 @@ const {
   initialized,
   sending,
   status,
-  trackedSources: [
-    to,
-    cc,
-    bcc,
-    subject,
-    body,
-    bodyHtml,
-    attachments,
-    accountId,
-    aliasEmail,
-    scheduledFor,
-    followUpAt,
-    plainTextCompose,
-    selectedSignatureId,
-    signatureVariant,
-    signatureOverrideText,
-    signatureOverrideHtml,
-  ],
-  buildInput: () => {
-    const account = activeAccount.value;
-    if (!account) return null;
-    return {
-      accountId: account.id,
-      threadId: contextThreadId.value,
-      to: to.value,
-      cc: cc.value,
-      bcc: bcc.value,
-      subject: subject.value,
-      body: body.value,
-      bodyHtml: plainTextCompose.value
-        ? null
-        : composerInlineAttachments.serializeInlineImages(bodyHtml.value),
-      fromAddress: fromAddress.value,
-      fromName: account.displayName,
-      replyTo: replyTo.value,
-      scheduledFor: scheduledFor.value,
-      sendOptions: {
-        reply_to_message_id: replyToMessageId.value, follow_up_at: followUpAt.value,
-        smime_sign_with_cert_id: smimeSignCertId.value, smime_encrypt_to_recipients: smimeEncrypt.value,
-        pgp_sign_with_key_id: pgpSignKeyId.value, pgp_encrypt_to_recipients: pgpEncrypt.value,
-        priority: priority.value,
-      },
-      attachments: attachments.value,
-      signatureId: selectedSignatureId.value,
-      signatureVariant: signatureVariant.value,
-      signatureOverrideText: signatureOverrideText.value,
-      signatureOverrideHtml: signatureOverrideHtml.value,
-    };
-  },
+  buildInput: () => activeAccount.value ? composerDraftInput(currentDraftState()) : null,
   drafts: draftsStore,
   t,
   onCaughtUp: () => localBackup.clear(),
@@ -326,30 +297,9 @@ const {
   finishDraftPersistence,
   closeDraftWithoutSaving,
 });
-const {
-  load: loadCrypto,
-  smimeSignCertId,
-  smimeEncrypt,
-  pgpSignKeyId,
-  pgpEncrypt,
-  cryptoMethod,
-  cryptoOptions,
-  canSignSelected,
-  canEncryptSelected,
-  cryptoSign,
-  cryptoEncrypt,
-  cryptoHint,
-} = useComposerCrypto({
-  to,
-  cc,
-  bcc,
-  fromAddress,
-  t,
-});
 const localBackup = useComposerLocalBackup({
   enabled: initialized,
   draftId,
-  trackedSources: [to, cc, bcc, subject, body, bodyHtml, accountId, aliasEmail, plainTextCompose],
   content: backupContent,
 });
 const editorClaim = useDraftEditorClaim(draftId, {
@@ -644,26 +594,11 @@ onMounted(async () => {
 });
 
 function backupContent(): ComposerBackupContent {
-  return {
-    accountId: accountId.value,
-    fromAddress: fromAddress.value,
-    to: [...to.value],
-    cc: [...cc.value],
-    bcc: [...bcc.value],
-    subject: subject.value,
-    body: body.value,
-    bodyHtml: plainTextCompose.value
-      ? null
-      : composerInlineAttachments.serializeInlineImages(bodyHtml.value),
-    plainText: plainTextCompose.value,
-  };
+  return composerRecoveryContent(currentDraftState());
 }
 
 function sameBackupText(a: ComposerBackupContent, b: ComposerBackupContent) {
-  const key = (content: ComposerBackupContent) => JSON.stringify([
-    content.to, content.cc, content.bcc,
-    normalizeVisibleText(content.subject), normalizeVisibleText(content.body),
-  ]);
+  const key = (content: ComposerBackupContent) => composerDraftSnapshot({ ...content, attachments: [] });
   return key(a) === key(b);
 }
 
@@ -706,6 +641,23 @@ async function restoreBackup() {
   plainTextCompose.value = content.plainText;
   body.value = content.body;
   bodyHtml.value = composerInlineAttachments.hydrateInlineImages(content.bodyHtml, attachments.value);
+  contextThreadId.value = content.threadId;
+  draftReplyTo.value = content.replyTo;
+  scheduledFor.value = content.scheduledFor;
+  replyToMessageId.value = content.sendOptions.reply_to_message_id ?? null;
+  followUpAt.value = content.sendOptions.follow_up_at ?? null;
+  cryptoMethod.value = content.sendOptions.smime_sign_with_cert_id || content.sendOptions.smime_encrypt_to_recipients
+    ? 'smime' : content.sendOptions.pgp_sign_with_key_id || content.sendOptions.pgp_encrypt_to_recipients ? 'pgp' : 'none';
+  await nextTick();
+  smimeSignCertId.value = content.sendOptions.smime_sign_with_cert_id ?? null;
+  smimeEncrypt.value = content.sendOptions.smime_encrypt_to_recipients ?? false;
+  pgpSignKeyId.value = content.sendOptions.pgp_sign_with_key_id ?? null;
+  pgpEncrypt.value = content.sendOptions.pgp_encrypt_to_recipients ?? false;
+  priority.value = content.sendOptions.priority ?? 'normal';
+  selectedSignatureId.value = content.signatureId;
+  signatureVariant.value = content.signatureVariant;
+  signatureOverrideText.value = content.signatureOverrideText;
+  signatureOverrideHtml.value = content.signatureOverrideHtml;
   localBackup.discardOrphan(offer);
 }
 
@@ -953,12 +905,24 @@ function currentDraftState(): ComposerDraftState {
   return {
     accountId: accountId.value,
     fromAddress: fromAddress.value,
+    fromName: activeAccount.value?.displayName ?? null,
+    threadId: contextThreadId.value,
+    replyTo: replyTo.value,
+    sendOptions: {
+      reply_to_message_id: replyToMessageId.value,
+      follow_up_at: followUpAt.value,
+      smime_sign_with_cert_id: smimeSignCertId.value,
+      smime_encrypt_to_recipients: smimeEncrypt.value,
+      pgp_sign_with_key_id: pgpSignKeyId.value,
+      pgp_encrypt_to_recipients: pgpEncrypt.value,
+      priority: priority.value,
+    },
     to: to.value,
     cc: cc.value,
     bcc: bcc.value,
     subject: subject.value,
     body: body.value,
-    bodyHtml: bodyHtml.value,
+    bodyHtml: plainTextCompose.value ? null : composerInlineAttachments.serializeInlineImages(bodyHtml.value),
     plainText: plainTextCompose.value,
     scheduledFor: scheduledFor.value,
     signatureId: selectedSignatureId.value,
@@ -1035,32 +999,26 @@ defineExpose({
         <h2>{{ defaultComposerTitle() }}</h2>
       </div>
       <div class="actions">
-        <button
+        <AppButton size="sm" variant="ghost"
           v-if="supportsBackend"
-          type="button"
-          class="text-btn"
           @click="showTemplatePicker = true"
         >
           {{ $t('compose.templates.button') }}
-        </button>
-        <button
+        </AppButton>
+        <AppButton size="sm" variant="ghost"
           v-if="supportsBackend"
-          type="button"
-          class="text-btn"
           :disabled="sending || discarding"
           @click="persistDraft({})"
         >
           {{ $t('common.save') }}
-        </button>
-        <button
+        </AppButton>
+        <AppButton size="sm" variant="danger"
           v-if="draftId"
-          type="button"
-          class="text-btn danger"
           :disabled="sending || discarding"
           @click="discardDraft()"
         >
           {{ $t('common.discard') }}
-        </button>
+        </AppButton>
       </div>
     </header>
 
@@ -1132,9 +1090,7 @@ defineExpose({
     <div class="row recipient-row">
       <label class="label">{{ $t('common.to') }}</label>
       <RecipientChips ref="toFieldRef" v-model="to" :placeholder="$t('compose.recipients.toPlaceholder')" class="field" />
-      <button
-        type="button"
-        class="link cc-link"
+      <AppButton size="sm" variant="ghost" class="cc-link"
         :aria-expanded="showCcBcc"
         :title="showCcBcc ? $t('compose.recipients.collapseCcBcc') : $t('compose.recipients.showCcBcc')"
         @click="showCcBcc = !showCcBcc"
@@ -1152,7 +1108,7 @@ defineExpose({
           stroke-linejoin="round"
           aria-hidden="true"
         ><path d="m3.5 4.5 2.5 2.5 2.5-2.5" /></svg>
-      </button>
+      </AppButton>
     </div>
 
     <template v-if="showCcBcc">
@@ -1246,24 +1202,24 @@ defineExpose({
       </div>
       <p v-if="scheduledFor" class="schedule-info">
         {{ $t('compose.schedule.scheduled', { time: formatScheduled(scheduledFor) }) }}
-        <button type="button" class="link small" @click="scheduledFor = null">{{ $t('compose.schedule.remove') }}</button>
+        <AppButton size="sm" variant="ghost" @click="scheduledFor = null">{{ $t('compose.schedule.remove') }}</AppButton>
       </p>
       <p v-if="followUpAt" class="schedule-info">
         {{ $t('compose.schedule.followUp', { time: formatScheduled(followUpAt) }) }}
-        <button type="button" class="link small" @click="followUpAt = null">{{ $t('compose.schedule.remove') }}</button>
+        <AppButton size="sm" variant="ghost" @click="followUpAt = null">{{ $t('compose.schedule.remove') }}</AppButton>
       </p>
       <div class="footer-actions">
-        <button type="button" class="tool-btn" :title="$t('compose.toolbar.attach')" :aria-label="$t('compose.toolbar.attach')" @click="attachmentZoneRef?.openPicker()">
+        <IconButton size="sm" :title="$t('compose.toolbar.attach')" :aria-label="$t('compose.toolbar.attach')" @click="attachmentZoneRef?.openPicker()">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M13.5 7.5l-6.2 6.2a3.5 3.5 0 01-5-5l6.5-6.5a2.5 2.5 0 013.5 3.5L5.8 12.2a1.5 1.5 0 01-2.1-2.1l6.1-6.1"/></svg>
-        </button>
-        <button v-if="supportsBackend" type="button" class="tool-btn" :title="$t('compose.toolbar.template')" :aria-label="$t('compose.toolbar.template')" @click="showTemplatePicker = true">
+        </IconButton>
+        <IconButton size="sm" v-if="supportsBackend" :title="$t('compose.toolbar.template')" :aria-label="$t('compose.toolbar.template')" @click="showTemplatePicker = true">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35"><path d="M3 1.5h7l3 3v10H3z"/><path d="M10 1.5v3h3M5.5 8h5M5.5 11h4"/></svg>
-        </button>
-        <button type="button" class="tool-btn" :title="$t('compose.sendLater.title')" :aria-label="$t('compose.sendLater.title')" @click="showSendLater = true">
+        </IconButton>
+        <IconButton size="sm" :title="$t('compose.sendLater.title')" :aria-label="$t('compose.sendLater.title')" @click="showSendLater = true">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg>
-        </button>
+        </IconButton>
         <details class="more-settings">
-          <summary class="tool-btn more-summary" :title="$t('compose.toolbar.more')">
+          <summary class="more-summary" :title="$t('compose.toolbar.more')">
             •••<span v-if="advancedActive" class="tool-dot" aria-hidden="true" />
           </summary>
           <div class="advanced-panel">
@@ -1321,14 +1277,12 @@ defineExpose({
             </div>
             <template v-if="draftId">
               <div class="panel-sep" role="separator" />
-              <button
-                type="button"
-                class="discard-btn"
+              <AppButton size="sm" variant="danger"
                 :disabled="sending || discarding"
                 @click="discardDraft()"
               >
                 {{ $t('compose.discardDraft') }}
-              </button>
+              </AppButton>
             </template>
           </div>
         </details>
@@ -1357,7 +1311,7 @@ defineExpose({
             >{{ option.label }}</option>
           </template>
         </select>
-        <button type="button" class="primary-btn" :disabled="!canSend" @click="send">
+        <AppButton size="sm" variant="primary" :disabled="!canSend" @click="send">
           {{
             sending
               ? $t('compose.sending')
@@ -1365,7 +1319,7 @@ defineExpose({
               ? $t('compose.schedule.submit')
               : $t('compose.send')
           }}
-        </button>
+        </AppButton>
       </div>
     </footer>
 
@@ -1447,36 +1401,7 @@ h2 {
   gap: 6px;
 }
 
-.text-btn {
-  background: transparent;
-  border: 0;
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-}
-.text-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-hover);
-}
-.text-btn.danger {
-  color: var(--accent-red);
-}
 
-.link {
-  background: transparent;
-  border: 0;
-  color: var(--accent-primary);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  text-align: left;
-  padding: 0;
-}
-.link.small {
-  font-size: var(--font-size-xs);
-  margin-left: 6px;
-}
 
 .row {
   display: grid;
@@ -1593,23 +1518,6 @@ textarea:focus {
   justify-content: flex-end;
 }
 
-.primary-btn {
-  border: 0;
-  background: var(--accent-primary);
-  color: var(--text-on-accent);
-  padding: 10px 20px;
-  border-radius: var(--radius-sm);
-  font-weight: var(--weight-semibold);
-  cursor: pointer;
-  transition: opacity var(--duration-normal) var(--ease-out);
-}
-.primary-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-.primary-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
 /* Banners sit in the composer's flow, inset like the fields below them. */
 .compose-notices,
@@ -1770,7 +1678,7 @@ textarea:focus {
   margin: 0;
 }
 
-.tool-btn {
+.more-summary {
   width: 34px;
   height: 34px;
   display: grid;
@@ -1784,7 +1692,7 @@ textarea:focus {
   cursor: pointer;
 }
 
-.tool-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.more-summary:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 .more-settings {
   position: relative;
@@ -1883,14 +1791,6 @@ textarea:focus {
   background: var(--accent-primary);
 }
 
-.discard-btn {
-  justify-self: start;
-  border: 0;
-  background: transparent;
-  color: var(--accent-red);
-  cursor: pointer;
-  font-size: var(--font-size-xs);
-}
 
 .footer-spacer { flex: 1; }
 
@@ -1907,13 +1807,6 @@ textarea:focus {
 
 .account-compact:hover { border-color: var(--border-color); color: var(--text-secondary); }
 
-.compose .primary-btn {
-  min-width: 104px;
-  height: 38px;
-  padding: 0 18px;
-  border-radius: var(--radius-sm);
-  box-shadow: 0 6px 16px color-mix(in srgb, var(--accent-primary) 26%, transparent);
-}
 
 .compose .status,
 .compose .schedule-info { font-size: var(--font-size-xs); }

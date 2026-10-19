@@ -580,26 +580,11 @@ impl<'a> CalendarRepository<'a> {
 }
 
 fn invite_id(account_id: &str, uid: &str, recurrence_id: &str) -> String {
-    let sanitized = uid
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>();
-    if recurrence_id.is_empty() {
-        return format!("inv-{account_id}-{sanitized}");
-    }
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(format!("{uid}|{recurrence_id}").as_bytes());
-    let suffix = digest[..8]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    format!("inv-{account_id}-{sanitized}-{suffix}")
+    crate::sync::provider_identity::provider_local_id(
+        "inv",
+        "calendar",
+        &[account_id, uid, recurrence_id],
+    )
 }
 
 fn stable_id(prefix: &str, value: &str) -> String {
@@ -741,6 +726,79 @@ mod tests {
                 .map(|source| source.name.as_str())
                 .collect::<Vec<_>>(),
             vec!["alpha", "Zulu"]
+        );
+    }
+
+    #[tokio::test]
+    async fn invitation_identity_preserves_a_legacy_id_and_rsvp_on_reimport() {
+        let pool = pool().await;
+        account(&pool, "account", "2026-01-01").await;
+        sqlx::query("INSERT INTO calendar_invites (id, account_id, uid, rsvp_status, raw_ics, created_at, updated_at) VALUES ('inv-legacy-event', 'account', 'event@example.test', 'accepted', ?, '', '')")
+            .bind(REQUEST).execute(&pool).await.unwrap();
+        let repository = CalendarRepository::new(&pool);
+        let revised = REQUEST.replace("SUMMARY:Planning", "SUMMARY:Revised planning");
+        let request = crate::email::calendar::parse_invite(&revised).unwrap();
+        let updated = repository
+            .upsert_invite("account", None, &request)
+            .await
+            .unwrap();
+        assert_eq!(updated.id, "inv-legacy-event");
+        assert_eq!(updated.rsvp_status, "accepted");
+        assert_eq!(updated.summary.as_deref(), Some("Revised planning"));
+        assert_eq!(
+            repository.get_invite("inv-legacy-event").await.unwrap(),
+            updated
+        );
+        assert_eq!(
+            repository
+                .list_invites(Some("account"))
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn invitation_identity_distinguishes_punctuation_in_imported_ics_uids() {
+        let pool = pool().await;
+        account(&pool, "account", "2026-01-01").await;
+        let repository = CalendarRepository::new(&pool);
+        let mut ids = Vec::new();
+        for uid in ["meeting/a", "meeting-a"] {
+            let raw = REQUEST.replace("UID:event@example.test", &format!("UID:{uid}"));
+            let request = crate::email::calendar::parse_invite(&raw).unwrap();
+            assert_eq!(request.uid, uid);
+            let invitation = repository
+                .upsert_invite("account", None, &request)
+                .await
+                .unwrap();
+            ids.push(invitation.id);
+        }
+        assert_ne!(ids[0], ids[1]);
+        assert_eq!(
+            repository
+                .find_invite("account", "meeting/a", None)
+                .await
+                .unwrap()
+                .id,
+            ids[0]
+        );
+        assert_eq!(
+            repository
+                .find_invite("account", "meeting-a", None)
+                .await
+                .unwrap()
+                .id,
+            ids[1]
+        );
+        assert_eq!(
+            repository
+                .list_invites(Some("account"))
+                .await
+                .unwrap()
+                .len(),
+            2
         );
     }
 

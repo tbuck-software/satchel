@@ -13,6 +13,9 @@ export const LOCAL_KEY_MARKER = 'master-key.keychain';
 /** @typedef {(command: string, args: string[], options: import('node:child_process').SpawnSyncOptionsWithStringEncoding) => { status: number | null, stdout: string }} SecurityRunner */
 
 // Rust hashes the unnormalized native path bytes: UTF-8 on macOS, UTF-16LE on Windows.
+/**
+ * @param {string} profilePath
+ */
 export function profileKeyringAccount(profilePath) {
   return `${LEGACY_ACCOUNT}:${createHash('sha256').update(Buffer.from(profilePath, 'utf8')).digest('hex')}`;
 }
@@ -27,6 +30,9 @@ function readAccount(account, run) {
   return validateKey(result.stdout.trim());
 }
 
+/**
+ * @param {string} key
+ */
 function validateKey(key) {
   if (
     !/^[A-Za-z0-9+/]{43}=$/.test(key)
@@ -51,6 +57,9 @@ function writeAccount(account, key, run) {
   }
 }
 
+/**
+ * @param {string} directory
+ */
 function backupAccount(directory) {
   const marker = join(directory, LOCAL_KEY_MARKER);
   if (!existsSync(marker)) return undefined;

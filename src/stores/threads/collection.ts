@@ -21,7 +21,7 @@ const WINDOW_KEEP_AHEAD_ROWS = 120;
 /** What the threads store exposes of the Collection. */
 export type ThreadCollectionSurface = Pick<
   ThreadCollection,
-  'threads' | 'find' | 'setViewportStart' | 'setWorkflowState' | 'applyWorkflowStates' | 'markRead'
+  'threads' | 'find' | 'setViewportStart' | 'applyWorkflowStates' | 'markRead'
 >;
 
 export interface ThreadCollection {
@@ -39,16 +39,8 @@ export interface ThreadCollection {
   patchRows(patches: { id: string; values: Partial<Thread> }[]): void;
   replaceRow(threadId: string, nextThread: Thread): boolean;
   remove(threadId: string): Thread | undefined;
-  setWorkflowState(threadId: string, nextState: WorkflowState, snoozeUntil?: string | null): void;
   applyWorkflowStates(mutations: WorkflowRowMutation[]): void;
   markRead(threadId: string, isRead: boolean): void;
-  addLocalOutgoingThread(input: {
-    threadId?: string;
-    accountId: string;
-    subject: string;
-    recipients: string[];
-    snippet: string;
-  }): string;
 }
 
 /** Thread rows contain only scalars, arrays and participant records. */
@@ -189,13 +181,6 @@ export function createThreadCollection(
     return removed;
   }
 
-  function setWorkflowState(threadId: string, nextState: WorkflowState, snoozeUntil?: string | null) {
-    const thread = find(threadId);
-    if (!thread) return;
-
-    applyWorkflowStates([{ threadId, state: nextState, snoozeUntil }]);
-  }
-
   /**
    * Apply a whole batch as one publication.
    *
@@ -232,45 +217,8 @@ export function createThreadCollection(
     patchRows([{ id: threadId, values: { unreadCount: isRead ? 0 : Math.max(1, thread.unreadCount) } }]);
   }
 
-  function addLocalOutgoingThread(input: {
-    threadId?: string;
-    accountId: string;
-    subject: string;
-    recipients: string[];
-    snippet: string;
-  }): string {
-    const threadId = input.threadId || `th-${Math.random().toString(36).slice(2, 8)}`;
-    const now = new Date().toISOString();
-    const participants = input.recipients.map((email) => ({
-      name: email,
-      email,
-    }));
-
-    replaceAll([
-      {
-        id: threadId,
-        accountId: input.accountId,
-        subject: input.subject,
-        participants: participants.length > 0 ? participants : [{ name: 'Recipient', email: 'recipient@example.com' }],
-        sentParticipants: participants,
-        snippet: input.snippet || input.subject,
-        lastMessageAt: now,
-        lastMessageAtMs: Date.parse(now),
-        messageCount: 1,
-        unreadCount: 0,
-        hasAttachments: false,
-        workflowState: 'waiting',
-        priority: 1,
-        mailboxNames: ['Sent'],
-        tags: [],
-      },
-      ...threads.value.filter((thread) => thread.id !== threadId),
-    ]);
-    return threadId;
-  }
-
   return {
-    surface: { threads, find, setViewportStart, setWorkflowState, applyWorkflowStates, markRead },
+    surface: { threads, find, setViewportStart, applyWorkflowStates, markRead },
     threads,
     find,
     indexBuilds,
@@ -281,9 +229,7 @@ export function createThreadCollection(
     patchRows,
     replaceRow,
     remove,
-    setWorkflowState,
     applyWorkflowStates,
     markRead,
-    addLocalOutgoingThread,
   };
 }

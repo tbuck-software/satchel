@@ -1,4 +1,6 @@
 import { createPersistedSlot, persistence } from './index';
+import type { ComposerDraftState } from '@/utils/composerDraftState';
+import type { BackendDraftSendOptions } from '@/types/composer';
 
 /**
  * Device-local copies of composer content that is not on disk yet.
@@ -19,17 +21,7 @@ export const MAX_BACKUP_HTML_CHARS = 512 * 1024;
 export const BACKUP_HEARTBEAT_MS = 5_000;
 const ALIVE_WINDOW_MS = BACKUP_HEARTBEAT_MS * 3;
 
-export interface ComposerBackupContent {
-  accountId: string;
-  fromAddress: string;
-  to: string[];
-  cc: string[];
-  bcc: string[];
-  subject: string;
-  body: string;
-  bodyHtml: string | null;
-  plainText: boolean;
-}
+export type ComposerBackupContent = Omit<ComposerDraftState, 'attachments'>;
 
 export interface ComposerBackup {
   /** One per composer instance. */
@@ -60,6 +52,16 @@ function decodeContent(value: unknown): ComposerBackupContent | undefined {
   ) {
     return undefined;
   }
+  const metadata: Record<string, string | null> = {};
+  for (const name of ['fromName', 'threadId', 'replyTo', 'scheduledFor', 'signatureId', 'signatureOverrideText', 'signatureOverrideHtml']) {
+    const field = raw[name];
+    if (field !== undefined && field !== null && typeof field !== 'string') return undefined;
+    metadata[name] = typeof field === 'string' ? field : null;
+  }
+  const signatureVariant = raw.signatureVariant ?? 'auto';
+  if (signatureVariant !== 'auto' && signatureVariant !== 'long' && signatureVariant !== 'short' && signatureVariant !== 'none') return undefined;
+  const sendOptions = decodeSendOptions(raw.sendOptions);
+  if (!sendOptions) return undefined;
   return {
     accountId: raw.accountId,
     fromAddress: raw.fromAddress,
@@ -70,7 +72,37 @@ function decodeContent(value: unknown): ComposerBackupContent | undefined {
     body: raw.body,
     bodyHtml: raw.bodyHtml,
     plainText: raw.plainText,
+    fromName: metadata.fromName ?? null,
+    threadId: metadata.threadId ?? null,
+    replyTo: metadata.replyTo ?? null,
+    scheduledFor: metadata.scheduledFor ?? null,
+    signatureId: metadata.signatureId ?? null,
+    signatureVariant,
+    signatureOverrideText: metadata.signatureOverrideText ?? null,
+    signatureOverrideHtml: metadata.signatureOverrideHtml ?? null,
+    sendOptions,
   };
+}
+
+function decodeSendOptions(value: unknown): BackendDraftSendOptions | undefined {
+  // Older v1 copies carried text only. New copies preserve delivery policy too.
+  if (value === undefined) return {};
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const result: BackendDraftSendOptions = {};
+  for (const key of ['reply_to_message_id', 'follow_up_at', 'smime_sign_with_cert_id', 'pgp_sign_with_key_id'] as const) {
+    const field = raw[key];
+    if (field === null || typeof field === 'string') result[key] = field;
+    else if (field !== undefined) return undefined;
+  }
+  for (const key of ['smime_encrypt_to_recipients', 'pgp_encrypt_to_recipients'] as const) {
+    const field = raw[key];
+    if (typeof field === 'boolean') result[key] = field;
+    else if (field !== undefined) return undefined;
+  }
+  if (raw.priority === null || raw.priority === 'high' || raw.priority === 'normal' || raw.priority === 'low') result.priority = raw.priority;
+  else if (raw.priority !== undefined) return undefined;
+  return result;
 }
 
 function decodeBackup(value: unknown): ComposerBackup | undefined {

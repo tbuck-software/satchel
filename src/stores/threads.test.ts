@@ -38,7 +38,7 @@ describe('threads store interactions', () => {
     const participants = [{ name: 'Sender', email: 'sender@example.com' }];
     store.threads = [thread({ id: 'th-a', participants }), thread({ id: 'th-b', participants })];
     const target = store.threads[1]!.id;
-    store.setSelection([store.threads[0]!.id]);
+    store.selectThread(store.threads[0]!.id);
 
     store.selectFromInteraction(target, { shiftKey: false, metaKey: false, ctrlKey: false }, true);
 
@@ -346,11 +346,11 @@ describe('threads store interactions', () => {
     expect(before?.group.threads.map((item) => item.id)).toEqual([
       'pipeline-new', 'pipeline-middle', 'pipeline-old',
     ]);
-    store.setWorkflowState('unrelated', 'done');
+    store.applyWorkflowStates([{ threadId: 'unrelated', state: 'done' }]);
     expect(bundle()?.group.threads.map((item) => item.id)).toEqual([
       'pipeline-new', 'pipeline-middle', 'pipeline-old',
     ]);
-    store.setWorkflowState('pipeline-new', 'done');
+    store.applyWorkflowStates([{ threadId: 'pipeline-new', state: 'done' }]);
     expect(bundle()?.group.id).toBe(before?.group.id);
     expect(bundle()?.group.threads.map((item) => item.id)).toEqual(['pipeline-middle', 'pipeline-old']);
   });
@@ -419,7 +419,7 @@ describe('threads store interactions', () => {
     ];
     await nextTick();
     expect(store.activeSimilarGroup?.threads.map((item) => item.id)).toEqual(['failed', 'fixed']);
-    store.setWorkflowState('failed', 'done');
+    store.applyWorkflowStates([{ threadId: 'failed', state: 'done' }]);
     await nextTick();
     expect(store.activeSimilarGroup?.ciProject).toBe('owner/repo');
     expect(store.activeSimilarGroup?.threads.map((item) => item.id)).toEqual(['fixed']);
@@ -458,7 +458,7 @@ describe('threads store interactions', () => {
     store.openSimilarGroup(groupEntry.group.id);
     const openedGroupId = store.activeSimilarGroupId;
 
-    store.setWorkflowState('notification-new', 'done');
+    store.applyWorkflowStates([{ threadId: 'notification-new', state: 'done' }]);
     await nextTick();
     expect(store.activeSimilarGroupId).toBe(openedGroupId);
     expect(store.activeSimilarGroup?.threads.map((item) => item.id)).toEqual([
@@ -466,14 +466,14 @@ describe('threads store interactions', () => {
       'notification-old',
     ]);
 
-    store.setWorkflowState('notification-middle', 'done');
+    store.applyWorkflowStates([{ threadId: 'notification-middle', state: 'done' }]);
     await nextTick();
     expect(store.activeSimilarGroupId).toBe(openedGroupId);
     expect(store.activeSimilarGroup?.threads.map((item) => item.id)).toEqual([
       'notification-old',
     ]);
 
-    store.setWorkflowState('notification-old', 'done');
+    store.applyWorkflowStates([{ threadId: 'notification-old', state: 'done' }]);
     await nextTick();
     expect(store.activeSimilarGroupId).toBe('');
     expect(store.activeSimilarGroup).toBeUndefined();
@@ -529,13 +529,13 @@ describe('threads store interactions', () => {
     ];
 
     store.openSmartBucket('bucket-notifications');
-    store.setWorkflowState('notification-new', 'done');
+    store.applyWorkflowStates([{ threadId: 'notification-new', state: 'done' }]);
     await nextTick();
     expect(store.activeSmartBucketId).toBe('bucket-notifications');
     expect(store.activeSmartBucket?.threads.map((item) => item.id)).toEqual(['notification-old']);
 
     // Only the final mail closes the folder and returns to the inbox.
-    store.setWorkflowState('notification-old', 'done');
+    store.applyWorkflowStates([{ threadId: 'notification-old', state: 'done' }]);
     await nextTick();
     expect(store.activeSmartBucketId).toBe('');
     expect(store.activeSmartBucket).toBeUndefined();

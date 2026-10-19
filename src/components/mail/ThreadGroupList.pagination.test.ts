@@ -43,7 +43,7 @@ describe('store and virtual list pagination', () => {
     });
     const store = useThreadsStore();
     await store.load();
-    store.setSelection(['th-00002']);
+    store.toggleSelectionForThread('th-00002');
     const items = computed(() => store.threads.map(thread => ({ kind: 'thread' as const, id: thread.id, thread })));
     const host = defineComponent(() => () => h(ThreadGroupList, {
       items: items.value, selectedThreadIds: store.selectedThreadIds,

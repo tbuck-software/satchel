@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
@@ -331,14 +333,15 @@ function escapeHtml(value: string) {
           <p v-else-if="discovering">{{ $t('settings.signatures.discovering') }}</p>
           <p v-else>{{ $t('settings.signatures.noSuggestions') }}</p>
         </div>
-        <button
-          type="button"
+        <AppButton
           class="ghost"
           :disabled="discovering"
           @click="discoverForIdentities"
+          variant="ghost"
+          size="sm"
         >
           {{ discovering ? $t('settings.signatures.checking') : $t('settings.signatures.checkAgain') }}
-        </button>
+        </AppButton>
       </div>
       <article
         v-for="suggestion in accountSuggestions"
@@ -363,29 +366,30 @@ function escapeHtml(value: string) {
           </small>
         </div>
         <div class="suggestion-actions">
-          <button type="button" class="ghost" @click="dismissSuggestion(suggestion)">{{ $t('settings.signatures.ignore') }}</button>
-          <button
-            type="button"
+          <AppButton class="ghost" @click="dismissSuggestion(suggestion)" variant="ghost" size="sm">{{ $t('settings.signatures.ignore') }}</AppButton>
+          <AppButton
             class="primary"
             :disabled="suggestion.id === adoptedSuggestionId"
             @click="adoptSuggestion(suggestion)"
+            variant="primary"
+            size="sm"
           >
             {{ suggestion.id === adoptedSuggestionId ? $t('settings.signatures.loadedInEditor') : $t('settings.signatures.adopt') }}
-          </button>
+          </AppButton>
         </div>
       </article>
     </div>
 
     <ul v-if="accountSignatures.length > 0" class="list">
       <li v-for="sig in accountSignatures" :key="sig.id">
-        <button type="button" class="row" @click="edit(sig.id)">
+        <CardButton class="row" @click="edit(sig.id)">
           <span class="name">
             {{ sig.name }}
             <span v-if="sig.is_default === 1" class="badge">{{ $t('common.default') }}</span>
           </span>
           <span class="preview">{{ sig.body_text.slice(0, 80) }}</span>
-        </button>
-        <button type="button" class="delete" @click="remove(sig.id)">{{ $t('common.delete') }}</button>
+        </CardButton>
+        <AppButton class="delete" @click="remove(sig.id)" variant="danger" size="sm">{{ $t('common.delete') }}</AppButton>
       </li>
     </ul>
     <p v-else class="empty">{{ $t('settings.signatures.emptyList') }}</p>
@@ -416,7 +420,7 @@ function escapeHtml(value: string) {
           <ul v-if="assets.length" class="asset-list">
             <li v-for="asset in assets" :key="asset.contentId">
               <span>{{ asset.filename }}</span>
-              <button type="button" class="delete" @click="removeAsset(asset.contentId)">{{ $t('common.remove') }}</button>
+              <AppButton class="delete" @click="removeAsset(asset.contentId)" variant="danger" size="sm">{{ $t('common.remove') }}</AppButton>
             </li>
           </ul>
         </div>
@@ -453,8 +457,8 @@ function escapeHtml(value: string) {
       <ToggleSwitch v-model="isDefault">{{ $t('settings.signatures.useAsDefault') }}</ToggleSwitch>
 
       <div class="actions">
-        <button v-if="editingId" type="button" class="ghost" @click="reset">{{ $t('common.cancel') }}</button>
-        <button type="button" class="primary" @click="save">{{ $t('common.save') }}</button>
+        <AppButton v-if="editingId" class="ghost" @click="reset" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
+        <AppButton class="primary" @click="save" variant="primary" size="sm">{{ $t('common.save') }}</AppButton>
       </div>
       <p v-if="status" class="status">{{ status }}</p>
     </div>
@@ -546,20 +550,6 @@ h4 {
   font-size: var(--font-size-xs);
 }
 
-.delete {
-  background: transparent;
-  border: 1px solid var(--border-color-muted);
-  color: var(--text-secondary);
-  border-radius: var(--radius-sm);
-  padding: 0 12px;
-  font-size: var(--font-size-xs);
-  cursor: pointer;
-}
-.delete:hover {
-  border-color: var(--accent-red);
-  color: var(--accent-red);
-}
-
 .empty {
   color: var(--text-tertiary);
   font-size: var(--font-size-sm);
@@ -595,11 +585,7 @@ h4 {
   margin: 0;
 }
 
-.suggestions-heading .ghost {
-  flex: none;
-  padding: 6px 12px;
-  font-size: var(--font-size-sm);
-}
+.suggestions-heading .ghost { flex:none; }
 
 .suggestions-heading p,
 .suggestion small {
@@ -689,33 +675,10 @@ h4 {
   list-style: none;
 }
 
-.asset-list .delete {
-  padding: 5px 9px;
-}
-
 .actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.primary {
-  background: var(--accent-primary);
-  color: var(--text-on-accent);
-  border: 0;
-  padding: 8px 16px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-weight: var(--weight-semibold);
-}
-
-.ghost {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  padding: 8px 16px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
 }
 
 .status {

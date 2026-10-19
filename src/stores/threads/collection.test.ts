@@ -31,7 +31,7 @@ it('reuses only unchanged rows, including nested values and optional fields', ()
 it('publishes immutable workflow and read mutations without changing other rows', () => {
   const collection = createThreadCollection([row('a'), row('b')]);
   const before = collection.threads.value;
-  collection.setWorkflowState('a', 'done');
+  collection.applyWorkflowStates([{ threadId: 'a', state: 'done' }]);
   expect(before[0]?.workflowState).toBe('inbox');
   expect(collection.find('a')?.workflowState).toBe('done');
   expect(collection.find('b')).toBe(before[1]);

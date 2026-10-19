@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NavItem from '@/components/ui/NavItem.vue';
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useContactsStore } from '@/stores/contacts';
@@ -74,16 +75,14 @@ function selectSection(section: ContactsSection) {
     <h3>{{ $t('contacts.views') }}</h3>
     <ul>
       <li v-for="section in visibleSections" :key="section.id">
-        <button
-          type="button"
-          :class="{ active: activeSection === section.id }"
+        <NavItem :label="section.label" :active="activeSection === section.id" :count="section.count"
+
           :aria-current="activeSection === section.id ? 'page' : undefined"
           @click="selectSection(section.id)"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" v-html="section.icon" />
-          <span>{{ section.label }}</span>
-          <small>{{ section.count }}</small>
-        </button>
+          <template #icon><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" v-html="section.icon" /></template>
+
+        </NavItem>
       </li>
     </ul>
   </nav>
@@ -121,57 +120,6 @@ ul {
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-button {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 36px;
-  padding: 8px 11px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: var(--font-size-sm);
-  font-weight: var(--weight-medium);
-  text-align: left;
-  cursor: pointer;
-}
-
-button:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-button.active {
-  background: var(--bg-active);
-  color: var(--text-primary);
-  font-weight: var(--weight-semibold);
-}
-
-button svg {
-  opacity: 0.65;
-}
-
-button.active svg {
-  color: var(--accent-primary);
-  opacity: 1;
-}
-
-button span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-button small {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 1020px) {

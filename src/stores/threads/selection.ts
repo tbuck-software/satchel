@@ -14,7 +14,6 @@ export interface ThreadSelectionSurface {
   leavingThreadStates: Ref<Partial<Record<string, WorkflowState>>>;
   selectThread(threadId: string): void;
   clearSelection(): void;
-  setSelection(threadIds: string[]): void;
   selectAllVisibleThreads(): void;
   selectFromInteraction(
     threadId: string,
@@ -274,7 +273,6 @@ export function createThreadSelection({
       leavingThreadStates,
       selectThread,
       clearSelection,
-      setSelection,
       selectAllVisibleThreads,
       selectFromInteraction,
       toggleSelectionForThread,

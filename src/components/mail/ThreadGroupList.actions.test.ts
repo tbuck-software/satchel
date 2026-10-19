@@ -102,6 +102,7 @@ describe('thread group list action context', () => {
         senderReviewSetupComplete: true,
         bulkBusy: false,
       },
+      global: { stubs: { CardButton: false } },
     });
 
     expect(wrapper.findAllComponents(ThreadListItem)).toHaveLength(3);

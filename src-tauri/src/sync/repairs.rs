@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use sqlx::{FromRow, SqlitePool};
 
-use crate::sync::thread_resolution::{refresh_provider_thread_projection, sanitize_id};
+use crate::sync::thread_resolution::refresh_provider_thread_projection;
+use satchel_core::sync::provider_identity::provider_local_id;
 
 #[derive(Debug, FromRow)]
 struct ImapThreadRepairRow {
@@ -66,10 +67,10 @@ pub async fn repair_imap_thread_id_collisions(pool: &SqlitePool) -> Result<u64, 
     let mut touched_thread_ids = HashSet::new();
 
     for row in rows {
-        let new_thread_id = format!(
-            "th-imap-{}-{}",
-            sanitize_id(&row.account_id),
-            sanitize_id(&row.thread_key)
+        let new_thread_id = provider_local_id(
+            "th",
+            "imap",
+            &[&row.account_id, "legacy-repair", &row.thread_key],
         );
         if new_thread_id == row.old_thread_id {
             continue;

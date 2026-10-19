@@ -1,3 +1,4 @@
+import type { TrashReceipt } from './generated/core/mail_actions/TrashReceipt';
 import type { ProjectedWireFields, RefinedWireFields } from './wireTypes';
 import type { ThreadDto as WireThreadDto } from './generated/app/commands/threads/ThreadDto';
 import type { ThreadCursor as WireThreadCursor } from './generated/app/commands/threads/ThreadCursor';
@@ -8,7 +9,6 @@ import type { RuleDto as WireRuleDto } from './generated/app/commands/rules/Rule
 import type { OptionalWireFields } from './wireTypes';
 // Auto-split from services/backend.ts — domain module.
 import { invoke } from './core';
-import type { WorkflowState } from '@/types/workflow';
 import type { ThreadSmartBucket } from '@/types/mail';
 import type { BatchTransitionInput, BatchTransitionResult } from './misc';
 
@@ -67,23 +67,6 @@ export async function backendMessageLinkTarget(threadId: string): Promise<Backen
 export async function backendResolveMessageLink(messageId: string): Promise<string | null> {
   return invoke<string | null>('resolve_message_link', { messageId });
 }
-
-
-export async function backendUpdateThreadState(
-  threadId: string,
-  nextState: WorkflowState,
-  snoozeUntil?: string | null,
-): Promise<BackendThread> {
-  return invoke<BackendThread>('update_thread_state', {
-    input: {
-      thread_id: threadId,
-      next_state: nextState,
-      snooze_until: snoozeUntil ?? null,
-    },
-  });
-}
-
-
 export type BackendRule = ProjectedWireFields<OptionalWireFields<WireRuleDto, 'description'>, { trigger_config: Record<string, unknown> }>;
 
 
@@ -139,8 +122,14 @@ export async function backendSetThreadTags(threadIds: string[], tags: string[]):
 }
 
 
-export async function backendTrashThreads(threadIds: string[]): Promise<void> {
-  return invoke<void>('trash_threads', {
+export type BackendTrashReceipt = TrashReceipt;
+
+export async function backendUndoTrash(receiptId: string): Promise<void> {
+  return invoke<void>('undo_trash', { receiptId });
+}
+
+export async function backendTrashThreads(threadIds: string[]): Promise<BackendTrashReceipt> {
+  return invoke<BackendTrashReceipt>('trash_threads', {
     input: {
       thread_ids: threadIds,
     },

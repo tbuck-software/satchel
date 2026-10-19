@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import DrawerButton from '@/components/layout/DrawerButton.vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -156,26 +158,26 @@ function appendOperator(token: string) {
           :aria-label="$t('search.queryLabel')"
         />
         <div class="operator-hints">
-          <button
+          <AppButton
             v-for="token in operatorHints"
             :key="token"
-            type="button"
             class="operator-chip"
             @click="appendOperator(token)"
+            variant="ghost"
+            size="sm"
           >
             {{ token }}
-          </button>
+          </AppButton>
         </div>
         <div v-if="accountFilterId" class="scope-row">
           <span class="scope-chip">
             {{ $t('search.accountScope', { account: accountFilterEmail || accountFilterId }) }}
-            <button
-              type="button"
+            <IconButton
               class="scope-chip__clear"
               :title="$t('search.searchAllAccounts')"
               :aria-label="$t('search.removeAccountFilter')"
               @click="accountFilterId = ''"
-            >×</button>
+            >×</IconButton>
           </span>
         </div>
       </header>
@@ -207,8 +209,7 @@ function appendOperator(token: string) {
           <p class="result-count" role="status">{{ $t(hasMore ? 'search.loadedHitCount' : 'search.hitCount', results.length) }}</p>
           <ul class="results" :aria-busy="loading">
             <li v-for="result in results" :key="result.messageId">
-              <button
-                type="button"
+              <CardButton
                 class="result-row"
                 :class="{ 'result-row--active': result.threadId === selectedThreadId }"
                 @click="open(result)"
@@ -229,7 +230,7 @@ function appendOperator(token: string) {
                     </template>
                   </span>
                 </span>
-              </button>
+              </CardButton>
             </li>
           </ul>
           <p v-if="errorText" class="state state--error" role="alert">{{ errorText }}</p>
@@ -289,8 +290,7 @@ function appendOperator(token: string) {
             <p class="result-count" role="status">{{ $t('search.server.hitCount', serverHits.length) }}</p>
             <ul class="results" :aria-label="$t('search.server.results')">
               <li v-for="entry in serverHits" :key="entry.hit.remote_id">
-                <button
-                  type="button"
+                <CardButton
                   class="result-row"
                   :disabled="Boolean(fetchingHitId)"
                   @click="openServerHit(entry)"
@@ -309,7 +309,7 @@ function appendOperator(token: string) {
                         : $t('search.server.note') }}
                     </span>
                   </span>
-                </button>
+                </CardButton>
               </li>
             </ul>
           </template>
@@ -440,23 +440,6 @@ function appendOperator(token: string) {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-}
-
-.operator-chip {
-  border: 1px solid var(--border-color-muted);
-  border-radius: var(--radius-full);
-  background: transparent;
-  color: var(--text-tertiary);
-  font: inherit;
-  font-size: var(--font-size-xs);
-  padding: 2px 8px;
-  cursor: pointer;
-  transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
-}
-
-.operator-chip:hover {
-  color: var(--text-primary);
-  border-color: var(--border-color);
 }
 
 .search-scroll {

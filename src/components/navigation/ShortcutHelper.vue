@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import { useUiStore } from '@/stores/ui';
 import { useSettingsStore } from '@/stores/settings';
 import { computed } from 'vue';
@@ -138,11 +140,11 @@ function editBindings() {
               <h3>{{ $t('shortcuts.title') }}</h3>
               <p>{{ $t('shortcuts.subtitle') }}</p>
             </div>
-            <button type="button" class="close-btn" :title="$t('common.close')" :aria-label="$t('shortcuts.close')" @click="ui.toggleShortcuts()">
+            <IconButton class="close-btn" :title="$t('common.close')" :aria-label="$t('shortcuts.close')" @click="ui.toggleShortcuts()">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
                 <path d="M4 4l8 8M12 4l-8 8"/>
               </svg>
-            </button>
+            </IconButton>
           </header>
 
           <div class="groups">
@@ -159,7 +161,7 @@ function editBindings() {
 
           <footer>
             <span><kbd>{{ commandPaletteKeyLabel }}</kbd> {{ $t('shortcuts.footerHint') }}</span>
-            <button type="button" @click="editBindings">{{ $t('shortcuts.editBindings') }}</button>
+            <AppButton @click="editBindings" variant="ghost" size="sm">{{ $t('shortcuts.editBindings') }}</AppButton>
           </footer>
         </section>
       </ModalShell>
@@ -213,26 +215,7 @@ h3 {
   font-weight: var(--weight-bold);
 }
 
-.close-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition:
-    background var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out);
-}
-
-.close-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
+.close-btn { width: 28px; }
 
 ul {
   list-style: none;

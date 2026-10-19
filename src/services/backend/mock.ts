@@ -47,6 +47,8 @@ const threads: Thread[] = mockThreads.map((thread) => ({ ...thread }));
 const messages: Record<string, Message[]> = Object.fromEntries(
   Object.entries(mockMessagesByThread).map(([id, list]) => [id, list.map((m) => ({ ...m }))]),
 );
+const trashReceipts = new Map<string, Thread[]>();
+let nextTrashReceipt = 0;
 const outbox: BackendOutboxItem[] = mockOutboxItems.map((item) => ({ ...item }));
 /*
  * `?mockLongThread=120` adds one HTML conversation of that many messages on
@@ -513,14 +515,6 @@ const handlers: Record<string, Handler> = {
     });
     return { total_count: inbox.length, buckets };
   },
-  update_thread_state: (payload) => {
-    const scope = input(payload);
-    const thread = findThread(scope.thread_id as string);
-    if (!thread) throw new Error('thread not found');
-    thread.workflowState = scope.next_state as WorkflowState;
-    thread.snoozeUntil = (scope.snooze_until as string | null) ?? undefined;
-    return threadDto(thread);
-  },
   transition_threads: (payload) => {
     const scope = input(payload);
     const rows = (scope.threads as Array<{ thread_id: string }>) ?? [];
@@ -579,10 +573,20 @@ const handlers: Record<string, Handler> = {
     thread.sharedWith = (scope.shared_with as string[] | undefined) ?? [];
   },
   trash_threads: (payload) => {
+    const removed: Thread[] = [];
     for (const id of ids(payload)) {
       const index = threads.findIndex((thread) => thread.id === id);
-      if (index >= 0) threads.splice(index, 1);
+      if (index >= 0) removed.push(...threads.splice(index, 1));
     }
+    const token = `trash-${++nextTrashReceipt}`;
+    trashReceipts.set(token, removed);
+    return { undo_token: token, undo_thread_ids: removed.map((thread) => thread.id), permanently_deleted: [] };
+  },
+  undo_trash: (payload) => {
+    const token = payload.receiptId as string;
+    const restored = trashReceipts.get(token) ?? [];
+    for (const thread of restored) if (!findThread(thread.id)) threads.push(thread);
+    trashReceipts.delete(token);
   },
   mark_threads_spam: (payload) => {
     for (const id of ids(payload)) {

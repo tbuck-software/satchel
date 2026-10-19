@@ -107,7 +107,7 @@ describe('loaded thread window', () => {
     const pinnedActive = store.threads[1]!.id;
     const pinnedSelection = [store.threads[2]!.id, store.threads[3]!.id];
     store.selectThread(pinnedActive);
-    store.setSelection(pinnedSelection);
+    store.selectedThreadIds = pinnedSelection;
 
     await pageThrough(store, 6);
 

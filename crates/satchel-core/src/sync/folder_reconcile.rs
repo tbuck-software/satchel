@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use sqlx::SqlitePool;
+use sqlx::{Executor, Sqlite, SqlitePool};
 
 use crate::providers::gmail::gmail_label_is_state_view;
 use crate::providers::traits::{MessageRef, RemoteMessageRemoval, RemoteMessageState};
@@ -37,11 +37,14 @@ pub enum PendingMutations {
 }
 
 /// The `(source folder, remote id)` pairs a queued mutation still owns.
-pub async fn pending_remote_message_refs(
-    pool: &SqlitePool,
+pub async fn pending_remote_message_refs<'e, E>(
+    executor: E,
     account_id: &str,
     scope: PendingMutations,
-) -> Result<HashSet<(String, String)>, String> {
+) -> Result<HashSet<(String, String)>, String>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
     let payloads = sqlx::query_scalar::<_, String>(
         "SELECT payload
          FROM sync_queue
@@ -50,7 +53,7 @@ pub async fn pending_remote_message_refs(
            AND status IN ('pending', 'sending', 'scheduled', 'failed')",
     )
     .bind(account_id)
-    .fetch_all(pool)
+    .fetch_all(executor)
     .await
     .map_err(|err| err.to_string())?;
 
@@ -89,7 +92,8 @@ pub async fn pending_remote_message_refs(
             RemoteMutationPayload::CreateFolder { .. }
             | RemoteMutationPayload::RenameFolder { .. }
             | RemoteMutationPayload::DeleteFolder { .. }
-            | RemoteMutationPayload::AppendSent { .. } => continue,
+            | RemoteMutationPayload::AppendSent { .. }
+            | RemoteMutationPayload::UndoTrash { .. } => continue,
         };
         for message_ref in message_refs {
             if let Some(folder) = message_ref.source_folder {
@@ -104,17 +108,20 @@ fn normalized_remote_folder(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 
-async fn pending_remote_folder_paths(
-    pool: &SqlitePool,
+async fn pending_remote_folder_paths<'e, E>(
+    executor: E,
     account_id: &str,
-) -> Result<HashSet<String>, String> {
+) -> Result<HashSet<String>, String>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
     let payloads = sqlx::query_scalar::<_, String>(
         "SELECT payload FROM sync_queue
          WHERE account_id = ? AND action_type = 'remote_mutation'
            AND status IN ('pending', 'sending', 'scheduled')",
     )
     .bind(account_id)
-    .fetch_all(pool)
+    .fetch_all(executor)
     .await
     .map_err(|err| err.to_string())?;
 
@@ -170,6 +177,9 @@ async fn pending_remote_folder_paths(
                 paths.insert(normalized_remote_folder(&from_path));
                 paths.insert(normalized_remote_folder(&to_path));
             }
+            // The forward move owns the folders until this dependent action
+            // can enqueue its reverse move.
+            RemoteMutationPayload::UndoTrash { .. } => {}
             RemoteMutationPayload::AppendSent { folder_hint, .. } => {
                 if let Some(folder) = folder_hint {
                     paths.insert(normalized_remote_folder(&folder));
@@ -211,13 +221,17 @@ pub async fn reconcile_missing_remote_folders(
         .iter()
         .map(|folder| normalized_remote_folder(folder))
         .collect::<HashSet<_>>();
-    let protected = pending_remote_folder_paths(pool, account_id).await?;
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|err| err.to_string())?;
+    let protected = pending_remote_folder_paths(&mut *tx, account_id).await?;
     let folders = sqlx::query_as::<_, (String, String, String, String, String, i64)>(
         "SELECT id, COALESCE(remote_id, ''), full_path, folder_type, updated_at, absent_runs
          FROM folders WHERE account_id = ? AND folder_type != 'local'",
     )
     .bind(account_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
     let eligible = folders
@@ -256,15 +270,12 @@ pub async fn reconcile_missing_remote_folders(
     {
         sqlx::query("UPDATE folders SET absent_runs = 0 WHERE account_id = ?")
             .bind(account_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await
             .map_err(|err| err.to_string())?;
+        tx.commit().await.map_err(|err| err.to_string())?;
         return Ok(HashSet::new());
     }
-    let mut tx = pool
-        .begin_with("BEGIN IMMEDIATE")
-        .await
-        .map_err(|err| err.to_string())?;
     let mut retained_threads = HashSet::new();
     for (folder_id, remote_id, path, _, updated_at, absent_runs) in eligible {
         let normalized = normalized_remote_folder(if remote_id.is_empty() {
@@ -330,16 +341,23 @@ pub async fn reconcile_imap_folder_rename(
     let Some(generation) = batch.remote_uidvalidity else {
         return Ok(());
     };
+    if !complete_remote_folder_list_available("imap") {
+        return Ok(());
+    }
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|err| err.to_string())?;
     let has_messages: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM messages WHERE folder_id = ?)")
             .bind(folder_id)
-            .fetch_one(pool)
+            .fetch_one(&mut *tx)
             .await
             .map_err(|error| error.to_string())?;
-    if !complete_remote_folder_list_available("imap") || has_messages {
+    if has_messages {
         return Ok(());
     }
-    let protected = pending_remote_folder_paths(pool, account_id).await?;
+    let protected = pending_remote_folder_paths(&mut *tx, account_id).await?;
     let candidates: Vec<(String, String)> = sqlx::query_as(
         "SELECT id, COALESCE(remote_id, full_path) FROM folders
          WHERE account_id = ? AND id != ? AND uidvalidity = ? AND folder_type != 'local'",
@@ -347,7 +365,7 @@ pub async fn reconcile_imap_folder_rename(
     .bind(account_id)
     .bind(folder_id)
     .bind(i64::from(generation))
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
     let mut matches = Vec::new();
@@ -357,7 +375,7 @@ pub async fn reconcile_imap_folder_rename(
         }
         let rows: Vec<(String, Option<String>)> = sqlx::query_as(
             "SELECT remote_id, message_id_header FROM messages WHERE folder_id = ? AND remote_id IS NOT NULL"
-        ).bind(&old_id).fetch_all(pool).await.map_err(|err| err.to_string())?;
+        ).bind(&old_id).fetch_all(&mut *tx).await.map_err(|err| err.to_string())?;
         let mut overlap = 0;
         let mut conflict = false;
         for message in &batch.messages {
@@ -378,10 +396,6 @@ pub async fn reconcile_imap_folder_rename(
         return Ok(());
     }
     let old = &matches[0];
-    let mut tx = pool
-        .begin_with("BEGIN IMMEDIATE")
-        .await
-        .map_err(|err| err.to_string())?;
     for statement in [
         "UPDATE messages SET folder_id = ?1 WHERE folder_id = ?2",
         "UPDATE messages SET pending_folder_id = ?1 WHERE pending_folder_id = ?2",
@@ -432,21 +446,26 @@ pub async fn reconcile_imap_folder_snapshot(
     remote_states: &[RemoteMessageState],
     snapshot_uidvalidity: Option<u32>,
 ) -> Result<ImapSnapshotChanges, String> {
+    let remote_by_id = remote_states
+        .iter()
+        .map(|state| (state.remote_id.as_str(), state))
+        .collect::<HashMap<_, _>>();
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|err| err.to_string())?;
     let local_uidvalidity =
         sqlx::query_scalar::<_, Option<i64>>("SELECT uidvalidity FROM folders WHERE id = ?")
             .bind(folder_id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(|err| err.to_string())?
             .flatten()
             .and_then(|value| u32::try_from(value).ok());
     let may_delete = generations_agree(snapshot_uidvalidity, local_uidvalidity);
 
-    let remote_by_id = remote_states
-        .iter()
-        .map(|state| (state.remote_id.as_str(), state))
-        .collect::<HashMap<_, _>>();
-    let pending_refs = pending_remote_message_refs(pool, account_id, PendingMutations::All).await?;
+    let pending_refs =
+        pending_remote_message_refs(&mut *tx, account_id, PendingMutations::All).await?;
     let local_rows = sqlx::query_as::<_, (String, String, Option<String>, i64, i64)>(
         "SELECT id, thread_id, remote_id, is_read, is_starred
          FROM messages
@@ -454,7 +473,7 @@ pub async fn reconcile_imap_folder_snapshot(
     )
     .bind(account_id)
     .bind(folder_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
 
@@ -465,10 +484,6 @@ pub async fn reconcile_imap_folder_snapshot(
         skipped_stale_generation: !may_delete,
         ..ImapSnapshotChanges::default()
     };
-    let mut tx = pool
-        .begin_with("BEGIN IMMEDIATE")
-        .await
-        .map_err(|err| err.to_string())?;
 
     for (message_id, thread_id, remote_id, is_read, is_starred) in local_rows {
         let Some(remote_id) = remote_id else {
@@ -668,13 +683,17 @@ pub async fn reconcile_external_workflow_states(
     if thread_ids.is_empty() {
         return Ok(());
     }
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|err| err.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     let queued_payloads = sqlx::query_scalar::<_, String>(
         "SELECT payload FROM sync_queue
          WHERE action_type = 'remote_mutation'
            AND status IN ('pending', 'sending', 'scheduled')",
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
     let pending_workflow_thread_ids = queued_payloads
@@ -724,7 +743,7 @@ pub async fn reconcile_external_workflow_states(
              WHERE id = ?",
         )
         .bind(thread_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|err| err.to_string())?;
         let Some((current, snooze_until, has_inbox, has_aside, has_later, has_archive)) = row
@@ -765,10 +784,11 @@ pub async fn reconcile_external_workflow_states(
         .bind(&now)
         .bind(&now)
         .bind(thread_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|err| err.to_string())?;
     }
+    tx.commit().await.map_err(|err| err.to_string())?;
     Ok(())
 }
 

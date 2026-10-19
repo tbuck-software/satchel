@@ -167,6 +167,37 @@ describe('messages store', () => {
     expect(useConnectionStore().backendErrorFor('messages')).toBe('offline');
   });
 
+  it('revalidates changes received while the initial snapshot is still loading', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof backendLoadThreadMessages>>) => void;
+    openMock.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    previewMock.mockResolvedValue([backendMessage({ id: 'arrived' }) as never]);
+    const store = useMessagesStore();
+    const initial = store.loadByThread('th-live');
+    const refreshed = store.refreshThread('th-live');
+    finish({ messages: [], bodies: [] });
+    await Promise.all([initial, refreshed]);
+    expect(previewMock).toHaveBeenCalledExactlyOnceWith('th-live');
+    expect(store.getByThread('th-live').map(message => message.id)).toEqual(['arrived']);
+  });
+
+  it('coalesces refresh bursts and re-reads changes received during revalidation', async () => {
+    vi.useFakeTimers();
+    const store = useMessagesStore();
+    openMock.mockResolvedValueOnce({ messages: [], bodies: [] });
+    await store.loadByThread('th-live');
+    let finish!: (value: never) => void;
+    previewMock.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const first = store.refreshThread('th-live');
+    const second = store.refreshThread('th-live');
+    const third = store.refreshThread('th-live');
+    previewMock.mockResolvedValueOnce([backendMessage({ id: 'latest', body_loaded: true }) as never]);
+    finish([] as never);
+    await Promise.all([first, second, third]);
+    expect(previewMock).toHaveBeenCalledTimes(2);
+    expect(store.getByThread('th-live').map(message => message.id)).toEqual(['latest']);
+    vi.useRealTimers();
+  });
+
   it('reports a failed conversation load and clears it on the next answer', async () => {
     commandsAvailableMock.mockReturnValue(true);
     previewMock.mockRejectedValueOnce(new Error('db is locked'));

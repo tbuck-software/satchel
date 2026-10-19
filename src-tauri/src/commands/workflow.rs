@@ -150,6 +150,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn trash_receipt_follows_the_exact_imap_projection_and_reverses_the_new_uid() {
+        let pool = seeded_pool().await;
+        let state = AppState::default();
+        sqlx::query("DELETE FROM messages WHERE id != 'message-inbox'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE messages SET message_id_header = '<trash@example.test>' WHERE id = 'message-inbox'").execute(&pool).await.unwrap();
+        let receipt =
+            satchel_core::mail_actions::trash_threads(&pool, &state.queue, &["thread".into()])
+                .await
+                .expect("trash receipt");
+        let forward = state.queue.claim_next(&pool).await.unwrap().unwrap();
+        let refs = match serde_json::from_value::<RemoteMutationPayload>(forward.payload.clone())
+            .unwrap()
+        {
+            RemoteMutationPayload::WorkflowMove { refs, .. } => refs,
+            other => panic!("unexpected payload {other:?}"),
+        };
+        let target: String =
+            sqlx::query_scalar("SELECT id FROM folders WHERE folder_type = 'trash'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        sqlx::query("INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, date, remote_id, message_id_header, created_at, updated_at) SELECT 'trash-delivery', account_id, ?, thread_id, from_address, to_addresses, date, '909', message_id_header, created_at, updated_at FROM messages WHERE id = 'message-inbox'")
+            .bind(&target).execute(&pool).await.unwrap();
+        for _ in 0..2 {
+            finalize_persisted_imap_workflow_target_projection(
+                &pool,
+                "account",
+                "thread",
+                &refs,
+                &target,
+                Some(&HashSet::from(["909".into()])),
+                &forward.id,
+                &forward.payload,
+            )
+            .await
+            .expect("idempotent persisted reconciliation");
+        }
+        state
+            .queue
+            .mark_completed(&pool, &forward.id)
+            .await
+            .unwrap();
+        satchel_core::mail_actions::undo::undo_trash(
+            &pool,
+            &state.queue,
+            receipt.undo_token.as_deref().unwrap(),
+        )
+        .await
+        .expect("undo completed IMAP trash");
+        let reverse = state.queue.claim_next(&pool).await.unwrap().unwrap();
+        assert_eq!(reverse.payload["refs"][0]["remote_id"], "909");
+        assert_eq!(reverse.payload["refs"][0]["source_folder"], "Trash");
+        assert_eq!(reverse.payload["target_remote_folder_id"], "INBOX");
+        let source_copies: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE id = 'message-inbox'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(source_copies, 0);
+    }
+
+    #[tokio::test]
     async fn notification_archive_queues_read_before_move_atomically() {
         let pool = seeded_pool().await;
         let state = AppState::default();

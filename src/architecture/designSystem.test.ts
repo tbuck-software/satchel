@@ -171,124 +171,23 @@ const MAX_KNOWN_PALETTE_CLASSES = 0;
 // Rule 3 — new UI is assembled from src/components/ui/.
 // ---------------------------------------------------------------------------
 
-/*
- * 254 hand-rolled buttons against the kit. UI-07 is tearing this down — the
- * settings panes are through,, UI-13 handed the last two switches to ToggleSwitch,
- * and UI-20 closed the kit gaps that were forcing new ones — and until the rest follows, every one of them is counted here, so
- * the 257th cannot arrive quietly. Grouped by the kind of debt: 64 separately
- * invented reasons would say less than eight honest ones, and the per-file
- * count is what ratchets.
- */
+/* All application controls use the kit. These two isolated surfaces have
+ * documented reasons for owning their buttons; do not add routine controls. */
 const KNOWN_RAW_BUTTON_GROUPS: KnownGroup[] = [
   {
-    reason: 'Settings pane written before the kit; UI-07 converts it.',
-    files: {
-      'src/components/settings/AliasEditor.vue': 4,
-      'src/components/settings/KeybindingEditor.vue': 1,
-      'src/components/settings/SettingsSidebar.vue': 1,
-      'src/components/settings/SignaturesEditor.vue': 8,
-      'src/components/settings/SmartFoldersEditor.vue': 4,
-      'src/components/settings/TemplatesEditor.vue': 4,
-    },
-  },
-  {
     reason: 'Full-width call-to-action row; a permanent exception (STYLEGUIDE.md).',
-    files: {
-      'src/components/settings/AccountSetup.vue': 1,
-    },
-  },
-  {
-    reason: 'Mail surface with its own button styling; UI-07 converts it.',
-    files: {
-      'src/components/mail/AttachmentDropZone.vue': 5,
-      'src/components/mail/AttachmentPreview.vue': 7,
-      'src/components/mail/ComposerHost.vue': 4,
-      'src/components/mail/ComposerSignature.vue': 5,
-      'src/components/mail/ComposerThreadContext.vue': 1,
-      'src/components/mail/EmailRenderer.vue': 4,
-      'src/components/mail/ExternalLinkPrompt.vue': 2,
-      'src/components/mail/InvitationCard.vue': 2,
-      'src/components/mail/MessageBubble.vue': 11,
-      'src/components/mail/MessageRecipientDetails.vue': 4,
-      'src/components/mail/MessageSecurityBadge.vue': 1,
-      'src/components/mail/MessageSourceDialog.vue': 2,
-      'src/components/mail/PgpStatusCard.vue': 2,
-      'src/components/mail/RecipientChips.vue': 2,
-      'src/components/mail/RichTextEditor.vue': 20,
-      'src/components/mail/SafeMarkdownNode.vue': 1,
-      'src/components/mail/SendLaterPicker.vue': 4,
-      'src/components/mail/SmimeStatusCard.vue': 1,
-      'src/components/mail/TemplatePicker.vue': 2,
-      'src/components/mail/ThreadGroupList.vue': 12,
-      'src/components/mail/ThreadToolbar.vue': 3,
-      'src/components/mail/ThreadView.vue': 2,
-      'src/components/mail/UnsubscribeBanner.vue': 2,
-    },
-  },
-  {
-    reason: 'Navigation chrome styling its own rows; NavItem and MenuItem fit.',
-    files: {
-      'src/components/layout/ComposeFab.vue': 1,
-      'src/components/layout/FolderBrowserPanel.vue': 11,
-      'src/components/layout/MailboxTree.vue': 2,
-      'src/components/layout/Sidebar.vue': 4,
-      'src/components/layout/SidebarUpdateAction.vue': 1,
-      'src/components/navigation/OmniSearch.vue': 1,
-      'src/components/navigation/ShortcutHelper.vue': 2,
-      'src/components/navigation/SnoozePicker.vue': 4,
-    },
-  },
-  {
-    reason: 'Calendar surface predating the kit; UI-07 converts it.',
-    files: {
-      'src/components/calendar/CalendarEventChip.vue': 1,
-      'src/components/calendar/CalendarMiniMonth.vue': 1,
-      'src/components/calendar/CalendarMonthGrid.vue': 2,
-      'src/components/calendar/CalendarSidebar.vue': 1,
-      'src/components/calendar/CalendarWeekGrid.vue': 2,
-    },
-  },
-  {
-    reason: 'Contacts and topics surfaces predating the kit; UI-07 converts them.',
-    files: {
-      'src/components/contacts/ContactsSidebar.vue': 1,
-      'src/components/contacts/PersonProfileSheet.vue': 1,
-      'src/components/topics/TopicChip.vue': 2,
-      'src/components/topics/TopicDetail.vue': 5,
-      'src/components/topics/TopicPickerOverlay.vue': 1,
-    },
-  },
-  {
-    reason: 'Onboarding was built as one screen and styles its own controls.',
-    files: {
-      'src/components/onboarding/OnboardingFlow.vue': 17,
-    },
-  },
-  {
-    reason: 'View-level toolbar or action row; UI-07 converts it.',
-    files: {
-      'src/views/ComposeView.vue': 11,
-      'src/views/ContactsView.vue': 1,
-      'src/views/DraftsView.vue': 1,
-      'src/views/InboxView.vue': 4,
-      'src/views/NewSendersView.vue': 7,
-      'src/views/SearchView.vue': 4,
-      'src/views/SettingsView.vue': 1,
-      'src/views/ThreadDetailView.vue': 1,
-    },
+    files: { 'src/components/settings/AccountSetup.vue': 1 },
   },
   {
     reason: 'Menu-bar popover; it ships its own minimal stylesheet (tray.css).',
-    files: {
-      'src/tray/TrayPopover.vue': 2,
-    },
+    files: { 'src/tray/TrayPopover.vue': 2 },
   },
 ];
 
 const KNOWN_RAW_BUTTONS = flatten(KNOWN_RAW_BUTTON_GROUPS);
 
 // Only ever lower this. See KNOWN_RAW_BUTTON_GROUPS.
-const MAX_KNOWN_RAW_BUTTONS = 215;
+const MAX_KNOWN_RAW_BUTTONS = 3;
 
 /*
  * Outside the kit a hand-rolled button is already counted above, so this rule

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import { computed, nextTick, ref, useId, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useContactsStore } from '@/stores/contacts';
@@ -171,7 +173,7 @@ defineExpose({ focus: () => inputRef.value?.focus() });
       :title="isValidRecipient(value) ? undefined : t('compose.recipients.invalid')"
     >
       {{ value }}
-      <button type="button" class="chip-remove" @click.stop="remove(index)">×</button>
+      <IconButton :title="t('common.remove')" class="chip-remove" @click.stop="remove(index)">×</IconButton>
     </span>
     <input
       ref="inputRef"
@@ -191,11 +193,10 @@ defineExpose({ focus: () => inputRef.value?.focus() });
     />
   </div>
   <div v-if="suggestionOpen" :id="listboxId" class="suggestions" role="listbox">
-    <button
+    <CardButton
       v-for="(contact, index) in suggestions"
       :key="contact.id"
       :id="suggestionId(index)"
-      type="button"
       role="option"
       :aria-selected="index === activeSuggestionIndex"
       :class="{ active: index === activeSuggestionIndex }"
@@ -204,7 +205,7 @@ defineExpose({ focus: () => inputRef.value?.focus() });
     >
       <span>{{ contact.display_name || contact.email }}</span>
       <small>{{ contact.email }}</small>
-    </button>
+    </CardButton>
   </div>
   </div>
 </template>

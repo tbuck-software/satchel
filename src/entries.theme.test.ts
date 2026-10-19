@@ -22,7 +22,8 @@ function stubMatchMedia(prefersLight: boolean) {
   }));
 }
 
-describe('window entries apply the stored theme', () => {
+// These imports transform complete entry graphs on a cold Vite cache.
+describe('window entries apply the stored theme', { timeout: 30_000 }, () => {
   beforeEach(() => {
     vi.resetModules();
     localStorage.clear();

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import CardButton from '@/components/ui/CardButton.vue';
 import { useDismissable } from '@/composables/useDismissable';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -76,25 +78,24 @@ useDismissable(() => true, () => emit('close'));
     <div class="picker-body">
       <h3>{{ $t('compose.sendLater.title') }}</h3>
       <div class="presets">
-        <button
+        <CardButton
           v-for="preset in presets"
           :key="preset.value"
-          type="button"
           @click="emit('select', preset.value)"
         >
           {{ preset.label }}
-        </button>
+        </CardButton>
       </div>
       <label class="custom">
         <span>{{ $t('compose.sendLater.custom') }}</span>
         <input v-model="customDate" type="datetime-local" />
       </label>
       <div class="actions">
-        <button v-if="props.value" type="button" class="link" @click="emit('select', null)">
+        <AppButton v-if="props.value" class="link" @click="emit('select', null)" variant="ghost" size="sm">
           {{ $t('compose.sendLater.clear') }}
-        </button>
-        <button type="button" class="ghost" @click="emit('close')">{{ $t('common.cancel') }}</button>
-        <button type="button" class="primary" @click="chooseCustom">{{ $t('compose.sendLater.confirm') }}</button>
+        </AppButton>
+        <AppButton class="ghost" @click="emit('close')" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
+        <AppButton class="primary" @click="chooseCustom" variant="primary" size="sm">{{ $t('compose.sendLater.confirm') }}</AppButton>
       </div>
     </div>
   </ModalShell>
@@ -157,31 +158,5 @@ h3 {
   align-items: center;
 }
 
-.link {
-  background: transparent;
-  border: 0;
-  color: var(--accent-red);
-  cursor: pointer;
-  margin-right: auto;
-  font-size: var(--font-size-sm);
-}
-
-.ghost {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  padding: 8px 16px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.primary {
-  background: var(--accent-primary);
-  color: var(--text-on-accent);
-  border: 0;
-  padding: 8px 18px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-weight: var(--weight-semibold);
-}
+.link { margin-right:auto; }
 </style>

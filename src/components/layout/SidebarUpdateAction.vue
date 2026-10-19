@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAppUpdateStore } from '@/stores/appUpdate';
@@ -19,9 +20,8 @@ const title = computed(() => {
 </script>
 
 <template>
-  <button
+  <CardButton
     v-if="update.visible"
-    type="button"
     class="update-action"
     :class="`update-action--${update.status}`"
     :style="update.status === 'downloading' ? { '--update-progress': `${update.progress}%` } : undefined"
@@ -65,7 +65,7 @@ const title = computed(() => {
       </svg>
       <span aria-live="polite">{{ label }}</span>
     </span>
-  </button>
+  </CardButton>
 </template>
 
 <style scoped>

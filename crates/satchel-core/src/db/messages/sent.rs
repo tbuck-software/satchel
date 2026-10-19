@@ -433,7 +433,8 @@ async fn ensure_sent_folder(
     account_id: &str,
     now: &str,
 ) -> Result<String, SentMessageError> {
-    let candidate_id = crate::db::folders::folder_db_id(account_id, "Sent");
+    let candidate_id =
+        crate::db::folders::resolve_provider_folder_id(&mut **tx, account_id, "Sent").await?;
     // The INSERT and its existence check are one SQLite write statement. This
     // serializes concurrent first sends without requiring provider folders to
     // have a global uniqueness constraint.
@@ -455,11 +456,12 @@ async fn ensure_sent_folder(
 
     sqlx::query_scalar::<_, String>(
         "SELECT id FROM folders
-         WHERE account_id = ? AND folder_type = 'sent'
-         ORDER BY created_at ASC, id ASC
+         WHERE account_id = ? AND (folder_type = 'sent' OR id = ?)
+         ORDER BY CASE WHEN folder_type = 'sent' THEN 0 ELSE 1 END, created_at ASC, id ASC
          LIMIT 1",
     )
     .bind(account_id)
+    .bind(&candidate_id)
     .fetch_one(&mut **tx)
     .await
     .map_err(Into::into)

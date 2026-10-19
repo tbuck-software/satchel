@@ -3,6 +3,8 @@
 //! Queue intent and local presentation commit together. Confirmed provider
 //! identities never change before the queued move has been reconciled.
 
+pub mod undo;
+
 use std::collections::HashMap;
 
 use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
@@ -16,6 +18,15 @@ use crate::sync::{
         ACTION_REMOTE_MUTATION,
     },
 };
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ipc-types", ts(export, export_to = "core/mail_actions/"))]
+pub struct TrashReceipt {
+    pub undo_token: Option<String>,
+    pub undo_thread_ids: Vec<String>,
+    pub permanently_deleted: Vec<String>,
+}
 
 pub enum MoveTarget<'a> {
     Folder(&'a str),
@@ -52,7 +63,20 @@ pub async fn ensure_no_pending_move(
     tx: &mut Transaction<'_, Sqlite>,
     thread_ids: &[String],
 ) -> Result<(), String> {
+    ensure_no_pending_move_except_receipt(tx, thread_ids, None).await
+}
+
+async fn ensure_no_pending_move_except_receipt(
+    tx: &mut Transaction<'_, Sqlite>,
+    thread_ids: &[String],
+    ignored_receipt: Option<&str>,
+) -> Result<(), String> {
     reconcile_legacy_pop3_moves(tx, Some(thread_ids)).await?;
+    let requested: Vec<String> = sqlx::query_scalar("SELECT t.thread_id FROM mail_action_threads t JOIN mail_action_receipts r ON r.id = t.receipt_id WHERE r.state = 'requested' AND (? IS NULL OR r.id != ?)")
+        .bind(ignored_receipt).bind(ignored_receipt).fetch_all(&mut **tx).await.map_err(|e| e.to_string())?;
+    if requested.iter().any(|id| thread_ids.contains(id)) {
+        return Err("backend.errors.mailMovePending".into());
+    }
     let payloads = sqlx::query_scalar::<_, String>(
         "SELECT payload FROM sync_queue WHERE action_type = 'remote_mutation'
          AND status IN ('pending', 'scheduled', 'sending', 'failed')",
@@ -276,22 +300,66 @@ pub async fn set_flags_in_transaction(
     Ok(queued)
 }
 
+pub async fn trash_threads(
+    pool: &SqlitePool,
+    queue: &SyncQueue,
+    ids: &[String],
+) -> Result<TrashReceipt, String> {
+    move_threads_with_receipt(pool, queue, ids, MoveTarget::Trash, true)
+        .await
+        .map(|(_, receipt)| receipt)
+}
+
 pub async fn move_threads(
     pool: &SqlitePool,
     queue: &SyncQueue,
     ids: &[String],
     target: MoveTarget<'_>,
 ) -> Result<Vec<String>, String> {
+    move_threads_with_receipt(pool, queue, ids, target, false)
+        .await
+        .map(|(queued, _)| queued)
+}
+
+async fn move_threads_with_receipt(
+    pool: &SqlitePool,
+    queue: &SyncQueue,
+    ids: &[String],
+    target: MoveTarget<'_>,
+    record_undo: bool,
+) -> Result<(Vec<String>, TrashReceipt), String> {
     if ids.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), TrashReceipt::default()));
     }
     let mut tx = pool
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|e| e.to_string())?;
     ensure_no_pending_move(&mut tx, ids).await?;
+    for id in ids {
+        sqlx::query("DELETE FROM mail_action_receipts WHERE state = 'available' AND id IN (SELECT receipt_id FROM mail_action_threads WHERE thread_id = ?)")
+            .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+    }
     let now = chrono::Utc::now().to_rfc3339();
     let mut queued = Vec::new();
+    let mut receipt = TrashReceipt::default();
+    let receipt_id = uuid::Uuid::new_v4().to_string();
+    if record_undo {
+        // Keep requested reversals until processed. Available receipts only serve short-lived UI actions.
+        sqlx::query(
+            "DELETE FROM mail_action_receipts WHERE state != 'requested' AND created_at < ?",
+        )
+        .bind((chrono::Utc::now() - chrono::Duration::days(1)).to_rfc3339())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+        sqlx::query("INSERT INTO mail_action_receipts (id, created_at) VALUES (?, ?)")
+            .bind(&receipt_id)
+            .bind(&now)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     let mut seen = std::collections::HashSet::new();
     for id in ids.iter().filter(|id| seen.insert(id.as_str())) {
         let (account, provider): (String, String) = sqlx::query_as(
@@ -302,6 +370,7 @@ pub async fn move_threads(
             && !rows.is_empty()
             && rows.iter().all(|m| m.folder_type == "trash");
         if permanent {
+            receipt.permanently_deleted.push(id.clone());
             let refs = rows
                 .iter()
                 .filter_map(Message::remote_ref)
@@ -329,6 +398,12 @@ pub async fn move_threads(
                 .await
                 .map_err(|e| e.to_string())?;
             continue;
+        }
+        let queue_start = queued.len();
+        if record_undo {
+            sqlx::query("INSERT INTO mail_action_threads (receipt_id, thread_id, account_id, workflow_state, board_column, snooze_until, action_at) SELECT ?, id, account_id, workflow_state, board_column, snooze_until, ? FROM threads WHERE id = ?")
+                .bind(&receipt_id).bind(&now).bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            receipt.undo_thread_ids.push(id.clone());
         }
         let (folder_id, remote, kind) =
             resolve_target(&mut tx, &account, &provider, &target, &now).await?;
@@ -388,6 +463,10 @@ pub async fn move_threads(
             queued.push(action.id);
         }
         for message in rows {
+            if record_undo {
+                sqlx::query("INSERT INTO mail_action_messages (receipt_id, message_id, original_folder_id, target_folder_id) SELECT ?, id, folder_id, ? FROM messages WHERE id = ?")
+                    .bind(&receipt_id).bind(&folder_id).bind(&message.id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            }
             if !provider.eq_ignore_ascii_case("pop3") && message.remote_ref().is_some() {
                 sqlx::query(
                     "UPDATE messages SET pending_folder_id = ?, updated_at = ? WHERE id = ?",
@@ -407,13 +486,34 @@ pub async fn move_threads(
             sqlx::query("UPDATE threads SET workflow_state = 'done', board_column = 'done', workflow_changed_at = ?, updated_at = ? WHERE id = ?")
                 .bind(&now).bind(&now).bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
         }
+        if record_undo {
+            for action_id in &queued[queue_start..] {
+                sqlx::query("INSERT INTO mail_action_queue (receipt_id, action_id) VALUES (?, ?)")
+                    .bind(&receipt_id)
+                    .bind(action_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+        }
         refresh_thread_projection_tx(&mut tx, id, &now)
             .await
             .map_err(|e| e.to_string())?;
     }
+    if record_undo {
+        if receipt.undo_thread_ids.is_empty() {
+            sqlx::query("DELETE FROM mail_action_receipts WHERE id = ?")
+                .bind(&receipt_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+        } else {
+            receipt.undo_token = Some(receipt_id);
+        }
+    }
     tx.commit().await.map_err(|e| e.to_string())?;
     queue.wake_worker();
-    Ok(queued)
+    Ok((queued, receipt))
 }
 
 async fn resolve_target(
@@ -439,7 +539,9 @@ async fn resolve_target(
         return Ok(row);
     }
     let remote = provisioned_remote_folder(provider, kind).to_string();
-    let id = crate::db::folders::folder_db_id(account, &remote);
+    let id = crate::db::folders::resolve_provider_folder_id(&mut **tx, account, &remote)
+        .await
+        .map_err(|err| err.to_string())?;
     let (name, path) = match (provider, kind) {
         (_, "archive") => ("Archiviert", "Archive"),
         ("outlook", "trash") => ("Papierkorb", "Deleted Items"),

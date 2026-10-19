@@ -2,6 +2,7 @@ pub mod attachment_fetch;
 pub mod calendar_backfill;
 pub mod errors;
 pub mod folder_reconcile;
+pub mod provider_identity;
 pub mod queue;
 pub mod rate_limit_state;
 pub mod remote_mutations;

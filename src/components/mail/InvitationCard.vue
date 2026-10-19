@@ -155,15 +155,16 @@ function actionLabel(response: 'accepted' | 'declined' | 'tentative') {
       <h4 class="title">{{ props.invite.summary || $t('mail.invite.noTitle') }}</h4>
       <p v-if="when" class="when">{{ when }}</p>
       <p v-if="props.invite.location || props.invite.organizer_email" class="meta">
-        <button
+        <AppButton
           v-if="locationUrl"
-          type="button"
           class="meta__link"
           :title="locationUrl.toString()"
           @click="openLocation"
+          variant="link"
+          size="sm"
         >
           {{ locationUrl.hostname }}
-        </button>
+        </AppButton>
         <span v-else-if="props.invite.location">{{ props.invite.location }}</span>
         <span v-if="props.invite.location && props.invite.organizer_email" class="meta__sep">·</span>
         <span v-if="props.invite.organizer_email">
@@ -174,14 +175,15 @@ function actionLabel(response: 'accepted' | 'declined' | 'tentative') {
       <div v-if="notes" class="notes" :class="{ 'notes--clamped': notesOverflow && !notesExpanded }">
         <PlainTextLinks :text="notes" @open-link="linkOpener.open" />
       </div>
-      <button
+      <AppButton
         v-if="notesOverflow"
-        type="button"
         class="notes-toggle"
         @click="notesExpanded = !notesExpanded"
+        variant="link"
+        size="sm"
       >
         {{ notesExpanded ? $t('mail.invite.showLess') : $t('mail.invite.showMore') }}
-      </button>
+      </AppButton>
 
       <p v-if="cancelled" class="cancelled-note">{{ $t('mail.invite.cancelledNote') }}</p>
       <p v-else-if="unboundedSeries" class="recurrence-warning">
@@ -353,23 +355,7 @@ function actionLabel(response: 'accepted' | 'declined' | 'tentative') {
   flex-shrink: 0;
 }
 
-.meta__link {
-  border: 0;
-  padding: 0;
-  background: none;
-  font: inherit;
-  color: var(--text-secondary);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.meta__link:hover {
-  color: var(--text-primary);
-}
+.meta__link { overflow: hidden; text-overflow: ellipsis; }
 
 .notes {
   margin-top: var(--space-xs);
@@ -393,21 +379,7 @@ function actionLabel(response: 'accepted' | 'declined' | 'tentative') {
   overflow: hidden;
 }
 
-.notes-toggle {
-  justify-self: start;
-  border: 0;
-  padding: 0;
-  background: none;
-  font-size: var(--font-size-sm);
-  color: var(--text-tertiary);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-.notes-toggle:hover {
-  color: var(--text-primary);
-}
+.notes-toggle { justify-self: start; }
 
 .cancelled-note {
   margin: var(--space-xs) 0 0;

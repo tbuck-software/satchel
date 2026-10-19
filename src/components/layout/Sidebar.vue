@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
+import CardButton from '@/components/ui/CardButton.vue';
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -260,15 +262,14 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
       <nav v-if="frequentContacts.length > 0" class="grid gap-1 px-3 pb-3 pt-5">
         <div class="flex items-center justify-between px-2 pb-1">
           <span class="text-2xs font-semibold text-tertiary">{{ $t('nav.frequent') }}</span>
-          <button type="button" class="border-0 bg-transparent p-0 text-2xs font-medium text-tertiary hover:text-secondary" @click="goTo('contacts')">{{ $t('common.all') }}</button>
+          <AppButton class="text-2xs" @click="goTo('contacts')" variant="ghost" size="sm">{{ $t('common.all') }}</AppButton>
         </div>
         <div class="grid gap-0.5">
-          <button
+          <CardButton
             v-for="contact in frequentContacts"
             :key="contact.email"
-            type="button"
             :class="[
-              'group/contact relative grid h-[34px] min-w-0 grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-sm bg-transparent px-2.5 text-left transition-colors hover:bg-hover',
+              'group/contact relative grid h-[34px] min-w-0 grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-sm px-2.5 text-left transition-colors hover:bg-hover',
               isHighlightedContact(contact) ? 'bg-hover' : ''
             ]"
             :title="$t('nav.contactSummary', { name: contact.name, email: contact.email, count: contact.threadCount })"
@@ -301,7 +302,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
                 <path d="M8 9.7v3.8" />
               </svg>
             </span>
-          </button>
+          </CardButton>
         </div>
       </nav>
 
@@ -316,20 +317,20 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
         <SidebarAgenda />
       </Suspense>
       <div class="module-switcher">
-        <button
+        <AppButton
           v-if="contextualSidebarActive"
-          type="button"
           :title="$t('nav.backToMail')"
           @click="returnToMail"
+          variant="ghost"
+          size="sm"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M10.5 3 5.5 8l5 5" />
           </svg>
           <span>{{ $t('common.back') }}</span>
-        </button>
-        <button
+        </AppButton>
+        <CardButton
           v-else
-          type="button"
           :class="{ active: settingsModuleActive }"
           :aria-current="settingsModuleActive ? 'page' : undefined"
           :title="$t('common.settings')"
@@ -340,7 +341,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
             <circle cx="12" cy="12" r="3" />
           </svg>
           <span>{{ $t('common.settings') }}</span>
-        </button>
+        </CardButton>
         <IconButton :title="$t('commands.showShortcuts')" @click="ui.toggleShortcuts()">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="8" cy="8" r="6.5" />

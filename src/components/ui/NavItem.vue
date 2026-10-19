@@ -45,7 +45,7 @@ defineEmits<{
     <span v-if="$slots.leading" class="nav-item__leading">
       <slot name="leading" />
     </span>
-    <span class="nav-item__label">{{ label }}</span>
+    <span class="nav-item__label"><slot>{{ label }}</slot></span>
     <span v-if="$slots.trailing" class="nav-item__trailing">
       <slot name="trailing" />
     </span>

@@ -421,9 +421,9 @@ fn run_thread_action(app: AppHandle, thread_id: String, action: ThreadAction) {
                     .await
                     .map(|_| ())
             }
-            ThreadAction::Trash => {
-                trash_threads(pool, state, ThreadIdsInput { thread_ids: ids }).await
-            }
+            ThreadAction::Trash => trash_threads(pool, state, ThreadIdsInput { thread_ids: ids })
+                .await
+                .map(|_| ()),
             ThreadAction::MarkRead => {
                 set_threads_read(
                     pool,

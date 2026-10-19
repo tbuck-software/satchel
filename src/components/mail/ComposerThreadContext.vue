@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppButton from '@/components/ui/AppButton.vue';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useMessagesStore } from '@/stores/messages';
@@ -56,11 +57,12 @@ function senderLabel(message: (typeof messages.value)[number]) {
 
 <template>
   <div class="thread-context" data-composer-context>
-    <button
-      type="button"
+    <AppButton
       class="context-toggle"
       :aria-expanded="expanded"
       @click="toggle"
+      variant="link"
+      size="sm"
     >
       <svg
         :class="['context-chevron', { 'context-chevron--open': expanded }]"
@@ -75,7 +77,7 @@ function senderLabel(message: (typeof messages.value)[number]) {
         aria-hidden="true"
       ><path d="m4.5 3.5 2.5 2.5-2.5 2.5" /></svg>
       {{ toggleLabel }}
-    </button>
+    </AppButton>
 
     <div v-if="expanded" class="context-list">
       <p v-if="loading" class="context-empty">{{ $t('compose.context.loading') }}</p>
@@ -98,24 +100,6 @@ function senderLabel(message: (typeof messages.value)[number]) {
   padding-top: 8px;
   border-top: 1px dashed var(--border-color-muted);
   cursor: default;
-}
-
-.context-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 4px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  font-size: var(--font-size-xs);
-}
-
-.context-toggle:hover {
-  background: var(--bg-hover);
-  color: var(--text-secondary);
 }
 
 .context-chevron {
