@@ -118,6 +118,30 @@ test.describe('list view', () => {
   });
 });
 
+/** The pane dividers were mouse-only separators: no tab stop, no keys, no value. */
+test('resizes both panes from the keyboard within the store limits', async ({ page }) => {
+  await openInbox(page);
+  const sidebar = page.getByRole('separator', { name: 'Resize the sidebar' });
+  const list = page.getByRole('separator', { name: 'Adjust the message list width' });
+
+  await expect(sidebar).toHaveAttribute('aria-valuemin', '220');
+  await expect(sidebar).toHaveAttribute('aria-valuemax', '420');
+  await expect(list).toHaveAttribute('aria-valuemin', '320');
+  await expect(list).toHaveAttribute('aria-valuemax', '760');
+
+  await sidebar.focus();
+  await page.keyboard.press('Home');
+  await expect(sidebar).toHaveAttribute('aria-valuenow', '220');
+  await page.keyboard.press('ArrowRight');
+  await expect(sidebar).toHaveAttribute('aria-valuenow', '236');
+  await expect(page.locator('aside').first()).toHaveJSProperty('offsetWidth', 236);
+
+  await list.focus();
+  const before = Number(await list.getAttribute('aria-valuenow'));
+  await page.keyboard.press('Shift+ArrowLeft');
+  await expect(list).toHaveAttribute('aria-valuenow', String(before - 64));
+});
+
 /**
  * Icon buttons are 26-38px. On a touch screen the hit area grows to 44px
  * around the icon without moving anything.
