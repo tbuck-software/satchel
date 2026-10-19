@@ -191,12 +191,11 @@ describe('useWorkflow refresh with a fully paged list', () => {
     ]);
   });
 
-  it('keeps a successful workflow transition when only marking read fails', async () => {
+  it('leaves marking read to the backend transition', async () => {
     const threads = useThreadsStore();
     const workflow = useWorkflow();
     await threads.load();
     threads.threads[0]!.unreadCount = 2;
-    setThreadsRead.mockRejectedValueOnce(new Error('flag update failed'));
 
     const pending = workflow.transitionMany(['t0'], 'done', 'manual', undefined, {
       refresh: false,
@@ -205,9 +204,10 @@ describe('useWorkflow refresh with a fully paged list', () => {
 
     await expect(pending).resolves.toEqual(['t0']);
     expect(threads.threads[0]!.workflowState).toBe('done');
-    expect(useToast().state.toasts).toEqual([
-      expect.objectContaining({ tone: 'warning', groupKey: 'workflow-read-error:done:flag update failed' }),
-    ]);
+    expect(threads.threads[0]!.unreadCount).toBe(0);
+    // A follow-up read request finds the scheduled move and is refused.
+    expect(setThreadsRead).not.toHaveBeenCalled();
+    expect(useToast().state.toasts).toEqual([]);
   });
 
   /**
@@ -292,9 +292,8 @@ describe('useWorkflow concurrent-transition convergence', () => {
 
     await expect(pending).resolves.toEqual(stale.map((thread) => thread.id));
     expect(stale.map((thread) => threads.find(thread.id)?.workflowState)).toEqual(['done', 'done', 'done', 'done']);
-    // One read flag for the batch, not one per converged thread.
-    expect(setThreadsRead).toHaveBeenCalledTimes(1);
-    expect(setThreadsRead).toHaveBeenCalledWith(stale.map((thread) => thread.id), true);
+    // The transition that filed them already marked them read.
+    expect(setThreadsRead).not.toHaveBeenCalled();
     // The reported bug surfaced exactly here: four grouped failure toasts.
     expect(useToast().state.toasts).toEqual([]);
   });

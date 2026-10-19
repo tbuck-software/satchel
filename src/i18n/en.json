@@ -3213,8 +3213,7 @@
     },
     "workflow": {
       "failedMany": "Could not mark {count} emails as “{label}”: {detail}",
-      "failedOne": "{label} failed: {detail}",
-      "readFailed": "Email {state}, but not marked as read: {detail} | {count} emails {state}, but not marked as read: {detail}"
+      "failedOne": "{label} failed: {detail}"
     }
   },
   "time": {

@@ -261,6 +261,79 @@ mod tests {
         assert_eq!(kinds, vec!["flags", "workflow_move"]);
     }
 
+    /// The client's check-off used to send a separate read request after the
+    /// transition. That request found the just-scheduled archive and was
+    /// refused with `mailMovePending` on every single check-off.
+    #[tokio::test]
+    async fn manual_done_marks_read_in_the_transition_before_the_move() {
+        let pool = seeded_pool().await;
+        let state = AppState::default();
+        transition_thread_inner(
+            &pool,
+            &state,
+            TransitionInput {
+                thread_id: "thread".into(),
+                from: WorkflowState::Inbox,
+                to: WorkflowState::Done,
+                snooze_until: None,
+            },
+        )
+        .await
+        .expect("done");
+        let unread: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM messages WHERE thread_id = 'thread' AND is_read = 0",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(unread, 0);
+        let kinds: Vec<String> = sqlx::query_scalar(
+            "SELECT json_extract(payload, '$.kind') FROM sync_queue ORDER BY rowid",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(kinds, vec!["flags", "workflow_move"]);
+    }
+
+    #[tokio::test]
+    async fn done_from_a_still_scheduled_aside_marks_read() {
+        let pool = seeded_pool().await;
+        let state = AppState::default();
+        for (from, to) in [
+            (WorkflowState::Inbox, WorkflowState::Aside),
+            (WorkflowState::Aside, WorkflowState::Done),
+        ] {
+            transition_thread_inner(
+                &pool,
+                &state,
+                TransitionInput {
+                    thread_id: "thread".into(),
+                    from,
+                    to,
+                    snooze_until: None,
+                },
+            )
+            .await
+            .expect("transition");
+        }
+        let unread: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM messages WHERE thread_id = 'thread' AND is_read = 0",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(unread, 0);
+        let moves: Vec<String> = sqlx::query_scalar(
+            "SELECT json_extract(payload, '$.target_folder_type') FROM sync_queue
+             WHERE json_extract(payload, '$.kind') = 'workflow_move'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(moves, vec!["archive"]);
+    }
+
     #[tokio::test]
     async fn notification_archive_rolls_back_read_when_move_cannot_be_queued() {
         let pool = seeded_pool().await;
@@ -482,7 +555,7 @@ mod tests {
         .expect("undo done");
         let result: (String, i64, i64) = sqlx::query_as(
             "SELECT workflow_state,
-                    (SELECT COUNT(*) FROM sync_queue),
+                    (SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_move'),
                     (SELECT COUNT(*) FROM workflow_events)
              FROM threads WHERE id = 'thread'",
         )
@@ -717,7 +790,7 @@ mod tests {
         .await
         .expect("local archive target");
         assert_eq!(target, ("archive".into(), "Archive".into()));
-        let queued: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_queue")
+        let queued: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_move'")
             .fetch_one(&pool)
             .await
             .expect("queued move");
@@ -740,7 +813,7 @@ mod tests {
         )
         .await
         .expect("done");
-        let payload: String = sqlx::query_scalar("SELECT payload FROM sync_queue LIMIT 1")
+        let payload: String = sqlx::query_scalar("SELECT payload FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_move'")
             .fetch_one(&pool)
             .await
             .expect("archive move");
@@ -829,7 +902,7 @@ mod tests {
         .await
         .expect("done");
         let (action_id, payload): (String, String) =
-            sqlx::query_as("SELECT id, payload FROM sync_queue LIMIT 1")
+            sqlx::query_as("SELECT id, payload FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_move'")
                 .fetch_one(&pool)
                 .await
                 .expect("archive move");
@@ -918,7 +991,7 @@ mod tests {
         .await
         .expect("done");
         let (action_id, payload): (String, String) =
-            sqlx::query_as("SELECT id, payload FROM sync_queue LIMIT 1")
+            sqlx::query_as("SELECT id, payload FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_move'")
                 .fetch_one(&pool)
                 .await
                 .expect("archive move");
