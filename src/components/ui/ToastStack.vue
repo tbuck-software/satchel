@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useToast, type Toast, type ToastAction } from '@/composables/useToast';
 import { useShortcutHints } from '@/composables/useShortcutHints';
+import {
+  clearanceAbove,
+  toastClearanceRevision,
+  toastObstacleRects,
+} from '@/composables/useToastClearance';
 import IconButton from '@/components/ui/IconButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 
@@ -86,6 +91,74 @@ const visibleToasts = computed(() => {
 });
 
 /*
+ * Lift the stack above the composer's send row and the reply bar while a
+ * toast is up (see `useToastClearance`). Measured on the events that move
+ * those surfaces — a toast arriving, a resize, the end of a drag or a
+ * transition, an owner's refresh — rather than every frame: an error toast
+ * can stay for a long time and a frame loop would run all of it.
+ */
+const stackRef = ref<HTMLElement | null>(null);
+const clearance = ref(0);
+/** `--space-sm`, between the stack and the surface it clears. */
+const CLEARANCE_GAP = 8;
+let clearanceFrame: number | null = null;
+
+function measureClearance() {
+  clearanceFrame = null;
+  const stack = stackRef.value;
+  if (!stack || visibleToasts.value.length === 0) {
+    clearance.value = 0;
+    return;
+  }
+  const rect = stack.getBoundingClientRect();
+  // Measured from where the stack sits when it is not lifted.
+  const resting = {
+    top: rect.top + clearance.value,
+    bottom: rect.bottom + clearance.value,
+    left: rect.left,
+    right: rect.right,
+  };
+  const lift = clearanceAbove(resting, toastObstacleRects(), CLEARANCE_GAP);
+  // Never past the top edge: covering a surface beats a toast nobody can see.
+  clearance.value = Math.max(0, Math.min(lift, resting.top - CLEARANCE_GAP));
+}
+
+function scheduleClearance() {
+  if (clearanceFrame !== null || typeof requestAnimationFrame === 'undefined') return;
+  clearanceFrame = requestAnimationFrame(measureClearance);
+}
+
+const CLEARANCE_EVENTS = ['pointerup', 'transitionend'] as const;
+let listening = false;
+
+function listenForClearance(active: boolean) {
+  if (active === listening || typeof window === 'undefined') return;
+  listening = active;
+  if (active) {
+    window.addEventListener('resize', scheduleClearance);
+    for (const name of CLEARANCE_EVENTS) document.addEventListener(name, scheduleClearance, true);
+  } else {
+    window.removeEventListener('resize', scheduleClearance);
+    for (const name of CLEARANCE_EVENTS) document.removeEventListener(name, scheduleClearance, true);
+  }
+}
+
+watch(
+  [() => visibleToasts.value.map((item) => item.id).join('|'), toastClearanceRevision],
+  async ([ids]) => {
+    listenForClearance(ids !== '');
+    await nextTick();
+    scheduleClearance();
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  listenForClearance(false);
+  if (clearanceFrame !== null) cancelAnimationFrame(clearanceFrame);
+});
+
+/*
  * Announcements go through two regions that exist before any toast does.
  * A live region inserted together with its text, as the rows are, is often
  * not read at all by VoiceOver. Undo receipts shown by the FAB land here too.
@@ -152,7 +225,7 @@ function showPreviousCompactUndo() {
 <template>
   <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ politeAnnouncement }}</div>
   <div class="sr-only" role="alert" aria-live="assertive" aria-atomic="true">{{ assertiveAnnouncement }}</div>
-  <div class="stack">
+  <div ref="stackRef" class="stack" :style="{ '--toast-clearance': `${clearance}px` }">
     <TransitionGroup name="toast" tag="div" class="stack__inner">
       <div
         v-for="item in visibleToasts"
@@ -220,7 +293,8 @@ function showPreviousCompactUndo() {
 .stack {
   position: fixed;
   right: calc(var(--space-xl) + var(--satchel-safe-area-right));
-  bottom: calc(var(--space-xl) + var(--satchel-safe-area-bottom));
+  /* Not transitioned: the lift is measured from the stack's own position. */
+  bottom: calc(var(--space-xl) + var(--satchel-safe-area-bottom) + var(--toast-clearance, 0px));
   z-index: 1000;
   max-width: min(
     440px,
@@ -360,7 +434,7 @@ function showPreviousCompactUndo() {
     right: var(--space-md);
     left: var(--space-md);
     /* Clear both the 56px compose FAB and the thread detail action bar. */
-    bottom: calc(92px + var(--satchel-safe-area-bottom));
+    bottom: calc(92px + var(--satchel-safe-area-bottom) + var(--toast-clearance, 0px));
     max-width: none;
   }
 
