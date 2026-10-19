@@ -45,6 +45,11 @@ const lastFailure = ref({ status: '', raw: '' });
 const statusDetail = computed(() =>
   lastFailure.value.status === statusText.value ? lastFailure.value.raw : '',
 );
+// The same pairing decides the tone: a failure must not look like the
+// success line that shares its place.
+const statusIsError = computed(() =>
+  statusText.value !== '' && lastFailure.value.status === statusText.value,
+);
 const groupwareOpen = ref(false);
 const groupwareBusy = ref(false);
 const groupwareAccountId = ref('');
@@ -61,6 +66,12 @@ const passwordInput = ref<HTMLInputElement | null>(null);
 const passwordAccount = computed(() =>
   emailAccounts.value.find((account) => account.id === passwordAccountId.value) ?? null,
 );
+
+/** A failure with no chain behind it — a missing field, a partial sync. */
+function reportProblem(text: string) {
+  statusText.value = text;
+  lastFailure.value = { status: text, raw: '' };
+}
 
 /** Put the class of failure in the status line and the chain behind it. */
 function reportFailure(key: string, error: unknown) {
@@ -169,11 +180,11 @@ async function connectGroupware(account: (typeof accounts.accounts)[number]) {
 
 async function saveGroupware() {
   if (!groupwareAccountId.value || !groupwareUsername.value.trim() || !groupwarePassword.value) {
-    statusText.value = t('settings.accounts.groupware.credentialsRequired');
+    reportProblem(t('settings.accounts.groupware.credentialsRequired'));
     return;
   }
   if (!caldavServer.value.trim() && !carddavServer.value.trim()) {
-    statusText.value = t('settings.accounts.groupware.serverRequired');
+    reportProblem(t('settings.accounts.groupware.serverRequired'));
     return;
   }
   groupwareBusy.value = true;
@@ -265,7 +276,7 @@ async function savePassword() {
 
 async function syncImapNow(showIfEmpty = true) {
   if (!oauthAvailable) {
-    statusText.value = t('settings.accounts.sync.requiresApp');
+    reportProblem(t('settings.accounts.sync.requiresApp'));
     return;
   }
 
@@ -305,7 +316,7 @@ async function syncImapNow(showIfEmpty = true) {
         ? translateBackendError(rawFailure) ?? rawFailure
         : t('settings.accounts.sync.unknownFailure');
       const failedCount = Math.max(summary.accounts_failed, summary.failures.length);
-      statusText.value = t('settings.accounts.sync.partial', {
+      reportProblem(t('settings.accounts.sync.partial', {
         messages: t(
           'settings.accounts.sync.messagesCount',
           { count: summary.messages_synced },
@@ -314,7 +325,7 @@ async function syncImapNow(showIfEmpty = true) {
         failed: failedCount,
         error: firstFailure,
         threads: threadsCount,
-      });
+      }));
     } else if (total === 0 && showIfEmpty) {
       if (summary.backfill_pending_accounts > 0) {
         statusText.value = t('settings.accounts.sync.backfillStatus', {
@@ -414,7 +425,7 @@ async function reconnectOauth(account: (typeof accounts.accounts)[number]) {
 
 async function removeAccount(accountId: string, email: string) {
   if (!oauthAvailable) {
-    statusText.value = t('settings.accounts.removeRequiresApp');
+    reportProblem(t('settings.accounts.removeRequiresApp'));
     return;
   }
 
@@ -619,7 +630,14 @@ async function removeAccount(accountId: string, email: string) {
     </div>
 
     <!-- Status message -->
-    <p v-if="statusText" class="status-msg">{{ statusText }}</p>
+    <p
+      v-if="statusText"
+      class="status-msg"
+      :class="{ 'status-msg--error': statusIsError }"
+      :role="statusIsError ? 'alert' : 'status'"
+    >
+      {{ statusText }}
+    </p>
     <details v-if="statusDetail" class="status-detail">
       <summary>{{ $t('errors.technicalDetails') }}</summary>
       <pre>{{ statusDetail }}</pre>
@@ -742,8 +760,12 @@ async function removeAccount(accountId: string, email: string) {
 .status-msg {
   margin: 0;
   font-size: var(--font-size-xs);
-  color: var(--accent-primary);
-  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.status-msg--error {
+  color: var(--accent-red-soft);
+  font-weight: var(--weight-semibold);
 }
 
 .status-detail {

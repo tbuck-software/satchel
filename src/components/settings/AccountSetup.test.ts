@@ -56,5 +56,19 @@ describe('Mail reconnect', () => {
     await vi.waitFor(() => expect(accounts.startReauth).toHaveBeenCalledWith(accounts.account.id));
     expect(backend.backendSyncGoogleCalendar).not.toHaveBeenCalled();
     expect(wrapper.get('.status-msg').text()).toContain(accounts.account.email);
+    // A success is a polite status line, not an alert.
+    expect(wrapper.get('.status-msg').attributes('role')).toBe('status');
+    expect(wrapper.get('.status-msg').classes()).not.toContain('status-msg--error');
+  });
+
+  it('shows a failed reconnect as an alert in the error tone', async () => {
+    accounts.startReauth.mockRejectedValue(new Error('consent revoked'));
+    const wrapper = mount(AccountSetup);
+    await wrapper.findAll('button.icon-button')[0]!.trigger('click');
+
+    await vi.waitFor(() =>
+      expect(wrapper.get('.status-msg').classes()).toContain('status-msg--error'),
+    );
+    expect(wrapper.get('.status-msg').attributes('role')).toBe('alert');
   });
 });
