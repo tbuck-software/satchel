@@ -16,17 +16,17 @@ use crate::sync::remote_mutations::{remote_move_thread_id_from_json, RemoteMutat
 use super::thread_resolution::refresh_provider_thread_projection;
 
 #[derive(Debug, Default)]
-pub(crate) struct ImapSnapshotChanges {
-    pub(crate) relocated_threads: HashSet<String>,
+pub struct ImapSnapshotChanges {
+    pub relocated_threads: HashSet<String>,
     /// The snapshot named a different identity generation than the folder, so
     /// nothing was removed. Visible to the caller because a folder that keeps
     /// skipping its reconciliation is a fault worth seeing.
-    pub(crate) skipped_stale_generation: bool,
+    pub skipped_stale_generation: bool,
 }
 
 /// Which queued mutations count as still owning a message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PendingMutations {
+pub enum PendingMutations {
     /// Everything that still has to reach the server. A message under any of
     /// them must not be relocated or removed locally.
     All,
@@ -37,7 +37,7 @@ pub(crate) enum PendingMutations {
 }
 
 /// The `(source folder, remote id)` pairs a queued mutation still owns.
-pub(crate) async fn pending_remote_message_refs(
+pub async fn pending_remote_message_refs(
     pool: &SqlitePool,
     account_id: &str,
     scope: PendingMutations,
@@ -197,7 +197,7 @@ fn complete_remote_folder_list_available(provider: &str) -> bool {
 
 /// Require consecutive complete listings before retiring a remote folder.
 /// Cached mail stays in a local folder so thread metadata remains attached.
-pub(crate) async fn reconcile_missing_remote_folders(
+pub async fn reconcile_missing_remote_folders(
     pool: &SqlitePool,
     account_id: &str,
     provider: &str,
@@ -320,7 +320,7 @@ pub(crate) async fn reconcile_missing_remote_folders(
 
 /// Match a renamed IMAP folder only when its generation and UID/header pairs
 /// agree with exactly one absent folder. UIDVALIDITY alone is not unique.
-pub(crate) async fn reconcile_imap_folder_rename(
+pub async fn reconcile_imap_folder_rename(
     pool: &SqlitePool,
     account_id: &str,
     folder_id: &str,
@@ -424,7 +424,7 @@ fn generations_agree(snapshot: Option<u32>, local: Option<u32>) -> bool {
 /// to. If it disagrees with the folder's own, every local row would look
 /// missing and be deleted along with its threads, tags and topics — so the
 /// removal half is skipped and only matching ids have their flags updated.
-pub(crate) async fn reconcile_imap_folder_snapshot(
+pub async fn reconcile_imap_folder_snapshot(
     pool: &SqlitePool,
     account_id: &str,
     folder_id: &str,
@@ -533,7 +533,7 @@ pub(crate) async fn reconcile_imap_folder_snapshot(
 /// Clear rows whose numeric IMAP UIDs became invalid after UIDVALIDITY changed.
 /// Keeping them would let a reused UID overwrite an unrelated message and its
 /// thread projection. Threads that still have messages in other folders live on.
-pub(crate) async fn reset_local_provider_folder(
+pub async fn reset_local_provider_folder(
     pool: &SqlitePool,
     account_id: &str,
     folder_id: &str,
@@ -544,7 +544,7 @@ pub(crate) async fn reset_local_provider_folder(
 /// Commit the new generation with the deletion of old UIDs. Otherwise an
 /// action can read an old message joined to the new folder UIDVALIDITY and
 /// mutate a different server message that reused its UID.
-pub(crate) async fn reset_local_provider_folder_with_generation(
+pub async fn reset_local_provider_folder_with_generation(
     pool: &SqlitePool,
     account_id: &str,
     folder_id: &str,
@@ -661,7 +661,7 @@ pub async fn reconcile_remote_message_removals(
     Ok(touched_threads)
 }
 
-pub(crate) async fn reconcile_external_workflow_states(
+pub async fn reconcile_external_workflow_states(
     pool: &SqlitePool,
     thread_ids: &HashSet<String>,
 ) -> Result<(), String> {
@@ -772,12 +772,12 @@ pub(crate) async fn reconcile_external_workflow_states(
     Ok(())
 }
 
-pub(crate) fn is_snooze_folder(name: &str) -> bool {
+pub fn is_snooze_folder(name: &str) -> bool {
     let normalized = name.trim().to_ascii_lowercase();
     normalized == "later" || normalized.ends_with(".later") || normalized.ends_with("/later")
 }
 
-pub(crate) fn should_snapshot_folder(provider: &str, folder_type: &str, folder_name: &str) -> bool {
+pub fn should_snapshot_folder(provider: &str, folder_type: &str, folder_name: &str) -> bool {
     let provider = provider.trim().to_ascii_lowercase();
     matches!(provider.as_str(), "imap" | "gmail" | "outlook")
         && (!folder_name.trim().is_empty() || !folder_type.trim().is_empty())
@@ -785,7 +785,7 @@ pub(crate) fn should_snapshot_folder(provider: &str, folder_type: &str, folder_n
 
 const SECONDARY_FOLDER_SNAPSHOT_INTERVAL_HOURS: i64 = 24;
 
-pub(crate) fn folder_snapshot_due(
+pub fn folder_snapshot_due(
     provider: &str,
     folder_type: &str,
     folder_name: &str,

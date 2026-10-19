@@ -7,7 +7,6 @@ pub use satchel_core::sync::*;
 
 pub mod attachment_processing;
 pub mod delivery_reconciliation;
-pub mod folder_reconcile;
 pub mod gmail_reconcile;
 pub mod idle;
 pub mod imap_workflow_target;
@@ -19,5 +18,4 @@ pub mod outbox;
 pub mod outlook_migration;
 pub mod queue_worker;
 pub mod repairs;
-pub mod thread_resolution;
 pub mod workflow_executor;

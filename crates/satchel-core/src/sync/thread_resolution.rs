@@ -13,7 +13,7 @@ use sqlx::{FromRow, SqlitePool};
 use crate::db::threads::ThreadRepository;
 use crate::providers::traits::MessageEnvelope;
 
-pub(crate) async fn refresh_provider_thread_projection(
+pub async fn refresh_provider_thread_projection(
     pool: &SqlitePool,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -26,7 +26,7 @@ pub(crate) async fn refresh_provider_thread_projection(
 /// a time from inside a loop, so a reset folder or a batch of superseded drafts
 /// paid a `BEGIN IMMEDIATE`, four aggregates and an UPDATE per thread instead
 /// of once for all of them.
-pub(crate) async fn refresh_provider_thread_projections(
+pub async fn refresh_provider_thread_projections(
     pool: &SqlitePool,
     thread_ids: &[String],
 ) -> Result<(), String> {
@@ -39,7 +39,7 @@ pub(crate) async fn refresh_provider_thread_projections(
         .map_err(|error| error.to_string())
 }
 
-pub(crate) fn sanitize_id(value: &str) -> String {
+pub fn sanitize_id(value: &str) -> String {
     value
         .chars()
         .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
@@ -148,7 +148,7 @@ pub fn synthetic_classification_headers(
     message: &MessageEnvelope,
     folder_remote_id: &str,
 ) -> String {
-    satchel_core::db::sender_preferences::classification_headers(
+    crate::db::sender_preferences::classification_headers(
         message.list_unsubscribe.as_deref(),
         message.list_unsubscribe_post.as_deref(),
         Some(folder_remote_id),
@@ -161,7 +161,7 @@ pub fn synthetic_classification_headers(
 /// Checks the direct parent (`In-Reply-To`) first, then the `References`
 /// chain from closest to root — the first hit wins so a reply lands next to
 /// its nearest known relative.
-pub(crate) async fn resolve_reply_thread_connection(
+pub async fn resolve_reply_thread_connection(
     connection: &mut sqlx::SqliteConnection,
     account_id: &str,
     message: &crate::providers::traits::MessageEnvelope,
@@ -233,7 +233,7 @@ const SUBJECT_FALLBACK_MIN_LEN: usize = 12;
 /// distribution list is not a conversation. Joining two threads cannot be
 /// undone: `merge_reply_split_threads` has no counterpart, and the target
 /// thread's workflow state, tags and topics win.
-pub(crate) async fn resolve_imap_subject_thread_connection(
+pub async fn resolve_imap_subject_thread_connection(
     connection: &mut sqlx::SqliteConnection,
     account_id: &str,
     account_email: &str,
@@ -938,7 +938,7 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("pool");
-        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+        sqlx::migrate!("./src/db/migrations")
             .run(&pool)
             .await
             .expect("migrations");

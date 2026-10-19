@@ -2082,7 +2082,7 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "ref",
-                        "name": "app::commands::workflow::BatchTransitionInput"
+                        "name": "core::workflow::transitions::BatchTransitionInput"
                     }
                 }
             }
@@ -4916,53 +4916,6 @@ export default {
                 }
             }
         },
-        "app::commands::workflow::BatchTransitionEntry": {
-            "kind": "object",
-            "fields": {
-                "from": {
-                    "required": true,
-                    "shape": {
-                        "kind": "value"
-                    }
-                },
-                "thread_id": {
-                    "required": true,
-                    "shape": {
-                        "kind": "value"
-                    }
-                }
-            }
-        },
-        "app::commands::workflow::BatchTransitionInput": {
-            "kind": "object",
-            "fields": {
-                "snooze_until": {
-                    "required": false,
-                    "shape": {
-                        "kind": "optional",
-                        "item": {
-                            "kind": "value"
-                        }
-                    }
-                },
-                "threads": {
-                    "required": true,
-                    "shape": {
-                        "kind": "array",
-                        "item": {
-                            "kind": "ref",
-                            "name": "app::commands::workflow::BatchTransitionEntry"
-                        }
-                    }
-                },
-                "to": {
-                    "required": true,
-                    "shape": {
-                        "kind": "value"
-                    }
-                }
-            }
-        },
         "core::db::messages::SearchCursor": {
             "kind": "object",
             "fields": {
@@ -5446,6 +5399,53 @@ export default {
                         "item": {
                             "kind": "value"
                         }
+                    }
+                }
+            }
+        },
+        "core::workflow::transitions::BatchTransitionEntry": {
+            "kind": "object",
+            "fields": {
+                "from": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "thread_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "core::workflow::transitions::BatchTransitionInput": {
+            "kind": "object",
+            "fields": {
+                "snooze_until": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "threads": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "ref",
+                            "name": "core::workflow::transitions::BatchTransitionEntry"
+                        }
+                    }
+                },
+                "to": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
                     }
                 }
             }
