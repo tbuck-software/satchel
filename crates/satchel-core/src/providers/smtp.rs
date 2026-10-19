@@ -94,7 +94,8 @@ pub fn build_submission(
     smtp: &SmtpRuntimeConfig,
     message: &OutgoingMessage,
 ) -> crate::sync::errors::SyncResult<Submission> {
-    if message.to.is_empty() {
+    // Cc or Bcc alone is a complete envelope; only no recipient at all is not.
+    if message.to.is_empty() && message.cc.is_empty() && message.bcc.is_empty() {
         return Err("missing recipient for SMTP send".into());
     }
 
@@ -577,6 +578,52 @@ mod tests {
             .map(ToString::to_string)
             .collect();
         assert_eq!(envelope, ["mara@example.test"]);
+    }
+
+    #[test]
+    fn a_message_with_only_cc_or_bcc_recipients_still_has_an_envelope() {
+        let cc_only = OutgoingMessage {
+            from_address: Some("anna@example.com".into()),
+            cc: vec!["copy@example.test".into()],
+            subject: "Status".into(),
+            body: "Hallo".into(),
+            ..Default::default()
+        };
+        let submission = build_submission(&smtp_config(), &cc_only).expect("cc-only submission");
+        let envelope: Vec<String> = submission
+            .envelope
+            .to()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(envelope, ["copy@example.test"]);
+
+        let bcc_only = OutgoingMessage {
+            cc: Vec::new(),
+            bcc: vec!["hidden@example.test".into()],
+            ..cc_only
+        };
+        let submission = build_submission(&smtp_config(), &bcc_only).expect("bcc-only submission");
+        let text = String::from_utf8(submission.bytes).expect("utf-8");
+        assert!(!text.contains("hidden@example.test"), "{text}");
+        let envelope: Vec<String> = submission
+            .envelope
+            .to()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(envelope, ["hidden@example.test"]);
+    }
+
+    #[test]
+    fn a_message_without_any_recipient_is_refused() {
+        let message = OutgoingMessage {
+            from_address: Some("anna@example.com".into()),
+            subject: "Status".into(),
+            body: "Hallo".into(),
+            ..Default::default()
+        };
+        assert!(build_submission(&smtp_config(), &message).is_err());
     }
 
     #[test]

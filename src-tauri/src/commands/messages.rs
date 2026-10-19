@@ -1193,8 +1193,11 @@ pub async fn send_message(
     input: OutgoingMessageInput,
 ) -> CommandResult<SendMessageResult> {
     let mut input = input;
-    let normalized_to = normalize_recipients(&input.to)?;
-    if normalized_to.is_empty() {
+    // Any of To, Cc and Bcc is enough: all three go into the envelope.
+    let has_recipient = !normalize_recipients(&input.to)?.is_empty()
+        || !normalize_recipients(&input.cc)?.is_empty()
+        || !normalize_recipients(&input.bcc)?.is_empty();
+    if !has_recipient {
         return Err(CommandError::from("missing recipient address"));
     }
     ensure_attachments_within_limit(&input.attachments)?;
