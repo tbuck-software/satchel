@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import ConfirmDialog from './ConfirmDialog.vue';
 import { useConfirm } from '@/composables/useConfirm';
+import { useUiStore } from '@/stores/ui';
 
 /*
  * The dialog is mounted once for the whole app, so its contract is: it renders
@@ -65,6 +66,22 @@ describe('confirm dialog', () => {
     document.body.querySelector<HTMLElement>('.shell-backdrop')?.click();
 
     await expect(answered).resolves.toBe(false);
+  });
+
+  it('closes on Back before an overlay that opened after the dialog was mounted', async () => {
+    const view = mountDialog();
+    const ui = useUiStore();
+    let sheetDismissed = false;
+    // The profile sheet registers long after App.vue mounted the dialog; a
+    // question asked from it must still be the first thing Back closes.
+    ui.registerOverlay({ isOpen: () => true, dismiss: () => { sheetDismissed = true; } });
+
+    const answered = useConfirm().ask({ title: 'Block?', confirmLabel: 'Block' });
+    await view.vm.$nextTick();
+    ui.dismissTopmostOverlay();
+
+    await expect(answered).resolves.toBe(false);
+    expect(sheetDismissed).toBe(false);
   });
 
   it('does not orphan the first promise when a second question arrives', async () => {

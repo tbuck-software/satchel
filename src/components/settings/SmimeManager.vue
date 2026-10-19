@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useConfirm } from '@/composables/useConfirm';
+import { usePrompt } from '@/composables/usePrompt';
 import { useSmimeStore } from '@/stores/smime';
 import type { BackendSmimeCert } from '@/services/backend';
 import AppButton from '@/components/ui/AppButton.vue';
 
 const { t } = useI18n();
+const { ask } = useConfirm();
+const prompt = usePrompt();
 const store = useSmimeStore();
 const pem = ref('');
 const label = ref('');
@@ -44,10 +48,22 @@ async function importPem() {
 }
 
 async function importPkcs12(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0];
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
   if (!file) return;
-  const phrase = window.prompt(t('settings.smime.pkcs12Prompt'), passphrase.value);
-  if (phrase === null) return;
+  const phrase = await prompt.ask({
+    title: t('settings.smime.importPkcs12'),
+    body: file.name,
+    label: t('settings.smime.pkcs12Prompt'),
+    initialValue: passphrase.value,
+    confirmLabel: t('settings.smime.importPkcs12'),
+    inputType: 'password',
+  });
+  if (phrase === null) {
+    // Choosing the same file again must fire `change` again.
+    input.value = '';
+    return;
+  }
   status.value = '';
   try {
     const buffer = await file.arrayBuffer();
@@ -60,7 +76,7 @@ async function importPkcs12(event: Event) {
       error: err instanceof Error ? err.message : String(err),
     });
   } finally {
-    (event.target as HTMLInputElement).value = '';
+    input.value = '';
   }
 }
 
@@ -86,7 +102,15 @@ async function generateSelfSigned() {
 }
 
 async function unlock(cert: BackendSmimeCert) {
-  const phrase = cert.has_passphrase ? window.prompt(t('settings.smime.unlockPrompt'), '') : '';
+  const phrase = cert.has_passphrase
+    ? await prompt.ask({
+      title: t('settings.smime.unlockTitle'),
+      body: cert.label,
+      label: t('settings.smime.unlockPrompt'),
+      confirmLabel: t('settings.smime.unlock'),
+      inputType: 'password',
+    })
+    : '';
   if (phrase === null) return;
   try {
     await store.unlock(cert.id, phrase);
@@ -99,7 +123,12 @@ async function unlock(cert: BackendSmimeCert) {
 }
 
 async function remove(cert: BackendSmimeCert) {
-  if (!confirm(t('settings.smime.deleteConfirm', { label: cert.label }))) return;
+  const confirmed = await ask({
+    title: t('settings.smime.deleteConfirm', { label: cert.label }),
+    confirmLabel: t('common.delete'),
+    tone: 'danger',
+  });
+  if (!confirmed) return;
   await store.remove(cert.id);
 }
 </script>

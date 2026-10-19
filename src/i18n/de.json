@@ -320,6 +320,9 @@
       "allDay": "Ganztägig",
       "attendees": "Teilnehmer",
       "delete": "Termin löschen",
+      "deleteConfirmBody": "Der Termin wird aus deinem Kalender entfernt. Das lässt sich nicht rückgängig machen.",
+      "deleteConfirmRemote": "Der Termin wird auch im Kalender auf dem Server gelöscht. Das lässt sich nicht rückgängig machen.",
+      "deleteConfirmTitle": "Diesen Termin löschen?",
       "details": "Termindetails",
       "edit": "Termin bearbeiten",
       "end": "Ende",
@@ -790,6 +793,7 @@
       "delete": "Kontakt löschen",
       "deleteConfirm": "Gespeicherten Kontakt für {email} löschen? Notizen und das festgelegte Bild verschwinden mit. Die Mail bleibt.",
       "deleteFailed": "Der Kontakt konnte nicht gelöscht werden: {error}",
+      "deleteTitle": "Diesen Kontakt löschen?",
       "label": "Personendetails",
       "messages": "{count} Nachricht | {count} Nachrichten",
       "noSubject": "(kein Betreff)",
@@ -848,6 +852,7 @@
       "scheduled": "Geplant"
     },
     "lastSaved": "Zuletzt gesichert: {time}",
+    "loadFailed": "Deine Entwürfe konnten nicht geladen werden.",
     "newMail": "Neue Mail",
     "noContent": "Noch kein Inhalt.",
     "noRecipients": "Entwurf, ohne Empfänger",
@@ -882,6 +887,7 @@
     "source": {
       "accounts": "Deine Konten konnten nicht geladen werden",
       "connection": "Satchel erreicht sein Backend nicht",
+      "drafts": "Deine Entwürfe konnten nicht geladen werden",
       "mailboxes": "Deine Postfächer konnten nicht geladen werden",
       "messages": "Die Nachrichten konnten nicht geladen werden",
       "outbox": "Der Postausgang konnte nicht geladen werden",
@@ -1079,7 +1085,9 @@
         "open": "Einladung",
         "tentative": "Vielleicht"
       },
+      "unboundedSeriesAction": "Antwort senden",
       "unboundedSeriesConfirm": "Diese Einladung gilt für die gesamte Serie und enthält kein Enddatum. Satchel sendet genau eine Antwort für die unbegrenzte Serie. Wirklich fortfahren?",
+      "unboundedSeriesTitle": "Auf die ganze Serie antworten?",
       "unboundedSeriesWarning": "Diese Serie hat kein Enddatum. Eine Antwort gilt für die gesamte unbegrenzte Serie und wird als genau eine Kalenderantwort versendet.",
       "wholeSeriesNote": "Deine Antwort gilt für die gesamte Serie."
     },
@@ -1420,6 +1428,7 @@
       "manual": "Manuell",
       "nextMonth": "Nächsten Monat",
       "nextWeek": "Nächste Woche",
+      "pastDate": "Wähle einen Zeitpunkt in der Zukunft.",
       "recent": "Zuletzt genutzt",
       "title": "Auf Wiedervorlage",
       "today14": "Heute 14:00",
@@ -1438,6 +1447,7 @@
     "blockAndMoveConfirm": "{email} blockieren und nach Abuse/Spam verschieben?",
     "blockConfirm": "Absender {email} blockieren? Bestehende und zukünftige Mails werden aus der Inbox entfernt und nach Abuse oder Spam verschoben.",
     "blockFailed": "{email} konnte nicht blockiert werden. Der Absender bleibt in der Prüfliste.",
+    "blockTitle": "Diesen Absender blockieren?",
     "bulk": {
       "acceptAll": "Alle zulassen",
       "acceptExisting": "{count} bestehenden Absender übernehmen | {count} bestehende Absender übernehmen",
@@ -1900,6 +1910,8 @@
       "restore": "Wiederherstellen…",
       "restoreCancelled": "Vorgemerkte Wiederherstellung verworfen.",
       "restoreConfirm": "Sicherung „{name}“ beim nächsten Start einspielen? Die aktuelle Datenbank wird ersetzt, bleibt aber als Kopie erhalten.",
+      "restoreConfirmAction": "Beim nächsten Start einspielen",
+      "restoreConfirmTitle": "Diese Sicherung einspielen?",
       "restorePassphrase": "Passphrase der Sicherung",
       "restorePassphraseHint": "Diese Sicherung enthält einen umschlossenen Master-Key.",
       "restorePending": "Eine Wiederherstellung ist vorgemerkt und greift beim nächsten Start.",
@@ -2268,6 +2280,7 @@
       "keyDeleteConfirmPrivate": "Privaten Schlüssel {fingerprint} löschen? Das lässt sich nicht rückgängig machen, und bereits empfangene Mail, die für diesen Schlüssel verschlüsselt wurde, ist danach nie wieder zu öffnen.",
       "keyDeleteConfirmPublic": "Öffentlichen Schlüssel {fingerprint} löschen? Bis du ihn erneut importierst, kannst du für diesen Kontakt keine Mail mehr verschlüsseln.",
       "keyDeleteFailed": "Löschen fehlgeschlagen: {error}",
+      "keyDeleteTitle": "Diesen Schlüssel löschen?",
       "keyDeleted": "Schlüssel {fingerprint} gelöscht.",
       "keyGenerated": "Schlüssel {fingerprint} erzeugt und importiert.",
       "keyGenerationFailed": "Schlüsselerzeugung fehlgeschlagen: {error}",
@@ -2346,6 +2359,7 @@
       "uiSlots": "UI-Slots: {list}",
       "webhookDeleteConfirm": "Webhook an {url} löschen? Satchel schickt dann keine Nachrichten-Metadaten mehr dorthin.",
       "webhookDeleteFailed": "Webhook konnte nicht gelöscht werden: {error}",
+      "webhookDeleteTitle": "Diesen Webhook löschen?",
       "webhookDeleted": "Webhook an {url} gelöscht.",
       "webhookEvents": "Events",
       "webhookNoEvents": "keine Ereignisse",
@@ -2667,7 +2681,7 @@
       "pemPlaceholder": "-----BEGIN CERTIFICATE-----",
       "pkcs12ImportFailed": "PKCS#12 Import fehlgeschlagen: {error}",
       "pkcs12Imported": "PKCS#12 importiert.",
-      "pkcs12Prompt": "PKCS#12 passphrase:",
+      "pkcs12Prompt": "PKCS#12-Passphrase",
       "selfSignedCreated": "Self-signed Zertifikat erzeugt.",
       "selfSignedHint": "Für Tests und internen Gebrauch — von fremden Clients nicht automatisch als vertrauenswürdig eingestuft.",
       "selfSignedTitle": "Self-signed erzeugen",
@@ -2676,7 +2690,8 @@
       "typePublic": "Öffentlich",
       "unlock": "Entsperren",
       "unlockFailed": "Entsperren fehlgeschlagen: {error}",
-      "unlockPrompt": "S/MIME passphrase:",
+      "unlockPrompt": "S/MIME-Passphrase",
+      "unlockTitle": "Zertifikat entsperren",
       "unlockedBadge": "Entsperrt",
       "unlockedStatus": "Zertifikat entsperrt."
     },
@@ -2710,6 +2725,7 @@
       "polled": "{count} neuer Artikel importiert. | {count} neue Artikel importiert.",
       "pushSourceUnsupported": "Push-Quelle ohne Endpunkt — wird nicht mehr befüllt",
       "removeConfirm": "Quelle und ihre lokale Ansicht deaktivieren?",
+      "removeConfirmAction": "Quelle deaktivieren",
       "title": "Feeds",
       "tokenOnce": "Jetzt kopieren – dieser Token wird nur einmal angezeigt.",
       "type": "Typ",
@@ -3114,11 +3130,11 @@
       "title": "Neue Absender"
     },
     "organize": {
-      "assigneePrompt": "Zuweisung (Name oder E-Mail):",
+      "assigneePrompt": "Zuweisung (Name oder E-Mail)",
       "saveFailed": "Organisation konnte nicht gespeichert werden: {error}",
       "saved": "Organisation gespeichert.",
-      "sharingPrompt": "Freigaben (E-Mail-Adressen, durch Kommas getrennt):",
-      "tagsPrompt": "Tags (durch Kommas getrennt):"
+      "sharingPrompt": "Freigaben (E-Mail-Adressen, durch Kommas getrennt)",
+      "tagsPrompt": "Tags (durch Kommas getrennt)"
     },
     "print": {
       "failed": "Drucken konnte nicht gestartet werden."

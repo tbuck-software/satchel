@@ -16,6 +16,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
 import { useI18n } from 'vue-i18n';
+import { useConfirm } from '@/composables/useConfirm';
 
 const props = defineProps<{
   open: boolean;
@@ -29,6 +30,7 @@ const emit = defineEmits<{
 
 const router = useRouter();
 const { t } = useI18n();
+const { ask } = useConfirm();
 const accounts = useAccountsStore();
 const contacts = useContactsStore();
 const settings = useSettingsStore();
@@ -111,7 +113,13 @@ function openThread(threadId: string) {
 
 async function deletePerson() {
   if (!contact.value) return;
-  if (!window.confirm(t('contacts.profile.deleteConfirm', { email: props.person.email }))) return;
+  const confirmed = await ask({
+    title: t('contacts.profile.deleteTitle'),
+    body: t('contacts.profile.deleteConfirm', { email: props.person.email }),
+    confirmLabel: t('common.delete'),
+    tone: 'danger',
+  });
+  if (!confirmed) return;
   try {
     await contacts.remove(props.person.email);
     emit('dismiss');
@@ -121,7 +129,12 @@ async function deletePerson() {
 }
 
 async function blockPerson() {
-  if (!window.confirm(t('contacts.profile.blockConfirm', { email: props.person.email }))) return;
+  const confirmed = await ask({
+    title: t('contacts.profile.blockConfirm', { email: props.person.email }),
+    confirmLabel: t('common.block'),
+    tone: 'danger',
+  });
+  if (!confirmed) return;
   await backendBlockSender({ pattern: props.person.email });
   emit('dismiss');
 }

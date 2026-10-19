@@ -2,6 +2,7 @@
 import { mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BackendPgpKey, BackendPlugin, BackendWebhook } from '@/services/backend';
+import { answerConfirms } from '@/test/dialogs';
 
 // The key list only renders once the PGP plugin is installed.
 const pgpPlugin: BackendPlugin = {
@@ -87,30 +88,30 @@ describe('PluginManager PGP key deletion', () => {
   });
 
   it('deletes nothing when the confirmation is declined', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const confirmSpy = answerConfirms(false);
     const { wrapper, deleteButton } = await renderWithKey(pgpKey());
 
     await deleteButton.trigger('click');
 
     expect(backend.backendDeletePgpKey).not.toHaveBeenCalled();
     expect(wrapper.findAll('.key-card')).toHaveLength(1);
-    confirmSpy.mockRestore();
+    confirmSpy.stop();
   });
 
   it('names the fingerprint and the permanent loss before deleting a private key', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = answerConfirms(true);
     const { deleteButton } = await renderWithKey(pgpKey());
 
     await deleteButton.trigger('click');
 
-    const question = confirmSpy.mock.calls[0]?.[0] ?? '';
+    const question = confirmSpy.asked.mock.calls[0]?.[0]?.body ?? '';
     expect(question).toContain('AAAA BBBB CCCC DDDD EEEE FFFF 0000 1111 2222 3333');
     expect(question).toContain('can never be opened again');
-    confirmSpy.mockRestore();
+    confirmSpy.stop();
   });
 
   it('deletes the confirmed key exactly once', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = answerConfirms(true);
     const { deleteButton } = await renderWithKey(pgpKey({ id: 'key-7' }));
 
     await deleteButton.trigger('click');
@@ -119,11 +120,11 @@ describe('PluginManager PGP key deletion', () => {
     });
 
     expect(backend.backendDeletePgpKey).toHaveBeenCalledWith('key-7');
-    confirmSpy.mockRestore();
+    confirmSpy.stop();
   });
 
   it('raises a toast when the deletion fails', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = answerConfirms(true);
     backend.backendDeletePgpKey.mockRejectedValue(new Error('keyring locked'));
     const { deleteButton } = await renderWithKey(pgpKey());
 
@@ -131,7 +132,7 @@ describe('PluginManager PGP key deletion', () => {
     await vi.waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith('Delete failed: keyring locked');
     });
-    confirmSpy.mockRestore();
+    confirmSpy.stop();
   });
 });
 
@@ -270,18 +271,18 @@ describe('PluginManager webhooks', () => {
   });
 
   it('deletes nothing when the confirmation is declined', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const confirmSpy = answerConfirms(false);
     const wrapper = await renderWithWebhook();
 
     await wrapper.find('.webhook-row button').trigger('click');
 
     expect(backend.backendDeleteWebhook).not.toHaveBeenCalled();
     expect(wrapper.findAll('.webhook-row')).toHaveLength(1);
-    confirmSpy.mockRestore();
+    confirmSpy.stop();
   });
 
   it('names the target URL in the question and deletes the confirmed webhook once', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = answerConfirms(true);
     const wrapper = await renderWithWebhook(webhook({ id: 'hook-7' }));
 
     await wrapper.find('.webhook-row button').trigger('click');
@@ -289,13 +290,13 @@ describe('PluginManager webhooks', () => {
       expect(backend.backendDeleteWebhook).toHaveBeenCalledTimes(1);
     });
 
-    expect(confirmSpy.mock.calls[0]?.[0] ?? '').toContain('https://example.test/satchel');
+    expect(confirmSpy.asked.mock.calls[0]?.[0]?.body ?? '').toContain('https://example.test/satchel');
     expect(backend.backendDeleteWebhook).toHaveBeenCalledWith('hook-7');
-    confirmSpy.mockRestore();
+    confirmSpy.stop();
   });
 
   it('keeps the row and raises a toast when the deletion fails', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = answerConfirms(true);
     backend.backendDeleteWebhook.mockRejectedValue(new Error('database is locked'));
     const wrapper = await renderWithWebhook();
 
@@ -305,7 +306,7 @@ describe('PluginManager webhooks', () => {
     });
 
     expect(wrapper.findAll('.webhook-row')).toHaveLength(1);
-    confirmSpy.mockRestore();
+    confirmSpy.stop();
   });
 
   it('switches a webhook off through the upsert', async () => {

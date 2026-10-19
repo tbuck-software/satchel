@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { answerConfirms, type DialogStub } from '@/test/dialogs';
+import type { ConfirmRequest } from '@/composables/useConfirm';
 
 const backend = vi.hoisted(() => ({
   backendCancelPendingRestore: vi.fn(),
@@ -40,6 +42,10 @@ const accountsState = vi.hoisted(() => ({
 vi.mock('@/stores/accounts', () => ({ useAccountsStore: () => accountsState }));
 
 import BackupExport from './BackupExport.vue';
+
+let confirms: DialogStub<ConfirmRequest, boolean>;
+
+afterEach(() => confirms.stop());
 
 const entry = {
   path: '/backups/satchel-20260828-101500',
@@ -92,7 +98,7 @@ beforeEach(() => {
   events.handlers.clear();
   accountsState.emailAccounts = [];
   accountsState.activeAccountId = null;
-  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  confirms = answerConfirms(true);
 });
 
 /** Play a backend `import:progress` event into the mounted component. */
@@ -170,16 +176,23 @@ describe('database backup section', () => {
       expect(backend.backendRestoreBackup).toHaveBeenCalledWith(entry.path, ''),
     );
     expect(wrapper.text()).toContain('next time Satchel starts');
+    // Asked in the app, not through window.confirm, and styled as destructive.
+    expect(confirms.asked).toHaveBeenCalledOnce();
+    expect(confirms.asked.mock.calls[0]![0]).toMatchObject({
+      body: expect.stringContaining('satchel-20260828-101500'),
+      tone: 'danger',
+    });
   });
 
   it('does nothing when the restore is not confirmed', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    confirms.reply(false);
     const wrapper = mount(BackupExport);
     await button(wrapper, 'Show backups').trigger('click');
     await vi.waitFor(() => expect(wrapper.text()).toContain('satchel-20260828-101500'));
 
     await button(wrapper, 'Restore').trigger('click');
 
+    await vi.waitFor(() => expect(confirms.asked).toHaveBeenCalledOnce());
     expect(backend.backendRestoreBackup).not.toHaveBeenCalled();
   });
 

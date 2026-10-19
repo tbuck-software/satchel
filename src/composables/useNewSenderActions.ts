@@ -2,6 +2,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useThreadsStore, type NewSenderGroup } from '@/stores/threads';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { t } from '@/i18n/runtime';
 
 /**
@@ -18,6 +19,7 @@ export function useNewSenderActions() {
   const threads = useThreadsStore();
   const threadActions = useThreadActions();
   const toast = useToast();
+  const { ask } = useConfirm();
 
   function selectNextSender() {
     const next = threads.newSenderStack?.senders[0];
@@ -35,7 +37,13 @@ export function useNewSenderActions() {
    * @returns whether the sender was blocked.
    */
   async function blockSender(sender: NewSenderGroup, confirmMessage: string): Promise<boolean> {
-    if (!window.confirm(confirmMessage)) return false;
+    const confirmed = await ask({
+      title: t('newSenders.blockTitle'),
+      body: confirmMessage,
+      confirmLabel: t('newSenders.block'),
+      tone: 'danger',
+    });
+    if (!confirmed) return false;
 
     try {
       await threadActions.blockSender({

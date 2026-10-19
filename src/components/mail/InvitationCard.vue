@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useConfirm } from '@/composables/useConfirm';
 import type { BackendCalendarInvite } from '@/types/calendar';
 import { useInvitesStore } from '@/stores/invites';
 import { icsDescriptionToText } from '@/utils/inviteText';
@@ -14,6 +15,7 @@ const props = defineProps<{
 }>();
 
 const { locale, t } = useI18n();
+const { ask } = useConfirm();
 const invitesStore = useInvitesStore();
 const responding = ref<'accepted' | 'declined' | 'tentative' | null>(null);
 const responseError = ref('');
@@ -112,13 +114,13 @@ const notesOverflow = computed(
 
 async function respond(response: 'accepted' | 'declined' | 'tentative') {
   if (responding.value !== null) return;
-  if (
-    unboundedSeries.value &&
-    !window.confirm(
-      t('mail.invite.unboundedSeriesConfirm'),
-    )
-  ) {
-    return;
+  if (unboundedSeries.value) {
+    const confirmed = await ask({
+      title: t('mail.invite.unboundedSeriesTitle'),
+      body: t('mail.invite.unboundedSeriesConfirm'),
+      confirmLabel: t('mail.invite.unboundedSeriesAction'),
+    });
+    if (!confirmed) return;
   }
   responseError.value = '';
   responding.value = response;

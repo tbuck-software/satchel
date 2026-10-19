@@ -42,6 +42,7 @@ import {
 import { registerThreadMessageKeyboardNavigation } from '@/composables/useThreadMessageKeyboardNavigation';
 import { registerThreadReaderCommands } from '@/composables/useThreadReaderCommands';
 import { useToast } from '@/composables/useToast';
+import { usePrompt } from '@/composables/usePrompt';
 import type { Message } from '@/types/mail';
 
 const props = defineProps<{
@@ -75,6 +76,7 @@ const router = useRouter();
 const ui = useUiStore();
 const composer = useComposerStore();
 const toast = useToast();
+const prompt = usePrompt();
 const { d, locale, t } = useI18n();
 const expandedThread = ref(false);
 const snoozePickerOpen = ref(false);
@@ -533,21 +535,35 @@ function applySnooze(date: string) {
 async function organizeThread(kind: 'tags' | 'assignee' | 'sharing') {
   if (!thread.value) return;
   try {
+    // The thread may change while the dialog is open; save to the one asked about.
+    const threadId = thread.value.id;
     if (kind === 'tags') {
-      const next = window.prompt(t('thread.organize.tagsPrompt'), thread.value.tags.join(', '));
+      const next = await prompt.ask({
+        title: t('thread.toolbar.editTags'),
+        label: t('thread.organize.tagsPrompt'),
+        initialValue: thread.value.tags.join(', '),
+        confirmLabel: t('common.save'),
+      });
       if (next === null) return;
-      await threadsStore.setTagsForThread(thread.value.id, next.split(','));
+      await threadsStore.setTagsForThread(threadId, next.split(','));
     } else if (kind === 'assignee') {
-      const next = window.prompt(t('thread.organize.assigneePrompt'), thread.value.assignee ?? '');
+      const next = await prompt.ask({
+        title: t('thread.toolbar.changeAssignee'),
+        label: t('thread.organize.assigneePrompt'),
+        initialValue: thread.value.assignee ?? '',
+        confirmLabel: t('common.save'),
+      });
       if (next === null) return;
-      await threadsStore.setAssignee(thread.value.id, next);
+      await threadsStore.setAssignee(threadId, next);
     } else {
-      const next = window.prompt(
-        t('thread.organize.sharingPrompt'),
-        (thread.value.sharedWith ?? []).join(', '),
-      );
+      const next = await prompt.ask({
+        title: t('thread.toolbar.changeSharing'),
+        label: t('thread.organize.sharingPrompt'),
+        initialValue: (thread.value.sharedWith ?? []).join(', '),
+        confirmLabel: t('common.save'),
+      });
       if (next === null) return;
-      await threadsStore.setSharedWith(thread.value.id, next.split(','));
+      await threadsStore.setSharedWith(threadId, next.split(','));
     }
     toast.success(t('thread.organize.saved'));
   } catch (error) {

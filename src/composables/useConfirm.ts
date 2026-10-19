@@ -2,7 +2,8 @@ import { reactive } from 'vue';
 
 export interface ConfirmRequest {
   title: string;
-  body: string;
+  /** Sentence under the title. A title that already is the question needs none. */
+  body?: string;
   /** Label of the button that goes through with it. */
   confirmLabel: string;
   /** Extra line under the body — what exactly is at stake. */

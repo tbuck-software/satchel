@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useToast } from '@/composables/useToast';
 import { useContactsStore } from '@/stores/contacts';
+import { answerConfirms, type DialogStub } from '@/test/dialogs';
+import type { ConfirmRequest } from '@/composables/useConfirm';
 
 const backend = vi.hoisted(() => ({
   backendDeleteContact: vi.fn(),
@@ -47,30 +49,35 @@ function deleteButton() {
     .find((button) => button.textContent?.trim() === 'Delete contact');
 }
 
+let confirms: DialogStub<ConfirmRequest, boolean>;
+
 beforeEach(() => {
+  confirms = answerConfirms(true);
   setActivePinia(createPinia());
   vi.clearAllMocks();
   document.body.innerHTML = '';
   useToast().clear();
 });
 
+afterEach(() => confirms.stop());
+
 describe('deleting a contact from the profile sheet', () => {
   it('does not touch the backend when the confirmation is declined', async () => {
     seedContact();
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    confirms.reply(false);
     const wrapper = mount(PersonProfileSheet, { props: { open: true, person: PERSON } });
 
     deleteButton()!.click();
-    await vi.waitFor(() => expect(window.confirm).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(confirms.asked).toHaveBeenCalledTimes(1));
 
-    expect(String(vi.mocked(window.confirm).mock.calls[0]?.[0])).toContain(PERSON.email);
+    expect(confirms.asked.mock.calls[0]![0].body).toContain(PERSON.email);
+    expect(confirms.asked.mock.calls[0]![0].tone).toBe('danger');
     expect(backend.backendDeleteContact).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
   it('deletes the confirmed contact and closes the sheet', async () => {
     const contacts = seedContact();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     backend.backendDeleteContact.mockResolvedValue(undefined);
     const wrapper = mount(PersonProfileSheet, { props: { open: true, person: PERSON } });
 
@@ -84,7 +91,6 @@ describe('deleting a contact from the profile sheet', () => {
 
   it('puts a refused contact back and says why', async () => {
     const contacts = seedContact();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     backend.backendDeleteContact.mockRejectedValue(new Error('database is locked'));
     const wrapper = mount(PersonProfileSheet, { props: { open: true, person: PERSON } });
 

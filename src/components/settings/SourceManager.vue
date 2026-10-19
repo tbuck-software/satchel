@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { useConfirm } from "@/composables/useConfirm";
 import {
   backendCreateSource,
   backendDeleteSource,
@@ -17,6 +18,7 @@ import ToggleSwitch from "@/components/ui/ToggleSwitch.vue";
 type SourceKind = "rss";
 
 const { t } = useI18n();
+const { ask } = useConfirm();
 const accounts = useAccountsStore();
 const threads = useThreadsStore();
 const sources = ref<BackendSource[]>([]);
@@ -67,7 +69,12 @@ async function createSource() {
 }
 
 async function removeSource(id: string) {
-  if (!window.confirm(t("settings.sources.removeConfirm"))) return;
+  const confirmed = await ask({
+    title: t("settings.sources.removeConfirm"),
+    confirmLabel: t("settings.sources.removeConfirmAction"),
+    tone: "danger",
+  });
+  if (!confirmed) return;
   try {
     await backendDeleteSource(id);
     await Promise.all([load(), accounts.load(), threads.load()]);

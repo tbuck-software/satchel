@@ -3,6 +3,8 @@
 import { defineComponent, reactive } from 'vue';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { answerConfirms, type DialogStub } from '@/test/dialogs';
+import type { ConfirmRequest } from '@/composables/useConfirm';
 
 type ThreadSummary = {
   id: string;
@@ -264,6 +266,8 @@ function render() {
 }
 
 describe('InboxView', () => {
+  let confirms: DialogStub<ConfirmRequest, boolean>;
+
   beforeEach(() => {
     harness.push.mockReset().mockResolvedValue(undefined);
     harness.selectFromInteraction.mockReset();
@@ -276,10 +280,13 @@ describe('InboxView', () => {
     harness.blockSender.mockReset();
     harness.toastError.mockReset();
     harness.backendErrorFor.mockReset().mockReturnValue(null);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirms = answerConfirms(true);
   });
 
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    confirms.stop();
+    vi.restoreAllMocks();
+  });
 
   it('uses the first scoped thread for the desktop list and detail fallback', () => {
     setup();

@@ -5,6 +5,7 @@ import Sidebar from '@/components/layout/Sidebar.vue';
 import ComposeFab from '@/components/layout/ComposeFab.vue';
 import ToastStack from '@/components/ui/ToastStack.vue';
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue';
+import PromptDialog from '@/components/ui/PromptDialog.vue';
 import UndoFab from '@/components/ui/UndoFab.vue';
 import AccountReauthBanner from '@/components/settings/AccountReauthBanner.vue';
 import ConnectionBanner from '@/components/layout/ConnectionBanner.vue';
@@ -153,6 +154,7 @@ if (standaloneCompose.value) {
     </Transition>
     <ToastStack />
     <ConfirmDialog />
+    <PromptDialog />
     <UndoFab :variant="ui.isSinglePane ? 'floating' : 'docked'" />
   </div>
 </template>
