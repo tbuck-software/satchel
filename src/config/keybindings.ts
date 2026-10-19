@@ -15,6 +15,7 @@ export interface KeybindingDefinition {
   defaultBinding: string;
   context: KeybindingContext;
   keywords?: string;
+  aliasOf?: string;
 }
 
 /**

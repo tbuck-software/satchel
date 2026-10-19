@@ -2805,8 +2805,8 @@
         "label": "Add to a topic"
       },
       "archive": {
-        "keywords": "archive",
-        "label": "Archive"
+        "keywords": "archive done",
+        "label": "Mark as done (second key)"
       },
       "clearSelection": {
         "keywords": "clear selection",

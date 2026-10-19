@@ -2805,8 +2805,8 @@
         "label": "Zu einem Thema hinzufügen"
       },
       "archive": {
-        "keywords": "archive archivieren",
-        "label": "Archivieren"
+        "keywords": "archive archivieren erledigt done",
+        "label": "Als erledigt markieren (Zweittaste)"
       },
       "clearSelection": {
         "keywords": "clear selection leeren",
