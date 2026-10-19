@@ -886,7 +886,7 @@
             "setting_disabled": "Benachrichtigungen ausgeschaltet",
             "filter_message_gone": "Nachricht inzwischen gelöscht",
             "filter_account_inactive": "Konto inaktiv",
-            "filter_not_inbox": "Nicht im Posteingang",
+            "filter_not_inbox": "Nicht in der Inbox",
             "filter_own_sent": "Eigene Nachricht",
             "filter_already_read": "Schon gelesen",
             "filter_muted_thread": "Thread stummgeschaltet",

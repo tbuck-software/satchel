@@ -138,7 +138,7 @@
         "actionFailedMessage": "{action} was saved locally. Server sync will keep trying.",
         "actionFailedTitle": "Action could not be completed",
         "actionNotAppliedMessage": "{action} was not applied. Please open Satchel and try again.",
-        "archive": "Archive",
+        "archive": "Done",
         "backgroundSyncChannel": "Background sync",
         "backgroundSyncDescription": "Keeps the connection open for new email",
         "backgroundSyncText": "Checking for new email in the background",
@@ -178,7 +178,7 @@
     },
     "notifications": {
       "actions": {
-        "archive": "Archive",
+        "archive": "Done",
         "markRead": "Mark as read",
         "trash": "Delete"
       },
@@ -431,7 +431,7 @@
         "backgroundSyncText": "Neue E-Mails werden im Hintergrund abgerufen",
         "channelDescription": "Benachrichtigungen über neue E-Mails",
         "channelName": "Neue E-Mails",
-        "followUpDue": "Follow-up fällig",
+        "followUpDue": "Nachfassen fällig",
         "newMessage": "Neue Nachricht",
         "noSubject": "(ohne Betreff)",
         "read": "Gelesen",
@@ -552,7 +552,7 @@
         "runningUntil": "Läuft · endet {day}",
         "tomorrow": "morgen"
       },
-      "inbox": "Posteingang",
+      "inbox": "Inbox",
       "loading": "Briefing wird geladen",
       "markDone": "Erledigen",
       "newMail": "Neu angekommen",

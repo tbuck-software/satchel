@@ -85,6 +85,23 @@ describe('message catalogue', () => {
     expect([...keyPaths(de)].sort()).toEqual([...enKeys].sort());
   });
 
+  /**
+   * The German copy says "du". The PGP and S/MIME texts had switched to
+   * "Sie", so one dialog addressed the reader two ways.
+   */
+  it('addresses the reader as du throughout the German copy', () => {
+    const lookup = (key: string) => key.split('.').reduce<unknown>(
+      (node, segment) => (node as Record<string, unknown>)?.[segment],
+      de,
+    );
+    const formal = /\b(Sie|Ihnen|Ihre[mnrs]?)\b/;
+    const offenders = keyPaths(de).filter((key) => {
+      const value = lookup(key);
+      return typeof value === 'string' && formal.test(value);
+    });
+    expect(offenders).toEqual([]);
+  });
+
   it('keeps placeholders identical across locales', () => {
     const placeholders = (bundle: unknown, key: string) => {
       const value = key.split('.').reduce<unknown>(
