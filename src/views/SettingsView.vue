@@ -1,36 +1,12 @@
 <script setup lang="ts">
 import CardButton from '@/components/ui/CardButton.vue';
-import { computed, onBeforeUnmount, ref } from 'vue';
+import { computed, defineAsyncComponent, onBeforeUnmount, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { useUiStore } from '@/stores/ui';
-import AboutPane from '@/components/settings/AboutPane.vue';
-import AccountSetup from '@/components/settings/AccountSetup.vue';
-import AliasEditor from '@/components/settings/AliasEditor.vue';
-import BackupExport from '@/components/settings/BackupExport.vue';
-import BlockedSendersEditor from '@/components/settings/BlockedSendersEditor.vue';
-import CalendarSettings from '@/components/settings/CalendarSettings.vue';
-import ContactAvatarSettings from '@/components/settings/ContactAvatarSettings.vue';
-import DiagnosticsPane from '@/components/settings/DiagnosticsPane.vue';
-import InlineImageBackfill from '@/components/settings/InlineImageBackfill.vue';
-import KeybindingEditor from '@/components/settings/KeybindingEditor.vue';
-import MobileSyncSettings from '@/components/settings/MobileSyncSettings.vue';
-import NotificationSettings from '@/components/settings/NotificationSettings.vue';
-import PluginManager from '@/components/settings/PluginManager.vue';
-import ProviderFeaturesEditor from '@/components/settings/ProviderFeaturesEditor.vue';
-import RemoteImageAllowlist from '@/components/settings/RemoteImageAllowlist.vue';
-import RuleBuilder from '@/components/settings/RuleBuilder.vue';
-import SignaturesEditor from '@/components/settings/SignaturesEditor.vue';
-import SmartFoldersEditor from '@/components/settings/SmartFoldersEditor.vue';
-import SmimeManager from '@/components/settings/SmimeManager.vue';
-import SourceManager from '@/components/settings/SourceManager.vue';
-import TemplatesEditor from '@/components/settings/TemplatesEditor.vue';
 import ThemeSelector from '@/components/settings/ThemeSelector.vue';
 import LanguageSelector from '@/components/settings/LanguageSelector.vue';
-import SwipeSettings from '@/components/settings/SwipeSettings.vue';
-import TrayPreferences from '@/components/settings/TrayPreferences.vue';
-import VacationSettings from '@/components/settings/VacationSettings.vue';
 import {
   resolveSettingsSection,
   settingsSectionIcons,
@@ -40,6 +16,35 @@ import {
 import { useI18n } from 'vue-i18n';
 import { registerSettingsFilterField } from '@/composables/settingsFilterFocus';
 import { useSettingsFilter } from '@/composables/useSettingsFilter';
+
+// Each section is its own chunk: opening Settings loads the section it shows,
+// not all of them — the signature and template editors bring the rich-text
+// editor along. Nothing renders while a chunk arrives; theme and language stay
+// static because the general section is the default.
+const AboutPane = defineAsyncComponent(() => import('@/components/settings/AboutPane.vue'));
+const AccountSetup = defineAsyncComponent(() => import('@/components/settings/AccountSetup.vue'));
+const AliasEditor = defineAsyncComponent(() => import('@/components/settings/AliasEditor.vue'));
+const BackupExport = defineAsyncComponent(() => import('@/components/settings/BackupExport.vue'));
+const BlockedSendersEditor = defineAsyncComponent(() => import('@/components/settings/BlockedSendersEditor.vue'));
+const CalendarSettings = defineAsyncComponent(() => import('@/components/settings/CalendarSettings.vue'));
+const ContactAvatarSettings = defineAsyncComponent(() => import('@/components/settings/ContactAvatarSettings.vue'));
+const DiagnosticsPane = defineAsyncComponent(() => import('@/components/settings/DiagnosticsPane.vue'));
+const InlineImageBackfill = defineAsyncComponent(() => import('@/components/settings/InlineImageBackfill.vue'));
+const KeybindingEditor = defineAsyncComponent(() => import('@/components/settings/KeybindingEditor.vue'));
+const MobileSyncSettings = defineAsyncComponent(() => import('@/components/settings/MobileSyncSettings.vue'));
+const NotificationSettings = defineAsyncComponent(() => import('@/components/settings/NotificationSettings.vue'));
+const PluginManager = defineAsyncComponent(() => import('@/components/settings/PluginManager.vue'));
+const ProviderFeaturesEditor = defineAsyncComponent(() => import('@/components/settings/ProviderFeaturesEditor.vue'));
+const RemoteImageAllowlist = defineAsyncComponent(() => import('@/components/settings/RemoteImageAllowlist.vue'));
+const RuleBuilder = defineAsyncComponent(() => import('@/components/settings/RuleBuilder.vue'));
+const SignaturesEditor = defineAsyncComponent(() => import('@/components/settings/SignaturesEditor.vue'));
+const SmartFoldersEditor = defineAsyncComponent(() => import('@/components/settings/SmartFoldersEditor.vue'));
+const SmimeManager = defineAsyncComponent(() => import('@/components/settings/SmimeManager.vue'));
+const SourceManager = defineAsyncComponent(() => import('@/components/settings/SourceManager.vue'));
+const TemplatesEditor = defineAsyncComponent(() => import('@/components/settings/TemplatesEditor.vue'));
+const SwipeSettings = defineAsyncComponent(() => import('@/components/settings/SwipeSettings.vue'));
+const TrayPreferences = defineAsyncComponent(() => import('@/components/settings/TrayPreferences.vue'));
+const VacationSettings = defineAsyncComponent(() => import('@/components/settings/VacationSettings.vue'));
 
 const route = useRoute();
 const router = useRouter();
