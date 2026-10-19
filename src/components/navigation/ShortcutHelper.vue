@@ -182,8 +182,14 @@ function editBindings() {
   gap: 18px;
 }
 
+/*
+ * `align-content: start`: a section shares its grid row with its neighbour,
+ * and with the default the taller column's surplus went to this section's
+ * heading track, pushing a short list hundreds of pixels below its title.
+ */
 .groups section {
   display: grid;
+  align-content: start;
   gap: 4px;
 }
 
