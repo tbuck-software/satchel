@@ -3,6 +3,8 @@ import AppButton from '@/components/ui/AppButton.vue';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useMessagesStore } from '@/stores/messages';
+import { useToast } from '@/composables/useToast';
+import { translateBackendError } from '@/utils/backendErrors';
 
 /**
  * Collapsible view of the conversation being answered, at the bottom of the
@@ -14,6 +16,7 @@ const props = defineProps<{
 
 const { locale, t } = useI18n();
 const messagesStore = useMessagesStore();
+const toast = useToast();
 
 const expanded = ref(false);
 const loading = ref(false);
@@ -34,6 +37,9 @@ async function toggle() {
     await messagesStore.loadByThread(props.threadId);
   } catch (error) {
     console.warn('thread context load failed', error);
+    toast.error(t('compose.context.loadFailed', {
+      error: translateBackendError(error) ?? (error instanceof Error ? error.message : String(error)),
+    }));
   } finally {
     loading.value = false;
   }

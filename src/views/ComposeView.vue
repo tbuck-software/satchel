@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
 import { attachmentBytes, encodeBase64 } from '@/utils/attachmentBytes';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
@@ -50,7 +50,8 @@ import {
   formatTimestamp,
   mergeRecipients,
 } from '@/utils/composerText';
-import { hasOnlyValidRecipients } from '@/utils/recipients';
+import { composerSendBlocker } from '@/utils/composerSendBlocker';
+import { deferredChangeTracker } from '@/utils/deferredChangeTracker';
 import {
   findResendSource,
   resendEditorHtml,
@@ -134,17 +135,28 @@ const priority = ref<'high' | 'normal' | 'low'>('normal');
  */
 const plainTextCompose = ref(settings.composePlainText);
 const richEditorRef = ref<InstanceType<typeof RichTextEditor> | null>(null);
-const hasQuotedHistory = computed(() => contextThreadId.value && (plainTextCompose.value
-  ? hasComposerTextHistory(body.value)
-  : hasComposerHtmlHistory(bodyHtml.value)));
+/**
+ * Finding the quote parses the whole body, so it is looked for once typing
+ * pauses rather than on every keystroke.
+ */
+const quotedHistory = deferredChangeTracker(
+  () => Boolean(contextThreadId.value && (plainTextCompose.value
+    ? hasComposerTextHistory(body.value)
+    : hasComposerHtmlHistory(bodyHtml.value))),
+  (value) => { hasQuotedHistory.value = value; },
+  250,
+);
+const hasQuotedHistory = ref(quotedHistory.current());
 
-function removeQuotedHistory() {
+async function removeQuotedHistory() {
   if (plainTextCompose.value) {
     body.value = removeComposerTextHistory(body.value);
     bodyHtml.value = null;
   } else {
     richEditorRef.value?.removeQuotedHistory();
   }
+  await nextTick();
+  quotedHistory.settle();
 }
 const toFieldRef = ref<InstanceType<typeof RecipientChips> | null>(null);
 
@@ -164,6 +176,10 @@ const composerInlineAttachments = useComposerInlineAttachments(
   () => richEditorRef.value,
 );
 const initialized = ref(false);
+// A loaded reply or draft shows its history control at once, not after a pause.
+watch(initialized, (ready) => {
+  if (ready) quotedHistory.settle();
+}, { flush: 'post' });
 
 const accounts = computed(() => accountsStore.emailAccounts);
 const activeAccount = computed(() =>
@@ -278,9 +294,11 @@ const {
   drafts: draftsStore,
   t,
   onCaughtUp: () => localBackup.clear(),
+  onSaved: (input) => markCloseBaselineSaved(input),
 });
 const {
   captureBaseline: captureCloseBaseline,
+  markSaved: markCloseBaselineSaved,
   hasMeaningfulContent,
   shouldConfirmClose,
   closeWithoutSaving: closeGuardWithoutSaving,
@@ -323,18 +341,35 @@ async function leaveComposer() {
   else await router.push({ name: 'inbox' });
 }
 
-const allRecipients = computed(() => [...to.value, ...cc.value, ...bcc.value]);
 /** A draft that could not be loaded must not be sent as an empty message. */
 const draftLoadFailed = ref(false);
-const canSend = computed(
-  () =>
-    initialized.value && !draftLoadFailed.value && Boolean(activeAccount.value) &&
-    to.value.length > 0 &&
-    // A chip the backend cannot turn into a mailbox must not reach the queue.
-    hasOnlyValidRecipients(allRecipients.value) &&
-    body.value.trim().length > 0 &&
-    !sending.value,
-);
+const sendBlocker = computed(() => composerSendBlocker({
+  initialized: initialized.value,
+  sending: sending.value,
+  draftLoadFailed: draftLoadFailed.value,
+  hasAccount: Boolean(activeAccount.value),
+  to: to.value,
+  cc: cc.value,
+  bcc: bcc.value,
+  body: body.value,
+  attachmentCount: attachments.value.length,
+}));
+const canSend = computed(() => sendBlocker.value === null);
+/** What the sender can do about a disabled Send button, if anything. */
+const sendBlockedHint = computed(() => {
+  const blocker = sendBlocker.value;
+  if (!blocker) return null;
+  switch (blocker.reason) {
+    case 'draftLoadFailed': return t('compose.sendBlocked.draftLoadFailed');
+    case 'noAccount': return t('compose.sendBlocked.noAccount');
+    case 'noRecipients': return t('compose.sendBlocked.noRecipients');
+    case 'invalidRecipients':
+      return t('compose.sendBlocked.invalidRecipients', { addresses: blocker.invalid.join(', ') });
+    case 'empty': return t('compose.sendBlocked.empty');
+    default: return null;
+  }
+});
+const sendHintId = `compose-send-hint-${useId()}`;
 
 watch(accountId, () => {
   // Keep the alias only when it belongs to the newly selected account; the
@@ -787,7 +822,11 @@ watch(subject, (value) => {
 });
 
 async function send() {
-  if (!canSend.value || !activeAccount.value) return;
+  if (!canSend.value || !activeAccount.value) {
+    // The shortcut has no greyed-out button to look at; say why nothing happened.
+    if (sendBlockedHint.value) status.value = { tone: 'warning', text: sendBlockedHint.value };
+    return;
+  }
   sending.value = true;
   let sendCommitted = false;
   try {
@@ -1085,11 +1124,13 @@ defineExpose({
       class="compose-subject"
       :placeholder="$t('common.subject')"
       :aria-label="$t('common.subject')"
+      @keydown.meta.enter.prevent="send"
+      @keydown.ctrl.enter.prevent="send"
     />
 
     <div class="row recipient-row">
       <label class="label">{{ $t('common.to') }}</label>
-      <RecipientChips ref="toFieldRef" v-model="to" :placeholder="$t('compose.recipients.toPlaceholder')" class="field" />
+      <RecipientChips ref="toFieldRef" v-model="to" :placeholder="$t('compose.recipients.toPlaceholder')" class="field" @submit="send" />
       <AppButton size="sm" variant="ghost" class="cc-link"
         :aria-expanded="showCcBcc"
         :title="showCcBcc ? $t('compose.recipients.collapseCcBcc') : $t('compose.recipients.showCcBcc')"
@@ -1114,11 +1155,11 @@ defineExpose({
     <template v-if="showCcBcc">
       <div class="row">
         <label class="label">{{ $t('common.cc') }}</label>
-        <RecipientChips v-model="cc" :placeholder="$t('compose.recipients.ccPlaceholder')" class="field" />
+        <RecipientChips v-model="cc" :placeholder="$t('compose.recipients.ccPlaceholder')" class="field" @submit="send" />
       </div>
       <div class="row">
         <label class="label">{{ $t('common.bcc') }}</label>
-        <RecipientChips v-model="bcc" :placeholder="$t('compose.recipients.bccPlaceholder')" class="field" />
+        <RecipientChips v-model="bcc" :placeholder="$t('compose.recipients.bccPlaceholder')" class="field" @submit="send" />
       </div>
     </template>
 
@@ -1311,15 +1352,25 @@ defineExpose({
             >{{ option.label }}</option>
           </template>
         </select>
-        <AppButton size="sm" variant="primary" :disabled="!canSend" @click="send">
-          {{
-            sending
-              ? $t('compose.sending')
-              : scheduledFor
-              ? $t('compose.schedule.submit')
-              : $t('compose.send')
-          }}
-        </AppButton>
+        <!-- A disabled button gets no hover of its own; the wrapper carries the tooltip. -->
+        <span class="send-wrap" :title="sendBlockedHint ?? undefined" data-testid="compose-send-wrap">
+          <AppButton
+            size="sm"
+            variant="primary"
+            :disabled="!canSend"
+            :aria-describedby="sendBlockedHint ? sendHintId : undefined"
+            @click="send"
+          >
+            {{
+              sending
+                ? $t('compose.sending')
+                : scheduledFor
+                ? $t('compose.schedule.submit')
+                : $t('compose.send')
+            }}
+          </AppButton>
+          <span v-if="sendBlockedHint" :id="sendHintId" class="sr-only">{{ sendBlockedHint }}</span>
+        </span>
       </div>
     </footer>
 
@@ -1793,6 +1844,8 @@ textarea:focus {
 
 
 .footer-spacer { flex: 1; }
+
+.send-wrap { display: inline-flex; }
 
 .account-compact {
   width: auto;

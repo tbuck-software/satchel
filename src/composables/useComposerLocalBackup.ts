@@ -6,6 +6,7 @@ import {
   type ComposerBackupContent,
 } from '@/persistence/composerBackup';
 import { hasMeaningfulComposerContent } from '@/utils/composerDraftState';
+import { deferredChangeTracker } from '@/utils/deferredChangeTracker';
 
 export interface ComposerLocalBackupOptions {
   enabled: Ref<boolean>;
@@ -20,7 +21,6 @@ export interface ComposerLocalBackupOptions {
  */
 export function useComposerLocalBackup(options: ComposerLocalBackupOptions) {
   const key = `composer-${crypto.randomUUID()}`;
-  let pending: ReturnType<typeof setTimeout> | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   let stored = false;
 
@@ -31,7 +31,6 @@ export function useComposerLocalBackup(options: ComposerLocalBackupOptions) {
   }
 
   function writeNow() {
-    pending = null;
     const content = options.content();
     if (!hasMeaningfulComposerContent(content)) {
       clear();
@@ -49,21 +48,26 @@ export function useComposerLocalBackup(options: ComposerLocalBackupOptions) {
     }
   }
 
-  function schedule() {
-    if (pending !== null) clearTimeout(pending);
-    pending = setTimeout(writeNow, options.debounceMs ?? 300);
-  }
+  // Serialising the content happens once typing pauses, not per keystroke.
+  const changes = deferredChangeTracker(
+    () => JSON.stringify(options.content()),
+    () => {
+      if (options.enabled.value) writeNow();
+    },
+    options.debounceMs ?? 300,
+  );
+  watch(options.enabled, (enabled) => {
+    if (enabled) changes.rebaseline();
+  }, { flush: 'sync' });
 
+  /** Writes a pending change now — the page may not get another chance. */
   function flush() {
-    if (pending === null) return;
-    clearTimeout(pending);
-    writeNow();
+    changes.settle();
   }
 
   /** The draft on disk has caught up with the editor. */
   function clear() {
-    if (pending !== null) clearTimeout(pending);
-    pending = null;
+    changes.rebaseline();
     stopHeartbeat();
     if (stored) composerBackupPersistence.remove(key);
     stored = false;
@@ -77,10 +81,6 @@ export function useComposerLocalBackup(options: ComposerLocalBackupOptions) {
   function discardOrphan(backup: ComposerBackup) {
     composerBackupPersistence.remove(backup.key);
   }
-
-  watch(() => JSON.stringify(options.content()), () => {
-    if (options.enabled.value) schedule();
-  });
 
   const onPageHide = () => flush();
   if (typeof window !== 'undefined') window.addEventListener('pagehide', onPageHide);

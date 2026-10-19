@@ -107,6 +107,35 @@ export function composerDraftInput(state: ComposerDraftState): Omit<BackendDraft
   };
 }
 
+/**
+ * The close guard's view of a saved draft: the persisted fields only,
+ * normalised like `composerDraftSnapshot`. Plain-text mode is not stored on
+ * its own — a plain-text draft simply has no HTML body — so it is left out.
+ */
+export function composerSavedSnapshot(input: Omit<BackendDraftInput, 'id' | 'expectedRevision'>): string {
+  return composerDraftSnapshot({
+    accountId: input.accountId,
+    fromAddress: input.fromAddress ?? '',
+    fromName: input.fromName ?? null,
+    threadId: input.threadId ?? null,
+    replyTo: input.replyTo ?? null,
+    sendOptions: input.sendOptions ?? {},
+    to: input.to ?? [],
+    cc: input.cc ?? [],
+    bcc: input.bcc ?? [],
+    subject: input.subject ?? '',
+    body: input.body ?? '',
+    bodyHtml: input.bodyHtml ?? null,
+    plainText: false,
+    scheduledFor: input.scheduledFor ?? null,
+    signatureId: input.signatureId ?? null,
+    signatureVariant: input.signatureVariant ?? 'auto',
+    signatureOverrideText: input.signatureOverrideText ?? null,
+    signatureOverrideHtml: input.signatureOverrideHtml ?? null,
+    attachments: input.attachments ?? [],
+  });
+}
+
 /** Recovery retains delivery policy; attachment bytes remain in the draft row. */
 export function composerRecoveryContent({ attachments: _attachments, ...content }: ComposerDraftState) {
   return content;

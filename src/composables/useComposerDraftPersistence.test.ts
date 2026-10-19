@@ -41,6 +41,7 @@ interface HarnessOptions {
   initialized?: boolean;
   intervalMs?: number;
   onCaughtUp?: () => void;
+  onSaved?: (input: Omit<BackendDraftInput, 'id' | 'expectedRevision'>) => void;
 }
 
 function createHarness(options: HarnessOptions = {}) {
@@ -92,6 +93,7 @@ function createHarness(options: HarnessOptions = {}) {
         t: translate,
         autosaveIntervalMs: options.intervalMs ?? 1_000,
         onCaughtUp: options.onCaughtUp,
+        onSaved: options.onSaved,
       });
       return () => h('div');
     },
@@ -162,6 +164,51 @@ describe('useComposerDraftPersistence', () => {
     expect(editor.save).toHaveBeenCalledWith(expect.objectContaining({ [field]: ['copy@example.com'] }));
   });
 
+  it('does not rebuild the draft input on every keystroke', async () => {
+    vi.useFakeTimers();
+    const editor = harness();
+    editor.buildInput.mockClear();
+
+    for (const text of ['H', 'He', 'Hel', 'Hell', 'Hello']) {
+      editor.body.value = text;
+      await nextTick();
+      await vi.advanceTimersByTimeAsync(50);
+    }
+    expect(editor.buildInput).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(editor.buildInput).toHaveBeenCalledTimes(1);
+    expect(editor.persistence.dirty.value).toBe(true);
+  });
+
+  it('flushes the latest keystroke on quit even before typing pauses', async () => {
+    vi.useFakeTimers();
+    const editor = harness();
+    editor.body.value = 'Hello world';
+    await nextTick();
+
+    await expect(flushOpenComposerDrafts()).resolves.toBe(true);
+
+    expect(editor.save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ body: 'Hello world' }));
+  });
+
+  it('reports exactly what each successful save put on disk', async () => {
+    const pending = deferred<BackendDraft | null>();
+    const onSaved = vi.fn();
+    const editor = harness({ save: async () => pending.promise, onSaved });
+    editor.body.value = 'Hello world';
+    await nextTick();
+
+    const saving = editor.persistence.persist();
+    // Typed while the save is in flight: not part of what was saved.
+    editor.body.value = 'Hello';
+    pending.resolve(null);
+    await saving;
+
+    expect(onSaved).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ body: 'Hello world' }));
+    expect(editor.persistence.dirty.value).toBe(true);
+  });
+
   it('autosaves a policy-only edit after the text is already durable', async () => {
     vi.useFakeTimers();
     const editor = harness({ intervalMs: 100 });
@@ -171,7 +218,7 @@ describe('useComposerDraftPersistence', () => {
     editor.persistence.startAutosave();
     editor.sendOptions.value = { pgp_encrypt_to_recipients: true, priority: 'high' };
     await nextTick();
-    expect(editor.persistence.dirty.value).toBe(true);
+    expect(editor.persistence.hasUnsavedChanges()).toBe(true);
     await vi.advanceTimersByTimeAsync(100);
     expect(editor.save).toHaveBeenLastCalledWith(expect.objectContaining({
       sendOptions: { pgp_encrypt_to_recipients: true, priority: 'high' },
@@ -486,12 +533,12 @@ describe('useComposerDraftPersistence', () => {
     const { initialized, body, persistence } = harness({ initialized: false });
     body.value = 'loaded draft';
     await nextTick();
-    expect(persistence.dirty.value).toBe(false);
+    expect(persistence.hasUnsavedChanges()).toBe(false);
 
     initialized.value = true;
     body.value = 'edited draft';
     await nextTick();
-    expect(persistence.dirty.value).toBe(true);
+    expect(persistence.hasUnsavedChanges()).toBe(true);
   });
 });
 

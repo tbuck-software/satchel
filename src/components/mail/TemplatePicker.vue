@@ -3,7 +3,10 @@ import AppButton from '@/components/ui/AppButton.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { useDismissable } from '@/composables/useDismissable';
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useTemplatesStore } from '@/stores/templates';
+import { useToast } from '@/composables/useToast';
+import { translateBackendError } from '@/utils/backendErrors';
 import ModalShell from '@/components/ui/ModalShell.vue';
 
 const emit = defineEmits<{
@@ -18,7 +21,9 @@ const emit = defineEmits<{
   (e: 'close'): void;
 }>();
 
+const { t } = useI18n();
 const templatesStore = useTemplatesStore();
+const toast = useToast();
 const filter = ref('');
 const variables = ref<Record<string, string>>({
   recipient_name: '',
@@ -45,6 +50,9 @@ async function pick(id: string) {
     emit('apply', rendered);
   } catch (err) {
     console.warn('template render failed', err);
+    toast.error(t('compose.templates.renderFailed', {
+      error: translateBackendError(err) ?? (err instanceof Error ? err.message : String(err)),
+    }));
   }
 }
 

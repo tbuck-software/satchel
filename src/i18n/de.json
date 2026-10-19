@@ -571,6 +571,7 @@
       "empty": "Keine Nachrichten im Verlauf.",
       "hide": "Verlauf ausblenden",
       "included": "Verlauf wird mitgesendet",
+      "loadFailed": "Der Verlauf konnte nicht geladen werden: {error}",
       "loading": "Verlauf wird geladen…",
       "noTextContent": "(Kein Textinhalt)",
       "remove": "Zitierten Verlauf aus dieser Nachricht entfernen",
@@ -671,11 +672,14 @@
       "blocked": "Satchel bleibt geöffnet: Ein Entwurf konnte nicht gespeichert werden."
     },
     "recipients": {
+      "backspaceAgain": "{address} ausgewählt. Erneut Rücktaste drücken, um die Adresse zu entfernen.",
       "bccPlaceholder": "bcc{'@'}example.com",
       "ccBcc": "Cc/Bcc",
       "ccPlaceholder": "cc{'@'}example.com",
       "collapseCcBcc": "Cc und Bcc einklappen",
       "invalid": "Das ist keine gültige E-Mail-Adresse.",
+      "invalidMarker": "(keine gültige Adresse)",
+      "remove": "{address} entfernen",
       "showCcBcc": "Cc und Bcc anzeigen",
       "toPlaceholder": "empfänger{'@'}example.com"
     },
@@ -695,6 +699,13 @@
       "submit": "Einplanen"
     },
     "send": "Senden",
+    "sendBlocked": {
+      "draftLoadFailed": "Der Entwurf konnte nicht geladen werden und kann daher nicht gesendet werden.",
+      "empty": "Schreib eine Nachricht oder hänge eine Datei an.",
+      "invalidRecipients": "Keine gültige E-Mail-Adresse: {addresses}",
+      "noAccount": "Füge ein E-Mail-Konto hinzu, um zu senden.",
+      "noRecipients": "Füge einen Empfänger unter An, Cc oder Bcc hinzu."
+    },
     "sendLater": {
       "clear": "Plan entfernen",
       "confirm": "Festlegen",
@@ -750,6 +761,7 @@
     "templates": {
       "button": "Vorlage…",
       "empty": "Keine Vorlagen vorhanden. Lege welche unter Settings > Vorlagen an.",
+      "renderFailed": "Die Vorlage konnte nicht eingefügt werden: {error}",
       "searchPlaceholder": "Vorlage suchen…",
       "title": "Vorlage einfügen"
     },

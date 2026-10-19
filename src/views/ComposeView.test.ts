@@ -77,6 +77,7 @@ vi.mock('@/composables/useAttachmentActions', () => ({
 vi.mock('@/composables/useComposerCloseGuard', () => ({
   useComposerCloseGuard: () => ({
     captureBaseline: harness.captureBaseline,
+    markSaved: vi.fn(),
     hasMeaningfulContent: () => true,
     shouldConfirmClose: () => false,
     closeWithoutSaving: vi.fn(),
@@ -459,6 +460,95 @@ describe('composer send guard', () => {
     expect(sendButton(wrapper).attributes('disabled')).toBeUndefined();
     await send(wrapper);
     expect(harness.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('says why Send is disabled instead of only greying it out', async () => {
+    // Not a blank new message: that one moves the focus into the (stubbed) To field.
+    const wrapper = render([], true, { mode: 'reply' });
+    await flushPromises();
+
+    expect(sendButton(wrapper).attributes('disabled')).toBeDefined();
+    const hint = 'Add a recipient under To, Cc or Bcc.';
+    expect(wrapper.get('[data-testid="compose-send-wrap"]').attributes('title')).toBe(hint);
+    const describedBy = sendButton(wrapper).attributes('aria-describedby');
+    expect(wrapper.get(`#${describedBy}`).text()).toBe(hint);
+  });
+
+  it('names the invalid address in the hint', async () => {
+    const wrapper = render(['"Buck']);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="compose-send-wrap"]').attributes('title'))
+      .toBe('Not a valid email address: "Buck');
+  });
+
+  it.each(['cc', 'bcc'] as const)('sends a message addressed through %s alone', async (field) => {
+    harness.sendMessage.mockResolvedValue({
+      status: 'sent', thread_id: 'thread-1', message_id: 'message-1',
+    } as BackendSendMessageResult);
+    const address = 'copy@example.com';
+    const wrapper = render([], true, field === 'cc'
+      ? { mode: 'reply', initialCc: [address] }
+      : { mode: 'reply', initialBcc: [address] });
+    await flushPromises();
+
+    expect(sendButton(wrapper).attributes('disabled')).toBeUndefined();
+    await send(wrapper);
+    expect(harness.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ to: [], [field]: [address] }));
+  });
+
+  it('sends a message that consists of attachments only', async () => {
+    harness.sendMessage.mockResolvedValue({
+      status: 'sent', thread_id: 'thread-1', message_id: 'message-1',
+    } as BackendSendMessageResult);
+    harness.fetchDraft.mockResolvedValue({
+      id: 'draft-1', account_id: 'account-1', to: ['boss@example.com'], cc: [], bcc: [],
+      subject: 'Scan', body: '', body_html: null,
+      attachments: [{ filename: 'scan.pdf', mime_type: 'application/pdf', content_base64: 'JVBERi0=', inline: false }],
+    });
+    const wrapper = render([], true, { initialDraftId: 'draft-1', initialBody: '' });
+    await flushPromises();
+
+    expect(sendButton(wrapper).attributes('disabled')).toBeUndefined();
+    await send(wrapper);
+    expect(harness.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      body: '',
+      attachments: [expect.objectContaining({ filename: 'scan.pdf' })],
+    }));
+  });
+
+  it.each(['meta', 'ctrl'] as const)('sends with %s+Enter from the subject line', async (modifier) => {
+    harness.sendMessage.mockResolvedValue({
+      status: 'sent', thread_id: 'thread-1', message_id: 'message-1',
+    } as BackendSendMessageResult);
+    const wrapper = render();
+    await flushPromises();
+
+    await wrapper.get('.compose-subject').trigger(`keydown.${modifier}.enter`);
+    await flushPromises();
+    expect(harness.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends when the recipient field submits', async () => {
+    harness.sendMessage.mockResolvedValue({
+      status: 'sent', thread_id: 'thread-1', message_id: 'message-1',
+    } as BackendSendMessageResult);
+    const wrapper = render();
+    await flushPromises();
+
+    wrapper.getComponent({ name: 'RecipientChips' }).vm.$emit('submit');
+    await flushPromises();
+    expect(harness.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('explains a blocked shortcut send in the status line', async () => {
+    // Not a blank new message: that one moves the focus into the (stubbed) To field.
+    const wrapper = render([], true, { mode: 'reply' });
+    await flushPromises();
+
+    await wrapper.get('.compose-subject').trigger('keydown.meta.enter');
+    await flushPromises();
+    expect(harness.sendMessage).not.toHaveBeenCalled();
+    expect(wrapper.get('.status--warning').text()).toBe('Add a recipient under To, Cc or Bcc.');
   });
 });
 

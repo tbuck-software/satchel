@@ -1,8 +1,10 @@
 import { onBeforeUnmount, ref, type Ref } from 'vue';
 import { getCurrentWebviewWindow, type WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { isMobileRuntime } from '@/utils/runtimeShell';
+import type { BackendDraftInput } from '@/types/composer';
 import {
-  composerDraftSnapshot,
+  composerDraftInput,
+  composerSavedSnapshot,
   hasMeaningfulComposerContent,
   type ComposerDraftState,
 } from '@/utils/composerDraftState';
@@ -20,14 +22,29 @@ interface ComposerCloseGuardOptions {
 
 /** Owns change detection and native standalone-window close handling. */
 export function useComposerCloseGuard(options: ComposerCloseGuardOptions) {
-  const initialSnapshot = ref('');
+  /**
+   * What closing would leave behind: the content at mount, then whatever the
+   * last successful save put on disk. Comparing with the mount state alone let
+   * an edit that was autosaved and then undone close without a save, leaving
+   * the autosaved version on disk.
+   */
+  const baseline = ref('');
   const standaloneCloseBusy = ref(false);
   let standaloneWindow: WebviewWindow | null = null;
   let standaloneCloseUnlisten: (() => void) | null = null;
   let disposed = false;
 
+  function currentSnapshot() {
+    return composerSavedSnapshot(composerDraftInput(options.currentState()));
+  }
+
   function captureBaseline() {
-    initialSnapshot.value = composerDraftSnapshot(options.currentState());
+    baseline.value = currentSnapshot();
+  }
+
+  /** The draft on disk now matches `input`. */
+  function markSaved(input: Omit<BackendDraftInput, 'id' | 'expectedRevision'>) {
+    baseline.value = composerSavedSnapshot(input);
   }
 
   function hasMeaningfulContent() {
@@ -36,7 +53,7 @@ export function useComposerCloseGuard(options: ComposerCloseGuardOptions) {
 
   function shouldConfirmClose() {
     if (!options.initialized.value || !hasMeaningfulContent()) return false;
-    return composerDraftSnapshot(options.currentState()) !== initialSnapshot.value;
+    return currentSnapshot() !== baseline.value;
   }
 
   async function closeWithoutSaving() {
@@ -105,6 +122,7 @@ export function useComposerCloseGuard(options: ComposerCloseGuardOptions) {
 
   return {
     captureBaseline,
+    markSaved,
     hasMeaningfulContent,
     shouldConfirmClose,
     closeWithoutSaving,

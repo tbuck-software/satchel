@@ -8,6 +8,7 @@ import type { BackendDraft, BackendDraftInput } from '@/types/composer';
 import { backendErrorKey, translateBackendError } from '@/utils/backendErrors';
 import { createCoalescingRunner } from '@/utils/coalescingRunner';
 import { composerDraftInputSnapshot, hasMeaningfulComposerContent } from '@/utils/composerDraftState';
+import { deferredChangeTracker } from '@/utils/deferredChangeTracker';
 
 export type ComposerStatusTone = 'info' | 'success' | 'warning' | 'error';
 
@@ -43,8 +44,12 @@ export interface ComposerDraftPersistenceOptions {
   drafts: ComposerDraftPersistenceAdapter;
   t: ComposerDraftTranslator;
   autosaveIntervalMs?: number;
+  /** How long typing has to pause before the draft is compared again. */
+  changeCheckDelayMs?: number;
   /** A save landed and nothing changed while it ran: the disk has caught up. */
   onCaughtUp?: () => void;
+  /** A save landed; `input` is exactly what is on disk now. */
+  onSaved?: (input: Omit<BackendDraftInput, 'id' | 'expectedRevision'>) => void;
 }
 
 /**
@@ -96,11 +101,27 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
 
   const runner = createCoalescingRunner(saveOnce, () => dirty.value);
 
-  watch(() => composerDraftInputSnapshot(options.buildInput()), () => {
-    if (!options.initialized.value) return;
-    revision += 1;
-    dirty.value = true;
-  });
+  // Building the input serialises the whole body, so it is not done per
+  // keystroke. Every path that reads `dirty` settles the tracker first.
+  const changes = deferredChangeTracker(
+    () => composerDraftInputSnapshot(options.buildInput()),
+    () => {
+      if (!options.initialized.value) return;
+      revision += 1;
+      dirty.value = true;
+    },
+    options.changeCheckDelayMs ?? 300,
+  );
+  // What loading put into the editor is not an edit.
+  watch(options.initialized, (initialized) => {
+    if (initialized) changes.rebaseline();
+  }, { flush: 'sync' });
+
+  /** Whether the editor holds anything the disk does not, as of right now. */
+  function hasUnsavedChanges() {
+    changes.settle();
+    return dirty.value;
+  }
 
   function isEmptyNewDraft(input: Omit<BackendDraftInput, 'id' | 'expectedRevision'>) {
     return (
@@ -110,6 +131,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
   }
 
   async function saveOnce(): Promise<DraftSaveOutcome> {
+    changes.settle();
     const input = options.buildInput();
     if (!input || isEmptyNewDraft(input)) {
       return { id: null, remoteError: null, error: null };
@@ -130,7 +152,10 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
         draftId.value = draft.id;
         serverRevision.value = draft.revision ?? null;
       }
+      // Edits made while the save ran count as changes now, not after a pause.
+      changes.settle();
       dirty.value = revision !== revisionAtStart;
+      options.onSaved?.(input);
       saveError.value = null;
       if (!dirty.value) options.onCaughtUp?.();
       // The local copy is durable even when the provider rejects its remote
@@ -185,7 +210,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
     autosaveTimer = setInterval(() => {
       // A conflict does not heal by retrying; the user picks a way out.
       if (saveError.value?.kind === 'conflict') return;
-      if (dirty.value && !options.sending.value && !paused) {
+      if (!options.sending.value && !paused && hasUnsavedChanges()) {
         void persist({ silent: true });
       }
     }, options.autosaveIntervalMs ?? 10_000);
@@ -202,6 +227,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
   }
 
   function finish() {
+    changes.rebaseline();
     dirty.value = false;
     stopAutosave();
   }
@@ -210,6 +236,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
     stopAutosave();
     await pause();
     try {
+      changes.rebaseline();
       dirty.value = false;
       if (draftId.value) {
         await options.drafts.remove(draftId.value);
@@ -230,6 +257,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
 
   async function closeWithoutSaving() {
     await pause();
+    changes.rebaseline();
     dirty.value = false;
     stopAutosave();
   }
@@ -239,6 +267,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
    * draft of its own.
    */
   async function saveAsNewDraft(): Promise<string | null> {
+    changes.settle();
     draftId.value = null;
     serverRevision.value = null;
     saveError.value = null;
@@ -250,7 +279,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
   /** What a quit waits for. `false` keeps the app open: the edit is not on disk. */
   async function flushBeforeExit(): Promise<boolean> {
     if (options.sending.value || paused) return true;
-    if (!dirty.value) return saveError.value === null;
+    if (!hasUnsavedChanges()) return saveError.value === null;
     await persist({ silent: true });
     return saveError.value === null;
   }
@@ -260,7 +289,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
   onBeforeUnmount(() => {
     openComposerFlushes.delete(flushBeforeExit);
     stopAutosave();
-    if (dirty.value && !options.sending.value && !paused) {
+    if (!options.sending.value && !paused && hasUnsavedChanges()) {
       void persist({ silent: true });
     }
   });
@@ -269,6 +298,7 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
     draftId,
     serverRevision,
     dirty,
+    hasUnsavedChanges,
     saveError,
     saveAsNewDraft,
     persist,

@@ -16,12 +16,38 @@ function editor() {
     plainText: true, scheduledFor: null, signatureId: null, signatureVariant: 'none',
     signatureOverrideText: null, signatureOverrideHtml: null,
   });
+  const read = vi.fn(() => content.value);
   const wrapper = mount(defineComponent({ setup() {
-    useComposerLocalBackup({ enabled: ref(true), draftId: ref(null), content: () => content.value });
+    useComposerLocalBackup({ enabled: ref(true), draftId: ref(null), content: read });
     return () => h('div');
   } }));
-  return { wrapper, content };
+  return { wrapper, content, read };
 }
+
+it('reads the composer once typing pauses, not on every keystroke', async () => {
+  const { wrapper, content, read } = editor();
+  try {
+    read.mockClear();
+    for (const body of ['H', 'He', 'Hel', 'Hell', 'Hello']) {
+      content.value.body = body;
+      await nextTick();
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    expect(read).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(composerBackupPersistence.findOrphan({}, Date.now() + 20_000)?.content.body).toBe('Hello');
+  } finally { wrapper.unmount(); }
+});
+
+it('writes the latest keystroke when the page goes away', async () => {
+  const { wrapper, content } = editor();
+  try {
+    content.value.body = 'Last words';
+    await nextTick();
+    window.dispatchEvent(new Event('pagehide'));
+    expect(composerBackupPersistence.findOrphan({}, Date.now() + 20_000)?.content.body).toBe('Last words');
+  } finally { wrapper.unmount(); }
+});
 
 it.each(['cc', 'bcc'] as const)('recovers an edit containing only %s', async field => {
   const { wrapper, content } = editor();

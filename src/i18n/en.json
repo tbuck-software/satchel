@@ -571,6 +571,7 @@
       "empty": "No messages in this conversation.",
       "hide": "Hide history",
       "included": "History is included",
+      "loadFailed": "Could not load the conversation: {error}",
       "loading": "Loading history…",
       "noTextContent": "(No text content)",
       "remove": "Remove quoted history from this message",
@@ -671,11 +672,14 @@
       "blocked": "Satchel stayed open: a draft could not be saved."
     },
     "recipients": {
+      "backspaceAgain": "{address} selected. Press Backspace again to remove it.",
       "bccPlaceholder": "bcc{'@'}example.com",
       "ccBcc": "Cc/Bcc",
       "ccPlaceholder": "cc{'@'}example.com",
       "collapseCcBcc": "Collapse Cc and Bcc",
       "invalid": "This is not a valid email address.",
+      "invalidMarker": "(not a valid address)",
+      "remove": "Remove {address}",
       "showCcBcc": "Show Cc and Bcc",
       "toPlaceholder": "recipient{'@'}example.com"
     },
@@ -695,6 +699,13 @@
       "submit": "Schedule"
     },
     "send": "Send",
+    "sendBlocked": {
+      "draftLoadFailed": "The draft could not be loaded, so it cannot be sent.",
+      "empty": "Write a message or attach a file.",
+      "invalidRecipients": "Not a valid email address: {addresses}",
+      "noAccount": "Add an email account to send.",
+      "noRecipients": "Add a recipient under To, Cc or Bcc."
+    },
     "sendLater": {
       "clear": "Remove schedule",
       "confirm": "Set",
@@ -750,6 +761,7 @@
     "templates": {
       "button": "Template…",
       "empty": "No templates yet. Create them under Settings > Templates.",
+      "renderFailed": "Could not insert the template: {error}",
       "searchPlaceholder": "Search templates…",
       "title": "Insert template"
     },
