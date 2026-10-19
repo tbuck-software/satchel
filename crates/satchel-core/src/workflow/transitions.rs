@@ -330,21 +330,6 @@ async fn transition_thread_configured(
     if workflow_move_reconciliation_in_progress(&mut tx, &input.thread_id).await? {
         return Err("the server move is being finalized; try again shortly".to_string());
     }
-    // Notification Done includes Read. Both intents must commit together,
-    // with source-folder flags queued before the move changes the UID.
-    let mut queued_ids = if queue_prefix.is_some() && input.to == WorkflowState::Done {
-        crate::mail_actions::set_flags_in_transaction(
-            &mut tx,
-            queue,
-            std::slice::from_ref(&input.thread_id),
-            Some(true),
-            None,
-            queue_prefix,
-        )
-        .await?
-    } else {
-        Vec::new()
-    };
     let plans = prepare_provider_plans_in_transaction(&mut tx, &input).await?;
     let changed = sqlx::query(
         "UPDATE threads
@@ -425,6 +410,24 @@ async fn transition_thread_configured(
         _ => Vec::new(),
     };
 
+    // Done includes Read. Both intents commit together, with source-folder
+    // flags queued before the move changes the UID. A separate read request
+    // afterwards would find the move scheduled and be rejected. It runs after
+    // the cancellations above: a still-scheduled move into Aside would
+    // otherwise count as pending too.
+    let mut queued_ids = if input.to == WorkflowState::Done {
+        crate::mail_actions::set_flags_in_transaction(
+            &mut tx,
+            queue,
+            std::slice::from_ref(&input.thread_id),
+            Some(true),
+            None,
+            queue_prefix,
+        )
+        .await?
+    } else {
+        Vec::new()
+    };
     for plan in selected {
         let account_id = plan.account_id.clone();
         let mut action: QueuedAction = plan.into_action(&input.thread_id, scheduled_for)?;

@@ -45,11 +45,12 @@ vi.mock('@/services/backend', async (importOriginal) => {
         failed: [{ thread_id: rejected!.thread_id, error: 'database is locked' }],
       };
     }),
-    backendSetThreadsRead: vi.fn(async (threadIds: string[]) => {
+    backendSetThreadsRead: vi.fn(async () => {
       calls.push('set_threads_read');
-      readIds.push(threadIds);
     }),
-    backendDismissMobileNotifications: record('dismiss_mobile_notifications', () => undefined),
+    backendDismissMobileNotifications: record('dismiss_mobile_notifications', (threadIds) => {
+      dismissedIds.push(threadIds as string[]);
+    }),
     backendListThreads: record('list_threads', () => ({
       threads: [],
       next_cursor: null,
@@ -62,7 +63,7 @@ vi.mock('@/services/backend', async (importOriginal) => {
   };
 });
 
-const readIds: string[][] = [];
+const dismissedIds: string[][] = [];
 const BATCH = 200;
 
 function seedThreads(count: number): Thread[] {
@@ -94,7 +95,7 @@ describe('bulk workflow transitions', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     calls.length = 0;
-    readIds.length = 0;
+    dismissedIds.length = 0;
     rejectFirst.enabled = false;
     vi.mocked(backendSupportsNativeCommands).mockReturnValue(true);
     useToast().clear();
@@ -102,7 +103,7 @@ describe('bulk workflow transitions', () => {
 
   afterEach(() => useToast().clear());
 
-  it('files a selection in three round trips and one receipt', async () => {
+  it('files a selection in two round trips and one receipt', async () => {
     const threads = useThreadsStore();
     threads.threads = seedThreads(BATCH);
     const actions = useThreadActions();
@@ -110,10 +111,11 @@ describe('bulk workflow transitions', () => {
     await actions.archive(threads.threads.map((thread) => thread.id));
 
     // Was 3 × 200: one transition, one read flag and one dismissal per thread.
+    // The transition now marks Done threads read itself.
     expect(countCommand('transition_threads')).toBe(1);
-    expect(countCommand('set_threads_read')).toBe(1);
+    expect(countCommand('set_threads_read')).toBe(0);
     expect(countCommand('dismiss_mobile_notifications')).toBe(1);
-    expect(readIds[0]).toHaveLength(BATCH);
+    expect(dismissedIds[0]).toHaveLength(BATCH);
 
     const toasts = useToast().state.toasts;
     expect(toasts).toHaveLength(1);
@@ -125,7 +127,7 @@ describe('bulk workflow transitions', () => {
    * against is gone: it cost three round trips and one list projection per
    * thread, and nothing in the UI reached it any more.
    */
-  it('costs three round trips and one projection for a whole selection', async () => {
+  it('costs two round trips and one projection for a whole selection', async () => {
     const threads = useThreadsStore();
     threads.threads = seedThreads(BATCH);
     const workflow = useWorkflow();
@@ -143,7 +145,7 @@ describe('bulk workflow transitions', () => {
     );
     scope.stop();
 
-    expect(calls.length).toBe(3);
+    expect(calls.length).toBe(2);
     // The batch changes every row before it publishes once.
     expect(projections).toBeLessThanOrEqual(2);
   }, 30_000);
@@ -193,7 +195,7 @@ describe('bulk workflow transitions', () => {
     const actions = useThreadActions();
     await Promise.all([actions.archive(['t-0']), actions.archive(['t-1']), actions.archive(['t-2'])]);
     expect(countCommand('transition_threads')).toBe(3);
-    expect(readIds.flat().sort()).toEqual(['t-0', 't-1', 't-2']);
+    expect(dismissedIds.flat().sort()).toEqual(['t-0', 't-1', 't-2']);
   });
 
   it('undoes by snapshot id after a list load evicts the archived rows', async () => {
@@ -243,6 +245,6 @@ describe('bulk workflow transitions', () => {
     expect(toasts.find((entry) => entry.tone === 'error')?.message).toContain('database is locked');
     // The rejected row keeps the state it really has, and its unread count.
     expect(threads.threads[0]).toMatchObject({ workflowState: 'inbox', unreadCount: 1 });
-    expect(readIds[0]).toEqual(['t-1', 't-2']);
+    expect(dismissedIds[0]).toEqual(['t-1', 't-2']);
   });
 });

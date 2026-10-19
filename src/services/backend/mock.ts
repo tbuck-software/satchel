@@ -524,6 +524,11 @@ const handlers: Record<string, Handler> = {
       if (!thread) continue;
       thread.workflowState = scope.to as WorkflowState;
       thread.snoozeUntil = (scope.snooze_until as string | null) ?? undefined;
+      // Done includes Read, committed with the transition like the backend does.
+      if (scope.to === 'done') {
+        thread.unreadCount = 0;
+        for (const message of messages[thread.id] ?? []) message.isRead = true;
+      }
       applied.push(thread.id);
     }
     return { applied, failed: [] };

@@ -20,7 +20,7 @@ use tauri_plugin_autostart::ManagerExt;
 use crate::{
     commands::{
         error::{CommandError, CommandResult},
-        threads, workflow,
+        workflow,
     },
     workflow::states::WorkflowState,
     AppState,
@@ -780,11 +780,6 @@ pub async fn act_on_tray_thread(app: AppHandle, input: TrayThreadActionInput) ->
         return Ok(());
     }
 
-    if to == WorkflowState::Done {
-        mark_tray_thread_done_read(pool.inner(), app.state::<AppState>().inner(), thread_id)
-            .await?;
-    }
-
     workflow::transition_thread_inner(
         pool.inner(),
         app.state::<AppState>().inner(),
@@ -802,23 +797,6 @@ pub async fn act_on_tray_thread(app: AppHandle, input: TrayThreadActionInput) ->
         serde_json::json!({ "thread_id": thread_id }),
     )
     .map_err(CommandError::unexpected)
-}
-
-async fn mark_tray_thread_done_read(
-    pool: &SqlitePool,
-    state: &AppState,
-    thread_id: &str,
-) -> CommandResult<()> {
-    threads::set_threads_read_command_inner(
-        pool,
-        state,
-        threads::UpdateThreadsReadInput {
-            thread_ids: vec![thread_id.to_string()],
-            is_read: true,
-        },
-    )
-    .await
-    .map(|_| ())
 }
 
 /// The launch agent decides; `app_settings` only remembers what we last set.
@@ -982,10 +960,13 @@ mod tests {
 
     use super::{
         attention_tray_icon, briefing_slice, load_tray_threads, load_upcoming_calendar_events,
-        mark_tray_thread_done_read, open_unread_count, resolve_autostart, TrayPreferences,
-        MAX_BRIEFING_THREADS, MAX_PENDING_THREADS,
+        open_unread_count, resolve_autostart, TrayPreferences, MAX_BRIEFING_THREADS,
+        MAX_PENDING_THREADS,
     };
-    use crate::{sync::remote_mutations::RemoteMutationPayload, AppState};
+    use crate::{
+        commands::workflow, sync::remote_mutations::RemoteMutationPayload,
+        workflow::states::WorkflowState, AppState,
+    };
 
     #[test]
     fn only_a_launch_agent_start_counts_as_an_autostart() {
@@ -1204,9 +1185,18 @@ mod tests {
         .await
         .expect("message");
 
-        mark_tray_thread_done_read(&pool, &AppState::default(), "thread")
-            .await
-            .expect("mark read");
+        workflow::transition_thread_inner(
+            &pool,
+            &AppState::default(),
+            workflow::TransitionInput {
+                thread_id: "thread".into(),
+                from: WorkflowState::Inbox,
+                to: WorkflowState::Done,
+                snooze_until: None,
+            },
+        )
+        .await
+        .expect("done");
 
         let projection: (i64, i64) = sqlx::query_as(
             "SELECT unread_count,
@@ -1219,7 +1209,8 @@ mod tests {
         assert_eq!(projection, (0, 1));
 
         let payload: String = sqlx::query_scalar(
-            "SELECT payload FROM sync_queue WHERE action_type = 'remote_mutation'",
+            "SELECT payload FROM sync_queue WHERE action_type = 'remote_mutation'
+             AND json_extract(payload, '$.kind') = 'flags'",
         )
         .fetch_one(&pool)
         .await

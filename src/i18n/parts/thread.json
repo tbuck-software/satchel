@@ -217,8 +217,7 @@
       },
       "workflow": {
         "failedMany": "Could not mark {count} emails as “{label}”: {detail}",
-        "failedOne": "{label} failed: {detail}",
-        "readFailed": "Email {state}, but not marked as read: {detail} | {count} emails {state}, but not marked as read: {detail}"
+        "failedOne": "{label} failed: {detail}"
       }
     },
     "time": {
@@ -443,8 +442,7 @@
       },
       "workflow": {
         "failedMany": "{count} E-Mails konnten nicht als „{label}“ markiert werden: {detail}",
-        "failedOne": "{label} fehlgeschlagen: {detail}",
-        "readFailed": "E-Mail {state}, aber nicht als gelesen markiert: {detail} | {count} E-Mails {state}, aber nicht als gelesen markiert: {detail}"
+        "failedOne": "{label} fehlgeschlagen: {detail}"
       }
     },
     "time": {

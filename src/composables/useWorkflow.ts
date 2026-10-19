@@ -7,11 +7,10 @@ import { useWorkflowStore } from '@/stores/workflow';
 import { useToast } from '@/composables/useToast';
 import {
   backendDismissMobileNotifications,
-  backendSetThreadsRead,
   backendTransitionThreads,
 } from '@/services/backend';
 import { recordFrontendDiagnostic } from '@/utils/diagnostics';
-import { t, tc } from '@/i18n/runtime';
+import { t } from '@/i18n/runtime';
 
 /**
  * How long a checked-off row animates out before it is removed from the list.
@@ -81,13 +80,6 @@ function concurrentTransitionFoundState(message: string): WorkflowState | null {
   return found && (WORKFLOW_STATES as string[]).includes(found)
     ? (found as WorkflowState)
     : null;
-}
-
-function readFailureMessage(count: number, state: WorkflowState, detail: string): string {
-  return tc('thread.workflow.readFailed', count, {
-    state: stateLabel(state).toLowerCase(),
-    detail,
-  });
 }
 
 /** Destinations that file the row away, so it animates out of the list. */
@@ -272,21 +264,9 @@ export function useWorkflow() {
 
     const appliedIds = applied.map((target) => target.threadId);
     if (appliedIds.length > 0 && to === 'done') {
-      try {
-        await withPersistenceSlot(async () => {
-          await backendSetThreadsRead(appliedIds, true);
-          await backendDismissMobileNotifications(appliedIds).catch(() => {});
-        });
-      } catch (err) {
-        // The workflow transition is durable and its provider move is queued.
-        // A later read failure must not pretend the whole action failed.
-        const message = err instanceof Error ? err.message : String(err);
-        toast.warning(readFailureMessage(appliedIds.length, to, message), {
-          groupKey: `workflow-read-error:${to}:${message}`,
-          count: appliedIds.length,
-          groupMessage: (count) => readFailureMessage(count, to, message),
-        });
-      }
+      // The backend marks Done threads read in the transition itself: a
+      // separate read request would find the scheduled move and be refused.
+      await withPersistenceSlot(() => backendDismissMobileNotifications(appliedIds).catch(() => {}));
     }
 
     if (options.refresh !== false && (appliedIds.length > 0 || adopted.length > 0)) {
