@@ -379,6 +379,30 @@ for (const [label, html] of [
   });
 }
 
+/*
+ * Inline images reach the frame as object URLs rather than data URLs, so the
+ * image bytes stay out of `srcdoc`. The frame is same-origin and its CSP lists
+ * `blob:`; this proves both engines actually load them from there.
+ */
+test('loads inline images from object URLs inside the sandboxed frame', async ({ page }) => {
+  await page.goto('/render-fidelity.html');
+  const payload = mailPayload('<p>Logo below</p><img alt="logo" src="cid:logo@satchel" style="width:2px">');
+  payload.attachments = [{
+    id: 'inline-logo', filename: 'logo.png', contentType: 'image/png',
+    contentId: 'logo@satchel', size: 68, isInline: true,
+    dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN9sAAAAASUVORK5CYII=',
+  }];
+  await page.waitForFunction(() => typeof window.__setSatchelRenderFidelityPayload === 'function');
+  await page.evaluate(async (value) => window.__setSatchelRenderFidelityPayload!(value), payload);
+
+  const frame = page.locator('iframe.satchel-email-document');
+  await expect(frame).toBeVisible();
+  expect(await frame.getAttribute('srcdoc')).not.toContain('base64');
+  const image = frame.contentFrame().locator('img[alt="logo"]');
+  await expect(image).toHaveAttribute('src', /^blob:/);
+  await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBe(1);
+});
+
 test('an allow-listed sender domain needs a trusted DMARC pass before fetching pixels', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('satchel:images-allowed-domains', '["example.test"]'));
   const requests: string[] = [];

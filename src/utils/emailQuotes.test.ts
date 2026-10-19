@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildQuotePart,
   dedupeQuoteParts,
@@ -335,6 +335,54 @@ describe('textFromHtml', () => {
 
   it('returns nothing for empty markup', () => {
     expect(textFromHtml('   ')).toBe('');
+  });
+
+  /*
+   * The text is read without mutating the tree now. The reference below is the
+   * former shape — replace the breaks, append to the blocks, take textContent —
+   * because quote hashes are built from this text and must not move.
+   */
+  function mutatingReference(html: string): string {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('br').forEach((node) => node.replaceWith(doc.createTextNode('\n')));
+    doc.querySelectorAll('address, article, aside, blockquote, div, footer, header, li, p, section, table, tr')
+      .forEach((node) => node.append(doc.createTextNode('\n')));
+    return (doc.body?.textContent || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n[ \t]+/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  it.each([
+    '<div>outer<div>inner<p>para<br>line</p></div>tail</div>',
+    '<table><tr><td>a</td><td>b<br></td></tr><tr><td>c</td></tr></table>',
+    '<p>text<!-- comment --> more</p><template><p>hidden</p></template>',
+    '<style>.x { color: red }</style><ul><li>one</li><li>two&nbsp; </li></ul>',
+    '<blockquote type="cite">Am 1. Mai schrieb A:<br><br><br><br>quoted</blockquote>',
+    '<svg><text>vector</text></svg><section><header>h</header><footer>f</footer></section>',
+  ])('reads the same text as the mutating pass: %s', (html) => {
+    expect(textFromHtml(html)).toBe(mutatingReference(html));
+  });
+});
+
+describe('extractHtmlBody parsing', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('parses a message without quotes once', () => {
+    const parses = vi.spyOn(DOMParser.prototype, 'parseFromString');
+    const result = extractHtmlBody('<div><p>Hallo</p><p>wie besprochen.</p></div>');
+    expect(result.quotes).toEqual([]);
+    expect(parses).toHaveBeenCalledTimes(1);
+  });
+
+  it('still finds plain-text quotes from the tree it parsed', () => {
+    const result = extractHtmlBody(
+      '<div>Danke!</div><div>Am 1. Mai 2026 schrieb Lena:</div><div>&gt; Kannst du das Angebot bis Freitag schicken?</div>',
+    );
+    expect(result.quotes).toHaveLength(1);
+    expect(result.quotes[0]!.text).toContain('Angebot bis Freitag');
   });
 });
 

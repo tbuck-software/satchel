@@ -1,7 +1,11 @@
 import { nextTick } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadPublicSuffixTable } from '@/utils/externalLinks';
 import { useSettingsStore } from './settings';
+
+// Link-host trust is keyed by registrable domain; the table loads on demand.
+beforeAll(() => loadPublicSuffixTable());
 
 function memoryStorage() {
   const values = new Map<string, string>();

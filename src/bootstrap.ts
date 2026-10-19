@@ -73,6 +73,7 @@ import { createStartupEventBuffer } from '@/utils/startupEventBuffer';
 import { scheduleIdleWork } from '@/utils/idleWork';
 import { crashReportForClipboard } from '@/utils/crashReport';
 import { loadOmniSearch } from '@/components/navigation/loadOmniSearch';
+import { loadPublicSuffixTable } from '@/utils/externalLinks';
 
 /** What an event registration hands back so it can be taken down again. */
 type Disposer = () => void | Promise<void>;
@@ -743,9 +744,11 @@ export function useAppBootstrap(): void {
       // The reader and command palette are the two most common first actions.
       // Warm their code only after the Inbox is usable, so the initial download
       // stays lean while the first click no longer waits on a chunk round trip.
+      // The reader's link assessment wants the public-suffix table as well.
       void Promise.allSettled([
         import('@/components/mail/ThreadView.vue'),
         loadOmniSearch(),
+        loadPublicSuffixTable(),
       ]);
     });
     if (!settingsStore.onboardingComplete && accountsStore.accounts.length > 0) {

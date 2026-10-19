@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   setPersistenceStorageProvider,
   type StorageLike,
@@ -6,6 +6,10 @@ import {
 import {
   settingsPersistence,
 } from './settings';
+import { loadPublicSuffixTable } from '@/utils/externalLinks';
+
+// Host normalization asks the public-suffix table, which loads on demand.
+beforeAll(() => loadPublicSuffixTable());
 
 const SETTINGS_STORAGE_KEYS = {
   onboardingComplete: 'satchel.onboardingComplete',

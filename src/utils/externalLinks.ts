@@ -1,23 +1,58 @@
+import { shallowRef } from 'vue';
+
 /*
  * `tldts` carries the public-suffix table — around a third of the viewer
- * window's initial JavaScript, parsed before a message appeared. It is loaded
- * on demand instead, and until it arrives a display/target mismatch counts as
- * a mismatch: the confirmation prompt, never silent approval.
+ * window's initial JavaScript, and ~46 KiB gzip the main window used to fetch
+ * and parse during startup, because this module sits behind the settings
+ * store. It is loaded on first use, or warmed once the app is idle, and until
+ * it arrives a display/target mismatch counts as a mismatch: the confirmation
+ * prompt, never silent approval.
  */
 type SuffixOptions = { allowPrivateDomains: boolean; extractHostname: boolean };
 type GetDomain = (host: string, options: SuffixOptions) => string | null;
 type ParseHost = (host: string, options: SuffixOptions) => { isIcann: boolean | null; isPrivate: boolean | null };
+type SuffixTable = { getDomain: GetDomain; parseHost: ParseHost };
 
-let getDomain: GetDomain | null = null;
-let parseHost: ParseHost | null = null;
-const publicSuffixTable = import('tldts').then((module) => {
-  getDomain = module.getDomain as GetDomain;
-  parseHost = module.parse as ParseHost;
-});
+let table: SuffixTable | null = null;
+let publicSuffixTable: Promise<void> | null = null;
+/** Reactive, so a view that answered without the table renders again once it is there. */
+const tableLoaded = shallowRef(false);
+let provisionalAnswers = 0;
 
-/** Resolves once the public-suffix table is usable. For tests and warm-up. */
+/** Starts loading the public-suffix table; resolves once it is usable. */
 export function loadPublicSuffixTable(): Promise<void> {
+  publicSuffixTable ??= import('tldts').then((module) => {
+    table = { getDomain: module.getDomain as GetDomain, parseHost: module.parse as ParseHost };
+    tableLoaded.value = true;
+  });
   return publicSuffixTable;
+}
+
+/** Whether the table is usable. A reactive read: computeds and renders track it. */
+export function publicSuffixTableLoaded(): boolean {
+  return tableLoaded.value;
+}
+
+/**
+ * Counts answers given without the table. A caller that caches what it built
+ * from assessments compares the count before and after to learn whether the
+ * result has to be redone once `publicSuffixTableLoaded()` turns true.
+ */
+export function provisionalLinkAnswers(): number {
+  return provisionalAnswers;
+}
+
+/**
+ * The table, or null while it is loading. Link assessment asks for it to be
+ * loaded; `linkRegistrableDomain` does not, because the settings store
+ * normalizes stored hosts with it at startup, and its other callers act on a
+ * link that was assessed first.
+ */
+function suffixTable(load = true): SuffixTable | null {
+  if (tableLoaded.value) return table;
+  if (load) void loadPublicSuffixTable();
+  provisionalAnswers += 1;
+  return null;
 }
 
 
@@ -165,8 +200,9 @@ function displayedHost(written: string): DisplayedHost | null {
 
 /** A bare token inside running text counts once its suffix is a real one; before the table loads, any does. */
 function knownSuffix(ascii: string): boolean {
-  if (!parseHost) return true;
-  const parsed = parseHost(ascii, { allowPrivateDomains: true, extractHostname: false });
+  const suffixes = suffixTable();
+  if (!suffixes) return true;
+  const parsed = suffixes.parseHost(ascii, { allowPrivateDomains: true, extractHostname: false });
   return Boolean(parsed.isIcann || parsed.isPrivate);
 }
 
@@ -201,10 +237,11 @@ function hostnamesMatch(displayed: DisplayedHost, actual: string): boolean {
   // A label in another script that only looks like an ASCII domain never vouches for one.
   if (displayed.lookalike) return false;
   // Without the table, two different hostnames stay different.
-  if (!getDomain) return false;
+  const suffixes = suffixTable();
+  if (!suffixes) return false;
   const options = { allowPrivateDomains: true, extractHostname: false };
-  const displayedDomain = getDomain(displayed.ascii, options);
-  const actualDomain = getDomain(actual, options);
+  const displayedDomain = suffixes.getDomain(displayed.ascii, options);
+  const actualDomain = suffixes.getDomain(actual, options);
   return displayedDomain !== null && displayedDomain === actualDomain;
 }
 
@@ -219,8 +256,9 @@ function hostnamesMatch(displayed: DisplayedHost, actual: string): boolean {
 export function linkRegistrableDomain(hostname: string): string {
   const normalized = hostname.trim().toLowerCase();
   if (!normalized) return '';
-  if (!getDomain) return normalized;
-  return getDomain(normalized, { allowPrivateDomains: true, extractHostname: false }) ?? normalized;
+  const suffixes = suffixTable(false);
+  if (!suffixes) return normalized;
+  return suffixes.getDomain(normalized, { allowPrivateDomains: true, extractHostname: false }) ?? normalized;
 }
 
 export function assessExternalLink(href: string, label = ''): ExternalLinkAssessment {

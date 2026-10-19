@@ -7,7 +7,7 @@ import type { Attachment } from '@/types/mail';
  * Content-ID. Nothing fetches those references for us: the mail document is
  * sandboxed and its CSP has no origin to resolve `cid:` against, so an
  * unresolved reference renders as a broken image. Rewriting them to the
- * attachment's data URL keeps the substitution local — no request leaves the
+ * attachment's data or object URL keeps the substitution local — no request leaves the
  * client, which is the point.
  *
  * Matching is deliberately generous. Content-IDs arrive bare, in angle
@@ -71,13 +71,30 @@ export function inlineImageSource(attachment: Attachment): string | null {
     ? attachment.dataUrl : null;
 }
 
-export function rewriteInlineAttachmentSources(
-  html: string,
-  attachments: Attachment[],
-  options: { attachmentsResolved: boolean; missingSource: string; keepPendingAttachments?: boolean },
-): { html: string; pending: number } {
-  if (!html || !/cid:/i.test(html)) return { html, pending: 0 };
-  const doc = new DOMParser().parseFromString(html, 'text/html');
+export interface InlineRewriteOptions {
+  attachmentsResolved: boolean;
+  missingSource: string;
+  keepPendingAttachments?: boolean;
+  /** Where an attachment's image loads from; its validated data URL by default. */
+  sourceFor?: (attachment: Attachment) => string | null;
+}
+
+/** `root` itself, if it matches, followed by its matching descendants. */
+function selfAndDescendants<T extends Element>(root: Element, selector: string): T[] {
+  const found = Array.from(root.querySelectorAll<T>(selector));
+  return root.matches(selector) ? [root as T, ...found] : found;
+}
+
+/**
+ * Resolve `cid:` references inside trees that are already parsed, in place.
+ * Returns how many referenced images are still waiting for their bytes.
+ */
+export function resolveInlineImageReferences(
+  roots: readonly Element[],
+  attachments: readonly Attachment[],
+  options: InlineRewriteOptions,
+): number {
+  const sourceFor = options.sourceFor ?? inlineImageSource;
   const known = new Map<string, Attachment>();
   for (const attachment of attachments) {
     for (const candidate of cidCandidates(attachment)) {
@@ -86,36 +103,52 @@ export function rewriteInlineAttachmentSources(
     }
   }
   let pending = 0;
-  for (const image of doc.querySelectorAll<HTMLImageElement>('img[src]')) {
-    const reference = image.getAttribute('src') ?? '';
-    if (!/^cid:/i.test(reference)) continue;
-    const attachment = known.get(cleanCid(reference).toLowerCase());
-    const source = attachment ? inlineImageSource(attachment) : null;
-    if (source) image.src = source;
-    else if (!options.attachmentsResolved || (attachment && options.keepPendingAttachments !== false)) pending += 1;
-    else image.src = options.missingSource;
+  for (const root of roots) {
+    for (const image of selfAndDescendants<HTMLImageElement>(root, 'img[src]')) {
+      const reference = image.getAttribute('src') ?? '';
+      if (!/^cid:/i.test(reference)) continue;
+      const attachment = known.get(cleanCid(reference).toLowerCase());
+      const source = attachment ? sourceFor(attachment) : null;
+      if (source) image.setAttribute('src', source);
+      else if (!options.attachmentsResolved || (attachment && options.keepPendingAttachments !== false)) pending += 1;
+      else image.setAttribute('src', options.missingSource);
+    }
   }
 
   // Other image references are assigned to nodes too. Only validated base64
-  // URLs can enter raw stylesheet text, so serialization cannot close a style.
+  // URLs and object URLs minted by the client can enter raw stylesheet text,
+  // so serialization cannot close a style.
   const sourceForReference = (reference: string) => {
     const attachment = known.get(cleanCid(reference).toLowerCase());
-    return attachment ? inlineImageSource(attachment) ?? reference : reference;
+    return attachment ? sourceFor(attachment) ?? reference : reference;
   };
   const replaceReferences = (value: string) => value.replace(
     /cid:<[^>]*>|cid:[^"'>),]+/gi, sourceForReference,
   );
-  for (const element of doc.querySelectorAll('[style], img[srcset], [background]')) {
-    for (const attribute of ['style', 'srcset', 'background']) {
-      const value = element.getAttribute(attribute);
-      if (value) element.setAttribute(attribute, attribute === 'srcset'
-        ? value.replace(/cid:<[^>]*>|cid:[^\s,]+/gi, sourceForReference)
-        : replaceReferences(value));
+  for (const root of roots) {
+    for (const element of selfAndDescendants(root, '[style], img[srcset], [background]')) {
+      for (const attribute of ['style', 'srcset', 'background']) {
+        const value = element.getAttribute(attribute);
+        if (value) element.setAttribute(attribute, attribute === 'srcset'
+          ? value.replace(/cid:<[^>]*>|cid:[^\s,]+/gi, sourceForReference)
+          : replaceReferences(value));
+      }
+    }
+    for (const style of selfAndDescendants(root, 'style')) {
+      style.textContent = replaceReferences(style.textContent ?? '');
     }
   }
-  for (const style of doc.querySelectorAll('style')) {
-    style.textContent = replaceReferences(style.textContent ?? '');
-  }
+  return pending;
+}
+
+export function rewriteInlineAttachmentSources(
+  html: string,
+  attachments: Attachment[],
+  options: InlineRewriteOptions,
+): { html: string; pending: number } {
+  if (!html || !/cid:/i.test(html)) return { html, pending: 0 };
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const pending = resolveInlineImageReferences([doc.documentElement], attachments, options);
   return { html: doc.documentElement.outerHTML, pending };
 }
 
@@ -127,6 +160,62 @@ export function applyInlineAttachmentSources(
   return rewriteInlineAttachmentSources(html, attachments, {
     attachmentsResolved: true, missingSource, keepPendingAttachments: false,
   }).html;
+}
+
+/**
+ * Inline images for the reader, as object URLs.
+ *
+ * A data URL carries the whole image inside every string that holds it: the
+ * prepared document, its cache entry and the frame's `srcdoc`, which the
+ * engine parses again on every navigation. An object URL is a short reference
+ * to bytes decoded once. The mail frame is same-origin (`allow-same-origin`)
+ * and its CSP admits `blob:`, so it loads them like any other local image.
+ *
+ * The owner of the documents calls `revoke` once none of them can be shown
+ * again. After that, or where object URLs are unavailable, sources fall back
+ * to the validated data URL.
+ */
+export interface InlineImageUrls {
+  sourceFor(attachment: Attachment): string | null;
+  revoke(): void;
+}
+
+function imageDataUrlToBlob(dataUrl: string): Blob | null {
+  // `inlineImageSource` validated the shape: data:image/<type>;base64,<payload>
+  const type = dataUrl.slice('data:'.length, dataUrl.indexOf(';'));
+  try {
+    const binary = atob(dataUrl.slice(dataUrl.indexOf(',') + 1).replace(/\s+/g, ''));
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return new Blob([bytes], { type });
+  } catch {
+    return null;
+  }
+}
+
+export function createInlineImageUrls(): InlineImageUrls {
+  const urls = new Map<string, string>();
+  let revoked = false;
+  return {
+    sourceFor(attachment) {
+      const dataUrl = inlineImageSource(attachment);
+      if (!dataUrl || revoked || typeof URL.createObjectURL !== 'function') return dataUrl;
+      const key = `${attachment.id}\u0000${dataUrl.length}`;
+      let url = urls.get(key);
+      if (!url) {
+        const blob = imageDataUrlToBlob(dataUrl);
+        if (!blob) return dataUrl;
+        url = URL.createObjectURL(blob);
+        urls.set(key, url);
+      }
+      return url;
+    },
+    revoke() {
+      revoked = true;
+      for (const url of urls.values()) URL.revokeObjectURL(url);
+      urls.clear();
+    },
+  };
 }
 
 /** Content IDs the body references from an `<img>`, normalized for lookup. */
