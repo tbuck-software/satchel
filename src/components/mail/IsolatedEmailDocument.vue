@@ -4,7 +4,7 @@ let lastClickedFrame: HTMLIFrameElement | null = null;
 </script>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { LinkInteraction } from '@/utils/externalLinks';
 import { visibleLinkText } from '@/utils/linkLabel';
 import { buildEmailCsp } from '@/utils/emailCsp';
@@ -165,25 +165,44 @@ const shellCss = `
   }
 `;
 
-// Inline importance keeps sender html/body rules from repainting the reader
-// canvas, while coloured panels inside the message retain their own fills.
-const canvasStyle = computed(() => props.canvasColor
-  ? ' style="background: var(--satchel-email-canvas) !important"'
-  : '');
+/**
+ * Zoom and the adapted palette, as custom properties on the frame's root.
+ *
+ * They change while a message is open — a zoom step, a theme switch — and the
+ * frame applies them in place. Written into `srcdoc` they re-navigated every
+ * open frame instead: the mail parsed again, its images reloaded, and the
+ * height settled from scratch.
+ */
+function presentationProperties(): Array<[name: string, value: string]> {
+  const properties: Array<[string, string]> = [['--satchel-email-zoom', `${props.zoom}%`]];
+  if (props.canvasColor) {
+    properties.push(['--satchel-email-canvas', props.canvasColor]);
+    properties.push(['--satchel-email-ink', props.textColor ?? '']);
+  }
+  return properties;
+}
 
-const sourceDocument = computed(() => `<!doctype html>
-<html${canvasStyle.value}>
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function buildSourceDocument(): string {
+  // Inline importance keeps sender html/body rules from repainting the reader
+  // canvas, while coloured panels inside the message retain their own fills.
+  const canvasRule = props.canvasColor ? 'background: var(--satchel-email-canvas) !important' : '';
+  // The values at build time go into the markup, so the first paint already
+  // has them; later changes go through `applyPresentation`.
+  const rootStyle = [
+    ...presentationProperties().map(([name, value]) => `${name}: ${value}`),
+    ...(canvasRule ? [canvasRule] : []),
+  ].join('; ');
+  return `<!doctype html>
+<html style="${escapeAttribute(rootStyle)}">
   <head>
     <meta http-equiv="Content-Security-Policy" content="${buildEmailCsp(props.allowRemoteImages)}">
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>${shellCss}</style>
-    ${props.canvasColor ? `<style>
-    html {
-      --satchel-email-canvas: ${props.canvasColor};
-      --satchel-email-ink: ${props.textColor};
-    }
-  </style>` : ''}
     ${props.flush ? `<style>
       .satchel-email-body[data-satchel-auto-dark="on"] {
         background: transparent !important;
@@ -197,12 +216,44 @@ const sourceDocument = computed(() => `<!doctype html>
          transform would leave the layout box at the old size and clip the
          message. Senders using px stay unaffected, which is why the body
          font-size is scaled too. */
-      html { font-size: ${props.zoom}%; }
-      .satchel-email-body { font-size: ${props.zoom}%; }
+      html { font-size: var(--satchel-email-zoom, 100%); }
+      .satchel-email-body { font-size: var(--satchel-email-zoom, 100%); }
     </style>
   </head>
-  <body${canvasStyle.value}>${props.html}</body>
-</html>`);
+  <body${canvasRule ? ` style="${canvasRule}"` : ''}>${props.html}</body>
+</html>`;
+}
+
+/**
+ * Rebuilt only for what needs a new document: the content, the CSP, and the
+ * rules that exist only with a palette or on the flush canvas. A watcher
+ * rather than a computed, so reading zoom and colours does not subscribe the
+ * document to them.
+ */
+const sourceDocument = ref('');
+watch(
+  [() => props.html, () => props.allowRemoteImages, () => props.flush, () => Boolean(props.canvasColor)],
+  () => {
+    sourceDocument.value = buildSourceDocument();
+  },
+  { immediate: true },
+);
+
+function applyPresentation(doc: Document) {
+  const style = doc.documentElement.style;
+  for (const [name, value] of presentationProperties()) {
+    if (style.getPropertyValue(name) !== value) style.setProperty(name, value);
+  }
+}
+
+watch(
+  [() => props.zoom, () => props.canvasColor, () => props.textColor],
+  () => {
+    const doc = frameRef.value?.contentDocument;
+    // A frame still navigating picks the values up when it is bound.
+    if (carriesMailContent(doc)) applyPresentation(doc);
+  },
+);
 
 function linkFromEvent(event: Event): HTMLAnchorElement | null {
   const anchor = event.composedPath().find((target) => (
@@ -449,6 +500,8 @@ function bindFrameDocument(doc: Document) {
   const frame = frameRef.value;
   if (!frame) return;
   frameDocument = doc;
+  // Values that changed while the document was still navigating.
+  applyPresentation(doc);
   doc.addEventListener('click', onFrameClick);
   doc.addEventListener('mouseover', onFrameMouseOver);
   doc.addEventListener('mouseout', onFrameMouseOut as EventListener);
