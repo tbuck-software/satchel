@@ -9,11 +9,13 @@ import {
   type BackendDraft,
   type BackendDraftInput,
 } from '@/services/backend';
+import { useConnectionStore } from '@/stores/connection';
 
 export const useDraftsStore = defineStore('drafts', () => {
   const items = ref<BackendDraft[]>([]);
   const loading = ref(false);
   const lastError = ref<string | null>(null);
+  const connectionStore = useConnectionStore();
 
   const sorted = computed(() =>
     [...items.value].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
@@ -29,8 +31,12 @@ export const useDraftsStore = defineStore('drafts', () => {
     try {
       items.value = await backendListDrafts();
       lastError.value = null;
+      connectionStore.clearBackendError('drafts');
     } catch (err) {
+      // `items` stays as it was: a failed list says nothing about the drafts.
+      // The view reads the connection channel to tell this from "no drafts".
       lastError.value = err instanceof Error ? err.message : String(err);
+      connectionStore.reportBackendError('drafts', err);
     } finally {
       loading.value = false;
     }

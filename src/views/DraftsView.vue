@@ -7,10 +7,12 @@ import { useDraftsStore } from '@/stores/drafts';
 import { useComposerStore } from '@/stores/composer';
 import { useAccountsStore } from '@/stores/accounts';
 import { useThreadsStore } from '@/stores/threads';
+import { useConnectionStore } from '@/stores/connection';
 import { useDraftActions } from '@/composables/useDraftActions';
 import AppButton from '@/components/ui/AppButton.vue';
 import CountBadge from '@/components/ui/CountBadge.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
+import ErrorState from '@/components/ui/ErrorState.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
@@ -22,6 +24,7 @@ import ListDetailLayout from '@/components/layout/ListDetailLayout.vue';
 import type { BackendDraft } from '@/types/composer';
 import type { Participant } from '@/types/mail';
 import { isOwnEmail, participantDisplayName } from '@/utils/mailIdentity';
+import { backendErrorLabel } from '@/utils/backendErrorLabels';
 
 const { locale, t } = useI18n();
 const ui = useUiStore();
@@ -29,10 +32,12 @@ const drafts = useDraftsStore();
 const composer = useComposerStore();
 const accounts = useAccountsStore();
 const threads = useThreadsStore();
+const connection = useConnectionStore();
 // Shared with the draft bubble inside a thread: same delete, same undo.
 const draftActions = useDraftActions();
 
 const selectedId = ref('');
+const loadError = computed(() => connection.backendErrorFor('drafts'));
 
 onMounted(() => {
   void drafts.load();
@@ -175,6 +180,16 @@ async function discardDraft(id: string) {
 
       <div class="drafts__body">
         <SkeletonRow v-if="drafts.loading && drafts.sorted.length === 0" :count="4" height="76px" />
+
+        <!-- A failed list leaves it empty. Without this branch the empty state
+             would claim there are no drafts. -->
+        <ErrorState
+          v-else-if="loadError && drafts.sorted.length === 0"
+          :title="$t('drafts.loadFailed')"
+          :detail="backendErrorLabel(loadError)"
+          :busy="drafts.loading"
+          @retry="drafts.load()"
+        />
 
         <EmptyState
           v-else-if="drafts.sorted.length === 0"

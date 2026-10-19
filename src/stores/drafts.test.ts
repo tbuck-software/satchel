@@ -8,6 +8,7 @@ import {
   type BackendDraftInput,
 } from '@/services/backend';
 import { useDraftsStore } from './drafts';
+import { useConnectionStore } from './connection';
 
 vi.mock('@/services/backend', () => ({
   backendCommandsAvailable: vi.fn(() => true),
@@ -78,6 +79,23 @@ describe('drafts store', () => {
     await expect(drafts.save(draftInput())).rejects.toThrow('disk full');
     expect(drafts.lastError).toBe('disk full');
     expect(drafts.items).toHaveLength(0);
+  });
+
+  it('reports a failed list to the connection channel and clears it on the next success', async () => {
+    listMock.mockResolvedValueOnce([storedDraft()]);
+    const drafts = useDraftsStore();
+    await drafts.load();
+
+    listMock.mockRejectedValueOnce(new Error('database is locked'));
+    await drafts.load();
+    // The view reads this to say "could not load" instead of "no drafts".
+    expect(useConnectionStore().backendErrorFor('drafts')).toBe('database is locked');
+    // A failed list says nothing about the drafts that were already shown.
+    expect(drafts.items).toHaveLength(1);
+
+    listMock.mockResolvedValueOnce([]);
+    await drafts.load();
+    expect(useConnectionStore().backendErrorFor('drafts')).toBeNull();
   });
 
   it('sorts newest first and only lists future sends as scheduled', async () => {

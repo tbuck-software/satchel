@@ -43,6 +43,7 @@ const harness = vi.hoisted(() => ({
   draftActions: null as DraftActionsHarness | null,
   items: null as BackendDraft[] | null,
   busyIds: null as Set<string> | null,
+  connection: null as { errors: Record<string, string>; backendErrorFor: (source: string) => string | null } | null,
 }));
 
 vi.mock('vue-i18n', () => ({
@@ -68,6 +69,10 @@ vi.mock('@/stores/accounts', () => ({
 
 vi.mock('@/stores/threads', () => ({
   useThreadsStore: () => harness.threads,
+}));
+
+vi.mock('@/stores/connection', () => ({
+  useConnectionStore: () => harness.connection,
 }));
 
 vi.mock('@/composables/useDraftActions', () => ({
@@ -253,6 +258,11 @@ function setup(items: BackendDraft[] = []) {
     isBusy: vi.fn((id: string) => harness.busyIds!.has(id)),
     discard: vi.fn().mockResolvedValue(true),
   };
+  const errors = reactive<Record<string, string>>({});
+  harness.connection = {
+    errors,
+    backendErrorFor: (source: string) => errors[source] ?? null,
+  };
 }
 
 function render() {
@@ -351,6 +361,21 @@ describe('DraftsView', () => {
 
     await wrapper.get('[data-test="empty-action"]').trigger('click');
     expect(harness.composer!.openNew).toHaveBeenCalledOnce();
+  });
+
+  it('shows an error with retry instead of the empty state when the list failed to load', async () => {
+    harness.connection!.errors.drafts = 'database is locked';
+    const wrapper = render();
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="list"] [data-test="empty-state"]').exists()).toBe(false);
+    const error = wrapper.get('[role="alert"]');
+    expect(error.text()).toContain('drafts.loadFailed');
+    expect(error.text()).toContain('database is locked');
+
+    harness.drafts!.load.mockClear();
+    await error.get('[data-test="app-button"]').trigger('click');
+    expect(harness.drafts!.load).toHaveBeenCalledOnce();
   });
 
   it('selects drafts and shows either a thread preview or the draft preview', async () => {
