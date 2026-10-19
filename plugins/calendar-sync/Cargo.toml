@@ -9,7 +9,8 @@ edition = "2021"
 api_version = "1.0"
 capabilities = ["read_threads"]
 events = ["message.received"]
-ui_slots = ["sidebar_section"]
+# This example has no implemented UI contribution yet.
+ui_slots = []
 trust = "local_unsigned"
 
 [lib]

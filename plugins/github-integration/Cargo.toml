@@ -9,7 +9,8 @@ edition = "2021"
 api_version = "1.0"
 capabilities = ["read_threads", "network_access"]
 events = ["thread.updated", "workflow.transitioned"]
-ui_slots = ["thread_view_panel", "assistant_context_panel"]
+# This example has no implemented UI contribution yet.
+ui_slots = []
 trust = "local_unsigned"
 
 [lib]

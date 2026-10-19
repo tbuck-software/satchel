@@ -39,6 +39,8 @@ their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - Outlook/Graph sending was rewritten to submit MIME and is **not yet
   verified against a live account.**
 - POP3 has not been verified against a live server.
+- The bundled calendar-sync and GitHub plugins are development examples. They
+  do not provide UI integrations. Calendar access uses the built-in calendar.
 - PGP signing and encryption work end to end (RFC 3156), but key management
   lives in the plugin manager rather than a dedicated settings page.
 - Account credentials are encrypted at rest (AES-GCM) with a key from the OS

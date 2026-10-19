@@ -43,7 +43,11 @@ async function renderOutputs() {
 async function load() {
   try {
     plugins.value = (await backendListPlugins()).filter((plugin) =>
-      plugin.ui_slots.includes(props.slotName),
+      plugin.enabled &&
+      plugin.ui_slots.includes(props.slotName) &&
+      // Match the runtime's command policy. The sidebar receives no mail data;
+      // all other slots require an explicit message-access grant.
+      (props.slotName === 'sidebar_section' || plugin.granted_capabilities.includes('read_threads')),
     );
     await renderOutputs();
   } catch {
