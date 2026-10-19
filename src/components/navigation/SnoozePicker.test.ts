@@ -50,6 +50,42 @@ describe('SnoozePicker', () => {
     expect(picker?.parentElement).toBe(document.body);
   });
 
+  it('is a labelled dialog that takes the focus when it opens', async () => {
+    wrapper = mount(SnoozePicker, {
+      attachTo: document.body,
+      props: { open: true },
+      global: { plugins: [createPinia()] },
+    });
+    await wrapper.vm.$nextTick();
+
+    const picker = document.body.querySelector<HTMLElement>('.picker')!;
+    expect(picker.getAttribute('role')).toBe('dialog');
+    const titleId = picker.getAttribute('aria-labelledby');
+    expect(titleId).toBeTruthy();
+    expect(document.getElementById(titleId!)?.textContent).toBe('Snooze');
+    expect(picker.contains(document.activeElement)).toBe(true);
+  });
+
+  it('says so when the custom time is in the past instead of ignoring Apply', async () => {
+    wrapper = mount(SnoozePicker, {
+      attachTo: document.body,
+      props: { open: true },
+      global: { plugins: [createPinia()] },
+    });
+    const apply = () => document.body.querySelectorAll<HTMLButtonElement>('.actions button')[1]!;
+    expect(apply().disabled).toBe(true);
+
+    const input = document.body.querySelector<HTMLInputElement>('input[type="datetime-local"]')!;
+    input.value = '2001-01-01T10:00';
+    input.dispatchEvent(new Event('input'));
+    await wrapper.vm.$nextTick();
+
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toContain('future');
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(apply().disabled).toBe(true);
+    expect(wrapper.emitted('choose')).toBeUndefined();
+  });
+
   it('hydrates and persists recent manual dates through the persistence boundary', async () => {
     const storage = memoryStorage({
       'satchel.waitingRecentDates': '["2099-01-02T10:00:00.000Z"]',

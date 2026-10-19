@@ -2,9 +2,10 @@
 import AppButton from '@/components/ui/AppButton.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { useDismissable } from '@/composables/useDismissable';
+import { useFocusTrap } from '@/composables/useFocusTrap';
 import { MAX_RECENT_SNOOZE_DATES } from '@/config/historyLimits';
 import { snoozePersistence } from '@/persistence/snooze';
-import { computed, ref } from 'vue';
+import { computed, ref, useId, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 const { t, d } = useI18n();
@@ -19,6 +20,11 @@ const emit = defineEmits<{
 }>();
 
 const selected = ref('');
+const picker = ref<HTMLElement | null>(null);
+const titleId = useId();
+const errorId = useId();
+/** Set when the custom time is not in the future; Apply used to do nothing. */
+const manualInPast = ref(false);
 const recentManual = ref<string[]>(readRecentManualDates());
 
 type SnoozePreset = {
@@ -97,14 +103,26 @@ function chooseDate(date: Date | string) {
   emit('close');
 }
 
+function isPast(value: string): boolean {
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) || time <= Date.now();
+}
+
+watch(selected, (value) => {
+  manualInPast.value = value !== '' && isPast(value);
+});
+
 function submit() {
   if (!selected.value) {
     return;
   }
-  const manualDate = new Date(selected.value);
-  if (manualDate.getTime() <= Date.now()) {
+  // Checked again here: a time that was ahead when it was typed can have
+  // passed by the time Apply is pressed.
+  if (isPast(selected.value)) {
+    manualInPast.value = true;
     return;
   }
+  const manualDate = new Date(selected.value);
   const isoDate = manualDate.toISOString();
   storeRecentManualDate(isoDate);
   chooseDate(isoDate);
@@ -112,12 +130,25 @@ function submit() {
 
 // Back closes this before whatever it was opened from.
 useDismissable(() => props.open, () => emit('close'));
+
+// The picker is teleported to the end of the page; without moving focus in,
+// a keyboard user would have to tab through everything to reach it.
+const { onTab } = useFocusTrap(picker, { isOpen: () => props.open, restingFocus: 'first' });
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="props.open" class="picker" @click.stop>
-      <h4>{{ $t('nav.snooze.title') }}</h4>
+    <div
+      v-if="props.open"
+      ref="picker"
+      class="picker"
+      role="dialog"
+      :aria-labelledby="titleId"
+      tabindex="-1"
+      @click.stop
+      @keydown.tab="onTab"
+    >
+      <h4 :id="titleId">{{ $t('nav.snooze.title') }}</h4>
       <div class="presets">
         <CardButton
           v-for="preset in presets"
@@ -142,11 +173,27 @@ useDismissable(() => props.open, () => emit('close'));
       </div>
       <label class="manual">
         <span class="section-label">{{ $t('nav.snooze.manual') }}</span>
-        <input v-model="selected" type="datetime-local" :min="minManualValue" />
+        <input
+          v-model="selected"
+          type="datetime-local"
+          :min="minManualValue"
+          :aria-invalid="manualInPast ? 'true' : undefined"
+          :aria-describedby="manualInPast ? errorId : undefined"
+        />
       </label>
+      <p v-if="manualInPast" :id="errorId" class="manual-error" role="alert">
+        {{ $t('nav.snooze.pastDate') }}
+      </p>
       <div class="actions">
         <AppButton @click="emit('close')" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
-        <AppButton @click="submit" variant="primary" size="sm">{{ $t('common.apply') }}</AppButton>
+        <AppButton
+          @click="submit"
+          variant="primary"
+          size="sm"
+          :disabled="!selected || manualInPast"
+        >
+          {{ $t('common.apply') }}
+        </AppButton>
       </div>
     </div>
   </Teleport>
@@ -211,6 +258,12 @@ button:hover {
 
 .preset small {
   color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.manual-error {
+  margin: 0;
+  color: var(--accent-red-soft);
   font-size: var(--font-size-xs);
 }
 
