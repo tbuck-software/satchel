@@ -9,6 +9,8 @@ import type {
   BackendCalendarSource,
 } from '@/types/calendar';
 import type { CalendarItem } from '@/utils/calendarGrid';
+import type { ConfirmRequest } from '@/composables/useConfirm';
+import { answerConfirms, type DialogStub } from '@/test/dialogs';
 
 type InvitesHarness = {
   items: BackendCalendarInvite[];
@@ -391,6 +393,47 @@ describe('CalendarView', () => {
 
     expect(harness.invites!.respond).toHaveBeenCalledWith('invite-1', 'accepted');
     expect(harness.toast.success).toHaveBeenCalledWith('Acceptance sent.');
+  });
+
+  describe('deleting an event', () => {
+    let confirms: DialogStub<ConfirmRequest, boolean>;
+
+    beforeEach(() => {
+      confirms = answerConfirms(false);
+    });
+
+    afterEach(() => confirms.stop());
+
+    async function openEventDetails() {
+      harness.invites!.events = [makeEvent()];
+      const wrapper = render();
+      await wrapper.get('[data-test="select-item"]').trigger('click');
+      await nextTick();
+      return wrapper;
+    }
+
+    it('asks first and keeps the event and its details when the answer is no', async () => {
+      const wrapper = await openEventDetails();
+
+      await wrapper.get('[data-test="remove"]').trigger('click');
+      await flushPromises();
+
+      expect(confirms.asked).toHaveBeenCalledOnce();
+      expect(confirms.asked.mock.calls[0]![0].tone).toBe('danger');
+      expect(harness.invites!.deleteEvent).not.toHaveBeenCalled();
+      expect(wrapper.find('[data-test="event-details"]').exists()).toBe(true);
+    });
+
+    it('deletes the event once it is confirmed', async () => {
+      confirms.reply(true);
+      const wrapper = await openEventDetails();
+
+      await wrapper.get('[data-test="remove"]').trigger('click');
+      await flushPromises();
+
+      expect(harness.invites!.deleteEvent).toHaveBeenCalledOnce();
+      expect(wrapper.find('[data-test="event-details"]').exists()).toBe(false);
+    });
   });
 
   it('saves a new event for the active email account', async () => {
