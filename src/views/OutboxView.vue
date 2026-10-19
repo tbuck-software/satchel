@@ -248,7 +248,6 @@ async function cancel(item: BackendOutboxItem) {
 
       <EmptyState
         v-else-if="outbox.items.length === 0"
-        icon="📭"
         :title="$t('outbox.empty.title')"
         :description="$t('outbox.empty.description')"
       />
@@ -496,7 +495,6 @@ async function cancel(item: BackendOutboxItem) {
       </article>
       <div v-else class="detail-placeholder">
         <EmptyState
-          icon="📭"
           :title="$t('outbox.detail.emptyTitle')"
           :description="$t('outbox.detail.emptyDescription')"
         />

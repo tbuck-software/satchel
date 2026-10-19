@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import EmailRenderer from '@/components/mail/EmailRenderer.vue';
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import ToastStack from '@/components/ui/ToastStack.vue';
 import { useToast } from '@/composables/useToast';
@@ -139,13 +140,16 @@ async function importIntoAccount() {
 
 <template>
   <main class="viewer">
-    <EmptyState v-if="loading" icon="✉️" :title="t('viewer.loading')" />
+    <EmptyState v-if="loading" :title="t('viewer.loading')">
+      <template #icon><AppIcon size="lg"><rect x="2.6" y="3.8" width="10.8" height="8.4" rx="1.4" /><path d="m3 5 5 3.4L13 5" /></AppIcon></template>
+    </EmptyState>
     <EmptyState
       v-else-if="error"
-      icon="✉️"
       :title="t('viewer.openFailed')"
       :description="error"
-    />
+    >
+      <template #icon><AppIcon size="lg"><rect x="2.6" y="3.8" width="10.8" height="8.4" rx="1.4" /><path d="m3 5 5 3.4L13 5" /></AppIcon></template>
+    </EmptyState>
     <template v-else-if="preview">
       <header class="head">
         <h1 class="subject">{{ preview.subject }}</h1>
