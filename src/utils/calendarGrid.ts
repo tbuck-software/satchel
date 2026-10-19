@@ -202,7 +202,7 @@ export function sourceColorMap(keys: Iterable<string>): Map<string, string> {
 
 export function sourceLabel(key: string): string {
   if (key === 'local') return t('calendar.source.local');
-  if (key === 'caldav') return 'GroupWise';
+  if (key === 'caldav') return t('calendar.source.caldav');
   if (key === 'invites') return t('calendar.source.invites');
   return prettifyGoogleCalendarId(key.slice('google:'.length));
 }

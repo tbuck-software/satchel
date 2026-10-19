@@ -286,7 +286,7 @@ describe('filterInvitesWithoutMirroredEvents', () => {
 describe('calendar sources', () => {
   it('labels the built-in sources in English and prettifies Google ids', () => {
     expect(sourceLabel('local')).toBe('Local');
-    expect(sourceLabel('caldav')).toBe('GroupWise');
+    expect(sourceLabel('caldav')).toBe('CalDAV');
     expect(sourceLabel('invites')).toBe('Invitations');
     expect(sourceLabel('google:alex@example.com')).toBe('alex@example.com');
     expect(sourceLabel('google:de.german#holiday@group.v.calendar.google.com')).toBe('de german holiday');

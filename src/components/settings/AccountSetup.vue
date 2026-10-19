@@ -567,7 +567,7 @@ async function removeAccount(accountId: string, email: string) {
     <div v-if="groupwareOpen" class="oauth-form groupware-form">
       <div class="oauth-hero">
         <div class="oauth-provider-badge">
-          <span class="oauth-provider-dot" /><span>GroupWise</span>
+          <span class="oauth-provider-dot" /><span>{{ $t('settings.accounts.groupware.badge') }}</span>
         </div>
         <p class="oauth-hero-title">
           {{ $t('settings.accounts.groupware.formTitle', { email: groupwareAccountEmail }) }}

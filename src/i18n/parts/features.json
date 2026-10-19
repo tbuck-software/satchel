@@ -54,6 +54,7 @@
       "source": {
         "heading": "Calendars",
         "local": "Local",
+        "caldav": "CalDAV",
         "invites": "Invitations",
         "googlePrimary": "Main calendar",
         "show": "Show",
@@ -436,6 +437,7 @@
       "source": {
         "heading": "Kalender",
         "local": "Lokal",
+        "caldav": "CalDAV",
         "invites": "Einladungen",
         "googlePrimary": "Hauptkalender",
         "show": "Einblenden",

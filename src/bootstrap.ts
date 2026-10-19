@@ -798,7 +798,7 @@ export function useAppBootstrap(): void {
     }
 
     // DAV sync is independent from mail transport. Keep it on a slower timer so
-    // GroupWise changes arrive without delaying or coupling them to mail sync.
+    // CalDAV / CardDAV changes arrive without delaying or coupling them to mail sync.
     if (backendSupportsNativeCommands()) {
       const runGroupwareSync = async () => {
         try {
