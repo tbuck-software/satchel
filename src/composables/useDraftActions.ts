@@ -38,16 +38,17 @@ export function useDraftActions() {
 
   /**
    * Undo needs the draft's content, and after the delete there is nothing left
-   * to read it from — so it is read first, from the store when the list is
-   * loaded and from the backend otherwise.
+   * to read it from — so it is read first. The backend comes first: the list
+   * in the store is loaded once, and saves from a popout or another device
+   * never reach it, so an undo from there restored an older version. The
+   * cached row is only the fallback when the read fails.
    */
   async function snapshot(draftId: string): Promise<BackendDraft | null> {
-    const known = drafts.items.find((item) => item.id === draftId);
-    if (known) return known;
+    const known = drafts.items.find((item) => item.id === draftId) ?? null;
     try {
-      return await drafts.fetchOne(draftId);
+      return (await drafts.fetchOne(draftId)) ?? known;
     } catch {
-      return null;
+      return known;
     }
   }
 

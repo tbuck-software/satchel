@@ -166,3 +166,58 @@ describe('RecipientChips contact suggestions', () => {
     wrapper.unmount();
   });
 });
+
+describe('RecipientChips keyboard and screen readers', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  it('names the address on each remove button and says which chips are invalid', () => {
+    const wrapper = mount(RecipientChips, { props: { modelValue: ['a@x.de', '"Buck'] } });
+    const buttons = wrapper.findAll('.chip-remove');
+    expect(buttons[0]!.attributes('aria-label')).toBe('Remove a@x.de');
+    expect(buttons[1]!.attributes('aria-label')).toBe('Remove "Buck');
+    const chips = wrapper.findAll('.chip');
+    expect(chips[0]!.find('.sr-only').exists()).toBe(false);
+    expect(chips[1]!.get('.sr-only').text()).toBe('(not a valid address)');
+    wrapper.unmount();
+  });
+
+  it('selects the last chip on the first Backspace and removes it on the second', async () => {
+    const wrapper = mount(RecipientChips, { props: { modelValue: ['a@x.de', 'b@y.de'] } });
+    const input = wrapper.get('input');
+
+    await input.trigger('keydown', { key: 'Backspace' });
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+    expect(wrapper.findAll('.chip')[1]!.classes()).toContain('chip--pending-removal');
+    expect(wrapper.get('[role="status"]').text()).toContain('b@y.de');
+
+    await input.trigger('keydown', { key: 'Backspace' });
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toEqual(['a@x.de']);
+    wrapper.unmount();
+  });
+
+  it('forgets the selection when another key comes in between', async () => {
+    const wrapper = mount(RecipientChips, { props: { modelValue: ['a@x.de'] } });
+    const input = wrapper.get('input');
+
+    await input.trigger('keydown', { key: 'Backspace' });
+    await input.trigger('keydown', { key: 'ArrowLeft' });
+    await input.trigger('keydown', { key: 'Backspace' });
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it.each(['metaKey', 'ctrlKey'] as const)('turns the typed address into a chip, then submits on %s+Enter', async (modifier) => {
+    const wrapper = mount(RecipientChips, { props: { modelValue: [] } });
+    const input = wrapper.get('input');
+    await input.setValue('c@z.de');
+
+    await input.trigger('keydown', { key: 'Enter', [modifier]: true });
+
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toEqual(['c@z.de']);
+    expect(wrapper.emitted('submit')).toHaveLength(1);
+    wrapper.unmount();
+  });
+});

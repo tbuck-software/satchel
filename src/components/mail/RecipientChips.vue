@@ -18,6 +18,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string[]): void;
+  /** Cmd/Ctrl+Enter, after the address being typed has become a chip. */
+  (e: 'submit'): void;
 }>();
 
 const { t } = useI18n();
@@ -28,10 +30,19 @@ const suggestions = ref<BackendContact[]>([]);
 const suggestionOpen = ref(false);
 const activeSuggestionIndex = ref(-1);
 const listboxId = `recipient-suggestions-${useId()}`;
+/**
+ * The chip a first Backspace in the empty field selected. The second one
+ * removes it; one stray keypress used to take a recipient away unseen.
+ */
+const pendingRemoval = ref<number | null>(null);
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let searchRevision = 0;
 
 const chips = computed(() => props.modelValue);
+
+watch(chips, () => {
+  pendingRemoval.value = null;
+});
 
 /** Appends tokens that are not chips yet, preserving their order. */
 function addTokens(tokens: string[]) {
@@ -51,6 +62,15 @@ function commitDraft() {
 }
 
 function onKey(event: KeyboardEvent) {
+  if (event.key !== 'Backspace') pendingRemoval.value = null;
+  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+    event.preventDefault();
+    if (draft.value.trim()) commitDraft();
+    suggestionOpen.value = false;
+    activeSuggestionIndex.value = -1;
+    emit('submit');
+    return;
+  }
   if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && suggestions.value.length > 0) {
     event.preventDefault();
     suggestionOpen.value = true;
@@ -81,9 +101,22 @@ function onKey(event: KeyboardEvent) {
       commitDraft();
     }
   } else if (event.key === 'Backspace' && draft.value === '' && chips.value.length > 0) {
-    emit('update:modelValue', chips.value.slice(0, -1));
+    const last = chips.value.length - 1;
+    if (pendingRemoval.value === last) remove(last);
+    else pendingRemoval.value = last;
   }
 }
+
+function onBlur() {
+  commitDraft();
+  pendingRemoval.value = null;
+}
+
+const pendingRemovalAnnouncement = computed(() => {
+  const index = pendingRemoval.value;
+  const value = index === null ? undefined : chips.value[index];
+  return value === undefined ? '' : t('compose.recipients.backspaceAgain', { address: value });
+});
 
 function suggestionId(index: number) {
   return `${listboxId}-${index}`;
@@ -169,11 +202,12 @@ defineExpose({ focus: () => inputRef.value?.focus() });
       v-for="(value, index) in chips"
       :key="value + index"
       class="chip"
-      :class="{ 'chip--invalid': !isValidRecipient(value) }"
+      :class="{ 'chip--invalid': !isValidRecipient(value), 'chip--pending-removal': pendingRemoval === index }"
       :title="isValidRecipient(value) ? undefined : t('compose.recipients.invalid')"
     >
       {{ value }}
-      <IconButton :title="t('common.remove')" class="chip-remove" @click.stop="remove(index)">×</IconButton>
+      <span v-if="!isValidRecipient(value)" class="sr-only">{{ t('compose.recipients.invalidMarker') }}</span>
+      <IconButton :title="t('compose.recipients.remove', { address: value })" class="chip-remove" @click.stop="remove(index)">×</IconButton>
     </span>
     <input
       ref="inputRef"
@@ -188,10 +222,11 @@ defineExpose({ focus: () => inputRef.value?.focus() });
       :aria-controls="suggestionOpen ? listboxId : undefined"
       :aria-activedescendant="suggestionOpen && activeSuggestionIndex >= 0 ? suggestionId(activeSuggestionIndex) : undefined"
       @keydown="onKey"
-      @blur="commitDraft"
+      @blur="onBlur"
       @paste="onPaste"
     />
   </div>
+  <span class="sr-only" role="status" aria-live="polite">{{ pendingRemovalAnnouncement }}</span>
   <div v-if="suggestionOpen" :id="listboxId" class="suggestions" role="listbox">
     <CardButton
       v-for="(contact, index) in suggestions"
@@ -289,6 +324,10 @@ defineExpose({ focus: () => inputRef.value?.focus() });
 .chip--invalid {
   background: color-mix(in srgb, var(--accent-red) 16%, var(--bg-raised));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-red) 55%, transparent) inset;
+}
+
+.chip--pending-removal {
+  box-shadow: 0 0 0 2px var(--accent-primary) inset;
 }
 
 .chip-remove {

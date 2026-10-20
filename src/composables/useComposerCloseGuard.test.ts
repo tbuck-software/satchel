@@ -3,7 +3,7 @@
 import { defineComponent, h, ref } from 'vue';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ComposerDraftState } from '@/utils/composerDraftState';
+import { composerDraftInput, type ComposerDraftState } from '@/utils/composerDraftState';
 
 const nativeWindow = vi.hoisted(() => ({
   getCurrent: vi.fn(),
@@ -158,6 +158,27 @@ describe('useComposerCloseGuard', () => {
 
     setState(draftState({ body: '   ' }));
     expect(closeGuard.hasMeaningfulContent()).toBe(false);
+    expect(closeGuard.shouldConfirmClose()).toBe(false);
+  });
+
+  it('compares with the last saved draft, not the one the composer opened', () => {
+    const { closeGuard, setState } = harness({ state: draftState({ body: 'Hello' }) });
+    closeGuard.captureBaseline();
+
+    // Typed and autosaved, then the typing is taken back.
+    setState(draftState({ body: 'Hello world' }));
+    closeGuard.markSaved(composerDraftInput(draftState({ body: 'Hello world' })));
+    expect(closeGuard.shouldConfirmClose()).toBe(false);
+    setState(draftState({ body: 'Hello' }));
+
+    // Matches the opening state, but the disk holds "Hello world".
+    expect(closeGuard.shouldConfirmClose()).toBe(true);
+  });
+
+  it('does not treat the plain-text switch alone as unsaved, since it is not stored', () => {
+    const { closeGuard, setState } = harness({ state: draftState({ body: 'Hello' }) });
+    closeGuard.captureBaseline();
+    setState(draftState({ body: 'Hello', plainText: true }));
     expect(closeGuard.shouldConfirmClose()).toBe(false);
   });
 

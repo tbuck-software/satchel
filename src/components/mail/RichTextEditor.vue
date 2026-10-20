@@ -136,6 +136,12 @@ const emit = defineEmits<{
 }>();
 
 const editor = shallowRef<Editor | null>(null);
+/**
+ * The HTML this editor last emitted. The parent hands it straight back through
+ * `html`; recognising the echo saves serialising the whole document a second
+ * time per keystroke. `null` whenever the content was replaced without an emit.
+ */
+let lastEmittedHtml: string | null = null;
 const showLinkDialog = ref(false);
 const linkUrl = ref('');
 const linkText = ref('');
@@ -216,6 +222,7 @@ editor.value = new Editor({
   onUpdate: ({ editor: ed }) => {
     const html = ed.getHTML();
     const text = ed.getText();
+    lastEmittedHtml = html;
     emit('update:modelValue', text);
     emit('update:html', html);
   },
@@ -237,10 +244,12 @@ watch(
     // skip when the change came from us.
     if (!editor.value) return;
     if (newHtml === oldHtml) return;
+    if (newHtml !== null && newHtml === lastEmittedHtml) return;
     const current = editor.value.getHTML();
     const candidate = newHtml || htmlFromText(props.modelValue);
     if (candidate !== current) {
       editor.value.commands.setContent(candidate, { emitUpdate: false });
+      lastEmittedHtml = null;
       if (props.focusPosition === 'start') editor.value.commands.setTextSelection(1);
     }
   },
@@ -253,6 +262,7 @@ watch(
     // If only plain-text changed externally and editor is empty, seed it.
     if (!props.html && !editor.value.getText() && next) {
       editor.value.commands.setContent(htmlFromText(next), { emitUpdate: false });
+      lastEmittedHtml = null;
     }
   },
 );

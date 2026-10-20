@@ -350,11 +350,11 @@ async fn build_outgoing_message(
         crate::commands::messages::normalize_recipients(values).map_err(|error| error.encoded())
     };
     let to = normalize(&input.to)?;
-    if to.is_empty() {
-        return Err("missing recipient address".to_string());
-    }
     let cc = normalize(&input.cc)?;
     let bcc = normalize(&input.bcc)?;
+    if to.is_empty() && cc.is_empty() && bcc.is_empty() {
+        return Err("missing recipient address".to_string());
+    }
 
     let reply_context = if let Some(thread_id) = input.thread_id.as_deref() {
         Some(

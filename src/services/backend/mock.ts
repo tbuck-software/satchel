@@ -837,7 +837,9 @@ const handlers: Record<string, Handler> = {
     const scope = input(payload);
     const accountId = payload.accountId as string;
     const recipients = (scope.to as string[] | undefined) ?? [];
-    if (recipients.length === 0) throw new Error('missing recipient');
+    // Like the backend: Cc or Bcc alone is enough.
+    const copies = [...((scope.cc as string[] | undefined) ?? []), ...((scope.bcc as string[] | undefined) ?? [])];
+    if (recipients.length === 0 && copies.length === 0) throw new Error('missing recipient');
 
     assertDraftNotQueued(scope.draft_id);
     const scheduledFor = (scope.scheduled_for as string | null) ?? null;

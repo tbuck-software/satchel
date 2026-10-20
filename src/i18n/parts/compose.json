@@ -8,6 +8,13 @@
       "noSubject": "(No subject)",
       "send": "Send",
       "sending": "Sending…",
+      "sendBlocked": {
+        "draftLoadFailed": "The draft could not be loaded, so it cannot be sent.",
+        "noAccount": "Add an email account to send.",
+        "noRecipients": "Add a recipient under To, Cc or Bcc.",
+        "invalidRecipients": "Not a valid email address: {addresses}",
+        "empty": "Write a message or attach a file."
+      },
       "discardDraft": "Discard draft",
       "sender": "Sender",
       "identityAlias": "{email} (alias)",
@@ -44,7 +51,10 @@
         "ccBcc": "Cc/Bcc",
         "showCcBcc": "Show Cc and Bcc",
         "collapseCcBcc": "Collapse Cc and Bcc",
-        "invalid": "This is not a valid email address."
+        "invalid": "This is not a valid email address.",
+        "invalidMarker": "(not a valid address)",
+        "remove": "Remove {address}",
+        "backspaceAgain": "{address} selected. Press Backspace again to remove it."
       },
       "body": {
         "plainAriaLabel": "Message (plain text)"
@@ -91,7 +101,8 @@
         "button": "Template…",
         "title": "Insert template",
         "searchPlaceholder": "Search templates…",
-        "empty": "No templates yet. Create them under Settings > Templates."
+        "empty": "No templates yet. Create them under Settings > Templates.",
+        "renderFailed": "Could not insert the template: {error}"
       },
       "sendLater": {
         "title": "Send later",
@@ -125,7 +136,8 @@
         "show": "Show history | Show history (1 message) | Show history ({count} messages)",
         "loading": "Loading history…",
         "empty": "No messages in this conversation.",
-        "noTextContent": "(No text content)"
+        "noTextContent": "(No text content)",
+        "loadFailed": "Could not load the conversation: {error}"
       },
       "editor": {
         "placeholder": "Write your message…",
@@ -338,6 +350,13 @@
       "noSubject": "(Ohne Betreff)",
       "send": "Senden",
       "sending": "Sende…",
+      "sendBlocked": {
+        "draftLoadFailed": "Der Entwurf konnte nicht geladen werden und kann daher nicht gesendet werden.",
+        "noAccount": "Füge ein E-Mail-Konto hinzu, um zu senden.",
+        "noRecipients": "Füge einen Empfänger unter An, Cc oder Bcc hinzu.",
+        "invalidRecipients": "Keine gültige E-Mail-Adresse: {addresses}",
+        "empty": "Schreib eine Nachricht oder hänge eine Datei an."
+      },
       "discardDraft": "Entwurf verwerfen",
       "sender": "Absender",
       "identityAlias": "{email} (Alias)",
@@ -374,7 +393,10 @@
         "ccBcc": "Cc/Bcc",
         "showCcBcc": "Cc und Bcc anzeigen",
         "collapseCcBcc": "Cc und Bcc einklappen",
-        "invalid": "Das ist keine gültige E-Mail-Adresse."
+        "invalid": "Das ist keine gültige E-Mail-Adresse.",
+        "invalidMarker": "(keine gültige Adresse)",
+        "remove": "{address} entfernen",
+        "backspaceAgain": "{address} ausgewählt. Erneut Rücktaste drücken, um die Adresse zu entfernen."
       },
       "body": {
         "plainAriaLabel": "Nachricht (Nur-Text)"
@@ -421,7 +443,8 @@
         "button": "Vorlage…",
         "title": "Vorlage einfügen",
         "searchPlaceholder": "Vorlage suchen…",
-        "empty": "Keine Vorlagen vorhanden. Lege welche unter Settings > Vorlagen an."
+        "empty": "Keine Vorlagen vorhanden. Lege welche unter Settings > Vorlagen an.",
+        "renderFailed": "Die Vorlage konnte nicht eingefügt werden: {error}"
       },
       "sendLater": {
         "title": "Später senden",
@@ -455,7 +478,8 @@
         "show": "Verlauf anzeigen | Verlauf anzeigen (1 Nachricht) | Verlauf anzeigen ({count} Nachrichten)",
         "loading": "Verlauf wird geladen…",
         "empty": "Keine Nachrichten im Verlauf.",
-        "noTextContent": "(Kein Textinhalt)"
+        "noTextContent": "(Kein Textinhalt)",
+        "loadFailed": "Der Verlauf konnte nicht geladen werden: {error}"
       },
       "editor": {
         "placeholder": "Nachricht verfassen…",
