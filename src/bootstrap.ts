@@ -576,6 +576,15 @@ export function useAppBootstrap(): void {
   const startupEvents = createStartupEventBuffer();
   let bootstrapDisposed = false;
 
+  /**
+   * Keep a listener for the mounted app, or release it at once when the root
+   * unmounted while its registration was still awaiting.
+   */
+  function adoptDisposer(dispose: Disposer) {
+    if (bootstrapDisposed) void dispose();
+    else eventDisposers.push(dispose);
+  }
+
   async function registerStartupEvents() {
     if (!backendSupportsNativeCommands()) return;
     const toast = useToast();
@@ -671,10 +680,8 @@ export function useAppBootstrap(): void {
     ];
     const outcomes = await Promise.allSettled(registrations.map((entry) => entry.register()));
     outcomes.forEach((outcome, index) => {
-      if (outcome.status === 'fulfilled') {
-        if (bootstrapDisposed) void outcome.value();
-        else eventDisposers.push(outcome.value);
-      } else console.warn(`event listener ${registrations[index]!.name} failed to register`, outcome.reason);
+      if (outcome.status === 'fulfilled') adoptDisposer(outcome.value);
+      else console.warn(`event listener ${registrations[index]!.name} failed to register`, outcome.reason);
     });
     if (bootstrapDisposed) return;
     // The native delegate retains a cold-start click until this pull marks us ready.
@@ -702,18 +709,17 @@ export function useAppBootstrap(): void {
         try {
           const { listen } = await import('@tauri-apps/api/event');
           // iOS: a tap the native side held back until this listener existed.
-          eventDisposers.push(
-            await listen<NativeNotificationRoute>('mobile:notification-route', ({ payload }) => {
-              const threadId = notificationRouteThreadId(payload);
-              if (threadId) void router.push({ name: 'thread', params: { id: threadId } });
-            }),
-            await listen('mobile:resumed', () => {
-              void refreshMobileMailState();
-            }),
-            await listen('mobile:notification-navigation', () => {
-              void consumePendingMobileNavigation();
-            }),
-          );
+          adoptDisposer(await listen<NativeNotificationRoute>('mobile:notification-route', ({ payload }) => {
+            const threadId = notificationRouteThreadId(payload);
+            if (threadId) void router.push({ name: 'thread', params: { id: threadId } });
+          }));
+          adoptDisposer(await listen('mobile:resumed', () => {
+            void refreshMobileMailState();
+          }));
+          adoptDisposer(await listen('mobile:notification-navigation', () => {
+            void consumePendingMobileNavigation();
+          }));
+          if (bootstrapDisposed) return;
           mobileVisibilityHandler = () => {
             if (document.visibilityState === 'visible') {
               void refreshMobileMailState();
@@ -739,6 +745,8 @@ export function useAppBootstrap(): void {
     // the first Inbox rows.
     await coreStoresLoad;
     await startupEvents.flush();
+    // Every await below can outlive the root; nothing may start after unmount.
+    if (bootstrapDisposed) return;
     cancelInteractionPrefetch = scheduleIdleWork(() => {
       // The reader and command palette are the two most common first actions.
       // Warm their code only after the Inbox is usable, so the initial download
@@ -764,6 +772,7 @@ export function useAppBootstrap(): void {
       outboxStore.start(),
       connectionStore.start(),
     ]);
+    if (bootstrapDisposed) return;
     void contactsStore.refreshLocalAvatars();
 
     if (backendSupportsNativeCommands()) {
@@ -779,6 +788,7 @@ export function useAppBootstrap(): void {
           );
         });
         const results = await Promise.allSettled(scans);
+        if (bootstrapDisposed) return;
         const suggestionIds = new Set(
           results.flatMap((result) =>
             result.status === 'fulfilled' ? result.value.map((item) => item.id) : [],
@@ -803,11 +813,13 @@ export function useAppBootstrap(): void {
       const runGroupwareSync = async () => {
         try {
           await backendSyncGroupware();
+          if (bootstrapDisposed) return;
           await Promise.all([contactsStore.load(), invitesStore.load()]);
         } catch {
           // Configuration and authentication errors are surfaced in account settings.
         } finally {
-          groupwareSyncTimer = window.setTimeout(() => {
+          // `onBeforeUnmount` already cleared the timer; do not arm a new one.
+          if (!bootstrapDisposed) groupwareSyncTimer = window.setTimeout(() => {
             void runGroupwareSync();
           }, GROUPWARE_SYNC_MS);
         }
@@ -819,7 +831,7 @@ export function useAppBootstrap(): void {
     if (backendSupportsNativeCommands()) {
       try {
         const crashes = await backendPendingCrashReports();
-        if (crashes.length > 0) {
+        if (crashes.length > 0 && !bootstrapDisposed) {
           const toast = useToast();
           const latestCrash = crashes.at(-1)!;
           const wasAnr = latestCrash.raw.startsWith('==== android anr at ');
@@ -852,6 +864,7 @@ export function useAppBootstrap(): void {
         console.warn('crash report check failed', err);
       }
     }
+    if (bootstrapDisposed) return;
 
     // Listen to mail-incoming events from the IMAP IDLE supervisor and refresh threads.
     // Failed outbox state is surfaced by the persistent store-backed toast above.
@@ -862,7 +875,7 @@ export function useAppBootstrap(): void {
         return null;
       });
 
-      if (mod) {
+      if (mod && !bootstrapDisposed) {
         const importIcsPath = async (path: string) => {
           try {
             const invite = await backendImportIcsPath(path);
@@ -1017,7 +1030,7 @@ export function useAppBootstrap(): void {
         const outcomes = await Promise.allSettled(registrations.map((entry) => entry.register()));
         outcomes.forEach((outcome, index) => {
           const name = registrations[index]!.name;
-          if (outcome.status === 'fulfilled') eventDisposers.push(outcome.value);
+          if (outcome.status === 'fulfilled') adoptDisposer(outcome.value);
           // Named, because "event listeners failed" told nobody which feature
           // just stopped existing.
           else console.warn(`event listener ${name} failed to register`, outcome.reason);
@@ -1025,13 +1038,16 @@ export function useAppBootstrap(): void {
 
         // Only after the listener stands: a launch from the Finder emits that
         // event long before any of this runs, and Tauri does not replay it.
-        try {
-          await drainPendingIcsPaths(backendTakePendingOpenWith, importIcsPath);
-        } catch (err) {
-          console.warn('pending ics paths could not be drained', err);
+        if (!bootstrapDisposed) {
+          try {
+            await drainPendingIcsPaths(backendTakePendingOpenWith, importIcsPath);
+          } catch (err) {
+            console.warn('pending ics paths could not be drained', err);
+          }
         }
       }
     }
+    if (bootstrapDisposed) return;
 
     // Global .ics drop handler — drag any .ics file into the app to import it as a RSVP card.
     if (typeof window !== 'undefined') {
@@ -1078,6 +1094,7 @@ export function useAppBootstrap(): void {
 
     if (backendSupportsNativeCommands()) {
       const scheduleNext = (delayMs: number) => {
+        if (bootstrapDisposed) return;
         if (imapAutoSyncTimer !== null) {
           window.clearTimeout(imapAutoSyncTimer);
         }
@@ -1095,6 +1112,7 @@ export function useAppBootstrap(): void {
         imapAutoSyncRunning = true;
         try {
           const summary = await runImapSyncOnce();
+          if (bootstrapDisposed) return;
           connectionStore.applySyncSummary(summary);
           if (summary.messages_synced > 0) {
             await Promise.all([threadsStore.refreshHead({ revalidateCachedRows: true }), mailboxesStore.load()]);
