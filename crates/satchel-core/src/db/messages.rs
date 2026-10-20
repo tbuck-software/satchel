@@ -177,6 +177,8 @@ pub enum MessageSearchError {
     Persistence(#[from] sqlx::Error),
 }
 
+static SEARCH_SLOT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Persistence boundary for message search.
 pub struct MessageSearchRepository<'a> {
     pool: &'a SqlitePool,
@@ -215,6 +217,12 @@ impl<'a> MessageSearchRepository<'a> {
             return Ok(empty(&parsed));
         }
 
+        // One search at a time per process. Search-as-you-type from several
+        // windows or panels could otherwise hold most of the read pool with
+        // queries whose results are already superseded, stalling thread lists
+        // and message loads behind them.
+        let _slot = SEARCH_SLOT.lock().await;
+
         if fts_match.is_empty() && parsed.has_only_thread_flags() {
             let hits = search_thread_flag_hits(pool, input, &parsed).await?;
             log_perf(
@@ -244,17 +252,15 @@ impl<'a> MessageSearchRepository<'a> {
         // would crowd every other result out of the panel.
         let mut query = if fts_match.is_empty() {
             // Operator-only query: no relevance signal, newest first.
+            //
+            // Only ranking columns are projected before deduplication. `snippet`
+            // and the flags are stored after the body columns, so reading them
+            // for every candidate walks body overflow pages; display columns are
+            // hydrated for the final page instead.
             QueryBuilder::<Sqlite>::new(
-            "SELECT id, thread_id, subject, snippet, from_name, from_address, date, is_read, workflow_state, folder_type, rank_cost, date as cursor_date FROM (
-                SELECT m.id as id, m.thread_id as thread_id,
-                       COALESCE(m.subject, '') as subject,
-                       COALESCE(m.snippet, '') as snippet,
-                       COALESCE(m.from_name, '') as from_name,
-                       COALESCE(m.from_address, '') as from_address,
+                "SELECT hit_rowid as rowid, rank_cost, date as cursor_date FROM (
+                SELECT m.rowid as hit_rowid, m.id as id, m.thread_id as thread_id,
                        COALESCE(m.date, '') as date,
-                       COALESCE(m.is_read, 0) as is_read,
-                       COALESCE(t.workflow_state, 'inbox') as workflow_state,
-                       COALESCE(fol.folder_type, '') as folder_type,
                        0.0 as rank_cost,
                        ROW_NUMBER() OVER (
                            PARTITION BY m.thread_id ORDER BY m.date DESC, m.id DESC
@@ -264,7 +270,7 @@ impl<'a> MessageSearchRepository<'a> {
                 LEFT JOIN folders fol ON fol.id = m.folder_id
                 JOIN accounts acc ON acc.id = m.account_id AND acc.is_active = 1
                 WHERE 1 = 1",
-        )
+            )
         } else {
             // Free-text query: FTS drives. The rank cost is weighted bm25 (subject
             // over sender/recipients over body; lower is better) plus an age
@@ -279,25 +285,18 @@ impl<'a> MessageSearchRepository<'a> {
             //
             // The extra nesting is required: the FTS5 bm25 function cannot appear
             // in the same SELECT as a window function, so the inner query computes
-            // relevance and the middle layer ranks per thread. Highlight snippets
-            // are intentionally hydrated only for the final page below; computing
-            // `snippet()` here would parse every match even though only 50 rows are
-            // returned.
+            // relevance and the middle layer ranks per thread. Display columns and
+            // highlight snippets are intentionally hydrated only for the final
+            // page below; computing `snippet()` here would parse every match even
+            // though only 50 rows are returned.
             let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT id, thread_id, subject, snippet, from_name, from_address, date, is_read, workflow_state, folder_type, rank_cost, date as cursor_date FROM (
+                "SELECT hit_rowid as rowid, rank_cost, date as cursor_date FROM (
                 SELECT fts_hits.*, ROW_NUMBER() OVER (
                     PARTITION BY thread_id ORDER BY rank_cost ASC, date DESC, id DESC
                 ) as thread_rank
                 FROM (
-                    SELECT m.id as id, m.thread_id as thread_id,
-                           COALESCE(m.subject, '') as subject,
-                           COALESCE(m.snippet, '') as snippet,
-                           COALESCE(m.from_name, '') as from_name,
-                           COALESCE(m.from_address, '') as from_address,
+                    SELECT m.rowid as hit_rowid, m.id as id, m.thread_id as thread_id,
                            COALESCE(m.date, '') as date,
-                           COALESCE(m.is_read, 0) as is_read,
-                           COALESCE(t.workflow_state, 'inbox') as workflow_state,
-                           COALESCE(fol.folder_type, '') as folder_type,
                            bm25(messages_fts, 10.0, 1.0, 5.0, 5.0, 3.0)
                              - COALESCE(julianday(m.date), 0.0) * 0.01 as rank_cost
                     FROM messages_fts
@@ -306,7 +305,7 @@ impl<'a> MessageSearchRepository<'a> {
                     LEFT JOIN folders fol ON fol.id = m.folder_id
                     JOIN accounts acc ON acc.id = m.account_id AND acc.is_active = 1
                     WHERE messages_fts MATCH ",
-        );
+            );
             query.push_bind(fts_match.clone());
             query
         };
@@ -332,19 +331,16 @@ impl<'a> MessageSearchRepository<'a> {
         }
         push_search_page(&mut query, input);
 
-        let rows = query
-            .build_query_as::<MessageSearchHitDto>()
+        let ranked = query
+            .build_query_as::<RankedSearchRow>()
             .fetch_all(pool)
             .await?;
-
-        let mut hits = rows;
-        if !fts_match.is_empty() {
-            hydrate_search_snippets(pool, &fts_match, &mut hits).await?;
-        }
-        for hit in &mut hits {
-            hit.subject = repair_likely_utf8_mojibake(&decode_mime_encoded_words(&hit.subject));
-            hit.from_name = repair_likely_utf8_mojibake(&decode_mime_encoded_words(&hit.from_name));
-        }
+        let hits = hydrate_search_hits(
+            pool,
+            (!fts_match.is_empty()).then_some(fts_match.as_str()),
+            ranked,
+        )
+        .await?;
 
         log_perf(
             "search_message_hits",
@@ -418,11 +414,24 @@ fn search_page(
     }
 }
 
+/// A ranked, deduplicated search hit before its display columns are loaded.
 #[derive(FromRow)]
-struct RankedSearchIdRow {
-    id: String,
+struct RankedSearchRow {
+    /// `messages.rowid`, which is also the `messages_fts` rowid.
+    rowid: i64,
     rank_cost: f64,
+    cursor_date: String,
 }
+
+/// Upper bound on the matches an unfiltered text search ranks.
+///
+/// bm25 and the per-thread window run for every match before `LIMIT`, so a
+/// broad term (`m*` while typing, a word in every signature) cost seconds on a
+/// large mailbox. Above this many matches only the newest ones are ranked;
+/// the age penalty in `rank_cost` buries older matches below them in all but
+/// extreme cases. Below it, the candidate set is the whole match set and
+/// ranking is exact.
+const UNFILTERED_SEARCH_CANDIDATES: i64 = 5_000;
 
 /// Ranks ordinary free-text searches against a compact message projection.
 ///
@@ -436,13 +445,31 @@ async fn search_unfiltered_text_hits(
     input: &SearchQuery,
     fts_match: &str,
 ) -> Result<Vec<MessageSearchHitDto>, MessageSearchError> {
+    let ranked = unfiltered_text_ranking_query(input, fts_match, UNFILTERED_SEARCH_CANDIDATES)
+        .build_query_as::<RankedSearchRow>()
+        .fetch_all(pool)
+        .await?;
+    hydrate_search_hits(pool, Some(fts_match), ranked).await
+}
+
+fn unfiltered_text_ranking_query(
+    input: &SearchQuery,
+    fts_match: &str,
+    candidate_cap: i64,
+) -> QueryBuilder<'static, Sqlite> {
+    let account_id = input
+        .account_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
     let mut query = QueryBuilder::<Sqlite>::new(
-        "SELECT id, rank_cost FROM (
+        "SELECT hit_rowid as rowid, rank_cost, date as cursor_date FROM (
             SELECT ranked.*, ROW_NUMBER() OVER (
                 PARTITION BY thread_id ORDER BY rank_cost ASC, date DESC, id DESC
             ) as thread_rank
             FROM (
-                SELECT sp.message_id as id,
+                SELECT sp.message_rowid as hit_rowid,
+                       sp.message_id as id,
                        sp.thread_id as thread_id,
                        sp.date as date,
                        bm25(messages_fts, 10.0, 1.0, 5.0, 5.0, 3.0)
@@ -453,140 +480,153 @@ async fn search_unfiltered_text_hits(
                 WHERE messages_fts MATCH ",
     );
     query.push_bind(fts_match.to_string());
-    if let Some(account_id) = input.account_id.as_deref().filter(|id| !id.is_empty()) {
+    if let Some(account_id) = &account_id {
         query.push(" AND sp.account_id = ");
-        query.push_bind(account_id.to_string());
+        query.push_bind(account_id.clone());
     }
+    // The date of the `candidate_cap`-th newest match, or '' (every match) when
+    // there are fewer. Finding it reads only doclist rowids and the compact
+    // projection; bm25 then runs for the candidates alone.
+    query.push(
+        " AND sp.date >= COALESCE((
+            SELECT cap.date
+            FROM messages_fts cap_fts
+            JOIN message_search_projection cap ON cap.message_rowid = cap_fts.rowid
+            JOIN accounts cap_acc ON cap_acc.id = cap.account_id AND cap_acc.is_active = 1
+            WHERE cap_fts.messages_fts MATCH ",
+    );
+    query.push_bind(fts_match.to_string());
+    if let Some(account_id) = account_id {
+        query.push(" AND cap.account_id = ");
+        query.push_bind(account_id);
+    }
+    query.push(" ORDER BY cap.date DESC LIMIT 1 OFFSET ");
+    query.push_bind(candidate_cap.max(1) - 1);
+    query.push("), '')");
     query.push(") as ranked ) WHERE thread_rank = 1");
     push_search_cursor(&mut query, input, true, "date", "thread_id");
     query.push(" ORDER BY rank_cost ASC, date DESC, thread_id DESC LIMIT ");
     push_search_page(&mut query, input);
-
-    let ranked = query
-        .build_query_as::<RankedSearchIdRow>()
-        .fetch_all(pool)
-        .await?;
-    hydrate_ranked_search_hits(pool, fts_match, ranked).await
+    query
 }
 
-async fn hydrate_ranked_search_hits(
+#[derive(FromRow)]
+struct HydratedSearchRow {
+    rowid: i64,
+    id: String,
+    thread_id: String,
+    subject: String,
+    snippet: String,
+    from_name: String,
+    from_address: String,
+    date: String,
+    is_read: bool,
+    workflow_state: String,
+    folder_type: String,
+}
+
+/// Loads display columns, and FTS highlights for text queries, for one ranked
+/// page, keeping the ranking order.
+///
+/// Rows are addressed by rowid. The FTS variant must still MATCH, since
+/// `snippet()` needs the match cursor, but `+rowid IN (…)` keeps the rowids
+/// out of the FTS index constraint: as an index constraint FTS5 re-runs the
+/// query once per rowid (painful for prefix terms), while as a filter the
+/// doclist is walked once, bounded by the page's rowid range, and only page
+/// rows join `messages`. Filtering on `m.id` instead joined every match.
+/// A message deleted between the two reads drops out of the page.
+async fn hydrate_search_hits(
     pool: &SqlitePool,
-    fts_match: &str,
-    ranked: Vec<RankedSearchIdRow>,
+    fts_match: Option<&str>,
+    ranked: Vec<RankedSearchRow>,
 ) -> Result<Vec<MessageSearchHitDto>, MessageSearchError> {
     if ranked.is_empty() {
         return Ok(Vec::new());
     }
 
     let mut query = QueryBuilder::<Sqlite>::new(
-        "SELECT m.id as id, m.thread_id as thread_id,
-                COALESCE(m.subject, '') as subject,
-                snippet(messages_fts, -1, ",
+        "SELECT m.rowid as rowid, m.id as id, m.thread_id as thread_id,
+                COALESCE(m.subject, '') as subject, ",
     );
-    query.push_bind(SEARCH_MARK_START);
-    query.push(", ");
-    query.push_bind(SEARCH_MARK_END);
+    if fts_match.is_some() {
+        query.push("snippet(messages_fts, -1, ");
+        query.push_bind(SEARCH_MARK_START);
+        query.push(", ");
+        query.push_bind(SEARCH_MARK_END);
+        query.push(", ' … ', 14)");
+    } else {
+        query.push("COALESCE(m.snippet, '')");
+    }
     query.push(
-        ", ' … ', 14) as snippet,
+        " as snippet,
                 COALESCE(m.from_name, '') as from_name,
                 COALESCE(m.from_address, '') as from_address,
                 COALESCE(m.date, '') as date,
-                COALESCE(m.date, '') as cursor_date,
                 COALESCE(m.is_read, 0) as is_read,
                 COALESCE(t.workflow_state, 'inbox') as workflow_state,
-                COALESCE(fol.folder_type, '') as folder_type,
-                0.0 as rank_cost
-         FROM messages_fts
-         JOIN messages m ON m.rowid = messages_fts.rowid
-         LEFT JOIN threads t ON t.id = m.thread_id
-         LEFT JOIN folders fol ON fol.id = m.folder_id
-         WHERE messages_fts MATCH ",
+                COALESCE(fol.folder_type, '') as folder_type",
     );
-    query.push_bind(fts_match.to_string());
-    query.push(" AND m.id IN (");
-    let mut ids = query.separated(", ");
-    for row in &ranked {
-        ids.push_bind(row.id.clone());
+    if let Some(fts_match) = fts_match {
+        let low = ranked.iter().map(|row| row.rowid).min().unwrap_or_default();
+        let high = ranked.iter().map(|row| row.rowid).max().unwrap_or_default();
+        query.push(
+            " FROM messages_fts
+              JOIN messages m ON m.rowid = messages_fts.rowid
+              LEFT JOIN threads t ON t.id = m.thread_id
+              LEFT JOIN folders fol ON fol.id = m.folder_id
+              WHERE messages_fts MATCH ",
+        );
+        query.push_bind(fts_match.to_string());
+        query.push(" AND messages_fts.rowid BETWEEN ");
+        query.push_bind(low);
+        query.push(" AND ");
+        query.push_bind(high);
+        query.push(" AND +messages_fts.rowid IN (");
+    } else {
+        query.push(
+            " FROM messages m
+              LEFT JOIN threads t ON t.id = m.thread_id
+              LEFT JOIN folders fol ON fol.id = m.folder_id
+              WHERE m.rowid IN (",
+        );
     }
-    ids.push_unseparated(")");
+    let mut rowids = query.separated(", ");
+    for row in &ranked {
+        rowids.push_bind(row.rowid);
+    }
+    rowids.push_unseparated(")");
 
     let mut hydrated = query
-        .build_query_as::<MessageSearchHitDto>()
+        .build_query_as::<HydratedSearchRow>()
         .fetch_all(pool)
         .await?
         .into_iter()
-        .map(|mut hit| {
-            hit.subject = repair_likely_utf8_mojibake(&decode_mime_encoded_words(&hit.subject));
-            hit.from_name = repair_likely_utf8_mojibake(&decode_mime_encoded_words(&hit.from_name));
-            (hit.id.clone(), hit)
-        })
+        .map(|row| (row.rowid, row))
         .collect::<HashMap<_, _>>();
 
     Ok(ranked
         .into_iter()
-        .filter_map(|row| {
-            hydrated.remove(&row.id).map(|mut hit| {
-                hit.rank_cost = row.rank_cost;
-                hit
-            })
+        .filter_map(|ranked| {
+            hydrated
+                .remove(&ranked.rowid)
+                .map(|row| MessageSearchHitDto {
+                    id: row.id,
+                    thread_id: row.thread_id,
+                    subject: repair_likely_utf8_mojibake(&decode_mime_encoded_words(&row.subject)),
+                    snippet: row.snippet,
+                    from_name: repair_likely_utf8_mojibake(&decode_mime_encoded_words(
+                        &row.from_name,
+                    )),
+                    from_address: row.from_address,
+                    date: row.date,
+                    is_read: row.is_read,
+                    workflow_state: row.workflow_state,
+                    folder_type: row.folder_type,
+                    rank_cost: ranked.rank_cost,
+                    cursor_date: ranked.cursor_date,
+                })
         })
         .collect())
-}
-
-#[derive(FromRow)]
-struct SearchSnippetRow {
-    id: String,
-    snippet: String,
-}
-
-/// Adds FTS highlights after ranking has reduced the result set to one page.
-///
-/// FTS5's `snippet()` walks token offsets and source text. Running it inside
-/// the ranking query made a common term pay that cost for thousands of rows.
-/// This second MATCH visits the same index but produces snippets only for the
-/// selected message ids; if a message disappears between the two read queries,
-/// its stored snippet remains a safe fallback.
-async fn hydrate_search_snippets(
-    pool: &SqlitePool,
-    fts_match: &str,
-    hits: &mut [MessageSearchHitDto],
-) -> Result<(), MessageSearchError> {
-    if hits.is_empty() {
-        return Ok(());
-    }
-
-    let mut query = QueryBuilder::<Sqlite>::new("SELECT m.id as id, snippet(messages_fts, -1, ");
-    query.push_bind(SEARCH_MARK_START);
-    query.push(", ");
-    query.push_bind(SEARCH_MARK_END);
-    query.push(
-        ", ' … ', 14) as snippet
-                FROM messages_fts
-                JOIN messages m ON m.rowid = messages_fts.rowid
-                WHERE messages_fts MATCH ",
-    );
-    query.push_bind(fts_match.to_string());
-    query.push(" AND m.id IN (");
-    let mut ids = query.separated(", ");
-    for hit in hits.iter() {
-        ids.push_bind(hit.id.clone());
-    }
-    ids.push_unseparated(")");
-
-    let snippets = query
-        .build_query_as::<SearchSnippetRow>()
-        .fetch_all(pool)
-        .await?
-        .into_iter()
-        .map(|row| (row.id, row.snippet))
-        .collect::<HashMap<_, _>>();
-
-    for hit in hits {
-        if let Some(snippet) = snippets.get(&hit.id) {
-            hit.snippet.clone_from(snippet);
-        }
-    }
-    Ok(())
 }
 
 /// Fast path for `is:unread`, `is:starred` and `has:attachment`.
@@ -1090,6 +1130,184 @@ fn log_perf(operation: &str, started_at: Instant, detail: String) {
 #[cfg(test)]
 mod tests {
     use super::{build_fts_query, parse_search_date, parse_search_query};
+
+    use super::{
+        unfiltered_text_ranking_query, RankedSearchRow, SearchCursor, SearchQuery,
+        UNFILTERED_SEARCH_CANDIDATES,
+    };
+    use sqlx::{sqlite::SqlitePoolOptions, QueryBuilder, Sqlite, SqlitePool};
+
+    /// The unfiltered ranking query as it was before the candidate cap.
+    fn uncapped_reference(input: &SearchQuery, fts_match: &str) -> QueryBuilder<'static, Sqlite> {
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT hit_rowid as rowid, rank_cost, date as cursor_date FROM (
+                SELECT ranked.*, ROW_NUMBER() OVER (
+                    PARTITION BY thread_id ORDER BY rank_cost ASC, date DESC, id DESC
+                ) as thread_rank
+                FROM (
+                    SELECT sp.message_rowid as hit_rowid, sp.message_id as id,
+                           sp.thread_id as thread_id, sp.date as date,
+                           bm25(messages_fts, 10.0, 1.0, 5.0, 5.0, 3.0)
+                             - COALESCE(julianday(sp.date), 0.0) * 0.01 as rank_cost
+                    FROM messages_fts
+                    JOIN message_search_projection sp ON sp.message_rowid = messages_fts.rowid
+                    JOIN accounts acc ON acc.id = sp.account_id AND acc.is_active = 1
+                    WHERE messages_fts MATCH ",
+        );
+        query.push_bind(fts_match.to_string());
+        if let Some(account_id) = input.account_id.as_deref().filter(|id| !id.is_empty()) {
+            query.push(" AND sp.account_id = ");
+            query.push_bind(account_id.to_string());
+        }
+        query.push(") as ranked ) WHERE thread_rank = 1");
+        super::push_search_cursor(&mut query, input, true, "date", "thread_id");
+        query.push(" ORDER BY rank_cost ASC, date DESC, thread_id DESC LIMIT ");
+        super::push_search_page(&mut query, input);
+        query
+    }
+
+    async fn ranked(
+        mut query: QueryBuilder<'static, Sqlite>,
+        pool: &SqlitePool,
+    ) -> Vec<(i64, f64)> {
+        query
+            .build_query_as::<RankedSearchRow>()
+            .fetch_all(pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| (row.rowid, row.rank_cost))
+            .collect()
+    }
+
+    async fn seeded_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql(
+            "INSERT INTO accounts(id, display_name, email, provider, config, credentials_ref, is_active, created_at, updated_at)
+             VALUES ('a0', 'A', 'a0@x.test', 'imap', '{}', '', 1, '2026-01-01', '2026-01-01'),
+                    ('a1', 'B', 'a1@x.test', 'imap', '{}', '', 1, '2026-01-01', '2026-01-01');
+             INSERT INTO folders(id, account_id, name, full_path, folder_type, created_at, updated_at)
+             SELECT 'inbox-' || id, id, 'Inbox', 'INBOX', 'inbox', '2026-01-01', '2026-01-01' FROM accounts;
+             -- Rowids run against dates (a backfill inserts older mail later),
+             -- several messages share a thread and some strong subject matches
+             -- are old.
+             WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x + 1 FROM n WHERE x < 119)
+             INSERT INTO messages(id, account_id, folder_id, thread_id, from_address, to_addresses,
+                                  subject, body_text, date, created_at, updated_at)
+             SELECT printf('m%03d', x), 'a' || (x % 2), 'inbox-a' || (x % 2), printf('t%03d', x / 3),
+                    'sender' || x || '@x.test', '[]',
+                    CASE WHEN x % 7 = 0 THEN 'Budget review' ELSE 'Weekly notes' END,
+                    CASE WHEN x % 4 = 0 THEN 'budget budget figures' ELSE 'budget figures' END,
+                    printf('2026-%02d-%02dT10:00:00Z', 12 - (x / 28) % 12, 1 + x % 28),
+                    '2026-01-01', '2026-01-01'
+             FROM n;",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    fn input(account_id: Option<&str>, limit: i64) -> SearchQuery {
+        SearchQuery {
+            query: String::new(),
+            account_id: account_id.map(str::to_string),
+            limit: Some(limit),
+            cursor: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn unfiltered_ranking_matches_the_uncapped_query_below_the_cap() {
+        let pool = seeded_pool().await;
+        for fts_match in [
+            "\"budget\"",
+            "\"bud\"*",
+            "\"budget\" AND \"review\"",
+            "\"missing\"",
+        ] {
+            for account_id in [None, Some("a1")] {
+                let mut page = input(account_id, 7);
+                loop {
+                    let expected = ranked(uncapped_reference(&page, fts_match), &pool).await;
+                    let actual = ranked(
+                        unfiltered_text_ranking_query(
+                            &page,
+                            fts_match,
+                            UNFILTERED_SEARCH_CANDIDATES,
+                        ),
+                        &pool,
+                    )
+                    .await;
+                    assert_eq!(actual, expected, "{fts_match} {account_id:?}");
+                    if expected.len() <= 7 {
+                        break;
+                    }
+                    let last = expected[6];
+                    let cursor_row: (String, String) =
+                        sqlx::query_as("SELECT date, thread_id FROM messages WHERE rowid = ?")
+                            .bind(last.0)
+                            .fetch_one(&pool)
+                            .await
+                            .unwrap();
+                    page.cursor = Some(SearchCursor {
+                        rank_cost: last.1,
+                        date: cursor_row.0,
+                        id: cursor_row.1,
+                    });
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn unfiltered_ranking_ranks_only_the_newest_candidates_of_a_broad_match() {
+        let pool = seeded_pool().await;
+        let cap = 20;
+        let newest: Vec<i64> =
+            sqlx::query_scalar("SELECT rowid FROM messages ORDER BY date DESC LIMIT ?")
+                .bind(cap)
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        let cutoff: String = sqlx::query_scalar(
+            "SELECT MIN(date) FROM messages WHERE rowid IN (SELECT value FROM json_each(?))",
+        )
+        .bind(serde_json::to_string(&newest).unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let hits = ranked(
+            unfiltered_text_ranking_query(&input(None, 500), "\"budget\"", cap),
+            &pool,
+        )
+        .await;
+        assert!(!hits.is_empty());
+        for (rowid, _) in &hits {
+            let date: String = sqlx::query_scalar("SELECT date FROM messages WHERE rowid = ?")
+                .bind(rowid)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert!(
+                date >= cutoff,
+                "{rowid} {date} is older than the candidates"
+            );
+        }
+        // Every thread among the newest candidates is still represented.
+        let threads: i64 =
+            sqlx::query_scalar("SELECT COUNT(DISTINCT thread_id) FROM messages WHERE date >= ?")
+                .bind(&cutoff)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(hits.len() as i64, threads);
+    }
 
     #[test]
     fn one_character_terms_do_not_expand_prefixes() {
