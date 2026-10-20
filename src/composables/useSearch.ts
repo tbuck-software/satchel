@@ -28,7 +28,7 @@ export interface SearchResult {
 
 // Local FTS is cheap enough that 220ms felt like input lag. 120ms still
 // coalesces normal typing without making the interface wait for the user.
-const DEBOUNCE_MS = 120;
+export const SEARCH_DEBOUNCE_MS = 120;
 // Fast searches should look instant, not flash a spinner for a few frames.
 const LOADING_INDICATOR_DELAY_MS = 160;
 
@@ -337,7 +337,7 @@ export function useSearch(options?: {
         // A sync ingesting a batch emits one event per message; without this
         // the composable would fire a query per mail.
         if (liveHandle) clearTimeout(liveHandle);
-        liveHandle = setTimeout(() => void scheduleSearch(trimmedQuery.value, requestId, true), DEBOUNCE_MS);
+        liveHandle = setTimeout(() => void scheduleSearch(trimmedQuery.value, requestId, true), SEARCH_DEBOUNCE_MS);
       },
     });
   }
@@ -365,7 +365,7 @@ export function useSearch(options?: {
       }
 
       beginLoading();
-      debounceHandle = setTimeout(() => void scheduleSearch(next, id), DEBOUNCE_MS);
+      debounceHandle = setTimeout(() => void scheduleSearch(next, id), SEARCH_DEBOUNCE_MS);
     },
   );
 
