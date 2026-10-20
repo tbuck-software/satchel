@@ -318,8 +318,9 @@ function messageDto(message: Message): BackendMessage {
     body_loaded: false,
     is_read: message.isRead,
     is_draft: Boolean(message.isDraft),
-    list_unsubscribe: message.listUnsubscribe ?? null,
-    list_unsubscribe_post: message.listUnsubscribePost ?? null,
+    // Like the backend preview: the unsubscribe headers travel with the body.
+    list_unsubscribe: null,
+    list_unsubscribe_post: null,
     auth_spf: message.authSpf ?? null,
     auth_dkim: message.authDkim ?? null,
     auth_dmarc: message.authDmarc ?? null,
@@ -333,6 +334,8 @@ function messageBodyDto(message: Message): BackendMessageBody {
     body_text: message.bodyText,
     body_html: message.bodyHtml ?? null,
     body_loaded: true,
+    list_unsubscribe: message.listUnsubscribe ?? null,
+    list_unsubscribe_post: message.listUnsubscribePost ?? null,
     auth_spf: message.authSpf ?? null,
     auth_dkim: message.authDkim ?? null,
     auth_dmarc: message.authDmarc ?? null,
@@ -594,10 +597,15 @@ const handlers: Record<string, Handler> = {
     trashReceipts.delete(token);
   },
   mark_threads_spam: (payload) => {
+    const removed: Thread[] = [];
     for (const id of ids(payload)) {
       const index = threads.findIndex((thread) => thread.id === id);
-      if (index >= 0) threads.splice(index, 1);
+      if (index >= 0) removed.push(...threads.splice(index, 1));
     }
+    // Same receipt shape and Undo path as the backend, which reuses trash receipts.
+    const token = `spam-${++nextTrashReceipt}`;
+    trashReceipts.set(token, removed);
+    return { undo_token: token, undo_thread_ids: removed.map((thread) => thread.id), permanently_deleted: [] };
   },
   move_threads_to_folder: () => undefined,
   dismiss_mobile_notifications: () => undefined,

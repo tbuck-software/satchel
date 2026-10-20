@@ -26,6 +26,7 @@ vi.mock('@/services/backend', () => ({
   backendUpsertTopicNote: vi.fn(),
 }));
 
+import { backendAddTopicItems, backendRemoveTopicItem } from '@/services/backend';
 import { useTopicsStore } from './topics';
 
 const topic = {
@@ -151,5 +152,56 @@ describe('topic files', () => {
     expect(harness.addFile).not.toHaveBeenCalled();
     expect(added).toBeNull();
     expect(store.filesFor('topic-1')).toEqual([]);
+  });
+});
+
+describe('topics store memberships', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.mocked(backendAddTopicItems).mockReset();
+    vi.mocked(backendRemoveTopicItem).mockReset();
+  });
+
+  it('reports only the items an add actually linked', async () => {
+    const store = useTopicsStore();
+    store.memberships['thread:member'] = ['topic-1'];
+    vi.mocked(backendAddTopicItems).mockResolvedValueOnce(undefined as never);
+
+    await expect(store.addItemsToTopic('topic-1', 'thread', ['member', 'fresh'])).resolves.toEqual(['fresh']);
+    expect(store.topicIdsFor('thread', 'member')).toEqual(['topic-1']);
+    expect(store.topicIdsFor('thread', 'fresh')).toEqual(['topic-1']);
+  });
+
+  it('rolls back only its own topic when an add fails', async () => {
+    const store = useTopicsStore();
+    let rejectAdd: (error: Error) => void = () => {};
+    vi.mocked(backendAddTopicItems).mockImplementationOnce(
+      () => new Promise((_, reject) => { rejectAdd = reject; }),
+    );
+    vi.mocked(backendAddTopicItems).mockResolvedValueOnce(undefined as never);
+
+    const failing = store.addItemsToTopic('topic-1', 'thread', ['thread-1']);
+    await store.addItemsToTopic('topic-2', 'thread', ['thread-1']);
+    rejectAdd(new Error('refused'));
+
+    await expect(failing).rejects.toThrow('refused');
+    expect(store.topicIdsFor('thread', 'thread-1')).toEqual(['topic-2']);
+  });
+
+  it('restores only its own topic when a removal fails', async () => {
+    const store = useTopicsStore();
+    store.memberships['thread:thread-1'] = ['topic-1'];
+    let rejectRemove: (error: Error) => void = () => {};
+    vi.mocked(backendRemoveTopicItem).mockImplementationOnce(
+      () => new Promise((_, reject) => { rejectRemove = reject; }),
+    );
+    vi.mocked(backendAddTopicItems).mockResolvedValueOnce(undefined as never);
+
+    const failing = store.removeItemFromTopic('topic-1', 'thread', 'thread-1');
+    await store.addItemsToTopic('topic-2', 'thread', ['thread-1']);
+    rejectRemove(new Error('refused'));
+
+    await expect(failing).rejects.toThrow('refused');
+    expect([...store.topicIdsFor('thread', 'thread-1')].sort()).toEqual(['topic-1', 'topic-2']);
   });
 });

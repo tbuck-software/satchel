@@ -169,36 +169,49 @@ export const useTopicsStore = defineStore('topics', () => {
     return memberships.value[membershipKey(itemType, itemId)] ?? [];
   }
 
-  async function addItemsToTopic(topicId: string, itemType: TopicItemType, itemIds: string[]) {
-    const previous = new Map<string, string[]>();
-    for (const itemId of itemIds) {
+  /**
+   * Link items to a topic. Resolves with the ids that were not members before,
+   * so an undo can unlink exactly those and leave earlier memberships alone.
+   */
+  async function addItemsToTopic(topicId: string, itemType: TopicItemType, itemIds: string[]): Promise<string[]> {
+    const added: string[] = [];
+    for (const itemId of new Set(itemIds)) {
       const key = membershipKey(itemType, itemId);
       const current = memberships.value[key] ?? [];
-      previous.set(key, current);
       if (!current.includes(topicId)) {
         memberships.value[key] = [...current, topicId];
+        added.push(itemId);
       }
     }
     try {
       await backendAddTopicItems({ topicId, itemType, itemIds });
       const topic = byId(topicId);
-      if (topic) topic.item_count += itemIds.filter((id) => !previous.get(membershipKey(itemType, id))?.includes(topicId)).length;
+      if (topic) topic.item_count += added.length;
+      return added;
     } catch (error) {
-      for (const [key, value] of previous) memberships.value[key] = value;
+      // Roll back only this topic: another topic change on the same item may
+      // have committed meanwhile.
+      for (const itemId of added) {
+        const key = membershipKey(itemType, itemId);
+        memberships.value[key] = (memberships.value[key] ?? []).filter((id) => id !== topicId);
+      }
       throw error;
     }
   }
 
-  async function removeItemFromTopic(topicId: string, itemType: TopicItemType, itemId: string) {
+  /** Unlink one item. Resolves with whether it was a member before. */
+  async function removeItemFromTopic(topicId: string, itemType: TopicItemType, itemId: string): Promise<boolean> {
     const key = membershipKey(itemType, itemId);
-    const current = memberships.value[key] ?? [];
-    memberships.value[key] = current.filter((id) => id !== topicId);
+    const wasMember = (memberships.value[key] ?? []).includes(topicId);
+    memberships.value[key] = (memberships.value[key] ?? []).filter((id) => id !== topicId);
     try {
       await backendRemoveTopicItem({ topicId, itemType, itemId });
       const topic = byId(topicId);
-      if (topic && current.includes(topicId)) topic.item_count = Math.max(0, topic.item_count - 1);
+      if (topic && wasMember) topic.item_count = Math.max(0, topic.item_count - 1);
+      return wasMember;
     } catch (error) {
-      memberships.value[key] = current;
+      const now = memberships.value[key] ?? [];
+      if (wasMember && !now.includes(topicId)) memberships.value[key] = [...now, topicId];
       throw error;
     }
   }

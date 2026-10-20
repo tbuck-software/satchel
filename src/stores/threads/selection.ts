@@ -14,6 +14,8 @@ export interface ThreadSelectionSurface {
   leavingThreadStates: Ref<Partial<Record<string, WorkflowState>>>;
   selectThread(threadId: string): void;
   clearSelection(): void;
+  /** Drop only these ids, keeping anything selected since an action began. */
+  deselectThreads(threadIds: readonly string[]): void;
   selectAllVisibleThreads(): void;
   selectFromInteraction(
     threadId: string,
@@ -102,6 +104,13 @@ export function createThreadSelection({
   function clearSelection() {
     selectedThreadIds.value = [];
     selectionAnchorId.value = '';
+  }
+
+  function deselectThreads(threadIds: readonly string[]) {
+    const removed = new Set(threadIds);
+    if (!selectedThreadIds.value.some((id) => removed.has(id))) return;
+    selectedThreadIds.value = selectedThreadIds.value.filter((id) => !removed.has(id));
+    if (removed.has(selectionAnchorId.value)) selectionAnchorId.value = '';
   }
 
   function beginThreadLeave(threadId: string, destination: WorkflowState) {
@@ -273,6 +282,7 @@ export function createThreadSelection({
       leavingThreadStates,
       selectThread,
       clearSelection,
+      deselectThreads,
       selectAllVisibleThreads,
       selectFromInteraction,
       toggleSelectionForThread,

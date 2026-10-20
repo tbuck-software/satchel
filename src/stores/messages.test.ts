@@ -502,6 +502,28 @@ describe('messages store', () => {
     });
   });
 
+  it('takes the unsubscribe headers from the body and keeps them across a preview refresh', async () => {
+    // The backend preview never carries them; only the body does.
+    previewMock.mockResolvedValue([backendMessage() as never]);
+    bodiesMock.mockResolvedValue([{
+      ...inlineBody('<p>Newsletter</p>'),
+      list_unsubscribe: '<https://news.example/u>',
+      list_unsubscribe_post: 'List-Unsubscribe=One-Click',
+    }] as never[]);
+    const messages = useMessagesStore();
+    await messages.loadByThread('th-live');
+    await vi.waitFor(() => {
+      expect(messages.getByThread('th-live')[0]).toMatchObject({
+        listUnsubscribe: '<https://news.example/u>',
+        listUnsubscribePost: 'List-Unsubscribe=One-Click',
+      });
+    });
+
+    await messages.refreshThread('th-live');
+
+    expect(messages.getByThread('th-live')[0]?.listUnsubscribe).toBe('<https://news.example/u>');
+  });
+
   it('lists the attachments of a whole thread in one invoke', async () => {
     const ids = Array.from({ length: 8 }, (_, index) => `m-${index}`);
     previewMock.mockResolvedValue(ids.map((id, index) =>

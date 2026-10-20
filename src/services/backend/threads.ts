@@ -168,8 +168,9 @@ export async function backendSetThreadMuted(threadId: string, muted: boolean): P
 }
 
 
-export async function backendMarkThreadsSpam(threadIds: string[]): Promise<void> {
-  return invoke<void>('mark_threads_spam', { input: { thread_ids: threadIds } });
+/** Spam returns the same receipt as trash; `backendUndoTrash` reverses either. */
+export async function backendMarkThreadsSpam(threadIds: string[]): Promise<BackendTrashReceipt> {
+  return invoke<BackendTrashReceipt>('mark_threads_spam', { input: { thread_ids: threadIds } });
 }
 
 

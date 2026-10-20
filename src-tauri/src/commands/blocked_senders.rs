@@ -59,6 +59,7 @@ impl From<BlockSenderInput> for BlockedSenderUpsertRequest {
 pub(crate) fn blocked_sender_error_key(error: BlockedSenderError) -> String {
     match error {
         BlockedSenderError::PatternEmpty => "backend.errors.blockedSenderPatternEmpty",
+        BlockedSenderError::OwnAddress => "backend.errors.blockedSenderOwnAddress",
         BlockedSenderError::Persistence(error) => {
             tracing::error!(error = ?error, "blocked sender persistence failed");
             "backend.errors.blockedSenderPersistenceFailed"
@@ -198,6 +199,14 @@ mod tests {
         assert_eq!(
             CommandError::from(BlockedSenderError::PatternEmpty).key,
             "backend.errors.blockedSenderPatternEmpty"
+        );
+    }
+
+    #[test]
+    fn own_address_refusals_use_a_stable_key() {
+        assert_eq!(
+            CommandError::from(BlockedSenderError::OwnAddress).key,
+            "backend.errors.blockedSenderOwnAddress"
         );
     }
 

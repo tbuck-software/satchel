@@ -18,6 +18,7 @@ import {
   backendSetUiStrings,
   backendUndoOutboxSend,
   backendAcknowledgeDraftFlush,
+  backendSyncGroupware,
 } from '@/services/backend';
 import { useAppBootstrap, useComposeWindowBootstrap } from '@/bootstrap';
 import { useToast } from '@/composables/useToast';
@@ -317,6 +318,54 @@ describe('bootstrap entries', () => {
 
     wrapper.unmount();
     expect(disposers.filter((dispose) => vi.mocked(dispose).mock.calls.length === 0)).toEqual([]);
+  });
+
+  it('starts no listeners or sync once the root unmounted during the core load', async () => {
+    let release!: (value: never[]) => void;
+    vi.mocked(backendListAccounts).mockReturnValueOnce(new Promise(resolve => { release = resolve; }));
+    const wrapper = boot(useAppBootstrap);
+    await vi.waitFor(() => expect(backendListAccounts).toHaveBeenCalled());
+    await flushPromises();
+
+    wrapper.unmount();
+    release([]);
+    await flushPromises();
+    await flushPromises();
+
+    const events = vi.mocked(listen).mock.calls.map(([event]) => event);
+    expect(events).not.toContain('mail:incoming');
+    expect(backendRunImapSync).not.toHaveBeenCalled();
+    expect(backendSyncGroupware).not.toHaveBeenCalled();
+  });
+
+  it('re-arms no sync timer when a sync settles after unmount', async () => {
+    let finishSync!: () => void;
+    vi.mocked(backendSyncGroupware).mockReturnValueOnce(new Promise(resolve => { finishSync = () => resolve({} as never); }));
+    let finishImap!: () => void;
+    vi.mocked(backendRunImapSync).mockReturnValueOnce(new Promise(resolve => {
+      finishImap = () => resolve({
+        accounts_synced: 0,
+        accounts_failed: 0,
+        folders_synced: 0,
+        messages_synced: 0,
+        backfill_pending_accounts: 0,
+        backfill_remaining_messages: 0,
+        backfill_total_messages: 0,
+        failures: [],
+      } as never);
+    }));
+    const wrapper = boot(useAppBootstrap);
+    await vi.waitFor(() => expect(backendRunImapSync).toHaveBeenCalled());
+    expect(backendSyncGroupware).toHaveBeenCalled();
+
+    wrapper.unmount();
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout');
+    finishSync();
+    finishImap();
+    await flushPromises();
+    await flushPromises();
+
+    expect(setTimeoutSpy.mock.calls.filter(([, delay]) => (delay ?? 0) >= 5000)).toEqual([]);
   });
 
   /** The buttons only exist if the type was registered before the handler. */

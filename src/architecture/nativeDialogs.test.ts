@@ -37,16 +37,10 @@ interface KnownViolation {
 /*
  * The calls that predate this scan. The list may shrink and must never grow.
  */
-const KNOWN_NATIVE_DIALOGS: KnownViolation[] = [
-  {
-    file: 'src/components/mail/ThreadView.vue',
-    count: 1,
-    reason: 'blockSender; moved to useConfirm in its own fix.',
-  },
-];
+const KNOWN_NATIVE_DIALOGS: KnownViolation[] = [];
 
 // Only ever lower this. See KNOWN_NATIVE_DIALOGS.
-const MAX_KNOWN_NATIVE_DIALOGS = 1;
+const MAX_KNOWN_NATIVE_DIALOGS = 0;
 
 interface NativeDialogCall {
   file: string;

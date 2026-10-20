@@ -13,6 +13,12 @@ export type MessageBodyDto = {
     smime_signer_email: string | null;
     smime_signer_cn: string | null;
     smime_error_detail: string | null;
+    /**
+     * The headers behind the unsubscribe banner. The preview leaves them
+     * empty; the banner sits beside a loaded body, so the body carries them.
+     */
+    list_unsubscribe: string | null;
+    list_unsubscribe_post: string | null;
     auth_spf: string | null;
     auth_dkim: string | null;
     auth_dmarc: string | null;

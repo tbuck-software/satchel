@@ -34,22 +34,28 @@ export const useOutboxStore = defineStore('outbox', () => {
   const error = ref<string | null>(null);
   const connectionStore = useConnectionStore();
 
+  // Five events trigger a reload; only the newest request may publish.
+  let loadRequestId = 0;
+
   async function load() {
     if (!backendCommandsAvailable()) return;
+    const requestId = ++loadRequestId;
     loading.value = true;
     try {
       const [mail, moves] = await Promise.all([backendListOutbox(), backendListFailedSyncActions()]);
+      if (requestId !== loadRequestId) return;
       items.value = [...moves, ...mail];
       error.value = null;
       connectionStore.clearBackendError('outbox');
     } catch (err) {
+      if (requestId !== loadRequestId) return;
       // Never rethrows: callers are click handlers and `start()`, and the
       // rejection used to vanish into `Promise.allSettled` at bootstrap.
       // `items` stays untouched — a failed list says nothing about the queue.
       error.value = err instanceof Error ? err.message : String(err);
       connectionStore.reportBackendError('outbox', err);
     } finally {
-      loading.value = false;
+      if (requestId === loadRequestId) loading.value = false;
     }
   }
 
@@ -69,8 +75,14 @@ export const useOutboxStore = defineStore('outbox', () => {
   }
 
   let unlisteners: Array<() => void> = [];
+  // `stop()` bumps the generation, so a `start()` still awaiting its listeners
+  // releases them instead of leaking them past the stop.
+  let generation = 0;
+  let started = false;
   async function start() {
-    if (!backendCommandsAvailable()) return;
+    if (started || !backendCommandsAvailable()) return;
+    started = true;
+    const session = ++generation;
     // Events are a Tauri-only channel; the mock transport has no emitter.
     if (!backendSupportsNativeCommands()) {
       await load();
@@ -80,15 +92,28 @@ export const useOutboxStore = defineStore('outbox', () => {
     // mail that never went out, a duplicate load costs one query.
     try {
       const mod = await import('@tauri-apps/api/event');
-      unlisteners = await Promise.all(
-        OUTBOX_EVENTS.map((eventName) => mod.listen(eventName, () => void load())),
+      if (session !== generation) return;
+      const registered = await Promise.allSettled(
+        OUTBOX_EVENTS.map((eventName) => mod.listen(eventName, () => {
+          if (session === generation) void load();
+        })),
       );
+      const released = registered.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+      if (session !== generation) {
+        released.forEach((unlisten) => unlisten());
+        return;
+      }
+      unlisteners = released;
+      const failed = registered.find((result) => result.status === 'rejected');
+      if (failed) console.warn('outbox listener setup failed', failed.reason);
     } catch (err) {
       console.warn('outbox listener setup failed', err);
     }
-    await load();
+    if (session === generation) await load();
   }
   function stop() {
+    generation += 1;
+    started = false;
     for (const unlisten of unlisteners) unlisten();
     unlisteners = [];
   }

@@ -17,7 +17,7 @@ const STORE_KEYS = [
   'activeSmartBucket', 'activeSmartBucketId', 'activeThread', 'activeThreadId',
   'allContactSummaries', 'applyWorkflowStates', 'beginThreadLeave',
   'categoryFilter', 'clearSelection', 'closeSimilarGroup', 'closeSmartBucket',
-  'contactSummaries', 'discardThread', 'endThreadLeave', 'ensureThreadLoaded', 'find',
+  'contactSummaries', 'deselectThreads', 'discardThread', 'endThreadLeave', 'ensureThreadLoaded', 'find',
   'focusNeighborThread', 'frequentContactSummaries', 'getSenderPreference', 'hasPreviousThreads', 'hasMoreThreads', 'leavingThreadIds',
   'leavingThreadStates', 'listEntries', 'load', 'loadPrevious', 'loadPreviousFailed', 'loadMore', 'loadMoreFailed', 'loadingMoreThreads',
   'mailboxFilter', 'markRead', 'markThreadsSpam', 'newSenderStack', 'nextThread', 'openContact',

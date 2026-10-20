@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BackendThreadCursor, BackendThreadPage } from './threads';
+import type { BackendThreadCursor, BackendThreadPage, BackendTrashReceipt } from './threads';
 
 describe('mock thread pagination', () => {
   beforeEach(() => {
@@ -47,4 +47,25 @@ describe('mock thread pagination', () => {
     } });
     expect(other).toEqual({ threads: [], next_cursor: null, has_more: false });
   }, 20000);
+});
+
+describe('mock spam receipt', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    window.history.replaceState({}, '', '/');
+  });
+
+  it('answers like the backend: a receipt that undo_trash reverses', async () => {
+    const { sendCommand } = await import('./mock');
+    const listed = await sendCommand<BackendThreadPage>('list_threads', { input: { limit: 1 } });
+    const id = listed.threads[0]!.id;
+
+    const receipt = await sendCommand<BackendTrashReceipt>('mark_threads_spam', { input: { thread_ids: [id] } });
+    expect(receipt.undo_thread_ids).toEqual([id]);
+    expect(receipt.undo_token).toBeTruthy();
+    await expect(sendCommand('get_thread', { threadId: id })).rejects.toBeTruthy();
+
+    await sendCommand('undo_trash', { receiptId: receipt.undo_token });
+    await expect(sendCommand<{ id: string }>('get_thread', { threadId: id })).resolves.toMatchObject({ id });
+  });
 });
