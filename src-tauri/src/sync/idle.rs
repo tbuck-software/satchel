@@ -81,7 +81,12 @@ where
         if !signal.take() {
             continue;
         }
-        sync().await;
+        // Nobody joins this task, and the supervisor's own `catch_unwind`
+        // covers only the IDLE loop. A panicking run used to end the consumer
+        // silently: IDLE kept raising the signal and no sync ever followed.
+        if AssertUnwindSafe(sync()).catch_unwind().await.is_err() {
+            tracing::error!("idle: triggered sync panicked; waiting for the next signal");
+        }
     }
 }
 
@@ -668,6 +673,42 @@ mod tests {
         assert_eq!(coalescer.runs(), 2, "the whole burst earns one follow-up");
 
         coalescer.handle.abort();
+    }
+
+    /// One panicking run must not take push sync down for the account.
+    #[tokio::test]
+    async fn a_panicking_run_leaves_the_consumer_running() {
+        let signal = Arc::new(SyncSignal::default());
+        let runs = Arc::new(AtomicUsize::new(0));
+        let handle = tokio::spawn({
+            let signal = signal.clone();
+            let runs = runs.clone();
+            async move {
+                coalesce_sync_runs(signal, Duration::from_millis(10), || {
+                    let runs = runs.clone();
+                    async move {
+                        if runs.fetch_add(1, Ordering::SeqCst) == 0 {
+                            panic!("first run fails");
+                        }
+                    }
+                })
+                .await;
+            }
+        });
+
+        signal.raise();
+        settle(150).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        signal.raise();
+        settle(150).await;
+        assert_eq!(
+            runs.load(Ordering::SeqCst),
+            2,
+            "the signal after a panic still starts a run"
+        );
+        assert!(!handle.is_finished());
+
+        handle.abort();
     }
 
     #[tokio::test]

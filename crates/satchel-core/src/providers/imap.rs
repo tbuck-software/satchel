@@ -274,6 +274,11 @@ struct ImapCursorState {
     backfill_next_seq: u32,
     #[serde(default)]
     backfill_total_seq: u32,
+    /// New messages the last run listed above `high_uid` but left for the next
+    /// one, because they did not fit into its fetch budget or a chunk broke
+    /// off. Counted as pending work so the caller comes back soon.
+    #[serde(default)]
+    incremental_pending: u32,
     #[serde(default)]
     format_version: u8,
     /// UIDVALIDITY of the mailbox this cursor belongs to. When the server reports
@@ -1064,6 +1069,278 @@ fn plain_expunge_is_safe(deleted: &std::collections::HashSet<u32>, uids: &[u32])
     deleted.iter().all(|uid| uids.contains(uid))
 }
 
+/// What the incremental fetch asks for, per message.
+const MESSAGE_FETCH_ITEMS: &str = "(UID FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT])";
+
+/// What the listing ahead of it asks for: enough to plan, nothing to parse.
+const MESSAGE_LISTING_ITEMS: &str = "(UID RFC822.SIZE)";
+
+/// One new message as the listing reported it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ListedMessage {
+    uid: u32,
+    seq: u32,
+    size: u64,
+}
+
+/// How much one command and one run may download.
+///
+/// A chunk is one `UID FETCH` and has to finish inside its own deadline; the
+/// run is what one `sync_messages` call holds in memory and what the account
+/// lock waits for. A message above the chunk budget still goes, alone.
+#[derive(Debug, Clone, Copy)]
+struct FetchLimits {
+    chunk_messages: usize,
+    chunk_bytes: u64,
+    run_messages: usize,
+    run_bytes: u64,
+}
+
+const FETCH_LIMITS: FetchLimits = FetchLimits {
+    chunk_messages: 50,
+    chunk_bytes: 4 * 1024 * 1024,
+    run_messages: 500,
+    run_bytes: 48 * 1024 * 1024,
+};
+
+/// The slowest link a chunk deadline still accepts, in bytes per second.
+///
+/// One deadline for a whole response failed every mail above roughly what the
+/// line moves in 20 seconds — and failed it again on every retry, because the
+/// cursor never got past it. The deadline grows with what the chunk carries.
+const MIN_FETCH_THROUGHPUT: u64 = 64 * 1024;
+
+/// The chunks one run fetches, and how many listed messages wait for the next.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct FetchPlan {
+    chunks: Vec<Vec<ListedMessage>>,
+    deferred: usize,
+}
+
+/// Keep the listing's new messages, ascending by UID.
+///
+/// `n:*` always names the highest message, even when `n` is past it (RFC 3501
+/// §6.4.8), so the cursor filter still applies. Entries without a UID are a
+/// protocol violation and only counted.
+fn listed_messages(
+    entries: impl IntoIterator<Item = (Option<u32>, u32, Option<u32>)>,
+    since_uid: u32,
+    since_seq: u32,
+) -> (Vec<ListedMessage>, usize) {
+    let mut uidless = 0usize;
+    let mut listed = Vec::new();
+    for (uid, seq, size) in entries {
+        let Some(uid) = uid.filter(|uid| *uid > 0) else {
+            uidless += 1;
+            continue;
+        };
+        let new = if since_uid > 0 {
+            uid > since_uid
+        } else if since_seq > 0 {
+            seq > since_seq
+        } else {
+            true
+        };
+        if new {
+            listed.push(ListedMessage {
+                uid,
+                seq,
+                size: u64::from(size.unwrap_or(0)),
+            });
+        }
+    }
+    listed.sort_by_key(|message| message.uid);
+    listed.dedup_by_key(|message| message.uid);
+    (listed, uidless)
+}
+
+/// Cut the listed messages into chunks, oldest first, until the run is full.
+///
+/// Order matters: the cursor may only move past a UID once everything below it
+/// has arrived, so the chunks run in ascending UID order and the run stops at
+/// a chunk boundary. The first chunk is always taken, however large.
+fn plan_incremental_fetch(listed: &[ListedMessage], limits: FetchLimits) -> FetchPlan {
+    let mut plan = FetchPlan::default();
+    let mut current = Vec::new();
+    let mut current_bytes = 0u64;
+    let mut run_bytes = 0u64;
+    // `index` is also the number of messages the run has taken so far.
+    for (index, message) in listed.iter().enumerate() {
+        let run_full = index > 0
+            && (index >= limits.run_messages
+                || run_bytes.saturating_add(message.size) > limits.run_bytes);
+        if run_full {
+            plan.deferred = listed.len() - index;
+            break;
+        }
+        let chunk_full = !current.is_empty()
+            && (current.len() >= limits.chunk_messages
+                || current_bytes.saturating_add(message.size) > limits.chunk_bytes);
+        if chunk_full {
+            plan.chunks.push(std::mem::take(&mut current));
+            current_bytes = 0;
+        }
+        current.push(*message);
+        current_bytes = current_bytes.saturating_add(message.size);
+        run_bytes = run_bytes.saturating_add(message.size);
+    }
+    if !current.is_empty() {
+        plan.chunks.push(current);
+    }
+    plan
+}
+
+/// The deadline for one chunk: the usual one, plus the time its bytes need on
+/// a slow line.
+fn chunk_timeout(base: Duration, chunk: &[ListedMessage]) -> Duration {
+    let bytes: u64 = chunk.iter().map(|message| message.size).sum();
+    base + Duration::from_secs(bytes / MIN_FETCH_THROUGHPUT)
+}
+
+/// Where the cursor stands once the first `completed` chunks have arrived.
+///
+/// Returns `(high_uid, high_seq, pending)`. Everything at or below `high_uid`
+/// has been fetched — a message the server expunged between listing and
+/// fetching is gone for good and needs no second look. `pending` is what the
+/// next run still has to fetch.
+fn advance_after_chunks(
+    since_uid: u32,
+    since_seq: u32,
+    plan: &FetchPlan,
+    completed: usize,
+) -> (u32, u32, u32) {
+    let done = &plan.chunks[..completed.min(plan.chunks.len())];
+    let high_uid = done
+        .iter()
+        .flatten()
+        .map(|message| message.uid)
+        .fold(since_uid, u32::max);
+    let high_seq = done
+        .iter()
+        .flatten()
+        .map(|message| message.seq)
+        .fold(since_seq, u32::max);
+    let pending = plan.chunks[done.len()..]
+        .iter()
+        .map(Vec::len)
+        .sum::<usize>()
+        + plan.deferred;
+    (
+        high_uid,
+        high_seq,
+        u32::try_from(pending).unwrap_or(u32::MAX),
+    )
+}
+
+/// What the chunked fetch brought back.
+#[derive(Debug, Default)]
+struct ChunkedFetch {
+    entries: Vec<async_imap::types::Fetch>,
+    /// Chunks that arrived in full, counted from the first.
+    completed: usize,
+    /// Why the run stopped early. The session is then in an unknown state.
+    interrupted: Option<String>,
+}
+
+/// Fetch the planned chunks one `UID FETCH` at a time.
+///
+/// A chunk that breaks off ends the run but keeps what came before it: the
+/// caller commits those messages and moves the cursor to their end, so the
+/// next run picks up at the broken chunk instead of downloading everything
+/// again. Only a failure of the very first chunk is an error.
+async fn fetch_planned_chunks<T>(
+    session: &mut async_imap::Session<T>,
+    plan: &FetchPlan,
+    base_timeout: Duration,
+) -> Result<ChunkedFetch, String>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    let mut fetched = ChunkedFetch::default();
+    for chunk in &plan.chunks {
+        let wanted: std::collections::HashSet<u32> =
+            chunk.iter().map(|message| message.uid).collect();
+        let uid_set = chunk
+            .iter()
+            .map(|message| message.uid.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        match collect_imap_response(
+            chunk_timeout(base_timeout, chunk),
+            session.uid_fetch(uid_set, MESSAGE_FETCH_ITEMS),
+            "UID FETCH",
+        )
+        .await
+        {
+            Ok(entries) => {
+                // An unsolicited FETCH for another message (a flag change)
+                // carries no body and must not land as an empty message.
+                fetched.entries.extend(
+                    entries
+                        .into_iter()
+                        .filter(|entry| entry.uid.is_none_or(|uid| wanted.contains(&uid))),
+                );
+                fetched.completed += 1;
+            }
+            Err(error) if fetched.completed == 0 => return Err(error),
+            Err(error) => {
+                fetched.interrupted = Some(error);
+                break;
+            }
+        }
+    }
+    Ok(fetched)
+}
+
+/// What every envelope of one fetch shares.
+#[derive(Clone)]
+struct EnvelopeContext {
+    folder: String,
+    uidvalidity: u32,
+    source_id: SourceId,
+    ingested_at: chrono::DateTime<chrono::Utc>,
+    receiver: String,
+}
+
+/// Parse a batch of fetched messages into envelopes off the async runtime.
+///
+/// MIME parsing a backfill batch of a thousand messages, or one message with
+/// a 25 MB attachment, is CPU work measured in seconds; on a runtime worker it
+/// stalls every IPC call scheduled behind it. `bodies` replaces each entry's
+/// own `BODY[TEXT]` when the bodies came from a separate fetch. Returns the
+/// envelopes and the number of entries discarded for lacking a UID.
+async fn envelopes_off_runtime(
+    entries: Vec<async_imap::types::Fetch>,
+    bodies: Option<std::collections::HashMap<u32, Vec<u8>>>,
+    context: EnvelopeContext,
+) -> Result<(Vec<MessageEnvelope>, usize), String> {
+    if entries.is_empty() {
+        return Ok((Vec::new(), 0));
+    }
+    tokio::task::spawn_blocking(move || {
+        let mut uidless = 0usize;
+        let mut envelopes = Vec::with_capacity(entries.len());
+        for entry in &entries {
+            // The FETCH asked for the UID. Answering without one is a protocol
+            // violation, and the sequence number this used to fall back to
+            // ends up in `messages.remote_id` — from where a later UID MOVE
+            // or UID STORE addresses a different message entirely.
+            let Some(uid) = entry.uid.filter(|uid| *uid > 0) else {
+                uidless += 1;
+                continue;
+            };
+            let body = match &bodies {
+                Some(bodies) => bodies.get(&uid).map(Vec::as_slice),
+                None => entry.text(),
+            };
+            envelopes.push(envelope_from_fetch(entry, body, uid, &context));
+        }
+        (envelopes, uidless)
+    })
+    .await
+    .map_err(|error| format!("imap message parsing failed: {error}"))
+}
+
 #[async_trait::async_trait]
 impl MailProvider for ImapProvider {
     async fn sync_folders(&self) -> crate::sync::errors::SyncResult<Vec<RemoteFolder>> {
@@ -1171,6 +1448,8 @@ impl MailProvider for ImapProvider {
             has_cursor = false;
         }
         if exists == 0 {
+            // Nothing left to list, so nothing the last run deferred either.
+            cursor_state.incremental_pending = 0;
             let cursor = if reset_folder {
                 cursor_state.format_version = Self::CURSOR_FORMAT_VERSION;
                 cursor_state.uidvalidity = server_uidvalidity;
@@ -1233,19 +1512,24 @@ impl MailProvider for ImapProvider {
             1
         };
 
-        const FETCH_ITEMS: &str = "(UID FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT])";
         // Incremental sync with a known UID cursor uses UID FETCH so that *every*
         // message newer than the cursor is fetched, no matter how many arrived since
         // the last run. A fixed seq-number tail window would silently skip mail once
         // more than `fetch_window` messages arrive between syncs (the cursor would
         // jump past them for good). Legacy seq-only cursors and fresh folders keep
         // the bounded window; older history flows in via the backfill below.
+        //
+        // The first FETCH lists only UIDs and sizes. The bodies follow in
+        // bounded chunks, oldest first, and the cursor moves only as far as the
+        // chunks that arrived: a run that fills its budget or loses a chunk
+        // leaves the rest to the next run, instead of failing the folder and
+        // starting the same download over on every retry.
         let use_uid_fetch = has_cursor && since_uid > 0;
-        let mut fetched = if use_uid_fetch {
+        let listing = if use_uid_fetch {
             let uid_set = format!("{}:*", since_uid.saturating_add(1));
             collect_imap_response(
                 Self::op_timeout(),
-                session.uid_fetch(uid_set, FETCH_ITEMS),
+                session.uid_fetch(uid_set, MESSAGE_LISTING_ITEMS),
                 "UID FETCH",
             )
             .await?
@@ -1262,66 +1546,53 @@ impl MailProvider for ImapProvider {
             };
             collect_imap_response(
                 Self::op_timeout(),
-                session.fetch(seq_set, FETCH_ITEMS),
+                session.fetch(seq_set, MESSAGE_LISTING_ITEMS),
                 "FETCH",
             )
             .await?
         };
-        fetched.sort_by_key(|entry| entry.uid.unwrap_or(entry.message));
-
-        let candidates = fetched
-            .into_iter()
-            .filter(|entry| {
-                let Some(uid) = entry.uid.filter(|uid| *uid > 0) else {
-                    // Kept so the loop below counts and reports it.
-                    return true;
-                };
-                if since_uid > 0 {
-                    uid > since_uid
-                } else if since_seq > 0 {
-                    entry.message > since_seq
-                } else {
-                    true
-                }
-            })
-            .collect::<Vec<_>>();
-
-        // One reference point for the whole batch: two messages of the same
-        // run must not be clamped against two different clocks.
-        let ingested_at = chrono::Utc::now();
-        let mut last_uid = since_uid;
-        let mut last_seq = since_seq;
-        let mut uidless_entries = 0usize;
-        let mut messages = Vec::new();
-        for entry in candidates {
-            // The FETCH asked for the UID. Answering without one is a protocol
-            // violation, and the sequence number this used to fall back to
-            // ends up in `messages.remote_id` — from where a later UID MOVE
-            // or UID STORE addresses a different message entirely.
-            let Some(uid) = entry.uid.filter(|uid| *uid > 0) else {
-                uidless_entries += 1;
-                continue;
-            };
-            if entry.message > last_seq {
-                last_seq = entry.message;
-            }
-            if uid > last_uid {
-                last_uid = uid;
-            }
-
-            messages.push(envelope_from_fetch(
-                &entry,
-                uid,
+        let (listed, mut uidless_entries) = listed_messages(
+            listing
+                .iter()
+                .map(|entry| (entry.uid, entry.message, entry.size)),
+            since_uid,
+            since_seq,
+        );
+        let plan = plan_incremental_fetch(&listed, FETCH_LIMITS);
+        let fetched = fetch_planned_chunks(&mut session, &plan, Self::op_timeout()).await?;
+        let (high_uid, high_seq, incremental_pending) =
+            advance_after_chunks(since_uid, since_seq, &plan, fetched.completed);
+        // A broken-off chunk leaves the connection mid-response. The backfill
+        // and the LOGOUT would only wait out their own deadlines on it.
+        let session_usable = fetched.interrupted.is_none();
+        if let Some(error) = fetched.interrupted.as_deref() {
+            tracing::warn!(
                 folder,
-                server_uidvalidity,
-                &core_source_id,
-                ingested_at,
-                &cfg.host,
-            ));
+                %error,
+                committed_chunks = fetched.completed,
+                pending = incremental_pending,
+                "imap incremental fetch broke off, keeping the chunks that arrived"
+            );
         }
 
-        cursor_state.high_uid = last_uid;
-        cursor_state.high_seq = last_seq;
+        let mut entries = fetched.entries;
+        entries.sort_by_key(|entry| entry.uid.unwrap_or(entry.message));
+        // One reference point for the whole batch: two messages of the same
+        // run must not be clamped against two different clocks.
+        let envelope_context = EnvelopeContext {
+            folder: folder.to_string(),
+            uidvalidity: server_uidvalidity,
+            source_id: core_source_id.clone(),
+            ingested_at: chrono::Utc::now(),
+            receiver: cfg.host.clone(),
+        };
+        let (mut messages, uidless) =
+            envelopes_off_runtime(entries, None, envelope_context.clone()).await?;
+        uidless_entries += uidless;
+
+        cursor_state.high_uid = high_uid;
+        cursor_state.high_seq = high_seq;
+        cursor_state.incremental_pending = incremental_pending;
 
         if let Some(resume) =
             backfill_resume_seq(since_uid, cursor_state.backfill_next_seq, tail_start)
@@ -1330,7 +1601,9 @@ impl MailProvider for ImapProvider {
             cursor_state.backfill_total_seq = resume;
         }
 
-        if cursor_state.backfill_next_seq > 0 {
+        // A run whose incremental fetch broke off leaves the backfill where it
+        // is; the next run continues both.
+        if cursor_state.backfill_next_seq > 0 && session_usable {
             let backfill_end = cursor_state.backfill_next_seq.min(exists);
             if backfill_end > 0 {
                 let backfill_window = Self::backfill_window(backfill_end);
@@ -1358,128 +1631,20 @@ impl MailProvider for ImapProvider {
                 .await?;
                 older.sort_by_key(|entry| entry.uid.unwrap_or(entry.message));
 
+                // Outside the window there is no body to parse, and the
+                // message is stored as the envelope it already is. Opening it
+                // fetches the body then — see `load_message_body`.
                 let recent_bodies = match body_cutoff {
-                    Some(cutoff) => {
-                        Self::fetch_recent_backfill_bodies(&mut session, &older, cutoff).await?
-                    }
-                    None => std::collections::HashMap::new(),
+                    Some(cutoff) => Some(
+                        Self::fetch_recent_backfill_bodies(&mut session, &older, cutoff).await?,
+                    ),
+                    None => None,
                 };
 
-                for entry in older {
-                    // Same protocol requirement as the incremental branch.
-                    let Some(uid) = entry.uid.filter(|uid| *uid > 0) else {
-                        uidless_entries += 1;
-                        continue;
-                    };
-                    let remote_id = uid.to_string();
-
-                    let header = entry
-                        .header()
-                        .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
-                        .unwrap_or_default();
-                    let subject = parse_header_value(&header, "Subject")
-                        .unwrap_or_else(|| "(no subject)".into());
-                    // Outside the window there is no body to parse, and the
-                    // message is stored as the envelope it already is. Opening
-                    // it fetches the body then — see `load_message_body`.
-                    let body_bytes: Option<&[u8]> = if body_cutoff.is_some() {
-                        recent_bodies.get(&uid).map(Vec::as_slice)
-                    } else {
-                        entry.text()
-                    };
-                    let mut parsed_body = parse_message_body(&header, body_bytes);
-                    merge_extracted_imap_fallback(
-                        &mut parsed_body,
-                        parse_extracted_imap_email(
-                            &header,
-                            body_bytes,
-                            core_source_id.clone(),
-                            folder,
-                            server_uidvalidity,
-                            uid,
-                        ),
-                    );
-                    let attachments = parsed_body.attachments.clone();
-                    let snippet = build_snippet(
-                        &subject,
-                        parsed_body.text.as_deref(),
-                        parsed_body.html.as_deref(),
-                    );
-                    let from_address =
-                        parse_from_address(&header).unwrap_or_else(|| "unknown@imap.local".into());
-                    let from_name = parse_from_name(&header);
-                    let to_addresses = parse_header_address_list(&header, "To");
-                    let cc_addresses = parse_header_address_list(&header, "Cc");
-                    let bcc_addresses = parse_header_address_list(&header, "Bcc");
-                    let reply_to = parse_header_value(&header, "Reply-To")
-                        .and_then(|raw| extract_email_address(&raw));
-                    let message_id_header = parse_header_value(&header, "Message-ID");
-                    let remote_draft_id = message_id_header
-                        .clone()
-                        .map(|id| encode_imap_draft_ref(folder, &id));
-                    let in_reply_to = parse_header_value(&header, "In-Reply-To");
-                    let references = parse_header_value(&header, "References")
-                        .map(|raw| split_references(&raw))
-                        .unwrap_or_default();
-                    let date_rfc3339 =
-                        parse_message_date(&header, entry_internal_date(&entry), ingested_at);
-                    let is_read = entry
-                        .flags()
-                        .any(|flag| matches!(flag, async_imap::types::Flag::Seen));
-                    let is_starred = entry
-                        .flags()
-                        .any(|flag| matches!(flag, async_imap::types::Flag::Flagged));
-                    let (auth_spf, auth_dkim, auth_dmarc) =
-                        parse_header_value(&header, "Authentication-Results")
-                            .map(|value| {
-                                crate::providers::traits::trusted_authentication_results(
-                                    &value, &cfg.host,
-                                )
-                            })
-                            .unwrap_or((None, None, None));
-
-                    messages.push(MessageEnvelope {
-                        remote_id,
-                        remote_uidvalidity: Some(server_uidvalidity),
-                        remote_thread_id: None,
-                        mailbox_ids: Vec::new(),
-                        message_id_header,
-                        in_reply_to,
-                        references,
-                        subject,
-                        snippet,
-                        from_address,
-                        from_name,
-                        to_addresses,
-                        cc_addresses,
-                        bcc_addresses,
-                        reply_to,
-                        remote_draft_id,
-                        received_at_rfc3339: entry_internal_date(&entry)
-                            .map(|date| date.to_rfc3339()),
-                        date_rfc3339,
-                        body_text: parsed_body.text,
-                        body_html: parsed_body.html,
-                        is_read,
-                        is_starred,
-                        body_calendar: parsed_body.calendar,
-                        smime_encrypted: parsed_body.smime_encrypted,
-                        smime_signed: parsed_body.smime_signed,
-                        pgp_signed: parsed_body.pgp_signed,
-                        trust: super::traits::MessageTrust {
-                            auth_verified: auth_spf.is_some()
-                                || auth_dkim.is_some()
-                                || auth_dmarc.is_some(),
-                            ..parsed_body.trust
-                        },
-                        list_unsubscribe: parse_header_value(&header, "List-Unsubscribe"),
-                        list_unsubscribe_post: parse_header_value(&header, "List-Unsubscribe-Post"),
-                        auth_spf,
-                        auth_dkim,
-                        auth_dmarc,
-                        attachments,
-                    });
-                }
+                let (older_messages, uidless) =
+                    envelopes_off_runtime(older, recent_bodies, envelope_context).await?;
+                uidless_entries += uidless;
+                messages.extend(older_messages);
 
                 if backfill_start <= 1 {
                     cursor_state.backfill_next_seq = 0;
@@ -1514,7 +1679,9 @@ impl MailProvider for ImapProvider {
             );
         }
 
-        let _ = timeout(Self::op_timeout(), session.logout()).await;
+        if session_usable {
+            let _ = timeout(Self::op_timeout(), session.logout()).await;
+        }
         Ok(SyncBatch {
             messages,
             removals: Vec::new(),
@@ -1564,28 +1731,25 @@ impl MailProvider for ImapProvider {
                 .join(",");
             let fetched = collect_imap_response(
                 Self::op_timeout(),
-                session.uid_fetch(
-                    uid_set,
-                    "(UID FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT])",
-                ),
+                session.uid_fetch(uid_set, MESSAGE_FETCH_ITEMS),
                 "UID FETCH",
             )
+            .await?
+            .into_iter()
+            .filter(|entry| entry.uid.is_some_and(|uid| uids.contains(&uid)))
+            .collect();
+            (messages, _) = envelopes_off_runtime(
+                fetched,
+                None,
+                EnvelopeContext {
+                    folder: folder.to_string(),
+                    uidvalidity: server_uidvalidity,
+                    source_id: core_source_id,
+                    ingested_at: chrono::Utc::now(),
+                    receiver: cfg.host.clone(),
+                },
+            )
             .await?;
-            let ingested_at = chrono::Utc::now();
-            for entry in &fetched {
-                let Some(uid) = entry.uid.filter(|uid| uids.contains(uid)) else {
-                    continue;
-                };
-                messages.push(envelope_from_fetch(
-                    entry,
-                    uid,
-                    folder,
-                    server_uidvalidity,
-                    &core_source_id,
-                    ingested_at,
-                    &cfg.host,
-                ));
-            }
         }
         let _ = timeout(Self::op_timeout(), session.logout()).await;
         Ok(Some(SyncBatch {
@@ -2128,6 +2292,7 @@ impl MailProvider for ImapProvider {
         folder: &str,
         on_event: IdleCallback,
     ) -> crate::sync::errors::SyncResult<()> {
+        let mut reconnect = IdleReconnectBackoff::default();
         loop {
             let mut session = self.login_session().await?;
             timeout(Self::op_timeout(), session.select(folder))
@@ -2153,6 +2318,7 @@ impl MailProvider for ImapProvider {
             // Refresh the IDLE every 25 minutes to stay under the 29-minute server timeout.
             let refresh = tokio::time::sleep(Duration::from_secs(25 * 60));
             tokio::pin!(refresh);
+            let waiting_since = Instant::now();
 
             let _server_signalled = tokio::select! {
                 result = idle_wait => result.is_ok(),
@@ -2176,9 +2342,52 @@ impl MailProvider for ImapProvider {
             // run every 25 minutes is cheap.
             (on_event)(IdleEvent::NewMessages);
 
-            // Sleep briefly and reconnect for the next IDLE round.
-            tokio::time::sleep(Duration::from_millis(500)).await;
+            // Sleep and reconnect for the next IDLE round. A server or
+            // middlebox that drops every IDLE at once used to get a fresh
+            // login and an inbox sync twice a second; consecutive short rounds
+            // now back off until a round lasts again.
+            let delay = reconnect.after_round(waiting_since.elapsed());
+            tokio::time::sleep(delay).await;
+            if delay > IDLE_RECONNECT_BASE {
+                // Mail delivered during the wait raises no IDLE event on
+                // the next connection; only a sync sees it.
+                (on_event)(IdleEvent::NewMessages);
+            }
         }
+    }
+}
+
+/// The pause before the next IDLE round when the last one was healthy.
+const IDLE_RECONNECT_BASE: Duration = Duration::from_millis(500);
+
+/// The longest pause between IDLE rounds that keep ending at once.
+const IDLE_RECONNECT_MAX: Duration = Duration::from_secs(120);
+
+/// An IDLE round that waited at least this long counts as healthy.
+const IDLE_HEALTHY_ROUND: Duration = Duration::from_secs(30);
+
+/// Spaces out IDLE reconnects while rounds keep ending right after they began.
+///
+/// The 25-minute refresh and a quiet mailbox make long rounds; a dropped
+/// connection, an end of stream or an immediate `BYE` make short ones. Each
+/// short round in a row doubles the pause, a healthy round resets it.
+#[derive(Debug, Default)]
+struct IdleReconnectBackoff {
+    short_rounds: u32,
+}
+
+impl IdleReconnectBackoff {
+    /// Record a finished round that waited `waited`; return the pause before
+    /// the next one.
+    fn after_round(&mut self, waited: Duration) -> Duration {
+        if waited >= IDLE_HEALTHY_ROUND {
+            self.short_rounds = 0;
+        } else {
+            self.short_rounds = self.short_rounds.saturating_add(1);
+        }
+        IDLE_RECONNECT_BASE
+            .saturating_mul(1u32 << self.short_rounds.min(16))
+            .min(IDLE_RECONNECT_MAX)
     }
 }
 
@@ -3659,19 +3868,31 @@ pub fn parse_message_date(
     filed.to_rfc3339()
 }
 
-/// The server's own receive time for a fetched message, if it reported one.
+/// Whether the second MIME parser could add anything to the first one's result.
+///
+/// The fallback re-parses the whole message, and `merge_extracted_imap_fallback`
+/// only ever fills a gap: a missing text or HTML body (not on a root crypto
+/// part) or an empty attachment list. Without a gap its result would be
+/// thrown away.
+fn extracted_fallback_could_help(parsed: &ParsedBody) -> bool {
+    parsed.attachments.is_empty()
+        || (!parsed.trust.root_crypto && (parsed.text.is_none() || parsed.html.is_none()))
+}
+
 /// One `UID FETCH (UID FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT])`
-/// entry as an envelope.
+/// entry as an envelope. `body` is the entry's `BODY[TEXT]` or, for a backfill
+/// that fetched bodies separately, what that fetch returned.
 fn envelope_from_fetch(
     entry: &async_imap::types::Fetch,
+    body: Option<&[u8]>,
     uid: u32,
-    folder: &str,
-    server_uidvalidity: u32,
-    core_source_id: &SourceId,
-    ingested_at: chrono::DateTime<chrono::Utc>,
-    receiver: &str,
+    context: &EnvelopeContext,
 ) -> MessageEnvelope {
     let remote_id = uid.to_string();
+    let folder = context.folder.as_str();
+    let server_uidvalidity = context.uidvalidity;
+    let ingested_at = context.ingested_at;
+    let receiver = context.receiver.as_str();
 
     let header = entry
         .header()
@@ -3679,18 +3900,20 @@ fn envelope_from_fetch(
         .unwrap_or_default();
 
     let subject = parse_header_value(&header, "Subject").unwrap_or_else(|| "(no subject)".into());
-    let mut parsed_body = parse_message_body(&header, entry.text());
-    merge_extracted_imap_fallback(
-        &mut parsed_body,
-        parse_extracted_imap_email(
-            &header,
-            entry.text(),
-            core_source_id.clone(),
-            folder,
-            server_uidvalidity,
-            uid,
-        ),
-    );
+    let mut parsed_body = parse_message_body(&header, body);
+    if extracted_fallback_could_help(&parsed_body) {
+        merge_extracted_imap_fallback(
+            &mut parsed_body,
+            parse_extracted_imap_email(
+                &header,
+                body,
+                context.source_id.clone(),
+                folder,
+                server_uidvalidity,
+                uid,
+            ),
+        );
+    }
     let attachments = parsed_body.attachments.clone();
     let snippet = build_snippet(
         &subject,
@@ -3765,6 +3988,7 @@ fn envelope_from_fetch(
     }
 }
 
+/// The server's own receive time for a fetched message, if it reported one.
 fn entry_internal_date(entry: &async_imap::types::Fetch) -> Option<chrono::DateTime<chrono::Utc>> {
     entry
         .internal_date()
@@ -5052,5 +5276,336 @@ Content-Type: text/html\r\n\r\n\
         assert_eq!(super::backfill_resume_seq(0, 0, 1), None);
         assert_eq!(super::backfill_resume_seq(0, 42, 900), None);
         assert_eq!(super::backfill_resume_seq(5000, 0, 900), None);
+    }
+
+    fn listed(uid: u32, size: u64) -> super::ListedMessage {
+        super::ListedMessage {
+            uid,
+            seq: uid,
+            size,
+        }
+    }
+
+    const TEST_LIMITS: super::FetchLimits = super::FetchLimits {
+        chunk_messages: 3,
+        chunk_bytes: 1_000,
+        run_messages: 7,
+        run_bytes: 5_000,
+    };
+
+    fn chunk_uids(plan: &super::FetchPlan) -> Vec<Vec<u32>> {
+        plan.chunks
+            .iter()
+            .map(|chunk| chunk.iter().map(|message| message.uid).collect())
+            .collect()
+    }
+
+    #[test]
+    fn the_listing_keeps_only_new_uids_in_ascending_order() {
+        // `n:*` names the highest message even when it is below `n`.
+        let entries = [
+            (Some(12), 3, Some(10)),
+            (Some(10), 1, Some(10)),
+            (None, 4, Some(10)),
+            (Some(11), 2, None),
+        ];
+        let (messages, uidless) = super::listed_messages(entries, 10, 0);
+        assert_eq!(
+            messages,
+            vec![
+                super::ListedMessage {
+                    uid: 11,
+                    seq: 2,
+                    size: 0
+                },
+                super::ListedMessage {
+                    uid: 12,
+                    seq: 3,
+                    size: 10
+                },
+            ]
+        );
+        assert_eq!(uidless, 1);
+
+        let (by_seq, _) = super::listed_messages([(Some(5), 1, None), (Some(6), 2, None)], 0, 1);
+        assert_eq!(by_seq.iter().map(|m| m.uid).collect::<Vec<_>>(), vec![6]);
+    }
+
+    #[test]
+    fn chunks_are_bounded_by_count_and_bytes_and_run_oldest_first() {
+        let messages: Vec<_> = (1..=5).map(|uid| listed(uid, 100)).collect();
+        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        assert_eq!(chunk_uids(&plan), vec![vec![1, 2, 3], vec![4, 5]]);
+        assert_eq!(plan.deferred, 0);
+
+        let messages = [listed(1, 400), listed(2, 400), listed(3, 400)];
+        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        assert_eq!(chunk_uids(&plan), vec![vec![1, 2], vec![3]]);
+    }
+
+    /// A 25 MB mail is above every budget and must still arrive.
+    #[test]
+    fn a_message_above_the_budgets_goes_alone() {
+        let messages = [listed(1, 10), listed(2, 50_000), listed(3, 10)];
+        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        assert_eq!(chunk_uids(&plan), vec![vec![1]]);
+        assert_eq!(plan.deferred, 2, "the large mail waits for its own run");
+
+        let plan = super::plan_incremental_fetch(&messages[1..], TEST_LIMITS);
+        assert_eq!(chunk_uids(&plan), vec![vec![2]]);
+        assert_eq!(plan.deferred, 1);
+    }
+
+    #[test]
+    fn a_backlog_beyond_the_run_budget_is_deferred() {
+        let messages: Vec<_> = (1..=20).map(|uid| listed(uid, 10)).collect();
+        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        assert_eq!(
+            chunk_uids(&plan),
+            vec![vec![1, 2, 3], vec![4, 5, 6], vec![7]]
+        );
+        assert_eq!(plan.deferred, 13);
+        assert_eq!(
+            super::plan_incremental_fetch(&[], TEST_LIMITS),
+            super::FetchPlan::default()
+        );
+    }
+
+    /// The cursor may only pass UIDs whose chunk arrived in full; what is left
+    /// is reported so the next run comes back for it.
+    #[test]
+    fn the_cursor_advances_per_completed_chunk() {
+        let messages: Vec<_> = (101..=120).map(|uid| listed(uid, 10)).collect();
+        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+
+        assert_eq!(super::advance_after_chunks(100, 7, &plan, 0), (100, 7, 20));
+        assert_eq!(
+            super::advance_after_chunks(100, 7, &plan, 1),
+            (103, 103, 17)
+        );
+        assert_eq!(
+            super::advance_after_chunks(100, 7, &plan, 3),
+            (107, 107, 13)
+        );
+        let empty = super::FetchPlan::default();
+        assert_eq!(super::advance_after_chunks(100, 7, &empty, 0), (100, 7, 0));
+    }
+
+    #[test]
+    fn a_chunk_deadline_grows_with_its_bytes() {
+        let base = Duration::from_secs(20);
+        assert_eq!(super::chunk_timeout(base, &[listed(1, 1_000)]), base);
+        let large = [listed(1, 25 * 1024 * 1024)];
+        assert_eq!(
+            super::chunk_timeout(base, &large),
+            base + Duration::from_secs(400)
+        );
+    }
+
+    #[test]
+    fn idle_reconnects_back_off_while_rounds_stay_short() {
+        let mut backoff = super::IdleReconnectBackoff::default();
+        let short = Duration::from_millis(50);
+        let delays: Vec<_> = (0..10).map(|_| backoff.after_round(short)).collect();
+        assert_eq!(delays[0], Duration::from_secs(1));
+        assert_eq!(delays[1], Duration::from_secs(2));
+        assert!(delays.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert_eq!(*delays.last().unwrap(), super::IDLE_RECONNECT_MAX);
+
+        assert_eq!(
+            backoff.after_round(Duration::from_secs(25 * 60)),
+            super::IDLE_RECONNECT_BASE,
+            "a healthy round resets the pause"
+        );
+        assert_eq!(backoff.after_round(short), Duration::from_secs(1));
+    }
+
+    /// Skipping the fallback parse must never change what a message keeps.
+    #[test]
+    fn the_fallback_parse_is_skipped_only_where_it_adds_nothing() {
+        let raw = concat!(
+            "Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n",
+            "--b\r\nContent-Type: multipart/alternative; boundary=\"a\"\r\n\r\n",
+            "--a\r\nContent-Type: text/plain\r\n\r\nHallo\r\n",
+            "--a\r\nContent-Type: text/html\r\n\r\n<p>Hallo</p>\r\n--a--\r\n",
+            "--b\r\nContent-Type: application/pdf\r\n",
+            "Content-Disposition: attachment; filename=\"a.pdf\"\r\n\r\nPDF\r\n--b--\r\n",
+        );
+        let (header, body) = super::split_header_and_body(raw.as_bytes());
+        let header = String::from_utf8_lossy(header);
+        let complete = parse_message_body(&header, Some(body));
+        assert!(complete.text.is_some() && complete.html.is_some());
+        assert!(!complete.attachments.is_empty());
+        assert!(!super::extracted_fallback_could_help(&complete));
+
+        // What skipping saves really is a no-op merge.
+        let mut merged = parse_message_body(&header, Some(body));
+        let extracted = parse_extracted_imap_email(
+            &header,
+            Some(body),
+            SourceId::new("imap/account-1"),
+            "INBOX",
+            7,
+            1,
+        );
+        assert!(extracted.is_some());
+        super::merge_extracted_imap_fallback(&mut merged, extracted);
+        assert_eq!(merged.text, complete.text);
+        assert_eq!(merged.html, complete.html);
+        assert_eq!(merged.attachments.len(), complete.attachments.len());
+
+        let plain = parse_message_body("Content-Type: text/plain\r\n", Some(b"Hallo"));
+        assert!(super::extracted_fallback_could_help(&plain));
+    }
+
+    /// A scripted IMAP server: answers LOGIN, then one FETCH response per
+    /// chunk command until `stall_at`, where it goes silent mid-response.
+    async fn chunk_server(
+        stall_at: usize,
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<Vec<String>>) {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (reader, mut writer) = socket.into_split();
+            let mut reader = tokio::io::BufReader::new(reader);
+            writer.write_all(b"* OK ready\r\n").await.unwrap();
+            let mut commands = Vec::new();
+            let mut line = String::new();
+            reader.read_line(&mut line).await.unwrap();
+            let tag = line.split_whitespace().next().unwrap().to_string();
+            writer
+                .write_all(format!("{tag} OK logged in\r\n").as_bytes())
+                .await
+                .unwrap();
+            for index in 0.. {
+                line.clear();
+                if reader.read_line(&mut line).await.unwrap() == 0 {
+                    break;
+                }
+                commands.push(line.trim_end().to_string());
+                let tag = line.split_whitespace().next().unwrap().to_string();
+                if !line.contains("UID FETCH") {
+                    writer
+                        .write_all(format!("{tag} OK bye\r\n").as_bytes())
+                        .await
+                        .unwrap();
+                    break;
+                }
+                let uids = line
+                    .split_whitespace()
+                    .nth(3)
+                    .unwrap()
+                    .split(',')
+                    .map(|uid| uid.parse::<u32>().unwrap())
+                    .collect::<Vec<_>>();
+                if index == stall_at {
+                    writer
+                        .write_all(b"* 1 FETCH (UID 1 BODY[TEXT] {100}\r\npartial")
+                        .await
+                        .unwrap();
+                    std::future::pending::<()>().await;
+                }
+                for uid in uids {
+                    let header = format!("Subject: mail {uid}\r\n\r\n");
+                    let text = format!("body {uid}");
+                    writer
+                        .write_all(
+                            format!(
+                                "* {uid} FETCH (UID {uid} FLAGS () BODY[HEADER] {{{}}}\r\n{header} BODY[TEXT] {{{}}}\r\n{text})\r\n",
+                                header.len(),
+                                text.len()
+                            )
+                            .as_bytes(),
+                        )
+                        .await
+                        .unwrap();
+                }
+                writer
+                    .write_all(format!("{tag} OK done\r\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+            commands
+        });
+        (address, server)
+    }
+
+    async fn chunk_session(
+        address: std::net::SocketAddr,
+    ) -> async_imap::Session<tokio::net::TcpStream> {
+        let socket = tokio::net::TcpStream::connect(address).await.unwrap();
+        let mut client = async_imap::Client::new(socket);
+        client.read_response().await.unwrap();
+        client.login("user", "password").await.unwrap()
+    }
+
+    /// A chunk that breaks off keeps the chunks before it: the next run starts
+    /// at the broken one instead of downloading everything again.
+    #[tokio::test]
+    async fn a_broken_chunk_keeps_the_chunks_that_arrived() {
+        let (address, server) = chunk_server(1).await;
+        let mut session = chunk_session(address).await;
+        let messages: Vec<_> = (1..=7).map(|uid| listed(uid, 10)).collect();
+        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+
+        let fetched = tokio::time::timeout(
+            Duration::from_secs(5),
+            super::fetch_planned_chunks(&mut session, &plan, Duration::from_millis(100)),
+        )
+        .await
+        .expect("the chunk deadline applies")
+        .expect("progress before the break is kept");
+        server.abort();
+
+        assert_eq!(fetched.completed, 1);
+        assert!(fetched.interrupted.unwrap().contains("timed out"));
+        let mut uids: Vec<_> = fetched.entries.iter().filter_map(|e| e.uid).collect();
+        uids.sort_unstable();
+        assert_eq!(uids, vec![1, 2, 3]);
+        assert!(fetched
+            .entries
+            .iter()
+            .all(|entry| entry.text().is_some_and(|text| text.starts_with(b"body "))));
+        assert_eq!(
+            super::advance_after_chunks(0, 0, &plan, fetched.completed),
+            (3, 3, 4)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_first_chunk_that_breaks_off_fails_the_fetch() {
+        let (address, server) = chunk_server(0).await;
+        let mut session = chunk_session(address).await;
+        let plan = super::plan_incremental_fetch(&[listed(1, 10)], TEST_LIMITS);
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            super::fetch_planned_chunks(&mut session, &plan, Duration::from_millis(100)),
+        )
+        .await
+        .expect("the chunk deadline applies");
+        server.abort();
+        assert!(result.unwrap_err().contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn every_chunk_is_one_uid_fetch_in_ascending_order() {
+        let (address, server) = chunk_server(usize::MAX).await;
+        let mut session = chunk_session(address).await;
+        let messages: Vec<_> = (1..=5).map(|uid| listed(uid, 10)).collect();
+        let plan = super::plan_incremental_fetch(&messages, TEST_LIMITS);
+        let fetched = super::fetch_planned_chunks(&mut session, &plan, Duration::from_secs(5))
+            .await
+            .expect("all chunks arrive");
+        assert_eq!(fetched.completed, 2);
+        assert!(fetched.interrupted.is_none());
+        assert_eq!(fetched.entries.len(), 5);
+        let _ = session.logout().await;
+        let commands = server.await.unwrap();
+        assert!(commands[0].ends_with(
+            "UID FETCH 1,2,3 (UID FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT])"
+        ));
+        assert!(commands[1].contains("UID FETCH 4,5 "));
     }
 }

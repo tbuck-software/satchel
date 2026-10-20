@@ -44,8 +44,9 @@ where
 
 /// Read backfill progress from the provider cursor formats used by mail sync.
 ///
-/// Gmail and Outlook use message counters; IMAP uses sequence counters. Keep
-/// the field priority and permissive JSON fallback stable because this is also
+/// Gmail and Outlook use message counters; IMAP uses sequence counters plus
+/// the new messages a bounded incremental run left for the next one. Keep the
+/// field priority and permissive JSON fallback stable because this is also
 /// used by the Tauri sync orchestrator while it aggregates account progress.
 pub fn backfill_stats(cursor: &str) -> Option<(usize, usize)> {
     let value = serde_json::from_str::<serde_json::Value>(cursor).ok()?;
@@ -60,15 +61,20 @@ pub fn backfill_stats(cursor: &str) -> Option<(usize, usize)> {
             .unwrap_or(remaining as u64) as usize;
         return Some((remaining, total.max(remaining)));
     }
-    let remaining = value
+    let incremental = value
+        .get("incremental_pending")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let backfill = value
         .get("backfill_next_seq")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0) as usize;
     let total = value
         .get("backfill_total_seq")
         .and_then(serde_json::Value::as_u64)
-        .unwrap_or(remaining as u64) as usize;
-    Some((remaining, total.max(remaining)))
+        .unwrap_or(backfill as u64) as usize;
+    let remaining = backfill + incremental;
+    Some((remaining, (total + incremental).max(remaining)))
 }
 
 pub fn backfill_pending(cursor: &str) -> bool {
@@ -143,6 +149,18 @@ mod tests {
         let cursor = r#"{"backfill_next_seq":4,"backfill_total_seq":3}"#;
         assert_eq!(backfill_stats(cursor), Some((4, 4)));
         assert!(backfill_pending(cursor));
+    }
+
+    /// New mail a bounded IMAP run left behind is pending work too: without it
+    /// neither the fast reschedule nor a complete target rebuild comes back.
+    #[test]
+    fn deferred_incremental_messages_count_as_pending() {
+        let cursor = r#"{"high_uid":40,"incremental_pending":7}"#;
+        assert_eq!(backfill_stats(cursor), Some((7, 7)));
+        assert!(backfill_pending(cursor));
+
+        let both = r#"{"backfill_next_seq":4,"backfill_total_seq":10,"incremental_pending":3}"#;
+        assert_eq!(backfill_stats(both), Some((7, 13)));
     }
 
     #[test]
