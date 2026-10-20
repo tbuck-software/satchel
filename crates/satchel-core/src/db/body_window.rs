@@ -73,9 +73,13 @@ fn block<'c>(
         let Some(last) = last else {
             return Ok(None);
         };
-        sqlx::query("UPDATE messages SET body_text = NULL, body_html = NULL, updated_at = ? WHERE id > ? AND id <= ? AND date < ? AND is_draft = 0 AND NULLIF(remote_id, '') IS NOT NULL AND (NULLIF(body_text, '') IS NOT NULL OR NULLIF(body_html, '') IS NOT NULL)")
+        // The unsanitized original and the raw source are usually the largest
+        // copies of the body; the provider still holds all of them. Imported
+        // messages carry a synthetic `import-` remote id and exist nowhere
+        // else, so their copies stay.
+        sqlx::query("UPDATE messages SET body_text = NULL, body_html = NULL, original_body_html = NULL, original_source = NULL, updated_at = ? WHERE id > ? AND id <= ? AND date < ? AND is_draft = 0 AND NULLIF(remote_id, '') IS NOT NULL AND remote_id NOT LIKE 'import-%' AND (NULLIF(body_text, '') IS NOT NULL OR NULLIF(body_html, '') IS NOT NULL OR NULLIF(original_body_html, '') IS NOT NULL OR original_source IS NOT NULL)")
             .bind(chrono::Utc::now().to_rfc3339()).bind(&cursor.after).bind(&last).bind(&cursor.cutoff).execute(&mut *connection).await?;
-        sqlx::query("UPDATE attachments SET cached_path = NULL WHERE cached_path IS NOT NULL AND message_id IN (SELECT id FROM messages WHERE id > ? AND id <= ? AND date < ? AND is_draft = 0 AND NULLIF(remote_id, '') IS NOT NULL)")
+        sqlx::query("UPDATE attachments SET cached_path = NULL WHERE cached_path IS NOT NULL AND message_id IN (SELECT id FROM messages WHERE id > ? AND id <= ? AND date < ? AND is_draft = 0 AND NULLIF(remote_id, '') IS NOT NULL AND remote_id NOT LIKE 'import-%')")
             .bind(&cursor.after).bind(&last).bind(&cursor.cutoff).execute(&mut *connection).await?;
         cursor.after = last;
         Ok(Some(serde_json::to_string(&cursor).expect("body cursor")))
