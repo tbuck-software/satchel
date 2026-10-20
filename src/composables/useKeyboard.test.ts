@@ -136,6 +136,20 @@ describe('single-key shortcut switch', () => {
     expect(harness.actions.archive).toHaveBeenCalledWith(['thread-1']);
   });
 
+  /** `e` is the second Done key; a binding saved for it keeps its id. */
+  it('marks done from either Done key, including a rebound second key', () => {
+    harness.settings.keybindings = { archive: 'y' };
+    mountKeyboard();
+
+    press('d');
+    press('y');
+    press('e');
+
+    expect(harness.actions.archive).toHaveBeenCalledTimes(2);
+    expect(harness.actions.archive).toHaveBeenCalledWith(['thread-1']);
+    harness.settings.keybindings = {};
+  });
+
   it('still refuses to steal a system combo', () => {
     mountKeyboard();
 

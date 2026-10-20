@@ -86,7 +86,7 @@
         "oauthGmail": "oauth google sign in login",
         "oauthOutlook": "oauth microsoft sign in login",
         "openCalendar": "calendar events",
-        "openFollowUps": "followups reminder",
+        "openFollowUps": "followups waiting reply",
         "openInbox": "inbox list",
         "pin": "pin flag star",
         "reply": "reply",
@@ -120,7 +120,7 @@
       "oauthOutlook": "Start OAuth (Outlook)",
       "oauthStarted": "{provider} sign-in started: {url}",
       "openCalendar": "Open calendar",
-      "openFollowUps": "Open follow-ups",
+      "openFollowUps": "Open Waiting for a reply",
       "openInbox": "Open inbox",
       "pin": "Pin or unpin",
       "setAside": "Set aside",
@@ -206,8 +206,8 @@
           "mails": "Mail",
           "navigation": "Navigation",
           "recent": "Recent searches",
-          "reminder": "Set a reminder",
-          "reminderForMany": "Reminder for {count} emails",
+          "reminder": "Snooze",
+          "reminderForMany": "Snooze {count} emails",
           "recentCommands": "Recently used"
         },
         "hint": "Searches mail, contacts and commands. Operators such as from: or has:attachment can be combined.",
@@ -253,8 +253,8 @@
           "label": "Add to a topic"
         },
         "archive": {
-          "keywords": "archive",
-          "label": "Archive"
+          "keywords": "archive done",
+          "label": "Mark as done (second key)"
         },
         "clearSelection": {
           "keywords": "clear selection",
@@ -285,8 +285,8 @@
           "label": "Go to drafts"
         },
         "goFollowUps": {
-          "keywords": "go followups reminder",
-          "label": "Go to follow-ups"
+          "keywords": "go followups waiting reply",
+          "label": "Go to Waiting for a reply"
         },
         "goInbox": {
           "keywords": "go inbox",
@@ -318,7 +318,7 @@
         },
         "moveSnoozed": {
           "keywords": "reminder snooze later",
-          "label": "Reminder / snooze"
+          "label": "Snooze"
         },
         "moveWaiting": {
           "keywords": "waiting reply",
@@ -429,7 +429,7 @@
         "calendar": "C Calendar",
         "contacts": "P Contacts",
         "drafts": "D Drafts",
-        "followUps": "F Follow-ups",
+        "followUps": "F Waiting for a reply",
         "inbox": "I Inbox",
         "outbox": "O Outbox"
       },
@@ -536,7 +536,7 @@
         "oauthGmail": "oauth google anmelden login",
         "oauthOutlook": "oauth microsoft anmelden login",
         "openCalendar": "calendar termine",
-        "openFollowUps": "followups wiedervorlage",
+        "openFollowUps": "followups nachfassen warten antwort",
         "openInbox": "inbox liste list",
         "pin": "pin flag anheften lösen",
         "reply": "reply antwort",
@@ -562,7 +562,7 @@
       "markDoneMany": "{count} E-Mails erledigen",
       "markRead": "Als gelesen markieren",
       "markUnread": "Als ungelesen markieren",
-      "moveToInbox": "In den Posteingang verschieben",
+      "moveToInbox": "In die Inbox verschieben",
       "noEmailAccount": "Kein E-Mail-Konto vorhanden.",
       "oauthFailed": "{provider}-Anmeldung konnte nicht gestartet werden.",
       "oauthGmail": "OAuth starten (Gmail)",
@@ -570,12 +570,12 @@
       "oauthOutlook": "OAuth starten (Outlook)",
       "oauthStarted": "{provider}-Anmeldung gestartet: {url}",
       "openCalendar": "Kalender öffnen",
-      "openFollowUps": "Follow-ups öffnen",
-      "openInbox": "Posteingang öffnen",
+      "openFollowUps": "„Warten auf Antwort“ öffnen",
+      "openInbox": "Inbox öffnen",
       "pin": "Anheften oder lösen",
       "setAside": "Beiseitelegen",
       "showShortcuts": "Tastenkürzel anzeigen",
-      "snooze": "Reminder / Wiedervorlage setzen …",
+      "snooze": "Auf Wiedervorlage legen …",
       "syncDone": "Synchronisierung abgeschlossen.",
       "syncFailed": "Synchronisierung fehlgeschlagen.",
       "syncMail": "E-Mails synchronisieren",
@@ -656,8 +656,8 @@
           "mails": "Mails",
           "navigation": "Navigation",
           "recent": "Letzte Suchen",
-          "reminder": "Reminder setzen",
-          "reminderForMany": "Reminder für {count} E-Mails",
+          "reminder": "Auf Wiedervorlage legen",
+          "reminderForMany": "{count} E-Mails auf Wiedervorlage legen",
           "recentCommands": "Zuletzt verwendet"
         },
         "hint": "Durchsucht Mails, Kontakte und Befehle. Operatoren wie from: oder has:attachment lassen sich kombinieren.",
@@ -703,8 +703,8 @@
           "label": "Zu einem Thema hinzufügen"
         },
         "archive": {
-          "keywords": "archive archivieren",
-          "label": "Archivieren"
+          "keywords": "archive archivieren erledigt done",
+          "label": "Als erledigt markieren (Zweittaste)"
         },
         "clearSelection": {
           "keywords": "clear selection leeren",
@@ -735,16 +735,16 @@
           "label": "Zu Entwürfen"
         },
         "goFollowUps": {
-          "keywords": "go followups reminder wiedervorlage",
-          "label": "Zu Follow-ups"
+          "keywords": "go followups nachfassen warten antwort",
+          "label": "Zu „Warten auf Antwort“"
         },
         "goInbox": {
           "keywords": "go inbox posteingang",
-          "label": "Zum Posteingang"
+          "label": "Zur Inbox"
         },
         "goOutbox": {
-          "keywords": "go outbox ausgang",
-          "label": "Zur Outbox"
+          "keywords": "go outbox postausgang",
+          "label": "Zum Postausgang"
         },
         "help": {
           "keywords": "help shortcuts hilfe",
@@ -764,11 +764,11 @@
         },
         "moveInbox": {
           "keywords": "move inbox posteingang",
-          "label": "In den Posteingang verschieben"
+          "label": "In die Inbox verschieben"
         },
         "moveSnoozed": {
           "keywords": "reminder snooze wiedervorlage",
-          "label": "Reminder / Wiedervorlage"
+          "label": "Auf Wiedervorlage legen"
         },
         "moveWaiting": {
           "keywords": "waiting warten",
@@ -879,9 +879,9 @@
         "calendar": "C Kalender",
         "contacts": "P Kontakte",
         "drafts": "D Entwürfe",
-        "followUps": "F Follow-ups",
-        "inbox": "I Posteingang",
-        "outbox": "O Outbox"
+        "followUps": "F Warten auf Antwort",
+        "inbox": "I Inbox",
+        "outbox": "O Postausgang"
       },
       "subtitle": "Alles Wichtige bleibt direkt unter den Fingern.",
       "title": "Tastenkürzel"

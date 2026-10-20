@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, watch } from 'vue';
+import { computed, defineAsyncComponent, watch } from 'vue';
 import { RouterView, useRoute } from 'vue-router';
 import Sidebar from '@/components/layout/Sidebar.vue';
 import ComposeFab from '@/components/layout/ComposeFab.vue';
 import ToastStack from '@/components/ui/ToastStack.vue';
+import PaneResizeHandle from '@/components/ui/PaneResizeHandle.vue';
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue';
 import PromptDialog from '@/components/ui/PromptDialog.vue';
 import UndoFab from '@/components/ui/UndoFab.vue';
@@ -13,7 +14,7 @@ import SyncStatusLine from '@/components/layout/SyncStatusLine.vue';
 import { useComposerStore } from '@/stores/composer';
 import { useTopicsStore } from '@/stores/topics';
 import { useSettingsStore } from '@/stores/settings';
-import { useUiStore } from '@/stores/ui';
+import { SIDEBAR_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
 import { useAppBootstrap, useComposeWindowBootstrap } from '@/bootstrap';
 import { loadOmniSearch } from '@/components/navigation/loadOmniSearch';
 
@@ -37,37 +38,11 @@ const TopicPickerOverlay = defineAsyncComponent(() => import('@/components/topic
 const OnboardingFlow = defineAsyncComponent(() => import('@/components/onboarding/OnboardingFlow.vue'));
 const SettingsModal = defineAsyncComponent(() => import('@/components/settings/SettingsModal.vue'));
 
-let sidebarResizeStartX = 0;
-let sidebarResizeStartWidth = 0;
-
-function onSidebarResizeMove(event: MouseEvent) {
-  const delta = event.clientX - sidebarResizeStartX;
-  ui.setSidebarWidth(sidebarResizeStartWidth + delta);
-}
-
-function stopSidebarResize() {
-  document.body.style.cursor = '';
-  document.body.style.userSelect = '';
-  window.removeEventListener('mousemove', onSidebarResizeMove);
-  window.removeEventListener('mouseup', stopSidebarResize);
-}
-
-function startSidebarResize(event: MouseEvent) {
-  sidebarResizeStartX = event.clientX;
-  sidebarResizeStartWidth = ui.sidebarWidth;
-  document.body.style.cursor = 'col-resize';
-  document.body.style.userSelect = 'none';
-  window.addEventListener('mousemove', onSidebarResizeMove);
-  window.addEventListener('mouseup', stopSidebarResize);
-}
-
 watch(() => route.fullPath, () => {
   if (ui.mobileSidebarOpen) {
     ui.closeMobileSidebar();
   }
 });
-
-onBeforeUnmount(stopSidebarResize);
 
 // Decided once, at setup: a window either is a composer popout or it is the
 // application. Reacting to the route instead would boot the full application —
@@ -88,11 +63,12 @@ if (standaloneCompose.value) {
     <!-- Desktop: sidebar + resize handle -->
     <template v-if="!ui.isMobile && !standaloneCompose">
       <Sidebar />
-      <div
-        class="resize-handle"
-        role="separator"
-        :aria-label="$t('ui.resizeSidebar')"
-        @mousedown.prevent="startSidebarResize"
+      <PaneResizeHandle
+        :label="$t('ui.resizeSidebar')"
+        :value="ui.sidebarWidth"
+        :min="SIDEBAR_WIDTH_LIMITS.min"
+        :max="SIDEBAR_WIDTH_LIMITS.max"
+        @resize="ui.setSidebarWidth"
       />
     </template>
 
@@ -225,29 +201,6 @@ if (standaloneCompose.value) {
 .shell--composer-standalone {
   grid-template-columns: 1fr;
   grid-template-rows: 1fr;
-}
-
-.resize-handle {
-  width: 1px;
-  position: relative;
-  cursor: col-resize;
-  background: var(--border-color-muted);
-  z-index: 2;
-}
-
-.resize-handle::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -3px;
-  width: 7px;
-}
-
-.resize-handle:hover,
-.resize-handle:active {
-  background: var(--accent-primary);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--accent-primary) 40%, transparent);
 }
 
 main {

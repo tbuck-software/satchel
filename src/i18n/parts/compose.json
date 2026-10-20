@@ -381,7 +381,7 @@
       },
       "schedule": {
         "scheduled": "Geplant: {time}",
-        "followUp": "Follow-up: {time}",
+        "followUp": "Nachfassen: {time}",
         "remove": "entfernen",
         "submit": "Einplanen",
         "editCancelled": "Der Versand wurde abgebrochen, damit du diesen Entwurf bearbeiten kannst. Wähle erneut Später senden, um die überarbeitete Nachricht zu planen."

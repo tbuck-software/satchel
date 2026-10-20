@@ -57,12 +57,21 @@ const CONTEXT_ORDER: readonly KeybindingContext[] = [
  * offered `Space` as a third way to open a row, which it is not. A hand-kept
  * copy of a registry is a copy that goes wrong.
  */
+/** The action's own key and the keys of its aliases, e.g. `d or e` for Done. */
+function keysFor(action: string): string {
+  const aliases = KEYBINDING_DEFINITIONS
+    .filter((definition) => definition.aliasOf === action)
+    .map((definition) => binding(definition.action));
+  return either(binding(action), ...aliases);
+}
+
 const registeredGroups = computed<ShortcutGroup[]>(() =>
   CONTEXT_ORDER.map((context) => ({
     title: KEYBINDING_CONTEXT_LABELS[context],
     items: KEYBINDING_DEFINITIONS
-      .filter((definition) => definition.context === context)
-      .map((definition) => [binding(definition.action), definition.label] as [string, string])
+      // An alias is one more key for an action, not a second action.
+      .filter((definition) => definition.context === context && !definition.aliasOf)
+      .map((definition) => [keysFor(definition.action), definition.label] as [string, string])
       .filter(([key]) => key !== ''),
   })).filter((group) => group.items.length > 0),
 );
@@ -182,8 +191,14 @@ function editBindings() {
   gap: 18px;
 }
 
+/*
+ * `align-content: start`: a section shares its grid row with its neighbour,
+ * and with the default the taller column's surplus went to this section's
+ * heading track, pushing a short list hundreds of pixels below its title.
+ */
 .groups section {
   display: grid;
+  align-content: start;
   gap: 4px;
 }
 

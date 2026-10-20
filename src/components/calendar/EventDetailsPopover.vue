@@ -31,7 +31,7 @@ const statusLabel = computed(() => {
     case 'cancelled':
       return t('calendar.status.cancelled');
     default:
-      if (props.item.source === 'caldav') return 'GroupWise';
+      if (props.item.source === 'caldav') return t('calendar.source.caldav');
       if (props.item.source === 'google') return t('calendar.status.googleCalendar');
       return t('calendar.status.ownEvent');
   }

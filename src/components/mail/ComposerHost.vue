@@ -12,6 +12,7 @@ import { useConfirm } from '@/composables/useConfirm';
 import { useFocusTrap } from '@/composables/useFocusTrap';
 import { resizeComposerRect, type ResizeDirection } from '@/utils/composerGeometry';
 import { useComposeWindow } from '@/composables/useComposeWindow';
+import { refreshToastClearance } from '@/composables/useToastClearance';
 
 interface ComposeViewHandle {
   persistDraft: (options?: { silent?: boolean }) => Promise<string | null>;
@@ -318,6 +319,10 @@ watch(
     }
   },
 );
+
+// A drag moves the send row by transform, which no layout event reports;
+// a toast that is already up has to follow it.
+watch([x, y, width, height, maximized], refreshToastClearance);
 
 if (typeof window !== 'undefined') window.addEventListener('resize', onResize);
 

@@ -38,14 +38,25 @@ describe('EmptyState', () => {
     expect(wrapper.findComponent(AppButton).exists()).toBe(false);
   });
 
-  it('renders a drawn icon and falls back to the character otherwise', () => {
+  it('renders a drawn icon in place of the default glyph', () => {
     const drawn = mount(EmptyState, {
       props: { title: 'Nichts hier' },
       slots: { icon: '<svg class="drawn" viewBox="0 0 16 16" />' },
     });
-    const plain = mount(EmptyState, { props: { title: 'Nichts hier', icon: '📭' } });
 
     expect(drawn.find('svg.drawn').exists()).toBe(true);
-    expect(plain.get('.icon').text()).toBe('📭');
+    expect(drawn.find('.app-icon').exists()).toBe(false);
+  });
+
+  /**
+   * The default was a sparkles emoji, which screen readers read out and the
+   * theme could not colour. The picture is decoration; the title is the news.
+   */
+  it('draws a kit glyph by default and hides the picture from assistive tech', () => {
+    const wrapper = mount(EmptyState, { props: { title: 'Nichts hier' } });
+
+    expect(wrapper.get('.icon').attributes('aria-hidden')).toBe('true');
+    expect(wrapper.find('.icon .app-icon').exists()).toBe(true);
+    expect(wrapper.get('.icon').text()).toBe('');
   });
 });

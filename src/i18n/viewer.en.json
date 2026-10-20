@@ -144,8 +144,8 @@
         "label": "Add to a topic"
       },
       "archive": {
-        "keywords": "archive",
-        "label": "Archive"
+        "keywords": "archive done",
+        "label": "Mark as done (second key)"
       },
       "clearSelection": {
         "keywords": "clear selection",
@@ -176,8 +176,8 @@
         "label": "Go to drafts"
       },
       "goFollowUps": {
-        "keywords": "go followups reminder",
-        "label": "Go to follow-ups"
+        "keywords": "go followups waiting reply",
+        "label": "Go to Waiting for a reply"
       },
       "goInbox": {
         "keywords": "go inbox",
@@ -209,7 +209,7 @@
       },
       "moveSnoozed": {
         "keywords": "reminder snooze later",
-        "label": "Reminder / snooze"
+        "label": "Snooze"
       },
       "moveWaiting": {
         "keywords": "waiting reply",

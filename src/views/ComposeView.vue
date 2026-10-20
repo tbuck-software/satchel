@@ -45,6 +45,7 @@ import { useDraftEditorClaim } from '@/composables/useDraftEditorClaim';
 import { useComposerSignature } from '@/composables/useComposerSignature';
 import { useComposerTransport } from '@/composables/useComposerTransport';
 import { useToast } from '@/composables/useToast';
+import { useToastClearance } from '@/composables/useToastClearance';
 import { outboxErrorLabel } from '@/utils/outboxLabels';
 import {
   formatTimestamp,
@@ -159,6 +160,9 @@ const startsInRecipients = computed(
   () => props.mode === 'new' && props.initialTo.length === 0 && !props.initialDraftId,
 );
 const attachmentZoneRef = ref<InstanceType<typeof AttachmentDropZone> | null>(null);
+// Send and the composer's own status line: no toast may sit on them.
+const footerRef = ref<HTMLElement | null>(null);
+useToastClearance(footerRef);
 const composerInlineAttachments = useComposerInlineAttachments(
   attachments,
   () => richEditorRef.value,
@@ -1188,7 +1192,7 @@ defineExpose({
       @move-to-attachment="composerInlineAttachments.onInlineAttachmentRemoved"
     />
 
-    <footer class="footer">
+    <footer ref="footerRef" class="footer">
       <div v-if="status" class="status-block">
         <p
           class="status"

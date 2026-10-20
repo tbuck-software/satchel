@@ -38,7 +38,7 @@ describe('shortcut helper', () => {
   it('lists every action the registry knows', () => {
     const text = open().get('.groups').text();
 
-    for (const definition of KEYBINDING_DEFINITIONS) {
+    for (const definition of KEYBINDING_DEFINITIONS.filter((entry) => !entry.aliasOf)) {
       expect(text, definition.action).toContain(definition.label);
     }
     expect(text).toContain('Preview the focused attachment');
@@ -58,11 +58,25 @@ describe('shortcut helper', () => {
     const settings = useSettingsStore();
     settings.keybindings = { ...settings.keybindings, archive: 'y' };
 
-    const archiveRow = open()
+    const doneRow = open()
       .findAll('.groups li')
-      .find((row) => row.text().includes('Archive'));
+      .find((row) => row.text().includes('Mark as done'));
 
-    expect(archiveRow?.get('kbd').text()).toBe('y');
+    expect(doneRow?.get('kbd').text()).toBe('d or y');
+  });
+
+  /**
+   * `d` and `e` both mark a thread done. The help listed them as "Mark as
+   * done" and "Archive", two actions that were one.
+   */
+  it('lists the second Done key on the Done row, not as an action of its own', () => {
+    const settings = useSettingsStore();
+    settings.keybindings = { ...settings.keybindings, markDone: 'd', archive: 'e' };
+    const rows = open().findAll('.groups li');
+
+    const doneRows = rows.filter((row) => row.text().includes('Mark as done'));
+    expect(doneRows.map((row) => row.get('kbd').text())).toEqual(['d or e']);
+    expect(rows.filter((row) => row.text().includes('Archive'))).toHaveLength(0);
   });
 
   /** With the switch off a bare key does nothing, so the help must not offer it. */
@@ -76,7 +90,6 @@ describe('shortcut helper', () => {
       .filter((row) => row.text().includes(label))
       .map((row) => row.get('kbd').text());
 
-    expect(keysFor('Archive')).toEqual([]);
     expect(keysFor('Mark as done')).toEqual(['Ctrl+D']);
     expect(keysFor('Show keyboard help')).toEqual(['?']);
   });

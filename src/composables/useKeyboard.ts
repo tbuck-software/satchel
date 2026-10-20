@@ -387,8 +387,12 @@ export function useKeyboard() {
       return true;
     }
 
-    if (matches(event, 'markDone')) {
-      void actions.archive(targetIds());
+    // `e` is the second key for Done (`aliasOf` in the registry), not a
+    // separate archive action.
+    if (matches(event, 'markDone') || matches(event, 'archive')) {
+      const ids = targetIds();
+      if (ids.length === 0) return false;
+      void actions.archive(ids);
       return true;
     }
 
@@ -401,13 +405,6 @@ export function useKeyboard() {
       const ids = targetIds();
       if (ids.length === 0) return false;
       void actions.setAside(ids);
-      return true;
-    }
-
-    if (matches(event, 'archive')) {
-      const ids = targetIds();
-      if (ids.length === 0) return false;
-      void actions.archive(ids);
       return true;
     }
 

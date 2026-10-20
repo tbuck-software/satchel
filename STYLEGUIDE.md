@@ -439,6 +439,7 @@ Reusable building blocks — use these instead of hand-rolled buttons/rows:
 | `ModalShell`        | The frame every full modal shares: one scrim, focus trap, focus return, `aria-modal`, no page scroll behind it. Full bleed below the single-pane breakpoint |
 | `BottomSheet`       | The small transient surface: rises from the bottom edge on a phone, anchored popover on a desktop. Not a modal, on purpose |
 | `ToggleSwitch`      | On/off switch. `before-change` may return `false` to refuse the flip; the knob then stays where it was |
+| `PaneResizeHandle`  | The hairline between two panes. Drags with the mouse; focusable, Arrow keys step 16px (Shift 64px), Home/End jump to the limits. Reports `aria-valuenow/min/max`; the limits come from the UI store |
 | `EmptyState`, `SkeletonRow`, `ToastStack` | Existing utility components             |
 
 ### Adoption, measured

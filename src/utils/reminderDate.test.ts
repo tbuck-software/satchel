@@ -27,7 +27,7 @@ describe('reminderDate', () => {
     expect(reminderSuggestions('', now)).toHaveLength(4);
     const parsed = reminderSuggestions('tomorrow 4pm', now);
     expect(parsed).toHaveLength(1);
-    expect(parsed[0]!.label).toBe('Set reminder');
+    expect(parsed[0]!.label).toBe('Snooze');
   });
 
   it('rejects unknown or past values', () => {

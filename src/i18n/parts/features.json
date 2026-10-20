@@ -57,6 +57,7 @@
       "source": {
         "heading": "Calendars",
         "local": "Local",
+        "caldav": "CalDAV",
         "invites": "Invitations",
         "googlePrimary": "Main calendar",
         "show": "Show",
@@ -109,7 +110,7 @@
         "importFailed": "Import failed: {error}"
       },
       "reminder": {
-        "set": "Set reminder",
+        "set": "Snooze",
         "thisAfternoon": "This afternoon",
         "tomorrowMorning": "Tomorrow morning",
         "nextWeek": "Next week",
@@ -443,6 +444,7 @@
       "source": {
         "heading": "Kalender",
         "local": "Lokal",
+        "caldav": "CalDAV",
         "invites": "Einladungen",
         "googlePrimary": "Hauptkalender",
         "show": "Einblenden",
@@ -495,7 +497,7 @@
         "importFailed": "Import fehlgeschlagen: {error}"
       },
       "reminder": {
-        "set": "Reminder setzen",
+        "set": "Auf Wiedervorlage legen",
         "thisAfternoon": "Heute Nachmittag",
         "tomorrowMorning": "Morgen früh",
         "nextWeek": "Nächste Woche",
@@ -630,7 +632,7 @@
         "notePlaceholder": "Notiz…",
         "showGist": "Kurzfassung anzeigen",
         "showOriginal": "Original anzeigen",
-        "openInInbox": "Im Posteingang öffnen",
+        "openInInbox": "In der Inbox öffnen",
         "removeThread": "Konversation aus Thema entfernen",
         "removeMessage": "Nachricht aus Thema entfernen",
         "remove": "Aus Thema entfernen",

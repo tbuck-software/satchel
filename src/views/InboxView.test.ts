@@ -58,6 +58,7 @@ vi.mock('@/stores/settings', () => ({
 }));
 
 vi.mock('@/stores/ui', () => ({
+  THREAD_LIST_WIDTH_LIMITS: { min: 320, max: 760 },
   useUiStore: () => harness.ui,
 }));
 

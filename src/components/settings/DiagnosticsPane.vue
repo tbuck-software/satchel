@@ -13,6 +13,7 @@ import {
 } from '@/services/backend';
 import AppButton from '@/components/ui/AppButton.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import { useToast } from '@/composables/useToast';
 
 const { locale, t } = useI18n();
@@ -260,10 +261,13 @@ onMounted(() => {
         <h4>{{ $t('settings.diagnostics.syncErrors.title') }}</h4>
         <EmptyState
           v-if="accountsWithProblems.length === 0"
-          icon="✅"
           :title="$t('settings.diagnostics.syncErrors.emptyTitle')"
           :description="$t('settings.diagnostics.syncErrors.emptyDescription')"
-        />
+        >
+          <template #icon>
+            <AppIcon size="lg"><path d="M3.5 8.4 6.5 11.4 12.5 5" /></AppIcon>
+          </template>
+        </EmptyState>
         <ul v-else class="rows">
           <li v-for="account in accountsWithProblems" :key="account.id" class="row">
             <div class="row__head">
@@ -306,7 +310,6 @@ onMounted(() => {
         <h4>{{ $t('settings.diagnostics.queue.title') }}</h4>
         <EmptyState
           v-if="overview.queue.by_status.length === 0"
-          icon="📭"
           :title="$t('settings.diagnostics.queue.emptyTitle')"
           :description="$t('settings.diagnostics.queue.emptyDescription')"
         />
@@ -332,10 +335,13 @@ onMounted(() => {
         <h5>{{ $t('settings.diagnostics.queue.recentFailures') }}</h5>
         <EmptyState
           v-if="overview.queue.recent_failures.length === 0"
-          icon="✅"
           :title="$t('settings.diagnostics.queue.noFailuresTitle')"
           :description="$t('settings.diagnostics.queue.noFailuresDescription')"
-        />
+        >
+          <template #icon>
+            <AppIcon size="lg"><path d="M3.5 8.4 6.5 11.4 12.5 5" /></AppIcon>
+          </template>
+        </EmptyState>
         <ul v-else class="rows">
           <li v-for="entry in overview.queue.recent_failures" :key="entry.id" class="row">
             <div class="row__head">
@@ -370,10 +376,13 @@ onMounted(() => {
         <p class="hint">{{ $t('settings.diagnostics.outbox.hint') }}</p>
         <EmptyState
           v-if="overview.notification_outbox.by_state.length === 0"
-          icon="🔕"
           :title="$t('settings.diagnostics.outbox.emptyTitle')"
           :description="$t('settings.diagnostics.outbox.emptyDescription')"
-        />
+        >
+          <template #icon>
+            <AppIcon size="lg"><path d="M5 7.2a3 3 0 0 1 6 0c0 2 .8 2.8 1.4 3.4H3.6C4.2 10 5 9.2 5 7.2z" /><path d="M6.8 12.4a1.4 1.4 0 0 0 2.4 0" /><path d="M2.4 2.4 13.6 13.6" /></AppIcon>
+          </template>
+        </EmptyState>
         <template v-else>
           <table class="table">
             <thead>
@@ -456,10 +465,13 @@ onMounted(() => {
         <p class="hint">{{ $t('settings.diagnostics.notifications.hint') }}</p>
         <EmptyState
           v-if="overview.notifications.by_status.length === 0"
-          icon="🔔"
           :title="$t('settings.diagnostics.notifications.emptyTitle')"
           :description="$t('settings.diagnostics.notifications.emptyDescription')"
-        />
+        >
+          <template #icon>
+            <AppIcon size="lg"><path d="M5 7.2a3 3 0 0 1 6 0c0 2 .8 2.8 1.4 3.4H3.6C4.2 10 5 9.2 5 7.2z" /><path d="M6.8 12.4a1.4 1.4 0 0 0 2.4 0" /></AppIcon>
+          </template>
+        </EmptyState>
         <template v-else>
           <table class="table">
             <thead>
@@ -509,10 +521,13 @@ onMounted(() => {
         <p class="hint">{{ $t('settings.diagnostics.leases.hint') }}</p>
         <EmptyState
           v-if="overview.sync_leases.length === 0"
-          icon="🔓"
           :title="$t('settings.diagnostics.leases.emptyTitle')"
           :description="$t('settings.diagnostics.leases.emptyDescription')"
-        />
+        >
+          <template #icon>
+            <AppIcon size="lg"><rect x="3.2" y="7.2" width="9.6" height="6.4" rx="1.4" /><path d="M5.6 7.2V5.2a2.4 2.4 0 0 1 4.6-1" /></AppIcon>
+          </template>
+        </EmptyState>
         <ul v-else class="rows">
           <li v-for="lease in overview.sync_leases" :key="lease.account_id" class="row">
             <div class="row__head">
@@ -547,10 +562,13 @@ onMounted(() => {
         <h4>{{ $t('settings.diagnostics.rateLimits.title') }}</h4>
         <EmptyState
           v-if="activeRateLimits.length === 0"
-          icon="🟢"
           :title="$t('settings.diagnostics.rateLimits.emptyTitle')"
           :description="$t('settings.diagnostics.rateLimits.emptyDescription')"
-        />
+        >
+          <template #icon>
+            <AppIcon size="lg"><path d="M3.5 8.4 6.5 11.4 12.5 5" /></AppIcon>
+          </template>
+        </EmptyState>
         <ul v-else class="rows">
           <li v-for="limit in activeRateLimits" :key="limit.provider" class="row">
             <div class="row__head">

@@ -11,7 +11,7 @@ import { useConnectionStore } from '@/stores/connection';
 import { useSettingsStore, type InboxGroupingMode, type InboxSenderBucket } from '@/stores/settings';
 import { useThreadsStore, type NewSenderDomainSuggestion, type NewSenderGroup } from '@/stores/threads';
 import { useTopicsStore } from '@/stores/topics';
-import { useUiStore } from '@/stores/ui';
+import { THREAD_LIST_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
 import { useFollowUpsStore } from '@/stores/followUps';
 import { formatListTime } from '@/utils/listTime';
 import type { ThreadCategory } from '@/types/mail';
@@ -28,6 +28,7 @@ import PaneHeader from '@/components/ui/PaneHeader.vue';
 import FilterPill from '@/components/ui/FilterPill.vue';
 import SearchField from '@/components/ui/SearchField.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
+import PaneResizeHandle from '@/components/ui/PaneResizeHandle.vue';
 import { registerListKeyboardNavigation } from '@/composables/useListKeyboardNavigation';
 import { useI18n } from 'vue-i18n';
 
@@ -371,32 +372,7 @@ const bundleSubtitle = computed(() => {
   return t('inbox.smartFolder');
 });
 
-let listResizeStartX = 0;
-let listResizeStartWidth = 0;
-
-function onListResizeMove(event: MouseEvent) {
-  const delta = event.clientX - listResizeStartX;
-  ui.setThreadListWidth(listResizeStartWidth + delta);
-}
-
-function stopListResize() {
-  document.body.style.cursor = '';
-  document.body.style.userSelect = '';
-  window.removeEventListener('mousemove', onListResizeMove);
-  window.removeEventListener('mouseup', stopListResize);
-}
-
-function startListResize(event: MouseEvent) {
-  listResizeStartX = event.clientX;
-  listResizeStartWidth = ui.threadListWidth;
-  document.body.style.cursor = 'col-resize';
-  document.body.style.userSelect = 'none';
-  window.addEventListener('mousemove', onListResizeMove);
-  window.addEventListener('mouseup', stopListResize);
-}
-
 onBeforeUnmount(() => {
-  stopListResize();
   document.removeEventListener('pointerdown', onViewMenuPointerDown);
   document.removeEventListener('keydown', onViewMenuKeydown);
 });
@@ -1086,12 +1062,14 @@ function acceptExistingSenders() {
     </article>
 
     <!-- Resize Handle -->
-    <div
+    <PaneResizeHandle
       v-if="!ui.isSinglePane"
       class="list-resize"
-      role="separator"
-      :aria-label="$t('inbox.resizeList')"
-      @mousedown.prevent="startListResize"
+      :label="$t('inbox.resizeList')"
+      :value="ui.threadListWidth"
+      :min="THREAD_LIST_WIDTH_LIMITS.min"
+      :max="THREAD_LIST_WIDTH_LIMITS.max"
+      @resize="ui.setThreadListWidth"
     />
 
     <!-- Detail Pane -->
@@ -1245,26 +1223,6 @@ function acceptExistingSenders() {
 
 .list-resize {
   grid-row: 1;
-  width: 1px;
-  background: var(--border-color-muted);
-  cursor: col-resize;
-  position: relative;
-  z-index: 2;
-}
-
-.list-resize::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -3px;
-  width: 7px;
-}
-
-.list-resize:hover,
-.list-resize:active {
-  background: var(--accent-primary);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--accent-primary) 30%, transparent);
 }
 
 .bundle-header {

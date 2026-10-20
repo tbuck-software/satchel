@@ -359,7 +359,7 @@
     "reminder": {
       "nextMonth": "Next month",
       "nextWeek": "Next week",
-      "set": "Set reminder",
+      "set": "Snooze",
       "thisAfternoon": "This afternoon",
       "tomorrowMorning": "Tomorrow morning"
     },
@@ -369,6 +369,7 @@
       "maybe": "Maybe"
     },
     "source": {
+      "caldav": "CalDAV",
       "googlePrimary": "Main calendar",
       "heading": "Calendars",
       "hide": "Hide",
@@ -441,7 +442,7 @@
       "oauthGmail": "oauth google sign in login",
       "oauthOutlook": "oauth microsoft sign in login",
       "openCalendar": "calendar events",
-      "openFollowUps": "followups reminder",
+      "openFollowUps": "followups waiting reply",
       "openInbox": "inbox list",
       "openSettingsSection": "settings preferences options",
       "pin": "pin flag star",
@@ -473,7 +474,7 @@
     "oauthOutlook": "Start OAuth (Outlook)",
     "oauthStarted": "{provider} sign-in started: {url}",
     "openCalendar": "Open calendar",
-    "openFollowUps": "Open follow-ups",
+    "openFollowUps": "Open Waiting for a reply",
     "openInbox": "Open inbox",
     "openSettingsSection": "Settings: {section}",
     "pin": "Pin or unpin",
@@ -1300,7 +1301,7 @@
       "actionFailedMessage": "{action} was saved locally. Server sync will keep trying.",
       "actionFailedTitle": "Action could not be completed",
       "actionNotAppliedMessage": "{action} was not applied. Please open Satchel and try again.",
-      "archive": "Archive",
+      "archive": "Done",
       "backgroundSyncChannel": "Background sync",
       "backgroundSyncDescription": "Keeps the connection open for new email",
       "backgroundSyncText": "Checking for new email in the background",
@@ -1400,8 +1401,8 @@
         "navigation": "Navigation",
         "recent": "Recent searches",
         "recentCommands": "Recently used",
-        "reminder": "Set a reminder",
-        "reminderForMany": "Reminder for {count} emails"
+        "reminder": "Snooze",
+        "reminderForMany": "Snooze {count} emails"
       },
       "hint": "Searches mail, contacts and commands. Operators such as from: or has:attachment can be combined.",
       "hints": {
@@ -1463,7 +1464,7 @@
   },
   "notifications": {
     "actions": {
-      "archive": "Archive",
+      "archive": "Done",
       "markRead": "Mark as read",
       "trash": "Delete"
     },
@@ -1731,31 +1732,32 @@
       "disconnected": "disconnected",
       "groupware": {
         "autoFailed": "Automatic discovery failed: {error}. Please add the credentials.",
+        "badge": "CalDAV / CardDAV",
         "caldavServer": "CalDAV server",
-        "caldavServerPlaceholder": "gwcaldav.example.com",
+        "caldavServerPlaceholder": "caldav.example.com",
         "calendar": "Calendar",
         "calendarAndContacts": "Calendar and contacts",
         "carddavServer": "CardDAV server",
-        "carddavServerPlaceholder": "gwcarddav.example.com",
+        "carddavServerPlaceholder": "carddav.example.com",
         "checking": "Checking…",
         "connect": "Connect",
         "connectTitle": "Connect CalDAV calendars and CardDAV contacts",
         "connected": "{services} connected: {events} events, {contacts} contacts{suffix}",
         "contacts": "Contacts",
-        "credentialsRequired": "Username and GroupWise password are required",
+        "credentialsRequired": "Username and password are required",
         "discovering": "Looking for calendars and contacts with the existing credentials …",
         "formCopy": "Satchel checks CalDAV and CardDAV before saving and then syncs both services.",
         "formTitle": "Connect calendars and contacts for {email}",
         "password": "Password",
-        "passwordPlaceholder": "GroupWise password",
-        "saveFailed": "GroupWise connection failed: {error}",
-        "saved": "GroupWise connected: {events} events, {contacts} contacts{suffix}",
+        "passwordPlaceholder": "CalDAV / CardDAV password",
+        "saveFailed": "CalDAV / CardDAV connection failed: {error}",
+        "saved": "CalDAV / CardDAV connected: {events} events, {contacts} contacts{suffix}",
         "serverRequired": "At least one CalDAV or CardDAV server is required",
-        "syncFailed": "GroupWise sync failed: {error}",
+        "syncFailed": "CalDAV / CardDAV sync failed: {error}",
         "syncNow": "Sync now",
-        "synced": "GroupWise sync: {events} events, {contacts} contacts{suffix}",
+        "synced": "CalDAV / CardDAV sync: {events} events, {contacts} contacts{suffix}",
         "username": "Username",
-        "usernamePlaceholder": "GroupWise username"
+        "usernamePlaceholder": "CalDAV / CardDAV username"
       },
       "imapFailed": "IMAP connection failed: {error}",
       "imapOk": "IMAP connection OK ({folders} folders)",
@@ -2821,8 +2823,8 @@
         "label": "Add to a topic"
       },
       "archive": {
-        "keywords": "archive",
-        "label": "Archive"
+        "keywords": "archive done",
+        "label": "Mark as done (second key)"
       },
       "clearSelection": {
         "keywords": "clear selection",
@@ -2853,8 +2855,8 @@
         "label": "Go to drafts"
       },
       "goFollowUps": {
-        "keywords": "go followups reminder",
-        "label": "Go to follow-ups"
+        "keywords": "go followups waiting reply",
+        "label": "Go to Waiting for a reply"
       },
       "goInbox": {
         "keywords": "go inbox",
@@ -2886,7 +2888,7 @@
       },
       "moveSnoozed": {
         "keywords": "reminder snooze later",
-        "label": "Reminder / snooze"
+        "label": "Snooze"
       },
       "moveWaiting": {
         "keywords": "waiting reply",
@@ -2997,7 +2999,7 @@
       "calendar": "C Calendar",
       "contacts": "P Contacts",
       "drafts": "D Drafts",
-      "followUps": "F Follow-ups",
+      "followUps": "F Waiting for a reply",
       "inbox": "I Inbox",
       "outbox": "O Outbox"
     },
@@ -3214,7 +3216,7 @@
       "resend": "Send again",
       "resetTextSize": "Reset text size",
       "saveAllAttachments": "Save all attachments ({count})",
-      "setReminder": "Set reminder",
+      "setReminder": "Snooze",
       "smaller": "Smaller",
       "textSize": "Text size",
       "wholeConversation": "Whole conversation"

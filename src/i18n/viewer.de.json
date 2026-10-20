@@ -115,7 +115,7 @@
       "decryptAction": "Diesen Block entschlüsseln",
       "decryptedPgp": "Entschlüsselter OpenPGP-Block",
       "decryptedSmime": "Entschlüsselter S/MIME-Block",
-      "encryptedHint": "Dieser Block kann mit Ihrem privaten Schlüssel entschlüsselt werden.",
+      "encryptedHint": "Dieser Block kann mit deinem privaten Schlüssel entschlüsselt werden.",
       "encryptedPgp": "Verschlüsselter OpenPGP-Block"
     },
     "quotes": {
@@ -144,8 +144,8 @@
         "label": "Zu einem Thema hinzufügen"
       },
       "archive": {
-        "keywords": "archive archivieren",
-        "label": "Archivieren"
+        "keywords": "archive archivieren erledigt done",
+        "label": "Als erledigt markieren (Zweittaste)"
       },
       "clearSelection": {
         "keywords": "clear selection leeren",
@@ -176,16 +176,16 @@
         "label": "Zu Entwürfen"
       },
       "goFollowUps": {
-        "keywords": "go followups reminder wiedervorlage",
-        "label": "Zu Follow-ups"
+        "keywords": "go followups nachfassen warten antwort",
+        "label": "Zu „Warten auf Antwort“"
       },
       "goInbox": {
         "keywords": "go inbox posteingang",
-        "label": "Zum Posteingang"
+        "label": "Zur Inbox"
       },
       "goOutbox": {
-        "keywords": "go outbox ausgang",
-        "label": "Zur Outbox"
+        "keywords": "go outbox postausgang",
+        "label": "Zum Postausgang"
       },
       "help": {
         "keywords": "help shortcuts hilfe",
@@ -205,11 +205,11 @@
       },
       "moveInbox": {
         "keywords": "move inbox posteingang",
-        "label": "In den Posteingang verschieben"
+        "label": "In die Inbox verschieben"
       },
       "moveSnoozed": {
         "keywords": "reminder snooze wiedervorlage",
-        "label": "Reminder / Wiedervorlage"
+        "label": "Auf Wiedervorlage legen"
       },
       "moveWaiting": {
         "keywords": "waiting warten",

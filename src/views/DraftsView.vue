@@ -13,6 +13,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import CountBadge from '@/components/ui/CountBadge.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import ErrorState from '@/components/ui/ErrorState.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
@@ -193,12 +194,15 @@ async function discardDraft(id: string) {
 
         <EmptyState
           v-else-if="drafts.sorted.length === 0"
-          icon="✉️"
           :title="$t('drafts.empty.title')"
           :description="$t('drafts.empty.description')"
           :action-label="$t('drafts.empty.action')"
           @action="composer.openNew()"
-        />
+        >
+          <template #icon>
+            <AppIcon size="lg"><rect x="2.6" y="3.8" width="10.8" height="8.4" rx="1.4" /><path d="m3 5 5 3.4L13 5" /></AppIcon>
+          </template>
+        </EmptyState>
 
         <div v-else class="groups">
           <section v-for="group in groups" :key="group.key" class="group">
@@ -381,10 +385,13 @@ async function discardDraft(id: string) {
       </article>
       <div v-else class="detail-placeholder">
         <EmptyState
-          icon="✉️"
           :title="$t('drafts.detail.emptyTitle')"
           :description="$t('drafts.detail.emptyDescription')"
-        />
+        >
+          <template #icon>
+            <AppIcon size="lg"><rect x="2.6" y="3.8" width="10.8" height="8.4" rx="1.4" /><path d="m3 5 5 3.4L13 5" /></AppIcon>
+          </template>
+        </EmptyState>
       </div>
     </template>
   </ListDetailLayout>

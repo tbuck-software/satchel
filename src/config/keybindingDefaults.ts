@@ -10,6 +10,12 @@ export interface KeybindingSpec {
   action: string;
   defaultBinding: string;
   context: KeybindingContext;
+  /**
+   * A second key for another action, not an action of its own. It keeps its
+   * own id so it can be rebound separately and saved bindings stay valid; the
+   * help lists it on the row of the action it triggers.
+   */
+  aliasOf?: string;
 }
 
 export const KEYBINDING_SPECS: readonly KeybindingSpec[] = [
@@ -31,7 +37,7 @@ export const KEYBINDING_SPECS: readonly KeybindingSpec[] = [
   { action: 'replyAll', defaultBinding: 'A', context: 'mail' },
   { action: 'forward', defaultBinding: 'f', context: 'mail' },
   { action: 'markDone', defaultBinding: 'd', context: 'mail' },
-  { action: 'archive', defaultBinding: 'e', context: 'mail' },
+  { action: 'archive', defaultBinding: 'e', context: 'mail', aliasOf: 'markDone' },
   { action: 'moveWaiting', defaultBinding: 'w', context: 'mail' },
   { action: 'moveSnoozed', defaultBinding: 's', context: 'mail' },
   { action: 'moveInbox', defaultBinding: 'i', context: 'mail' },

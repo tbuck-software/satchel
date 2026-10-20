@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import AppButton from '@/components/ui/AppButton.vue';
+import { useToastClearance } from '@/composables/useToastClearance';
 
 /*
  * The foot of the reader: who you would be answering, as whom, and one way
@@ -18,10 +20,14 @@ defineProps<{
 defineEmits<{
   reply: [];
 }>();
+
+// The bar ends the reader in the corner the toast stack starts in.
+const barRef = ref<HTMLElement | null>(null);
+useToastClearance(barRef);
 </script>
 
 <template>
-  <div class="reply-bar">
+  <div ref="barRef" class="reply-bar">
     <CardButton class="reply-bar__field" @click="$emit('reply')">
       <span class="reply-bar__placeholder">{{ $t('thread.reply.to', { name: recipient }) }}</span>
       <span class="reply-bar__identity">

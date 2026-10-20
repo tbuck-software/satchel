@@ -1,3 +1,4 @@
+import type { Locator } from '@playwright/test';
 import { expect, test } from './mock-contract.fixture';
 
 test.beforeEach(async ({ page }) => {
@@ -314,5 +315,59 @@ test('filters Settings from the keyboard and leaves them with Escape', async ({ 
   await expect(nav.getByRole('button', { name: /^Swipe gestures/ })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page).not.toHaveURL(/\/settings/);
+});
+
+/** Whether the centre of `locator` is the element itself, not something on top of it. */
+async function isUncovered(locator: Locator) {
+  return locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return element.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+  });
+}
+
+/**
+ * The mock starts with two error toasts (a failed sync, a failed send). The
+ * stack sat in the corner where both the reply bar and the composer's send
+ * row end, and at 900x700 it took the click meant for Send.
+ */
+test('keeps error toasts off the reply bar and the send button', async ({ page }) => {
+  await expect(page.locator('.toast--error').first()).toBeVisible();
+  await expect.poll(() => isUncovered(page.locator('.reply-bar').getByRole('button', { name: 'Reply', exact: true }))).toBe(true);
+
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.getByText('Staging login 500 after deployment', { exact: true }).first().click();
+  await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
+  const composer = page.getByRole('dialog', { name: 'Compose email' });
+  await expect(page.locator('.toast--error').first()).toBeVisible();
+  const send = composer.getByRole('button', { name: 'Send', exact: true });
+  await expect.poll(() => isUncovered(send)).toBe(true);
+});
+
+/**
+ * Each section shares a grid row with its neighbour. With the default
+ * `align-content` the taller column's surplus went to the shorter section's
+ * heading track: "Mailbox focused" showed its title and, 300px further down
+ * and out of view, its list.
+ */
+test('puts every shortcut list right under its heading', async ({ page }) => {
+  await page.keyboard.press('?');
+  const sections = page.locator('.groups > section');
+  await expect(sections.first()).toBeVisible();
+
+  const layout = await sections.evaluateAll((nodes) => nodes.map((node) => {
+    const heading = node.querySelector('h4')!.getBoundingClientRect();
+    const list = node.querySelector('ul')!.getBoundingClientRect();
+    return {
+      title: node.querySelector('h4')!.textContent ?? '',
+      heading: heading.height,
+      gap: list.top - heading.bottom,
+    };
+  }));
+
+  expect(layout.length).toBeGreaterThan(3);
+  for (const { title, heading, gap } of layout) {
+    expect(heading, title).toBeLessThan(40);
+    expect(gap, title).toBeLessThan(16);
+  }
 });
 

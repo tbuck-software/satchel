@@ -11,8 +11,13 @@ const MOBILE_BREAKPOINT = 768;
 const SINGLE_PANE_BREAKPOINT = 1020;
 const READER_MIN_WIDTH = 380;
 const DIVIDER_WIDTH = 1;
-const clampSidebarWidth = (width: number) => Math.min(420, Math.max(220, Math.round(width)));
-const clampThreadListWidth = (width: number) => Math.min(760, Math.max(320, Math.round(width)));
+/** Pane width limits in px. The resize handles read them for their ARIA range. */
+export const SIDEBAR_WIDTH_LIMITS = { min: 220, max: 420 } as const;
+export const THREAD_LIST_WIDTH_LIMITS = { min: 320, max: 760 } as const;
+const clamp = (width: number, limits: { min: number; max: number }) =>
+  Math.min(limits.max, Math.max(limits.min, Math.round(width)));
+const clampSidebarWidth = (width: number) => clamp(width, SIDEBAR_WIDTH_LIMITS);
+const clampThreadListWidth = (width: number) => clamp(width, THREAD_LIST_WIDTH_LIMITS);
 
 export function layoutModeForWidth(width: number, sidebarWidth = 240, threadListWidth = 408) {
   const isMobile = width < MOBILE_BREAKPOINT;
