@@ -1313,21 +1313,20 @@ pub(crate) async fn refresh_thread_projection_tx(
     Ok(())
 }
 
+/// One row of the single-statement smart inbox summary: the scope total
+/// repeated on every row, plus one preview item with its bucket's aggregate.
+/// An inbox without any non-personal bucket yields one row of NULL previews.
 #[derive(Debug, FromRow)]
-struct SmartBucketAggregateRow {
-    bucket: String,
-    count: i64,
-    unread_count: i64,
-}
-
-#[derive(Debug, FromRow)]
-struct SmartBucketPreviewRow {
-    bucket: String,
-    id: String,
-    sender_name: String,
-    sender_email: String,
-    subject: String,
-    unread_count: i64,
+struct SmartBucketSummaryRow {
+    total_count: i64,
+    bucket: Option<String>,
+    id: Option<String>,
+    sender_name: Option<String>,
+    sender_email: Option<String>,
+    subject: Option<String>,
+    unread_count: Option<i64>,
+    bucket_count: Option<i64>,
+    bucket_unread_count: Option<i64>,
 }
 
 #[derive(Debug, FromRow)]
@@ -4137,6 +4136,7 @@ mod tests {
             ),
             Some("sample.user@example.com".to_string()),
             Some("sample.user@example.com".to_string()),
+            None,
         );
 
         assert!(participants.contains("sample.user@example.com"));
@@ -4157,6 +4157,7 @@ mod tests {
             ),
             Some("SHOP APOTHEKE".to_string()),
             Some("info@shop-apotheke.com".to_string()),
+            None,
         );
 
         let participants = serde_json::from_str::<Vec<Value>>(&participants)
@@ -4179,6 +4180,7 @@ mod tests {
             ),
             Some("Lena Lehmann".to_string()),
             Some("training-lehmann@example.org".to_string()),
+            None,
         );
 
         let participants = serde_json::from_str::<Vec<Value>>(&participants)
@@ -4186,6 +4188,150 @@ mod tests {
 
         assert_eq!(participants[0]["name"], "Lena Lehmann");
         assert_eq!(participants[0]["email"], "training-lehmann@example.org");
+    }
+
+    /// The quadratic merge this module used before the address index; the
+    /// reference the capped projection must agree with.
+    fn legacy_participants(
+        raw: Option<String>,
+        message_participants: Option<String>,
+        latest_from_name: Option<String>,
+        latest_from_address: Option<String>,
+    ) -> Vec<Value> {
+        let mut normalized = Vec::<ParticipantProjection>::new();
+        for raw_json in [
+            message_participants.unwrap_or_else(|| "[]".to_string()),
+            raw.unwrap_or_else(|| "[]".to_string()),
+        ] {
+            let parsed = serde_json::from_str::<Vec<Value>>(&raw_json).unwrap_or_default();
+            for next in parsed.into_iter().filter_map(participant_from_json) {
+                if let Some(existing) = normalized
+                    .iter_mut()
+                    .find(|participant| participant.email.eq_ignore_ascii_case(&next.email))
+                {
+                    if existing.name.eq_ignore_ascii_case(&existing.email)
+                        || (!next.name.eq_ignore_ascii_case(&next.email)
+                            && next.name.len() > existing.name.len())
+                    {
+                        existing.name = next.name;
+                    }
+                    continue;
+                }
+                normalized.push(next);
+            }
+        }
+        if let Some(latest_email) = normalize_participant_email(latest_from_address.as_deref()) {
+            let latest_name =
+                resolve_sender_display_name(latest_from_name.as_deref(), &latest_email);
+            if let Some(index) = normalized
+                .iter()
+                .position(|participant| participant.email.eq_ignore_ascii_case(&latest_email))
+            {
+                normalized.remove(index);
+            }
+            normalized.insert(
+                0,
+                ParticipantProjection {
+                    name: latest_name,
+                    email: latest_email,
+                },
+            );
+        }
+        serde_json::from_str(&serde_json::to_string(&normalized).unwrap()).unwrap()
+    }
+
+    fn reply_all_participants() -> (String, String) {
+        // 300 recipients, every address seen twice in differing case and with
+        // and without a display name, plus stored participants that overlap.
+        let mut message = Vec::new();
+        for index in 0..300 {
+            message.push(serde_json::json!({
+                "name": format!("r{index}@corp.example"),
+                "email": format!("r{index}@corp.example"),
+            }));
+        }
+        for index in (0..300).rev() {
+            message.push(serde_json::json!({
+                "name": format!("Recipient {index}"),
+                "email": format!("R{index}@Corp.Example"),
+            }));
+        }
+        let stored = (290..320)
+            .map(|index| Value::String(format!("Stored {index} <r{index}@corp.example>")))
+            .collect::<Vec<_>>();
+        (
+            serde_json::to_string(&stored).unwrap(),
+            serde_json::to_string(&message).unwrap(),
+        )
+    }
+
+    #[test]
+    fn normalize_participants_keeps_the_leading_entries_of_the_full_merge() {
+        let (stored, message) = reply_all_participants();
+        for latest in [Some("r7@corp.example"), Some("new@corp.example"), None] {
+            let expected = legacy_participants(
+                Some(stored.clone()),
+                Some(message.clone()),
+                Some("Latest".to_string()),
+                latest.map(str::to_string),
+            );
+            let actual = serde_json::from_str::<Vec<Value>>(&normalize_participants_json(
+                Some(stored.clone()),
+                Some(message.clone()),
+                Some("Latest".to_string()),
+                latest.map(str::to_string),
+                None,
+            ))
+            .unwrap();
+            assert!(expected.len() > THREAD_PARTICIPANT_LIMIT);
+            assert_eq!(
+                actual,
+                expected[..THREAD_PARTICIPANT_LIMIT],
+                "latest {latest:?}"
+            );
+        }
+
+        // Short lists are untouched.
+        let short = r#"[{"name":"A","email":"a@x.test"},{"name":"b@x.test","email":"B@x.test"}]"#;
+        assert_eq!(
+            serde_json::from_str::<Vec<Value>>(&normalize_participants_json(
+                Some(r#"["Bee <b@x.test>"]"#.to_string()),
+                Some(short.to_string()),
+                Some("A".to_string()),
+                Some("a@x.test".to_string()),
+                None,
+            ))
+            .unwrap(),
+            legacy_participants(
+                Some(r#"["Bee <b@x.test>"]"#.to_string()),
+                Some(short.to_string()),
+                Some("A".to_string()),
+                Some("a@x.test".to_string()),
+            )
+        );
+    }
+
+    #[test]
+    fn normalize_participants_keeps_the_filtered_contact_past_the_cap() {
+        let (stored, message) = reply_all_participants();
+        let participants = serde_json::from_str::<Vec<Value>>(&normalize_participants_json(
+            Some(stored),
+            Some(message),
+            None,
+            None,
+            Some("R250@corp.example"),
+        ))
+        .unwrap();
+        assert_eq!(participants.len(), THREAD_PARTICIPANT_LIMIT + 1);
+        assert_eq!(participants[0]["email"], "r0@corp.example");
+        assert_eq!(
+            participants[THREAD_PARTICIPANT_LIMIT]["email"],
+            "r250@corp.example"
+        );
+        assert_eq!(
+            participants[THREAD_PARTICIPANT_LIMIT]["name"],
+            "Recipient 250"
+        );
     }
     #[tokio::test]
     async fn paginates_without_gaps_or_duplicates() {
@@ -4907,6 +5053,295 @@ mod tests {
             vec!["polar", "netcup"]
         );
     }
+    #[derive(Debug, FromRow)]
+    struct SmartBucketAggregateRow {
+        bucket: String,
+        count: i64,
+        unread_count: i64,
+    }
+
+    #[derive(Debug, FromRow)]
+    struct SmartBucketPreviewRow {
+        bucket: String,
+        id: String,
+        sender_name: String,
+        sender_email: String,
+        subject: String,
+        unread_count: i64,
+    }
+
+    /// The three-statement summary this module shipped before the single
+    /// materialized query; kept as the reference the new query must match.
+    async fn legacy_smart_inbox_summary(
+        pool: &SqlitePool,
+        account_id: Option<&str>,
+    ) -> Result<SmartInboxSummaryRecord, ThreadError> {
+        let account_id = account_id.map(str::trim).filter(|value| !value.is_empty());
+        let total_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(1)
+             FROM threads
+             WHERE workflow_state IN ('inbox', 'todo')
+               AND is_muted = 0
+               AND (? IS NULL OR account_id = ?)
+               AND EXISTS (
+                 SELECT 1 FROM accounts
+                 WHERE accounts.id = threads.account_id AND accounts.is_active = 1
+               )
+               AND EXISTS (
+                 SELECT 1 FROM messages
+                 JOIN folders ON folders.id = COALESCE(messages.pending_folder_id, messages.folder_id)
+                 WHERE messages.thread_id = threads.id
+                   AND LOWER(TRIM(COALESCE(folders.remote_id, folders.name))) = 'inbox'
+               )",
+        )
+        .bind(account_id)
+        .bind(account_id)
+        .fetch_one(pool)
+        .await?;
+
+        let bucket_case = smart_bucket_case_sql();
+        let mut aggregate_query = QueryBuilder::<Sqlite>::new("WITH scoped AS (SELECT threads.*, ");
+        aggregate_query.push(bucket_case.as_str());
+        aggregate_query.push(
+            " AS bucket FROM threads
+             LEFT JOIN messages latest_message ON latest_message.id = (
+               SELECT id FROM messages WHERE thread_id = threads.id
+               ORDER BY is_draft ASC, date DESC, id DESC LIMIT 1
+             )
+             WHERE workflow_state IN ('inbox', 'todo')
+               AND is_muted = 0
+               AND EXISTS (
+                 SELECT 1 FROM accounts
+                 WHERE accounts.id = threads.account_id AND accounts.is_active = 1
+               ) AND (",
+        );
+        if let Some(account_id) = account_id {
+            aggregate_query
+                .push("threads.account_id = ")
+                .push_bind(account_id.to_string());
+        } else {
+            aggregate_query.push("1 = 1");
+        }
+        aggregate_query.push(
+            ") AND EXISTS (
+               SELECT 1 FROM messages
+               JOIN folders ON folders.id = COALESCE(messages.pending_folder_id, messages.folder_id)
+               WHERE messages.thread_id = threads.id
+                 AND LOWER(TRIM(COALESCE(folders.remote_id, folders.name))) = 'inbox'
+             )), memberships AS (
+               SELECT id, unread_count, bucket FROM scoped
+               UNION ALL
+               SELECT id, unread_count, 'pinned' AS bucket
+               FROM scoped WHERE is_starred = 1 AND bucket != 'pinned'
+             )
+             SELECT bucket, COUNT(1) AS count, COALESCE(SUM(unread_count), 0) AS unread_count
+             FROM memberships WHERE bucket != 'personal'
+             GROUP BY bucket",
+        );
+        let aggregates = aggregate_query
+            .build_query_as::<SmartBucketAggregateRow>()
+            .fetch_all(pool)
+            .await?;
+
+        let mut preview_query = QueryBuilder::<Sqlite>::new(
+            "WITH scoped AS (
+               SELECT threads.id, threads.subject, threads.unread_count, threads.last_message_date,
+                      threads.is_starred,
+                      COALESCE(NULLIF(TRIM(latest_message.from_name), ''),
+                               latest_message.from_address, threads.subject) AS sender_name,
+                      COALESCE(latest_message.from_address, '') AS sender_email, ",
+        );
+        preview_query.push(bucket_case.as_str());
+        preview_query.push(
+            " AS bucket
+               FROM threads
+               LEFT JOIN messages latest_message ON latest_message.id = (
+                 SELECT id FROM messages WHERE thread_id = threads.id
+                 ORDER BY is_draft ASC, date DESC, id DESC LIMIT 1
+               )
+               WHERE workflow_state IN ('inbox', 'todo')
+                 AND is_muted = 0
+                 AND EXISTS (
+                   SELECT 1 FROM accounts
+                   WHERE accounts.id = threads.account_id AND accounts.is_active = 1
+                 ) AND (",
+        );
+        if let Some(account_id) = account_id {
+            preview_query
+                .push("threads.account_id = ")
+                .push_bind(account_id.to_string());
+        } else {
+            preview_query.push("1 = 1");
+        }
+        preview_query.push(
+            ") AND EXISTS (
+              SELECT 1 FROM messages
+              JOIN folders ON folders.id = COALESCE(messages.pending_folder_id, messages.folder_id)
+              WHERE messages.thread_id = threads.id
+                AND LOWER(TRIM(COALESCE(folders.remote_id, folders.name))) = 'inbox'
+            )), memberships AS (
+              SELECT id, subject, unread_count, last_message_date, sender_name, sender_email, bucket
+              FROM scoped
+              UNION ALL
+              SELECT id, subject, unread_count, last_message_date, sender_name, sender_email, 'pinned' AS bucket
+              FROM scoped WHERE is_starred = 1 AND bucket != 'pinned'
+            ), ranked AS (
+              SELECT *, ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY last_message_date DESC, id DESC) AS rank
+              FROM memberships WHERE bucket != 'personal'
+            )
+            SELECT bucket, id, sender_name, sender_email, COALESCE(subject, '(kein Betreff)') AS subject,
+                   unread_count
+            FROM ranked WHERE rank <= 4 ORDER BY bucket, rank",
+        );
+        let preview_rows = preview_query
+            .build_query_as::<SmartBucketPreviewRow>()
+            .fetch_all(pool)
+            .await?;
+
+        let mut previews = HashMap::<String, Vec<SmartInboxPreviewRecord>>::new();
+        for row in preview_rows {
+            previews
+                .entry(row.bucket)
+                .or_default()
+                .push(SmartInboxPreviewRecord {
+                    id: row.id,
+                    sender_name: row.sender_name,
+                    sender_email: row.sender_email,
+                    subject: decode_mime_encoded_words(&row.subject),
+                    unread_count: row.unread_count.max(0) as u32,
+                });
+        }
+        let order = [
+            "priority",
+            "pinned",
+            "invitations",
+            "notifications",
+            "newsletter",
+        ];
+        let aggregates = aggregates
+            .into_iter()
+            .map(|row| (row.bucket.clone(), row))
+            .collect::<HashMap<_, _>>();
+        let buckets = order
+            .into_iter()
+            .filter_map(|key| aggregates.get(key).map(|row| (key, row)))
+            .map(|(key, row)| SmartInboxBucketRecord {
+                key: key.to_string(),
+                count: row.count.max(0) as u32,
+                unread_count: row.unread_count.max(0) as u32,
+                preview_items: previews.remove(key).unwrap_or_default(),
+            })
+            .collect();
+
+        Ok(SmartInboxSummaryRecord {
+            total_count: total_count.max(0) as u32,
+            buckets,
+        })
+    }
+
+    #[tokio::test]
+    async fn smart_inbox_summary_matches_the_three_query_reference() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory pool");
+        crate::db::init(&pool).await.expect("migrations");
+
+        sqlx::raw_sql(
+            "INSERT INTO accounts(id, display_name, email, provider, config, credentials_ref, is_active, created_at, updated_at)
+             VALUES ('a0', 'A', 'a0@x.test', 'imap', '{}', '', 1, '2026-01-01', '2026-01-01'),
+                    ('a1', 'B', 'a1@x.test', 'imap', '{}', '', 1, '2026-01-01', '2026-01-01'),
+                    ('off', 'C', 'off@x.test', 'imap', '{}', '', 0, '2026-01-01', '2026-01-01');
+             INSERT INTO folders(id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             SELECT 'inbox-' || id, id, 'Inbox', 'INBOX', 'inbox', 'INBOX', '2026-01-01', '2026-01-01' FROM accounts;
+             INSERT INTO folders(id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             SELECT 'archive-' || id, id, 'Archive', 'Archive', 'archive', 'Archive', '2026-01-01', '2026-01-01' FROM accounts;
+             WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x + 1 FROM n WHERE x < 179)
+             INSERT INTO threads(id, account_id, subject, last_message_date, message_count, unread_count,
+                                 workflow_state, priority, category, category_source, is_starred, is_muted,
+                                 created_at, updated_at)
+             SELECT printf('t%03d', x),
+                    CASE WHEN x % 23 = 0 THEN 'off' ELSE 'a' || (x % 2) END,
+                    CASE WHEN x % 13 = 0 THEN NULL ELSE '=?UTF-8?Q?Gr=C3=BC=C3=9Fe?= ' || x END,
+                    -- Repeated dates exercise the id tiebreak of the preview order.
+                    printf('2026-07-%02dT10:00:00Z', 1 + x % 20),
+                    2, x % 4,
+                    CASE x % 11 WHEN 0 THEN 'done' WHEN 1 THEN 'todo' WHEN 2 THEN 'waiting' ELSE 'inbox' END,
+                    CASE WHEN x % 17 = 0 THEN 2 ELSE x % 2 END,
+                    CASE x % 6 WHEN 0 THEN NULL WHEN 1 THEN 'personal' WHEN 2 THEN 'updates'
+                               WHEN 3 THEN 'promotions' WHEN 4 THEN 'social' ELSE 'personal' END,
+                    CASE WHEN x % 5 = 0 THEN 'heuristic' ELSE 'legacy' END,
+                    CASE WHEN x % 7 = 0 THEN 1 ELSE 0 END,
+                    CASE WHEN x % 19 = 0 THEN 1 ELSE 0 END,
+                    '2026-01-01', '2026-01-01'
+             FROM n;
+             WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x + 1 FROM n WHERE x < 359)
+             INSERT INTO messages(id, account_id, folder_id, pending_folder_id, thread_id, from_address,
+                                  from_name, to_addresses, subject, date, is_read, is_draft,
+                                  provider_labels, created_at, updated_at)
+             SELECT printf('m%03d', x), t.account_id,
+                    -- Some threads only live outside the inbox; some move there pending.
+                    CASE WHEN (x / 2) % 9 = 0 THEN 'archive-' ELSE 'inbox-' END || t.account_id,
+                    CASE WHEN x % 31 = 0 THEN 'inbox-' || t.account_id END,
+                    t.id,
+                    CASE x % 8 WHEN 0 THEN 'No-Reply@shop.example' WHEN 1 THEN ' info@news.example'
+                               WHEN 2 THEN 'gitlab@git.example' WHEN 3 THEN 'person.noreply@corp.example'
+                               ELSE 'person' || x || '@mail.example' END,
+                    CASE WHEN x % 3 = 0 THEN '' ELSE 'Person ' || x END,
+                    '[]', 'Message ' || x, t.last_message_date, x % 2,
+                    CASE WHEN x % 10 = 9 THEN 1 ELSE 0 END,
+                    CASE WHEN x % 4 = 2 THEN '[\"CATEGORY_PERSONAL\"]' ELSE '[]' END,
+                    '2026-01-01', '2026-01-01'
+             FROM n JOIN threads t ON t.id = printf('t%03d', x / 2);
+             INSERT INTO calendar_invites(id, message_id, account_id, uid, raw_ics, created_at, updated_at)
+             SELECT 'invite-' || id, id, account_id, 'uid-' || id, 'BEGIN:VCALENDAR', '2026-01-01', '2026-01-01'
+             FROM messages WHERE CAST(SUBSTR(id, 2) AS INTEGER) % 10 = 4;",
+        )
+        .execute(&pool)
+        .await
+        .expect("fixture");
+
+        for account_id in [None, Some("a0"), Some("a1"), Some("off"), Some("  ")] {
+            let expected = legacy_smart_inbox_summary(&pool, account_id)
+                .await
+                .expect("reference summary");
+            let actual = ThreadRepository::new(&pool)
+                .smart_inbox_summary(account_id)
+                .await
+                .expect("summary");
+            assert_eq!(
+                serde_json::to_value(&actual).unwrap(),
+                serde_json::to_value(&expected).unwrap(),
+                "account {account_id:?}"
+            );
+        }
+        let all = ThreadRepository::new(&pool)
+            .smart_inbox_summary(None)
+            .await
+            .expect("summary");
+        assert!(all.total_count > 0);
+        assert_eq!(all.buckets.len(), 5, "every bucket is populated");
+        assert!(all
+            .buckets
+            .iter()
+            .all(|bucket| bucket.preview_items.len() == 4));
+
+        sqlx::query("DELETE FROM calendar_invites")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM messages")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let empty = ThreadRepository::new(&pool)
+            .smart_inbox_summary(None)
+            .await
+            .expect("empty summary");
+        assert_eq!(empty.total_count, 0);
+        assert!(empty.buckets.is_empty());
+    }
 }
 #[derive(Debug, Serialize)]
 struct ParticipantProjection {
@@ -4914,13 +5349,27 @@ struct ParticipantProjection {
     email: String,
 }
 
+/// Participants a thread projection carries per list.
+///
+/// Rows read the first entry (and the first one that is not an own address);
+/// contact summaries and the client-side contact filter look further down, so
+/// the bound is generous. Without it a 300-recipient reply-all thread shipped
+/// its whole recipient list (16 KB) with every list refresh.
+const THREAD_PARTICIPANT_LIMIT: usize = 25;
+
+/// Merges message participants and the stored thread participants, latest
+/// sender first, and keeps the first `THREAD_PARTICIPANT_LIMIT`. `keep_email`
+/// survives the cut: a contact-filtered list must still contain the contact,
+/// or the client-side filter drops the row the server just returned.
 fn normalize_participants_json(
     raw: Option<String>,
     message_participants: Option<String>,
     latest_from_name: Option<String>,
     latest_from_address: Option<String>,
+    keep_email: Option<&str>,
 ) -> String {
     let mut normalized = Vec::<ParticipantProjection>::new();
+    let mut index_by_email = HashMap::<String, usize>::new();
 
     for raw_json in [
         message_participants.unwrap_or_else(|| "[]".to_string()),
@@ -4928,16 +5377,13 @@ fn normalize_participants_json(
     ] {
         let parsed = serde_json::from_str::<Vec<Value>>(&raw_json).unwrap_or_default();
         for participant in parsed.into_iter().filter_map(participant_from_json) {
-            upsert_participant(&mut normalized, participant);
+            upsert_participant(&mut normalized, &mut index_by_email, participant);
         }
     }
 
     if let Some(latest_email) = normalize_participant_email(latest_from_address.as_deref()) {
         let latest_name = resolve_sender_display_name(latest_from_name.as_deref(), &latest_email);
-        if let Some(index) = normalized
-            .iter()
-            .position(|participant| participant.email.eq_ignore_ascii_case(&latest_email))
-        {
+        if let Some(&index) = index_by_email.get(&latest_email.to_ascii_lowercase()) {
             normalized.remove(index);
         }
 
@@ -4950,14 +5396,21 @@ fn normalize_participants_json(
         );
     }
 
+    cap_participants(&mut normalized, keep_email);
     serde_json::to_string(&normalized).unwrap_or_else(|_| "[]".to_string())
 }
 
-fn upsert_participant(participants: &mut Vec<ParticipantProjection>, next: ParticipantProjection) {
-    if let Some(existing) = participants
-        .iter_mut()
-        .find(|participant| participant.email.eq_ignore_ascii_case(&next.email))
-    {
+/// Same-address entries merge case-insensitively (ASCII, like the address
+/// comparison everywhere else in the projection); the index keeps a thread
+/// with hundreds of recipients linear instead of quadratic.
+fn upsert_participant(
+    participants: &mut Vec<ParticipantProjection>,
+    index_by_email: &mut HashMap<String, usize>,
+    next: ParticipantProjection,
+) {
+    let key = next.email.to_ascii_lowercase();
+    if let Some(&index) = index_by_email.get(&key) {
+        let existing = &mut participants[index];
         if existing.name.eq_ignore_ascii_case(&existing.email)
             || (!next.name.eq_ignore_ascii_case(&next.email)
                 && next.name.len() > existing.name.len())
@@ -4967,7 +5420,24 @@ fn upsert_participant(participants: &mut Vec<ParticipantProjection>, next: Parti
         return;
     }
 
+    index_by_email.insert(key, participants.len());
     participants.push(next);
+}
+
+fn cap_participants(participants: &mut Vec<ParticipantProjection>, keep_email: Option<&str>) {
+    if participants.len() <= THREAD_PARTICIPANT_LIMIT {
+        return;
+    }
+    let keep_email = keep_email.map(str::to_lowercase);
+    let pinned = keep_email
+        .and_then(|email| {
+            participants[THREAD_PARTICIPANT_LIMIT..]
+                .iter()
+                .position(|participant| participant.email.to_lowercase() == email)
+        })
+        .map(|offset| participants.swap_remove(THREAD_PARTICIPANT_LIMIT + offset));
+    participants.truncate(THREAD_PARTICIPANT_LIMIT);
+    participants.extend(pinned);
 }
 
 fn normalize_mailbox_names_json(raw: Option<String>) -> String {
@@ -5248,12 +5718,19 @@ fn thread_record_from_row(row: ThreadRow) -> ThreadRecord {
         tags: parse_string_array(row.tags),
         assignee: row.assignee,
         shared_with: parse_string_array(row.shared_with),
-        sent_participants: normalize_participants_json(None, row.sent_participants, None, None),
+        sent_participants: normalize_participants_json(
+            None,
+            row.sent_participants,
+            None,
+            None,
+            None,
+        ),
         participants: normalize_participants_json(
             row.participants,
             row.message_participants,
             row.latest_from_name,
             row.latest_from_address,
+            None,
         ),
         mailbox_names: normalize_mailbox_names_json(row.mailbox_names),
         category: row.category,
@@ -5308,82 +5785,77 @@ async fn list_smart_inbox_summary_inner(
     account_id: Option<&str>,
 ) -> Result<SmartInboxSummaryRecord, ThreadError> {
     let account_id = account_id.map(str::trim).filter(|value| !value.is_empty());
-    let total_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(1)
-         FROM threads
-         WHERE workflow_state IN ('inbox', 'todo')
-           AND is_muted = 0
-           AND (? IS NULL OR account_id = ?)
-           AND EXISTS (
-             SELECT 1 FROM accounts
-             WHERE accounts.id = threads.account_id AND accounts.is_active = 1
-           )
-           AND EXISTS (
-             SELECT 1 FROM messages
-             JOIN folders ON folders.id = COALESCE(messages.pending_folder_id, messages.folder_id)
-             WHERE messages.thread_id = threads.id
-               AND LOWER(TRIM(COALESCE(folders.remote_id, folders.name))) = 'inbox'
-           )",
-    )
-    .bind(account_id)
-    .bind(account_id)
-    .fetch_one(pool)
-    .await?;
-
-    let bucket_case = smart_bucket_case_sql();
-    let mut aggregate_query = QueryBuilder::<Sqlite>::new("WITH scoped AS (SELECT threads.*, ");
-    aggregate_query.push(bucket_case.as_str());
-    aggregate_query.push(
-        " AS bucket FROM threads
-         LEFT JOIN messages latest_message ON latest_message.id = (
-           SELECT id FROM messages WHERE thread_id = threads.id
-           ORDER BY is_draft ASC, date DESC, id DESC LIMIT 1
-         )
-         WHERE workflow_state IN ('inbox', 'todo')
-           AND is_muted = 0
-           AND EXISTS (
-             SELECT 1 FROM accounts
-             WHERE accounts.id = threads.account_id AND accounts.is_active = 1
-           ) AND (",
-    );
-    if let Some(account_id) = account_id {
-        aggregate_query
-            .push("threads.account_id = ")
-            .push_bind(account_id.to_string());
-    } else {
-        aggregate_query.push("1 = 1");
-    }
-    aggregate_query.push(
-        ") AND EXISTS (
-           SELECT 1 FROM messages
-           JOIN folders ON folders.id = COALESCE(messages.pending_folder_id, messages.folder_id)
-           WHERE messages.thread_id = threads.id
-             AND LOWER(TRIM(COALESCE(folders.remote_id, folders.name))) = 'inbox'
-         )), memberships AS (
-           SELECT id, unread_count, bucket FROM scoped
-           UNION ALL
-           SELECT id, unread_count, 'pinned' AS bucket
-           FROM scoped WHERE is_starred = 1 AND bucket != 'pinned'
-         )
-         SELECT bucket, COUNT(1) AS count, COALESCE(SUM(unread_count), 0) AS unread_count
-         FROM memberships WHERE bucket != 'personal'
-         GROUP BY bucket",
-    );
-    let aggregates = aggregate_query
-        .build_query_as::<SmartBucketAggregateRow>()
+    let rows = smart_inbox_summary_query(account_id)
+        .build_query_as::<SmartBucketSummaryRow>()
         .fetch_all(pool)
         .await?;
 
-    let mut preview_query = QueryBuilder::<Sqlite>::new(
-        "WITH scoped AS (
+    let total_count = rows.first().map_or(0, |row| row.total_count);
+    let mut aggregates = HashMap::<String, (i64, i64)>::new();
+    let mut previews = HashMap::<String, Vec<SmartInboxPreviewRecord>>::new();
+    for row in rows {
+        let (Some(bucket), Some(id)) = (row.bucket, row.id) else {
+            continue;
+        };
+        aggregates.entry(bucket.clone()).or_insert((
+            row.bucket_count.unwrap_or(0),
+            row.bucket_unread_count.unwrap_or(0),
+        ));
+        previews
+            .entry(bucket)
+            .or_default()
+            .push(SmartInboxPreviewRecord {
+                id,
+                sender_name: row.sender_name.unwrap_or_default(),
+                sender_email: row.sender_email.unwrap_or_default(),
+                subject: decode_mime_encoded_words(&row.subject.unwrap_or_default()),
+                unread_count: row.unread_count.unwrap_or(0).max(0) as u32,
+            });
+    }
+    let order = [
+        "priority",
+        "pinned",
+        "invitations",
+        "notifications",
+        "newsletter",
+    ];
+    let buckets = order
+        .into_iter()
+        .filter_map(|key| aggregates.get(key).map(|row| (key, row)))
+        .map(|(key, (count, unread_count))| SmartInboxBucketRecord {
+            key: key.to_string(),
+            count: (*count).max(0) as u32,
+            unread_count: (*unread_count).max(0) as u32,
+            preview_items: previews.remove(key).unwrap_or_default(),
+        })
+        .collect();
+
+    Ok(SmartInboxSummaryRecord {
+        total_count: total_count.max(0) as u32,
+        buckets,
+    })
+}
+
+/// Total, per-bucket aggregates and the four newest previews per bucket in one
+/// statement.
+///
+/// The bucket CASE (latest-message join, invite lookup, ~40 sender patterns)
+/// is the expensive part of the summary and runs after every list refresh.
+/// `scoped` is materialized so it is evaluated exactly once per inbox thread;
+/// the total, the window aggregates and the preview ranking all read from it.
+/// Starred threads also count towards `pinned` independent of their primary
+/// bucket, hence the second branch of `memberships`.
+fn smart_inbox_summary_query(account_id: Option<&str>) -> QueryBuilder<'static, Sqlite> {
+    let mut query = QueryBuilder::<Sqlite>::new(
+        "WITH scoped AS MATERIALIZED (
            SELECT threads.id, threads.subject, threads.unread_count, threads.last_message_date,
                   threads.is_starred,
                   COALESCE(NULLIF(TRIM(latest_message.from_name), ''),
                            latest_message.from_address, threads.subject) AS sender_name,
                   COALESCE(latest_message.from_address, '') AS sender_email, ",
     );
-    preview_query.push(bucket_case.as_str());
-    preview_query.push(
+    query.push(smart_bucket_case_sql());
+    query.push(
         " AS bucket
            FROM threads
            LEFT JOIN messages latest_message ON latest_message.id = (
@@ -5398,13 +5870,13 @@ async fn list_smart_inbox_summary_inner(
              ) AND (",
     );
     if let Some(account_id) = account_id {
-        preview_query
+        query
             .push("threads.account_id = ")
             .push_bind(account_id.to_string());
     } else {
-        preview_query.push("1 = 1");
+        query.push("1 = 1");
     }
-    preview_query.push(
+    query.push(
         ") AND EXISTS (
           SELECT 1 FROM messages
           JOIN folders ON folders.id = COALESCE(messages.pending_folder_id, messages.folder_id)
@@ -5412,62 +5884,25 @@ async fn list_smart_inbox_summary_inner(
             AND LOWER(TRIM(COALESCE(folders.remote_id, folders.name))) = 'inbox'
         )), memberships AS (
           SELECT id, subject, unread_count, last_message_date, sender_name, sender_email, bucket
-          FROM scoped
+          FROM scoped WHERE bucket != 'personal'
           UNION ALL
           SELECT id, subject, unread_count, last_message_date, sender_name, sender_email, 'pinned' AS bucket
           FROM scoped WHERE is_starred = 1 AND bucket != 'pinned'
         ), ranked AS (
-          SELECT *, ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY last_message_date DESC, id DESC) AS rank
-          FROM memberships WHERE bucket != 'personal'
+          SELECT *,
+                 ROW_NUMBER() OVER (PARTITION BY bucket ORDER BY last_message_date DESC, id DESC) AS rank,
+                 COUNT(1) OVER (PARTITION BY bucket) AS bucket_count,
+                 COALESCE(SUM(unread_count) OVER (PARTITION BY bucket), 0) AS bucket_unread_count
+          FROM memberships
         )
-        SELECT bucket, id, sender_name, sender_email, COALESCE(subject, '(kein Betreff)') AS subject,
-               unread_count
-        FROM ranked WHERE rank <= 4 ORDER BY bucket, rank",
+        SELECT totals.total_count, ranked.bucket, ranked.id, ranked.sender_name, ranked.sender_email,
+               COALESCE(ranked.subject, '(kein Betreff)') AS subject, ranked.unread_count,
+               ranked.bucket_count, ranked.bucket_unread_count
+        FROM (SELECT COUNT(1) AS total_count FROM scoped) totals
+        LEFT JOIN ranked ON ranked.rank <= 4
+        ORDER BY ranked.bucket, ranked.rank",
     );
-    let preview_rows = preview_query
-        .build_query_as::<SmartBucketPreviewRow>()
-        .fetch_all(pool)
-        .await?;
-
-    let mut previews = HashMap::<String, Vec<SmartInboxPreviewRecord>>::new();
-    for row in preview_rows {
-        previews
-            .entry(row.bucket)
-            .or_default()
-            .push(SmartInboxPreviewRecord {
-                id: row.id,
-                sender_name: row.sender_name,
-                sender_email: row.sender_email,
-                subject: decode_mime_encoded_words(&row.subject),
-                unread_count: row.unread_count.max(0) as u32,
-            });
-    }
-    let order = [
-        "priority",
-        "pinned",
-        "invitations",
-        "notifications",
-        "newsletter",
-    ];
-    let aggregates = aggregates
-        .into_iter()
-        .map(|row| (row.bucket.clone(), row))
-        .collect::<HashMap<_, _>>();
-    let buckets = order
-        .into_iter()
-        .filter_map(|key| aggregates.get(key).map(|row| (key, row)))
-        .map(|(key, row)| SmartInboxBucketRecord {
-            key: key.to_string(),
-            count: row.count.max(0) as u32,
-            unread_count: row.unread_count.max(0) as u32,
-            preview_items: previews.remove(key).unwrap_or_default(),
-        })
-        .collect();
-
-    Ok(SmartInboxSummaryRecord {
-        total_count: total_count.max(0) as u32,
-        buckets,
-    })
+    query
 }
 
 /// Every projection joins the latest message once. Reuse it for classification
@@ -5893,6 +6328,10 @@ async fn list_threads_inner(
         "listed threads"
     );
 
+    let contact_email = input
+        .contact_email
+        .as_deref()
+        .and_then(|value| normalize_participant_email(Some(value)));
     let threads = rows
         .into_iter()
         .map(|row| ThreadRecord {
@@ -5922,12 +6361,19 @@ async fn list_threads_inner(
             tags: parse_string_array(row.tags),
             assignee: row.assignee,
             shared_with: parse_string_array(row.shared_with),
-            sent_participants: normalize_participants_json(None, row.sent_participants, None, None),
+            sent_participants: normalize_participants_json(
+                None,
+                row.sent_participants,
+                None,
+                None,
+                None,
+            ),
             participants: normalize_participants_json(
                 row.participants,
                 row.message_participants,
                 row.latest_from_name,
                 row.latest_from_address,
+                contact_email.as_deref(),
             ),
             mailbox_names: normalize_mailbox_names_json(row.mailbox_names),
             category: row.category,
