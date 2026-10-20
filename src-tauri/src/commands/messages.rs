@@ -99,6 +99,10 @@ pub struct MessageBodyDto {
     pub smime_signer_email: Option<String>,
     pub smime_signer_cn: Option<String>,
     pub smime_error_detail: Option<String>,
+    /// The headers behind the unsubscribe banner. The preview leaves them
+    /// empty; the banner sits beside a loaded body, so the body carries them.
+    pub list_unsubscribe: Option<String>,
+    pub list_unsubscribe_post: Option<String>,
     pub auth_spf: Option<String>,
     pub auth_dkim: Option<String>,
     pub auth_dmarc: Option<String>,
@@ -373,6 +377,8 @@ async fn message_bodies(
             smime_signer_email: dto.smime_signer_email,
             smime_signer_cn: dto.smime_signer_cn,
             smime_error_detail: dto.smime_error_detail,
+            list_unsubscribe: dto.list_unsubscribe,
+            list_unsubscribe_post: dto.list_unsubscribe_post,
             auth_spf: dto.auth_spf,
             auth_dkim: dto.auth_dkim,
             auth_dmarc: dto.auth_dmarc,

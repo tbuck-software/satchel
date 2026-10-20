@@ -191,6 +191,9 @@ function applyMessageBody(message: Message, body: BackendMessageBody): Message {
     bodyLoadError: undefined,
     pgp: pgpStatus,
     smime: smimeStatus,
+    // Previews leave these empty; the body is where the backend sends them.
+    listUnsubscribe: body.list_unsubscribe ?? message.listUnsubscribe ?? null,
+    listUnsubscribePost: body.list_unsubscribe_post ?? message.listUnsubscribePost ?? null,
     authSpf: body.auth_spf ?? null,
     authDkim: body.auth_dkim ?? null,
     authDmarc: body.auth_dmarc ?? null,
@@ -219,6 +222,8 @@ function mergeMessagePreview(preview: Message, existing?: Message): Message {
     bodyLoadError: existing.bodyLoadError,
     pgp: existing.pgp,
     smime: existing.smime,
+    listUnsubscribe: existing.listUnsubscribe ?? preview.listUnsubscribe,
+    listUnsubscribePost: existing.listUnsubscribePost ?? preview.listUnsubscribePost,
     authSpf: existing.authSpf,
     authDkim: existing.authDkim,
     authDmarc: existing.authDmarc,
