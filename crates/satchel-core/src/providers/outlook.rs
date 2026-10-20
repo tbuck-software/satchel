@@ -1000,7 +1000,9 @@ impl MailProvider for OutlookProvider {
         }
 
         for id in retries {
-            if attempted.contains(&id) {
+            // A delta tombstone drops its id from the quarantine after the
+            // retry list was taken; there is nothing left to retry.
+            if attempted.contains(&id) || !cursor_state.mime_quarantine.contains_key(&id) {
                 continue;
             }
             match Self::load_graph_message(&client, &token, &id).await {
@@ -1018,12 +1020,10 @@ impl MailProvider for OutlookProvider {
                     }
                 }
                 Err(error) => {
-                    let row = cursor_state
-                        .mime_quarantine
-                        .get_mut(&id)
-                        .expect("quarantined message");
-                    row.attempts += 1;
-                    row.last_error = error.to_string();
+                    if let Some(row) = cursor_state.mime_quarantine.get_mut(&id) {
+                        row.attempts += 1;
+                        row.last_error = error.to_string();
+                    }
                 }
             }
         }
