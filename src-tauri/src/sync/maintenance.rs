@@ -23,14 +23,13 @@ pub fn spawn_maintenance_worker(pool: SqlitePool, checkpoint_pool: SqlitePool, a
     tauri::async_runtime::spawn(async move {
         // Delay first run by 30s so it doesn't compete with startup sync.
         tokio::time::sleep(Duration::from_secs(30)).await;
+        // A failed pass waits for the next one. Retrying it within the minute
+        // repeated whatever failed, VACUUM included, for as long as it kept
+        // failing; the steps' own `last_*_at` markers decide what reruns.
         loop {
-            satchel_core::sync::worker::retry_with_backoff(
-                "maintenance",
-                Duration::from_secs(1),
-                Duration::from_secs(60),
-                || run_once(&pool, &checkpoint_pool, &app),
-            )
-            .await;
+            if let Err(err) = run_once(&pool, &checkpoint_pool, &app).await {
+                warn!(target: "satchel::maintenance", %err, "maintenance pass failed");
+            }
             tokio::time::sleep(RUN_INTERVAL).await;
         }
     });
@@ -293,14 +292,28 @@ async fn run_once(
             .await
             .map_err(|err| err.to_string())?
     {
-        let pre = db_size_bytes(app).unwrap_or(0);
+        let db_path = db_path(app);
+        let pre = db_path.as_deref().and_then(file_size).unwrap_or(0);
+        let free = db_path.as_deref().and_then(free_disk_bytes);
+        if !vacuum_fits(pre, free) {
+            // Not recorded: the next pass checks the disk again.
+            warn!(
+                target: "satchel::maintenance",
+                pre, ?free, "VACUUM skipped: less free disk space than the database needs"
+            );
+            return Ok(());
+        }
+        // Recorded before the attempt. A VACUUM that fails (SQLITE_FULL, a
+        // lock) then waits its week like one that succeeded, instead of
+        // rewriting the whole file under an exclusive lock on every pass.
+        record_setting(pool, "maintenance.last_vacuum_at").await;
         // SQLite preserves rowids for indexed tables; messages has its primary-key index.
         // The gap-preservation regression pins this against the linked SQLite version.
         sqlx::query("VACUUM")
             .execute(pool)
             .await
             .map_err(|err| err.to_string())?;
-        let post = db_size_bytes(app).unwrap_or(0);
+        let post = db_path.as_deref().and_then(file_size).unwrap_or(0);
         info!(
             target: "satchel::maintenance",
             pre, post, "VACUUM done"
@@ -321,7 +334,6 @@ async fn run_once(
                 }
             });
         }
-        record_setting(pool, "maintenance.last_vacuum_at").await;
     }
 
     Ok(())
@@ -617,11 +629,7 @@ async fn trash_cleanup(pool: &SqlitePool) -> Result<u64, String> {
     // thread purge. Queue rows are durable retry state and must not share the
     // Core repository's aggregate transaction.
     let outbox_cutoff = (chrono::Utc::now() - chrono::Duration::days(60)).to_rfc3339();
-    sqlx::query("DELETE FROM sync_queue WHERE status = 'failed' AND updated_at < ?")
-        .bind(&outbox_cutoff)
-        .execute(pool)
-        .await
-        .map_err(|err| err.to_string())?;
+    satchel_core::mail_actions::purge_failed_queue_rows(pool, &outbox_cutoff).await?;
 
     Ok(removed)
 }
@@ -661,12 +669,72 @@ async fn purge_orphan_attachments(pool: &SqlitePool, app: &AppHandle) -> Result<
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn db_size_bytes(app: &AppHandle) -> Option<u64> {
-    let path = app
-        .path()
+fn db_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
         .resolve("satchel/satchel.db", tauri::path::BaseDirectory::AppData)
-        .ok()?;
-    std::fs::metadata(&path).ok().map(|m| m.len())
+        .ok()
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn file_size(path: &std::path::Path) -> Option<u64> {
+    std::fs::metadata(path).ok().map(|m| m.len())
+}
+
+/// VACUUM writes a complete second copy of the database before it can drop
+/// the first. With less free space than that it can only fail, and fail late.
+/// An unknown amount of free space does not block it.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn vacuum_fits(db_size: u64, free: Option<u64>) -> bool {
+    free.is_none_or(|free| free >= db_size)
+}
+
+/// Bytes available to this user on the file system holding `path`.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn free_disk_bytes(path: &std::path::Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let directory = path.parent()?;
+    let directory = std::ffi::CString::new(directory.as_os_str().as_bytes()).ok()?;
+    let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: `directory` is NUL-terminated and outlives the call; `stats` is
+    // only read after statvfs reported that it filled it in.
+    let stats = unsafe {
+        if libc::statvfs(directory.as_ptr(), stats.as_mut_ptr()) != 0 {
+            return None;
+        }
+        stats.assume_init()
+    };
+    // The field widths differ between Linux and macOS.
+    #[allow(clippy::unnecessary_cast)]
+    let free = (stats.f_bavail as u64).saturating_mul(stats.f_frsize as u64);
+    Some(free)
+}
+
+#[cfg(all(
+    not(any(target_os = "android", target_os = "ios")),
+    not(any(target_os = "macos", target_os = "linux"))
+))]
+fn free_disk_bytes(_path: &std::path::Path) -> Option<u64> {
+    None
+}
+
+#[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
+mod vacuum_tests {
+    use super::vacuum_fits;
+
+    #[test]
+    fn vacuum_needs_room_for_a_second_copy() {
+        assert!(vacuum_fits(2_000, Some(2_000)));
+        assert!(!vacuum_fits(2_000, Some(1_999)));
+        assert!(vacuum_fits(2_000, None));
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn free_disk_space_is_read_for_the_database_directory() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let free = super::free_disk_bytes(&directory.path().join("satchel.db"));
+        assert!(free.is_some_and(|bytes| bytes > 0), "{free:?}");
+    }
 }
 
 #[cfg(test)]
