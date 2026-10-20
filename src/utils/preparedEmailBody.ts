@@ -7,8 +7,9 @@ import {
   type BodyExtraction,
   type QuotePart,
 } from '@/utils/emailQuotes';
-import { applyInlineAttachmentSources } from '@/utils/emailInlineImages';
+import { createInlineImageUrls, resolveInlineImageReferences } from '@/utils/emailInlineImages';
 import { buildIsolatedDocument, htmlToPlainText } from '@/utils/emailDocument';
+import { provisionalLinkAnswers, publicSuffixTableLoaded } from '@/utils/externalLinks';
 import { hasMeaningfulMarkdown } from '@/utils/safeMarkdown';
 
 export interface EmailBodyInput {
@@ -35,14 +36,22 @@ export interface PreparedDocument {
  *
  * Quote extraction, the plain-text fallback and the isolated document each
  * parse the HTML; a renderer that remounts (scrolled back into view, thread
- * reopened) reuses them instead of parsing again.
+ * reopened) reuses them instead of parsing again. Opening an HTML message in
+ * its HTML view parses it twice: once for the quotes, once for the document.
  */
 export interface PreparedEmailBody {
   readonly extracted: BodyExtraction;
   readonly plainText: string;
+  /** Lexes `plainText` as Markdown on first read; for an HTML body that costs a parse of its own. */
   readonly markdownAvailable: boolean;
   document(options: DocumentOptions): PreparedDocument;
   quoteDocument(part: QuotePart, options: DocumentOptions): string;
+  /**
+   * Keeps the object URLs of the body's inline images alive until the returned
+   * release runs. The cache holds the body while it is cached, a renderer while
+   * it shows it; the URLs are revoked once neither does.
+   */
+  retain(): () => void;
 }
 
 interface CacheEntry {
@@ -51,6 +60,17 @@ interface CacheEntry {
   text: string | undefined;
   body: PreparedEmailBody;
   size: number;
+  release: () => void;
+}
+
+/**
+ * A built document, and whether a link in it was assessed before the
+ * public-suffix table arrived. Such a document is built again once the table
+ * is there, so its link warnings do not outlive the wait.
+ */
+interface BuiltDocument<T> {
+  value: T;
+  provisional: boolean;
 }
 
 const MAX_ENTRIES = 48;
@@ -67,29 +87,60 @@ function attachmentSignature(input: EmailBodyInput): string {
 }
 
 function createPreparedBody(input: EmailBodyInput, onGrow: (chars: number) => void): PreparedEmailBody {
-  const resolvedHtml = input.html
-    ? applyInlineAttachmentSources(input.html, [...input.attachments], input.missingImageSource)
-    : undefined;
+  // `cid:` references stay as they are through quote extraction, the image
+  // blocker and the presentation passes; `buildIsolatedDocument` resolves them
+  // last, in the tree it serializes anyway.
   let extracted: BodyExtraction;
   if (!input.normalizeQuotes) {
     extracted = {
-      currentHtml: resolvedHtml,
+      currentHtml: input.html,
       currentText: normalizePlainTextIndent(input.text || ''),
       quotes: [],
     };
-  } else if (resolvedHtml?.trim()) {
-    extracted = extractHtmlBody(resolvedHtml);
+  } else if (input.html?.trim()) {
+    extracted = extractHtmlBody(input.html);
   } else {
     extracted = extractPlainTextBody(input.text || '');
   }
   onGrow(extracted.currentHtml?.length ?? 0);
 
+  const inlineImages = createInlineImageUrls();
+  const attachments = [...input.attachments];
+  const resolveInlineImages = input.html && /cid:/i.test(input.html)
+    ? (roots: Element[]) => {
+      resolveInlineImageReferences(roots, attachments, {
+        attachmentsResolved: true,
+        missingSource: input.missingImageSource,
+        keepPendingAttachments: false,
+        sourceFor: inlineImages.sourceFor,
+      });
+    }
+    : undefined;
+  let holders = 0;
+
   let plainText: string | undefined;
   let markdownAvailable: boolean | undefined;
-  const documents = new Map<string, PreparedDocument>();
-  const quoteDocuments = new Map<string, string>();
+  const documents = new Map<string, BuiltDocument<PreparedDocument>>();
+  const quoteDocuments = new Map<string, BuiltDocument<string>>();
   const optionKey = (options: DocumentOptions) =>
     `${options.autoDark ? 'dark' : 'light'}:${options.allowRemoteImages ? 'remote' : 'blocked'}`;
+
+  function built<T>(
+    cache: Map<string, BuiltDocument<T>>,
+    key: string,
+    build: () => T,
+    size: (value: T) => number,
+  ): T {
+    const existing = cache.get(key);
+    // The table check is a reactive read, so a computed showing a provisional
+    // document evaluates again when the table arrives.
+    if (existing && !(existing.provisional && publicSuffixTableLoaded())) return existing.value;
+    const answersBefore = provisionalLinkAnswers();
+    const value = build();
+    cache.set(key, { value, provisional: provisionalLinkAnswers() !== answersBefore });
+    if (!existing) onGrow(size(value));
+    return value;
+  }
 
   return {
     extracted,
@@ -105,36 +156,42 @@ function createPreparedBody(input: EmailBodyInput, onGrow: (chars: number) => vo
       return markdownAvailable;
     },
     document(options) {
-      const key = optionKey(options);
-      let prepared = documents.get(key);
-      if (!prepared) {
+      return built(documents, optionKey(options), () => {
         const source = extracted.currentHtml || '';
         const blocked = source && !options.allowRemoteImages ? blockRemoteImages(source) : null;
         const safe = blocked?.html ?? source;
-        prepared = {
-          html: safe ? buildIsolatedDocument(safe, options.autoDark) : '',
+        return {
+          html: safe ? buildIsolatedDocument(safe, options.autoDark, resolveInlineImages) : '',
           blockedCount: blocked?.blockedCount ?? 0,
         };
-        documents.set(key, prepared);
-        onGrow(prepared.html.length);
-      }
-      return prepared;
+      }, (prepared) => prepared.html.length);
     },
     quoteDocument(part, options) {
-      const key = `${part.id}:${optionKey(options)}`;
-      let prepared = quoteDocuments.get(key);
-      if (prepared === undefined) {
+      return built(quoteDocuments, `${part.id}:${optionKey(options)}`, () => {
         const source = part.html ?? '';
-        prepared = source
+        return source
           ? buildIsolatedDocument(
               options.allowRemoteImages ? source : blockRemoteImages(source).html,
               options.autoDark,
+              resolveInlineImages,
             )
           : '';
-        quoteDocuments.set(key, prepared);
-        onGrow(prepared.length);
-      }
-      return prepared;
+      }, (prepared) => prepared.length);
+    },
+    retain() {
+      holders += 1;
+      let held = true;
+      return () => {
+        if (!held) return;
+        held = false;
+        holders -= 1;
+        if (holders > 0) return;
+        inlineImages.revoke();
+        // Built documents point at the revoked URLs. Should the body be asked
+        // again, it builds afresh, with data URLs.
+        documents.clear();
+        quoteDocuments.clear();
+      };
     },
   };
 }
@@ -144,6 +201,7 @@ function evict(key: string) {
   if (!entry) return;
   cachedChars -= entry.size;
   cache.delete(key);
+  entry.release();
 }
 
 function enforceBudget(protectedKey: string) {
@@ -182,6 +240,7 @@ export function prepareEmailBody(cacheKey: string | undefined, input: EmailBodyI
     text: input.text,
     size: 0,
     body: undefined as unknown as PreparedEmailBody,
+    release: () => {},
   };
   entry.body = createPreparedBody(input, (chars) => {
     entry.size += chars;
@@ -190,6 +249,7 @@ export function prepareEmailBody(cacheKey: string | undefined, input: EmailBodyI
       enforceBudget(key);
     }
   });
+  entry.release = entry.body.retain();
   cache.set(key, entry);
   cachedChars += entry.size;
   enforceBudget(key);
@@ -201,6 +261,8 @@ export function preparedEmailBodyStats(): { entries: number; chars: number } {
 }
 
 export function clearPreparedEmailBodies(): void {
+  const entries = [...cache.values()];
   cache.clear();
   cachedChars = 0;
+  for (const entry of entries) entry.release();
 }

@@ -50,6 +50,36 @@ describe('before the public-suffix table is loaded', () => {
   });
 });
 
+/*
+ * The settings store imports this module, so a load at import time put the
+ * table on the startup path of every window.
+ */
+describe('loading the public-suffix table', () => {
+  it('waits for the first link assessment instead of loading on import', async () => {
+    const loaded = vi.fn();
+    vi.doMock('tldts', async () => {
+      loaded();
+      return vi.importActual<typeof import('tldts')>('tldts');
+    });
+    vi.resetModules();
+    const fresh = await import('./externalLinks');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(loaded).not.toHaveBeenCalled();
+    // Normalizing a stored host does not start it either.
+    expect(fresh.linkRegistrableDomain('shop.example.com')).toBe('shop.example.com');
+    expect(loaded).not.toHaveBeenCalled();
+
+    fresh.assessExternalLink('https://shop.example.com/x', 'https://example.com');
+    await fresh.loadPublicSuffixTable();
+    expect(loaded).toHaveBeenCalledOnce();
+    expect(fresh.publicSuffixTableLoaded()).toBe(true);
+
+    vi.doUnmock('tldts');
+    vi.resetModules();
+  });
+});
+
 describe('external link assessment', () => {
   it('allows matching HTTPS URLs without confirmation', () => {
     expect(assessExternalLink('https://gitlab.code.example/work/3', 'https://gitlab.code.example/work/3')).toMatchObject({

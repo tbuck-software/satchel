@@ -20,8 +20,16 @@ import { visibleLinkText } from '@/utils/linkLabel';
  * The link pass is the one part with a safety role. It runs after
  * sanitisation and marks each anchor by verdict, so the click handler in the
  * component never has to re-derive whether a destination was trusted.
+ *
+ * `resolveInlineImages` swaps `cid:` references for loadable sources in the
+ * finished tree, right before serialization, so the inline images never pass
+ * through the passes above as text.
  */
-export function buildIsolatedDocument(html: string, autoDark: boolean): string {
+export function buildIsolatedDocument(
+  html: string,
+  autoDark: boolean,
+  resolveInlineImages?: (roots: Element[]) => void,
+): string {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
   doc.querySelectorAll('link, meta').forEach((node) => node.remove());
@@ -136,7 +144,10 @@ export function buildIsolatedDocument(html: string, autoDark: boolean): string {
   }
   wrapper.innerHTML = doc.body?.innerHTML ?? html;
 
-  const styles = Array.from(doc.head?.querySelectorAll('style') ?? [])
+  const headStyles = Array.from(doc.head?.querySelectorAll('style') ?? []);
+  // Last, so the colour and table passes above never walk image bytes.
+  resolveInlineImages?.([wrapper, ...headStyles]);
+  const styles = headStyles
     .map((style) => style.outerHTML)
     .join('');
   return `${styles}${wrapper.outerHTML}`;

@@ -171,6 +171,8 @@ const prepared = computed(() => prepareEmailBody(props.cacheKey, {
   normalizeQuotes: props.normalizeQuotes,
   missingImageSource: missingImageSource.value,
 }));
+// Keeps the body's inline image URLs valid while this renderer shows it.
+watch(prepared, (body, _previous, onCleanup) => onCleanup(body.retain()), { immediate: true });
 
 const extractedBody = computed(() => prepared.value.extracted);
 const renderHtml = computed(() => extractedBody.value.currentHtml || '');
@@ -230,7 +232,15 @@ const displayText = computed(() =>
 
 /** Only offer the toggle when there is actually HTML to switch away from. */
 const htmlAvailable = computed(() => Boolean(renderHtml.value.trim()));
-const markdownAvailable = computed(() => prepared.value.markdownAvailable);
+/**
+ * Markdown is detected in the text view. An HTML message only has one once the
+ * reader switches to a text mode, so the option joins the toggle then: asking
+ * up front cost a further parse of the HTML and a Markdown lex of up to 250 KB
+ * on every open, for an option that is rarely there.
+ */
+const markdownAvailable = computed(() => (
+  (!htmlAvailable.value || preferPlainText.value) && prepared.value.markdownAvailable
+));
 const blockedImagesCount = computed(() => {
   if (imagesEffectivelyAllowed.value) return 0;
   if (viewMode.value === 'markdown' && markdownAvailable.value) {
@@ -283,7 +293,8 @@ watch(
   ],
   () => {
     if (!htmlAvailable.value || settings.preferPlainTextReading) {
-      viewMode.value = markdownAvailable.value ? 'markdown' : 'text';
+      // Text is what will show, so its Markdown check is due either way.
+      viewMode.value = prepared.value.markdownAvailable ? 'markdown' : 'text';
     } else {
       viewMode.value = shouldAutoDarkHtml.value ? 'auto-dark' : 'html';
     }

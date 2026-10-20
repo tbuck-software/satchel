@@ -124,15 +124,49 @@ export function textFromHtml(html: string): string {
   }
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
-  for (const breakNode of Array.from(doc.querySelectorAll('br'))) {
-    breakNode.replaceWith(doc.createTextNode('\n'));
+  return doc.body ? normalizeQuoteText(quoteTextFromNode(doc.body)) : '';
+}
+
+const QUOTE_TEXT_BLOCKS = new Set([
+  'address', 'article', 'aside', 'blockquote', 'div', 'footer', 'header', 'li', 'p', 'section', 'table', 'tr',
+]);
+
+/**
+ * The raw text `textFromHtml` reads from a parsed tree: a line break per
+ * `<br>` and after every block. It reads without touching the tree, so
+ * `extractHtmlBody` can take the text from the document it parsed anyway and
+ * go on to cut quotes out of it. Iterative, because mail nests deep enough to
+ * exhaust the stack.
+ */
+function quoteTextFromNode(root: Node): string {
+  const parts: string[] = [];
+  const stack: Array<[node: Node, leaving: boolean]> = [[root, false]];
+  while (stack.length > 0) {
+    const [node, leaving] = stack.pop()!;
+    if (leaving) {
+      parts.push('\n');
+      continue;
+    }
+    if (node.nodeType === 3 || node.nodeType === 4) {
+      parts.push((node as CharacterData).data);
+      continue;
+    }
+    if (node.nodeType !== 1) continue;
+    const name = (node as Element).localName;
+    if (name === 'br') {
+      parts.push('\n');
+      continue;
+    }
+    if (QUOTE_TEXT_BLOCKS.has(name)) stack.push([node, true]);
+    for (let child = node.lastChild; child; child = child.previousSibling) {
+      stack.push([child, false]);
+    }
   }
-  for (const block of Array.from(
-    doc.querySelectorAll('address, article, aside, blockquote, div, footer, header, li, p, section, table, tr'),
-  )) {
-    block.append(doc.createTextNode('\n'));
-  }
-  return (doc.body?.textContent || '')
+  return parts.join('');
+}
+
+function normalizeQuoteText(text: string): string {
+  return text
     .replace(/\u00a0/g, ' ')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n[ \t]+/g, '\n')
@@ -652,9 +686,12 @@ function extractQuotePartsFromContainer(
 export function extractHtmlBody(html: string): BodyExtraction {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
+  // Read the text before the quotes are cut out of the tree: it is the same
+  // text `textFromHtml(html)` returns, without parsing the message again.
+  const fullText = html.trim() ? normalizeQuoteText(quoteTextFromNode(doc.body)) : '';
   const parts: QuotePart[] = [];
   extractQuotePartsFromContainer(doc.body, parts);
-  const textFallback = extractPlainTextBody(textFromHtml(html)).quotes;
+  const textFallback = extractPlainTextBody(fullText).quotes;
   const htmlQuoteTexts = parts.map((part) => normalizeForHash(part.text));
   // A selector-backed HTML quote may contain older messages whose own wrapper
   // has no recognizable marker. The text fallback finds those headers too, but
