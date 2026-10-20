@@ -389,10 +389,10 @@ pub async fn get_thread(
 
 #[tauri::command]
 pub async fn get_threads(
-    pool: tauri::State<'_, SqlitePool>,
+    pool: tauri::State<'_, crate::db::ReadPool>,
     thread_ids: Vec<String>,
 ) -> CommandResult<Vec<ThreadDto>> {
-    Ok(ThreadRepository::new(pool.inner())
+    Ok(ThreadRepository::new(pool.inner().as_ref())
         .get_many(&thread_ids)
         .await?
         .into_iter()

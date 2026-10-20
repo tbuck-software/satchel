@@ -349,3 +349,118 @@ async fn projection_triggers_accept_outer_message_upserts_during_backfill() {
         .await
         .unwrap();
 }
+
+/// `thread_folders` and the folder counters, held against a full recount.
+async fn assert_thread_folders_match_recount(pool: &SqlitePool) {
+    let recount: Vec<(String, String, i64, i64, i64)> = sqlx::query_as(
+        "SELECT f.id, m.thread_id, COUNT(*), COALESCE(SUM(m.is_read = 0), 0),
+                CASE WHEN LOWER(TRIM(f.folder_type)) = 'inbox'
+                     THEN COALESCE(t.workflow_state NOT IN ('aside', 'done', 'snoozed'), 0) ELSE 1 END
+         FROM messages m JOIN folders f ON f.id = COALESCE(m.pending_folder_id, m.folder_id)
+         LEFT JOIN threads t ON t.id = m.thread_id
+         WHERE m.thread_id IS NOT NULL
+         GROUP BY f.id, m.thread_id ORDER BY 1, 2",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let stored: Vec<(String, String, i64, i64, i64)> = sqlx::query_as(
+        "SELECT folder_id, thread_id, message_count, unread_count, visible
+         FROM thread_folders ORDER BY 1, 2",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, recount);
+    let folders: Vec<(String, i64, i64, i64, i64)> = sqlx::query_as(
+        "SELECT f.id, f.thread_count, f.thread_unread_count,
+                COALESCE((SELECT SUM(visible) FROM thread_folders WHERE folder_id = f.id), 0),
+                COALESCE((SELECT SUM(visible AND unread_count > 0) FROM thread_folders WHERE folder_id = f.id), 0)
+         FROM folders f ORDER BY f.id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    for (id, threads, unread, expected_threads, expected_unread) in folders {
+        assert_eq!(
+            (threads, unread),
+            (expected_threads, expected_unread),
+            "{id}"
+        );
+    }
+    assert_counts(pool).await;
+}
+
+#[tokio::test]
+async fn incremental_folder_counts_match_a_full_recount() {
+    let pool = pool(false).await;
+    repair(&pool, &THREAD_FOLDERS).await;
+    assert_thread_folders_match_recount(&pool).await;
+    let insert = "INSERT INTO messages(id,account_id,folder_id,thread_id,from_address,to_addresses,subject,is_read,date,created_at,updated_at)
+        VALUES(?,'a',?,?,'s@test.local','[]','s',?,'2026-01-01','2026-01-01','2026-01-01')";
+    for (id, folder, thread, read) in [
+        ("n1", "inbox", Some("t1"), Some(0)),
+        ("n2", "archive", Some("t1"), Some(1)),
+        ("n3", "inbox", Some("t2"), None),
+        ("n4", "inbox", None, Some(0)),
+    ] {
+        sqlx::query(insert)
+            .bind(id)
+            .bind(folder)
+            .bind(thread)
+            .bind(read)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_thread_folders_match_recount(&pool).await;
+    }
+    for sql in [
+        // Rewriting a value with itself must not count it twice.
+        "UPDATE messages SET is_read = is_read, folder_id = folder_id",
+        "UPDATE messages SET is_read = 1 WHERE id = 'n3'",
+        "UPDATE messages SET is_read = NULL WHERE id = 'm1'",
+        "UPDATE messages SET is_read = 0, pending_folder_id = 'archive' WHERE id = 'm2'",
+        "UPDATE messages SET thread_id = 't2', is_read = 0 WHERE id = 'n1'",
+        "UPDATE messages SET thread_id = 't1' WHERE id = 'n4'",
+        "UPDATE messages SET thread_id = NULL WHERE id = 'm3'",
+        "UPDATE messages SET folder_id = 'archive', pending_folder_id = NULL WHERE id = 'm2'",
+        "UPDATE threads SET workflow_state = 'done' WHERE id = 't2'",
+        "INSERT INTO messages(id,account_id,folder_id,thread_id,from_address,to_addresses,subject,date,created_at,updated_at)
+         VALUES('n6','a','inbox','t2','s@test.local','[]','s','2026-01-01','2026-01-01','2026-01-01')",
+        "UPDATE threads SET workflow_state = 'inbox' WHERE id = 't2'",
+        "DELETE FROM messages WHERE id IN ('n1', 'n2')",
+        "DELETE FROM messages WHERE thread_id = 't1'",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+        assert_thread_folders_match_recount(&pool).await;
+    }
+}
+
+#[tokio::test]
+async fn marking_a_thread_read_leaves_already_read_messages_alone() {
+    let pool = pool(false).await;
+    repair(&pool, &THREAD_FOLDERS).await;
+    sqlx::query("UPDATE messages SET is_read = 1, updated_at = 'untouched' WHERE id = 'm1'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    ThreadRepository::new(&pool)
+        .set_read_state(&["t1".to_string()], true)
+        .await
+        .unwrap();
+    let rows: Vec<(String, i64, String)> = sqlx::query_as(
+        "SELECT id, is_read, updated_at FROM messages WHERE thread_id = 't1' ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows[0], ("m1".into(), 1, "untouched".into()));
+    assert_eq!(rows[1].1, 1);
+    assert_ne!(rows[1].2, "2026-01-01");
+    assert_thread_folders_match_recount(&pool).await;
+    ThreadRepository::new(&pool)
+        .set_read_state(&["t1".to_string(), "t2".to_string()], false)
+        .await
+        .unwrap();
+    assert_thread_folders_match_recount(&pool).await;
+}

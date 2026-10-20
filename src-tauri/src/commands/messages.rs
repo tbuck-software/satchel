@@ -159,7 +159,15 @@ pub async fn list_messages_preview(
 /// Older parser versions stored the detached signature as an attachment but not
 /// as a verifiable MIME bundle. Refresh only those explicit candidates, never
 /// the rest of a thread. Returns the threads that changed.
-async fn repair_unparsed_smime_messages(pool: &SqlitePool, message_ids: &[String]) -> Vec<String> {
+///
+/// Each attempt is recorded, so a message the parser still cannot read is
+/// fetched again after [`SMIME_REPAIR_RETRY`] rather than on every open, and
+/// a message already being fetched is not fetched a second time alongside.
+async fn repair_unparsed_smime_messages(
+    pool: &SqlitePool,
+    write_pool: &SqlitePool,
+    message_ids: &[String],
+) -> Vec<String> {
     if message_ids.is_empty() {
         return Vec::new();
     }
@@ -170,6 +178,7 @@ async fn repair_unparsed_smime_messages(pool: &SqlitePool, message_ids: &[String
          JOIN attachments a ON a.message_id = m.id
          WHERE m.id IN ({placeholders})
            AND m.smime_signed IS NULL
+           AND (m.smime_repair_attempted_at IS NULL OR m.smime_repair_attempted_at < ?)
            AND LOWER(a.content_type) IN (
              'application/pkcs7-signature',
              'application/x-pkcs7-signature'
@@ -180,24 +189,38 @@ async fn repair_unparsed_smime_messages(pool: &SqlitePool, message_ids: &[String
     for id in message_ids {
         query = query.bind(id);
     }
-    let Ok(candidates) = query.fetch_all(pool).await else {
+    let retry_before = (Utc::now() - SMIME_REPAIR_RETRY).to_rfc3339();
+    let Ok(candidates) = query.bind(retry_before).fetch_all(pool).await else {
         return Vec::new();
     };
+    let claim = SmimeRepairClaim::new(candidates);
 
     let mut repaired: Vec<String> = Vec::new();
-    for (message_id, thread_id) in candidates {
-        match fetch_remote_message_source(pool, &message_id).await {
-            Ok(Some(raw)) => match persist_raw_message_metadata(pool, &message_id, &raw).await {
-                Ok(true) => {
-                    if !repaired.contains(&thread_id) {
-                        repaired.push(thread_id);
+    for (message_id, thread_id) in claim.candidates.iter().cloned() {
+        let attempt = fetch_remote_message_source(pool, &message_id).await;
+        if let Err(error) =
+            sqlx::query("UPDATE messages SET smime_repair_attempted_at = ? WHERE id = ?")
+                .bind(Utc::now().to_rfc3339())
+                .bind(&message_id)
+                .execute(write_pool)
+                .await
+        {
+            tracing::warn!(%message_id, %error, "could not record S/MIME repair attempt");
+        }
+        match attempt {
+            Ok(Some(raw)) => {
+                match persist_raw_message_metadata(write_pool, &message_id, &raw).await {
+                    Ok(true) => {
+                        if !repaired.contains(&thread_id) {
+                            repaired.push(thread_id);
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        tracing::warn!(%message_id, %error, "could not persist repaired S/MIME metadata");
                     }
                 }
-                Ok(false) => {}
-                Err(error) => {
-                    tracing::warn!(%message_id, %error, "could not persist repaired S/MIME metadata");
-                }
-            },
+            }
             Ok(None) => {}
             Err(error) => {
                 tracing::warn!(%message_id, %error, "could not refresh unparsed S/MIME message");
@@ -205,6 +228,45 @@ async fn repair_unparsed_smime_messages(pool: &SqlitePool, message_ids: &[String
         }
     }
     repaired
+}
+
+/// How long a message the S/MIME repair could not fix waits for another try.
+const SMIME_REPAIR_RETRY: chrono::Duration = chrono::Duration::days(1);
+
+/// S/MIME repair candidates this caller fetches; released on drop.
+struct SmimeRepairClaim {
+    candidates: Vec<(String, String)>,
+}
+
+fn smime_repairs_in_flight() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static IN_FLIGHT: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    IN_FLIGHT.get_or_init(Default::default)
+}
+
+impl SmimeRepairClaim {
+    /// Keep the candidates no other caller is fetching right now.
+    fn new(candidates: Vec<(String, String)>) -> Self {
+        let mut in_flight = smime_repairs_in_flight()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let candidates = candidates
+            .into_iter()
+            .filter(|(message_id, _)| in_flight.insert(message_id.clone()))
+            .collect();
+        Self { candidates }
+    }
+}
+
+impl Drop for SmimeRepairClaim {
+    fn drop(&mut self) {
+        let mut in_flight = smime_repairs_in_flight()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (message_id, _) in &self.candidates {
+            in_flight.remove(message_id);
+        }
+    }
 }
 
 #[tauri::command]
@@ -311,11 +373,14 @@ async fn message_bodies(
         return Ok(vec![]);
     }
 
-    let repair_pool = write_pool.clone();
+    let repair_pool = pool.clone();
+    let repair_write_pool = write_pool.clone();
     let repair_ids = message_ids.to_vec();
     let repair_events = state.events.clone();
     tauri::async_runtime::spawn(async move {
-        for thread_id in repair_unparsed_smime_messages(&repair_pool, &repair_ids).await {
+        for thread_id in
+            repair_unparsed_smime_messages(&repair_pool, &repair_write_pool, &repair_ids).await
+        {
             repair_events.publish(AppEvent::ThreadsUpdated(vec![thread_id]));
         }
     });
@@ -1917,6 +1982,70 @@ mod tests {
         assert_eq!(
             super::map_stored_message_row(row).auth_dmarc.as_deref(),
             Some("pass")
+        );
+    }
+
+    #[tokio::test]
+    async fn unfixable_smime_candidates_are_not_refetched_on_every_open() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .unwrap();
+        // The stored source stands in for the provider: it has no signature
+        // the parser can recover, so every attempt ends without a repair.
+        for sql in [
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at) VALUES ('a', 'Account', 'me@example.test', 'imap', '{}', '', '', '')",
+            "INSERT INTO folders (id, account_id, name, full_path, folder_type, created_at, updated_at) VALUES ('f', 'a', 'Inbox', 'Inbox', 'inbox', '', '')",
+            "INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, date, original_source, created_at, updated_at) VALUES ('m', 'a', 'f', 't', 'bob@example.test', '[]', '', CAST('From: bob@example.test' || char(13, 10, 13, 10) || 'Plain' AS BLOB), '', '')",
+            "INSERT INTO attachments (id, message_id, filename, content_type, size, created_at) VALUES ('att', 'm', 'smime.p7s', 'application/pkcs7-signature', 1, '')",
+        ] {
+            sqlx::query(sql).execute(&pool).await.unwrap();
+        }
+        let ids = vec!["m".to_string()];
+        let raw_size = || async {
+            sqlx::query_scalar::<_, Option<i64>>("SELECT raw_size FROM messages WHERE id = 'm'")
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        };
+
+        assert!(super::repair_unparsed_smime_messages(&pool, &pool, &ids)
+            .await
+            .is_empty());
+        assert!(raw_size().await.is_some(), "the first open refetches");
+        sqlx::query("UPDATE messages SET raw_size = NULL WHERE id = 'm'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        super::repair_unparsed_smime_messages(&pool, &pool, &ids).await;
+        assert!(raw_size().await.is_none(), "the next open must not");
+
+        // After the retry window the message gets another attempt.
+        sqlx::query("UPDATE messages SET smime_repair_attempted_at = '2000-01-01T00:00:00+00:00'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        super::repair_unparsed_smime_messages(&pool, &pool, &ids).await;
+        assert!(raw_size().await.is_some());
+    }
+
+    #[test]
+    fn a_message_in_smime_repair_is_not_claimed_twice() {
+        let candidate = || vec![("claimed-twice".to_string(), "t".to_string())];
+        let first = super::SmimeRepairClaim::new(candidate());
+        assert_eq!(first.candidates.len(), 1);
+        assert!(super::SmimeRepairClaim::new(candidate())
+            .candidates
+            .is_empty());
+        drop(first);
+        assert_eq!(
+            super::SmimeRepairClaim::new(candidate()).candidates.len(),
+            1
         );
     }
 

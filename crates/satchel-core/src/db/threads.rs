@@ -744,8 +744,10 @@ impl<'a> ThreadRepository<'a> {
             // `unread_count = 0` here and leaving `is_read = 0` behind meant
             // the next projection refresh — the ingest runs one before it gets
             // to the blocked check — counted them straight back up.
-            sqlx::query("UPDATE messages SET is_read = 1, updated_at = ? WHERE thread_id = ?")
-                .bind(&now)
+            sqlx::query(
+                "UPDATE messages SET is_read = 1, updated_at = ? WHERE thread_id = ? AND is_read IS NOT 1",
+            )
+            .bind(&now)
                 .bind(thread_id)
                 .execute(&mut *tx)
                 .await?;
@@ -777,7 +779,11 @@ impl<'a> ThreadRepository<'a> {
         query.push_bind(if is_read { 1 } else { 0 });
         query.push(", updated_at = ");
         query.push_bind(&now);
-        query.push(" WHERE thread_id IN (");
+        // Rows already in the target state are left alone: each changed row
+        // fires the folder-count triggers, and `updated_at` should mean it.
+        query.push(" WHERE is_read IS NOT ");
+        query.push_bind(if is_read { 1 } else { 0 });
+        query.push(" AND thread_id IN (");
         {
             let mut separated = query.separated(", ");
             for thread_id in thread_ids {

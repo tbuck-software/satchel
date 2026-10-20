@@ -86,6 +86,60 @@ async fn changed_body_window_is_deferred_resumable_and_not_reset_by_other_saves(
 }
 
 #[tokio::test]
+async fn body_window_evicts_the_unsanitized_original_but_keeps_imports() {
+    let pool = fixture().await;
+    message(&pool, "remote", "Body").await;
+    message(&pool, "only-original", "").await;
+    message(&pool, "imported", "Body").await;
+    sqlx::query("UPDATE messages SET body_text = NULL WHERE id = 'only-original'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE messages SET body_html = '<p>Body</p>', original_body_html = '<p onclick=x()>Body</p>', original_source = CAST('raw' AS BLOB)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE messages SET body_html = NULL WHERE id = 'only-original'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE messages SET remote_id = 'import-1' WHERE id = 'imported'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    body_window::set_days(&pool, 90, 0).await.unwrap();
+    data_repairs::run_repair(&pool, &BODY_WINDOW, 10, None, |_| {})
+        .await
+        .unwrap();
+
+    let stored = |id: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>, Option<Vec<u8>>)>(
+                "SELECT body_text, body_html, original_body_html, original_source FROM messages WHERE id = ?",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(stored("remote").await, (None, None, None, None));
+    assert_eq!(stored("only-original").await, (None, None, None, None));
+    let imported = stored("imported").await;
+    assert!(imported.0.is_some() && imported.1.is_some());
+    assert!(imported.2.is_some() && imported.3.is_some());
+    let source = db::messages::MessageReadRepository::new(&pool)
+        .get_message_source("remote")
+        .await
+        .unwrap();
+    assert!(
+        source.body_html.is_none(),
+        "show source must not keep serving it"
+    );
+}
+
+#[tokio::test]
 async fn disabling_or_changing_the_body_window_cancels_or_restarts_its_cursor() {
     let pool = fixture().await;
     message(&pool, "a", "Body").await;
