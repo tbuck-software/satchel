@@ -976,9 +976,12 @@ export function createThreadPersistence({
       if (requestId !== loadRequestId || inputKey !== threadListInputKey(buildBackendThreadListInput())) return;
       const fresh = page.threads.map(row => toThreadModel(row, accounts()));
       const ids = new Set(fresh.map(row => row.id));
-      collection.replaceAll([...fresh, ...threads.value.filter(row => !ids.has(row.id))]
-        .sort((a, b) => Date.parse(b.sortDate ?? b.lastMessageAt) - Date.parse(a.sortDate ?? a.lastMessageAt)
-          || b.id.localeCompare(a.id)));
+      // Parse each sort date once; parsing in the comparator cost two
+      // `Date.parse` per comparison over the whole loaded window.
+      const keyed = [...fresh, ...threads.value.filter(row => !ids.has(row.id))]
+        .map(row => ({ row, at: Date.parse(row.sortDate ?? row.lastMessageAt) }));
+      keyed.sort((a, b) => b.at - a.at || b.row.id.localeCompare(a.row.id));
+      collection.replaceAll(keyed.map(entry => entry.row));
       const boundary = collection.enforceWindow([
         selection.getActiveThreadId(), ...selection.getSelectedThreadIds(),
       ], 'backward');
