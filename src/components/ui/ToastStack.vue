@@ -128,7 +128,7 @@ function scheduleClearance() {
   clearanceFrame = requestAnimationFrame(measureClearance);
 }
 
-const CLEARANCE_EVENTS = ['pointerup', 'transitionend'] as const;
+const CLEARANCE_TRIGGERS = ['pointerup', 'transitionend'] as const;
 let listening = false;
 
 function listenForClearance(active: boolean) {
@@ -136,10 +136,10 @@ function listenForClearance(active: boolean) {
   listening = active;
   if (active) {
     window.addEventListener('resize', scheduleClearance);
-    for (const name of CLEARANCE_EVENTS) document.addEventListener(name, scheduleClearance, true);
+    for (const name of CLEARANCE_TRIGGERS) document.addEventListener(name, scheduleClearance, true);
   } else {
     window.removeEventListener('resize', scheduleClearance);
-    for (const name of CLEARANCE_EVENTS) document.removeEventListener(name, scheduleClearance, true);
+    for (const name of CLEARANCE_TRIGGERS) document.removeEventListener(name, scheduleClearance, true);
   }
 }
 
