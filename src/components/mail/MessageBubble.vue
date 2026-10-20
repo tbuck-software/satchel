@@ -233,7 +233,7 @@ const threadsStore = useThreadsStore();
  */
 const senderMenuAnchor = ref<AnchorBox | null>(null);
 const senderAccountId = computed(
-  () => threadsStore.threads.find((thread) => thread.id === props.message.threadId)?.accountId
+  () => threadsStore.find(props.message.threadId)?.accountId
     ?? threadsStore.activeThread?.accountId
     ?? '',
 );

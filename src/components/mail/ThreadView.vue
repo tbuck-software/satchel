@@ -85,7 +85,7 @@ const PRINT_CLEANUP_FALLBACK_MS = 60_000;
 let printCleanupTimer: number | null = null;
 let printPreviousTitle: string | null = null;
 
-const thread = computed(() => threadsStore.threads.find((item) => item.id === props.threadId));
+const thread = computed(() => (props.threadId ? threadsStore.find(props.threadId) : undefined));
 const threadTopics = computed(() => {
   if (!props.threadId) return [];
   return topicsStore
@@ -410,7 +410,7 @@ async function openSelectedThread(threadId: string, previousId: string | undefin
   if (props.threadId !== threadId) return;
   awaitingMessages.value = false;
   endOpen?.();
-  const current = threadsStore.threads.find((item) => item.id === threadId);
+  const current = threadsStore.find(threadId);
   if (current?.unreadCount) {
     // Dwell before marking read: this watcher also fires for auto-selection
     // (app launch, archive advancing to the next thread, j/k scanning) — an
