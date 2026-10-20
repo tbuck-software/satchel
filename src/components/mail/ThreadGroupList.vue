@@ -209,18 +209,30 @@ function hasNewSenderFooter(stack: NewSenderStack): boolean {
   return Boolean(stack.domainSuggestion) || stack.count > 1;
 }
 
-const itemOffsets = computed(() => {
+interface ListLayout {
+  offsets: number[];
+  total: number;
+}
+
+/*
+ * Offsets and total height come out of one walk over the items. The scroll
+ * anchor below reads the layout of the array it is leaving, which the computed
+ * no longer holds by then; the weak map keeps it for exactly that array.
+ */
+const layoutsByItems = new WeakMap<readonly ThreadListEntry[], ListLayout>();
+const layout = computed<ListLayout>(() => {
   let offset = 0;
-  return props.items.map((item) => {
+  const offsets = props.items.map((item) => {
     const current = offset;
     offset += itemHeight(item);
     return current;
   });
+  const next = { offsets, total: offset };
+  layoutsByItems.set(props.items, next);
+  return next;
 });
-
-const totalHeight = computed(() =>
-  props.items.reduce((sum, item) => sum + itemHeight(item), 0),
-);
+const itemOffsets = computed(() => layout.value.offsets);
+const totalHeight = computed(() => layout.value.total);
 
 function findStartIndex(top: number): number {
   const offsets = itemOffsets.value;
@@ -519,6 +531,39 @@ watch(
   { flush: 'post' },
 );
 
+/** The first row reaching below `top` and how far `top` sits into it. */
+function scrollAnchor(items: readonly ThreadListEntry[], top: number): { id: string; offset: number } | undefined {
+  const offsets = layoutsByItems.get(items)?.offsets;
+  if (!offsets) {
+    let offset = 0;
+    for (const item of items) {
+      const height = itemHeight(item);
+      if (offset + height > top) return { id: item.id, offset: top - offset };
+      offset += height;
+    }
+    return undefined;
+  }
+  // Binary search over the retained offsets for the last row starting at or
+  // above `top`; it holds `top` unless `top` lies past the end of the list.
+  let low = 0;
+  let high = items.length - 1;
+  let found = -1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (offsets[mid]! <= top) {
+      found = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  if (found < 0) return undefined;
+  const item = items[found]!;
+  const offset = offsets[found]!;
+  if (offset + itemHeight(item) > top) return { id: item.id, offset: top - offset };
+  return undefined;
+}
+
 watch(
   // Reference comparison is enough: the store rebuilds this array on every
   // change. A deep watch here walked thousands of thread objects on each
@@ -528,28 +573,16 @@ watch(
     const el = scrollerRef.value;
     // Capture the actual visible row rather than the overscan start. Its
     // position survives a prepend, a trim, and inserted date headers.
-    let offset = 0;
-    let anchor: { id: string; offset: number } | undefined;
     const top = el?.scrollTop ?? 0;
-    for (const item of previous) {
-      const height = itemHeight(item);
-      if (offset + height > top) {
-        anchor = { id: item.id, offset: top - offset };
-        break;
-      }
-      offset += height;
-    }
+    const anchor = el ? scrollAnchor(previous, top) : undefined;
     if (el && anchor) {
-      let nextOffset = 0;
-      for (const item of items) {
-        if (item.id === anchor.id) {
-          const nextTop = nextOffset + anchor.offset;
-          el.scrollTop = nextTop;
-          scrollTop.value = nextTop;
-          pendingScrollTop = nextTop;
-          break;
-        }
-        nextOffset += itemHeight(item);
+      const index = items.findIndex((item) => item.id === anchor.id);
+      const nextOffset = index < 0 ? undefined : itemOffsets.value[index];
+      if (nextOffset !== undefined) {
+        const nextTop = nextOffset + anchor.offset;
+        el.scrollTop = nextTop;
+        scrollTop.value = nextTop;
+        pendingScrollTop = nextTop;
       }
     }
     await nextTick();

@@ -359,7 +359,7 @@ function isContactAddress(email: string): boolean {
   return email.includes('@');
 }
 
-export function buildContactSummaries(threads: Thread[], ownEmails: Set<string>): ContactThreadSummary[] {
+function collectContacts(threads: readonly Thread[], ownEmails: Set<string>): Map<string, ContactThreadSummary> {
   const contacts = new Map<string, ContactThreadSummary>();
 
   // One pass per thread. The former pre-pass collected the same addresses a
@@ -374,19 +374,54 @@ export function buildContactSummaries(threads: Thread[], ownEmails: Set<string>)
     }
   }
 
-  return [...contacts.values()].sort((a, b) => {
-    if (b.threadCount !== a.threadCount) {
-      return b.threadCount - a.threadCount;
-    }
-    if (b.messageCount !== a.messageCount) {
-      return b.messageCount - a.messageCount;
-    }
-    const dateDelta = b.lastMessageAtMs - a.lastMessageAtMs;
-    if (dateDelta !== 0) {
-      return dateDelta;
-    }
-    return a.name.localeCompare(b.name);
-  });
+  return contacts;
+}
+
+/** Most threads first, then most messages, then most recent, then by name. */
+function compareContacts(a: ContactThreadSummary, b: ContactThreadSummary): number {
+  if (b.threadCount !== a.threadCount) {
+    return b.threadCount - a.threadCount;
+  }
+  if (b.messageCount !== a.messageCount) {
+    return b.messageCount - a.messageCount;
+  }
+  const dateDelta = b.lastMessageAtMs - a.lastMessageAtMs;
+  if (dateDelta !== 0) {
+    return dateDelta;
+  }
+  return a.name.localeCompare(b.name);
+}
+
+export function buildContactSummaries(threads: Thread[], ownEmails: Set<string>): ContactThreadSummary[] {
+  return [...collectContacts(threads, ownEmails).values()].sort(compareContacts);
+}
+
+/**
+ * The first `limit` entries `buildContactSummaries` would return, skipping
+ * `excludedEmails`.
+ *
+ * The sidebar shows five contacts. Sorting every known address for that
+ * on each thread mutation was the larger half of its cost; a bounded
+ * insertion keeps the selection linear in the number of contacts.
+ */
+export function buildTopContactSummaries(
+  threads: readonly Thread[],
+  ownEmails: Set<string>,
+  limit: number,
+  excludedEmails: ReadonlySet<string> = new Set(),
+): ContactThreadSummary[] {
+  const top: ContactThreadSummary[] = [];
+  if (limit <= 0) return top;
+  for (const contact of collectContacts(threads, ownEmails).values()) {
+    if (excludedEmails.has(contact.email.toLowerCase())) continue;
+    const last = top[top.length - 1];
+    if (top.length >= limit && last && compareContacts(contact, last) >= 0) continue;
+    let position = top.length;
+    while (position > 0 && compareContacts(contact, top[position - 1]!) < 0) position -= 1;
+    top.splice(position, 0, contact);
+    if (top.length > limit) top.pop();
+  }
+  return top;
 }
 
 /**
@@ -419,6 +454,90 @@ export function buildPinnedContactSummaries(
   return contacts;
 }
 
+export interface NewSenderReviewInputs {
+  senderBuckets: Record<string, InboxSenderBucket>;
+  acceptedSenders: Record<string, true>;
+  acceptedDomains: Record<string, true>;
+  senderReviewStartedAt: string | null;
+  dismissedNewSenders: Record<string, string>;
+  ownEmails: Set<string>;
+}
+
+/**
+ * Build the "is this an unreviewed sender?" test once per input set.
+ *
+ * The review start and the dismissal dates are parsed here, not per thread:
+ * the list projections run this over every visible thread on each mutation.
+ */
+export function newSenderPredicate({
+  senderBuckets,
+  acceptedSenders,
+  acceptedDomains,
+  senderReviewStartedAt,
+  dismissedNewSenders,
+  ownEmails,
+}: NewSenderReviewInputs): (thread: Thread) => boolean {
+  const reviewStart = senderReviewStartedAt ? Date.parse(senderReviewStartedAt) : NaN;
+  const dismissedThrough = new Map<string, number>();
+  function dismissedThroughFor(email: string): number {
+    let value = dismissedThrough.get(email);
+    if (value === undefined) {
+      value = Date.parse(dismissedNewSenders[email] ?? '');
+      dismissedThrough.set(email, value);
+    }
+    return value;
+  }
+
+  return (thread) => {
+    if (thread.isStarred || thread.priority >= 2 || thread.hasInvite) {
+      return false;
+    }
+
+    if (thread.senderKnown) {
+      return false;
+    }
+
+    const senderEmail = primarySenderEmail(thread);
+    if (!senderEmail || senderEmail.endsWith('@satchel.local')) {
+      return false;
+    }
+
+    // One of our own addresses is never a sender to review. It reaches the top of
+    // the participant list whenever the thread leads with our own message.
+    if (ownEmails.has(senderEmail)) {
+      return false;
+    }
+
+    if (thread.sentParticipants?.some((participant) => normalizedParticipantEmail(participant.email) === senderEmail)) {
+      return false;
+    }
+
+    // The category never vetoes the review: bulk signals like List-Unsubscribe
+    // also cloak phishing, so an unknown sender must stay reviewable even when
+    // classified as promotions/updates/social. Machine-shaped senders and the
+    // allowlists below remain the noise filters.
+    if (isMachineSender(thread.participants[0])) {
+      return false;
+    }
+
+    const lastMessage = thread.lastMessageAtMs;
+    if (Number.isFinite(reviewStart) && Number.isFinite(lastMessage) && lastMessage <= reviewStart) {
+      return false;
+    }
+
+    const dismissed = dismissedThroughFor(senderEmail);
+    if (Number.isFinite(dismissed) && Number.isFinite(lastMessage) && lastMessage <= dismissed) {
+      return false;
+    }
+
+    return (
+      !senderBuckets[senderEmail] &&
+      !acceptedSenders[senderEmail] &&
+      !acceptedDomains[senderDomain(senderEmail)]
+    );
+  };
+}
+
 export function isNewSenderThread(
   thread: Thread,
   senderBuckets: Record<string, InboxSenderBucket>,
@@ -428,56 +547,32 @@ export function isNewSenderThread(
   dismissedNewSenders: Record<string, string>,
   ownEmails: Set<string>,
 ): boolean {
-  if (thread.isStarred || thread.priority >= 2 || thread.hasInvite) {
-    return false;
-  }
+  return newSenderPredicate({
+    senderBuckets,
+    acceptedSenders,
+    acceptedDomains,
+    senderReviewStartedAt,
+    dismissedNewSenders,
+    ownEmails,
+  })(thread);
+}
 
-  if (thread.senderKnown) {
-    return false;
+/**
+ * Ids of the threads that belong in the new-sender review.
+ *
+ * Both the review stack and the smart buckets need this split; computing it
+ * once lets each of them read a set instead of rerunning the test.
+ */
+export function collectNewSenderThreadIds(
+  threads: readonly Thread[],
+  inputs: NewSenderReviewInputs,
+): Set<string> {
+  const isNewSender = newSenderPredicate(inputs);
+  const ids = new Set<string>();
+  for (const thread of threads) {
+    if (isNewSender(thread)) ids.add(thread.id);
   }
-
-  const senderEmail = primarySenderEmail(thread);
-  if (!senderEmail || senderEmail.endsWith('@satchel.local')) {
-    return false;
-  }
-
-  // One of our own addresses is never a sender to review. It reaches the top of
-  // the participant list whenever the thread leads with our own message.
-  if (ownEmails.has(senderEmail)) {
-    return false;
-  }
-
-  if (thread.sentParticipants?.some((participant) => normalizedParticipantEmail(participant.email) === senderEmail)) {
-    return false;
-  }
-
-  // The category never vetoes the review: bulk signals like List-Unsubscribe
-  // also cloak phishing, so an unknown sender must stay reviewable even when
-  // classified as promotions/updates/social. Machine-shaped senders and the
-  // allowlists below remain the noise filters.
-  if (isMachineSender(thread.participants[0])) {
-    return false;
-  }
-
-  if (senderReviewStartedAt) {
-    const reviewStart = Date.parse(senderReviewStartedAt);
-    const lastMessage = Date.parse(thread.lastMessageAt);
-    if (Number.isFinite(reviewStart) && Number.isFinite(lastMessage) && lastMessage <= reviewStart) {
-      return false;
-    }
-  }
-
-  const dismissedThrough = Date.parse(dismissedNewSenders[senderEmail] ?? '');
-  const lastMessage = Date.parse(thread.lastMessageAt);
-  if (Number.isFinite(dismissedThrough) && Number.isFinite(lastMessage) && lastMessage <= dismissedThrough) {
-    return false;
-  }
-
-  return (
-    !senderBuckets[senderEmail] &&
-    !acceptedSenders[senderEmail] &&
-    !acceptedDomains[senderDomain(senderEmail)]
-  );
+  return ids;
 }
 
 export function bucketLabel(key: SmartInboxBucketKey): string {
@@ -676,27 +771,13 @@ export function buildDomainSuggestion(senders: NewSenderGroup[]): NewSenderDomai
 
 export function buildNewSenderStack(
   inputThreads: Thread[],
-  senderBuckets: Record<string, InboxSenderBucket>,
-  acceptedSenders: Record<string, true>,
-  acceptedDomains: Record<string, true>,
-  senderReviewStartedAt: string | null,
-  dismissedNewSenders: Record<string, string>,
-  ownEmails: Set<string>,
+  newSenderThreadIds: ReadonlySet<string>,
 ): NewSenderStack | null {
   const buckets = new Map<string, Thread[]>();
+  if (newSenderThreadIds.size === 0) return null;
 
   for (const thread of inputThreads) {
-    if (
-      !isNewSenderThread(
-        thread,
-        senderBuckets,
-        acceptedSenders,
-        acceptedDomains,
-        senderReviewStartedAt,
-        dismissedNewSenders,
-        ownEmails,
-      )
-    ) {
+    if (!newSenderThreadIds.has(thread.id)) {
       continue;
     }
 
@@ -994,12 +1075,7 @@ export function buildSmartDateGroupedEntries(
 
 export function buildSmartInboxBuckets(
   inputThreads: Thread[],
-  senderBuckets: Record<string, InboxSenderBucket>,
-  acceptedSenders: Record<string, true>,
-  acceptedDomains: Record<string, true>,
-  senderReviewStartedAt: string | null,
-  dismissedNewSenders: Record<string, string>,
-  ownEmails: Set<string>,
+  newSenderThreadIds: ReadonlySet<string>,
   serverBuckets?: BackendSmartInboxBucket[],
 ): SmartInboxBucketGroup[] {
   const bucketOrder: SmartInboxBucketKey[] = [
@@ -1012,17 +1088,7 @@ export function buildSmartInboxBuckets(
   const buckets = new Map<SmartInboxBucketKey, Thread[]>();
 
   for (const thread of inputThreads) {
-    if (
-      isNewSenderThread(
-        thread,
-        senderBuckets,
-        acceptedSenders,
-        acceptedDomains,
-        senderReviewStartedAt,
-        dismissedNewSenders,
-        ownEmails,
-      )
-    ) {
+    if (newSenderThreadIds.has(thread.id)) {
       continue;
     }
 

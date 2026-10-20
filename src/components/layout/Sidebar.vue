@@ -48,7 +48,7 @@ const globalFrequentContacts = ref<ContactThreadSummary[]>([]);
 const frequentContacts = computed(() => {
   const summaries = threads.activeContactEmail
     ? globalFrequentContacts.value
-    : threads.contactSummaries;
+    : threads.frequentContactSummaries;
   // Pins are cross-account: their name/preview resolves over every account,
   // not just the active one — otherwise a pinned contact from the other
   // inbox degrades to a bare address.
@@ -136,16 +136,16 @@ const contextualSidebarActive = computed(
   () => calendarModuleActive.value || contactsModuleActive.value || settingsModuleActive.value,
 );
 
-// Reading `contactSummaries` here would rebuild the contact projection on
-// every thread mutation, including on routes that never show the list.
+// Reading the contact projection unguarded would rebuild it on every thread
+// mutation, including on routes that never show the list.
 watch(
-  () => (contextualSidebarActive.value || threads.activeContactEmail ? null : threads.contactSummaries),
+  () => (contextualSidebarActive.value || threads.activeContactEmail ? null : threads.frequentContactSummaries),
   (contacts) => {
     // A contact filter replaces the thread store with that contact's result
     // set. Keep the sidebar based on the last unfiltered result instead of
     // turning it into a list of co-participants from the selected contact.
     if (contacts) {
-      globalFrequentContacts.value = contacts.slice(0, 5);
+      globalFrequentContacts.value = contacts;
     }
   },
   { immediate: true },
