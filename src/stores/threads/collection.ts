@@ -203,12 +203,28 @@ export function createThreadCollection(
     })));
   }
 
+  /**
+   * Replace the patched rows in place of a copy.
+   *
+   * Row positions do not move, so the id index carries over to the new array
+   * instead of being rebuilt, and unpatched rows are not compared at all.
+   */
   function patchRows(patches: { id: string; values: Partial<Thread> }[]) {
-    const byId = new Map(patches.map(patch => [patch.id, patch.values]));
-    replaceAll(threads.value.map(thread => {
-      const values = byId.get(thread.id);
-      return values ? { ...thread, ...values } : thread;
-    }));
+    const known = index();
+    let nextThreads: Thread[] | null = null;
+    for (const { id, values } of patches) {
+      const position = known.get(id);
+      if (position === undefined) continue;
+      const source = nextThreads ?? threads.value;
+      const prior = source[position]!;
+      const patched = { ...prior, ...values };
+      if (sameRow(prior, patched)) continue;
+      nextThreads ??= [...threads.value];
+      nextThreads[position] = patched;
+    }
+    if (!nextThreads) return;
+    threads.value = nextThreads;
+    indexedArray = nextThreads;
   }
 
   function markRead(threadId: string, isRead: boolean) {

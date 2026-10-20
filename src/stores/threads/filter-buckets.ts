@@ -7,6 +7,7 @@ import type { VisibleThreadProjection } from '@/stores/threads/selection';
 import type { WorkflowState } from '@/types/workflow';
 import {
   buildContactSummaries,
+  buildTopContactSummaries,
   buildDateGroupedEntries,
   buildDateScopedSimilarGroups,
   buildThreadDateSections,
@@ -18,6 +19,7 @@ import {
   buildSmartDateGroupedEntries,
   buildSmartInboxBuckets,
   cleanThreadSnippet,
+  collectNewSenderThreadIds,
   isVisibleInCurrentScope,
   matchesMailboxFilter,
   normalizedParticipantEmail,
@@ -30,6 +32,9 @@ import {
   type SmartInboxBucketGroup,
   type ThreadListEntry,
 } from '@/utils/threadList';
+
+/** Rows the sidebar's contact section fills beyond the pinned ones. */
+export const FREQUENT_CONTACT_LIMIT = 5;
 
 interface ThreadSelectionBridge {
   getActiveThreadId(): string;
@@ -68,6 +73,7 @@ export interface ThreadFilterBucketsSurface {
   activeContact: ComputedRef<ContactThreadSummary | null>;
   visibleThreads: ComputedRef<Thread[]>;
   contactSummaries: ComputedRef<ContactThreadSummary[]>;
+  frequentContactSummaries: ComputedRef<ContactThreadSummary[]>;
   allContactSummaries: ComputedRef<ContactThreadSummary[]>;
   pinnedContactSummaries: ComputedRef<Map<string, ContactThreadSummary>>;
   similarThreadGroups: ComputedRef<SimilarThreadGroup[]>;
@@ -143,12 +149,27 @@ export function createThreadFilterBuckets({
   const ownAccountEmails = computed(
     () => new Set(accounts().map((account) => normalizedParticipantEmail(account.email)).filter(Boolean)),
   );
-  const contactSummaries = computed(() => {
-    const scopedThreads = activeAccountId()
+  const accountScopedThreads = computed(() =>
+    activeAccountId()
       ? threads.value.filter((thread) => thread.accountId === activeAccountId())
-      : threads.value;
-    return buildContactSummaries(scopedThreads, ownAccountEmails.value);
-  });
+      : threads.value,
+  );
+  const contactSummaries = computed(() =>
+    buildContactSummaries(accountScopedThreads.value, ownAccountEmails.value),
+  );
+  /**
+   * The head of `contactSummaries` without pinned addresses, for the
+   * always-mounted sidebar. It needs five rows; the full projection sorted
+   * every known address for them on each thread mutation.
+   */
+  const frequentContactSummaries = computed(() =>
+    buildTopContactSummaries(
+      accountScopedThreads.value,
+      ownAccountEmails.value,
+      FREQUENT_CONTACT_LIMIT,
+      new Set(pinnedContacts()),
+    ),
+  );
   /**
    * Unscoped variant, for the contacts module only.
    *
@@ -162,8 +183,12 @@ export function createThreadFilterBuckets({
   const pinnedContactSummaries = computed(() =>
     buildPinnedContactSummaries(threads.value, ownAccountEmails.value, pinnedContacts()),
   );
+  // Read on every Inbox render; without the guard it kept the full contact
+  // projection evaluated when no contact filter was set.
   const activeContact = computed(() =>
-    contactSummaries.value.find((contact) => contact.email === activeContactEmail.value) ?? null,
+    activeContactEmail.value
+      ? contactSummaries.value.find((contact) => contact.email === activeContactEmail.value) ?? null
+      : null,
   );
 
   const visibleThreads = computed(() => {
@@ -221,16 +246,23 @@ export function createThreadFilterBuckets({
   const similarThreadGroups = computed<SimilarThreadGroup[]>(() =>
     sectionSimilarGroups(visibleDateSections.value),
   );
+  /*
+   * The review stack and the smart buckets split the visible threads along
+   * the same line. Each used to run the sender test over every thread, so a
+   * single-row patch paid for it twice.
+   */
+  const newSenderThreadIds = computed(() =>
+    collectNewSenderThreadIds(visibleThreads.value, {
+      senderBuckets: inboxSenderBuckets(),
+      acceptedSenders: acceptedSenders(),
+      acceptedDomains: acceptedDomains(),
+      senderReviewStartedAt: senderReviewStartedAt(),
+      dismissedNewSenders: dismissedNewSenders(),
+      ownEmails: ownAccountEmails.value,
+    }),
+  );
   const newSenderStack = computed<NewSenderStack | null>(() =>
-    buildNewSenderStack(
-      visibleThreads.value,
-      inboxSenderBuckets(),
-      acceptedSenders(),
-      acceptedDomains(),
-      senderReviewStartedAt(),
-      dismissedNewSenders(),
-      ownAccountEmails.value,
-    ),
+    buildNewSenderStack(visibleThreads.value, newSenderThreadIds.value),
   );
   // Summary rows are scoped to account + mailbox. Ignore an earlier scope as
   // soon as navigation changes instead of briefly labelling the new Inbox
@@ -252,12 +284,7 @@ export function createThreadFilterBuckets({
   const smartInboxBuckets = computed<SmartInboxBucketGroup[]>(() =>
     buildSmartInboxBuckets(
       visibleThreads.value,
-      inboxSenderBuckets(),
-      acceptedSenders(),
-      acceptedDomains(),
-      senderReviewStartedAt(),
-      dismissedNewSenders(),
-      ownAccountEmails.value,
+      newSenderThreadIds.value,
       currentSmartInboxSummary.value?.buckets,
     ),
   );
@@ -496,31 +523,36 @@ export function createThreadFilterBuckets({
       }
     });
 
-    watch(smartInboxBuckets, (nextBuckets, previousBuckets) => {
-      if (!activeSmartBucketId.value) {
-        return;
-      }
+    // Guarded in the source like the contact watcher below: watching the
+    // computed itself kept the bucket projection evaluated in every view.
+    watch(
+      () => (activeSmartBucketId.value ? smartInboxBuckets.value : null),
+      (nextBuckets, previousBuckets) => {
+        if (!nextBuckets) {
+          return;
+        }
 
-      const nextBucket = nextBuckets.find((bucket) => bucket.id === activeSmartBucketId.value);
-      if (nextBucket?.threads.length) {
-        return;
-      }
+        const nextBucket = nextBuckets.find((bucket) => bucket.id === activeSmartBucketId.value);
+        if (nextBucket?.threads.length) {
+          return;
+        }
 
-      // Server summaries can advertise a bucket before its first page has been
-      // loaded. Do not close that initially empty shell; only close once a bucket
-      // that actually showed threads has lost its final local member.
-      const previousBucket = previousBuckets?.find(
-        (bucket) => bucket.id === activeSmartBucketId.value,
-      );
-      if (nextBucket && !previousBucket?.threads.length) {
-        return;
-      }
+        // Server summaries can advertise a bucket before its first page has been
+        // loaded. Do not close that initially empty shell; only close once a bucket
+        // that actually showed threads has lost its final local member.
+        const previousBucket = previousBuckets?.find(
+          (bucket) => bucket.id === activeSmartBucketId.value,
+        );
+        if (nextBucket && !previousBucket?.threads.length) {
+          return;
+        }
 
-      // Reload through the regular close path: the rows on screen are the
-      // bucket-filtered page, and leaving the bucket without refetching would
-      // leave the Inbox showing that narrow slice instead of its own list.
-      closeSmartBucket();
-    });
+        // Reload through the regular close path: the rows on screen are the
+        // bucket-filtered page, and leaving the bucket without refetching would
+        // leave the Inbox showing that narrow slice instead of its own list.
+        closeSmartBucket();
+      },
+    );
 
     watch(activeSmartBucket, (nextBucket) => {
       if (!nextBucket) {
@@ -569,6 +601,7 @@ export function createThreadFilterBuckets({
     activeContact,
     visibleThreads,
     contactSummaries,
+    frequentContactSummaries,
     allContactSummaries,
     pinnedContactSummaries,
     similarThreadGroups,

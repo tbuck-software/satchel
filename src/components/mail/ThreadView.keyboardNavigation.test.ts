@@ -43,6 +43,9 @@ vi.mock('@/stores/threads', () => ({
       id: 'thread-1', accountId: 'account-1', subject: 'Navigation', mailboxNames: ['Inbox'],
       unreadCount: 0, isStarred: false, isMuted: false, tags: [], workflowState: 'inbox',
     }],
+    find(this: { threads: Array<{ id: string }> }, id: string) {
+      return this.threads.find((thread) => thread.id === id);
+    },
     scopedVisibleThreads: [],
     focusNeighborThread: vi.fn(),
     setThreadsRead: vi.fn(),

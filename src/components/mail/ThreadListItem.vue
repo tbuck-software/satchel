@@ -62,6 +62,14 @@ const followUpPickerOpen = ref(false);
 const contextMenuOpen = ref(false);
 const contextMenuAnchor = ref<AnchorBox | null>(null);
 const senderMenuAnchor = ref<AnchorBox | null>(null);
+/*
+ * The menus mount on first use and stay for the row's lifetime, so closing
+ * still plays their transition. Mounting both up front cost every visible row
+ * two Teleports, two Transitions and their watchers for a menu that is rarely
+ * opened.
+ */
+const contextMenuMounted = ref(false);
+const senderMenuMounted = ref(false);
 const rowRef = ref<HTMLElement | null>(null);
 
 const primaryParticipantName = computed(() => {
@@ -220,6 +228,7 @@ function openContextMenu(event: MouseEvent) {
     bottom: event.clientY,
   };
   senderMenuAnchor.value = null;
+  contextMenuMounted.value = true;
   contextMenuOpen.value = true;
 }
 
@@ -230,6 +239,7 @@ function closeContextMenu() {
 
 function openSenderMenu(event: MouseEvent) {
   const trigger = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  senderMenuMounted.value = true;
   senderMenuAnchor.value = {
     left: trigger.left,
     top: trigger.top - 6,
@@ -573,6 +583,7 @@ function onDragStart(event: DragEvent) {
     </div>
   </article>
   <ContextMenu
+    v-if="contextMenuMounted"
     :open="contextMenuOpen"
     :anchor="contextMenuAnchor"
     :label="$t('thread.row.menuLabel')"
@@ -632,6 +643,7 @@ function onDragStart(event: DragEvent) {
   </ContextMenu>
 
   <ContextMenu
+    v-if="senderMenuMounted"
     :open="contextMenuOpen && senderMenuAnchor !== null"
     :anchor="senderMenuAnchor"
     :label="$t('thread.row.senderMenuLabel', { email: primaryParticipantEmail })"

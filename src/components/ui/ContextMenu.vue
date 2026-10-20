@@ -183,7 +183,8 @@ onBeforeUnmount(() => {
       @pointerdown="emit('close')"
       @contextmenu.prevent="emit('close')"
     />
-    <Transition name="context-menu">
+    <!-- `appear`: rows mount their menu on first open, already open. -->
+    <Transition name="context-menu" appear>
       <div
         v-if="props.open"
         ref="menuRef"

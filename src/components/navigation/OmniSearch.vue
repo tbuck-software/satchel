@@ -69,6 +69,29 @@ const reminderQuery = ref('');
 useFocusTrap(panelRef, { isOpen: () => ui.omniOpen, moveFocusIn: () => false });
 
 const term = computed(() => query.value.trim().toLowerCase());
+/*
+ * Lowercased once per contact list and already in frequency order, so a
+ * keystroke only filters. Building, lowercasing and sorting per keystroke
+ * scaled with the whole address book.
+ */
+const contactSearchIndex = computed(() =>
+  contactsStore.contacts
+    .map((contact) => ({
+      contact,
+      text: `${contact.display_name ?? ''} ${contact.email}`.toLowerCase(),
+    }))
+    .sort((a, b) => (b.contact.frequency ?? 0) - (a.contact.frequency ?? 0)),
+);
+
+function matchingContacts(needle: string) {
+  const matches: BackendContact[] = [];
+  for (const entry of contactSearchIndex.value) {
+    if (!entry.text.includes(needle)) continue;
+    matches.push(entry.contact);
+    if (matches.length >= CONTACT_LIMIT) break;
+  }
+  return matches;
+}
 const inputValue = computed({
   get: () => ui.omniMode === 'reminder' ? reminderQuery.value : query.value,
   set: (value: string) => {
@@ -163,12 +186,7 @@ const groups = computed<OmniGroup[]>(() => {
   );
   add(
     t('nav.omni.groups.contacts'),
-    contactsStore.contacts
-      .filter((contact) =>
-        `${contact.display_name ?? ''} ${contact.email}`.toLowerCase().includes(term.value),
-      )
-      .sort((a, b) => (b.frequency ?? 0) - (a.frequency ?? 0))
-      .slice(0, CONTACT_LIMIT)
+    matchingContacts(term.value)
       .map((contact) => ({ kind: 'contact', id: `contact:${contact.email}`, contact })),
   );
   add(

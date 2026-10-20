@@ -88,6 +88,20 @@ function spoofingSkeleton(value: string): string {
   return Array.from(skeleton, (character) => (mappings[character] ?? character).toLowerCase()).join('');
 }
 
+/*
+ * The brand side of the comparison never changes. Skeletonizing it per call
+ * cost the new-sender review stack most of its time: one call per sender, on
+ * every list mutation.
+ */
+let brandSkeletons: Array<{ tokens: string[]; domains: string[] }> | null = null;
+function skeletonsForBrands(): Array<{ tokens: string[]; domains: string[] }> {
+  brandSkeletons ??= BRANDS.map((brand) => ({
+    tokens: brand.tokens.map(spoofingSkeleton),
+    domains: brand.domains.map(spoofingSkeleton),
+  }));
+  return brandSkeletons;
+}
+
 function nameTokens(displayName: string): string[] {
   return spoofingSkeleton(displayName).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 }
@@ -127,9 +141,11 @@ export function detectSenderSpoofing(
       // Malformed sender domains must not prevent reading the message.
     }
     const domainSkeleton = spoofingSkeleton(unicodeDomain);
-    for (const brand of BRANDS) {
-      const nameClaimsBrand = brand.tokens.some((token) => tokens.includes(spoofingSkeleton(token)));
-      const domainImitatesBrand = domainMatches(domainSkeleton, brand.domains.map(spoofingSkeleton));
+    const skeletons = skeletonsForBrands();
+    for (const [index, brand] of BRANDS.entries()) {
+      const skeleton = skeletons[index]!;
+      const nameClaimsBrand = skeleton.tokens.some((token) => tokens.includes(token));
+      const domainImitatesBrand = domainMatches(domainSkeleton, skeleton.domains);
       if ((nameClaimsBrand || domainImitatesBrand) && !domainMatches(domain, brand.domains)) {
         return {
           kind: 'brand', brand: brand.label, domain,

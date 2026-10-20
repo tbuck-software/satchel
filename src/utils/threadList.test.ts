@@ -5,6 +5,8 @@ import {
   toThreadModel,
   buildContactSummaries,
   buildNewSenderStack,
+  buildTopContactSummaries,
+  collectNewSenderThreadIds,
   buildPriorityCardEntry,
   isNewSenderThread,
   PRIORITY_CARD_MAX_THREADS,
@@ -128,6 +130,17 @@ describe('isNewSenderThread', () => {
   });
 });
 
+function newSenderIds(threads: Thread[]): Set<string> {
+  return collectNewSenderThreadIds(threads, {
+    senderBuckets: emptyRecords as never,
+    acceptedSenders: {},
+    acceptedDomains: {},
+    senderReviewStartedAt: null,
+    dismissedNewSenders: {},
+    ownEmails: new Set(['me@example.com']),
+  });
+}
+
 describe('buildNewSenderStack', () => {
   it('pulls an unknown promotions sender into the review stack', () => {
     const phishing = thread({
@@ -137,7 +150,7 @@ describe('buildNewSenderStack', () => {
       subject: 'Sicherheitswarnung',
     });
 
-    const stack = buildNewSenderStack([phishing], {} as never, {}, {}, null, {}, new Set(['me@example.com']));
+    const stack = buildNewSenderStack([phishing], newSenderIds([phishing]));
 
     expect(stack?.senders.map((sender) => sender.senderEmail)).toEqual([
       'kundensicherheitscenter@hashtagmediapoint.com',
@@ -155,19 +168,72 @@ describe('buildNewSenderStack', () => {
       participants: [{ name: 'Neue Person', email: 'person@example.com' }],
     });
 
-    const stack = buildNewSenderStack(
-      [phishing, honest],
-      {} as never,
-      {},
-      {},
-      null,
-      {},
-      new Set(['me@example.com']),
-    );
+    const stack = buildNewSenderStack([phishing, honest], newSenderIds([phishing, honest]));
 
     const byEmail = new Map(stack?.senders.map((sender) => [sender.senderEmail, sender]));
     expect(byEmail.get('kundensicherheitscenter@hashtagmediapoint.com')?.spoofingText).toContain('N26');
     expect(byEmail.get('person@example.com')?.spoofingText).toBeNull();
+  });
+});
+
+describe('collectNewSenderThreadIds', () => {
+  it('matches the per-thread test, review start and dismissals included', () => {
+    const candidates = [
+      thread({ id: 'old', participants: [{ name: 'Alt', email: 'alt@example.com' }], lastMessageAt: '2026-08-01T10:00:00Z' }),
+      thread({ id: 'new', participants: [{ name: 'Neu', email: 'neu@example.com' }], lastMessageAt: '2026-08-20T10:00:00Z' }),
+      thread({ id: 'dismissed', participants: [{ name: 'Weg', email: 'weg@example.com' }], lastMessageAt: '2026-08-20T10:00:00Z' }),
+      thread({ id: 'again', participants: [{ name: 'Weg', email: 'weg@example.com' }], lastMessageAt: '2026-08-24T10:00:00Z' }),
+      thread({ id: 'starred', participants: [{ name: 'Stern', email: 'stern@example.com' }], isStarred: true }),
+    ];
+    const inputs = {
+      senderBuckets: emptyRecords as never,
+      acceptedSenders: {},
+      acceptedDomains: {},
+      senderReviewStartedAt: '2026-08-10T00:00:00Z',
+      dismissedNewSenders: { 'weg@example.com': '2026-08-21T00:00:00Z' },
+      ownEmails: new Set(['me@example.com']),
+    };
+
+    const ids = collectNewSenderThreadIds(candidates, inputs);
+
+    expect([...ids]).toEqual(candidates
+      .filter((entry) => isNewSenderThread(
+        entry,
+        inputs.senderBuckets,
+        inputs.acceptedSenders,
+        inputs.acceptedDomains,
+        inputs.senderReviewStartedAt,
+        inputs.dismissedNewSenders,
+        inputs.ownEmails,
+      ))
+      .map((entry) => entry.id));
+    expect([...ids]).toEqual(['new', 'again']);
+  });
+});
+
+describe('buildTopContactSummaries', () => {
+  const ownEmails = new Set(['me@example.com']);
+
+  it('returns the head of the full projection without the excluded addresses', () => {
+    const threads: Thread[] = [];
+    for (let index = 0; index < 400; index += 1) {
+      // Uneven counts with ties, so the order rests on every tie-breaker.
+      const contact = (index * 7) % 23;
+      threads.push(thread({
+        id: `t-${index}`,
+        participants: [{ name: `Person ${contact % 5}`, email: `p${contact}@example.com` }],
+        sentParticipants: [{ name: `Person ${contact % 5}`, email: `p${contact}@example.com` }],
+        messageCount: 1 + (index % 3),
+        lastMessageAt: new Date(1_700_000_000_000 + (index % 9) * 60_000).toISOString(),
+      }));
+    }
+    const full = buildContactSummaries(threads, ownEmails);
+    const excluded = new Set([full[0]!.email, full[3]!.email]);
+
+    expect(buildTopContactSummaries(threads, ownEmails, 5, excluded))
+      .toEqual(full.filter((contact) => !excluded.has(contact.email)).slice(0, 5));
+    expect(buildTopContactSummaries(threads, ownEmails, 5)).toEqual(full.slice(0, 5));
+    expect(buildTopContactSummaries(threads, ownEmails, 0)).toEqual([]);
   });
 });
 

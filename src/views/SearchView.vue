@@ -4,7 +4,7 @@ import IconButton from '@/components/ui/IconButton.vue';
 import DrawerButton from '@/components/layout/DrawerButton.vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useSearch, type SearchResult } from '@/composables/useSearch';
+import { SEARCH_DEBOUNCE_MS, useSearch, type SearchResult } from '@/composables/useSearch';
 import { useServerSearch } from '@/composables/useServerSearch';
 import { useRecentSearches } from '@/composables/useRecentSearches';
 import { useThreadsStore } from '@/stores/threads';
@@ -100,11 +100,32 @@ watch(
   },
 );
 
-// Keep the URL shareable without spamming history entries.
-watch(query, (next) => {
+// Keep the URL shareable without spamming history entries. Debounced like
+// the search itself: WebKit throttles `history.replaceState` and throws once
+// a fast typist exceeds its budget.
+let urlSyncHandle: ReturnType<typeof setTimeout> | undefined;
+function cancelUrlSync() {
+  if (urlSyncHandle === undefined) return;
+  clearTimeout(urlSyncHandle);
+  urlSyncHandle = undefined;
+}
+function syncQueryToUrl() {
+  cancelUrlSync();
+  // A timer outliving a navigation must not pull the user back here.
+  if (route.name !== 'search') return;
+  void router.replace({ name: 'search', query: { ...route.query, q: query.value || undefined } });
+}
+function flushUrlSync() {
+  if (urlSyncHandle !== undefined) syncQueryToUrl();
+}
+
+// Synchronous, so a flush right after an assignment already sees the timer.
+watch(query, () => {
   if (ui.isSinglePane) selectedThreadId.value = '';
-  void router.replace({ name: 'search', query: { ...route.query, q: next || undefined } });
-});
+  cancelUrlSync();
+  urlSyncHandle = setTimeout(syncQueryToUrl, SEARCH_DEBOUNCE_MS);
+}, { flush: 'sync' });
+onBeforeUnmount(flushUrlSync);
 
 // The detail pane follows the results: first hit selected automatically,
 // stale selections dropped — like the inbox list. Hits usually point at
@@ -127,11 +148,14 @@ onBeforeUnmount(ui.registerBackNavigation({
 }));
 
 watch(accountFilterId, (id) => {
+  // Carries the current query, so a pending query sync has nothing left to do.
+  cancelUrlSync();
   void router.replace({ name: 'search', query: { ...route.query, q: query.value || undefined, global: id ? undefined : '1' } });
 });
 
 /** Selecting a hit shows the conversation in the detail pane, like the inbox. */
 function open(result: SearchResult) {
+  flushUrlSync();
   // Feeds the omni panel's "Letzte Suchen" group.
   pushRecent(query.value);
   void threads.ensureThreadLoaded(result.threadId);
@@ -141,6 +165,8 @@ function open(result: SearchResult) {
 
 function appendOperator(token: string) {
   query.value = query.value ? `${query.value.trimEnd()} ${token}` : token;
+  // A chip is one deliberate edit, not typing to coalesce.
+  flushUrlSync();
 }
 </script>
 
@@ -156,6 +182,7 @@ function appendOperator(token: string) {
           class="search-input"
           :placeholder="$t('search.placeholder')"
           :aria-label="$t('search.queryLabel')"
+          @keydown.enter="flushUrlSync"
         />
         <div class="operator-hints">
           <AppButton

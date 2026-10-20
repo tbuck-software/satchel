@@ -9,7 +9,7 @@ import {
   type Ref,
 } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SearchResult } from '@/composables/useSearch';
 
 type SearchState = {
@@ -67,6 +67,7 @@ vi.mock('vue-router', () => ({
   useRouter: () => harness.router,
 }));
 vi.mock('@/composables/useSearch', () => ({
+  SEARCH_DEBOUNCE_MS: 120,
   useSearch: (options: { accountFilter: Ref<string>; liveUpdates: boolean }) => {
     harness.localSearchOptions = options;
     return harness.searchState!;
@@ -181,6 +182,10 @@ function mountView(query: Record<string, string> = { q: 'invoice' }) {
   });
 }
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   harness.ui.isSinglePane = false;
@@ -210,11 +215,57 @@ describe('SearchView', () => {
     expect(harness.searchState?.query.value).toBe('contact');
     expect(harness.localSearchOptions?.accountFilter.value).toBe('');
 
+    vi.useFakeTimers();
     await wrapper.get('.search-input').setValue('new query');
+    vi.advanceTimersByTime(120);
     expect(harness.router.replace).toHaveBeenLastCalledWith({
       name: 'search',
       query: { q: 'new query', global: '1' },
     });
+  });
+
+  it('writes the URL once per typing burst, and at once on Enter', async () => {
+    const wrapper = mountView({ q: '' });
+    await nextTick();
+    vi.useFakeTimers();
+    harness.router.replace.mockReset();
+
+    const input = wrapper.get('.search-input');
+    for (const value of ['i', 'in', 'inv', 'invo']) {
+      await input.setValue(value);
+      vi.advanceTimersByTime(50);
+    }
+    expect(harness.router.replace).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(120);
+    expect(harness.router.replace).toHaveBeenCalledTimes(1);
+    expect(harness.router.replace).toHaveBeenLastCalledWith({
+      name: 'search',
+      query: { q: 'invo', global: undefined },
+    });
+
+    await input.setValue('invoice');
+    await input.trigger('keydown', { key: 'Enter' });
+    expect(harness.router.replace).toHaveBeenCalledTimes(2);
+    expect(harness.router.replace).toHaveBeenLastCalledWith({
+      name: 'search',
+      query: { q: 'invoice', global: undefined },
+    });
+    vi.advanceTimersByTime(500);
+    expect(harness.router.replace).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops a pending URL write once the route has moved on', async () => {
+    const wrapper = mountView({ q: '' });
+    await nextTick();
+    vi.useFakeTimers();
+    harness.router.replace.mockReset();
+
+    await wrapper.get('.search-input').setValue('invoice');
+    harness.route!.name = 'inbox';
+    wrapper.unmount();
+    vi.advanceTimersByTime(500);
+
+    expect(harness.router.replace).not.toHaveBeenCalled();
   });
 
   it('appends an operator chip to the current query', async () => {

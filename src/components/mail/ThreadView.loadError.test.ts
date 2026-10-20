@@ -49,6 +49,9 @@ vi.mock('@/stores/threads', () => ({
       tags: [],
       workflowState: 'inbox',
     }],
+    find(this: { threads: Array<{ id: string }> }, id: string) {
+      return this.threads.find((thread) => thread.id === id);
+    },
     scopedVisibleThreads: [],
     focusNeighborThread: vi.fn(),
     setThreadsRead: vi.fn(),

@@ -41,3 +41,23 @@ it('publishes immutable workflow and read mutations without changing other rows'
   collection.markRead('a', true);
   expect(collection.threads.value).toBe(read);
 });
+
+it('patches a row without rebuilding the id index', () => {
+  const collection = createThreadCollection([row('a'), row('b'), row('c')]);
+  collection.find('a');
+  const builds = collection.indexBuilds();
+  const before = collection.threads.value;
+
+  collection.markRead('b', true);
+
+  expect(collection.threads.value).not.toBe(before);
+  expect(collection.find('b')?.unreadCount).toBe(0);
+  expect(collection.find('c')).toBe(before[2]);
+  expect(collection.indexBuilds()).toBe(builds);
+
+  // A patch that changes nothing publishes nothing.
+  const read = collection.threads.value;
+  collection.markRead('b', true);
+  collection.applyWorkflowStates([{ threadId: 'missing', state: 'done' }]);
+  expect(collection.threads.value).toBe(read);
+});
