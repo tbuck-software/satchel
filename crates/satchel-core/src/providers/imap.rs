@@ -1905,8 +1905,13 @@ impl MailProvider for ImapProvider {
     ) -> crate::sync::errors::SyncResult<()> {
         let mut session = self.login_session().await?;
         let folder = folder_hint.unwrap_or("Sent");
+        // The literal has to cross the uplink inside the deadline. The flat
+        // operation timeout cut large copies off on every attempt, and when
+        // the server had stored the copy anyway, the retry filed it twice.
+        let append_timeout =
+            crate::utils::http::upload_timeout(Self::op_timeout(), raw_rfc822.len());
         let first = timeout(
-            Self::op_timeout(),
+            append_timeout,
             session.append(folder, Some("(\\Seen)"), None, raw_rfc822),
         )
         .await
@@ -1925,7 +1930,7 @@ impl MailProvider for ImapProvider {
                 .map_err(|_| format!("imap CREATE {folder} timed out"))?
                 .map_err(|create_err| format!("imap CREATE {folder} failed: {create_err}"))?;
             timeout(
-                Self::op_timeout(),
+                append_timeout,
                 session.append(folder, Some("(\\Seen)"), None, raw_rfc822),
             )
             .await

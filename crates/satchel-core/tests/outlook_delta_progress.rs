@@ -435,3 +435,95 @@ async fn a_failed_initial_backfill_stays_pending_across_delta_runs() {
     );
     std::env::remove_var("SATCHEL_GRAPH_API_BASE");
 }
+
+/// Serves one delta page holding a tombstone for `gone`; fetching `gone`
+/// itself answers 404 because the message no longer exists.
+async fn spawn_tombstone_graph() -> (String, Arc<Mutex<Vec<String>>>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let recorded = requests.clone();
+    let served = address.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buffer = vec![0; 8192];
+            let Ok(read) = socket.read(&mut buffer).await else {
+                continue;
+            };
+            let line = String::from_utf8_lossy(&buffer[..read])
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_string();
+            recorded.lock().unwrap().push(line.clone());
+            let (status, body) = if line.contains("/delta") {
+                (
+                    "200 OK",
+                    serde_json::json!({
+                        "value": [{"id": "gone", "@removed": {"reason": "deleted"}}],
+                        "@odata.deltaLink": format!("http://{served}/delta-next")
+                    })
+                    .to_string(),
+                )
+            } else {
+                (
+                    "404 Not Found",
+                    "{\"error\":{\"code\":\"ErrorItemNotFound\"}}".to_string(),
+                )
+            };
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+        }
+    });
+    (address, requests)
+}
+
+/// A quarantined message deleted on the server arrives as a delta tombstone.
+/// The retry pass used to fetch it anyway, get a 404 and panic on the
+/// quarantine row the tombstone had just removed. The cursor was never saved,
+/// so the same panic aborted every later run of the account.
+#[tokio::test]
+async fn a_tombstoned_quarantine_entry_is_not_retried() {
+    let _guard = env_lock().await;
+    let (address, requests) = spawn_tombstone_graph().await;
+    std::env::set_var("SATCHEL_GRAPH_API_BASE", format!("http://{address}"));
+    let provider = OutlookProvider::from_account_config(
+        &satchel_core::accounts::AccountConfig::from_plaintext(ACCOUNT_CONFIG),
+    );
+    let checkpoint = SyncCheckpoint {
+        cursor: Some(
+            serde_json::json!({
+                "latest_received": "2026-01-01T00:00:00Z", "format_version": 1,
+                "delta_link": format!("http://{address}/delta"),
+                "mime_quarantine": {"gone": {"attempts": 1, "last_error": "boom"}}
+            })
+            .to_string(),
+        ),
+    };
+
+    let batch = provider.sync_messages("inbox", checkpoint).await.unwrap();
+
+    assert_eq!(batch.removals.len(), 1);
+    assert_eq!(batch.removals[0].remote_id, "gone");
+    let state = cursor_state(&batch);
+    assert!(state["mime_quarantine"].as_object().unwrap().is_empty());
+    assert_eq!(
+        state["delta_link"],
+        serde_json::json!(format!("http://{address}/delta-next"))
+    );
+    assert!(
+        !requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|request| request.contains("/me/messages/gone")),
+        "a deleted message is not fetched again"
+    );
+    std::env::remove_var("SATCHEL_GRAPH_API_BASE");
+}

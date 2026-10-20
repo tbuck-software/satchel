@@ -1000,7 +1000,9 @@ impl MailProvider for OutlookProvider {
         }
 
         for id in retries {
-            if attempted.contains(&id) {
+            // A delta tombstone drops its id from the quarantine after the
+            // retry list was taken; there is nothing left to retry.
+            if attempted.contains(&id) || !cursor_state.mime_quarantine.contains_key(&id) {
                 continue;
             }
             match Self::load_graph_message(&client, &token, &id).await {
@@ -1018,12 +1020,10 @@ impl MailProvider for OutlookProvider {
                     }
                 }
                 Err(error) => {
-                    let row = cursor_state
-                        .mime_quarantine
-                        .get_mut(&id)
-                        .expect("quarantined message");
-                    row.attempts += 1;
-                    row.last_error = error.to_string();
+                    if let Some(row) = cursor_state.mime_quarantine.get_mut(&id) {
+                        row.attempts += 1;
+                        row.last_error = error.to_string();
+                    }
                 }
             }
         }
@@ -1205,15 +1205,28 @@ impl MailProvider for OutlookProvider {
             None => crate::email::build::build_rfc822_with_bcc(&message, None, None)?,
         };
 
+        let payload = base64::engine::general_purpose::STANDARD.encode(raw.as_bytes());
+        // The client-wide deadline covers the upload too; sized to the message,
+        // a few megabytes over a slow uplink can still finish.
+        let deadline = crate::utils::http::upload_timeout(
+            crate::utils::http::UPLOAD_BASE_TIMEOUT,
+            payload.len(),
+        );
+        let upload = crate::utils::http::UploadProgress::default();
         let response = client
             .post(format!("{}/me/sendMail", graph_api_base()))
             .bearer_auth(token)
             .header("Content-Type", "text/plain")
-            .body(base64::engine::general_purpose::STANDARD.encode(raw.as_bytes()))
+            .timeout(deadline)
+            .body(upload.body(payload))
             .send()
             .await
             .map_err(|err| {
-                crate::sync::errors::http_submission_transport_failure("outlook", err)
+                crate::sync::errors::http_submission_transport_failure(
+                    "outlook",
+                    err,
+                    upload.fully_handed_over(),
+                )
             })?;
 
         if !response.status().is_success() {

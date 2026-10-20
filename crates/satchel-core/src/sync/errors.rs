@@ -134,12 +134,23 @@ pub fn http_failure(provider: &str, action: &str, status: u16, body: &str) -> Sy
 }
 
 /// A connection failure precedes submission; later transport errors may hide acceptance.
-pub fn http_submission_transport_failure(provider: &str, error: reqwest::Error) -> SyncError {
+///
+/// `body_handed_over` says whether the whole request body reached the
+/// transport ([`crate::utils::http::UploadProgress`]). A failure before that —
+/// an upload cut off by its deadline or a dropped uplink — delivered nothing,
+/// because the server never had the complete message, and stays retryable.
+pub fn http_submission_transport_failure(
+    provider: &str,
+    error: reqwest::Error,
+    body_handed_over: bool,
+) -> SyncError {
     let message = format!("{provider} send failed: {error}");
     if error.is_connect() {
         SyncError::Transient(message)
     } else if error.is_builder() {
         SyncError::Permanent(message)
+    } else if !body_handed_over {
+        SyncError::Transient(message)
     } else {
         SyncError::DeliveryUnknown(message)
     }
