@@ -42,6 +42,7 @@ import {
 import { registerThreadMessageKeyboardNavigation } from '@/composables/useThreadMessageKeyboardNavigation';
 import { registerThreadReaderCommands } from '@/composables/useThreadReaderCommands';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import type { Message } from '@/types/mail';
 
 const props = defineProps<{
@@ -75,6 +76,7 @@ const router = useRouter();
 const ui = useUiStore();
 const composer = useComposerStore();
 const toast = useToast();
+const confirmDialog = useConfirm();
 const { d, locale, t } = useI18n();
 const expandedThread = ref(false);
 const snoozePickerOpen = ref(false);
@@ -347,7 +349,17 @@ const threadAccount = computed(() =>
   accountsStore.accounts.find((account) => account.id === thread.value?.accountId),
 );
 const canReply = computed(() => accountsStore.capabilitiesFor(threadAccount.value).can_reply);
-const latestSenderAddress = computed(() => visibleMessages.value.at(-1)?.from.email ?? '');
+/**
+ * The sender a block applies to: the latest incoming message. Our own reply
+ * or a draft at the end of the thread would otherwise block ourselves.
+ */
+const latestSenderAddress = computed(() => [...messages.value]
+  .reverse()
+  .find((message) => !message.isDraft && !isOwnEmail(accountsStore.accounts, message.from.email))
+  ?.from.email?.trim() ?? '');
+const ownDomains = computed(() => new Set(accountsStore.accounts
+  .map((account) => account.email.split('@').at(-1)?.trim().toLowerCase() ?? '')
+  .filter(Boolean)));
 
 /** Who the reply would go to: the last sender who is not one of our own. */
 const replyRecipientName = computed(() => {
@@ -601,23 +613,29 @@ async function toggleAside() {
 
 async function blockSender(scope: 'address' | 'domain' = 'address') {
   if (!thread.value) return;
-  const lastMsg = messagesStore.getByThread(thread.value.id).at(-1);
-  const sender = lastMsg?.from?.email;
-  if (!sender) return;
-  const domain = sender.split('@').at(-1)?.trim();
-  const pattern = scope === 'domain' && domain ? `*@${domain}` : sender;
-  const confirmationKey = scope === 'domain' && domain
-    ? 'thread.block.confirmDomain'
-    : 'thread.block.confirmAddress';
-  if (!window.confirm(t(confirmationKey, { address: sender, domain })))
+  const { id: threadId, accountId } = thread.value;
+  const sender = latestSenderAddress.value;
+  const domain = sender.split('@').at(-1)?.trim().toLowerCase() ?? '';
+  const byDomain = scope === 'domain' && Boolean(domain);
+  if (!sender || (byDomain && ownDomains.value.has(domain))) {
+    toast.error(t('thread.block.ownAddress'));
     return;
+  }
+  const pattern = byDomain ? `*@${domain}` : sender;
+  const confirmed = await confirmDialog.ask({
+    title: t(byDomain ? 'thread.block.confirmTitleDomain' : 'thread.block.confirmTitleAddress'),
+    body: t(byDomain ? 'thread.block.confirmDomain' : 'thread.block.confirmAddress', { address: sender, domain }),
+    confirmLabel: t('thread.block.confirmAction'),
+    tone: 'danger',
+  });
+  if (!confirmed) return;
   try {
     await threadActions.blockSender({
       pattern,
-      accountId: thread.value.accountId,
-      threadIds: [thread.value.id],
+      accountId,
+      threadIds: [threadId],
     });
-    toast.success(scope === 'domain'
+    toast.success(byDomain
       ? t('thread.block.domainBlocked', { domain })
       : t('thread.block.senderBlocked', { address: sender }));
   } catch (err) {

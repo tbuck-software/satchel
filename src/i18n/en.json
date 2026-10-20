@@ -94,6 +94,7 @@
       "backupPassphraseRejected": "That passphrase does not open this backup's master key.",
       "backupPassphraseRequired": "This backup's master key is wrapped. Enter the passphrase it was created with.",
       "backupPassphraseTooShort": "Use at least 12 characters for the backup passphrase.",
+      "blockedSenderOwnAddress": "Your own address or domain cannot be blocked.",
       "blockedSenderPatternEmpty": "Enter an email address or domain to block.",
       "blockedSenderPersistenceFailed": "Blocked senders are currently unavailable. Please try again.",
       "browserWindowBlocked": "The browser blocked the new window. Allow pop-ups for Satchel and try again.",
@@ -3028,10 +3029,14 @@
       "unnamed": "unnamed"
     },
     "block": {
+      "confirmAction": "Block",
       "confirmAddress": "Block sender {address}? Future mail lands in Abuse or Spam automatically.",
       "confirmDomain": "Block the domain {domain}? Future mail lands in Abuse or Spam automatically.",
+      "confirmTitleAddress": "Block sender?",
+      "confirmTitleDomain": "Block domain?",
       "domainBlocked": "Domain {domain} blocked.",
       "failed": "Blocking failed: {error}",
+      "ownAddress": "Your own address or domain cannot be blocked.",
       "senderBlocked": "{address} blocked."
     },
     "bucket": {
@@ -3142,6 +3147,8 @@
       "restoreEmpty": "No conversations could be restored.",
       "restoreFailed": "Restoring failed.",
       "snoozed": "Email snoozed | {count} emails snoozed",
+      "spamFailed": "Marking as spam failed.",
+      "spammed": "Thread marked as spam | {count} threads marked as spam",
       "trashFailed": "Deleting failed.",
       "trashed": "Thread deleted | Threads deleted",
       "waiting": "Email waiting for a reply | {count} emails waiting for a reply"

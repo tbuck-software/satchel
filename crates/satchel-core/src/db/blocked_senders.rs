@@ -45,6 +45,8 @@ pub struct BlockedSenderUpsertRequest {
 pub enum BlockedSenderError {
     #[error("blocked sender pattern is empty")]
     PatternEmpty,
+    #[error("blocked sender pattern matches one of the user's own addresses")]
+    OwnAddress,
     #[error("blocked sender persistence failed: {0}")]
     Persistence(#[source] sqlx::Error),
 }
@@ -90,6 +92,19 @@ impl<'a> BlockedSenderRepository<'a> {
         let now = chrono::Utc::now().to_rfc3339();
 
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        // A rule against an own address or domain would file the user's own
+        // replies and sent copies as spam.
+        let own_addresses: Vec<String> = sqlx::query_scalar(
+            "SELECT email FROM accounts UNION SELECT email FROM account_aliases",
+        )
+        .fetch_all(&mut *transaction)
+        .await?;
+        if own_addresses
+            .iter()
+            .any(|email| matches_sender(&pattern, pattern_type.as_str(), email))
+        {
+            return Err(BlockedSenderError::OwnAddress);
+        }
         sqlx::query(
             "INSERT INTO blocked_senders (id, account_id, pattern, pattern_type, created_at)
              VALUES (?, ?, ?, ?, ?)
@@ -290,6 +305,44 @@ mod tests {
             "unknown",
             "alice@example.com"
         ));
+    }
+
+    #[tokio::test]
+    async fn own_addresses_and_domains_cannot_be_blocked() {
+        let pool = pool().await;
+        insert_account(&pool, "acc-1").await;
+        sqlx::query(
+            "INSERT INTO account_aliases (id, account_id, email, created_at, updated_at)
+             VALUES ('alias-1', 'acc-1', 'me@alias.example', '2026-01-01', '2026-01-01')",
+        )
+        .execute(&pool)
+        .await
+        .expect("alias");
+        let repository = BlockedSenderRepository::new(&pool);
+        for pattern in [
+            "ACC-1@example.com",
+            "*@example.com",
+            "@example.com",
+            "alias.example",
+            "me@alias.example",
+        ] {
+            let error = repository
+                .upsert(BlockedSenderUpsertRequest {
+                    account_id: Some("acc-1".into()),
+                    pattern: pattern.into(),
+                })
+                .await
+                .expect_err(pattern);
+            assert!(matches!(error, BlockedSenderError::OwnAddress), "{pattern}");
+        }
+        assert!(repository.list().await.unwrap().is_empty());
+        repository
+            .upsert(BlockedSenderUpsertRequest {
+                account_id: Some("acc-1".into()),
+                pattern: "*@other.example.com".into(),
+            })
+            .await
+            .expect("foreign domain");
     }
 
     #[tokio::test]

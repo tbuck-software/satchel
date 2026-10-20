@@ -36,7 +36,11 @@
         "confirmDomain": "Block the domain {domain}? Future mail lands in Abuse or Spam automatically.",
         "domainBlocked": "Domain {domain} blocked.",
         "failed": "Blocking failed: {error}",
-        "senderBlocked": "{address} blocked."
+        "senderBlocked": "{address} blocked.",
+        "confirmTitleAddress": "Block sender?",
+        "confirmTitleDomain": "Block domain?",
+        "confirmAction": "Block",
+        "ownAddress": "Your own address or domain cannot be blocked."
       },
       "bucket": {
         "invitations": "Events",
@@ -148,7 +152,9 @@
         "permanentlyDeleted": "Thread permanently deleted | {count} threads permanently deleted",
         "trashed": "Thread deleted | Threads deleted",
         "waiting": "Email waiting for a reply | {count} emails waiting for a reply",
-        "restoreEmpty": "No conversations could be restored."
+        "restoreEmpty": "No conversations could be restored.",
+        "spammed": "Thread marked as spam | {count} threads marked as spam",
+        "spamFailed": "Marking as spam failed."
       },
       "row": {
         "draftPrefix": "Draft,",
@@ -261,7 +267,11 @@
         "confirmDomain": "Die Domain {domain} blockieren? Zukünftige Mails landen automatisch in Abuse oder Spam.",
         "domainBlocked": "Domain {domain} blockiert.",
         "failed": "Blockieren fehlgeschlagen: {error}",
-        "senderBlocked": "{address} blockiert."
+        "senderBlocked": "{address} blockiert.",
+        "confirmTitleAddress": "Absender blockieren?",
+        "confirmTitleDomain": "Domain blockieren?",
+        "confirmAction": "Blockieren",
+        "ownAddress": "Die eigene Adresse oder Domain lässt sich nicht blockieren."
       },
       "bucket": {
         "invitations": "Termine",
@@ -373,7 +383,9 @@
         "permanentlyDeleted": "Thread endgültig gelöscht | {count} Threads endgültig gelöscht",
         "trashed": "Thread gelöscht | Threads gelöscht",
         "waiting": "E-Mail wartet auf Antwort | {count} E-Mails warten auf Antwort",
-        "restoreEmpty": "Keine Konversation konnte wiederhergestellt werden."
+        "restoreEmpty": "Keine Konversation konnte wiederhergestellt werden.",
+        "spammed": "Thread als Spam markiert | {count} Threads als Spam markiert",
+        "spamFailed": "Als Spam markieren fehlgeschlagen."
       },
       "row": {
         "draftPrefix": "Entwurf,",

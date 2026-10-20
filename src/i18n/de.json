@@ -94,6 +94,7 @@
       "backupPassphraseRejected": "Diese Passphrase öffnet den Master-Key dieser Sicherung nicht.",
       "backupPassphraseRequired": "Der Master-Key dieser Sicherung ist umschlossen. Gib die Passphrase ein, mit der sie erstellt wurde.",
       "backupPassphraseTooShort": "Verwende mindestens 12 Zeichen für die Sicherungs-Passphrase.",
+      "blockedSenderOwnAddress": "Die eigene Adresse oder Domain lässt sich nicht blockieren.",
       "blockedSenderPatternEmpty": "Gib eine E-Mail-Adresse oder Domain zum Blockieren ein.",
       "blockedSenderPersistenceFailed": "Blockierte Absender sind momentan nicht verfügbar. Bitte versuche es erneut.",
       "browserWindowBlocked": "Der Browser hat das neue Fenster blockiert. Erlaube Pop-ups für Satchel und versuche es erneut.",
@@ -3028,10 +3029,14 @@
       "unnamed": "unbenannt"
     },
     "block": {
+      "confirmAction": "Blockieren",
       "confirmAddress": "Absender {address} blockieren? Zukünftige Mails landen automatisch in Abuse oder Spam.",
       "confirmDomain": "Die Domain {domain} blockieren? Zukünftige Mails landen automatisch in Abuse oder Spam.",
+      "confirmTitleAddress": "Absender blockieren?",
+      "confirmTitleDomain": "Domain blockieren?",
       "domainBlocked": "Domain {domain} blockiert.",
       "failed": "Blockieren fehlgeschlagen: {error}",
+      "ownAddress": "Die eigene Adresse oder Domain lässt sich nicht blockieren.",
       "senderBlocked": "{address} blockiert."
     },
     "bucket": {
@@ -3142,6 +3147,8 @@
       "restoreEmpty": "Keine Konversation konnte wiederhergestellt werden.",
       "restoreFailed": "Wiederherstellen fehlgeschlagen.",
       "snoozed": "E-Mail auf Wiedervorlage | {count} E-Mails auf Wiedervorlage",
+      "spamFailed": "Als Spam markieren fehlgeschlagen.",
+      "spammed": "Thread als Spam markiert | {count} Threads als Spam markiert",
       "trashFailed": "Löschen fehlgeschlagen.",
       "trashed": "Thread gelöscht | Threads gelöscht",
       "waiting": "E-Mail wartet auf Antwort | {count} E-Mails warten auf Antwort"
