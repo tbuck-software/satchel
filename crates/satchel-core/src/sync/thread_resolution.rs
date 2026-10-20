@@ -829,94 +829,183 @@ pub async fn deduplicate_cached_draft_autosaves(
 
 /// Merge threads that were split because a reply synced before its parent
 /// (or predates reply-aware threading). The parent's thread is canonical;
-/// the reply's whole thread moves over, topic links included. Chains
-/// converge across iterations.
+/// the reply's whole thread moves over, topic links included.
+///
+/// Only IMAP threads split this way; the other providers name the
+/// conversation themselves. Each pass checks the messages added since the
+/// last one, as replies and as parents, and remembers how far it got.
 pub async fn merge_reply_split_threads(pool: &SqlitePool) -> Result<u64, String> {
     merge_reply_split_threads_with_budget(pool, None).await
 }
 
+/// Progress of the reply merge across passes.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
-struct ReplyMergeCursor {
-    after: String,
-    round: u8,
-    moved_in_round: u64,
+struct ReplyMergeState {
+    /// Every message up to this rowid has been checked.
+    checked_rowid: i64,
+    /// The pass in progress: the highest rowid it covers ...
+    pass_end: Option<i64>,
+    /// ... and the rowid it has paged up to.
+    after: i64,
+    /// Replies whose merge was deferred (a queued remote move holds the
+    /// thread), tried again on the next pass.
+    deferred: Vec<String>,
 }
 
 static REPLY_MERGE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-const REPLY_MERGE_CURSOR: &str = "maintenance.reply_merge_cursor";
+const REPLY_MERGE_STATE: &str = "maintenance.reply_merge_state";
+/// The cursor of the former full-table pass, which restarted on every launch.
+const LEGACY_REPLY_MERGE_CURSOR: &str = "maintenance.reply_merge_cursor";
+const REPLY_MERGE_PAGE: i64 = 256;
+/// Deferred replies kept for retry; a merge that never becomes possible must
+/// not grow the state without bound.
+const MAX_DEFERRED_REPLIES: usize = 1_000;
+
+/// Replies among, or answering, the messages in `(after, last]`.
+const REPLY_MERGE_CANDIDATES: &str = "
+    SELECT child.id FROM messages child
+    JOIN accounts acc ON acc.id = child.account_id AND acc.provider = 'imap'
+    WHERE child.rowid > ?1 AND child.rowid <= ?2
+      AND NULLIF(TRIM(child.in_reply_to), '') IS NOT NULL
+      AND child.thread_id LIKE 'th-imap-%'
+    UNION
+    SELECT child.id FROM messages parent
+    JOIN accounts acc ON acc.id = parent.account_id AND acc.provider = 'imap'
+    JOIN messages child ON child.account_id = parent.account_id
+      AND child.in_reply_to = parent.message_id_header
+    WHERE parent.rowid > ?1 AND parent.rowid <= ?2
+      AND NULLIF(TRIM(parent.message_id_header), '') IS NOT NULL
+      AND parent.thread_id LIKE 'th-imap-%'
+      AND child.in_reply_to IS NOT NULL
+      AND child.thread_id LIKE 'th-imap-%' AND child.thread_id != parent.thread_id";
+
+/// Merge one reply's thread into its parent's. `Ok(None)` when there is
+/// nothing to merge, `Ok(Some(0))` when the merge was deferred.
+async fn merge_reply_into_parent(pool: &SqlitePool, reply_id: &str) -> Result<Option<u64>, String> {
+    let pair = sqlx::query_as::<_, (String, String)>(
+        "SELECT child.thread_id, parent.thread_id
+         FROM messages child
+         JOIN accounts acc ON acc.id = child.account_id AND acc.provider = 'imap'
+         JOIN messages parent ON parent.id = (
+           SELECT id FROM messages
+           WHERE account_id = child.account_id AND message_id_header = child.in_reply_to
+             AND thread_id LIKE 'th-imap-%' ORDER BY id LIMIT 1
+         )
+         WHERE child.id = ? AND NULLIF(TRIM(child.in_reply_to), '') IS NOT NULL
+           AND child.thread_id LIKE 'th-imap-%' AND child.thread_id != parent.thread_id",
+    )
+    .bind(reply_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| err.to_string())?;
+    let Some((child, parent)) = pair else {
+        return Ok(None);
+    };
+    ThreadRepository::new(pool)
+        .merge_into(&child, &parent)
+        .await
+        .map(Some)
+        .map_err(|err| err.to_string())
+}
+
+async fn save_reply_merge_state(pool: &SqlitePool, state: &ReplyMergeState) -> Result<(), String> {
+    sqlx::query("INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+        .bind(REPLY_MERGE_STATE)
+        .bind(serde_json::to_string(state).map_err(|err| err.to_string())?)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(pool)
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
 
 async fn merge_reply_split_threads_with_budget(
     pool: &SqlitePool,
     max_blocks: Option<u64>,
 ) -> Result<u64, String> {
     let _guard = REPLY_MERGE_LOCK.lock().await;
+    sqlx::query("DELETE FROM app_settings WHERE key = ?")
+        .bind(LEGACY_REPLY_MERGE_CURSOR)
+        .execute(pool)
+        .await
+        .map_err(|err| err.to_string())?;
     let saved: Option<String> = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = ?")
-        .bind(REPLY_MERGE_CURSOR)
+        .bind(REPLY_MERGE_STATE)
         .fetch_optional(pool)
         .await
         .map_err(|err| err.to_string())?;
-    let mut cursor: ReplyMergeCursor = saved
-        .map(|v| serde_json::from_str(&v))
-        .transpose()
-        .map_err(|err| err.to_string())?
+    let mut state: ReplyMergeState = saved
+        .and_then(|value| serde_json::from_str(&value).ok())
         .unwrap_or_default();
     let mut moved_total = 0;
-    let mut blocks = 0;
-    while max_blocks.is_none_or(|max| blocks < max) {
-        // Page every message by its stable primary key, including non-replies.
-        let ids: Vec<String> =
-            sqlx::query_scalar("SELECT id FROM messages WHERE id > ? ORDER BY id LIMIT 256")
-                .bind(&cursor.after)
-                .fetch_all(pool)
-                .await
-                .map_err(|err| err.to_string())?;
-        if ids.is_empty() {
-            if cursor.moved_in_round == 0 || cursor.round >= 9 {
-                break;
-            }
-            cursor.after.clear();
-            cursor.round += 1;
-            cursor.moved_in_round = 0;
-        } else {
-            for id in &ids {
-                let pair = sqlx::query_as::<_, (String, String)>(
-                    "SELECT child.thread_id, parent.thread_id
-                     FROM messages child
-                     JOIN accounts acc ON acc.id = child.account_id AND acc.provider = 'imap'
-                     JOIN messages parent ON parent.id = (
-                       SELECT id FROM messages
-                       WHERE account_id = child.account_id AND message_id_header = child.in_reply_to
-                         AND thread_id LIKE 'th-imap-%' ORDER BY id LIMIT 1
-                     )
-                     WHERE child.id = ? AND NULLIF(TRIM(child.in_reply_to), '') IS NOT NULL
-                       AND child.thread_id LIKE 'th-imap-%' AND child.thread_id != parent.thread_id",
-                ).bind(id).fetch_optional(pool).await.map_err(|err| err.to_string())?;
-                if let Some((child, parent)) = pair {
-                    let moved = ThreadRepository::new(pool)
-                        .merge_into(&child, &parent)
-                        .await
-                        .map_err(|err| err.to_string())?;
-                    moved_total += moved;
-                    cursor.moved_in_round += moved;
+    let mut deferred = Vec::new();
+    let pass_end = match state.pass_end {
+        Some(end) => end,
+        None => {
+            // A new pass: retry what the last one had to leave.
+            for reply_id in std::mem::take(&mut state.deferred) {
+                match merge_reply_into_parent(pool, &reply_id).await? {
+                    Some(0) => deferred.push(reply_id),
+                    Some(moved) => moved_total += moved,
+                    None => {}
                 }
             }
-            cursor.after = ids.last().expect("nonempty block").clone();
+            let end: Option<i64> = sqlx::query_scalar("SELECT MAX(rowid) FROM messages")
+                .fetch_one(pool)
+                .await
+                .map_err(|err| err.to_string())?;
+            let end = end.unwrap_or(0);
+            state.after = state.checked_rowid;
+            state.pass_end = Some(end);
+            end
         }
-        // Merges are idempotent. A crash before this commit repeats only this block.
-        sqlx::query("INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
-            .bind(REPLY_MERGE_CURSOR).bind(serde_json::to_string(&cursor).map_err(|err| err.to_string())?)
-            .bind(chrono::Utc::now().to_rfc3339()).execute(pool).await.map_err(|err| err.to_string())?;
+    };
+    let mut blocks = 0;
+    while max_blocks.is_none_or(|max| blocks < max) {
+        let last: Option<i64> = sqlx::query_scalar(
+            "SELECT MAX(rowid) FROM (SELECT rowid FROM messages WHERE rowid > ? AND rowid <= ? ORDER BY rowid LIMIT ?)",
+        )
+        .bind(state.after)
+        .bind(pass_end)
+        .bind(REPLY_MERGE_PAGE)
+        .fetch_one(pool)
+        .await
+        .map_err(|err| err.to_string())?;
+        let Some(last) = last else {
+            state.checked_rowid = pass_end.max(state.checked_rowid);
+            state.pass_end = None;
+            state.after = state.checked_rowid;
+            break;
+        };
+        let candidates: Vec<String> = sqlx::query_scalar(REPLY_MERGE_CANDIDATES)
+            .bind(state.after)
+            .bind(last)
+            .fetch_all(pool)
+            .await
+            .map_err(|err| err.to_string())?;
+        for reply_id in candidates {
+            match merge_reply_into_parent(pool, &reply_id).await? {
+                Some(0) => deferred.push(reply_id),
+                Some(moved) => moved_total += moved,
+                None => {}
+            }
+        }
+        state.after = last;
+        // Merges are idempotent. A crash before this commit repeats only this page.
+        state.deferred.append(&mut deferred);
+        save_reply_merge_state(pool, &state).await?;
         blocks += 1;
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-    if max_blocks.is_none_or(|max| blocks < max) {
-        sqlx::query("DELETE FROM app_settings WHERE key = ?")
-            .bind(REPLY_MERGE_CURSOR)
-            .execute(pool)
-            .await
-            .map_err(|err| err.to_string())?;
+    state.deferred.append(&mut deferred);
+    state.deferred.sort();
+    state.deferred.dedup();
+    if state.deferred.len() > MAX_DEFERRED_REPLIES {
+        let excess = state.deferred.len() - MAX_DEFERRED_REPLIES;
+        state.deferred.drain(..excess);
     }
+    save_reply_merge_state(pool, &state).await?;
     Ok(moved_total)
 }
 
@@ -969,61 +1058,115 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn reply_merge_resumes_a_saved_page_and_converges_across_passes() {
-        use super::{merge_reply_split_threads_with_budget, REPLY_MERGE_CURSOR};
+    async fn reply_merge_pool() -> sqlx::SqlitePool {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
             .await
             .unwrap();
         crate::db::init(&pool).await.unwrap();
-        sqlx::query("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, sync_state, created_at, updated_at) VALUES ('a', 'A', 'a@b.test', 'imap', '{}', '', '{}', '', '')").execute(&pool).await.unwrap();
-        sqlx::query("INSERT INTO folders (id, account_id, name, full_path, folder_type, created_at, updated_at) VALUES ('f', 'a', 'INBOX', 'INBOX', 'inbox', '', '')").execute(&pool).await.unwrap();
-        for (id, parent) in [
-            ("a-child", Some("<z-parent>")),
-            ("m-reply", Some("<a-child>")),
-            ("z-parent", None),
-        ] {
-            let thread = format!("th-imap-{id}");
-            sqlx::query("INSERT INTO threads (id, account_id, subject, last_message_date, workflow_state, message_count, created_at, updated_at) VALUES (?, 'a', 'S', '2020-01-01', 'inbox', 1, '', '')").bind(&thread).execute(&pool).await.unwrap();
-            sqlx::query("INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, date, message_id_header, in_reply_to, created_at, updated_at) VALUES (?, 'a', 'f', ?, 'a@b.test', '[]', 'S', '2020-01-01', ?, ?, '', '')")
-                .bind(id).bind(thread).bind(format!("<{id}>")).bind(parent).execute(&pool).await.unwrap();
-        }
-        // Enough non-replies to put the parent on a later page.
+        sqlx::query("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, sync_state, created_at, updated_at) VALUES ('a', 'A', 'a@b.test', 'imap', '{}', '', '{}', '', ''), ('g', 'G', 'g@b.test', 'gmail', '{}', '', '{}', '', '')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO folders (id, account_id, name, full_path, folder_type, created_at, updated_at) VALUES ('f', 'a', 'INBOX', 'INBOX', 'inbox', '', ''), ('gf', 'g', 'INBOX', 'INBOX', 'inbox', '', '')").execute(&pool).await.unwrap();
+        pool
+    }
+
+    /// One message in its own thread, `th-imap-<id>` (or `th-gmail-<id>`).
+    async fn reply_merge_message(
+        pool: &sqlx::SqlitePool,
+        account: &str,
+        id: &str,
+        parent: Option<&str>,
+    ) {
+        let (folder, prefix) = if account == "a" {
+            ("f", "th-imap")
+        } else {
+            ("gf", "th-gmail")
+        };
+        let thread = format!("{prefix}-{id}");
+        sqlx::query("INSERT INTO threads (id, account_id, subject, last_message_date, workflow_state, message_count, created_at, updated_at) VALUES (?, ?, 'S', '2020-01-01', 'inbox', 1, '', '')").bind(&thread).bind(account).execute(pool).await.unwrap();
+        sqlx::query("INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, date, message_id_header, in_reply_to, created_at, updated_at) VALUES (?, ?, ?, ?, 'a@b.test', '[]', 'S', '2020-01-01', ?, ?, '', '')")
+            .bind(id).bind(account).bind(folder).bind(thread).bind(format!("<{id}>")).bind(parent.map(|p| format!("<{p}>"))).execute(pool).await.unwrap();
+    }
+
+    async fn thread_of(pool: &sqlx::SqlitePool, id: &str) -> String {
+        sqlx::query_scalar("SELECT thread_id FROM messages WHERE id = ?")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn reply_merge_resumes_a_saved_page_and_converges_a_chain() {
+        use super::{merge_reply_split_threads_with_budget, REPLY_MERGE_STATE};
+        let pool = reply_merge_pool().await;
+        reply_merge_message(&pool, "a", "a-child", Some("z-parent")).await;
+        // Enough non-replies to put the rest of the chain on a later page.
         sqlx::query("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<300) INSERT INTO messages (id, account_id, folder_id, from_address, to_addresses, subject, date, created_at, updated_at) SELECT printf('b%04d', x), 'a', 'f', 'a@b.test', '[]', 'Other', '', '', '' FROM n").execute(&pool).await.unwrap();
+        reply_merge_message(&pool, "a", "m-reply", Some("a-child")).await;
+        reply_merge_message(&pool, "a", "z-parent", None).await;
+
         assert_eq!(
             merge_reply_split_threads_with_budget(&pool, Some(1))
                 .await
                 .unwrap(),
-            1
+            2,
+            "the first page holds a reply and the parent of another"
         );
-        let cursor: String = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = ?")
-            .bind(REPLY_MERGE_CURSOR)
+        let state: String = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = ?")
+            .bind(REPLY_MERGE_STATE)
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert!(cursor.contains("b0255"), "{cursor}");
+        assert!(state.contains("\"after\":256"), "{state}");
         assert_eq!(
             merge_reply_split_threads_with_budget(&pool, None)
                 .await
                 .unwrap(),
-            1
+            0
         );
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(DISTINCT thread_id) FROM messages WHERE thread_id IS NOT NULL",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!(count, 1);
-        assert!(
-            sqlx::query_scalar::<_, String>("SELECT value FROM app_settings WHERE key = ?")
-                .bind(REPLY_MERGE_CURSOR)
-                .fetch_optional(&pool)
-                .await
-                .unwrap()
-                .is_none()
+        assert_eq!(thread_of(&pool, "a-child").await, "th-imap-z-parent");
+        assert_eq!(thread_of(&pool, "m-reply").await, "th-imap-z-parent");
+        let state: String = sqlx::query_scalar("SELECT value FROM app_settings WHERE key = ?")
+            .bind(REPLY_MERGE_STATE)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(state.contains("\"checked_rowid\":303"), "{state}");
+        assert!(state.contains("\"pass_end\":null"), "{state}");
+    }
+
+    #[tokio::test]
+    async fn later_reply_merge_passes_check_only_new_messages_as_replies_and_parents() {
+        use super::merge_reply_split_threads;
+        let pool = reply_merge_pool().await;
+        reply_merge_message(&pool, "a", "old-parent", None).await;
+        reply_merge_message(&pool, "a", "early-reply", Some("late-parent")).await;
+        reply_merge_message(&pool, "a", "settled", None).await;
+        reply_merge_message(&pool, "a", "settled-reply", Some("settled")).await;
+        assert_eq!(merge_reply_split_threads(&pool).await.unwrap(), 1);
+        assert_eq!(thread_of(&pool, "settled-reply").await, "th-imap-settled");
+
+        // Split a checked pair by hand: a later pass must not page back over it.
+        sqlx::query("INSERT INTO threads (id, account_id, subject, last_message_date, workflow_state, message_count, created_at, updated_at) VALUES ('th-imap-resplit', 'a', 'S', '2020-01-01', 'inbox', 1, '', '')").execute(&pool).await.unwrap();
+        sqlx::query("UPDATE messages SET thread_id = 'th-imap-resplit' WHERE id = 'settled-reply'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        // A new reply to an old parent, and a new parent of an old reply.
+        reply_merge_message(&pool, "a", "new-reply", Some("old-parent")).await;
+        reply_merge_message(&pool, "a", "late-parent", None).await;
+        // Other providers name their conversations; their replies stay put.
+        reply_merge_message(&pool, "g", "gmail-parent", None).await;
+        reply_merge_message(&pool, "g", "gmail-reply", Some("gmail-parent")).await;
+
+        assert_eq!(merge_reply_split_threads(&pool).await.unwrap(), 2);
+        assert_eq!(thread_of(&pool, "new-reply").await, "th-imap-old-parent");
+        assert_eq!(thread_of(&pool, "early-reply").await, "th-imap-late-parent");
+        assert_eq!(thread_of(&pool, "settled-reply").await, "th-imap-resplit");
+        assert_eq!(
+            thread_of(&pool, "gmail-reply").await,
+            "th-gmail-gmail-reply"
         );
     }
 

@@ -22,6 +22,7 @@ index idx_invites_uid: CREATE UNIQUE INDEX idx_invites_uid ON calendar_invites(a
 index idx_mail_action_messages_current: CREATE INDEX idx_mail_action_messages_current ON mail_action_messages(message_id)
 index idx_message_addresses_email_thread: CREATE INDEX idx_message_addresses_email_thread ON message_addresses(email, thread_id, message_id)
 index idx_messages_account: CREATE INDEX idx_messages_account ON messages(account_id)
+index idx_messages_account_in_reply_to: CREATE INDEX idx_messages_account_in_reply_to ON messages(account_id, in_reply_to) WHERE in_reply_to IS NOT NULL
 index idx_messages_account_msgid: CREATE INDEX idx_messages_account_msgid ON messages(account_id, message_id_header)
 index idx_messages_account_remote: CREATE INDEX idx_messages_account_remote ON messages(account_id, remote_id)
 index idx_messages_category: CREATE INDEX idx_messages_category ON messages(category) WHERE category IS NOT NULL
