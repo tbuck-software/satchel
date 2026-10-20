@@ -10,7 +10,7 @@ import {
   type BackendOutboxItem,
 } from '@/services/backend';
 import { useConnectionStore } from './connection';
-import { useOutboxStore } from './outbox';
+import { OUTBOX_EVENTS, useOutboxStore } from './outbox';
 
 vi.mock('@/services/backend', () => ({
   backendCommandsAvailable: vi.fn(() => true),
@@ -112,6 +112,45 @@ describe('outbox store', () => {
       'outbox:sent',
     ]);
     expect(outbox.error).toBe('db is locked');
+  });
+
+  it('publishes only the newest of overlapping loads', async () => {
+    let resolveFirst: (items: BackendOutboxItem[]) => void = () => {};
+    listMock
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce([outboxItem({ id: 'fresh' })]);
+    const outbox = useOutboxStore();
+
+    const stale = outbox.load();
+    await outbox.load();
+    resolveFirst([outboxItem({ id: 'stale' })]);
+    await stale;
+
+    expect(outbox.items.map((item) => item.id)).toEqual(['fresh']);
+    expect(outbox.loading).toBe(false);
+  });
+
+  it('registers listeners once and releases them when stopped mid-start', async () => {
+    listMock.mockResolvedValue([]);
+    const released = vi.fn();
+    let finishListen: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { finishListen = resolve; });
+    listenMock.mockImplementation(async () => {
+      await gate;
+      return released;
+    });
+    const outbox = useOutboxStore();
+
+    const starting = outbox.start();
+    const duplicate = outbox.start();
+    await vi.waitFor(() => expect(listenMock).toHaveBeenCalledTimes(OUTBOX_EVENTS.length));
+    outbox.stop();
+    finishListen();
+    await Promise.all([starting, duplicate]);
+
+    expect(released).toHaveBeenCalledTimes(OUTBOX_EVENTS.length);
+    expect(listMock).not.toHaveBeenCalled();
+    listenMock.mockImplementation(async () => () => {});
   });
 
   it('removes an item only after the backend accepted the retry', async () => {
