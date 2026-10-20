@@ -1,12 +1,13 @@
 //! Resumable body eviction requested by a changed retention setting.
 
-use super::data_repairs::DataRepair;
+use super::data_repairs::{DataRepair, Prepared};
 use futures::future::BoxFuture;
 use sqlx::{SqliteConnection, SqlitePool};
 
 pub const BODY_WINDOW: DataRepair = DataRepair {
     name: "body_window",
     block,
+    prepare: None,
 };
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -56,6 +57,7 @@ fn block<'c>(
     connection: &'c mut SqliteConnection,
     cursor: &'c str,
     limit: i64,
+    _prepared: Option<Prepared>,
 ) -> BoxFuture<'c, Result<Option<String>, sqlx::Error>> {
     Box::pin(async move {
         let mut cursor: Cursor =
