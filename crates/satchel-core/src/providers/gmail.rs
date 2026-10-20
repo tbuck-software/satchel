@@ -425,6 +425,25 @@ async fn send_with_rate_limit_retry<F>(
 where
     F: Fn() -> reqwest::RequestBuilder,
 {
+    send_with_rate_limit_retry_mapped(build, label, units, |err| {
+        format!("gmail {label} failed: {err}").into()
+    })
+    .await
+}
+
+/// [`send_with_rate_limit_retry`] with the caller deciding what a transport
+/// error means. A submission needs that: whether its body got out decides
+/// between a retry and `delivery_unknown`.
+async fn send_with_rate_limit_retry_mapped<F, E>(
+    build: F,
+    label: &str,
+    units: f64,
+    transport_error: E,
+) -> crate::sync::errors::SyncResult<reqwest::Response>
+where
+    F: Fn() -> reqwest::RequestBuilder,
+    E: Fn(reqwest::Error) -> crate::sync::errors::SyncError,
+{
     let priority = current_priority();
     let mut attempt = 1u32;
     loop {
@@ -452,13 +471,7 @@ where
         // exactly when we are already over budget.
         await_quota(units, priority, label).await?;
 
-        let response = build().send().await.map_err(|err| {
-            if label == "send" {
-                crate::sync::errors::http_submission_transport_failure("gmail", err)
-            } else {
-                format!("gmail {label} failed: {err}").into()
-            }
-        })?;
+        let response = build().send().await.map_err(&transport_error)?;
 
         let status = response.status();
         if status.is_success() || !(status.as_u16() == 429 || status.as_u16() == 403) {
@@ -1650,20 +1663,39 @@ impl MailProvider for GmailProvider {
     async fn send(&self, message: OutgoingMessage) -> crate::sync::errors::SyncResult<()> {
         let token = self.access_token().await?;
         let raw = build_gmail_raw_message(&message)?;
-        let payload = serde_json::json!({
-            "raw": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw.as_bytes())
-        });
+        let payload = bytes::Bytes::from(
+            serde_json::json!({
+                "raw": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw.as_bytes())
+            })
+            .to_string(),
+        );
 
         let client = crate::utils::http::client();
-        let response = send_with_rate_limit_retry(
+        // The client-wide deadline covers the upload too; sized to the message,
+        // a few megabytes over a slow uplink can still finish.
+        let deadline = crate::utils::http::upload_timeout(
+            crate::utils::http::UPLOAD_BASE_TIMEOUT,
+            payload.len(),
+        );
+        let upload = crate::utils::http::UploadProgress::default();
+        let response = send_with_rate_limit_retry_mapped(
             || {
                 client
                     .post(format!("{}/messages/send", gmail_api_base()))
                     .bearer_auth(&token)
-                    .json(&payload)
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .timeout(deadline)
+                    .body(upload.body(payload.clone()))
             },
             "send",
             cost::MESSAGES_SEND,
+            |err| {
+                crate::sync::errors::http_submission_transport_failure(
+                    "gmail",
+                    err,
+                    upload.fully_handed_over(),
+                )
+            },
         )
         .await?;
 
