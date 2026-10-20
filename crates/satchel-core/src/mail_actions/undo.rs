@@ -334,6 +334,42 @@ mod tests {
         assert_restored(&pool).await;
     }
     #[tokio::test]
+    async fn spam_receipt_undo_moves_the_thread_back_to_its_source() {
+        let pool = pool("imap").await;
+        let queue = SyncQueue::new();
+        let receipt = super::super::mark_threads_spam(&pool, &queue, &["thread".into()])
+            .await
+            .expect("spam");
+        assert_eq!(receipt.undo_thread_ids, vec!["thread".to_string()]);
+        assert!(receipt.permanently_deleted.is_empty());
+        let pending: String = sqlx::query_scalar(
+            "SELECT f.folder_type FROM messages m JOIN folders f ON f.id = m.pending_folder_id WHERE m.id = 'message'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(pending, "spam");
+
+        undo_trash(&pool, &queue, &receipt.undo_token.expect("undo receipt"))
+            .await
+            .expect("spam undo");
+        let message: (String, Option<String>) = sqlx::query_as(
+            "SELECT folder_id, pending_folder_id FROM messages WHERE id = 'message'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(message, ("inbox".into(), None));
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_queue")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_restored(&pool).await;
+    }
+    #[tokio::test]
     async fn completed_move_undo_uses_reconciled_destination_identity() {
         let pool = pool("imap").await;
         let queue = SyncQueue::new();

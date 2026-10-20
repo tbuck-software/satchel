@@ -65,13 +65,8 @@ pub async fn mark_threads_spam(
     pool: tauri::State<'_, SqlitePool>,
     state: tauri::State<'_, AppState>,
     input: SpamThreadsInput,
-) -> CommandResult<()> {
-    satchel_core::mail_actions::move_threads(
-        pool.inner(),
-        &state.queue,
-        &input.thread_ids,
-        satchel_core::mail_actions::MoveTarget::Spam,
-    )
-    .await?;
-    Ok(())
+) -> CommandResult<satchel_core::mail_actions::TrashReceipt> {
+    satchel_core::mail_actions::mark_threads_spam(pool.inner(), &state.queue, &input.thread_ids)
+        .await
+        .map_err(Into::into)
 }

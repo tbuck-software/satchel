@@ -137,3 +137,20 @@ describe('select-all over a large loaded window', () => {
     expect(median(indexed) / median(linear)).toBeLessThan(0.8);
   }, 120_000);
 });
+
+describe('deselecting acted-on threads', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('drops only the given ids and keeps a selection made meanwhile', () => {
+    const store = useThreadsStore();
+    store.threads = seedThreads(4);
+    store.toggleSelectionForThread('th-0');
+    store.toggleSelectionForThread('th-2');
+
+    store.deselectThreads(['th-0', 'th-1']);
+
+    expect(store.selectedThreadIds).toEqual(['th-2']);
+  });
+});

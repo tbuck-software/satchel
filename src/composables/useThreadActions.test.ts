@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const trashMock = vi.fn();
+const spamMock = vi.fn();
 const readMock = vi.fn();
 const moveMock = vi.fn();
 const undoTrashMock = vi.fn();
@@ -42,6 +43,7 @@ const threadState = {
   find: (threadId: string) => threadState.threads.find((entry) => entry.id === threadId),
   ensureThreadLoaded: vi.fn(),
   clearSelection: vi.fn(),
+  deselectThreads: vi.fn(),
   focusNeighborThread: vi.fn(),
   setWorkflowState: setWorkflowStateMock,
   applyWorkflowStates: applyWorkflowStatesMock,
@@ -51,6 +53,7 @@ const threadState = {
   refreshHead: refreshHeadMock,
   // Owns the optimistic removal and its rollback.
   trashThreads: (...args: unknown[]) => trashMock(...args),
+  markThreadsSpam: (...args: unknown[]) => spamMock(...args),
   setThreadsRead: (...args: unknown[]) => readMock(...args),
   // Owns the optimistic star and its rollback.
   setThreadsStarred: (...args: [string[], boolean]) => starMock(...args),
@@ -90,9 +93,12 @@ vi.mock('@/services/backend', () => ({
 // stub it out so the backend mock above stays minimal.
 const topicAddMock = vi.hoisted(() => vi.fn());
 const topicRemoveMock = vi.hoisted(() => vi.fn());
+const topicMembershipsMock = vi.hoisted(() => vi.fn());
 vi.mock('@/stores/topics', () => ({
   useTopicsStore: () => ({
     byId: () => undefined,
+    hasMembershipsFor: () => true,
+    loadMembershipsFor: topicMembershipsMock,
     addItemsToTopic: topicAddMock,
     removeItemFromTopic: topicRemoveMock,
   }),
@@ -154,17 +160,19 @@ describe('useThreadActions', () => {
     undoTrashMock.mockReset();
     setActivePinia(createPinia());
     toasts.length = 0;
-    for (const mock of [trashMock, moveMock, blockMock, transitionMock, transitionManyMock, loadThreadsMock, refreshHeadMock, loadMailboxesMock]) {
+    for (const mock of [trashMock, spamMock, moveMock, blockMock, transitionMock, transitionManyMock, loadThreadsMock, refreshHeadMock, loadMailboxesMock]) {
       mock.mockReset();
       mock.mockResolvedValue(undefined);
     }
     trashMock.mockResolvedValue({ undo_token: 'receipt-1', undo_thread_ids: ['thread-1'], permanently_deleted: [] });
+    spamMock.mockResolvedValue({ undo_token: 'spam-receipt', undo_thread_ids: ['thread-1'], permanently_deleted: [] });
     // `transition` reports whether the backend accepted the change;
     // `transitionMany` reports the ids it actually changed.
     transitionMock.mockResolvedValue(true);
     transitionManyMock.mockImplementation(async (threadIds: string[]) => [...threadIds]);
     threadState.ensureThreadLoaded.mockReset();
     threadState.clearSelection.mockReset();
+    threadState.deselectThreads.mockReset();
     threadState.focusNeighborThread.mockReset();
     // Keeps its store-like implementation; mockReset would drop it.
     starMock.mockClear();
@@ -510,6 +518,38 @@ describe('useThreadActions', () => {
     expect(refreshHeadMock).not.toHaveBeenCalled();
   });
 
+  it('files spam like trash: neighbour focus, receipt Undo, acted-on ids deselected', async () => {
+    const actions = useThreadActions();
+
+    await actions.markSpam(['thread-1']);
+
+    expect(threadState.focusNeighborThread).toHaveBeenCalledWith('thread-1');
+    expect(spamMock).toHaveBeenCalledWith(['thread-1']);
+    expect(threadState.deselectThreads).toHaveBeenCalledWith(['thread-1']);
+    expect(threadState.clearSelection).not.toHaveBeenCalled();
+    const toast = toasts.at(-1);
+    expect(toast).toMatchObject({ tone: 'success', message: 'Thread marked as spam' });
+    await toast!.action!.handler();
+    expect(undoTrashMock).toHaveBeenCalledWith('spam-receipt');
+    expect(refreshHeadMock).toHaveBeenCalled();
+  });
+
+  it('reports a refused spam move without a receipt', async () => {
+    spamMock.mockRejectedValueOnce(new Error('offline'));
+
+    await useThreadActions().markSpam(['thread-1']);
+
+    expect(toasts).toEqual([{ message: 'offline', tone: 'error' }]);
+    expect(threadState.deselectThreads).not.toHaveBeenCalled();
+  });
+
+  it('deselects only the archived ids, keeping a selection made meanwhile', async () => {
+    await useThreadActions().archive(['thread-1']);
+
+    expect(threadState.deselectThreads).toHaveBeenCalledWith(['thread-1']);
+    expect(threadState.clearSelection).not.toHaveBeenCalled();
+  });
+
   it('ignores actions on an empty selection', async () => {
     const actions = useThreadActions();
 
@@ -555,8 +595,36 @@ describe('silent failures (#119)', () => {
     threadState.threads = [seedThread({ priority: 1 })];
   });
 
+  it('undoes only the topic links the add actually created', async () => {
+    topicAddMock.mockResolvedValue(['thread-2']);
+    topicRemoveMock.mockResolvedValue(true);
+    await useThreadActions().addToTopic(['thread-1', 'thread-2'], 'topic-1');
+
+    await toasts[0]?.action?.handler();
+
+    expect(topicRemoveMock).toHaveBeenCalledExactlyOnceWith('topic-1', 'thread', 'thread-2');
+  });
+
+  it('offers no undo when every thread already belonged to the topic', async () => {
+    topicAddMock.mockResolvedValue([]);
+    await useThreadActions().addToTopic(['thread-1'], 'topic-1');
+
+    expect(toasts[0]?.tone).toBe('success');
+    expect(toasts[0]?.action).toBeUndefined();
+  });
+
+  it('re-adds only threads the removal actually unlinked', async () => {
+    topicRemoveMock.mockImplementation(async (_topic: string, _type: string, id: string) => id === 'thread-1');
+    topicAddMock.mockResolvedValue(['thread-1']);
+    await useThreadActions().removeFromTopic(['thread-1', 'thread-2'], 'topic-1');
+
+    await toasts[0]?.action?.handler();
+
+    expect(topicAddMock).toHaveBeenCalledExactlyOnceWith('topic-1', 'thread', ['thread-1']);
+  });
+
   it('reports a failed topic undo and keeps the receipt', async () => {
-    topicAddMock.mockResolvedValue(undefined);
+    topicAddMock.mockResolvedValue(['thread-1']);
     topicRemoveMock.mockRejectedValue(new Error('topic store offline'));
     const actions = useThreadActions();
     await actions.addToTopic(['thread-1'], 'topic-1');
@@ -567,7 +635,7 @@ describe('silent failures (#119)', () => {
   });
 
   it('reports a failed re-add when undoing a topic removal', async () => {
-    topicRemoveMock.mockResolvedValue(undefined);
+    topicRemoveMock.mockResolvedValue(true);
     topicAddMock.mockRejectedValue(new Error('re-add refused'));
     const actions = useThreadActions();
     await actions.removeFromTopic(['thread-1'], 'topic-1');

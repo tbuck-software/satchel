@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   backendGetSenderPreference,
   backendListThreads,
+  backendMarkThreadsSpam,
   backendSetThreadTags,
   backendTrashThreads,
   backendDismissMobileNotifications,
@@ -17,6 +18,7 @@ vi.mock('@/services/backend', async (importOriginal) => {
     ...actual,
     backendGetSenderPreference: vi.fn(),
     backendListThreads: vi.fn(),
+    backendMarkThreadsSpam: vi.fn(),
     backendSetThreadTags: vi.fn(),
     backendTrashThreads: vi.fn(),
     backendDismissMobileNotifications: vi.fn(),
@@ -120,6 +122,81 @@ describe('thread organization persistence', () => {
     await store.setTagsForThread('thread-persisted', ['rechnung', ' Wichtig ', 'RECHNUNG']);
     expect(setTagsMock).toHaveBeenCalledWith(['thread-persisted'], ['rechnung', 'wichtig']);
     expect(store.threads[0]!.tags).toEqual(['rechnung', 'wichtig']);
+  });
+
+  it('serializes organization writes so a refusal restores only its own field', async () => {
+    const store = useThreadsStore();
+    await store.load();
+    let rejectFirst!: (error: Error) => void;
+    updateOrganizationMock.mockImplementationOnce(() => new Promise((_, reject) => { rejectFirst = reject; }));
+
+    const assignee = store.setAssignee('thread-persisted', 'Neu');
+    const shared = store.setSharedWith('thread-persisted', ['b@example.com']);
+    await vi.waitFor(() => expect(updateOrganizationMock).toHaveBeenCalledTimes(1));
+    // The second write waits: it must read the row after the first settles.
+    await Promise.resolve();
+    expect(updateOrganizationMock).toHaveBeenCalledTimes(1);
+
+    rejectFirst(new Error('offline'));
+    await expect(assignee).rejects.toThrow('offline');
+    await shared;
+
+    expect(updateOrganizationMock).toHaveBeenLastCalledWith({
+      threadId: 'thread-persisted',
+      boardPosition: 12.5,
+      assignee: 'Alex',
+      sharedWith: ['b@example.com'],
+    });
+    expect(store.threads[0]).toMatchObject({ assignee: 'Alex', sharedWith: ['b@example.com'] });
+  });
+
+  it('returns the spam receipt and drops the row before the backend answers', async () => {
+    const receipt = { undo_token: 'spam', undo_thread_ids: ['thread-persisted'], permanently_deleted: [] };
+    let resolveSpam!: (value: typeof receipt) => void;
+    vi.mocked(backendMarkThreadsSpam).mockReturnValueOnce(new Promise((resolve) => { resolveSpam = resolve; }));
+    const store = useThreadsStore();
+    await store.load();
+    listThreadsMock.mockResolvedValue({ threads: [], next_cursor: null, has_more: false });
+
+    const spam = store.markThreadsSpam(['thread-persisted']);
+    await vi.waitFor(() => expect(backendMarkThreadsSpam).toHaveBeenCalled());
+    expect(store.find('thread-persisted')).toBeUndefined();
+    resolveSpam(receipt);
+
+    await expect(spam).resolves.toEqual(receipt);
+  });
+
+  it('does not reinsert a refused trash into a list whose scope changed meanwhile', async () => {
+    let rejectTrash!: (error: Error) => void;
+    vi.mocked(backendTrashThreads).mockReturnValueOnce(new Promise((_, reject) => { rejectTrash = reject; }));
+    const store = useThreadsStore();
+    await store.load();
+    listThreadsMock.mockResolvedValue({ threads: [], next_cursor: null, has_more: false });
+
+    const trash = store.trashThreads(['thread-persisted']);
+    store.setMailboxFilter({ kind: 'all', value: null });
+    rejectTrash(new Error('offline'));
+
+    await expect(trash).rejects.toThrow('offline');
+    expect(store.find('thread-persisted')).toBeUndefined();
+  });
+
+  it('puts a refused trash back in list order', async () => {
+    listThreadsMock.mockResolvedValue({
+      threads: [
+        backendThread({ id: 'newer', last_message_date: '2026-07-17T10:00:00Z' }),
+        backendThread({ id: 'older', last_message_date: '2026-07-15T10:00:00Z' }),
+      ],
+      next_cursor: null,
+      has_more: false,
+    });
+    vi.mocked(backendTrashThreads).mockRejectedValueOnce(new Error('offline'));
+    const store = useThreadsStore();
+    await store.load();
+
+    await expect(store.trashThreads(['newer'])).rejects.toThrow('offline');
+
+    expect(store.threads.map((thread) => thread.id)).toEqual(['newer', 'older']);
   });
 
   it('rolls the tags back when the write fails', async () => {

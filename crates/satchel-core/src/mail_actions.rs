@@ -310,6 +310,18 @@ pub async fn trash_threads(
         .map(|(_, receipt)| receipt)
 }
 
+/// Spam reuses the trash receipt, so the same Undo moves every message back to
+/// the folder it came from and restores the workflow state.
+pub async fn mark_threads_spam(
+    pool: &SqlitePool,
+    queue: &SyncQueue,
+    ids: &[String],
+) -> Result<TrashReceipt, String> {
+    move_threads_with_receipt(pool, queue, ids, MoveTarget::Spam, true)
+        .await
+        .map(|(_, receipt)| receipt)
+}
+
 pub async fn move_threads(
     pool: &SqlitePool,
     queue: &SyncQueue,

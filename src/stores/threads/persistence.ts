@@ -123,7 +123,7 @@ export interface ThreadPersistenceSurface {
     category: NonNullable<Thread['category']>,
     bucket: InboxSenderBucket,
   ): Promise<void>;
-  markThreadsSpam(threadIds: string[]): Promise<void>;
+  markThreadsSpam(threadIds: string[]): Promise<BackendTrashReceipt>;
   setThreadsRead(threadIds: string[], isRead: boolean): Promise<void>;
   trashThreads(threadIds: string[]): Promise<BackendTrashReceipt>;
   setTagsForThread(threadId: string, tags: string[]): Promise<void>;
@@ -264,9 +264,14 @@ export function createThreadPersistence({
     return result;
   }
 
+  /**
+   * `alwaysRollBack` keeps the contract of writes that used to roll back and
+   * rethrow even without a backend, instead of keeping the local echo.
+   */
   async function writeOptimistically(
     patches: { id: string; values: Partial<Thread> }[],
     write: () => Promise<unknown>,
+    { alwaysRollBack = false }: { alwaysRollBack?: boolean } = {},
   ) {
     return serializeMutation(async () => {
       const previous = patches.flatMap(({ id, values }) => {
@@ -280,25 +285,38 @@ export function createThreadPersistence({
       try {
         await write();
       } catch (error) {
-        if (!backendCommandsAvailable()) return;
+        if (!alwaysRollBack && !backendCommandsAvailable()) return;
         collection.patchRows(previous.map(({ id, before }) => ({ id, values: before })));
         throw error;
       }
     });
   }
 
+  /**
+   * Drop rows from the list before a remote move and return the rollback.
+   * The rollback only reinserts into the list the rows were taken from: after
+   * a scope change they belong to another projection, so the list is
+   * refreshed instead.
+   */
+  function removeOptimistically(targets: ReadonlySet<string>): () => void {
+    const scopeKey = threadListInputKey(buildBackendThreadListInput());
+    const { removed, retained } = partitionThreads(threads.value, targets);
+    collection.replaceAll(retained);
+    return () => {
+      if (scopeKey !== threadListInputKey(buildBackendThreadListInput())) {
+        void refreshHead();
+        return;
+      }
+      const present = new Set(threads.value.map((thread) => thread.id));
+      collection.replaceAll([...threads.value, ...removed.filter((thread) => !present.has(thread.id))]
+        .sort(filter.compareThreads));
+    };
+  }
 
   async function setPriority(threadId: string, priority: Thread['priority']) {
-    const thread = collection.find(threadId);
-    if (!thread) return;
-    const previous = thread.priority;
-    collection.patchRows([{ id: threadId, values: { priority } }]);
-    try {
-      await backendSetThreadPriority(threadId, priority);
-    } catch (error) {
-      collection.patchRows([{ id: threadId, values: { priority: previous } }]);
-      throw error;
-    }
+    if (!collection.find(threadId)) return;
+    await writeOptimistically([{ id: threadId, values: { priority } }],
+      () => backendSetThreadPriority(threadId, priority), { alwaysRollBack: true });
   }
 
   async function setThreadMuted(threadId: string, muted: boolean) {
@@ -398,24 +416,24 @@ export function createThreadPersistence({
     }
   }
 
-  async function markThreadsSpam(threadIds: string[]) {
+  async function markThreadsSpam(threadIds: string[]): Promise<BackendTrashReceipt> {
     const targets = new Set(threadIds.map((id) => id.trim()).filter(Boolean));
     const normalized = [...targets];
-    if (normalized.length === 0) return;
-    await serializeMutation(async () => {
-      const { removed, retained } = partitionThreads(threads.value, targets);
-      collection.replaceAll(retained);
+    const empty: BackendTrashReceipt = { undo_token: null, undo_thread_ids: [], permanently_deleted: [] };
+    if (normalized.length === 0) return empty;
+    const receipt = await serializeMutation(async () => {
+      const rollback = removeOptimistically(targets);
       try {
-        await backendMarkThreadsSpam(normalized);
+        return await backendMarkThreadsSpam(normalized);
       } catch (error) {
-        if (!backendCommandsAvailable()) return;
-        const present = new Set(threads.value.map((thread) => thread.id));
-        collection.replaceAll([...threads.value, ...removed.filter((thread) => !present.has(thread.id))]
-          .sort(filter.compareThreads));
+        if (!backendCommandsAvailable()) return empty;
+        rollback();
         throw error;
       }
     });
-    await refreshHead();
+    // A refresh failure cannot roll back a committed action or lose its Undo receipt.
+    await Promise.allSettled([refreshHead(), reloadMailboxes()]);
+    return receipt;
   }
 
   /*
@@ -518,18 +536,13 @@ export function createThreadPersistence({
       }));
     dismissed.forEach((sender) => settings.setDismissedNewSender(sender.email, sender.through));
 
-    const { removed, retained } = partitionThreads(threads.value, targets);
-    collection.replaceAll(retained);
+    const rollback = removeOptimistically(targets);
     let receipt: BackendTrashReceipt;
     try {
       receipt = await backendTrashThreads(normalized);
     } catch (error) {
       dismissed.forEach((sender) => settings.setDismissedNewSender(sender.email, sender.previous ?? null));
-      const restoredIds = new Set(threads.value.map((thread) => thread.id));
-      collection.replaceAll(
-        [...threads.value, ...removed.filter((thread) => !restoredIds.has(thread.id))]
-          .sort((a, b) => b.lastMessageAtMs - a.lastMessageAtMs),
-      );
+      rollback();
       throw error;
     }
     // A refresh failure cannot roll back a committed action or lose its Undo receipt.
@@ -538,44 +551,28 @@ export function createThreadPersistence({
   }
 
   async function setTagsForThread(threadId: string, tags: string[]) {
-    const thread = collection.find(threadId);
-    if (!thread) return;
+    if (!collection.find(threadId)) return;
     const normalized = Array.from(
       new Set(tags.map((tag) => tag.trim().toLowerCase()).filter(Boolean)),
     );
-    const previous = [...thread.tags];
-    collection.patchRows([{ id: threadId, values: { tags: normalized } }]);
-    try {
-      await backendSetThreadTags([threadId], normalized);
-    } catch (error) {
-      collection.patchRows([{ id: threadId, values: { tags: previous } }]);
-      throw error;
-    }
+    await writeOptimistically([{ id: threadId, values: { tags: normalized } }],
+      () => backendSetThreadTags([threadId], normalized), { alwaysRollBack: true });
   }
 
+  /*
+   * The organization command writes the whole row. Serialized, each write
+   * reads the row only after the previous one committed or rolled back, so a
+   * refusal cannot restore a value the backend has already replaced.
+   */
   async function setAssignee(threadId: string, assignee?: string) {
-    const thread = collection.find(threadId);
-    if (!thread) {
-      return;
-    }
-
-    const previous = thread.assignee;
+    if (!collection.find(threadId)) return;
     const normalized = assignee?.trim();
-    collection.patchRows([{ id: threadId, values: { assignee: normalized ? normalized : undefined } }]);
-    try {
-      await persistThreadOrganization(collection.find(threadId)!);
-    } catch (error) {
-      collection.patchRows([{ id: threadId, values: { assignee: previous } }]);
-      throw error;
-    }
+    await writeOptimistically([{ id: threadId, values: { assignee: normalized ? normalized : undefined } }],
+      () => persistThreadOrganization(threadId), { alwaysRollBack: true });
   }
 
   async function setSharedWith(threadId: string, sharedWith: string[]) {
-    const thread = collection.find(threadId);
-    if (!thread) {
-      return;
-    }
-
+    if (!collection.find(threadId)) return;
     const normalized = Array.from(
       new Set(
         sharedWith
@@ -583,18 +580,13 @@ export function createThreadPersistence({
           .filter((value) => value.length > 0),
       ),
     );
-
-    const previous = [...(thread.sharedWith ?? [])];
-    collection.patchRows([{ id: threadId, values: { sharedWith: normalized } }]);
-    try {
-      await persistThreadOrganization(collection.find(threadId)!);
-    } catch (error) {
-      collection.patchRows([{ id: threadId, values: { sharedWith: previous } }]);
-      throw error;
-    }
+    await writeOptimistically([{ id: threadId, values: { sharedWith: normalized } }],
+      () => persistThreadOrganization(threadId), { alwaysRollBack: true });
   }
 
-  function persistThreadOrganization(thread: Thread) {
+  function persistThreadOrganization(threadId: string) {
+    const thread = collection.find(threadId);
+    if (!thread) return Promise.resolve();
     return backendUpdateThreadOrganization({
       threadId: thread.id,
       boardPosition: thread.boardPosition ?? null,

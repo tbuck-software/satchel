@@ -594,10 +594,15 @@ const handlers: Record<string, Handler> = {
     trashReceipts.delete(token);
   },
   mark_threads_spam: (payload) => {
+    const removed: Thread[] = [];
     for (const id of ids(payload)) {
       const index = threads.findIndex((thread) => thread.id === id);
-      if (index >= 0) threads.splice(index, 1);
+      if (index >= 0) removed.push(...threads.splice(index, 1));
     }
+    // Same receipt shape and Undo path as the backend, which reuses trash receipts.
+    const token = `spam-${++nextTrashReceipt}`;
+    trashReceipts.set(token, removed);
+    return { undo_token: token, undo_thread_ids: removed.map((thread) => thread.id), permanently_deleted: [] };
   },
   move_threads_to_folder: () => undefined,
   dismiss_mobile_notifications: () => undefined,

@@ -206,7 +206,8 @@ export function useThreadActions() {
         unreadCount: nextState === 'done' ? 0 : undefined,
       })));
 
-      threads.clearSelection();
+      // The user may have selected other threads while this one was in flight.
+      threads.deselectThreads(normalizedThreadIds);
       continueTriageAfterFiling(threadIds);
 
       // Each successful transition already started its own visible Undo period.
@@ -289,8 +290,16 @@ export function useThreadActions() {
     });
   }
 
-  /** Undo uses the backend receipt, which owns exact source folders and provider delivery state. */
-  async function trash(threadIds: string[]): Promise<void> {
+  /**
+   * Trash and spam share one shape: the store removes the rows optimistically,
+   * the backend returns a receipt, and Undo hands that receipt back. The
+   * receipt owns exact source folders and provider delivery state.
+   */
+  async function fileWithReceipt(
+    threadIds: string[],
+    file: (threadIds: string[]) => Promise<BackendTrashReceipt>,
+    messages: { failed: string; result: (count: number) => string },
+  ): Promise<void> {
     if (threadIds.length === 0) return;
 
     const knownIds = snapshotStates(threadIds).map((entry) => entry.threadId);
@@ -306,22 +315,22 @@ export function useThreadActions() {
       let receipt: BackendTrashReceipt;
       try {
         // The store drops the threads from the list first and puts them back if
-        // the backend refuses, so a delete is gone from the view immediately
+        // the backend refuses, so they are gone from the view immediately
         // instead of after a full reload of a large mailbox.
-        receipt = await threads.trashThreads(threadIds);
+        receipt = await file(threadIds);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t('thread.result.trashFailed'));
+        toast.error(err instanceof Error ? err.message : messages.failed);
         return;
       }
 
-      threads.clearSelection();
+      threads.deselectThreads(threadIds);
       continueTriageAfterFiling(threadIds);
 
       if (receipt.permanently_deleted.length > 0) {
         toast.info(tc('thread.result.permanentlyDeleted', receipt.permanently_deleted.length));
       }
       if (receipt.undo_thread_ids.length === 0) return;
-      const message = tc('thread.result.trashed', receipt.undo_thread_ids.length);
+      const message = messages.result(receipt.undo_thread_ids.length);
       const undoToken = receipt.undo_token;
       if (!undoToken) {
         toast.info(message, { timeout: UNDO_TIMEOUT_MS });
@@ -348,54 +357,92 @@ export function useThreadActions() {
     });
   }
 
+  async function trash(threadIds: string[]): Promise<void> {
+    await fileWithReceipt(threadIds, (ids) => threads.trashThreads(ids), {
+      failed: t('thread.result.trashFailed'),
+      result: (count) => tc('thread.result.trashed', count),
+    });
+  }
+
+  /** Spam moves like trash, so it answers like trash: next thread, toast, Undo. */
+  async function markSpam(threadIds: string[]): Promise<void> {
+    await fileWithReceipt(threadIds, (ids) => threads.markThreadsSpam(ids), {
+      failed: t('thread.result.spamFailed'),
+      result: (count) => tc('thread.result.spammed', count),
+    });
+  }
+
+  /** Memberships decide what an Undo may revert; read unknown ones first. */
+  async function ensureTopicMemberships(threadIds: string[]) {
+    const unknown = threadIds.filter((threadId) => !topics.hasMembershipsFor('thread', threadId));
+    if (unknown.length === 0) return;
+    try {
+      await topics.loadMembershipsFor('thread', unknown);
+    } catch {
+      // Unknown memberships count as absent; the write itself still applies.
+    }
+  }
+
   /** Link threads to a topic; the store applies the optimistic membership. */
   async function addToTopic(threadIds: string[], topicId: string): Promise<void> {
+    threadIds = Array.from(new Set(threadIds));
     if (threadIds.length === 0) return;
     const topicName = topics.byId(topicId)?.name ?? '';
+    let added: string[];
     try {
-      await topics.addItemsToTopic(topicId, 'thread', threadIds);
+      await ensureTopicMemberships(threadIds);
+      added = await topics.addItemsToTopic(topicId, 'thread', threadIds);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('thread.result.addToTopicFailed'));
       return;
     }
+    // Undo unlinks only what this action linked; earlier members stay.
     toast.success(
       tc('thread.result.addedToTopic', threadIds.length, { topic: topicName }),
       {
         timeout: UNDO_TIMEOUT_MS,
-        action: {
-          label: t('thread.actions.undo'),
-          handler: () => attempt(
-            () => Promise.all(
-              threadIds.map((threadId) => topics.removeItemFromTopic(topicId, 'thread', threadId)),
+        ...(added.length > 0 ? {
+          action: {
+            label: t('thread.actions.undo'),
+            handler: () => attempt(
+              () => Promise.all(
+                added.map((threadId) => topics.removeItemFromTopic(topicId, 'thread', threadId)),
+              ),
+              t('thread.result.removeFromTopicFailed'),
             ),
-            t('thread.result.removeFromTopicFailed'),
-          ),
-        },
+          },
+        } : {}),
       },
     );
   }
 
   async function removeFromTopic(threadIds: string[], topicId: string): Promise<void> {
+    threadIds = Array.from(new Set(threadIds));
     if (threadIds.length === 0) return;
     const topicName = topics.byId(topicId)?.name ?? '';
+    let removed: string[];
     try {
-      await Promise.all(
+      await ensureTopicMemberships(threadIds);
+      const wasMember = await Promise.all(
         threadIds.map((threadId) => topics.removeItemFromTopic(topicId, 'thread', threadId)),
       );
+      removed = threadIds.filter((_, index) => wasMember[index]);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('thread.result.removeFromTopicFailed'));
       return;
     }
     toast.success(t('thread.result.removedFromTopic', { topic: topicName }), {
       timeout: UNDO_TIMEOUT_MS,
-      action: {
-        label: t('thread.actions.undo'),
-        present: 'fab',
-        handler: () => attempt(
-          () => topics.addItemsToTopic(topicId, 'thread', threadIds),
-          t('thread.result.addToTopicFailed'),
-        ),
-      },
+      ...(removed.length > 0 ? {
+        action: {
+          label: t('thread.actions.undo'),
+          present: 'fab',
+          handler: () => attempt(
+            () => topics.addItemsToTopic(topicId, 'thread', removed),
+            t('thread.result.addToTopicFailed'),
+          ),
+        },
+      } : {}),
     });
   }
 
@@ -415,7 +462,7 @@ export function useThreadActions() {
     );
     if (!applied) return;
 
-    threads.clearSelection();
+    threads.deselectThreads(threadIds);
     await threads.refreshHead();
   }
 
@@ -452,7 +499,6 @@ export function useThreadActions() {
 
   const setRead = (ids: string[], read: boolean) => attempt(() => threads.setThreadsRead(ids, read));
   const setMuted = (id: string, muted: boolean) => attempt(() => threads.setThreadMuted(id, muted));
-  const markSpam = (ids: string[]) => attempt(() => threads.markThreadsSpam(ids));
 
   return {
     attempt,
