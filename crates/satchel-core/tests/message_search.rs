@@ -1034,3 +1034,92 @@ async fn flag_cursor_uses_thread_sort_date_when_a_newer_draft_is_displayed() {
         assert!(!second.has_more);
     }
 }
+
+#[tokio::test]
+async fn every_branch_hydrates_display_columns_for_the_final_page() {
+    let pool = pool().await;
+    seed_account(&pool).await;
+    sqlx::query(
+        "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, message_count, unread_count, sync_enabled, sort_order, created_at, updated_at)
+         VALUES ('fld-trash', 'acc-1', 'Trash', 'Trash', 'trash', 'Trash', 0, 0, 1, 1, '2026-01-01', '2026-01-01')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    seed_message(
+        &pool,
+        SeedMessage {
+            id: "hydrated",
+            subject: "=?UTF-8?Q?Rechnung_M=C3=A4rz?=",
+            body_text: "Die Rechnung liegt bei",
+            from_name: "=?UTF-8?Q?J=C3=BCrgen?=",
+            from_address: "juergen@example.com",
+            date: "2026-03-01T00:00:00Z",
+            is_read: false,
+            ..Default::default()
+        },
+    )
+    .await;
+    sqlx::query(
+        "UPDATE messages SET folder_id = 'fld-trash', snippet = 'Stored preview' WHERE id = 'hydrated'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE threads SET workflow_state = 'todo' WHERE id = 'th-hydrated'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Unfiltered text, text with operators, and operator-only queries.
+    for (raw, marked) in [
+        ("rechnung", true),
+        ("rechnung from:juergen", true),
+        ("from:juergen subject:rechnung", false),
+    ] {
+        let hits = MessageSearchRepository::new(&pool)
+            .search(&query(raw))
+            .await
+            .unwrap()
+            .hits;
+        assert_eq!(hits.len(), 1, "{raw}");
+        let hit = &hits[0];
+        assert_eq!(hit.id, "hydrated", "{raw}");
+        assert_eq!(hit.thread_id, "th-hydrated", "{raw}");
+        assert_eq!(hit.subject, "Rechnung März", "{raw}");
+        assert_eq!(hit.from_name, "Jürgen", "{raw}");
+        assert_eq!(hit.from_address, "juergen@example.com", "{raw}");
+        assert_eq!(hit.date, "2026-03-01T00:00:00Z", "{raw}");
+        assert!(!hit.is_read, "{raw}");
+        assert_eq!(hit.workflow_state, "todo", "{raw}");
+        assert_eq!(hit.folder_type, "trash", "{raw}");
+        if marked {
+            assert!(hit.snippet.contains("\u{1}"), "{raw}: {:?}", hit.snippet);
+        } else {
+            assert_eq!(hit.snippet, "Stored preview", "{raw}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn concurrent_searches_share_the_search_slot() {
+    let pool = pool().await;
+    seed_account(&pool).await;
+    seed_message(
+        &pool,
+        SeedMessage {
+            subject: "Quarterly report",
+            ..Default::default()
+        },
+    )
+    .await;
+    let repository = MessageSearchRepository::new(&pool);
+    let queries = ["report", "quarterly", "subject:report", "is:unread", "rep"].map(query);
+    let results =
+        futures::future::join_all(queries.iter().map(|input| repository.search(input))).await;
+    let counts = results
+        .into_iter()
+        .map(|result| result.unwrap().hits.len())
+        .collect::<Vec<_>>();
+    assert_eq!(counts, vec![1, 1, 1, 0, 1]);
+}
