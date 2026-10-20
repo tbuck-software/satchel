@@ -91,6 +91,10 @@ objc2-contacts = "0.3.2"
 objc2-foundation = "0.3.2"
 objc2-user-notifications = "0.3.2"
 
+# `statvfs` for the free-space check before VACUUM (macOS gets libc above).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Globalization"] }
 

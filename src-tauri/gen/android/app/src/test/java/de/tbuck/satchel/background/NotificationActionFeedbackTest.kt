@@ -53,6 +53,12 @@ class NotificationActionFeedbackTest {
     assertFalse(NotificationActionFeedback.retry(context, "thread", SatchelNotifications.ACTION_READ, """{"status":"completed"}""", 7))
   }
 
+  @Test fun permanentlyFailedActionWarnsAndStopsRetrying() {
+    val failed = """{"status":"failed","error":"imapUidValidityChanged"}"""
+    assertFalse(NotificationActionFeedback.retry(context, "thread", SatchelNotifications.ACTION_ARCHIVE, failed, 0))
+    assertEquals(1, manager.activeNotifications.size)
+  }
+
   @Test fun unrelatedSuccessDoesNotDismissAnUnsavedAction() {
     NotificationActionFeedback.retry(context, "failed", SatchelNotifications.ACTION_READ, notApplied, 5)
     NotificationActionFeedback.retry(context, "other", SatchelNotifications.ACTION_READ, """{"status":"completed"}""", 0)

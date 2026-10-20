@@ -157,6 +157,100 @@ pub async fn settle_action(
     })
 }
 
+/// Settle an action, retrying the bookkeeping itself a few times.
+///
+/// The provider work already happened; only its record is missing. A row left
+/// in `sending` belongs to this session, so `reset_sending` does not pick it up
+/// before the next start, and `ensure_no_pending_move` keeps refusing every
+/// further action on the thread until then. Every branch of [`settle_action`]
+/// writes an absolute state, so running it again is safe.
+pub async fn settle_action_with_retry(
+    pool: &SqlitePool,
+    queue: &SyncQueue,
+    action: &QueuedAction,
+    result: SyncResult<()>,
+) -> Result<Outcome, String> {
+    let mut last_error = None;
+    for delay in SETTLE_RETRY_DELAYS_MS {
+        if delay > 0 {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
+        match settle_action(pool, queue, action, result.clone()).await {
+            Ok(outcome) => return Ok(outcome),
+            Err(error) => {
+                tracing::warn!(%error, action = %action.id, "queue bookkeeping failed; retrying");
+                last_error = Some(error);
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| "queue bookkeeping failed".into()))
+}
+
+const SETTLE_RETRY_DELAYS_MS: [u64; 4] = [0, 250, 1_000, 5_000];
+
+/// How a drain over a fixed set of queue rows ended.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DrainOutcome {
+    /// Every row ran and is gone.
+    Completed,
+    /// A row is waiting for its next attempt or is being executed elsewhere.
+    Pending { error: String },
+    /// A row has reached `failed`. It stays visible to the user, who can retry
+    /// or discard it; draining again cannot change that.
+    Failed { error: String },
+}
+
+/// Execute the given rows in order outside the [`QueueWorker`], settling each
+/// one exactly as the worker does: same retry budget, same permanent-error
+/// path. Stops at the first row that is not done.
+///
+/// Android's notification quick actions run this in their own process. Before
+/// it went through [`settle_action`], every failure was rescheduled without a
+/// bound, so a move that could never succeed stayed pending forever and kept
+/// its thread locked against any further action.
+pub async fn drain_actions(
+    pool: &SqlitePool,
+    queue: &SyncQueue,
+    ids: &[String],
+    mut execute: impl AsyncFnMut(&QueuedAction) -> SyncResult<()>,
+) -> Result<DrainOutcome, String> {
+    queue.reset_stale_sending_ids(pool, ids).await?;
+    for id in ids {
+        let Some(action) = queue.claim_ready(pool, id).await? else {
+            let row: Option<(String, Option<String>)> =
+                sqlx::query_as("SELECT status, last_error FROM sync_queue WHERE id = ?")
+                    .bind(id)
+                    .fetch_optional(pool)
+                    .await
+                    .map_err(|error| error.to_string())?;
+            match row {
+                None => continue,
+                Some((status, error)) if status == "failed" => {
+                    return Ok(DrainOutcome::Failed {
+                        error: error.unwrap_or_default(),
+                    });
+                }
+                Some(_) => {
+                    return Ok(DrainOutcome::Pending {
+                        error: "provider mutation is waiting for retry".into(),
+                    });
+                }
+            }
+        };
+        let result = execute(&action).await;
+        match settle_action_with_retry(pool, queue, &action, result).await? {
+            Outcome::Completed => {}
+            Outcome::Retry { error, .. } | Outcome::DeliveryUnrecorded { error, .. } => {
+                return Ok(DrainOutcome::Pending { error });
+            }
+            Outcome::Failed { error }
+            | Outcome::Delivered { error }
+            | Outcome::DeliveryUnknown { error } => return Ok(DrainOutcome::Failed { error }),
+        }
+    }
+    Ok(DrainOutcome::Completed)
+}
+
 #[async_trait]
 pub trait ActionExecutor: Send + Sync + 'static {
     type Permit: Send + 'static;
@@ -235,7 +329,7 @@ impl<E: ActionExecutor> QueueWorker<E> {
                 (self.pool.clone(), self.queue.clone(), self.executor.clone());
             self.tasks.spawn(async move {
                 let result = executor.execute(&action).await;
-                let outcome = settle_action(&pool, &queue, &action, result).await;
+                let outcome = settle_action_with_retry(&pool, &queue, &action, result).await;
                 drop(permit);
                 executor.observe(&action, outcome).await;
                 action.account_id
@@ -334,5 +428,153 @@ mod tests {
     #[tokio::test]
     async fn a_permanently_rate_limited_action_stops_circulating() {
         assert_eq!(rounds_until_failed().await, MAX_RATE_LIMIT_ROUNDS + 1);
+    }
+
+    async fn notification_row(pool: &SqlitePool, queue: &SyncQueue) -> String {
+        let mut action = QueuedAction::new(
+            "acc-1".into(),
+            "remote_mutation",
+            serde_json::json!({"kind": "workflow_move"}),
+        );
+        action.id = "notification:digest:1".into();
+        queue.enqueue(pool, action.clone()).await.expect("enqueue");
+        action.id
+    }
+
+    async fn status_of(pool: &SqlitePool, id: &str) -> Option<String> {
+        sqlx::query_scalar("SELECT status FROM sync_queue WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .expect("status")
+    }
+
+    #[tokio::test]
+    async fn a_drained_permanent_error_settles_as_failed_and_stays_there() {
+        let pool = fresh_pool().await;
+        let queue = SyncQueue::new();
+        let id = notification_row(&pool, &queue).await;
+        let mut calls = 0;
+        let outcome = drain_actions(
+            &pool,
+            &queue,
+            std::slice::from_ref(&id),
+            async |_: &QueuedAction| {
+                calls += 1;
+                Err(SyncError::Permanent("imapUidValidityChanged".into()))
+            },
+        )
+        .await
+        .expect("drained");
+        assert!(
+            matches!(outcome, DrainOutcome::Failed { .. }),
+            "{outcome:?}"
+        );
+        assert_eq!(status_of(&pool, &id).await.as_deref(), Some("failed"));
+
+        // WorkManager coming back must not run it again nor report it pending.
+        let again = drain_actions(
+            &pool,
+            &queue,
+            std::slice::from_ref(&id),
+            async |_: &QueuedAction| {
+                calls += 1;
+                Ok(())
+            },
+        )
+        .await
+        .expect("drained");
+        assert!(matches!(again, DrainOutcome::Failed { .. }), "{again:?}");
+        assert_eq!(calls, 1);
+    }
+
+    #[tokio::test]
+    async fn a_drained_transient_error_runs_out_of_retries() {
+        let pool = fresh_pool().await;
+        let queue = SyncQueue::new();
+        let id = notification_row(&pool, &queue).await;
+        for round in 1..=MAX_RETRIES + 5 {
+            let outcome = drain_actions(
+                &pool,
+                &queue,
+                std::slice::from_ref(&id),
+                async |_: &QueuedAction| Err(SyncError::Transient("connection reset".into())),
+            )
+            .await
+            .expect("drained");
+            match outcome {
+                DrainOutcome::Pending { .. } => {}
+                DrainOutcome::Failed { .. } => {
+                    assert_eq!(round, MAX_RETRIES + 1);
+                    return;
+                }
+                DrainOutcome::Completed => panic!("a failing row cannot complete"),
+            }
+            // Skip the backoff so the next attempt finds the row due.
+            sqlx::query("UPDATE sync_queue SET next_retry_at = NULL")
+                .execute(&pool)
+                .await
+                .expect("due");
+        }
+        panic!("a drained row kept retrying past MAX_RETRIES");
+    }
+
+    #[tokio::test]
+    async fn a_drain_completes_and_skips_rows_already_done() {
+        let pool = fresh_pool().await;
+        let queue = SyncQueue::new();
+        let id = notification_row(&pool, &queue).await;
+        let ids = vec![id.clone(), "notification:digest:gone".into()];
+        let outcome = drain_actions(&pool, &queue, &ids, async |_: &QueuedAction| Ok(()))
+            .await
+            .expect("drained");
+        assert_eq!(outcome, DrainOutcome::Completed);
+        assert_eq!(status_of(&pool, &id).await, None);
+    }
+
+    #[tokio::test]
+    async fn settle_retries_its_bookkeeping_while_the_database_is_locked() {
+        use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
+        let directory = tempfile::tempdir().expect("temp directory");
+        let options = SqliteConnectOptions::new()
+            .filename(directory.path().join("settle.sqlite"))
+            .busy_timeout(Duration::ZERO)
+            .journal_mode(SqliteJournalMode::Wal)
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect_with(options)
+            .await
+            .expect("file pool");
+        sqlx::migrate!("./src/db/migrations")
+            .run(&pool)
+            .await
+            .expect("migrations");
+        let queue = SyncQueue::new();
+        let action = QueuedAction::new("acc-1".into(), "remote_mutation", serde_json::json!({}));
+        queue.enqueue(&pool, action.clone()).await.expect("enqueue");
+        let claimed = queue
+            .claim_ready(&pool, &action.id)
+            .await
+            .expect("claim")
+            .expect("claimed");
+
+        let writer = pool.begin_with("BEGIN IMMEDIATE").await.expect("lock");
+        assert!(
+            settle_action(&pool, &queue, &claimed, Ok(()))
+                .await
+                .is_err(),
+            "the lock must make a single attempt fail"
+        );
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            writer.commit().await.expect("release");
+        });
+        let outcome = settle_action_with_retry(&pool, &queue, &claimed, Ok(()))
+            .await
+            .expect("settled after the lock was released");
+        release.await.expect("release task");
+        assert!(matches!(outcome, Outcome::Completed));
+        assert_eq!(status_of(&pool, &action.id).await, None);
     }
 }

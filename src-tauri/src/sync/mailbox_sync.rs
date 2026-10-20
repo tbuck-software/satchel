@@ -407,6 +407,26 @@ async fn account_run_with_deadline<T>(
     })?
 }
 
+/// Run one account's sync under its lock (and, on mobile, the global mailbox
+/// permit), with the deadline counted from the moment both are held.
+///
+/// Serialize one complete account snapshot, then release the permit so due
+/// Outbox work gets a fair turn before the next account, avoiding the old
+/// all-account lock convoy. The wait for the lock is not part of the run: a
+/// poll queued behind a long full sync used to time out without doing any work
+/// and mark the account as failed.
+async fn account_run_exclusive<T>(
+    account_id: &str,
+    duration: std::time::Duration,
+    run: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    #[cfg(mobile)]
+    let _mobile_work_guard = acquire_mobile_mailbox_work_permit().await;
+    let run_lock = sync_run_lock(account_id);
+    let _run_guard = run_lock.lock().await;
+    account_run_with_deadline(duration, run).await
+}
+
 /// Execute one mailbox synchronization request.
 ///
 /// `folders` controls whether the provider's complete folder set or only the
@@ -446,16 +466,9 @@ pub(crate) async fn sync_mailboxes(
     let mut summary = MailboxSyncSummary::default();
 
     for account_id in account_ids {
-        let result = account_run_with_deadline(ACCOUNT_SYNC_TIMEOUT, async {
-        #[cfg(mobile)]
-        let _mobile_work_guard = acquire_mobile_mailbox_work_permit().await;
-
-        // Serialize one complete account snapshot, then release the permit so
-        // due Outbox work gets a fair turn before the next account. Re-reading
-        // under the permit prevents a concurrent run from restoring a stale
-        // cursor while avoiding the old all-account lock convoy.
-        let run_lock = sync_run_lock(&account_id);
-        let _run_guard = run_lock.lock().await;
+        let result = account_run_exclusive(&account_id, ACCOUNT_SYNC_TIMEOUT, async {
+        // Re-reading under the lock prevents a concurrent run from restoring a
+        // stale cursor.
         let Some(mut account) = sqlx::query_as::<_, MailAccountRow>(
             "SELECT id, display_name, email, provider, config, sync_state, outlook_immutable_ids_migrated,
                     COALESCE(NULLIF(last_sync_at, ''), NULLIF(created_at, '')) AS ingest_cutoff
@@ -1459,6 +1472,24 @@ mod tests {
         assert!(result.is_ok(), "account run escaped its deadline");
         assert!(result.unwrap().unwrap_err().contains("timed out"));
         assert!(lock.try_lock().is_ok());
+    }
+
+    #[tokio::test]
+    async fn waiting_for_the_account_lock_does_not_count_against_the_deadline() {
+        let lock = crate::sync::leases::sync_run_lock("deadline-wait-test");
+        let held = lock.clone().lock_owned().await;
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            drop(held);
+        });
+        let result = super::account_run_exclusive(
+            "deadline-wait-test",
+            std::time::Duration::from_millis(50),
+            async { Ok::<_, String>("ran") },
+        )
+        .await;
+        release.await.unwrap();
+        assert_eq!(result, Ok("ran"));
     }
 
     #[tokio::test]

@@ -109,19 +109,70 @@ pub async fn discard_failed_move(pool: &SqlitePool, id: &str) -> Result<bool, St
     };
     let thread_id =
         remote_move_thread_id_from_json(&payload).ok_or("backend.errors.mailMovePending")?;
-    sqlx::query(
-        "UPDATE messages SET pending_folder_id = NULL WHERE thread_id = ? AND account_id = ?",
-    )
-    .bind(&thread_id)
-    .bind(account_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| e.to_string())?;
+    release_move_destination(&mut tx, &account_id, &thread_id).await?;
     crate::db::threads::refresh_thread_projections_tx(&mut tx, &[thread_id])
         .await
         .map_err(|e| e.to_string())?;
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// Drop failed queue rows last updated before `cutoff` (RFC 3339), as retention.
+///
+/// A failed move still owns its unconfirmed destination, and mailbox queries
+/// list the thread under `pending_folder_id`. Deleting the row alone left the
+/// thread in the target folder for good, so each purged move releases its
+/// destination in the same transaction, as [`discard_failed_move`] does.
+/// Failed sends are never purged: without a draft, the payload is the only
+/// copy of a mail that did not go out.
+pub async fn purge_failed_queue_rows(pool: &SqlitePool, cutoff: &str) -> Result<u64, String> {
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "DELETE FROM sync_queue WHERE status = 'failed' AND updated_at < ? AND action_type <> ?
+         RETURNING account_id, action_type, payload",
+    )
+    .bind(cutoff)
+    .bind(crate::sync::queue::ACTION_SEND_MESSAGE)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    let mut released = Vec::new();
+    for (account_id, action_type, payload) in &rows {
+        if action_type != ACTION_REMOTE_MUTATION {
+            continue;
+        }
+        if let Some(thread_id) = remote_move_thread_id_from_json(payload) {
+            release_move_destination(&mut tx, account_id, &thread_id).await?;
+            released.push(thread_id);
+        }
+    }
+    released.sort();
+    released.dedup();
+    crate::db::threads::refresh_thread_projections_tx(&mut tx, &released)
+        .await
+        .map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(rows.len() as u64)
+}
+
+/// Return a thread whose move will not run to its confirmed provider folder.
+async fn release_move_destination(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE messages SET pending_folder_id = NULL WHERE thread_id = ? AND account_id = ?",
+    )
+    .bind(thread_id)
+    .bind(account_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Older versions queued POP3 moves that the provider cannot perform. Finish
@@ -679,5 +730,59 @@ mod tests {
         let moves: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_move'")
             .fetch_one(&pool).await.expect("move count");
         assert_eq!(moves, 0);
+    }
+
+    #[tokio::test]
+    async fn purging_old_failed_rows_releases_moves_and_keeps_unsent_mail() {
+        let pool = pop3_pool().await;
+        let queue = SyncQueue::new();
+        sqlx::query("UPDATE messages SET pending_folder_id = 'custom' WHERE id = 'message'")
+            .execute(&pool)
+            .await
+            .expect("pending move");
+        let old = "2025-01-01T00:00:00+00:00";
+        let failed = |action_type: &str, payload: serde_json::Value, updated_at: &str| {
+            let mut action = QueuedAction::new("acc".into(), action_type, payload);
+            action.status = "failed".into();
+            action.updated_at = updated_at.into();
+            action
+        };
+        let rows = [
+            failed(
+                ACTION_REMOTE_MUTATION,
+                serde_json::json!({"kind":"workflow_move","workflow_thread_id":"thread"}),
+                old,
+            ),
+            failed(
+                crate::sync::queue::ACTION_SEND_MESSAGE,
+                serde_json::json!({"input": {"subject": "only copy"}}),
+                old,
+            ),
+            failed(
+                ACTION_REMOTE_MUTATION,
+                serde_json::json!({"kind":"set_flags"}),
+                &chrono::Utc::now().to_rfc3339(),
+            ),
+        ];
+        for row in &rows {
+            queue.enqueue(&pool, row.clone()).await.expect("failed row");
+        }
+
+        let cutoff = "2025-06-01T00:00:00+00:00";
+        assert_eq!(purge_failed_queue_rows(&pool, cutoff).await.unwrap(), 1);
+
+        let pending: Option<String> =
+            sqlx::query_scalar("SELECT pending_folder_id FROM messages WHERE id = 'message'")
+                .fetch_one(&pool)
+                .await
+                .expect("message");
+        assert!(pending.is_none(), "the purged move kept its destination");
+        let left: Vec<String> = sqlx::query_scalar("SELECT id FROM sync_queue ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .expect("rows");
+        let mut expected = vec![rows[1].id.clone(), rows[2].id.clone()];
+        expected.sort();
+        assert_eq!(left, expected);
     }
 }

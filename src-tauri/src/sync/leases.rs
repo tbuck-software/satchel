@@ -35,6 +35,7 @@ pub(crate) struct CrossProcessSyncLease {
     account_id: String,
     owner_token: String,
     heartbeat: tokio::task::JoinHandle<()>,
+    released: bool,
 }
 
 #[cfg(target_os = "android")]
@@ -110,33 +111,53 @@ impl CrossProcessSyncLease {
             account_id: account_id.to_string(),
             owner_token,
             heartbeat,
+            released: false,
         }))
     }
 
-    pub(crate) async fn release(self) {
+    pub(crate) async fn release(mut self) {
         self.heartbeat.abort();
+        Self::delete(&self.pool, &self.account_id, &self.owner_token).await;
+        self.released = true;
+    }
+
+    async fn delete(pool: &SqlitePool, account_id: &str, owner_token: &str) {
         if let Err(error) = sqlx::query(
             "DELETE FROM account_sync_leases
              WHERE account_id = ? AND owner_token = ?",
         )
-        .bind(&self.account_id)
-        .bind(&self.owner_token)
-        .execute(&self.pool)
+        .bind(account_id)
+        .bind(owner_token)
+        .execute(pool)
         .await
         {
             tracing::warn!(
                 %error,
-                account_id = %self.account_id,
+                %account_id,
                 "cross-process mailbox lease release failed"
             );
         }
     }
 }
 
+/// A run cancelled by its deadline never reaches `release`. Without deleting
+/// the row here, the other process would wait out the full lease.
 #[cfg(target_os = "android")]
 impl Drop for CrossProcessSyncLease {
     fn drop(&mut self) {
         self.heartbeat.abort();
+        if self.released {
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let pool = self.pool.clone();
+        let account_id = std::mem::take(&mut self.account_id);
+        let owner_token = std::mem::take(&mut self.owner_token);
+        runtime.spawn(async move {
+            Self::delete(&pool, &account_id, &owner_token).await;
+        });
     }
 }
 
