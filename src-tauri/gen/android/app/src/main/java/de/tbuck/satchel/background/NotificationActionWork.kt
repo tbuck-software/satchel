@@ -101,7 +101,7 @@ class NotificationActionWorker(context: Context, private val params: WorkerParam
   }
 }
 
-/** Local persistence failures need attention; provider retries stay silent. */
+/** Local persistence and permanent provider failures need attention; provider retries stay silent. */
 internal object NotificationActionFeedback {
   private const val FAILURE_TAG = "satchel.notification-action-failed"
 
@@ -119,10 +119,12 @@ internal object NotificationActionFeedback {
         it.tag == FAILURE_TAG &&
           it.notification.extras.getString(SatchelNotifications.EXTRA_THREAD_ID) == threadId
       }.forEach { manager.cancel(it.tag, it.id) }
-    } else if (attempt == 5) {
+    } else if (status == "failed" || attempt == 5) {
       showFailure(context, threadId, actionId)
     }
-    return status != "completed"
+    // A failed provider action waits in the app for retry or discard; running
+    // the work again cannot change it.
+    return status != "completed" && status != "failed"
   }
 
   private fun showFailure(context: Context, threadId: String, actionId: String) {

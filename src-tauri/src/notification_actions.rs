@@ -22,7 +22,9 @@ use crate::{
     commands::threads::{set_threads_read_inner_with_queue_prefix, UpdateThreadsReadInput},
     commands::workflow::{transition_thread_for_notification, TransitionInput},
     sync::{
+        queue::QueuedAction,
         remote_mutations::execute_remote_mutation,
+        worker::{drain_actions, DrainOutcome},
         workflow_executor::execute_queued_remote_mutation,
     },
     workflow::states::WorkflowState,
@@ -75,13 +77,30 @@ pub extern "system" fn Java_de_tbuck_satchel_background_NotificationActionNative
 #[serde(tag = "status", rename_all = "snake_case")]
 pub(crate) enum NotificationActionOutcome {
     Completed,
-    Pending { error: String },
-    NotApplied { error: String },
+    Pending {
+        error: String,
+    },
+    NotApplied {
+        error: String,
+    },
+    /// The provider refused the action for good. The row is `failed` and waits
+    /// in the app for retry or discard, so WorkManager must stop retrying.
+    Failed {
+        error: String,
+    },
 }
 
 impl NotificationActionOutcome {
     fn not_applied(error: String) -> Self {
         Self::NotApplied { error }
+    }
+
+    fn from_drain(result: Result<DrainOutcome, String>) -> Self {
+        match result {
+            Ok(DrainOutcome::Completed) => Self::Completed,
+            Ok(DrainOutcome::Pending { error }) | Err(error) => Self::Pending { error },
+            Ok(DrainOutcome::Failed { error }) => Self::Failed { error },
+        }
     }
 }
 
@@ -383,10 +402,11 @@ pub(crate) async fn execute_notification_action_inner(
                     // move but before Read. Resolve flags only after the move
                     // has reconciled the destination's folder-scoped UIDs.
                     let ids = notification_queue_ids(&pool, &queue_prefix).await?;
-                    if let Err(error) =
-                        drain_notification_action_mutations(&pool, &state, &ids).await
-                    {
-                        return Ok(NotificationActionOutcome::Pending { error });
+                    match NotificationActionOutcome::from_drain(
+                        drain_notification_action_mutations(&pool, &state, &ids).await,
+                    ) {
+                        NotificationActionOutcome::Completed => {}
+                        unfinished => return Ok(unfinished),
                     }
                     set_threads_read_inner_with_queue_prefix(
                         &pool,
@@ -437,12 +457,9 @@ pub(crate) async fn execute_notification_action_inner(
 
     // The action record is durable even when the provider is unreachable.
     // Retrying that sync is normal local-first behavior, not a failed action.
-    Ok(
-        match drain_notification_action_mutations(&pool, &state, &queued_ids).await {
-            Ok(()) => NotificationActionOutcome::Completed,
-            Err(error) => NotificationActionOutcome::Pending { error },
-        },
-    )
+    Ok(NotificationActionOutcome::from_drain(
+        drain_notification_action_mutations(&pool, &state, &queued_ids).await,
+    ))
 }
 
 async fn notification_queue_ids(pool: &SqlitePool, prefix: &str) -> Result<Vec<String>, String> {
@@ -483,54 +500,30 @@ async fn load_action_record(pool: &SqlitePool, key: &str) -> Result<Option<Vec<S
         .transpose()
 }
 
+/// Run this action's queue rows here, settled the way the main worker settles
+/// them: bounded retries, and a permanent error ends the row as `failed`.
 pub(crate) async fn drain_notification_action_mutations(
     pool: &SqlitePool,
     state: &AppState,
     queued_ids: &[String],
-) -> Result<(), String> {
-    state.queue.reset_sending_ids(pool, queued_ids).await?;
-    for id in queued_ids {
-        let Some(action) = state.queue.claim_ready(pool, id).await? else {
-            let status: Option<String> =
-                sqlx::query_scalar("SELECT status FROM sync_queue WHERE id = ?")
-                    .bind(id)
-                    .fetch_optional(pool)
-                    .await
-                    .map_err(|error| error.to_string())?;
-            if status.is_some() {
-                return Err("provider mutation is waiting for retry".to_string());
+) -> Result<DrainOutcome, String> {
+    drain_actions(
+        pool,
+        &state.queue,
+        queued_ids,
+        async |action: &QueuedAction| {
+            if matches!(
+                serde_json::from_value(action.payload.clone()),
+                Ok(
+                    crate::sync::remote_mutations::RemoteMutationPayload::WorkflowMove { .. }
+                        | crate::sync::remote_mutations::RemoteMutationPayload::BlockedMove { .. }
+                )
+            ) {
+                execute_queued_remote_mutation(pool, None, state, action).await
+            } else {
+                execute_remote_mutation(pool, &action.account_id, action.payload.clone()).await
             }
-            continue;
-        };
-        let result = if matches!(
-            serde_json::from_value(action.payload.clone()),
-            Ok(
-                crate::sync::remote_mutations::RemoteMutationPayload::WorkflowMove { .. }
-                    | crate::sync::remote_mutations::RemoteMutationPayload::BlockedMove { .. }
-            )
-        ) {
-            execute_queued_remote_mutation(pool, None, state, &action).await
-        } else {
-            execute_remote_mutation(pool, &action.account_id, action.payload.clone()).await
-        };
-        match result {
-            Ok(()) => state.queue.mark_completed(pool, &action.id).await?,
-            Err(error) => {
-                let error_message = error.to_string();
-                let next_retry = chrono::Utc::now() + chrono::Duration::seconds(30);
-                state
-                    .queue
-                    .mark_failed_retry(
-                        pool,
-                        &action.id,
-                        action.retry_count.saturating_add(1),
-                        next_retry,
-                        &error_message,
-                    )
-                    .await?;
-                return Err(error_message);
-            }
-        }
-    }
-    Ok(())
+        },
+    )
+    .await
 }

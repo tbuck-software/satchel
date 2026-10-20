@@ -26,6 +26,21 @@ pub const DISCARDABLE_MAIL_STATUSES: &[&str] = &[
 /// useful advice — look in the provider's Sent folder.
 pub const DELIVERY_STATUS_UNKNOWN_ERROR_KEY: &str = "backend.errors.messageDeliveryStatusUnknown";
 
+/// How long a `notification:` row belongs to the Android notification-action
+/// worker after it last touched it.
+///
+/// That worker enqueues and drains its rows in its own process, so the main
+/// worker leaves them alone. But WorkManager may never come back for them (the
+/// work was cancelled, or ended on a failure the user then retried), and
+/// skipping them for good kept their thread locked behind
+/// `mailMovePending`. A row nobody has touched for this long is adopted by the
+/// main worker like any other. Retrying a failed row hands it over at once.
+pub const NOTIFICATION_ROW_LEASE_MS: i64 = 15 * 60 * 1000;
+
+fn notification_lease_cutoff_ms() -> i64 {
+    Utc::now().timestamp_millis() - NOTIFICATION_ROW_LEASE_MS
+}
+
 fn sending_session() -> &'static str {
     static SESSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     SESSION.get_or_init(|| uuid::Uuid::new_v4().to_string())
@@ -146,7 +161,8 @@ impl SyncQueue {
                     rowid
                 ) AS position
                 FROM sync_queue
-                WHERE status IN ('pending', 'scheduled') AND id NOT LIKE 'notification:%'
+                WHERE status IN ('pending', 'scheduled')
+                  AND (id NOT LIKE 'notification:%' OR COALESCE(updated_at_ms, 0) <= ?)
                   AND NOT EXISTS (SELECT 1 FROM accounts WHERE accounts.id = sync_queue.account_id AND is_active = 0)
                   AND NOT EXISTS (SELECT 1 FROM sync_queue_dependencies d JOIN sync_queue predecessor ON predecessor.id = d.depends_on WHERE d.action_id = sync_queue.id)
                   AND (action_type <> 'send_message' OR
@@ -160,6 +176,7 @@ impl SyncQueue {
                  AND (scheduled_for IS NULL OR scheduled_for <= ?)
                ORDER BY CASE action_type WHEN 'send_message' THEN 0 ELSE 1 END, created_at",
         )
+        .bind(notification_lease_cutoff_ms())
         .bind(&now)
         .bind(&now)
         .bind(&now)
@@ -312,7 +329,7 @@ impl SyncQueue {
              WHERE status IN ('pending', 'scheduled')
                AND NOT EXISTS (SELECT 1 FROM accounts WHERE accounts.id = sync_queue.account_id AND is_active = 0)
                AND NOT EXISTS (SELECT 1 FROM sync_queue_dependencies d JOIN sync_queue predecessor ON predecessor.id = d.depends_on WHERE d.action_id = sync_queue.id)
-               AND id NOT LIKE 'notification:%'
+               AND (id NOT LIKE 'notification:%' OR COALESCE(updated_at_ms, 0) <= ?)
                AND (next_retry_at IS NULL OR next_retry_at <= ?)
                AND (scheduled_for IS NULL OR scheduled_for <= ?)
              ORDER BY
@@ -320,6 +337,7 @@ impl SyncQueue {
                COALESCE(next_retry_at, scheduled_for, created_at) ASC
              LIMIT 1",
         )
+        .bind(notification_lease_cutoff_ms())
         .bind(&now)
         .bind(&now)
         .fetch_optional(pool)
@@ -634,7 +652,8 @@ impl SyncQueue {
                  END,
                  next_retry_at = CASE WHEN action_type = ? THEN NULL ELSE next_retry_at END,
                  sending_session = NULL, updated_at = ?, updated_at_ms = ?
-             WHERE status = 'sending' AND id NOT LIKE 'notification:%'
+             WHERE status = 'sending'
+               AND (id NOT LIKE 'notification:%' OR COALESCE(updated_at_ms, 0) <= ?)
                AND sending_session IS NOT ?",
         )
         .bind(ACTION_SEND_MESSAGE)
@@ -643,6 +662,7 @@ impl SyncQueue {
         .bind(ACTION_SEND_MESSAGE)
         .bind(&now)
         .bind(now_ms)
+        .bind(notification_lease_cutoff_ms())
         .bind(sending_session())
         .execute(pool)
         .await
@@ -650,7 +670,10 @@ impl SyncQueue {
         Ok(result.rows_affected())
     }
 
-    pub async fn reset_sending_ids(
+    /// Return the given rows to `pending` if they were left in `sending` for
+    /// longer than [`NOTIFICATION_ROW_LEASE_MS`]. A younger `sending` row may
+    /// be executing right now in the other process.
+    pub async fn reset_stale_sending_ids(
         &self,
         pool: &SqlitePool,
         ids: &[String],
@@ -661,13 +684,16 @@ impl SyncQueue {
         let now = Utc::now().to_rfc3339();
         let now_ms = Utc::now().timestamp_millis();
         let mut query = sqlx::QueryBuilder::<Sqlite>::new(
-            "UPDATE sync_queue SET status = 'pending', updated_at = ",
+            "UPDATE sync_queue SET status = 'pending', sending_session = NULL, updated_at = ",
         );
         query
             .push_bind(now)
             .push(", updated_at_ms = ")
             .push_bind(now_ms);
-        query.push(" WHERE status = 'sending' AND id IN (");
+        query
+            .push(" WHERE status = 'sending' AND COALESCE(updated_at_ms, 0) <= ")
+            .push_bind(notification_lease_cutoff_ms());
+        query.push(" AND id IN (");
         let mut separated = query.separated(", ");
         for id in ids {
             separated.push_bind(id);
@@ -690,8 +716,9 @@ impl SyncQueue {
              WHERE status IN ('pending', 'scheduled')
                AND NOT EXISTS (SELECT 1 FROM accounts WHERE accounts.id = sync_queue.account_id AND is_active = 0)
                AND NOT EXISTS (SELECT 1 FROM sync_queue_dependencies d JOIN sync_queue predecessor ON predecessor.id = d.depends_on WHERE d.action_id = sync_queue.id)
-               AND id NOT LIKE 'notification:%'",
+               AND (id NOT LIKE 'notification:%' OR COALESCE(updated_at_ms, 0) <= ?)",
         )
+        .bind(notification_lease_cutoff_ms())
         .fetch_optional(pool)
         .await
         .ok()
@@ -813,7 +840,7 @@ impl SyncQueue {
         let now = Utc::now().to_rfc3339();
         let now_ms = Utc::now().timestamp_millis();
         sqlx::query(
-            "UPDATE sync_queue SET status = 'pending', retry_count = 0, next_retry_at = NULL, last_error = NULL, updated_at = ?, updated_at_ms = ? WHERE id = ?",
+            "UPDATE sync_queue SET status = 'pending', retry_count = 0, next_retry_at = NULL, last_error = NULL, updated_at = ?, updated_at_ms = CASE WHEN id LIKE 'notification:%' THEN 0 ELSE ? END WHERE id = ?",
         )
         .bind(&now)
         .bind(now_ms)
@@ -865,7 +892,7 @@ impl SyncQueue {
     pub async fn requeue_failed_move(&self, pool: &SqlitePool, id: &str) -> Result<bool, String> {
         let changed = sqlx::query(
             "UPDATE sync_queue SET status = 'pending', retry_count = 0, next_retry_at = NULL, last_error = NULL,
-             updated_at = ?, updated_at_ms = ? WHERE id = ? AND action_type = 'remote_mutation' AND status = 'failed'
+             updated_at = ?, updated_at_ms = CASE WHEN id LIKE 'notification:%' THEN 0 ELSE ? END WHERE id = ? AND action_type = 'remote_mutation' AND status = 'failed'
              AND json_valid(payload) AND json_extract(payload, '$.kind') IN ('workflow_move', 'blocked_move')",
         ).bind(Utc::now().to_rfc3339()).bind(Utc::now().timestamp_millis()).bind(id)
             .execute(pool).await.map_err(|e| e.to_string())?.rows_affected();
@@ -881,7 +908,7 @@ impl SyncQueue {
         let changed = sqlx::query(
             "UPDATE sync_queue
              SET status = 'pending', retry_count = 0, next_retry_at = NULL,
-                 last_error = NULL, updated_at = ?, updated_at_ms = ?
+                 last_error = NULL, updated_at = ?, updated_at_ms = CASE WHEN id LIKE 'notification:%' THEN 0 ELSE ? END
              WHERE action_type IN (?, ?) AND status = 'failed'",
         )
         .bind(&now)
@@ -1880,5 +1907,100 @@ mod tests {
         // Initial step should be short (~10s) and final step capped at 2h.
         assert_eq!(values[0], 10);
         assert_eq!(*values.last().unwrap(), 2 * 60 * 60);
+    }
+
+    async fn enqueue_notification_move(pool: &SqlitePool, queue: &SyncQueue) -> String {
+        let mut action = QueuedAction::new(
+            "acc-1".into(),
+            "remote_mutation",
+            json!({"kind": "workflow_move", "thread_id": "t1"}),
+        );
+        action.id = "notification:digest:1".into();
+        queue.enqueue(pool, action.clone()).await.unwrap();
+        action.id
+    }
+
+    async fn age_row(pool: &SqlitePool, id: &str, millis: i64) {
+        sqlx::query("UPDATE sync_queue SET updated_at_ms = ? WHERE id = ?")
+            .bind(chrono::Utc::now().timestamp_millis() - millis)
+            .bind(id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    async fn head_ids(queue: &SyncQueue, pool: &SqlitePool) -> Vec<String> {
+        queue
+            .ready_account_heads(pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|action| action.id)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn the_main_worker_adopts_an_abandoned_notification_row() {
+        let pool = fresh_pool().await;
+        let queue = SyncQueue::new();
+        let id = enqueue_notification_move(&pool, &queue).await;
+        assert!(head_ids(&queue, &pool).await.is_empty());
+        assert!(queue.peek_next_ready(&pool).await.unwrap().is_none());
+
+        age_row(&pool, &id, NOTIFICATION_ROW_LEASE_MS + 1_000).await;
+        assert_eq!(head_ids(&queue, &pool).await, vec![id.clone()]);
+        assert_eq!(
+            queue.peek_next_ready(&pool).await.unwrap().map(|a| a.id),
+            Some(id)
+        );
+        assert!(queue.next_wakeup(&pool).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn retrying_a_failed_notification_move_hands_it_to_the_main_worker() {
+        let pool = fresh_pool().await;
+        let queue = SyncQueue::new();
+        let id = enqueue_notification_move(&pool, &queue).await;
+        queue
+            .mark_failed_permanent(&pool, &id, "imapUidValidityChanged")
+            .await
+            .unwrap();
+        assert!(queue.requeue_failed_move(&pool, &id).await.unwrap());
+        assert_eq!(head_ids(&queue, &pool).await, vec![id]);
+    }
+
+    #[tokio::test]
+    async fn only_a_stale_sending_notification_row_is_reset() {
+        let pool = fresh_pool().await;
+        let queue = SyncQueue::new();
+        let id = enqueue_notification_move(&pool, &queue).await;
+        queue
+            .claim_ready(&pool, &id)
+            .await
+            .unwrap()
+            .expect("claimed");
+        let ids = vec![id.clone()];
+
+        // Young: possibly running in the other process right now.
+        assert_eq!(queue.reset_stale_sending_ids(&pool, &ids).await.unwrap(), 0);
+        sqlx::query("UPDATE sync_queue SET sending_session = 'other-process'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(queue.reset_sending(&pool).await.unwrap(), 0);
+
+        age_row(&pool, &id, NOTIFICATION_ROW_LEASE_MS + 1_000).await;
+        assert_eq!(queue.reset_stale_sending_ids(&pool, &ids).await.unwrap(), 1);
+        queue
+            .claim_ready(&pool, &id)
+            .await
+            .unwrap()
+            .expect("claimed");
+        sqlx::query("UPDATE sync_queue SET sending_session = 'other-process'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        age_row(&pool, &id, NOTIFICATION_ROW_LEASE_MS + 1_000).await;
+        assert_eq!(queue.reset_sending(&pool).await.unwrap(), 1);
     }
 }
