@@ -551,4 +551,48 @@ describe('thread row layout', () => {
 
     wrapper.unmount();
   });
+
+  it('mounts its menus only once they are first opened', async () => {
+    const wrapper = mount(ThreadListItem, {
+      attachTo: document.body,
+      global: { stubs: { SenderFilingMenu: { template: '<i data-test="sender-menu" />' } } },
+      props: {
+        thread: {
+          id: 'thread',
+          accountId: 'account',
+          subject: 'Betreff',
+          participants: [{ name: 'Absender', email: 'sender@example.com' }],
+          snippet: 'Vorschau',
+          lastMessageAt: '2026-08-06T12:00:00Z',
+          lastMessageAtMs: Date.parse('2026-08-06T12:00:00Z'),
+          messageCount: 1,
+          unreadCount: 0,
+          hasAttachments: false,
+          workflowState: 'inbox',
+          priority: 1,
+          mailboxNames: ['INBOX'],
+          tags: [],
+          isStarred: false,
+        },
+        active: false,
+        selected: false,
+        selectionMode: false,
+      },
+    });
+
+    expect(wrapper.findAllComponents({ name: 'ContextMenu' })).toHaveLength(0);
+
+    await wrapper.get('article').trigger('contextmenu', { clientX: 20, clientY: 30 });
+    await nextTick();
+    expect(wrapper.findAllComponents({ name: 'ContextMenu' })).toHaveLength(1);
+    expect(document.body.querySelector('.context-menu')).not.toBeNull();
+
+    const trigger = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.context-menu button'))
+      .find((button) => button.textContent?.trim() === 'Sender');
+    trigger?.click();
+    await nextTick();
+    expect(wrapper.findAllComponents({ name: 'ContextMenu' })).toHaveLength(2);
+
+    wrapper.unmount();
+  });
 });
