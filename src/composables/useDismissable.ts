@@ -1,4 +1,4 @@
-import { onBeforeUnmount } from 'vue';
+import { onBeforeUnmount, watch } from 'vue';
 import { useUiStore } from '@/stores/ui';
 
 /**
@@ -17,4 +17,26 @@ import { useUiStore } from '@/stores/ui';
 export function useDismissable(isOpen: () => boolean, dismiss: () => void) {
   const ui = useUiStore();
   onBeforeUnmount(ui.registerOverlay({ isOpen, dismiss }));
+}
+
+/**
+ * `useDismissable` for a surface mounted once for the whole app that opens on
+ * top of whatever is up at the time — the confirm and prompt dialogs.
+ *
+ * Registering at mount would file it beneath every overlay opened later, and
+ * Escape or Back would close the sheet behind the question instead of the
+ * question. It joins the stack each time it opens, so it is always on top.
+ */
+export function useDismissableOnTop(isOpen: () => boolean, dismiss: () => void) {
+  const ui = useUiStore();
+  let unregister: (() => void) | null = null;
+  watch(
+    isOpen,
+    (open) => {
+      unregister?.();
+      unregister = open ? ui.registerOverlay({ isOpen, dismiss }) : null;
+    },
+    { immediate: true, flush: 'sync' },
+  );
+  onBeforeUnmount(() => unregister?.());
 }

@@ -2,18 +2,18 @@
 import ModalShell from '@/components/ui/ModalShell.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import { useConfirm } from '@/composables/useConfirm';
-import { useDismissable } from '@/composables/useDismissable';
+import { useDismissableOnTop } from '@/composables/useDismissable';
 
 /**
  * The one confirmation dialog. Mounted once in `App.vue`; `useConfirm().ask()`
  * fills it from anywhere.
  *
  * Every way out that is not the confirming button answers no, which is why
- * `useDismissable` and the backdrop both go through `answer(false)`.
+ * the back stack and the backdrop both go through `answer(false)`.
  */
 const { state, answer } = useConfirm();
 
-useDismissable(
+useDismissableOnTop(
   () => state.pending !== null,
   () => answer(false),
 );
@@ -30,7 +30,7 @@ useDismissable(
     >
       <div class="confirm">
         <h2 class="confirm__title">{{ state.pending.title }}</h2>
-        <p class="confirm__body">{{ state.pending.body }}</p>
+        <p v-if="state.pending.body" class="confirm__body">{{ state.pending.body }}</p>
         <p v-if="state.pending.detail" class="confirm__detail">{{ state.pending.detail }}</p>
         <footer class="confirm__actions">
           <AppButton variant="ghost" autofocus @click="answer(false)">

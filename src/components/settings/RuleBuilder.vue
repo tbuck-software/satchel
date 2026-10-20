@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useConfirm } from '@/composables/useConfirm';
 import {
   backendDeleteRule,
   backendListRules,
@@ -21,6 +22,7 @@ interface ConditionDraft { field: ConditionField; value: string }
 interface ActionDraft { kind: ActionKind; value: string }
 
 const { t } = useI18n();
+const { ask } = useConfirm();
 
 const conditionFields: ConditionField[] = [
   'from_contains',
@@ -199,7 +201,12 @@ async function toggleRule(rule: BackendRule) {
 }
 
 async function removeRule(rule: BackendRule) {
-  if (!window.confirm(t('settings.rules.deleteConfirm', { name: rule.name }))) return;
+  const confirmed = await ask({
+    title: t('settings.rules.deleteConfirm', { name: rule.name }),
+    confirmLabel: t('common.delete'),
+    tone: 'danger',
+  });
+  if (!confirmed) return;
   await backendDeleteRule(rule.id);
   await load();
 }
@@ -220,7 +227,11 @@ async function runNow() {
 async function runVisible() {
   const threadIds = threads.visibleThreads.map((thread) => thread.id);
   if (threadIds.length === 0) return;
-  if (!window.confirm(t('settings.rules.applyVisibleConfirm', threadIds.length))) return;
+  const confirmed = await ask({
+    title: t('settings.rules.applyVisibleConfirm', threadIds.length),
+    confirmLabel: t('common.apply'),
+  });
+  if (!confirmed) return;
   try {
     const applied = await backendRunRulesForThreads(threadIds);
     notice.value = t('settings.rules.appliedCount', applied.length);

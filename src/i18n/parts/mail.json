@@ -113,6 +113,8 @@
           "tentative": "Maybe"
         },
         "unboundedSeriesConfirm": "This invitation covers the whole series and has no end date. Satchel sends exactly one reply for the unbounded series. Continue?",
+        "unboundedSeriesAction": "Send reply",
+        "unboundedSeriesTitle": "Reply to the whole series?",
         "unboundedSeriesWarning": "This series has no end date. A reply applies to the entire unbounded series and is sent as exactly one calendar response.",
         "wholeSeriesNote": "Your reply applies to the whole series."
       },
@@ -442,6 +444,8 @@
           "tentative": "Vielleicht"
         },
         "unboundedSeriesConfirm": "Diese Einladung gilt für die gesamte Serie und enthält kein Enddatum. Satchel sendet genau eine Antwort für die unbegrenzte Serie. Wirklich fortfahren?",
+        "unboundedSeriesAction": "Antwort senden",
+        "unboundedSeriesTitle": "Auf die ganze Serie antworten?",
         "unboundedSeriesWarning": "Diese Serie hat kein Enddatum. Eine Antwort gilt für die gesamte unbegrenzte Serie und wird als genau eine Kalenderantwort versendet.",
         "wholeSeriesNote": "Deine Antwort gilt für die gesamte Serie."
       },

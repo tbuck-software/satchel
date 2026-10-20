@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useConfirm } from '@/composables/useConfirm';
 import {
   backendErrorKey,
   backendDeletePgpKey,
@@ -35,6 +36,7 @@ import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
 import TimeAgo from '@/components/common/TimeAgo.vue';
 
 const { t } = useI18n();
+const { ask } = useConfirm();
 const toast = useToast();
 
 interface PluginView {
@@ -248,7 +250,13 @@ async function setWebhookEnabled(webhook: BackendWebhook, enabled: boolean) {
 async function removeWebhook(webhook: BackendWebhook) {
   // A webhook forwards message metadata to a foreign host. Name the host in
   // the question, so nobody deletes the wrong one from a list of two.
-  if (!window.confirm(t('settings.plugins.webhookDeleteConfirm', { url: webhook.url }))) return;
+  const confirmed = await ask({
+    title: t('settings.plugins.webhookDeleteTitle'),
+    body: t('settings.plugins.webhookDeleteConfirm', { url: webhook.url }),
+    confirmLabel: t('settings.plugins.deleteWebhook'),
+    tone: 'danger',
+  });
+  if (!confirmed) return;
   try {
     await backendDeleteWebhook(webhook.id);
     webhooks.value = webhooks.value.filter((entry) => entry.id !== webhook.id);
@@ -545,7 +553,13 @@ async function removeKey(key: BackendPgpKey) {
   const question = key.key_type === 'private'
     ? t('settings.pgp.keyDeleteConfirmPrivate', { fingerprint })
     : t('settings.pgp.keyDeleteConfirmPublic', { fingerprint });
-  if (!window.confirm(question)) return;
+  const confirmed = await ask({
+    title: t('settings.pgp.keyDeleteTitle'),
+    body: question,
+    confirmLabel: t('common.delete'),
+    tone: 'danger',
+  });
+  if (!confirmed) return;
 
   deletingKeyId.value = key.id;
   statusText.value = '';

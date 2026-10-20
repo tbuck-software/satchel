@@ -225,6 +225,7 @@
     },
     "drafts": {
       "title": "Drafts",
+      "loadFailed": "Your drafts could not be loaded.",
       "newMail": "New email",
       "subtitle": {
         "nothing": "Nothing started",
@@ -554,6 +555,7 @@
     },
     "drafts": {
       "title": "Entwürfe",
+      "loadFailed": "Deine Entwürfe konnten nicht geladen werden.",
       "newMail": "Neue Mail",
       "subtitle": {
         "nothing": "Nichts angefangen",

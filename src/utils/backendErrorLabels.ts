@@ -25,6 +25,7 @@ export const BACKEND_ERROR_SOURCES = [
   'connection',
   'sync',
   'outbox',
+  'drafts',
 ] as const;
 
 export type BackendErrorSource = (typeof BACKEND_ERROR_SOURCES)[number];
@@ -37,6 +38,7 @@ const SOURCE_KEYS: Record<string, string> = {
   connection: 'errors.source.connection',
   sync: 'errors.source.sync',
   outbox: 'errors.source.outbox',
+  drafts: 'errors.source.drafts',
 };
 
 const UNKNOWN_SOURCE_KEY = 'errors.source.unknown';

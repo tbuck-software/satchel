@@ -9,6 +9,7 @@ import { useAccountsStore } from '@/stores/accounts';
 import { useMailboxesStore, type FolderTreeNode } from '@/stores/mailboxes';
 import { useThreadsStore } from '@/stores/threads';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 
 const props = defineProps<{
   open: boolean;
@@ -33,6 +34,7 @@ const mailboxes = useMailboxesStore();
 const threads = useThreadsStore();
 
 const toast = useToast();
+const { ask } = useConfirm();
 const panelRef = ref<HTMLElement | null>(null);
 const busy = ref(false);
 const creatingFor = ref<string | null>(null);
@@ -90,7 +92,12 @@ async function confirmRename(folderId: string) {
 
 async function removeFolder(folderId: string, label: string) {
   if (busy.value) return;
-  if (!window.confirm(t('nav.folderBrowser.confirmDelete', { name: label }))) return;
+  const confirmed = await ask({
+    title: t('nav.folderBrowser.confirmDelete', { name: label }),
+    confirmLabel: t('common.delete'),
+    tone: 'danger',
+  });
+  if (!confirmed) return;
   busy.value = true;
   try {
     await mailboxes.deleteFolder(folderId);

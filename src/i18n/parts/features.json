@@ -35,6 +35,9 @@
         "attendees": "Attendees",
         "edit": "Edit event",
         "delete": "Delete event",
+        "deleteConfirmRemote": "The event is also deleted from the calendar on the server. This cannot be undone.",
+        "deleteConfirmBody": "The event is removed from your calendar. This cannot be undone.",
+        "deleteConfirmTitle": "Delete this event?",
         "details": "Event details"
       },
       "rsvp": {
@@ -161,6 +164,7 @@
         "blockConfirm": "Really block {email}?",
         "delete": "Delete contact",
         "deleteConfirm": "Delete the stored contact for {email}? Notes and the pinned avatar go with it. The mail stays.",
+        "deleteTitle": "Delete this contact?",
         "deleteFailed": "The contact could not be deleted: {error}"
       }
     },
@@ -417,6 +421,9 @@
         "attendees": "Teilnehmer",
         "edit": "Termin bearbeiten",
         "delete": "Termin löschen",
+        "deleteConfirmRemote": "Der Termin wird auch im Kalender auf dem Server gelöscht. Das lässt sich nicht rückgängig machen.",
+        "deleteConfirmBody": "Der Termin wird aus deinem Kalender entfernt. Das lässt sich nicht rückgängig machen.",
+        "deleteConfirmTitle": "Diesen Termin löschen?",
         "details": "Termindetails"
       },
       "rsvp": {
@@ -543,6 +550,7 @@
         "blockConfirm": "{email} wirklich blockieren?",
         "delete": "Kontakt löschen",
         "deleteConfirm": "Gespeicherten Kontakt für {email} löschen? Notizen und das festgelegte Bild verschwinden mit. Die Mail bleibt.",
+        "deleteTitle": "Diesen Kontakt löschen?",
         "deleteFailed": "Der Kontakt konnte nicht gelöscht werden: {error}"
       }
     },

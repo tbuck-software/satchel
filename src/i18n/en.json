@@ -320,6 +320,9 @@
       "allDay": "All day",
       "attendees": "Attendees",
       "delete": "Delete event",
+      "deleteConfirmBody": "The event is removed from your calendar. This cannot be undone.",
+      "deleteConfirmRemote": "The event is also deleted from the calendar on the server. This cannot be undone.",
+      "deleteConfirmTitle": "Delete this event?",
       "details": "Event details",
       "edit": "Edit event",
       "end": "End",
@@ -790,6 +793,7 @@
       "delete": "Delete contact",
       "deleteConfirm": "Delete the stored contact for {email}? Notes and the pinned avatar go with it. The mail stays.",
       "deleteFailed": "The contact could not be deleted: {error}",
+      "deleteTitle": "Delete this contact?",
       "label": "Person details",
       "messages": "{count} message | {count} messages",
       "noSubject": "(no subject)",
@@ -848,6 +852,7 @@
       "scheduled": "Scheduled"
     },
     "lastSaved": "Last saved: {time}",
+    "loadFailed": "Your drafts could not be loaded.",
     "newMail": "New email",
     "noContent": "Nothing written yet.",
     "noRecipients": "Draft, no recipients",
@@ -882,6 +887,7 @@
     "source": {
       "accounts": "Your accounts could not be loaded",
       "connection": "Satchel cannot reach its backend",
+      "drafts": "Your drafts could not be loaded",
       "mailboxes": "Your mailboxes could not be loaded",
       "messages": "The messages could not be loaded",
       "outbox": "The outbox could not be loaded",
@@ -1079,7 +1085,9 @@
         "open": "Invitation",
         "tentative": "Maybe"
       },
+      "unboundedSeriesAction": "Send reply",
       "unboundedSeriesConfirm": "This invitation covers the whole series and has no end date. Satchel sends exactly one reply for the unbounded series. Continue?",
+      "unboundedSeriesTitle": "Reply to the whole series?",
       "unboundedSeriesWarning": "This series has no end date. A reply applies to the entire unbounded series and is sent as exactly one calendar response.",
       "wholeSeriesNote": "Your reply applies to the whole series."
     },
@@ -1420,6 +1428,7 @@
       "manual": "Custom",
       "nextMonth": "Next month",
       "nextWeek": "Next week",
+      "pastDate": "Pick a time in the future.",
       "recent": "Recently used",
       "title": "Snooze",
       "today14": "Today 14:00",
@@ -1438,6 +1447,7 @@
     "blockAndMoveConfirm": "Block {email} and move to abuse/spam?",
     "blockConfirm": "Block sender {email}? Existing and future messages are removed from the inbox and moved to abuse or spam.",
     "blockFailed": "Could not block {email}. The sender is still in the review list.",
+    "blockTitle": "Block this sender?",
     "bulk": {
       "acceptAll": "Allow all",
       "acceptExisting": "Adopt {count} existing sender | Adopt {count} existing senders",
@@ -1900,6 +1910,8 @@
       "restore": "Restore…",
       "restoreCancelled": "The staged restore was discarded.",
       "restoreConfirm": "Restore backup “{name}” on the next start? The current database will be replaced but kept as a copy.",
+      "restoreConfirmAction": "Restore on next start",
+      "restoreConfirmTitle": "Restore this backup?",
       "restorePassphrase": "Passphrase of the backup",
       "restorePassphraseHint": "This backup carries a wrapped master key.",
       "restorePending": "A restore is staged and will be applied on the next start.",
@@ -2268,6 +2280,7 @@
       "keyDeleteConfirmPrivate": "Delete the private key {fingerprint}? This cannot be undone, and mail you have already received that was encrypted for this key can never be opened again.",
       "keyDeleteConfirmPublic": "Delete the public key {fingerprint}? Until you import it again you cannot encrypt mail for this contact.",
       "keyDeleteFailed": "Delete failed: {error}",
+      "keyDeleteTitle": "Delete this key?",
       "keyDeleted": "Deleted key {fingerprint}.",
       "keyGenerated": "Generated and imported key {fingerprint}.",
       "keyGenerationFailed": "Key generation failed: {error}",
@@ -2346,6 +2359,7 @@
       "uiSlots": "UI slots: {list}",
       "webhookDeleteConfirm": "Delete the webhook to {url}? Satchel will stop sending message metadata there.",
       "webhookDeleteFailed": "Could not delete webhook: {error}",
+      "webhookDeleteTitle": "Delete this webhook?",
       "webhookDeleted": "Webhook to {url} deleted.",
       "webhookEvents": "Events",
       "webhookNoEvents": "no events",
@@ -2667,7 +2681,7 @@
       "pemPlaceholder": "-----BEGIN CERTIFICATE-----",
       "pkcs12ImportFailed": "PKCS#12 import failed: {error}",
       "pkcs12Imported": "PKCS#12 imported.",
-      "pkcs12Prompt": "PKCS#12 passphrase:",
+      "pkcs12Prompt": "PKCS#12 passphrase",
       "selfSignedCreated": "Self-signed certificate created.",
       "selfSignedHint": "For testing and internal use — other clients will not trust it automatically.",
       "selfSignedTitle": "Generate self-signed",
@@ -2676,7 +2690,8 @@
       "typePublic": "Public",
       "unlock": "Unlock",
       "unlockFailed": "Unlocking failed: {error}",
-      "unlockPrompt": "S/MIME passphrase:",
+      "unlockPrompt": "S/MIME passphrase",
+      "unlockTitle": "Unlock certificate",
       "unlockedBadge": "Unlocked",
       "unlockedStatus": "Certificate unlocked."
     },
@@ -2710,6 +2725,7 @@
       "polled": "{count} new article imported. | {count} new articles imported.",
       "pushSourceUnsupported": "Push source without an endpoint — it is no longer populated",
       "removeConfirm": "Disable this source and its local view?",
+      "removeConfirmAction": "Disable source",
       "title": "Feeds",
       "tokenOnce": "Copy it now – this token is shown only once.",
       "type": "Type",
@@ -3114,11 +3130,11 @@
       "title": "New senders"
     },
     "organize": {
-      "assigneePrompt": "Assignee (name or email):",
+      "assigneePrompt": "Assignee (name or email)",
       "saveFailed": "Organisation could not be saved: {error}",
       "saved": "Organisation saved.",
-      "sharingPrompt": "Shared with (email addresses, comma separated):",
-      "tagsPrompt": "Tags (comma separated):"
+      "sharingPrompt": "Shared with (email addresses, comma separated)",
+      "tagsPrompt": "Tags (comma separated)"
     },
     "print": {
       "failed": "Printing could not be started."

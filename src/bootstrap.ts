@@ -468,9 +468,14 @@ export function useAppBootstrap(): void {
     if (!backendSupportsNativeCommands() || connectionStore.retrying) return;
     connectionStore.retrying = true;
     try {
-      // The outbox reports into the same banner, so the retry has to reach it —
-      // otherwise a failed `list_outbox` leaves a banner nothing can clear.
-      await Promise.all([loadCoreStores(), outboxStore.load(), connectionStore.refresh()]);
+      // The outbox and the drafts report into the same banner, so the retry has
+      // to reach them — otherwise a failed list leaves a banner nothing can clear.
+      await Promise.all([
+        loadCoreStores(),
+        outboxStore.load(),
+        connectionStore.backendErrorFor('drafts') ? draftsStore.load() : undefined,
+        connectionStore.refresh(),
+      ]);
     } finally {
       connectionStore.retrying = false;
     }

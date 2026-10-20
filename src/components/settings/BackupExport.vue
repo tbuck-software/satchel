@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useConfirm } from '@/composables/useConfirm';
 import { useAccountsStore } from '@/stores/accounts';
 import {
   backendChooseDirectory,
@@ -29,6 +30,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
 
 const { locale, t } = useI18n();
+const { ask } = useConfirm();
 const accounts = useAccountsStore();
 const toast = useToast();
 const accountId = ref<string>('');
@@ -230,9 +232,12 @@ async function showBackups() {
 }
 
 async function restoreBackup(entry: BackendBackupEntry) {
-  const ok = window.confirm(
-    t('settings.backup.restoreConfirm', { name: entry.name }),
-  );
+  const ok = await ask({
+    title: t('settings.backup.restoreConfirmTitle'),
+    body: t('settings.backup.restoreConfirm', { name: entry.name }),
+    confirmLabel: t('settings.backup.restoreConfirmAction'),
+    tone: 'danger',
+  });
   if (!ok) return;
   busy.value = true;
   backupStatus.value = '';
@@ -265,7 +270,11 @@ async function cancelRestore() {
 
 async function pruneOldBackups() {
   if (!backupDir.value) return;
-  const ok = window.confirm(t('settings.backup.pruneConfirm', { count: BACKUPS_TO_KEEP }));
+  const ok = await ask({
+    title: t('settings.backup.pruneConfirm', { count: BACKUPS_TO_KEEP }),
+    confirmLabel: t('common.delete'),
+    tone: 'danger',
+  });
   if (!ok) return;
   busy.value = true;
   try {

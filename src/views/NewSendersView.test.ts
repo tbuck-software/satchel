@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
 import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NewSenderGroup, NewSenderStack } from '@/stores/threads';
+import type { ConfirmRequest } from '@/composables/useConfirm';
+import { answerConfirms, type DialogStub } from '@/test/dialogs';
 
 const harness = vi.hoisted(() => ({
   push: vi.fn(),
-  confirm: vi.fn(),
   acceptSender: vi.fn(),
   acceptSenders: vi.fn(),
   acceptDomain: vi.fn(),
@@ -106,9 +107,13 @@ function render() {
 }
 
 describe('NewSendersView', () => {
+  let confirms: DialogStub<ConfirmRequest, boolean>;
+
+  afterEach(() => confirms.stop());
+
   beforeEach(() => {
     harness.push.mockReset();
-    harness.confirm.mockReset().mockReturnValue(false);
+    confirms = answerConfirms(false);
     harness.acceptSender.mockReset();
     harness.acceptSenders.mockReset();
     harness.acceptDomain.mockReset();
@@ -120,10 +125,6 @@ describe('NewSendersView', () => {
     harness.selectThread.mockReset();
     harness.settings.senderReviewStartedAt = null;
     harness.threads.newSenderStack = null;
-    Object.defineProperty(window, 'confirm', {
-      configurable: true,
-      value: harness.confirm,
-    });
   });
 
   it('offers sender allow for personal mailboxes without offering domain allow', async () => {
@@ -210,12 +211,17 @@ describe('NewSendersView', () => {
     const blockButton = wrapper.get('article .actions button:last-child');
     await blockButton.trigger('click');
 
-    expect(harness.confirm).toHaveBeenCalledTimes(1);
+    await flushPromises();
+    expect(confirms.asked).toHaveBeenCalledTimes(1);
+    expect(confirms.asked.mock.calls[0]![0]).toMatchObject({
+      body: expect.stringContaining('blocked@example.org'),
+      tone: 'danger',
+    });
     expect(harness.setDismissedNewSender).not.toHaveBeenCalled();
     expect(harness.blockSender).not.toHaveBeenCalled();
     expect(harness.load).not.toHaveBeenCalled();
 
-    harness.confirm.mockReturnValue(true);
+    confirms.reply(true);
     await blockButton.trigger('click');
     await flushPromises();
 
@@ -238,7 +244,7 @@ describe('NewSendersView', () => {
   it('keeps the sender in the review list when the block fails', async () => {
     const sender = makeSender({ senderEmail: 'blocked@example.org', accountId: 'account-9' });
     harness.threads.newSenderStack = makeStack([sender]);
-    harness.confirm.mockReturnValue(true);
+    confirms.reply(true);
     harness.blockSender.mockRejectedValue(new Error('rules table locked'));
 
     const wrapper = render();

@@ -2,8 +2,10 @@
 
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useUiStore } from '@/stores/ui';
+import { answerConfirms, type DialogStub } from '@/test/dialogs';
+import type { ConfirmRequest } from '@/composables/useConfirm';
 
 const harness = vi.hoisted(() => ({ respond: vi.fn() }));
 
@@ -62,15 +64,19 @@ function action(wrapper: ReturnType<typeof render>, label: string) {
 }
 
 describe('recurring invitation safety', () => {
+  let confirms: DialogStub<ConfirmRequest, boolean>;
+
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     harness.respond.mockResolvedValue(undefined);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirms = answerConfirms(true);
   });
 
+  afterEach(() => confirms.stop());
+
   it('identifies an unbounded series and requires explicit confirmation', async () => {
-    vi.mocked(window.confirm).mockReturnValue(false);
+    confirms.reply(false);
     const wrapper = render();
 
     expect(wrapper.text()).toContain('This series has no end date');
@@ -78,8 +84,21 @@ describe('recurring invitation safety', () => {
 
     await action(wrapper, 'Accept series').trigger('click');
 
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('whole series'));
+    expect(confirms.asked).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.stringContaining('whole series'),
+    }));
+    await flushPromises();
     expect(harness.respond).not.toHaveBeenCalled();
+  });
+
+  it('sends the reply for an unbounded series once it is confirmed', async () => {
+    const wrapper = render();
+
+    await action(wrapper, 'Accept series').trigger('click');
+    await flushPromises();
+
+    expect(confirms.asked).toHaveBeenCalledOnce();
+    expect(harness.respond).toHaveBeenCalledWith('invite-1', 'accepted');
   });
 
   it('does not warn for a bounded series and prevents duplicate submission', async () => {
@@ -92,7 +111,7 @@ describe('recurring invitation safety', () => {
     await wrapper.vm.$nextTick();
     await button.trigger('click');
 
-    expect(window.confirm).not.toHaveBeenCalled();
+    expect(confirms.asked).not.toHaveBeenCalled();
     expect(harness.respond).toHaveBeenCalledTimes(1);
     expect(button.attributes()).toHaveProperty('disabled');
 

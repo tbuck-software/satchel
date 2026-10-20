@@ -1016,8 +1016,8 @@ input::placeholder { color: color-mix(in srgb, var(--text-tertiary) 72%, transpa
 .actions-row { display: flex; align-items: center; gap: 15px; margin-top: 12px; }
 .actions-row .primary-action { margin-left: auto; }
 .actions-row.end { justify-content: flex-end; }
-.inline-error { margin: 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent-red) 24%, transparent); border-radius: var(--radius-sm); color: color-mix(in srgb, var(--accent-red) 86%, var(--text-primary)); background: color-mix(in srgb, var(--accent-red) 7%, transparent); font-size: var(--font-size-3xs); line-height: 1.45; }
-.error-detail { margin: 6px 0 0; font-size: var(--font-size-3xs); color: var(--text-tertiary); }
+.inline-error { margin: 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent-red) 24%, transparent); border-radius: var(--radius-sm); color: color-mix(in srgb, var(--accent-red) 86%, var(--text-primary)); background: color-mix(in srgb, var(--accent-red) 7%, transparent); font-size: var(--font-size-sm); line-height: 1.45; }
+.error-detail { margin: 6px 0 0; font-size: var(--font-size-xs); color: var(--text-tertiary); }
 .error-detail summary { cursor: pointer; }
 .error-detail pre { margin: 6px 0 0; padding: var(--space-sm); border-radius: var(--radius-sm); background: var(--bg-raised); overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 

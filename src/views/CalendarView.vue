@@ -5,6 +5,7 @@ import { useInvitesStore } from '@/stores/invites';
 import { useAccountsStore } from '@/stores/accounts';
 import { useCalendarUiStore } from '@/stores/calendarUi';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import {
   addDays,
   addMonths,
@@ -45,6 +46,7 @@ const invites = useInvitesStore();
 const accounts = useAccountsStore();
 const calendarUi = useCalendarUiStore();
 const toast = useToast();
+const { ask } = useConfirm();
 
 const viewMode = computed(() => calendarUi.viewMode);
 const anchor = computed(() => calendarUi.anchor);
@@ -220,6 +222,23 @@ async function respondUndated(inviteId: string, response: 'accepted' | 'declined
 }
 
 async function removeItem(item: CalendarItem) {
+  // The details card floats above every modal, so it steps aside for the
+  // question and comes back if the answer is no.
+  const shown = selected.value;
+  selected.value = null;
+  const confirmed = await ask({
+    title: t('calendar.event.deleteConfirmTitle'),
+    body: item.source === 'caldav'
+      ? t('calendar.event.deleteConfirmRemote')
+      : t('calendar.event.deleteConfirmBody'),
+    detail: item.title,
+    confirmLabel: t('calendar.event.delete'),
+    tone: 'danger',
+  });
+  if (!confirmed) {
+    selected.value = shown;
+    return;
+  }
   try {
     await invites.deleteEvent(item.id);
     selected.value = null;

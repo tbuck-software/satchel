@@ -118,11 +118,11 @@
         "title": "New senders"
       },
       "organize": {
-        "assigneePrompt": "Assignee (name or email):",
+        "assigneePrompt": "Assignee (name or email)",
         "saveFailed": "Organisation could not be saved: {error}",
         "saved": "Organisation saved.",
-        "sharingPrompt": "Shared with (email addresses, comma separated):",
-        "tagsPrompt": "Tags (comma separated):"
+        "sharingPrompt": "Shared with (email addresses, comma separated)",
+        "tagsPrompt": "Tags (comma separated)"
       },
       "print": {
         "failed": "Printing could not be started."
@@ -343,11 +343,11 @@
         "title": "Neue Absender"
       },
       "organize": {
-        "assigneePrompt": "Zuweisung (Name oder E-Mail):",
+        "assigneePrompt": "Zuweisung (Name oder E-Mail)",
         "saveFailed": "Organisation konnte nicht gespeichert werden: {error}",
         "saved": "Organisation gespeichert.",
-        "sharingPrompt": "Freigaben (E-Mail-Adressen, durch Kommas getrennt):",
-        "tagsPrompt": "Tags (durch Kommas getrennt):"
+        "sharingPrompt": "Freigaben (E-Mail-Adressen, durch Kommas getrennt)",
+        "tagsPrompt": "Tags (durch Kommas getrennt)"
       },
       "print": {
         "failed": "Drucken konnte nicht gestartet werden."

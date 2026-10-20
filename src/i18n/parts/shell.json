@@ -233,6 +233,7 @@
       "smartFolders": "Smart folders",
       "snooze": {
         "manual": "Custom",
+        "pastDate": "Pick a time in the future.",
         "nextMonth": "Next month",
         "nextWeek": "Next week",
         "recent": "Recently used",
@@ -682,6 +683,7 @@
       "smartFolders": "Smart Folders",
       "snooze": {
         "manual": "Manuell",
+        "pastDate": "Wähle einen Zeitpunkt in der Zukunft.",
         "nextMonth": "Nächsten Monat",
         "nextWeek": "Nächste Woche",
         "recent": "Zuletzt genutzt",

@@ -19,6 +19,7 @@
       "source": {
         "accounts": "Your accounts could not be loaded",
         "connection": "Satchel cannot reach its backend",
+        "drafts": "Your drafts could not be loaded",
         "mailboxes": "Your mailboxes could not be loaded",
         "messages": "The messages could not be loaded",
         "outbox": "The outbox could not be loaded",
@@ -112,6 +113,7 @@
       "blockAndMoveConfirm": "Block {email} and move to abuse/spam?",
       "blockConfirm": "Block sender {email}? Existing and future messages are removed from the inbox and moved to abuse or spam.",
       "blockFailed": "Could not block {email}. The sender is still in the review list.",
+      "blockTitle": "Block this sender?",
       "bulk": {
         "acceptAll": "Allow all",
         "acceptExisting": "Adopt {count} existing sender | Adopt {count} existing senders",
@@ -306,6 +308,7 @@
       "source": {
         "accounts": "Deine Konten konnten nicht geladen werden",
         "connection": "Satchel erreicht sein Backend nicht",
+        "drafts": "Deine Entwürfe konnten nicht geladen werden",
         "mailboxes": "Deine Postfächer konnten nicht geladen werden",
         "messages": "Die Nachrichten konnten nicht geladen werden",
         "outbox": "Der Postausgang konnte nicht geladen werden",
@@ -399,6 +402,7 @@
       "blockAndMoveConfirm": "{email} blockieren und nach Abuse/Spam verschieben?",
       "blockConfirm": "Absender {email} blockieren? Bestehende und zukünftige Mails werden aus der Inbox entfernt und nach Abuse oder Spam verschoben.",
       "blockFailed": "{email} konnte nicht blockiert werden. Der Absender bleibt in der Prüfliste.",
+      "blockTitle": "Diesen Absender blockieren?",
       "bulk": {
         "acceptAll": "Alle zulassen",
         "acceptExisting": "{count} bestehenden Absender übernehmen | {count} bestehende Absender übernehmen",
