@@ -4,7 +4,6 @@ import { useThreadsStore } from '@/stores/threads';
 import { useAccountsStore } from '@/stores/accounts';
 import { useComposerStore } from '@/stores/composer';
 import { useSettingsStore } from '@/stores/settings';
-import { useConnectionStore } from '@/stores/connection';
 import { useTopicsStore } from '@/stores/topics';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { useMessageLinks } from '@/composables/useMessageLinks';
@@ -12,8 +11,9 @@ import { useShortcutHints, type ShortcutHint } from '@/composables/useShortcutHi
 import { activeThreadReaderCommands } from '@/composables/useThreadReaderCommands';
 import { useUndoFab } from '@/composables/useUndoFab';
 import { useToast } from '@/composables/useToast';
+import { useMailSync } from '@/composables/useMailSync';
 import { useUiStore } from '@/stores/ui';
-import { backendRunImapSync, backendStartOauthFlow } from '@/services/backend';
+import { backendStartOauthFlow } from '@/services/backend';
 import { transportErrorCause } from '@/utils/transportLabels';
 import { t } from '@/i18n/runtime';
 import { availableSettingsSections } from '@/components/settings/settingsSections';
@@ -40,11 +40,11 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
   const accounts = useAccountsStore();
   const composer = useComposerStore();
   const settings = useSettingsStore();
-  const connection = useConnectionStore();
   const topics = useTopicsStore();
   const threadActions = useThreadActions();
   const messageLinks = useMessageLinks();
   const toast = useToast();
+  const { syncMail } = useMailSync();
   const ui = useUiStore();
   const { hint } = useShortcutHints();
   const undoFab = useUndoFab();
@@ -343,17 +343,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       title: t('commands.syncMail'),
       context: 'app',
       keywords: t('commands.keywords.syncMail'),
-      run: async () => {
-        try {
-          // The backfill counts live only in this reply — hand them to the
-          // store so the inbox can say what it is waiting for.
-          connection.applySyncSummary(await backendRunImapSync());
-          toast.success(t('commands.syncDone'));
-        } catch (error) {
-          const cause = transportErrorCause(error);
-          toast.error(cause ? t('commands.syncFailedCause', { cause }) : t('commands.syncFailed'));
-        }
-      },
+      run: syncMail,
     },
     {
       id: 'oauth:gmail',

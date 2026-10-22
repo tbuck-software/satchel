@@ -19,7 +19,7 @@ import NavItem from '@/components/ui/NavItem.vue';
 import PluginSlotHost from '@/components/plugins/PluginSlotHost.vue';
 import MailboxTree from './MailboxTree.vue';
 import SidebarUpdateAction from './SidebarUpdateAction.vue';
-import SyncStatusLine from './SyncStatusLine.vue';
+import SyncButton from './SyncButton.vue';
 
 // Route-specific sidebars used to pull calendar grids and the complete
 // settings navigation into the Inbox bundle even though their v-if was false.
@@ -194,6 +194,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
         data-tauri-drag-region
       />
       <h1 class="sidebar-brand__name" data-tauri-drag-region>Satchel</h1>
+      <SyncButton class="sidebar-brand__sync" />
     </header>
 
     <SidebarMailTools @compose="onComposeClick" />
@@ -350,7 +351,6 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
           </svg>
         </IconButton>
       </div>
-      <SyncStatusLine hide-idle />
     </footer>
 
     <FolderBrowserPanel
@@ -389,6 +389,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
 }
 
 .sidebar-brand__name {
+  min-width: 0;
   overflow: hidden;
   color: var(--text-primary);
   font-size: var(--font-size-lg);
@@ -396,6 +397,10 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
   text-overflow: ellipsis;
   white-space: nowrap;
   user-select: none;
+}
+
+.sidebar-brand__sync {
+  margin-left: auto;
 }
 
 /* The native host already draws the traffic lights. Share their row and keep
