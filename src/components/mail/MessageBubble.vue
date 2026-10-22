@@ -80,6 +80,7 @@ const messageActionsOpen = ref(false);
 const pgpDismissed = ref(false);
 const smimeDismissed = ref(false);
 const {
+  pgpBusy,
   pgpStatus,
   smimeStatus,
   passphraseRequest,
@@ -304,7 +305,7 @@ const showPgpCard = computed(() => {
     return false;
   }
 
-  if (state === 'encrypted_no_key' || state === 'key_available_locked' || state === 'decrypted') {
+  if (state === 'key_available_locked' || state === 'decrypted') {
     return false;
   }
 
@@ -323,8 +324,8 @@ watch(
   },
 );
 
-function openKeyImport() {
-  ui.openSettings();
+function openKeyImport(section: 'pgp' | 'smime') {
+  ui.openSettings(section);
 }
 
 function dismissPgpCard() {
@@ -336,7 +337,7 @@ function dismissSmimeCard() {
 }
 
 async function handleUnlock() {
-  await unlockPgp(props.message.threadId);
+  await unlockPgp(props.message.threadId, props.message.id);
 }
 
 async function handleSmimeUnlock() {
@@ -516,11 +517,12 @@ function openSenderDetails() {
       :signer-name="props.message.pgp?.signerName"
       :signer-fingerprint="props.message.pgp?.signerFingerprint"
       :from-address="props.message.from.email"
-      @import-key="openKeyImport"
+      @import-key="openKeyImport('pgp')"
       @unlock="handleUnlock"
+      @retry="messagesStore.reloadPgpMessages(props.message.threadId)"
       @dismiss="dismissPgpCard"
     />
-    <p v-if="pgpStatus" class="mt-1 font-mono text-xs text-accent-green">{{ pgpStatus }}</p>
+    <p v-if="pgpStatus" role="status" class="mt-1 text-xs text-secondary">{{ pgpStatus }}</p>
 
     <SmimeStatusCard
       v-if="showSmimeCard && smimeState"
@@ -530,7 +532,7 @@ function openSenderDetails() {
       :signer-email="props.message.smime?.signerEmail"
       :signer-cn="props.message.smime?.signerCn"
       :from-address="props.message.from.email"
-      @import-cert="openKeyImport"
+      @import-cert="openKeyImport('smime')"
       @unlock="handleSmimeUnlock"
       @dismiss="dismissSmimeCard"
     />
@@ -592,6 +594,8 @@ function openSenderDetails() {
         :html="props.message.bodyHtml"
         :text="visibleBodyText"
         :pgp-state="pgpState"
+        :can-decrypt="true"
+        :decrypting="pgpBusy"
         :sender-email="props.message.from?.email"
         :trusted-dmarc-pass="props.message.authDmarc === 'pass'"
         :attachments="props.message.attachments"

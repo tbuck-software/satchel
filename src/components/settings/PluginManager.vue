@@ -34,10 +34,13 @@ import AppButton from '@/components/ui/AppButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
 import TimeAgo from '@/components/common/TimeAgo.vue';
+import AppBanner from '@/components/ui/AppBanner.vue';
+import { useMessagesStore } from '@/stores/messages';
 
 const { t } = useI18n();
 const { ask } = useConfirm();
 const toast = useToast();
+const messages = useMessagesStore();
 
 interface PluginView {
   id: string;
@@ -150,6 +153,8 @@ function formatFingerprint(raw: string): string {
 }
 
 const pgpPlugin = computed(() => plugins.value.find((plugin) => plugin.id === pgpPluginId) ?? null);
+const pgpMessageAccessBlocked = computed(() => pgpPlugin.value?.capabilities.includes('read_threads')
+  && !hasGrant(pgpPlugin.value, 'read_threads'));
 const additionalPlugins = computed(() =>
   plugins.value.filter((plugin) => plugin.id !== pgpPluginId),
 );
@@ -178,6 +183,7 @@ async function toggleCapability(plugin: PluginView, capability: string) {
       granted,
     });
     await loadPlugins();
+    if (plugin.id === pgpPluginId) await messages.reloadPgpMessages();
   } catch (error) {
     statusText.value = t('settings.plugins.permissionUpdateFailed', {
       error: (error as Error).message ?? String(error),
@@ -189,6 +195,7 @@ async function setPluginEnabled(plugin: PluginView, enabled: boolean) {
   try {
     await backendSetPluginEnabled({ pluginId: plugin.id, enabled });
     await loadPlugins();
+    if (plugin.id === pgpPluginId) await messages.reloadPgpMessages();
   } catch (error) {
     statusText.value = t('settings.plugins.enableFailed', {
       error: (error as Error).message ?? String(error),
@@ -201,9 +208,9 @@ async function loadPlugins() {
   try {
     const rows = await backendListPlugins();
     plugins.value = rows.map(toViewModel);
-    pluginMetrics.value = await backendListPluginMetrics();
-    pluginAudit.value = (await backendListPluginAuditLog()).slice(-20).reverse();
-    webhooks.value = await backendListWebhooks();
+    pluginMetrics.value = showPlugins.value ? await backendListPluginMetrics() : [];
+    pluginAudit.value = showPlugins.value ? (await backendListPluginAuditLog()).slice(-20).reverse() : [];
+    webhooks.value = showPlugins.value ? await backendListWebhooks() : [];
   } catch {
     plugins.value = [];
     pluginMetrics.value = [];
@@ -413,6 +420,7 @@ async function importBundle(rawBundle: string, labelPrefix?: string) {
 
     if (result.imported.length > 0) {
       resetImportFields();
+      await messages.reloadPgpMessages();
     }
   } catch (error) {
     statusText.value = t('settings.pgp.importFailed', {
@@ -598,6 +606,7 @@ async function unlockSingleKey(key: BackendPgpKey, passphrase?: string): Promise
       );
     }
     void loadKeys();
+    await messages.reloadPgpMessages();
     statusText.value = t('settings.pgp.unlockSuccess', result.unlocked);
     unlockEditorKeyId.value = null;
     unlockPassphrase.value = '';
@@ -714,7 +723,7 @@ onMounted(() => {
       {{ $t('settings.pgp.engineUnavailableBody') }}
     </p>
 
-    <p v-if="showPgp && pgpPlugin" class="pgp-scope-note">
+    <p v-if="showPgp && showPlugins && pgpPlugin" class="pgp-scope-note">
       {{ $t('settings.pgp.scopeNote') }}
     </p>
 
@@ -738,11 +747,15 @@ onMounted(() => {
         />
       </header>
       <p v-if="pgpPlugin.disabledBy === 'timeouts'" class="plugin-error">{{ $t('settings.plugins.disabledByTimeouts') }}</p>
-      <div class="plugin-contract">
-        <span>API {{ pgpPlugin.apiVersion }}</span>
-        <span>{{ pgpPlugin.trust.replace('_', ' ') }}</span>
-        <span>{{ pgpPlugin.capabilities.join(', ') || $t('settings.plugins.noCapabilities') }}</span>
-      </div>
+      <AppBanner
+        v-if="pgpMessageAccessBlocked"
+        :title="$t('settings.pgp.messageAccessBlocked')"
+      >
+        <p class="pgp-access-description">{{ $t('settings.pgp.messageAccessBlockedDescription') }}</p>
+        <AppButton size="sm" @click="toggleCapability(pgpPlugin, 'read_threads')">
+          {{ $t('settings.pgp.allowMessageAccess') }}
+        </AppButton>
+      </AppBanner>
       <div class="permission-grid">
         <ToggleSwitch
           v-for="capability in pgpPlugin.capabilities"
@@ -751,7 +764,7 @@ onMounted(() => {
           :model-value="hasGrant(pgpPlugin, capability)"
           @update:model-value="toggleCapability(pgpPlugin, capability)"
         >
-          {{ capability }}
+          {{ capability === 'read_threads' ? $t('settings.pgp.messageAccess') : capability }}
         </ToggleSwitch>
       </div>
       <span v-if="unenforcedCapabilities(pgpPlugin).length" class="plugin-meta">
@@ -760,144 +773,10 @@ onMounted(() => {
 
       <section class="keys">
         <header class="keys-header">
-          <h4>{{ $t('settings.pgp.importKeys') }}</h4>
+          <h4>{{ $t('settings.pgp.storedKeysTitle') }}</h4>
           <AppButton :disabled="loadingKeys || importingBundle" @click="loadKeys">
             {{ loadingKeys ? $t('common.loading') : $t('common.refresh') }}
           </AppButton>
-        </header>
-
-        <div
-          class="dropzone"
-          :class="{ active: dragActive, loaded: !!pendingImportFileName }"
-          @dragenter="onDragEnter"
-          @dragover="onDragOver"
-          @dragleave="onDragLeave"
-          @drop="onDrop"
-        >
-          <p v-if="dragActive" class="dropzone-title">
-            {{ $t('settings.pgp.dropRelease') }}
-          </p>
-          <p v-else-if="pendingImportFileName" class="dropzone-title">
-            {{ $t('settings.pgp.dropLoaded', { name: pendingImportFileName }) }}
-          </p>
-          <p v-else class="dropzone-title">
-            {{ $t('settings.pgp.dropHint') }}
-          </p>
-          <AppButton @click="openFilePicker">{{ $t('settings.pgp.chooseFile') }}</AppButton>
-          <input
-            ref="fileInput"
-            class="hidden-input"
-            type="file"
-            accept=".asc,.txt,text/plain,application/pgp-keys"
-            @change="onFilePicked"
-          />
-        </div>
-
-        <div class="field-grid">
-          <label class="field">
-            <span class="field-label">{{ $t('settings.pgp.labelPrefix') }}</span>
-            <input v-model="importLabelPrefix" :placeholder="$t('settings.pgp.labelPrefixPlaceholder')" />
-          </label>
-          <label class="field">
-            <span class="field-label">{{ $t('settings.pgp.passphraseOptional') }}</span>
-            <input v-model="importPassphrase" type="password" :placeholder="$t('settings.pgp.importPassphrasePlaceholder')" />
-          </label>
-        </div>
-
-        <label class="field">
-          <span class="field-label">{{ $t('settings.pgp.keyMaterial') }}</span>
-          <div class="secure-material">
-            <p v-if="importArmored.trim()" class="secure-material-info">
-              {{ $t('settings.pgp.keyMaterialLoaded') }}
-            </p>
-            <p v-else class="secure-material-info">
-              {{ $t('settings.pgp.keyMaterialEmpty') }}
-            </p>
-            <div class="secure-material-actions">
-              <AppButton @click="showImportArmored = !showImportArmored">
-                {{ showImportArmored ? $t('settings.pgp.hideManualInput') : $t('settings.pgp.pasteManually') }}
-              </AppButton>
-              <AppButton v-if="importArmored.trim()" variant="ghost" @click="clearImportMaterial">
-                {{ $t('settings.pgp.clearMaterial') }}
-              </AppButton>
-            </div>
-          </div>
-          <textarea
-            v-if="showImportArmored"
-            v-model="importArmored"
-            rows="7"
-            :placeholder="$t('settings.pgp.keyMaterialPlaceholder')"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            spellcheck="false"
-          />
-        </label>
-
-        <div class="key-actions">
-          <AppButton
-            :disabled="validatingImportPassphrase || importingBundle"
-            @click="verifyImportPassphrase(false)"
-          >
-            {{ validatingImportPassphrase ? $t('settings.pgp.checking') : $t('settings.pgp.verifyPassphrase') }}
-          </AppButton>
-          <AppButton variant="primary" :disabled="importingBundle" @click="importFromTextarea">
-            {{ importingBundle ? $t('settings.pgp.importing') : $t('settings.pgp.importKeys') }}
-          </AppButton>
-        </div>
-        <p v-if="importValidationText" class="inline-status" :class="importValidationTone">
-          {{ importValidationText }}
-        </p>
-      </section>
-
-        <section class="keys">
-          <header class="keys-header">
-            <h4>{{ $t('settings.pgp.generateTitle') }}</h4>
-          </header>
-          <p class="keys-desc">{{ $t('settings.pgp.generateDescription') }}</p>
-
-        <div class="field-grid">
-          <label class="field">
-            <span class="field-label">{{ $t('common.name') }}</span>
-            <input v-model="generateName" :placeholder="$t('settings.pgp.generateNamePlaceholder')" />
-          </label>
-          <label class="field">
-            <span class="field-label">{{ $t('common.email') }}</span>
-            <input v-model="generateEmail" type="email" :placeholder="$t('settings.pgp.generateEmailPlaceholder')" />
-          </label>
-        </div>
-
-        <div class="field-grid">
-          <label class="field">
-            <span class="field-label">{{ $t('settings.pgp.labelOptional') }}</span>
-            <input v-model="generateLabel" :placeholder="$t('settings.pgp.generateLabelPlaceholder')" />
-          </label>
-          <label class="field">
-            <span class="field-label">{{ $t('settings.pgp.passphraseOptional') }}</span>
-            <input v-model="generatePassphrase" type="password" :placeholder="$t('settings.pgp.generatePassphrasePlaceholder')" />
-          </label>
-        </div>
-
-        <div class="key-actions">
-          <AppButton variant="primary" :disabled="generatingKey" @click="generateKey">
-            {{ generatingKey ? $t('settings.pgp.generating') : $t('settings.pgp.generateTitle') }}
-          </AppButton>
-        </div>
-
-        <label v-if="generatedPublicKey" class="field">
-          <span class="field-label">{{ generatedFingerprint
-            ? $t('settings.pgp.generatedPublicKeyWithFingerprint', { fingerprint: generatedFingerprint })
-            : $t('settings.pgp.generatedPublicKey') }}</span>
-          <textarea :value="generatedPublicKey" rows="6" readonly />
-          <div class="key-actions">
-            <AppButton @click="copyPublicKey">{{ $t('settings.pgp.copyPublicKey') }}</AppButton>
-          </div>
-        </label>
-      </section>
-
-      <section class="keys">
-        <header class="keys-header">
-          <h4>{{ $t('settings.pgp.storedKeysTitle') }}</h4>
         </header>
 
         <p v-if="loadingKeys" class="empty">{{ $t('settings.pgp.keysLoading') }}</p>
@@ -971,6 +850,140 @@ onMounted(() => {
           </article>
         </div>
       </section>
+
+      <details class="keys pgp-key-task" :open="keys.length === 0">
+        <summary>{{ $t('settings.pgp.importKeys') }}</summary>
+        <div class="pgp-key-task-body">
+
+          <div
+            class="dropzone"
+            :class="{ active: dragActive, loaded: !!pendingImportFileName }"
+            @dragenter="onDragEnter"
+            @dragover="onDragOver"
+            @dragleave="onDragLeave"
+            @drop="onDrop"
+          >
+            <p v-if="dragActive" class="dropzone-title">
+              {{ $t('settings.pgp.dropRelease') }}
+            </p>
+            <p v-else-if="pendingImportFileName" class="dropzone-title">
+              {{ $t('settings.pgp.dropLoaded', { name: pendingImportFileName }) }}
+            </p>
+            <p v-else class="dropzone-title">
+              {{ $t('settings.pgp.dropHint') }}
+            </p>
+            <AppButton @click="openFilePicker">{{ $t('settings.pgp.chooseFile') }}</AppButton>
+            <input
+              ref="fileInput"
+              class="hidden-input"
+              type="file"
+              accept=".asc,.txt,text/plain,application/pgp-keys"
+              @change="onFilePicked"
+            />
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span class="field-label">{{ $t('settings.pgp.labelPrefix') }}</span>
+              <input v-model="importLabelPrefix" :placeholder="$t('settings.pgp.labelPrefixPlaceholder')" />
+            </label>
+            <label class="field">
+              <span class="field-label">{{ $t('settings.pgp.passphraseOptional') }}</span>
+              <input v-model="importPassphrase" type="password" :placeholder="$t('settings.pgp.importPassphrasePlaceholder')" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span class="field-label">{{ $t('settings.pgp.keyMaterial') }}</span>
+            <div class="secure-material">
+              <p v-if="importArmored.trim()" class="secure-material-info">
+                {{ $t('settings.pgp.keyMaterialLoaded') }}
+              </p>
+              <p v-else class="secure-material-info">
+                {{ $t('settings.pgp.keyMaterialEmpty') }}
+              </p>
+              <div class="secure-material-actions">
+                <AppButton @click="showImportArmored = !showImportArmored">
+                  {{ showImportArmored ? $t('settings.pgp.hideManualInput') : $t('settings.pgp.pasteManually') }}
+                </AppButton>
+                <AppButton v-if="importArmored.trim()" variant="ghost" @click="clearImportMaterial">
+                  {{ $t('settings.pgp.clearMaterial') }}
+                </AppButton>
+              </div>
+            </div>
+            <textarea
+              v-if="showImportArmored"
+              v-model="importArmored"
+              rows="7"
+              :placeholder="$t('settings.pgp.keyMaterialPlaceholder')"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+            />
+          </label>
+
+          <div class="key-actions">
+            <AppButton
+              :disabled="validatingImportPassphrase || importingBundle"
+              @click="verifyImportPassphrase(false)"
+            >
+              {{ validatingImportPassphrase ? $t('settings.pgp.checking') : $t('settings.pgp.verifyPassphrase') }}
+            </AppButton>
+            <AppButton variant="primary" :disabled="importingBundle" @click="importFromTextarea">
+              {{ importingBundle ? $t('settings.pgp.importing') : $t('settings.pgp.importKeys') }}
+            </AppButton>
+          </div>
+          <p v-if="importValidationText" class="inline-status" :class="importValidationTone">
+            {{ importValidationText }}
+          </p>
+        </div>
+      </details>
+
+      <details class="keys pgp-key-task">
+        <summary>{{ $t('settings.pgp.generateTitle') }}</summary>
+        <div class="pgp-key-task-body">
+          <p class="keys-desc">{{ $t('settings.pgp.generateDescription') }}</p>
+
+          <div class="field-grid">
+            <label class="field">
+              <span class="field-label">{{ $t('common.name') }}</span>
+              <input v-model="generateName" :placeholder="$t('settings.pgp.generateNamePlaceholder')" />
+            </label>
+            <label class="field">
+              <span class="field-label">{{ $t('common.email') }}</span>
+              <input v-model="generateEmail" type="email" :placeholder="$t('settings.pgp.generateEmailPlaceholder')" />
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span class="field-label">{{ $t('settings.pgp.labelOptional') }}</span>
+              <input v-model="generateLabel" :placeholder="$t('settings.pgp.generateLabelPlaceholder')" />
+            </label>
+            <label class="field">
+              <span class="field-label">{{ $t('settings.pgp.passphraseOptional') }}</span>
+              <input v-model="generatePassphrase" type="password" :placeholder="$t('settings.pgp.generatePassphrasePlaceholder')" />
+            </label>
+          </div>
+
+          <div class="key-actions">
+            <AppButton variant="primary" :disabled="generatingKey" @click="generateKey">
+              {{ generatingKey ? $t('settings.pgp.generating') : $t('settings.pgp.generateTitle') }}
+            </AppButton>
+          </div>
+
+          <label v-if="generatedPublicKey" class="field">
+            <span class="field-label">{{ generatedFingerprint
+              ? $t('settings.pgp.generatedPublicKeyWithFingerprint', { fingerprint: generatedFingerprint })
+              : $t('settings.pgp.generatedPublicKey') }}</span>
+            <textarea :value="generatedPublicKey" rows="6" readonly />
+            <div class="key-actions">
+              <AppButton @click="copyPublicKey">{{ $t('settings.pgp.copyPublicKey') }}</AppButton>
+            </div>
+          </label>
+        </div>
+      </details>
     </section>
 
     <div v-if="additionalPlugins.length > 0" class="plugin-list">
@@ -1019,7 +1032,7 @@ onMounted(() => {
       </article>
     </div>
 
-    <section v-if="pluginAudit.length > 0" class="keys">
+    <section v-if="showPlugins && pluginAudit.length > 0" class="keys">
       <header class="keys-header">
         <h4>{{ $t('settings.plugins.auditTitle') }}</h4>
       </header>
@@ -1033,7 +1046,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="keys">
+    <section v-if="showPlugins" class="keys">
       <header class="keys-header">
         <h4>{{ $t('settings.plugins.webhooksTitle') }}</h4>
       </header>
@@ -1113,6 +1126,7 @@ onMounted(() => {
 
 .section {
   display: grid;
+  min-width: 0;
   gap: 20px;
 }
 
@@ -1132,6 +1146,7 @@ onMounted(() => {
 
 .pgp-integration {
   display: grid;
+  min-width: 0;
   gap: 14px;
   padding: 14px;
   border-radius: var(--radius-md);
@@ -1147,10 +1162,35 @@ onMounted(() => {
 
 .keys {
   display: grid;
+  min-width: 0;
   gap: 10px;
   padding: 12px;
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--bg-base) 75%, transparent);
+}
+
+.pgp-key-task {
+  display: block;
+}
+
+.pgp-access-description {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.pgp-key-task summary {
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  font-weight: var(--weight-semibold);
+}
+
+.pgp-key-task-body {
+  display: grid;
+  gap: var(--space-md);
+  padding-top: var(--space-md);
 }
 
 .keys-header {

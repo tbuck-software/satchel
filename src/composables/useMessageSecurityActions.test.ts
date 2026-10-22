@@ -5,6 +5,8 @@ const harness = vi.hoisted(() => ({
   unlockPgp: vi.fn(),
   unlockSmime: vi.fn(),
   loadByThread: vi.fn(),
+  reloadPgpMessages: vi.fn(),
+  getByThread: vi.fn((): Array<{ id: string; bodyText: string }> => []),
 }));
 
 vi.mock('@/services/backend', () => ({
@@ -12,7 +14,11 @@ vi.mock('@/services/backend', () => ({
   backendUnlockSmimeCerts: harness.unlockSmime,
 }));
 vi.mock('@/stores/messages', () => ({
-  useMessagesStore: () => ({ loadByThread: harness.loadByThread }),
+  useMessagesStore: () => ({
+    loadByThread: harness.loadByThread,
+    reloadPgpMessages: harness.reloadPgpMessages,
+    getByThread: harness.getByThread,
+  }),
 }));
 vi.mock('@/i18n/runtime', () => ({
   t: (key: string) => key,
@@ -44,6 +50,14 @@ beforeEach(() => {
 });
 
 describe('useMessageSecurityActions', () => {
+  it('reports a decryption failure when unlocking leaves the message encrypted', async () => {
+    harness.getByThread.mockReturnValueOnce([{
+      id: 'encrypted-message', bodyText: '-----BEGIN PGP MESSAGE-----\nciphertext\n-----END PGP MESSAGE-----',
+    }]);
+    const actions = useMessageSecurityActions();
+    await actions.unlockPgp('thread-1', 'encrypted-message');
+    expect(actions.pgpStatus.value).toBe('mail.pgp.decryptFailed');
+  });
   it('unlocks PGP without asking and reloads the thread', async () => {
     const actions = useMessageSecurityActions();
 
@@ -52,7 +66,7 @@ describe('useMessageSecurityActions', () => {
     expect(harness.unlockPgp).toHaveBeenCalledOnce();
     expect(harness.unlockPgp).toHaveBeenCalledWith();
     expect(actions.passphraseRequest.value).toBeNull();
-    expect(harness.loadByThread).toHaveBeenCalledWith('thread-1');
+    expect(harness.reloadPgpMessages).toHaveBeenCalledWith('thread-1');
     expect(actions.pgpStatus.value).toBe('mail.pgp.unlocked');
     expect(actions.pgpBusy.value).toBe(false);
   });
@@ -67,7 +81,7 @@ describe('useMessageSecurityActions', () => {
 
     expect(harness.unlockPgp).toHaveBeenNthCalledWith(2, { passphrase: 'secret' });
     expect(actions.passphraseRequest.value).toBeNull();
-    expect(harness.loadByThread).toHaveBeenCalledWith('thread-2');
+    expect(harness.reloadPgpMessages).toHaveBeenCalledWith('thread-2');
     expect(actions.pgpStatus.value).toBe('mail.pgp.unlocked');
   });
 
@@ -84,7 +98,7 @@ describe('useMessageSecurityActions', () => {
 
     expect(actions.passphraseRequest.value).toBeNull();
     expect(harness.unlockPgp).toHaveBeenCalledOnce();
-    expect(harness.loadByThread).not.toHaveBeenCalled();
+    expect(harness.reloadPgpMessages).not.toHaveBeenCalled();
     expect(actions.pgpStatus.value).toBe('mail.pgp.noKeyDescription');
     expect(actions.pgpBusy.value).toBe(false);
   });
@@ -99,7 +113,7 @@ describe('useMessageSecurityActions', () => {
     await answerPrompt(actions, 'wrong');
     await unlocking;
 
-    expect(harness.loadByThread).not.toHaveBeenCalled();
+    expect(harness.reloadPgpMessages).not.toHaveBeenCalled();
     expect(actions.pgpStatus.value).toBe('mail.pgp.passphraseWrong');
     expect(actions.pgpBusy.value).toBe(false);
   });
@@ -113,7 +127,7 @@ describe('useMessageSecurityActions', () => {
     await unlocking;
 
     expect(harness.unlockPgp).toHaveBeenCalledOnce();
-    expect(harness.loadByThread).not.toHaveBeenCalled();
+    expect(harness.reloadPgpMessages).not.toHaveBeenCalled();
     expect(actions.pgpStatus.value).toBe('');
     expect(actions.pgpBusy.value).toBe(false);
   });
@@ -159,8 +173,8 @@ describe('useMessageSecurityActions', () => {
     await Promise.all([first, second]);
 
     expect(harness.unlockPgp).toHaveBeenCalledOnce();
-    expect(harness.loadByThread).toHaveBeenCalledWith('thread-8');
-    expect(harness.loadByThread).not.toHaveBeenCalledWith('thread-9');
+    expect(harness.reloadPgpMessages).toHaveBeenCalledWith('thread-8');
+    expect(harness.reloadPgpMessages).not.toHaveBeenCalledWith('thread-9');
   });
 
   it('releases an unlock that is still waiting on a dialog when it is reset', async () => {

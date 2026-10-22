@@ -1155,7 +1155,7 @@
       "errorTitle": "Fehler bei der Verarbeitung",
       "importKey": "Schlüssel importieren",
       "noKey": "Geschützte Nachricht",
-      "noKeyDescription": "Der passende Schlüssel wurde nicht gefunden. Importiere den privaten Schlüssel, um diese Nachricht zu lesen.",
+      "noKeyDescription": "Kein passender privater Schlüssel gefunden. Importiere unter Einstellungen → OpenPGP den Schlüssel, für den diese Nachricht verschlüsselt wurde. Ein neu erzeugter Schlüssel kann diese Nachricht nicht entschlüsseln.",
       "passphraseLabel": "PGP-Passphrase",
       "passphrasePrompt": "Passphrase für diesen PGP-Schlüssel (optional):",
       "passphraseWrong": "Diese Passphrase entsperrt den Schlüssel nicht.",
@@ -1181,9 +1181,10 @@
     },
     "pgpBlock": {
       "decryptAction": "Diesen Block entschlüsseln",
+      "decryptHint": "Entschlüssle diesen Block mit deinen gespeicherten privaten Schlüsseln. Falls nötig, fragt Satchel nach der Passphrase.",
       "decryptedPgp": "Entschlüsselter OpenPGP-Block",
       "decryptedSmime": "Entschlüsselter S/MIME-Block",
-      "encryptedHint": "Dieser Block kann mit deinem privaten Schlüssel entschlüsselt werden.",
+      "encryptedHint": "Importiere und entsperre den passenden privaten Schlüssel unter Einstellungen → OpenPGP und öffne die Nachricht erneut, um diesen Block zu lesen.",
       "encryptedPgp": "Verschlüsselter OpenPGP-Block"
     },
     "quotes": {
@@ -2262,6 +2263,7 @@
     },
     "pgp": {
       "addMaterialFirst": "Vor der Passphrase-Prüfung Schlüsselmaterial hinzufügen.",
+      "allowMessageAccess": "Nachrichtenzugriff erlauben",
       "checking": "Wird geprüft …",
       "chooseFile": "`.asc`-Datei wählen",
       "clearMaterial": "Leeren",
@@ -2313,6 +2315,9 @@
       "labelOptional": "Bezeichnung (optional)",
       "labelPrefix": "Label-Präfix (optional)",
       "labelPrefixPlaceholder": "example keyring",
+      "messageAccess": "Nachrichten durch das PGP-Plugin verarbeiten lassen",
+      "messageAccessBlocked": "Nachrichtenzugriff ist blockiert",
+      "messageAccessBlockedDescription": "Das PGP-Plugin ist aktiviert, darf aber keine Nachrichten lesen. Erlaube den Zugriff, damit es PGP-Inhalte erkennen und verarbeiten kann.",
       "nameAndEmailRequired": "Für die Schlüsselerzeugung sind Name und E-Mail erforderlich.",
       "noKeyMaterial": "Keine Schlüsseldaten in der Eingabe gefunden.",
       "noPassphraseSet": "Keine Passphrase gesetzt. Für öffentliche oder ungeschützte private Schlüssel ist das in Ordnung.",

@@ -168,7 +168,7 @@
         "errorTitle": "Processing failed",
         "importKey": "Import key",
         "noKey": "Protected message",
-        "noKeyDescription": "No matching key found. Import the private key to read this message.",
+        "noKeyDescription": "No matching private key found. Import the key this message was encrypted for in Settings → OpenPGP. A newly generated key cannot decrypt this message.",
         "passphraseLabel": "PGP passphrase",
         "passphrasePrompt": "PGP passphrase for this key (optional):",
         "passphraseWrong": "That passphrase does not unlock this key.",
@@ -193,10 +193,11 @@
         "signaturePartialDescription": "A signature covers one part of this message. The rest of the message is unsigned."
       },
       "pgpBlock": {
+        "decryptHint": "Decrypt this block with your stored private keys. Satchel will ask for a passphrase if needed.",
         "decryptAction": "Decrypt this block",
         "decryptedPgp": "Decrypted OpenPGP block",
         "decryptedSmime": "Decrypted S/MIME block",
-        "encryptedHint": "This block can be decrypted with your private key.",
+        "encryptedHint": "To read this block, import and unlock the matching private key in Settings → OpenPGP, then reopen the message.",
         "encryptedPgp": "Encrypted OpenPGP block"
       },
       "quotes": {
@@ -499,7 +500,7 @@
         "errorTitle": "Fehler bei der Verarbeitung",
         "importKey": "Schlüssel importieren",
         "noKey": "Geschützte Nachricht",
-        "noKeyDescription": "Der passende Schlüssel wurde nicht gefunden. Importiere den privaten Schlüssel, um diese Nachricht zu lesen.",
+        "noKeyDescription": "Kein passender privater Schlüssel gefunden. Importiere unter Einstellungen → OpenPGP den Schlüssel, für den diese Nachricht verschlüsselt wurde. Ein neu erzeugter Schlüssel kann diese Nachricht nicht entschlüsseln.",
         "passphraseLabel": "PGP-Passphrase",
         "passphrasePrompt": "Passphrase für diesen PGP-Schlüssel (optional):",
         "passphraseWrong": "Diese Passphrase entsperrt den Schlüssel nicht.",
@@ -524,10 +525,11 @@
         "signaturePartialDescription": "Eine Signatur deckt einen Teil dieser Nachricht ab. Der Rest der Nachricht ist nicht signiert."
       },
       "pgpBlock": {
+        "decryptHint": "Entschlüssle diesen Block mit deinen gespeicherten privaten Schlüsseln. Falls nötig, fragt Satchel nach der Passphrase.",
         "decryptAction": "Diesen Block entschlüsseln",
         "decryptedPgp": "Entschlüsselter OpenPGP-Block",
         "decryptedSmime": "Entschlüsselter S/MIME-Block",
-        "encryptedHint": "Dieser Block kann mit deinem privaten Schlüssel entschlüsselt werden.",
+        "encryptedHint": "Importiere und entsperre den passenden privaten Schlüssel unter Einstellungen → OpenPGP und öffne die Nachricht erneut, um diesen Block zu lesen.",
         "encryptedPgp": "Verschlüsselter OpenPGP-Block"
       },
       "quotes": {

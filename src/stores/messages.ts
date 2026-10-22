@@ -498,6 +498,28 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
+  /** Reprocess loaded PGP bodies after key or plugin settings change. */
+  async function reloadPgpMessages(onlyThreadId?: string): Promise<void> {
+    const threadIds = onlyThreadId ? [onlyThreadId] : [...retained.keys()];
+    await Promise.all(threadIds.map(async (threadId) => {
+      // A snapshot taken before the key changed must finish before the reread.
+      while (threadLoadPromises.has(threadId)) await threadLoadPromises.get(threadId);
+      const ids = (messagesByThread.value[threadId] ?? [])
+        .filter((message) => message.bodyLoaded !== false && (
+          message.pgp || message.bodyText.includes('-----BEGIN PGP ')
+        ))
+        .map((message) => message.id);
+      if (ids.length === 0) return;
+      await trackLoad(threadId, async () => {
+        const version = nextVersion(threadId);
+        await hydrateMessageBodies(threadId, ids, version);
+        // Decryption may reveal attachments that were absent from the ciphertext.
+        for (const id of ids) hydratedAttachmentMessageIds.delete(id);
+        await hydrateMessageAttachments(threadId, ids, version);
+      }, false);
+    }));
+  }
+
   function cacheStats() {
     const cachedMessages = [...retained.keys()].flatMap(
       (threadId) => messagesByThread.value[threadId] ?? [],
@@ -1017,6 +1039,7 @@ export const useMessagesStore = defineStore('messages', () => {
     refreshThread,
     retainThread,
     markThreadsStale,
+    reloadPgpMessages,
     loadAttachmentsForMessages,
     retryInlineImages,
   };

@@ -132,6 +132,29 @@ describe('messages store', () => {
     unsubscribeMock.mockReset();
   });
 
+  it('reprocesses cached PGP bodies after keys change, including older expanded mail', async () => {
+    const armor = '-----BEGIN PGP MESSAGE-----\nciphertext\n-----END PGP MESSAGE-----';
+    previewMock.mockResolvedValue([
+      backendMessage({ id: 'encrypted-old', body_text: armor, body_loaded: true }) as never,
+      backendMessage({ id: 'encrypted-new', body_text: armor, body_loaded: true }) as never,
+      backendMessage({ id: 'plain', body_text: 'Unrelated', body_loaded: true }) as never,
+    ]);
+    const messages = useMessagesStore();
+    await messages.loadByThread('th-live');
+    bodiesMock.mockClear();
+    bodiesMock.mockResolvedValue([
+      { ...inlineBody(''), id: 'encrypted-old', body_text: 'Decrypted older mail', pgp_state: 'decrypted' },
+      { ...inlineBody(''), id: 'encrypted-new', body_text: 'Decrypted latest mail', pgp_state: 'decrypted' },
+    ]);
+
+    await messages.reloadPgpMessages();
+    expect(bodiesMock).toHaveBeenCalledExactlyOnceWith(['encrypted-old', 'encrypted-new']);
+    expect(messages.getByThread('th-live').map((message) => message.bodyText))
+      .toEqual(['Decrypted older mail', 'Decrypted latest mail', 'Unrelated']);
+    await messages.openThread('th-live');
+    expect(messages.getByThread('th-live')[0]?.pgp?.state).toBe('decrypted');
+  });
+
   it('does not request message source data outside the native backend', async () => {
     const messages = useMessagesStore();
 

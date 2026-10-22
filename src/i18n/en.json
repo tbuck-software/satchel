@@ -1155,7 +1155,7 @@
       "errorTitle": "Processing failed",
       "importKey": "Import key",
       "noKey": "Protected message",
-      "noKeyDescription": "No matching key found. Import the private key to read this message.",
+      "noKeyDescription": "No matching private key found. Import the key this message was encrypted for in Settings → OpenPGP. A newly generated key cannot decrypt this message.",
       "passphraseLabel": "PGP passphrase",
       "passphrasePrompt": "PGP passphrase for this key (optional):",
       "passphraseWrong": "That passphrase does not unlock this key.",
@@ -1181,9 +1181,10 @@
     },
     "pgpBlock": {
       "decryptAction": "Decrypt this block",
+      "decryptHint": "Decrypt this block with your stored private keys. Satchel will ask for a passphrase if needed.",
       "decryptedPgp": "Decrypted OpenPGP block",
       "decryptedSmime": "Decrypted S/MIME block",
-      "encryptedHint": "This block can be decrypted with your private key.",
+      "encryptedHint": "To read this block, import and unlock the matching private key in Settings → OpenPGP, then reopen the message.",
       "encryptedPgp": "Encrypted OpenPGP block"
     },
     "quotes": {
@@ -2262,6 +2263,7 @@
     },
     "pgp": {
       "addMaterialFirst": "Add key material before verifying the passphrase.",
+      "allowMessageAccess": "Allow message access",
       "checking": "Checking…",
       "chooseFile": "Choose `.asc` file",
       "clearMaterial": "Clear",
@@ -2313,6 +2315,9 @@
       "labelOptional": "Label (optional)",
       "labelPrefix": "Label prefix (optional)",
       "labelPrefixPlaceholder": "example keyring",
+      "messageAccess": "Allow the PGP plugin to process messages",
+      "messageAccessBlocked": "Message access is blocked",
+      "messageAccessBlockedDescription": "The PGP plugin is enabled but cannot read messages. Allow access so it can detect and process PGP content.",
       "nameAndEmailRequired": "Name and email are required to generate a key.",
       "noKeyMaterial": "No key material found in the input.",
       "noPassphraseSet": "No passphrase set. That is fine for public keys or unprotected private keys.",

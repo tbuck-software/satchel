@@ -36,6 +36,9 @@ const props = withDefaults(defineProps<{
   html?: string;
   text?: string;
   pgpState?: PgpMessageState | null;
+  /** Only a host with a connected decrypt action may offer the button. */
+  canDecrypt?: boolean;
+  decrypting?: boolean;
   senderEmail?: string | null;
   trustedDmarcPass?: boolean;
   attachments?: Attachment[];
@@ -354,8 +357,6 @@ onBeforeUnmount(() => {
 
 const segments = computed<RenderSegment[]>(() => splitRenderSegments(displayText.value));
 
-const canRequestUnlock = computed(() => props.pgpState === 'key_available_locked');
-
 const hasPgpSegments = computed(() =>
   segments.value.some((segment) => segment.kind !== 'text'),
 );
@@ -488,16 +489,17 @@ const hasPgpSegments = computed(() =>
         <section v-else-if="segment.kind === 'pgp_encrypted'" class="pgp-segment encrypted">
           <header class="pgp-segment-header">{{ $t('mail.pgpBlock.encryptedPgp') }}</header>
           <p class="pgp-segment-hint">
-            {{ $t('mail.pgpBlock.encryptedHint') }}
+            {{ props.canDecrypt ? $t('mail.pgpBlock.decryptHint') : $t('mail.pgpBlock.encryptedHint') }}
           </p>
           <AppButton
-            v-if="canRequestUnlock"
+            v-if="props.canDecrypt"
             class="pgp-segment-action"
+            :disabled="props.decrypting"
             @click="emit('request-unlock')"
             variant="primary"
             size="sm"
           >
-            {{ $t('mail.pgpBlock.decryptAction') }}
+            {{ props.decrypting ? $t('mail.pgp.decrypting') : $t('mail.pgpBlock.decryptAction') }}
           </AppButton>
           <pre class="pgp-segment-raw">{{ segment.content }}</pre>
         </section>

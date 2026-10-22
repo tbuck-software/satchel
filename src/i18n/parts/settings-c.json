@@ -43,6 +43,10 @@
       },
       "pgp": {
         "title": "OpenPGP",
+        "messageAccessBlocked": "Message access is blocked",
+        "messageAccessBlockedDescription": "The PGP plugin is enabled but cannot read messages. Allow access so it can detect and process PGP content.",
+        "allowMessageAccess": "Allow message access",
+        "messageAccess": "Allow the PGP plugin to process messages",
         "description": "Import, generate and unlock keys for this session. Incoming PGP messages are decrypted and their signatures verified with them.",
         "engineUnavailableTitle": "The selected PGP engine is unavailable.",
         "engineUnavailableBody": "Satchel's built-in OpenPGP engine is always available. If you selected GnuPG for a hardware token, install GnuPG or switch back to the built-in engine.",
@@ -336,6 +340,10 @@
       },
       "pgp": {
         "title": "OpenPGP",
+        "messageAccessBlocked": "Nachrichtenzugriff ist blockiert",
+        "messageAccessBlockedDescription": "Das PGP-Plugin ist aktiviert, darf aber keine Nachrichten lesen. Erlaube den Zugriff, damit es PGP-Inhalte erkennen und verarbeiten kann.",
+        "allowMessageAccess": "Nachrichtenzugriff erlauben",
+        "messageAccess": "Nachrichten durch das PGP-Plugin verarbeiten lassen",
         "description": "Schlüssel importieren, erzeugen und für diese Sitzung entsperren. Eingehende PGP-Nachrichten werden damit entschlüsselt und Signaturen geprüft.",
         "engineUnavailableTitle": "Die ausgewählte PGP-Engine ist nicht verfügbar.",
         "engineUnavailableBody": "Satchels integrierte OpenPGP-Engine ist immer verfügbar. Falls du GnuPG für ein Hardware-Token ausgewählt hast, installiere GnuPG oder wechsle zurück zur integrierten Engine.",
