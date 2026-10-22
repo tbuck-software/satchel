@@ -952,6 +952,16 @@ const handlers: Record<string, Handler> = {
   }),
 
   /* --- odds and ends the bootstrap asks for --------------------------- */
+  run_imap_sync: () => ({
+    accounts_synced: accounts.filter((account) => account.kind === 'email').length,
+    accounts_failed: 0,
+    folders_synced: 0,
+    messages_synced: 0,
+    backfill_pending_accounts: 0,
+    backfill_remaining_messages: 0,
+    backfill_total_messages: 0,
+    failures: [],
+  }),
   current_connection_state: () => ({
     online: true,
     syncing: false,

@@ -1,5 +1,60 @@
 import { expect, test } from './mock-contract.fixture';
 
+test('sync activity keeps the sidebar geometry stable', async ({ page }) => {
+  await page.goto('/settings');
+  const sidebar = page.locator('aside').first();
+  const footer = sidebar.locator('.sidebar-footer');
+  await expect(footer.getByRole('button', { name: 'Back', exact: true })).toBeVisible();
+  const button = sidebar.locator('.sidebar-brand').getByRole('button', { name: 'Sync email', exact: true });
+  await expect(button).toBeVisible();
+  const restingButton = await button.boundingBox();
+  const restingFooter = await footer.boundingBox();
+  const restingContent = await sidebar.locator('.sidebar-scroll').boundingBox();
+
+  for (const state of [
+    { syncing: true, online: true },
+    { syncing: false, online: true },
+    { syncing: false, online: false },
+    { syncing: false, online: true },
+  ]) {
+    await page.evaluate(async (nextState) => {
+      const root = document.querySelector('#app') as Element & {
+        __vue_app__: { config: { globalProperties: {
+          $pinia: { _s: Map<string, { $patch: (state: typeof nextState) => void }> };
+        } } };
+      };
+      root.__vue_app__.config.globalProperties.$pinia._s.get('connection')!.$patch(nextState);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    }, state);
+    expect(await footer.boundingBox()).toEqual(restingFooter);
+    expect(await sidebar.locator('.sidebar-scroll').boundingBox()).toEqual(restingContent);
+    expect(await button.boundingBox()).toEqual(restingButton);
+    await expect(button).toHaveAttribute('aria-busy', String(state.syncing));
+    if (state.syncing || !state.online) await expect(button).toBeDisabled();
+    else await expect(button).toBeEnabled();
+  }
+  await button.click();
+  await expect(page.getByRole('status')).toContainText(['Sync finished.']);
+});
+
+test('sync button fits beside the logo in the narrow native macOS header', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('satchel.ui.sidebarWidth', '220'));
+  await page.goto('/settings');
+  const header = page.locator('.sidebar-brand');
+  const button = header.getByRole('button', { name: 'Sync email', exact: true });
+  await expect(button).toBeVisible();
+  await page.evaluate(() => {
+    document.documentElement.dataset.runtimePlatform = 'macos';
+    document.documentElement.dataset.windowChrome = 'true';
+  });
+  const brand = await header.boundingBox();
+  const sync = await button.boundingBox();
+  const name = await header.locator('h1').boundingBox();
+  expect(sync!.x + sync!.width).toBeLessThanOrEqual(brand!.x + brand!.width);
+  expect(name!.x + name!.width).toBeLessThanOrEqual(sync!.x);
+  expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+});
+
 test('mobile mailbox controls stay open until a destination is selected', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');

@@ -82,9 +82,8 @@ if (standaloneCompose.value) {
       <AccountReauthBanner v-if="!standaloneCompose" />
       <ConnectionBanner v-if="!standaloneCompose" />
 
-      <!-- The sidebar carries this line, and on the phone the sidebar is a
-           drawer nobody opens to find out they are offline. Same component,
-           same store, resting state suppressed. -->
+      <!-- On the phone the sidebar's sync button lives in a closed drawer.
+           Keep connection status visible here, with resting state suppressed. -->
       <SyncStatusLine
         v-if="ui.isMobile && !standaloneCompose"
         class="mobile-sync-status"
