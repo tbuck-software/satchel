@@ -25,11 +25,11 @@ for (const platform of Object.values(PLATFORMS)) {
     url: `https://github.com/${RELEASE_REPOSITORY}/releases/download/${plan.tag}/${metadata.name}`,
   };
 }
-const manifest = { version: plan.version, source: plan.source, pub_date: plan.published, notes: `Satchel ${plan.channel} from main.`, release_tag: plan.tag, channel: plan.channel, platforms };
+const manifest = { version: plan.version, source: plan.source, pub_date: plan.published, notes: `Satchel ${plan.channel} from main.`, release_tag: plan.tag, channel: plan.channel, app_identifier: 'de.tbuck.satchel', platforms };
 writeFileSync(join(folder, 'latest.json'), JSON.stringify(manifest, null, 2) + '\n');
 copyFileSync('output/installer/install-satchel.mjs', join(folder, 'install-satchel.mjs'));
 for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) copyFileSync(name, join(folder, name));
-const notes = `Satchel ${plan.channel} ${plan.version}\n\nBuilt from main at ${plan.source}.\n\n${plan.channel === 'nightly' ? 'Nightly builds may contain unfinished changes. They use the separate Satchel Daily profile.' : 'Stable desktop release.'}\n\n<!-- satchel-source:${plan.source} -->\n`;
+const notes = `Satchel ${plan.channel} ${plan.version}\n\nBuilt from main at ${plan.source}.\n\n${plan.channel === 'nightly' ? 'Nightly builds may contain unfinished changes. Select Nightly updates in Settings → About Satchel to follow this channel with your existing app and profile.' : 'Stable desktop release.'}\n\n<!-- satchel-source:${plan.source} -->\n`;
 writeFileSync('output/release-notes.md', notes);
 /** @param {string[]} args @returns {string} */
 function gh(args) {
@@ -49,7 +49,9 @@ if (plan.channel === 'nightly') {
   } catch { exists = false; }
   if (!exists) gh(['release', 'create', 'nightly', '--verify-tag', '--title', 'Satchel Nightly', '--prerelease', '--notes-file', 'output/release-notes.md']);
   // Expose the channel manifest only after the immutable, signed versioned assets exist.
-  gh(['release', 'upload', 'nightly', join(folder, 'latest.json'), '--clobber']);
+  // Do not replace the former Daily app's latest.json with another bundle ID.
+  copyFileSync(join(folder, 'latest.json'), join(folder, 'satchel.json'));
+  gh(['release', 'upload', 'nightly', join(folder, 'satchel.json'), '--clobber']);
   gh(['release', 'edit', 'nightly', '--notes-file', 'output/release-notes.md']);
 }
 console.log(`Published ${plan.tag} to the ${plan.channel} channel.`);

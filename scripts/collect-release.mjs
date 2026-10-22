@@ -23,7 +23,7 @@ const artifacts = files(root);
 const extension = target.includes('windows') ? '.exe' : platform.updater;
 const updater = artifacts.filter(file => file.endsWith(extension));
 if (updater.length !== 1) throw new Error(`Expected one ${extension} updater for ${target}`);
-const prefix = `Satchel${plan.channel === 'nightly' ? '-Daily' : ''}-${platform.name}`;
+const prefix = `Satchel-${platform.name}`;
 const updaterName = prefix + platform.updater;
 const signature = readFileSync(updater[0] + '.sig', 'utf8').trim();
 if (!signature) throw new Error('Missing updater signature');

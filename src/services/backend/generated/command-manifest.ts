@@ -743,6 +743,10 @@ export default {
                 }
             }
         },
+        "get_app_update_preferences": {
+            "kind": "object",
+            "fields": {}
+        },
         "get_message_source": {
             "kind": "object",
             "fields": {
@@ -1726,6 +1730,17 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "app::commands::server_search::ServerSearchInput"
+                    }
+                }
+            }
+        },
+        "set_app_update_channel": {
+            "kind": "object",
+            "fields": {
+                "channel": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
                     }
                 }
             }

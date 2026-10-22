@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import AppButton from '@/components/ui/AppButton.vue';
 import ErrorState from '@/components/ui/ErrorState.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
+import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
 import { useAppUpdateStore } from '@/stores/appUpdate';
 import {
   backendAppBuildInfo,
@@ -50,7 +51,7 @@ async function openProject(path = '') {
   }
 }
 
-onMounted(loadBuild);
+onMounted(() => { void loadBuild(); void updates.loadPreferences(); });
 </script>
 
 <template>
@@ -82,8 +83,18 @@ onMounted(loadBuild);
 
     <section class="about-pane__section">
       <SectionHeading :label="$t('settings.about.updates')" />
+      <ToggleSwitch
+        :label="$t('app.update.nightly')"
+        :model-value="updates.channel === 'nightly'"
+        :disabled="!updates.supported || updates.changingChannel || updates.checking || updates.status === 'downloading'"
+        :before-change="(enabled) => updates.setChannel(enabled ? 'nightly' : 'stable')"
+      >
+        {{ $t('app.update.nightly') }}
+      </ToggleSwitch>
+      <p>{{ $t('app.update.nightlyHint') }}</p>
+      <p v-if="updates.preferencesLoaded && !updates.supported">{{ $t('app.update.sourceBuild') }}</p>
       <div class="about-pane__actions">
-        <AppButton :disabled="updates.checking || updates.visible" @click="updates.checkForUpdates()">
+        <AppButton :disabled="!updates.supported || updates.changingChannel || updates.checking || updates.visible" @click="updates.checkForUpdates()">
           {{ $t(updates.checking ? 'app.update.checking' : 'app.update.check') }}
         </AppButton>
         <AppButton
@@ -100,7 +111,7 @@ onMounted(loadBuild);
         {{ $t('app.update.version', { version: updates.version }) }}
       </p>
       <p v-else-if="updates.checked" role="status">
-        {{ $t(updates.channel ? 'app.update.upToDate' : 'app.update.sourceBuild') }}
+        {{ $t('app.update.upToDate') }}
       </p>
       <p v-if="updates.error" role="alert">{{ updates.error }}</p>
     </section>

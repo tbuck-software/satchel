@@ -59,6 +59,10 @@
         }
       },
       "update": {
+        "nightly": "Nightly updates",
+        "nightlyHint": "Get daily updates when changes are available. Your accounts and data stay in this app. Updates download in the background and install when you quit.",
+        "ready": "Satchel {version} downloaded. Restart to update.",
+        "restartNow": "Restart now",
         "available": "Update available",
         "downloading": "Downloading {progress}%",
         "failedRetry": "Update failed, retry",
@@ -509,6 +513,10 @@
         }
       },
       "update": {
+        "nightly": "Nightly-Updates",
+        "nightlyHint": "Erhalte tägliche Updates, wenn es Änderungen gibt. Deine Konten und Daten bleiben in dieser App. Updates werden im Hintergrund geladen und beim Beenden installiert.",
+        "ready": "Satchel {version} ist geladen. Zum Aktualisieren neu starten.",
+        "restartNow": "Jetzt neu starten",
         "available": "Update verfügbar",
         "downloading": "Wird heruntergeladen: {progress}%",
         "failedRetry": "Update fehlgeschlagen, erneut versuchen",

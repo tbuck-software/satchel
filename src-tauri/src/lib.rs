@@ -669,6 +669,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_update::check_app_update,
+            commands::app_update::get_app_update_preferences,
+            commands::app_update::set_app_update_channel,
             commands::app_update::download_app_update,
             commands::app_update::app_update_progress,
             commands::app_update::install_app_update,
@@ -920,7 +922,8 @@ pub fn run() {
             // of typing — the autosave interval — went with it, without a word.
             #[cfg(desktop)]
             if let tauri::RunEvent::ExitRequested { api, .. } = &event {
-                if request_draft_flush(app) {
+                if !commands::app_update::exit_is_prepared(app)
+                    && (commands::app_update::install_on_exit(app) || request_draft_flush(app)) {
                     api.prevent_exit();
                 }
             }
