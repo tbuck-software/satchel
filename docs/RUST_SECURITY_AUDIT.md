@@ -41,7 +41,7 @@ weekly workflow still reports other advisories.
 
 ## Remaining audit warnings
 
-The 2026-10-18 lockfile scan reports no other vulnerabilities after the compatible dependency updates. It still reports
+The 2026-10-22 lockfile scan reports no other vulnerabilities after the compatible dependency updates. It still reports
 warnings, which `cargo audit` does not treat as vulnerabilities:
 
 - `fxhash` is unmaintained through Wasmtime's profiling dependency.
@@ -55,8 +55,15 @@ remove the warnings by updating their parents when compatible releases exist.
 
 ## Wasmtime and the vendored SMTP library
 
-Wasmtime and wasmtime-wasi 36.0.18 also fix RUSTSEC-2026-0363 and
-RUSTSEC-2026-0352, in addition to the fixes in 36.0.17. Plugin runtime tests run with built components required.
+Wasmtime and wasmtime-wasi 36.0.19 fix RUSTSEC-2026-0379 and
+RUSTSEC-2026-0380 in Cranelift, in addition to RUSTSEC-2026-0363 and
+RUSTSEC-2026-0352 fixed in 36.0.18. Plugin runtime tests run with built components required.
+
+Both lockfiles use rustls-webpki 0.103.16, webpki-roots 1.0.10 and
+webpki-root-certs 1.0.10. These fix RUSTSEC-2026-0382, RUSTSEC-2026-0381
+and RUSTSEC-2026-0383 in certificate validation and the bundled trust stores.
+The 0.26 webpki-roots compatibility wrapper delegates to the patched 1.0.10
+trust store. No additional audit exception is needed.
 
 The lettre fork remains based on 0.11.19 for Android verifier compatibility.
 Upstream's 0.11.22 SMTP response limits are backported. Reviewed release drift
