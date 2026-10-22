@@ -203,7 +203,7 @@ change an update feed.
 On macOS:
 
 ```sh
-pnpm run install:nightly   # Satchel Daily.app, separate daily profile
+pnpm run install:nightly   # Satchel.app, follows the nightly update channel
 pnpm run install:stable    # Satchel.app, stable profile
 # Also available as make nightly / make stable.
 ```
@@ -215,10 +215,17 @@ only Node 22 or later:
 curl -fLsS https://github.com/tbuck-software/satchel/releases/latest/download/install-satchel.mjs | node --input-type=module - --channel stable --open
 ```
 
-For Satchel Daily, download the installer from the latest versioned nightly
-prerelease on the [releases page](https://github.com/tbuck-software/satchel/releases)
+Stable and nightly releases both install `Satchel.app` and use the regular
+`de.tbuck.satchel` profile. In Settings → About Satchel, turn on **Nightly
+updates** to receive daily builds in the same app with the same accounts and
+data. Turn it off to follow stable releases again; an older stable version is
+never installed over a newer nightly. Stable resumes when its version catches up.
+
+For a first nightly installation, download the installer from the latest versioned
+nightly prerelease on the [releases page](https://github.com/tbuck-software/satchel/releases)
 and run it with `--channel nightly --open`. From a checkout, use
-`pnpm run install:nightly`.
+`pnpm run install:nightly`. An explicit installer channel also updates the stored
+channel choice in an existing regular profile.
 
 The GitHub CLI command remains available for authenticated downloads:
 
@@ -242,13 +249,17 @@ Linux and Windows installers are available on the releases page.
 
 ## In-app updates
 
-Packaged desktop releases check their channel two minutes after startup and
-every six hours. Settings also offers a manual check. The sidebar offers a
-new version, shows download progress, and asks for a restart. Updates are
-never installed without that action. The backend verifies the updater signature,
-then asks every composer window to save before installation. A failed save or
-an unresponsive window cancels the update. Source builds and mobile apps do
-not use this updater. Mobile apps are distributed through their app stores.
+Packaged desktop releases check their selected channel eight seconds after startup
+and every six hours. Settings also offers a manual check and shows download
+progress. Updates download in the background. Once ready, a persistent toast offers
+**Restart now** and can be dismissed to keep working. A downloaded update installs
+on the next regular quit even if the toast was dismissed. The update notification
+does not consume sidebar layout space.
+
+The backend verifies the updater signature, then asks every composer window to save
+before either an update restart or installation on quit. A failed save or an
+unresponsive window cancels installation and leaves the app open. Source builds and
+mobile apps do not use this updater. Mobile apps are distributed through their app stores.
 
 On macOS, the verified replacement bundle has its quarantine attribute removed
 before restart. Quarantine remains enabled for mail attachments. If an older
@@ -257,10 +268,16 @@ installer from your Mac's Terminal once. The installer recognizes the
 translocated process and closes it before replacing the app and reopening it
 from Applications.
 
-Nightly uses the existing Satchel Daily identifier and profile so the two
-channels remain separate. A nightly never replaces stable or shares its data.
-The existing local source-build commands remain available as `make daily` and
-`make install`; they do not subscribe to a release feed.
+Nightly is a release channel of the regular app. Both channels use the same bundle
+identity, installation path, profile and credential keychain entries. The selected
+channel lives in `app_settings` under `updates.channel`. Only the backend chooses
+the fixed feed URL; switching clears any pending package from the previous channel.
+
+The regular app's nightly feed is `nightly/satchel.json`. The former released
+Satchel Daily app's `nightly/latest.json` is left untouched, so those installations
+cannot silently receive a bundle with another identity or lose access to their
+separate profiles. Local `make daily` builds remain isolated as Satchel Daily;
+`make daily` and `make install` do not subscribe to a release feed.
 
 Before public release, in-app checks cannot read the private GitHub feed. Use
 one of the authenticated installation commands above. After the repository is

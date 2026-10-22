@@ -18,7 +18,6 @@ import IconButton from '@/components/ui/IconButton.vue';
 import NavItem from '@/components/ui/NavItem.vue';
 import PluginSlotHost from '@/components/plugins/PluginSlotHost.vue';
 import MailboxTree from './MailboxTree.vue';
-import SidebarUpdateAction from './SidebarUpdateAction.vue';
 import SyncButton from './SyncButton.vue';
 
 // Route-specific sidebars used to pull calendar grids and the complete
@@ -313,7 +312,6 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
     <!-- Kept outside the scroll container so every primary destination stays
          anchored to the bottom, even with a long mailbox tree. -->
     <footer class="sidebar-footer">
-      <SidebarUpdateAction />
       <Suspense v-if="!contextualSidebarActive">
         <SidebarAgenda />
       </Suspense>

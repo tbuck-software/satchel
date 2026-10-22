@@ -9,6 +9,8 @@ const backend = vi.hoisted(() => ({
   backendAppBuildInfo: vi.fn(),
   backendOpenExternalUrl: vi.fn(),
   backendCheckAppUpdate: vi.fn(),
+  backendGetAppUpdatePreferences: vi.fn(),
+  backendSetAppUpdateChannel: vi.fn(),
 }));
 vi.mock('@/services/backend', async importOriginal => ({
   ...await importOriginal<typeof import('@/services/backend')>(),
@@ -21,10 +23,35 @@ beforeEach(() => {
   setActivePinia(createPinia());
   backend.backendAppBuildInfo.mockResolvedValue({ version: '0.1.1', commit: '48b6d7c', os: 'macos', arch: 'aarch64', debug: false });
   backend.backendCheckAppUpdate.mockResolvedValue({ channel: 'stable', version: null });
+  backend.backendGetAppUpdatePreferences.mockResolvedValue({ channel: 'stable', supported: true });
+  backend.backendSetAppUpdateChannel.mockResolvedValue(undefined);
   backend.backendOpenExternalUrl.mockResolvedValue(undefined);
 });
 
 describe('About Satchel', () => {
+  it('switches the same installed app to nightly updates', async () => {
+    const wrapper = mount(AboutPane);
+    await flushPromises();
+    const toggle = wrapper.get<HTMLInputElement>('input[role="switch"]');
+    expect(toggle.element.checked).toBe(false);
+    await toggle.setValue(true);
+    await flushPromises();
+    expect(backend.backendSetAppUpdateChannel).toHaveBeenCalledWith('nightly');
+    expect(toggle.element.checked).toBe(true);
+    expect(backend.backendCheckAppUpdate).toHaveBeenCalledOnce();
+  });
+
+  it('restores the switch when the channel cannot be saved', async () => {
+    backend.backendSetAppUpdateChannel.mockRejectedValueOnce(new Error('cannot save'));
+    const wrapper = mount(AboutPane);
+    await flushPromises();
+    const toggle = wrapper.get<HTMLInputElement>('input[role="switch"]');
+    await toggle.setValue(true);
+    await flushPromises();
+    expect(toggle.element.checked).toBe(false);
+    expect(wrapper.text()).toContain('cannot save');
+    expect(backend.backendCheckAppUpdate).not.toHaveBeenCalled();
+  });
   it('shows the running binary version and lets the user check for updates', async () => {
     const wrapper = mount(AboutPane);
     await flushPromises();

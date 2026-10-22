@@ -58,6 +58,7 @@ import { flushOpenComposerDrafts } from '@/composables/useComposerDraftPersisten
 import { useComposerStore } from '@/stores/composer';
 import { useAppUpdateStore } from '@/stores/appUpdate';
 import { useToast } from '@/composables/useToast';
+import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { useKeyboard } from '@/composables/useKeyboard';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { createMobileResume } from '@/mobile/resume';
@@ -216,8 +217,11 @@ function useDraftFlushOnExit(): void {
           if (!saved) toast.error(t('compose.quit.blocked'));
         }
       });
-      if (unlisten === null) unlisten = () => { stop(); stopUpdate(); };
-      else { stop(); stopUpdate(); }
+      const stopUpdateError = await mod.listen<string>('app-update:failed', ({ payload }) => {
+        toast.error(backendErrorLabel(payload));
+      });
+      if (unlisten === null) unlisten = () => { stop(); stopUpdate(); stopUpdateError(); };
+      else { stop(); stopUpdate(); stopUpdateError(); }
     } catch (error) {
       console.warn('draft flush bridge failed', error);
     }

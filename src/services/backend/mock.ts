@@ -375,6 +375,8 @@ function oauthStatus(accountId: string) {
     has_refresh_token: true, expires_at: null, granted_scopes: oauthScopes.get(accountId) ?? [googleMailScope] };
 }
 
+let appUpdateChannel: 'stable' | 'nightly' = 'stable';
+
 const handlers: Record<string, Handler> = {
   oauth_status: (payload) => oauthStatus(String(payload.accountId)),
   start_oauth_flow: (payload) => {
@@ -397,7 +399,9 @@ const handlers: Record<string, Handler> = {
   },
   sync_google_calendar: () => ({ accounts_checked: accounts.filter((account) => account.provider === 'gmail').length,
     events_synced: 0, errors: [] }),
-  check_app_update: () => ({ channel: null, version: null }),
+  get_app_update_preferences: () => ({ channel: appUpdateChannel, supported: true }),
+  set_app_update_channel: (payload) => { appUpdateChannel = payload.channel as 'stable' | 'nightly'; },
+  check_app_update: () => ({ channel: appUpdateChannel, version: null }),
   download_app_update: () => null,
   app_update_progress: () => 100,
   install_app_update: () => null,

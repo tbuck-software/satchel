@@ -21,8 +21,8 @@ if (process.platform !== 'darwin') throw new Error('This installer supports macO
 const target = process.arch === 'arm64' ? 'aarch64-apple-darwin' : process.arch === 'x64' ? 'x86_64-apple-darwin' : null;
 if (!target) throw new Error('Unsupported Mac architecture');
 const platform = PLATFORMS[target];
-const name = channel === 'nightly' ? 'Satchel Daily' : 'Satchel';
-const identifier = channel === 'nightly' ? 'de.tbuck.satchel.daily' : 'de.tbuck.satchel';
+const name = 'Satchel';
+const identifier = 'de.tbuck.satchel';
 const installed = join('/Applications', `${name}.app`);
 const profile = join(homedir(), 'Library', 'Application Support', identifier, 'satchel');
 const temporary = mkdtempSync(join(tmpdir(), 'satchel-release-'));
@@ -70,11 +70,12 @@ function backup() {
 
 try {
   console.log(`Downloading the latest ${channel} build…`);
-  const manifest = JSON.parse((await download(channel === 'nightly' ? 'nightly' : 'latest', 'latest.json')).toString('utf8'));
+  const manifest = JSON.parse((await download(channel === 'nightly' ? 'nightly' : 'latest', channel === 'nightly' ? 'satchel.json' : 'latest.json')).toString('utf8'));
   if (!/^\d+\.\d+\.\d+(?:-nightly\.\d+)?$/.test(manifest.version)
     || manifest.release_tag !== `v${manifest.version}` || manifest.channel !== channel) throw new Error('Invalid release manifest');
   const asset = manifest.platforms[platform.platform];
-  const filename = `Satchel${channel === 'nightly' ? '-Daily' : ''}-${platform.name}${platform.updater}`;
+  if ((manifest.app_identifier ?? (channel === 'stable' ? identifier : null)) !== identifier) throw new Error('Release belongs to another app profile');
+  const filename = `Satchel-${platform.name}${platform.updater}`;
   const expectedUrl = `https://github.com/${RELEASE_REPOSITORY}/releases/download/${manifest.release_tag}/${filename}`;
   if (!asset || asset.url !== expectedUrl || typeof asset.signature !== 'string') throw new Error('Invalid update asset');
   const bytes = await download(manifest.release_tag, filename);
@@ -109,6 +110,12 @@ try {
     if (existsSync(installed)) renameSync(installed, old);
     renameSync(staged, installed);
     rmSync(old, { recursive: true, force: true });
+    const db = join(profile, 'satchel.db');
+    if (existsSync(db)) {
+      execFileSync('sqlite3', [db, `INSERT INTO app_settings (key, value, updated_at)
+        VALUES ('updates.channel', '${channel}', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;`]);
+    }
   } catch (error) {
     if (!existsSync(installed) && existsSync(old)) renameSync(old, installed);
     rmSync(staged, { recursive: true, force: true });

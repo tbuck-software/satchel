@@ -1,5 +1,16 @@
 import { invoke } from './core';
 import type { AppUpdateCheck } from './generated/app/commands/app_update/AppUpdateCheck';
+import type { AppUpdatePreferences } from './generated/app/commands/app_update/AppUpdatePreferences';
+import type { UpdateChannel } from './generated/app/commands/app_update/UpdateChannel';
+export type { UpdateChannel };
+
+export function backendGetAppUpdatePreferences(): Promise<AppUpdatePreferences> {
+  return invoke<AppUpdatePreferences>('get_app_update_preferences');
+}
+
+export function backendSetAppUpdateChannel(channel: UpdateChannel): Promise<void> {
+  return invoke<void>('set_app_update_channel', { channel });
+}
 
 export function backendCheckAppUpdate(): Promise<AppUpdateCheck> {
   return invoke<AppUpdateCheck>('check_app_update');

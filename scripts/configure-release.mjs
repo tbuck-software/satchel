@@ -12,15 +12,17 @@ for (const file of ['src-tauri/Cargo.toml', 'Cargo.lock']) {
   if (!pattern.test(text)) throw new Error(`Cannot update version in ${file}`);
   writeFileSync(file, text.replace(pattern, file.endsWith('Cargo.toml') ? `version = "${plan.version}"` : `$1version = "${plan.version}"`));
 }
-const nightly = plan.channel === 'nightly';
-const base = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'));
-const daily = JSON.parse(readFileSync('src-tauri/tauri.daily.conf.json', 'utf8'));
+/** @type {Record<string, string>} */
+const resources = { '../output/release-notices/': 'licenses/', '../output/release-plan.json': 'release.json' };
 const config = {
   version: plan.version,
-  ...(nightly ? { ...daily, app: { ...daily.app, windows: [{ ...base.app.windows[0], ...daily.app.windows[0] }] } } : {}),
+  // Update channels share the regular app's bundle identity and data profile.
+  // The Daily config remains available only for isolated local source builds.
+  productName: 'Satchel',
+  identifier: 'de.tbuck.satchel',
   bundle: {
     createUpdaterArtifacts: true,
-    resources: { '../output/release-notices/': 'licenses/', '../output/release-plan.json': 'release.json' },
+    resources,
     ...(process.platform === 'darwin' ? { macOS: { signingIdentity: process.env.APPLE_SIGNING_IDENTITY || '-' } } : {}),
   },
 };

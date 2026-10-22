@@ -18,6 +18,8 @@ use std::process::Command;
 /// Every command registered with `generate_handler!`.
 const COMMANDS: &[&str] = &[
     "check_app_update",
+    "get_app_update_preferences",
+    "set_app_update_channel",
     "download_app_update",
     "app_update_progress",
     "install_app_update",

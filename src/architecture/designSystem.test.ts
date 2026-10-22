@@ -302,7 +302,6 @@ const KNOWN_ICON_LITERAL_GROUPS: KnownGroup[] = [
   {
     reason: 'Sidebar and menu-bar glyphs on an 18 grid; redraw on 16 or 20.',
     files: {
-      'src/components/layout/SidebarUpdateAction.vue': 2,
       'src/tray/TrayPopover.vue': 1,
     },
   },
@@ -325,7 +324,7 @@ const KNOWN_ICON_LITERAL_GROUPS: KnownGroup[] = [
 const KNOWN_ICON_LITERALS = flatten(KNOWN_ICON_LITERAL_GROUPS);
 
 // Only ever lower this. See KNOWN_ICON_LITERAL_GROUPS.
-const MAX_KNOWN_ICON_LITERALS = 20;
+const MAX_KNOWN_ICON_LITERALS = 18;
 
 // ---------------------------------------------------------------------------
 // Rule 5 — transitions take their timing from the motion tokens.

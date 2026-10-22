@@ -63,7 +63,11 @@
       "checking": "Checking for updates…",
       "downloading": "Downloading {progress}%",
       "failedRetry": "Update failed, retry",
+      "nightly": "Nightly updates",
+      "nightlyHint": "Get daily updates when changes are available. Your accounts and data stay in this app. Updates download in the background and install when you quit.",
+      "ready": "Satchel {version} downloaded. Restart to update.",
       "restart": "Restart to update",
+      "restartNow": "Restart now",
       "sourceBuild": "This build is updated from source.",
       "upToDate": "You are up to date.",
       "version": "Version {version}"

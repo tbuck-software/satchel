@@ -1,5 +1,32 @@
 import { expect, test } from './mock-contract.fixture';
 
+test('nightly updates keep the same app and announce a download without moving the sidebar', async ({ page }) => {
+  await page.goto('/settings?section=about');
+  const toggle = page.getByRole('switch', { name: 'Nightly updates', exact: true });
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).not.toBeChecked();
+  await page.locator('.about-pane .toggle-switch').click();
+  await expect(toggle).toBeChecked();
+  const footer = page.locator('.sidebar-footer').first();
+  const restingFooter = await footer.boundingBox();
+
+  await page.evaluate(async () => {
+    const modulePath = '/src/stores/appUpdate.ts';
+    const { useAppUpdateStore } = await import(modulePath);
+    const update = useAppUpdateStore();
+    update.offerUpdate({ version: '0.1.10-nightly.42', download: async () => {}, restart: async () => {} });
+    await update.downloadUpdate();
+  });
+
+  const toast = page.locator('.toast').filter({ hasText: 'Satchel 0.1.10-nightly.42 downloaded' });
+  await expect(toast.getByRole('button', { name: 'Restart now', exact: true })).toBeVisible();
+  expect(await footer.boundingBox()).toEqual(restingFooter);
+  await toast.getByRole('button', { name: 'Dismiss message', exact: true }).click();
+  await expect(toast).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Restart to update', exact: true })).toBeVisible();
+  expect(await footer.boundingBox()).toEqual(restingFooter);
+});
+
 test('sync activity keeps the sidebar geometry stable', async ({ page }) => {
   await page.goto('/settings');
   const sidebar = page.locator('aside').first();
