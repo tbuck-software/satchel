@@ -61,8 +61,8 @@ hickory-resolver = "0.26"
 # for a feature the mobile UI does not expose. TLS roots and the keyring moved
 # to `satchel-core` with the modules that use them.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
-wasmtime = { version = "36.0.18", features = ["component-model"] }
-wasmtime-wasi = "36.0.18"
+wasmtime = { version = "36.0.19", features = ["component-model"] }
+wasmtime-wasi = "36.0.19"
 tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-autostart = "2"
 # Releases use raw NSIS/AppImage payloads. Legacy ZIP support adds an unused,
