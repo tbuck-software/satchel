@@ -45,9 +45,11 @@ const toast = vi.hoisted(() => ({
   warning: vi.fn(),
   error: vi.fn(),
 }));
+const messages = vi.hoisted(() => ({ reloadPgpMessages: vi.fn(async () => {}) }));
 
 vi.mock('@/services/backend', () => backend);
 vi.mock('@/composables/useToast', () => ({ useToast: () => toast }));
+vi.mock('@/stores/messages', () => ({ useMessagesStore: () => messages }));
 
 import PluginManager from './PluginManager.vue';
 
@@ -161,6 +163,43 @@ describe('PluginManager capability switches', () => {
     const text = wrapper.text();
     expect(text).toContain('Not enforced yet: network_access');
     expect(text).not.toContain('Not enforced yet: read_threads');
+  });
+});
+
+describe('OpenPGP setup', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    backend.backendListPlugins.mockResolvedValue([{ ...pgpPlugin, capabilities: ['read_threads'] }]);
+    backend.backendListPgpKeys.mockResolvedValue([pgpKey()]);
+  });
+
+  it('names a blocked message permission and offers to grant it', async () => {
+    const wrapper = mount(PluginManager, { props: { only: 'pgp' } });
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Message access is blocked'));
+    const allow = wrapper.findAll('button').find((button) => button.text() === 'Allow message access');
+    expect(allow).toBeDefined();
+    await allow!.trigger('click');
+    await vi.waitFor(() => expect(backend.backendSetPluginPermission).toHaveBeenCalledWith({
+      pluginId: 'satchel-plugin-pgp', capability: 'read_threads', granted: true,
+    }));
+    await vi.waitFor(() => expect(messages.reloadPgpMessages).toHaveBeenCalled());
+  });
+
+  it('reloads cached encrypted messages when a private key is unlocked', async () => {
+    backend.backendUnlockPgpKeys.mockResolvedValue({ unlocked: 1, key_ids: ['key-1'] });
+    const { wrapper } = await renderWithKey(pgpKey());
+    const unlock = wrapper.findAll('.key-card-actions button').find((button) => button.text() === 'Unlock');
+    await unlock!.trigger('click');
+    await vi.waitFor(() => expect(messages.reloadPgpMessages).toHaveBeenCalledOnce());
+  });
+
+  it('puts existing keys before import and generation and omits plugin internals', async () => {
+    const { wrapper } = await renderWithKey(pgpKey({ is_unlocked: true }));
+    const text = wrapper.text();
+    expect(text.indexOf('Stored keys')).toBeLessThan(text.indexOf('Import keys'));
+    expect(text).not.toContain('read_threads');
+    expect(wrapper.find('.plugin-contract').exists()).toBe(false);
+    expect(text).not.toContain('Webhooks');
   });
 });
 

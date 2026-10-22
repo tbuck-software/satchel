@@ -4,7 +4,7 @@ import {
   backendUnlockPgpKeys,
   backendUnlockSmimeCerts,
 } from '@/services/backend';
-import { backendErrorKey } from '@/utils/backendErrors';
+import { backendErrorKey, translateBackendError } from '@/utils/backendErrors';
 import { useMessagesStore } from '@/stores/messages';
 
 /** Which material the passphrase dialog is currently asking about. */
@@ -69,7 +69,7 @@ export function useMessageSecurityActions() {
   // leave the unlock hanging on a promise nobody can resolve any more.
   if (getCurrentScope()) onScopeDispose(() => settlePassphrase(null));
 
-  async function unlockPgp(threadId: string): Promise<void> {
+  async function unlockPgp(threadId: string, messageId?: string): Promise<void> {
     if (pgpBusy.value) return;
 
     pgpBusy.value = true;
@@ -94,7 +94,12 @@ export function useMessageSecurityActions() {
         }
       }
 
-      await messagesStore.loadByThread(threadId);
+      await messagesStore.reloadPgpMessages(threadId);
+      const message = messagesStore.getByThread(threadId).find((item) => item.id === messageId);
+      if (messageId && (!message || message.bodyLoadError || message.bodyText.includes('-----BEGIN PGP MESSAGE-----'))) {
+        pgpStatus.value = translateBackendError(message?.pgp?.errorDetail) ?? t('mail.pgp.decryptFailed');
+        return;
+      }
       pgpStatus.value = t('mail.pgp.unlocked');
     } catch {
       pgpStatus.value = t('mail.pgp.unlockFailed');

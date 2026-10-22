@@ -1058,6 +1058,23 @@ fn apply_message_plugins(
     has_pgp_private_key: bool,
     dto: &mut MessageDto,
 ) -> Vec<String> {
+    // Detection and decryption belong to the native engine. A denied or absent
+    // optional plugin must not hide the key import/unlock action. The caller
+    // has already checked that the ciphertext is the trusted root entity.
+    if dto
+        .body_text
+        .trim_start()
+        .starts_with("-----BEGIN PGP MESSAGE-----")
+    {
+        dto.pgp_state = Some(
+            if has_pgp_private_key {
+                "key_available_locked"
+            } else {
+                "encrypted_no_key"
+            }
+            .into(),
+        );
+    }
     let mut switched_off = Vec::new();
     for plugin_id in plugin_ids {
         let input = MessageTransformInput {
@@ -1829,6 +1846,30 @@ mod tests {
             .map(|metrics| metrics.plugin_id)
             .collect();
         assert_eq!(attempted, ["first-plugin", "second-plugin"]);
+    }
+
+    #[test]
+    fn encrypted_mail_keeps_a_native_unlock_action_when_the_pgp_plugin_is_denied() {
+        let runtime = crate::plugins::runtime::PluginRuntime::default();
+        runtime.set_permission_grants(Default::default()).unwrap();
+        for (has_key, expected) in [(true, "key_available_locked"), (false, "encrypted_no_key")] {
+            let mut dto = super::map_stored_message_row(stored_body_record(
+                Some("-----BEGIN PGP MESSAGE-----\nciphertext\n-----END PGP MESSAGE-----".into()),
+                None,
+            ));
+            super::apply_message_plugins(
+                &runtime,
+                &["satchel-plugin-pgp".into()],
+                has_key,
+                &mut dto,
+            );
+            assert_eq!(dto.pgp_state.as_deref(), Some(expected));
+            assert!(dto
+                .pgp_error_detail
+                .as_deref()
+                .unwrap()
+                .contains("read_threads"));
+        }
     }
 
     #[test]

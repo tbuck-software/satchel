@@ -111,11 +111,15 @@
       "imagePreview": "Bildvorschau",
       "imagesBlockedTitle": "Markdown-Bilder werden zum Schutz vor Tracking nicht geladen"
     },
+    "pgp": {
+      "decrypting": "Wird entschlüsselt"
+    },
     "pgpBlock": {
       "decryptAction": "Diesen Block entschlüsseln",
+      "decryptHint": "Entschlüssle diesen Block mit deinen gespeicherten privaten Schlüsseln. Falls nötig, fragt Satchel nach der Passphrase.",
       "decryptedPgp": "Entschlüsselter OpenPGP-Block",
       "decryptedSmime": "Entschlüsselter S/MIME-Block",
-      "encryptedHint": "Dieser Block kann mit deinem privaten Schlüssel entschlüsselt werden.",
+      "encryptedHint": "Importiere und entsperre den passenden privaten Schlüssel unter Einstellungen → OpenPGP und öffne die Nachricht erneut, um diesen Block zu lesen.",
       "encryptedPgp": "Verschlüsselter OpenPGP-Block"
     },
     "quotes": {

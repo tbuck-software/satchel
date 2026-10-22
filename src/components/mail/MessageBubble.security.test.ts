@@ -7,6 +7,7 @@ import { useUiStore } from '@/stores/ui';
 import AttachmentChip from './AttachmentChip.vue';
 import MessageSecurityBadge from './MessageSecurityBadge.vue';
 import MessageBubble from './MessageBubble.vue';
+import PgpStatusCard from './PgpStatusCard.vue';
 
 let wrapper: VueWrapper | null = null;
 
@@ -44,6 +45,33 @@ afterEach(() => {
 });
 
 describe('message security affordances', () => {
+  it('offers private key import for an encrypted message with no matching key', async () => {
+    const message = signedMessage();
+    message.pgp = { state: 'encrypted_no_key' };
+    message.bodyText = '-----BEGIN PGP MESSAGE-----\nencrypted\n-----END PGP MESSAGE-----';
+    message.attachments = [];
+    wrapper = mount(MessageBubble, {
+      props: { message, canReply: false },
+      global: {
+        stubs: {
+          EmailRenderer: true,
+          InvitationCard: true,
+          ItemRenderer: true,
+          SenderFilingMenu: true,
+          UnsubscribeBanner: true,
+        },
+      },
+    });
+
+    const card = wrapper.getComponent(PgpStatusCard);
+    const importButton = card.findAll('button').find((button) => button.text() === 'Import key');
+    expect(importButton).toBeDefined();
+    await importButton!.trigger('click');
+
+    expect(useUiStore().settingsOpen).toBe(true);
+    expect(useUiStore().settingsSection).toBe('pgp');
+  });
+
   it('moves a detached S/MIME signature from attachments into sender details', async () => {
     wrapper = mount(MessageBubble, {
       attachTo: document.body,
