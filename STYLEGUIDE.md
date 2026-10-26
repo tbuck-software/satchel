@@ -30,7 +30,7 @@ and fails on:
 | Icons share one frame | an `<svg>` with `stroke-width="1.4"`, a non-square or off-scale `viewBox`, or a render size of 13/15/17/19px |
 | Transitions come from the motion tokens | a literal time in `transition:` or `transition-duration:` |
 | The focus ring stays on | `outline: none`, `outline: 0`, `outline-none` without a listed replacement |
-| Contrast | a rule that declares both its own background and a `--text-*` colour, measured against the resolved tokens in **both** themes: 4.5 : 1 for every text token, tertiary included. Each text token must also clear 4.5 : 1 on `--bg-base`, `--bg-list`, `--bg-surface`, `--bg-raised`, `--bg-overlay`, `--bg-hover` and `--bg-active` |
+| Contrast | a rule that declares both its own background and a `--text-*` colour, measured against the resolved tokens in **both** themes: 4.5 : 1 for every text token, tertiary included. Primary, secondary, tertiary and accent text must also clear 4.5 : 1 on `--bg-base`, `--bg-list`, `--bg-surface`, `--bg-raised`, `--bg-overlay`, `--bg-hover`, `--bg-active` and `--bg-active-hover` |
 
 The tree does not pass these rules yet. Today's breakage is frozen file by file
 in that test's `KNOWN_*` lists, each entry with a count and a reason, and each
@@ -62,8 +62,8 @@ theme; the roles do not.
 | Token             | Light (paper) | Dark      | Usage                                    |
 |-------------------|-----------|-----------|------------------------------------------|
 | `--bg-base`       | `#f4f2ed` | `#111214` | App background and sidebar — the pane that sits back |
-| `--bg-list`       | `#faf9f6` | `#17181b` | The thread-list pane, one step forward   |
-| `--bg-surface`    | `#ffffff` | `#1c1d21` | The reading canvas, and cards on `--bg-base` |
+| `--bg-list`       | `#faf9f6` | `#17181b` | List panes, contacts and out-of-month calendar cells |
+| `--bg-surface`    | `#ffffff` | `#1c1d21` | Reading and writing canvases, and cards on `--bg-base` |
 | `--bg-raised`     | `#ebe8e1` | `#24262b` | Quiet buttons, pills, search fields      |
 | `--bg-stack`      | `#f1eee8` | `#1a1b1f` | Collections, distinct from row hover     |
 | `--bg-stack-hover`| `#e9e5dc` | `#22242a` | Hover feedback on collections           |
@@ -72,8 +72,8 @@ theme; the roles do not.
 | `--bg-sidebar`    | `#f4f2ed` | `#111214` | Sidebar background (same as base)        |
 | `--bg-backdrop`   | `rgba(28, 27, 25, 0.35)` | `rgba(5, 7, 11, 0.55)` | The scrim behind a modal — the only one |
 | `--bg-hover`      | `#efece6` | `#23252a` | Hover state for interactive elements     |
-| `--bg-active`     | `#dcecef` | `#213247` | Passive selected-state background        |
-| `--bg-active-hover`| `#cce2e6`| `#2b405a` | Active + hover combined                  |
+| `--bg-active`     | `#dcecef` | `#1c3034` | Passive selected-state background        |
+| `--bg-active-hover`| `#d7e8eb`| `#22353a` | Active + hover combined                  |
 
 On paper the reader is the *brightest* surface, not an inset one: the message is
 the sheet, so it gets no card of its own. `--bg-inset` kept its name and lost
@@ -98,11 +98,22 @@ surfaces it measures 2.8–4 : 1, so petrol *text* takes `--text-accent`, which
 the contrast check holds to 4.5 : 1 on every shared surface like the other text
 tokens. Fills, rings and edges stay on `--accent-primary`.
 
+Selection contrast uses the same resolved-token luminance calculation as
+`designSystem.test.ts`. All four shared text tokens clear 4.5 : 1.
+
+| Text token | Dark active | Dark active hover | Light active | Light active hover |
+|------------|-------------|-------------------|--------------|--------------------|
+| `--text-primary` | 11.74 : 1 | 10.91 : 1 | 14.17 : 1 | 13.63 : 1 |
+| `--text-secondary` | 6.18 : 1 | 5.74 : 1 | 7.14 : 1 | 6.87 : 1 |
+| `--text-tertiary` | 4.98 : 1 | 4.63 : 1 | 4.77 : 1 | 4.59 : 1 |
+| `--text-accent` | 5.71 : 1 | 5.30 : 1 | 6.45 : 1 | 6.21 : 1 |
+
 ### Borders
 | Token                | Light     | Dark      | Usage                         |
 |----------------------|-----------|-----------|-------------------------------|
 | `--border-color`     | `#ddd8cd` | `#30333a` | Primary borders               |
 | `--border-color-muted`| `#e6e2db`| `#272a30` | Subtle separators             |
+| `--calendar-grid-line`| `var(--border-color)` (`#ddd8cd`) | `var(--border-color)` (`#30333a`) | Calendar grid hairlines |
 
 ### Accent Colors
 The primary is the petrol from the inbox reference (`#17707f`), lifted to `#277e8b`

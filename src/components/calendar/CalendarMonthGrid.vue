@@ -163,7 +163,7 @@ function createOn(day: Date, event: MouseEvent) {
 }
 
 .month__cell--muted {
-  background: var(--bg-base);
+  background: var(--bg-list);
 }
 
 .month__cell--muted .month__daynum {

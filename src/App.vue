@@ -221,7 +221,7 @@ main {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg-base);
+  background: var(--bg-surface);
 }
 
 .shell--mobile .main-shell {

@@ -253,7 +253,7 @@ function openContact(email: string) {
   min-width: 0;
   min-height: 0;
   color: var(--text-primary);
-  background: var(--bg-base);
+  background: var(--bg-list);
 }
 
 .contact-search {

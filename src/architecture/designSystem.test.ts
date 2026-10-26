@@ -1295,9 +1295,10 @@ describe('design system: text on a self-declared surface stays readable', () => 
    */
   const TEXT_SURFACES = [
     '--bg-base', '--bg-list', '--bg-surface', '--bg-raised', '--bg-overlay', '--bg-hover', '--bg-active',
+    '--bg-active-hover',
   ];
   it.each(THEME_NAMES)('keeps every text token at 4.5:1 on the shared surfaces in %s', (theme) => {
-    const misses = Object.keys(MEASURED_TEXT_TOKENS).flatMap((token) => TEXT_SURFACES.flatMap((surface) => {
+    const misses = [...Object.keys(MEASURED_TEXT_TOKENS), '--text-accent'].flatMap((token) => TEXT_SURFACES.flatMap((surface) => {
       const ratio = contrastRatio(
         resolveColor(`var(${token})`, theme) as Rgba,
         resolveColor(`var(${surface})`, theme) as Rgba,

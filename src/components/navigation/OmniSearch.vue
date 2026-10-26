@@ -551,7 +551,7 @@ function onEnter(event: KeyboardEvent) {
 .panel {
   width: min(680px, 92vw);
   height: min(640px, 80vh);
-  background: var(--bg-surface);
+  background: var(--bg-overlay);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
@@ -629,7 +629,7 @@ function onEnter(event: KeyboardEvent) {
   display: block;
   height: var(--space-xl);
   margin-top: calc(var(--space-xl) * -1);
-  background: linear-gradient(to bottom, transparent, var(--bg-surface));
+  background: linear-gradient(to bottom, transparent, var(--bg-overlay));
   pointer-events: none;
 }
 

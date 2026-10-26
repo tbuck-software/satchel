@@ -441,7 +441,7 @@ onBeforeUnmount(() => {
   pointer-events: auto;
   border: 1px solid color-mix(in srgb, var(--border-color) 78%, white 8%);
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--bg-surface) 97%, transparent);
+  background: var(--bg-surface);
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.48), 0 2px 10px rgba(0, 0, 0, 0.32), 0 1px 0 rgba(255, 255, 255, 0.035) inset;
   backdrop-filter: blur(28px) saturate(125%);
   -webkit-backdrop-filter: blur(28px) saturate(125%);

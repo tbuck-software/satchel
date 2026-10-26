@@ -17,8 +17,8 @@
   --bg-overlay: #2e3137;
   --bg-backdrop: rgba(5, 7, 11, 0.55);
   --bg-hover: #23252a;
-  --bg-active: #213247;
-  --bg-active-hover: #2b405a;
+  --bg-active: #1c3034;
+  --bg-active-hover: #22353a;
 
   /* A well *below* the pane: code blocks, swipe tracks, skeleton bars. Not the
      reading canvas — that is --bg-surface, the brightest step, in both themes. */
@@ -26,18 +26,18 @@
 
   --control-off: #707986;
   --control-off-border: #939cab;
-  --calendar-grid-line: #3b3f48;
+  --calendar-grid-line: var(--border-color);
 
   /* Text */
   --text-primary: #e9edf3;
   --text-secondary: #a6aebc;
-  /* 4.5:1 on --bg-active and --bg-overlay too, the darkest surfaces it sits on. */
+  /* 4.5:1 on --bg-active-hover and --bg-overlay too. */
   --text-tertiary: #939cab;
   --text-inverse: #111214;
   /* Accent-coloured text: links, a label that names an action, a keycap.
      --accent-primary is a fill that carries white ink, and as text on these
-     charcoal surfaces it measures 2.8–4:1; this lifts it to 5.4:1 on the
-     darkest one (--bg-active). Fills stay on --accent-primary. */
+     charcoal surfaces it measures 2.8–4:1; this keeps 4.5:1 on the shared
+     surfaces. Fills stay on --accent-primary. */
   --text-accent: #5fb3bf;
 
   /* The open row of a list: a sheet (--bg-surface + --shadow-sm) with this
@@ -197,7 +197,6 @@
 [data-theme='light'] {
   --control-off: #777267;
   --control-off-border: #6a655b;
-  --calendar-grid-line: #ddd8cd;
   --bg-base: #f4f2ed;
   --bg-list: #faf9f6;
   --bg-sidebar: #f4f2ed;
@@ -211,7 +210,7 @@
   --bg-backdrop: rgba(28, 27, 25, 0.35);
   --bg-hover: #efece6;
   --bg-active: #dcecef;
-  --bg-active-hover: #cce2e6;
+  --bg-active-hover: #d7e8eb;
   --bg-inset: #ebe8e1;
 
   --text-primary: #1c1b19;

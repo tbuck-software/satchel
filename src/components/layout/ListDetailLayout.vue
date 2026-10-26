@@ -113,7 +113,7 @@ onBeforeUnmount(stopResize);
   min-width: 0;
   overflow: hidden;
   display: grid;
-  background: var(--bg-base);
+  background: var(--bg-list);
   border-right: 1px solid var(--border-color-muted);
 }
 
