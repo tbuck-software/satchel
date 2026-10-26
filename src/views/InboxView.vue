@@ -932,7 +932,6 @@ function acceptExistingSenders() {
             :bucket-key="activeBucket.key"
             :tone="activeBucket.tone"
             :size="34"
-            :icon-size="18"
           />
           <Avatar
             v-else-if="activeGroup"

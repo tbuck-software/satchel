@@ -82,7 +82,7 @@ describe('new-sender review in the list', () => {
     ]);
     expect(rows[1]!.text()).toContain('sender2@example.com');
     // Banner, three rows, domain line, rest line, card padding.
-    expect(sectionHeight(wrapper)).toContain(`height: ${16 + 44 + 3 * 72 + 40 + 40 + 4}px`);
+    expect(sectionHeight(wrapper)).toContain(`height: ${16 + 44 + 3 * 72 + 32 + 32 + 4}px`);
 
     const allow = rows[1]!.findAll('button').find((button) => button.text() === 'Allow');
     await allow!.trigger('click');
@@ -100,6 +100,6 @@ describe('new-sender review in the list', () => {
 
     expect(wrapper.findAll('[data-list-target-key^="new-sender:"]')).toHaveLength(2);
     expect(wrapper.text()).not.toContain('more sender');
-    expect(sectionHeight(wrapper)).toContain(`height: ${16 + 44 + 2 * 72 + 40 + 4}px`);
+    expect(sectionHeight(wrapper)).toContain(`height: ${16 + 44 + 2 * 72 + 32 + 4}px`);
   });
 });

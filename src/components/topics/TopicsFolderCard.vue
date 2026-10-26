@@ -4,10 +4,13 @@ import { useI18n } from 'vue-i18n';
 import type { Topic } from '@/stores/topics';
 import Avatar from '@/components/common/Avatar.vue';
 import FolderPreviewCard from '@/components/mail/FolderPreviewCard.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 
 const props = defineProps<{
   topics: Topic[];
+  /** Names on the preview line; see FolderPreviewCard. */
+  previewLimit?: number;
   targetKey?: string;
   keyboardFocused?: boolean;
 }>();
@@ -46,16 +49,17 @@ const chips = computed(() =>
     :count="props.topics.length"
     :unread-count="unreadTotal"
     :chips="chips"
+    :preview-limit="props.previewLimit"
     :target-key="props.targetKey"
     :keyboard-focused="props.keyboardFocused"
     :aria-label="$t('topics.card.label', { count: props.topics.length, unread: unreadTotal })"
     @click="emit('open')"
   >
     <template #icon>
-      <span class="topics-tile" aria-hidden="true">
-        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <span class="topics-glyph" aria-hidden="true">
+        <AppIcon size="lg">
           <path d="M2 4.5C2 3.7 2.7 3 3.5 3H6L7.5 4.5H12.5C13.3 4.5 14 5.2 14 6V11.5C14 12.3 13.3 13 12.5 13H3.5C2.7 13 2 12.3 2 11.5V4.5Z" />
-        </svg>
+        </AppIcon>
       </span>
     </template>
     <template #chip="{ chip }">
@@ -75,15 +79,13 @@ const chips = computed(() =>
 </template>
 
 <style scoped>
-/* Icon tile in the smart-bucket language: a circle, like the bundle icons
-   below it in the list. */
-.topics-tile {
+/* A glyph in the bundle language: hue on the line, no disc, so the folder
+   does not read as one more sender beside the avatars. */
+.topics-glyph {
   display: grid;
   place-items: center;
   width: 36px;
   height: 36px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--accent-purple) 16%, transparent);
   color: var(--accent-purple);
   flex-shrink: 0;
 }

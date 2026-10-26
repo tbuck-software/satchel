@@ -5,7 +5,7 @@ import AvatarUnreadDot from '@/components/ui/AvatarUnreadDot.vue';
 import FolderPreviewCard from './FolderPreviewCard.vue';
 
 describe('folder preview totals', () => {
-  it('counts all emails outside the preview, including read emails', () => {
+  it('shows two names on one line and counts every other email, read ones included', () => {
     const wrapper = mount(FolderPreviewCard, {
       props: {
         label: 'Newsletter',
@@ -17,9 +17,23 @@ describe('folder preview totals', () => {
       slots: { chip: '<span>Sender</span>' },
     });
 
-    expect(wrapper.findAll('.folder-chip')).toHaveLength(4);
-    expect(wrapper.get('.folder-chip-counter--regular').text()).toBe('+209');
-    expect(wrapper.get('.folder-chip-counter--compact').text()).toBe('+211');
+    expect(wrapper.findAll('.folder-chip')).toHaveLength(2);
+    expect(wrapper.findAll('.folder-chip-counter')).toHaveLength(1);
+    expect(wrapper.get('.folder-chip-counter').text()).toBe('+211');
+  });
+
+  it('shows one name at the phone limit', () => {
+    const wrapper = mount(FolderPreviewCard, {
+      props: {
+        label: 'Newsletter',
+        count: 213,
+        previewLimit: 1,
+        chips: Array.from({ length: 4 }, (_, index) => ({ id: `mail-${index}`, unread: false })),
+      },
+    });
+
+    expect(wrapper.findAll('.folder-chip')).toHaveLength(1);
+    expect(wrapper.get('.folder-chip-counter').text()).toBe('+212');
   });
 
   it('includes emails the server did not send as previews', () => {
@@ -29,8 +43,7 @@ describe('folder preview totals', () => {
         chips: [{ id: 'mail-1', unread: false }, { id: 'mail-2', unread: false }],
       },
     });
-    expect(wrapper.get('.folder-chip-counter--regular').text()).toBe('+602');
-    expect(wrapper.get('.folder-chip-counter--compact').text()).toBe('+602');
+    expect(wrapper.get('.folder-chip-counter').text()).toBe('+602');
   });
 
   it('shows no remainder when every item fits and keeps unread previews first', () => {
@@ -60,8 +73,7 @@ describe('folder preview totals', () => {
         chips: Array.from({ length: 6 }, (_, index) => ({ id: `topic-${index}`, unread: false })),
       },
     });
-    expect(wrapper.findAll('.folder-chip')).toHaveLength(4);
-    expect(wrapper.get('.folder-chip-counter--regular').text()).toBe('+2');
-    expect(wrapper.get('.folder-chip-counter--compact').text()).toBe('+4');
+    expect(wrapper.findAll('.folder-chip')).toHaveLength(2);
+    expect(wrapper.get('.folder-chip-counter').text()).toBe('+4');
   });
 });

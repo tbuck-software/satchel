@@ -9,15 +9,23 @@ export interface FolderPreviewChip {
   title?: string;
 }
 
-const props = defineProps<{
-  label: string;
-  count?: number;
-  /** Unread total for the whole folder, announced with its total count. */
-  unreadCount?: number;
-  chips: T[];
-  targetKey?: string;
-  keyboardFocused?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    label: string;
+    count?: number;
+    /** Unread total for the whole folder, announced with its total count. */
+    unreadCount?: number;
+    chips: T[];
+    /**
+     * How many names the one preview line carries: two on the desktop, one
+     * on a phone. The rest is a count in its own cell, so it is never clipped.
+     */
+    previewLimit?: number;
+    targetKey?: string;
+    keyboardFocused?: boolean;
+  }>(),
+  { previewLimit: 2 },
+);
 
 const { t } = useI18n();
 
@@ -26,15 +34,12 @@ const sortedChips = computed(() =>
   [...props.chips].sort((left, right) => Number(right.unread) - Number(left.unread)),
 );
 
-function hiddenCount(visibleLimit: number): number {
+const visibleChips = computed(() => sortedChips.value.slice(0, Math.max(1, props.previewLimit)));
+
+const hiddenCount = computed(() => {
   const total = Math.max(props.count ?? props.chips.length, props.chips.length);
-  return Math.max(0, total - Math.min(visibleLimit, props.chips.length));
-}
-
-const hiddenAfterFour = computed(() => hiddenCount(4));
-const hiddenAfterTwo = computed(() => hiddenCount(2));
-
-const visibleChips = computed(() => sortedChips.value.slice(0, 4));
+  return Math.max(0, total - visibleChips.value.length);
+});
 </script>
 
 <template>
@@ -43,13 +48,13 @@ const visibleChips = computed(() => sortedChips.value.slice(0, 4));
     :class="{ 'folder-preview-card--keyboard-focused': props.keyboardFocused }"
     :data-list-target-key="props.targetKey"
   >
-    <span class="folder-preview-card__icon relative block h-9 w-9">
+    <span class="folder-preview-card__icon relative grid h-9 w-9 place-items-center">
       <slot name="icon" />
     </span>
 
     <span class="block min-w-0">
       <span class="flex min-h-6 min-w-0 items-center gap-1.5">
-        <span class="min-w-0 truncate text-md font-bold text-primary">{{ props.label }}</span>
+        <span class="folder-preview-card__label min-w-0 truncate text-sm font-semibold text-primary">{{ props.label }}</span>
         <span
           v-if="props.count !== undefined"
           class="shrink-0 text-2xs font-semibold text-tertiary tabular-nums"
@@ -62,28 +67,23 @@ const visibleChips = computed(() => sortedChips.value.slice(0, 4));
         </span>
       </span>
 
-      <span
-        class="folder-preview-card__previews mt-1 min-w-0 gap-x-3 gap-y-0.5"
-        :class="{ 'folder-preview-card__previews--stacked': visibleChips.length <= 2 }"
-      >
+      <!-- One line: names first, the remainder in a cell of its own. -->
+      <span class="folder-preview-card__previews mt-0.5 flex min-w-0 items-center gap-3">
         <span
           v-for="chip in visibleChips"
           :key="chip.id"
-          class="folder-chip flex min-w-0 items-center gap-1.5 text-xs leading-[18px]"
-          :class="chip.unread ? 'font-strong text-primary' : 'text-secondary'"
+          class="folder-chip flex min-w-0 items-center gap-1.5 text-xs"
+          :class="chip.unread ? 'font-medium text-primary' : 'text-secondary'"
           :title="chip.title"
         >
           <slot name="chip" :chip="chip" />
         </span>
-        <span v-if="hiddenAfterFour > 0" class="folder-chip-counter folder-chip-counter--regular">
-          {{ t('thread.list.folderMore', { count: hiddenAfterFour }) }}
-        </span>
-        <span v-if="hiddenAfterTwo > 0" class="folder-chip-counter folder-chip-counter--compact">
-          {{ t('thread.list.folderMore', { count: hiddenAfterTwo }) }}
+        <span v-if="hiddenCount > 0" class="folder-chip-counter">
+          {{ t('thread.list.folderMore', { count: hiddenCount }) }}
         </span>
         <span
           v-if="sortedChips.length === 0 && $slots.empty"
-          class="folder-preview-card__empty text-xs leading-[18px] text-tertiary"
+          class="folder-preview-card__empty min-w-0 truncate text-xs text-tertiary"
         >
           <slot name="empty" />
         </span>
@@ -93,14 +93,8 @@ const visibleChips = computed(() => sortedChips.value.slice(0, 4));
 </template>
 
 <style scoped>
-/* The card is its own container: the chip clipping must follow the card's
-   width in every host (virtualised list, topics folder), not the scroller's.
-   It sits flat on the pane like a mail row: a bundle is a row that opens a
+/* It sits flat on the pane like a mail row: a bundle is a row that opens a
    page, and a bordered card per bundle stacked four boxes above the mail. */
-.folder-preview-card {
-  container-type: inline-size;
-}
-
 .folder-preview-card__icon {
   --avatar-dot-surface: var(--bg-list);
 }
@@ -109,29 +103,15 @@ const visibleChips = computed(() => sortedChips.value.slice(0, 4));
   --avatar-dot-surface: var(--bg-hover);
 }
 
-/* Explicit cells keep long names from consuming the second preview line.
-   The rest count has its own cell, so it cannot be clipped below the card. */
+/* Names shrink by their length, the count never does. The line is one text
+   line tall, so a long name truncates instead of wrapping into the next row. */
 .folder-preview-card__previews {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
-  grid-auto-rows: 18px;
+  height: calc(var(--font-size-xs) * 1.5);
 }
 
-.folder-chip:nth-child(1) { grid-area: 1 / 1; }
-.folder-chip:nth-child(2) { grid-area: 1 / 2; }
-.folder-chip:nth-child(3) { grid-area: 2 / 1; }
-.folder-chip:nth-child(4) { grid-area: 2 / 2; }
-
-/* Two previews take a line each at full width instead of halving the names. */
-.folder-preview-card__previews--stacked {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.folder-preview-card__previews--stacked .folder-chip:nth-child(2) { grid-area: 2 / 1; }
-.folder-preview-card__previews--stacked .folder-chip-counter--regular { grid-area: 2 / 2; }
-
-.folder-preview-card__empty {
-  grid-column: 1 / -1;
+.folder-chip {
+  flex: 0 1 auto;
+  line-height: 1.5;
 }
 
 .folder-preview-card--keyboard-focused {
@@ -144,42 +124,10 @@ const visibleChips = computed(() => sortedChips.value.slice(0, 4));
 }
 
 .folder-chip-counter {
-  grid-area: 2 / 3;
-  display: inline-flex;
   flex-shrink: 0;
-  align-items: center;
   color: var(--text-tertiary);
   font-size: var(--font-size-2xs);
-  font-weight: var(--weight-strong);
-  line-height: 18px;
+  font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
-}
-
-.folder-chip-counter--compact {
-  display: none;
-}
-
-/* 344px card ≈ the previous 360px scroller breakpoint minus the horizontal
-   padding between scroller and card. */
-@container (max-width: 344px) {
-  .folder-preview-card__previews {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .folder-chip:nth-child(2) { grid-area: 2 / 1; }
-
-  .folder-chip:nth-of-type(n + 3) {
-    display: none;
-  }
-
-  .folder-chip-counter--regular {
-    display: none;
-  }
-
-  .folder-chip-counter--compact {
-    margin-inline-end: calc(2 * var(--space-2xl));
-    grid-area: 2 / 2;
-    display: inline-flex;
-  }
 }
 </style>

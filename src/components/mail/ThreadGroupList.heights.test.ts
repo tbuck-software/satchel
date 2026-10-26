@@ -102,8 +102,8 @@ describe('thread list row heights', () => {
       ['--thread-row-h', '72px'],
       ['--date-header-h', '32px'],
       ['--bucket-h', '72px'],
-      ['--folder-card-h', '80px'],
-      ['--card-header-h', '40px'],
+      ['--folder-card-h', '64px'],
+      ['--card-header-h', '32px'],
       ['--review-row-h', '68px'],
       ['--review-banner-h', '44px'],
     ]) {
@@ -129,7 +129,7 @@ describe('thread list row heights', () => {
       for (const [name, value] of [
         ['--thread-row-h', '88px'],
         ['--date-header-h', '28px'],
-        ['--folder-card-h', '88px'],
+        ['--folder-card-h', '72px'],
         ['--card-header-h', '32px'],
         ['--review-row-h', '84px'],
         ['--review-banner-h', '52px'],

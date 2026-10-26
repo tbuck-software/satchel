@@ -3163,6 +3163,7 @@
       "emptyGroup": "No threads in this group.",
       "emptyView": "No threads in this view.",
       "folderAria": "{label}, {count} email | {label}, {count} emails",
+      "folderAriaUnread": "{label}, {count} email, {unread} unread | {label}, {count} emails, {unread} unread",
       "folderMore": "+{count}",
       "loadFailed": "Your mail could not be loaded.",
       "loadMoreFailed": "Older mail could not be loaded, so the list ends here.",

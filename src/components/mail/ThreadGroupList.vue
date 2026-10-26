@@ -109,18 +109,21 @@ interface RowMetrics {
  * header's bottom edge (`pb-0`) and the free space goes above it. With 12px
  * under the label and the folder section's own inset on top, "Today" floated
  * alone, closer to the section it ends than to the one it starts.
+ *
+ * A collection row is a label and one preview line, so it stays clearly
+ * shorter than a message: the mail, not the summaries, carries the list.
  */
-const DESK_ROWS: RowMetrics = { thread: 72, dateHeader: 32, folderCard: 80, banner: 44 };
+const DESK_ROWS: RowMetrics = { thread: 72, dateHeader: 32, folderCard: 64, banner: 44 };
 /*
  * tokens.css lifts every font token by 2px at 1020px and below. Three-line
  * rows at 72px then had no room left: snippet and next sender touched.
  */
-const PHONE_ROWS: RowMetrics = { thread: 88, dateHeader: 28, folderCard: 88, banner: 52 };
+const PHONE_ROWS: RowMetrics = { thread: 88, dateHeader: 28, folderCard: 72, banner: 52 };
 const PHONE_TYPE_QUERY = '(max-width: 1020px)';
 
 const BUCKET_HEIGHT = 76;
 /** Group header, and the "+N more" / domain-allow footer that matches it. */
-const CARD_HEADER_HEIGHT = 40;
+const CARD_HEADER_HEIGHT = 32;
 const PHONE_CARD_HEADER_HEIGHT = 32;
 /** Priority group `pt-1 pb-2`: it has no card, only its header and rows. */
 const PRIORITY_SECTION_PADDING = 12;
@@ -142,6 +145,11 @@ function onPhoneTypeChange(event: MediaQueryListEvent) {
 
 const rows = computed(() => (phoneTypeScale.value ? PHONE_ROWS : DESK_ROWS));
 const cardHeaderHeight = computed(() => phoneTypeScale.value ? PHONE_CARD_HEADER_HEIGHT : CARD_HEADER_HEIGHT);
+/**
+ * A collection row carries one preview line: two sender names on the desktop,
+ * one at the phone type scale, where two halves would truncate both.
+ */
+const folderPreviewLimit = computed(() => (phoneTypeScale.value ? 1 : 2));
 /** The review row sits inside a thread-height wrapper, inset two pixels a side. */
 const reviewRowHeight = computed(() => rows.value.thread - 4);
 
@@ -802,6 +810,7 @@ onBeforeUnmount(() => {
                 <TopicsFolderCard
                   v-if="topicsCardVisible && props.topics"
                   :topics="props.topics"
+                  :preview-limit="folderPreviewLimit"
                   target-key="topics"
                   :keyboard-focused="props.keyboardNavigationActive && props.focusedTargetKey === 'topics'"
                   @open="emit('openTopics')"
@@ -814,9 +823,12 @@ onBeforeUnmount(() => {
                   :count="folder.count"
                   :unread-count="folder.unreadCount"
                   :chips="folderChips(folder)"
+                  :preview-limit="folderPreviewLimit"
                   :target-key="`bucket:${folder.id}`"
                   :keyboard-focused="props.keyboardNavigationActive && props.focusedTargetKey === `bucket:${folder.id}`"
-                  :aria-label="$t('thread.list.folderAria', { label: folder.label, count: folder.count })"
+                  :aria-label="folder.unreadCount > 0
+                    ? $t('thread.list.folderAriaUnread', { label: folder.label, count: folder.count, unread: folder.unreadCount })
+                    : $t('thread.list.folderAria', { label: folder.label, count: folder.count })"
                   @click="emit('openBucket', folder.id)"
                 >
                   <template #icon>
@@ -824,8 +836,7 @@ onBeforeUnmount(() => {
                       :bucket-key="folder.key"
                       :tone="folder.tone"
                       :size="36"
-                      :icon-size="18"
-                      shape="circle"
+                      shape="glyph"
                     />
                   </template>
                   <template #chip="{ chip }">

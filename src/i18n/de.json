@@ -3163,6 +3163,7 @@
       "emptyGroup": "Keine Threads in dieser Gruppe.",
       "emptyView": "Keine Threads in dieser Ansicht.",
       "folderAria": "{label}, {count} Mail | {label}, {count} Mails",
+      "folderAriaUnread": "{label}, {count} Mail, {unread} ungelesen | {label}, {count} Mails, {unread} ungelesen",
       "folderMore": "+{count}",
       "loadFailed": "Die E-Mails konnten nicht geladen werden.",
       "loadMoreFailed": "Ältere E-Mails konnten nicht geladen werden, die Liste endet deshalb hier.",
