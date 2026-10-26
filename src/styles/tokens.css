@@ -26,7 +26,7 @@
 
   --control-off: #707986;
   --control-off-border: #939cab;
-  --calendar-grid-line: var(--border-color);
+  --calendar-grid-line: #3b3f48;
 
   /* Text */
   --text-primary: #e9edf3;
@@ -197,6 +197,7 @@
 [data-theme='light'] {
   --control-off: #777267;
   --control-off-border: #6a655b;
+  --calendar-grid-line: #ddd8cd;
   --bg-base: #f4f2ed;
   --bg-list: #faf9f6;
   --bg-sidebar: #f4f2ed;

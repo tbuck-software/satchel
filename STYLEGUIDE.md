@@ -113,7 +113,7 @@ Selection contrast uses the same resolved-token luminance calculation as
 |----------------------|-----------|-----------|-------------------------------|
 | `--border-color`     | `#ddd8cd` | `#30333a` | Primary borders               |
 | `--border-color-muted`| `#e6e2db`| `#272a30` | Subtle separators             |
-| `--calendar-grid-line`| `var(--border-color)` (`#ddd8cd`) | `var(--border-color)` (`#30333a`) | Calendar grid hairlines |
+| `--calendar-grid-line`| `#ddd8cd` | `#3b3f48` | Calendar grid hairlines, a step above `--border-color` in the dark theme |
 
 ### Accent Colors
 The primary is the petrol from the inbox reference (`#17707f`), lifted to `#277e8b`
