@@ -41,24 +41,24 @@ const overflow = computed(() => Math.max(0, today.value.length - MAX_ROWS));
 <template>
   <section v-if="today.length > 0" class="agenda" :aria-label="$t('nav.agenda.title')">
     <span class="agenda__title">{{ $t('nav.agenda.title') }}</span>
-    <div v-for="item in rows" :key="item.key" class="agenda__row">
-      <span
-        class="agenda__bar"
-        :class="{ 'agenda__bar--all-day': item.allDay }"
-        :style="{ background: item.color ?? colors.get(item.sourceKey) ?? 'var(--accent-primary)' }"
-        aria-hidden="true"
-      />
-      <!--
-        An all-day row prints no time — the same answer the week and month
-        grids give (`show-time="!item.allDay"`). "Ganztägig" is three times
-        the width the column has, and it ran straight into the title. The
-        bar carries the meaning for the eye, the hidden label for a reader.
-      -->
-      <span class="agenda__time">
-        <span v-if="item.allDay" class="sr-only">{{ $t('calendar.event.allDay') }}</span>
-        <template v-else>{{ formatTime(item.start) }}</template>
-      </span>
-      <span class="agenda__label">{{ item.title }}</span>
+    <!--
+      One grid for all rows: the time column takes the width of its widest
+      entry, so an all-day row says so ("All day" / "Ganztägig") and its title
+      still starts on the same edge as the timed rows.
+    -->
+    <div class="agenda__rows">
+      <div v-for="item in rows" :key="item.key" class="agenda__row">
+        <span
+          class="agenda__bar"
+          :class="{ 'agenda__bar--all-day': item.allDay }"
+          :style="{ background: item.color ?? colors.get(item.sourceKey) ?? 'var(--accent-primary)' }"
+          aria-hidden="true"
+        />
+        <span class="agenda__time">
+          {{ item.allDay ? $t('calendar.event.allDay') : formatTime(item.start) }}
+        </span>
+        <span class="agenda__label">{{ item.title }}</span>
+      </div>
     </div>
     <span v-if="overflow > 0" class="agenda__more">{{ $t('nav.agenda.more', { count: overflow }) }}</span>
   </section>
@@ -84,12 +84,18 @@ const overflow = computed(() => Math.max(0, today.value.length - MAX_ROWS));
   color: var(--text-primary);
 }
 
-.agenda__row {
-  display: flex;
+.agenda__rows {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
-  gap: var(--space-sm);
+  column-gap: var(--space-sm);
+  row-gap: var(--space-sm);
   min-width: 0;
   font-size: var(--font-size-xs);
+}
+
+.agenda__row {
+  display: contents;
 }
 
 .agenda__bar {
@@ -105,8 +111,6 @@ const overflow = computed(() => Math.max(0, today.value.length - MAX_ROWS));
 }
 
 .agenda__time {
-  width: 38px;
-  flex-shrink: 0;
   white-space: nowrap;
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;

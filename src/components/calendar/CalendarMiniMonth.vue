@@ -5,6 +5,7 @@ import {
   addMonths,
   isSameDay,
   monthGridDays,
+  weekdayLabels,
 } from '@/utils/calendarGrid';
 import IconButton from '@/components/ui/IconButton.vue';
 import { useI18n } from 'vue-i18n';
@@ -24,14 +25,7 @@ const { locale } = useI18n();
 // back to the selected day whenever the main view navigates.
 const cursor = ref(new Date(props.selected));
 
-const weekdayLabels = computed(() => {
-  const monday = new Date(2024, 0, 1);
-  return Array.from({ length: 7 }, (_, index) =>
-    new Intl.DateTimeFormat(locale.value, { weekday: 'narrow' }).format(
-      new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index),
-    ),
-  );
-});
+const weekdayHeaders = computed(() => weekdayLabels(locale.value, 'narrow'));
 
 const monthTitle = computed(() =>
   new Intl.DateTimeFormat(locale.value, { month: 'long', year: 'numeric' }).format(cursor.value),
@@ -71,7 +65,7 @@ const cells = computed(() =>
       </span>
     </header>
     <div class="mini-month__weekdays" aria-hidden="true">
-      <span v-for="(label, index) in weekdayLabels" :key="index">{{ label }}</span>
+      <span v-for="(label, index) in weekdayHeaders" :key="index">{{ label }}</span>
     </div>
     <div class="mini-month__grid">
       <CardButton
@@ -131,7 +125,16 @@ const cells = computed(() =>
   padding: 2px 0;
 }
 
+/*
+ * A fixed circle centred in its column, so the number sits in the middle of
+ * the today/selected fill and lines up under the centred weekday header.
+ * CardButton is a left-aligned flex box by default; both are undone here.
+ */
 .mini-month__day {
+  justify-self: center;
+  justify-content: center;
+  align-items: center;
+  width: 24px;
   height: 24px;
   border: 0;
   border-radius: var(--radius-full);

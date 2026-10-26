@@ -16,6 +16,7 @@ import {
   overlapsDay,
   startOfWeek,
   weekDays,
+  weekdayLabels,
   type CalendarItem,
 } from './calendarGrid';
 
@@ -258,6 +259,12 @@ describe('itemFromInvite', () => {
     );
     expect(item!.status).toBe('cancelled');
   });
+
+  it('falls back to the untitled label for a missing or blank summary', () => {
+    const at = { starts_at: '2026-07-29T09:00:00Z' };
+    expect(itemFromInvite(makeInvite({ ...at, summary: null }))!.title).toBe('(No title)');
+    expect(itemFromInvite(makeInvite({ ...at, summary: '  ' }))!.title).toBe('(No title)');
+  });
 });
 
 describe('filterInvitesWithoutMirroredEvents', () => {
@@ -373,5 +380,29 @@ describe('itemFromEvent', () => {
       updated_at: '2026-07-01T00:00:00Z',
     };
     expect(itemFromEvent(event).attendees).toEqual(['a@example.com', 'b@example.com']);
+  });
+
+  it('falls back to the untitled label for a blank title', () => {
+    const event: BackendCalendarEvent = {
+      id: 'ev-2',
+      account_id: 'acc-1',
+      uid: 'uid-ev-2',
+      title: ' ',
+      starts_at: '2026-07-29T14:00:00Z',
+      ends_at: '2026-07-29T14:30:00Z',
+      all_day: 0,
+      attendees_json: '[]',
+      source: 'local',
+      created_at: '2026-07-01T00:00:00Z',
+      updated_at: '2026-07-01T00:00:00Z',
+    };
+    expect(itemFromEvent(event).title).toBe('(No title)');
+  });
+});
+
+describe('weekdayLabels', () => {
+  it('starts on Monday and follows the requested locale', () => {
+    expect(weekdayLabels('en')).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+    expect(weekdayLabels('de', 'narrow')).toEqual(['M', 'D', 'M', 'D', 'F', 'S', 'S']);
   });
 });

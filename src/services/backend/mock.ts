@@ -399,6 +399,16 @@ const handlers: Record<string, Handler> = {
   },
   sync_google_calendar: () => ({ accounts_checked: accounts.filter((account) => account.provider === 'gmail').length,
     events_synced: 0, errors: [] }),
+  // No mock account carries a CalDAV/CardDAV service, so the real command
+  // would skip every one of them and report an empty pass.
+  sync_groupware: () => ({
+    accounts_checked: 0,
+    calendars_found: 0,
+    events_synced: 0,
+    address_books_found: 0,
+    contacts_synced: 0,
+    errors: [],
+  }),
   get_app_update_preferences: () => ({ channel: appUpdateChannel, supported: true }),
   set_app_update_channel: (payload) => { appUpdateChannel = payload.channel as 'stable' | 'nightly'; },
   check_app_update: () => ({ channel: appUpdateChannel, version: null }),

@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { useSettingsStore } from '@/stores/settings';
-import AppButton from '@/components/ui/AppButton.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
 
 const settings = useSettingsStore();
+
+function setTheme(value: string) {
+  if (value === 'light' || value === 'dark') settings.theme = value;
+}
 
 function setAttachmentOpenBehavior(value: string) {
   settings.attachmentOpenBehavior = value === 'system' ? 'system' : 'preview';
@@ -24,20 +27,15 @@ function setAttachmentOpenBehavior(value: string) {
           <span class="setting-label">{{ $t('settings.theme.appearance') }}</span>
           <span class="setting-hint">{{ $t('settings.theme.appearanceHint') }}</span>
         </div>
-        <AppButton variant="secondary" @click="settings.toggleTheme()">
-          <template #icon>
-            <!-- Sun -->
-            <svg v-if="settings.theme === 'dark'" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="8" cy="8" r="3" />
-              <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.3 3.3l1.4 1.4M11.3 11.3l1.4 1.4M3.3 12.7l1.4-1.4M11.3 4.7l1.4-1.4" />
-            </svg>
-            <!-- Moon -->
-            <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M13.5 8.5a5.5 5.5 0 01-6-6 5.5 5.5 0 106 6z" />
-            </svg>
-          </template>
-          {{ settings.theme === 'dark' ? $t('settings.theme.dark') : $t('settings.theme.light') }}
-        </AppButton>
+        <SegmentedControl
+          :model-value="settings.theme"
+          :options="[
+            { value: 'light', label: $t('settings.theme.light') },
+            { value: 'dark', label: $t('settings.theme.dark') },
+          ]"
+          :aria-label="$t('settings.theme.appearance')"
+          @update:model-value="setTheme"
+        />
       </div>
 
       <div class="setting-row">

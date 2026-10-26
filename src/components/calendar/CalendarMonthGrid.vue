@@ -6,6 +6,7 @@ import {
   isSameDay,
   itemsForDay,
   monthGridDays,
+  weekdayLabels,
   type CalendarItem,
 } from '@/utils/calendarGrid';
 import type { AnchorBox } from '@/utils/popoverPlacement';
@@ -25,14 +26,7 @@ const emit = defineEmits<{
 
 const { locale } = useI18n();
 
-const weekdayLabels = computed(() => {
-  const monday = new Date(2024, 0, 1);
-  return Array.from({ length: 7 }, (_, index) =>
-    new Intl.DateTimeFormat(locale.value, { weekday: 'short' }).format(
-      new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + index),
-    ),
-  );
-});
+const weekdayHeaders = computed(() => weekdayLabels(locale.value));
 const MAX_VISIBLE = 3;
 
 const today = new Date();
@@ -64,7 +58,7 @@ function createOn(day: Date, event: MouseEvent) {
 <template>
   <div class="month" role="grid" :aria-label="$t('calendar.view.monthGrid')">
     <div class="month__weekdays" role="row">
-      <span v-for="label in weekdayLabels" :key="label" role="columnheader">{{ label }}</span>
+      <span v-for="label in weekdayHeaders" :key="label" role="columnheader">{{ label }}</span>
     </div>
     <div class="month__grid" :style="{ '--rows': rowCount }">
       <div

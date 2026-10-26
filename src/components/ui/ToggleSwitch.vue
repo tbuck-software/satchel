@@ -44,7 +44,10 @@ async function onChange(event: Event) {
 </script>
 
 <template>
-  <label class="toggle-switch" :class="{ 'toggle-switch--disabled': disabled }">
+  <label
+    class="toggle-switch"
+    :class="{ 'toggle-switch--disabled': disabled, 'toggle-switch--bare': !$slots.default }"
+  >
     <input
       type="checkbox"
       role="switch"
@@ -71,6 +74,15 @@ async function onChange(event: Event) {
   min-width: 0;
   cursor: pointer;
   user-select: none;
+}
+
+/*
+ * Without a caption there is nothing to truncate. In a settings row a long
+ * hint would otherwise squeeze the label below its track, and the track
+ * would overflow past the row's right inset.
+ */
+.toggle-switch--bare {
+  flex-shrink: 0;
 }
 
 .toggle-switch--disabled {

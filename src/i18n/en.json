@@ -335,7 +335,7 @@
       "organizer": "Organizer",
       "start": "Start",
       "title": "Title",
-      "untitled": "(no title)"
+      "untitled": "(No title)"
     },
     "hint": "Clicking an empty day or time slot creates an event. Events from mails with an {ics} attachment are detected automatically.",
     "importIcs": "Import .ics…",
@@ -2804,9 +2804,9 @@
       "autoDarkHint": "Show light mail designs with good contrast in dark mode.",
       "collapseQuoted": "Collapse quoted history automatically",
       "collapseQuotedHint": "Fold earlier messages behind a compact history toggle.",
-      "dark": "Dunkel",
+      "dark": "Dark",
       "description": "How Satchel looks and behaves.",
-      "light": "Hell",
+      "light": "Light",
       "plainTextCompose": "Compose new messages as plain text",
       "plainTextComposeHint": "The composer then sends no HTML.",
       "plainTextRead": "Show mail as plain text",

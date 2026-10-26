@@ -12,6 +12,7 @@ import type { WorkflowState } from '@/types/workflow';
 import NavItem from '@/components/ui/NavItem.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import { outboxVisibleCount } from '@/utils/outboxLabels';
+import { activeMailboxNavNode } from '@/utils/mailboxNav';
 
 type SectionIcon =
   | 'inbox'
@@ -197,30 +198,14 @@ const favoriteFolderGroups = computed(() =>
   })),
 );
 
-const activeNodeId = computed(() => {
-  if (router.currentRoute.value.name === 'outbox') return 'section:outbox';
-  if (threads.workflowFilter !== 'all' && threads.mailboxFilter.kind === 'all') {
-    return `section:${sectionIdForWorkflow(threads.workflowFilter)}`;
-  }
-
-  if (threads.workflowFilter === 'all' && threads.mailboxFilter.kind === 'section' && threads.mailboxFilter.value) {
-    return `section:${threads.mailboxFilter.value}`;
-  }
-
-  if (threads.workflowFilter === 'all' && threads.mailboxFilter.kind === 'folder' && threads.mailboxFilter.value) {
-    return accounts.activeAccountId
-      ? `folder:${accounts.activeAccountId}:${threads.mailboxFilter.value}`
-      : `folder:${threads.mailboxFilter.value}`;
-  }
-
-  return '';
-});
-
-function sectionIdForWorkflow(state: WorkflowState): string {
-  if (state === 'done') return 'archive';
-  if (state === 'snoozed') return 'snoozed';
-  return state;
-}
+const activeNodeId = computed(() =>
+  activeMailboxNavNode({
+    routeName: typeof router.currentRoute.value.name === 'string' ? router.currentRoute.value.name : null,
+    workflowFilter: threads.workflowFilter,
+    mailboxFilter: threads.mailboxFilter,
+    activeAccountId: accounts.activeAccountId,
+  }),
+);
 
 function countWorkflowThreads(state: WorkflowState, accountId?: string | null): number {
   return threads.threads.filter((thread) => {

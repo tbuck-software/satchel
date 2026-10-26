@@ -4,12 +4,14 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   allDayItemsForDay,
   formatTime,
+  formatWeekday,
   isSameDay,
   layoutDay,
   type CalendarItem,
 } from '@/utils/calendarGrid';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 import CalendarEventChip from './CalendarEventChip.vue';
+import { useI18n } from 'vue-i18n';
 
 const props = defineProps<{
   days: Date[];
@@ -25,8 +27,15 @@ const emit = defineEmits<{
 const HOUR_HEIGHT = 48;
 const OVERLAP_INSET = 10;
 const MAX_OVERLAP_INSET_LEVELS = 3;
-const WEEKDAY_LABELS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+/**
+ * Below this a block cannot stack title over time (24px for half an hour), so
+ * both go on one line. Stacked, the title shrank to nothing and a short event
+ * read as a bare time range.
+ */
+const COMPACT_EVENT_MINUTES = 45;
 const SNAP_MINUTES = 30;
+
+const { locale } = useI18n();
 
 const scroller = ref<HTMLElement | null>(null);
 const now = ref(new Date());
@@ -38,7 +47,7 @@ const columns = computed(() =>
   props.days.map((day) => ({
     day,
     key: day.toISOString(),
-    label: WEEKDAY_LABELS[(day.getDay() + 6) % 7],
+    label: formatWeekday(day, locale.value),
     isToday: isSameDay(day, now.value),
     allDay: allDayItemsForDay(props.items, day),
     positioned: layoutDay(props.items, day),
@@ -154,7 +163,10 @@ onBeforeUnmount(() => {
             class="week__event"
             :class="[
               `week__event--${entry.item.status}`,
-              { 'week__event--overlapping': entry.overlapLevel > 0 },
+              {
+                'week__event--overlapping': entry.overlapLevel > 0,
+                'week__event--compact': entry.endMin - entry.startMin < COMPACT_EVENT_MINUTES,
+              },
             ]"
             :style="{
               ...blockStyle(entry),
@@ -363,7 +375,17 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--chip-accent, var(--accent-primary)) 34%, var(--bg-surface));
 }
 
+.week__event--compact {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-1-5);
+  padding-block: 0;
+  line-height: 1.6;
+}
+
 .week__event-title {
+  flex-shrink: 0;
+  max-width: 100%;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -371,6 +393,9 @@ onBeforeUnmount(() => {
 }
 
 .week__event-time {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }

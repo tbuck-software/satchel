@@ -68,7 +68,7 @@ export function itemFromEvent(event: BackendCalendarEvent): CalendarItem {
     kind: 'event',
     id: event.id,
     uid: event.uid,
-    title: event.title || t('calendar.event.untitled'),
+    title: event.title.trim() || t('calendar.event.untitled'),
     location: event.location ?? null,
     description: descriptionToText(event.description),
     organizer: null,
@@ -102,7 +102,7 @@ export function itemFromInvite(invite: BackendCalendarInvite): CalendarItem | nu
     color: null,
     id: invite.id,
     uid: invite.uid,
-    title: invite.summary || t('calendar.event.untitled'),
+    title: invite.summary?.trim() || t('calendar.event.untitled'),
     location: invite.location ?? null,
     description: descriptionToText(invite.description),
     organizer: invite.organizer_name || invite.organizer_email || null,
@@ -405,6 +405,27 @@ export function layoutDay(items: CalendarItem[], day: Date): PositionedItem[] {
 // ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
+
+/**
+ * Weekday name of `day` in the UI locale. Every calendar header goes through
+ * here, so the week grid cannot drift back to a hard-coded language while the
+ * month grid follows the UI.
+ */
+export function formatWeekday(
+  day: Date,
+  locale: string,
+  width: 'short' | 'narrow' = 'short',
+): string {
+  return new Intl.DateTimeFormat(locale, { weekday: width }).format(day);
+}
+
+/** Monday-first weekday names in the UI locale, for column headers. */
+export function weekdayLabels(locale: string, width: 'short' | 'narrow' = 'short'): string[] {
+  // 2024-01-01 is a Monday.
+  return Array.from({ length: 7 }, (_, index) =>
+    formatWeekday(new Date(2024, 0, 1 + index), locale, width),
+  );
+}
 
 export function formatTime(date: Date): string {
   return d(date, 'time');
