@@ -75,13 +75,14 @@ const chips = computed(() =>
 </template>
 
 <style scoped>
-/* Icon tile in the smart-bucket language. */
+/* Icon tile in the smart-bucket language: a circle, like the bundle icons
+   below it in the list. */
 .topics-tile {
   display: grid;
   place-items: center;
   width: 36px;
   height: 36px;
-  border-radius: var(--radius-md);
+  border-radius: 50%;
   background: color-mix(in srgb, var(--accent-purple) 16%, transparent);
   color: var(--accent-purple);
   flex-shrink: 0;

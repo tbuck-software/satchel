@@ -91,6 +91,12 @@ the unread dot, so the one saturated colour in the window still means something.
 | `--text-secondary` | `#4f4b44` | `#a6aebc` | Body text, labels               |
 | `--text-tertiary`  | `#6a655b` | `#939cab` | Timestamps, hints, disabled     |
 | `--text-inverse`   | `#faf9f6` | `#111214` | Text on accent backgrounds      |
+| `--text-accent`    | `#125a66` | `#5fb3bf` | Accent-coloured text: links, action labels, keycaps; `text-accent` in Tailwind |
+
+`--accent-primary` is a fill — it carries white ink. As text on the dark
+surfaces it measures 2.8–4 : 1, so petrol *text* takes `--text-accent`, which
+the contrast check holds to 4.5 : 1 on every shared surface like the other text
+tokens. Fills, rings and edges stay on `--accent-primary`.
 
 ### Borders
 | Token                | Light     | Dark      | Usage                         |
@@ -171,6 +177,11 @@ The sidebar's compact compose button uses `--accent-primary` with
 `--text-on-accent`. Pressed filter pills use `--action-neutral` with
 `--action-neutral-ink`. Sender initials use a 16% identity tint on `--bg-surface`, with
 ink mixed from the identity colour and `--text-primary`.
+
+The open row of a list — inbox, priority group, search — is one treatment:
+`--bg-surface` with `box-shadow: var(--selection-edge), var(--shadow-sm)`, a
+sheet with a 3px petrol edge. A tinted fill is the checked (multi-select) state,
+not the open one, and no group draws a surface of its own for the sheet to sit in.
 
 Stacks use up to three offset sender avatars, the count next to the sender,
 a preview of distinct subjects, and a translated collection summary. Their
@@ -275,6 +286,7 @@ Literals go to the nearest step: 4–7px `xs`, 8–11px `sm`, 12–15px `md`,
 | `--shadow-md`  | `0 8px 24px …0.10` + hairline            | `0 8px 24px …0.35`            | Dropdowns, cards   |
 | `--shadow-lg`  | `0 16px 48px …0.14` + hairline           | `0 16px 48px …0.45`           | Modals, overlays   |
 | `--shadow-glow`| `0 0 20px …0.10`                         | `0 0 20px …0.15`              | Focus glow         |
+| `--selection-edge` | `inset 3px 0 0 var(--accent-primary)` | same                   | The open list row's edge, paired with `--shadow-sm` |
 
 All three light-theme shadows carry a hairline ring of their own. A white sheet
 on pale paper is a 1.07 : 1 step, and a drop shadow draws no top edge — without
@@ -399,8 +411,16 @@ the text instead. Repeating the fallback in a component is not that, and
 - Virtualized scroll for performance
 - Rows: 72px, flat on the pane — avatar with one unread dot, sender, subject,
   snippet, timestamp, quick actions on hover. The open thread is the only sheet
-  in the list (`--bg-surface` + `--shadow-sm`); bundles and stacks are quieter
-  than a mail, not louder (`--bg-stack` with a muted border)
+  in the list (`--bg-surface` + `--selection-edge` + `--shadow-sm`). Bundles
+  (topics, pinned, notifications, newsletters) are rows too: flat on the pane,
+  `--bg-hover` under the pointer, no card. Stacks of similar mail keep
+  `--bg-stack`
+- Priority is a group header, not a card: the bolt in `--accent-amber`, the
+  label in `--accent-amber-soft`, ordinary rows below it
+- New senders is the one triage card (`--bg-stack`, muted hairline): a single
+  line by default — glyph, title, count, the newest names, Review — that
+  expands in place to three sender rows. The state persists
+  (`satchel.ui.newSendersExpanded`); Enter on the banner toggles it
 
 ### Detail Pane (right)
 - Flex-grow to fill remaining space, background `--bg-surface` — the sheet

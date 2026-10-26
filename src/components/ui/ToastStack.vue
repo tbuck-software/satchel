@@ -344,7 +344,7 @@ function showPreviousCompactUndo() {
 
 .toast--info .toast__icon {
   background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
-  color: var(--accent-primary);
+  color: var(--text-accent);
 }
 
 .toast--success .toast__icon {
@@ -379,7 +379,7 @@ function showPreviousCompactUndo() {
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--accent-primary);
+  color: var(--text-accent);
   font: inherit;
   font-weight: var(--weight-semibold);
   cursor: pointer;

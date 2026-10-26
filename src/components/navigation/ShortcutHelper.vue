@@ -266,7 +266,7 @@ footer button {
   border: 1px solid color-mix(in srgb, var(--accent-primary) 35%, var(--border-color));
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
-  color: var(--accent-primary);
+  color: var(--text-accent);
   padding: 7px 10px;
   font: inherit;
   font-size: var(--font-size-xs);
@@ -292,7 +292,7 @@ kbd {
   background: var(--bg-raised);
   border-radius: var(--radius-xs);
   padding: 3px 8px;
-  color: var(--accent-primary);
+  color: var(--text-accent);
   /* "Ctrl+Shift+T" and "Backspace or Del" are wider than the column. */
   white-space: normal;
   overflow-wrap: anywhere;

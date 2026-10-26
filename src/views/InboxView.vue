@@ -14,6 +14,7 @@ import { useTopicsStore } from '@/stores/topics';
 import { THREAD_LIST_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
 import { useFollowUpsStore } from '@/stores/followUps';
 import { formatListTime } from '@/utils/listTime';
+import { NEW_SENDER_PREVIEW_LIMIT } from '@/utils/threadList';
 import type { ThreadCategory } from '@/types/mail';
 import type { WorkflowState } from '@/types/workflow';
 import SmartBucketIcon from '@/components/mail/SmartBucketIcon.vue';
@@ -140,7 +141,7 @@ const smartFolderRowVisible = computed(() =>
   listItems.value.some((item) => item.kind === 'folder-row'),
 );
 
-type KeyboardListTargetKind = 'thread' | 'bucket' | 'group' | 'topics' | 'new-sender';
+type KeyboardListTargetKind = 'thread' | 'bucket' | 'group' | 'topics' | 'new-senders' | 'new-sender';
 interface KeyboardListTarget {
   key: string;
   kind: KeyboardListTargetKind;
@@ -209,11 +210,18 @@ const keyboardTargets = computed<KeyboardListTarget[]>(() => {
     } else if (item.kind === 'group') {
       targets.push({ key: `group:${item.group.id}`, kind: 'group', id: item.group.id });
     } else if (item.kind === 'new-sender-stack') {
-      targets.push({
-        key: `new-sender:${item.stack.id}`,
-        kind: 'new-sender',
-        id: item.stack.senders[0]?.topThreadId ?? '',
-      });
+      // The banner first; its sender rows only while it is expanded, and the
+      // same three the list renders.
+      targets.push({ key: `new-senders:${item.stack.id}`, kind: 'new-senders', id: item.stack.id });
+      if (ui.newSendersExpanded) {
+        targets.push(
+          ...item.stack.senders.slice(0, NEW_SENDER_PREVIEW_LIMIT).map((sender) => ({
+            key: `new-sender:${sender.id}`,
+            kind: 'new-sender' as const,
+            id: sender.topThreadId,
+          })),
+        );
+      }
     } else if (item.kind === 'thread') {
       targets.push({ key: `thread:${item.thread.id}`, kind: 'thread', id: item.thread.id });
     }
@@ -556,6 +564,10 @@ function openKeyboardFocus(): boolean {
   if (target.kind === 'group') {
     pendingKeyboardFocusRestore = target.key;
     openGroup(target.id);
+    return true;
+  }
+  if (target.kind === 'new-senders') {
+    ui.toggleNewSendersExpanded();
     return true;
   }
 
@@ -1035,6 +1047,7 @@ function acceptExistingSenders() {
           :selected-thread-ids="threads.selectedThreadIds"
           :active-group-id="activeBundle?.id"
           :sender-review-setup-complete="Boolean(settings.senderReviewStartedAt)"
+          :new-senders-expanded="ui.newSendersExpanded"
           :bulk-busy="bulkBusy"
           :topics="topicsStore.activeTopics"
           @load-more="void threads.loadMore()"
@@ -1049,6 +1062,7 @@ function acceptExistingSenders() {
           @open-topics="topicsViewOpen = true"
           @create-topic="void createTopic()"
           @open-new-senders="openNewSenders"
+          @toggle-new-senders="ui.toggleNewSendersExpanded()"
           @accept-existing-senders="acceptExistingSenders"
           @bucket-action="onBucketAction"
           @group-done="onGroupDone"

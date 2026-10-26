@@ -110,13 +110,16 @@
         "moved": "Moved to “{folder}”."
       },
       "newSenders": {
-        "acceptExisting": "Accept existing",
+        "acceptExisting": "Allow {count} sender | Allow all {count} senders",
         "acceptExistingTitle": "Treat every sender so far as known",
         "allow": "Allow",
         "allowDomain": "Allow everything from {'@'}{domain}",
         "allowDomainTitle": "Allow all past and future mail from {'@'}{domain}",
         "allowTitle": "Allow this sender from now on",
+        "collapse": "Hide the sender rows",
+        "expand": "Show the newest senders here",
         "moreSenders": "+{count} more sender | +{count} more senders",
+        "review": "Review",
         "senderCount": "{count} sender | {count} senders",
         "showAll": "Show all new senders",
         "title": "New senders"
@@ -341,13 +344,16 @@
         "moved": "Nach „{folder}“ verschoben."
       },
       "newSenders": {
-        "acceptExisting": "Bestand übernehmen",
+        "acceptExisting": "{count} Absender zulassen | Alle {count} Absender zulassen",
         "acceptExistingTitle": "Alle bisherigen Absender als bekannt übernehmen",
         "allow": "Zulassen",
         "allowDomain": "Alle von {'@'}{domain} zulassen",
         "allowDomainTitle": "Alle bisherigen und künftigen Mails von {'@'}{domain} zulassen",
         "allowTitle": "Absender künftig zulassen",
+        "collapse": "Absenderzeilen ausblenden",
+        "expand": "Neueste Absender hier anzeigen",
         "moreSenders": "+{count} weiterer Absender | +{count} weitere Absender",
+        "review": "Prüfen",
         "senderCount": "{count} Absender | {count} Absender",
         "showAll": "Alle neuen Absender anzeigen",
         "title": "Neue Absender"

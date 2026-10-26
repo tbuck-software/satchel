@@ -5,6 +5,7 @@ import { uiPersistence } from './ui';
 const UI_STORAGE_KEYS = {
   sidebarWidth: 'satchel.ui.sidebarWidth',
   threadListWidth: 'satchel.ui.threadListWidth',
+  newSendersExpanded: 'satchel.ui.newSendersExpanded',
 } as const;
 
 function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
@@ -68,6 +69,19 @@ describe('ui persistence', () => {
 
     expect(storage.values.get(UI_STORAGE_KEYS.sidebarWidth)).toBe('220');
     expect(storage.values.get(UI_STORAGE_KEYS.threadListWidth)).toBe('760.5');
+  });
+
+  it('reads the new-sender expansion as a strict boolean, collapsed by default', () => {
+    const storage = memoryStorage();
+    restoreProvider = setPersistenceStorageProvider(() => storage);
+
+    expect(uiPersistence.newSendersExpanded.read()).toBe(false);
+    uiPersistence.newSendersExpanded.write(true);
+    expect(storage.values.get(UI_STORAGE_KEYS.newSendersExpanded)).toBe('true');
+    expect(uiPersistence.newSendersExpanded.read()).toBe(true);
+
+    storage.values.set(UI_STORAGE_KEYS.newSendersExpanded, 'yes');
+    expect(uiPersistence.newSendersExpanded.read()).toBe(false);
   });
 
   it('tolerates unavailable and throwing storage', () => {

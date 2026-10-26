@@ -106,7 +106,7 @@ it('patches one row of 2,000 without re-running the per-thread projections twice
   store.threads = rows.map(row => toThreadModel(row, []));
   let renders = 0;
   const Row = defineComponent({
-    props: ['thread', 'active', 'selected', 'keyboardFocused', 'selectionMode', 'selectedIds', 'posInSet', 'setSize', 'tinted'],
+    props: ['thread', 'active', 'selected', 'keyboardFocused', 'selectionMode', 'selectedIds', 'posInSet', 'setSize'],
     setup(props) { return () => { renders++; return h('div', props.thread.subject); }; },
   });
   // The whole smart-inbox pipeline, as the Inbox renders it.

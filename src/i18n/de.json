@@ -3146,13 +3146,16 @@
       "moved": "Nach „{folder}“ verschoben."
     },
     "newSenders": {
-      "acceptExisting": "Bestand übernehmen",
+      "acceptExisting": "{count} Absender zulassen | Alle {count} Absender zulassen",
       "acceptExistingTitle": "Alle bisherigen Absender als bekannt übernehmen",
       "allow": "Zulassen",
       "allowDomain": "Alle von {'@'}{domain} zulassen",
       "allowDomainTitle": "Alle bisherigen und künftigen Mails von {'@'}{domain} zulassen",
       "allowTitle": "Absender künftig zulassen",
+      "collapse": "Absenderzeilen ausblenden",
+      "expand": "Neueste Absender hier anzeigen",
       "moreSenders": "+{count} weiterer Absender | +{count} weitere Absender",
+      "review": "Prüfen",
       "senderCount": "{count} Absender | {count} Absender",
       "showAll": "Alle neuen Absender anzeigen",
       "title": "Neue Absender"

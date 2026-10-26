@@ -789,7 +789,7 @@ function onEnter(event: KeyboardEvent) {
 
 .snippet mark {
   background: transparent;
-  color: var(--accent-primary);
+  color: var(--text-accent);
   font-weight: var(--weight-strong);
 }
 
@@ -799,7 +799,7 @@ function onEnter(event: KeyboardEvent) {
 }
 
 .footer-label {
-  color: var(--accent-primary);
+  color: var(--text-accent);
   font-size: var(--font-size-sm);
   font-weight: var(--weight-semibold);
 }

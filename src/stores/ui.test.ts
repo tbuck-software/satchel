@@ -78,6 +78,20 @@ describe('layout persistence', () => {
     expect(ui.threadListWidth).toBe(408);
   });
 
+  it('starts the new-sender review collapsed and remembers a toggle', () => {
+    const ui = useUiStore();
+    expect(ui.newSendersExpanded).toBe(false);
+
+    ui.toggleNewSendersExpanded();
+
+    expect(ui.newSendersExpanded).toBe(true);
+    expect(window.localStorage.getItem('satchel.ui.newSendersExpanded')).toBe('true');
+    ui.$dispose();
+
+    setActivePinia(createPinia());
+    expect(useUiStore().newSendersExpanded).toBe(true);
+  });
+
   it('clamps and rounds only in setters before persisting', async () => {
     const ui = useUiStore();
 

@@ -428,7 +428,7 @@ function appendOperator(token: string) {
   padding: 2px 6px 2px 9px;
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
-  color: var(--accent-primary);
+  color: var(--text-accent);
   font-size: var(--font-size-xs);
   font-weight: var(--weight-semibold);
 }
@@ -586,8 +586,11 @@ function appendOperator(token: string) {
   background: var(--bg-hover);
 }
 
+/* The inbox's open-row treatment: a sheet with the petrol edge. A tinted
+   fill here and a sheet there made the same state look like two. */
 .result-row--active {
-  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+  background: var(--bg-surface);
+  box-shadow: var(--selection-edge), var(--shadow-sm);
 }
 
 .result-body {
@@ -661,7 +664,7 @@ function appendOperator(token: string) {
 
 .result-server-note {
   font-size: var(--font-size-xs);
-  color: var(--accent-primary);
+  color: var(--text-accent);
 }
 
 .server-search {

@@ -1025,6 +1025,8 @@ export function buildDateGroupedEntries(inputThreads: Thread[]): ThreadListEntry
 
 /** Full rows shown in the priority card before the rest folds behind "+N more". */
 export const PRIORITY_CARD_MAX_THREADS = 3;
+/** Sender rows the expanded new-sender review shows in the list; the review page has the rest. */
+export const NEW_SENDER_PREVIEW_LIMIT = 3;
 
 export function buildPriorityCardEntry(
   bucket: SmartInboxBucketGroup,

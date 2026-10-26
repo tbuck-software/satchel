@@ -30,6 +30,15 @@
   /* 4.5:1 on --bg-active and --bg-overlay too, the darkest surfaces it sits on. */
   --text-tertiary: #939cab;
   --text-inverse: #111214;
+  /* Accent-coloured text: links, a label that names an action, a keycap.
+     --accent-primary is a fill that carries white ink, and as text on these
+     charcoal surfaces it measures 2.8–4:1; this lifts it to 5.4:1 on the
+     darkest one (--bg-active). Fills stay on --accent-primary. */
+  --text-accent: #5fb3bf;
+
+  /* The open row of a list: a sheet (--bg-surface + --shadow-sm) with this
+     edge in front, the same in the inbox, a priority group and search. */
+  --selection-edge: inset 3px 0 0 var(--accent-primary);
 
   /* Petrol from the reference. Both fills retain contrast with white ink. */
   --accent-primary: #277e8b;
@@ -204,6 +213,9 @@
      take (designSystem.test.ts). The drawing's #8a857b managed 3:1. */
   --text-tertiary: #6a655b;
   --text-inverse: #faf9f6;
+  /* Darker than the light fill, so small text keeps 4.5:1 on a petrol tint
+     too (a toast icon, a scope chip) and 6.4:1 on --bg-active. */
+  --text-accent: #125a66;
 
   /* #e6e2db is the hairline the drawing uses, and it reads — but a card edge
      on --bg-base measures 1.15:1 there, under the 1.2:1 the surface test

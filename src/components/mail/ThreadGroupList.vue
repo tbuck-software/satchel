@@ -24,6 +24,7 @@ import TopicsFolderCard from '@/components/topics/TopicsFolderCard.vue';
 import ErrorState from '@/components/ui/ErrorState.vue';
 import SkeletonRow from '@/components/ui/SkeletonRow.vue';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
+import { NEW_SENDER_PREVIEW_LIMIT } from '@/utils/threadList';
 
 const props = defineProps<{
   items: ThreadListEntry[];
@@ -44,6 +45,8 @@ const props = defineProps<{
   /** First-sync progress. While it runs, an empty list is not an empty mailbox. */
   backfill?: { remaining: number; total: number } | null;
   senderReviewSetupComplete: boolean;
+  /** The new-sender review shows its sender rows instead of the one-line banner. */
+  newSendersExpanded?: boolean;
   bulkBusy: boolean;
   /** When set, the topics folder joins the smart folder section as its first card. */
   topics?: BackendTopic[];
@@ -57,6 +60,7 @@ const emit = defineEmits<{
   openTopics: [];
   createTopic: [];
   openNewSenders: [];
+  toggleNewSenders: [];
   acceptExistingSenders: [];
   bucketAction: [payload: { threadIds: string[]; action: 'done' | 'read' }];
   groupDone: [threadIds: string[]];
@@ -95,27 +99,31 @@ interface RowMetrics {
   thread: number;
   dateHeader: number;
   folderCard: number;
+  /** The collapsed new-sender review: one line, a button tall. */
+  banner: number;
 }
 
-const DESK_ROWS: RowMetrics = { thread: 72, dateHeader: 36, folderCard: 80 };
+const DESK_ROWS: RowMetrics = { thread: 72, dateHeader: 36, folderCard: 80, banner: 44 };
 /*
  * tokens.css lifts every font token by 2px at 1020px and below. Three-line
  * rows at 72px then had no room left: snippet and next sender touched.
  */
-const PHONE_ROWS: RowMetrics = { thread: 88, dateHeader: 44, folderCard: 88 };
+const PHONE_ROWS: RowMetrics = { thread: 88, dateHeader: 44, folderCard: 88, banner: 52 };
 const PHONE_TYPE_QUERY = '(max-width: 1020px)';
 
 const BUCKET_HEIGHT = 76;
-/** Card header, and the "+N more" / domain-allow footer that matches it. */
+/** Group header, and the "+N more" / domain-allow footer that matches it. */
 const CARD_HEADER_HEIGHT = 40;
-/** Section `py-3`, so twelve above and twelve below. */
-const SECTION_PADDING = 24;
-/** Card `pb-2`. */
-const CARD_BOTTOM_PADDING = 8;
+/** Priority group `pt-1 pb-2`: it has no card, only its header and rows. */
+const PRIORITY_SECTION_PADDING = 12;
+/** New-sender section `py-2` around its card. */
+const REVIEW_SECTION_PADDING = 16;
+/** Expanded review card `pb-1`. */
+const REVIEW_CARD_BOTTOM_PADDING = 4;
 // The folder section carries no own title — it sits under the "Heute" header,
 // whose bottom padding already separates the two.
 const FOLDER_SECTION_TOP_INSET = 4;
-const FOLDER_CARD_GAP = 6;
+const FOLDER_CARD_GAP = 2;
 const FOLDER_SECTION_FOOTER_HEIGHT = 12;
 
 const phoneTypeScale = ref(
@@ -141,6 +149,7 @@ const rowHeights = computed(() => ({
   '--folder-section-inset': `${FOLDER_SECTION_TOP_INSET}px`,
   '--card-header-h': `${CARD_HEADER_HEIGHT}px`,
   '--review-row-h': `${reviewRowHeight.value}px`,
+  '--review-banner-h': `${rows.value.banner}px`,
 }));
 
 const scrollerRef = ref<HTMLElement | null>(null);
@@ -192,21 +201,53 @@ function itemHeight(item: ThreadListEntry): number {
   }
   if (item.kind === 'priority-card') {
     // Rows add a thread height each, the optional "+N weitere" footer a card header.
-    return SECTION_PADDING + CARD_HEADER_HEIGHT + CARD_BOTTOM_PADDING
+    return PRIORITY_SECTION_PADDING + CARD_HEADER_HEIGHT
       + item.threads.length * thread
       + (item.hiddenCount > 0 ? CARD_HEADER_HEIGHT : 0);
   }
   if (item.kind === 'date-header') return dateHeader;
   if (item.kind === 'bucket') return BUCKET_HEIGHT;
   if (item.kind === 'new-sender-stack') {
-    return SECTION_PADDING + CARD_HEADER_HEIGHT + thread + CARD_BOTTOM_PADDING
-      + (hasNewSenderFooter(item.stack) ? CARD_HEADER_HEIGHT : 0);
+    const collapsed = REVIEW_SECTION_PADDING + rows.value.banner;
+    if (!props.newSendersExpanded) return collapsed;
+    const footer = newSenderFooter(item.stack);
+    return collapsed
+      + visibleSenders(item.stack).length * thread
+      + (footer.domain ? CARD_HEADER_HEIGHT : 0)
+      + (footer.more ? CARD_HEADER_HEIGHT : 0)
+      + REVIEW_CARD_BOTTOM_PADDING;
   }
   return thread;
 }
 
-function hasNewSenderFooter(stack: NewSenderStack): boolean {
-  return Boolean(stack.domainSuggestion) || stack.count > 1;
+function visibleSenders(stack: NewSenderStack): NewSenderGroup[] {
+  return props.newSendersExpanded ? stack.senders.slice(0, NEW_SENDER_PREVIEW_LIMIT) : [];
+}
+
+/** Senders past the preview, which only the review page lists. */
+function hiddenSenderCount(stack: NewSenderStack): number {
+  return Math.max(0, stack.count - NEW_SENDER_PREVIEW_LIMIT);
+}
+
+/**
+ * The expanded card's two optional footer lines: the domain shortcut, and one
+ * for the rest of the senders plus the first-run "allow all" — either is enough
+ * to need the line.
+ */
+function newSenderFooter(stack: NewSenderStack): { domain: boolean; more: boolean } {
+  return {
+    domain: Boolean(stack.domainSuggestion),
+    more: hiddenSenderCount(stack) > 0 || !props.senderReviewSetupComplete,
+  };
+}
+
+/** Who is waiting, for the collapsed line: the newest few names. */
+function senderNames(stack: NewSenderStack): string {
+  return stack.senders.slice(0, NEW_SENDER_PREVIEW_LIMIT).map((sender) => sender.senderName).join(', ');
+}
+
+function activateSender(sender: NewSenderGroup) {
+  emit('activate', { threadId: sender.topThreadId, shiftKey: false, metaKey: false, ctrlKey: false });
 }
 
 interface ListLayout {
@@ -325,8 +366,10 @@ function threadSetSize(id: string): number | undefined {
 const topSpacerHeight = computed(() => itemOffsets.value[startIndex.value] ?? 0);
 /**
  * Scroll past the last row far enough that it clears the floating undo FAB
- * (and the mobile compose FAB zone) instead of hiding behind it. Constant —
- * the FAB appears and disappears, but the list geometry must not.
+ * and the mobile compose FAB instead of hiding behind it: the compose FAB's
+ * footprint (56px, 20px off the edge) plus a 20px gap. The safe-area inset the
+ * FAB also sits above is added in the template, where the variable resolves.
+ * Constant — the FAB appears and disappears, but the list geometry must not.
  */
 const LIST_BOTTOM_INSET = 96;
 const bottomSpacerHeight = computed(() => {
@@ -489,7 +532,12 @@ function targetKeysForItem(item: ThreadListEntry): string[] {
   }
   if (item.kind === 'bucket') return [`bucket:${item.bucket.id}`];
   if (item.kind === 'group') return [`group:${item.group.id}`];
-  if (item.kind === 'new-sender-stack') return [`new-sender:${item.stack.id}`];
+  if (item.kind === 'new-sender-stack') {
+    return [
+      `new-senders:${item.stack.id}`,
+      ...visibleSenders(item.stack).map((sender) => `new-sender:${sender.id}`),
+    ];
+  }
   if (item.kind === 'thread') return [`thread:${item.thread.id}`];
   return [];
 }
@@ -784,63 +832,62 @@ onBeforeUnmount(() => {
               </div>
             </section>
 
+            <!-- No card: a group header in amber, then ordinary rows. The open
+                 row's sheet is then the only surface in the group. -->
             <section
               v-else-if="item.kind === 'priority-card'"
-              class="bg-list px-5 py-3"
+              class="priority-group bg-list pb-2 pt-1"
               :style="{ height: `${itemHeight(item)}px` }"
               :aria-label="$t('thread.bucket.priority')"
             >
-              <article class="priority-card -mx-3 overflow-hidden rounded-2xl pb-2">
-                <CardButton
-                  class="priority-card__header group/priority relative flex h-[var(--card-header-h)] w-full cursor-pointer items-center gap-[7px] border-0 bg-transparent px-4 text-left"
-                  :title="$t('thread.list.showAllPriority')"
-                  @click="emit('openBucket', item.bucket.id)"
-                >
-                  <svg class="priority-card__bolt shrink-0" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M9.2 1.8L4.4 8.4h3.4l-1 5.8 4.8-7H8.2l1-5.4z" />
-                  </svg>
-                  <h3 class="priority-card__title m-0 text-sm font-strong tracking-[0.01em]">{{ item.bucket.label }}</h3>
-                  <span class="pt-px text-2xs font-semibold text-tertiary tabular-nums">{{ item.bucket.count }}</span>
-                  <svg class="shrink-0 text-tertiary opacity-0 transition-opacity group-hover/priority:opacity-100" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M6 3.5L10.5 8 6 12.5" />
-                  </svg>
-                </CardButton>
+              <CardButton
+                class="priority-group__header group/priority mx-2 flex h-[var(--card-header-h)] w-[calc(100%-16px)] cursor-pointer items-center gap-1.5 rounded-lg border-0 bg-transparent px-3 text-left"
+                :title="$t('thread.list.showAllPriority')"
+                @click="emit('openBucket', item.bucket.id)"
+              >
+                <svg class="priority-group__bolt shrink-0" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M9.2 1.8L4.4 8.4h3.4l-1 5.8 4.8-7H8.2l1-5.4z" />
+                </svg>
+                <h3 class="priority-group__title m-0 text-sm font-strong tracking-[0.01em]">{{ item.bucket.label }}</h3>
+                <span class="pt-px text-2xs font-semibold text-tertiary tabular-nums">{{ item.bucket.count }}</span>
+                <svg class="shrink-0 text-tertiary opacity-0 transition-opacity group-hover/priority:opacity-100" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M6 3.5L10.5 8 6 12.5" />
+                </svg>
+              </CardButton>
 
-                <div role="listbox" :aria-label="item.bucket.label" aria-multiselectable="true">
-                  <div
-                    v-for="(thread, index) in item.threads"
-                    :key="thread.id"
-                    class="thread-list-row flex h-[var(--thread-row-h)] items-center px-2"
-                    role="presentation"
-                  >
-                    <ThreadListItem
-                      class="w-full"
-                      :thread="thread"
-                      tinted
-                      :pos-in-set="index + 1"
-                      :set-size="item.threads.length"
-                      :active="isActive(thread)"
-                      :selected="isSelected(thread)"
-                      :keyboard-focused="props.keyboardNavigationActive && props.focusedTargetKey === `thread:${thread.id}`"
-                      :selection-mode="props.selectedThreadIds.length > 0"
-                      :data-list-target-key="`thread:${thread.id}`"
-                      @activate="emit('activate', $event)"
-                      @check="emit('check', $event)"
-                    />
-                  </div>
+              <div role="listbox" :aria-label="item.bucket.label" aria-multiselectable="true">
+                <div
+                  v-for="(thread, index) in item.threads"
+                  :key="thread.id"
+                  class="thread-list-row flex h-[var(--thread-row-h)] items-center px-2"
+                  role="presentation"
+                >
+                  <ThreadListItem
+                    class="w-full"
+                    :thread="thread"
+                    :pos-in-set="index + 1"
+                    :set-size="item.threads.length"
+                    :active="isActive(thread)"
+                    :selected="isSelected(thread)"
+                    :keyboard-focused="props.keyboardNavigationActive && props.focusedTargetKey === `thread:${thread.id}`"
+                    :selection-mode="props.selectedThreadIds.length > 0"
+                    :data-list-target-key="`thread:${thread.id}`"
+                    @activate="emit('activate', $event)"
+                    @check="emit('check', $event)"
+                  />
                 </div>
+              </div>
 
-                <CardButton
-                  v-if="item.hiddenCount > 0"
-                  class="priority-card__more relative mx-2 flex h-[var(--card-header-h)] w-[calc(100%-16px)] cursor-pointer items-center justify-center gap-1.5 rounded-lg border-0 bg-transparent text-xs font-semibold"
-                  :class="{ 'list-target--keyboard-focused': props.keyboardNavigationActive && props.focusedTargetKey === `bucket:${item.bucket.id}` }"
-                  :data-list-target-key="`bucket:${item.bucket.id}`"
-                  :title="$t('thread.list.showAllPriority')"
-                  @click="emit('openBucket', item.bucket.id)"
-                >
-                  {{ $t('thread.list.morePriority', { count: item.hiddenCount }) }}
-                </CardButton>
-              </article>
+              <CardButton
+                v-if="item.hiddenCount > 0"
+                class="priority-group__more relative mx-2 flex h-[var(--card-header-h)] w-[calc(100%-16px)] cursor-pointer items-center gap-1.5 rounded-lg border-0 bg-transparent text-xs font-semibold"
+                :class="{ 'list-target--keyboard-focused': props.keyboardNavigationActive && props.focusedTargetKey === `bucket:${item.bucket.id}` }"
+                :data-list-target-key="`bucket:${item.bucket.id}`"
+                :title="$t('thread.list.showAllPriority')"
+                @click="emit('openBucket', item.bucket.id)"
+              >
+                {{ $t('thread.list.morePriority', { count: item.hiddenCount }) }}
+              </CardButton>
             </section>
 
             <div
@@ -871,119 +918,164 @@ onBeforeUnmount(() => {
 
             <section
               v-else-if="item.kind === 'new-sender-stack'"
-              class="bg-list px-5 py-3"
+              class="bg-list px-2 py-2"
               :style="{ height: `${itemHeight(item)}px` }"
               :aria-label="$t('thread.newSenders.title')"
             >
-              <article class="review-card -mx-3 overflow-hidden rounded-2xl pb-2">
-                <div class="review-card__header relative flex h-[var(--card-header-h)] items-center gap-2 px-4">
+              <article class="review-card overflow-hidden rounded-xl" :class="{ 'pb-1': props.newSendersExpanded }">
+                <!-- Collapsed, the review is this one line: who is waiting and
+                     the way in. The rows open in place; the page holds them all. -->
+                <div class="review-card__banner flex h-[var(--review-banner-h)] items-center gap-1 pr-1.5">
                   <CardButton
-                    class="group/newsender flex min-w-0 cursor-pointer items-center gap-[7px] border-0 bg-transparent p-0 text-left"
-                    :title="$t('thread.newSenders.showAll')"
-                    @click="emit('openNewSenders')"
+                    class="review-card__toggle flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent pl-3 text-left"
+                    :class="{ 'list-target--keyboard-focused': props.keyboardNavigationActive && props.focusedTargetKey === `new-senders:${item.stack.id}` }"
+                    :data-list-target-key="`new-senders:${item.stack.id}`"
+                    :title="props.newSendersExpanded ? $t('thread.newSenders.collapse') : $t('thread.newSenders.expand')"
+                    :aria-expanded="props.newSendersExpanded ? 'true' : 'false'"
+                    @click="emit('toggleNewSenders')"
                   >
                     <svg class="review-card__glyph shrink-0" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <circle cx="8" cy="5.7" r="2.5" />
                       <path d="M3.8 13a4.2 4.2 0 018.4 0" />
                     </svg>
-                    <h3 class="review-card__title m-0 truncate text-sm font-strong tracking-[0.01em]">{{ item.stack.label }}</h3>
-                    <span class="pt-px text-2xs font-semibold text-tertiary tabular-nums">{{ item.stack.count }}</span>
-                    <svg class="shrink-0 text-tertiary opacity-0 transition-opacity group-hover/newsender:opacity-100" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                      <path d="M6 3.5L10.5 8 6 12.5" />
+                    <h3 class="m-0 shrink-0 text-sm font-strong text-primary">{{ item.stack.label }}</h3>
+                    <span class="shrink-0 pt-px text-2xs font-semibold text-tertiary tabular-nums">{{ item.stack.count }}</span>
+                    <span class="min-w-0 truncate pl-1 text-xs text-tertiary">{{ senderNames(item.stack) }}</span>
+                    <svg
+                      class="review-card__chevron ml-auto shrink-0 text-tertiary"
+                      :class="{ 'review-card__chevron--open': props.newSendersExpanded }"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M4 6l4 4 4-4" />
                     </svg>
                   </CardButton>
                   <AppButton
-                    v-if="!props.senderReviewSetupComplete"
-                    class="review-card__setup ml-auto"
-                    :title="$t('thread.newSenders.acceptExistingTitle')"
-                    @click="emit('acceptExistingSenders')"
-                    variant="ghost"
+                    :title="$t('thread.newSenders.showAll')"
+                    @click="emit('openNewSenders')"
+                    variant="soft"
                     size="sm"
                   >
-                    {{ $t('thread.newSenders.acceptExisting') }}
+                    {{ $t('thread.newSenders.review') }}
                   </AppButton>
-                  <CountBadge v-else-if="item.stack.unreadCount > 0" class="ml-auto" :value="item.stack.unreadCount" tone="accent" />
                 </div>
 
-                <div class="flex h-[var(--thread-row-h)] items-center px-2">
-                  <article
-                    class="review-card__row grid h-[var(--review-row-h)] w-full cursor-pointer grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 transition-colors"
-                    :class="{ 'list-target--keyboard-focused': props.keyboardNavigationActive && props.focusedTargetKey === `new-sender:${item.stack.id}` }"
-                    :data-list-target-key="`new-sender:${item.stack.id}`"
-                    role="button"
-                    tabindex="0"
-                    @click="emit('activate', { threadId: item.stack.senders[0]!.topThreadId, shiftKey: false, metaKey: false, ctrlKey: false })"
-                    @keydown.enter.prevent="emit('activate', { threadId: item.stack.senders[0]!.topThreadId, shiftKey: false, metaKey: false, ctrlKey: false })"
-                    @keydown.space.prevent="emit('activate', { threadId: item.stack.senders[0]!.topThreadId, shiftKey: false, metaKey: false, ctrlKey: false })"
+                <template v-if="props.newSendersExpanded">
+                  <div
+                    v-for="sender in visibleSenders(item.stack)"
+                    :key="sender.id"
+                    class="flex h-[var(--thread-row-h)] items-center px-1"
                   >
-                    <Avatar
-                      :name="item.stack.senders[0]!.senderName"
-                      :email="item.stack.senders[0]!.senderEmail"
-                      :size="38"
-                    />
-                    <div class="min-w-0 text-left">
-                      <div class="flex min-w-0 items-center gap-1.5">
-                        <span class="min-w-0 truncate text-md font-strong text-primary">{{ item.stack.senders[0]!.senderName }}</span>
-                        <CountBadge v-if="item.stack.senders[0]!.count > 1" :value="item.stack.senders[0]!.count" />
+                    <article
+                      class="review-card__row grid h-[var(--review-row-h)] w-full cursor-pointer grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-2 transition-colors"
+                      :class="{ 'list-target--keyboard-focused': props.keyboardNavigationActive && props.focusedTargetKey === `new-sender:${sender.id}` }"
+                      :data-list-target-key="`new-sender:${sender.id}`"
+                      role="button"
+                      tabindex="0"
+                      @click="activateSender(sender)"
+                      @keydown.enter.prevent="activateSender(sender)"
+                      @keydown.space.prevent="activateSender(sender)"
+                    >
+                      <Avatar :name="sender.senderName" :email="sender.senderEmail" :size="36" />
+                      <div class="min-w-0 text-left">
+                        <div class="flex min-w-0 items-center gap-1.5">
+                          <span class="min-w-0 truncate text-md font-strong text-primary">{{ sender.senderName }}</span>
+                          <CountBadge v-if="sender.count > 1" :value="sender.count" />
+                        </div>
+                        <div class="mt-0.5 truncate text-xs text-secondary" :title="sender.senderEmail">{{ sender.senderEmail }}</div>
+                        <div
+                          class="mt-0.5 truncate text-xs"
+                          :class="sender.spoofingText ? 'font-medium text-accent-red' : 'text-tertiary'"
+                        >
+                          {{ sender.spoofingText || sender.subject || sender.previewText }}
+                        </div>
                       </div>
-                      <div class="mt-0.5 truncate text-xs text-secondary">{{ item.stack.senders[0]!.senderEmail }}</div>
-                      <div
-                        class="mt-1 truncate text-xs"
-                        :class="item.stack.senders[0]!.spoofingText ? 'font-medium text-accent-red' : 'text-tertiary'"
-                      >
-                        {{ item.stack.senders[0]!.spoofingText || item.stack.senders[0]!.subject || item.stack.senders[0]!.previewText }}
+
+                      <!-- Stacked in their own column, so the identity keeps
+                           the full width of the row for name, address and subject. -->
+                      <div class="new-sender-actions grid shrink-0 gap-1">
+                        <AppButton
+                          class="new-sender-actions__allow"
+                          :title="$t('thread.newSenders.allowTitle')"
+                          @click.stop="emit('newSenderAction', { sender, action: 'accept' })"
+                          variant="secondary"
+                          size="sm"
+                        >
+                          <template #icon>
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                              <path d="M3.5 8.4l2.5 2.5 6.5-6.8" />
+                            </svg>
+                          </template>
+                          {{ $t('thread.newSenders.allow') }}
+                        </AppButton>
+                        <AppButton
+                          class="new-sender-actions__block"
+                          :title="$t('thread.actions.blockSender')"
+                          @click.stop="emit('newSenderAction', { sender, action: 'block' })"
+                          variant="secondary"
+                          size="sm"
+                        >
+                          <template #icon>
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                              <circle cx="8" cy="8" r="5.5" />
+                              <path d="M4.1 11.9l7.8-7.8" />
+                            </svg>
+                          </template>
+                          {{ $t('common.block') }}
+                        </AppButton>
                       </div>
-                    </div>
+                    </article>
+                  </div>
 
-                    <div class="new-sender-actions flex shrink-0 items-center gap-1.5">
-                      <AppButton
-
-                        :title="$t('thread.newSenders.allowTitle')"
-                        @click.stop="emit('newSenderAction', { sender: item.stack.senders[0]!, action: 'accept' })"
-                        variant="primary"
-                        size="sm"
-                      >
-                        {{ $t('thread.newSenders.allow') }}
-                      </AppButton>
-                      <AppButton
-
-                        :title="$t('thread.actions.blockSender')"
-                        @click.stop="emit('newSenderAction', { sender: item.stack.senders[0]!, action: 'block' })"
-                        variant="danger"
-                        size="sm"
-                      >
-                        {{ $t('common.block') }}
-                      </AppButton>
-                    </div>
-                  </article>
-                </div>
-
-                <CardButton
-                  v-if="item.stack.domainSuggestion"
-                  class="review-card__more relative mx-2 flex h-[var(--card-header-h)] w-[calc(100%-16px)] min-w-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg border-0 bg-transparent px-3 text-xs font-semibold"
-                  :title="$t('thread.newSenders.allowDomainTitle', { domain: item.stack.domainSuggestion.domain })"
-                  @click="emit('acceptDomain', item.stack.domainSuggestion)"
-                >
-                  <svg class="shrink-0" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="8" cy="8" r="3.1" />
-                    <path d="M11.1 8v1.2a1.7 1.7 0 003.4 0V8a6.5 6.5 0 10-2.6 5.2" />
-                  </svg>
-                  <span class="min-w-0 truncate">{{ $t('thread.newSenders.allowDomain', { domain: item.stack.domainSuggestion.domain }) }}</span>
-                  <span class="shrink-0 font-medium tabular-nums opacity-70">{{ $t('thread.newSenders.senderCount', { count: item.stack.domainSuggestion.senderCount }) }}</span>
-                </CardButton>
-                <CardButton
-                  v-else-if="item.stack.count > 1"
-                  class="review-card__more relative mx-2 flex h-[var(--card-header-h)] w-[calc(100%-16px)] cursor-pointer items-center justify-center gap-1.5 rounded-lg border-0 bg-transparent text-xs font-semibold"
-                  @click="emit('openNewSenders')"
-                >
-                  {{ $t('thread.newSenders.moreSenders', { count: item.stack.count - 1 }) }}
-                </CardButton>
+                  <CardButton
+                    v-if="item.stack.domainSuggestion"
+                    class="review-card__more relative mx-1 flex h-[var(--card-header-h)] w-[calc(100%-8px)] min-w-0 cursor-pointer items-center gap-1.5 rounded-lg border-0 bg-transparent px-2 text-xs font-semibold"
+                    :title="$t('thread.newSenders.allowDomainTitle', { domain: item.stack.domainSuggestion.domain })"
+                    @click="emit('acceptDomain', item.stack.domainSuggestion)"
+                  >
+                    <svg class="shrink-0" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <circle cx="8" cy="8" r="3.1" />
+                      <path d="M11.1 8v1.2a1.7 1.7 0 003.4 0V8a6.5 6.5 0 10-2.6 5.2" />
+                    </svg>
+                    <span class="min-w-0 truncate">{{ $t('thread.newSenders.allowDomain', { domain: item.stack.domainSuggestion.domain }) }}</span>
+                    <span class="shrink-0 font-medium tabular-nums opacity-70">{{ $t('thread.newSenders.senderCount', { count: item.stack.domainSuggestion.senderCount }) }}</span>
+                  </CardButton>
+                  <div
+                    v-if="newSenderFooter(item.stack).more"
+                    class="flex h-[var(--card-header-h)] items-center gap-2 px-1"
+                  >
+                    <CardButton
+                      v-if="hiddenSenderCount(item.stack) > 0"
+                      class="review-card__more flex h-full min-w-0 cursor-pointer items-center rounded-lg border-0 bg-transparent px-2 text-xs font-semibold"
+                      @click="emit('openNewSenders')"
+                    >
+                      {{ $t('thread.newSenders.moreSenders', { count: hiddenSenderCount(item.stack) }) }}
+                    </CardButton>
+                    <AppButton
+                      v-if="!props.senderReviewSetupComplete"
+                      class="review-card__setup ml-auto"
+                      :title="$t('thread.newSenders.acceptExistingTitle')"
+                      @click="emit('acceptExistingSenders')"
+                      variant="ghost"
+                      size="sm"
+                    >
+                      {{ $t('thread.newSenders.acceptExisting', item.stack.count) }}
+                    </AppButton>
+                  </div>
+                </template>
               </article>
             </section>
 
             <section
               v-else-if="item.kind === 'bucket'"
-              class="group/bucket mx-2 flex h-[var(--bucket-h)] cursor-pointer items-center gap-3 rounded-xl bg-stack px-3 transition-colors hover:bg-stack-hover"
+              class="group/bucket mx-2 flex h-[var(--bucket-h)] cursor-pointer items-center gap-3 rounded-xl px-3 transition-colors hover:bg-hover"
               :class="{ 'list-target--keyboard-focused': props.keyboardNavigationActive && props.focusedTargetKey === `bucket:${item.bucket.id}` }"
               :data-list-target-key="`bucket:${item.bucket.id}`"
               role="button"
@@ -1062,7 +1154,7 @@ onBeforeUnmount(() => {
         </template>
       </template>
 
-      <div aria-hidden="true" :style="{ height: `${bottomSpacerHeight}px` }" />
+      <div aria-hidden="true" :style="{ height: `calc(${bottomSpacerHeight}px + var(--satchel-safe-area-bottom, 0px))` }" />
       <div v-if="props.loadMoreFailed && !props.loadPreviousFailed" class="thread-list-more-failed" role="alert">
         <span>{{ $t('thread.list.loadMoreFailed') }}</span>
         <AppButton size="sm" variant="secondary" @click="emit('retryLoadMore')">
@@ -1142,70 +1234,68 @@ onBeforeUnmount(() => {
     var(--shadow-glow);
 }
 
-/* One warm, borderless surface — the rows render transparent on it (see the
-   `tinted` prop on ThreadListItem), so the wash reads as a single card the way
-   Spark draws it, not as pale rows floating on a tinted tray. Tokens only:
-   a hex here would not survive the light theme. */
-.priority-card {
-  background: color-mix(in srgb, var(--accent-amber) 9%, var(--bg-list));
+/* Priority is a group, not a card: the amber stays on the bolt and the label,
+   the rows sit on the pane like every other mail. A full-card wash read as a
+   warning surface in the dark theme and nested the open row's sheet inside a
+   second one. The label takes the soft amber — the fill amber is 3.2:1 on
+   paper. */
+.priority-group__header {
+  transition: background-color var(--duration-fast) var(--ease-out);
 }
 
-.priority-card__header::after {
-  content: '';
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 0;
-  height: 1px;
-  background: color-mix(in srgb, var(--accent-amber) 22%, transparent);
+.priority-group__header:hover {
+  background: var(--bg-hover);
 }
 
-.priority-card__bolt,
-.priority-card__title {
+.priority-group__bolt {
   color: var(--accent-amber);
 }
 
-.priority-card__more {
+.priority-group__title {
+  color: var(--accent-amber-soft);
+}
+
+/* Lines up with the text column of the rows: 12px inset, 36px avatar, 12px gap. */
+.priority-group__more {
+  padding-inline-start: 60px;
   color: var(--text-tertiary);
   transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
-.priority-card__more:hover {
-  background: color-mix(in srgb, var(--accent-amber) 9%, transparent);
-  color: var(--accent-amber);
+.priority-group__more:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
-/* The sender-review card is the priority card's blue sibling: same borderless
-   wash, hairline under the header, quiet footer — one grammar, two tones. */
+/* The one triage card in the list, and a quiet one: the collection fill with
+   a hairline, the accent only on the glyph. */
 .review-card {
-  background: color-mix(in srgb, var(--accent-primary) 7%, var(--bg-list));
+  background: var(--bg-stack);
+  box-shadow: inset 0 0 0 1px var(--border-color-muted);
 }
 
-.review-card__header::after {
-  content: '';
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 0;
-  height: 1px;
-  background: color-mix(in srgb, var(--accent-primary) 20%, transparent);
+.review-card__toggle {
+  border-radius: var(--radius-md);
 }
 
-.review-card__glyph,
-.review-card__title {
-  color: var(--accent-primary);
+.review-card__glyph {
+  color: var(--text-accent);
+}
+
+.review-card__chevron {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.review-card__chevron--open {
+  transform: rotate(180deg);
 }
 
 .review-card__setup {
-  color: var(--accent-primary);
-}
-
-.review-card__setup:hover {
-  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+  color: var(--text-accent);
 }
 
 .review-card__row:hover {
-  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+  background: var(--bg-stack-hover);
 }
 
 .review-card__more {
@@ -1214,8 +1304,16 @@ onBeforeUnmount(() => {
 }
 
 .review-card__more:hover {
-  background: color-mix(in srgb, var(--accent-primary) 9%, transparent);
-  color: var(--accent-primary);
+  background: var(--bg-stack-hover);
+  color: var(--text-primary);
+}
+
+.new-sender-actions__allow :deep(svg) {
+  color: var(--text-accent);
+}
+
+.new-sender-actions__block :deep(svg) {
+  color: var(--accent-red-soft);
 }
 
 .mail-list-skeleton {
@@ -1271,12 +1369,6 @@ onBeforeUnmount(() => {
 .section-done-button:focus-visible {
   opacity: 1;
   pointer-events: auto;
-}
-
-@container (max-width: 360px) {
-  .review-card__row { gap: 8px; }
-  .new-sender-actions { flex-direction: column; align-items: stretch; gap: 4px; }
-  .new-sender-actions button { height: 26px; justify-content: center; padding-inline: 9px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

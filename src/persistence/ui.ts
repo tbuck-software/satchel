@@ -3,6 +3,7 @@ import { createPersistedSlot, persistence } from './index';
 const UI_STORAGE_KEYS = {
   sidebarWidth: 'satchel.ui.sidebarWidth',
   threadListWidth: 'satchel.ui.threadListWidth',
+  newSendersExpanded: 'satchel.ui.newSendersExpanded',
 } as const;
 
 function widthSlot(key: string, fallback: number) {
@@ -18,6 +19,12 @@ function widthSlot(key: string, fallback: number) {
 
 const sidebarWidthSlot = widthSlot(UI_STORAGE_KEYS.sidebarWidth, 240);
 const threadListWidthSlot = widthSlot(UI_STORAGE_KEYS.threadListWidth, 408);
+// Collapsed by default: the review is a banner until someone asks for the rows.
+const newSendersExpandedSlot = createPersistedSlot<boolean>(UI_STORAGE_KEYS.newSendersExpanded, {
+  fallback: () => false,
+  decode: (raw) => raw === 'true',
+  encode: (value) => String(value),
+});
 
 export const uiPersistence = {
   sidebarWidth: {
@@ -30,6 +37,12 @@ export const uiPersistence = {
     read: () => persistence.read(threadListWidthSlot),
     write: (value: number) => {
       persistence.write(threadListWidthSlot, value);
+    },
+  },
+  newSendersExpanded: {
+    read: () => persistence.read(newSendersExpandedSlot),
+    write: (value: boolean) => {
+      persistence.write(newSendersExpandedSlot, value);
     },
   },
 };

@@ -105,6 +105,7 @@ describe('thread list row heights', () => {
       ['--folder-card-h', '80px'],
       ['--card-header-h', '40px'],
       ['--review-row-h', '68px'],
+      ['--review-banner-h', '44px'],
     ]) {
       expect(style).toContain(`${name}: ${value}`);
     }
@@ -130,6 +131,7 @@ describe('thread list row heights', () => {
         ['--date-header-h', '44px'],
         ['--folder-card-h', '88px'],
         ['--review-row-h', '84px'],
+        ['--review-banner-h', '52px'],
       ]) {
         expect(style).toContain(`${name}: ${value}`);
       }

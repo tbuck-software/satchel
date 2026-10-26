@@ -37,11 +37,6 @@ const props = defineProps<{
   posInSet?: number;
   /** Total number of rows in the list, for virtualised announcements. */
   setSize?: number;
-  /**
-   * The row sits on an already tinted card (priority card): no own surface
-   * and a translucent hover, so the card's wash shows through.
-   */
-  tinted?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -349,7 +344,6 @@ function onDragStart(event: DragEvent) {
       swipeTracking ? 'thread-row--swiping' : '',
       swipeSettling ? 'thread-row--settling' : '',
       props.keyboardFocused ? 'thread-row--keyboard-focused' : '',
-      props.tinted ? 'thread-row--tinted' : '',
     ]"
     role="option"
     :aria-selected="props.selected || props.active"
@@ -427,8 +421,6 @@ function onDragStart(event: DragEvent) {
             ? 'bg-[color-mix(in_srgb,var(--accent-primary)_14%,var(--bg-list))]'
             : props.active
               ? 'thread-row__surface--open'
-              : props.tinted
-              ? 'bg-transparent group-hover:bg-[color-mix(in_srgb,var(--accent-amber)_9%,transparent)]'
               : 'bg-[var(--bg-list)] group-hover:bg-hover',
       ]"
       :style="swipeSurfaceStyle"
@@ -696,24 +688,6 @@ function onDragStart(event: DragEvent) {
   --avatar-dot-surface: var(--bg-hover);
 }
 
-/* On the priority card the row is a see-through layer over the card's amber
-   wash. The swipe track only goes clear while resting (tone `neutral`) — a
-   real swipe still paints its solid action color. */
-.thread-row--tinted,
-.thread-row--tinted .thread-row__swipe-track--neutral {
-  background: transparent;
-}
-
-/* The hover quick actions keep their raised elevation, warmed to the card —
-   the neutral blue-grey `bg-raised` reads as a foreign object on amber. */
-.thread-row--tinted .thread-row__meta :deep(button) {
-  background: color-mix(in srgb, var(--accent-amber) 12%, var(--bg-raised));
-}
-
-.thread-row--tinted .thread-row__meta :deep(button:hover) {
-  background: color-mix(in srgb, var(--accent-amber) 24%, var(--bg-raised));
-}
-
 .thread-row__surface {
   z-index: 2;
   transition: transform var(--duration-slow) var(--ease-out),
@@ -722,10 +696,12 @@ function onDragStart(event: DragEvent) {
 }
 
 /* The open thread is a sheet lifted off the list, the same treatment the
-   active nav item gets. On paper a fill alone is a 1.07:1 step. */
+   active nav item gets. On paper a fill alone is a 1.07:1 step, so the petrol
+   edge says "this one" where the sheet alone only says "raised" — the same
+   pair marks the open search result. */
 .thread-row__surface--open {
   background: var(--bg-surface);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--selection-edge), var(--shadow-sm);
 }
 
 .thread-row__surface--keyboard-focused {
@@ -763,6 +739,13 @@ function onDragStart(event: DragEvent) {
 .thread-row__swipe-track--cyan { background: var(--swipe-cyan); }
 .thread-row__swipe-track--red { background: var(--swipe-red); }
 .thread-row__swipe-track--neutral { background: var(--bg-inset); }
+
+/* At rest the well stays clear: the dark inset fringes the surface's rounded
+   corners and drew a faint box around every row on a phone. It shows once the
+   surface actually moves. */
+.thread-row:not(.thread-row--swiping):not(.thread-row--settling) .thread-row__swipe-track--neutral {
+  background: transparent;
+}
 
 .thread-row__swipe-action {
   --swipe-progress: 0;

@@ -3146,13 +3146,16 @@
       "moved": "Moved to “{folder}”."
     },
     "newSenders": {
-      "acceptExisting": "Accept existing",
+      "acceptExisting": "Allow {count} sender | Allow all {count} senders",
       "acceptExistingTitle": "Treat every sender so far as known",
       "allow": "Allow",
       "allowDomain": "Allow everything from {'@'}{domain}",
       "allowDomainTitle": "Allow all past and future mail from {'@'}{domain}",
       "allowTitle": "Allow this sender from now on",
+      "collapse": "Hide the sender rows",
+      "expand": "Show the newest senders here",
       "moreSenders": "+{count} more sender | +{count} more senders",
+      "review": "Review",
       "senderCount": "{count} sender | {count} senders",
       "showAll": "Show all new senders",
       "title": "New senders"

@@ -40,7 +40,7 @@ const visibleChips = computed(() => sortedChips.value.slice(0, 4));
 
 <template>
   <ListRowButton
-    class="folder-preview-card group/folder relative grid h-[var(--folder-card-h,auto)] w-full cursor-pointer grid-cols-[36px_minmax(0,1fr)] items-center gap-3 rounded-xl border-0 bg-stack px-3 py-2 text-left text-secondary transition-colors hover:bg-stack-hover hover:text-primary"
+    class="folder-preview-card group/folder relative grid h-[var(--folder-card-h,auto)] w-full cursor-pointer grid-cols-[36px_minmax(0,1fr)] items-center gap-3 rounded-xl border-0 bg-transparent px-3 py-2 text-left text-secondary transition-colors hover:bg-hover hover:text-primary"
     :class="{ 'folder-preview-card--keyboard-focused': props.keyboardFocused }"
     :data-list-target-key="props.targetKey"
   >
@@ -95,19 +95,19 @@ const visibleChips = computed(() => sortedChips.value.slice(0, 4));
 
 <style scoped>
 /* The card is its own container: the chip clipping must follow the card's
-   width in every host (virtualised list, topics folder), not the scroller's. */
+   width in every host (virtualised list, topics folder), not the scroller's.
+   It sits flat on the pane like a mail row: a bundle is a row that opens a
+   page, and a bordered card per bundle stacked four boxes above the mail. */
 .folder-preview-card {
   container-type: inline-size;
-  /* Same edge as a bundle card: on the list the fill alone is barely a step. */
-  box-shadow: inset 0 0 0 1px var(--border-color-muted);
 }
 
 .folder-preview-card__icon {
-  --avatar-dot-surface: var(--bg-stack);
+  --avatar-dot-surface: var(--bg-list);
 }
 
 .folder-preview-card:hover .folder-preview-card__icon {
-  --avatar-dot-surface: var(--bg-stack-hover);
+  --avatar-dot-surface: var(--bg-hover);
 }
 
 /* Explicit cells keep long names from consuming the second preview line.

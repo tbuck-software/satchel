@@ -9,7 +9,7 @@
  *
  * Usage examples:
  *   bg-base, bg-surface, bg-raised, bg-overlay, bg-hover, bg-active
- *   text-primary, text-secondary, text-tertiary
+ *   text-primary, text-secondary, text-tertiary, text-accent
  *   text-accent-primary, bg-accent-primary, border-accent-primary
  *   border-border, border-border-muted
  *   rounded-sm, rounded-md, rounded-lg
@@ -36,6 +36,7 @@
   --color-tertiary: var(--text-tertiary);
   --color-inverse: var(--text-inverse);
   --color-on-accent: var(--text-on-accent);
+  --color-accent: var(--text-accent);
 
   /* Accents */
   --color-accent-primary: var(--accent-primary);

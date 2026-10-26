@@ -6,7 +6,7 @@ async function openInbox(page: Page) {
 }
 
 async function switchToListMode(page: Page) {
-  await page.getByRole('button', { name: 'View' }).click();
+  await page.getByRole('button', { name: 'View', exact: true }).click();
   await page.getByRole('menuitemradio', { name: 'List', exact: true }).click();
 }
 

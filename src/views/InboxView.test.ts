@@ -411,6 +411,41 @@ describe('InboxView', () => {
     expect(wrapper.get('[data-test="thread-detail"]').attributes('data-thread-id')).toBe('thread-2');
   });
 
+  it('steps onto the new-sender banner, expands it with Enter and then walks its rows', async () => {
+    setup();
+    const first = harness.threads!.listEntries as Array<Record<string, unknown>>;
+    const senders = ['s1', 's2', 's3', 's4'].map((id) => ({ id: `new-sender-${id}`, topThreadId: `thread-${id}` }));
+    harness.threads!.listEntries = [
+      { kind: 'new-sender-stack', id: 'new-sender-stack', stack: { id: 'new-sender-stack', senders } },
+      ...first,
+    ];
+    harness.ui!.newSendersExpanded = false;
+    harness.ui!.toggleNewSendersExpanded = vi.fn(() => {
+      harness.ui!.newSendersExpanded = !harness.ui!.newSendersExpanded;
+    });
+    render();
+    const keyboard = (harness.registerKeyboardNavigation.mock.calls[0] as unknown as [{
+      move: (delta: 1 | -1) => boolean;
+      open: () => boolean;
+    }])[0];
+
+    // Topics sits above the list in the classic layout; the banner comes next.
+    keyboard.move(1);
+    expect(harness.selectThread).not.toHaveBeenCalled();
+    expect(keyboard.open()).toBe(true);
+    expect(harness.ui!.toggleNewSendersExpanded).toHaveBeenCalledTimes(1);
+    await flushPromises();
+
+    // Expanded: the same three rows the list shows, each selecting its thread.
+    keyboard.move(1);
+    keyboard.move(1);
+    keyboard.move(1);
+    keyboard.move(1);
+    expect(harness.selectThread.mock.calls.map(([id]) => id)).toEqual([
+      'thread-s1', 'thread-s2', 'thread-s3', 'thread-1',
+    ]);
+  });
+
   it('ticks a new sender off only after the block went through', async () => {
     setup();
     harness.blockSender.mockResolvedValue(undefined);

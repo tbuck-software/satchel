@@ -7,7 +7,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('renders the inbox and opens a thread', async ({ page }) => {
-  await page.getByRole('button', { name: 'View' }).click();
+  await page.getByRole('button', { name: 'View', exact: true }).click();
   await page.getByRole('menuitemradio', { name: 'List', exact: true }).click();
   await page.getByText('Google Cloud billing threshold reached', { exact: true }).first().click();
   await expect(page.getByText('Your configured billing threshold for Project Atlas has been reached.').first()).toBeVisible();

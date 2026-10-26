@@ -949,6 +949,7 @@ const MEASURED_TEXT_TOKENS: Record<string, number> = {
   '--text-primary': 4.5,
   '--text-secondary': 4.5,
   '--text-tertiary': 4.5,
+  '--text-accent': 4.5,
 };
 const CSS_RULE = /([^{}]*)\{([^{}]*)\}/g;
 

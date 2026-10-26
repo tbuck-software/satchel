@@ -51,6 +51,8 @@ export const useUiStore = defineStore('ui', () => {
   const accountSetupOpen = ref(false);
   const sidebarWidth = ref(clampSidebarWidth(uiPersistence.sidebarWidth.read()));
   const threadListWidth = ref(clampThreadListWidth(uiPersistence.threadListWidth.read()));
+  /** The new-sender review in the inbox: a one-line banner, or its sender rows. */
+  const newSendersExpanded = ref(uiPersistence.newSendersExpanded.read());
   const initialLayout = layoutModeForWidth(
     typeof window !== 'undefined' ? window.innerWidth : SINGLE_PANE_BREAKPOINT + 1,
     sidebarWidth.value,
@@ -304,6 +306,11 @@ export const useUiStore = defineStore('ui', () => {
     threadListWidth.value = clampThreadListWidth(width);
   }
 
+  function toggleNewSendersExpanded() {
+    newSendersExpanded.value = !newSendersExpanded.value;
+    uiPersistence.newSendersExpanded.write(newSendersExpanded.value);
+  }
+
   watch(sidebarWidth, (value) => {
     uiPersistence.sidebarWidth.write(value);
   });
@@ -324,6 +331,7 @@ export const useUiStore = defineStore('ui', () => {
     accountSetupOpen,
     sidebarWidth,
     threadListWidth,
+    newSendersExpanded,
     openOmni,
     openReminder,
     leaveOmniStep,
@@ -348,6 +356,7 @@ export const useUiStore = defineStore('ui', () => {
     openSettingsDetail,
     mobileSidebarOpen,
     setSidebarWidth,
+    toggleNewSendersExpanded,
     setThreadListWidth,
     openMobileSidebar,
     closeMobileSidebar,
