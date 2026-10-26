@@ -341,7 +341,7 @@ function onKeydown(event: KeyboardEvent) {
           :aria-label="$t('calendar.view.label')"
           @update:model-value="setViewMode"
         />
-        <AppButton variant="ghost" size="sm" @click="filePicker?.click()">
+        <AppButton variant="ghost" size="sm" :title="$t('calendar.importIcsHint')" @click="filePicker?.click()">
           {{ $t('calendar.importIcs') }}
         </AppButton>
         <AppButton variant="primary" size="sm" :title="$t('calendar.createHint')" @click="newEvent">{{ $t('calendar.newEvent') }}</AppButton>
@@ -458,8 +458,9 @@ function onKeydown(event: KeyboardEvent) {
 .calendar__heading h2 {
   margin: 0;
   color: var(--text-primary);
-  font-size: var(--font-size-2xl);
-  letter-spacing: -0.02em;
+  font-size: var(--font-size-lg);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
 }
 
 .calendar__range {

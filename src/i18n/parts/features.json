@@ -2,7 +2,7 @@
   "en": {
     "calendar": {
       "title": "Calendar",
-      "importIcs": "Import .ics…",
+      "importIcs": "Import calendar…",
       "newEvent": "New event",
       "hint": "Clicking an empty day or time slot creates an event. Events from mails with an {ics} attachment are detected automatically.",
       "more": "+{count} more",
@@ -116,7 +116,8 @@
         "nextWeek": "Next week",
         "nextMonth": "Next month"
       },
-      "createHint": "Click an empty day or time slot to create an event."
+      "createHint": "Click an empty day or time slot to create an event.",
+      "importIcsHint": "Import an .ics calendar file"
     },
     "contacts": {
       "title": "Contacts",
@@ -179,7 +180,11 @@
         "name": "Name (optional)",
         "saved": "Contact saved.",
         "failed": "The contact could not be saved."
-      }
+      },
+      "search": "Search contacts",
+      "otherInitial": "#",
+      "noMatches": "No matching contacts",
+      "noMatchesDescription": "Try a different name or email address."
     },
     "topics": {
       "title": "Topics",
@@ -401,7 +406,7 @@
   "de": {
     "calendar": {
       "title": "Kalender",
-      "importIcs": ".ics importieren…",
+      "importIcs": "Kalender importieren…",
       "newEvent": "Neuer Termin",
       "hint": "Klick auf einen freien Tag oder eine freie Uhrzeit legt einen Termin an. Auto-erkannt werden Termine aus Mails mit {ics}-Anhang.",
       "more": "+{count} weitere",
@@ -515,7 +520,8 @@
         "nextWeek": "Nächste Woche",
         "nextMonth": "Nächsten Monat"
       },
-      "createHint": "Klicke auf einen freien Tag oder eine freie Uhrzeit, um einen Termin anzulegen."
+      "createHint": "Klicke auf einen freien Tag oder eine freie Uhrzeit, um einen Termin anzulegen.",
+      "importIcsHint": "Eine .ics-Kalenderdatei importieren"
     },
     "contacts": {
       "title": "Kontakte",
@@ -578,7 +584,11 @@
         "name": "Name (optional)",
         "saved": "Kontakt gespeichert.",
         "failed": "Der Kontakt konnte nicht gespeichert werden."
-      }
+      },
+      "search": "Kontakte durchsuchen",
+      "otherInitial": "#",
+      "noMatches": "Keine passenden Kontakte",
+      "noMatchesDescription": "Versuche einen anderen Namen oder eine andere E-Mail-Adresse."
     },
     "topics": {
       "title": "Themen",

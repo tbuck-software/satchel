@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AddContactDialog from '@/components/contacts/AddContactDialog.vue';
-import CardButton from '@/components/ui/CardButton.vue';
+import ListRowButton from '@/components/ui/ListRowButton.vue';
+import SectionHeading from '@/components/ui/SectionHeading.vue';
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Avatar from '@/components/common/Avatar.vue';
@@ -36,6 +37,7 @@ const addressBook = useContactsStore();
 const settings = useSettingsStore();
 const ui = useUiStore();
 const addingContact = ref(false);
+const search = ref('');
 
 onMounted(() => {
   if (!addressBook.loaded) void addressBook.load();
@@ -112,6 +114,24 @@ const visibleContacts = computed(() => {
   );
 });
 
+const contactGroups = computed(() => {
+  const query = search.value.trim().toLocaleLowerCase(locale.value);
+  const contacts = visibleContacts.value
+    .filter((contact) => [contact.name, contact.email, contact.context]
+      .some((value) => value.toLocaleLowerCase(locale.value).includes(query)))
+    .sort((left, right) => left.name.localeCompare(right.name, locale.value, { sensitivity: 'base' }));
+  const groups = new Map<string, ContactRow[]>();
+  for (const contact of contacts) {
+    const initial = [...contact.name.normalize('NFD').replace(/\p{M}/gu, '')][0]?.toLocaleUpperCase(locale.value) ?? '';
+    const label = /\p{L}/u.test(initial) ? initial : t('contacts.otherInitial');
+    const group = groups.get(label) ?? [];
+    group.push(contact);
+    groups.set(label, group);
+  }
+  return [...groups].map(([label, contacts]) => ({ label, contacts }));
+});
+const filteredCount = computed(() => contactGroups.value.reduce((total, group) => total + group.contacts.length, 0));
+
 const sectionCopy = computed<Record<ContactsSection, { title: string; subtitle: string; empty: string }>>(() => ({
   all: {
     title: t('contacts.sections.all.title'),
@@ -148,7 +168,7 @@ function openContact(email: string) {
     <PaneHeader
       :title="currentCopy.title"
       :subtitle="currentCopy.subtitle"
-      :count="visibleContacts.length"
+      :count="filteredCount"
     >
       <template #actions>
         <AppButton variant="secondary" size="sm" :aria-label="t('contacts.addressBookSettings')" @click="ui.openSettings('contacts')">
@@ -162,29 +182,37 @@ function openContact(email: string) {
       </template>
     </PaneHeader>
 
+    <div class="contact-search">
+      <label class="sr-only" for="contact-search">{{ t('contacts.search') }}</label>
+      <AppIcon><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></AppIcon>
+      <input id="contact-search" v-model="search" type="search" :placeholder="t('contacts.search')" />
+    </div>
     <div class="contacts-view__scroll">
-      <div v-if="visibleContacts.length" class="contact-list">
-        <CardButton
-          v-for="contact in visibleContacts"
-          :key="contact.email"
-          @click="openContact(contact.email)"
-        >
-          <Avatar :name="contact.name" :email="contact.email" :size="42" />
-          <span class="copy">
-            <strong>{{ contact.name }}</strong>
-            <span v-if="contact.name.trim().toLowerCase() !== contact.email.trim().toLowerCase()">
-              {{ contact.email }}
+      <div v-if="filteredCount" class="contact-list">
+        <section v-for="group in contactGroups" :key="group.label" class="contact-group" :aria-label="group.label">
+          <SectionHeading :label="group.label" />
+          <ListRowButton
+            v-for="contact in group.contacts"
+            class="contact-row"
+            :key="contact.email"
+            @click="openContact(contact.email)"
+          >
+            <Avatar :name="contact.name" :email="contact.email" :size="36" />
+            <span class="copy">
+              <strong>{{ contact.name }}</strong>
+              <span v-if="contact.name.trim().toLowerCase() !== contact.email.trim().toLowerCase()">
+                {{ contact.email }}
+              </span>
+              <span v-if="contact.context" class="context">{{ contact.context }}</span>
             </span>
-            <span v-if="contact.context" class="context">{{ contact.context }}</span>
-          </span>
-          <span class="row-meta">
-            <svg v-if="contact.pinned" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" :aria-label="$t('nav.contactPinned')">
-              <path d="M6.5 2.5h3l-.4 4.1 2.4 2.1v1H4.5v-1l2.4-2.1z" />
-              <path d="M8 9.7v3.8" fill="none" />
-            </svg>
-            <span>{{ contact.meta }}</span>
-          </span>
-        </CardButton>
+            <span class="row-meta">
+              <span v-if="contact.pinned" :aria-label="t('nav.contactPinned')">
+                <AppIcon size="sm"><path d="M6.5 2.5h3l-.4 4.1 2.4 2.1v1H4.5v-1l2.4-2.1zM8 9.7v3.8" /></AppIcon>
+              </span>
+              <span v-if="activeSection === 'all'" class="source-tag">{{ contact.meta }}</span>
+            </span>
+          </ListRowButton>
+        </section>
       </div>
       <!-- A failed query leaves the list empty. Without this branch the empty
            state claims the address book was never imported. -->
@@ -194,6 +222,11 @@ function openContact(email: string) {
         :detail="backendErrorLabel(addressBook.error)"
         :busy="addressBook.loading"
         @retry="addressBook.load()"
+      />
+      <EmptyState
+        v-else-if="search.trim() && !addressBook.loading"
+        :title="t('contacts.noMatches')"
+        :description="t('contacts.noMatchesDescription')"
       />
       <EmptyState
         v-else-if="!addressBook.loading"
@@ -214,7 +247,7 @@ function openContact(email: string) {
 <style scoped>
 .contacts-view {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr);
   height: 100%;
   min-width: 0;
@@ -223,51 +256,64 @@ function openContact(email: string) {
   background: var(--bg-base);
 }
 
+.contact-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0 var(--space-lg) var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+}
+
+.contact-search:focus-within {
+  border-color: var(--accent-primary);
+}
+
+.contact-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.contact-search input::placeholder {
+  color: var(--text-tertiary);
+}
+
 .contacts-view__scroll {
   min-height: 0;
   overflow-y: auto;
   border-top: 1px solid var(--border-color-muted);
-  padding: 24px 28px 48px;
+  padding: var(--space-sm) var(--space-lg) var(--space-2xl);
 }
 
-.contact-list {
-  display: grid;
-  gap: 6px;
-  width: min(100%, 760px);
-  margin: 0 auto;
+.contact-group + .contact-group {
+  margin-top: var(--space-md);
 }
 
-.contact-list button {
+.contact-group > :deep(.section-heading) {
+  padding-inline: var(--space-md);
+}
+
+.contact-group .contact-row {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
-  width: 100%;
-  min-width: 0;
-  padding: 12px 14px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color var(--duration-fast) var(--ease-out),
-    background var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-out);
-}
-
-.contact-list button:hover {
-  border-color: var(--border-color);
-  background: var(--bg-hover);
-  transform: translateX(2px);
+  gap: var(--space-md);
+  padding: var(--space-2-5) var(--space-md);
+  border-bottom: 1px solid var(--border-color-muted);
+  border-radius: 0;
 }
 
 .copy {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: var(--space-2xs);
 }
 
 .copy strong,
@@ -291,32 +337,26 @@ function openContact(email: string) {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: var(--space-1-5);
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
   white-space: nowrap;
 }
 
-.row-meta svg {
+.row-meta :deep(svg) {
   color: var(--accent-amber);
 }
 
+.source-tag {
+  padding: var(--space-2xs) var(--space-xs);
+  border-radius: var(--radius-xs);
+  background: var(--bg-raised);
+}
+
 @media (max-width: 700px) {
-  .contact-settings-label {
-    display: none;
-  }
-
-  .contacts-view__scroll {
-    padding: 16px 12px 36px;
-  }
-
-  .contact-list button {
-    grid-template-columns: 42px minmax(0, 1fr);
-  }
-
-  .row-meta {
-    grid-column: 2;
-    justify-content: flex-start;
-  }
+  .contact-settings-label { display: none; }
+  .contacts-view__scroll { padding-inline: var(--space-sm); }
+  .contact-group .contact-row { column-gap: var(--space-sm); }
+  .row-meta { max-width: 8rem; white-space: normal; text-align: right; }
 }
 </style>

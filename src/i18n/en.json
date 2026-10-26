@@ -339,7 +339,8 @@
       "untitled": "(No title)"
     },
     "hint": "Clicking an empty day or time slot creates an event. Events from mails with an {ics} attachment are detected automatically.",
-    "importIcs": "Import .ics…",
+    "importIcs": "Import calendar…",
+    "importIcsHint": "Import an .ics calendar file",
     "more": "+{count} more",
     "nav": {
       "next": "Forward (→)",
@@ -818,6 +819,9 @@
       "conversations": "{count} conversation | {count} conversations",
       "pinned": "Pinned"
     },
+    "noMatches": "No matching contacts",
+    "noMatchesDescription": "Try a different name or email address.",
+    "otherInitial": "#",
     "profile": {
       "allMail": "All emails",
       "blockConfirm": "Really block {email}?",
@@ -838,6 +842,7 @@
       "savingNote": "Saving …",
       "unpin": "Unpin"
     },
+    "search": "Search contacts",
     "sections": {
       "addressBook": {
         "empty": "No address book contacts synced yet.",
@@ -3167,7 +3172,8 @@
       "markAllRead": "Mark all read",
       "morePriority": "+{count} more email | +{count} more emails",
       "showAllPriority": "Show all priority emails",
-      "smartGroups": "Smart inbox groups"
+      "smartGroups": "Smart inbox groups",
+      "unreadCount": "{count} unread"
     },
     "move": {
       "failed": "Moving failed: {error}",

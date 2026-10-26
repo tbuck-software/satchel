@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
+import AvatarUnreadDot from '@/components/ui/AvatarUnreadDot.vue';
 import FolderPreviewCard from './FolderPreviewCard.vue';
 
 describe('folder preview totals', () => {
@@ -42,6 +43,14 @@ describe('folder preview totals', () => {
     });
     expect(wrapper.find('.folder-chip-counter').exists()).toBe(false);
     expect(wrapper.findAll('.folder-chip').map((chip) => chip.text())).toEqual(['unread', 'read']);
+  });
+
+  it('keeps bundle unread totals distinct from per-thread avatar dots', () => {
+    const wrapper = mount(FolderPreviewCard, {
+      props: { label: 'Notifications', count: 4, unreadCount: 2, chips: [] },
+    });
+    expect(wrapper.findComponent(AvatarUnreadDot).exists()).toBe(false);
+    expect(wrapper.get('[title="2 unread"]').text()).toBe('4');
   });
 
   it('falls back to the supplied items when there is no total', () => {

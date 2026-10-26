@@ -115,12 +115,13 @@ const DESK_ROWS: RowMetrics = { thread: 72, dateHeader: 32, folderCard: 80, bann
  * tokens.css lifts every font token by 2px at 1020px and below. Three-line
  * rows at 72px then had no room left: snippet and next sender touched.
  */
-const PHONE_ROWS: RowMetrics = { thread: 88, dateHeader: 40, folderCard: 88, banner: 52 };
+const PHONE_ROWS: RowMetrics = { thread: 88, dateHeader: 28, folderCard: 88, banner: 52 };
 const PHONE_TYPE_QUERY = '(max-width: 1020px)';
 
 const BUCKET_HEIGHT = 76;
 /** Group header, and the "+N more" / domain-allow footer that matches it. */
 const CARD_HEADER_HEIGHT = 40;
+const PHONE_CARD_HEADER_HEIGHT = 32;
 /** Priority group `pt-1 pb-2`: it has no card, only its header and rows. */
 const PRIORITY_SECTION_PADDING = 12;
 /** New-sender section `py-2` around its card. */
@@ -140,6 +141,7 @@ function onPhoneTypeChange(event: MediaQueryListEvent) {
 }
 
 const rows = computed(() => (phoneTypeScale.value ? PHONE_ROWS : DESK_ROWS));
+const cardHeaderHeight = computed(() => phoneTypeScale.value ? PHONE_CARD_HEADER_HEIGHT : CARD_HEADER_HEIGHT);
 /** The review row sits inside a thread-height wrapper, inset two pixels a side. */
 const reviewRowHeight = computed(() => rows.value.thread - 4);
 
@@ -150,7 +152,7 @@ const rowHeights = computed(() => ({
   '--bucket-h': `${BUCKET_HEIGHT - 4}px`,
   '--folder-card-h': `${rows.value.folderCard}px`,
   '--folder-card-gap': `${FOLDER_CARD_GAP}px`,
-  '--card-header-h': `${CARD_HEADER_HEIGHT}px`,
+  '--card-header-h': `${cardHeaderHeight.value}px`,
   '--review-row-h': `${reviewRowHeight.value}px`,
   '--review-banner-h': `${rows.value.banner}px`,
 }));
@@ -203,9 +205,9 @@ function itemHeight(item: ThreadListEntry): number {
   }
   if (item.kind === 'priority-card') {
     // Rows add a thread height each, the optional "+N weitere" footer a card header.
-    return PRIORITY_SECTION_PADDING + CARD_HEADER_HEIGHT
+    return PRIORITY_SECTION_PADDING + cardHeaderHeight.value
       + item.threads.length * thread
-      + (item.hiddenCount > 0 ? CARD_HEADER_HEIGHT : 0);
+      + (item.hiddenCount > 0 ? cardHeaderHeight.value : 0);
   }
   if (item.kind === 'date-header') return dateHeader;
   if (item.kind === 'bucket') return BUCKET_HEIGHT;
@@ -215,8 +217,8 @@ function itemHeight(item: ThreadListEntry): number {
     const footer = newSenderFooter(item.stack);
     return collapsed
       + visibleSenders(item.stack).length * thread
-      + (footer.domain ? CARD_HEADER_HEIGHT : 0)
-      + (footer.more ? CARD_HEADER_HEIGHT : 0)
+      + (footer.domain ? cardHeaderHeight.value : 0)
+      + (footer.more ? cardHeaderHeight.value : 0)
       + REVIEW_CARD_BOTTOM_PADDING;
   }
   return thread;
@@ -942,7 +944,7 @@ onBeforeUnmount(() => {
                     </svg>
                     <h3 class="m-0 shrink-0 text-sm font-strong text-primary">{{ item.stack.label }}</h3>
                     <span class="shrink-0 pt-px text-2xs font-semibold text-tertiary tabular-nums">{{ item.stack.count }}</span>
-                    <span class="min-w-0 truncate pl-1 text-xs text-tertiary">{{ senderNames(item.stack) }}</span>
+                    <span class="review-card__preview min-w-0 truncate pl-1 text-xs text-tertiary">{{ senderNames(item.stack) }}</span>
                     <svg
                       class="review-card__chevron ml-auto shrink-0 text-tertiary"
                       :class="{ 'review-card__chevron--open': props.newSendersExpanded }"
@@ -1223,6 +1225,16 @@ onBeforeUnmount(() => {
 .thread-list-scroller {
   container-type: inline-size;
   scrollbar-gutter: stable;
+}
+
+@container (max-width: 440px) {
+  .review-card__preview { display: none; }
+}
+
+@media (max-width: 1020px) {
+  .thread-list-scroller {
+    padding-bottom: calc(3 * var(--space-2xl) + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 .list-target--keyboard-focused {

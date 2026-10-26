@@ -1,7 +1,6 @@
 <script setup lang="ts" generic="T extends FolderPreviewChip">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import AvatarUnreadDot from '@/components/ui/AvatarUnreadDot.vue';
 import ListRowButton from '@/components/ui/ListRowButton.vue';
 
 export interface FolderPreviewChip {
@@ -13,7 +12,7 @@ export interface FolderPreviewChip {
 const props = defineProps<{
   label: string;
   count?: number;
-  /** Unread total for the whole folder; > 0 marks the icon the way an unread row marks its avatar. */
+  /** Unread total for the whole folder, announced with its total count. */
   unreadCount?: number;
   chips: T[];
   targetKey?: string;
@@ -46,7 +45,6 @@ const visibleChips = computed(() => sortedChips.value.slice(0, 4));
   >
     <span class="folder-preview-card__icon relative block h-9 w-9">
       <slot name="icon" />
-      <AvatarUnreadDot v-if="(props.unreadCount ?? 0) > 0" />
     </span>
 
     <span class="block min-w-0">
@@ -55,6 +53,7 @@ const visibleChips = computed(() => sortedChips.value.slice(0, 4));
         <span
           v-if="props.count !== undefined"
           class="shrink-0 text-2xs font-semibold text-tertiary tabular-nums"
+          :title="props.unreadCount ? t('thread.list.unreadCount', { count: props.unreadCount }) : undefined"
         >
           {{ props.count }}
         </span>
@@ -178,6 +177,7 @@ const visibleChips = computed(() => sortedChips.value.slice(0, 4));
   }
 
   .folder-chip-counter--compact {
+    margin-inline-end: calc(2 * var(--space-2xl));
     grid-area: 2 / 2;
     display: inline-flex;
   }

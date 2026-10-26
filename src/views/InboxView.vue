@@ -873,6 +873,7 @@ function acceptExistingSenders() {
       <template v-else>
       <PaneHeader
         v-if="!activeBundle"
+        class="inbox-header"
         :title="listTitle"
         :subtitle="listScope"
         :count="listCount"
@@ -1259,6 +1260,12 @@ function acceptExistingSenders() {
 
 .list-resize {
   grid-row: 1;
+}
+
+@media (max-width: 1020px) {
+  .inbox-header :deep(.pane-header__actions) {
+    align-self: flex-start;
+  }
 }
 
 .bundle-header {

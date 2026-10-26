@@ -210,6 +210,37 @@ describe('ContactsView', () => {
     expect(harness.addressBook.load).toHaveBeenCalledOnce();
   });
 
+  it('groups and filters contacts by name, email and notes, and distinguishes no matches', async () => {
+    harness.addressBook.contacts = [
+      { email: 'zoe@example.com', display_name: 'Zoë' },
+      { email: 'alice@example.com', display_name: 'Alice', notes: 'Design team' },
+      { email: 'amy@example.com', display_name: 'Amy' },
+    ];
+    const wrapper = render();
+    expect(wrapper.findAll('.section-heading__label').map((heading) => heading.text())).toEqual(['A', 'Z']);
+    expect(wrapper.findAll('.contact-row strong').map((name) => name.text())).toEqual(['Alice', 'Amy', 'Zoë']);
+    for (const query of ['ALICE', 'alice@', 'design']) {
+      await wrapper.get('input[type="search"]').setValue(query);
+      expect(wrapper.findAll('.contact-row')).toHaveLength(1);
+      expect(wrapper.get('.contact-row').text()).toContain('Alice');
+    }
+    await wrapper.get('input').setValue('missing');
+    expect(wrapper.get('.empty h3').text()).toBe('No matching contacts');
+    expect(wrapper.get('[data-test="pane-header"]').attributes('data-count')).toBe('0');
+    await wrapper.get('input').setValue('');
+    expect(wrapper.findAll('.contact-row')).toHaveLength(3);
+  });
+
+  it('omits redundant source tags in address book and frequent views', () => {
+    harness.addressBook.contacts = [{ email: 'alice@example.com', display_name: 'Alice' }];
+    expect(render().get('.source-tag').text()).toBe('Address book');
+    harness.route.query = { section: 'address-book' };
+    expect(render().find('.source-tag').exists()).toBe(false);
+    harness.route.query = { section: 'frequent' };
+    harness.threads.allContactSummaries = [{ email: 'alice@example.com', name: 'Alice', threadCount: 2, previewText: '' }];
+    expect(render().find('.source-tag').exists()).toBe(false);
+  });
+
   it('opens the contact filter before navigating back to the inbox', async () => {
     harness.threads.allContactSummaries = [
       {

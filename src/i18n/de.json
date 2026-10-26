@@ -339,7 +339,8 @@
       "untitled": "(ohne Titel)"
     },
     "hint": "Klick auf einen freien Tag oder eine freie Uhrzeit legt einen Termin an. Auto-erkannt werden Termine aus Mails mit {ics}-Anhang.",
-    "importIcs": ".ics importieren…",
+    "importIcs": "Kalender importieren…",
+    "importIcsHint": "Eine .ics-Kalenderdatei importieren",
     "more": "+{count} weitere",
     "nav": {
       "next": "Weiter (→)",
@@ -818,6 +819,9 @@
       "conversations": "{count} Konversation | {count} Konversationen",
       "pinned": "Angepinnt"
     },
+    "noMatches": "Keine passenden Kontakte",
+    "noMatchesDescription": "Versuche einen anderen Namen oder eine andere E-Mail-Adresse.",
+    "otherInitial": "#",
     "profile": {
       "allMail": "Alle E-Mails",
       "blockConfirm": "{email} wirklich blockieren?",
@@ -838,6 +842,7 @@
       "savingNote": "Speichert …",
       "unpin": "Loslösen"
     },
+    "search": "Kontakte durchsuchen",
     "sections": {
       "addressBook": {
         "empty": "Noch keine Adressbuchkontakte synchronisiert.",
@@ -3167,7 +3172,8 @@
       "markAllRead": "Alle gelesen",
       "morePriority": "+{count} weitere E-Mail | +{count} weitere E-Mails",
       "showAllPriority": "Alle Prioritäts-E-Mails anzeigen",
-      "smartGroups": "Smart Inbox Gruppen"
+      "smartGroups": "Smart Inbox Gruppen",
+      "unreadCount": "{count} ungelesen"
     },
     "move": {
       "failed": "Verschieben fehlgeschlagen: {error}",

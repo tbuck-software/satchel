@@ -128,8 +128,9 @@ describe('thread list row heights', () => {
       const style = scrollerStyle(mountList());
       for (const [name, value] of [
         ['--thread-row-h', '88px'],
-        ['--date-header-h', '40px'],
+        ['--date-header-h', '28px'],
         ['--folder-card-h', '88px'],
+        ['--card-header-h', '32px'],
         ['--review-row-h', '84px'],
         ['--review-banner-h', '52px'],
       ]) {
