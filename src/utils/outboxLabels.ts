@@ -42,7 +42,9 @@ const STATUS_TONES: Record<string, OutboxTone> = {
   delivery_unknown: 'warning',
   failed: 'danger',
   sending: 'accent',
-  scheduled: 'warning',
+  // A send waiting for its time is the queue working, not a warning; only an
+  // overdue one turns amber, and the view decides that.
+  scheduled: 'neutral',
   pending: 'neutral',
 };
 

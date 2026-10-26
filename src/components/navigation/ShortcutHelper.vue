@@ -136,6 +136,7 @@ const fixedGroups = computed<ShortcutGroup[]>(() => {
       items: [
         { keys: either('mod+k', 'mod+f', '/'), description: t('shortcuts.actions.openCommandPalette.label') },
         { keys: either('mod+enter'), description: t('nav.omni.showAll') },
+        { keys: either('tab'), description: t('shortcuts.helper.paletteGroups') },
       ],
     },
   ];

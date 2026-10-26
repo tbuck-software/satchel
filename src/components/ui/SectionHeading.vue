@@ -3,16 +3,21 @@ withDefaults(
   defineProps<{
     label: string;
     count?: number;
+    /** What the section is about, after the label: quieter and truncated. */
+    detail?: string;
   }>(),
   {
     count: undefined,
+    detail: undefined,
   },
 );
 </script>
 
 <template>
   <div class="section-heading">
-    <h3 class="section-heading__label">{{ label }}</h3>
+    <h3 class="section-heading__label" :class="{ 'section-heading__label--detailed': detail }">
+      {{ label }}<span v-if="detail" class="section-heading__detail"> · {{ detail }}</span>
+    </h3>
     <span v-if="count !== undefined" class="section-heading__count">{{ count }}</span>
     <span v-if="$slots.trailing" class="section-heading__trailing">
       <slot name="trailing" />
@@ -34,6 +39,19 @@ withDefaults(
   font-weight: var(--weight-semibold);
   color: var(--text-secondary);
   letter-spacing: 0.01em;
+}
+
+/* A detail is open-ended (a subject line), so it is the part that gives way. */
+.section-heading__label--detailed {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.section-heading__detail {
+  font-weight: var(--weight-regular);
+  color: var(--text-tertiary);
 }
 
 .section-heading__count {

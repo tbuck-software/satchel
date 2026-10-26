@@ -73,7 +73,7 @@ async function openFollowUpPicker() {
   await nextTick();
 
   const entry = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.context-menu button'))
-    .find((button) => button.textContent?.trim() === 'Follow up …');
+    .find((button) => button.textContent?.trim() === 'Follow up…');
   expect(entry, 'the row context menu offers a follow-up entry').toBeDefined();
   entry!.click();
   await nextTick();

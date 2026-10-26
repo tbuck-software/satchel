@@ -20,6 +20,7 @@ import {
   outboxStatusLabel,
   outboxStatusTone,
   outboxTimeLabel,
+  type OutboxTone,
 } from '@/utils/outboxLabels';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import AppButton from '@/components/ui/AppButton.vue';
@@ -30,6 +31,7 @@ import IconButton from '@/components/ui/IconButton.vue';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import SkeletonRow from '@/components/ui/SkeletonRow.vue';
+import Avatar from '@/components/common/Avatar.vue';
 import TimeAgo from '@/components/common/TimeAgo.vue';
 import type { BackendOutboxItem } from '@/types/outbox';
 
@@ -117,6 +119,16 @@ function isDeliveryWarning(item: BackendOutboxItem): boolean {
   return item.status === 'delivered' || item.status === 'delivery_unknown';
 }
 
+/** Failures and delivery warnings wait for a decision; the rest runs on its own. */
+function needsAttention(item: BackendOutboxItem): boolean {
+  return item.status === 'failed' || isDeliveryWarning(item);
+}
+
+/** The status colour, with a scheduled send that missed its time turned amber. */
+function markerTone(item: BackendOutboxItem): OutboxTone {
+  return isOverdue(item) ? 'warning' : outboxStatusTone(item.status);
+}
+
 function exactTime(value?: string | null): string {
   if (!value) return '';
   const date = new Date(value);
@@ -134,6 +146,11 @@ function headline(item: BackendOutboxItem): string {
   return outboxActionLabel(item.action_type);
 }
 
+/** The row's first line, where an inbox row names the sender. */
+function who(item: BackendOutboxItem): string {
+  return recipientLine(item) || outboxActionLabel(item.action_type);
+}
+
 function recipientLine(item: BackendOutboxItem): string {
   if (item.recipients.length === 0) return '';
   if (item.recipients.length <= 2) return t('outbox.recipients', { recipients: item.recipients.join(', ') });
@@ -143,10 +160,16 @@ function recipientLine(item: BackendOutboxItem): string {
   });
 }
 
-/** Small tertiary facts after the recipients — never a repeat of the headline. */
+/**
+ * Small tertiary facts under the subject — never a repeat of the first line
+ * or the headline. Sending is what a mail with recipients does, so only
+ * another action is named.
+ */
 function metaParts(item: BackendOutboxItem): string[] {
   const parts: string[] = [];
-  if (item.subject) parts.push(outboxActionLabel(item.action_type));
+  if (item.subject && item.recipients.length > 0 && item.action_type !== 'send_message') {
+    parts.push(outboxActionLabel(item.action_type));
+  }
   if (item.retry_count > 0) parts.push(outboxAttemptsLabel(item.retry_count));
   return parts;
 }
@@ -264,145 +287,122 @@ async function cancel(item: BackendOutboxItem) {
               v-for="item in group.items"
               :key="item.id"
               class="row"
-              :class="[`row--${outboxStatusTone(item.status)}`, { 'row--busy': busy.has(item.id), 'row--active': item.id === selectedId }]"
+              :class="{
+                'row--attention': needsAttention(item),
+                'row--busy': busy.has(item.id),
+                'row--active': item.id === selectedId,
+              }"
+              :aria-current="item.id === selectedId ? 'true' : undefined"
               @click="selectedId = item.id"
             >
-              <span class="row__marker" aria-hidden="true">
-                <svg
-                  v-if="item.status === 'failed' || isDeliveryWarning(item)"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
+              <!-- The same lead as an inbox row: who it goes to, with the queue
+                   state pinned to the avatar the way unread is. -->
+              <span class="row__lead">
+                <Avatar
+                  v-if="item.recipients.length > 0"
+                  :name="item.recipients[0] ?? ''"
+                  :email="item.recipients[0]"
+                  :size="36"
+                />
+                <span v-else class="row__action-icon" aria-hidden="true">
+                  <AppIcon>
+                    <path d="M2.5 5.5h7.8M8.3 3.5l2 2-2 2M13.5 10.5H5.7M7.7 8.5l-2 2 2 2" />
+                  </AppIcon>
+                </span>
+                <span
+                  v-if="item.status !== 'pending'"
+                  class="row__marker"
+                  :class="`row__marker--${markerTone(item)}`"
+                  aria-hidden="true"
                 >
-                  <circle cx="8" cy="8" r="5.6" />
-                  <path d="M8 5.1v3.4" />
-                  <path d="M8 10.7h.01" />
-                </svg>
-                <svg
-                  v-else-if="item.status === 'sending'"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M14 2 2 6.6l4.8 2.1L9 13.6 14 2Z" />
-                  <path d="m6.8 8.7 3-3" />
-                </svg>
-                <svg
-                  v-else-if="item.status === 'scheduled'"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <circle cx="8" cy="8" r="5.6" />
-                  <path d="M8 4.8V8l2.3 1.4" />
-                </svg>
-                <svg
-                  v-else
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                >
-                  <circle cx="8" cy="8" r="5.6" />
-                  <path d="M5.4 8h.01M8 8h.01M10.6 8h.01" />
-                </svg>
+                  <svg v-if="needsAttention(item)" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                    <path d="M8 3.5v5" />
+                    <path d="M8 12.2h.01" />
+                  </svg>
+                  <svg v-else-if="item.status === 'sending'" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" />
+                  </svg>
+                  <svg v-else viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M8 3.5V8l3 2" />
+                  </svg>
+                </span>
               </span>
 
               <div class="row__body">
-                <div class="row__headline">
-                  <span class="row__subject">{{ headline(item) }}</span>
-                  <span v-if="isOverdue(item)" class="row__time">{{ $t('outbox.overdue') }}</span>
+                <div class="row__top" :class="{ 'row__top--quick': !needsAttention(item) }">
+                  <span class="row__who">{{ who(item) }}</span>
+                  <span v-if="isOverdue(item)" class="row__time row__time--overdue">{{ $t('outbox.overdue') }}</span>
                   <TimeAgo
                     v-else-if="relevantTime(item)"
                     :date="relevantTime(item) as string"
                     class="row__time"
                     :title="`${outboxTimeLabel(item.status, relevantTime(item))}: ${exactTime(relevantTime(item))}`"
                   />
+                  <!-- Queued work is calm: its actions wait under the pointer,
+                       as the inbox row's do. -->
+                  <span v-if="!needsAttention(item)" class="row__quick">
+                    <IconButton
+                      v-if="canRetry(item)"
+                      size="sm"
+                      :title="outboxRetryLabel(item.action_type, item.status)"
+                      :disabled="busy.has(item.id)"
+                      @click.stop="retry(item)"
+                    >
+                      <AppIcon size="sm">
+                        <path d="M13.5 8a5.5 5.5 0 1 1-1.7-3.9" />
+                        <path d="M13.5 2v3.2h-3.2" />
+                      </AppIcon>
+                    </IconButton>
+                    <IconButton
+                      v-if="outboxActionCanBeCancelled(item.action_type, item.status)"
+                      size="sm"
+                      tone="danger"
+                      :title="$t('common.discard')"
+                      :disabled="busy.has(item.id)"
+                      @click.stop="cancel(item)"
+                    >
+                      <AppIcon size="sm">
+                        <path d="M2.5 4h11M5.5 4V2.8A1.3 1.3 0 0 1 6.8 1.5h2.4a1.3 1.3 0 0 1 1.3 1.3V4" />
+                        <path d="M12.6 4v9a1.5 1.5 0 0 1-1.5 1.5h-6.2A1.5 1.5 0 0 1 3.4 13V4" />
+                      </AppIcon>
+                    </IconButton>
+                  </span>
                 </div>
 
-                <p
-                  v-if="recipientLine(item) || metaParts(item).length > 0"
-                  class="row__meta"
-                >
-                  <span v-if="recipientLine(item)" class="row__to">{{ recipientLine(item) }}</span>
-                  <template v-for="(part, index) in metaParts(item)" :key="part">
-                    <span v-if="index > 0 || recipientLine(item)" class="row__dot">·</span>
-                    <span>{{ part }}</span>
-                  </template>
-                </p>
+                <span v-if="headline(item) !== who(item)" class="row__subject">{{ headline(item) }}</span>
 
                 <p v-if="item.last_error" class="row__reason">
                   {{ outboxErrorLabel(item.last_error) }}
                 </p>
-              </div>
+                <p v-else-if="metaParts(item).length > 0" class="row__meta">
+                  {{ metaParts(item).join(' · ') }}
+                </p>
 
-              <div class="row__actions">
-                <AppButton
-                  v-if="item.status === 'failed' && canRetry(item)"
-                  size="sm"
-                  variant="soft"
-                  :disabled="busy.has(item.id)"
-                  @click.stop="retry(item)"
-                >
-                  {{ outboxRetryLabel(item.action_type, item.status) }}
-                </AppButton>
-                <IconButton
-                  v-else-if="canRetry(item)"
-                  size="sm"
-                  :title="outboxRetryLabel(item.action_type, item.status)"
-                  :disabled="busy.has(item.id)"
-                  @click.stop="retry(item)"
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
+                <!-- What needs a decision says so in words, right where the
+                     reason is, instead of behind a hover. -->
+                <div v-if="needsAttention(item)" class="row__fix">
+                  <AppButton
+                    v-if="canRetry(item)"
+                    size="sm"
+                    variant="soft"
+                    :disabled="busy.has(item.id)"
+                    @click.stop="retry(item)"
                   >
-                    <path d="M13.5 8a5.5 5.5 0 1 1-1.7-3.9" />
-                    <path d="M13.5 2v3.2h-3.2" />
-                  </svg>
-                </IconButton>
-                <IconButton
-                  v-if="outboxActionCanBeCancelled(item.action_type, item.status) || outboxActionCanBeDismissed(item.action_type, item.status)"
-                  size="sm"
-                  :tone="isDeliveryWarning(item) ? 'default' : 'danger'"
-                  :title="$t(isDeliveryWarning(item) ? 'outbox.dismiss' : 'common.discard')"
-                  :disabled="busy.has(item.id)"
-                  @click.stop="cancel(item)"
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
+                    {{ outboxRetryLabel(item.action_type, item.status) }}
+                  </AppButton>
+                  <AppButton
+                    v-if="outboxActionCanBeCancelled(item.action_type, item.status) || outboxActionCanBeDismissed(item.action_type, item.status)"
+                    size="sm"
+                    variant="ghost"
+                    :disabled="busy.has(item.id)"
+                    @click.stop="cancel(item)"
                   >
-                    <template v-if="isDeliveryWarning(item)">
-                      <path d="M4 4l8 8M12 4 4 12" />
-                    </template>
-                    <template v-else>
-                      <path d="M2.5 4h11M5.5 4V2.8A1.3 1.3 0 0 1 6.8 1.5h2.4a1.3 1.3 0 0 1 1.3 1.3V4" />
-                      <path d="M12.6 4v9a1.5 1.5 0 0 1-1.5 1.5h-6.2A1.5 1.5 0 0 1 3.4 13V4" />
-                    </template>
-                  </svg>
-                </IconButton>
+                    {{ $t(isDeliveryWarning(item) ? 'outbox.dismiss' : 'common.discard') }}
+                  </AppButton>
+                  <span v-if="item.retry_count > 0" class="row__attempts">
+                    {{ outboxAttemptsLabel(item.retry_count) }}
+                  </span>
+                </div>
               </div>
             </li>
           </ul>
@@ -421,7 +421,7 @@ async function cancel(item: BackendOutboxItem) {
             </svg>
           </IconButton>
           <div class="detail__copy">
-            <p class="detail__status" :class="`detail__status--${outboxStatusTone(selectedItem.status)}`">
+            <p class="detail__status" :class="`detail__status--${markerTone(selectedItem)}`">
               {{ isOverdue(selectedItem) ? $t('outbox.overdue') : outboxStatusLabel(selectedItem.status) }}
             </p>
             <h2 class="detail__subject">{{ headline(selectedItem) }}</h2>
@@ -538,38 +538,42 @@ async function cancel(item: BackendOutboxItem) {
 .list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-xs);
+  gap: var(--space-2xs);
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
+/*
+ * The inbox row, not a card: avatar, who it goes to and when, subject, then
+ * a meta line. Failures announce themselves through the badge, the reason and
+ * the buttons, not through a red box around the row.
+ */
 .row {
+  --row-surface: var(--bg-list);
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
   gap: var(--space-md);
-  padding: var(--space-md) var(--space-md) var(--space-md) var(--space-sm);
+  padding: var(--space-2-5) var(--space-md);
   border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  border: var(--border-muted);
+  background: var(--row-surface);
+  cursor: pointer;
   transition:
     background var(--duration-fast) var(--ease-out),
-    border-color var(--duration-fast) var(--ease-out),
     opacity var(--duration-fast) var(--ease-out);
 }
 
 .row:hover {
-  background: var(--bg-hover);
+  --row-surface: var(--bg-hover);
 }
 
-.row {
-  cursor: pointer;
-}
-
-.row--active {
-  border-color: var(--accent-primary);
-  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-surface));
+/* The open entry is the sheet with the petrol edge, as in the inbox and in
+   search — whatever its state. */
+.row--active,
+.row--active:hover {
+  --row-surface: var(--bg-surface);
+  box-shadow: var(--selection-edge), var(--shadow-sm);
 }
 
 .row--busy {
@@ -577,127 +581,169 @@ async function cancel(item: BackendOutboxItem) {
   pointer-events: none;
 }
 
-/* Status marker — a tinted disc, the same language as the workflow chips. */
-.row__marker {
+.row__lead {
+  position: relative;
+  width: 36px;
+  height: 36px;
+}
+
+.row__action-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  margin-top: 1px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--radius-full);
   background: var(--bg-raised);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
+}
+
+/* The queue state, pinned to the avatar where the inbox pins unread. The
+   ring is the row's own surface, so the badge sits cut out of the avatar. */
+.row__marker {
+  position: absolute;
+  right: calc(var(--space-1-5) * -1);
+  bottom: calc(var(--space-xs) * -1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 0 var(--space-2xs) var(--row-surface);
+  transition: box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .row__marker svg {
-  width: 16px;
-  height: 16px;
+  width: 10px;
+  height: 10px;
 }
 
-.row--danger {
-  border-color: color-mix(in srgb, var(--accent-red) 30%, transparent);
-  background: color-mix(in srgb, var(--accent-red) 5%, var(--bg-surface));
+.row__marker--danger {
+  background: var(--accent-red);
+  color: var(--text-on-accent);
 }
 
-.row--danger:hover {
-  background: color-mix(in srgb, var(--accent-red) 9%, var(--bg-surface));
+.row__marker--warning {
+  background: var(--accent-amber);
+  color: var(--text-on-amber);
 }
 
-.row--danger .row__marker {
-  background: color-mix(in srgb, var(--accent-red) 16%, transparent);
-  color: var(--accent-red);
+.row__marker--accent {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
 }
 
-.row--accent .row__marker {
-  background: color-mix(in srgb, var(--accent-primary) 16%, transparent);
-  color: var(--accent-primary);
-}
-
-.row--warning .row__marker {
-  background: color-mix(in srgb, var(--accent-amber) 16%, transparent);
-  color: var(--accent-amber);
+.row__marker--neutral {
+  background: var(--bg-raised);
+  color: var(--text-secondary);
 }
 
 .row__body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-2xs);
   min-width: 0;
 }
 
-.row__headline {
-  display: flex;
+.row__top {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
   gap: var(--space-sm);
-  min-width: 0;
+  min-height: var(--space-5);
 }
 
-.row__subject {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--font-size-md);
-  font-weight: var(--weight-semibold);
+.row__who {
+  overflow: hidden;
   color: var(--text-primary);
-  overflow: hidden;
+  font-size: var(--font-size-md);
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* When the next step happens is information, not a hint. */
 .row__time {
-  flex-shrink: 0;
-}
-
-.row__meta {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  margin: 0;
-  min-width: 0;
-  font-size: var(--font-size-sm);
   color: var(--text-secondary);
-}
-
-.row__to {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.row__meta > span:not(.row__to) {
-  flex-shrink: 0;
-  color: var(--text-tertiary);
   font-size: var(--font-size-xs);
-}
-
-.row__dot {
-  color: var(--text-tertiary);
-}
-
-/* The reason a mail is stuck — readable prose, not a red terminal block. */
-.row__reason {
-  margin: 5px 0 0;
-  padding-left: 10px;
-  border-left: 2px solid color-mix(in srgb, var(--accent-red) 45%, transparent);
-  font-size: var(--font-size-sm);
-  line-height: 1.45;
-  color: var(--text-secondary);
-}
-
-.row__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2xs);
-  flex-shrink: 0;
-  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   transition: opacity var(--duration-fast) var(--ease-out);
 }
 
-.row:hover .row__actions,
-.row:focus-within .row__actions,
-.row--danger .row__actions {
+.row__time--overdue {
+  color: var(--accent-amber-soft);
+  font-weight: var(--weight-medium);
+}
+
+.row__quick {
+  position: absolute;
+  top: 50%;
+  right: calc(var(--space-xs) * -1);
+  display: flex;
+  gap: var(--space-2xs);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.row:hover .row__quick,
+.row:focus-within .row__quick {
   opacity: 1;
+  pointer-events: auto;
+}
+
+.row:hover .row__top--quick .row__time,
+.row:focus-within .row__top--quick .row__time {
+  opacity: 0;
+}
+
+.row__subject {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row__meta {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Why it is stuck, in plain words and the error ink — two lines at most;
+   the detail pane has the rest. */
+.row__reason {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--accent-red-soft);
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.row__fix {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: var(--space-1-5);
+}
+
+.row__attempts {
+  margin-left: var(--space-xs);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
 }
 
 .spinning {
@@ -749,15 +795,15 @@ async function cancel(item: BackendOutboxItem) {
 }
 
 .detail__status--danger {
-  color: var(--accent-red);
+  color: var(--accent-red-soft);
 }
 
 .detail__status--accent {
-  color: var(--accent-primary);
+  color: var(--text-accent);
 }
 
 .detail__status--warning {
-  color: var(--accent-amber);
+  color: var(--accent-amber-soft);
 }
 
 .detail__subject {

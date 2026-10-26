@@ -119,6 +119,11 @@ const SkeletonRowStub = defineComponent({
   template: '<div data-test="skeleton" :data-count="count" />',
 });
 
+const AvatarStub = defineComponent({
+  props: { name: { type: String, required: true } },
+  template: '<span class="avatar" :data-name="name" />',
+});
+
 const TimeAgoStub = defineComponent({
   props: {
     date: { type: String, required: true },
@@ -150,6 +155,7 @@ function render() {
     global: {
       stubs: {
         AppButton: AppButtonStub,
+        Avatar: AvatarStub,
         EmptyState: EmptyStateStub,
         ErrorState: ErrorStateStub,
         IconButton: IconButtonStub,
@@ -275,6 +281,33 @@ describe('OutboxView', () => {
       'Close warning',
     ]);
     expect(detailActions[1]!.attributes('disabled')).toBeUndefined();
+  });
+
+  it('states a failure in the row and keeps queued work quiet', async () => {
+    harness.outbox!.items = [
+      makeItem({ id: 'failed', status: 'failed', retry_count: 2, last_error: 'Target folder no longer exists' }),
+      makeItem({ id: 'queued', status: 'pending', subject: 'Queued mail', recipients: ['a@example.com', 'b@example.com'] }),
+    ];
+    const wrapper = render();
+    const [failedRow, queuedRow] = wrapper.findAll('.row');
+
+    expect(failedRow!.get('.row__reason').text()).toBe('Target folder no longer exists');
+    expect(failedRow!.findAll('.row__fix .app-button').map((button) => button.text())).toEqual([
+      'Send again',
+      'Discard',
+    ]);
+    expect(failedRow!.get('.row__attempts').text()).toBe('2 attempts');
+    expect(failedRow!.get('.row__marker').classes()).toContain('row__marker--danger');
+
+    expect(queuedRow!.get('.row__who').text()).toBe('To a@example.com, b@example.com');
+    expect(queuedRow!.find('.row__fix').exists()).toBe(false);
+    expect(queuedRow!.find('.row__marker').exists()).toBe(false);
+    expect(queuedRow!.find('.row__quick .icon-button[title="Discard"]').exists()).toBe(true);
+
+    expect(failedRow!.attributes('aria-current')).toBe('true');
+    await queuedRow!.trigger('click');
+    expect(queuedRow!.attributes('aria-current')).toBe('true');
+    expect(failedRow!.attributes('aria-current')).toBeUndefined();
   });
 
   it('retries a failed item once at a time and confirms success', async () => {

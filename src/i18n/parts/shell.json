@@ -33,7 +33,7 @@
       },
       "notifications": {
         "read": "Read",
-        "replyPlaceholder": "Write a reply …"
+        "replyPlaceholder": "Write a reply…"
       },
       "outbox": {
         "sendFailed": "{count} email could not be sent. | {count} emails could not be sent."
@@ -55,7 +55,7 @@
           "lastSynced": "Last synced {time}",
           "never": "Not synced yet",
           "offline": "Offline — no connection",
-          "syncing": "Syncing …"
+          "syncing": "Syncing…"
         }
       },
       "update": {
@@ -75,7 +75,7 @@
       }
     },
     "commands": {
-      "addToTopic": "Add to a topic …",
+      "addToTopic": "Add to a topic…",
       "compose": "Compose new email",
       "copyLink": "Copy link to this email",
       "editShortcuts": "Edit keyboard shortcuts",
@@ -129,7 +129,7 @@
       "pin": "Pin or unpin",
       "setAside": "Set aside",
       "showShortcuts": "Show keyboard shortcuts",
-      "snooze": "Snooze …",
+      "snooze": "Snooze…",
       "syncDone": "Sync finished.",
       "syncFailed": "Sync failed.",
       "syncMail": "Sync email",
@@ -206,7 +206,6 @@
           "commands": "Commands",
           "contacts": "Contacts",
           "mailActions": "Mail actions",
-          "mailActionsFor": "Mail actions · {subject}",
           "mails": "Mail",
           "navigation": "Navigation",
           "recent": "Recent searches",
@@ -216,19 +215,18 @@
         },
         "hint": "Searches mail, contacts and commands. Operators such as from: or has:attachment can be combined.",
         "hints": {
-          "group": "Group",
           "navigate": "Navigate"
         },
         "noReminderDate": "Date not recognised. Try “tomorrow 9”, “next Friday 2pm” or “in 3 hours”.",
         "noResults": "No hits found.",
         "placeholder": "Search mail or run a command",
         "queryLabel": "Search term",
-        "reminderPlaceholder": "When? e.g. tomorrow 9, tomorrow 4pm, in 2 hours …",
+        "reminderPlaceholder": "When? e.g. tomorrow 9, tomorrow 4pm, in 2 hours…",
         "removeRecent": "Remove from recent searches",
         "removeRecentNamed": "Remove “{query}” from recent searches",
         "results": "Search results",
         "searching": "Searching",
-        "searchingState": "Searching …",
+        "searchingState": "Searching…",
         "showAll": "Open full search",
         "syntaxHint": "Narrow mail with"
       },
@@ -422,6 +420,7 @@
         "moveThroughMail": "Move through mail and folders",
         "moveThroughMessages": "Move through messages and drafts",
         "newMail": "New email",
+        "paletteGroups": "Jump between result groups",
         "prevNextThread": "Previous / next thread",
         "selectRange": "Select a range"
       },
@@ -660,7 +659,6 @@
           "commands": "Befehle",
           "contacts": "Kontakte",
           "mailActions": "E-Mail-Aktionen",
-          "mailActionsFor": "E-Mail-Aktionen · {subject}",
           "mails": "Mails",
           "navigation": "Navigation",
           "recent": "Letzte Suchen",
@@ -670,7 +668,6 @@
         },
         "hint": "Durchsucht Mails, Kontakte und Befehle. Operatoren wie from: oder has:attachment lassen sich kombinieren.",
         "hints": {
-          "group": "Gruppe",
           "navigate": "Navigieren"
         },
         "noReminderDate": "Datum nicht erkannt. Versuche „morgen 9“, „next Friday 2pm“ oder „in 3 Stunden“.",
@@ -876,6 +873,7 @@
         "moveThroughMail": "Durch Mails und Ordner bewegen",
         "moveThroughMessages": "Durch Nachrichten und Entwürfe bewegen",
         "newMail": "Neue Mail",
+        "paletteGroups": "Zwischen Ergebnisgruppen springen",
         "prevNextThread": "Vorheriger / nächster Thread",
         "selectRange": "Bereich auswählen"
       },

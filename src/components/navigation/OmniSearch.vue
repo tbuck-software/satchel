@@ -32,7 +32,6 @@ const CONTACT_LIMIT = 4;
 const ACCOUNT_LIMIT = 3;
 const escapeKeyLabel = formatBinding('escape');
 const enterKeyLabel = formatBinding('enter');
-const tabKeyLabel = formatBinding('tab');
 const showAllKeyLabel = formatBinding('mod+enter');
 /** Query syntax, not prose: shown as typed, in every language. */
 const SEARCH_OPERATORS = ['from:', 'subject:', 'has:attachment'];
@@ -48,6 +47,8 @@ type OmniItem =
 
 interface OmniGroup {
   label: string;
+  /** What the group acts on, set quieter after the label. */
+  detail?: string;
   items: OmniItem[];
   /** Index of the first item within the flattened list. */
   start: number;
@@ -141,9 +142,9 @@ function commandItems(list: OmniCommand[]): OmniItem[] {
 const groups = computed<OmniGroup[]>(() => {
   const list: OmniGroup[] = [];
   let start = 0;
-  const add = (label: string, items: OmniItem[]) => {
+  const add = (label: string, items: OmniItem[], detail?: string) => {
     if (items.length === 0) return;
-    list.push({ label, items, start });
+    list.push({ label, items, start, detail });
     start += items.length;
   };
 
@@ -168,11 +169,12 @@ const groups = computed<OmniGroup[]>(() => {
       t('nav.omni.groups.recent'),
       recent.value.map((entry) => ({ kind: 'recent', id: `recent:${entry}`, recentQuery: entry })),
     );
-    const mailLabel = activeThread.value
-      ? t('nav.omni.groups.mailActionsFor', { subject: activeThread.value.subject })
-      : t('nav.omni.groups.mailActions');
     add(t('nav.omni.groups.recentCommands'), commandItems(recentCommands.value));
-    add(mailLabel, commandItems(matchingCommands('mail')));
+    add(
+      t('nav.omni.groups.mailActions'),
+      commandItems(matchingCommands('mail')),
+      activeThread.value?.subject,
+    );
     add(t('nav.omni.groups.navigation'), commandItems(matchingCommands('navigation')));
     add(t('nav.omni.groups.app'), commandItems(matchingCommands('app')));
     return list;
@@ -412,7 +414,7 @@ function onEnter(event: KeyboardEvent) {
 
             <div v-else-if="flatItems.length > 0" id="omni-list" class="list" role="listbox" :aria-label="$t('nav.omni.results')">
             <template v-for="group in groups" :key="group.label || 'footer'">
-              <SectionHeading v-if="group.label" :label="group.label" role="presentation" class="group-heading" />
+              <SectionHeading v-if="group.label" :label="group.label" :detail="group.detail" role="presentation" class="group-heading" />
               <CardButton
                 v-for="(item, offset) in group.items"
                 :id="`omni-item-${group.start + offset}`"
@@ -523,11 +525,12 @@ function onEnter(event: KeyboardEvent) {
             </p>
           </div>
 
+          <!-- The three keys every visit needs. Tab between groups and the
+               full-search chord live in the shortcut help; the full-search
+               row carries its own cap whenever there are results. -->
           <footer class="hints" aria-hidden="true">
             <span><KeyCap>↑</KeyCap><KeyCap>↓</KeyCap> {{ $t('nav.omni.hints.navigate') }}</span>
-            <span v-if="ui.omniMode === 'default'"><KeyCap>{{ tabKeyLabel }}</KeyCap> {{ $t('nav.omni.hints.group') }}</span>
             <span><KeyCap>{{ enterKeyLabel }}</KeyCap> {{ $t('common.open') }}</span>
-            <span v-if="ui.omniMode === 'default'"><KeyCap>{{ showAllKeyLabel }}</KeyCap> {{ $t('nav.omni.showAll') }}</span>
             <span><KeyCap>{{ escapeKeyLabel }}</KeyCap> {{ ui.omniMode === 'reminder' ? $t('common.back') : $t('common.close') }}</span>
           </footer>
         </section>
@@ -544,7 +547,10 @@ function onEnter(event: KeyboardEvent) {
   backdrop-filter: blur(4px);
   display: grid;
   place-items: start center;
-  padding-top: 10vh;
+  /* Hangs from the pane header line rather than a share of the window: at
+     10vh the panel's top edge cut through the reader's subject, which peeked
+     out above it as half a line of text. */
+  padding-top: 64px;
   z-index: 100;
 }
 
@@ -654,8 +660,15 @@ function onEnter(event: KeyboardEvent) {
   line-height: 1.6;
 }
 
+/* Group names label the commands, they are not content: one step quieter
+   than the rows, so the commands read first. */
 .group-heading {
   padding: 8px 10px 2px;
+}
+
+.group-heading :deep(.section-heading__label) {
+  font-size: var(--font-size-xs);
+  font-weight: var(--weight-medium);
 }
 
 .row {
@@ -670,7 +683,8 @@ function onEnter(event: KeyboardEvent) {
   align-items: center;
   gap: 10px;
   font: inherit;
-  color: var(--text-secondary);
+  /* Commands are the content here; in a quieter ink they read as disabled. */
+  color: var(--text-primary);
   cursor: pointer;
   /* No fade: the selection follows the arrow keys, and a highlight still
      easing in behind a fast keypress points at the row before. */
@@ -678,7 +692,6 @@ function onEnter(event: KeyboardEvent) {
 
 .row:hover {
   background: var(--bg-hover);
-  color: var(--text-primary);
 }
 
 /* The row Enter will run, marked the way the open thread is in the list: a
@@ -687,7 +700,6 @@ function onEnter(event: KeyboardEvent) {
 .row.active {
   background: var(--bg-active);
   box-shadow: var(--selection-edge);
-  color: var(--text-primary);
 }
 
 .row--command {
@@ -784,7 +796,7 @@ function onEnter(event: KeyboardEvent) {
   justify-content: center;
   width: 20px;
   height: 20px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 /*
@@ -799,7 +811,7 @@ function onEnter(event: KeyboardEvent) {
 
 .row.active .row-icon,
 .row:hover .row-icon {
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .row-title {

@@ -34,7 +34,7 @@ describe('SyncStatusLine', () => {
     const connection = useConnectionStore();
     connection.syncing = true;
 
-    expect(mount(SyncStatusLine).get('[role="status"]').text()).toContain('Syncing …');
+    expect(mount(SyncStatusLine).get('[role="status"]').text()).toContain('Syncing…');
   });
 
   it('shows the last sync as a formatted time, not a raw timestamp', () => {

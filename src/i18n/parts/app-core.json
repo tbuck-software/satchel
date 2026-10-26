@@ -4,7 +4,7 @@
       "attachmentEmpty": "The attachment came back without any data.",
       "backendUnknown": "Unknown backend error",
       "banner": {
-        "retrying": "Trying again …",
+        "retrying": "Trying again…",
         "passwordRejected": "{account} did not accept the password.",
         "updatePassword": "Update password",
         "serverResponse": "Server response"
@@ -229,7 +229,7 @@
       },
       "noSubject": "(no subject)",
       "pendingHits": "{count} new result – refresh | {count} new results – refresh",
-      "placeholder": "Search all messages …",
+      "placeholder": "Search all messages…",
       "queryLabel": "Search term",
       "removeAccountFilter": "Remove account filter",
       "running": "Searching",
@@ -238,13 +238,13 @@
         "action": "Search on the server",
         "failed": "Server search failed. Check the connection and the sign-in.",
         "fetchFailed": "The message could not be loaded from the server.",
-        "fetching": "Loading …",
+        "fetching": "Loading…",
         "hitCount": "{count} server result | {count} server results",
         "hint": "Finds mail that has not been synced locally yet.",
         "noMore": "No further results on the server.",
         "note": "Only on the server – click to download the message.",
         "results": "Server results",
-        "running": "Searching the server …",
+        "running": "Searching the server…",
         "failedCause": "Server search failed: {cause}",
         "fetchFailedCause": "The message could not be loaded from the server: {cause}"
       },

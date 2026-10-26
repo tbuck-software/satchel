@@ -1446,7 +1446,6 @@
         "commands": "Befehle",
         "contacts": "Kontakte",
         "mailActions": "E-Mail-Aktionen",
-        "mailActionsFor": "E-Mail-Aktionen · {subject}",
         "mails": "Mails",
         "navigation": "Navigation",
         "recent": "Letzte Suchen",
@@ -1456,7 +1455,6 @@
       },
       "hint": "Durchsucht Mails, Kontakte und Befehle. Operatoren wie from: oder has:attachment lassen sich kombinieren.",
       "hints": {
-        "group": "Gruppe",
         "navigate": "Navigieren"
       },
       "noReminderDate": "Datum nicht erkannt. Versuche „morgen 9“, „next Friday 2pm“ oder „in 3 Stunden“.",
@@ -2011,7 +2009,7 @@
       "imageReadFailed": "Bild konnte nicht gelesen werden.",
       "imageUrlPlaceholder": "Bild-URL",
       "importFailed": "Profilbilder konnten nicht importiert werden.",
-      "importing": "Importiere...",
+      "importing": "Importiere…",
       "lock": "Sperren",
       "noAutoImportBody": "Der Import startet erst nach deinem Klick. macOS kann beim ersten Mal einen normalen Kontakte-Systemdialog anzeigen.",
       "noAutoImportTitle": "Kein Import beim App-Start",
@@ -3044,6 +3042,7 @@
       "moveThroughMail": "Durch Mails und Ordner bewegen",
       "moveThroughMessages": "Durch Nachrichten und Entwürfe bewegen",
       "newMail": "Neue Mail",
+      "paletteGroups": "Zwischen Ergebnisgruppen springen",
       "prevNextThread": "Vorheriger / nächster Thread",
       "selectRange": "Bereich auswählen"
     },

@@ -2,7 +2,7 @@
   "en": {
     "thread": {
       "actions": {
-        "addToTopic": "Add to topic …",
+        "addToTopic": "Add to topic…",
         "aside": "Aside",
         "blockSender": "Block sender",
         "inbox": "Inbox",
@@ -73,10 +73,10 @@
         "done": "Follow-up done",
         "due": "Follow-up due",
         "on": "Follow up {date}",
-        "change": "Change follow-up …",
+        "change": "Change follow-up…",
         "failed": "Follow-up could not be saved: {detail}",
         "scheduled": "Follow-up set for {date}",
-        "set": "Follow up …"
+        "set": "Follow up…"
       },
       "link": {
         "copied": "Link copied.",

@@ -35,7 +35,7 @@
     },
     "notifications": {
       "read": "Read",
-      "replyPlaceholder": "Write a reply …"
+      "replyPlaceholder": "Write a reply…"
     },
     "outbox": {
       "sendFailed": "{count} email could not be sent. | {count} emails could not be sent."
@@ -54,7 +54,7 @@
         "lastSynced": "Last synced {time}",
         "never": "Not synced yet",
         "offline": "Offline — no connection",
-        "syncing": "Syncing …"
+        "syncing": "Syncing…"
       }
     },
     "update": {
@@ -425,7 +425,7 @@
     }
   },
   "commands": {
-    "addToTopic": "Add to a topic …",
+    "addToTopic": "Add to a topic…",
     "blockAddress": "Block this sender",
     "blockDomain": "Block the sender's whole domain",
     "compose": "Compose new email",
@@ -489,7 +489,7 @@
     "printLatest": "Print latest email",
     "setAside": "Set aside",
     "showShortcuts": "Show keyboard shortcuts",
-    "snooze": "Snooze …",
+    "snooze": "Snooze…",
     "syncDone": "Sync finished.",
     "syncFailed": "Sync failed.",
     "syncFailedCause": "Sync failed: {cause}",
@@ -835,11 +835,11 @@
       "noteSaveFailed": "The note could not be saved.",
       "notesHeading": "Personal notes",
       "notesHint": "Stored in Satchel",
-      "notesPlaceholder": "For example: we are on first-name terms, prefers short check-ins …",
+      "notesPlaceholder": "For example: we are on first-name terms, prefers short check-ins…",
       "pin": "Pin",
       "recentMail": "Recent conversations",
       "saveNote": "Save note",
-      "savingNote": "Saving …",
+      "savingNote": "Saving…",
       "unpin": "Unpin"
     },
     "search": "Search contacts",
@@ -909,7 +909,7 @@
     "backendUnknown": "Unknown backend error",
     "banner": {
       "passwordRejected": "{account} did not accept the password.",
-      "retrying": "Trying again …",
+      "retrying": "Trying again…",
       "serverResponse": "Server response",
       "updatePassword": "Update password"
     },
@@ -1446,7 +1446,6 @@
         "commands": "Commands",
         "contacts": "Contacts",
         "mailActions": "Mail actions",
-        "mailActionsFor": "Mail actions · {subject}",
         "mails": "Mail",
         "navigation": "Navigation",
         "recent": "Recent searches",
@@ -1456,19 +1455,18 @@
       },
       "hint": "Searches mail, contacts and commands. Operators such as from: or has:attachment can be combined.",
       "hints": {
-        "group": "Group",
         "navigate": "Navigate"
       },
       "noReminderDate": "Date not recognised. Try “tomorrow 9”, “next Friday 2pm” or “in 3 hours”.",
       "noResults": "No hits found.",
       "placeholder": "Search mail or run a command",
       "queryLabel": "Search term",
-      "reminderPlaceholder": "When? e.g. tomorrow 9, tomorrow 4pm, in 2 hours …",
+      "reminderPlaceholder": "When? e.g. tomorrow 9, tomorrow 4pm, in 2 hours…",
       "removeRecent": "Remove from recent searches",
       "removeRecentNamed": "Remove “{query}” from recent searches",
       "results": "Search results",
       "searching": "Searching",
-      "searchingState": "Searching …",
+      "searchingState": "Searching…",
       "showAll": "Open full search",
       "syntaxHint": "Narrow mail with"
     },
@@ -1564,13 +1562,13 @@
       "recheck": "Check again",
       "resuming": "Continuing the sign-in you started earlier.",
       "smtpHost": "SMTP server",
-      "stateChecking": "checking …",
+      "stateChecking": "checking…",
       "stateConnected": "connected",
       "stateNeedsInput": "Input required",
       "stateNotOffered": "not offered",
       "test": "Test connection",
       "testSucceeded": "Connection works — {count} folders found.",
-      "testing": "Testing …",
+      "testing": "Testing…",
       "username": "Username"
     },
     "errors": {
@@ -1603,7 +1601,7 @@
       "accountTitle": "Account set up",
       "copy": "You can add an account in the settings at any time.",
       "importPhotos": "Optional: import contact photos",
-      "importingPhotos": "Importing contact photos …",
+      "importingPhotos": "Importing contact photos…",
       "openSatchel": "Open Satchel",
       "photosFailed": "Contact photos could not be imported.",
       "photosImported": "{count} contact photos imported.",
@@ -1727,7 +1725,7 @@
     },
     "noSubject": "(no subject)",
     "pendingHits": "{count} new result – refresh | {count} new results – refresh",
-    "placeholder": "Search all messages …",
+    "placeholder": "Search all messages…",
     "queryLabel": "Search term",
     "removeAccountFilter": "Remove account filter",
     "running": "Searching",
@@ -1738,13 +1736,13 @@
       "failedCause": "Server search failed: {cause}",
       "fetchFailed": "The message could not be loaded from the server.",
       "fetchFailedCause": "The message could not be loaded from the server: {cause}",
-      "fetching": "Loading …",
+      "fetching": "Loading…",
       "hint": "Finds mail that has not been synced locally yet.",
       "hitCount": "{count} server result | {count} server results",
       "noMore": "No further results on the server.",
       "note": "Only on the server – click to download the message.",
       "results": "Server results",
-      "running": "Searching the server …"
+      "running": "Searching the server…"
     },
     "tips": "Search tips",
     "title": "Search",
@@ -1797,7 +1795,7 @@
         "connected": "{services} connected: {events} events, {contacts} contacts{suffix}",
         "contacts": "Contacts",
         "credentialsRequired": "Username and password are required",
-        "discovering": "Looking for calendars and contacts with the existing credentials …",
+        "discovering": "Looking for calendars and contacts with the existing credentials…",
         "formCopy": "Satchel checks CalDAV and CardDAV before saving and then syncs both services.",
         "formTitle": "Connect calendars and contacts for {email}",
         "password": "Password",
@@ -1817,7 +1815,7 @@
       "oauthStatus": "{provider}: {state}",
       "password": {
         "action": "Update password",
-        "checking": "Signing in …",
+        "checking": "Signing in…",
         "failed": "Password not saved: {error}",
         "formCopy": "Satchel signs in with it first and keeps it only once the server accepts it.",
         "formTitle": "New password for {email}",
@@ -1835,7 +1833,7 @@
         "success": "Sign-in renewed."
       },
       "reconnect": {
-        "browserOpened": "Browser opened – please confirm the sign-in for {email} …",
+        "browserOpened": "Browser opened – please confirm the sign-in for {email}…",
         "buttonTitle": "Renew sign-in – opens the browser. Needed for new permissions such as the calendar.",
         "cancelled": "The sign-in was cancelled.",
         "done": "Reconnected: {email}.",
@@ -2656,7 +2654,7 @@
       "footerRecord": "Click a row and press the new key combination",
       "noMatch": "No matching command.",
       "reservedConflict": "Taken by a fixed key: {keys}",
-      "searchPlaceholder": "Search command or key …",
+      "searchPlaceholder": "Search command or key…",
       "then": "then",
       "title": "Keyboard shortcuts"
     },
@@ -2674,7 +2672,7 @@
       "imageReadError": "The image could not be read.",
       "insertLogo": "Insert logo or image",
       "loadedInEditor": "Loaded in the editor below",
-      "longPlaceholder": "Kind regards …",
+      "longPlaceholder": "Kind regards…",
       "longVersion": "Long version",
       "modeAlwaysFull": "Always the long version",
       "modeAlwaysShort": "Always the short version",
@@ -2684,7 +2682,7 @@
       "newTitle": "New signature",
       "noSuggestions": "No recurring signature found. It is worth another try after the first full sync.",
       "saved": "Saved.",
-      "shortPlaceholder": "Best …",
+      "shortPlaceholder": "Best…",
       "shortVersion": "Short version for later messages in the thread",
       "suggestionDismissed": "Suggestion ignored.",
       "suggestionLoaded": "Found signature loaded. Please check it and save.",
@@ -2773,7 +2771,7 @@
       "interval": "Interval",
       "intervalHours": "{count} hour | {count} hours",
       "intervalMinutes": "{count} minute | {count} minutes",
-      "namePlaceholder": "Builds, blog, monitoring …",
+      "namePlaceholder": "Builds, blog, monitoring…",
       "notify": "Notify",
       "opmlImported": "{created} feeds imported, {skipped} skipped.",
       "opmlImportedWithErrors": "{created} feeds imported, {skipped} skipped. {errors} errors.",
@@ -2832,7 +2830,7 @@
       "appearanceHint": "Switch between the dark and the light look.",
       "attachmentOpen": "Open attachments with",
       "attachmentOpenAria": "Default action for attachments",
-      "attachmentOpenHint": "The space bar always opens quick look regardless.",
+      "attachmentOpenHint": "The space bar always opens Quick Look, whichever you choose.",
       "attachmentOpenSystem": "Default app",
       "autoDark": "Darken HTML mail automatically",
       "autoDarkHint": "Show light mail designs with good contrast in dark mode.",
@@ -3044,6 +3042,7 @@
       "moveThroughMail": "Move through mail and folders",
       "moveThroughMessages": "Move through messages and drafts",
       "newMail": "New email",
+      "paletteGroups": "Jump between result groups",
       "prevNextThread": "Previous / next thread",
       "selectRange": "Select a range"
     },
@@ -3072,7 +3071,7 @@
   },
   "thread": {
     "actions": {
-      "addToTopic": "Add to topic …",
+      "addToTopic": "Add to topic…",
       "aside": "Aside",
       "blockSender": "Block sender",
       "inbox": "Inbox",
@@ -3140,13 +3139,13 @@
       "filenameFallback": "Email"
     },
     "followUp": {
-      "change": "Change follow-up …",
+      "change": "Change follow-up…",
       "done": "Follow-up done",
       "due": "Follow-up due",
       "failed": "Follow-up could not be saved: {detail}",
       "on": "Follow up {date}",
       "scheduled": "Follow-up set for {date}",
-      "set": "Follow up …"
+      "set": "Follow up…"
     },
     "link": {
       "copied": "Link copied.",
@@ -3351,7 +3350,7 @@
       "notFoundDescription": "The topic was deleted or does not exist yet.",
       "notFoundTitle": "Topic not found",
       "noteLabel": "New note",
-      "notePlaceholder": "Jot down a note … (e.g. from calls or chats)",
+      "notePlaceholder": "Jot down a note… (e.g. from calls or chats)",
       "participants": "Participants",
       "rename": "Rename topic",
       "reopen": "Reopen",
@@ -3386,7 +3385,7 @@
       "messageAdded": "Message added to topic “{name}”",
       "messageRemoved": "Message removed from topic “{name}”",
       "searchLabel": "Search topics",
-      "searchPlaceholder": "Search topics or create a new one …",
+      "searchPlaceholder": "Search topics or create a new one…",
       "title": "Add to topic",
       "titleMessage": "Add message to topic"
     },

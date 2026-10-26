@@ -246,7 +246,7 @@
         "typeRss": "RSS / Atom",
         "typeWebhook": "Webhook",
         "typeScript": "Script",
-        "namePlaceholder": "Builds, blog, monitoring …",
+        "namePlaceholder": "Builds, blog, monitoring…",
         "feedUrl": "Feed URL",
         "feedUrlPlaceholder": "https://example.com/feed.xml",
         "identifier": "Identifier",

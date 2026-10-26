@@ -6,7 +6,6 @@ import PaneHeader from '@/components/ui/PaneHeader.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { useUiStore } from '@/stores/ui';
 import ThemeSelector from '@/components/settings/ThemeSelector.vue';
-import LanguageSelector from '@/components/settings/LanguageSelector.vue';
 import {
   resolveSettingsSection,
   settingsSectionIcons,
@@ -114,8 +113,9 @@ onBeforeUnmount(() => unregisterFilter?.());
 </script>
 
 <template>
-  <section class="settings-view">
+  <section class="settings-view" :class="{ 'settings-view--wide': activeSection === 'shortcuts' }">
     <PaneHeader
+      :class="{ 'settings-view__header': !ui.isSinglePane }"
       :title="showOverview ? $t('common.settings') : (ui.isSinglePane ? activeLabel : $t('common.settings'))"
       :subtitle="showOverview ? $t('settings.overview.subtitle') : (ui.isSinglePane ? $t('common.settings') : activeLabel)"
       :no-menu="ui.isSinglePane"
@@ -169,16 +169,8 @@ onBeforeUnmount(() => unregisterFilter?.());
     </div>
 
     <div v-else class="settings-view__scroll">
-      <div
-        class="settings-view__content"
-        :class="{ 'settings-view__content--wide': activeSection === 'shortcuts' }"
-      >
-        <template v-if="activeSection === 'general'">
-          <ThemeSelector />
-          <div class="language-setting">
-            <LanguageSelector />
-          </div>
-        </template>
+      <div class="settings-view__content">
+        <ThemeSelector v-if="activeSection === 'general'" />
         <AboutPane v-else-if="activeSection === 'about'" />
         <SwipeSettings v-else-if="activeSection === 'swipes'" />
         <CalendarSettings
@@ -218,6 +210,8 @@ onBeforeUnmount(() => unregisterFilter?.());
 
 <style scoped>
 .settings-view {
+  /* The reading column every section sits in; the header follows it. */
+  --settings-column: 760px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
@@ -339,11 +333,24 @@ onBeforeUnmount(() => unregisterFilter?.());
   white-space: nowrap;
 }
 
+.settings-view--wide {
+  --settings-column: 980px;
+}
+
+/* The pane title starts where the section does. Left at the pane's edge it
+   sat a column's margin away from the cards below it on a wide window. */
+.settings-view > .settings-view__header {
+  padding-inline: max(
+    var(--space-lg),
+    calc((100% - var(--settings-column)) / 2 + var(--space-2xl))
+  );
+}
+
 /* A readable column, centred in the pane: about 700px of card at any window
    width, so a row's copy and its control stay within one glance. */
 .settings-view__content {
   container-type: inline-size;
-  width: min(100%, 760px);
+  width: min(100%, var(--settings-column));
   margin-inline: auto;
   padding: var(--space-2xl) var(--space-2xl) calc(2 * var(--space-2xl));
 }
@@ -359,17 +366,6 @@ onBeforeUnmount(() => unregisterFilter?.());
 [data-theme='light'] .settings-view__content :deep(select),
 [data-theme='light'] .settings-view__content :deep(input) {
   color-scheme: light;
-}
-
-.settings-view__content--wide {
-  width: min(100%, 980px);
-}
-
-.language-setting {
-  margin-top: var(--space-lg);
-  overflow: hidden;
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
 }
 
 @media (max-width: 700px) {

@@ -21,8 +21,10 @@
   max-width: 100%;
 }
 
+/* The full border step: --border-color-muted is barely a step off the
+   raised card in the dark theme, and the rows ran together. */
 .setting-row + .setting-row {
-  border-top: 1px solid var(--border-color-muted);
+  border-top: 1px solid var(--border-color);
 }
 
 .setting-info {
@@ -38,9 +40,11 @@
   font-weight: var(--weight-medium);
 }
 
+/* Secondary ink at the body step below the label: at 12px the hints read
+   as fine print on the grey card. */
 .setting-hint,
 .setting-info > span:not(.setting-label) {
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-  line-height: 1.5;
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
 }

@@ -2,6 +2,7 @@
 import { useSettingsStore } from '@/stores/settings';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
+import LanguageSelector from './LanguageSelector.vue';
 
 const settings = useSettingsStore();
 
@@ -37,6 +38,10 @@ function setAttachmentOpenBehavior(value: string) {
           @update:model-value="setTheme"
         />
       </div>
+
+      <!-- One card for the section: on its own, the language row was a second
+           card with no heading of its own. -->
+      <LanguageSelector />
 
       <div class="setting-row">
         <div class="setting-info">
@@ -114,7 +119,7 @@ function setAttachmentOpenBehavior(value: string) {
 .section-desc {
   margin: var(--space-xs) 0 0;
   font-size: var(--font-size-sm);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 </style>
 
