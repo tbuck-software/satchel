@@ -231,3 +231,24 @@ describe('thread toolbar menu keyboard', () => {
     expect(wrapper.find('.context-menu').exists()).toBe(false);
   });
 });
+
+describe('thread toolbar icon buttons', () => {
+  /* Clock and bin say little on their own; the tooltip has to say both what
+     the button does and which key does the same. */
+  it('name the action and its key in the tooltip', () => {
+    const wrapper = render({ showBack: true, position: 2, total: 5 });
+
+    const titles = wrapper
+      .findAll('.icon-button')
+      .map((button) => button.attributes('title'))
+      .filter((title) => title !== 'More actions');
+
+    expect(titles).toEqual([
+      'Back · h',
+      'Snooze · s',
+      'Delete · #',
+      'Previous conversation · k',
+      'Next conversation · j',
+    ]);
+  });
+});

@@ -216,13 +216,12 @@
         },
         "hint": "Searches mail, contacts and commands. Operators such as from: or has:attachment can be combined.",
         "hints": {
-          "allHits": "All hits",
           "group": "Group",
           "navigate": "Navigate"
         },
         "noReminderDate": "Date not recognised. Try “tomorrow 9”, “next Friday 2pm” or “in 3 hours”.",
         "noResults": "No hits found.",
-        "placeholder": "Search or type a command … (from:, subject:, has:attachment)",
+        "placeholder": "Search mail or run a command",
         "queryLabel": "Search term",
         "reminderPlaceholder": "When? e.g. tomorrow 9, tomorrow 4pm, in 2 hours …",
         "removeRecent": "Remove from recent searches",
@@ -230,7 +229,8 @@
         "results": "Search results",
         "searching": "Searching",
         "searchingState": "Searching …",
-        "showAll": "Show all hits"
+        "showAll": "Open full search",
+        "syntaxHint": "Narrow mail with"
       },
       "pinContact": "Pin contact",
       "pinContactNamed": "Pin {name}",
@@ -670,13 +670,12 @@
         },
         "hint": "Durchsucht Mails, Kontakte und Befehle. Operatoren wie from: oder has:attachment lassen sich kombinieren.",
         "hints": {
-          "allHits": "Alle Treffer",
           "group": "Gruppe",
           "navigate": "Navigieren"
         },
         "noReminderDate": "Datum nicht erkannt. Versuche „morgen 9“, „next Friday 2pm“ oder „in 3 Stunden“.",
         "noResults": "Keine Treffer gefunden.",
-        "placeholder": "Suchen oder Befehl eingeben … (from:, subject:, has:attachment)",
+        "placeholder": "Mails durchsuchen oder Befehl ausführen",
         "queryLabel": "Suchbegriff",
         "reminderPlaceholder": "Wann? z. B. morgen 9, tomorrow 4pm, in 2 Stunden …",
         "removeRecent": "Aus letzten Suchen entfernen",
@@ -684,7 +683,8 @@
         "results": "Suchergebnisse",
         "searching": "Suche läuft",
         "searchingState": "Suche läuft …",
-        "showAll": "Alle Treffer anzeigen"
+        "showAll": "Vollständige Suche öffnen",
+        "syntaxHint": "Mails eingrenzen mit"
       },
       "pinContact": "Kontakt anpinnen",
       "pinContactNamed": "{name} anpinnen",

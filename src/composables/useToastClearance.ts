@@ -30,12 +30,28 @@ export function refreshToastClearance(): void {
   toastClearanceRevision.value += 1;
 }
 
-/** The registered surfaces that are on screen right now. */
-export function toastObstacleRects(): ClearanceRect[] {
+/**
+ * Whether something other than the surface — or the stack itself, which may
+ * be lying on it right now — is on top of the surface's centre. A reply bar
+ * under a sheet or a dialog cannot be reached anyway, and lifting the stack
+ * over it only put the toasts on whatever covers it: the close button of the
+ * message details sheet, once the bar followed a short thread up the pane.
+ */
+function isCovered(element: HTMLElement, rect: DOMRect, stack: Element | null): boolean {
+  if (typeof document.elementFromPoint !== 'function') return false;
+  const top = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  return top !== null && !element.contains(top) && !stack?.contains(top);
+}
+
+/** The registered surfaces that are on screen, and not under something, right now. */
+export function toastObstacleRects(stack: Element | null = null): ClearanceRect[] {
   const rects: ClearanceRect[] = [];
   for (const target of obstacles) {
-    const rect = target.value?.getBoundingClientRect();
-    if (rect && rect.width > 0 && rect.height > 0) rects.push(rect);
+    const element = target.value;
+    const rect = element?.getBoundingClientRect();
+    if (!element || !rect || rect.width <= 0 || rect.height <= 0) continue;
+    if (isCovered(element, rect, stack)) continue;
+    rects.push(rect);
   }
   return rects;
 }

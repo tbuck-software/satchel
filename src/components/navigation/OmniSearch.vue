@@ -34,6 +34,8 @@ const escapeKeyLabel = formatBinding('escape');
 const enterKeyLabel = formatBinding('enter');
 const tabKeyLabel = formatBinding('tab');
 const showAllKeyLabel = formatBinding('mod+enter');
+/** Query syntax, not prose: shown as typed, in every language. */
+const SEARCH_OPERATORS = ['from:', 'subject:', 'has:attachment'];
 
 type OmniItem =
   | { kind: 'command'; id: string; command: OmniCommand }
@@ -398,6 +400,14 @@ function onEnter(event: KeyboardEvent) {
               {{ warning }}
             </p>
 
+            <!-- The operators live here rather than in the placeholder: the
+                 field asks one plain question, and this line goes away as soon
+                 as there is a query to narrow. -->
+            <p v-if="ui.omniMode === 'default' && !hasQuery" class="syntax-hint">
+              {{ $t('nav.omni.syntaxHint') }}
+              <code v-for="operator in SEARCH_OPERATORS" :key="operator">{{ operator }}</code>
+            </p>
+
             <p v-if="ui.omniMode === 'default' && errorText" class="state state--error" role="alert">{{ errorText }}</p>
 
             <div v-else-if="flatItems.length > 0" id="omni-list" class="list" role="listbox" :aria-label="$t('nav.omni.results')">
@@ -517,7 +527,7 @@ function onEnter(event: KeyboardEvent) {
             <span><KeyCap>↑</KeyCap><KeyCap>↓</KeyCap> {{ $t('nav.omni.hints.navigate') }}</span>
             <span v-if="ui.omniMode === 'default'"><KeyCap>{{ tabKeyLabel }}</KeyCap> {{ $t('nav.omni.hints.group') }}</span>
             <span><KeyCap>{{ enterKeyLabel }}</KeyCap> {{ $t('common.open') }}</span>
-            <span v-if="ui.omniMode === 'default'"><KeyCap>{{ showAllKeyLabel }}</KeyCap> {{ $t('nav.omni.hints.allHits') }}</span>
+            <span v-if="ui.omniMode === 'default'"><KeyCap>{{ showAllKeyLabel }}</KeyCap> {{ $t('nav.omni.showAll') }}</span>
             <span><KeyCap>{{ escapeKeyLabel }}</KeyCap> {{ ui.omniMode === 'reminder' ? $t('common.back') : $t('common.close') }}</span>
           </footer>
         </section>
@@ -601,10 +611,47 @@ function onEnter(event: KeyboardEvent) {
   .spinner-slot--visible { animation-duration: 2s; }
 }
 
+/* The bottom padding is the fade's own room: at the end of the list the fade
+   lies over it rather than over the last row. */
 .list {
-  padding: 6px;
+  padding: 6px 6px var(--space-xl);
   display: grid;
   gap: 2px;
+}
+
+/* A scroll edge above the footer. Without it the last visible row ran into
+   the footer's rule cut in half, which read as a rendering fault rather than
+   as "there is more". */
+.results-region::after {
+  content: '';
+  position: sticky;
+  bottom: 0;
+  display: block;
+  height: var(--space-xl);
+  margin-top: calc(var(--space-xl) * -1);
+  background: linear-gradient(to bottom, transparent, var(--bg-surface));
+  pointer-events: none;
+}
+
+.syntax-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1-5);
+  margin: 0;
+  padding: var(--space-2-5) var(--space-lg) 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.syntax-hint code {
+  padding: 0 var(--space-1-5);
+  border-radius: var(--radius-xs);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  line-height: 1.6;
 }
 
 .group-heading {
@@ -625,12 +672,21 @@ function onEnter(event: KeyboardEvent) {
   font: inherit;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out);
+  /* No fade: the selection follows the arrow keys, and a highlight still
+     easing in behind a fast keypress points at the row before. */
 }
 
-.row.active,
 .row:hover {
   background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* The row Enter will run, marked the way the open thread is in the list: a
+   tinted fill alone was a step neighbours could be mistaken for, the petrol
+   edge is not. */
+.row.active {
+  background: var(--bg-active);
+  box-shadow: var(--selection-edge);
   color: var(--text-primary);
 }
 
@@ -683,9 +739,13 @@ function onEnter(event: KeyboardEvent) {
   white-space: nowrap;
 }
 
+/* One column for every cap: a fixed cell, caps flush right, so a chord and
+   a single letter end on the same edge and start inside the same cell. */
 .command-shortcut {
   display: inline-flex;
+  justify-content: flex-end;
   gap: var(--space-xs);
+  min-width: 4.5rem;
 }
 
 /* Recent rows carry a third column for the remove control. */
@@ -714,7 +774,7 @@ function onEnter(event: KeyboardEvent) {
 }
 
 .recent-remove:hover {
-  background: var(--bg-active);
+  background: var(--bg-active-hover);
   color: var(--text-primary);
 }
 

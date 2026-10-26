@@ -121,7 +121,7 @@ test('offers commands in the omni panel while the query is empty', async ({ page
 test('hands a query over to the full search page', async ({ page }) => {
   await page.getByTitle('Search (/)').click();
   await page.getByLabel('Search term').fill('Invoice');
-  await page.getByRole('option', { name: /Show all hits/ }).click();
+  await page.getByRole('option', { name: /Open full search/ }).click();
   await expect(page.getByRole('heading', { name: 'Search', exact: true })).toBeVisible();
   await expect(page.getByText('Invoice March (waiting for vendor correction)').first()).toBeVisible();
 });
@@ -135,7 +135,7 @@ test('hands a query over to the full search page', async ({ page }) => {
 test('stays on the page an overlay navigated to', async ({ page }) => {
   await page.getByTitle('Search (/)').click();
   await page.getByLabel('Search term').fill('Invoice');
-  await page.getByRole('option', { name: /Show all hits/ }).click();
+  await page.getByRole('option', { name: /Open full search/ }).click();
   await expect(page.getByRole('heading', { name: 'Search', exact: true })).toBeVisible();
 
   // Long enough for a rewind scheduled on the next tick to have fired.

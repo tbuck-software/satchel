@@ -231,7 +231,7 @@ const visibleAttachments = computed(() => {
  */
 const surfaceClasses = computed(() => {
   if (props.message.isDraft) {
-    return ['message-surface--draft', ui.isMobile ? '' : 'message-surface--indented'];
+    return ['message-surface--draft', ui.isMobile ? 'message-surface--draft-compact' : 'message-surface--indented'];
   }
   return ui.isMobile
     ? ['border-b border-border-muted py-4']
@@ -818,11 +818,21 @@ function openSenderDetails() {
     box-shadow var(--duration-fast) var(--ease-out);
 }
 
+/* The card hangs into the gutter by its own padding and border, so the
+   draft's avatar and text stand on the same axes as every other message's.
+   The reply foot's bar bleeds by the same amount (ThreadView). A phone has a
+   16px gutter, so the card there keeps a smaller inset. */
 .message-surface--draft {
-  padding: var(--space-lg);
-  border: 1px dashed var(--border-color);
+  --draft-inset: var(--space-lg);
+  margin-inline: calc(-1 * (var(--draft-inset) + 1px));
+  padding: var(--draft-inset);
+  border: 1px dashed color-mix(in srgb, var(--text-tertiary) 45%, var(--border-color));
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--bg-raised) 45%, var(--bg-surface));
+}
+
+.message-surface--draft-compact {
+  --draft-inset: var(--space-md);
 }
 
 .message-surface--draft + .message-surface--draft {

@@ -2,7 +2,7 @@
 
 import { mount } from '@vue/test-utils';
 import { createPinia } from 'pinia';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { defineComponent, h, nextTick, ref } from 'vue';
 import ToastStack from '@/components/ui/ToastStack.vue';
 import { useToast } from './useToast';
@@ -92,6 +92,35 @@ describe('ToastStack with a registered surface', () => {
     toast.clear();
     await settle();
     expect(stack().style.getPropertyValue('--toast-clearance')).toBe('0px');
+    wrapper.unmount();
+  });
+
+  it('stays down when a sheet covers the surface', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('send-row')) return box(300, 640, 600, 60);
+      if (this.classList.contains('stack')) return box(500, 610, 376, 66);
+      return box(0, 0, 0, 0);
+    });
+    const sheet = document.createElement('div');
+    document.body.append(sheet);
+    // jsdom does not lay out, so it has no hit testing of its own.
+    const elementFromPoint = vi.fn(() => sheet);
+    const original = document.elementFromPoint;
+    document.elementFromPoint = elementFromPoint;
+    onTestFinished(() => {
+      document.elementFromPoint = original;
+      sheet.remove();
+    });
+    const wrapper = mount(defineComponent({ render: () => [h(SendRow), h(ToastStack)] }), {
+      global: { plugins: [createPinia()] },
+      attachTo: document.body,
+    });
+
+    toast.error('Senden fehlgeschlagen');
+    await settle();
+    // Probed at the send row's centre, and found the sheet there.
+    expect(elementFromPoint).toHaveBeenCalledWith(600, 670);
+    expect((wrapper.get('.stack').element as HTMLElement).style.getPropertyValue('--toast-clearance')).toBe('0px');
     wrapper.unmount();
   });
 });

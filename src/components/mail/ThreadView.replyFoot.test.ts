@@ -8,6 +8,7 @@ const harness = vi.hoisted(() => ({
   openDraft: vi.fn(),
   openReply: vi.fn(),
   isMobile: false,
+  refreshToastClearance: vi.fn(),
 }));
 
 vi.mock('@/stores/connection', () => ({
@@ -75,7 +76,10 @@ vi.mock('@/composables/useThreadActions', () => ({
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: vi.fn(), info: vi.fn(), error: vi.fn() }),
 }));
-vi.mock('@/composables/useToastClearance', () => ({ useToastClearance: vi.fn() }));
+vi.mock('@/composables/useToastClearance', () => ({
+  useToastClearance: vi.fn(),
+  refreshToastClearance: harness.refreshToastClearance,
+}));
 vi.mock('@/utils/perf', () => ({ perfStart: () => undefined }));
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -163,6 +167,40 @@ describe('thread reply foot', () => {
     expect(harness.openDraft).toHaveBeenCalledWith('draft-1');
     expect(harness.openReply).not.toHaveBeenCalled();
     wrapper.unmount();
+  });
+
+  /*
+   * In a short thread the foot sits right under the last message, so a body
+   * arriving or a message folding moves it. The toast stack measures where
+   * the bar is only when told; without this it stayed where the bar was.
+   */
+  it('tells the toast stack when the thread above the foot changes height', async () => {
+    const observers: Array<{ callback: ResizeObserverCallback; targets: Element[] }> = [];
+    vi.stubGlobal('ResizeObserver', class {
+      private entry: { callback: ResizeObserverCallback; targets: Element[] };
+      constructor(callback: ResizeObserverCallback) {
+        this.entry = { callback, targets: [] };
+        observers.push(this.entry);
+      }
+      observe(target: Element) { this.entry.targets.push(target); }
+      unobserve() {}
+      disconnect() { this.entry.targets = []; }
+    });
+    try {
+      const wrapper = render();
+      await flushPromises();
+
+      const column = wrapper.get('.thread-reading-column').element;
+      const footObserver = observers.find((entry) => entry.targets.includes(column));
+      expect(footObserver?.targets).toContain(wrapper.get('.thread-reply-foot').element);
+
+      harness.refreshToastClearance.mockClear();
+      footObserver!.callback([], {} as ResizeObserver);
+      expect(harness.refreshToastClearance).toHaveBeenCalledTimes(1);
+      wrapper.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('leaves the phone to its action bar', async () => {

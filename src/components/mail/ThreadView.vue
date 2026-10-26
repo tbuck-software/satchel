@@ -42,6 +42,7 @@ import {
 import { registerThreadMessageKeyboardNavigation } from '@/composables/useThreadMessageKeyboardNavigation';
 import { registerThreadReaderCommands } from '@/composables/useThreadReaderCommands';
 import { useToast } from '@/composables/useToast';
+import { refreshToastClearance } from '@/composables/useToastClearance';
 import { usePrompt } from '@/composables/usePrompt';
 import { useConfirm } from '@/composables/useConfirm';
 import type { Message } from '@/types/mail';
@@ -219,25 +220,30 @@ onMounted(observeMessages);
 onBeforeUnmount(() => viewportObserver?.disconnect());
 
 /*
- * The reply bar floats over the end of the thread. It sticks to the foot of
- * the scroll area, so its own box is the room the last message scrolls up
- * into; its measured height is the scroll padding that keeps a message
- * revealed from the keyboard from stopping underneath it.
+ * The reply bar follows the end of the thread and, once the thread is taller
+ * than the pane, sticks to the foot of the scroll area, so its own box is the
+ * room the last message scrolls up into; its measured height is the scroll
+ * padding that keeps a message revealed from the keyboard from stopping
+ * underneath it. In a short thread it moves whenever the content above it
+ * changes height, and the toast stack has to hear about that to stay off it.
  */
 const showReplyFoot = computed(() => canReply.value && !ui.isMobile);
 const replyFoot = ref<HTMLElement | null>(null);
+const readingColumn = ref<HTMLElement | null>(null);
 const replyFootHeight = ref(0);
 let replyFootObserver: ResizeObserver | null = null;
 
-watch(replyFoot, (element) => {
+watch([replyFoot, readingColumn], ([element, column]) => {
   replyFootObserver?.disconnect();
   replyFootObserver = null;
   replyFootHeight.value = element?.offsetHeight ?? 0;
   if (!element || typeof ResizeObserver === 'undefined') return;
   replyFootObserver = new ResizeObserver(() => {
     replyFootHeight.value = element.offsetHeight;
+    refreshToastClearance();
   });
   replyFootObserver.observe(element);
+  if (column) replyFootObserver.observe(column);
 });
 onBeforeUnmount(() => replyFootObserver?.disconnect());
 
@@ -969,7 +975,7 @@ function showEntireThread() {
       ]"
       :style="showReplyFoot ? { '--reply-foot-h': `${replyFootHeight}px` } : undefined"
     >
-      <div :class="ui.isMobile ? '' : 'thread-reading-column'">
+      <div ref="readingColumn" :class="ui.isMobile ? '' : 'thread-reading-column'">
         <PluginSlotHost
           slot-name="thread_view_panel"
           :context="{ threadId: thread.id, subject: thread.subject }"
@@ -1052,6 +1058,7 @@ function showEntireThread() {
       <div v-if="showReplyFoot" ref="replyFoot" class="thread-reply-foot">
         <div class="thread-reply-foot__column">
           <ThreadReplyBar
+            class="thread-reply-foot__bar"
             :recipient="footRecipientName"
             :identity="threadAccount?.displayName ?? ''"
             :identity-color="threadAccount?.color ?? null"
@@ -1110,44 +1117,46 @@ function showEntireThread() {
   padding: var(--space-xl) calc(var(--space-5) * 2) var(--space-2xl);
 }
 
+/*
+ * 48rem leaves the body (the column less the 52px avatar indent) at about
+ * 716px, so the 640–700px tables a lot of HTML mail is built on still fit
+ * without sideways scrolling. Plain text keeps its own 60ch measure inside it.
+ */
 .thread-reading-column {
   width: 100%;
   max-width: 48rem;
   margin: 0 auto;
 }
 
-/* A column, so the foot can dock to the bottom of a short thread instead of
-   hanging under its last message. */
+/* The foot's box is the inset at the end of the thread: the last message, or
+   the draft card, stops above it, and scrolled-to messages stop above it too. */
 .thread-reading-content--reply {
-  display: flex;
-  flex-direction: column;
   padding-bottom: 0;
   scroll-padding-bottom: var(--reply-foot-h, 0px);
 }
 
-.thread-reading-content--reply > .thread-reading-column {
-  flex: 1 0 auto;
-}
-
-/* Sticky inside the scroll area rather than stacked under it: the content
-   passes beneath the bar and fades out above it, and at the end of the
-   thread the bar's own box — fade included — is the inset that lifts the last
-   message, or the draft card, fully clear of it. */
+/* Sticky inside the scroll area rather than stacked under it. In a short
+   thread it is simply the next thing after the last message, one message gap
+   below it; once the thread outgrows the pane it holds the bottom edge, the
+   content passes beneath it and fades out above it. */
 .thread-reply-foot {
   position: sticky;
   bottom: 0;
   z-index: 1;
-  flex-shrink: 0;
-  padding: var(--space-xl) 0 var(--space-5);
+  padding: var(--space-5) 0 var(--space-5);
   background: linear-gradient(to bottom, transparent, var(--bg-surface) var(--space-lg));
 }
 
-/* The bar lines up with the message bodies, not with the avatars: it is the
-   next message, and it starts where theirs do (52px, see MessageBubble). */
+/* The bar is a card like the draft above it and hangs into the gutter by the
+   same amount (padding plus border, see .message-surface--draft): both cards
+   share their edges, and the bar's text stands on the avatar axis. */
 .thread-reply-foot__column {
   max-width: 48rem;
   margin: 0 auto;
-  padding-left: 52px;
+}
+
+.thread-reply-foot__bar {
+  margin-inline: calc(-1 * (var(--space-lg) + 1px));
 }
 
 .thread-state {

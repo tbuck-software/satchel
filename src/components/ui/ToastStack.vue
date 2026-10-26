@@ -118,7 +118,7 @@ function measureClearance() {
     left: rect.left,
     right: rect.right,
   };
-  const lift = clearanceAbove(resting, toastObstacleRects(), CLEARANCE_GAP);
+  const lift = clearanceAbove(resting, toastObstacleRects(stack), CLEARANCE_GAP);
   // Never past the top edge: covering a surface beats a toast nobody can see.
   clearance.value = Math.max(0, Math.min(lift, resting.top - CLEARANCE_GAP));
 }
