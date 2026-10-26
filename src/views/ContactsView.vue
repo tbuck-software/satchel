@@ -167,6 +167,7 @@ function openContact(email: string) {
 <template>
   <section class="contacts-view">
     <PaneHeader
+      class="contact-header"
       :title="currentCopy.title"
       :subtitle="currentCopy.subtitle"
       :count="filteredCount"
@@ -204,7 +205,7 @@ function openContact(email: string) {
               </span>
               <span v-if="contact.context" class="context">{{ contact.context }}</span>
             </span>
-            <span class="row-meta">
+            <span v-if="contact.pinned || activeSection === 'all'" class="row-meta">
               <span v-if="contact.pinned" :aria-label="t('nav.contactPinned')">
                 <AppIcon size="sm"><path d="M6.5 2.5h3l-.4 4.1 2.4 2.1v1H4.5v-1l2.4-2.1zM8 9.7v3.8" /></AppIcon>
               </span>
@@ -255,7 +256,12 @@ function openContact(email: string) {
   background: var(--bg-list);
 }
 
+.contact-header {
+  max-width: calc(var(--directory-content-max) + 2 * var(--space-lg));
+}
+
 .contact-search {
+  max-width: var(--directory-content-max);
   margin: 0 var(--space-lg) var(--space-md);
 }
 
@@ -264,6 +270,10 @@ function openContact(email: string) {
   overflow-y: auto;
   border-top: 1px solid var(--border-color-muted);
   padding: var(--space-sm) var(--space-lg) var(--space-2xl);
+}
+
+.contact-list {
+  max-width: var(--directory-content-max);
 }
 
 .contact-group + .contact-group {
@@ -276,7 +286,7 @@ function openContact(email: string) {
 
 .contact-group .contact-row {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-columns: var(--list-avatar-size) minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-md);
   padding: var(--space-2-5) var(--space-md);
@@ -300,6 +310,12 @@ function openContact(email: string) {
 .copy > span {
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
+  font-weight: var(--weight-regular);
+}
+
+.copy strong {
+  font-size: var(--font-size-md);
+  font-weight: var(--weight-medium);
 }
 
 .copy .context {
@@ -312,25 +328,32 @@ function openContact(email: string) {
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-1-5);
+  max-width: var(--directory-provenance-max);
+  margin-left: var(--space-xs);
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
-  white-space: nowrap;
+  font-weight: var(--weight-regular);
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .row-meta :deep(svg) {
   color: var(--accent-amber);
 }
 
-.source-tag {
-  padding: var(--space-2xs) var(--space-xs);
-  border-radius: var(--radius-xs);
-  background: var(--bg-raised);
-}
-
 @media (max-width: 700px) {
   .contact-settings-label { display: none; }
-  .contacts-view__scroll { padding-inline: var(--space-sm); }
-  .contact-group .contact-row { column-gap: var(--space-sm); }
-  .row-meta { max-width: 8rem; white-space: normal; text-align: right; }
+  .contact-group .contact-row {
+    grid-template-columns: var(--list-avatar-size) minmax(0, 1fr);
+    row-gap: var(--space-2xs);
+  }
+  .row-meta {
+    grid-column: 2;
+    justify-self: start;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    margin-left: 0;
+    text-align: left;
+  }
 }
 </style>

@@ -275,11 +275,11 @@ function appendOperator(token: string) {
                 :class="{ 'result-row--active': result.threadId === selectedThreadId }"
                 @click="open(result)"
               >
-                <Avatar :name="result.fromName" :email="result.fromAddress" :size="34" />
+                <Avatar :name="result.fromName" :email="result.fromAddress" :size="36" />
                 <span class="result-body">
                   <span class="result-top">
                     <strong :class="{ unread: !result.isRead }">{{ result.fromName }}</strong>
-                    <span v-if="result.location" class="result-location">{{ result.location }}</span>
+                    <span v-if="result.location" class="result-location" :title="result.location">{{ result.location }}</span>
                     <TimeAgo :date="result.date" class="result-time" />
                   </span>
                   <span class="result-subject">
@@ -361,7 +361,7 @@ function appendOperator(token: string) {
                   :disabled="Boolean(fetchingHitId)"
                   @click="openServerHit(entry)"
                 >
-                  <Avatar :name="entry.hit.from" :email="entry.hit.from" :size="34" />
+                  <Avatar :name="entry.hit.from" :email="entry.hit.from" :size="36" />
                   <span class="result-body">
                     <span class="result-top">
                       <strong>{{ entry.hit.from }}</strong>
@@ -525,45 +525,58 @@ function appendOperator(token: string) {
 
 .search-skeleton {
   display: grid;
-  gap: 2px;
-  padding: 4px 6px;
+  gap: var(--space-2xs);
   animation: search-skeleton-pulse 1.2s ease-in-out infinite alternate;
 }
 
 .search-skeleton__row {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-columns: var(--list-avatar-size) minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
-  min-height: 76px;
-  padding: 9px 8px;
+  gap: var(--space-md);
+  min-height: var(--search-result-min-height);
+  padding: var(--space-xs) var(--space-md);
 }
 
 .search-skeleton__avatar,
-.search-skeleton__body i {
+.search-skeleton__body i::before {
   background: var(--bg-raised);
 }
 
 .search-skeleton__avatar {
-  width: 34px;
-  height: 34px;
+  width: var(--list-avatar-size);
+  height: var(--list-avatar-size);
   border-radius: 50%;
 }
 
 .search-skeleton__body {
   display: grid;
-  gap: 7px;
+  gap: var(--space-2xs);
 }
 
 .search-skeleton__body i {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 42%;
-  height: 8px;
+  height: calc(var(--font-size-md) * 1.5);
+}
+
+.search-skeleton__body i::before {
+  content: '';
+  width: 100%;
+  height: var(--space-sm);
   border-radius: var(--radius-full);
 }
 
-.search-skeleton__body i:nth-child(2) { width: 72%; }
-.search-skeleton__body i:nth-child(3) { width: 58%; opacity: 0.7; }
+.search-skeleton__body i:nth-child(2) {
+  width: 72%;
+  height: calc(var(--font-size-sm) * 1.5);
+}
+.search-skeleton__body i:nth-child(3) {
+  width: 58%;
+  height: calc(var(--font-size-xs) * 1.5);
+  opacity: 0.7;
+}
 
 @keyframes search-skeleton-pulse {
   to { opacity: 0.52; }
@@ -607,20 +620,21 @@ function appendOperator(token: string) {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 2px;
+  gap: var(--space-2xs);
 }
 
 .result-row {
   width: 100%;
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  align-items: center;
+  gap: var(--space-md);
+  min-height: var(--search-result-min-height);
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
   font: inherit;
   text-align: left;
-  padding: 9px 8px;
+  padding: var(--space-xs) var(--space-md);
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out);
 }
@@ -640,13 +654,13 @@ function appendOperator(token: string) {
   min-width: 0;
   flex: 1;
   display: grid;
-  gap: 2px;
+  gap: var(--space-2xs);
 }
 
 .result-top {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--space-sm);
   min-width: 0;
 }
 
@@ -656,25 +670,32 @@ function appendOperator(token: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--font-size-sm);
-  font-weight: var(--weight-semibold);
+  font-size: var(--font-size-md);
+  font-weight: var(--weight-medium);
   color: var(--text-primary);
 }
 
 .result-top strong.unread {
-  font-weight: var(--weight-bold);
+  font-weight: var(--weight-strong);
 }
 
 .result-time {
-  flex-shrink: 0;
+  max-width: 35%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
+  font-weight: var(--weight-regular);
+  color: var(--text-secondary);
 }
 
 /* Where the hit lives — folder or workflow state, nothing for plain inbox. */
 .result-location {
-  flex-shrink: 0;
-  padding: 1px 7px;
+  min-width: 0;
+  max-width: 25%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 var(--space-1-5);
   border-radius: var(--radius-full);
   background: var(--bg-raised);
   color: var(--text-tertiary);
@@ -684,6 +705,7 @@ function appendOperator(token: string) {
 
 .result-subject {
   font-size: var(--font-size-sm);
+  font-weight: var(--weight-medium);
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -692,7 +714,8 @@ function appendOperator(token: string) {
 
 .result-snippet {
   font-size: var(--font-size-xs);
-  color: var(--text-secondary);
+  font-weight: var(--weight-regular);
+  color: var(--text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -146,6 +146,11 @@
   --input-height: 38px;
   --touch-target: 44px;
 
+  --directory-content-max: 960px;
+  --directory-provenance-max: 120px;
+  --list-avatar-size: 36px;
+  --search-result-min-height: 72px;
+
   /* Borders */
   --border-color: #30333a;
   --border-color-muted: #272a30;
@@ -280,6 +285,7 @@
 @media (max-width: 1020px) {
   :root {
     --input-height: 44px;
+    --search-result-min-height: 88px;
     --font-size-3xs: 12px;
     --font-size-2xs: 12px;
     --font-size-xs: 13px;
