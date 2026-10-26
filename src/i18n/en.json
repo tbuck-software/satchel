@@ -306,6 +306,7 @@
     }
   },
   "calendar": {
+    "createHint": "Click an empty day or time slot to create an event.",
     "editor": {
       "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
       "descriptionPlaceholder": "Notes, agenda, …",
@@ -765,6 +766,7 @@
     },
     "subject": {
       "forwardFallback": "Forwarded message",
+      "placeholder": "Add a subject",
       "replyFallback": "Reply"
     },
     "templates": {
@@ -2839,7 +2841,7 @@
       "plainTextRead": "Show mail as plain text",
       "plainTextReadHint": "HTML is not rendered. You can switch this per message at any time.",
       "singleKeyShortcuts": "Single-key shortcuts",
-      "singleKeyShortcutsHint": "Navigate with j/k, act with e, # or u, and jump with g …. Shortcuts with Cmd, Ctrl or Alt, the command palette (: or /) and this shortcut help (?) stay on either way.",
+      "singleKeyShortcutsHint": "Use single keys to navigate and act on mail without holding Cmd, Ctrl or Alt.",
       "title": "General",
       "vim": "Vim navigation",
       "vimHint": "Navigate with j/k and work through messages from the keyboard."

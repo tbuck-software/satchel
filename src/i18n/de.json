@@ -306,6 +306,7 @@
     }
   },
   "calendar": {
+    "createHint": "Klicke auf einen freien Tag oder eine freie Uhrzeit, um einen Termin anzulegen.",
     "editor": {
       "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
       "descriptionPlaceholder": "Notizen, Agenda, …",
@@ -765,6 +766,7 @@
     },
     "subject": {
       "forwardFallback": "Weitergeleitete Nachricht",
+      "placeholder": "Betreff hinzufügen",
       "replyFallback": "Antwort"
     },
     "templates": {
@@ -2839,7 +2841,7 @@
       "plainTextRead": "Mails als reinen Text anzeigen",
       "plainTextReadHint": "HTML wird nicht gerendert. Pro Nachricht jederzeit umschaltbar.",
       "singleKeyShortcuts": "Einzeltasten-Shortcuts",
-      "singleKeyShortcutsHint": "Mit j/k navigieren, mit e, # oder u handeln und mit g … springen. Kürzel mit Cmd, Strg oder Alt, die Kommandopalette (: oder /) und diese Tastaturhilfe (?) bleiben in jedem Fall aktiv.",
+      "singleKeyShortcutsHint": "Mit einzelnen Tasten durch Mails navigieren und Aktionen ausführen, ohne Cmd, Strg oder Alt zu drücken.",
       "title": "Allgemein",
       "vim": "Vim-Navigation",
       "vimHint": "Mit j/k navigieren und Nachrichten per Tastatur bearbeiten."

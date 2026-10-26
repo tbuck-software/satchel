@@ -43,7 +43,7 @@ function setAttachmentOpenBehavior(value: string) {
           <span class="setting-label">{{ $t('settings.theme.singleKeyShortcuts') }}</span>
           <span class="setting-hint">{{ $t('settings.theme.singleKeyShortcutsHint') }}</span>
         </div>
-        <ToggleSwitch v-model="settings.singleKeyShortcuts" />
+        <ToggleSwitch v-model="settings.singleKeyShortcuts" :label="$t('settings.theme.singleKeyShortcuts')" />
       </div>
 
       <div class="setting-row">
@@ -67,7 +67,7 @@ function setAttachmentOpenBehavior(value: string) {
           <span class="setting-label">{{ $t('settings.theme.autoDark') }}</span>
           <span class="setting-hint">{{ $t('settings.theme.autoDarkHint') }}</span>
         </div>
-        <ToggleSwitch v-model="settings.autoDarkHtmlMails" />
+        <ToggleSwitch v-model="settings.autoDarkHtmlMails" :label="$t('settings.theme.autoDark')" />
       </div>
 
       <div class="setting-row">
@@ -75,7 +75,7 @@ function setAttachmentOpenBehavior(value: string) {
           <span class="setting-label">{{ $t('settings.theme.plainTextRead') }}</span>
           <span class="setting-hint">{{ $t('settings.theme.plainTextReadHint') }}</span>
         </div>
-        <ToggleSwitch v-model="settings.preferPlainTextReading" />
+        <ToggleSwitch v-model="settings.preferPlainTextReading" :label="$t('settings.theme.plainTextRead')" />
       </div>
 
       <div class="setting-row">
@@ -83,7 +83,7 @@ function setAttachmentOpenBehavior(value: string) {
           <span class="setting-label">{{ $t('settings.theme.plainTextCompose') }}</span>
           <span class="setting-hint">{{ $t('settings.theme.plainTextComposeHint') }}</span>
         </div>
-        <ToggleSwitch v-model="settings.composePlainText" />
+        <ToggleSwitch v-model="settings.composePlainText" :label="$t('settings.theme.plainTextCompose')" />
       </div>
 
       <div class="setting-row">
@@ -91,7 +91,7 @@ function setAttachmentOpenBehavior(value: string) {
           <span class="setting-label">{{ $t('settings.theme.collapseQuoted') }}</span>
           <span class="setting-hint">{{ $t('settings.theme.collapseQuotedHint') }}</span>
         </div>
-        <ToggleSwitch v-model="settings.collapseQuotedHistory" />
+        <ToggleSwitch v-model="settings.collapseQuotedHistory" :label="$t('settings.theme.collapseQuoted')" />
       </div>
     </div>
   </div>
@@ -100,7 +100,7 @@ function setAttachmentOpenBehavior(value: string) {
 <style scoped>
 .section {
   display: grid;
-  gap: 20px;
+  gap: var(--space-5);
 }
 
 .section-header h3 {
@@ -112,45 +112,10 @@ function setAttachmentOpenBehavior(value: string) {
 }
 
 .section-desc {
-  margin: 4px 0 0;
+  margin: var(--space-xs) 0 0;
   font-size: var(--font-size-sm);
   color: var(--text-tertiary);
 }
-
-.setting-group {
-  display: grid;
-  gap: 0;
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
-  overflow: hidden;
-}
-
-.setting-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
-}
-
-.setting-row + .setting-row {
-  border-top: 1px solid var(--border-color-muted);
-}
-
-.setting-info {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.setting-label {
-  font-size: var(--font-size-md);
-  font-weight: var(--weight-medium);
-  color: var(--text-primary);
-}
-
-.setting-hint {
-  font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
-}
 </style>
+
+<style scoped src="./settingsRows.css"></style>

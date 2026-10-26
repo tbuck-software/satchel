@@ -31,28 +31,4 @@ function setPreference(value: string) {
   </div>
 </template>
 
-<style scoped>
-.setting-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-lg);
-  padding: var(--space-md) var(--space-lg);
-}
-
-.setting-info {
-  display: grid;
-  gap: var(--space-2xs);
-}
-
-.setting-label {
-  font-size: var(--font-size-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--text-primary);
-}
-
-.setting-hint {
-  font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
-}
-</style>
+<style scoped src="./settingsRows.css"></style>

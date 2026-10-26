@@ -105,7 +105,7 @@ function createOn(day: Date, event: MouseEvent) {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  border: var(--border-muted);
+  border: 1px solid var(--calendar-grid-line);
   border-radius: var(--radius-md);
   background: var(--bg-surface);
   overflow: hidden;
@@ -113,8 +113,8 @@ function createOn(day: Date, event: MouseEvent) {
 
 .month__weekdays {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  border-bottom: var(--border-muted);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border-bottom: 1px solid var(--calendar-grid-line);
   background: var(--bg-surface);
 }
 
@@ -125,14 +125,14 @@ function createOn(day: Date, event: MouseEvent) {
   font-weight: var(--weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  text-align: right;
+  text-align: center;
 }
 
 .month__grid {
   display: grid;
   flex: 1;
   min-height: 0;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   grid-template-rows: repeat(var(--rows), minmax(0, 1fr));
 }
 
@@ -143,8 +143,8 @@ function createOn(day: Date, event: MouseEvent) {
   min-height: 0;
   min-width: 0;
   padding: 4px;
-  border-right: var(--border-muted);
-  border-bottom: var(--border-muted);
+  border-right: 1px solid var(--calendar-grid-line);
+  border-bottom: 1px solid var(--calendar-grid-line);
   overflow: hidden;
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out);
@@ -159,7 +159,7 @@ function createOn(day: Date, event: MouseEvent) {
 }
 
 .month__cell--muted {
-  background: color-mix(in srgb, var(--bg-inset) 45%, transparent);
+  background: var(--bg-base);
 }
 
 .month__cell--muted .month__daynum {
@@ -167,7 +167,7 @@ function createOn(day: Date, event: MouseEvent) {
 }
 
 .month__daynum {
-  align-self: flex-end;
+  align-self: center;
   display: grid;
   place-items: center;
   min-width: 24px;
@@ -176,7 +176,7 @@ function createOn(day: Date, event: MouseEvent) {
   border: 0;
   border-radius: var(--radius-full);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: var(--font-size-xs);
   font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;

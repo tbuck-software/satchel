@@ -340,8 +340,10 @@ onBeforeUnmount(() => unregisterFilter?.());
 }
 
 .settings-view__content {
-  width: min(100%, 720px);
-  padding: 30px 36px 56px;
+  container-type: inline-size;
+  width: min(100%, 980px);
+  margin-inline: auto;
+  padding: var(--space-2xl) var(--space-2xl) calc(2 * var(--space-2xl));
 }
 
 .settings-view__content--wide {
@@ -357,7 +359,7 @@ onBeforeUnmount(() => unregisterFilter?.());
 
 @media (max-width: 700px) {
   .settings-view__content {
-    padding: 22px 16px 40px;
+    padding: var(--space-xl) var(--space-lg) var(--space-2xl);
   }
 }
 </style>

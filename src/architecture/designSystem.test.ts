@@ -94,11 +94,6 @@ const RAW_COLOR_EXEMPT_FILES: Record<string, string> = {
  */
 const KNOWN_RAW_COLORS: KnownViolation[] = [
   {
-    file: 'src/components/calendar/CalendarWeekGrid.vue',
-    count: 1,
-    reason: 'Hand-mixed event shadow; --shadow-sm covers it.',
-  },
-  {
     file: 'src/components/mail/ComposerHost.vue',
     count: 3,
     reason: 'Floating-composer shadow stack, hand-mixed.',
@@ -151,7 +146,7 @@ const KNOWN_RAW_COLORS: KnownViolation[] = [
 ];
 
 // Only ever lower this. See KNOWN_RAW_COLORS.
-const MAX_KNOWN_RAW_COLORS = 28;
+const MAX_KNOWN_RAW_COLORS = 27;
 
 // ---------------------------------------------------------------------------
 // Rule 2 — no Tailwind default palette, only the classes bridged in tailwind.css.
@@ -257,7 +252,6 @@ const KNOWN_SCALE_LITERAL_GROUPS: KnownGroup[] = [
   {
     reason: 'View-level layout sizing its own chrome; UI-11 puts it on the scale.',
     files: {
-      'src/views/CalendarView.vue': 1,
       'src/views/InboxView.vue': 1,
       'src/views/NewSendersView.vue': 2,
     },
@@ -267,7 +261,7 @@ const KNOWN_SCALE_LITERAL_GROUPS: KnownGroup[] = [
 const KNOWN_SCALE_LITERALS = flatten(KNOWN_SCALE_LITERAL_GROUPS);
 
 // Only ever lower this. See KNOWN_SCALE_LITERAL_GROUPS.
-const MAX_KNOWN_SCALE_LITERALS = 50;
+const MAX_KNOWN_SCALE_LITERALS = 49;
 
 // ---------------------------------------------------------------------------
 // Rule 4b — icons share one line weight, a few grids and three sizes.

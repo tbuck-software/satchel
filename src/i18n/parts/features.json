@@ -115,7 +115,8 @@
         "tomorrowMorning": "Tomorrow morning",
         "nextWeek": "Next week",
         "nextMonth": "Next month"
-      }
+      },
+      "createHint": "Click an empty day or time slot to create an event."
     },
     "contacts": {
       "title": "Contacts",
@@ -513,7 +514,8 @@
         "tomorrowMorning": "Morgen früh",
         "nextWeek": "Nächste Woche",
         "nextMonth": "Nächsten Monat"
-      }
+      },
+      "createHint": "Klicke auf einen freien Tag oder eine freie Uhrzeit, um einen Termin anzulegen."
     },
     "contacts": {
       "title": "Kontakte",

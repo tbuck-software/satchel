@@ -190,3 +190,20 @@ describe('accent hover fills (UI-15)', () => {
     expect(source).not.toMatch(/color-mix\([^;]*\b(?:white|black)\b/);
   });
 });
+
+
+describe('preference and composer controls', () => {
+  it.each(THEME_NAMES)('keeps off switches visible against cards in %s', (theme) => {
+    for (const surface of ['--bg-raised', '--bg-surface']) {
+      expect(contrast('--control-off', surface, theme)).toBeGreaterThanOrEqual(3);
+      expect(contrast('--control-off-border', surface, theme)).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it.each(THEME_NAMES)('keeps inactive Send and placeholders readable in %s', (theme) => {
+    expect(onAccent('color-mix(in srgb, var(--accent-primary) 75%, var(--bg-raised))', theme))
+      .toBeGreaterThanOrEqual(3);
+    expect(contrast('--text-secondary', '--bg-base', theme)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast('--text-secondary', '--bg-raised', theme)).toBeGreaterThanOrEqual(4.5);
+  });
+});

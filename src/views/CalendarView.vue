@@ -9,6 +9,7 @@ import { useConfirm } from '@/composables/useConfirm';
 import {
   addDays,
   addMonths,
+  calendarSourceKey,
   draftFromItem,
   emptyDraft,
   filterInvitesWithoutMirroredEvents,
@@ -90,7 +91,7 @@ const allItems = computed<CalendarItem[]>(() => {
   const merged = [...events, ...inviteItems];
   const colors = sourceColorMap([
     ...merged.map((item) => item.sourceKey),
-    ...invites.sources.map((source) => `${source.source}:${source.remote_id}`),
+    ...invites.sources.map((source) => calendarSourceKey(source.source, source.remote_id)),
   ]);
   return merged.map((item) => ({ ...item, color: colors.get(item.sourceKey) ?? null }));
 });
@@ -343,7 +344,7 @@ function onKeydown(event: KeyboardEvent) {
         <AppButton variant="ghost" size="sm" @click="filePicker?.click()">
           {{ $t('calendar.importIcs') }}
         </AppButton>
-        <AppButton variant="primary" size="sm" @click="newEvent">{{ $t('calendar.newEvent') }}</AppButton>
+        <AppButton variant="primary" size="sm" :title="$t('calendar.createHint')" @click="newEvent">{{ $t('calendar.newEvent') }}</AppButton>
         <input
           ref="filePicker"
           type="file"
@@ -391,10 +392,6 @@ function onKeydown(event: KeyboardEvent) {
         @open-day="openDay"
       />
     </div>
-
-    <i18n-t keypath="calendar.hint" tag="p" class="calendar__hint">
-      <template #ics><code>.ics</code></template>
-    </i18n-t>
 
     <CalendarPopover
       :anchor="selected?.anchor ?? null"
@@ -525,18 +522,5 @@ function onKeydown(event: KeyboardEvent) {
 .calendar__grid {
   flex: 1;
   min-height: 0;
-}
-
-.calendar__hint {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-}
-
-.calendar__hint code {
-  background: var(--bg-raised);
-  padding: 1px 6px;
-  border-radius: var(--radius-xs);
-  font-size: 0.9em;
 }
 </style>

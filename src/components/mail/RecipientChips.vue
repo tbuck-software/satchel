@@ -356,4 +356,8 @@ input {
   font-family: inherit;
   box-shadow: none !important;
 }
+input::placeholder {
+  color: var(--text-secondary);
+  opacity: 1;
+}
 </style>

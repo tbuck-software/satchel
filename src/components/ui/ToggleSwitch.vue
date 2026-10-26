@@ -111,8 +111,8 @@ async function onChange(event: Event) {
   height: 21px;
   padding: var(--space-2xs);
   border-radius: var(--radius-full);
-  background: var(--bg-overlay);
-  box-shadow: inset 0 0 0 1px var(--border-color-muted);
+  background: var(--control-off);
+  box-shadow: inset 0 0 0 1px var(--control-off-border);
   transition: background var(--duration-normal) var(--ease-out);
 }
 

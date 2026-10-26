@@ -139,7 +139,7 @@ const cells = computed(() =>
   border: 0;
   border-radius: var(--radius-full);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: var(--font-size-2xs);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
@@ -155,11 +155,11 @@ const cells = computed(() =>
 
 .mini-month__day--muted {
   color: var(--text-tertiary);
-  opacity: 0.6;
+  background: var(--bg-inset);
 }
 
 .mini-month__day--today {
-  color: var(--accent-primary);
+  color: var(--text-accent);
   font-weight: var(--weight-bold);
 }
 

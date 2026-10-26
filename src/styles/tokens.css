@@ -24,6 +24,10 @@
      reading canvas — that is --bg-surface, the brightest step, in both themes. */
   --bg-inset: #0c0d0f;
 
+  --control-off: #707986;
+  --control-off-border: #939cab;
+  --calendar-grid-line: #3b3f48;
+
   /* Text */
   --text-primary: #e9edf3;
   --text-secondary: #a6aebc;
@@ -191,6 +195,9 @@
 }
 
 [data-theme='light'] {
+  --control-off: #777267;
+  --control-off-border: #6a655b;
+  --calendar-grid-line: #ddd8cd;
   --bg-base: #f4f2ed;
   --bg-list: #faf9f6;
   --bg-sidebar: #f4f2ed;

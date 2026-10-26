@@ -211,7 +211,7 @@
         "vim": "Vim navigation",
         "vimHint": "Navigate with j/k and work through messages from the keyboard.",
         "singleKeyShortcuts": "Single-key shortcuts",
-        "singleKeyShortcutsHint": "Navigate with j/k, act with e, # or u, and jump with g …. Shortcuts with Cmd, Ctrl or Alt, the command palette (: or /) and this shortcut help (?) stay on either way."
+        "singleKeyShortcutsHint": "Use single keys to navigate and act on mail without holding Cmd, Ctrl or Alt."
       },
       "tray": {
         "autostart": "Start Satchel automatically at login",
@@ -461,7 +461,7 @@
         "vim": "Vim-Navigation",
         "vimHint": "Mit j/k navigieren und Nachrichten per Tastatur bearbeiten.",
         "singleKeyShortcuts": "Einzeltasten-Shortcuts",
-        "singleKeyShortcutsHint": "Mit j/k navigieren, mit e, # oder u handeln und mit g … springen. Kürzel mit Cmd, Strg oder Alt, die Kommandopalette (: oder /) und diese Tastaturhilfe (?) bleiben in jedem Fall aktiv."
+        "singleKeyShortcutsHint": "Mit einzelnen Tasten durch Mails navigieren und Aktionen ausführen, ohne Cmd, Strg oder Alt zu drücken."
       },
       "tray": {
         "autostart": "Satchel beim Login automatisch starten",

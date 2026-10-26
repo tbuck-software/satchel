@@ -53,7 +53,7 @@ defineEmits<{
     color var(--duration-fast) var(--ease-out);
 }
 
-.segmented__option:hover:not(:disabled) {
+.segmented__option:not(.segmented__option--active):hover:not(:disabled) {
   color: var(--text-primary);
 }
 
@@ -63,7 +63,8 @@ defineEmits<{
 }
 
 .segmented__option--active {
-  background: var(--bg-overlay);
-  color: var(--text-primary);
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+  box-shadow: var(--shadow-sm);
 }
 </style>

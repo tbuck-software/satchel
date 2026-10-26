@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { BackendCalendarEvent, BackendCalendarInvite } from '@/services/backend';
 import {
   collectSources,
+  calendarSourceKey,
   descriptionToText,
   filterInvitesWithoutMirroredEvents,
   itemFromEvent,
@@ -298,6 +299,16 @@ describe('calendar sources', () => {
     expect(sourceLabel('google:alex@example.com')).toBe('alex@example.com');
     expect(sourceLabel('google:de.german#holiday@group.v.calendar.google.com')).toBe('de german holiday');
     expect(sourceLabel('google:primary')).toBe('Main calendar');
+  });
+
+  it('matches declared local calendars to their event bucket', () => {
+    const key = calendarSourceKey('local', 'local');
+    const sources = collectSources([makeItem({ sourceKey: 'local' })], [{ key, label: 'Satchel' }]);
+    expect(sources).toEqual([
+      { key: 'local', label: 'Satchel', count: 1, color: 'var(--accent-primary)' },
+    ]);
+    expect(calendarSourceKey('caldav', '/calendars/work')).toBe('caldav');
+    expect(calendarSourceKey('google', 'work@example.com')).toBe('google:work@example.com');
   });
 
   it('assigns stable distinct colors to Google calendars', () => {

@@ -30,7 +30,7 @@ function onClick(event: MouseEvent) {
 <template>
   <CardButton
     class="event-chip"
-    :class="`event-chip--${item.status}`"
+    :class="[`event-chip--${item.status}`, { 'event-chip--all-day': item.allDay }]"
     :style="item.color ? { '--chip-accent': item.color } : undefined"
     :title="item.title"
     @click.stop="onClick"
@@ -48,8 +48,10 @@ function onClick(event: MouseEvent) {
   width: 100%;
   min-width: 0;
   border: 0;
+  border-left: 2px solid var(--chip-accent, var(--accent-primary));
+  flex-shrink: 0;
   border-radius: var(--radius-xs);
-  padding: 1px 6px;
+  padding: var(--space-2xs) var(--space-xs);
   /* Own events are tinted by their source calendar; invites override below. */
   background: color-mix(in srgb, var(--chip-accent, var(--accent-primary)) 18%, transparent);
   color: var(--text-primary);
@@ -71,10 +73,20 @@ function onClick(event: MouseEvent) {
 }
 
 .event-chip__title {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   font-weight: var(--weight-semibold);
+}
+
+.event-chip--all-day .event-chip__title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .event-chip--accepted {

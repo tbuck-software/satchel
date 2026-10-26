@@ -59,8 +59,7 @@ export function itemFromEvent(event: BackendCalendarEvent): CalendarItem {
   if (!Number.isFinite(end.getTime()) || end.getTime() <= start.getTime()) {
     end = new Date(start.getTime() + DEFAULT_DURATION_MS);
   }
-  const sourceKey =
-    event.source === 'google' ? `google:${event.collection_href ?? 'primary'}` : event.source;
+  const sourceKey = calendarSourceKey(event.source, event.collection_href);
   return {
     sourceKey,
     color: null,
@@ -173,6 +172,11 @@ export interface CalendarSource {
 export interface CalendarSourceDefinition {
   key: string;
   label: string;
+}
+
+/** Declared calendars and their events must share the same filter/color key. */
+export function calendarSourceKey(source: string, remoteId?: string | null): string {
+  return source === 'google' ? `google:${remoteId ?? 'primary'}` : source;
 }
 
 /** Google calendars cycle through these; local/caldav/invites have fixed colors. */

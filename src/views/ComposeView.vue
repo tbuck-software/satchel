@@ -1050,13 +1050,13 @@ defineExpose({
         <h2>{{ defaultComposerTitle() }}</h2>
       </div>
       <div class="actions">
-        <AppButton size="sm" variant="ghost"
+        <AppButton size="sm" variant="secondary"
           v-if="supportsBackend"
           @click="showTemplatePicker = true"
         >
           {{ $t('compose.templates.button') }}
         </AppButton>
-        <AppButton size="sm" variant="ghost"
+        <AppButton size="sm" variant="secondary"
           v-if="supportsBackend"
           :disabled="sending || discarding"
           @click="persistDraft({})"
@@ -1206,6 +1206,7 @@ defineExpose({
         v-model="subject"
         class="compose-subject"
         :aria-label="$t('common.subject')"
+        :placeholder="$t('compose.subject.placeholder')"
         @keydown.meta.enter.prevent="send"
         @keydown.ctrl.enter.prevent="send"
       />
@@ -1444,7 +1445,8 @@ defineExpose({
 }
 
 .plain-editor::placeholder {
-  color: var(--text-tertiary);
+  opacity: 1;
+  color: var(--text-secondary);
 }
 
 .compose {
@@ -1886,10 +1888,11 @@ textarea:focus {
   appearance: none;
   width: 100%;
   min-width: 0;
-  padding: var(--space-sm) var(--space-2xl) var(--space-sm) var(--space-md);
-  border: var(--border-default);
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
+  min-height: 36px;
+  padding: var(--space-sm) var(--space-2xl) var(--space-sm) 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text-primary);
   font-size: var(--font-size-sm);
   text-overflow: ellipsis;
@@ -1913,8 +1916,8 @@ textarea:focus {
 
 .send-wrap :deep(.send-button:disabled) {
   opacity: 1;
-  background: var(--bg-raised);
-  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--accent-primary) 75%, var(--bg-raised));
+  color: var(--text-on-accent);
 }
 
 

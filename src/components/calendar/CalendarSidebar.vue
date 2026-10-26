@@ -4,6 +4,7 @@ import { computed, onMounted } from 'vue';
 import { useInvitesStore } from '@/stores/invites';
 import { useCalendarUiStore } from '@/stores/calendarUi';
 import {
+  calendarSourceKey,
   collectSources,
   itemFromEvent,
   itemFromInvite,
@@ -27,7 +28,7 @@ const sources = computed(() => {
     ...invites.items.map(itemFromInvite).filter((item): item is CalendarItem => item !== null),
   ];
   const definitions = invites.sources.map((source) => ({
-    key: `${source.source}:${source.remote_id}`,
+    key: calendarSourceKey(source.source, source.remote_id),
     label: source.name,
   }));
   return collectSources(items, definitions);

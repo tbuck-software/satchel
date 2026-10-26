@@ -322,6 +322,13 @@ describe('CalendarView', () => {
     setupHarness();
   });
 
+  it('keeps the creation hint on New event instead of below the grid', () => {
+    const wrapper = render();
+    expect(wrapper.find('.calendar__hint').exists()).toBe(false);
+    expect(wrapper.get('button[title="Click an empty day or time slot to create an event."]').text())
+      .toBe('New event');
+  });
+
   it('loads local mirrors and starts remote sync, surfacing the first sync error', async () => {
     harness.invites!.syncRemote.mockResolvedValue(['Google calendar unavailable', 'CalDAV unavailable']);
 

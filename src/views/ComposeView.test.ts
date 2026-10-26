@@ -222,6 +222,17 @@ beforeEach(() => {
 });
 
 describe('composer fields and actions', () => {
+  it('describes an empty subject and keeps Send primary while blocked', async () => {
+    const wrapper = render([], false);
+    await flushPromises();
+
+    expect(wrapper.get('.compose-subject').attributes('placeholder')).toBe('Add a subject');
+    expect(sendButton(wrapper).classes()).toContain('app-button--primary');
+    expect(sendButton(wrapper).attributes('disabled')).toBeDefined();
+    expect(wrapper.get('[data-testid="compose-send-wrap"]').attributes('title')).toBeTruthy();
+    wrapper.unmount();
+  });
+
   it('keeps the sender and recipients before the subject and body in DOM order', async () => {
     const wrapper = render(['boss@example.com'], true, {
       initialCc: ['copy@example.com'], initialBcc: ['private@example.com'],

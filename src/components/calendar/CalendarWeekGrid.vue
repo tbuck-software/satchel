@@ -199,7 +199,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  border: var(--border-muted);
+  border: 1px solid var(--calendar-grid-line);
   border-radius: var(--radius-md);
   background: var(--bg-surface);
   overflow: hidden;
@@ -208,7 +208,7 @@ onBeforeUnmount(() => {
 .week__header {
   display: grid;
   grid-template-columns: var(--times-width) repeat(7, 1fr);
-  border-bottom: var(--border-muted);
+  border-bottom: 1px solid var(--calendar-grid-line);
 }
 
 .week--single .week__header {
@@ -216,7 +216,7 @@ onBeforeUnmount(() => {
 }
 
 .week__corner {
-  border-right: var(--border-muted);
+  border-right: 1px solid var(--calendar-grid-line);
 }
 
 .week__dayhead {
@@ -225,7 +225,7 @@ onBeforeUnmount(() => {
   gap: 2px;
   min-width: 0;
   padding: 6px 6px 4px;
-  border-right: var(--border-muted);
+  border-right: 1px solid var(--calendar-grid-line);
 }
 
 .week__dayhead:last-child {
@@ -235,7 +235,7 @@ onBeforeUnmount(() => {
 .week__daylabel {
   display: inline-flex;
   align-items: center;
-  align-self: flex-start;
+  align-self: center;
   gap: 6px;
   border: 0;
   border-radius: var(--radius-full);
@@ -297,7 +297,7 @@ onBeforeUnmount(() => {
 .week__times {
   display: flex;
   flex-direction: column;
-  border-right: var(--border-muted);
+  border-right: 1px solid var(--calendar-grid-line);
 }
 
 .week__time {
@@ -326,12 +326,12 @@ onBeforeUnmount(() => {
 .week__col {
   position: relative;
   min-width: 0;
-  border-right: var(--border-muted);
+  border-right: 1px solid var(--calendar-grid-line);
   cursor: pointer;
   /* Hour ruling without 24 extra nodes per column. */
   background-image: repeating-linear-gradient(
     to bottom,
-    var(--border-color-muted) 0 1px,
+    var(--calendar-grid-line) 0 1px,
     transparent 1px 48px
   );
   transition: background-color var(--duration-fast) var(--ease-out);
@@ -354,7 +354,7 @@ onBeforeUnmount(() => {
   margin: 0 1px;
   padding: 3px 6px;
   border: 0;
-  /* Own events are tinted by their source calendar; invites override below. */
+  /* Source edges stay stable while invite responses change the fill. */
   border-left: 2px solid
     color-mix(in srgb, var(--chip-accent, var(--accent-primary)) 72%, var(--text-primary));
   border-radius: var(--radius-xs);
@@ -368,7 +368,7 @@ onBeforeUnmount(() => {
 }
 
 .week__event--overlapping {
-  box-shadow: -1px 1px 3px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--shadow-sm);
 }
 
 .week__event:hover {
@@ -384,6 +384,7 @@ onBeforeUnmount(() => {
 }
 
 .week__event-title {
+  min-width: 0;
   flex-shrink: 0;
   max-width: 100%;
   overflow: hidden;
@@ -392,7 +393,16 @@ onBeforeUnmount(() => {
   font-weight: var(--weight-semibold);
 }
 
+.week__event--compact .week__event-title {
+  flex: 1;
+}
+
+.week__event--compact .week__event-time {
+  flex-shrink: 0;
+}
+
 .week__event-time {
+  text-overflow: ellipsis;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -401,7 +411,6 @@ onBeforeUnmount(() => {
 }
 
 .week__event--accepted {
-  border-left-color: color-mix(in srgb, var(--accent-green) 72%, var(--text-primary));
   background: color-mix(in srgb, var(--accent-green) 20%, var(--bg-surface));
 }
 .week__event--accepted:hover {
@@ -409,7 +418,6 @@ onBeforeUnmount(() => {
 }
 
 .week__event--tentative {
-  border-left-color: color-mix(in srgb, var(--accent-amber) 72%, var(--text-primary));
   background: color-mix(in srgb, var(--accent-amber) 20%, var(--bg-surface));
 }
 .week__event--tentative:hover {
@@ -417,7 +425,6 @@ onBeforeUnmount(() => {
 }
 
 .week__event--needs-action {
-  border-left-color: color-mix(in srgb, var(--accent-purple) 72%, var(--text-primary));
   background: color-mix(in srgb, var(--accent-purple) 20%, var(--bg-surface));
 }
 .week__event--needs-action:hover {

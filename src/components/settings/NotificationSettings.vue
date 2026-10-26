@@ -204,12 +204,6 @@ async function save() {
 .settings-section { display:grid; gap:20px; }
 header h3 { margin:0; color:var(--text-primary); font-size:var(--font-size-2xl); letter-spacing:-.02em; }
 header p { margin:5px 0 0; color:var(--text-tertiary); font-size:var(--font-size-sm); }
-.setting-group { overflow:hidden; border-radius:var(--radius-md); background:var(--bg-raised); }
-.setting-row { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:15px 16px; color:inherit; }
-.setting-row + .setting-row { border-top:1px solid var(--border-color-muted); }
-.setting-info { min-width:0; display:grid; gap:3px; }
-.setting-info strong { color:var(--text-primary); font-size:var(--font-size-md); font-weight: var(--weight-medium); }
-.setting-info span { color:var(--text-tertiary); font-size:var(--font-size-xs); line-height:1.4; }
 select { max-width:230px; border:0; border-radius: var(--radius-sm); background:var(--bg-overlay); color:var(--text-primary); padding:8px 10px; font:inherit; font-size: var(--font-size-sm); }
 .number-control { display:flex; align-items:center; gap:6px; border-radius: var(--radius-sm); background:var(--bg-overlay); padding:3px 9px; }
 .number-control input { width:58px; border:0; background:transparent; color:var(--text-primary); font:inherit; text-align:right; }
@@ -229,3 +223,5 @@ select { max-width:230px; border:0; border-radius: var(--radius-sm); background:
   line-height: 1.5;
 }
 </style>
+
+<style scoped src="./settingsRows.css"></style>

@@ -188,7 +188,8 @@
       },
       "subject": {
         "replyFallback": "Reply",
-        "forwardFallback": "Forwarded message"
+        "forwardFallback": "Forwarded message",
+        "placeholder": "Add a subject"
       },
       "reply": {
         "intro": "On {date}, {sender} wrote:"
@@ -530,7 +531,8 @@
       },
       "subject": {
         "replyFallback": "Antwort",
-        "forwardFallback": "Weitergeleitete Nachricht"
+        "forwardFallback": "Weitergeleitete Nachricht",
+        "placeholder": "Betreff hinzufügen"
       },
       "reply": {
         "intro": "Am {date} schrieb {sender}:"

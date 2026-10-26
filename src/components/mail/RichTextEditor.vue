@@ -873,7 +873,7 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
   margin: 0.5em 0;
 }
 .content :deep(.ProseMirror p.is-editor-empty:first-child::before) {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   content: attr(data-placeholder);
   float: left;
   height: 0;
