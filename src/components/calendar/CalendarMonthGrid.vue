@@ -101,6 +101,8 @@ function createOn(day: Date, event: MouseEvent) {
 
 <style scoped>
 .month {
+  /* Cell padding plus the day number's own side padding. */
+  --month-inset: var(--space-2-5);
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -118,14 +120,16 @@ function createOn(day: Date, event: MouseEvent) {
   background: var(--bg-surface);
 }
 
+/* Weekday and day number share one axis: both end at the cell's right
+   edge, inset by --month-inset, the way Apple's month view reads. */
 .month__weekdays span {
-  padding: 6px 8px;
+  padding: 6px var(--month-inset);
   color: var(--text-tertiary);
   font-size: var(--font-size-2xs);
   font-weight: var(--weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  text-align: center;
+  text-align: right;
 }
 
 .month__grid {
@@ -167,12 +171,12 @@ function createOn(day: Date, event: MouseEvent) {
 }
 
 .month__daynum {
-  align-self: center;
+  align-self: flex-end;
   display: grid;
   place-items: center;
   min-width: 24px;
   height: 24px;
-  padding: 0 4px;
+  padding: 0 var(--space-1-5);
   border: 0;
   border-radius: var(--radius-full);
   background: transparent;

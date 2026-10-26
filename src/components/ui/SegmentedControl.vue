@@ -35,7 +35,10 @@ defineEmits<{
   gap: var(--space-2xs);
   padding: var(--space-2xs);
   border-radius: var(--radius-full);
-  background: var(--bg-raised);
+  /* A well below whatever it sits on: the settings card is --bg-raised
+     itself, so the track needs a recessed fill and a hairline to show. */
+  background: var(--bg-inset);
+  box-shadow: inset 0 0 0 1px var(--border-color-muted);
 }
 
 .segmented__option {
@@ -62,9 +65,11 @@ defineEmits<{
   cursor: not-allowed;
 }
 
+/* The chosen segment is a raised neutral sheet, like an active nav item —
+   the petrol fill stays for primary actions. */
 .segmented__option--active {
-  background: var(--accent-primary);
-  color: var(--text-on-accent);
+  background: var(--bg-overlay);
+  color: var(--text-primary);
   box-shadow: var(--shadow-sm);
 }
 </style>

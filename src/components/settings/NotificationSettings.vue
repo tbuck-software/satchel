@@ -202,7 +202,7 @@ async function save() {
 
 <style scoped>
 .settings-section { display:grid; gap:20px; }
-header h3 { margin:0; color:var(--text-primary); font-size:var(--font-size-2xl); letter-spacing:-.02em; }
+header h3 { margin:0; color:var(--text-primary); font-size:var(--font-size-2xl); font-weight:var(--weight-bold); letter-spacing:-.02em; }
 header p { margin:5px 0 0; color:var(--text-tertiary); font-size:var(--font-size-sm); }
 select { max-width:230px; border:0; border-radius: var(--radius-sm); background:var(--bg-overlay); color:var(--text-primary); padding:8px 10px; font:inherit; font-size: var(--font-size-sm); }
 .number-control { display:flex; align-items:center; gap:6px; border-radius: var(--radius-sm); background:var(--bg-overlay); padding:3px 9px; }

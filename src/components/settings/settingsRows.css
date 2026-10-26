@@ -9,11 +9,13 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--space-lg);
+  gap: var(--space-xl);
   padding: var(--space-3-5) var(--space-lg);
   color: inherit;
 }
 
+/* The control sits flush with the card's right edge. A fixed control column
+   lined the controls up with each other but left a dead gap after the copy. */
 .setting-row > :last-child {
   justify-self: end;
   max-width: 100%;
@@ -41,24 +43,4 @@
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
   line-height: 1.5;
-}
-
-@container (min-width: 650px) {
-  .setting-row {
-    grid-template-columns: minmax(0, 1fr) 240px;
-    gap: var(--space-xl);
-  }
-
-  .setting-row > :last-child {
-    justify-self: start;
-  }
-}
-
-/* Native WebKit selects also need the app theme for their painted control. */
-.setting-row select {
-  color-scheme: dark;
-}
-
-:global([data-theme='light']) .setting-row select {
-  color-scheme: light;
 }

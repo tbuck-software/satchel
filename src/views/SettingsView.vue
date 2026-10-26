@@ -339,11 +339,26 @@ onBeforeUnmount(() => unregisterFilter?.());
   white-space: nowrap;
 }
 
+/* A readable column, centred in the pane: about 700px of card at any window
+   width, so a row's copy and its control stay within one glance. */
 .settings-view__content {
   container-type: inline-size;
-  width: min(100%, 980px);
+  width: min(100%, 760px);
   margin-inline: auto;
   padding: var(--space-2xl) var(--space-2xl) calc(2 * var(--space-2xl));
+}
+
+/* Native WebKit selects and number spinners paint in the document's scheme,
+   not the app theme — a white menu in the dark theme otherwise. One rule for
+   every section instead of one per editor. */
+.settings-view__content :deep(select),
+.settings-view__content :deep(input) {
+  color-scheme: dark;
+}
+
+[data-theme='light'] .settings-view__content :deep(select),
+[data-theme='light'] .settings-view__content :deep(input) {
+  color-scheme: light;
 }
 
 .settings-view__content--wide {

@@ -30,7 +30,7 @@ function onClick(event: MouseEvent) {
 <template>
   <CardButton
     class="event-chip"
-    :class="[`event-chip--${item.status}`, { 'event-chip--all-day': item.allDay }]"
+    :class="`event-chip--${item.status}`"
     :style="item.color ? { '--chip-accent': item.color } : undefined"
     :title="item.title"
     @click.stop="onClick"
@@ -72,6 +72,8 @@ function onClick(event: MouseEvent) {
   font-variant-numeric: tabular-nums;
 }
 
+/* One line in every lane, all-day included: a wrapped chip makes its row
+   taller than its neighbours. The full title is in the tooltip. */
 .event-chip__title {
   flex: 1;
   min-width: 0;
@@ -79,14 +81,6 @@ function onClick(event: MouseEvent) {
   white-space: nowrap;
   text-overflow: ellipsis;
   font-weight: var(--weight-semibold);
-}
-
-.event-chip--all-day .event-chip__title {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  white-space: normal;
-  overflow-wrap: anywhere;
 }
 
 .event-chip--accepted {
