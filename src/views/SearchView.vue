@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
+import { highlightMatches, searchHighlightTerms } from '@/utils/highlight';
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import DrawerButton from '@/components/layout/DrawerButton.vue';
@@ -47,6 +49,17 @@ const { query, results, loading, showLoading, errorText, warnings, hasQuery, pen
     liveUpdates: true,
   });
 const { push: pushRecent } = useRecentSearches();
+
+const searchInput = ref<HTMLInputElement | null>(null);
+const tipsOpen = ref(false);
+const highlightTerms = computed(() => searchHighlightTerms(query.value));
+const highlightedResults = computed(() => results.value.map((result) => ({
+  ...result,
+  subjectSegments: highlightMatches(result.subject, highlightTerms.value),
+  snippetSegments: result.snippetSegments.some((segment) => segment.marked)
+    ? result.snippetSegments : highlightMatches(result.snippet, highlightTerms.value),
+})));
+watch(hasQuery, () => { tipsOpen.value = false; });
 
 const accountFilterEmail = computed(
   () => accounts.accounts.find((account) => account.id === accountFilterId.value)?.email ?? '',
@@ -167,6 +180,7 @@ function appendOperator(token: string) {
   query.value = query.value ? `${query.value.trimEnd()} ${token}` : token;
   // A chip is one deliberate edit, not typing to coalesce.
   flushUrlSync();
+  searchInput.value?.focus();
 }
 </script>
 
@@ -176,21 +190,42 @@ function appendOperator(token: string) {
     <section class="search-pane">
       <header class="search-header" :class="{ 'search-header--loading': showLoading }">
         <DrawerButton /><h2 class="search-title">{{ $t('search.title') }}</h2>
-        <input
-          v-model="query"
-          type="search"
-          class="search-input"
-          :placeholder="$t('search.placeholder')"
-          :aria-label="$t('search.queryLabel')"
-          @keydown.enter="flushUrlSync"
-        />
-        <div class="operator-hints">
+        <div class="search-entry">
+          <input
+            ref="searchInput"
+            v-model="query"
+            type="text"
+            role="searchbox"
+            inputmode="search"
+            autocomplete="off"
+            class="search-input"
+            :placeholder="t('search.placeholder')"
+            :aria-label="t('search.queryLabel')"
+            @keydown.enter="flushUrlSync"
+          />
+          <IconButton v-if="hasQuery" class="search-clear" :title="t('search.clear')" @click="query = ''; searchInput?.focus()">
+            <AppIcon><circle cx="8" cy="8" r="6" /><path d="m6 6 4 4m0-4-4 4" /></AppIcon>
+          </IconButton>
+        </div>
+        <AppButton
+          v-if="hasQuery"
+          variant="ghost"
+          size="sm"
+          class="search-tips"
+          :aria-expanded="tipsOpen"
+          aria-controls="search-operators"
+          @click="tipsOpen = !tipsOpen"
+        >
+          <template #icon><AppIcon><path :d="tipsOpen ? 'm4 10 4-4 4 4' : 'm4 6 4 4 4-4'" /></AppIcon></template>
+          {{ t('search.tips') }}
+        </AppButton>
+        <div v-if="!hasQuery || tipsOpen" id="search-operators" class="operator-hints" :aria-label="t('search.tips')">
           <AppButton
             v-for="token in operatorHints"
             :key="token"
             class="operator-chip"
             @click="appendOperator(token)"
-            variant="ghost"
+            variant="secondary"
             size="sm"
           >
             {{ token }}
@@ -235,7 +270,7 @@ function appendOperator(token: string) {
         <template v-else-if="results.length > 0">
           <p class="result-count" role="status">{{ $t(hasMore ? 'search.loadedHitCount' : 'search.hitCount', results.length) }}</p>
           <ul class="results" :aria-busy="loading">
-            <li v-for="result in results" :key="result.messageId">
+            <li v-for="result in highlightedResults" :key="result.messageId">
               <CardButton
                 class="result-row"
                 :class="{ 'result-row--active': result.threadId === selectedThreadId }"
@@ -248,7 +283,12 @@ function appendOperator(token: string) {
                     <span v-if="result.location" class="result-location">{{ result.location }}</span>
                     <TimeAgo :date="result.date" class="result-time" />
                   </span>
-                  <span class="result-subject">{{ result.subject }}</span>
+                  <span class="result-subject">
+                    <template v-for="(segment, index) in result.subjectSegments" :key="index">
+                      <mark v-if="segment.marked">{{ segment.text }}</mark>
+                      <template v-else>{{ segment.text }}</template>
+                    </template>
+                  </span>
                   <!-- snippet(-1) may echo the subject when the match sits there -->
                   <span v-if="result.snippet !== result.subject" class="result-snippet">
                     <template v-for="(segment, index) in result.snippetSegments" :key="index">
@@ -279,10 +319,10 @@ function appendOperator(token: string) {
           :description="$t('search.noResults.description')"
         >
           <template #icon>
-            <svg width="40" height="40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.55">
+            <AppIcon size="lg">
               <circle cx="7" cy="7" r="5" />
               <path d="M11 11L14 14" />
-            </svg>
+            </AppIcon>
           </template>
         </EmptyState>
         <EmptyState
@@ -291,10 +331,10 @@ function appendOperator(token: string) {
           :description="$t('search.intro.description')"
         >
           <template #icon>
-            <svg width="40" height="40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.55">
+            <AppIcon size="lg">
               <circle cx="7" cy="7" r="5" />
               <path d="M11 11L14 14" />
-            </svg>
+            </AppIcon>
           </template>
         </EmptyState>
 
@@ -328,8 +368,18 @@ function appendOperator(token: string) {
                       <strong>{{ entry.hit.from }}</strong>
                       <TimeAgo v-if="entry.hit.date" :date="entry.hit.date" class="result-time" />
                     </span>
-                    <span class="result-subject">{{ entry.hit.subject }}</span>
-                    <span v-if="entry.hit.snippet" class="result-snippet">{{ entry.hit.snippet }}</span>
+                    <span class="result-subject">
+                      <template v-for="(segment, index) in highlightMatches(entry.hit.subject, highlightTerms)" :key="index">
+                        <mark v-if="segment.marked">{{ segment.text }}</mark>
+                        <template v-else>{{ segment.text }}</template>
+                      </template>
+                    </span>
+                    <span v-if="entry.hit.snippet" class="result-snippet">
+                      <template v-for="(segment, index) in highlightMatches(entry.hit.snippet, highlightTerms)" :key="index">
+                        <mark v-if="segment.marked">{{ segment.text }}</mark>
+                        <template v-else>{{ segment.text }}</template>
+                      </template>
+                    </span>
                     <span class="result-server-note">
                       {{ fetchingHitId === entry.hit.remote_id
                         ? $t('search.server.fetching')
@@ -357,10 +407,10 @@ function appendOperator(token: string) {
           :description="$t('search.detail.description')"
         >
           <template #icon>
-            <svg width="40" height="40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.55">
+            <AppIcon size="lg">
               <circle cx="7" cy="7" r="5" />
               <path d="M11 11L14 14" />
-            </svg>
+            </AppIcon>
           </template>
         </EmptyState>
       </div>
@@ -380,8 +430,8 @@ function appendOperator(token: string) {
 .search-header {
   position: relative;
   display: grid;
-  gap: 8px;
-  padding: 14px 14px 10px;
+  gap: var(--space-sm);
+  padding: var(--space-3-5) var(--space-3-5) var(--space-2-5);
   border-bottom: 1px solid var(--border-color-muted);
 }
 
@@ -448,6 +498,21 @@ function appendOperator(token: string) {
   opacity: 1;
 }
 
+.search-entry {
+  position: relative;
+}
+
+.search-clear {
+  position: absolute;
+  inset-inline-end: var(--space-xs);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.search-tips {
+  justify-self: start;
+}
+
 .search-input {
   width: 100%;
   border: 1px solid var(--border-color);
@@ -456,7 +521,7 @@ function appendOperator(token: string) {
   color: var(--text-primary);
   font: inherit;
   font-size: var(--font-size-md);
-  padding: 9px 12px;
+  padding: var(--space-2-5) var(--space-2xl) var(--space-2-5) var(--space-md);
 }
 
 .search-input:focus {
@@ -466,7 +531,12 @@ function appendOperator(token: string) {
 .operator-hints {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: var(--space-1-5);
+}
+
+.operator-chip {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-medium);
 }
 
 .search-scroll {
@@ -655,11 +725,12 @@ function appendOperator(token: string) {
   white-space: nowrap;
 }
 
+.result-subject mark,
 .result-snippet mark {
-  background: color-mix(in srgb, var(--accent-amber) 30%, transparent);
+  background: var(--bg-active);
   color: var(--text-primary);
-  border-radius: 2px;
-  padding: 0 1px;
+  border-radius: var(--radius-xs);
+  font-weight: var(--weight-semibold);
 }
 
 .result-server-note {

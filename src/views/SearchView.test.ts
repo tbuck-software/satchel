@@ -268,10 +268,52 @@ describe('SearchView', () => {
     expect(harness.router.replace).not.toHaveBeenCalled();
   });
 
+  it('shows chips before a query, then collapses them behind an accessible disclosure', async () => {
+    const wrapper = mountView({ q: '' });
+    await nextTick();
+    expect(wrapper.findAll('.operator-chip')).toHaveLength(9);
+    await wrapper.get('.search-input').setValue('plan');
+    expect(wrapper.findAll('.operator-chip')).toHaveLength(0);
+    expect(wrapper.get('.search-tips').attributes('aria-expanded')).toBe('false');
+    await wrapper.get('.search-tips').trigger('click');
+    expect(wrapper.findAll('.operator-chip')).toHaveLength(9);
+    expect(wrapper.get('.search-tips').attributes('aria-expanded')).toBe('true');
+    wrapper.unmount();
+  });
+
+  it('highlights query terms in subjects and snippets without interpreting mail as HTML', async () => {
+    const wrapper = mountView({ q: 'plan' });
+    await nextTick();
+    harness.searchState!.results.value = [{
+      ...result('message-1', 'thread-1'),
+      subject: '<img src=x onerror=alert(1)> PLAN',
+      snippet: 'A plan & <script> for today',
+      snippetSegments: [{ text: 'A plan & <script> for today', marked: false }],
+    }];
+    await nextTick();
+    expect(wrapper.get('.result-subject mark').text()).toBe('PLAN');
+    expect(wrapper.get('.result-snippet mark').text()).toBe('plan');
+    expect(wrapper.get('.result-subject').text()).toContain('<img src=x');
+    expect(wrapper.find('.result-subject img').exists()).toBe(false);
+    expect(wrapper.find('.result-snippet script').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('clears the query with the named clear control and restores the operator chips', async () => {
+    const wrapper = mountView({ q: 'plan' });
+    await nextTick();
+    await wrapper.get('.search-clear').trigger('click');
+    expect(harness.searchState!.query.value).toBe('');
+    expect(wrapper.find('.search-clear').exists()).toBe(false);
+    expect(wrapper.findAll('.operator-chip')).toHaveLength(9);
+    wrapper.unmount();
+  });
+
   it('appends an operator chip to the current query', async () => {
     const wrapper = mountView({ q: 'from:alice@example.com' });
     await nextTick();
 
+    await wrapper.get('.search-tips').trigger('click');
     const chip = wrapper.findAll('.operator-chip')
       .find((button) => button.text() === 'has:attachment');
     expect(chip).toBeDefined();

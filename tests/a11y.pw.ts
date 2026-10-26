@@ -1,5 +1,25 @@
 import { expect, test, type Page } from './mock-contract.fixture';
 
+test('keeps contact actions in the mobile pane and saves a new contact', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/contacts');
+  const add = page.getByRole('button', { name: 'Add contact', exact: true });
+  await expect(add).toBeVisible();
+  for (const control of [add, page.getByRole('button', { name: 'Address book settings', exact: true })]) {
+    const box = await control.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+  }
+  await add.click();
+  const dialog = page.getByRole('dialog', { name: 'Add contact', exact: true });
+  await dialog.getByLabel('Email address').fill('mobile-contact@example.com');
+  await dialog.getByLabel('Name (optional)', { exact: true }).fill('Mobile Contact');
+  await dialog.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator('.contact-list button').filter({ hasText: 'mobile-contact@example.com' })).toContainText('Mobile Contact');
+});
+
 async function openInbox(page: Page) {
   await page.goto('/');
   await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();

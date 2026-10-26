@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitHighlight, stripHighlight } from './highlight';
+import { highlightMatches, searchHighlightTerms, splitHighlight, stripHighlight } from './highlight';
 
 describe('splitHighlight', () => {
   it('splits marked ranges into segments', () => {
@@ -36,5 +36,21 @@ describe('splitHighlight', () => {
 describe('stripHighlight', () => {
   it('removes the markers and keeps the text', () => {
     expect(stripHighlight('Anbei die \u0001Rechnung\u0002')).toBe('Anbei die Rechnung');
+  });
+});
+
+describe('search term highlighting', () => {
+  it('uses positive text and subject terms, ignoring filter values and exclusions', () => {
+    expect(searchHighlightTerms('from:alice@example.com subject:"Project plan" invoice* -newsletter has:attachment'))
+      .toEqual(['Project plan', 'invoice']);
+  });
+
+  it('matches literal metacharacters, case and overlapping terms without losing text', () => {
+    const text = 'Plan C++ [budget] & planning';
+    const segments = highlightMatches(text, ['plan', 'planning', 'C++', '[budget]']);
+    expect(segments.filter((part) => part.marked).map((part) => part.text))
+      .toEqual(['Plan', 'C++', '[budget]', 'planning']);
+    expect(segments.map((part) => part.text).join('')).toBe(text);
+    expect(highlightMatches(text, [])).toEqual([{ text, marked: false }]);
   });
 });

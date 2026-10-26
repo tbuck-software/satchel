@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
+import EmptyState from '@/components/ui/EmptyState.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import MenuItem from '@/components/ui/MenuItem.vue';
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -354,6 +356,16 @@ const listTitle = computed(() => {
   if (filter === 'all') return t('folders.allMail');
   const key = workflowLabelKeys[filter];
   return key ? t(key) : filter;
+});
+
+const workflowEmpty = computed(() => {
+  if (activeBundle.value || threads.activeContact || threads.mailboxFilter.kind !== 'all') return null;
+  switch (threads.workflowFilter) {
+    case 'waiting': return { title: t('inbox.empty.waiting.title'), description: t('inbox.empty.waiting.description'), icon: 'waiting' };
+    case 'snoozed': return { title: t('inbox.empty.snoozed.title'), description: t('inbox.empty.snoozed.description'), icon: 'clock' };
+    case 'aside': return { title: t('inbox.empty.aside.title'), description: t('inbox.empty.aside.description'), icon: 'aside' };
+    default: return null;
+  }
 });
 
 const listScope = computed(() => {
@@ -1020,7 +1032,7 @@ function acceptExistingSenders() {
       <div class="min-h-0 min-w-0 overflow-hidden flex flex-col">
       <!-- Topics folder: cross-source collections, opened in the detail pane.
            Only rendered here when the list has no smart folder section to join. -->
-      <div v-if="!activeBundle && !smartFolderRowVisible" class="topics-folder no-drag shrink-0">
+      <div v-if="!activeBundle && !smartFolderRowVisible && !(workflowEmpty && listItems.length === 0)" class="topics-folder no-drag shrink-0">
         <TopicsFolderCard
           :topics="topicsStore.activeTopics"
           target-key="topics"
@@ -1069,7 +1081,17 @@ function acceptExistingSenders() {
           @date-group-done="onDateGroupDone"
           @new-sender-action="onNewSenderAction"
           @accept-domain="onAcceptDomain"
-        />
+        >
+          <template v-if="workflowEmpty" #empty>
+            <EmptyState :title="workflowEmpty.title" :description="workflowEmpty.description">
+              <template #icon>
+                <AppIcon v-if="workflowEmpty.icon === 'clock'" size="lg"><circle cx="8" cy="8" r="6" /><path d="M8 4v4l3 2" /></AppIcon>
+                <AppIcon v-else-if="workflowEmpty.icon === 'waiting'" size="lg"><path d="M2 3h12v8H8l-4 3v-3H2zM5 6h6M5 8h3" /></AppIcon>
+                <AppIcon v-else size="lg"><rect x="2" y="4" width="12" height="9" rx="1" /><path d="M6 4V2h4v2M2 7h12M6 9h4" /></AppIcon>
+              </template>
+            </EmptyState>
+          </template>
+        </ThreadGroupList>
       </div>
       </div>
       </template>

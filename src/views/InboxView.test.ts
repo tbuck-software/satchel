@@ -15,6 +15,7 @@ type ThreadSummary = {
 
 const harness = vi.hoisted(() => ({
   push: vi.fn(),
+  route: { name: 'inbox' },
   blockSender: vi.fn(),
   toastError: vi.fn(),
   selectFromInteraction: vi.fn(),
@@ -35,6 +36,7 @@ const harness = vi.hoisted(() => ({
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: harness.push }),
+  useRoute: () => harness.route,
 }));
 
 vi.mock('vue-i18n', () => ({
@@ -110,6 +112,7 @@ const ThreadGroupListStub = defineComponent({
       :data-active-thread-id="activeThreadId"
       :data-item-count="String(items.length)"
     >
+      <slot v-if="!items.length" name="empty" />
       <button data-test="retry" @click="$emit('retry')" />
       <button
         data-test="activate-pointer"
@@ -327,6 +330,20 @@ describe('InboxView', () => {
     expect(harness.threads!.load).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['waiting', 'snoozed', 'aside'])('uses one contextual empty state for %s without the topics card', (workflow) => {
+    setup();
+    harness.threads!.workflowFilter = workflow;
+    harness.threads!.mailboxFilter = { kind: 'all', value: null };
+    harness.threads!.listEntries = [];
+    harness.threads!.smartListEntries = [];
+    harness.topics!.activeTopics = [{ id: 'topic-1', title: 'An unrelated topic' }];
+    const wrapper = render();
+    expect(wrapper.find('.topics-folder').exists()).toBe(false);
+    expect(wrapper.get('.empty h3').text()).toBe(`inbox.empty.${workflow}.title`);
+    expect(wrapper.get('.empty p').text()).toBe(`inbox.empty.${workflow}.description`);
+    expect(wrapper.findAll('.empty button')).toHaveLength(0);
+  });
+
   it('selects pointer-activated mail in place on desktop', async () => {
     setup();
     const wrapper = render();
@@ -490,6 +507,7 @@ describe('InboxView', () => {
   });
 
   it('offers desktop account filtering in the sidebar popover', async () => {
+    harness.route.name = 'search';
     setup({
       accounts: [
         { id: 'account-1', displayName: 'Work' },
@@ -504,6 +522,8 @@ describe('InboxView', () => {
         stubs: { teleport: true },
       },
     });
+    expect(wrapper.get('.search-field').attributes('aria-current')).toBe('page');
+
     await wrapper.get('[aria-haspopup="menu"]').trigger('click');
     expect(harness.ui!.closeMobileSidebar).not.toHaveBeenCalled();
     const items = wrapper.findAll('[role="menuitemcheckbox"]');

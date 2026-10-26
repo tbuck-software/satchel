@@ -1,10 +1,15 @@
 <script setup lang="ts">
+import AddContactDialog from '@/components/contacts/AddContactDialog.vue';
 import CardButton from '@/components/ui/CardButton.vue';
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Avatar from '@/components/common/Avatar.vue';
 import ErrorState from '@/components/ui/ErrorState.vue';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
+import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
+import EmptyState from '@/components/ui/EmptyState.vue';
+import { useUiStore } from '@/stores/ui';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import {
   resolveContactsSection,
@@ -29,6 +34,8 @@ const { locale, t } = useI18n();
 const threads = useThreadsStore();
 const addressBook = useContactsStore();
 const settings = useSettingsStore();
+const ui = useUiStore();
+const addingContact = ref(false);
 
 onMounted(() => {
   if (!addressBook.loaded) void addressBook.load();
@@ -142,7 +149,18 @@ function openContact(email: string) {
       :title="currentCopy.title"
       :subtitle="currentCopy.subtitle"
       :count="visibleContacts.length"
-    />
+    >
+      <template #actions>
+        <AppButton variant="secondary" size="sm" :aria-label="t('contacts.addressBookSettings')" @click="ui.openSettings('contacts')">
+          <template #icon><AppIcon><path d="M3 2.5h10v11H3zM5.5 5h5M5.5 8h5" /></AppIcon></template>
+          <span class="contact-settings-label">{{ t('contacts.addressBookSettings') }}</span>
+        </AppButton>
+        <AppButton variant="primary" size="sm" @click="addingContact = true">
+          <template #icon><AppIcon><path d="M8 2v12M2 8h12" /></AppIcon></template>
+          {{ t('contacts.add.title') }}
+        </AppButton>
+      </template>
+    </PaneHeader>
 
     <div class="contacts-view__scroll">
       <div v-if="visibleContacts.length" class="contact-list">
@@ -177,8 +195,19 @@ function openContact(email: string) {
         :busy="addressBook.loading"
         @retry="addressBook.load()"
       />
-      <p v-else class="empty">{{ currentCopy.empty }}</p>
+      <EmptyState
+        v-else-if="!addressBook.loading"
+        :title="currentCopy.empty"
+        :description="activeSection === 'pinned' ? t('contacts.emptyPinnedDescription') : t('contacts.emptyDescription')"
+        :action-label="['pinned', 'frequent'].includes(activeSection) ? undefined : t('contacts.connectAddressBook')"
+        @action="ui.openSettings('contacts')"
+      >
+        <template #icon>
+          <AppIcon size="lg"><circle cx="6" cy="5" r="2.5" /><path d="M1.5 13v-1a4.5 4.5 0 0 1 9 0v1M11 3a2.5 2.5 0 0 1 0 5M12 10a3 3 0 0 1 2.5 3" /></AppIcon>
+        </template>
+      </EmptyState>
     </div>
+    <AddContactDialog v-if="addingContact" @dismiss="addingContact = false" />
   </section>
 </template>
 
@@ -186,6 +215,7 @@ function openContact(email: string) {
 .contacts-view {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   height: 100%;
   min-width: 0;
   min-height: 0;
@@ -271,14 +301,11 @@ function openContact(email: string) {
   color: var(--accent-amber);
 }
 
-.empty {
-  max-width: 680px;
-  margin: 60px auto;
-  color: var(--text-tertiary);
-  text-align: center;
-}
-
 @media (max-width: 700px) {
+  .contact-settings-label {
+    display: none;
+  }
+
   .contacts-view__scroll {
     padding: 16px 12px 36px;
   }

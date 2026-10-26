@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { useAccountsStore } from '@/stores/accounts';
 import { useUiStore } from '@/stores/ui';
 import ContextMenu from '@/components/ui/ContextMenu.vue';
@@ -12,6 +13,7 @@ import type { AnchorBox } from '@/utils/popoverPlacement';
 defineEmits<{ compose: [event: MouseEvent] }>();
 
 const accounts = useAccountsStore();
+const route = useRoute();
 const ui = useUiStore();
 const filterAnchor = ref<AnchorBox | null>(null);
 let filterTrigger: HTMLElement | null = null;
@@ -37,7 +39,7 @@ function selectAccount(id: string) {
 
 <template>
   <div class="sidebar-mail-tools">
-    <SearchField :label="$t('inbox.searchPlaceholder')" :title="$t('inbox.searchTitle')" @click="ui.openOmni()" />
+    <SearchField :active="route.name === 'search'" :label="$t('inbox.searchPlaceholder')" :title="$t('inbox.searchTitle')" @click="ui.openOmni()" />
     <IconButton
       size="lg"
       class="sidebar-mail-tools__filter"

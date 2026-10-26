@@ -10,6 +10,7 @@
 defineProps<{
   label: string;
   title?: string;
+  active?: boolean;
 }>();
 
 defineEmits<{
@@ -18,7 +19,7 @@ defineEmits<{
 </script>
 
 <template>
-  <button type="button" class="search-field" :title="title" @click="$emit('click', $event)">
+  <button type="button" class="search-field" :class="{ 'search-field--active': active }" :aria-current="active ? 'page' : undefined" :title="title" @click="$emit('click', $event)">
     <svg
       class="search-field__icon"
       width="16"
@@ -58,6 +59,12 @@ defineEmits<{
 
 .search-field:hover {
   background: var(--bg-hover);
+}
+
+.search-field--active {
+  background: var(--bg-surface);
+  color: var(--text-accent);
+  box-shadow: var(--selection-edge), var(--shadow-sm);
 }
 
 .search-field__icon {

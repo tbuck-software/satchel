@@ -246,7 +246,7 @@
       },
       "empty": {
         "title": "No drafts",
-        "description": "Write a new email — it is saved automatically every 10 seconds.",
+        "description": "Your unfinished emails are saved here automatically.",
         "action": "Write a new email"
       },
       "groups": {
@@ -588,7 +588,7 @@
       },
       "empty": {
         "title": "Keine Entwürfe",
-        "description": "Schreib eine neue Mail — sie wird alle 10 Sekunden automatisch gesichert.",
+        "description": "Deine angefangenen E-Mails werden hier automatisch gespeichert.",
         "action": "Neue Mail schreiben"
       },
       "groups": {

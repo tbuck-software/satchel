@@ -799,6 +799,17 @@
     }
   },
   "contacts": {
+    "add": {
+      "email": "Email address",
+      "failed": "The contact could not be saved.",
+      "name": "Name (optional)",
+      "saved": "Contact saved.",
+      "title": "Add contact"
+    },
+    "addressBookSettings": "Address book settings",
+    "connectAddressBook": "Connect an address book",
+    "emptyDescription": "Contacts appear from mail correspondents and address-book sync.",
+    "emptyPinnedDescription": "Pin a person from their contact details for quick access here.",
     "loadFailed": "The address book could not be loaded.",
     "meta": {
       "addressBook": "Address book",
@@ -861,7 +872,7 @@
     "editDraft": "Edit draft",
     "empty": {
       "action": "Write a new email",
-      "description": "Write a new email — it is saved automatically every 10 seconds.",
+      "description": "Your unfinished emails are saved here automatically.",
       "title": "No drafts"
     },
     "goesOut": "Goes out: {time}",
@@ -967,6 +978,20 @@
     "classify": "File",
     "classifyAs": "File as",
     "conversationCount": "{count} conversation | {count} conversations",
+    "empty": {
+      "aside": {
+        "description": "Conversations you set aside stay here until you need them.",
+        "title": "Nothing set aside"
+      },
+      "snoozed": {
+        "description": "Snoozed conversations wait here until their return time.",
+        "title": "Nothing snoozed"
+      },
+      "waiting": {
+        "description": "Conversations marked as waiting for a reply appear here.",
+        "title": "No replies pending"
+      }
+    },
     "filterStrip": "Filter the list",
     "mailCount": "{count} message | {count} messages",
     "markedReadToast": "{count} message marked as read | {count} messages marked as read",
@@ -1671,6 +1696,7 @@
   },
   "search": {
     "accountScope": "Account: {account}",
+    "clear": "Clear search",
     "detail": {
       "description": "Pick a result on the left to read the conversation here.",
       "title": "No result selected"
@@ -1682,14 +1708,14 @@
     },
     "hitCount": "{count} result | {count} results",
     "intro": {
-      "description": "Searches subject, sender and the full message text. Operators such as from: or has:attachment can be combined.",
+      "description": "Search subjects, senders and message text across your mail.",
       "title": "Search all messages"
     },
     "loadMore": "Load more results",
     "loadedHitCount": "{count} result loaded | {count} results loaded",
     "loadingMore": "Loading results…",
     "noResults": {
-      "description": "No subject, sender or message text matches this search.",
+      "description": "Try fewer words or remove a filter.",
       "title": "No results"
     },
     "noSubject": "(no subject)",
@@ -1713,6 +1739,7 @@
       "results": "Server results",
       "running": "Searching the server …"
     },
+    "tips": "Search tips",
     "title": "Search",
     "warning": {
       "date": "“{operator}:{value}” is ignored – give the date as YYYY-MM-DD or relative (7d, 2w, yesterday).",

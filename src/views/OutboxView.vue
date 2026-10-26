@@ -23,6 +23,7 @@ import {
 } from '@/utils/outboxLabels';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import ErrorState from '@/components/ui/ErrorState.vue';
 import IconButton from '@/components/ui/IconButton.vue';
@@ -250,7 +251,9 @@ async function cancel(item: BackendOutboxItem) {
         v-else-if="outbox.items.length === 0"
         :title="$t('outbox.empty.title')"
         :description="$t('outbox.empty.description')"
-      />
+      >
+        <template #icon><AppIcon size="lg"><path d="M8 10V2m-3 3 3-3 3 3M3 9v4h10V9" /></AppIcon></template>
+      </EmptyState>
 
       <div v-else class="groups">
         <section v-for="group in groups" :key="group.status" class="group">

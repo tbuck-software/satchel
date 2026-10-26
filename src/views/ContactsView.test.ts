@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const harness = vi.hoisted(() => ({
   route: { query: {} as Record<string, unknown> },
   push: vi.fn(),
+  openSettings: vi.fn(),
   addressBook: {
     contacts: [] as Array<{
       email: string;
@@ -31,6 +32,8 @@ const harness = vi.hoisted(() => ({
     pinnedContacts: [] as string[],
   },
 }));
+
+vi.mock('@/stores/ui', () => ({ useUiStore: () => ({ openSettings: harness.openSettings }) }));
 
 vi.mock('vue-router', () => ({
   useRoute: () => harness.route,
@@ -58,7 +61,7 @@ const PaneHeaderStub = defineComponent({
     subtitle: { type: String, required: true },
     count: { type: Number, required: true },
   },
-  template: '<header data-test="pane-header" :data-title="title" :data-subtitle="subtitle" :data-count="count" />',
+  template: '<header data-test="pane-header" :data-title="title" :data-subtitle="subtitle" :data-count="count"><slot name="actions" /></header>',
 });
 
 const AvatarStub = defineComponent({
@@ -75,6 +78,7 @@ function render() {
     global: {
       stubs: {
         PaneHeader: PaneHeaderStub,
+        AddContactDialog: true,
         Avatar: AvatarStub,
       },
     },
@@ -83,6 +87,7 @@ function render() {
 
 describe('ContactsView', () => {
   beforeEach(() => {
+    harness.openSettings.mockReset();
     harness.route.query = {};
     harness.push.mockReset().mockResolvedValue(undefined);
     harness.addressBook.contacts = [];
@@ -93,6 +98,19 @@ describe('ContactsView', () => {
     harness.threads.allContactSummaries = [];
     harness.threads.openContact.mockReset();
     harness.settings.pinnedContacts = [];
+  });
+
+  it('offers address-book setup from the header and empty state, and opens contact creation', async () => {
+    const wrapper = render();
+    expect(wrapper.get('.empty h3').text()).toBe('No contacts found yet.');
+    expect(wrapper.get('.empty p').text()).toContain('mail correspondents and address-book sync');
+    await wrapper.get('.empty button').trigger('click');
+    expect(harness.openSettings).toHaveBeenLastCalledWith('contacts');
+    const actions = wrapper.findAll('header button');
+    await actions[0]!.trigger('click');
+    expect(harness.openSettings).toHaveBeenCalledTimes(2);
+    await actions[1]!.trigger('click');
+    expect(wrapper.findComponent({ name: 'AddContactDialog' }).exists()).toBe(true);
   });
 
   it('normalizes and deduplicates email keys while preserving address-book names and notes', () => {

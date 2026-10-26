@@ -167,6 +167,17 @@
         "deleteConfirm": "Delete the stored contact for {email}? Notes and the pinned avatar go with it. The mail stays.",
         "deleteTitle": "Delete this contact?",
         "deleteFailed": "The contact could not be deleted: {error}"
+      },
+      "addressBookSettings": "Address book settings",
+      "connectAddressBook": "Connect an address book",
+      "emptyDescription": "Contacts appear from mail correspondents and address-book sync.",
+      "emptyPinnedDescription": "Pin a person from their contact details for quick access here.",
+      "add": {
+        "title": "Add contact",
+        "email": "Email address",
+        "name": "Name (optional)",
+        "saved": "Contact saved.",
+        "failed": "The contact could not be saved."
       }
     },
     "topics": {
@@ -554,6 +565,17 @@
         "deleteConfirm": "Gespeicherten Kontakt für {email} löschen? Notizen und das festgelegte Bild verschwinden mit. Die Mail bleibt.",
         "deleteTitle": "Diesen Kontakt löschen?",
         "deleteFailed": "Der Kontakt konnte nicht gelöscht werden: {error}"
+      },
+      "addressBookSettings": "Adressbuch-Einstellungen",
+      "connectAddressBook": "Adressbuch verbinden",
+      "emptyDescription": "Kontakte entstehen aus E-Mail-Korrespondenz und Adressbuch-Synchronisierung.",
+      "emptyPinnedDescription": "Pinne eine Person in ihren Kontaktdetails für den schnellen Zugriff hier.",
+      "add": {
+        "title": "Kontakt hinzufügen",
+        "email": "E-Mail-Adresse",
+        "name": "Name (optional)",
+        "saved": "Kontakt gespeichert.",
+        "failed": "Der Kontakt konnte nicht gespeichert werden."
       }
     },
     "topics": {

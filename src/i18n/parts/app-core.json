@@ -103,7 +103,21 @@
       },
       "view": "View",
       "viewGrouped": "Grouped",
-      "viewList": "List"
+      "viewList": "List",
+      "empty": {
+        "waiting": {
+          "title": "No replies pending",
+          "description": "Conversations marked as waiting for a reply appear here."
+        },
+        "snoozed": {
+          "title": "Nothing snoozed",
+          "description": "Snoozed conversations wait here until their return time."
+        },
+        "aside": {
+          "title": "Nothing set aside",
+          "description": "Conversations you set aside stay here until you need them."
+        }
+      }
     },
     "newSenders": {
       "allow": "Allow sender",
@@ -206,11 +220,11 @@
       },
       "hitCount": "{count} result | {count} results",
       "intro": {
-        "description": "Searches subject, sender and the full message text. Operators such as from: or has:attachment can be combined.",
+        "description": "Search subjects, senders and message text across your mail.",
         "title": "Search all messages"
       },
       "noResults": {
-        "description": "No subject, sender or message text matches this search.",
+        "description": "Try fewer words or remove a filter.",
         "title": "No results"
       },
       "noSubject": "(no subject)",
@@ -241,7 +255,9 @@
       },
       "loadedHitCount": "{count} result loaded | {count} results loaded",
       "loadMore": "Load more results",
-      "loadingMore": "Loading results…"
+      "loadingMore": "Loading results…",
+      "tips": "Search tips",
+      "clear": "Clear search"
     },
     "tray": {
       "actionFailed": "Action failed: {detail}",
@@ -392,7 +408,21 @@
       },
       "view": "Ansicht",
       "viewGrouped": "Gruppiert",
-      "viewList": "Liste"
+      "viewList": "Liste",
+      "empty": {
+        "waiting": {
+          "title": "Keine Antworten offen",
+          "description": "Hier erscheinen Unterhaltungen, die auf eine Antwort warten."
+        },
+        "snoozed": {
+          "title": "Nichts zurückgestellt",
+          "description": "Zurückgestellte Unterhaltungen warten hier bis zu ihrer Rückkehr."
+        },
+        "aside": {
+          "title": "Nichts beiseitegelegt",
+          "description": "Beiseitegelegte Unterhaltungen bleiben hier, bis du sie brauchst."
+        }
+      }
     },
     "newSenders": {
       "allow": "Absender zulassen",
@@ -495,11 +525,11 @@
       },
       "hitCount": "{count} Treffer | {count} Treffer",
       "intro": {
-        "description": "Durchsucht Betreff, Absender und den vollständigen Nachrichtentext. Operatoren wie from: oder has:attachment lassen sich kombinieren.",
+        "description": "Durchsuche Betreff, Absender und Nachrichtentext in deinen E-Mails.",
         "title": "Alle Nachrichten durchsuchen"
       },
       "noResults": {
-        "description": "Kein Betreff, Absender oder Nachrichtentext passt zu dieser Suche.",
+        "description": "Versuche weniger Wörter oder entferne einen Filter.",
         "title": "Keine Treffer"
       },
       "noSubject": "(kein Betreff)",
@@ -530,7 +560,9 @@
       },
       "loadedHitCount": "{count} Treffer geladen | {count} Treffer geladen",
       "loadMore": "Weitere Treffer laden",
-      "loadingMore": "Treffer werden geladen…"
+      "loadingMore": "Treffer werden geladen…",
+      "tips": "Suchtipps",
+      "clear": "Suche leeren"
     },
     "tray": {
       "actionFailed": "Aktion fehlgeschlagen: {detail}",

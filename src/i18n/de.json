@@ -799,6 +799,17 @@
     }
   },
   "contacts": {
+    "add": {
+      "email": "E-Mail-Adresse",
+      "failed": "Der Kontakt konnte nicht gespeichert werden.",
+      "name": "Name (optional)",
+      "saved": "Kontakt gespeichert.",
+      "title": "Kontakt hinzufügen"
+    },
+    "addressBookSettings": "Adressbuch-Einstellungen",
+    "connectAddressBook": "Adressbuch verbinden",
+    "emptyDescription": "Kontakte entstehen aus E-Mail-Korrespondenz und Adressbuch-Synchronisierung.",
+    "emptyPinnedDescription": "Pinne eine Person in ihren Kontaktdetails für den schnellen Zugriff hier.",
     "loadFailed": "Das Adressbuch konnte nicht geladen werden.",
     "meta": {
       "addressBook": "Adressbuch",
@@ -861,7 +872,7 @@
     "editDraft": "Entwurf bearbeiten",
     "empty": {
       "action": "Neue Mail schreiben",
-      "description": "Schreib eine neue Mail — sie wird alle 10 Sekunden automatisch gesichert.",
+      "description": "Deine angefangenen E-Mails werden hier automatisch gespeichert.",
       "title": "Keine Entwürfe"
     },
     "goesOut": "Geht raus: {time}",
@@ -967,6 +978,20 @@
     "classify": "Einordnen",
     "classifyAs": "Einordnen als",
     "conversationCount": "{count} Konversation | {count} Konversationen",
+    "empty": {
+      "aside": {
+        "description": "Beiseitegelegte Unterhaltungen bleiben hier, bis du sie brauchst.",
+        "title": "Nichts beiseitegelegt"
+      },
+      "snoozed": {
+        "description": "Zurückgestellte Unterhaltungen warten hier bis zu ihrer Rückkehr.",
+        "title": "Nichts zurückgestellt"
+      },
+      "waiting": {
+        "description": "Hier erscheinen Unterhaltungen, die auf eine Antwort warten.",
+        "title": "Keine Antworten offen"
+      }
+    },
     "filterStrip": "Liste filtern",
     "mailCount": "{count} Mail | {count} Mails",
     "markedReadToast": "{count} Mail gelesen | {count} Mails gelesen",
@@ -1671,6 +1696,7 @@
   },
   "search": {
     "accountScope": "Konto: {account}",
+    "clear": "Suche leeren",
     "detail": {
       "description": "Wähle links ein Suchergebnis, um die Konversation hier zu lesen.",
       "title": "Kein Treffer ausgewählt"
@@ -1682,14 +1708,14 @@
     },
     "hitCount": "{count} Treffer | {count} Treffer",
     "intro": {
-      "description": "Durchsucht Betreff, Absender und den vollständigen Nachrichtentext. Operatoren wie from: oder has:attachment lassen sich kombinieren.",
+      "description": "Durchsuche Betreff, Absender und Nachrichtentext in deinen E-Mails.",
       "title": "Alle Nachrichten durchsuchen"
     },
     "loadMore": "Weitere Treffer laden",
     "loadedHitCount": "{count} Treffer geladen | {count} Treffer geladen",
     "loadingMore": "Treffer werden geladen…",
     "noResults": {
-      "description": "Kein Betreff, Absender oder Nachrichtentext passt zu dieser Suche.",
+      "description": "Versuche weniger Wörter oder entferne einen Filter.",
       "title": "Keine Treffer"
     },
     "noSubject": "(kein Betreff)",
@@ -1713,6 +1739,7 @@
       "results": "Server-Treffer",
       "running": "Server-Suche läuft …"
     },
+    "tips": "Suchtipps",
     "title": "Suche",
     "warning": {
       "date": "„{operator}:{value}\" wird ignoriert – Datum bitte als JJJJ-MM-TT oder relativ (7d, 2w, gestern).",

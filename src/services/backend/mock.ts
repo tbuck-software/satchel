@@ -23,6 +23,7 @@ import {
   mockTopicTimeline,
 } from '@/data/mock';
 import type { Account, Message, Thread } from '@/types/mail';
+import type { BackendContact } from '@/types/contacts';
 import type { BackendDraft } from '@/types/composer';
 import type { BackendMessage, BackendMessageBody } from '@/types/messages';
 import type { BackendCalendarEvent, BackendCalendarSource } from '@/types/calendar';
@@ -146,6 +147,35 @@ function seedMeasurementThreads() {
   }
 }
 seedMeasurementThreads();
+
+// Ingest touches senders and To/Cc recipients in the same contact table.
+const contacts: BackendContact[] = [];
+for (const message of Object.values(messages).flat().filter((message) => !message.isDraft)) {
+  const account = accounts.find((item) => item.email.trim().toLowerCase() === message.from.email.trim().toLowerCase());
+  const sender = { ...message.from, name: account?.displayName || message.from.name };
+  for (const person of [sender, ...[...message.to, ...(message.cc ?? [])].map((recipient) => ({ ...recipient, name: '' }))]) {
+    const email = person.email.trim().toLowerCase();
+    if (!email.includes('@')) continue;
+    const existing = contacts.find((contact) => contact.email === email);
+    if (existing) {
+      existing.frequency += 1;
+      if (person.name) existing.display_name = person.name;
+      if (!existing.last_contacted || message.timestamp > existing.last_contacted) existing.last_contacted = message.timestamp;
+    } else {
+      contacts.push({
+        id: `contact-${email}`, email, display_name: person.name || null,
+        avatar_url: null, avatar_source: null, avatar_locked: 0, avatar_updated_at: null,
+        frequency: 1, last_contacted: message.timestamp, notes: null,
+        created_at: message.timestamp, updated_at: message.timestamp,
+      });
+    }
+  }
+}
+function sortedContacts() {
+  return [...contacts].sort((left, right) => right.frequency - left.frequency
+    || (right.last_contacted ?? right.created_at).localeCompare(left.last_contacted ?? left.created_at)
+    || left.email.localeCompare(right.email));
+}
 
 /** Commands answered so far, by name. Read by the reader's measurement script. */
 const commandCounts: Record<string, number> = {};
@@ -1060,8 +1090,40 @@ const handlers: Record<string, Handler> = {
   list_invites: () => [],
   list_calendar_events: () => calendarEvents,
   list_calendar_sources: () => calendarSources,
-  list_contacts: () => [],
-  search_contacts: () => [],
+  list_contacts: () => sortedContacts().slice(0, 500),
+  search_contacts: ({ query, limit }) => {
+    const term = String(query ?? '').trim().toLowerCase();
+    if (!term) return [];
+    return sortedContacts().filter((contact) => `${contact.email} ${contact.display_name ?? ''}`.toLowerCase().includes(term))
+      .slice(0, Math.min(50, Math.max(1, Number(limit ?? 12))));
+  },
+  upsert_contact: ({ input: raw }) => {
+    const input = raw as { id: string | null; email: string; display_name: string | null; notes: string | null; avatar_url: string | null };
+    const email = input.email.trim().toLowerCase();
+    if (!email.includes('@')) throw new Error('contact email is invalid');
+    const previous = contacts.find((contact) => contact.email === email);
+    const now = new Date().toISOString();
+    if (previous) {
+      previous.display_name = input.display_name?.trim() || previous.display_name;
+      previous.notes = input.notes?.trim() || previous.notes;
+      previous.frequency += 1;
+      previous.last_contacted = now;
+      previous.updated_at = now;
+      return { ...previous };
+    }
+    const contact: BackendContact = {
+      id: input.id ?? `contact-${email}`, email, display_name: input.display_name?.trim() || null,
+      notes: input.notes?.trim() || null, avatar_url: input.avatar_url, avatar_source: 'manual',
+      avatar_locked: input.avatar_url ? 1 : 0, avatar_updated_at: input.avatar_url ? now : null, frequency: 1, last_contacted: now,
+      created_at: now, updated_at: now,
+    };
+    contacts.push(contact);
+    return { ...contact };
+  },
+  delete_contact: ({ id }) => {
+    const index = contacts.findIndex((contact) => contact.id === id);
+    if (index >= 0) contacts.splice(index, 1);
+  },
   sync_local_contact_avatars: () => 0,
   list_blocked_senders: () => [],
   list_rules: () => [],

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import EmptyState from '@/components/ui/EmptyState.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -1197,13 +1198,11 @@ onBeforeUnmount(() => {
       <SkeletonRow :count="4" height="84px" />
     </div>
 
-    <div v-else class="flex h-full min-h-[200px] flex-col items-center justify-center gap-3 text-tertiary">
-      <svg width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.28">
-        <rect x="4" y="8" width="24" height="18" rx="3" />
-        <path d="M4 12L16 18L28 12" />
-      </svg>
-      <p class="m-0 text-sm">{{ emptyLabel }}</p>
-    </div>
+    <template v-else>
+      <slot name="empty">
+        <EmptyState :title="emptyLabel" />
+      </slot>
+    </template>
   </div>
 </template>
 

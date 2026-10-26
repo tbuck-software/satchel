@@ -260,7 +260,6 @@ const KNOWN_SCALE_LITERAL_GROUPS: KnownGroup[] = [
       'src/views/CalendarView.vue': 1,
       'src/views/InboxView.vue': 1,
       'src/views/NewSendersView.vue': 2,
-      'src/views/SearchView.vue': 1,
     },
   },
 ];
@@ -268,7 +267,7 @@ const KNOWN_SCALE_LITERAL_GROUPS: KnownGroup[] = [
 const KNOWN_SCALE_LITERALS = flatten(KNOWN_SCALE_LITERAL_GROUPS);
 
 // Only ever lower this. See KNOWN_SCALE_LITERAL_GROUPS.
-const MAX_KNOWN_SCALE_LITERALS = 51;
+const MAX_KNOWN_SCALE_LITERALS = 50;
 
 // ---------------------------------------------------------------------------
 // Rule 4b — icons share one line weight, a few grids and three sizes.
@@ -313,7 +312,6 @@ const KNOWN_ICON_LITERAL_GROUPS: KnownGroup[] = [
   {
     reason: 'Drawings, not icons: empty-state illustrations and the undo countdown ring.',
     files: {
-      'src/components/mail/ThreadGroupList.vue': 1,
       'src/components/mail/ThreadView.vue': 1,
       'src/components/ui/UndoFab.vue': 1,
     },
@@ -323,7 +321,7 @@ const KNOWN_ICON_LITERAL_GROUPS: KnownGroup[] = [
 const KNOWN_ICON_LITERALS = flatten(KNOWN_ICON_LITERAL_GROUPS);
 
 // Only ever lower this. See KNOWN_ICON_LITERAL_GROUPS.
-const MAX_KNOWN_ICON_LITERALS = 18;
+const MAX_KNOWN_ICON_LITERALS = 17;
 
 // ---------------------------------------------------------------------------
 // Rule 5 — transitions take their timing from the motion tokens.
