@@ -17,11 +17,14 @@ import { backendStartOauthFlow } from '@/services/backend';
 import { transportErrorCause } from '@/utils/transportLabels';
 import { t } from '@/i18n/runtime';
 import { availableSettingsSections } from '@/components/settings/settingsSections';
+import type { CommandIconName } from '@/components/navigation/commandIcons';
 
 export interface OmniCommand {
   id: string;
   title: string;
   context: 'mail' | 'navigation' | 'app';
+  /** The glyph the same action wears in the toolbar or sidebar; none rather than a stand-in. */
+  icon?: CommandIconName;
   shortcut?: ShortcutHint | null;
   /** Extra match terms (English aliases etc.) beyond the visible title. */
   keywords?: string;
@@ -64,6 +67,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     return [
       {
         id: 'thread:block-address',
+        icon: 'block',
         title: t('commands.blockAddress'),
         context: 'mail',
         keywords: t('commands.keywords.block'),
@@ -71,6 +75,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:block-domain',
+        icon: 'block',
         title: t('commands.blockDomain'),
         context: 'mail',
         keywords: t('commands.keywords.block'),
@@ -78,6 +83,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:print-conversation',
+        icon: 'print',
         title: t('commands.printConversation'),
         context: 'mail',
         shortcut: hint('print'),
@@ -86,6 +92,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:print-latest',
+        icon: 'print',
         title: t('commands.printLatest'),
         context: 'mail',
         keywords: t('commands.keywords.print'),
@@ -93,6 +100,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:export-eml',
+        icon: 'export',
         title: t('commands.exportEml'),
         context: 'mail',
         keywords: t('commands.keywords.export'),
@@ -100,6 +108,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:export-markdown',
+        icon: 'export',
         title: t('commands.exportMarkdown'),
         context: 'mail',
         keywords: t('commands.keywords.export'),
@@ -107,6 +116,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:export-text',
+        icon: 'export',
         title: t('commands.exportText'),
         context: 'mail',
         keywords: t('commands.keywords.export'),
@@ -114,6 +124,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       ...reader.moveTargets.map((target): OmniCommand => ({
         id: `thread:move:${target.id}`,
+        icon: 'folder',
         title: t('commands.moveToFolder', { folder: target.label }),
         context: 'mail',
         keywords: t('commands.keywords.moveToFolder'),
@@ -155,6 +166,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
   const commands = computed<OmniCommand[]>(() => [
     {
       id: 'view:inbox',
+      icon: 'inbox',
       title: t('commands.openInbox'),
       context: 'navigation',
       keywords: t('commands.keywords.openInbox'),
@@ -162,6 +174,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     },
     {
       id: 'view:calendar',
+      icon: 'calendar',
       title: t('commands.openCalendar'),
       context: 'navigation',
       keywords: t('commands.keywords.openCalendar'),
@@ -169,6 +182,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     },
     {
       id: 'view:followups',
+      icon: 'waiting',
       title: t('commands.openFollowUps'),
       context: 'navigation',
       keywords: t('commands.keywords.openFollowUps'),
@@ -176,6 +190,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     },
     {
       id: 'compose:new',
+      icon: 'compose',
       title: t('commands.compose'),
       context: 'app',
       shortcut: hint('compose'),
@@ -185,6 +200,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     ...(targetIds().length > 0 ? [
       {
         id: 'thread:reply',
+        icon: 'reply' as const,
         title: t('common.reply'),
         context: 'mail' as const,
         shortcut: hint('reply'),
@@ -193,6 +209,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:reply-all',
+        icon: 'replyAll' as const,
         title: t('common.replyAll'),
         context: 'mail' as const,
         shortcut: hint('replyAll'),
@@ -201,6 +218,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:forward',
+        icon: 'forward' as const,
         title: t('common.forward'),
         context: 'mail' as const,
         shortcut: hint('forward'),
@@ -209,6 +227,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:done',
+        icon: 'done' as const,
         title: targetIds().length > 1
           ? t('commands.markDoneMany', { count: targetIds().length })
           : t('commands.markDone'),
@@ -219,6 +238,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:snooze',
+        icon: 'clock' as const,
         title: t('commands.snooze'),
         context: 'mail' as const,
         shortcut: hint('moveSnoozed'),
@@ -227,6 +247,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:waiting',
+        icon: 'waiting' as const,
         title: t('commands.waiting'),
         context: 'mail' as const,
         shortcut: hint('moveWaiting'),
@@ -235,6 +256,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:aside',
+        icon: 'aside' as const,
         title: t('commands.setAside'),
         context: 'mail' as const,
         shortcut: hint('setAside'),
@@ -243,6 +265,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:inbox',
+        icon: 'inbox' as const,
         title: t('commands.moveToInbox'),
         context: 'mail' as const,
         shortcut: hint('moveInbox'),
@@ -251,6 +274,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:toggle-read',
+        icon: 'envelope' as const,
         title: targetIds().some((id) => threads.find(id)?.unreadCount)
           ? t('commands.markRead')
           : t('commands.markUnread'),
@@ -265,6 +289,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:pin',
+        icon: 'pin' as const,
         title: t('commands.pin'),
         context: 'mail' as const,
         shortcut: hint('pin'),
@@ -273,6 +298,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:topic',
+        icon: 'topic' as const,
         title: t('commands.addToTopic'),
         context: 'mail' as const,
         shortcut: hint('addToTopic'),
@@ -281,6 +307,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:copy-link',
+        icon: 'link' as const,
         title: t('commands.copyLink'),
         context: 'mail' as const,
         shortcut: hint('copyLink'),
@@ -289,6 +316,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:trash',
+        icon: 'trash' as const,
         title: targetIds().length > 1
           ? t('commands.trashMany', { count: targetIds().length })
           : t('common.delete'),
@@ -299,6 +327,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:mute',
+        icon: 'mute' as const,
         title: threads.activeThreadId && threads.find(threads.activeThreadId)?.isMuted
           ? t('thread.actions.unmute')
           : t('thread.actions.mute'),
@@ -312,6 +341,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       {
         id: 'thread:spam',
+        icon: 'spam' as const,
         title: t('thread.toolbar.markSpam'),
         context: 'mail' as const,
         shortcut: hint('markSpam'),
@@ -322,6 +352,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     ] : []),
     ...(undoFab.entries.value.length > 0 ? [{
       id: 'undo:latest',
+      icon: 'undo' as const,
       title: t('commands.undo', { label: undoFab.entries.value.at(-1)?.label ?? '' }),
       context: 'app' as const,
       shortcut: hint('undo'),
@@ -333,6 +364,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     }] : []),
     {
       id: 'theme:toggle',
+      icon: 'theme',
       title: t('commands.toggleTheme'),
       context: 'app',
       keywords: t('commands.keywords.toggleTheme'),
@@ -340,6 +372,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     },
     {
       id: 'sync:run',
+      icon: 'sync',
       title: t('commands.syncMail'),
       context: 'app',
       keywords: t('commands.keywords.syncMail'),
@@ -347,6 +380,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     },
     {
       id: 'oauth:gmail',
+      icon: 'account',
       title: t('commands.oauthGmail'),
       context: 'app',
       keywords: t('commands.keywords.oauthGmail'),
@@ -354,6 +388,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     },
     {
       id: 'oauth:outlook',
+      icon: 'account',
       title: t('commands.oauthOutlook'),
       context: 'app',
       keywords: t('commands.keywords.oauthOutlook'),
@@ -361,6 +396,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     },
     {
       id: 'help:shortcuts',
+      icon: 'keyboard',
       title: t('commands.showShortcuts'),
       context: 'app',
       shortcut: hint('help'),
@@ -369,6 +405,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     },
     {
       id: 'settings:keybindings',
+      icon: 'keyboard',
       title: t('commands.editShortcuts'),
       context: 'app',
       keywords: t('commands.keywords.editShortcuts'),
@@ -377,6 +414,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     // One per section, found by name or by what the section is for.
     ...availableSettingsSections().flatMap((group) => group.items).map((section) => ({
       id: `settings:section:${section}`,
+      icon: 'settings' as const,
       title: t('commands.openSettingsSection', { section: t(`settings.sections.${section}.label`) }),
       context: 'navigation' as const,
       keywords: `${t(`settings.sections.${section}.description`)} ${t('commands.keywords.openSettingsSection')}`,

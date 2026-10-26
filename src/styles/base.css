@@ -79,6 +79,18 @@
     outline-offset: var(--focus-outline-offset);
   }
 
+  /*
+   * A dialog that rests focus on itself, so its name is read before its
+   * contents, is never a Tab stop: `tabindex="-1"` takes focus from script
+   * only. WebKit still counts that as keyboard focus when a key opened the
+   * dialog and drew its own blue ring around the whole frame. The dialog
+   * appearing is the feedback; the first Tab lands on a control, which wears
+   * the ring above as usual.
+   */
+  :is([role='dialog'], [role='alertdialog'])[tabindex='-1']:focus {
+    outline: none;
+  }
+
   a {
     color: inherit;
     text-decoration: none;

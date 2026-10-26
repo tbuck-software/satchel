@@ -326,10 +326,6 @@ function closeImagePreview() {
   backdrop-filter: blur(8px);
 }
 
-.md-lightbox:focus {
-  outline: none;
-}
-
 .md-lightbox__figure {
   display: grid;
   max-width: 100%;

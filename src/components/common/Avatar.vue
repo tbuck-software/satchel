@@ -25,6 +25,8 @@ const avatar = computed(() =>
   }),
 );
 const showImage = computed(() => Boolean(avatar.value.imageUrl && !imageFailed.value));
+/** A bare logo glyph, set on a light plate so a black mark survives a dark list. */
+const onPlate = computed(() => showImage.value && avatar.value.source === 'favicon' && !avatar.value.tile);
 
 watch(
   () => avatar.value.imageUrl,
@@ -42,6 +44,7 @@ watch(
       showImage ? 'avatar--image' : 'avatar--initials',
       showImage && avatar.source === 'provided' ? 'avatar--provided' : '',
       showImage && avatar.source === 'favicon' ? 'avatar--favicon' : '',
+      onPlate ? 'avatar--plate' : '',
     ]"
     :style="{
       width: `${sizeVal}px`,
@@ -49,7 +52,7 @@ watch(
       fontSize: `${Math.round(sizeVal * 0.38)}px`,
       '--avatar-color': avatar.color,
       backgroundColor: showImage
-        ? avatar.source === 'favicon' ? 'var(--email-canvas)' : 'var(--bg-surface)'
+        ? onPlate ? 'var(--email-canvas)' : 'var(--bg-surface)'
         : 'color-mix(in srgb, var(--avatar-color) 16%, var(--bg-surface))',
     }"
   >
@@ -59,7 +62,7 @@ watch(
       :alt="props.name"
       loading="lazy"
       decoding="async"
-      :style="avatar.source === 'favicon' ? {
+      :style="onPlate ? {
         width: `${Math.min(sizeVal * 0.78, imageWidth || sizeVal * 0.78)}px`,
         height: `${Math.min(sizeVal * 0.78, imageWidth || sizeVal * 0.78)}px`,
       } : undefined"
@@ -72,6 +75,7 @@ watch(
 
 <style scoped>
 .avatar {
+  position: relative;
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
@@ -99,8 +103,22 @@ watch(
   object-fit: cover;
 }
 
-.avatar--favicon img {
+.avatar--plate img {
   border-radius: 0;
   object-fit: contain;
+}
+
+/*
+ * A logo's edge is a hairline, drawn over the image so a tile's own fill
+ * cannot cover it. The plate alone had no edge in the light theme and a
+ * glaring one in the dark.
+ */
+.avatar--favicon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--border-color-muted);
+  pointer-events: none;
 }
 </style>

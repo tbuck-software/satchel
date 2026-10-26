@@ -5,6 +5,7 @@ import { nextTick } from 'vue';
 import { useSettingsStore } from '@/stores/settings';
 import {
   ariaKeyshortcuts,
+  bindingKeycaps,
   DEFAULT_KEYBINDINGS,
   effectiveBindings,
   formatBinding,
@@ -96,7 +97,7 @@ describe('single-key switch', () => {
     expect(effectiveBindings('trash', off)).toEqual(['backspace', 'delete']);
     expect(effectiveBindings('archive', off)).toEqual([]);
     expect(shortcutHint('archive', off)).toBeNull();
-    expect(shortcutHint('compose', { ...off, singleKeyShortcuts: true }, 'MacIntel')).toEqual({ label: 'n', aria: 'N' });
+    expect(shortcutHint('compose', { ...off, singleKeyShortcuts: true }, 'MacIntel')).toEqual({ label: 'n', keys: ['n'], aria: 'N' });
   });
 });
 
@@ -117,6 +118,15 @@ describe('shortcut labels', () => {
     expect(formatBinding('g i', 'MacIntel')).toBe('g i');
   });
 
+  /** A cap is a whole chord; a sequence is one cap per stroke. */
+  it('splits a binding into keycaps, one per stroke', () => {
+    expect(bindingKeycaps('mod+shift+t', 'MacIntel')).toEqual(['⇧⌘T']);
+    expect(bindingKeycaps('mod+enter', 'Win32')).toEqual(['Ctrl+Enter']);
+    expect(bindingKeycaps('alt+d', 'MacIntel')).toEqual(['⌥D']);
+    expect(bindingKeycaps('g i', 'MacIntel')).toEqual(['g', 'i']);
+    expect(bindingKeycaps('')).toEqual([]);
+  });
+
   it('describes single strokes for aria-keyshortcuts and skips sequences', () => {
     expect(ariaKeyshortcuts('mod+k', 'MacIntel')).toBe('Meta+K');
     expect(ariaKeyshortcuts('mod+k', 'Win32')).toBe('Control+K');
@@ -128,7 +138,7 @@ describe('shortcut labels', () => {
 
   it('follows a rebinding', () => {
     const state = { keybindings: { ...DEFAULT_KEYBINDINGS, markDone: 'mod+d' }, singleKeyShortcuts: false };
-    expect(shortcutHint('markDone', state, 'MacIntel')).toEqual({ label: '⌘D', aria: 'Meta+D' });
+    expect(shortcutHint('markDone', state, 'MacIntel')).toEqual({ label: '⌘D', keys: ['⌘D'], aria: 'Meta+D' });
   });
 });
 

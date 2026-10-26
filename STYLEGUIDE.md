@@ -313,7 +313,9 @@ an outline would be clipped. `AppButton`, `IconButton` and `NavItem` define no
 focus of their own on purpose.
 
 Switching the ring off needs a replacement, and the check lists the places that
-draw one elsewhere.
+draw one elsewhere. The one global exception lives in `base.css`: a dialog frame
+with `tabindex="-1"` takes focus only from script, so its name is announced, and
+WebKit would otherwise ring the whole frame whenever a key opened it.
 
 ---
 
@@ -453,6 +455,7 @@ Reusable building blocks — use these instead of hand-rolled buttons/rows:
 | `FilterPill`        | One pill in a filter strip: pressed state, optional identity dot and count. `pressed`, not `active` — a strip is a set of toggles |
 | `SearchField`       | Search entry in the sidebar or mobile list. A button shaped like a field that opens the shared omni search |
 | `CountBadge`        | Rounded count badge, tones neutral/accent/danger               |
+| `KeyCap`            | One key as the keyboard prints it (`⌘K`, `Ctrl+K`, `g`). Palette, shortcut help and hints share it; a sequence or a set of alternatives is several caps, laid out by the caller. Labels come from `bindingKeycaps` |
 | `SectionHeading`    | Group label ("Heute", "Ordner") with optional count/trailing slot |
 | `PaneHeader`        | Pane top bar: title, subtitle, count, actions slot, drag region |
 | `SegmentedControl`  | Pill-shaped grouped toggle                                     |

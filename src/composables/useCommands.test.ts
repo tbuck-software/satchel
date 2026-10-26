@@ -5,6 +5,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useThreadsStore } from '@/stores/threads';
 import { registerThreadReaderCommands } from './useThreadReaderCommands';
 import { useCommands } from './useCommands';
+import { COMMAND_ICONS } from '@/components/navigation/commandIcons';
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -29,14 +30,14 @@ afterEach(() => {
 describe('palette shortcut hints', () => {
   /** `D` reads as Shift+D in registry notation; the binding is a plain `d`. */
   it('shows the binding as it is pressed', () => {
-    expect(command('thread:done')?.shortcut).toEqual({ label: 'd', aria: 'D' });
+    expect(command('thread:done')?.shortcut).toEqual({ label: 'd', keys: ['d'], aria: 'D' });
     expect(command('thread:reply-all')?.shortcut?.label).toBe('Shift+A');
   });
 
   it('follows a rebinding instead of a hard-coded key', () => {
     useSettingsStore().setKeybinding('reply', 'mod+r');
 
-    expect(command('thread:reply')?.shortcut).toEqual({ label: 'Ctrl+R', aria: 'Control+R' });
+    expect(command('thread:reply')?.shortcut).toEqual({ label: 'Ctrl+R', keys: ['Ctrl+R'], aria: 'Control+R' });
   });
 
   it('hides bare keys while single-key shortcuts are off', () => {
@@ -45,6 +46,20 @@ describe('palette shortcut hints', () => {
     expect(command('thread:done')?.shortcut).toBeNull();
     expect(command('compose:new')?.shortcut?.label).toBe('Ctrl+N');
     expect(command('help:shortcuts')?.shortcut?.label).toBe('?');
+  });
+});
+
+describe('palette icons', () => {
+  /*
+   * Every row used to lead with the same '>' chevron, which promised a
+   * submenu none of them had. A command wears the glyph of the button it
+   * stands in for, so a missing one shows up here rather than as a gap.
+   */
+  it('gives every command an icon from the palette set', () => {
+    for (const entry of useCommands().commands.value) {
+      expect(entry.icon, entry.id).toBeDefined();
+      expect(COMMAND_ICONS[entry.icon!], entry.id).toBeDefined();
+    }
   });
 });
 

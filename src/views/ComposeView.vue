@@ -51,7 +51,7 @@ import {
   formatTimestamp,
   mergeRecipients,
 } from '@/utils/composerText';
-import { ariaKeyshortcuts, formatBinding } from '@/config/keybindings';
+import { ariaKeyshortcuts, bindingKeycaps, formatBinding } from '@/config/keybindings';
 import { composerSendBlocker } from '@/utils/composerSendBlocker';
 import { deferredChangeTracker } from '@/utils/deferredChangeTracker';
 import {
@@ -377,7 +377,11 @@ const sendBlockedHint = computed(() => {
 const sendHintId = `compose-send-hint-${useId()}`;
 const senderFieldId = `compose-sender-${useId()}`;
 const subjectFieldId = `compose-subject-${useId()}`;
-const sendShortcut = { label: formatBinding('mod+enter'), aria: ariaKeyshortcuts('mod+enter') };
+const sendShortcut = {
+  label: formatBinding('mod+enter'),
+  keys: bindingKeycaps('mod+enter'),
+  aria: ariaKeyshortcuts('mod+enter'),
+};
 
 watch(accountId, () => {
   // Keep the alias only when it belongs to the newly selected account; the

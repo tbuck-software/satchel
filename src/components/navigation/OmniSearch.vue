@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
+import KeyCap from '@/components/ui/KeyCap.vue';
 import { computed, nextTick, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -15,6 +17,7 @@ import { useThreadActions } from '@/composables/useThreadActions';
 import { useFocusTrap } from '@/composables/useFocusTrap';
 import { reminderSuggestions, type ReminderSuggestion } from '@/utils/reminderDate';
 import { formatBinding } from '@/config/keybindings';
+import { COMMAND_ICONS } from './commandIcons';
 import { rankByQuery, searchQuery } from '@/utils/searchScore';
 import type { BackendContact } from '@/services/backend';
 import type { Account } from '@/types/mail';
@@ -27,7 +30,9 @@ const RECENT_COMMAND_LIMIT = 3;
 const MAIL_LIMIT = 8;
 const CONTACT_LIMIT = 4;
 const ACCOUNT_LIMIT = 3;
-const escapeKeyLabel = 'Esc';
+const escapeKeyLabel = formatBinding('escape');
+const enterKeyLabel = formatBinding('enter');
+const tabKeyLabel = formatBinding('tab');
 const showAllKeyLabel = formatBinding('mod+enter');
 
 type OmniItem =
@@ -406,26 +411,28 @@ function onEnter(event: KeyboardEvent) {
                 :aria-selected="group.start + offset === activeIndex"
                 :aria-keyshortcuts="item.kind === 'command' ? item.command.shortcut?.aria : undefined"
                 class="row"
-                :class="{ active: group.start + offset === activeIndex, 'row--command': item.kind === 'command', 'row--reminder': item.kind === 'reminder', 'row--footer': item.kind === 'footer' }"
+                :class="{ active: group.start + offset === activeIndex, 'row--command': item.kind === 'command', 'row--compact': item.kind === 'command' || item.kind === 'recent', 'row--reminder': item.kind === 'reminder', 'row--footer': item.kind === 'footer' }"
                 @click="activate(item)"
                 @mouseenter="activeIndex = group.start + offset"
               >
                 <template v-if="item.kind === 'command'">
                   <span class="row-icon" aria-hidden="true">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M6 3L11 8L6 13"/>
-                    </svg>
+                    <AppIcon v-if="item.command.icon" :grid="COMMAND_ICONS[item.command.icon].grid">
+                      <path v-for="path in COMMAND_ICONS[item.command.icon].paths" :key="path" :d="path" />
+                    </AppIcon>
                   </span>
                   <span class="row-title">{{ item.command.title }}</span>
-                  <kbd v-if="item.command.shortcut" class="command-shortcut">{{ item.command.shortcut.label }}</kbd>
+                  <span v-if="item.command.shortcut" class="command-shortcut">
+                    <KeyCap v-for="(key, index) in item.command.shortcut.keys" :key="index">{{ key }}</KeyCap>
+                  </span>
                 </template>
 
                 <template v-else-if="item.kind === 'recent'">
                   <span class="row-icon" aria-hidden="true">
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                    <AppIcon>
                       <circle cx="8" cy="8" r="5.5"/>
                       <path d="M8 5.5V8L10 9.5"/>
-                    </svg>
+                    </AppIcon>
                   </span>
                   <span class="row-title">{{ item.recentQuery }}</span>
                   <!-- span, not button: options must not nest interactive elements -->
@@ -484,12 +491,12 @@ function onEnter(event: KeyboardEvent) {
                     <strong>{{ item.reminder.label }}</strong>
                     <small>{{ item.reminder.detail }}</small>
                   </span>
-                  <kbd class="command-shortcut">↵</kbd>
+                  <span class="command-shortcut"><KeyCap>{{ enterKeyLabel }}</KeyCap></span>
                 </template>
 
                 <template v-else>
                   <span class="footer-label">{{ $t('nav.omni.showAll') }}</span>
-                  <kbd class="footer-kbd">{{ showAllKeyLabel }}</kbd>
+                  <KeyCap class="footer-kbd">{{ showAllKeyLabel }}</KeyCap>
                 </template>
               </CardButton>
             </template>
@@ -507,11 +514,11 @@ function onEnter(event: KeyboardEvent) {
           </div>
 
           <footer class="hints" aria-hidden="true">
-            <span><kbd>↑</kbd><kbd>↓</kbd> {{ $t('nav.omni.hints.navigate') }}</span>
-            <span v-if="ui.omniMode === 'default'"><kbd>⇥</kbd> {{ $t('nav.omni.hints.group') }}</span>
-            <span><kbd>↵</kbd> {{ $t('common.open') }}</span>
-            <span v-if="ui.omniMode === 'default'"><kbd>{{ showAllKeyLabel }}</kbd> {{ $t('nav.omni.hints.allHits') }}</span>
-            <span><kbd>{{ escapeKeyLabel }}</kbd> {{ ui.omniMode === 'reminder' ? $t('common.back') : $t('common.close') }}</span>
+            <span><KeyCap>↑</KeyCap><KeyCap>↓</KeyCap> {{ $t('nav.omni.hints.navigate') }}</span>
+            <span v-if="ui.omniMode === 'default'"><KeyCap>{{ tabKeyLabel }}</KeyCap> {{ $t('nav.omni.hints.group') }}</span>
+            <span><KeyCap>{{ enterKeyLabel }}</KeyCap> {{ $t('common.open') }}</span>
+            <span v-if="ui.omniMode === 'default'"><KeyCap>{{ showAllKeyLabel }}</KeyCap> {{ $t('nav.omni.hints.allHits') }}</span>
+            <span><KeyCap>{{ escapeKeyLabel }}</KeyCap> {{ ui.omniMode === 'reminder' ? $t('common.back') : $t('common.close') }}</span>
           </footer>
         </section>
       </div>
@@ -677,9 +684,8 @@ function onEnter(event: KeyboardEvent) {
 }
 
 .command-shortcut {
-  min-width: 24px;
-  color: var(--text-tertiary);
-  font-weight: var(--weight-strong);
+  display: inline-flex;
+  gap: var(--space-xs);
 }
 
 /* Recent rows carry a third column for the remove control. */
@@ -716,9 +722,24 @@ function onEnter(event: KeyboardEvent) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 20px;
+  height: 20px;
   color: var(--text-tertiary);
+}
+
+/*
+ * Commands and recent searches are one line each, at a desktop list density
+ * (36px): fourteen commands fit where eleven did. Mail and contact hits keep
+ * their avatar rows.
+ */
+.row--compact {
+  min-height: 36px;
+  padding-block: var(--space-1-5);
+}
+
+.row.active .row-icon,
+.row:hover .row-icon {
+  color: var(--text-secondary);
 }
 
 .row-title {
@@ -850,20 +871,6 @@ function onEnter(event: KeyboardEvent) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-}
-
-kbd {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  padding: 1px 5px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-xs);
-  background: var(--bg-raised);
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: var(--font-size-2xs);
 }
 
 /* A phone has no room for a dialog floating a tenth of the way down with a

@@ -383,18 +383,12 @@ const KNOWN_FOCUS_SUPPRESSION_GROUPS: KnownGroup[] = [
       'src/components/mail/ThreadListItem.vue': 1,
     },
   },
-  {
-    reason: 'Overlay focused programmatically; the scrim is the feedback.',
-    files: {
-      'src/components/mail/SafeMarkdownBody.vue': 1,
-    },
-  },
 ];
 
 const KNOWN_FOCUS_SUPPRESSIONS = flatten(KNOWN_FOCUS_SUPPRESSION_GROUPS);
 
 // Only ever lower this. See KNOWN_FOCUS_SUPPRESSION_GROUPS.
-const MAX_KNOWN_FOCUS_SUPPRESSIONS = 10;
+const MAX_KNOWN_FOCUS_SUPPRESSIONS = 9;
 
 // ---------------------------------------------------------------------------
 // Rule 7 — text on a self-declared surface stays readable in both themes.

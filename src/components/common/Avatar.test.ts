@@ -34,4 +34,21 @@ describe('sender avatar loading', () => {
     expect(photo.classes()).toContain('avatar--provided');
     photo.unmount();
   });
+
+  /*
+   * The monograms are whole tiles. On the white logo plate they read as a
+   * grey disc in a thick white ring, the brightest thing in a dark list.
+   */
+  it('fills the avatar with a monogram tile and keeps the plate for a bare logo', () => {
+    const monogram = mount(Avatar, { props: { name: 'Google Cloud', email: 'billing@cloud.google.com' } });
+    expect(monogram.classes()).toContain('avatar--favicon');
+    expect(monogram.classes()).not.toContain('avatar--plate');
+    expect(monogram.get('img').attributes('style') ?? '').not.toContain('width');
+    monogram.unmount();
+
+    const logo = mount(Avatar, { props: { name: 'Stripe', email: 'receipts@stripe.com' } });
+    expect(logo.classes()).toContain('avatar--plate');
+    expect(logo.attributes('style')).toContain('var(--email-canvas)');
+    logo.unmount();
+  });
 });

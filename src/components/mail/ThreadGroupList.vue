@@ -103,12 +103,18 @@ interface RowMetrics {
   banner: number;
 }
 
-const DESK_ROWS: RowMetrics = { thread: 72, dateHeader: 36, folderCard: 80, banner: 44 };
+/*
+ * A date header belongs to the rows below it, so its label sits on the
+ * header's bottom edge (`pb-0`) and the free space goes above it. With 12px
+ * under the label and the folder section's own inset on top, "Today" floated
+ * alone, closer to the section it ends than to the one it starts.
+ */
+const DESK_ROWS: RowMetrics = { thread: 72, dateHeader: 32, folderCard: 80, banner: 44 };
 /*
  * tokens.css lifts every font token by 2px at 1020px and below. Three-line
  * rows at 72px then had no room left: snippet and next sender touched.
  */
-const PHONE_ROWS: RowMetrics = { thread: 88, dateHeader: 44, folderCard: 88, banner: 52 };
+const PHONE_ROWS: RowMetrics = { thread: 88, dateHeader: 40, folderCard: 88, banner: 52 };
 const PHONE_TYPE_QUERY = '(max-width: 1020px)';
 
 const BUCKET_HEIGHT = 76;
@@ -120,9 +126,6 @@ const PRIORITY_SECTION_PADDING = 12;
 const REVIEW_SECTION_PADDING = 16;
 /** Expanded review card `pb-1`. */
 const REVIEW_CARD_BOTTOM_PADDING = 4;
-// The folder section carries no own title — it sits under the "Heute" header,
-// whose bottom padding already separates the two.
-const FOLDER_SECTION_TOP_INSET = 4;
 const FOLDER_CARD_GAP = 2;
 const FOLDER_SECTION_FOOTER_HEIGHT = 12;
 
@@ -146,7 +149,6 @@ const rowHeights = computed(() => ({
   '--bucket-h': `${BUCKET_HEIGHT - 4}px`,
   '--folder-card-h': `${rows.value.folderCard}px`,
   '--folder-card-gap': `${FOLDER_CARD_GAP}px`,
-  '--folder-section-inset': `${FOLDER_SECTION_TOP_INSET}px`,
   '--card-header-h': `${CARD_HEADER_HEIGHT}px`,
   '--review-row-h': `${reviewRowHeight.value}px`,
   '--review-banner-h': `${rows.value.banner}px`,
@@ -194,8 +196,7 @@ function itemHeight(item: ThreadListEntry): number {
   const { thread, dateHeader, folderCard } = rows.value;
   if (item.kind === 'folder-row') {
     const cardCount = item.folders.length + (topicsCardVisible.value ? 1 : 0);
-    return FOLDER_SECTION_TOP_INSET
-      + cardCount * folderCard
+    return cardCount * folderCard
       + Math.max(0, cardCount - 1) * FOLDER_CARD_GAP
       + FOLDER_SECTION_FOOTER_HEIGHT;
   }
@@ -728,7 +729,7 @@ onBeforeUnmount(() => {
     <div v-if="props.items.length > 0">
       <div v-if="stickyHeader" class="sticky-header-anchor">
         <div
-          class="sticky-header flex h-[var(--date-header-h)] items-end bg-list px-5 pb-2 pt-3"
+          class="sticky-header flex h-[var(--date-header-h)] items-end bg-list px-5 pb-0 pt-3"
           :style="{ transform: `translateY(-${stickyHeader.lift}px)` }"
         >
           <SectionHeading :label="stickyHeader.item.label" :count="stickyHeader.item.count > 0 ? stickyHeader.item.count : undefined" class="w-full">
@@ -790,7 +791,7 @@ onBeforeUnmount(() => {
           <template v-for="item in segment.items" :key="item.id">
             <section
               v-if="item.kind === 'folder-row'"
-              class="border-b border-border/50 bg-list px-5 pt-[var(--folder-section-inset)]"
+              class="border-b border-border/50 bg-list px-5"
               :style="{ height: `${itemHeight(item)}px` }"
               :aria-label="$t('thread.list.smartGroups')"
             >
@@ -892,7 +893,7 @@ onBeforeUnmount(() => {
 
             <div
               v-else-if="item.kind === 'date-header'"
-              class="flex h-[var(--date-header-h)] items-end bg-list px-5 pb-2 pt-3"
+              class="flex h-[var(--date-header-h)] items-end bg-list px-5 pb-0 pt-3"
             >
               <SectionHeading :label="item.label" :count="item.count > 0 ? item.count : undefined" class="w-full">
                 <template #trailing>

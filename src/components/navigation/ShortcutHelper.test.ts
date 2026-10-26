@@ -29,6 +29,11 @@ afterEach(() => {
   while (helpers.length > 0) helpers.pop()?.unmount();
 });
 
+/** The keycaps of a row, in order. */
+function caps(row: { findAll: (selector: string) => Array<{ text: () => string }> }): string[] {
+  return row.findAll('kbd').map((cap) => cap.text());
+}
+
 describe('shortcut helper', () => {
   /**
    * The groups were typed out by hand and drifted: `previewAttachment` was
@@ -50,7 +55,7 @@ describe('shortcut helper', () => {
       .filter((row) => row.text().includes('Open the focused item'));
 
     expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) expect(row.get('kbd').text()).not.toContain('Space');
+    for (const row of rows) expect(caps(row)).not.toContain('Space');
   });
 
   /** A rebound key has to show up as the key the user actually presses. */
@@ -62,7 +67,32 @@ describe('shortcut helper', () => {
       .findAll('.groups li')
       .find((row) => row.text().includes('Mark as done'));
 
-    expect(doneRow?.get('kbd').text()).toBe('d or y');
+    expect(caps(doneRow!)).toEqual(['d', 'y']);
+  });
+
+  /*
+   * "d or e" sat in one chip, so the help offered a key labelled "d or e".
+   * Each alternative is a cap of its own, with a translated "or" between.
+   */
+  it('shows alternatives as separate keycaps joined by "or"', () => {
+    const settings = useSettingsStore();
+    settings.keybindings = { ...settings.keybindings, markDone: 'd', archive: 'e' };
+    const doneRow = open()
+      .findAll('.groups li')
+      .find((row) => row.text().includes('Mark as done'))!;
+
+    expect(caps(doneRow)).toEqual(['d', 'e']);
+    expect(doneRow.findAll('.keys__or').map((word) => word.text())).toEqual(['or']);
+  });
+
+  /** A sequence is pressed one key after the other: one cap per stroke. */
+  it('splits a sequence into one keycap per stroke', () => {
+    const inboxRow = open()
+      .findAll('.groups li')
+      .find((row) => row.text().includes('Go to inbox'))!;
+
+    expect(caps(inboxRow)).toEqual(['g', 'i']);
+    expect(inboxRow.findAll('.keys__or')).toHaveLength(0);
   });
 
   /**
@@ -75,7 +105,7 @@ describe('shortcut helper', () => {
     const rows = open().findAll('.groups li');
 
     const doneRows = rows.filter((row) => row.text().includes('Mark as done'));
-    expect(doneRows.map((row) => row.get('kbd').text())).toEqual(['d or e']);
+    expect(doneRows.map(caps)).toEqual([['d', 'e']]);
     expect(rows.filter((row) => row.text().includes('Archive'))).toHaveLength(0);
   });
 
@@ -88,10 +118,10 @@ describe('shortcut helper', () => {
     const rows = open().findAll('.groups li');
     const keysFor = (label: string) => rows
       .filter((row) => row.text().includes(label))
-      .map((row) => row.get('kbd').text());
+      .map(caps);
 
-    expect(keysFor('Mark as done')).toEqual(['Ctrl+D']);
-    expect(keysFor('Show keyboard help')).toEqual(['?']);
+    expect(keysFor('Mark as done')).toEqual([['Ctrl+D']]);
+    expect(keysFor('Show keyboard help')).toEqual([['?']]);
   });
 
   /** The help used to say "Cmd+…" on every platform. */

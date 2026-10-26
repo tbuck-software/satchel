@@ -54,12 +54,30 @@ const localBrandAvatars: Record<string, string> = {
   'pragmaticengineer.com': '/avatars/pragmaticengineer.svg',
 };
 
+/*
+ * The monograms (see public/avatars/sources.json) are whole tiles with their
+ * own fill. Set on the white logo plate like the glyph logos above, they left a
+ * thick white ring around a grey disc — the brightest thing in a dark list.
+ * They fill the avatar instead.
+ */
+const monogramTiles: ReadonlySet<string> = new Set([
+  'google.com',
+  'github.com',
+  'apple.com',
+  'amazon.de',
+  'metro.de',
+  'linkedin.com',
+  'pragmaticengineer.com',
+]);
+
 export interface SenderAvatar {
   initials: string;
   color: string;
   imageUrl: string | null;
   domain: string | null;
   source: 'provided' | 'favicon' | 'initials';
+  /** The image is a full tile that fills the avatar, not a logo set on a plate. */
+  tile: boolean;
 }
 
 export function resolveSenderAvatar(input: {
@@ -85,6 +103,7 @@ export function resolveSenderAvatar(input: {
     source: input.imageUrl
       ? input.imageSource === 'favicon' ? 'favicon' : 'provided'
       : brandImage ? 'favicon' : 'initials',
+    tile: !providedPhoto && Boolean(brandImage) && monogramTiles.has(faviconDomain!),
   };
 }
 

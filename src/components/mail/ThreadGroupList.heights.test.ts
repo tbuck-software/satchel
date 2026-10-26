@@ -100,7 +100,7 @@ describe('thread list row heights', () => {
     const style = scrollerStyle(mountList());
     for (const [name, value] of [
       ['--thread-row-h', '72px'],
-      ['--date-header-h', '36px'],
+      ['--date-header-h', '32px'],
       ['--bucket-h', '72px'],
       ['--folder-card-h', '80px'],
       ['--card-header-h', '40px'],
@@ -128,7 +128,7 @@ describe('thread list row heights', () => {
       const style = scrollerStyle(mountList());
       for (const [name, value] of [
         ['--thread-row-h', '88px'],
-        ['--date-header-h', '44px'],
+        ['--date-header-h', '40px'],
         ['--folder-card-h', '88px'],
         ['--review-row-h', '84px'],
         ['--review-banner-h', '52px'],

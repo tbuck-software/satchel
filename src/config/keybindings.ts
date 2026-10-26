@@ -231,12 +231,18 @@ export function formatBindingStroke(stroke: string, platform?: string): string[]
   return result;
 }
 
+/**
+ * The keycaps of a binding, one per stroke: `['⇧A']`, `['Ctrl+K']`, `['g', 'i']`.
+ * A cap is the whole chord, the way a menu prints it — not one cap per key.
+ */
+export function bindingKeycaps(binding: string, platform?: string): string[] {
+  const joiner = isApplePlatform(platform) ? '' : '+';
+  return bindingStrokes(binding).map((stroke) => formatBindingStroke(stroke, platform).join(joiner));
+}
+
 /** One label for a whole binding, e.g. `⇧A`, `Ctrl+K` or `g i`. */
 export function formatBinding(binding: string, platform?: string): string {
-  const joiner = isApplePlatform(platform) ? '' : '+';
-  return bindingStrokes(binding)
-    .map((stroke) => formatBindingStroke(stroke, platform).join(joiner))
-    .join(' ');
+  return bindingKeycaps(binding, platform).join(' ');
 }
 
 const ARIA_KEY_NAMES: Record<string, string> = {
@@ -280,7 +286,8 @@ export function shortcutHint(
 ): ShortcutHint | null {
   const binding = effectiveBindings(action, state)[0];
   if (!binding) return null;
-  return { label: formatBinding(binding, platform), aria: ariaKeyshortcuts(binding, platform) };
+  const keys = bindingKeycaps(binding, platform);
+  return { label: keys.join(' '), keys, aria: ariaKeyshortcuts(binding, platform) };
 }
 
 export interface KeybindingConflict {
