@@ -367,7 +367,10 @@ function openSenderDetails() {
     :class="[
       ui.isMobile
         ? 'mb-0 border-b border-border-muted px-0 py-4'
-        : 'message-surface--indented mb-0 border-b border-border-muted px-0 py-6 last:border-b-0',
+        : 'message-surface--indented mb-0 border-b border-border-muted px-0 pt-6 last:border-b-0',
+      // The hover actions are the last row of an open message and stay in the
+      // layout while hidden, so the padding under them is the smaller step.
+      ui.isMobile ? '' : props.collapsed ? 'pb-6' : 'pb-4',
       props.collapsed ? 'message-surface--collapsed' : '',
       props.keyboardFocused ? 'message-surface--keyboard-focused' : '',
     ]"
@@ -623,7 +626,7 @@ function openSenderDetails() {
     />
 
     <!-- Attachments -->
-    <div v-if="visibleAttachments.length > 0" class="mt-6 flex flex-wrap gap-3">
+    <div v-if="visibleAttachments.length > 0" class="mt-4 flex flex-wrap gap-2">
       <AttachmentCard
         v-for="attachment in visibleAttachments"
         :key="attachment.id"
@@ -634,7 +637,7 @@ function openSenderDetails() {
     <!-- Desktop contextual actions; mobile already has the fixed thread bar. -->
     <div
       v-if="!ui.isMobile && (props.canReply || props.message.isDraft)"
-      class="mt-4 flex gap-2 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100"
+      class="mt-2 flex gap-2 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100"
     >
       <!-- A draft is answered by finishing it, not by replying to yourself. -->
       <template v-if="props.message.isDraft">

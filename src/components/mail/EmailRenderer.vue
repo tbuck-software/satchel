@@ -597,10 +597,19 @@ const hasPgpSegments = computed(() =>
   gap: 10px;
 }
 
+/*
+  A text/plain body is a letter, not a terminal. The element is a <pre> for its
+  whitespace, and a <pre> brings the monospace face along; nothing in the
+  message asks for that (format=fixed is the RFC 3676 default, not a choice),
+  so it reads in the app's face, at the HTML body's line height, and wraps at a
+  line length the eye can follow back.
+*/
 .text {
+  max-width: 72ch;
   margin: 0;
+  font-family: var(--font-sans);
   font-size: var(--font-size-lg);
-  line-height: 1.6;
+  line-height: 1.55;
   color: var(--text-primary);
   overflow-wrap: anywhere;
 }

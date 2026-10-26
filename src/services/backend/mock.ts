@@ -213,9 +213,24 @@ const calendarEvents: BackendCalendarEvent[] = mockCalendarEvents.map((event) =>
 const calendarSources: BackendCalendarSource[] = mockCalendarSources.map((source) => ({ ...source }));
 const senderPreferences = new Map<string, { category: string | null; isPriority: boolean }>();
 
-/** A 2x2 slate-grey PNG. The smallest thing a thumbnail can be drawn from. */
+/**
+ * A 336x208 sketch of a login page under an error banner, about 800 bytes.
+ * Every image attachment in the demo mailbox thumbnails from it, so it has to
+ * read as a screenshot; a flat swatch made the card look broken.
+ */
 const MOCK_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGOYNa0HiBggFAAw1gbxw9+yowAAAABJRU5ErkJggg==';
+  'iVBORw0KGgoAAAANSUhEUgAAAVAAAADQBAMAAACjASSGAAAAKlBMVEX////09vjs7/P94uDe4ufc4efW2+H0v0+qsbphxVQX' +
+  'cH/sal7WRUE0OkLa/vY3AAACuElEQVR42u2dMU5bQRCGx46xiCUk06PIMhfgBMgFB6AJDc2rnDYlJUegdvUaGtJwAAofIQdI' +
+  'kE8AlixZkbHsFCslSCD8dmc9b5/ft9Ir8DDaj39mdnYXya/xVaoxmgIooIBGGa2Nv7EcW3CcFVS0PXQ/9R39azcTzs2zONB2' +
+  'JkMRafakLyKtwas/cGkT2aU6R8dGOTguBJq5pyciPZGBuIeqrwFo7p6JiExcuowrp6hVsg4KgS5yGYnIaiKPbol/8OgINo2n' +
+  'sXE/mkhn2ixY64yqBxTQXQJt9FEUUEABBRRQQLdxBHin63b10z4bKBqDUw7J0f+jG2XeLopWsOpF5PPNx/ZvqSh6o7TTmSoL' +
+  '+l1pNzmFHkaZdz0l9JUDnUaZd4qi4WUQZz8a0ELXzxQToIACmugOX3udvprYgPYftOqc+pMG/LOh+Usfxy8WOXqkT7hlz0DR' +
+  'CIKGSLrDy9NRjGn9Y8+CDyiggO7S7smN3x/YZifpKHoQbDQG/amwUkyVBj1RWE1BZ8FG6+XpmBwFFFBAAQUUUEAT2JTsX4d4' +
+  'Xdkrem3oRY4mBWoc+vBi+nNF6Gu6jko78/cZlQDavvzh7zQclRD6eyMfLehliNNLRtUDCiig2wa9DXHay0tQ9NzIR9tCF7cV' +
+  '6fWyGFFMgAIKaIpnJu6eyNHUQY1Dz90T66j/4O4pdujvjXy0oNw9AQoooImCcvcUu4Vy90TVAwoooIACCmgdQRWbkk7A3vKi' +
+  'DEVzIx8taMfMSQmaG3pR9WlV/Zsxf3OIuktT0azAJ3SmnQTNI67vWy2mzh2hrwVoZuilAp2bOWlDn1kKqqn6+QXFBCiggAIK' +
+  'KKCA1g70k/dXh8+eYhzV1oT+31gNIkx7ahD6GLH3j3xI6FfqlzO2/AUNe31cGd+Ry3vuAAUUUEABBRRQQAEFtMD4C4tNcaDi' +
+  'eAAwAAAAAElFTkSuQmCC';
 
 let sequence = 0;
 function nextId(prefix: string): string {

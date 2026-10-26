@@ -16,6 +16,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   archive: [];
+  moveToInbox: [];
   reply: [];
   toggleRead: [];
   snooze: [];
@@ -104,11 +105,27 @@ function sheetAction(action: SheetAction) {
         </svg>
       </IconButton>
     </div>
+    <!-- A done thread gets the way back, not a Done that would do nothing. -->
     <AppButton
+      v-if="props.isDone"
       class="bar-done"
       variant="primary"
       size="md"
-      :disabled="props.isDone"
+      @click="emit('moveToInbox')"
+    >
+      <template #icon>
+        <svg class="bar-done__icon" width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M8 11V3.4M5.4 8.4 8 11l2.6-2.6" />
+          <path d="M2.8 11.2v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2" />
+        </svg>
+      </template>
+      {{ $t('commands.moveToInbox') }}
+    </AppButton>
+    <AppButton
+      v-else
+      class="bar-done"
+      variant="primary"
+      size="md"
       @click="emit('archive')"
     >
       <template #icon>

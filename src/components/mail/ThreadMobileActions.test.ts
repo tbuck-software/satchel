@@ -27,7 +27,7 @@ describe('ThreadMobileActions', () => {
     document.body.innerHTML = '';
   });
 
-  it('preserves mobile action labels, visibility, and disabled state', async () => {
+  it('preserves mobile action labels and visibility, and offers the inbox on a done thread', async () => {
     const wrapper = mount(ThreadMobileActions, {
       props: { ...baseProps, isStarred: true, isAside: true, isDone: true },
     });
@@ -36,7 +36,11 @@ describe('ThreadMobileActions', () => {
     expect(wrapper.find('.bar-btn[title="Reply"]').exists()).toBe(true);
     expect(wrapper.find('.bar-btn[title="Mark as read"]').exists()).toBe(true);
     expect(wrapper.find('.bar-btn[title="Snooze"]').exists()).toBe(true);
-    expect(wrapper.get('.bar-done').attributes('disabled')).toBeDefined();
+    expect(wrapper.get('.bar-done').attributes('disabled')).toBeUndefined();
+    expect(wrapper.get('.bar-done').text()).toBe('Move to inbox');
+    await wrapper.get('.bar-done').trigger('click');
+    expect(wrapper.emitted('moveToInbox')).toHaveLength(1);
+    expect(wrapper.emitted('archive')).toBeUndefined();
 
     await wrapper.get('.bar-btn[title="More"]').trigger('click');
     expect(wrapper.get('.bar-btn[title="More"]').attributes('aria-haspopup')).toBe('dialog');

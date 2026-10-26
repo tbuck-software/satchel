@@ -20,6 +20,7 @@ const harness = vi.hoisted(() => {
     messagesLoading: false,
     messagesError: null as string | null,
     archive: vi.fn(),
+    moveToInbox: vi.fn(),
     loadMessages: vi.fn().mockResolvedValue(undefined),
   };
 });
@@ -94,7 +95,7 @@ vi.mock('@/composables/useThreadActions', () => ({
     snoozeAt: vi.fn(),
     togglePinned: vi.fn(),
     setAside: vi.fn(),
-    moveToInbox: vi.fn(),
+    moveToInbox: harness.moveToInbox,
   }),
 }));
 vi.mock('@/composables/useToast', () => ({
@@ -167,13 +168,19 @@ describe('mobile Done action', () => {
     expect(wrapper.emitted('back')).toHaveLength(1);
   });
 
-  it('shows that an already completed conversation is done', async () => {
+  it('offers the way back to the inbox on an already completed conversation', async () => {
     harness.thread.workflowState = 'done';
     const wrapper = render();
     await flushPromises();
 
     expect(wrapper.get('.thread-state-badge').text()).toBe('Done');
-    expect(wrapper.get('.bar-done').attributes('disabled')).toBeDefined();
+    const button = wrapper.get('.bar-done');
+    expect(button.text()).toBe('Move to inbox');
+    await button.trigger('click');
+
+    expect(harness.moveToInbox).toHaveBeenCalledWith(['thread-1']);
+    expect(harness.archive).not.toHaveBeenCalled();
+    expect(wrapper.emitted('back')).toBeUndefined();
   });
 
   it('keeps the initial conversation skeleton until the visible body is ready', () => {

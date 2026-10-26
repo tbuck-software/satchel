@@ -21,6 +21,8 @@ const props = withDefaults(
     isUnread?: boolean;
     isStarred?: boolean;
     isAside?: boolean;
+    /** Done already: the primary action turns into its inverse. */
+    isDone?: boolean;
     isMuted?: boolean;
     showBack?: boolean;
     senderAddress?: string;
@@ -37,6 +39,7 @@ const props = withDefaults(
     isUnread: false,
     isStarred: false,
     isAside: false,
+    isDone: false,
     isMuted: false,
     showBack: false,
     senderAddress: '',
@@ -54,6 +57,7 @@ const emit = defineEmits<{
   previous: [];
   next: [];
   archive: [];
+  moveToInbox: [];
   toggleRead: [];
   togglePin: [];
   setAside: [];
@@ -194,7 +198,23 @@ function runExport(format: ExportFormat) {
 
       <!-- The one thing this toolbar is for. Everything beside it is an icon,
            so the accent says which key you were reaching for. -->
+      <!-- On a thread that is done already, "Done" would do nothing; the
+           button offers the way back instead. -->
       <AppButton
+        v-if="isDone"
+        variant="primary"
+        class="thread-toolbar__done"
+        :title="$t('commands.moveToInbox')"
+        :shortcut="hint('moveInbox')"
+        @click="emit('moveToInbox')"
+      >
+        <template #icon>
+          <AppIcon><path d="M8 11V3.4M5.4 8.4 8 11l2.6-2.6" /><path d="M2.8 11.2v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2" /></AppIcon>
+        </template>
+        {{ $t('commands.moveToInbox') }}
+      </AppButton>
+      <AppButton
+        v-else
         variant="primary"
         class="thread-toolbar__done"
         :title="$t('common.done')"

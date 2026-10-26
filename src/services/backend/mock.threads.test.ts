@@ -49,6 +49,27 @@ describe('mock thread pagination', () => {
   }, 20000);
 });
 
+describe('mock thread seed', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    window.history.replaceState({}, '', '/?mockExtraThreads=0');
+  });
+
+  it('counts exactly the messages the reader will load', async () => {
+    const { sendCommand } = await import('./mock');
+    const page = await sendCommand<BackendThreadPage>('list_threads', { input: { limit: 1000 } });
+    expect(page.threads.length).toBeGreaterThan(0);
+    const mismatches: string[] = [];
+    for (const thread of page.threads) {
+      const messages = await sendCommand<unknown[]>('list_messages_preview', { threadId: thread.id });
+      if (messages.length !== thread.message_count) {
+        mismatches.push(`${thread.id}: ${thread.message_count} listed, ${messages.length} seeded`);
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+});
+
 describe('mock spam receipt', () => {
   beforeEach(() => {
     vi.resetModules();

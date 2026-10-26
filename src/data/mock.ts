@@ -19,6 +19,9 @@ export const mockAccounts: Account[] = [
   },
 ];
 
+// `messageCount` is the number of messages seeded for the thread below, drafts
+// included, as the backend's projection counts them. A thread without seeded
+// messages gets one, so its count is 1.
 const mockThreadSeeds: Omit<Thread, 'lastMessageAtMs'>[] = [
   {
     id: 'th-1',
@@ -30,7 +33,7 @@ const mockThreadSeeds: Omit<Thread, 'lastMessageAtMs'>[] = [
     ],
     snippet: 'Users cannot sign in on staging since this morning...',
     lastMessageAt: new Date(Date.now() - 20 * 60_000).toISOString(),
-    messageCount: 5,
+    messageCount: 3,
     unreadCount: 1,
     hasAttachments: true,
     workflowState: 'inbox',
@@ -49,7 +52,7 @@ const mockThreadSeeds: Omit<Thread, 'lastMessageAtMs'>[] = [
     ],
     snippet: 'Please confirm the corrected line items in the attached PDF.',
     lastMessageAt: new Date(Date.now() - 26 * 60 * 60_000).toISOString(),
-    messageCount: 2,
+    messageCount: 1,
     unreadCount: 0,
     hasAttachments: true,
     workflowState: 'snoozed',
@@ -65,7 +68,7 @@ const mockThreadSeeds: Omit<Thread, 'lastMessageAtMs'>[] = [
     participants: [{ name: 'Engineering', email: 'eng@satchel.dev' }],
     snippet: 'Decisions from today: cache invalidation, release train...',
     lastMessageAt: new Date(Date.now() - 3 * 60 * 60_000).toISOString(),
-    messageCount: 3,
+    messageCount: 1,
     unreadCount: 0,
     hasAttachments: false,
     workflowState: 'inbox',
@@ -98,7 +101,7 @@ const mockThreadSeeds: Omit<Thread, 'lastMessageAtMs'>[] = [
     ],
     snippet: 'Can you review the first-week checklist?',
     lastMessageAt: new Date(Date.now() - 50 * 60 * 60_000).toISOString(),
-    messageCount: 5,
+    messageCount: 1,
     unreadCount: 0,
     hasAttachments: false,
     workflowState: 'done',
@@ -180,7 +183,7 @@ const mockThreadSeeds: Omit<Thread, 'lastMessageAtMs'>[] = [
     participants: [{ name: 'GitHub', email: 'notifications@github.com' }],
     snippet: 'The deploy workflow failed on main after 3m 12s.',
     lastMessageAt: new Date(Date.now() - 72 * 60_000).toISOString(),
-    messageCount: 3,
+    messageCount: 1,
     unreadCount: 2,
     hasAttachments: false,
     workflowState: 'inbox',
@@ -244,7 +247,7 @@ const mockThreadSeeds: Omit<Thread, 'lastMessageAtMs'>[] = [
     participants: [{ name: 'Sentry', email: 'alerts@sentry.io' }],
     snippet: 'Error rate for api.satchel.dev crossed the configured threshold.',
     lastMessageAt: new Date(Date.now() - 86 * 60_000).toISOString(),
-    messageCount: 2,
+    messageCount: 1,
     unreadCount: 1,
     hasAttachments: false,
     workflowState: 'inbox',
@@ -500,7 +503,7 @@ const mockThreadSeeds: Omit<Thread, 'lastMessageAtMs'>[] = [
     participants: [{ name: 'Mina Patel', email: 'mina@design.example' }],
     snippet: 'Could we move coffee to Thursday? I want to bring the new component audit.',
     lastMessageAt: new Date(Date.now() - 6.2 * 60 * 60_000).toISOString(),
-    messageCount: 2,
+    messageCount: 1,
     unreadCount: 0,
     hasAttachments: false,
     workflowState: 'inbox',
@@ -567,7 +570,7 @@ const baseMessages: Message[] = [
     bodyText: 'Please confirm line item 4 and tax percentage once reviewed.',
     timestamp: new Date(Date.now() - 28 * 60 * 60_000).toISOString(),
     isRead: true,
-    attachments: [{ id: 'a-2', filename: 'invoice-march.pdf', contentType: 'application/pdf', size: 1_200_000 }],
+    attachments: [{ id: 'a-4', filename: 'invoice-march.pdf', contentType: 'application/pdf', size: 1_200_000 }],
   },
   {
     id: 'm-4',

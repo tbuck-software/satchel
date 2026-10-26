@@ -77,6 +77,20 @@ describe('thread toolbar filing actions', () => {
     expect(wrapper.text()).toContain('Unpin');
     expect(wrapper.text()).toContain('Back to the inbox');
   });
+
+  it('turns the primary action into its inverse on a done thread', async () => {
+    const open = render();
+    await open.get('.thread-toolbar__done').trigger('click');
+    expect(open.get('.thread-toolbar__done').text()).toContain('Done');
+    expect(open.emitted('archive')).toHaveLength(1);
+
+    const done = render({ isDone: true });
+    const primary = done.get('.thread-toolbar__done');
+    expect(primary.text()).toContain('Move to inbox');
+    await primary.trigger('click');
+    expect(done.emitted('moveToInbox')).toHaveLength(1);
+    expect(done.emitted('archive')).toBeUndefined();
+  });
 });
 
 /*

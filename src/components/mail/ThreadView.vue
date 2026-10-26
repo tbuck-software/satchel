@@ -218,6 +218,29 @@ watch(
 onMounted(observeMessages);
 onBeforeUnmount(() => viewportObserver?.disconnect());
 
+/*
+ * The reply bar floats over the end of the thread. It sticks to the foot of
+ * the scroll area, so its own box is the room the last message scrolls up
+ * into; its measured height is the scroll padding that keeps a message
+ * revealed from the keyboard from stopping underneath it.
+ */
+const showReplyFoot = computed(() => canReply.value && !ui.isMobile);
+const replyFoot = ref<HTMLElement | null>(null);
+const replyFootHeight = ref(0);
+let replyFootObserver: ResizeObserver | null = null;
+
+watch(replyFoot, (element) => {
+  replyFootObserver?.disconnect();
+  replyFootObserver = null;
+  replyFootHeight.value = element?.offsetHeight ?? 0;
+  if (!element || typeof ResizeObserver === 'undefined') return;
+  replyFootObserver = new ResizeObserver(() => {
+    replyFootHeight.value = element.offsetHeight;
+  });
+  replyFootObserver.observe(element);
+});
+onBeforeUnmount(() => replyFootObserver?.disconnect());
+
 function defaultFocusedMessageId(): string {
   const targets = messageTargets.value;
   return targets.filter((message) => !message.isDraft && !message.isRead).at(-1)?.id
@@ -497,6 +520,11 @@ function archiveThread() {
   if (props.showBack) {
     emit('back');
   }
+}
+
+async function moveToInbox() {
+  if (!thread.value) return;
+  await threadActions.moveToInbox([thread.value.id]);
 }
 
 /**
@@ -852,6 +880,7 @@ function showEntireThread() {
       :is-unread="isUnread"
       :is-starred="thread.isStarred"
       :is-aside="thread.workflowState === 'aside'"
+      :is-done="thread.workflowState === 'done'"
       :is-muted="thread.isMuted"
       :show-back="showBack"
       :position="props.position ?? 0"
@@ -863,6 +892,7 @@ function showEntireThread() {
       @previous="emit('previous')"
       @next="emit('next')"
       @archive="archiveThread"
+      @move-to-inbox="void moveToInbox()"
       @toggle-read="void toggleReadState()"
       @toggle-pin="togglePin"
       @set-aside="toggleAside"
@@ -901,7 +931,15 @@ function showEntireThread() {
     </div>
 
     <!-- ═══ SCROLLABLE CONTENT ═══ -->
-    <div ref="scrollRoot" :class="['flex-1 overflow-y-auto', ui.isMobile ? 'px-4 py-5' : 'thread-reading-content']">
+    <div
+      ref="scrollRoot"
+      :class="[
+        'flex-1 overflow-y-auto',
+        ui.isMobile ? 'px-4 py-5' : 'thread-reading-content',
+        { 'thread-reading-content--reply': showReplyFoot },
+      ]"
+      :style="showReplyFoot ? { '--reply-foot-h': `${replyFootHeight}px` } : undefined"
+    >
       <div :class="ui.isMobile ? '' : 'max-w-3xl mx-auto'">
         <PluginSlotHost
           slot-name="thread_view_panel"
@@ -981,16 +1019,16 @@ function showEntireThread() {
           @toggle-collapsed="toggleMessageFromPointer"
         />
       </div>
-    </div>
 
-    <!-- The pane ends where an answer would begin. -->
-    <div v-if="canReply && !ui.isMobile" class="thread-reply-foot">
-      <ThreadReplyBar
-        :recipient="replyRecipientName"
-        :identity="threadAccount?.displayName ?? ''"
-        :identity-color="threadAccount?.color ?? null"
-        @reply="replyThread"
-      />
+      <!-- The pane ends where an answer would begin. -->
+      <div v-if="showReplyFoot" ref="replyFoot" class="thread-reply-foot">
+        <ThreadReplyBar
+          :recipient="replyRecipientName"
+          :identity="threadAccount?.displayName ?? ''"
+          :identity-color="threadAccount?.color ?? null"
+          @reply="replyThread"
+        />
+      </div>
     </div>
 
     <ThreadMobileActions
@@ -1001,6 +1039,7 @@ function showEntireThread() {
       :is-aside="thread.workflowState === 'aside'"
       :is-done="thread.workflowState === 'done'"
       @archive="archiveThread"
+      @move-to-inbox="void moveToInbox()"
       @reply="replyThread"
       @toggle-read="void toggleReadState()"
       @snooze="snoozeThread"
@@ -1040,13 +1079,25 @@ function showEntireThread() {
   padding: var(--space-xl) calc(var(--space-5) * 2) var(--space-2xl);
 }
 
+.thread-reading-content--reply {
+  padding-bottom: 0;
+  scroll-padding-bottom: var(--reply-foot-h, 0px);
+}
+
+/* Sticky inside the scroll area rather than stacked under it: the content
+   passes beneath the bar and fades out above it, and at the end of the
+   thread the bar's own box is the inset that lifts the last message clear. */
 .thread-reply-foot {
-  flex-shrink: 0;
-  box-sizing: border-box;
-  width: 100%;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: var(--space-2xl) 0 var(--space-5);
+  background: linear-gradient(to bottom, transparent, var(--bg-surface) var(--space-xl));
+}
+
+.thread-reply-foot > * {
   max-width: 48rem;
   margin: 0 auto;
-  padding: 0 calc(var(--space-5) * 2) var(--space-5);
 }
 
 .thread-heading-line {

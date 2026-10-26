@@ -19,8 +19,8 @@ const open = useAttachmentOpen(() => props.attachment);
  * A picture shows itself; everything else shows what it is.
  *
  * The bound is the point: the card fetches the bytes to draw the thumbnail,
- * so a 40 MB raw photo would pull 40 MB over IPC to fill 168 by 104 pixels.
- * Past the bound the card falls back to the type badge, which costs nothing.
+ * so a 40 MB raw photo would pull 40 MB over IPC to fill 168 by 96 pixels.
+ * Past the bound the card falls back to the compact type row, which costs nothing.
  */
 const THUMBNAIL_MAX_BYTES = 2_000_000;
 
@@ -30,11 +30,24 @@ const isThumbnailable = computed(
     && props.attachment.size <= THUMBNAIL_MAX_BYTES,
 );
 
+/*
+ * The tile's tint says what kind of file it is before the name is read. Only
+ * the families someone acts on differently get a colour; the rest stay ink.
+ */
+const FILE_KINDS: Record<string, string> = {
+  PDF: 'pdf',
+  DOC: 'document', DOCX: 'document', ODT: 'document', RTF: 'document', PAGE: 'document',
+  XLS: 'sheet', XLSX: 'sheet', ODS: 'sheet', CSV: 'sheet', NUMB: 'sheet',
+  ZIP: 'archive', GZ: 'archive', TGZ: 'archive', TAR: 'archive', '7Z': 'archive', RAR: 'archive',
+};
+
 const extension = computed(() => {
   const dot = props.attachment.filename.lastIndexOf('.');
   if (dot <= 0) return props.attachment.contentType.split('/')[1]?.slice(0, 4).toUpperCase() ?? '';
   return props.attachment.filename.slice(dot + 1).slice(0, 4).toUpperCase();
 });
+
+const fileKind = computed(() => FILE_KINDS[extension.value] ?? 'other');
 
 const thumbnailUrl = ref('');
 const rootRef = ref<HTMLElement | null>(null);
@@ -86,7 +99,16 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="rootRef" class="attachment-card group">
+  <!--
+    One surface either way. A picture gets a preview above its name; any other
+    file is a single row, because a large box with a glyph in it says less than
+    the type tile does and costs four times the height.
+  -->
+  <div
+    ref="rootRef"
+    class="attachment-card group"
+    :class="isThumbnailable ? 'attachment-card--image' : 'attachment-card--file'"
+  >
     <CardButton
       class="attachment-card__open"
       :title="open.primaryTitle.value"
@@ -95,15 +117,21 @@ onBeforeUnmount(() => {
       @click="open.openPrimary"
       @keydown="open.handlePreviewKey"
     >
-      <span class="attachment-card__preview">
+      <span v-if="isThumbnailable" class="attachment-card__preview">
         <img v-if="thumbnailUrl" :src="thumbnailUrl" :alt="props.attachment.filename">
-        <span v-else class="attachment-card__badge">
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M13 5.5V13a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 13V3a1.5 1.5 0 0 1 1.5-1.5H9L13 5.5Z" />
-            <path d="M9 1.5v4h4" />
-          </svg>
-          <span v-if="extension" class="attachment-card__extension">{{ extension }}</span>
-        </span>
+        <!-- Until the bytes arrive, or if they never do: still a picture. -->
+        <svg v-else width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2" y="3" width="12" height="10" rx="1.5" />
+          <circle cx="5.75" cy="6.25" r="1.25" />
+          <path d="m14 10.5-3.5-3.5L4 13" />
+        </svg>
+      </span>
+      <span v-else class="attachment-card__tile" :data-kind="fileKind" aria-hidden="true">
+        <template v-if="extension">{{ extension }}</template>
+        <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13 5.5V13a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 13V3a1.5 1.5 0 0 1 1.5-1.5H9L13 5.5Z" />
+          <path d="M9 1.5v4h4" />
+        </svg>
       </span>
       <span class="attachment-card__meta">
         <span class="attachment-card__name">{{ props.attachment.filename }}</span>
@@ -152,24 +180,50 @@ onBeforeUnmount(() => {
 <style scoped>
 .attachment-card {
   position: relative;
-  width: 168px;
+  /* A row of cards wraps; a file row must not stretch to a picture's height. */
+  align-self: flex-start;
+  border: var(--border-default);
   border-radius: var(--radius-md);
-  background: var(--bg-raised);
+  background: color-mix(in srgb, var(--bg-raised) 60%, var(--bg-surface));
   overflow: hidden;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.attachment-card:hover {
+  background: var(--bg-raised);
+}
+
+.attachment-card--image {
+  width: 168px;
+}
+
+.attachment-card--file {
+  width: 216px;
 }
 
 .attachment-card__open {
-  flex-direction: column;
   width: 100%;
+}
+
+.attachment-card--image .attachment-card__open {
+  flex-direction: column;
+}
+
+.attachment-card--file .attachment-card__open {
+  align-items: center;
+  gap: var(--space-2-5);
+  padding: var(--space-sm);
 }
 
 .attachment-card__preview {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 104px;
+  height: 96px;
   overflow: hidden;
-  background: var(--bg-surface);
+  border-bottom: var(--border-muted);
+  background: color-mix(in srgb, var(--text-tertiary) 10%, transparent);
+  color: var(--text-secondary);
 }
 
 .attachment-card__preview img {
@@ -178,26 +232,50 @@ onBeforeUnmount(() => {
   object-fit: cover;
 }
 
-.attachment-card__badge {
+.attachment-card__tile {
   display: flex;
-  flex-direction: column;
+  flex-shrink: 0;
   align-items: center;
-  gap: var(--space-1-5);
-  color: var(--text-tertiary);
-}
-
-.attachment-card__extension {
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--text-tertiary) 14%, transparent);
+  color: var(--text-secondary);
   font-size: var(--font-size-3xs);
   font-weight: var(--weight-bold);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
+}
+
+.attachment-card__tile[data-kind='pdf'] {
+  background: color-mix(in srgb, var(--accent-red) 14%, transparent);
+  color: var(--accent-red);
+}
+
+.attachment-card__tile[data-kind='document'] {
+  background: color-mix(in srgb, var(--accent-primary) 16%, transparent);
+  color: var(--accent-primary);
+}
+
+.attachment-card__tile[data-kind='sheet'] {
+  background: color-mix(in srgb, var(--accent-green) 14%, transparent);
+  color: var(--accent-green);
+}
+
+.attachment-card__tile[data-kind='archive'] {
+  background: color-mix(in srgb, var(--accent-amber) 14%, transparent);
+  color: var(--accent-amber);
 }
 
 .attachment-card__meta {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: var(--space-2xs);
   min-width: 0;
-  padding: var(--space-sm) var(--space-md) var(--space-2-5);
+}
+
+.attachment-card--image .attachment-card__meta {
+  padding: var(--space-sm) var(--space-md);
 }
 
 .attachment-card__name {
@@ -214,7 +292,7 @@ onBeforeUnmount(() => {
   font-size: var(--font-size-2xs);
 }
 
-/* On the preview, not beside the name: the card is one target, and the two
+/* Over the card, not beside the name: the card is one target, and the two
    secondary ways in should not compete with it until the pointer is there. */
 .attachment-card__actions {
   position: absolute;
@@ -228,6 +306,11 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow-sm);
   opacity: 0;
   transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.attachment-card--file .attachment-card__actions {
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .attachment-card:hover .attachment-card__actions,
