@@ -70,7 +70,8 @@ function mountRow() {
 async function openFollowUpPicker() {
   const wrapper = mountRow();
   await wrapper.get('article').trigger('contextmenu', { clientX: 20, clientY: 30 });
-  await nextTick();
+  // The menu is an async component; wait for it to load.
+  await vi.waitFor(() => expect(document.body.querySelector('.context-menu')).not.toBeNull());
 
   const entry = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.context-menu button'))
     .find((button) => button.textContent?.trim() === 'Follow up…');

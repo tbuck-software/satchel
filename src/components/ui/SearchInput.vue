@@ -1,13 +1,23 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import AppIcon from './AppIcon.vue';
 
 defineOptions({ inheritAttrs: false });
-defineProps<{
+const props = defineProps<{
+  modelValue: string;
   label: string;
   placeholder?: string;
 }>();
-const model = defineModel<string>({ required: true });
+const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
+/*
+ * A plain prop/emit pair rather than `defineModel`: Vue's `useModel` helper
+ * would otherwise be the only reason it sits in the shared `vendor-vue` chunk
+ * every window loads at startup.
+ */
+const model = computed({
+  get: () => props.modelValue,
+  set: (value: string) => emit('update:modelValue', value),
+});
 const input = ref<HTMLInputElement | null>(null);
 
 defineExpose({

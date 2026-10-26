@@ -7,6 +7,11 @@ import { useSettingsStore } from '@/stores/settings';
 import { useThreadsStore } from '@/stores/threads';
 import ThreadListItem from './ThreadListItem.vue';
 
+/** The row's menus are async components: wait until `count` of them are in the DOM. */
+async function contextMenusOpen(count = 1) {
+  await vi.waitFor(() => expect(document.body.querySelectorAll('.context-menu')).toHaveLength(count));
+}
+
 const { archiveMock, setAsideMock, moveToInboxMock, setPinnedMock, trashMock } = vi.hoisted(() => ({
   archiveMock: vi.fn(),
   setAsideMock: vi.fn(),
@@ -435,7 +440,7 @@ describe('thread row layout', () => {
     expect(wrapper.find('button[title="Set aside"]').exists()).toBe(false);
 
     await wrapper.get('article').trigger('contextmenu', { clientX: 20, clientY: 30 });
-    await nextTick();
+    await contextMenusOpen();
 
     const actions = Array.from(document.body.querySelectorAll('.context-menu button'))
       .map((button) => button.textContent?.trim() ?? '');
@@ -487,7 +492,7 @@ describe('thread row layout', () => {
     });
 
     await wrapper.get('article').trigger('contextmenu', { clientX: 20, clientY: 30 });
-    await nextTick();
+    await contextMenusOpen();
 
     const menu = document.body.querySelector('.context-menu');
     const actions = Array.from(menu?.querySelectorAll('button') ?? [])
@@ -536,7 +541,7 @@ describe('thread row layout', () => {
     });
 
     await wrapper.get('article').trigger('contextmenu', { clientX: 20, clientY: 30 });
-    await nextTick();
+    await contextMenusOpen();
 
     expect(document.body.textContent).not.toContain('Newsletter');
     expect(document.body.querySelector('[data-test="sender-menu"]')).toBeNull();
@@ -545,7 +550,7 @@ describe('thread row layout', () => {
       .find((button) => button.textContent?.trim() === 'Sender');
     expect(trigger?.getAttribute('aria-haspopup')).toBe('menu');
     trigger?.click();
-    await nextTick();
+    await contextMenusOpen(2);
 
     expect(document.body.querySelector('[data-test="sender-menu"]')).not.toBeNull();
 
@@ -583,14 +588,14 @@ describe('thread row layout', () => {
     expect(wrapper.findAllComponents({ name: 'ContextMenu' })).toHaveLength(0);
 
     await wrapper.get('article').trigger('contextmenu', { clientX: 20, clientY: 30 });
-    await nextTick();
+    await contextMenusOpen();
     expect(wrapper.findAllComponents({ name: 'ContextMenu' })).toHaveLength(1);
     expect(document.body.querySelector('.context-menu')).not.toBeNull();
 
     const trigger = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.context-menu button'))
       .find((button) => button.textContent?.trim() === 'Sender');
     trigger?.click();
-    await nextTick();
+    await contextMenusOpen(2);
     expect(wrapper.findAllComponents({ name: 'ContextMenu' })).toHaveLength(2);
 
     wrapper.unmount();

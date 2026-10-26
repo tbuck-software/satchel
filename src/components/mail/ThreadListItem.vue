@@ -7,9 +7,7 @@ import Avatar from '@/components/common/Avatar.vue';
 import AvatarUnreadDot from '@/components/ui/AvatarUnreadDot.vue';
 import ListRowMeta from '@/components/ui/ListRowMeta.vue';
 import CountBadge from '@/components/ui/CountBadge.vue';
-import ContextMenu from '@/components/ui/ContextMenu.vue';
 import MenuItem from '@/components/ui/MenuItem.vue';
-import SenderFilingMenu from '@/components/mail/SenderFilingMenu.vue';
 import ThreadListQuickActions from '@/components/mail/ThreadListQuickActions.vue';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { useMessageLinks } from '@/composables/useMessageLinks';
@@ -24,6 +22,10 @@ import { transportErrorLabel } from '@/utils/transportLabels';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 
 const SnoozePicker = defineAsyncComponent(() => import('@/components/navigation/SnoozePicker.vue'));
+// Both menus mount on first use (see `contextMenuMounted`), so neither is
+// loaded with the list.
+const ContextMenu = defineAsyncComponent(() => import('@/components/ui/ContextMenu.vue'));
+const SenderFilingMenu = defineAsyncComponent(() => import('@/components/mail/SenderFilingMenu.vue'));
 
 defineOptions({ inheritAttrs: false });
 

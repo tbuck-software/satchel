@@ -525,6 +525,8 @@ describe('InboxView', () => {
     expect(wrapper.get('.search-field').attributes('aria-current')).toBe('page');
 
     await wrapper.get('[aria-haspopup="menu"]').trigger('click');
+    // The menu loads on first open.
+    await vi.waitFor(() => expect(wrapper.findAll('[role="menuitemcheckbox"]')).toHaveLength(3));
     expect(harness.ui!.closeMobileSidebar).not.toHaveBeenCalled();
     const items = wrapper.findAll('[role="menuitemcheckbox"]');
     expect(items.map((item) => item.text())).toEqual(['folders.allAccounts', 'Work', 'Uni']);

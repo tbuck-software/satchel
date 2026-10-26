@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { nextTick, ref } from 'vue';
+import { defineAsyncComponent, nextTick, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useAccountsStore } from '@/stores/accounts';
 import { useUiStore } from '@/stores/ui';
-import ContextMenu from '@/components/ui/ContextMenu.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import MenuItem from '@/components/ui/MenuItem.vue';
@@ -11,6 +10,11 @@ import SearchField from '@/components/ui/SearchField.vue';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 
 defineEmits<{ compose: [event: MouseEvent] }>();
+
+// The account filter menu mounts on first open and then stays, so closing
+// still plays its transition; until then the sidebar does not load it.
+const ContextMenu = defineAsyncComponent(() => import('@/components/ui/ContextMenu.vue'));
+const filterMenuMounted = ref(false);
 
 const accounts = useAccountsStore();
 const route = useRoute();
@@ -23,6 +27,7 @@ function openFilter(event: MouseEvent) {
   const { left, bottom } = filterTrigger.getBoundingClientRect();
   // A point below the trigger opens the menu beneath the toolbar.
   filterAnchor.value = { left, right: left, top: bottom + 6, bottom: bottom + 6 };
+  filterMenuMounted.value = true;
 }
 
 function closeFilter() {
@@ -60,7 +65,7 @@ function selectAccount(id: string) {
     >
       <AppIcon><path d="M8 3v10M3 8h10" /></AppIcon>
     </IconButton>
-    <ContextMenu :open="!!filterAnchor" :anchor="filterAnchor" :label="$t('nav.mailboxFilter')" @close="closeFilter">
+    <ContextMenu v-if="filterMenuMounted" :open="!!filterAnchor" :anchor="filterAnchor" :label="$t('nav.mailboxFilter')" @close="closeFilter">
       <MenuItem :label="$t('folders.allAccounts')" icon="inbox" :checked="!accounts.activeAccountId" @select="selectAccount('')" />
       <MenuItem
         v-for="account in accounts.accounts"

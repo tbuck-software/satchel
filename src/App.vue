@@ -5,13 +5,13 @@ import Sidebar from '@/components/layout/Sidebar.vue';
 import ComposeFab from '@/components/layout/ComposeFab.vue';
 import ToastStack from '@/components/ui/ToastStack.vue';
 import PaneResizeHandle from '@/components/ui/PaneResizeHandle.vue';
-import ConfirmDialog from '@/components/ui/ConfirmDialog.vue';
-import PromptDialog from '@/components/ui/PromptDialog.vue';
 import UndoFab from '@/components/ui/UndoFab.vue';
 import AccountReauthBanner from '@/components/settings/AccountReauthBanner.vue';
 import ConnectionBanner from '@/components/layout/ConnectionBanner.vue';
 import SyncStatusLine from '@/components/layout/SyncStatusLine.vue';
 import { useComposerStore } from '@/stores/composer';
+import { useConfirm } from '@/composables/useConfirm';
+import { usePrompt } from '@/composables/usePrompt';
 import { useTopicsStore } from '@/stores/topics';
 import { useSettingsStore } from '@/stores/settings';
 import { SIDEBAR_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
@@ -23,6 +23,8 @@ const topicsStore = useTopicsStore();
 const settingsStore = useSettingsStore();
 const ui = useUiStore();
 const composer = useComposerStore();
+const { state: confirmState } = useConfirm();
+const { state: promptState } = usePrompt();
 const standaloneCompose = computed(() =>
   route.name === 'compose' && route.query.standalone === '1',
 );
@@ -37,6 +39,10 @@ const ShortcutHelper = defineAsyncComponent(() => import('@/components/navigatio
 const TopicPickerOverlay = defineAsyncComponent(() => import('@/components/topics/TopicPickerOverlay.vue'));
 const OnboardingFlow = defineAsyncComponent(() => import('@/components/onboarding/OnboardingFlow.vue'));
 const SettingsModal = defineAsyncComponent(() => import('@/components/settings/SettingsModal.vue'));
+// The shared yes/no and one-line dialogs: their state lives in `useConfirm` /
+// `usePrompt`, so the frame (ModalShell, focus trap) loads with the first question.
+const ConfirmDialog = defineAsyncComponent(() => import('@/components/ui/ConfirmDialog.vue'));
+const PromptDialog = defineAsyncComponent(() => import('@/components/ui/PromptDialog.vue'));
 
 watch(() => route.fullPath, () => {
   if (ui.mobileSidebarOpen) {
@@ -128,8 +134,8 @@ if (standaloneCompose.value) {
       </div>
     </Transition>
     <ToastStack />
-    <ConfirmDialog />
-    <PromptDialog />
+    <ConfirmDialog v-if="confirmState.pending" />
+    <PromptDialog v-if="promptState.pending" />
     <UndoFab :variant="ui.isSinglePane ? 'floating' : 'docked'" />
   </div>
 </template>
