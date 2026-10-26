@@ -91,6 +91,19 @@ describe('thread toolbar filing actions', () => {
     expect(done.emitted('moveToInbox')).toHaveLength(1);
     expect(done.emitted('archive')).toBeUndefined();
   });
+
+  it('leaves Reply to the reply foot and the menu when the reader has one', async () => {
+    const plain = render({ canReply: true });
+    expect(plain.find('.thread-toolbar button[title^="Reply"]').exists()).toBe(true);
+
+    const docked = render({ canReply: true, replyInFoot: true });
+    expect(docked.find('.thread-toolbar button[title^="Reply"]').exists()).toBe(false);
+    await openMenu(docked);
+    const item = menuItem(docked, 'Reply');
+    expect(item, 'no Reply in the menu').toBeTruthy();
+    await item!.trigger('click');
+    expect(docked.emitted('reply')).toHaveLength(1);
+  });
 });
 
 /*

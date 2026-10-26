@@ -1161,7 +1161,7 @@
       "bodyLoadFailed": "Der Nachrichtentext konnte nicht geladen werden.",
       "collapse": "Nachricht einklappen",
       "discardDraft": "Diesen Entwurf verwerfen",
-      "draft": "Entwurf",
+      "draftNotSent": "Entwurf · nicht gesendet",
       "expand": "Nachricht ausklappen",
       "fileSender": "{name} einordnen",
       "inlineImagesFailed": "Eingebettete Bilder konnten nicht geladen werden.",
@@ -3199,6 +3199,8 @@
     },
     "reply": {
       "as": "als {identity}",
+      "continue": "Antwort an {name} fortsetzen …",
+      "resume": "Entwurf fortsetzen",
       "to": "An {name} antworten …"
     },
     "result": {
@@ -3280,7 +3282,6 @@
       "wholeConversation": "Ganze Unterhaltung"
     },
     "view": {
-      "draftDivider": "Entwurf · nicht gesendet | Entwürfe · nicht gesendet",
       "empty": "Wähle eine Konversation",
       "loadFailed": "Diese Konversation konnte nicht geladen werden.",
       "loading": "Konversation wird geladen",

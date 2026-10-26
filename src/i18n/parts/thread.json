@@ -136,6 +136,8 @@
       },
       "reply": {
         "as": "as {identity}",
+        "continue": "Continue your reply to {name}…",
+        "resume": "Resume draft",
         "to": "Reply to {name}…"
       },
       "result": {
@@ -217,7 +219,6 @@
         "wholeConversation": "Whole conversation"
       },
       "view": {
-        "draftDivider": "Draft · not sent | Drafts · not sent",
         "empty": "Pick a conversation",
         "loadFailed": "This conversation could not be loaded.",
         "loading": "Loading conversation",
@@ -370,6 +371,8 @@
       },
       "reply": {
         "as": "als {identity}",
+        "continue": "Antwort an {name} fortsetzen …",
+        "resume": "Entwurf fortsetzen",
         "to": "An {name} antworten …"
       },
       "result": {
@@ -451,7 +454,6 @@
         "wholeConversation": "Ganze Unterhaltung"
       },
       "view": {
-        "draftDivider": "Entwurf · nicht gesendet | Entwürfe · nicht gesendet",
         "empty": "Wähle eine Konversation",
         "loadFailed": "Diese Konversation konnte nicht geladen werden.",
         "loading": "Konversation wird geladen",

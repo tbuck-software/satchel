@@ -41,18 +41,13 @@ const emit = defineEmits<{
     @toggle-collapsed="emit('toggleCollapsed', $event)"
   />
 
+  <!-- The drafts end the thread as cards of their own; each one says it is
+       unsent, so the group needs no divider over it. -->
   <section
     v-if="props.draftMessages.length > 0"
-    class="mt-6"
+    class="thread-drafts"
     :aria-label="$t('thread.view.unsentDrafts')"
   >
-    <div class="mb-3 flex items-center gap-3" aria-hidden="true">
-      <span class="h-px flex-1 bg-border/70" />
-      <span class="text-xs font-semibold uppercase tracking-wide text-tertiary">
-        {{ $t('thread.view.draftDivider', { count: props.draftMessages.length }) }}
-      </span>
-      <span class="h-px flex-1 bg-border/70" />
-    </div>
     <ThreadMessageGroup
       :messages="props.draftMessages"
       :can-reply="props.canReply"
@@ -70,3 +65,9 @@ const emit = defineEmits<{
     />
   </section>
 </template>
+
+<style scoped>
+.thread-drafts {
+  margin-top: var(--space-md);
+}
+</style>

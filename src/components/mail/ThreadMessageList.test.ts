@@ -74,7 +74,9 @@ describe('ThreadMessageList', () => {
       keyboardFocused: true,
     });
     expect(wrapper.get('section').attributes('aria-label')).toBe('thread.view.unsentDrafts');
-    expect(wrapper.get('section').text()).toContain('thread.view.draftDivider:1');
+    // Each draft card labels itself; the group has no divider over it.
+    expect(wrapper.get('section').findAll('article').map((node) => node.attributes('data-message-id')))
+      .toEqual(['draft-1']);
   });
 
   it('forwards message actions with the owning message id', () => {
@@ -96,7 +98,7 @@ describe('ThreadMessageList', () => {
     expect(wrapper.emitted('discardDraft')).toEqual([['draft-1']]);
   });
 
-  it('omits the draft divider when there are no drafts', async () => {
+  it('omits the draft group when there are no drafts', async () => {
     const wrapper = render();
     await wrapper.setProps({ draftMessages: [] });
 

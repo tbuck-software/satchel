@@ -173,7 +173,7 @@ describe('mobile Done action', () => {
     const wrapper = render();
     await flushPromises();
 
-    expect(wrapper.get('.thread-state-badge').text()).toBe('Done');
+    expect(wrapper.get('.thread-state').text()).toBe('Done');
     const button = wrapper.get('.bar-done');
     expect(button.text()).toBe('Move to inbox');
     await button.trigger('click');

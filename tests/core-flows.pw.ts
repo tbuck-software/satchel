@@ -348,7 +348,8 @@ async function isUncovered(locator: Locator) {
  */
 test('keeps error toasts off the reply bar and the send button', async ({ page }) => {
   await expect(page.locator('.toast--error').first()).toBeVisible();
-  await expect.poll(() => isUncovered(page.locator('.reply-bar').getByRole('button', { name: 'Reply', exact: true }))).toBe(true);
+  // The active thread carries an unsent draft, so the bar resumes it.
+  await expect.poll(() => isUncovered(page.locator('.reply-bar').getByRole('button', { name: 'Resume draft', exact: true }))).toBe(true);
 
   await page.setViewportSize({ width: 900, height: 700 });
   await page.getByText('Staging login 500 after deployment', { exact: true }).first().click();

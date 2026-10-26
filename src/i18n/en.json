@@ -1161,7 +1161,7 @@
       "bodyLoadFailed": "The message body could not be loaded.",
       "collapse": "Collapse message",
       "discardDraft": "Discard this draft",
-      "draft": "Draft",
+      "draftNotSent": "Draft · not sent",
       "expand": "Expand message",
       "fileSender": "File {name}",
       "inlineImagesFailed": "Embedded images could not be loaded.",
@@ -3199,6 +3199,8 @@
     },
     "reply": {
       "as": "as {identity}",
+      "continue": "Continue your reply to {name}…",
+      "resume": "Resume draft",
       "to": "Reply to {name}…"
     },
     "result": {
@@ -3280,7 +3282,6 @@
       "wholeConversation": "Whole conversation"
     },
     "view": {
-      "draftDivider": "Draft · not sent | Drafts · not sent",
       "empty": "Pick a conversation",
       "loadFailed": "This conversation could not be loaded.",
       "loading": "Loading conversation",

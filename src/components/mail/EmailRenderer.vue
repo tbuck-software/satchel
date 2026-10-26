@@ -602,10 +602,11 @@ const hasPgpSegments = computed(() =>
   whitespace, and a <pre> brings the monospace face along; nothing in the
   message asks for that (format=fixed is the RFC 3676 default, not a choice),
   so it reads in the app's face, at the HTML body's line height, and wraps at a
-  line length the eye can follow back.
+  line length the eye can follow back. `ch` is the width of a zero, wider than
+  the average letter of the sans face: 60ch comes to roughly 85 characters.
 */
 .text {
-  max-width: 72ch;
+  max-width: 60ch;
   margin: 0;
   font-family: var(--font-sans);
   font-size: var(--font-size-lg);

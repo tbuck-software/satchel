@@ -386,6 +386,12 @@ const ownDomains = computed(() => new Set(accountsStore.accounts
   .map((account) => account.email.split('@').at(-1)?.trim().toLowerCase() ?? '')
   .filter(Boolean)));
 
+/**
+ * The newest unsent draft. While it exists the reply foot resumes it: a
+ * fresh reply beside it would leave the draft behind as a second answer.
+ */
+const resumableDraft = computed(() => messages.value.filter((message) => message.isDraft).at(-1));
+
 /** Who the reply would go to: the last sender who is not one of our own. */
 const replyRecipientName = computed(() => {
   const incoming = [...visibleMessages.value]
@@ -393,6 +399,23 @@ const replyRecipientName = computed(() => {
     .find((message) => !isOwnEmail(accountsStore.accounts, message.from.email));
   const from = incoming?.from ?? visibleMessages.value.at(-1)?.from;
   return from?.name?.trim() || from?.email || '';
+});
+/**
+ * The draft's addressee, by the name the thread already knows them under: a
+ * saved draft often carries the bare address, or the address as its name.
+ */
+const footRecipientName = computed(() => {
+  const to = resumableDraft.value?.to[0];
+  if (!to) return replyRecipientName.value;
+  const address = to.email.trim().toLowerCase();
+  const nameOf = (person: { name?: string; email: string }) => {
+    const name = person.name?.trim() ?? '';
+    return name.toLowerCase() === address ? '' : name;
+  };
+  const known = messages.value
+    .flatMap((message) => [message.from, ...message.to])
+    .find((person) => person.email.trim().toLowerCase() === address && nameOf(person));
+  return nameOf(to) || (known && nameOf(known)) || to.email;
 });
 const moveTargets = computed(() => {
   if (!thread.value) return [];
@@ -619,6 +642,11 @@ async function toggleReadState() {
 function replyThread() {
   if (!canReply.value || !thread.value) return;
   composer.openReply(thread.value.id);
+}
+
+function replyFromFoot() {
+  if (resumableDraft.value) composer.openDraft(resumableDraft.value.id);
+  else replyThread();
 }
 
 function forwardThread() {
@@ -888,6 +916,7 @@ function showEntireThread() {
       :sender-address="latestSenderAddress"
       :move-targets="moveTargets"
       :can-reply="canReply"
+      :reply-in-foot="showReplyFoot"
       @back="emit('back')"
       @previous="emit('previous')"
       @next="emit('next')"
@@ -940,25 +969,18 @@ function showEntireThread() {
       ]"
       :style="showReplyFoot ? { '--reply-foot-h': `${replyFootHeight}px` } : undefined"
     >
-      <div :class="ui.isMobile ? '' : 'max-w-3xl mx-auto'">
+      <div :class="ui.isMobile ? '' : 'thread-reading-column'">
         <PluginSlotHost
           slot-name="thread_view_panel"
           :context="{ threadId: thread.id, subject: thread.subject }"
         />
         <!-- Thread heading -->
-        <div :class="ui.isMobile ? 'mb-5' : 'mb-6'">
-          <div class="thread-heading-line">
-            <h1 class="text-2xl font-semibold leading-tight tracking-tight text-primary">{{ thread.normalizedSubject ?? thread.subject }}</h1>
-            <span v-if="thread.workflowState === 'done'" class="thread-state-badge">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 8.5l3.5 3.5L13 5"/>
-              </svg>
-              {{ $t('common.done') }}
-            </span>
-          </div>
-          <!-- Which mailbox this arrived in, and how long the thread is. Both
-               are answered by scrolling; the line saves the scroll. -->
-          <div class="mt-1.5 flex flex-wrap items-center gap-2.5 text-xs text-tertiary">
+        <div :class="ui.isMobile ? 'mb-4' : 'mb-3'">
+          <h1 class="text-2xl font-semibold leading-tight tracking-tight text-primary">{{ thread.normalizedSubject ?? thread.subject }}</h1>
+          <!-- Which mailbox this arrived in, how long the thread is and, once
+               it is done, that it is. Answered by scrolling or by the list;
+               the line saves both. -->
+          <div class="mt-1.5 flex flex-wrap items-center gap-2.5 text-xs text-secondary">
             <span v-if="threadAccount" class="inline-flex items-center gap-1.5">
               <span
                 class="h-[7px] w-[7px] rounded-full"
@@ -968,6 +990,12 @@ function showEntireThread() {
               {{ threadAccount.displayName }}
             </span>
             <span>{{ $t('thread.row.messages', { count: messages.length }) }}</span>
+            <span v-if="thread.workflowState === 'done'" class="thread-state">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 8.5l3.5 3.5L13 5"/>
+              </svg>
+              {{ $t('common.done') }}
+            </span>
           </div>
           <div v-if="threadTopics.length > 0" class="mt-2 flex flex-wrap items-center gap-1.5">
             <TopicChip
@@ -1022,12 +1050,15 @@ function showEntireThread() {
 
       <!-- The pane ends where an answer would begin. -->
       <div v-if="showReplyFoot" ref="replyFoot" class="thread-reply-foot">
-        <ThreadReplyBar
-          :recipient="replyRecipientName"
-          :identity="threadAccount?.displayName ?? ''"
-          :identity-color="threadAccount?.color ?? null"
-          @reply="replyThread"
-        />
+        <div class="thread-reply-foot__column">
+          <ThreadReplyBar
+            :recipient="footRecipientName"
+            :identity="threadAccount?.displayName ?? ''"
+            :identity-color="threadAccount?.color ?? null"
+            :resumes-draft="Boolean(resumableDraft)"
+            @reply="replyFromFoot"
+          />
+        </div>
       </div>
     </div>
 
@@ -1079,46 +1110,54 @@ function showEntireThread() {
   padding: var(--space-xl) calc(var(--space-5) * 2) var(--space-2xl);
 }
 
-.thread-reading-content--reply {
-  padding-bottom: 0;
-  scroll-padding-bottom: var(--reply-foot-h, 0px);
-}
-
-/* Sticky inside the scroll area rather than stacked under it: the content
-   passes beneath the bar and fades out above it, and at the end of the
-   thread the bar's own box is the inset that lifts the last message clear. */
-.thread-reply-foot {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  padding: var(--space-2xl) 0 var(--space-5);
-  background: linear-gradient(to bottom, transparent, var(--bg-surface) var(--space-xl));
-}
-
-.thread-reply-foot > * {
+.thread-reading-column {
+  width: 100%;
   max-width: 48rem;
   margin: 0 auto;
 }
 
-.thread-heading-line {
+/* A column, so the foot can dock to the bottom of a short thread instead of
+   hanging under its last message. */
+.thread-reading-content--reply {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-sm);
+  flex-direction: column;
+  padding-bottom: 0;
+  scroll-padding-bottom: var(--reply-foot-h, 0px);
 }
 
-.thread-state-badge {
+.thread-reading-content--reply > .thread-reading-column {
+  flex: 1 0 auto;
+}
+
+/* Sticky inside the scroll area rather than stacked under it: the content
+   passes beneath the bar and fades out above it, and at the end of the
+   thread the bar's own box — fade included — is the inset that lifts the last
+   message, or the draft card, fully clear of it. */
+.thread-reply-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  flex-shrink: 0;
+  padding: var(--space-xl) 0 var(--space-5);
+  background: linear-gradient(to bottom, transparent, var(--bg-surface) var(--space-lg));
+}
+
+/* The bar lines up with the message bodies, not with the avatars: it is the
+   next message, and it starts where theirs do (52px, see MessageBubble). */
+.thread-reply-foot__column {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding-left: 52px;
+}
+
+.thread-state {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
-  min-height: 24px;
-  padding: 2px 8px;
-  border: 1px solid color-mix(in srgb, var(--accent-green) 35%, transparent);
-  border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--accent-green) 10%, transparent);
+}
+
+.thread-state svg {
   color: var(--accent-green);
-  font-size: var(--font-size-xs);
-  font-weight: var(--weight-semibold);
 }
 
 /* ── Mobile top bar ── */

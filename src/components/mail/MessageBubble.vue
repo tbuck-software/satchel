@@ -224,6 +224,20 @@ const visibleAttachments = computed(() => {
   });
 });
 
+/*
+ * One rhythm on the desktop: the same step above and below a message, so the
+ * rule between two of them sits halfway. A draft is not a sent message on the
+ * canvas but an unfinished one lying on it, so it gets a card instead of a rule.
+ */
+const surfaceClasses = computed(() => {
+  if (props.message.isDraft) {
+    return ['message-surface--draft', ui.isMobile ? '' : 'message-surface--indented'];
+  }
+  return ui.isMobile
+    ? ['border-b border-border-muted py-4']
+    : ['message-surface--indented border-b border-border-muted py-5 last:border-b-0'];
+});
+
 const threadsStore = useThreadsStore();
 
 /**
@@ -365,12 +379,7 @@ function openSenderDetails() {
   <article
     class="message-surface group relative overflow-hidden"
     :class="[
-      ui.isMobile
-        ? 'mb-0 border-b border-border-muted px-0 py-4'
-        : 'message-surface--indented mb-0 border-b border-border-muted px-0 pt-6 last:border-b-0',
-      // The hover actions are the last row of an open message and stay in the
-      // layout while hidden, so the padding under them is the smaller step.
-      ui.isMobile ? '' : props.collapsed ? 'pb-6' : 'pb-4',
+      surfaceClasses,
       props.collapsed ? 'message-surface--collapsed' : '',
       props.keyboardFocused ? 'message-surface--keyboard-focused' : '',
     ]"
@@ -397,7 +406,9 @@ function openSenderDetails() {
         </CardButton>
         <Avatar v-else :name="senderName" :email="props.message.from.email" :size="avatarSize" />
         <div class="min-w-0">
-          <div class="flex items-center gap-2">
+          <!-- A draft's label goes under the name where the line is short; a
+               folded message keeps one line and lets its snippet give way. -->
+          <div class="flex items-center gap-x-2 gap-y-0.5" :class="{ 'flex-wrap': props.message.isDraft }">
             <AppButton
               class="sender-identity-trigger text-md font-semibold text-primary"
               :aria-label="$t('mail.recipients.showSenderDetails', { name: senderName })"
@@ -420,14 +431,11 @@ function openSenderDetails() {
               :pgp-signer-fingerprint="props.message.pgp?.signerFingerprint"
               @show-details="openSenderDetails"
             />
-            <span
-              v-if="props.message.isDraft"
-              class="rounded-md border border-border/80 bg-raised px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide text-secondary"
-            >
-              {{ $t('mail.message.draft') }}
+            <span v-if="props.message.isDraft" class="message-draft-label">
+              {{ $t('mail.message.draftNotSent') }}
             </span>
           </div>
-          <div class="message-address-line mt-0.5 text-xs text-tertiary">
+          <div class="message-address-line mt-0.5 text-xs text-secondary">
             <AppButton
               v-if="props.message.from.email"
               class="message-sender-email sender-identity-trigger"
@@ -458,20 +466,69 @@ function openSenderDetails() {
         </div>
       </div>
       <div class="flex items-start gap-1.5 shrink-0">
-        <IconButton
+        <!-- Desktop contextual actions, on hover beside the date: kept in the
+             header, a hidden row under every message would hold its height
+             open and push the rhythm apart. Mobile has the fixed thread bar. -->
+        <div
           v-if="!ui.isMobile"
-          size="sm"
-          class="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-          :title="$t('mail.message.addToTopicSingle')"
-          @click="topicsStore.openPicker({ itemType: 'message', itemIds: [props.message.id] })"
+          class="message-hover-actions opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
         >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M2.5 4.5C2.5 3.7 3.2 3 4 3H6.5L8 4.5H12C12.8 4.5 13.5 5.2 13.5 6V11.5C13.5 12.3 12.8 13 12 13H4C3.2 13 2.5 12.3 2.5 11.5V4.5Z" />
-            <path d="M8 7V11M6 9H10" />
-          </svg>
-        </IconButton>
+          <template v-if="!props.collapsed">
+            <!-- A draft is answered by finishing it, not by replying to yourself. -->
+            <template v-if="props.message.isDraft">
+              <IconButton size="sm" :title="$t('common.edit')" @click="emit('editDraft', props.message.id)">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M11.2 2.6l2.2 2.2L5.8 12.4 3 13l.6-2.8z"/>
+                  <path d="M2.5 14.5h11"/>
+                </svg>
+              </IconButton>
+              <IconButton
+                size="sm"
+                tone="danger"
+                :disabled="props.draftBusy"
+                :title="$t('mail.message.discardDraft')"
+                @click="emit('discardDraft', props.message.id)"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2.5 4h11M5.5 4V2.8A1.3 1.3 0 0 1 6.8 1.5h2.4a1.3 1.3 0 0 1 1.3 1.3V4"/>
+                  <path d="M12.6 4v9a1.5 1.5 0 0 1-1.5 1.5H4.9A1.5 1.5 0 0 1 3.4 13V4"/>
+                </svg>
+              </IconButton>
+            </template>
+            <template v-else-if="props.canReply">
+              <IconButton size="sm" :title="$t('common.reply')" @click="emit('reply')">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6 3L1 8l5 5"/>
+                  <path d="M1 8h9a5 5 0 015 5"/>
+                </svg>
+              </IconButton>
+              <IconButton size="sm" :title="$t('common.forward')" @click="emit('forward')">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10 3l5 5-5 5"/>
+                  <path d="M15 8H6a5 5 0 00-5 5"/>
+                </svg>
+              </IconButton>
+            </template>
+            <IconButton size="sm" :title="$t('mail.message.showSource')" @click="sourceDialogOpen = true">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 4L2.5 8 6 12"/>
+                <path d="M10 4l3.5 4L10 12"/>
+              </svg>
+            </IconButton>
+          </template>
+          <IconButton
+            size="sm"
+            :title="$t('mail.message.addToTopicSingle')"
+            @click="topicsStore.openPicker({ itemType: 'message', itemIds: [props.message.id] })"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M2.5 4.5C2.5 3.7 3.2 3 4 3H6.5L8 4.5H12C12.8 4.5 13.5 5.2 13.5 6V11.5C13.5 12.3 12.8 13 12 13H4C3.2 13 2.5 12.3 2.5 11.5V4.5Z" />
+              <path d="M8 7V11M6 9H10" />
+            </svg>
+          </IconButton>
+        </div>
         <div class="text-right">
-          <div class="text-xs text-tertiary font-medium">{{ fullTimestamp }}</div>
+          <div class="text-xs text-secondary font-medium">{{ fullTimestamp }}</div>
         </div>
         <IconButton
           v-if="!ui.isMobile"
@@ -581,7 +638,7 @@ function openSenderDetails() {
         />
         <EmailRenderer
           v-if="props.message.sourcePayload.kind === 'rss' && props.message.bodyHtml"
-          class="mt-5 text-secondary leading-relaxed"
+          class="mt-3 text-secondary leading-relaxed"
           :html="props.message.bodyHtml"
           :text="visibleBodyText"
           :sender-email="props.message.from?.email"
@@ -593,7 +650,7 @@ function openSenderDetails() {
       </template>
       <EmailRenderer
         v-else
-        class="mt-5 text-secondary leading-relaxed"
+        class="mt-3 text-secondary leading-relaxed"
         :html="props.message.bodyHtml"
         :text="visibleBodyText"
         :pgp-state="pgpState"
@@ -609,7 +666,7 @@ function openSenderDetails() {
     </div>
     <div
       v-if="!bodyLoaded"
-      class="message-body-loading mt-5"
+      class="message-body-loading mt-3"
       role="status"
       :aria-label="$t('mail.message.loading')"
       aria-busy="true"
@@ -620,7 +677,7 @@ function openSenderDetails() {
     </div>
     <AppBanner
       v-else-if="props.message.bodyLoadError"
-      class="mt-6"
+      class="mt-4"
       tone="danger"
       :title="$t('mail.message.bodyLoadFailed')"
     />
@@ -632,72 +689,6 @@ function openSenderDetails() {
         :key="attachment.id"
         :attachment="attachment"
       />
-    </div>
-
-    <!-- Desktop contextual actions; mobile already has the fixed thread bar. -->
-    <div
-      v-if="!ui.isMobile && (props.canReply || props.message.isDraft)"
-      class="mt-2 flex gap-2 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100"
-    >
-      <!-- A draft is answered by finishing it, not by replying to yourself. -->
-      <template v-if="props.message.isDraft">
-        <AppButton variant="soft" size="sm" @click="emit('editDraft', props.message.id)">
-          <template #icon>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M11.2 2.6l2.2 2.2L5.8 12.4 3 13l.6-2.8z"/>
-              <path d="M2.5 14.5h11"/>
-            </svg>
-          </template>
-          {{ $t('common.edit') }}
-        </AppButton>
-        <AppButton
-          variant="danger"
-          size="sm"
-          :disabled="props.draftBusy"
-          :title="$t('mail.message.discardDraft')"
-          @click="emit('discardDraft', props.message.id)"
-        >
-          <template #icon>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M2.5 4h11M5.5 4V2.8A1.3 1.3 0 0 1 6.8 1.5h2.4a1.3 1.3 0 0 1 1.3 1.3V4"/>
-              <path d="M12.6 4v9a1.5 1.5 0 0 1-1.5 1.5H4.9A1.5 1.5 0 0 1 3.4 13V4"/>
-            </svg>
-          </template>
-          {{ $t('common.discard') }}
-        </AppButton>
-      </template>
-      <AppButton v-if="!props.message.isDraft" variant="soft" size="sm" @click="emit('reply')">
-        <template #icon>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M6 3L1 8l5 5"/>
-            <path d="M1 8h9a5 5 0 015 5"/>
-          </svg>
-        </template>
-        {{ $t('common.reply') }}
-      </AppButton>
-      <AppButton v-if="!props.message.isDraft" variant="soft" size="sm" @click="emit('forward')">
-        <template #icon>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M10 3l5 5-5 5"/>
-            <path d="M15 8H6a5 5 0 00-5 5"/>
-          </svg>
-        </template>
-        {{ $t('common.forward') }}
-      </AppButton>
-      <AppButton
-        variant="ghost"
-        size="sm"
-        :title="$t('mail.message.sourceTitle')"
-        @click="sourceDialogOpen = true"
-      >
-        <template #icon>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M6 4L2.5 8 6 12"/>
-            <path d="M10 4l3.5 4L10 12"/>
-          </svg>
-        </template>
-        {{ $t('mail.message.source') }}
-      </AppButton>
     </div>
 
     </template>
@@ -827,6 +818,17 @@ function openSenderDetails() {
     box-shadow var(--duration-fast) var(--ease-out);
 }
 
+.message-surface--draft {
+  padding: var(--space-lg);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-raised) 45%, var(--bg-surface));
+}
+
+.message-surface--draft + .message-surface--draft {
+  margin-top: var(--space-md);
+}
+
 .message-surface--keyboard-focused {
   border-color: color-mix(in srgb, var(--accent-primary) 48%, var(--border-color));
   background: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-surface));
@@ -893,6 +895,26 @@ function openSenderDetails() {
   .message-address-separator {
     display: none;
   }
+}
+
+.message-draft-label {
+  flex-shrink: 0;
+  padding: var(--space-2xs) var(--space-1-5);
+  border: var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-3xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.message-hover-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  /* Pulled up to the date's line: the icons are taller than its text. */
+  margin-top: calc(var(--space-xs) * -1);
 }
 
 .message-collapse-toggle { width: 24px; flex: 0 0 auto; }
@@ -968,7 +990,7 @@ function openSenderDetails() {
 }
 
 .message-body-placeholder {
-  margin-top: var(--space-5);
+  margin-top: var(--space-md);
 }
 
 .message-body-skeleton {

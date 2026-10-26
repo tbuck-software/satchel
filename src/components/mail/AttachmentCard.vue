@@ -16,11 +16,11 @@ const attachmentActions = useAttachmentActions();
 const open = useAttachmentOpen(() => props.attachment);
 
 /*
- * A picture shows itself; everything else shows what it is.
+ * A picture shows itself in the tile; everything else shows what it is.
  *
  * The bound is the point: the card fetches the bytes to draw the thumbnail,
- * so a 40 MB raw photo would pull 40 MB over IPC to fill 168 by 96 pixels.
- * Past the bound the card falls back to the compact type row, which costs nothing.
+ * so a 40 MB raw photo would pull 40 MB over IPC to fill a 36-pixel tile.
+ * Past the bound the tile shows the type instead, which costs nothing.
  */
 const THUMBNAIL_MAX_BYTES = 2_000_000;
 
@@ -100,15 +100,13 @@ onBeforeUnmount(() => {
 
 <template>
   <!--
-    One surface either way. A picture gets a preview above its name; any other
-    file is a single row, because a large box with a glyph in it says less than
-    the type tile does and costs four times the height.
+    One row for every kind of file, so a group of them lines up: a picture
+    puts its thumbnail where any other file has its type tile. A preview card
+    above the name was four times the height of the row beside it, and the
+    group read as two sizes that happened to share a line. The full picture
+    is one click away in the preview.
   -->
-  <div
-    ref="rootRef"
-    class="attachment-card group"
-    :class="isThumbnailable ? 'attachment-card--image' : 'attachment-card--file'"
-  >
+  <div ref="rootRef" class="attachment-card group">
     <CardButton
       class="attachment-card__open"
       :title="open.primaryTitle.value"
@@ -117,10 +115,10 @@ onBeforeUnmount(() => {
       @click="open.openPrimary"
       @keydown="open.handlePreviewKey"
     >
-      <span v-if="isThumbnailable" class="attachment-card__preview">
-        <img v-if="thumbnailUrl" :src="thumbnailUrl" :alt="props.attachment.filename">
+      <span v-if="isThumbnailable" class="attachment-card__tile attachment-card__tile--image" aria-hidden="true">
+        <img v-if="thumbnailUrl" :src="thumbnailUrl" alt="">
         <!-- Until the bytes arrive, or if they never do: still a picture. -->
-        <svg v-else width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="2" y="3" width="12" height="10" rx="1.5" />
           <circle cx="5.75" cy="6.25" r="1.25" />
           <path d="m14 10.5-3.5-3.5L4 13" />
@@ -180,8 +178,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .attachment-card {
   position: relative;
-  /* A row of cards wraps; a file row must not stretch to a picture's height. */
-  align-self: flex-start;
+  width: 216px;
   border: var(--border-default);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--bg-raised) 60%, var(--bg-surface));
@@ -193,43 +190,11 @@ onBeforeUnmount(() => {
   background: var(--bg-raised);
 }
 
-.attachment-card--image {
-  width: 168px;
-}
-
-.attachment-card--file {
-  width: 216px;
-}
-
 .attachment-card__open {
   width: 100%;
-}
-
-.attachment-card--image .attachment-card__open {
-  flex-direction: column;
-}
-
-.attachment-card--file .attachment-card__open {
   align-items: center;
   gap: var(--space-2-5);
   padding: var(--space-sm);
-}
-
-.attachment-card__preview {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 96px;
-  overflow: hidden;
-  border-bottom: var(--border-muted);
-  background: color-mix(in srgb, var(--text-tertiary) 10%, transparent);
-  color: var(--text-secondary);
-}
-
-.attachment-card__preview img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
 }
 
 .attachment-card__tile {
@@ -245,6 +210,16 @@ onBeforeUnmount(() => {
   font-size: var(--font-size-3xs);
   font-weight: var(--weight-bold);
   letter-spacing: 0.04em;
+}
+
+.attachment-card__tile--image {
+  overflow: hidden;
+}
+
+.attachment-card__tile--image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .attachment-card__tile[data-kind='pdf'] {
@@ -274,10 +249,6 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-.attachment-card--image .attachment-card__meta {
-  padding: var(--space-sm) var(--space-md);
-}
-
 .attachment-card__name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -288,7 +259,7 @@ onBeforeUnmount(() => {
 }
 
 .attachment-card__size {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: var(--font-size-2xs);
 }
 
@@ -308,7 +279,7 @@ onBeforeUnmount(() => {
   transition: opacity var(--duration-fast) var(--ease-out);
 }
 
-.attachment-card--file .attachment-card__actions {
+.attachment-card__actions {
   top: 50%;
   transform: translateY(-50%);
 }
