@@ -20,6 +20,22 @@ test('opens a reply composer for the active conversation', async ({ page }) => {
   await expect(composer.getByText('Reply', { exact: true })).toBeVisible();
 });
 
+test('tabs from addressing through the subject to the message body', async ({ page }) => {
+  await page.goto('/compose');
+  await page.getByLabel('Sender', { exact: true }).focus();
+  await page.keyboard.press('Tab');
+  const to = page.getByPlaceholder('recipient@example.com');
+  await expect(to).toBeFocused();
+  await to.fill('person@example.com');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Cc/Bcc', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('Subject', { exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.ProseMirror')).toBeFocused();
+});
+
 test('keeps long composer text from covering the conversation history', async ({ page }) => {
   await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });

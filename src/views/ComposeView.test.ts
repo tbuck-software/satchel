@@ -221,6 +221,33 @@ beforeEach(() => {
   harness.realEditor = false;
 });
 
+describe('composer fields and actions', () => {
+  it('keeps the sender and recipients before the subject and body in DOM order', async () => {
+    const wrapper = render(['boss@example.com'], true, {
+      initialCc: ['copy@example.com'], initialBcc: ['private@example.com'],
+    });
+    await flushPromises();
+
+    const fields = wrapper.findAll('select.sender-select, recipient-chips-stub, .compose-subject, .plain-editor');
+    expect(fields.map((field) => field.element.tagName)).toEqual([
+      'SELECT', 'RECIPIENT-CHIPS-STUB', 'RECIPIENT-CHIPS-STUB', 'RECIPIENT-CHIPS-STUB', 'INPUT', 'TEXTAREA',
+    ]);
+    expect((wrapper.get('select.sender-select').element as HTMLSelectElement).value).toBe('account-1|me@example.com');
+    expect(wrapper.get('.footer').find('select').exists()).toBe(false);
+  });
+
+  it('names all utility actions and advertises the platform send shortcut', async () => {
+    const wrapper = render();
+    await flushPromises();
+
+    for (const title of ['Attach file', 'Use template', 'Send later', 'More options']) {
+      expect(wrapper.get(`[title="${title}"]`).attributes('aria-label')).toBe(title);
+    }
+    expect(sendButton(wrapper).attributes('title')).toMatch(/^Send · /);
+    expect(sendButton(wrapper).attributes('aria-keyshortcuts')).toMatch(/^(Control|Meta)\+Enter$/);
+  });
+});
+
 describe.each([true, false])('outgoing conversation history, plain text: %s', (plainText) => {
   it.each(['reply', 'reply-all', 'forward'] as const)('includes earlier messages when sending a %s', async (mode) => {
     harness.composePlainText = plainText;

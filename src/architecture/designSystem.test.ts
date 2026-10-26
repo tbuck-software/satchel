@@ -258,7 +258,6 @@ const KNOWN_SCALE_LITERAL_GROUPS: KnownGroup[] = [
     reason: 'View-level layout sizing its own chrome; UI-11 puts it on the scale.',
     files: {
       'src/views/CalendarView.vue': 1,
-      'src/views/ComposeView.vue': 2,
       'src/views/InboxView.vue': 1,
       'src/views/NewSendersView.vue': 2,
       'src/views/SearchView.vue': 1,
@@ -269,7 +268,7 @@ const KNOWN_SCALE_LITERAL_GROUPS: KnownGroup[] = [
 const KNOWN_SCALE_LITERALS = flatten(KNOWN_SCALE_LITERAL_GROUPS);
 
 // Only ever lower this. See KNOWN_SCALE_LITERAL_GROUPS.
-const MAX_KNOWN_SCALE_LITERALS = 53;
+const MAX_KNOWN_SCALE_LITERALS = 51;
 
 // ---------------------------------------------------------------------------
 // Rule 4b — icons share one line weight, a few grids and three sizes.
@@ -949,7 +948,6 @@ const MEASURED_TEXT_TOKENS: Record<string, number> = {
   '--text-primary': 4.5,
   '--text-secondary': 4.5,
   '--text-tertiary': 4.5,
-  '--text-accent': 4.5,
 };
 const CSS_RULE = /([^{}]*)\{([^{}]*)\}/g;
 

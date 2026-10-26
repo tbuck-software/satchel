@@ -51,6 +51,7 @@ import {
   formatTimestamp,
   mergeRecipients,
 } from '@/utils/composerText';
+import { ariaKeyshortcuts, formatBinding } from '@/config/keybindings';
 import { composerSendBlocker } from '@/utils/composerSendBlocker';
 import { deferredChangeTracker } from '@/utils/deferredChangeTracker';
 import {
@@ -374,6 +375,9 @@ const sendBlockedHint = computed(() => {
   }
 });
 const sendHintId = `compose-send-hint-${useId()}`;
+const senderFieldId = `compose-sender-${useId()}`;
+const subjectFieldId = `compose-subject-${useId()}`;
+const sendShortcut = { label: formatBinding('mod+enter'), aria: ariaKeyshortcuts('mod+enter') };
 
 watch(accountId, () => {
   // Keep the alias only when it belongs to the newly selected account; the
@@ -1123,14 +1127,38 @@ defineExpose({
       </AppBanner>
     </div>
 
-    <input
-      v-model="subject"
-      class="compose-subject"
-      :placeholder="$t('common.subject')"
-      :aria-label="$t('common.subject')"
-      @keydown.meta.enter.prevent="send"
-      @keydown.ctrl.enter.prevent="send"
-    />
+    <div class="row sender-row">
+      <label class="label" :for="senderFieldId">{{ $t('common.from') }}</label>
+      <div class="sender-field">
+        <select
+          class="sender-select"
+          :id="senderFieldId"
+          :disabled="sending"
+          :title="$t('compose.sender')"
+          :aria-label="$t('compose.sender')"
+          :value="currentIdentityKey"
+          @change="onIdentitySelected"
+        >
+          <template v-if="identityChoices.length > 1">
+            <optgroup
+              v-for="group in identityChoices"
+              :key="group.account.id"
+              :label="group.account.displayName"
+            >
+              <option v-for="option in group.options" :key="option.key" :value="option.key">{{ option.label }}</option>
+            </optgroup>
+          </template>
+          <template v-else>
+            <option
+              v-for="option in identityChoices[0]?.options ?? []"
+              :key="option.key"
+              :value="option.key"
+            >{{ option.label }}</option>
+          </template>
+        </select>
+        <AppIcon class="sender-chevron" size="sm"><path d="m4 6 4 4 4-4" /></AppIcon>
+      </div>
+    </div>
 
     <div class="row recipient-row">
       <label class="label">{{ $t('common.to') }}</label>
@@ -1166,6 +1194,18 @@ defineExpose({
         <RecipientChips v-model="bcc" :placeholder="$t('compose.recipients.bccPlaceholder')" class="field" @submit="send" />
       </div>
     </template>
+
+    <div class="row subject-row">
+      <label class="label" :for="subjectFieldId">{{ $t('common.subject') }}</label>
+      <input
+        :id="subjectFieldId"
+        v-model="subject"
+        class="compose-subject"
+        :aria-label="$t('common.subject')"
+        @keydown.meta.enter.prevent="send"
+        @keydown.ctrl.enter.prevent="send"
+      />
+    </div>
 
     <div v-if="hasQuotedHistory" class="history-control">
       <span>{{ $t('compose.context.included') }}</span>
@@ -1264,7 +1304,7 @@ defineExpose({
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg>
         </IconButton>
         <details class="more-settings">
-          <summary class="more-summary" :title="$t('compose.toolbar.more')">
+          <summary class="more-summary" :title="$t('compose.toolbar.more')" :aria-label="$t('compose.toolbar.more')">
             •••<span v-if="advancedActive" class="tool-dot" aria-hidden="true" />
           </summary>
           <div class="advanced-panel">
@@ -1332,35 +1372,14 @@ defineExpose({
           </div>
         </details>
         <span class="footer-spacer" />
-        <select
-          class="account-compact"
-          :title="$t('compose.sender')"
-          :aria-label="$t('compose.sender')"
-          :value="currentIdentityKey"
-          @change="onIdentitySelected"
-        >
-          <template v-if="identityChoices.length > 1">
-            <optgroup
-              v-for="group in identityChoices"
-              :key="group.account.id"
-              :label="group.account.displayName"
-            >
-              <option v-for="option in group.options" :key="option.key" :value="option.key">{{ option.label }}</option>
-            </optgroup>
-          </template>
-          <template v-else>
-            <option
-              v-for="option in identityChoices[0]?.options ?? []"
-              :key="option.key"
-              :value="option.key"
-            >{{ option.label }}</option>
-          </template>
-        </select>
         <!-- A disabled button gets no hover of its own; the wrapper carries the tooltip. -->
         <span class="send-wrap" :title="sendBlockedHint ?? undefined" data-testid="compose-send-wrap">
           <AppButton
             size="sm"
             variant="primary"
+            class="send-button"
+            :title="sendBlockedHint ?? $t('compose.send')"
+            :shortcut="canSend ? sendShortcut : null"
             :disabled="!canSend"
             :aria-describedby="sendBlockedHint ? sendHintId : undefined"
             @click="send"
@@ -1439,8 +1458,8 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 12px;
+  gap: var(--space-lg);
+  padding-bottom: var(--space-md);
   border-bottom: 1px solid var(--border-color-muted);
 }
 
@@ -1595,7 +1614,10 @@ textarea:focus {
   flex-direction: column;
   gap: 0;
   min-height: 0;
-  padding: 18px 22px 14px;
+  width: 100%;
+  max-width: calc(48rem + var(--space-xl) * 2);
+  margin-inline: auto;
+  padding: var(--space-lg) var(--space-xl) var(--space-3-5);
   overflow: hidden;
   background: transparent;
 }
@@ -1605,18 +1627,16 @@ textarea:focus {
 }
 
 .compose-subject {
-  flex: none;
   width: 100%;
-  min-height: 46px;
-  padding: 0 2px 12px;
+  min-width: 0;
+  min-height: 36px;
+  padding: var(--space-sm) 0;
   border: 0;
-  border-bottom: 1px solid var(--border-color-muted);
   border-radius: 0;
   background: transparent;
   color: var(--text-primary);
-  font-size: 21px;
-  font-weight: var(--weight-strong);
-  letter-spacing: -0.025em;
+  font-size: var(--font-size-lg);
+  font-weight: var(--weight-semibold);
 }
 
 .compose-subject::placeholder { color: var(--text-tertiary); }
@@ -1624,20 +1644,20 @@ textarea:focus {
 
 .compose .row {
   flex: none;
-  grid-template-columns: 44px minmax(0, 1fr);
-  min-height: 42px;
-  gap: 8px;
-  padding: 5px 0;
+  grid-template-columns: 64px minmax(0, 1fr);
+  min-height: 44px;
+  gap: var(--space-sm);
+  padding: var(--space-xs) 0;
   border-bottom: 1px solid var(--border-color-muted);
 }
 
 .compose .recipient-row {
-  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
 }
 
 .compose .label {
   align-self: center;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: var(--font-size-sm);
   font-weight: var(--weight-medium);
   letter-spacing: 0;
@@ -1851,29 +1871,54 @@ textarea:focus {
 
 .send-wrap { display: inline-flex; }
 
-.account-compact {
-  width: auto;
-  max-width: 190px;
-  height: 34px;
-  padding: 0 28px 0 9px;
-  border-color: transparent;
-  background-color: transparent;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
+.sender-field {
+  position: relative;
+  min-width: 0;
+  justify-self: start;
+  max-width: 100%;
 }
 
-.account-compact:hover { border-color: var(--border-color); color: var(--text-secondary); }
+.sender-select {
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-sm) var(--space-2xl) var(--space-sm) var(--space-md);
+  border: var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.sender-select option,
+.sender-select optgroup {
+  background: var(--bg-overlay);
+  color: var(--text-primary);
+}
+
+.sender-chevron {
+  position: absolute;
+  right: var(--space-sm);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.send-wrap :deep(.send-button:disabled) {
+  opacity: 1;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+}
 
 
 .compose .status,
 .compose .schedule-info { font-size: var(--font-size-xs); }
 
 @media (max-width: 620px) {
-  .compose { padding: 14px 14px 10px; }
-  .compose-subject { font-size: 18px; }
-  /* The panel no longer carries a sender select, so the picker has to
-     survive on small screens — shrink it instead of hiding it. */
-  .account-compact { max-width: 132px; }
+  .compose { padding: var(--space-3-5) var(--space-3-5) var(--space-2-5); }
   .compose .compose-attachments :deep(.empty) > span { display: none; }
   .composer-header { display: none; }
 }
