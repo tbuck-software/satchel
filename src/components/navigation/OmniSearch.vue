@@ -68,6 +68,7 @@ const { recentIds: recentCommandIds, record: recordCommand } = useRecentCommands
 
 const inputRef = ref<HTMLInputElement | null>(null);
 const panelRef = ref<HTMLElement | null>(null);
+const resultsRef = ref<HTMLElement | null>(null);
 const activeIndex = ref(0);
 const reminderQuery = ref('');
 
@@ -262,9 +263,13 @@ watch(
   { immediate: true },
 );
 
-watch(activeIndex, async () => {
+watch(activeIndex, async (index) => {
   await nextTick();
-  if (activeId.value) {
+  // Back at the first row, the syntax hint and its group heading come back
+  // with it instead of staying scrolled away above it.
+  if (index === 0) {
+    resultsRef.value?.scrollTo({ top: 0 });
+  } else if (activeId.value) {
     document.getElementById(activeId.value)?.scrollIntoView({ block: 'nearest' });
   }
 });
@@ -397,7 +402,7 @@ function onEnter(event: KeyboardEvent) {
             />
           </div>
 
-          <div class="results-region">
+          <div ref="resultsRef" class="results-region">
             <p v-for="warning in ui.omniMode === 'default' ? warnings : []" :key="warning" class="warning" role="status">
               {{ warning }}
             </p>
@@ -570,6 +575,9 @@ function onEnter(event: KeyboardEvent) {
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
+  /* A selected row scrolled into view stops clear of the footer's rule; on the
+     last row that reveals the list's closing padding as well. */
+  scroll-padding-bottom: var(--space-md);
 }
 
 .search-row {
@@ -617,26 +625,13 @@ function onEnter(event: KeyboardEvent) {
   .spinner-slot--visible { animation-duration: 2s; }
 }
 
-/* The bottom padding is the fade's own room: at the end of the list the fade
-   lies over it rather than over the last row. */
+/* No fade above the footer: a gradient over the last visible row made an
+   available command look disabled. The footer's rule is the scroll edge, and
+   the list ends on clear padding. */
 .list {
-  padding: 6px 6px var(--space-xl);
+  padding: 6px 6px var(--space-md);
   display: grid;
   gap: 2px;
-}
-
-/* A scroll edge above the footer. Without it the last visible row ran into
-   the footer's rule cut in half, which read as a rendering fault rather than
-   as "there is more". */
-.results-region::after {
-  content: '';
-  position: sticky;
-  bottom: 0;
-  display: block;
-  height: var(--space-xl);
-  margin-top: calc(var(--space-xl) * -1);
-  background: linear-gradient(to bottom, transparent, var(--bg-overlay));
-  pointer-events: none;
 }
 
 .syntax-hint {

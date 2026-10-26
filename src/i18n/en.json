@@ -2839,6 +2839,8 @@
       "collapseQuotedHint": "Fold earlier messages behind a compact history toggle.",
       "dark": "Dark",
       "description": "How Satchel looks and behaves.",
+      "groupInterface": "Interface",
+      "groupMail": "Mail",
       "light": "Light",
       "plainTextCompose": "Compose new messages as plain text",
       "plainTextComposeHint": "The composer then sends no HTML.",

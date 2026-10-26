@@ -2839,6 +2839,8 @@
       "collapseQuotedHint": "Frühere Nachrichten hinter einem kompakten Verlaufsschalter zusammenfassen.",
       "dark": "Dunkel",
       "description": "Darstellung und Verhalten von Satchel.",
+      "groupInterface": "Oberfläche",
+      "groupMail": "Mail",
       "light": "Hell",
       "plainTextCompose": "Neue Nachrichten als reinen Text verfassen",
       "plainTextComposeHint": "Der Composer sendet dann kein HTML mit.",

@@ -118,6 +118,31 @@ test('offers commands in the omni panel while the query is empty', async ({ page
   await expect(panel.getByRole('option', { name: 'Compose new email' })).toBeVisible();
 });
 
+/**
+ * The list once ended under a fade, so the last visible command looked
+ * disabled. Without it, arrow keys have to bring a whole row clear of the
+ * footer's rule, and the way back to the top has to bring the heading too.
+ */
+test('scrolls the selected command clear of the omni footer', async ({ page }) => {
+  await page.keyboard.press('ControlOrMeta+k');
+  const panel = page.getByRole('dialog', { name: 'Search and commands' });
+  await expect(panel.getByRole('option', { name: 'Compose new email' })).toBeVisible();
+  const selected = panel.locator('[role="option"][aria-selected="true"]');
+  const footer = panel.locator('footer.hints');
+  const clearance = async () => {
+    const [row, foot] = await Promise.all([selected.boundingBox(), footer.boundingBox()]);
+    return row && foot ? foot.y - (row.y + row.height) : Number.NaN;
+  };
+
+  // Up from the first command wraps to the last one.
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(clearance).toBeGreaterThanOrEqual(11.5);
+
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(() => panel.locator('.results-region').evaluate((el) => el.scrollTop)).toBe(0);
+  await expect(panel.getByText('Narrow mail with')).toBeInViewport();
+});
+
 test('hands a query over to the full search page', async ({ page }) => {
   await page.getByTitle('Search (/)').click();
   await page.getByLabel('Search term').fill('Invoice');

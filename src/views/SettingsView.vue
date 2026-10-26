@@ -221,6 +221,9 @@ onBeforeUnmount(() => unregisterFilter?.());
 .settings-view__scroll {
   min-height: 0;
   overflow-y: auto;
+  /* A classic scrollbar would shift the centred column off the pane title
+     above it; reserving the gutter on both sides keeps the two aligned. */
+  scrollbar-gutter: stable both-edges;
   border-top: 1px solid var(--border-color-muted);
 }
 

@@ -1444,7 +1444,9 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   gap: var(--space-lg);
-  padding-bottom: var(--space-md);
+  /* With the page's 16px padding the title's line box starts 24px down. The
+     header exists only on the page, so the embedded composer keeps its edge. */
+  padding-block: var(--space-sm) var(--space-lg);
   border-bottom: 1px solid var(--border-color-muted);
 }
 
