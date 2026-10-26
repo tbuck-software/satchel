@@ -227,7 +227,7 @@ const visibleAttachments = computed(() => {
 /*
  * One rhythm on the desktop: the same step above and below a message, so the
  * rule between two of them sits halfway. A draft is not a sent message on the
- * canvas but an unfinished one lying on it, so it gets a card instead of a rule.
+ * canvas but an unfinished one lying on it, so it gets an edge instead of a rule.
  */
 const surfaceClasses = computed(() => {
   if (props.message.isDraft) {
@@ -818,25 +818,25 @@ function openSenderDetails() {
     box-shadow var(--duration-fast) var(--ease-out);
 }
 
-/* The card hangs into the gutter by its own padding and border, so the
-   draft's avatar and text stand on the same axes as every other message's.
-   The reply foot's bar bleeds by the same amount (ThreadView). A phone has a
-   16px gutter, so the card there keeps a smaller inset. */
+/* A draft keeps every axis of the messages above it — avatar, name, body —
+   and says "pending" with a thin petrol edge in the gutter beside it, the
+   colour of the button that resumes it. The edge sits outside the column, so the
+   avatar stays on the line the other avatars stand on; a card would have to
+   hang its frame into the gutter (wider than the column) or push the avatar
+   in (off the axis). The edge spans the content, not the padding: it starts
+   level with the avatar and ends with the body. */
 .message-surface--draft {
-  --draft-inset: var(--space-lg);
-  margin-inline: calc(-1 * (var(--draft-inset) + 1px));
-  padding: var(--draft-inset);
-  border: 1px dashed color-mix(in srgb, var(--text-tertiary) 45%, var(--border-color));
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-raised) 45%, var(--bg-surface));
+  --draft-gap: var(--space-md);
+  margin-block-start: var(--space-5);
+  margin-inline-start: calc(-1 * (var(--draft-gap) + 2px));
+  padding-inline-start: var(--draft-gap);
+  border-inline-start: 2px solid color-mix(in srgb, var(--accent-primary) 70%, transparent);
 }
 
+/* A phone has a 16px gutter. */
 .message-surface--draft-compact {
-  --draft-inset: var(--space-md);
-}
-
-.message-surface--draft + .message-surface--draft {
-  margin-top: var(--space-md);
+  --draft-gap: var(--space-sm);
+  margin-block-start: var(--space-lg);
 }
 
 .message-surface--keyboard-focused {

@@ -683,7 +683,7 @@ function onEnter(event: KeyboardEvent) {
 
 /* The row Enter will run, marked the way the open thread is in the list: a
    tinted fill alone was a step neighbours could be mistaken for, the petrol
-   edge is not. */
+   ring is not. */
 .row.active {
   background: var(--bg-active);
   box-shadow: var(--selection-edge);

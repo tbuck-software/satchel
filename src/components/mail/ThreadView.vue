@@ -907,51 +907,54 @@ function showEntireThread() {
 <template>
   <section v-if="thread" class="flex flex-col h-full overflow-hidden bg-surface">
     <!-- ═══ DESKTOP TOOLBAR ═══ -->
-    <ThreadToolbar
-      v-if="!ui.isMobile"
-      :thread-id="thread.id"
-      :subject="thread.subject"
-      :is-unread="isUnread"
-      :is-starred="thread.isStarred"
-      :is-aside="thread.workflowState === 'aside'"
-      :is-done="thread.workflowState === 'done'"
-      :is-muted="thread.isMuted"
-      :show-back="showBack"
-      :position="props.position ?? 0"
-      :total="props.total ?? 0"
-      :sender-address="latestSenderAddress"
-      :move-targets="moveTargets"
-      :can-reply="canReply"
-      :reply-in-foot="showReplyFoot"
-      @back="emit('back')"
-      @previous="emit('previous')"
-      @next="emit('next')"
-      @archive="archiveThread"
-      @move-to-inbox="void moveToInbox()"
-      @toggle-read="void toggleReadState()"
-      @toggle-pin="togglePin"
-      @set-aside="toggleAside"
-      @snooze="snoozeThread"
-      @delete="deleteThread"
-      @toggle-muted="toggleMuted"
-      @spam="markSpam"
-      @block="blockSender"
-      @move="moveThread"
-      @print="printThread"
-      :attachment-count="downloadableAttachments.length"
-      :reader-zoom="settings.readerZoom"
-      @zoom="(delta) => settings.setReaderZoom(delta === 0 ? 100 : settings.readerZoom + delta)"
-      @save-attachments="void saveAllAttachments()"
-      @copy-markdown="copyMarkdown"
-      @copy-link="void messageLinks.copy(thread.id)"
-      @export="exportThread"
-      @reply="replyThread"
-      @resend="resendThread"
-      @forward="forwardThread"
-      @all-actions="ui.openOmni()"
-      @organize="void organizeThread($event)"
-      @add-to-topic="openTopicPicker"
-    />
+    <!-- The frame narrows the toolbar to the reading column, so its first and
+         last controls stand on the column's edges rather than the pane's. -->
+    <div v-if="!ui.isMobile" class="thread-toolbar-frame" data-tauri-drag-region>
+      <ThreadToolbar
+        :thread-id="thread.id"
+        :subject="thread.subject"
+        :is-unread="isUnread"
+        :is-starred="thread.isStarred"
+        :is-aside="thread.workflowState === 'aside'"
+        :is-done="thread.workflowState === 'done'"
+        :is-muted="thread.isMuted"
+        :show-back="showBack"
+        :position="props.position ?? 0"
+        :total="props.total ?? 0"
+        :sender-address="latestSenderAddress"
+        :move-targets="moveTargets"
+        :can-reply="canReply"
+        :reply-in-foot="showReplyFoot"
+        @back="emit('back')"
+        @previous="emit('previous')"
+        @next="emit('next')"
+        @archive="archiveThread"
+        @move-to-inbox="void moveToInbox()"
+        @toggle-read="void toggleReadState()"
+        @toggle-pin="togglePin"
+        @set-aside="toggleAside"
+        @snooze="snoozeThread"
+        @delete="deleteThread"
+        @toggle-muted="toggleMuted"
+        @spam="markSpam"
+        @block="blockSender"
+        @move="moveThread"
+        @print="printThread"
+        :attachment-count="downloadableAttachments.length"
+        :reader-zoom="settings.readerZoom"
+        @zoom="(delta) => settings.setReaderZoom(delta === 0 ? 100 : settings.readerZoom + delta)"
+        @save-attachments="void saveAllAttachments()"
+        @copy-markdown="copyMarkdown"
+        @copy-link="void messageLinks.copy(thread.id)"
+        @export="exportThread"
+        @reply="replyThread"
+        @resend="resendThread"
+        @forward="forwardThread"
+        @all-actions="ui.openOmni()"
+        @organize="void organizeThread($event)"
+        @add-to-topic="openTopicPicker"
+      />
+    </div>
 
     <!-- ═══ MOBILE TOP BAR ═══ -->
     <div v-else class="mobile-top-bar" data-tauri-drag-region>
@@ -1058,7 +1061,6 @@ function showEntireThread() {
       <div v-if="showReplyFoot" ref="replyFoot" class="thread-reply-foot">
         <div class="thread-reply-foot__column">
           <ThreadReplyBar
-            class="thread-reply-foot__bar"
             :recipient="footRecipientName"
             :identity="threadAccount?.displayName ?? ''"
             :identity-color="threadAccount?.color ?? null"
@@ -1117,6 +1119,17 @@ function showEntireThread() {
   padding: var(--space-xl) calc(var(--space-5) * 2) var(--space-2xl);
 }
 
+/* The column's left edge is the content's side padding, or half of what is
+   left beside 48rem once the pane is wider; the toolbar pads itself by
+   --space-xl, so the frame adds the difference. */
+.thread-toolbar-frame {
+  flex-shrink: 0;
+  padding-inline: max(
+    calc(var(--space-5) * 2 - var(--space-xl)),
+    calc((100% - 48rem) / 2 - var(--space-xl))
+  );
+}
+
 /*
  * 48rem leaves the body (the column less the 52px avatar indent) at about
  * 716px, so the 640–700px tables a lot of HTML mail is built on still fit
@@ -1147,16 +1160,11 @@ function showEntireThread() {
   background: linear-gradient(to bottom, transparent, var(--bg-surface) var(--space-lg));
 }
 
-/* The bar is a card like the draft above it and hangs into the gutter by the
-   same amount (padding plus border, see .message-surface--draft): both cards
-   share their edges, and the bar's text stands on the avatar axis. */
+/* The bar spans exactly the reading column: its edges stand on the avatar
+   axis and the date's, the same lines every message above it keeps. */
 .thread-reply-foot__column {
   max-width: 48rem;
   margin: 0 auto;
-}
-
-.thread-reply-foot__bar {
-  margin-inline: calc(-1 * (var(--space-lg) + 1px));
 }
 
 .thread-state {

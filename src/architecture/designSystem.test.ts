@@ -1337,7 +1337,7 @@ describe('design system: text on a self-declared surface stays readable', () => 
     const found = violationsInSource(source, path, 'contrast');
 
     expect(found.map((entry) => `${entry.line} ${entry.detail}`)).toEqual([
-      '4 .thin: --text-tertiary on var(--accent-primary) is 1.71:1 in dark',
+      '4 .thin: --text-tertiary on var(--accent-primary) is 1.86:1 in dark',
     ]);
   });
 

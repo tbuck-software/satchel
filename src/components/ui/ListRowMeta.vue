@@ -19,7 +19,9 @@ defineProps<{ time: string }>();
 .list-row-meta__time {
   display: block;
   padding-top: var(--space-2xs);
-  color: var(--text-tertiary);
+  /* When the mail came is information, not a hint: secondary, like the
+     reader's own timestamp. */
+  color: var(--text-secondary);
   font-size: var(--font-size-xs);
   line-height: 1.4;
   font-variant-numeric: tabular-nums;

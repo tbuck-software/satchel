@@ -697,7 +697,7 @@ function onDragStart(event: DragEvent) {
 
 /* The open thread is a sheet lifted off the list, the same treatment the
    active nav item gets. On paper a fill alone is a 1.07:1 step, so the petrol
-   edge says "this one" where the sheet alone only says "raised" — the same
+   ring says "this one" where the sheet alone only says "raised" — the same
    pair marks the open search result. */
 .thread-row__surface--open {
   background: var(--bg-surface);

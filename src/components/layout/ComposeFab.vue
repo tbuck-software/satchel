@@ -39,10 +39,13 @@ function compose() {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* The platform's FAB: a 56px circle, the same shape as the undo FAB that
+     mirrors it in the other corner. ThreadGroupList's end inset is sized to
+     clear this footprint. */
   width: 56px;
   height: 56px;
   border: 0;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-full);
   color: var(--text-on-accent);
   background: var(--accent-primary);
   box-shadow: var(--shadow-lg);

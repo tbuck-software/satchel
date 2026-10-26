@@ -88,8 +88,8 @@ the unread dot, so the one saturated colour in the window still means something.
 | Token              | Light     | Dark      | Usage                           |
 |--------------------|-----------|-----------|---------------------------------|
 | `--text-primary`   | `#1c1b19` | `#e9edf3` | Headlines, primary text         |
-| `--text-secondary` | `#4f4b44` | `#a6aebc` | Body text, labels               |
-| `--text-tertiary`  | `#6a655b` | `#939cab` | Timestamps, hints, disabled     |
+| `--text-secondary` | `#4f4b44` | `#b1b8c4` | Body text, labels, metadata that carries information (times, sizes, accounts) |
+| `--text-tertiary`  | `#6a655b` | `#9ba3b1` | Snippets, hints, placeholders, disabled |
 | `--text-inverse`   | `#faf9f6` | `#111214` | Text on accent backgrounds      |
 | `--text-accent`    | `#125a66` | `#5fb3bf` | Accent-coloured text: links, action labels, keycaps; `text-accent` in Tailwind |
 
@@ -104,8 +104,8 @@ Selection contrast uses the same resolved-token luminance calculation as
 | Text token | Dark active | Dark active hover | Light active | Light active hover |
 |------------|-------------|-------------------|--------------|--------------------|
 | `--text-primary` | 11.74 : 1 | 10.91 : 1 | 14.17 : 1 | 13.63 : 1 |
-| `--text-secondary` | 6.18 : 1 | 5.74 : 1 | 7.14 : 1 | 6.87 : 1 |
-| `--text-tertiary` | 4.98 : 1 | 4.63 : 1 | 4.77 : 1 | 4.59 : 1 |
+| `--text-secondary` | 6.91 : 1 | 6.42 : 1 | 7.14 : 1 | 6.87 : 1 |
+| `--text-tertiary` | 5.43 : 1 | 5.05 : 1 | 4.77 : 1 | 4.59 : 1 |
 | `--text-accent` | 5.71 : 1 | 5.30 : 1 | 6.45 : 1 | 6.21 : 1 |
 
 ### Borders
@@ -191,7 +191,8 @@ ink mixed from the identity colour and `--text-primary`.
 
 The open row of a list — inbox, priority group, search — is one treatment:
 `--bg-surface` with `box-shadow: var(--selection-edge), var(--shadow-sm)`, a
-sheet with a 3px petrol edge. A tinted fill is the checked (multi-select) state,
+sheet outlined by a petrol hairline. The ring follows the rounded corners, where
+a leading bar had to bend around them. A tinted fill is the checked (multi-select) state,
 not the open one, and no group draws a surface of its own for the sheet to sit in.
 
 Stacks use up to three offset sender avatars, the count next to the sender,
@@ -297,7 +298,7 @@ Literals go to the nearest step: 4–7px `xs`, 8–11px `sm`, 12–15px `md`,
 | `--shadow-md`  | `0 8px 24px …0.10` + hairline            | `0 8px 24px …0.35`            | Dropdowns, cards   |
 | `--shadow-lg`  | `0 16px 48px …0.14` + hairline           | `0 16px 48px …0.45`           | Modals, overlays   |
 | `--shadow-glow`| `0 0 20px …0.10`                         | `0 0 20px …0.15`              | Focus glow         |
-| `--selection-edge` | `inset 3px 0 0 var(--accent-primary)` | same                   | The open list row's edge, paired with `--shadow-sm` |
+| `--selection-edge` | `inset 0 0 0 1px` `--accent-primary` at 70% | same           | The open list row's ring, paired with `--shadow-sm` |
 
 All three light-theme shadows carry a hairline ring of their own. A white sheet
 on pale paper is a 1.07 : 1 step, and a drop shadow draws no top edge — without

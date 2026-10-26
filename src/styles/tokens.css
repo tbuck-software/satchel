@@ -30,9 +30,9 @@
 
   /* Text */
   --text-primary: #e9edf3;
-  --text-secondary: #a6aebc;
+  --text-secondary: #b1b8c4;
   /* 4.5:1 on --bg-active-hover and --bg-overlay too. */
-  --text-tertiary: #939cab;
+  --text-tertiary: #9ba3b1;
   --text-inverse: #111214;
   /* Accent-coloured text: links, a label that names an action, a keycap.
      --accent-primary is a fill that carries white ink, and as text on these
@@ -40,9 +40,10 @@
      surfaces. Fills stay on --accent-primary. */
   --text-accent: #5fb3bf;
 
-  /* The open row of a list: a sheet (--bg-surface + --shadow-sm) with this
-     edge in front, the same in the inbox, a priority group and search. */
-  --selection-edge: inset 3px 0 0 var(--accent-primary);
+  /* The open row of a list: a sheet (--bg-surface + --shadow-sm) outlined by
+     this petrol hairline, the same in the inbox, a priority group and search.
+     A ring follows the row's rounded corners; a leading bar bent around them. */
+  --selection-edge: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 70%, transparent);
 
   /* Petrol from the reference. Both fills retain contrast with white ink. */
   --accent-primary: #277e8b;

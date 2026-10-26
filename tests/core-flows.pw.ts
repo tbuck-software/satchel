@@ -361,6 +361,27 @@ test('keeps error toasts off the reply bar and the send button', async ({ page }
 });
 
 /**
+ * The reader is one column: the avatars stand on its left edge, and the
+ * draft, the reply bar and the toolbar's first button keep to the same line.
+ * The draft card and the reply bar used to hang into the gutter, wider than
+ * the messages above them.
+ */
+test('keeps the draft, the reply bar and the toolbar on the reading column', async ({ page }) => {
+  const column = await page.locator('.thread-reading-column').boundingBox();
+  const sent = await page.locator('.message-surface:not(.message-surface--draft) .message-header').first().boundingBox();
+  const draft = await page.locator('.message-surface--draft .message-header').first().boundingBox();
+  const bar = await page.locator('.reply-bar').boundingBox();
+  const done = await page.locator('.thread-toolbar__done').boundingBox();
+  if (!column || !sent || !draft || !bar || !done) throw new Error('reader not laid out');
+
+  expect(Math.abs(sent.x - column.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(draft.x - column.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(bar.x - column.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(bar.x + bar.width - (column.x + column.width))).toBeLessThanOrEqual(1);
+  expect(Math.abs(done.x - column.x)).toBeLessThanOrEqual(1);
+});
+
+/**
  * Each section shares a grid row with its neighbour. With the default
  * `align-content` the taller column's surplus went to the shorter section's
  * heading track: "Mailbox focused" showed its title and, 300px further down

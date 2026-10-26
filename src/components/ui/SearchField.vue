@@ -61,10 +61,13 @@ defineEmits<{
   background: var(--bg-hover);
 }
 
+/* "You are in search" is a place in the sidebar, marked like the active nav
+   item: a raised sheet with petrol ink. The open-row ring would read as a
+   focus ring here, beside the query field that actually has focus. */
 .search-field--active {
   background: var(--bg-surface);
   color: var(--text-accent);
-  box-shadow: var(--selection-edge), var(--shadow-sm);
+  box-shadow: var(--shadow-sm);
 }
 
 .search-field__icon {

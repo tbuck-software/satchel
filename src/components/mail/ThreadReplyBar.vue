@@ -94,7 +94,8 @@ useToastClearance(barRef);
   align-items: center;
   gap: var(--space-1-5);
   flex-shrink: 0;
-  color: var(--text-tertiary);
+  /* Which account answers is a fact to check, not a placeholder. */
+  color: var(--text-secondary);
   font-size: var(--font-size-2xs);
 }
 
