@@ -57,10 +57,10 @@ const cells = computed(() =>
     <header class="mini-month__header">
       <span class="mini-month__title">{{ monthTitle }}</span>
       <span class="mini-month__nav">
-        <IconButton size="sm" :title="$t('calendar.nav.previousMonth')" @click="cursor = addMonths(cursor, -1)">
+        <IconButton :title="$t('calendar.nav.previousMonth')" @click="cursor = addMonths(cursor, -1)">
           <AppIcon><path d="m10 3-5 5 5 5" /></AppIcon>
         </IconButton>
-        <IconButton size="sm" :title="$t('calendar.nav.nextMonth')" @click="cursor = addMonths(cursor, 1)">
+        <IconButton :title="$t('calendar.nav.nextMonth')" @click="cursor = addMonths(cursor, 1)">
           <AppIcon><path d="m6 3 5 5-5 5" /></AppIcon>
         </IconButton>
       </span>
@@ -107,9 +107,12 @@ const cells = computed(() =>
   font-weight: var(--weight-semibold);
 }
 
+/* The 32px targets reach past the header line instead of pushing the grid
+   down; the outer button's glyph ends on the grid's right edge. */
 .mini-month__nav {
   display: inline-flex;
-  gap: 2px;
+  margin-block: calc(-1 * var(--space-xs));
+  margin-right: calc(-1 * var(--space-sm));
 }
 
 .mini-month__weekdays,
@@ -118,16 +121,22 @@ const cells = computed(() =>
   grid-template-columns: repeat(7, 1fr);
 }
 
+.mini-month__weekdays {
+  padding-bottom: var(--space-2xs);
+  border-bottom: 1px solid var(--border-color-muted);
+  margin-bottom: var(--space-2xs);
+}
+
 .mini-month__weekdays span {
   color: var(--text-tertiary);
   font-size: var(--font-size-2xs);
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-medium);
   text-align: center;
-  padding: 2px 0;
+  padding: var(--space-xs) 0;
 }
 
 /*
- * A fixed circle centred in its column, so the number sits in the middle of
+ * A circle (28px where the column allows) centred in its column, so the number sits in the middle of
  * the today/selected fill and lines up under the centred weekday header.
  * CardButton is a left-aligned flex box by default; both are undone here.
  */
@@ -135,8 +144,8 @@ const cells = computed(() =>
   justify-self: center;
   justify-content: center;
   align-items: center;
-  width: 24px;
-  height: 24px;
+  width: min(28px, 100%);
+  aspect-ratio: 1;
   border: 0;
   border-radius: var(--radius-full);
   background: transparent;
@@ -154,9 +163,11 @@ const cells = computed(() =>
   color: var(--text-primary);
 }
 
+/* The neighbouring months are context, not targets to notice: plain,
+   dimmed numbers, no fill — the main grid shades them, the mini month does
+   not have the room to. */
 .mini-month__day--muted {
-  color: var(--text-tertiary);
-  background: var(--bg-inset);
+  color: color-mix(in srgb, var(--text-tertiary) 70%, transparent);
 }
 
 .mini-month__day--today {

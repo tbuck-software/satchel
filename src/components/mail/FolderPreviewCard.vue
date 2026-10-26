@@ -62,7 +62,10 @@ const hiddenCount = computed(() => {
         >
           {{ props.count }}
         </span>
-        <span v-if="$slots.actions" class="ml-auto flex shrink-0 items-center gap-1">
+        <!-- As tall as the title line, so a 26px button leaves the row the
+             same height as the bundles without one; the button's own inset
+             is pulled out so its glyph ends where the preview counts end. -->
+        <span v-if="$slots.actions" class="-mr-1.5 ml-auto flex h-6 shrink-0 items-center gap-1">
           <slot name="actions" />
         </span>
       </span>

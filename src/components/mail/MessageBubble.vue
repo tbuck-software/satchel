@@ -18,6 +18,7 @@ import { useSettingsStore } from '@/stores/settings';
 import Avatar from '@/components/common/Avatar.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppBanner from '@/components/ui/AppBanner.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
 import AttachmentCard from './AttachmentCard.vue';
@@ -547,11 +548,7 @@ function openSenderDetails() {
           :title="$t('mail.message.actions')"
           @click="messageActionsOpen = true"
         >
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-            <circle cx="3" cy="8" r="1.35" />
-            <circle cx="8" cy="8" r="1.35" />
-            <circle cx="13" cy="8" r="1.35" />
-          </svg>
+          <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>
         </IconButton>
       </div>
     </div>

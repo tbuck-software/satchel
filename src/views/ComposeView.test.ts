@@ -257,6 +257,17 @@ describe('composer fields and actions', () => {
     expect(sendButton(wrapper).attributes('title')).toMatch(/^Send · /);
     expect(sendButton(wrapper).attributes('aria-keyshortcuts')).toMatch(/^(Control|Meta)\+Enter$/);
   });
+
+  it('keeps the page header to the title and puts Save beside Send', async () => {
+    const wrapper = render(['boss@example.com'], false);
+    await flushPromises();
+
+    expect(wrapper.get('.compose-header').findAll('button')).toHaveLength(0);
+    const footerLabels = wrapper.get('.footer').findAll('button').map((button) => button.text());
+    expect(footerLabels.slice(-2)).toEqual(['Save', 'Send']);
+    expect(wrapper.get('[title="Attach file"]').text()).toBe('Attach');
+    expect(wrapper.get('[title="Send later"]').text()).toBe('Send later');
+  });
 });
 
 describe.each([true, false])('outgoing conversation history, plain text: %s', (plainText) => {

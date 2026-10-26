@@ -192,6 +192,14 @@ function createOn(day: Date, event: MouseEvent) {
   background: var(--bg-hover);
 }
 
+/* Today is a place, not an event: the cell itself is lifted with a faint
+   tint and an accent edge, so it still reads when its chips share the
+   accent. The number badge stays the anchor. */
+.month__cell--today {
+  background: color-mix(in srgb, var(--accent-primary) 7%, var(--bg-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 60%, transparent);
+}
+
 .month__cell--today .month__daynum {
   background: var(--accent-primary);
   color: var(--text-on-accent);

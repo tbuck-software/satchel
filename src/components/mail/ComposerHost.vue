@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
@@ -378,14 +379,14 @@ onBeforeUnmount(() => {
               :aria-label="maximized ? $t('compose.window.restore') : $t('compose.window.maximize')"
               @click.stop="toggleMaximize"
             >
-              <svg v-if="!maximized" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35"><path d="M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3"/></svg>
-              <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35"><rect x="2.5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M5 5V3.5A1.5 1.5 0 016.5 2h6A1.5 1.5 0 0114 3.5v6A1.5 1.5 0 0112.5 11H11"/></svg>
+              <AppIcon v-if="!maximized"><path d="M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3"/></AppIcon>
+              <AppIcon v-else><rect x="2.5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M5 5V3.5A1.5 1.5 0 016.5 2h6A1.5 1.5 0 0114 3.5v6A1.5 1.5 0 0112.5 11H11"/></AppIcon>
             </IconButton>
             <IconButton :title="$t('compose.window.popOut')" :aria-label="$t('compose.window.popOut')" @click.stop="openInOwnWindow">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4.5" width="9.5" height="9.5" rx="2"/><path d="M6 2h8v8M13.5 2.5L8 8"/></svg>
+              <AppIcon><rect x="2" y="4.5" width="9.5" height="9.5" rx="2"/><path d="M6 2h8v8M13.5 2.5L8 8"/></AppIcon>
             </IconButton>
             <IconButton :title="$t('compose.window.close')" :aria-label="$t('compose.window.close')" @click.stop="requestCloseComposer">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M3 3l10 10M13 3L3 13"/></svg>
+              <AppIcon><path d="M3 3l10 10M13 3L3 13"/></AppIcon>
             </IconButton>
           </div>
         </header>

@@ -1045,32 +1045,10 @@ defineExpose({
 
 <template>
   <section :class="['compose', { 'compose--embedded': props.embedded }]">
+    <!-- The header carries the title alone. Template and Save live in the
+         footer beside Send, Discard in the options panel. -->
     <header v-if="!props.embedded" class="compose-header">
-      <div>
-        <h2>{{ defaultComposerTitle() }}</h2>
-      </div>
-      <div class="actions">
-        <AppButton size="sm" variant="secondary"
-          v-if="supportsBackend"
-          @click="showTemplatePicker = true"
-        >
-          {{ $t('compose.templates.button') }}
-        </AppButton>
-        <AppButton size="sm" variant="secondary"
-          v-if="supportsBackend"
-          :disabled="sending || discarding"
-          @click="persistDraft({})"
-        >
-          {{ $t('common.save') }}
-        </AppButton>
-        <AppButton size="sm" variant="danger"
-          v-if="draftId"
-          :disabled="sending || discarding"
-          @click="discardDraft()"
-        >
-          {{ $t('common.discard') }}
-        </AppButton>
-      </div>
+      <h2>{{ defaultComposerTitle() }}</h2>
     </header>
 
     <div v-if="popoutUndo || popoutNotice" class="compose-after-send">
@@ -1288,18 +1266,22 @@ defineExpose({
         <AppButton size="sm" variant="ghost" @click="followUpAt = null">{{ $t('compose.schedule.remove') }}</AppButton>
       </p>
       <div class="footer-actions">
-        <IconButton size="lg" :title="$t('compose.toolbar.attach')" :aria-label="$t('compose.toolbar.attach')" @click="attachmentZoneRef?.openPicker()">
-          <AppIcon size="lg"><path d="M13.5 7.5l-6.2 6.2a3.5 3.5 0 01-5-5l6.5-6.5a2.5 2.5 0 013.5 3.5L5.8 12.2a1.5 1.5 0 01-2.1-2.1l6.1-6.1"/></AppIcon>
-        </IconButton>
+        <!-- The two actions a message most often needs say their name; the
+             label folds away when the composer is narrow. -->
+        <AppButton variant="ghost" class="tool-button" :title="$t('compose.toolbar.attach')" :aria-label="$t('compose.toolbar.attach')" @click="attachmentZoneRef?.openPicker()">
+          <template #icon><AppIcon size="lg"><path d="M13.5 7.5l-6.2 6.2a3.5 3.5 0 01-5-5l6.5-6.5a2.5 2.5 0 013.5 3.5L5.8 12.2a1.5 1.5 0 01-2.1-2.1l6.1-6.1"/></AppIcon></template>
+          <span class="tool-label">{{ $t('compose.toolbar.attachShort') }}</span>
+        </AppButton>
+        <AppButton variant="ghost" class="tool-button" :title="$t('compose.sendLater.title')" :aria-label="$t('compose.sendLater.title')" @click="showSendLater = true">
+          <template #icon><AppIcon size="lg"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></AppIcon></template>
+          <span class="tool-label">{{ $t('compose.sendLater.title') }}</span>
+        </AppButton>
         <IconButton size="lg" v-if="supportsBackend" :title="$t('compose.toolbar.template')" :aria-label="$t('compose.toolbar.template')" @click="showTemplatePicker = true">
           <AppIcon size="lg"><path d="M3 1.5h7l3 3v10H3z"/><path d="M10 1.5v3h3M5.5 8h5M5.5 11h4"/></AppIcon>
         </IconButton>
-        <IconButton size="lg" :title="$t('compose.sendLater.title')" :aria-label="$t('compose.sendLater.title')" @click="showSendLater = true">
-          <AppIcon size="lg"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></AppIcon>
-        </IconButton>
         <details class="more-settings">
           <summary class="more-summary" :title="$t('compose.toolbar.more')" :aria-label="$t('compose.toolbar.more')">
-            <AppIcon size="lg"><path d="M3 8h.01M8 8h.01M13 8h.01" /></AppIcon><span v-if="advancedActive" class="tool-dot" aria-hidden="true" />
+            <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon><span v-if="advancedActive" class="tool-dot" aria-hidden="true" />
           </summary>
           <div class="advanced-panel">
             <div class="panel-row">
@@ -1366,10 +1348,17 @@ defineExpose({
           </div>
         </details>
         <span class="footer-spacer" />
+        <AppButton
+          v-if="!props.embedded && supportsBackend"
+          variant="ghost"
+          :disabled="sending || discarding"
+          @click="persistDraft({})"
+        >
+          {{ $t('common.save') }}
+        </AppButton>
         <!-- A disabled button gets no hover of its own; the wrapper carries the tooltip. -->
         <span class="send-wrap" :title="sendBlockedHint ?? undefined" data-testid="compose-send-wrap">
           <AppButton
-            size="sm"
             variant="primary"
             class="send-button"
             :title="sendBlockedHint ?? $t('compose.send')"
@@ -1423,6 +1412,7 @@ defineExpose({
   width: 100%;
   flex: 1 1 auto;
   min-height: 120px;
+  padding: 2px 0;
   resize: none;
   border: 0;
   outline: none;
@@ -1464,13 +1454,6 @@ h2 {
   font-weight: var(--weight-bold);
   color: var(--text-primary);
 }
-
-.actions {
-  display: flex;
-  gap: 6px;
-}
-
-
 
 .row {
   display: grid;
@@ -1605,6 +1588,10 @@ textarea:focus {
 
 /* Composer window layout */
 .compose {
+  /* Labels sit in a column of their own; every value — field, body text,
+     attachments — starts at the same left edge after it. */
+  --compose-label-w: 64px;
+  --compose-value-x: calc(var(--compose-label-w) + var(--space-sm));
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -1639,15 +1626,15 @@ textarea:focus {
 
 .compose .row {
   flex: none;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: var(--compose-label-w) minmax(0, 1fr);
   min-height: 44px;
   gap: var(--space-sm);
   padding: var(--space-xs) 0;
-  border-bottom: 1px solid var(--border-color-muted);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .compose .recipient-row {
-  grid-template-columns: 64px minmax(0, 1fr) auto;
+  grid-template-columns: var(--compose-label-w) minmax(0, 1fr) auto;
 }
 
 .compose .label {
@@ -1665,7 +1652,7 @@ textarea:focus {
   align-items: center;
   gap: 3px;
   padding: 5px 3px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .compose .cc-link:hover { color: var(--text-primary); }
@@ -1689,8 +1676,16 @@ textarea:focus {
   display: flex;
   flex-direction: column;
   overflow: auto;
-  padding: 10px 0 4px;
+  padding: var(--space-md) 0 var(--space-xs) var(--compose-value-x);
   cursor: text;
+}
+
+/* On the page, the writing area grows with the text and the action bar
+   follows right under it, instead of waiting at the bottom of the window.
+   The floating composer keeps filling its frame. */
+.compose:not(.compose--embedded) .body {
+  flex: 0 1 auto;
+  min-height: min(18rem, 40vh);
 }
 
 /* The editor grows to fill leftover space but must not claim the full
@@ -1709,7 +1704,7 @@ textarea:focus {
 
 .compose .body :deep(.content) {
   flex: 1;
-  padding: 2px;
+  padding: 2px 0;
   cursor: text;
   font-size: var(--font-size-lg);
   line-height: 1.68;
@@ -1719,7 +1714,7 @@ textarea:focus {
   flex: none;
   max-height: 132px;
   overflow: auto;
-  margin: 3px 0 8px;
+  margin: 3px 0 8px var(--compose-value-x);
   padding: 8px 10px;
   border-color: var(--border-color-muted);
   border-radius: var(--radius-sm);
@@ -1738,19 +1733,33 @@ textarea:focus {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 5px;
-  padding-top: 9px;
+  padding-top: var(--space-sm);
+  border-top-color: var(--border-color);
 }
 
 .compose .footer-actions {
+  container-type: inline-size;
   width: 100%;
   align-items: center;
   flex-wrap: nowrap;
+  gap: var(--space-2xs);
   margin: 0;
 }
 
+/* Labelled tools sit flush with the icon-only ones beside them. */
+.tool-button {
+  padding-inline: var(--space-2-5) var(--space-3-5);
+}
+
+@container (max-width: 34rem) {
+  .tool-label { display: none; }
+  .tool-button { width: 38px; padding: 0; }
+  .tool-button :deep(.app-button__icon) { margin: 0; }
+}
+
 .more-summary {
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   display: grid;
   flex: none;
   place-items: center;
@@ -1758,7 +1767,7 @@ textarea:focus {
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
@@ -1915,6 +1924,9 @@ textarea:focus {
 
 @media (max-width: 620px) {
   .compose { padding: var(--space-3-5) var(--space-3-5) var(--space-2-5); }
+  /* A phone has no width to spare for an empty label column. */
+  .compose .body { padding-left: 0; }
+  .compose .compose-attachments { margin-left: 0; }
   .compose .compose-attachments :deep(.empty) > span { display: none; }
   .composer-header { display: none; }
 }

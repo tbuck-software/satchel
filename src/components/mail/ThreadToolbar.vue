@@ -279,7 +279,7 @@ function runExport(format: ExportFormat) {
           :aria-expanded="menuOpen"
           @click="toggleMenu"
         >
-          <AppIcon size="lg"><path d="M3 8h.01M8 8h.01M13 8h.01" /></AppIcon>
+          <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>
         </IconButton>
       </span>
     </div>

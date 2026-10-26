@@ -36,4 +36,15 @@ describe('CalendarMonthGrid styles', () => {
     expect(rule(chip, '.event-chip__title')).toMatch(/white-space: nowrap;/);
     expect(chip).not.toMatch(/line-clamp/);
   });
+
+  it('marks today on the cell, not only on its number', () => {
+    expect(rule(grid, '.month__cell--today')).toMatch(/background: /);
+    expect(rule(grid, '.month__cell--today')).toMatch(/box-shadow: inset /);
+  });
+
+  it('shows the mini month\'s neighbouring days as plain numbers', () => {
+    const mini = read('src/components/calendar/CalendarMiniMonth.vue');
+
+    expect(rule(mini, '.mini-month__day--muted')).not.toMatch(/background/);
+  });
 });

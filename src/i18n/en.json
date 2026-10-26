@@ -783,6 +783,7 @@
     },
     "toolbar": {
       "attach": "Attach file",
+      "attachShort": "Attach",
       "more": "More options",
       "template": "Use template"
     },

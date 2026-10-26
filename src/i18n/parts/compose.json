@@ -68,6 +68,7 @@
       },
       "toolbar": {
         "attach": "Attach file",
+        "attachShort": "Attach",
         "template": "Use template",
         "more": "More options"
       },
@@ -411,6 +412,7 @@
       },
       "toolbar": {
         "attach": "Datei anhängen",
+        "attachShort": "Anhängen",
         "template": "Vorlage verwenden",
         "more": "Weitere Optionen"
       },
