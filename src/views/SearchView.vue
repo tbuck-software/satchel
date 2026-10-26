@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppIcon from '@/components/ui/AppIcon.vue';
+import SearchInput from '@/components/ui/SearchInput.vue';
 import { highlightMatches, searchHighlightTerms } from '@/utils/highlight';
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
@@ -50,7 +51,7 @@ const { query, results, loading, showLoading, errorText, warnings, hasQuery, pen
   });
 const { push: pushRecent } = useRecentSearches();
 
-const searchInput = ref<HTMLInputElement | null>(null);
+const searchInput = ref<InstanceType<typeof SearchInput> | null>(null);
 const tipsOpen = ref(false);
 const highlightTerms = computed(() => searchHighlightTerms(query.value));
 const highlightedResults = computed(() => results.value.map((result) => ({
@@ -191,21 +192,19 @@ function appendOperator(token: string) {
       <header class="search-header" :class="{ 'search-header--loading': showLoading }">
         <DrawerButton /><h2 class="search-title">{{ $t('search.title') }}</h2>
         <div class="search-entry">
-          <input
+          <SearchInput
             ref="searchInput"
             v-model="query"
-            type="text"
-            role="searchbox"
-            inputmode="search"
-            autocomplete="off"
-            class="search-input"
             :placeholder="t('search.placeholder')"
-            :aria-label="t('search.queryLabel')"
+            :label="t('search.queryLabel')"
             @keydown.enter="flushUrlSync"
-          />
-          <IconButton v-if="hasQuery" class="search-clear" :title="t('search.clear')" @click="query = ''; searchInput?.focus()">
-            <AppIcon><circle cx="8" cy="8" r="6" /><path d="m6 6 4 4m0-4-4 4" /></AppIcon>
-          </IconButton>
+          >
+            <template #trailing>
+              <IconButton v-if="hasQuery" class="search-clear" :title="t('search.clear')" @click="query = ''; searchInput?.focus()">
+                <AppIcon><circle cx="8" cy="8" r="6" /><path d="m6 6 4 4m0-4-4 4" /></AppIcon>
+              </IconButton>
+            </template>
+          </SearchInput>
         </div>
         <AppButton
           v-if="hasQuery"
@@ -498,34 +497,8 @@ function appendOperator(token: string) {
   opacity: 1;
 }
 
-.search-entry {
-  position: relative;
-}
-
-.search-clear {
-  position: absolute;
-  inset-inline-end: var(--space-xs);
-  top: 50%;
-  transform: translateY(-50%);
-}
-
 .search-tips {
   justify-self: start;
-}
-
-.search-input {
-  width: 100%;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: var(--font-size-md);
-  padding: var(--space-2-5) var(--space-2xl) var(--space-2-5) var(--space-md);
-}
-
-.search-input:focus {
-  border-color: var(--accent-primary);
 }
 
 .operator-hints {

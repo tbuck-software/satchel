@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import DrawerButton from '@/components/layout/DrawerButton.vue';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useInvitesStore } from '@/stores/invites';
@@ -330,9 +331,9 @@ function onKeydown(event: KeyboardEvent) {
         <span class="calendar__range">{{ rangeLabel }}</span>
       </div>
       <div class="calendar__nav">
-        <IconButton size="sm" :title="$t('calendar.nav.previous')" @click="navigate(-1)">‹</IconButton>
+        <IconButton size="sm" :title="$t('calendar.nav.previous')" @click="navigate(-1)"><AppIcon><path d="m10 3-5 5 5 5" /></AppIcon></IconButton>
         <AppButton variant="soft" size="sm" :title="$t('calendar.nav.today')" @click="goToday">{{ $t('common.today') }}</AppButton>
-        <IconButton size="sm" :title="$t('calendar.nav.next')" @click="navigate(1)">›</IconButton>
+        <IconButton size="sm" :title="$t('calendar.nav.next')" @click="navigate(1)"><AppIcon><path d="m6 3 5 5-5 5" /></AppIcon></IconButton>
       </div>
       <div class="calendar__actions">
         <SegmentedControl

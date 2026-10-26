@@ -460,11 +460,12 @@ Reusable building blocks — use these instead of hand-rolled buttons/rows:
 | Component           | Purpose                                                        |
 |---------------------|----------------------------------------------------------------|
 | `NavItem`           | Sidebar/tree row: icon or avatar, label, count. Active = a raised sheet (`--bg-surface` + `--shadow-sm`), not an accent pill. Pass `pressed` and the row becomes a toggle that says so. Grows to a 48px touch target below 1020px |
-| `IconButton`        | Icon-only button, sizes sm/md/lg, tones default/accent/danger/warning |
+| `IconButton`        | Icon-only button, sizes sm/md/lg, tones default/accent/danger/warning. Reserves a 44px target in the layout for coarse pointers |
 | `AppIcon`           | The frame for a stroke icon: 16 viewBox, stroke 1.5, round caps, `aria-hidden`. Sizes sm 14 / md 16 / lg 20; `grid="20"` or `"24"` for a glyph drawn on a larger grid. The glyph is the slot |
 | `AppButton`         | Text action, pill variants primary/soft/secondary/ghost/danger and inline variant link, sizes sm/md. `type="submit"` for the button that carries a form's Enter key |
 | `CardButton`        | A button that is a *region* — an attachment card, a row, a tile. Contributes the reset and the behaviour, no padding, fill, radius or border: the look stays with the caller |
 | `FilterPill`        | One pill in a filter strip: pressed state, optional identity dot and count. `pressed`, not `active` — a strip is a set of toggles |
+| `SearchInput`       | Editable search/filter field with a search glyph, optional trailing control, and exposed focus/select methods. Uses `--input-height` at 38px desktop and 44px below 1020px |
 | `SearchField`       | Search entry in the sidebar or mobile list. A button shaped like a field that opens the shared omni search |
 | `CountBadge`        | Rounded count badge, tones neutral/accent/danger               |
 | `KeyCap`            | One key as the keyboard prints it (`⌘K`, `Ctrl+K`, `g`). Palette, shortcut help and hints share it; a sequence or a set of alternatives is several caps, laid out by the caller. Labels come from `bindingKeycaps` |
@@ -571,6 +572,8 @@ highlighted while the flyout is open.
 - Workflow states: blue=inbox, amber=todo, cyan=waiting, green=done, purple=snoozed
 
 ### Inputs
+- Editable search and filter fields use `SearchInput`; `SearchField` opens omni search.
+- Height: `--input-height` at 38px desktop, 44px below 1020px; horizontal inset: `--space-md`.
 - Border: `--border-color`, radius: `--radius-sm`
 - Background: `--bg-raised`
 - Focus: `border-color: --accent-primary`

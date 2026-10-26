@@ -143,6 +143,9 @@
   --space-xl: 24px;
   --space-2xl: 32px;
 
+  --input-height: 38px;
+  --touch-target: 44px;
+
   /* Borders */
   --border-color: #30333a;
   --border-color-muted: #272a30;
@@ -276,6 +279,7 @@
  */
 @media (max-width: 1020px) {
   :root {
+    --input-height: 44px;
     --font-size-3xs: 12px;
     --font-size-2xs: 12px;
     --font-size-xs: 13px;

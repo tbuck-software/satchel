@@ -110,21 +110,11 @@ defineEmits<{
   cursor: default;
 }
 
-/* A finger needs 44px; the pseudo-element grows the hit area, not the layout. */
+/* Grow the layout with the touch target so adjacent controls never overlap. */
 @media (pointer: coarse) {
-  /* Zero specificity: a parent that positions the button keeps its position. */
-  :where(.icon-button) {
-    position: relative;
-  }
-
-  .icon-button::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: max(100%, 44px);
-    height: max(100%, 44px);
-    transform: translate(-50%, -50%);
+  .icon-button {
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
   }
 }
 

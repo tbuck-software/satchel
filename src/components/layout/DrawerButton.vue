@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { useUiStore } from '@/stores/ui';
 
@@ -17,8 +18,8 @@ const ui = useUiStore();
 
 <template>
   <IconButton v-if="ui.isMobile" :title="$t('common.menu')" @click="ui.toggleMobileSidebar()">
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+    <AppIcon>
       <path d="M2 4h12M2 8h12M2 12h12" />
-    </svg>
+    </AppIcon>
   </IconButton>
 </template>

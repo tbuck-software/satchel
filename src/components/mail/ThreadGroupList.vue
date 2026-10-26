@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
@@ -757,9 +758,9 @@ onBeforeUnmount(() => {
                 variant="ghost"
                 size="sm"
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <AppIcon size="sm">
                   <path d="M3.5 8.4l2.5 2.5 6.5-6.8" />
-                </svg>
+                </AppIcon>
                 {{ $t('thread.list.checkAll') }}
               </AppButton>
             </template>
@@ -860,14 +861,14 @@ onBeforeUnmount(() => {
                 :title="$t('thread.list.showAllPriority')"
                 @click="emit('openBucket', item.bucket.id)"
               >
-                <svg class="priority-group__bolt shrink-0" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <AppIcon size="lg" class="priority-group__bolt shrink-0">
                   <path d="M9.2 1.8L4.4 8.4h3.4l-1 5.8 4.8-7H8.2l1-5.4z" />
-                </svg>
+                </AppIcon>
                 <h3 class="priority-group__title m-0 text-sm font-strong tracking-[0.01em]">{{ item.bucket.label }}</h3>
                 <span class="pt-px text-2xs font-semibold text-tertiary tabular-nums">{{ item.bucket.count }}</span>
-                <svg class="shrink-0 text-tertiary opacity-0 transition-opacity group-hover/priority:opacity-100" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <AppIcon size="sm" class="shrink-0 text-tertiary">
                   <path d="M6 3.5L10.5 8 6 12.5" />
-                </svg>
+                </AppIcon>
               </CardButton>
 
               <div role="listbox" :aria-label="item.bucket.label" aria-multiselectable="true">
@@ -922,9 +923,9 @@ onBeforeUnmount(() => {
                     variant="ghost"
                     size="sm"
                   >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <AppIcon size="sm">
                       <path d="M3.5 8.4l2.5 2.5 6.5-6.8" />
-                    </svg>
+                    </AppIcon>
                     {{ $t('thread.list.checkAll') }}
                   </AppButton>
                 </template>
@@ -949,28 +950,16 @@ onBeforeUnmount(() => {
                     :aria-expanded="props.newSendersExpanded ? 'true' : 'false'"
                     @click="emit('toggleNewSenders')"
                   >
-                    <svg class="review-card__glyph shrink-0" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <AppIcon size="lg" class="review-card__glyph shrink-0">
                       <circle cx="8" cy="5.7" r="2.5" />
                       <path d="M3.8 13a4.2 4.2 0 018.4 0" />
-                    </svg>
+                    </AppIcon>
                     <h3 class="m-0 shrink-0 text-sm font-strong text-primary">{{ item.stack.label }}</h3>
                     <span class="shrink-0 pt-px text-2xs font-semibold text-tertiary tabular-nums">{{ item.stack.count }}</span>
                     <span class="review-card__preview min-w-0 truncate pl-1 text-xs text-tertiary">{{ senderNames(item.stack) }}</span>
-                    <svg
-                      class="review-card__chevron ml-auto shrink-0 text-tertiary"
-                      :class="{ 'review-card__chevron--open': props.newSendersExpanded }"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      aria-hidden="true"
-                    >
+                    <AppIcon size="sm" class="review-card__chevron ml-auto shrink-0 text-tertiary" :class="{ 'review-card__chevron--open': props.newSendersExpanded }">
                       <path d="M4 6l4 4 4-4" />
-                    </svg>
+                    </AppIcon>
                   </CardButton>
                   <AppButton
                     :title="$t('thread.newSenders.showAll')"
@@ -1024,9 +1013,9 @@ onBeforeUnmount(() => {
                           size="sm"
                         >
                           <template #icon>
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <AppIcon size="sm">
                               <path d="M3.5 8.4l2.5 2.5 6.5-6.8" />
-                            </svg>
+                            </AppIcon>
                           </template>
                           {{ $t('thread.newSenders.allow') }}
                         </AppButton>
@@ -1038,10 +1027,10 @@ onBeforeUnmount(() => {
                           size="sm"
                         >
                           <template #icon>
-                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <AppIcon size="sm">
                               <circle cx="8" cy="8" r="5.5" />
                               <path d="M4.1 11.9l7.8-7.8" />
-                            </svg>
+                            </AppIcon>
                           </template>
                           {{ $t('common.block') }}
                         </AppButton>
@@ -1055,10 +1044,10 @@ onBeforeUnmount(() => {
                     :title="$t('thread.newSenders.allowDomainTitle', { domain: item.stack.domainSuggestion.domain })"
                     @click="emit('acceptDomain', item.stack.domainSuggestion)"
                   >
-                    <svg class="shrink-0" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <AppIcon size="sm" class="shrink-0">
                       <circle cx="8" cy="8" r="3.1" />
                       <path d="M11.1 8v1.2a1.7 1.7 0 003.4 0V8a6.5 6.5 0 10-2.6 5.2" />
-                    </svg>
+                    </AppIcon>
                     <span class="min-w-0 truncate">{{ $t('thread.newSenders.allowDomain', { domain: item.stack.domainSuggestion.domain }) }}</span>
                     <span class="shrink-0 font-medium tabular-nums opacity-70">{{ $t('thread.newSenders.senderCount', { count: item.stack.domainSuggestion.senderCount }) }}</span>
                   </CardButton>
@@ -1122,10 +1111,10 @@ onBeforeUnmount(() => {
                   :aria-label="$t('thread.list.markAllRead')"
                   @click.stop="emit('bucketAction', { threadIds: item.bucket.threadIds, action: 'read' })"
                 >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <AppIcon>
                     <path d="M2.8 5.2L8 8.7l5.2-3.5" />
                     <rect x="2.5" y="4" width="11" height="8.5" rx="1.7" />
-                  </svg>
+                  </AppIcon>
                 </IconButton>
                 <IconButton
 
@@ -1133,27 +1122,16 @@ onBeforeUnmount(() => {
                   :aria-label="$t('thread.list.checkAll')"
                   @click.stop="emit('bucketAction', { threadIds: item.bucket.threadIds, action: 'done' })"
                 >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <AppIcon>
                     <path d="M3.5 8.4l2.5 2.5 6.5-6.8" />
-                  </svg>
+                  </AppIcon>
                 </IconButton>
               </div>
 
               <!-- The row opens a page of its own, and says so even at rest. -->
-              <svg
-                class="shrink-0 text-tertiary"
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
+              <AppIcon class="shrink-0 text-tertiary">
                 <path d="M6 3.5L10.5 8 6 12.5" />
-              </svg>
+              </AppIcon>
             </section>
 
             <ThreadGroupCard

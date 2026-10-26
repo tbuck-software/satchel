@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import NavItem from '@/components/ui/NavItem.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
+import SearchInput from '@/components/ui/SearchInput.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
@@ -18,7 +20,7 @@ const ui = useUiStore();
 const { t } = useI18n();
 const { query, filtering, results, groups } = useSettingsFilter();
 const activeSection = computed(() => resolveSettingsSection(route.query.section));
-const filterInput = ref<HTMLInputElement | null>(null);
+const filterInput = ref<InstanceType<typeof SearchInput> | null>(null);
 const highlighted = ref(0);
 
 /** While filtering, one ranked list replaces the groups; the rows stay the same. */
@@ -82,23 +84,19 @@ function isHighlighted(section: SettingsSection): boolean {
 <template>
   <nav class="settings-sidebar" :aria-label="$t('common.settings')">
     <h2>{{ $t('common.settings') }}</h2>
-    <label class="settings-filter">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
-        <circle cx="7" cy="7" r="5" />
-        <path d="M11 11L14 14" />
-      </svg>
-      <input
+    <div class="settings-filter">
+      <SearchInput
         ref="filterInput"
         v-model="query"
-        type="search"
         data-settings-filter
         :placeholder="$t('settings.search.placeholder')"
-        :aria-label="$t('settings.search.label')"
+        :label="$t('settings.search.label')"
         aria-keyshortcuts="/"
         @keydown="onFilterKeydown"
-      />
-      <kbd v-if="!query" aria-hidden="true">/</kbd>
-    </label>
+      >
+        <template #trailing><kbd v-if="!query" aria-hidden="true">/</kbd></template>
+      </SearchInput>
+    </div>
     <template v-for="group in shownGroups" :key="group.title">
       <h3>{{ group.title }}</h3>
       <ul>
@@ -108,7 +106,7 @@ function isHighlighted(section: SettingsSection): boolean {
             :aria-current="activeSection === section.id ? 'page' : undefined"
             @click="selectSection(section.id)"
           >
-            <template #icon><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" v-html="settingsSectionIcons[section.id]" /></template>
+            <template #icon><AppIcon :grid="24"><g v-html="settingsSectionIcons[section.id]" /></AppIcon></template>
             <span class="settings-sidebar__copy">
               <span>{{ section.label }}</span>
               <small v-if="section.hint">{{ section.hint }}</small>
@@ -173,45 +171,14 @@ ul {
   white-space: nowrap;
 }
 
-/* The input is the box, so it keeps the focus ring base.css gives it. */
 .settings-filter {
-  position: relative;
-  display: block;
-  margin: 0 2px 6px;
-  color: var(--text-tertiary);
-}
-
-.settings-filter svg {
-  position: absolute;
-  top: 50%;
-  left: var(--space-md);
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-
-.settings-filter input {
-  width: 100%;
-  height: 36px;
-  padding: 0 34px 0 36px;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: var(--font-size-sm);
-}
-
-.settings-filter input::placeholder {
-  color: var(--text-tertiary);
+  margin: 0 var(--space-2xs) var(--space-1-5);
 }
 
 .settings-filter kbd {
-  position: absolute;
-  top: 50%;
-  right: var(--space-sm);
-  transform: translateY(-50%);
-  padding: 0 6px;
-  border: 1px solid var(--border-color);
+  margin-inline-end: var(--space-xs);
+  padding: 0 var(--space-1-5);
+  border: var(--border-default);
   border-radius: var(--radius-sm);
   color: var(--text-tertiary);
   font-family: inherit;

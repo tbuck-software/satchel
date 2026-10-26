@@ -288,7 +288,6 @@ const KNOWN_ICON_LITERAL_GROUPS: KnownGroup[] = [
       'src/components/mail/MessageRecipientDetails.vue': 1,
       'src/components/onboarding/OnboardingFlow.vue': 1,
       'src/components/settings/CalendarSettings.vue': 1,
-      'src/views/ComposeView.vue': 1,
     },
   },
   {
@@ -315,7 +314,7 @@ const KNOWN_ICON_LITERAL_GROUPS: KnownGroup[] = [
 const KNOWN_ICON_LITERALS = flatten(KNOWN_ICON_LITERAL_GROUPS);
 
 // Only ever lower this. See KNOWN_ICON_LITERAL_GROUPS.
-const MAX_KNOWN_ICON_LITERALS = 17;
+const MAX_KNOWN_ICON_LITERALS = 16;
 
 // ---------------------------------------------------------------------------
 // Rule 5 — transitions take their timing from the motion tokens.

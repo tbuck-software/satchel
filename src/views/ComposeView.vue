@@ -1173,18 +1173,7 @@ defineExpose({
         @click="showCcBcc = !showCcBcc"
       >
         {{ $t('compose.recipients.ccBcc') }}
-        <svg
-          :class="{ 'cc-link-icon--open': showCcBcc }"
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        ><path d="m3.5 4.5 2.5 2.5 2.5-2.5" /></svg>
+        <AppIcon :class="{ 'cc-link-icon--open': showCcBcc }"><path d="m4 6 4 4 4-4" /></AppIcon>
       </AppButton>
     </div>
 
@@ -1299,18 +1288,18 @@ defineExpose({
         <AppButton size="sm" variant="ghost" @click="followUpAt = null">{{ $t('compose.schedule.remove') }}</AppButton>
       </p>
       <div class="footer-actions">
-        <IconButton size="sm" :title="$t('compose.toolbar.attach')" :aria-label="$t('compose.toolbar.attach')" @click="attachmentZoneRef?.openPicker()">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M13.5 7.5l-6.2 6.2a3.5 3.5 0 01-5-5l6.5-6.5a2.5 2.5 0 013.5 3.5L5.8 12.2a1.5 1.5 0 01-2.1-2.1l6.1-6.1"/></svg>
+        <IconButton size="lg" :title="$t('compose.toolbar.attach')" :aria-label="$t('compose.toolbar.attach')" @click="attachmentZoneRef?.openPicker()">
+          <AppIcon size="lg"><path d="M13.5 7.5l-6.2 6.2a3.5 3.5 0 01-5-5l6.5-6.5a2.5 2.5 0 013.5 3.5L5.8 12.2a1.5 1.5 0 01-2.1-2.1l6.1-6.1"/></AppIcon>
         </IconButton>
-        <IconButton size="sm" v-if="supportsBackend" :title="$t('compose.toolbar.template')" :aria-label="$t('compose.toolbar.template')" @click="showTemplatePicker = true">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35"><path d="M3 1.5h7l3 3v10H3z"/><path d="M10 1.5v3h3M5.5 8h5M5.5 11h4"/></svg>
+        <IconButton size="lg" v-if="supportsBackend" :title="$t('compose.toolbar.template')" :aria-label="$t('compose.toolbar.template')" @click="showTemplatePicker = true">
+          <AppIcon size="lg"><path d="M3 1.5h7l3 3v10H3z"/><path d="M10 1.5v3h3M5.5 8h5M5.5 11h4"/></AppIcon>
         </IconButton>
-        <IconButton size="sm" :title="$t('compose.sendLater.title')" :aria-label="$t('compose.sendLater.title')" @click="showSendLater = true">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></svg>
+        <IconButton size="lg" :title="$t('compose.sendLater.title')" :aria-label="$t('compose.sendLater.title')" @click="showSendLater = true">
+          <AppIcon size="lg"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></AppIcon>
         </IconButton>
         <details class="more-settings">
           <summary class="more-summary" :title="$t('compose.toolbar.more')" :aria-label="$t('compose.toolbar.more')">
-            •••<span v-if="advancedActive" class="tool-dot" aria-hidden="true" />
+            <AppIcon size="lg"><path d="M3 8h.01M8 8h.01M13 8h.01" /></AppIcon><span v-if="advancedActive" class="tool-dot" aria-hidden="true" />
           </summary>
           <div class="advanced-panel">
             <div class="panel-row">

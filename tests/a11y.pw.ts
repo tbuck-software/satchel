@@ -163,8 +163,8 @@ test('resizes both panes from the keyboard within the store limits', async ({ pa
 });
 
 /**
- * Icon buttons are 26-38px. On a touch screen the hit area grows to 44px
- * around the icon without moving anything.
+ * Touch targets reserve their full 44px in the layout, so neighbouring
+ * controls cannot claim the same tap.
  */
 test.describe('touch targets', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -176,7 +176,8 @@ test.describe('touch targets', () => {
 
     for (const button of buttons) {
       const box = await button.boundingBox();
-      expect(box!.width).toBeLessThan(44);
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
       const hits = await button.evaluate((element) => {
         const rect = element.getBoundingClientRect();
         const x = rect.left + rect.width / 2;

@@ -197,7 +197,7 @@ function runExport(format: ExportFormat) {
     <div class="thread-toolbar__group">
       <template v-if="showBack">
         <IconButton size="lg" :title="$t('common.back')" :shortcut="hint('leaveItem')" @click="emit('back')">
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg>
+          <AppIcon size="lg"><path d="M10 3L5 8l5 5"/></AppIcon>
         </IconButton>
         <span class="divider" />
       </template>
@@ -215,7 +215,7 @@ function runExport(format: ExportFormat) {
         @click="emit('moveToInbox')"
       >
         <template #icon>
-          <AppIcon><path d="M8 11V3.4M5.4 8.4 8 11l2.6-2.6" /><path d="M2.8 11.2v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2" /></AppIcon>
+          <AppIcon size="lg"><path d="M8 11V3.4M5.4 8.4 8 11l2.6-2.6" /><path d="M2.8 11.2v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2" /></AppIcon>
         </template>
         {{ $t('commands.moveToInbox') }}
       </AppButton>
@@ -228,15 +228,15 @@ function runExport(format: ExportFormat) {
         @click="emit('archive')"
       >
         <template #icon>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3.2L13 5"/></svg>
+          <AppIcon size="lg"><path d="M3 8.5l3.2 3.2L13 5"/></AppIcon>
         </template>
         {{ $t('common.done') }}
       </AppButton>
       <IconButton size="lg" :title="$t('thread.toolbar.setReminder')" :shortcut="hint('moveSnoozed')" @click="emit('snooze')">
-        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l2.5 1.5"/></svg>
+        <AppIcon size="lg"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l2.5 1.5"/></AppIcon>
       </IconButton>
       <IconButton size="lg" tone="danger" :title="$t('common.delete')" :shortcut="hint('trash')" @click="emit('delete')">
-        <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h12M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4"/><path d="M13 4v9.5a1.5 1.5 0 01-1.5 1.5h-7A1.5 1.5 0 013 13.5V4"/></svg>
+        <AppIcon size="lg"><path d="M2 4h12M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4"/><path d="M13 4v9.5a1.5 1.5 0 01-1.5 1.5h-7A1.5 1.5 0 013 13.5V4"/></AppIcon>
       </IconButton>
     </div>
 
@@ -252,7 +252,7 @@ function runExport(format: ExportFormat) {
           :shortcut="hint('prevThread')"
           @click="emit('previous')"
         >
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3.5 6 8l5 4.5"/></svg>
+          <AppIcon size="lg"><path d="M11 3.5 6 8l5 4.5"/></AppIcon>
         </IconButton>
         <IconButton
           size="lg"
@@ -261,13 +261,13 @@ function runExport(format: ExportFormat) {
           :shortcut="hint('nextThread')"
           @click="emit('next')"
         >
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5 10 8l-5 4.5"/></svg>
+          <AppIcon size="lg"><path d="M5 3.5 10 8l-5 4.5"/></AppIcon>
         </IconButton>
       </template>
 
       <PluginSlotHost slot-name="top_toolbar" :context="{ threadId, subject }" />
       <AppButton v-if="canReply && !replyInFoot" variant="soft" :title="$t('common.reply')" :shortcut="hint('reply')" @click="emit('reply')">
-        <template #icon><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3L1 8l5 5"/><path d="M1 8h9a5 5 0 015 5"/></svg></template>
+        <template #icon><AppIcon size="lg"><path d="M6 3L1 8l5 5"/><path d="M1 8h9a5 5 0 015 5"/></AppIcon></template>
         {{ $t('common.reply') }}
       </AppButton>
 
@@ -279,7 +279,7 @@ function runExport(format: ExportFormat) {
           :aria-expanded="menuOpen"
           @click="toggleMenu"
         >
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/></svg>
+          <AppIcon size="lg"><path d="M3 8h.01M8 8h.01M13 8h.01" /></AppIcon>
         </IconButton>
       </span>
     </div>
@@ -423,7 +423,7 @@ function runExport(format: ExportFormat) {
             :title="$t('thread.toolbar.smaller')"
             :aria-label="$t('thread.toolbar.decreaseText')"
             @click.stop="emit('zoom', -10)"
-          >−</IconButton>
+          ><AppIcon><path d="M3 8h10" /></AppIcon></IconButton>
           <span class="zoom-value">{{ props.readerZoom }}%</span>
           <IconButton
             class="zoom-btn"
@@ -431,14 +431,14 @@ function runExport(format: ExportFormat) {
             :title="$t('thread.toolbar.larger')"
             :aria-label="$t('thread.toolbar.increaseText')"
             @click.stop="emit('zoom', 10)"
-          >+</IconButton>
+          ><AppIcon><path d="M3 8h10M8 3v10" /></AppIcon></IconButton>
           <IconButton
             class="zoom-btn"
             role="menuitem"
             :title="$t('common.reset')"
             :aria-label="$t('thread.toolbar.resetTextSize')"
             @click.stop="emit('zoom', 0)"
-          >⤺</IconButton>
+          ><AppIcon><path d="M3 6a5.5 5.5 0 1 1 0 5M3 2v4h4" /></AppIcon></IconButton>
         </span>
       </div>
     </div>

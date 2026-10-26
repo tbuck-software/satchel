@@ -23,6 +23,7 @@ import { showInFolderAction } from '@/utils/showInFolderAction';
 import ErrorState from '@/components/ui/ErrorState.vue';
 import ThreadMessageList from './ThreadMessageList.vue';
 import ThreadPaneSkeleton from './ThreadPaneSkeleton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import ThreadToolbar from './ThreadToolbar.vue';
 import ThreadPrintSheet from './ThreadPrintSheet.vue';
 import ThreadMobileActions from './ThreadMobileActions.vue';
@@ -959,9 +960,7 @@ function showEntireThread() {
     <!-- ═══ MOBILE TOP BAR ═══ -->
     <div v-else class="mobile-top-bar" data-tauri-drag-region>
       <IconButton class="mobile-back-btn" :title="$t('common.back')" :aria-label="$t('common.back')" @click="emit('back')">
-        <svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M10 3L5 8l5 5"/>
-        </svg>
+        <AppIcon size="lg"><path d="M10 3L5 8l5 5" /></AppIcon>
       </IconButton>
       <div class="mobile-top-meta">
         <span class="mobile-top-count">{{ $t('thread.row.messages', { count: messages.length }) }}</span>
@@ -1000,9 +999,7 @@ function showEntireThread() {
             </span>
             <span>{{ $t('thread.row.messages', { count: messages.length }) }}</span>
             <span v-if="thread.workflowState === 'done'" class="thread-state">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 8.5l3.5 3.5L13 5"/>
-              </svg>
+              <AppIcon size="sm"><path d="M3 8.5l3.5 3.5L13 5" /></AppIcon>
               {{ $t('common.done') }}
             </span>
           </div>
@@ -1193,8 +1190,8 @@ function showEntireThread() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: var(--touch-target);
+  height: var(--touch-target);
   border-radius: var(--radius-md);
   color: var(--text-secondary);
   background: none;

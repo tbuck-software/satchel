@@ -3,6 +3,8 @@ import CardButton from '@/components/ui/CardButton.vue';
 import { computed, defineAsyncComponent, onBeforeUnmount, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
+import SearchInput from '@/components/ui/SearchInput.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { useUiStore } from '@/stores/ui';
 import ThemeSelector from '@/components/settings/ThemeSelector.vue';
@@ -51,7 +53,7 @@ const { t } = useI18n();
 const ui = useUiStore();
 const { groups, labels, mobileSyncPlatform } = useSettingsSections();
 const { query: filterQuery, filtering, results: filterResults } = useSettingsFilter();
-const filterInput = ref<HTMLInputElement | null>(null);
+const filterInput = ref<InstanceType<typeof SearchInput> | null>(null);
 /** The phone overview filters like the desktop sidebar: one ranked list while typing. */
 const overviewGroups = computed(() => (
   filtering.value
@@ -105,7 +107,7 @@ function goBack() {
 
 let unregisterFilter: (() => void) | null = null;
 function bindOverviewFilter(element: unknown) {
-  filterInput.value = element as HTMLInputElement | null;
+  filterInput.value = element as InstanceType<typeof SearchInput> | null;
   unregisterFilter?.();
   unregisterFilter = element ? registerSettingsFilterField(() => filterInput.value?.focus()) : null;
 }
@@ -122,23 +124,21 @@ onBeforeUnmount(() => unregisterFilter?.());
     >
       <template v-if="ui.isSinglePane" #leading>
         <IconButton :title="$t('common.back')" size="lg" @click="goBack">
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="m10.5 3-5 5 5 5" />
-          </svg>
+          <AppIcon size="lg"><path d="m10.5 3-5 5 5 5" /></AppIcon>
         </IconButton>
       </template>
     </PaneHeader>
 
     <div v-if="showOverview" class="settings-overview">
-      <input
-        :ref="bindOverviewFilter"
-        v-model="filterQuery"
-        class="settings-overview__filter"
-        type="search"
-        data-settings-filter
-        :placeholder="$t('settings.search.placeholder')"
-        :aria-label="$t('settings.search.label')"
-      />
+      <div class="settings-overview__filter">
+        <SearchInput
+          :ref="bindOverviewFilter"
+          v-model="filterQuery"
+          data-settings-filter
+          :placeholder="$t('settings.search.placeholder')"
+          :label="$t('settings.search.label')"
+        />
+      </div>
       <p v-if="filtering && filterResults.length === 0" class="settings-overview__empty" role="status">
         {{ $t('settings.search.empty', { query: filterQuery.trim() }) }}
       </p>
@@ -154,15 +154,13 @@ onBeforeUnmount(() => unregisterFilter?.());
               class="settings-overview__icon"
               :class="`settings-overview__icon--${sectionTones[section.id]}`"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" v-html="settingsSectionIcons[section.id]" />
+              <AppIcon :grid="24"><g v-html="settingsSectionIcons[section.id]" /></AppIcon>
             </span>
             <span class="settings-overview__copy">
               <strong>{{ sectionLabel(section.id) }}</strong>
               <small>{{ section.hint ?? sectionDescription(section.id) }}</small>
             </span>
-            <svg class="settings-overview__chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="m6 3 5 5-5 5" />
-            </svg>
+            <AppIcon class="settings-overview__chevron"><path d="m6 3 5 5-5 5" /></AppIcon>
           </CardButton>
         </div>
       </section>
@@ -238,16 +236,7 @@ onBeforeUnmount(() => unregisterFilter?.());
 }
 
 .settings-overview__filter {
-  width: 100%;
-  height: 44px;
-  margin-top: 14px;
-  padding: 0 var(--space-md);
-  border: 1px solid var(--border-color-muted);
-  border-radius: var(--radius-lg);
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: var(--font-size-md);
+  margin-top: var(--space-3-5);
 }
 
 .settings-overview__empty {
@@ -308,8 +297,7 @@ onBeforeUnmount(() => unregisterFilter?.());
 .settings-overview__icon--pink { --settings-tone: var(--accent-pink); }
 .settings-overview__icon--orange { --settings-tone: var(--accent-orange); }
 
-.settings-overview__icon svg { width: 17px; height: 17px; }
-.settings-overview__chevron { width: 16px; color: var(--text-tertiary); }
+.settings-overview__chevron { color: var(--text-tertiary); }
 
 .settings-overview__copy {
   display: grid;

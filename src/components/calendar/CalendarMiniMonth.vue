@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, ref, watch } from 'vue';
 import {
@@ -57,10 +58,10 @@ const cells = computed(() =>
       <span class="mini-month__title">{{ monthTitle }}</span>
       <span class="mini-month__nav">
         <IconButton size="sm" :title="$t('calendar.nav.previousMonth')" @click="cursor = addMonths(cursor, -1)">
-          ‹
+          <AppIcon><path d="m10 3-5 5 5 5" /></AppIcon>
         </IconButton>
         <IconButton size="sm" :title="$t('calendar.nav.nextMonth')" @click="cursor = addMonths(cursor, 1)">
-          ›
+          <AppIcon><path d="m6 3 5 5-5 5" /></AppIcon>
         </IconButton>
       </span>
     </header>

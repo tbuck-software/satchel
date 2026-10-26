@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
 import IconButton from '@/components/ui/IconButton.vue';
@@ -59,11 +60,7 @@ function sheetAction(action: SheetAction) {
         :aria-expanded="moreSheetOpen"
         @click="openMore"
       >
-        <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <circle cx="3" cy="8" r="1.5" />
-          <circle cx="8" cy="8" r="1.5" />
-          <circle cx="13" cy="8" r="1.5" />
-        </svg>
+        <AppIcon size="lg"><path d="M3 8h.01M8 8h.01M13 8h.01" /></AppIcon>
       </IconButton>
       <IconButton
         v-if="props.canReply"
@@ -72,10 +69,10 @@ function sheetAction(action: SheetAction) {
         :title="$t('common.reply')"
         @click="emit('reply')"
       >
-        <svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <AppIcon size="lg">
           <path d="M6 3L1 8l5 5" />
           <path d="M1 8h9a5 5 0 015 5" />
-        </svg>
+        </AppIcon>
       </IconButton>
       <IconButton
         class="bar-btn"
@@ -83,15 +80,15 @@ function sheetAction(action: SheetAction) {
         :title="props.isUnread ? $t('thread.actions.markRead') : $t('thread.actions.markUnread')"
         @click="emit('toggleRead')"
       >
-        <svg v-if="props.isUnread" width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <AppIcon size="lg" v-if="props.isUnread">
           <path d="M2 4.5h12v7a2 2 0 01-2 2H4a2 2 0 01-2-2z" />
           <path d="M2 5l6 4 6-4" />
-        </svg>
-        <svg v-else width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        </AppIcon>
+        <AppIcon size="lg" v-else>
           <path d="M2 5.5l6 4 6-4" />
           <path d="M2 5.5V12a2 2 0 002 2h8a2 2 0 002-2V5.5" />
           <path d="M5 3.5h6" />
-        </svg>
+        </AppIcon>
       </IconButton>
       <IconButton
         class="bar-btn"
@@ -99,10 +96,10 @@ function sheetAction(action: SheetAction) {
         :title="$t('thread.actions.snooze')"
         @click="emit('snooze')"
       >
-        <svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <AppIcon size="lg">
           <circle cx="8" cy="8" r="6" />
           <path d="M8 4v4l2.5 1.5" />
-        </svg>
+        </AppIcon>
       </IconButton>
     </div>
     <!-- A done thread gets the way back, not a Done that would do nothing. -->
@@ -114,10 +111,10 @@ function sheetAction(action: SheetAction) {
       @click="emit('moveToInbox')"
     >
       <template #icon>
-        <svg class="bar-done__icon" width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <AppIcon size="lg" class="bar-done__icon">
           <path d="M8 11V3.4M5.4 8.4 8 11l2.6-2.6" />
           <path d="M2.8 11.2v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2" />
-        </svg>
+        </AppIcon>
       </template>
       {{ $t('commands.moveToInbox') }}
     </AppButton>
@@ -129,9 +126,9 @@ function sheetAction(action: SheetAction) {
       @click="emit('archive')"
     >
       <template #icon>
-        <svg class="bar-done__icon" width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <AppIcon size="lg" class="bar-done__icon">
           <path d="M3 8.5l3.5 3.5L13 5" />
-        </svg>
+        </AppIcon>
       </template>
       {{ $t('common.done') }}
     </AppButton>
@@ -150,10 +147,10 @@ function sheetAction(action: SheetAction) {
         @click="sheetAction('togglePin')"
       >
         <template #icon>
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <AppIcon>
             <path d="M5.2 2.3h5.6l-.8 4 2.1 2.1v1.1H3.9V8.4L6 6.3l-.8-4Z" />
             <path d="M8 9.5v4.2" />
-          </svg>
+          </AppIcon>
         </template>
         {{ props.isStarred ? $t('thread.actions.unpin') : $t('thread.actions.pin') }}
       </AppButton>
@@ -163,12 +160,12 @@ function sheetAction(action: SheetAction) {
         @click="sheetAction('setAside')"
       >
         <template #icon>
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <AppIcon>
             <path d="M2.5 5.5h11v7.5h-11z" />
             <path d="M5.5 8.5h5" />
             <path d="M8 1.8v4" />
             <path d="M6.2 4 8 5.8 9.8 4" />
-          </svg>
+          </AppIcon>
         </template>
         {{ props.isAside ? $t('thread.actions.moveToInbox') : $t('thread.actions.setAside') }}
       </AppButton>
@@ -180,10 +177,10 @@ function sheetAction(action: SheetAction) {
         @click="sheetAction('forward')"
       >
         <template #icon>
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <AppIcon>
             <path d="M10 3l5 5-5 5" />
             <path d="M15 8H6a5 5 0 00-5 5" />
-          </svg>
+          </AppIcon>
         </template>
         {{ $t('common.forward') }}
       </AppButton>
@@ -194,10 +191,10 @@ function sheetAction(action: SheetAction) {
         @click="sheetAction('delete')"
       >
         <template #icon>
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <AppIcon>
             <path d="M2 4h12M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4" />
             <path d="M13 4v9.5a1.5 1.5 0 01-1.5 1.5h-7A1.5 1.5 0 013 13.5V4" />
-          </svg>
+          </AppIcon>
         </template>
         {{ $t('common.delete') }}
       </AppButton>
@@ -224,10 +221,10 @@ function sheetAction(action: SheetAction) {
 }
 
 .mobile-bar .bar-btn {
-  width: 44px;
-  height: 44px;
-  min-width: 44px;
-  min-height: 44px;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
   border-radius: var(--radius-md);
   -webkit-tap-highlight-color: transparent;
 }
@@ -282,7 +279,6 @@ function sheetAction(action: SheetAction) {
 .bar-done__icon {
   position: relative;
   flex: 0 0 auto;
-  stroke-width: 2.1;
 }
 
 /* ── Bottom-sheet action rows ── */

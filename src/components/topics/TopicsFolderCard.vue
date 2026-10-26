@@ -70,9 +70,9 @@ const chips = computed(() =>
     <template #empty>{{ $t('topics.card.empty') }}</template>
     <template #actions>
       <IconButton size="sm" :title="$t('topics.card.new')" @click.stop="emit('create')">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <AppIcon size="sm">
           <path d="M8 3V13M3 8H13" />
-        </svg>
+        </AppIcon>
       </IconButton>
     </template>
   </FolderPreviewCard>

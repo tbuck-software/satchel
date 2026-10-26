@@ -9,6 +9,7 @@ import ErrorState from '@/components/ui/ErrorState.vue';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import SearchInput from '@/components/ui/SearchInput.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import { useUiStore } from '@/stores/ui';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
@@ -183,9 +184,7 @@ function openContact(email: string) {
     </PaneHeader>
 
     <div class="contact-search">
-      <label class="sr-only" for="contact-search">{{ t('contacts.search') }}</label>
-      <AppIcon><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></AppIcon>
-      <input id="contact-search" v-model="search" type="search" :placeholder="t('contacts.search')" />
+      <SearchInput id="contact-search" v-model="search" :label="t('contacts.search')" :placeholder="t('contacts.search')" />
     </div>
     <div class="contacts-view__scroll">
       <div v-if="filteredCount" class="contact-list">
@@ -257,32 +256,7 @@ function openContact(email: string) {
 }
 
 .contact-search {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
   margin: 0 var(--space-lg) var(--space-md);
-  padding: var(--space-sm) var(--space-md);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
-  color: var(--text-secondary);
-}
-
-.contact-search:focus-within {
-  border-color: var(--accent-primary);
-}
-
-.contact-search input {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font: inherit;
-}
-
-.contact-search input::placeholder {
-  color: var(--text-tertiary);
 }
 
 .contacts-view__scroll {
