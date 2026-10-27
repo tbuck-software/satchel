@@ -1,7 +1,7 @@
 //! Read command signatures and serde field names without loading the application.
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use heck::{ToLowerCamelCase, ToSnakeCase};
 use quote::ToTokens;
@@ -578,7 +578,9 @@ fn scan(root: &Path, directory: &Path, namespace: &str, catalog: &mut Catalog) {
 }
 
 fn main() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    // A shared Cargo target can reuse a binary built in another worktree.
+    // Resolve sources at runtime so generation always reads this checkout.
+    let root = std::env::current_dir().expect("workspace directory");
     let mut catalog = Catalog::default();
     for (path, namespace) in [
         ("src-tauri/src", "app"),
