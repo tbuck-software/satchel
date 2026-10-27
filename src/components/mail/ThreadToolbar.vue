@@ -29,10 +29,11 @@ const props = withDefaults(
     moveTargets?: Array<{ id: string; label: string }>;
     canReply?: boolean;
     /**
-     * The reader ends in a reply foot. Reply then lives there and in the menu;
-     * a second button up here would only compete with it.
+     * The reader offers the reply itself: a reply foot, or the card of an
+     * unsent draft. Reply then lives there and in the menu; a second button
+     * up here would only compete with it.
      */
-    replyInFoot?: boolean;
+    replyInReader?: boolean;
     /** Number of downloadable attachments across the thread. */
     attachmentCount?: number;
     readerZoom?: number;
@@ -50,7 +51,7 @@ const props = withDefaults(
     senderAddress: '',
     moveTargets: () => [],
     canReply: true,
-    replyInFoot: false,
+    replyInReader: false,
     attachmentCount: 0,
     readerZoom: 100,
     position: 0,
@@ -266,7 +267,7 @@ function runExport(format: ExportFormat) {
       </template>
 
       <PluginSlotHost slot-name="top_toolbar" :context="{ threadId, subject }" />
-      <AppButton v-if="canReply && !replyInFoot" variant="soft" :title="$t('common.reply')" :shortcut="hint('reply')" @click="emit('reply')">
+      <AppButton v-if="canReply && !replyInReader" variant="soft" :title="$t('common.reply')" :shortcut="hint('reply')" @click="emit('reply')">
         <template #icon><AppIcon size="lg"><path d="M6 3L1 8l5 5"/><path d="M1 8h9a5 5 0 015 5"/></AppIcon></template>
         {{ $t('common.reply') }}
       </AppButton>

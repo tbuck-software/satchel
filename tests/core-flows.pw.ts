@@ -1,4 +1,4 @@
-import type { Locator } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './mock-contract.fixture';
 
 test.beforeEach(async ({ page }) => {
@@ -13,8 +13,16 @@ test('renders the inbox and opens a thread', async ({ page }) => {
   await expect(page.getByText('Your configured billing threshold for Project Atlas has been reached.').first()).toBeVisible();
 });
 
-test('opens a reply composer for the active conversation', async ({ page }) => {
-  await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
+/** The active conversation carries an unsent draft; a fresh reply needs it gone. */
+async function discardActiveDraft(page: Page) {
+  await page.locator('.draft-card').getByRole('button', { name: 'Discard', exact: true }).click();
+  await expect(page.locator('.draft-card')).toHaveCount(0);
+  await expect(page.locator('.reply-bar')).toBeVisible();
+}
+
+test('opens a reply composer for the active conversation once its draft is discarded', async ({ page }) => {
+  await discardActiveDraft(page);
+  await page.locator('.reply-bar').getByRole('button', { name: 'Reply', exact: true }).click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   await expect(composer).toBeVisible();
   await expect(composer.getByText('Reply', { exact: true })).toBeVisible();
@@ -333,7 +341,8 @@ test('normalizes localized reply chains for display while retaining reply spelli
   });
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Staging login 500 after deployment', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
+  await discardActiveDraft(page);
+  await page.locator('.reply-bar').getByRole('button', { name: 'Reply', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Compose email' }).getByLabel('Subject', { exact: true }))
     .toHaveValue('SV: Staging login 500 after deployment');
 });
@@ -368,42 +377,76 @@ async function isUncovered(locator: Locator) {
 
 /**
  * The mock starts with two error toasts (a failed sync, a failed send). The
- * stack sat in the corner where both the reply bar and the composer's send
- * row end, and at 900x700 it took the click meant for Send.
+ * stack sat in the corner where the reply bar, the draft card and the
+ * composer's send row end, and at 900x700 it took the click meant for Send.
  */
-test('keeps error toasts off the reply bar and the send button', async ({ page }) => {
+test('keeps error toasts off the draft card, the reply bar and the send button', async ({ page }) => {
   await expect(page.locator('.toast--error').first()).toBeVisible();
-  // The active thread carries an unsent draft, so the bar resumes it.
-  await expect.poll(() => isUncovered(page.locator('.reply-bar').getByRole('button', { name: 'Resume draft', exact: true }))).toBe(true);
+  // The active thread carries an unsent draft, so it ends in the draft card.
+  const resume = page.locator('.draft-card').getByRole('button', { name: 'Continue editing', exact: true });
+  await expect.poll(() => isUncovered(resume)).toBe(true);
 
   await page.setViewportSize({ width: 900, height: 700 });
   await page.getByText('Staging login 500 after deployment', { exact: true }).first().click();
-  await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
+  await resume.click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   await expect(page.locator('.toast--error').first()).toBeVisible();
   const send = composer.getByRole('button', { name: 'Send', exact: true });
   await expect.poll(() => isUncovered(send)).toBe(true);
 });
 
+test('keeps error toasts off the reply bar of a thread without a draft', async ({ page }) => {
+  await page.goto('/thread/th-2');
+  await expect(page.locator('.toast--error').first()).toBeVisible();
+  await expect.poll(() => isUncovered(page.locator('.reply-bar').getByRole('button', { name: 'Reply', exact: true }))).toBe(true);
+});
+
+/**
+ * A thread with an unsent draft shows that draft once: the card at the end of
+ * the conversation. The reply bar under it used to repeat the draft with a
+ * placeholder and a Resume button; `r` goes back into the draft instead of
+ * starting a second reply beside it.
+ */
+test('shows an unsent draft once and resumes it with r', async ({ page }) => {
+  const card = page.locator('.draft-card');
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText('Draft · not sent');
+  await expect(card).toContainText('To Sarah Kim');
+  await expect(card).toContainText('Der OAuth-Fix ist auf Staging.');
+  await expect(page.locator('.reply-bar')).toHaveCount(0);
+  await expect(page.locator('.thread-toolbar').getByRole('button', { name: 'Reply', exact: true })).toHaveCount(0);
+
+  await page.locator('.thread-reading-column h1').click();
+  await page.keyboard.press('r');
+  const composer = page.getByRole('dialog', { name: 'Compose email' });
+  await expect(composer).toBeVisible();
+  await expect(composer).toContainText('Der OAuth-Fix ist auf Staging.');
+});
+
 /**
  * The reader is one column: the avatars stand on its left edge, and the
- * draft, the reply bar and the toolbar's first button keep to the same line.
- * The draft card and the reply bar used to hang into the gutter, wider than
+ * draft card, the reply bar and the toolbar's first button keep to the same
+ * line. The draft and the reply bar used to hang into the gutter, wider than
  * the messages above them.
  */
-test('keeps the draft, the reply bar and the toolbar on the reading column', async ({ page }) => {
+test('keeps the draft card, the reply bar and the toolbar on the reading column', async ({ page }) => {
   const column = await page.locator('.thread-reading-column').boundingBox();
-  const sent = await page.locator('.message-surface:not(.message-surface--draft) .message-header').first().boundingBox();
-  const draft = await page.locator('.message-surface--draft .message-header').first().boundingBox();
-  const bar = await page.locator('.reply-bar').boundingBox();
+  const sent = await page.locator('.message-surface .message-header').first().boundingBox();
+  const draft = await page.locator('.draft-card').first().boundingBox();
   const done = await page.locator('.thread-toolbar__done').boundingBox();
-  if (!column || !sent || !draft || !bar || !done) throw new Error('reader not laid out');
+  if (!column || !sent || !draft || !done) throw new Error('reader not laid out');
 
   expect(Math.abs(sent.x - column.x)).toBeLessThanOrEqual(1);
   expect(Math.abs(draft.x - column.x)).toBeLessThanOrEqual(1);
-  expect(Math.abs(bar.x - column.x)).toBeLessThanOrEqual(1);
-  expect(Math.abs(bar.x + bar.width - (column.x + column.width))).toBeLessThanOrEqual(1);
+  expect(Math.abs(draft.x + draft.width - (column.x + column.width))).toBeLessThanOrEqual(1);
   expect(Math.abs(done.x - column.x)).toBeLessThanOrEqual(1);
+
+  await page.goto('/thread/th-2');
+  const plainColumn = await page.locator('.thread-reading-column').boundingBox();
+  const bar = await page.locator('.reply-bar').boundingBox();
+  if (!plainColumn || !bar) throw new Error('reply bar not laid out');
+  expect(Math.abs(bar.x - plainColumn.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(bar.x + bar.width - (plainColumn.x + plainColumn.width))).toBeLessThanOrEqual(1);
 });
 
 /**

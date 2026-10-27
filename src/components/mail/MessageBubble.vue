@@ -48,15 +48,12 @@ import { useMessageSecurityActions } from '@/composables/useMessageSecurityActio
 const props = withDefaults(defineProps<{
   message: Message;
   canReply?: boolean;
-  /** A discard is already running for this draft. */
-  draftBusy?: boolean;
   collapsed?: boolean;
   keyboardFocused?: boolean;
   /** False while the message is far from the viewport: no renderer, no frame. */
   bodyMounted?: boolean;
 }>(), {
   canReply: true,
-  draftBusy: false,
   collapsed: false,
   keyboardFocused: false,
   bodyMounted: true,
@@ -64,8 +61,6 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   reply: [];
   forward: [];
-  editDraft: [messageId: string];
-  discardDraft: [messageId: string];
   focusMessage: [];
   toggleCollapsed: [];
 }>();
@@ -151,7 +146,7 @@ const senderName = computed(() => participantDisplayName(accountsStore.accounts,
 const isOwn = computed(() => isOwnEmail(accountsStore.accounts, props.message.from.email));
 
 const spoofingWarning = computed(() =>
-  props.message.isDraft || isOwn.value
+  isOwn.value
     ? null
     : detectSenderSpoofing(senderName.value, props.message.from.email, {
         spf: props.message.authSpf,
@@ -227,13 +222,10 @@ const visibleAttachments = computed(() => {
 
 /*
  * One rhythm on the desktop: the same step above and below a message, so the
- * rule between two of them sits halfway. A draft is not a sent message on the
- * canvas but an unfinished one lying on it, so it gets an edge instead of a rule.
+ * rule between two of them sits halfway. Drafts are not messages here; they
+ * end the thread as ThreadDraftCard.
  */
 const surfaceClasses = computed(() => {
-  if (props.message.isDraft) {
-    return ['message-surface--draft', ui.isMobile ? 'message-surface--draft-compact' : 'message-surface--indented'];
-  }
   return ui.isMobile
     ? ['border-b border-border-muted py-4']
     : ['message-surface--indented border-b border-border-muted py-5 last:border-b-0'];
@@ -407,9 +399,8 @@ function openSenderDetails() {
         </CardButton>
         <Avatar v-else :name="senderName" :email="props.message.from.email" :size="avatarSize" />
         <div class="min-w-0">
-          <!-- A draft's label goes under the name where the line is short; a
-               folded message keeps one line and lets its snippet give way. -->
-          <div class="flex items-center gap-x-2 gap-y-0.5" :class="{ 'flex-wrap': props.message.isDraft }">
+          <!-- A folded message keeps one line and lets its snippet give way. -->
+          <div class="flex items-center gap-x-2 gap-y-0.5">
             <AppButton
               class="sender-identity-trigger text-md font-semibold text-primary"
               :aria-label="$t('mail.recipients.showSenderDetails', { name: senderName })"
@@ -432,9 +423,6 @@ function openSenderDetails() {
               :pgp-signer-fingerprint="props.message.pgp?.signerFingerprint"
               @show-details="openSenderDetails"
             />
-            <span v-if="props.message.isDraft" class="message-draft-label">
-              {{ $t('mail.message.draftNotSent') }}
-            </span>
           </div>
           <div class="message-address-line mt-0.5 text-xs text-secondary">
             <AppButton
@@ -475,28 +463,7 @@ function openSenderDetails() {
           class="message-hover-actions opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
         >
           <template v-if="!props.collapsed">
-            <!-- A draft is answered by finishing it, not by replying to yourself. -->
-            <template v-if="props.message.isDraft">
-              <IconButton size="sm" :title="$t('common.edit')" @click="emit('editDraft', props.message.id)">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M11.2 2.6l2.2 2.2L5.8 12.4 3 13l.6-2.8z"/>
-                  <path d="M2.5 14.5h11"/>
-                </svg>
-              </IconButton>
-              <IconButton
-                size="sm"
-                tone="danger"
-                :disabled="props.draftBusy"
-                :title="$t('mail.message.discardDraft')"
-                @click="emit('discardDraft', props.message.id)"
-              >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M2.5 4h11M5.5 4V2.8A1.3 1.3 0 0 1 6.8 1.5h2.4a1.3 1.3 0 0 1 1.3 1.3V4"/>
-                  <path d="M12.6 4v9a1.5 1.5 0 0 1-1.5 1.5H4.9A1.5 1.5 0 0 1 3.4 13V4"/>
-                </svg>
-              </IconButton>
-            </template>
-            <template v-else-if="props.canReply">
+            <template v-if="props.canReply">
               <IconButton size="sm" :title="$t('common.reply')" @click="emit('reply')">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M6 3L1 8l5 5"/>
@@ -707,30 +674,14 @@ function openSenderDetails() {
         <nav role="menu" class="message-action-sheet" :aria-label="$t('mail.message.actionsNav')">
           <h2>{{ $t('mail.message.actions') }}</h2>
           <MenuItem label=""
-            v-if="props.message.isDraft"
-            @select="runMessageAction(() => emit('editDraft', props.message.id))"
-          >
-            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13.8 3.2 3 3L7 16l-4 1 1-4z" /><path d="M2.5 18h15" /></svg></template>
-            {{ $t('common.edit') }}
-          </MenuItem>
-          <MenuItem label=""
-            v-if="props.message.isDraft"
-            tone="danger"
-            :disabled="props.draftBusy"
-            @select="runMessageAction(() => emit('discardDraft', props.message.id))"
-          >
-            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h14M7 5V3h6v2M5 5l1 12h8l1-12" /></svg></template>
-            {{ $t('common.discard') }}
-          </MenuItem>
-          <MenuItem label=""
-            v-if="props.canReply && !props.message.isDraft"
+            v-if="props.canReply"
             @select="runMessageAction(() => emit('reply'))"
           >
             <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 4-5 5 5 5" /><path d="M3 9h9a5 5 0 0 1 5 5" /></svg></template>
             {{ $t('common.reply') }}
           </MenuItem>
           <MenuItem label=""
-            v-if="props.canReply && !props.message.isDraft"
+            v-if="props.canReply"
             @select="runMessageAction(() => emit('forward'))"
           >
             <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 4 5 5-5 5" /><path d="M17 9H8a5 5 0 0 0-5 5" /></svg></template>
@@ -815,27 +766,6 @@ function openSenderDetails() {
     box-shadow var(--duration-fast) var(--ease-out);
 }
 
-/* A draft keeps every axis of the messages above it — avatar, name, body —
-   and says "pending" with a thin petrol edge in the gutter beside it, the
-   colour of the button that resumes it. The edge sits outside the column, so the
-   avatar stays on the line the other avatars stand on; a card would have to
-   hang its frame into the gutter (wider than the column) or push the avatar
-   in (off the axis). The edge spans the content, not the padding: it starts
-   level with the avatar and ends with the body. */
-.message-surface--draft {
-  --draft-gap: var(--space-md);
-  margin-block-start: var(--space-5);
-  margin-inline-start: calc(-1 * (var(--draft-gap) + 2px));
-  padding-inline-start: var(--draft-gap);
-  border-inline-start: 2px solid color-mix(in srgb, var(--accent-primary) 70%, transparent);
-}
-
-/* A phone has a 16px gutter. */
-.message-surface--draft-compact {
-  --draft-gap: var(--space-sm);
-  margin-block-start: var(--space-lg);
-}
-
 .message-surface--keyboard-focused {
   border-color: color-mix(in srgb, var(--accent-primary) 48%, var(--border-color));
   background: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-surface));
@@ -902,18 +832,6 @@ function openSenderDetails() {
   .message-address-separator {
     display: none;
   }
-}
-
-.message-draft-label {
-  flex-shrink: 0;
-  padding: var(--space-2xs) var(--space-1-5);
-  border: var(--border-default);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  font-size: var(--font-size-3xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .message-hover-actions {

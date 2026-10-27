@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import type { Message } from '@/types/mail';
 import ThreadMessageGroup from './ThreadMessageGroup.vue';
+import ThreadDraftCard from './ThreadDraftCard.vue';
 
 const props = defineProps<{
   messages: Message[];
   draftMessages: Message[];
   canReply: boolean;
   draftBusy: (messageId: string) => boolean;
+  /** Who a draft is addressed to, as the thread knows them. */
+  draftRecipient: (message: Message) => string;
+  /** The identity a draft would go out as. */
+  draftIdentity?: string;
+  draftIdentityColor?: string | null;
   collapsedMessageIds: ReadonlySet<string>;
   /** Messages whose renderer may mount; without it, every open message. */
   bodyMountedIds?: ReadonlySet<string>;
@@ -28,39 +34,34 @@ const emit = defineEmits<{
   <ThreadMessageGroup
     :messages="props.messages"
     :can-reply="props.canReply"
-    :draft-busy="props.draftBusy"
     :collapsed-message-ids="props.collapsedMessageIds"
     :body-mounted-ids="props.bodyMountedIds"
     :focused-message-id="props.focusedMessageId"
     :keyboard-active="props.keyboardActive"
     @reply="emit('reply')"
     @forward="emit('forward')"
-    @edit-draft="emit('editDraft', $event)"
-    @discard-draft="emit('discardDraft', $event)"
     @focus-message="emit('focusMessage', $event)"
     @toggle-collapsed="emit('toggleCollapsed', $event)"
   />
 
-  <!-- The drafts end the thread, each marked as unsent by its own label and
-       edge, so the group needs no divider over it. -->
+  <!-- The drafts end the thread, each one card that carries its own way back
+       in, so the group needs no divider over it. -->
   <section
     v-if="props.draftMessages.length > 0"
     :aria-label="$t('thread.view.unsentDrafts')"
   >
-    <ThreadMessageGroup
-      :messages="props.draftMessages"
-      :can-reply="props.canReply"
-      :draft-busy="props.draftBusy"
-      :collapsed-message-ids="props.collapsedMessageIds"
-      :body-mounted-ids="props.bodyMountedIds"
-      :focused-message-id="props.focusedMessageId"
-      :keyboard-active="props.keyboardActive"
-      @reply="emit('reply')"
-      @forward="emit('forward')"
-      @edit-draft="emit('editDraft', $event)"
-      @discard-draft="emit('discardDraft', $event)"
-      @focus-message="emit('focusMessage', $event)"
-      @toggle-collapsed="emit('toggleCollapsed', $event)"
+    <ThreadDraftCard
+      v-for="draft in props.draftMessages"
+      :key="draft.id"
+      :message="draft"
+      :recipient="props.draftRecipient(draft)"
+      :identity="props.draftIdentity"
+      :identity-color="props.draftIdentityColor"
+      :busy="props.draftBusy(draft.id)"
+      :keyboard-focused="props.keyboardActive && props.focusedMessageId === draft.id"
+      @edit="emit('editDraft', draft.id)"
+      @discard="emit('discardDraft', draft.id)"
+      @focus="emit('focusMessage', draft.id)"
     />
   </section>
 </template>

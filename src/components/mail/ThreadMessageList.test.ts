@@ -11,12 +11,25 @@ const MessageBubbleStub = defineComponent({
   props: {
     message: { type: Object, required: true },
     canReply: Boolean,
-    draftBusy: Boolean,
     collapsed: Boolean,
     keyboardFocused: Boolean,
   },
-  emits: ['reply', 'forward', 'edit-draft', 'discard-draft', 'focus-message', 'toggle-collapsed'],
+  emits: ['reply', 'forward', 'focus-message', 'toggle-collapsed'],
   template: '<article :data-message-id="message.id" />',
+});
+
+const DraftCardStub = defineComponent({
+  name: 'ThreadDraftCard',
+  props: {
+    message: { type: Object, required: true },
+    recipient: String,
+    identity: String,
+    identityColor: String,
+    busy: Boolean,
+    keyboardFocused: Boolean,
+  },
+  emits: ['edit', 'discard', 'focus'],
+  template: '<article :data-draft-id="message.id" />',
 });
 
 function message(id: string, isDraft = false): Message {
@@ -41,6 +54,8 @@ function render() {
       draftMessages: [message('draft-1', true)],
       canReply: true,
       draftBusy: (messageId: string) => messageId === 'draft-1',
+      draftRecipient: (draft: Message) => `to:${draft.id}`,
+      draftIdentity: 'Work',
       collapsedMessageIds: new Set(['message-1']),
       focusedMessageId: 'draft-1',
       keyboardActive: true,
@@ -50,49 +65,46 @@ function render() {
         $t: (key: string, params?: { count?: number }) =>
           params?.count === undefined ? key : `${key}:${params.count}`,
       },
-      stubs: { MessageBubble: MessageBubbleStub },
+      stubs: { MessageBubble: MessageBubbleStub, ThreadDraftCard: DraftCardStub },
     },
   });
 }
 
 describe('ThreadMessageList', () => {
-  it('renders regular messages before a labelled draft group and forwards display state', () => {
+  it('renders messages as bubbles and each draft as one card after them', () => {
     const wrapper = render();
     const bubbles = wrapper.findAllComponents(MessageBubbleStub);
+    const cards = wrapper.findAllComponents(DraftCardStub);
 
-    expect(bubbles.map((bubble) => bubble.props('message').id)).toEqual(['message-1', 'draft-1']);
-    expect(bubbles[0]!.props()).toMatchObject({
-      canReply: true,
-      draftBusy: false,
-      collapsed: true,
-      keyboardFocused: false,
-    });
-    expect(bubbles[1]!.props()).toMatchObject({
-      canReply: true,
-      draftBusy: true,
-      collapsed: false,
+    // A draft is never a message bubble: one object per draft, the card.
+    expect(bubbles.map((bubble) => bubble.props('message').id)).toEqual(['message-1']);
+    expect(bubbles[0]!.props()).toMatchObject({ canReply: true, collapsed: true, keyboardFocused: false });
+    expect(cards.map((card) => card.props('message').id)).toEqual(['draft-1']);
+    expect(cards[0]!.props()).toMatchObject({
+      recipient: 'to:draft-1',
+      identity: 'Work',
+      busy: true,
       keyboardFocused: true,
     });
     expect(wrapper.get('section').attributes('aria-label')).toBe('thread.view.unsentDrafts');
-    // Each draft card labels itself; the group has no divider over it.
-    expect(wrapper.get('section').findAll('article').map((node) => node.attributes('data-message-id')))
-      .toEqual(['draft-1']);
   });
 
-  it('forwards message actions with the owning message id', () => {
+  it('forwards message and draft actions with the owning message id', () => {
     const wrapper = render();
-    const [messageBubble, draftBubble] = wrapper.findAllComponents(MessageBubbleStub);
+    const messageBubble = wrapper.findComponent(MessageBubbleStub);
+    const draftCard = wrapper.findComponent(DraftCardStub);
 
-    messageBubble!.vm.$emit('reply');
-    messageBubble!.vm.$emit('forward');
-    messageBubble!.vm.$emit('focus-message');
-    messageBubble!.vm.$emit('toggle-collapsed');
-    draftBubble!.vm.$emit('edit-draft', 'draft-1');
-    draftBubble!.vm.$emit('discard-draft', 'draft-1');
+    messageBubble.vm.$emit('reply');
+    messageBubble.vm.$emit('forward');
+    messageBubble.vm.$emit('focus-message');
+    messageBubble.vm.$emit('toggle-collapsed');
+    draftCard.vm.$emit('edit');
+    draftCard.vm.$emit('discard');
+    draftCard.vm.$emit('focus');
 
     expect(wrapper.emitted('reply')).toHaveLength(1);
     expect(wrapper.emitted('forward')).toHaveLength(1);
-    expect(wrapper.emitted('focusMessage')).toEqual([['message-1']]);
+    expect(wrapper.emitted('focusMessage')).toEqual([['message-1'], ['draft-1']]);
     expect(wrapper.emitted('toggleCollapsed')).toEqual([['message-1']]);
     expect(wrapper.emitted('editDraft')).toEqual([['draft-1']]);
     expect(wrapper.emitted('discardDraft')).toEqual([['draft-1']]);

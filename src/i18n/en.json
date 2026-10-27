@@ -3133,6 +3133,13 @@
       "backToInbox": "Back to the inbox",
       "unavailable": "This conversation is no longer available."
     },
+    "draft": {
+      "continueEditing": "Continue editing",
+      "empty": "No text yet",
+      "open": "Continue your draft to {name}",
+      "saved": "Last saved {time}",
+      "to": "To {name}"
+    },
     "export": {
       "copiedConversation": "Conversation copied as Markdown.",
       "copiedLatest": "Latest email copied as Markdown.",
@@ -3210,8 +3217,6 @@
     },
     "reply": {
       "as": "as {identity}",
-      "continue": "Continue your reply to {name}…",
-      "resume": "Resume draft",
       "to": "Reply to {name}…"
     },
     "result": {

@@ -3133,6 +3133,13 @@
       "backToInbox": "Zurück zur Inbox",
       "unavailable": "Diese Konversation ist nicht mehr verfügbar."
     },
+    "draft": {
+      "continueEditing": "Weiter bearbeiten",
+      "empty": "Noch kein Text",
+      "open": "Entwurf an {name} weiter bearbeiten",
+      "saved": "Zuletzt gespeichert: {time}",
+      "to": "An {name}"
+    },
     "export": {
       "copiedConversation": "Unterhaltung als Markdown kopiert.",
       "copiedLatest": "Letzte E-Mail als Markdown kopiert.",
@@ -3210,8 +3217,6 @@
     },
     "reply": {
       "as": "als {identity}",
-      "continue": "Antwort an {name} fortsetzen …",
-      "resume": "Entwurf fortsetzen",
       "to": "An {name} antworten …"
     },
     "result": {

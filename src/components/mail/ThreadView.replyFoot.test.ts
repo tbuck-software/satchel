@@ -7,6 +7,7 @@ const harness = vi.hoisted(() => ({
   messages: [] as Message[],
   openDraft: vi.fn(),
   openReply: vi.fn(),
+  discard: vi.fn().mockResolvedValue(false),
   isMobile: false,
   refreshToastClearance: vi.fn(),
 }));
@@ -32,6 +33,9 @@ vi.mock('@/stores/messages', () => ({
     needsDetails: () => false,
     loadAttachmentsForMessages: vi.fn().mockResolvedValue(undefined),
   }),
+}));
+vi.mock('@/stores/drafts', () => ({
+  useDraftsStore: () => ({ items: [], sorted: [] }),
 }));
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: () => ({ readerZoom: 100, setReaderZoom: vi.fn() }),
@@ -68,7 +72,7 @@ vi.mock('@/stores/composer', () => ({
   }),
 }));
 vi.mock('@/composables/useDraftActions', () => ({
-  useDraftActions: () => ({ discard: vi.fn(), isBusy: () => false }),
+  useDraftActions: () => ({ discard: harness.discard, isBusy: () => false }),
 }));
 vi.mock('@/composables/useThreadActions', () => ({
   useThreadActions: () => ({ setRead: vi.fn().mockResolvedValue(true) }),
@@ -142,30 +146,50 @@ describe('thread reply foot', () => {
     const button = wrapper.get('.reply-bar').findAll('button').at(-1)!;
     expect(button.text()).toBe('Reply');
     expect(wrapper.get('.reply-bar').text()).toContain('Reply to Sarah Kim');
-    expect(wrapper.findComponent({ name: 'ThreadToolbar' }).props('replyInFoot')).toBe(true);
+    expect(wrapper.findComponent({ name: 'ThreadToolbar' }).props('replyInReader')).toBe(true);
 
     await button.trigger('click');
-    expect(harness.openReply).toHaveBeenCalledWith('thread-1');
+    expect(harness.openReply).toHaveBeenCalledWith('thread-1', false);
     expect(harness.openDraft).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
-  it('resumes the unsent draft instead of starting a second reply', async () => {
+  /*
+   * One draft object: the card at the end of the thread. The foot under it
+   * used to repeat the draft as a placeholder and a Resume button.
+   */
+  it('gives way to the draft card, which is the one way back into the draft', async () => {
     harness.messages = [message('first'), draft];
     const wrapper = render();
     await flushPromises();
 
-    const bar = wrapper.get('.reply-bar');
-    const button = bar.findAll('button').at(-1)!;
-    expect(button.text()).toBe('Resume draft');
-    // The thread knows the addressee by name even when the draft does not.
-    expect(bar.text()).toContain('Continue your reply to Sarah Kim');
+    expect(wrapper.find('.reply-bar').exists()).toBe(false);
+    expect(wrapper.find('.thread-reply-foot').exists()).toBe(false);
+    // Nor does the toolbar bring Reply back as a second way in.
+    expect(wrapper.findComponent({ name: 'ThreadToolbar' }).props('replyInReader')).toBe(true);
 
-    await button.trigger('click');
-    await bar.findAll('button')[0]!.trigger('click');
+    const card = wrapper.get('.draft-card');
+    // The thread knows the addressee by name even when the draft does not.
+    expect(card.text()).toContain('To Sarah Kim');
+    expect(card.text()).toContain('Draft · not sent');
+
+    await card.get('.draft-card__body').trigger('click');
+    const continueButton = card.findAll('button').find((button) => button.text() === 'Continue editing')!;
+    await continueButton.trigger('click');
     expect(harness.openDraft).toHaveBeenCalledTimes(2);
     expect(harness.openDraft).toHaveBeenCalledWith('draft-1');
     expect(harness.openReply).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('discards the draft through the shared undo path', async () => {
+    harness.messages = [message('first'), draft];
+    const wrapper = render();
+    await flushPromises();
+
+    const discard = wrapper.get('.draft-card').findAll('button').find((button) => button.text() === 'Discard')!;
+    await discard.trigger('click');
+    expect(harness.discard).toHaveBeenCalledWith('draft-1');
     wrapper.unmount();
   });
 

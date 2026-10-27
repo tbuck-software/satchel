@@ -114,6 +114,22 @@ const MessageBubbleStub = defineComponent({
   `,
 });
 
+/* The draft card does not fold; it marks focus like a message does. */
+const DraftCardStub = defineComponent({
+  props: {
+    message: { type: Object, required: true },
+    keyboardFocused: Boolean,
+  },
+  template: `
+    <article
+      :data-thread-message-id="message.id"
+      data-draft="true"
+      :data-keyboard-focused="String(keyboardFocused)"
+      tabindex="-1"
+    />
+  `,
+});
+
 /** Stands in for the browser's observer; the test decides what is on screen. */
 class FakeIntersectionObserver {
   static current: FakeIntersectionObserver | null = null;
@@ -155,6 +171,7 @@ function render() {
     global: {
       stubs: {
         MessageBubble: MessageBubbleStub,
+        ThreadDraftCard: DraftCardStub,
         ThreadToolbar: true,
         ThreadPaneSkeleton: true,
         PluginSlotHost: true,
@@ -200,9 +217,11 @@ describe('thread message keyboard navigation', () => {
     await nextTick();
     expect(wrapper.get('[data-thread-message-id="first"]').attributes('data-collapsed')).toBe('false');
 
+    // Every message folds; the draft card has no folded form.
     expect(toggleAllThreadMessages()).toBe(true);
     await nextTick();
-    expect(wrapper.findAll('[data-collapsed="true"]')).toHaveLength(4);
+    expect(wrapper.findAll('[data-collapsed="true"]')).toHaveLength(3);
+    expect(wrapper.find('[data-draft="true"]').exists()).toBe(true);
 
     expect(toggleAllThreadMessages()).toBe(true);
     await nextTick();
@@ -225,6 +244,9 @@ describe('thread message keyboard navigation', () => {
 
     expect(openThreadMessageFocus()).toBe(true);
     expect(harness.openDraft).toHaveBeenCalledWith('draft');
+    // Toggling a draft goes back into it too: there is nothing to fold.
+    expect(toggleFocusedThreadMessage()).toBe(true);
+    expect(harness.openDraft).toHaveBeenCalledTimes(2);
     wrapper.unmount();
   });
 

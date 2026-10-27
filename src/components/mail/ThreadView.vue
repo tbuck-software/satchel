@@ -13,6 +13,7 @@ import { useTopicsStore } from '@/stores/topics';
 import { useUiStore } from '@/stores/ui';
 import { useComposerStore } from '@/stores/composer';
 import { useDraftActions } from '@/composables/useDraftActions';
+import { useThreadReply } from '@/composables/useThreadReply';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { useMessageLinks } from '@/composables/useMessageLinks';
 import { useAttachmentActions } from '@/composables/useAttachmentActions';
@@ -71,6 +72,7 @@ const threadsStore = useThreadsStore();
 const threadActions = useThreadActions();
 const messageLinks = useMessageLinks();
 const draftActions = useDraftActions();
+const threadReply = useThreadReply();
 const attachmentActions = useAttachmentActions();
 const accountsStore = useAccountsStore();
 const connection = useConnectionStore();
@@ -160,8 +162,10 @@ function isMessageOpen(messageId: string): boolean {
   return messageOpenOverrides.value.get(messageId) ?? defaultOpenMessageIds.value.has(messageId);
 }
 
+/* A draft is a card, not a message: it has no folded form. */
+const foldableMessages = computed(() => messageTargets.value.filter((message) => !message.isDraft));
 const collapsedMessageIds = computed(() => new Set(
-  messageTargets.value.filter((message) => !isMessageOpen(message.id)).map((message) => message.id),
+  foldableMessages.value.filter((message) => !isMessageOpen(message.id)).map((message) => message.id),
 ));
 
 function setMessagesOpen(messageIds: string[], open: boolean) {
@@ -227,8 +231,15 @@ onBeforeUnmount(() => viewportObserver?.disconnect());
  * padding that keeps a message revealed from the keyboard from stopping
  * underneath it. In a short thread it moves whenever the content above it
  * changes height, and the toast stack has to hear about that to stay off it.
+ *
+ * An unsent draft takes its place. The draft card already ends the thread
+ * with the way back into that reply; a bar under it would be the same draft
+ * a second time, and a fresh reply from it a second answer beside the first.
+ * Reply all and Forward stay in the toolbar menu and on their keys.
  */
-const showReplyFoot = computed(() => canReply.value && !ui.isMobile);
+const showReplyFoot = computed(() => canReply.value && !ui.isMobile && !resumableDraft.value);
+/** The reader offers the reply itself — the foot, or a draft card. */
+const replyInReader = computed(() => showReplyFoot.value || (canReply.value && Boolean(resumableDraft.value)));
 const replyFoot = ref<HTMLElement | null>(null);
 const readingColumn = ref<HTMLElement | null>(null);
 const replyFootHeight = ref(0);
@@ -290,6 +301,11 @@ function moveMessageFocus(delta: 1 | -1): boolean {
 function toggleFocusedMessage(activateKeyboard = true): boolean {
   const messageId = ensureFocusedMessage();
   if (!messageId) return false;
+  // A draft card does not fold; acting on it means going back into it.
+  if (messageTargets.value.find((message) => message.id === messageId)?.isDraft) {
+    composer.openDraft(messageId);
+    return true;
+  }
 
   expandedThread.value = true;
   setMessagesOpen([messageId], !isMessageOpen(messageId));
@@ -299,7 +315,7 @@ function toggleFocusedMessage(activateKeyboard = true): boolean {
 }
 
 function toggleAllMessages(): boolean {
-  const ids = messageTargets.value.map((message) => message.id);
+  const ids = foldableMessages.value.map((message) => message.id);
   if (ids.length === 0) return false;
 
   expandedThread.value = true;
@@ -394,8 +410,8 @@ const ownDomains = computed(() => new Set(accountsStore.accounts
   .filter(Boolean)));
 
 /**
- * The newest unsent draft. While it exists the reply foot resumes it: a
- * fresh reply beside it would leave the draft behind as a second answer.
+ * The newest unsent draft. While it exists it is the reply: the foot gives
+ * way to its card, and Reply (`r`) opens it — see useThreadReply.
  */
 const resumableDraft = computed(() => messages.value.filter((message) => message.isDraft).at(-1));
 
@@ -408,11 +424,11 @@ const replyRecipientName = computed(() => {
   return from?.name?.trim() || from?.email || '';
 });
 /**
- * The draft's addressee, by the name the thread already knows them under: a
+ * A draft's addressee, by the name the thread already knows them under: a
  * saved draft often carries the bare address, or the address as its name.
  */
-const footRecipientName = computed(() => {
-  const to = resumableDraft.value?.to[0];
+function draftRecipientName(draft: Message): string {
+  const to = draft.to[0];
   if (!to) return replyRecipientName.value;
   const address = to.email.trim().toLowerCase();
   const nameOf = (person: { name?: string; email: string }) => {
@@ -423,7 +439,7 @@ const footRecipientName = computed(() => {
     .flatMap((message) => [message.from, ...message.to])
     .find((person) => person.email.trim().toLowerCase() === address && nameOf(person));
   return nameOf(to) || (known && nameOf(known)) || to.email;
-});
+}
 const moveTargets = computed(() => {
   if (!thread.value) return [];
   const currentNames = new Set(thread.value.mailboxNames.map((name) => name.trim().toLowerCase()));
@@ -648,12 +664,7 @@ async function toggleReadState() {
 
 function replyThread() {
   if (!canReply.value || !thread.value) return;
-  composer.openReply(thread.value.id);
-}
-
-function replyFromFoot() {
-  if (resumableDraft.value) composer.openDraft(resumableDraft.value.id);
-  else replyThread();
+  threadReply.reply(thread.value.id);
 }
 
 function forwardThread() {
@@ -925,7 +936,7 @@ function showEntireThread() {
         :sender-address="latestSenderAddress"
         :move-targets="moveTargets"
         :can-reply="canReply"
-        :reply-in-foot="showReplyFoot"
+        :reply-in-reader="replyInReader"
         @back="emit('back')"
         @previous="emit('previous')"
         @next="emit('next')"
@@ -1041,6 +1052,9 @@ function showEntireThread() {
           :draft-messages="draftMessages"
           :can-reply="canReply"
           :draft-busy="draftActions.isBusy"
+          :draft-recipient="draftRecipientName"
+          :draft-identity="threadAccount?.displayName ?? ''"
+          :draft-identity-color="threadAccount?.color ?? null"
           :collapsed-message-ids="collapsedMessageIds"
           :body-mounted-ids="bodyMountedIds"
           :focused-message-id="focusedMessageId"
@@ -1058,11 +1072,10 @@ function showEntireThread() {
       <div v-if="showReplyFoot" ref="replyFoot" class="thread-reply-foot">
         <div class="thread-reply-foot__column">
           <ThreadReplyBar
-            :recipient="footRecipientName"
+            :recipient="replyRecipientName"
             :identity="threadAccount?.displayName ?? ''"
             :identity-color="threadAccount?.color ?? null"
-            :resumes-draft="Boolean(resumableDraft)"
-            @reply="replyFromFoot"
+            @reply="replyThread"
           />
         </div>
       </div>
@@ -1138,8 +1151,8 @@ function showEntireThread() {
   margin: 0 auto;
 }
 
-/* The foot's box is the inset at the end of the thread: the last message, or
-   the draft card, stops above it, and scrolled-to messages stop above it too. */
+/* The foot's box is the inset at the end of the thread: the last message
+   stops above it, and scrolled-to messages stop above it too. */
 .thread-reading-content--reply {
   padding-bottom: 0;
   scroll-padding-bottom: var(--reply-foot-h, 0px);

@@ -9,17 +9,14 @@ import { useToastClearance } from '@/composables/useToastClearance';
  * in. Not a composer — drafts, signatures, attachments, scheduling and send
  * live in ComposerHost, and a second text field here would either duplicate
  * that or quietly lose what you typed into it on the way over. The bar shows
- * the two things you would otherwise open the composer to find out.
+ * the two things you would otherwise open the composer to find out. While
+ * the thread has an unsent draft the bar is not shown: the draft card is the
+ * reply in progress.
  */
 defineProps<{
   recipient: string;
   identity: string;
   identityColor?: string | null;
-  /**
-   * An unsent draft ends the thread. The way in is then that draft, not a
-   * second reply beside it.
-   */
-  resumesDraft?: boolean;
 }>();
 
 defineEmits<{
@@ -35,7 +32,7 @@ useToastClearance(barRef);
   <div ref="barRef" class="reply-bar">
     <CardButton class="reply-bar__field" @click="$emit('reply')">
       <span class="reply-bar__placeholder">
-        {{ resumesDraft ? $t('thread.reply.continue', { name: recipient }) : $t('thread.reply.to', { name: recipient }) }}
+        {{ $t('thread.reply.to', { name: recipient }) }}
       </span>
       <span class="reply-bar__identity">
         <span
@@ -49,16 +46,12 @@ useToastClearance(barRef);
     </CardButton>
     <AppButton variant="primary" size="sm" @click="$emit('reply')">
       <template #icon>
-        <svg v-if="resumesDraft" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M11.2 2.6l2.2 2.2L5.8 12.4 3 13l.6-2.8z" />
-          <path d="M2.5 14.5h11" />
-        </svg>
-        <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M6 3L1 8l5 5" />
           <path d="M1 8h9a5 5 0 0 1 5 5" />
         </svg>
       </template>
-      {{ resumesDraft ? $t('thread.reply.resume') : $t('common.reply') }}
+      {{ $t('common.reply') }}
     </AppButton>
   </div>
 </template>
