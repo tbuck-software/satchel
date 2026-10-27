@@ -13,6 +13,7 @@ import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import type { ThreadCategory } from '@/types/mail';
+import { useListSearchStore } from '@/stores/listSearch';
 import { useSettingsStore } from '@/stores/settings';
 import { useThreadsStore } from '@/stores/threads';
 import { type InboxSenderBucket } from '@/stores/settings';
@@ -28,6 +29,7 @@ const emit = defineEmits<{ close: [] }>();
 
 const { t } = useI18n();
 const router = useRouter();
+const listSearch = useListSearchStore();
 const settings = useSettingsStore();
 const threadsStore = useThreadsStore();
 const actions = useThreadActions();
@@ -93,11 +95,11 @@ async function choose(entry: (typeof BUCKETS)['value'][number]) {
   }
 }
 
+/** The sender's mail in every mailbox, as the list search — like a sidebar contact. */
 function showAll() {
   emit('close');
-  // `from:` is an operator the backend search understands; the in-list text
-  // filter does not, so this has to leave the list.
-  void router.push({ name: 'search', query: { q: `from:${normalizedEmail.value}` } });
+  listSearch.open(`from:${normalizedEmail.value}`, 'all');
+  void router.push({ name: 'inbox' });
 }
 </script>
 

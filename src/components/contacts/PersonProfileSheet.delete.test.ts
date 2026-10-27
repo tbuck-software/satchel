@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useToast } from '@/composables/useToast';
 import { useContactsStore } from '@/stores/contacts';
+import { useListSearchStore } from '@/stores/listSearch';
 import { answerConfirms, type DialogStub } from '@/test/dialogs';
 import type { ConfirmRequest } from '@/composables/useConfirm';
 
@@ -18,7 +19,8 @@ vi.mock('@/services/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/backend')>()),
   ...backend,
 }));
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+const router = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock('vue-router', () => ({ useRouter: () => router }));
 
 import PersonProfileSheet from './PersonProfileSheet.vue';
 
@@ -110,6 +112,24 @@ describe('deleting a contact from the profile sheet', () => {
     });
 
     expect(deleteButton()).toBeUndefined();
+    wrapper.unmount();
+  });
+});
+
+describe('showing all mail from the profile sheet', () => {
+  it('opens the list search for the person over all mail', async () => {
+    seedContact();
+    const wrapper = mount(PersonProfileSheet, { props: { open: true, person: { ...PERSON, email: 'Ada@Example.test' } } });
+    const button = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+      .find((candidate) => candidate.textContent?.trim() === 'All emails');
+    expect(button).toBeDefined();
+    button!.click();
+
+    const listSearch = useListSearchStore();
+    expect(listSearch.query).toBe('from:ada@example.test');
+    expect(listSearch.scope).toBe('all');
+    expect(router.push).toHaveBeenCalledWith({ name: 'inbox' });
+    expect(wrapper.emitted('navigate')).toHaveLength(1);
     wrapper.unmount();
   });
 });

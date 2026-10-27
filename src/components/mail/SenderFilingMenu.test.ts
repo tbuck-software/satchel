@@ -177,4 +177,19 @@ describe('sender filing menu', () => {
       { label: 'Show all mail', checked: false },
     ]);
   });
+
+  it('shows all of the sender\'s mail in the list search, not the search page', async () => {
+    getPreferenceMock.mockResolvedValue({ sender_email: 'mike@agency.example', category: null, is_priority: false });
+    const wrapper = mountMenu();
+    await flushPromises();
+
+    await wrapper.findAll('button').at(-1)!.trigger('click');
+
+    const { useListSearchStore } = await import('@/stores/listSearch');
+    const listSearch = useListSearchStore();
+    expect(listSearch.query).toBe('from:mike@agency.example');
+    expect(listSearch.scope).toBe('all');
+    expect(pushMock).toHaveBeenCalledWith({ name: 'inbox' });
+    expect(wrapper.emitted('close')).toHaveLength(1);
+  });
 });

@@ -6,6 +6,7 @@ import type { Participant, Thread } from '@/types/mail';
 import { backendBlockSender } from '@/services/backend';
 import { useAccountsStore } from '@/stores/accounts';
 import { useContactsStore } from '@/stores/contacts';
+import { useListSearchStore } from '@/stores/listSearch';
 import { useSettingsStore } from '@/stores/settings';
 import { useThreadsStore } from '@/stores/threads';
 import { useToast } from '@/composables/useToast';
@@ -33,6 +34,7 @@ const { t } = useI18n();
 const { ask } = useConfirm();
 const accounts = useAccountsStore();
 const contacts = useContactsStore();
+const listSearch = useListSearchStore();
 const settings = useSettingsStore();
 const threads = useThreadsStore();
 const toast = useToast();
@@ -98,12 +100,11 @@ async function saveNotes() {
   }
 }
 
+/** Their mail in every mailbox, as the list search — like a sidebar contact. */
 function showAllMail() {
   emit('navigate');
-  void router.push({
-    name: 'search',
-    query: { q: props.person.email, global: '1' },
-  });
+  listSearch.open(`from:${normalizedEmail.value}`, 'all');
+  void router.push({ name: 'inbox' });
 }
 
 function openThread(threadId: string) {
