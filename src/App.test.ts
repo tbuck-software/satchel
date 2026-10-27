@@ -3,11 +3,16 @@
 import { createPinia } from 'pinia';
 import { mount } from '@vue/test-utils';
 import { createMemoryHistory, createRouter } from 'vue-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.vue';
 import { useAppBootstrap, useComposeWindowBootstrap } from '@/bootstrap';
 import { useUiStore } from '@/stores/ui';
 import { nextTick } from 'vue';
+
+// App mounts several children lazily (onboarding, banners, toasts). Let
+// their imports finish before the environment is torn down, or the file
+// passes and the run still fails on a late stylesheet import.
+afterAll(() => vi.dynamicImportSettled());
 
 vi.mock('@/bootstrap', () => ({
   useAppBootstrap: vi.fn(),
