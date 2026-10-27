@@ -1,4 +1,4 @@
-//! Bounded queue scheduling and retry bookkeeping shared by the app and tests.
+//! Queue scheduling and retry bookkeeping shared by the app and tests.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -8,7 +8,7 @@ use tokio::task::JoinSet;
 
 use super::{
     errors::SyncResult,
-    queue::{backoff_seconds, QueuedAction, SyncQueue, MAX_RETRIES},
+    queue::{backoff_seconds, QueuedAction, SyncQueue},
 };
 
 /// How often one action may be deferred for a provider rate limit before it is
@@ -95,7 +95,7 @@ pub async fn settle_action(
     let error = if failure.was_delivered() {
         failure.to_string()
     } else {
-        serde_json::json!({"key": "backend.errors.queueActionFailed", "params": {"message": failure.to_string()}}).to_string()
+        failure.encoded()
     };
     if failure.was_delivered() {
         return Ok(
@@ -121,12 +121,12 @@ pub async fn settle_action(
     // without one the action circulates forever, never reaches `failed`, and so
     // never shows up in any failure count.
     let rate_limited = failure.is_rate_limited();
-    let retry_count = action.retry_count + u32::from(!rate_limited);
-    let rate_limit_rounds = action.rate_limit_rounds + u32::from(rate_limited);
-    if failure.is_permanent()
-        || retry_count > MAX_RETRIES
-        || rate_limit_rounds > MAX_RATE_LIMIT_ROUNDS
-    {
+    let retry_count = action.retry_count.saturating_add(u32::from(!rate_limited));
+    let rate_limit_rounds = action
+        .rate_limit_rounds
+        .saturating_add(u32::from(rate_limited));
+    // Elapsed attempts do not make a network outage permanent.
+    if failure.is_permanent() || rate_limit_rounds > MAX_RATE_LIMIT_ROUNDS {
         queue
             .mark_failed_permanent(pool, &action.id, &error)
             .await?;
@@ -201,7 +201,7 @@ pub enum DrainOutcome {
 }
 
 /// Execute the given rows in order outside the [`QueueWorker`], settling each
-/// one exactly as the worker does: same retry budget, same permanent-error
+/// one exactly as the worker does: same capped backoff, same permanent-error
 /// path. Stops at the first row that is not done.
 ///
 /// Android's notification quick actions run this in their own process. Before
@@ -489,11 +489,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_drained_transient_error_runs_out_of_retries() {
+    async fn a_drained_transient_error_keeps_retrying_then_recovers() {
         let pool = fresh_pool().await;
         let queue = SyncQueue::new();
         let id = notification_row(&pool, &queue).await;
-        for round in 1..=MAX_RETRIES + 5 {
+        for _round in 1..=12 {
             let outcome = drain_actions(
                 &pool,
                 &queue,
@@ -504,10 +504,7 @@ mod tests {
             .expect("drained");
             match outcome {
                 DrainOutcome::Pending { .. } => {}
-                DrainOutcome::Failed { .. } => {
-                    assert_eq!(round, MAX_RETRIES + 1);
-                    return;
-                }
+                DrainOutcome::Failed { .. } => panic!("transient failure must stay pending"),
                 DrainOutcome::Completed => panic!("a failing row cannot complete"),
             }
             // Skip the backoff so the next attempt finds the row due.
@@ -516,7 +513,11 @@ mod tests {
                 .await
                 .expect("due");
         }
-        panic!("a drained row kept retrying past MAX_RETRIES");
+        assert_eq!(status_of(&pool, &id).await.as_deref(), Some("pending"));
+        let outcome = drain_actions(&pool, &queue, &[id], async |_: &QueuedAction| Ok(()))
+            .await
+            .expect("recovered");
+        assert_eq!(outcome, DrainOutcome::Completed);
     }
 
     #[tokio::test]

@@ -11,9 +11,11 @@
  * `status`, never `alert`: being offline is a state the user usually caused,
  * not a failure that interrupts them.
  */
-import { computed } from 'vue';
+import { computed, defineAsyncComponent, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useConnectionStore } from '@/stores/connection';
+import { useOutboxStore } from '@/stores/outbox';
+import AppButton from '@/components/ui/AppButton.vue';
 import { formatListTime } from '@/utils/listTime';
 
 const props = withDefaults(defineProps<{
@@ -21,6 +23,14 @@ const props = withDefaults(defineProps<{
   hideIdle?: boolean;
 }>(), { hideIdle: false });
 
+const SyncFailures = defineAsyncComponent(() => import('./SyncFailures.vue'));
+const failuresOpen = ref(false);
+function openFailures(event: MouseEvent) {
+  (event.currentTarget as HTMLElement).focus();
+  failuresOpen.value = true;
+}
+const outbox = useOutboxStore();
+const failureCount = computed(() => outbox.attentionCount);
 const connection = useConnectionStore();
 const { t } = useI18n();
 
@@ -38,13 +48,20 @@ const label = computed(() => {
 </script>
 
 <template>
-  <p v-if="visible" class="sync-status" :class="`sync-status--${connection.syncStatus}`" role="status">
+  <div v-if="failureCount > 0 || visible">
+  <AppButton v-if="failureCount > 0" variant="link" class="sync-failure-status" aria-haspopup="dialog" :aria-expanded="failuresOpen" @click="openFailures">
+    {{ t('app.sync.failures.label', { count: failureCount }, failureCount) }}
+  </AppButton>
+  <p v-else-if="visible" class="sync-status" :class="`sync-status--${connection.syncStatus}`" role="status">
     <span class="sync-status__dot" aria-hidden="true" />
     <span class="sync-status__text">{{ label }}</span>
   </p>
+  <SyncFailures v-if="failureCount > 0 || failuresOpen" :open="failuresOpen" @close="failuresOpen = false" />
+  </div>
 </template>
 
 <style scoped>
+.sync-failure-status { color: var(--accent-red-soft); padding: var(--space-xs) var(--space-sm); }
 .sync-status {
   display: flex;
   align-items: center;

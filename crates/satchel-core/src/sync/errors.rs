@@ -57,6 +57,102 @@ impl SyncError {
         }
     }
 
+    /// Preserve structured provider causes; otherwise store a plain, translatable
+    /// reason alongside the diagnostic used by support and legacy recovery.
+    pub fn encoded(&self) -> String {
+        let diagnostic = self.to_string();
+        if diagnostic.starts_with("backend.errors.")
+            || serde_json::from_str::<serde_json::Value>(&diagnostic)
+                .ok()
+                .is_some_and(|value| {
+                    value["key"]
+                        .as_str()
+                        .is_some_and(|key| key.starts_with("backend.errors."))
+                })
+        {
+            return diagnostic;
+        }
+        let lower = diagnostic.to_ascii_lowercase();
+        let key = if self.is_rate_limited() {
+            "backend.errors.queueRateLimited"
+        } else if !self.is_permanent() {
+            "backend.errors.queueTemporary"
+        } else if lower.contains("invalid recipient")
+            || lower.contains("missing recipient")
+            || lower.contains("recipient")
+            || lower.contains("no such user")
+        {
+            "backend.errors.queueRecipientRejected"
+        } else if lower.contains("too large")
+            || lower.contains("size exceeds")
+            || lower.contains("status 413")
+        {
+            "backend.errors.queueMessageTooLarge"
+        } else if lower.contains("folder")
+            || lower.contains("mailbox")
+            || lower.contains("uidvalidity")
+        {
+            "backend.errors.queueFolderChanged"
+        } else if lower.contains("auth")
+            || lower.contains("token")
+            || lower.contains("invalid_grant")
+        {
+            "backend.errors.queueAuthentication"
+        } else {
+            "backend.errors.queueRejected"
+        };
+        serde_json::json!({"key": key, "params": {"message": diagnostic}}).to_string()
+    }
+
+    /// Only recognise known temporary legacy diagnostics. An unknown stored
+    /// failure may be a permanent rejection whose typed variant was lost.
+    pub fn recoverable_stored_failure(error: &str) -> bool {
+        let value = serde_json::from_str::<serde_json::Value>(error).ok();
+        let key = value.as_ref().and_then(|v| v["key"].as_str());
+        if key.is_some_and(|k| {
+            k != "backend.errors.queueActionFailed" && k != "backend.errors.queueTemporary"
+        }) {
+            return false;
+        }
+        let diagnostic = value
+            .as_ref()
+            .and_then(|v| v["params"]["message"].as_str())
+            .unwrap_or(error);
+        // This legacy diagnostic was only written after the sender observed
+        // a fresh token committed by another refresh. It is safe to try again.
+        if diagnostic.contains("oauth refresh failed from stale config:") {
+            return true;
+        }
+        if Self::from_message(diagnostic).is_permanent() {
+            return false;
+        }
+        let lower = diagnostic.to_ascii_lowercase();
+        // HTTP send responses can hide acceptance. Never infer safe delivery
+        // from a stored string where submission progress has been lost.
+        if lower.contains("send") && (lower.contains("status 5") || lower.contains("status 408")) {
+            return false;
+        }
+        [
+            "offline",
+            "dns",
+            "lookup address",
+            "name resolution",
+            "no such host",
+            "network is unreachable",
+            "network unreachable",
+            "connection reset",
+            "connection refused",
+            "connect error",
+            "connection error",
+            "timed out",
+            "timeout",
+            "status 5",
+            "status 401",
+        ]
+        .iter()
+        .any(|marker| lower.contains(marker))
+    }
+
     pub fn is_rate_limited(&self) -> bool {
         matches!(self, Self::RateLimited { .. })
     }
@@ -124,7 +220,9 @@ pub fn http_failure(provider: &str, action: &str, status: u16, body: &str) -> Sy
         || (status == 403 && body.contains("userRateLimitExceeded"));
     if rate_limited {
         SyncError::rate_limited(message, None)
-    } else if matches!(status, 400 | 401 | 403 | 404 | 410 | 422) {
+    } else if matches!(status, 400 | 403 | 404 | 410 | 413 | 422)
+        || (status == 401 && is_permanent_message(body))
+    {
         SyncError::Permanent(message)
     } else if action == "send" && (status >= 500 || status == 408) {
         SyncError::DeliveryUnknown(message)
@@ -236,7 +334,6 @@ fn is_permanent_message(error: &str) -> bool {
         return false;
     }
     lower.contains("status 400")
-        || lower.contains("status 401")
         || lower.contains("status 403")
         || lower.contains("status 404")
         || lower.contains("status 410")
@@ -245,6 +342,24 @@ fn is_permanent_message(error: &str) -> bool {
         || lower.contains("invalid recipient")
         || lower.contains("invalid from")
         || lower.contains("authentication failed")
+        || lower.contains("invalid_grant")
+        || lower.contains("token revoked")
+        || lower.contains("access revoked")
+        || lower.contains("message too large")
+        || lower.contains("message size exceeds")
+        || lower.contains("status 413")
+        || lower.contains("folder not found")
+        || lower.contains("folder no longer exists")
+        || lower.contains("mailbox does not exist")
+        || lower.contains("invalid credentials")
+        || lower.contains("no such mailbox")
+        || lower.contains("imapuidvalidity")
+        || lower.contains("uid validity changed")
+        || ((lower.contains("folder") || lower.contains("mailbox"))
+            && (lower.contains("no longer exists")
+                || lower.contains("not found")
+                || lower.contains("doesn't exist")
+                || lower.contains("nonexistent")))
 }
 
 #[cfg(test)]
@@ -373,6 +488,70 @@ mod tests {
             http_failure("gmail", "history", 500, "backend"),
             SyncError::Transient(_)
         ));
+    }
+
+    #[test]
+    fn temporary_failures_and_token_refresh_races_stay_retryable() {
+        for message in [
+            "offline",
+            "DNS lookup failed",
+            "connection reset",
+            "timeout",
+            "gmail labels failed with status 503",
+            "oauth refresh failed with status 500",
+            "gmail labels failed with status 401: expired access token",
+        ] {
+            assert!(
+                !SyncError::from_message(message).is_permanent(),
+                "{message}"
+            );
+            assert!(SyncError::recoverable_stored_failure(message), "{message}");
+        }
+        assert!(SyncError::recoverable_stored_failure(
+            "oauth refresh failed from stale config: invalid_grant"
+        ));
+        assert!(!http_failure("gmail", "labels", 401, "expired token").is_permanent());
+        assert!(
+            SyncError::Transient("oauth stale refresh: invalid_grant".into())
+                .encoded()
+                .contains("queueTemporary")
+        );
+        assert!(http_failure("gmail", "labels", 401, "access revoked").is_permanent());
+    }
+
+    #[test]
+    fn permanent_causes_have_translatable_reasons_and_are_not_recovered() {
+        for (message, key) in [
+            ("message too large", "queueMessageTooLarge"),
+            ("invalid recipient", "queueRecipientRejected"),
+            ("folder not found", "queueFolderChanged"),
+            (
+                "imap COPY failed: [NONEXISTENT] Mailbox doesn't exist",
+                "queueFolderChanged",
+            ),
+            (
+                "oauth refresh status 400: invalid_grant",
+                "queueAuthentication",
+            ),
+            ("authentication failed", "queueAuthentication"),
+        ] {
+            let error = SyncError::from_message(message);
+            assert!(error.is_permanent(), "{message}");
+            assert!(error.encoded().contains(key));
+            assert!(!SyncError::recoverable_stored_failure(&error.encoded()));
+        }
+        assert!(!SyncError::recoverable_stored_failure(
+            "unknown provider rejection"
+        ));
+        assert!(!SyncError::recoverable_stored_failure(
+            "gmail send failed with status 503"
+        ));
+        let structured =
+            r#"{"key":"backend.errors.imapUidValidityChanged","params":{"folder":"Inbox"}}"#;
+        assert_eq!(
+            SyncError::Permanent(structured.into()).encoded(),
+            structured
+        );
     }
 
     #[test]

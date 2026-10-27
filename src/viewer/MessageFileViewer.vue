@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import EmailRenderer from '@/components/mail/EmailRenderer.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
-import ToastStack from '@/components/ui/ToastStack.vue';
 import { useToast } from '@/composables/useToast';
 import type { Attachment } from '@/types/mail';
 // Submodules, not the barrel: `services/backend/index.ts` re-exports all
@@ -24,6 +23,10 @@ import { formatBytes } from '@/utils/formatBytes';
 
 const { locale, t } = useI18n();
 const toast = useToast();
+// A viewer only needs notifications after an attachment or import action.
+const ToastStack = defineAsyncComponent(() => import('@/components/ui/ToastStack.vue'));
+const toastMounted = ref(false);
+watch(() => toast.state.toasts.length, (count) => { if (count > 0) toastMounted.value = true; }, { immediate: true });
 
 const preview = ref<BackendMessageFilePreview | null>(null);
 const error = ref('');
@@ -222,7 +225,7 @@ async function importIntoAccount() {
         />
       </article>
     </template>
-    <ToastStack />
+    <ToastStack v-if="toastMounted" />
   </main>
 </template>
 

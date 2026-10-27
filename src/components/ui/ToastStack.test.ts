@@ -205,3 +205,19 @@ describe('ToastStack announcements', () => {
     wrapper.unmount();
   });
 });
+
+it('announces both failure types from a single queue refresh once', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+  const wrapper = mount(ToastStack);
+  toast.error('A send needs attention');
+  toast.error('A change needs attention');
+  await nextTick();
+  vi.advanceTimersByTime(100);
+  await nextTick();
+  expect(wrapper.get('[role="alert"]').text()).toBe('A send needs attention A change needs attention');
+  wrapper.unmount();
+  toast.clear();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});

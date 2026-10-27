@@ -1,17 +1,8 @@
 import { onBeforeUnmount, onMounted, ref, shallowReactive, type Ref } from 'vue';
 
 /**
- * Surfaces a toast must not cover: the composer's send row and the reader's
- * reply bar. The stack sits fixed in the bottom-right corner, which is exactly
- * where both of them end — and an error toast stays for nine seconds while a
- * failing sync keeps putting one back, so the stack used to sit on the Send
- * button that would have resolved the error.
- *
- * The owner registers its element; `ToastStack` measures the registered
- * elements and lifts itself above whichever it would overlap. Measured, not
- * configured: the composer is dragged, resized and maximised, the reply bar
- * comes and goes with the thread, and a fixed offset would be wrong for most
- * of those.
+ * Owners register the whole composer and reply bar. The lower-left toast stack
+ * measures their bounds when notifications or layout change, then clears them.
  */
 
 export interface ClearanceRect {

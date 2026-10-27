@@ -59,6 +59,7 @@
       "replyPlaceholder": "Write a reply…"
     },
     "outbox": {
+      "needsAttention": "{count} email needs attention in Outbox. | {count} emails need attention in Outbox.",
       "sendFailed": "{count} email could not be sent. | {count} emails could not be sent."
     },
     "plugins": {
@@ -68,6 +69,13 @@
       "discovered": "Found {count} signature in your sent mail. | Found {count} signatures in your sent mail."
     },
     "sync": {
+      "failures": {
+        "explanation": "Temporary connection problems retry automatically. These items need a review.",
+        "label": "{count} item needs attention | {count} items need attention",
+        "resolved": "Everything is up to date.",
+        "title": "Needs attention",
+        "unavailable": "Open Outbox to review the affected items."
+      },
       "mutationsFailed": "{count} change could not be synced to the server. | {count} changes could not be synced to the server.",
       "retryFailed": "Re-sync failed: {error}",
       "retryQueued": "{count} change is being synced again. | {count} changes are being synced again.",
@@ -245,6 +253,13 @@
       "pop3CredentialsRejected": "No POP3 configuration accepted these credentials. Check the username or enter the server manually.",
       "pop3PlaintextRejected": "This POP3 account is set to port 110 without encryption. Satchel will not send the password unencrypted: switch the account to port 995 with TLS.",
       "queueActionFailed": "The queued action failed: {message}",
+      "queueAuthentication": "The server no longer accepts your sign-in. Reconnect the account in Settings.",
+      "queueFolderChanged": "The folder changed or no longer exists. Sync your folders and choose a destination again.",
+      "queueMessageTooLarge": "The message is too large for the server. Remove attachments before sending again.",
+      "queueRateLimited": "The server keeps limiting requests. Try again later.",
+      "queueRecipientRejected": "The server rejected a recipient. Check the email address before sending again.",
+      "queueRejected": "The server rejected this action. Review its details before trying again.",
+      "queueTemporary": "The server is temporarily unavailable. Satchel will try again automatically.",
       "recipientAddressInvalid": "This is not a valid recipient address: {value}",
       "replyContextLoadFailed": "The reply context could not be loaded. The message has not been sent yet.",
       "replyThreadNotFound": "The conversation for this reply is no longer available.",

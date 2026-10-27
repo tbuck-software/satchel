@@ -149,7 +149,9 @@ pub async fn execute_send_action(
                     .bind(&account.id)
                     .execute(pool)
                     .await;
-                    return Err(format!("oauth refresh failed from stale config: {err}").into());
+                    return Err(SyncError::Transient(format!(
+                        "oauth refresh failed from stale config: {err}"
+                    )));
                 }
 
                 let now = Utc::now().to_rfc3339();

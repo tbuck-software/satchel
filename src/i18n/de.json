@@ -59,6 +59,7 @@
       "replyPlaceholder": "Antwort schreiben …"
     },
     "outbox": {
+      "needsAttention": "{count} E-Mail im Postausgang benötigt Aufmerksamkeit. | {count} E-Mails im Postausgang benötigen Aufmerksamkeit.",
       "sendFailed": "{count} E-Mail konnte nicht gesendet werden. | {count} E-Mails konnten nicht gesendet werden."
     },
     "plugins": {
@@ -68,6 +69,13 @@
       "discovered": "{count} Signatur in gesendeten Nachrichten gefunden. | {count} Signaturen in gesendeten Nachrichten gefunden."
     },
     "sync": {
+      "failures": {
+        "explanation": "Vorübergehende Verbindungsprobleme werden automatisch erneut versucht. Diese Einträge müssen geprüft werden.",
+        "label": "{count} Eintrag benötigt Aufmerksamkeit | {count} Einträge benötigen Aufmerksamkeit",
+        "resolved": "Alles ist auf dem neuesten Stand.",
+        "title": "Aufmerksamkeit erforderlich",
+        "unavailable": "Öffne den Postausgang, um die betroffenen Einträge zu prüfen."
+      },
       "mutationsFailed": "{count} Änderung konnte nicht mit dem Server abgeglichen werden. | {count} Änderungen konnten nicht mit dem Server abgeglichen werden.",
       "retryFailed": "Erneuter Abgleich fehlgeschlagen: {error}",
       "retryQueued": "{count} Änderung wird erneut abgeglichen. | {count} Änderungen werden erneut abgeglichen.",
@@ -245,6 +253,13 @@
       "pop3CredentialsRejected": "Keine POP3-Konfiguration hat diese Zugangsdaten akzeptiert. Prüfe den Benutzernamen oder trage den Server von Hand ein.",
       "pop3PlaintextRejected": "Dieses POP3-Konto steht auf Port 110 ohne Verschlüsselung. Satchel sendet das Passwort nicht im Klartext: stelle das Konto auf Port 995 mit TLS um.",
       "queueActionFailed": "Die vorgemerkte Aktion ist fehlgeschlagen: {message}",
+      "queueAuthentication": "Der Server akzeptiert deine Anmeldung nicht mehr. Verbinde das Konto in den Einstellungen erneut.",
+      "queueFolderChanged": "Der Ordner hat sich geändert oder existiert nicht mehr. Synchronisiere die Ordner und wähle das Ziel erneut.",
+      "queueMessageTooLarge": "Die Nachricht ist für den Server zu groß. Entferne Anhänge vor dem erneuten Senden.",
+      "queueRateLimited": "Der Server begrenzt weiterhin die Anfragen. Versuche es später erneut.",
+      "queueRecipientRejected": "Der Server hat einen Empfänger abgelehnt. Prüfe die E-Mail-Adresse vor dem erneuten Senden.",
+      "queueRejected": "Der Server hat diese Aktion abgelehnt. Prüfe die Details vor einem erneuten Versuch.",
+      "queueTemporary": "Der Server ist vorübergehend nicht erreichbar. Satchel versucht es automatisch erneut.",
       "recipientAddressInvalid": "Das ist keine gültige Empfängeradresse: {value}",
       "replyContextLoadFailed": "Der Antwortkontext konnte nicht geladen werden. Die Nachricht wurde noch nicht gesendet.",
       "replyThreadNotFound": "Die Unterhaltung für diese Antwort ist nicht mehr verfügbar.",

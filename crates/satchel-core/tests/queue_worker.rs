@@ -2,7 +2,7 @@
 use async_trait::async_trait;
 use satchel_core::sync::{
     errors::{SyncError, SyncResult},
-    queue::{QueuedAction, SyncQueue, MAX_RETRIES},
+    queue::{QueuedAction, SyncQueue},
     worker::{ActionExecutor, Outcome, QueueWorker},
 };
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
@@ -125,17 +125,17 @@ async fn status_count(pool: &SqlitePool) -> i64 {
         .unwrap()
 }
 #[tokio::test]
-async fn production_worker_exhausts_transient_budget_and_preserves_order() {
+async fn production_worker_retries_transient_outages_and_preserves_order() {
     let (pool, queue, executor) = fixture().await;
     let first = enqueue(&pool, &queue, "a", "remote_mutation").await;
     let second = enqueue(&pool, &queue, "a", "remote_mutation").await;
     *executor.failure.lock().unwrap() = Some(SyncError::Transient("connection reset".into()));
     let mut worker = QueueWorker::new(pool.clone(), queue, executor.clone(), 2);
-    for attempt in 0..=MAX_RETRIES {
+    for attempt in 0..=10 {
         assert_eq!(worker.dispatch_ready().await.unwrap(), 1);
         executor.gate.add_permits(1);
         worker.wait_for_completion().await;
-        if attempt < MAX_RETRIES {
+        if attempt < 10 {
             assert_eq!(
                 worker.dispatch_ready().await.unwrap(),
                 0,
@@ -148,7 +148,7 @@ async fn production_worker_exhausts_transient_budget_and_preserves_order() {
                 .unwrap();
         }
     }
-    assert_eq!(status(&pool, &first).await.as_deref(), Some("failed"));
+    assert_eq!(status(&pool, &first).await.as_deref(), Some("pending"));
     assert_eq!(status(&pool, &second).await.as_deref(), Some("pending"));
     let outcomes = executor.outcomes.lock().unwrap();
     let counts: Vec<u32> = outcomes
@@ -158,8 +158,8 @@ async fn production_worker_exhausts_transient_budget_and_preserves_order() {
             _ => None,
         })
         .collect();
-    assert_eq!(counts, (1..=MAX_RETRIES).collect::<Vec<_>>());
-    assert!(matches!(outcomes.last(), Some(Outcome::Failed { .. })));
+    assert_eq!(counts, (1..=11).collect::<Vec<_>>());
+    assert!(matches!(outcomes.last(), Some(Outcome::Retry { .. })));
 }
 #[tokio::test]
 async fn rate_limits_preserve_budget_and_delivered_mail_never_retries() {

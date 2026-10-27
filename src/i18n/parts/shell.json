@@ -36,6 +36,7 @@
         "replyPlaceholder": "Write a reply…"
       },
       "outbox": {
+        "needsAttention": "{count} email needs attention in Outbox. | {count} emails need attention in Outbox.",
         "sendFailed": "{count} email could not be sent. | {count} emails could not be sent."
       },
       "signatures": {
@@ -48,6 +49,13 @@
         "autoDisabled": "The plugin {plugin} kept timing out and was switched off. You can switch it back on under Settings → Integrations."
       },
       "sync": {
+        "failures": {
+          "title": "Needs attention",
+          "label": "{count} item needs attention | {count} items need attention",
+          "explanation": "Temporary connection problems retry automatically. These items need a review.",
+          "unavailable": "Open Outbox to review the affected items.",
+          "resolved": "Everything is up to date."
+        },
         "mutationsFailed": "{count} change could not be synced to the server. | {count} changes could not be synced to the server.",
         "retryFailed": "Re-sync failed: {error}",
         "retryQueued": "{count} change is being synced again. | {count} changes are being synced again.",
@@ -492,6 +500,7 @@
         "replyPlaceholder": "Antwort schreiben …"
       },
       "outbox": {
+        "needsAttention": "{count} E-Mail im Postausgang benötigt Aufmerksamkeit. | {count} E-Mails im Postausgang benötigen Aufmerksamkeit.",
         "sendFailed": "{count} E-Mail konnte nicht gesendet werden. | {count} E-Mails konnten nicht gesendet werden."
       },
       "signatures": {
@@ -504,6 +513,13 @@
         "autoDisabled": "Das Plugin {plugin} lief wiederholt in Zeitüberschreitungen und wurde abgeschaltet. Unter Einstellungen → Integrationen lässt es sich wieder einschalten."
       },
       "sync": {
+        "failures": {
+          "title": "Aufmerksamkeit erforderlich",
+          "label": "{count} Eintrag benötigt Aufmerksamkeit | {count} Einträge benötigen Aufmerksamkeit",
+          "explanation": "Vorübergehende Verbindungsprobleme werden automatisch erneut versucht. Diese Einträge müssen geprüft werden.",
+          "unavailable": "Öffne den Postausgang, um die betroffenen Einträge zu prüfen.",
+          "resolved": "Alles ist auf dem neuesten Stand."
+        },
         "mutationsFailed": "{count} Änderung konnte nicht mit dem Server abgeglichen werden. | {count} Änderungen konnten nicht mit dem Server abgeglichen werden.",
         "retryFailed": "Erneuter Abgleich fehlgeschlagen: {error}",
         "retryQueued": "{count} Änderung wird erneut abgeglichen. | {count} Änderungen werden erneut abgeglichen.",

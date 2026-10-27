@@ -35,7 +35,7 @@ test('sync activity keeps the sidebar geometry stable', async ({ page }) => {
   const sidebar = page.locator('aside').first();
   const footer = sidebar.locator('.sidebar-footer');
   await expect(footer.getByRole('button', { name: 'Settings', exact: true })).toHaveAttribute('aria-current', 'page');
-  const button = sidebar.locator('.sidebar-brand').getByRole('button', { name: 'Sync email', exact: true });
+  const button = sidebar.locator('.sidebar-brand .sync-button');
   await expect(button).toBeVisible();
   const restingButton = await button.boundingBox();
   const restingFooter = await footer.boundingBox();
@@ -60,10 +60,13 @@ test('sync activity keeps the sidebar geometry stable', async ({ page }) => {
     expect(await sidebar.locator('.sidebar-scroll').boundingBox()).toEqual(restingContent);
     expect(await button.boundingBox()).toEqual(restingButton);
     await expect(button).toHaveAttribute('aria-busy', String(state.syncing));
-    if (state.syncing || !state.online) await expect(button).toBeDisabled();
-    else await expect(button).toBeEnabled();
+    // Existing failures stay reachable while a sync runs or the app is offline.
+    await expect(button).toBeEnabled();
   }
   await button.click();
+  const failures = page.getByRole('dialog', { name: 'Needs attention', exact: true });
+  await expect(failures).toBeVisible();
+  await failures.getByRole('button', { name: 'Sync email', exact: true }).click();
   await expect(page.getByRole('status')).toContainText(['Sync finished.']);
 });
 
@@ -71,7 +74,7 @@ test('sync button fits beside the logo in the narrow native macOS header', async
   await page.addInitScript(() => localStorage.setItem('satchel.ui.sidebarWidth', '220'));
   await page.goto('/settings');
   const header = page.locator('.sidebar-brand');
-  const button = header.getByRole('button', { name: 'Sync email', exact: true });
+  const button = header.locator('.sync-button');
   await expect(button).toBeVisible();
   await page.evaluate(() => {
     document.documentElement.dataset.runtimePlatform = 'macos';

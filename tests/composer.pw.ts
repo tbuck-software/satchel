@@ -30,10 +30,12 @@ for (const theme of ['dark', 'light'] as const) {
           const box = await composer.boundingBox();
           return box && Math.round(viewport.width - box.x - box.width);
         }).toBe(18);
-        const box = (await composer.boundingBox())!;
-        expect(Math.round(viewport.height - box.y - box.height)).toBe(18);
-        expect(box.width).toBeCloseTo(620, 3);
-        expect(box.height).toBeCloseTo(540, 3);
+        await expect.poll(async () => {
+          const box = (await composer.boundingBox())!;
+          return Math.round(viewport.height - box.y - box.height);
+        }).toBe(18);
+        await expect.poll(async () => (await composer.boundingBox())!.width).toBeCloseTo(620, 3);
+        await expect.poll(async () => (await composer.boundingBox())!.height).toBeCloseTo(540, 3);
         if (mode === 'reply') {
           const history = composer.locator('[data-composer-history]');
           await expect(history).toContainText(/On .+ wrote:/);
@@ -100,7 +102,13 @@ test('phone ComposeFab opens a full-screen composer and returns to the mailbox',
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   await expect(composer).toBeVisible();
   const box = (await composer.boundingBox())!;
-  expect(box).toMatchObject({ x: 0, y: 0, width: 390, height: 844 });
+  expect(box).toMatchObject({ x: 0, width: 390 });
+  expect(Math.round(box.y + box.height)).toBe(844);
+  // Fresh failure receipts reserve a lane above the full-screen composer.
+  for (const toast of await page.locator('.toast').all()) {
+    const receipt = (await toast.boundingBox())!;
+    expect(receipt.y + receipt.height).toBeLessThanOrEqual(box.y);
+  }
   await expect(composer.getByRole('button', { name: 'Maximise composer' })).toHaveCount(0);
   await composer.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(composer).toHaveCount(0);

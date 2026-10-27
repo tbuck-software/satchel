@@ -622,6 +622,38 @@ impl SyncQueue {
         Ok(())
     }
 
+    /// Recover old retry-budget failures at startup. Explicit rejections and
+    /// ambiguous deliveries stay terminal. The status/error guard prevents a
+    /// concurrent manual retry or edit from being overwritten.
+    pub async fn requeue_failed_transient(&self, pool: &SqlitePool) -> Result<u64, String> {
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT id, last_error FROM sync_queue WHERE status = 'failed' AND last_error IS NOT NULL"
+        ).fetch_all(pool).await.map_err(|err| err.to_string())?;
+        let mut changed = 0;
+        for (id, error) in rows {
+            if !super::errors::SyncError::recoverable_stored_failure(&error) {
+                continue;
+            }
+            changed += sqlx::query(
+                "UPDATE sync_queue SET status = 'pending', next_retry_at = NULL,
+                 sending_session = NULL, updated_at = ?, updated_at_ms = ?
+                 WHERE id = ? AND status = 'failed' AND last_error = ?",
+            )
+            .bind(Utc::now().to_rfc3339())
+            .bind(Utc::now().timestamp_millis())
+            .bind(id)
+            .bind(error)
+            .execute(pool)
+            .await
+            .map_err(|err| err.to_string())?
+            .rows_affected();
+        }
+        if changed > 0 {
+            self.wake_worker();
+        }
+        Ok(changed)
+    }
+
     /// Recover actions that were in `sending` state when the app crashed.
     ///
     /// Remote mutations are safe to retry. A mail send is ambiguous: the
@@ -937,8 +969,6 @@ pub fn backoff_seconds(retry_count: u32) -> i64 {
         _ => 2 * 60 * 60,
     }
 }
-
-pub const MAX_RETRIES: u32 = 5;
 
 #[cfg(test)]
 mod tests {
@@ -1898,9 +1928,66 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn startup_requeues_only_known_transient_failures() {
+        let pool = fresh_pool().await;
+        let queue = SyncQueue::new();
+        for (id, status, error) in [
+            (
+                "offline-send",
+                "failed",
+                r#"{"key":"backend.errors.queueActionFailed","params":{"message":"DNS lookup failed"}}"#,
+            ),
+            ("offline-move", "failed", "connection reset"),
+            ("rejected", "failed", "invalid recipient"),
+            ("revoked", "failed", "invalid_grant"),
+            ("unknown", "delivery_unknown", "connection reset"),
+            ("delivered", "delivered", "timeout"),
+            ("ambiguous", "failed", "gmail send failed with status 503"),
+        ] {
+            let mut action = QueuedAction::new(
+                "acc-1".into(),
+                if id == "offline-move" {
+                    "remote_mutation"
+                } else {
+                    "send_message"
+                },
+                serde_json::json!({}),
+            );
+            action.id = id.into();
+            queue.enqueue(&pool, action).await.unwrap();
+            sqlx::query(
+                "UPDATE sync_queue SET status = ?, last_error = ?, retry_count = 6 WHERE id = ?",
+            )
+            .bind(status)
+            .bind(error)
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        assert_eq!(queue.requeue_failed_transient(&pool).await.unwrap(), 2);
+        assert_eq!(queue.requeue_failed_transient(&pool).await.unwrap(), 0);
+        let statuses: Vec<(String, String)> = sqlx::query_as("SELECT id, status FROM sync_queue")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        for (id, status) in statuses {
+            assert_eq!(
+                status,
+                match id.as_str() {
+                    "offline-send" | "offline-move" => "pending",
+                    "unknown" => "delivery_unknown",
+                    "delivered" => "delivered",
+                    _ => "failed",
+                }
+            );
+        }
+    }
+
     #[test]
     fn backoff_progression_is_monotonic() {
-        let values: Vec<i64> = (1..=MAX_RETRIES + 2).map(backoff_seconds).collect();
+        let values: Vec<i64> = (1..=12).map(backoff_seconds).collect();
         for window in values.windows(2) {
             assert!(window[1] >= window[0], "backoff non-monotonic: {values:?}");
         }

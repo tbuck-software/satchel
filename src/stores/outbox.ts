@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import {
   backendCancelOutboxAction,
   backendListFailedSyncActions,
@@ -7,6 +7,7 @@ import {
   backendCommandsAvailable,
   backendListOutbox,
   backendRetryOutboxAction,
+  backendRetryFailedSyncActions,
   backendSupportsNativeCommands,
   type BackendOutboxItem,
 } from '@/services/backend';
@@ -33,6 +34,16 @@ export const useOutboxStore = defineStore('outbox', () => {
   /** Raw cause of the last failed list, so the view can tell empty from broken. */
   const error = ref<string | null>(null);
   const connectionStore = useConnectionStore();
+  const failedSendCount = computed(() => items.value.filter((item) =>
+    item.action_type === 'send_message' && ['failed', 'delivered', 'delivery_unknown'].includes(item.status),
+  ).length);
+  const failedChangeCount = computed(() => items.value.filter((item) =>
+    item.action_type !== 'send_message' && item.status === 'failed',
+  ).length);
+  // Queue events arrive before the periodic count snapshot. Keep attention
+  // reachable during that gap, including after a short-lived receipt expires.
+  const attentionCount = computed(() => Math.max(connectionStore.failedSends, failedSendCount.value)
+    + Math.max(connectionStore.failedRemoteMutations, failedChangeCount.value));
 
   // Five events trigger a reload; only the newest request may publish.
   let loadRequestId = 0;
@@ -62,6 +73,12 @@ export const useOutboxStore = defineStore('outbox', () => {
   async function retry(id: string) {
     await backendRetryOutboxAction(id);
     items.value = items.value.filter((i) => i.id !== id);
+  }
+
+  async function retryFailedSyncActions() {
+    const count = await backendRetryFailedSyncActions();
+    await Promise.all([load(), connectionStore.refresh()]);
+    return count;
   }
 
   async function cancel(id: string) {
@@ -118,5 +135,5 @@ export const useOutboxStore = defineStore('outbox', () => {
     unlisteners = [];
   }
 
-  return { items, loading, error, load, retry, cancel, start, stop };
+  return { items, loading, error, failedSendCount, failedChangeCount, attentionCount, load, retry, retryFailedSyncActions, cancel, start, stop };
 });

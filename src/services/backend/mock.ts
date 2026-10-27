@@ -95,7 +95,11 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
 }
 const trashReceipts = new Map<string, Thread[]>();
 let nextTrashReceipt = 0;
-const outbox: BackendOutboxItem[] = mockOutboxItems.map((item) => ({ ...item }));
+const outbox: BackendOutboxItem[] = mockOutboxItems.map((item) => ({
+  ...item,
+  last_error: item.id === 'failed-move' ? 'backend.errors.queueFolderChanged'
+    : item.id === 'ob-failed' ? 'backend.errors.queueMessageTooLarge' : item.last_error,
+}));
 if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockVisibility')) outbox.splice(0);
 /*
  * `?mockLongThread=120` adds one HTML conversation of that many messages on
@@ -991,7 +995,16 @@ const handlers: Record<string, Handler> = {
     if (draft) putDraft({ ...draft, scheduled_for: null });
     queuedDrafts.delete(payload.id as string);
   },
-  retry_failed_sync_actions: () => 0,
+  retry_failed_sync_actions: () => {
+    const failed = outbox.filter((item) => item.action_type !== 'send_message' && item.status === 'failed');
+    for (const item of failed) {
+      item.status = 'pending';
+      item.retry_count = 0;
+      item.next_retry_at = null;
+      item.last_error = null;
+    }
+    return failed.length;
+  },
   undo_outbox_send: (payload) => takeQueuedDraft(payload.id as string),
 
   /* --- drafts --------------------------------------------------------- */

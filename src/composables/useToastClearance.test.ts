@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { defineComponent, h, nextTick, ref } from 'vue';
@@ -67,6 +67,7 @@ describe('ToastStack with a registered surface', () => {
   }
 
   async function settle() {
+    await flushPromises();
     await nextTick();
     await nextTick();
     await nextTick();
@@ -87,7 +88,7 @@ describe('ToastStack with a registered surface', () => {
     toast.error('Senden fehlgeschlagen');
     await settle();
     // Stack bottom 676, send row top 640: 36px plus the 8px gap.
-    expect(stack().style.getPropertyValue('--toast-clearance')).toBe('44px');
+    await vi.waitFor(() => expect(stack().style.getPropertyValue('--toast-clearance')).toBe('44px'));
 
     toast.clear();
     await settle();
@@ -123,4 +124,12 @@ describe('ToastStack with a registered surface', () => {
     expect((wrapper.get('.stack').element as HTMLElement).style.getPropertyValue('--toast-clearance')).toBe('0px');
     wrapper.unmount();
   });
+});
+
+it('clears the whole quoted composer history rather than only the send row', () => {
+  const composer = rect(250, 882, 662, 1422);
+  expect(clearanceAbove(rect(780, 870, 24, 464), [composer], 8)).toBe(0);
+  // Dragging the composer left makes the entire window an obstacle.
+  const dragged = { ...composer, left: 240, right: 1000 };
+  expect(clearanceAbove(rect(780, 870, 24, 464), [dragged], 8)).toBe(628);
 });

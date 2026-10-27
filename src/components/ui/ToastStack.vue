@@ -4,9 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { useToast, type Toast, type ToastAction } from '@/composables/useToast';
 import { useShortcutHints } from '@/composables/useShortcutHints';
 import {
-  clearanceAbove,
   toastClearanceRevision,
-  toastObstacleRects,
 } from '@/composables/useToastClearance';
 import IconButton from '@/components/ui/IconButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -91,7 +89,7 @@ const visibleToasts = computed(() => {
 });
 
 /*
- * Lift the stack above the composer's send row and the reply bar while a
+ * Keep the lower-left stack outside the whole composer and reply bar while a
  * toast is up (see `useToastClearance`). Measured on the events that move
  * those surfaces — a toast arriving, a resize, the end of a drag or a
  * transition, an owner's refresh — rather than every frame: an error toast
@@ -99,28 +97,39 @@ const visibleToasts = computed(() => {
  */
 const stackRef = ref<HTMLElement | null>(null);
 const clearance = ref(0);
+const reserved = ref(false);
+const availableWidth = ref<number | null>(null);
+let stackObserver: ResizeObserver | null = null;
 /** `--space-sm`, between the stack and the surface it clears. */
 const CLEARANCE_GAP = 8;
 let clearanceFrame: number | null = null;
 
-function measureClearance() {
+let placementModule: Promise<typeof import('@/composables/toastPlacement')> | null = null;
+async function measureClearance() {
   clearanceFrame = null;
   const stack = stackRef.value;
   if (!stack || visibleToasts.value.length === 0) {
     clearance.value = 0;
+    reserved.value = false;
+    availableWidth.value = null;
+    document.documentElement.style.removeProperty('--toast-reserved-height');
     return;
   }
-  const rect = stack.getBoundingClientRect();
-  // Measured from where the stack sits when it is not lifted.
-  const resting = {
-    top: rect.top + clearance.value,
-    bottom: rect.bottom + clearance.value,
-    left: rect.left,
-    right: rect.right,
-  };
-  const lift = clearanceAbove(resting, toastObstacleRects(stack), CLEARANCE_GAP);
-  // Never past the top edge: covering a surface beats a toast nobody can see.
-  clearance.value = Math.max(0, Math.min(lift, resting.top - CLEARANCE_GAP));
+  const { measureToastPlacement } = await (placementModule ??= import('@/composables/toastPlacement'));
+  if (stackRef.value !== stack || visibleToasts.value.length === 0) return;
+  const next = measureToastPlacement(stack, {
+    clearance: clearance.value, reserved: reserved.value, availableWidth: availableWidth.value,
+  }, CLEARANCE_GAP);
+  clearance.value = next.clearance;
+  reserved.value = next.reserved;
+  availableWidth.value = next.availableWidth;
+  if (next.reserved) {
+    document.documentElement.style.setProperty('--toast-reserved-height',
+      `calc(${stack.getBoundingClientRect().height + 2 * CLEARANCE_GAP}px + var(--satchel-safe-area-top))`);
+  } else {
+    document.documentElement.style.removeProperty('--toast-reserved-height');
+  }
+  if (next.remeasure) void nextTick(scheduleClearance);
 }
 
 function scheduleClearance() {
@@ -153,7 +162,15 @@ watch(
   { immediate: true },
 );
 
+onMounted(() => {
+  if (typeof ResizeObserver !== 'undefined' && stackRef.value) {
+    stackObserver = new ResizeObserver(scheduleClearance);
+    stackObserver.observe(stackRef.value);
+  }
+});
 onBeforeUnmount(() => {
+  stackObserver?.disconnect();
+  document.documentElement.style.removeProperty('--toast-reserved-height');
   listenForClearance(false);
   if (clearanceFrame !== null) cancelAnimationFrame(clearanceFrame);
 });
@@ -167,6 +184,7 @@ const politeAnnouncement = ref('');
 const assertiveAnnouncement = ref('');
 const announcedIds = new Set<string>();
 let announceTimer: number | null = null;
+const pendingAnnouncements = new Map<string, Toast>();
 
 function announcementFor(item: Toast): string {
   const count = item.groupKey
@@ -187,15 +205,18 @@ watch(
     for (const id of announcedIds) if (!current.has(id)) announcedIds.delete(id);
     const fresh = toast.state.toasts.filter((item) => !announcedIds.has(item.id));
     fresh.forEach((item) => announcedIds.add(item.id));
-    const newest = fresh.at(-1);
-    if (!newest) return;
-    const target = newest.tone === 'error' ? assertiveAnnouncement : politeAnnouncement;
-    // Cleared first, so a repeat of the same text is still a change.
-    target.value = '';
+    if (fresh.length === 0) return;
+    if (fresh.some((item) => item.tone === 'error')) assertiveAnnouncement.value = '';
+    if (fresh.some((item) => item.tone !== 'error')) politeAnnouncement.value = '';
+    for (const item of fresh) pendingAnnouncements.set(item.groupKey ?? item.id, item);
+    // Batch arrivals from one queue refresh without dropping the first error.
     if (announceTimer !== null) window.clearTimeout(announceTimer);
     announceTimer = window.setTimeout(() => {
       announceTimer = null;
-      target.value = announcementFor(newest);
+      const pending = [...pendingAnnouncements.values()];
+      pendingAnnouncements.clear();
+      assertiveAnnouncement.value = pending.filter((item) => item.tone === 'error').map(announcementFor).join(' ');
+      politeAnnouncement.value = pending.filter((item) => item.tone !== 'error').map(announcementFor).join(' ');
     }, 100);
   },
   { immediate: true },
@@ -225,7 +246,7 @@ function showPreviousCompactUndo() {
 <template>
   <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ politeAnnouncement }}</div>
   <div class="sr-only" role="alert" aria-live="assertive" aria-atomic="true">{{ assertiveAnnouncement }}</div>
-  <div ref="stackRef" class="stack" :style="{ '--toast-clearance': `${clearance}px` }">
+  <div ref="stackRef" class="stack" :class="{ 'stack--reserved': reserved }" :style="{ '--toast-clearance': `${clearance}px`, '--toast-available-width': availableWidth ? `${availableWidth}px` : undefined }">
     <TransitionGroup name="toast" tag="div" class="stack__inner">
       <div
         v-for="item in visibleToasts"
@@ -292,12 +313,13 @@ function showPreviousCompactUndo() {
 <style scoped>
 .stack {
   position: fixed;
-  right: calc(var(--space-xl) + var(--satchel-safe-area-right));
+  left: calc(var(--space-xl) + var(--satchel-safe-area-left));
   /* Not transitioned: the lift is measured from the stack's own position. */
   bottom: calc(var(--space-xl) + var(--satchel-safe-area-bottom) + var(--toast-clearance, 0px));
   z-index: 1000;
   max-width: min(
     440px,
+    var(--toast-available-width, 440px),
     calc(
       100vw - 2 * var(--space-xl) - var(--satchel-safe-area-left) -
         var(--satchel-safe-area-right)
@@ -309,11 +331,12 @@ function showPreviousCompactUndo() {
 .stack__inner {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: var(--space-sm);
 }
 
 .toast {
+  max-width: 100%;
   pointer-events: auto;
   display: flex;
   align-items: center;
@@ -447,6 +470,11 @@ function showPreviousCompactUndo() {
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
   }
+}
+
+.stack.stack--reserved {
+  top: calc(var(--space-sm) + var(--satchel-safe-area-top));
+  bottom: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {

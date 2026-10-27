@@ -90,3 +90,29 @@ describe('SyncButton', () => {
     expect(parentMousedown).not.toHaveBeenCalled();
   });
 });
+
+it('keeps failures available after toasts expire, including while offline or syncing', async () => {
+  const connection = useConnectionStore();
+  connection.failedSends = 1;
+  connection.failedRemoteMutations = 1;
+  connection.online = false;
+  connection.syncing = true;
+  const wrapper = mount(SyncButton, { global: { stubs: { SyncFailures: true } } });
+  expect(wrapper.get('button').attributes('disabled')).toBeUndefined();
+  expect(wrapper.get('button').attributes('aria-label')).toBe('2 items need attention');
+  expect(wrapper.find('.sync-button__failure').exists()).toBe(true);
+  await wrapper.get('button').trigger('click');
+  expect(wrapper.get('button').attributes('aria-expanded')).toBe('true');
+  expect(backendRunImapSync).not.toHaveBeenCalled();
+  wrapper.unmount();
+});
+
+it('shows a failure before the next connection count snapshot arrives', async () => {
+  const { useOutboxStore } = await import('@/stores/outbox');
+  useOutboxStore().items = [{ id: 'new-failure', account_id: 'a', action_type: 'send_message',
+    status: 'failed', retry_count: 1, created_at: '', updated_at: '', recipients: [] }];
+  const wrapper = mount(SyncButton, { global: { stubs: { SyncFailures: true } } });
+  expect(wrapper.get('button').attributes('aria-label')).toBe('1 item needs attention');
+  expect(wrapper.find('.sync-button__failure').exists()).toBe(true);
+  wrapper.unmount();
+});

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import ComposeView from '@/views/ComposeView.vue';
@@ -13,7 +13,7 @@ import { useConfirm } from '@/composables/useConfirm';
 import { useFocusTrap } from '@/composables/useFocusTrap';
 import { COMPOSER_DEFAULT_SIZE, COMPOSER_MINIMUM_SIZE, COMPOSER_DOCK_GAP, fitComposerRect, dockComposerRect, resizeComposerRect, type ResizeDirection } from '@/utils/composerGeometry';
 import { useComposeWindow } from '@/composables/useComposeWindow';
-import { refreshToastClearance } from '@/composables/useToastClearance';
+import { useToastClearance, refreshToastClearance } from '@/composables/useToastClearance';
 
 interface ComposeViewHandle {
   persistDraft: (options?: { silent?: boolean }) => Promise<string | null>;
@@ -37,6 +37,7 @@ const router = useRouter();
 const composeWindow = useComposeWindow(router);
 const layerRef = ref<HTMLElement | null>(null);
 const windowRef = ref<HTMLElement | null>(null);
+useToastClearance(windowRef);
 const formRef = ref<ComposeViewHandle | null>(null);
 const width = ref<number>(COMPOSER_DEFAULT_SIZE.width);
 const height = ref<number>(COMPOSER_DEFAULT_SIZE.height);
@@ -323,9 +324,17 @@ watch(
 // a toast that is already up has to follow it.
 watch([x, y, width, height, maximized], refreshToastClearance, { flush: 'post' });
 
+let layerObserver: ResizeObserver | null = null;
+onMounted(() => {
+  if (typeof ResizeObserver === 'undefined' || !layerRef.value) return;
+  layerObserver = new ResizeObserver(onResize);
+  layerObserver.observe(layerRef.value);
+});
+
 if (typeof window !== 'undefined') window.addEventListener('resize', onResize);
 
 onBeforeUnmount(() => {
+  layerObserver?.disconnect();
   window.removeEventListener('resize', onResize);
   window.removeEventListener('pointermove', moveDrag);
   window.removeEventListener('pointermove', moveResize);
@@ -424,7 +433,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .composer-layer {
   position: absolute;
-  inset: 0;
+  inset: var(--toast-reserved-height, 0px) 0 0;
   z-index: 240;
   pointer-events: none;
   overflow: hidden;

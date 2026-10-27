@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, watch } from 'vue';
+import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { RouterView, useRoute } from 'vue-router';
 import Sidebar from '@/components/layout/Sidebar.vue';
-import ToastStack from '@/components/ui/ToastStack.vue';
 import PaneResizeHandle from '@/components/ui/PaneResizeHandle.vue';
 import UndoFab from '@/components/ui/UndoFab.vue';
 import AccountReauthBanner from '@/components/settings/AccountReauthBanner.vue';
-import SyncStatusLine from '@/components/layout/SyncStatusLine.vue';
 import { useComposerStore } from '@/stores/composer';
+import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePrompt } from '@/composables/usePrompt';
 import { useTopicsStore } from '@/stores/topics';
@@ -21,6 +20,9 @@ const topicsStore = useTopicsStore();
 const settingsStore = useSettingsStore();
 const ui = useUiStore();
 const composer = useComposerStore();
+const toast = useToast();
+const toastMounted = ref(false);
+watch(() => toast.state.toasts.length, (count) => { if (count > 0) toastMounted.value = true; }, { immediate: true });
 const { state: confirmState } = useConfirm();
 const { state: promptState } = usePrompt();
 const standaloneCompose = computed(() =>
@@ -32,6 +34,8 @@ const standaloneCompose = computed(() =>
 // fetched as soon as Vue mounts it, even when its own template renders nothing.
 const loadComposerHost = () => import('@/components/mail/ComposerHost.vue');
 const ComposerHost = defineAsyncComponent(loadComposerHost);
+const ToastStack = defineAsyncComponent(() => import('@/components/ui/ToastStack.vue'));
+const SyncStatusLine = defineAsyncComponent(() => import('@/components/layout/SyncStatusLine.vue'));
 const OmniSearch = defineAsyncComponent(loadOmniSearch);
 // Phone-only, and shown only while the backend reports trouble: neither is
 // needed to draw the first desktop frame.
@@ -135,7 +139,7 @@ if (standaloneCompose.value) {
         <span>{{ ui.keySequenceHint }}</span>
       </div>
     </Transition>
-    <ToastStack />
+    <ToastStack v-if="toastMounted" />
     <ConfirmDialog v-if="confirmState.pending" />
     <PromptDialog v-if="promptState.pending" />
     <UndoFab :variant="ui.isSinglePane ? 'floating' : 'docked'" />

@@ -7,6 +7,7 @@ import { useAccountsStore } from '@/stores/accounts';
 import { useMailboxesStore, type FavoriteFolderGroup, type FolderTreeNode } from '@/stores/mailboxes';
 import { useThreadsStore, type MailboxFilter } from '@/stores/threads';
 import { useConnectionStore } from '@/stores/connection';
+import { useOutboxStore } from '@/stores/outbox';
 import { useThreadActions } from '@/composables/useThreadActions';
 import type { WorkflowState } from '@/types/workflow';
 import NavItem from '@/components/ui/NavItem.vue';
@@ -67,6 +68,7 @@ const mailboxes = useMailboxesStore();
 const threads = useThreadsStore();
 const threadActions = useThreadActions();
 const connection = useConnectionStore();
+const outbox = useOutboxStore();
 
 const openGroups = ref<Record<string, boolean>>({
   inbox: true,
@@ -234,7 +236,7 @@ function sectionHasContent(section: SectionSpec): boolean {
 
 function sectionCount(section: SectionSpec, accountId?: string | null): number {
   if (section.source === 'route') {
-    return outboxVisibleCount(connection.pendingSends, connection.failedSends);
+    return outboxVisibleCount(connection.pendingSends, Math.max(connection.failedSends, outbox.failedSendCount));
   }
   if (section.source === 'workflow') {
     return countWorkflowThreads(section.workflowState!, accountId);
@@ -347,6 +349,7 @@ async function onDropToFolder(folderId: string, event: DragEvent) {
           :label="$t(section.labelKey)"
           :active="activeNodeId === `section:${section.id}`"
           :count="section.showTotal ? section.total : undefined"
+          :count-tone="section.id === 'outbox' && (connection.failedSends > 0 || outbox.failedSendCount > 0) ? 'danger' : 'neutral'"
           @click="selectSection(section)"
         >
           <template #icon>

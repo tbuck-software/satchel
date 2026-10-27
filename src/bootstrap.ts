@@ -15,7 +15,6 @@ import {
   backendMobileNotificationsFrontendReady,
   backendPendingCrashReports,
   backendUndoOutboxSend,
-  backendRetryFailedSyncActions,
   backendRunImapSync,
   backendSetBackgroundSync,
   backendSetUiStrings,
@@ -58,6 +57,7 @@ import { flushOpenComposerDrafts } from '@/composables/useComposerDraftPersisten
 import { useComposerStore } from '@/stores/composer';
 import { useAppUpdateStore } from '@/stores/appUpdate';
 import { useToast } from '@/composables/useToast';
+import { useQueueFailureToasts } from '@/composables/useQueueFailureToasts';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { useKeyboard } from '@/composables/useKeyboard';
 import { useThreadActions } from '@/composables/useThreadActions';
@@ -276,7 +276,6 @@ export function useAppBootstrap(): void {
   let imapAutoSyncRunning = false;
   let groupwareSyncTimer: number | null = null;
 
-  const appToast = useToast();
   useNativeUiStrings();
   useDraftFlushOnExit();
 
@@ -293,64 +292,7 @@ export function useAppBootstrap(): void {
   const IMAP_SYNC_IDLE_MS = 5 * 60_000;
   const SIGNATURE_DISCOVERY_INTERVAL_MS = 7 * 24 * 60 * 60_000;
   const GROUPWARE_SYNC_MS = 5 * 60_000;
-  const OUTBOX_FAILURE_TOAST_GROUP = 'outbox-failures';
-  const SYNC_FAILURE_TOAST_GROUP = 'sync-action-failures';
-
-  watch(
-    () => outboxStore.items
-      .filter((item) => item.status === 'failed')
-      .map((item) => `${item.id}:${item.action_type}`)
-      .sort()
-      .join('|'),
-    () => {
-      appToast.dismissGroup(OUTBOX_FAILURE_TOAST_GROUP);
-      const failed = outboxStore.items.filter((item) => item.action_type === 'send_message' && item.status === 'failed');
-      if (failed.length === 0) return;
-
-      const message = t('app.outbox.sendFailed', { count: failed.length }, failed.length);
-
-      appToast.error(message, {
-        // The failed item remains visible in Outbox. On a phone the global
-        // surface otherwise covers useful controls indefinitely, so announce it
-        // once and then get out of the way.
-        timeout: ui.isMobile ? 6500 : 0,
-        groupKey: OUTBOX_FAILURE_TOAST_GROUP,
-        action: {
-          label: t('nav.folders.outbox'),
-          handler: () => router.push({ name: 'outbox' }),
-        },
-      });
-    },
-    { immediate: true },
-  );
-
-  watch(
-    () => connectionStore.failedRemoteMutations,
-    (failed) => {
-      appToast.dismissGroup(SYNC_FAILURE_TOAST_GROUP);
-      if (failed === 0) return;
-      appToast.error(
-        t('app.sync.mutationsFailed', { count: failed }, failed),
-        {
-          timeout: 0,
-          groupKey: SYNC_FAILURE_TOAST_GROUP,
-          action: {
-            label: t('common.retry'),
-            handler: async () => {
-              try {
-                const retried = await backendRetryFailedSyncActions();
-                await connectionStore.refresh();
-                appToast.info(t('app.sync.retryQueued', { count: retried }, retried));
-              } catch (err) {
-                appToast.error(t('app.sync.retryFailed', { error: String(err) }));
-              }
-            },
-          },
-        },
-      );
-    },
-    { immediate: true },
-  );
+  useQueueFailureToasts();
 
   let icsDragOverHandler: ((event: DragEvent) => void) | null = null;
   let icsDropHandler: ((event: DragEvent) => void) | null = null;

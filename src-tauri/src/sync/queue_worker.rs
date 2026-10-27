@@ -26,6 +26,13 @@ pub fn spawn_queue_worker(state: AppState, pool: SqlitePool, app: AppHandle) {
             || state.queue.reset_sending(&pool),
         )
         .await;
+        satchel_core::sync::worker::retry_with_backoff(
+            "transient queue recovery",
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_secs(60),
+            || state.queue.requeue_failed_transient(&pool),
+        )
+        .await;
         let repaired = satchel_core::sync::worker::retry_with_backoff(
             "POP3 move recovery",
             std::time::Duration::from_secs(1),

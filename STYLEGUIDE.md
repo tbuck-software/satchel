@@ -599,6 +599,13 @@ not by which file the code happens to sit in. Do not invent a fourth.
 | `useToast().error(…)` | A single event that is already over — one send, one delete, one import | `ToastStack` renders `tone === 'error'` with `role="alert"` |
 | `.state.state--error` | A list or pane that cannot show its content (`SearchView.vue`) | `<p class="state state--error" role="alert">` plus a retry control |
 
+A failed queue item is an action that needs attention, while the backend may
+still be healthy. Announce each new failure once with an expiring toast. Keep
+the unresolved state on the sync control and the Outbox count; the sync control
+opens the reasons and recovery actions. A persistent toast must not mirror the
+queue state. Temporary outages keep retrying automatically; uncertain delivery
+waits for the user so a retry cannot send a duplicate.
+
 Rules that hold for all three:
 
 - An error must not look like a success. The neutral grey status line is not an
