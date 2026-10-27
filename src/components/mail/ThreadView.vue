@@ -245,20 +245,6 @@ const readingColumn = ref<HTMLElement | null>(null);
 const replyFootHeight = ref(0);
 let replyFootObserver: ResizeObserver | null = null;
 
-watch([replyFoot, readingColumn], ([element, column]) => {
-  replyFootObserver?.disconnect();
-  replyFootObserver = null;
-  replyFootHeight.value = element?.offsetHeight ?? 0;
-  if (!element || typeof ResizeObserver === 'undefined') return;
-  replyFootObserver = new ResizeObserver(() => {
-    replyFootHeight.value = element.offsetHeight;
-    refreshToastClearance();
-  });
-  replyFootObserver.observe(element);
-  if (column) replyFootObserver.observe(column);
-});
-onBeforeUnmount(() => replyFootObserver?.disconnect());
-
 function defaultFocusedMessageId(): string {
   const targets = messageTargets.value;
   return targets.filter((message) => !message.isDraft && !message.isRead).at(-1)?.id
@@ -414,6 +400,22 @@ const ownDomains = computed(() => new Set(accountsStore.accounts
  * way to its card, and Reply (`r`) opens it — see useThreadReply.
  */
 const resumableDraft = computed(() => messages.value.filter((message) => message.isDraft).at(-1));
+
+// The draft card ends the column itself, so the column's height moves it the
+// same way it moves the foot: messages loading above it push it down.
+watch([replyFoot, readingColumn, () => Boolean(resumableDraft.value)], ([element, column, draft]) => {
+  replyFootObserver?.disconnect();
+  replyFootObserver = null;
+  replyFootHeight.value = element?.offsetHeight ?? 0;
+  if ((!element && !draft) || typeof ResizeObserver === 'undefined') return;
+  replyFootObserver = new ResizeObserver(() => {
+    if (element) replyFootHeight.value = element.offsetHeight;
+    refreshToastClearance();
+  });
+  if (element) replyFootObserver.observe(element);
+  if (column) replyFootObserver.observe(column);
+});
+onBeforeUnmount(() => replyFootObserver?.disconnect());
 
 /** Who the reply would go to: the last sender who is not one of our own. */
 const replyRecipientName = computed(() => {

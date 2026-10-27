@@ -227,6 +227,42 @@ describe('thread reply foot', () => {
     }
   });
 
+  /*
+   * The draft card mounts before the messages above it have their bodies, and
+   * they push it down into the stack's corner. Without a refresh the stack
+   * kept to where the card first was and lay on Continue editing.
+   */
+  it('tells the toast stack when the thread above the draft card changes height', async () => {
+    harness.messages = [message('first'), draft];
+    const observers: Array<{ callback: ResizeObserverCallback; targets: Element[] }> = [];
+    vi.stubGlobal('ResizeObserver', class {
+      private entry: { callback: ResizeObserverCallback; targets: Element[] };
+      constructor(callback: ResizeObserverCallback) {
+        this.entry = { callback, targets: [] };
+        observers.push(this.entry);
+      }
+      observe(target: Element) { this.entry.targets.push(target); }
+      unobserve() {}
+      disconnect() { this.entry.targets = []; }
+    });
+    try {
+      const wrapper = render();
+      await flushPromises();
+
+      expect(wrapper.find('.thread-reply-foot').exists()).toBe(false);
+      const column = wrapper.get('.thread-reading-column').element;
+      const columnObserver = observers.find((entry) => entry.targets.includes(column));
+      expect(columnObserver).toBeDefined();
+
+      harness.refreshToastClearance.mockClear();
+      columnObserver!.callback([], {} as ResizeObserver);
+      expect(harness.refreshToastClearance).toHaveBeenCalledTimes(1);
+      wrapper.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('leaves the phone to its action bar', async () => {
     harness.isMobile = true;
     const wrapper = render();

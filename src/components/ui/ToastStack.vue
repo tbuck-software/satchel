@@ -89,11 +89,12 @@ const visibleToasts = computed(() => {
 });
 
 /*
- * Keep the lower-left stack outside the whole composer and reply bar while a
- * toast is up (see `useToastClearance`). Measured on the events that move
- * those surfaces — a toast arriving, a resize, the end of a drag or a
- * transition, an owner's refresh — rather than every frame: an error toast
- * can stay for a long time and a frame loop would run all of it.
+ * Keep the lower-left stack outside the whole composer, the reply bar and the
+ * draft card while a toast is up (see `useToastClearance`). Measured on the
+ * events that move those surfaces — a toast arriving, a resize, a scroll (the
+ * draft card scrolls with the reader), the end of a drag or a transition, an
+ * owner's refresh — at most once a frame rather than every frame: an error
+ * toast can stay for a long time and a frame loop would run all of it.
  */
 const stackRef = ref<HTMLElement | null>(null);
 const clearance = ref(0);
@@ -137,7 +138,7 @@ function scheduleClearance() {
   clearanceFrame = requestAnimationFrame(measureClearance);
 }
 
-const CLEARANCE_TRIGGERS = ['pointerup', 'transitionend'] as const;
+const CLEARANCE_TRIGGERS = ['pointerup', 'transitionend', 'scroll'] as const;
 let listening = false;
 
 function listenForClearance(active: boolean) {
