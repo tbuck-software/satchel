@@ -519,12 +519,11 @@ describe('InboxView', () => {
     expect(harness.toastError).not.toHaveBeenCalled();
   });
   /*
-   * Inherited from MailboxTree, where the accounts used to live: they are
-   * navigation, not aggregate metadata, and must be reachable before the
-   * slower folder-count query has warmed up. The strip reads the account
-   * list directly, so it cannot wait on anything.
+   * A phone used to show the accounts twice: as pills above the list and in
+   * the filter menu beside the search field. The menu is the one control, on
+   * every form factor; the strip keeps only the Inbox categories.
    */
-  it('offers every mail account in the mobile filter strip, plus all of them', async () => {
+  it('leaves the account choice to the filter menu on a phone', () => {
     setup({
       mobile: true,
       accounts: [
@@ -534,15 +533,10 @@ describe('InboxView', () => {
     });
 
     const wrapper = render();
-    const pills = wrapper.findAll('.filter-pill');
-    const labels = pills.map((pill) => pill.text().replace(/\s+\d+$/, ''));
-
-    expect(labels).toContain('Work');
-    expect(labels).toContain('Uni');
-    expect(labels[0]).toBe('inbox.allAccounts');
-
-    await pills.find((pill) => pill.text().startsWith('Uni'))!.trigger('click');
-    expect(harness.setActiveAccount).toHaveBeenCalledWith('account-2');
+    const labels = wrapper.findAll('.filter-pill').map((pill) => pill.text());
+    expect(labels).not.toContain('Work');
+    expect(labels).not.toContain('inbox.allAccounts');
+    expect(wrapper.find('.list-filter-menu__trigger').exists()).toBe(true);
   });
 
   it('offers account and layout filtering in one list filter menu', async () => {

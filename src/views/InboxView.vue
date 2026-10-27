@@ -301,8 +301,6 @@ const categoryTabs = computed(() => [
   { value: 'social' as const, label: t('inbox.category.social'), count: categoryCounts.value.social },
 ]);
 
-const accountFilterVisible = computed(() => ui.isMobile && accounts.accounts.length > 1);
-
 const categoryFilterVisible = computed(
   () => !contactViewActive.value
     && !smartInboxActive.value
@@ -900,39 +898,21 @@ function acceptExistingSenders() {
         <ListFilterMenu :show-layout="!folderViewActive" />
       </ListSearchBar>
 
-      <!-- One strip: which mailbox the list is drawn from, then how it is
-           sliced. Accounts only when there is more than one to choose. -->
+      <!-- How the list is sliced. The account it is drawn from is chosen in
+           the filter menu, on phones too: one account control, not two. -->
       <nav
-        v-if="!activeBundle && !searchActive && (accountFilterVisible || categoryFilterVisible)"
+        v-if="!activeBundle && !searchActive && categoryFilterVisible"
         class="filter-strip"
         :aria-label="$t('inbox.filterStrip')"
       >
-        <template v-if="accountFilterVisible">
-          <FilterPill
-            :label="$t('inbox.allAccounts')"
-            :pressed="!accounts.activeAccountId"
-            @click="accounts.setActiveAccount('')"
-          />
-          <FilterPill
-            v-for="account in accounts.accounts"
-            :key="account.id"
-            :label="account.displayName"
-            :dot="account.color"
-            :pressed="accounts.activeAccountId === account.id"
-            @click="accounts.setActiveAccount(account.id)"
-          />
-        </template>
-        <span v-if="accountFilterVisible && categoryFilterVisible" class="filter-strip__divider" />
-        <template v-if="categoryFilterVisible">
-          <FilterPill
-            v-for="tab in categoryTabs"
-            :key="tab.value"
-            :label="tab.label"
-            :count="tab.count"
-            :pressed="threads.categoryFilter === tab.value"
-            @click="threads.categoryFilter = tab.value"
-          />
-        </template>
+        <FilterPill
+          v-for="tab in categoryTabs"
+          :key="tab.value"
+          :label="tab.label"
+          :count="tab.count"
+          :pressed="threads.categoryFilter === tab.value"
+          @click="threads.categoryFilter = tab.value"
+        />
       </nav>
 
       <SelectionToolbar v-if="threads.selectedThreadIds.length > 0" :busy="bulkBusy" />
@@ -1166,14 +1146,6 @@ function acceptExistingSenders() {
 
 .filter-strip::-webkit-scrollbar {
   display: none;
-}
-
-.filter-strip__divider {
-  width: 1px;
-  height: 16px;
-  flex-shrink: 0;
-  margin: 0 var(--space-xs);
-  background: var(--border-color);
 }
 
 .category-tab.active .count {

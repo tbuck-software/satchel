@@ -1014,7 +1014,6 @@
     "waitingForReply": "Waiting for a reply"
   },
   "inbox": {
-    "allAccounts": "All",
     "bundleDone": "Check all off",
     "bundleDoneTitle": "Check off every message and go back",
     "category": {

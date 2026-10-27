@@ -69,7 +69,6 @@
       "waitingForReply": "Waiting for a reply"
     },
     "inbox": {
-      "allAccounts": "All",
       "bundleDone": "Check all off",
       "bundleDoneTitle": "Check off every message and go back",
       "category": {
@@ -388,7 +387,6 @@
       "waitingForReply": "Warten auf Antwort"
     },
     "inbox": {
-      "allAccounts": "Alle",
       "bundleDone": "Alle abhaken",
       "bundleDoneTitle": "Alle Mails abhaken und zurück",
       "category": {
