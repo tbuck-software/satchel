@@ -154,7 +154,6 @@
         "more": "+{count} more",
         "title": "Today"
       },
-      "backToMail": "Back to mail",
       "calendar": "Calendar",
       "composeMessage": "Write a new message",
       "composeNewWindow": "New email (Shift-click for a separate window)",
@@ -196,6 +195,7 @@
       },
       "frequent": "Frequent",
       "modules": "Areas",
+      "mail": "Mail",
       "newMessage": "New message",
       "commandPalette": "Search & commands",
       "omni": {
@@ -610,7 +610,6 @@
         "more": "+{count} weitere",
         "title": "Heute"
       },
-      "backToMail": "Zurück zu Mail",
       "calendar": "Kalender",
       "composeMessage": "Neue Nachricht schreiben",
       "composeNewWindow": "Neue E-Mail (Shift+Klick für eigenes Fenster)",
@@ -652,6 +651,7 @@
       },
       "frequent": "Häufig",
       "modules": "Bereiche",
+      "mail": "E-Mail",
       "newMessage": "Neue E-Mail",
       "commandPalette": "Suche & Befehle",
       "omni": {

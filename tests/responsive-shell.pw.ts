@@ -9,6 +9,7 @@ test('nightly updates keep the same app and announce a download without moving t
   await expect(toggle).toBeChecked();
   const footer = page.locator('.sidebar-footer').first();
   const restingFooter = await footer.boundingBox();
+  await expect(footer.getByRole('button', { name: 'Update available', exact: true })).toHaveCount(0);
 
   await page.evaluate(async () => {
     const modulePath = '/src/stores/appUpdate.ts';
@@ -23,7 +24,9 @@ test('nightly updates keep the same app and announce a download without moving t
   expect(await footer.boundingBox()).toEqual(restingFooter);
   await toast.getByRole('button', { name: 'Dismiss message', exact: true }).click();
   await expect(toast).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Restart to update', exact: true })).toBeVisible();
+  await expect(page.locator('.about-pane').getByRole('button', { name: 'Restart to update', exact: true })).toBeVisible();
+  // The sidebar offers it too, beside Settings, only now that there is one.
+  await expect(footer.getByRole('button', { name: 'Restart to update', exact: true })).toBeVisible();
   expect(await footer.boundingBox()).toEqual(restingFooter);
 });
 
@@ -31,7 +34,7 @@ test('sync activity keeps the sidebar geometry stable', async ({ page }) => {
   await page.goto('/settings');
   const sidebar = page.locator('aside').first();
   const footer = sidebar.locator('.sidebar-footer');
-  await expect(footer.getByRole('button', { name: 'Back', exact: true })).toBeVisible();
+  await expect(footer.getByRole('button', { name: 'Settings', exact: true })).toHaveAttribute('aria-current', 'page');
   const button = sidebar.locator('.sidebar-brand').getByRole('button', { name: 'Sync email', exact: true });
   await expect(button).toBeVisible();
   const restingButton = await button.boundingBox();

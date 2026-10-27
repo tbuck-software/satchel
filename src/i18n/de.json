@@ -1431,7 +1431,6 @@
       "more": "+{count} weitere",
       "title": "Heute"
     },
-    "backToMail": "Zurück zu Mail",
     "calendar": "Kalender",
     "commandPalette": "Suche & Befehle",
     "composeMessage": "Neue Nachricht schreiben",
@@ -1473,6 +1472,7 @@
       "waiting": "Warten auf Antwort"
     },
     "frequent": "Häufig",
+    "mail": "E-Mail",
     "modules": "Bereiche",
     "newMessage": "Neue E-Mail",
     "omni": {

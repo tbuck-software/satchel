@@ -8,6 +8,7 @@ import { useAccountsStore } from '@/stores/accounts';
 import { useSmartFoldersStore } from '@/stores/smartFolders';
 import { useSettingsStore } from '@/stores/settings';
 import { useUiStore } from '@/stores/ui';
+import { useAppUpdateStore } from '@/stores/appUpdate';
 import { useListSearchStore } from '@/stores/listSearch';
 import { useThreadsStore, type ContactThreadSummary } from '@/stores/threads';
 import { useComposerStore } from '@/stores/composer';
@@ -15,6 +16,7 @@ import { useComposeWindow } from '@/composables/useComposeWindow';
 import { startWindowDrag as dragWindow } from '@/services/appWindow';
 import Avatar from '@/components/common/Avatar.vue';
 import SidebarMailTools from './SidebarMailTools.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import NavItem from '@/components/ui/NavItem.vue';
 import PluginSlotHost from '@/components/plugins/PluginSlotHost.vue';
@@ -41,6 +43,7 @@ const settings = useSettingsStore();
 const ui = useUiStore();
 const composer = useComposerStore();
 const smartFolders = useSmartFoldersStore();
+const appUpdate = useAppUpdateStore();
 const listSearch = useListSearchStore();
 const composeWindow = useComposeWindow(router);
 const foldersPanelOpen = ref(false);
@@ -129,6 +132,15 @@ function startWindowDrag(event: MouseEvent) {
   void dragWindow();
 }
 
+const updateLabel = computed(() => {
+  switch (appUpdate.status) {
+    case 'downloading': return t('app.update.downloading', { progress: appUpdate.progress });
+    case 'ready': return t('app.update.restart');
+    case 'failed': return t('app.update.failedRetry');
+    default: return t('app.update.available');
+  }
+});
+
 const calendarModuleActive = computed(() => route.name === 'calendar');
 const contactsModuleActive = computed(() => route.name === 'contacts');
 const settingsModuleActive = computed(() => route.name === 'settings');
@@ -211,34 +223,6 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
         <MailboxTree @open-folders-panel="foldersPanelOpen = true" @navigate="ui.closeMobileSidebar()" />
         <PluginSlotHost slot-name="sidebar_section" />
       </nav>
-      <!-- The other two areas sit with the mailboxes, where the drawing puts
-           them: one list of places, not a switcher hidden in the footer. -->
-      <nav class="grid gap-0.5 px-3 pt-5" :aria-label="$t('nav.modules')">
-        <NavItem
-          :label="$t('nav.contacts')"
-          :active="contactsModuleActive"
-          @click="goTo('contacts')"
-        >
-          <template #icon>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="5.5" cy="5.5" r="2.5" />
-              <path d="M1.5 13.5C1.5 11.3 3.3 9.5 5.5 9.5C7.7 9.5 9.5 11.3 9.5 13.5M10.5 3.2A2.5 2.5 0 0 1 10.5 7.8M11.5 9.7C13.2 10.2 14.5 11.7 14.5 13.5" />
-            </svg>
-          </template>
-        </NavItem>
-        <NavItem
-          :label="$t('nav.calendar')"
-          :active="calendarModuleActive"
-          @click="goTo('calendar')"
-        >
-          <template #icon>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="1.5" y="2.5" width="13" height="12" rx="2" />
-              <path d="M1.5 6H14.5M5 1V3.5M11 1V3.5" />
-            </svg>
-          </template>
-        </NavItem>
-      </nav>
       <!-- Smart folders (saved searches) -->
       <nav v-if="smartFolders.items.length > 0" class="grid gap-0.5 px-3 pb-2 pt-5">
         <span class="text-2xs font-semibold text-tertiary px-3 mb-1">{{ $t('nav.smartFolders') }}</span>
@@ -318,38 +302,54 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
       <Suspense v-if="!contextualSidebarActive">
         <SidebarAgenda />
       </Suspense>
-      <div class="module-switcher">
-        <AppButton
-          v-if="contextualSidebarActive"
-          :title="$t('nav.backToMail')"
-          @click="returnToMail"
-          variant="ghost"
-          size="sm"
+      <!-- One row: the areas on the left, the app on the right. -->
+      <div class="sidebar-footer__row">
+        <nav class="sidebar-footer__areas" :aria-label="$t('nav.modules')">
+          <IconButton
+            :title="$t('nav.mail')"
+            :active="!contextualSidebarActive"
+            :aria-current="!contextualSidebarActive ? 'page' : undefined"
+            @click="returnToMail"
+          >
+            <AppIcon><rect x="2" y="3.5" width="12" height="9" rx="1.5" /><path d="m2.5 4.5 5.5 4 5.5-4" /></AppIcon>
+          </IconButton>
+          <IconButton
+            :title="$t('nav.calendar')"
+            :active="calendarModuleActive"
+            :aria-current="calendarModuleActive ? 'page' : undefined"
+            @click="goTo('calendar')"
+          >
+            <AppIcon><rect x="2" y="3" width="12" height="11" rx="2" /><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" /></AppIcon>
+          </IconButton>
+          <IconButton
+            :title="$t('nav.contacts')"
+            :active="contactsModuleActive"
+            :aria-current="contactsModuleActive ? 'page' : undefined"
+            @click="goTo('contacts')"
+          >
+            <AppIcon><circle cx="6" cy="5.5" r="2.5" /><path d="M1.5 13.5c0-2.2 2-4 4.5-4s4.5 1.8 4.5 4M10.5 3.2a2.5 2.5 0 0 1 0 4.6M11.5 9.7c1.7.5 3 2 3 3.8" /></AppIcon>
+          </IconButton>
+        </nav>
+        <IconButton
+          v-if="appUpdate.visible"
+          class="sidebar-footer__update"
+          tone="accent"
+          :title="updateLabel"
+          :disabled="appUpdate.status === 'downloading'"
+          @click="void appUpdate.activate()"
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M10.5 3 5.5 8l5 5" />
-          </svg>
-          <span>{{ $t('common.back') }}</span>
-        </AppButton>
-        <CardButton
-          v-else
-          :class="{ active: settingsModuleActive }"
-          :aria-current="settingsModuleActive ? 'page' : undefined"
+          <AppIcon><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" /></AppIcon>
+        </IconButton>
+        <IconButton
           :title="$t('common.settings')"
+          :active="settingsModuleActive"
+          :aria-current="settingsModuleActive ? 'page' : undefined"
           @click="goTo('settings')"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <AppIcon :grid="24">
             <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
             <circle cx="12" cy="12" r="3" />
-          </svg>
-          <span>{{ $t('common.settings') }}</span>
-        </CardButton>
-        <IconButton :title="$t('commands.showShortcuts')" @click="ui.toggleShortcuts()">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="8" cy="8" r="6.5" />
-            <path d="M6.2 6.1a1.9 1.9 0 1 1 2.4 2.2c-.4.2-.6.5-.6.9v.4" />
-            <path d="M8 12.1h.01" />
-          </svg>
+          </AppIcon>
         </IconButton>
       </div>
     </footer>
@@ -473,55 +473,18 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
   background: var(--bg-sidebar);
 }
 
-.module-switcher {
+.sidebar-footer__row {
   display: flex;
   align-items: center;
   gap: var(--space-2xs);
-}
-
-.module-switcher > button {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
-  flex: 1 1 auto;
   min-width: 0;
-  min-height: 36px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  padding: var(--space-1-5) var(--space-2-5);
-  font: inherit;
-  font-size: var(--font-size-md);
-  font-weight: var(--weight-medium);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out);
 }
 
-.module-switcher > button svg {
-  flex-shrink: 0;
-}
-
-.module-switcher > button span {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.module-switcher > button:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.module-switcher > button.active {
-  background: color-mix(in srgb, var(--accent-primary) 11%, transparent);
-  color: var(--accent-primary);
-  font-weight: var(--weight-semibold);
+.sidebar-footer__areas {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-width: 0;
 }
 </style>
