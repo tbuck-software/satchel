@@ -55,6 +55,7 @@ for (const theme of ['dark', 'light'] as const) {
         const signatureBox = (await signature.boundingBox())!;
         const sendBox = (await send.boundingBox())!;
         expect(signatureBox.y + signatureBox.height).toBeLessThanOrEqual(sendBox.y);
+        const box = (await composer.boundingBox())!;
         expect(sendBox.y + sendBox.height).toBeLessThan(box.y + box.height);
         await page.screenshot({ path: testInfo.outputPath(`${mode}-${theme}-${viewport.width}x${viewport.height}@2x.png`) });
         await send.focus();
