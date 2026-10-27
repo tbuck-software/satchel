@@ -10,8 +10,13 @@ for (const theme of ['dark', 'light'] as const) {
         await page.addInitScript((value) => localStorage.setItem('satchel.theme', value), theme);
         await page.goto('/?mockSignatures=1');
         await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();
-        if (mode === 'new') await page.getByRole('button', { name: 'Write a new message', exact: true }).click();
-        else await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
+        if (mode === 'new') await page.getByRole('button', { name: 'New message', exact: true }).click();
+        else {
+          // The fixture thread carries an unsent draft, and Reply resumes it.
+          // Discard it first so this checks a fresh reply's layout.
+          await page.getByRole('region', { name: 'Unsent drafts' }).getByRole('button', { name: 'Discard', exact: true }).click();
+          await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
+        }
         const composer = page.getByRole('dialog', { name: 'Compose email' });
         await expect(composer).toBeVisible();
         const writer = composer.locator('.ProseMirror').first();
@@ -77,6 +82,8 @@ for (const theme of ['dark', 'light'] as const) {
 
 test('signature switches in place and survives saving and reopening a reply draft', async ({ page }) => {
   await page.goto('/?mockSignatures=1');
+  // Reply resumes the fixture thread's unsent draft; start from a fresh reply.
+  await page.getByRole('region', { name: 'Unsent drafts' }).getByRole('button', { name: 'Discard', exact: true }).click();
   await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
   let composer = page.getByRole('dialog', { name: 'Compose email' });
   await composer.locator('.ProseMirror').first().fill('My answer for the saved draft.');
@@ -120,7 +127,7 @@ test('drag, resize, maximize and reopen keep the composer inside the window', as
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/?mockSignatures=1');
   await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();
-  await page.getByRole('button', { name: 'Write a new message', exact: true }).click();
+  await page.getByRole('button', { name: 'New message', exact: true }).click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   await expect(composer).toBeVisible();
   // Docking runs after the first layout; measure once the window has settled

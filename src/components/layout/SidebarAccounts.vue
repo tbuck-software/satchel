@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
@@ -21,10 +22,16 @@ function open(accountId: string) {
   ui.closeMobileSidebar();
   void router.push({ name: 'inbox' });
 }
+
+// A lone account that is always visible has nothing to switch to or look
+// in on; the section only appears once there is a choice or a schedule.
+const shown = computed(() => accounts.emailAccounts.length > 1
+  || accounts.emailAccounts.some((account) => accounts.visibilityFor(account.id)?.policy.mode !== undefined
+    && accounts.visibilityFor(account.id)?.policy.mode !== 'always'));
 </script>
 
 <template>
-  <nav v-if="accounts.emailAccounts.length" class="sidebar-accounts" :aria-label="t('accountVisibility.accounts')">
+  <nav v-if="shown" class="sidebar-accounts" :aria-label="t('accountVisibility.accounts')">
     <SectionHeading :label="t('accountVisibility.accounts')" />
     <NavItem v-if="accounts.emailAccounts.length > 1" :label="t('folders.allAccounts')" :active="!accounts.activeAccountId" @click="open('')" />
     <div v-for="account in accounts.emailAccounts" :key="account.id" class="sidebar-accounts__row" :class="{ 'sidebar-accounts__row--resting': !accounts.isVisible(account.id) }">
