@@ -1,4 +1,5 @@
 // Generated from Rust. Run pnpm ipc:generate.
+import type { ThreadListScope } from "../threads/ThreadListScope";
 import type { SearchCursor } from "./SearchCursor";
 export type SearchQuery = {
     query: string;
@@ -15,4 +16,9 @@ export type SearchQuery = {
      * Continue after the final hit of the previous page.
      */
     cursor?: SearchCursor | null;
+    /**
+     * Keep hits whose thread is in this list, tested the way the thread
+     * list tests it. The list search uses it to search the list on screen.
+     */
+    list_scope?: ThreadListScope | null;
 };

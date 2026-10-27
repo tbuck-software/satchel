@@ -5,6 +5,7 @@ use std::{collections::HashMap, time::Instant};
 use thiserror::Error;
 
 use crate::db::data_repairs;
+use crate::db::threads::{push_thread_scope_filters, FolderLookup, ThreadListScope};
 use crate::utils::mime::{decode_mime_encoded_words, repair_likely_utf8_mojibake};
 
 mod reads;
@@ -21,7 +22,7 @@ pub use sent::{
 };
 pub use signatures::{SignatureHistoryMessage, SignatureMessageError, SignatureMessageRepository};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ipc-types", ts(export, export_to = "core/db/messages/", optional_fields = nullable))]
 pub struct SearchQuery {
@@ -36,6 +37,33 @@ pub struct SearchQuery {
     /// Continue after the final hit of the previous page.
     #[serde(default)]
     pub cursor: Option<SearchCursor>,
+    /// Keep hits whose thread is in this list, tested the way the thread
+    /// list tests it. The list search uses it to search the list on screen.
+    #[serde(default)]
+    pub list_scope: Option<ThreadListScope>,
+}
+
+/// A list scope ready for SQL: the scope plus whether the address index the
+/// contact filter reads is complete.
+struct ListScopeFilter<'a> {
+    scope: &'a ThreadListScope,
+    addresses_ready: bool,
+}
+
+impl ListScopeFilter<'_> {
+    /// ` AND` the thread in `thread_id_column` belongs to the list.
+    fn push(&self, query: &mut QueryBuilder<'_, Sqlite>, thread_id_column: &str) {
+        query
+            .push(" AND EXISTS (SELECT 1 FROM threads WHERE threads.id = ")
+            .push(thread_id_column);
+        push_thread_scope_filters(
+            query,
+            self.scope,
+            self.addresses_ready,
+            FolderLookup::PerThread,
+        );
+        query.push(")");
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -217,6 +245,22 @@ impl<'a> MessageSearchRepository<'a> {
             return Ok(empty(&parsed));
         }
 
+        // A list scope that says nothing a thread could fail is no scope.
+        let list_scope = input
+            .list_scope
+            .as_ref()
+            .filter(|scope| !scope.is_unbounded());
+        let addresses_ready = match list_scope {
+            Some(scope) if scope.needs_addresses() => {
+                !data_repairs::is_pending(pool, &data_repairs::MESSAGE_ADDRESSES).await?
+            }
+            _ => true,
+        };
+        let list = list_scope.map(|scope| ListScopeFilter {
+            scope,
+            addresses_ready,
+        });
+
         // One search at a time per process. Search-as-you-type from several
         // windows or panels could otherwise hold most of the read pool with
         // queries whose results are already superseded, stalling thread lists
@@ -224,7 +268,7 @@ impl<'a> MessageSearchRepository<'a> {
         let _slot = SEARCH_SLOT.lock().await;
 
         if fts_match.is_empty() && parsed.has_only_thread_flags() {
-            let hits = search_thread_flag_hits(pool, input, &parsed).await?;
+            let hits = search_thread_flag_hits(pool, input, &parsed, list.as_ref()).await?;
             log_perf(
                 "search_message_hits",
                 started_at,
@@ -234,7 +278,7 @@ impl<'a> MessageSearchRepository<'a> {
         }
 
         if !fts_match.is_empty() && !parsed.has_filters() && parsed.excluded_terms.is_empty() {
-            let hits = search_unfiltered_text_hits(pool, input, &fts_match).await?;
+            let hits = search_unfiltered_text_hits(pool, input, &fts_match, list.as_ref()).await?;
             log_perf(
                 "search_message_hits",
                 started_at,
@@ -319,6 +363,9 @@ impl<'a> MessageSearchRepository<'a> {
             input.account_id.as_deref(),
             cc_index_ready,
         );
+        if let Some(list) = &list {
+            list.push(&mut query, "m.thread_id");
+        }
 
         if fts_match.is_empty() {
             query.push(") WHERE thread_rank = 1");
@@ -444,11 +491,13 @@ async fn search_unfiltered_text_hits(
     pool: &SqlitePool,
     input: &SearchQuery,
     fts_match: &str,
+    list: Option<&ListScopeFilter<'_>>,
 ) -> Result<Vec<MessageSearchHitDto>, MessageSearchError> {
-    let ranked = unfiltered_text_ranking_query(input, fts_match, UNFILTERED_SEARCH_CANDIDATES)
-        .build_query_as::<RankedSearchRow>()
-        .fetch_all(pool)
-        .await?;
+    let ranked =
+        unfiltered_text_ranking_query(input, fts_match, UNFILTERED_SEARCH_CANDIDATES, list)
+            .build_query_as::<RankedSearchRow>()
+            .fetch_all(pool)
+            .await?;
     hydrate_search_hits(pool, Some(fts_match), ranked).await
 }
 
@@ -456,6 +505,7 @@ fn unfiltered_text_ranking_query(
     input: &SearchQuery,
     fts_match: &str,
     candidate_cap: i64,
+    list: Option<&ListScopeFilter<'_>>,
 ) -> QueryBuilder<'static, Sqlite> {
     let account_id = input
         .account_id
@@ -490,6 +540,9 @@ fn unfiltered_text_ranking_query(
                 "sp.account_id",
             ));
     }
+    if let Some(list) = list {
+        list.push(&mut query, "sp.thread_id");
+    }
     // The date of the `candidate_cap`-th newest match, or '' (every match) when
     // there are fewer. Finding it reads only doclist rowids and the compact
     // projection; bm25 then runs for the candidates alone.
@@ -511,6 +564,11 @@ fn unfiltered_text_ranking_query(
             .push(crate::db::account_visibility::visible_account_sql(
                 "cap.account_id",
             ));
+    }
+    // The cap counts the list's matches, or a scoped search would rank
+    // fewer candidates than an unscoped one.
+    if let Some(list) = list {
+        list.push(&mut query, "cap.thread_id");
     }
     query.push(" ORDER BY cap.date DESC LIMIT 1 OFFSET ");
     query.push_bind(candidate_cap.max(1) - 1);
@@ -652,6 +710,7 @@ async fn search_thread_flag_hits(
     pool: &SqlitePool,
     input: &SearchQuery,
     parsed: &ParsedSearchQuery,
+    list: Option<&ListScopeFilter<'_>>,
 ) -> Result<Vec<MessageSearchHitDto>, MessageSearchError> {
     let date_column = if parsed.is_unread {
         "m.date"
@@ -710,6 +769,9 @@ async fn search_thread_flag_hits(
     }
     if parsed.is_starred {
         query.push(" AND t.is_starred = 1");
+    }
+    if let Some(list) = list {
+        list.push(&mut query, "t.id");
     }
 
     push_search_cursor(&mut query, input, false, date_column, "t.id");
@@ -1243,6 +1305,7 @@ mod tests {
             account_id: account_id.map(str::to_string),
             limit: Some(limit),
             cursor: None,
+            list_scope: None,
         }
     }
 
@@ -1264,6 +1327,7 @@ mod tests {
                             &page,
                             fts_match,
                             UNFILTERED_SEARCH_CANDIDATES,
+                            None,
                         ),
                         &pool,
                     )
@@ -1307,7 +1371,7 @@ mod tests {
         .await
         .unwrap();
         let hits = ranked(
-            unfiltered_text_ranking_query(&input(None, 500), "\"budget\"", cap),
+            unfiltered_text_ranking_query(&input(None, 500), "\"budget\"", cap, None),
             &pool,
         )
         .await;

@@ -41,4 +41,38 @@ describe('mock message search pagination', () => {
     expect(ignored.hits).toEqual([]);
     expect(ignored.warnings).toEqual([{ operator: 'in', value: 'unknown' }]);
   });
+
+  it('narrows to a list exactly as list_threads draws it', async () => {
+    const { sendCommand } = await import('./mock');
+    const search = async (list_scope: Record<string, string | undefined> | null) => {
+      const page: BackendMessageSearchResponse = await sendCommand('search_message_hits', { input: {
+        query: 'e', limit: 500, cursor: null, list_scope,
+      } });
+      return page.hits;
+    };
+    // The fixture has no to-do mail in the Inbox; make one.
+    const [todo] = await search({ mailbox_kind: 'section', mailbox_value: 'inbox' });
+    await sendCommand('transition_threads', { input: {
+      threads: [{ thread_id: todo!.thread_id, from: 'inbox' }], to: 'todo',
+    } });
+    for (const scope of [
+      { mailbox_kind: 'section', mailbox_value: 'inbox' },
+      { workflow_state: 'done' },
+      { mailbox_kind: 'folder', mailbox_value: 'Archive' },
+    ]) {
+      const listed: { threads: Array<{ id: string; workflow_state: string }> } = await sendCommand('list_threads', {
+        input: { ...scope, limit: 1000 },
+      });
+      const inList = new Set(listed.threads.map((thread) => thread.id));
+      const everywhere = await search(null);
+      const scoped = await search(scope);
+      expect(scoped.map((hit) => hit.thread_id)).toEqual(
+        everywhere.filter((hit) => inList.has(hit.thread_id)).map((hit) => hit.thread_id),
+      );
+      expect(scoped.length, JSON.stringify(scope)).toBeGreaterThan(0);
+    }
+    // The Inbox is inbox *and* todo — what `in:inbox` alone does not say.
+    const inbox = await search({ mailbox_kind: 'section', mailbox_value: 'inbox' });
+    expect(new Set(inbox.map((hit) => hit.workflow_state))).toEqual(new Set(['inbox', 'todo']));
+  });
 });

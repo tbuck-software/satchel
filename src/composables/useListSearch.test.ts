@@ -1,4 +1,4 @@
-import { effectScope, nextTick, reactive } from 'vue';
+import { effectScope, nextTick, reactive, shallowRef } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Thread } from '@/types/mail';
@@ -20,8 +20,7 @@ vi.mock('@/stores/threads', () => ({ useThreadsStore: () => harness.threads }));
 vi.mock('@/stores/accounts', () => ({ useAccountsStore: () => harness.accounts }));
 
 import {
-  LIST_SEARCH_MAX_FILL_PAGES,
-  mailboxSearchOperator,
+  listSearchScope,
   namesLocation,
   threadMatchesListSearch,
   useListSearch,
@@ -66,15 +65,19 @@ const INBOX: ListSearchMailbox = {
 };
 
 describe('mailbox scope helpers', () => {
-  it('names the backend operator only where it says exactly the mailbox', () => {
-    expect(mailboxSearchOperator({ ...INBOX, workflowFilter: 'snoozed', mailboxFilter: { kind: 'all', value: null } }))
-      .toBe('in:snoozed');
-    expect(mailboxSearchOperator({ ...INBOX, mailboxFilter: { kind: 'section', value: 'sent' } })).toBe('in:sent');
-    expect(mailboxSearchOperator({ ...INBOX, mailboxFilter: { kind: 'section', value: 'archive' } })).toBe('in:done');
-    // The Inbox list is inbox *and* todo; one operator cannot say that.
-    expect(mailboxSearchOperator(INBOX)).toBeNull();
-    expect(mailboxSearchOperator({ ...INBOX, mailboxFilter: { kind: 'folder', value: 'Projects' } })).toBeNull();
-    expect(mailboxSearchOperator({ ...INBOX, activeContactEmail: 'ada@example.org' })).toBeNull();
+  it('names the list the way the list request names it', () => {
+    // The Inbox is inbox *and* todo with mail in the inbox folder; the
+    // backend decides that from the same words the list uses.
+    expect(listSearchScope(INBOX)).toEqual({
+      contact_email: null, mailbox_kind: 'section', mailbox_value: 'inbox', workflow_state: null,
+    });
+    expect(listSearchScope({ ...INBOX, workflowFilter: 'snoozed', mailboxFilter: { kind: 'all', value: null } }))
+      .toEqual({ contact_email: null, mailbox_kind: null, mailbox_value: null, workflow_state: 'snoozed' });
+    expect(listSearchScope({ ...INBOX, mailboxFilter: { kind: 'folder', value: 'Projects' } }))
+      .toMatchObject({ mailbox_kind: 'folder', mailbox_value: 'Projects' });
+    // A contact list is the contact, whatever mailbox was open before.
+    expect(listSearchScope({ ...INBOX, activeContactEmail: 'ada@example.org' }))
+      .toEqual({ contact_email: 'ada@example.org', mailbox_kind: null, mailbox_value: null, workflow_state: null });
   });
 
   it('matches threads the way the list does', () => {
@@ -96,11 +99,11 @@ describe('mailbox scope helpers', () => {
 
 describe('useListSearch', () => {
   let scope: ReturnType<typeof effectScope>;
-  let mailbox: ListSearchMailbox;
+  const mailbox = shallowRef<ListSearchMailbox>(INBOX);
 
   function start() {
     scope = effectScope();
-    return scope.run(() => useListSearch({ mailbox: () => mailbox }))!;
+    return scope.run(() => useListSearch({ mailbox: () => mailbox.value }))!;
   }
 
   async function settle() {
@@ -113,7 +116,7 @@ describe('useListSearch', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     setActivePinia(createPinia());
-    mailbox = { ...INBOX };
+    mailbox.value = { ...INBOX };
     harness.threads = reactive({ threads: [thread('a', 'inbox'), thread('b', 'done')] });
     harness.accounts = reactive({ activeAccountId: 'account-1', accounts: [] });
     harness.search.mockReset().mockResolvedValue(page(['a', 'b']));
@@ -146,24 +149,32 @@ describe('useListSearch', () => {
 
     store.setQuery('invoice');
     await settle();
+    expect(harness.search).toHaveBeenLastCalledWith('invoice', expect.objectContaining({
+      accountId: 'account-1',
+      listScope: expect.objectContaining({ mailbox_kind: 'section', mailbox_value: 'inbox' }),
+    }));
+    // The store's copy of `b` is done: a row that left the Inbox drops out.
     expect(search.resultThreads.value.map((row) => row.id)).toEqual(['a']);
     expect(search.narrowed.value).toBe(true);
 
     store.setScope('all');
     await settle();
-    // All mail is every account too.
+    // All mail is every account too, and no list.
     expect(harness.search).toHaveBeenLastCalledWith('invoice', expect.objectContaining({ accountId: undefined }));
+    expect(harness.search.mock.lastCall?.[1]).not.toHaveProperty('listScope');
     expect(search.resultThreads.value.map((row) => row.id)).toEqual(['a', 'b']);
   });
 
-  it('hands the operator to the backend where one names the mailbox', async () => {
-    mailbox = { ...INBOX, workflowFilter: 'done', mailboxFilter: { kind: 'all', value: null } };
+  it('leaves the query as typed and names the list beside it', async () => {
+    mailbox.value = { ...INBOX, workflowFilter: 'done', mailboxFilter: { kind: 'all', value: null } };
     const store = useListSearchStore();
     const search = start();
 
     store.setQuery('invoice');
     await settle();
-    expect(harness.search).toHaveBeenCalledWith('in:done invoice', expect.anything());
+    expect(harness.search).toHaveBeenCalledWith('invoice', expect.objectContaining({
+      listScope: expect.objectContaining({ workflow_state: 'done', mailbox_kind: null }),
+    }));
     expect(search.resultThreads.value.map((row) => row.id)).toEqual(['b']);
   });
 
@@ -174,6 +185,7 @@ describe('useListSearch', () => {
     store.setQuery('invoice in:done');
     await settle();
     expect(search.narrowed.value).toBe(false);
+    expect(harness.search.mock.lastCall?.[1]).not.toHaveProperty('listScope');
     expect(search.resultThreads.value.map((row) => row.id)).toEqual(['a', 'b']);
   });
 
@@ -187,23 +199,42 @@ describe('useListSearch', () => {
     expect(harness.getThreads).toHaveBeenCalledWith(['a', 'z']);
   });
 
-  it('pages on its own while a narrowed list is short, but not without end', async () => {
-    harness.search.mockImplementation(async () => page(['b'], true));
+  it('pages only when the list asks: the backend already searched the list', async () => {
+    harness.search.mockImplementation(async () => page(['a'], true));
     const store = useListSearchStore();
     const search = start();
 
     store.setQuery('invoice');
-    for (let round = 0; round < LIST_SEARCH_MAX_FILL_PAGES + 3; round += 1) await settle();
-
-    // The first page plus the bounded fill.
-    expect(harness.search).toHaveBeenCalledTimes(1 + LIST_SEARCH_MAX_FILL_PAGES);
-    expect(search.resultThreads.value).toEqual([]);
+    for (let round = 0; round < 3; round += 1) await settle();
+    expect(harness.search).toHaveBeenCalledTimes(1);
     expect(search.loading.value).toBe(false);
 
-    // The list's own end-of-scroll request does not reopen the walk.
     search.loadMore();
     await settle();
-    expect(harness.search).toHaveBeenCalledTimes(1 + LIST_SEARCH_MAX_FILL_PAGES);
+    expect(harness.search).toHaveBeenCalledTimes(2);
+    expect(harness.search).toHaveBeenLastCalledWith('invoice', expect.objectContaining({
+      cursor: expect.objectContaining({ id: 'a' }),
+      listScope: expect.objectContaining({ mailbox_value: 'inbox' }),
+    }));
+  });
+
+  it('searches again when the list changes, not when it is recomputed', async () => {
+    const store = useListSearchStore();
+    start();
+
+    store.setQuery('invoice');
+    await settle();
+    expect(harness.search).toHaveBeenCalledTimes(1);
+
+    mailbox.value = { ...INBOX };
+    await settle();
+    expect(harness.search).toHaveBeenCalledTimes(1);
+
+    mailbox.value = { ...INBOX, mailboxFilter: { kind: 'folder', value: 'Projects' } };
+    await settle();
+    expect(harness.search).toHaveBeenLastCalledWith('invoice', expect.objectContaining({
+      listScope: expect.objectContaining({ mailbox_kind: 'folder', mailbox_value: 'Projects' }),
+    }));
   });
 
   it('clears query, scope and the open hit together', () => {

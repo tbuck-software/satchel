@@ -528,6 +528,32 @@ function findThread(threadId: string): Thread | undefined {
   return threads.find((thread) => thread.id === threadId);
 }
 
+/**
+ * Whether a thread is in the list a request names — the contact, workflow
+ * state and mailbox of `list_threads`, without account or bucket. The same
+ * test narrows `search_message_hits` to a list, as `ThreadListScope` does.
+ */
+function inThreadList(thread: Thread, scope: Record<string, unknown>): boolean {
+  const contact = String(scope.contact_email ?? '').toLowerCase();
+  const mailbox = String(scope.mailbox_value ?? '');
+  if (scope.workflow_state && scope.workflow_state !== 'all' && thread.workflowState !== scope.workflow_state) return false;
+  if (contact && !thread.participants.some(person => person.email.toLowerCase() === contact)) return false;
+  const folders = thread.mailboxNames ?? [];
+  if (scope.mailbox_kind === 'folder' && mailbox && !folders.includes(mailbox)) return false;
+  if (scope.mailbox_kind === 'section') {
+    if (mailbox === 'inbox' && (!['inbox', 'todo'].includes(thread.workflowState)
+      || !folders.some(folder => folder.toLowerCase() === 'inbox'))) return false;
+    const patterns: Record<string, RegExp> = {
+      archive: /archive|archiv/i, sent: /sent/i, drafts: /draft/i,
+      trash: /trash|deleted/i, spam: /spam|junk/i,
+      notifications: /notif|updates|forum/i, blocked: /blocked/i,
+    };
+    const pattern = patterns[mailbox];
+    if (pattern && !folders.some(folder => pattern.test(folder))) return false;
+  }
+  return true;
+}
+
 function byDateDesc(a: Thread, b: Thread): number {
   return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime();
 }
@@ -627,28 +653,11 @@ const handlers: Record<string, Handler> = {
   list_threads: (payload) => {
     const scope = input(payload);
     const accountId = scope.account_id as string | undefined;
-    const contact = String(scope.contact_email ?? '').toLowerCase();
-    const mailbox = String(scope.mailbox_value ?? '');
     const rows = threads.filter(thread => {
       if (accountId ? thread.accountId !== accountId : !accountVisible(thread.accountId)) return false;
-      if (scope.workflow_state && thread.workflowState !== scope.workflow_state) return false;
-      if (contact && !thread.participants.some(person => person.email.toLowerCase() === contact)) return false;
       if (scope.smart_bucket && (scope.smart_bucket === 'pinned'
         ? !thread.isStarred : classifySmartBucket(thread) !== scope.smart_bucket)) return false;
-      const folders = thread.mailboxNames ?? [];
-      if (scope.mailbox_kind === 'folder' && !folders.includes(mailbox)) return false;
-      if (scope.mailbox_kind === 'section') {
-        if (mailbox === 'inbox' && (!['inbox', 'todo'].includes(thread.workflowState)
-          || !folders.some(folder => folder.toLowerCase() === 'inbox'))) return false;
-        const patterns: Record<string, RegExp> = {
-          archive: /archive|archiv/i, sent: /sent/i, drafts: /draft/i,
-          trash: /trash|deleted/i, spam: /spam|junk/i,
-          notifications: /notif|updates|forum/i, blocked: /blocked/i,
-        };
-        const pattern = patterns[mailbox];
-        if (pattern && !folders.some(folder => pattern.test(folder))) return false;
-      }
-      return true;
+      return inThreadList(thread, scope);
     }).sort((a, b) => Date.parse(b.sortDate ?? b.lastMessageAt) - Date.parse(a.sortDate ?? a.lastMessageAt)
       || b.id.localeCompare(a.id));
     const backwards = !!scope.before_cursor;
@@ -927,12 +936,14 @@ const handlers: Record<string, Handler> = {
       return valid;
     });
     const accountId = request.account_id;
+    const listScope = (request.list_scope ?? null) as Record<string, unknown> | null;
     const cursor = request.cursor as { date: string; id: string } | null;
     const limit = Math.max(1, Math.min(500, Number(request.limit ?? 50)));
     const seen = new Set<string>();
     const hits = Object.values(messages).flat().filter((message) => {
       const thread = findThread(message.threadId);
       if (!query || !filters.some((token) => token.operator || !token.value.startsWith('-')) || !thread || (accountId ? thread.accountId !== accountId : !accountVisible(thread.accountId))) return false;
+      if (listScope && !inThreadList(thread, listScope)) return false;
       const text = `${message.subject} ${message.bodyText} ${message.from.name} ${message.from.email}`.toLowerCase();
       return filters.every(({ operator, value }) => {
         switch (operator) {

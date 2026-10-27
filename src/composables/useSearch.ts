@@ -5,6 +5,7 @@ import {
   type BackendMessageSearchHit,
   type BackendSearchWarning,
   type BackendMessageSearchResponse,
+  type BackendSearchListScope,
 } from '@/services/backend';
 import { useAccountsStore } from '@/stores/accounts';
 import { useMailEvents } from '@/composables/useMailEvents';
@@ -104,9 +105,23 @@ export function useSearch(options?: {
   liveUpdates?: boolean;
   /** Bounded preview size; full search uses the default page size. */
   limit?: number;
+  /**
+   * Only hits whose thread is in this list, as the list itself decides —
+   * the list search's "this mailbox". `null` searches everywhere.
+   */
+  listScope?: Ref<BackendSearchListScope | null>;
 }) {
   const accountsStore = useAccountsStore();
   const accountFilter = options?.accountFilter;
+
+  function requestOptions() {
+    const listScope = options?.listScope?.value;
+    return {
+      accountId: effectiveAccountId(),
+      ...(options?.limit ? { limit: options.limit } : {}),
+      ...(listScope ? { listScope } : {}),
+    };
+  }
 
   function effectiveAccountId(): string | undefined {
     if (accountFilter) return accountFilter.value || undefined;
@@ -220,10 +235,7 @@ export function useSearch(options?: {
       let rows: SearchResult[];
       let notes: string[] = [];
       if (backendCommandsAvailable()) {
-        const response = await backendSearchMessageHits(raw, {
-          accountId: effectiveAccountId(),
-          ...(options?.limit ? { limit: options.limit } : {}),
-        });
+        const response = await backendSearchMessageHits(raw, requestOptions());
         if (id !== requestId) return;
         cursor = response.next_cursor ?? null;
         hasMore.value = response.has_more ?? false;
@@ -267,9 +279,7 @@ export function useSearch(options?: {
     if (!raw || !backendCommandsAvailable()) return;
 
     try {
-      const response = await backendSearchMessageHits(raw, {
-        accountId: effectiveAccountId(),
-      });
+      const response = await backendSearchMessageHits(raw, requestOptions());
       // The user typed, switched account or refreshed while this was in flight.
       if (id !== requestId) return;
 
@@ -311,8 +321,7 @@ export function useSearch(options?: {
     errorText.value = '';
     try {
       const response = await backendSearchMessageHits(trimmedQuery.value, {
-        accountId: effectiveAccountId(), cursor: nextCursor,
-        ...(options?.limit ? { limit: options.limit } : {}),
+        ...requestOptions(), cursor: nextCursor,
       });
       if (id !== requestId) return;
       const seen = new Set(results.value.map((row) => row.threadId));
@@ -343,7 +352,14 @@ export function useSearch(options?: {
   }
 
   watch(
-    [trimmedQuery, () => accountsStore.activeAccountId, () => accountFilter?.value, () => accountsStore.visibilityKey],
+    [
+      trimmedQuery,
+      () => accountsStore.activeAccountId,
+      () => accountFilter?.value,
+      () => accountsStore.visibilityKey,
+      // By value: a recomputed scope naming the same list is the same search.
+      () => JSON.stringify(options?.listScope?.value ?? null),
+    ],
     ([next]) => {
       if (debounceHandle) clearTimeout(debounceHandle);
       if (liveHandle) clearTimeout(liveHandle);

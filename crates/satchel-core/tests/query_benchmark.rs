@@ -104,6 +104,7 @@ async fn queries_300k_messages() {
                             account_id: None,
                             limit: None,
                             cursor: None,
+                            list_scope: None,
                         })
                         .await
                         .unwrap();

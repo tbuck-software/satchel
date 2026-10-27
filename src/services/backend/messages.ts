@@ -9,6 +9,7 @@ import type {
   BackendMessageBody,
   BackendMessageSearchResponse,
   BackendOpenedThread,
+  BackendSearchListScope,
   BackendServerSearchHit,
   BackendUnsubscribeResult,
 } from '@/types/messages';
@@ -24,6 +25,7 @@ export type {
   BackendMessageSearchHit,
   BackendMessageSearchResponse,
   BackendOpenedThread,
+  BackendSearchListScope,
   BackendSearchWarning,
   BackendServerSearchHit,
   BackendUnsubscribeResult,
@@ -60,7 +62,13 @@ export async function backendListMessageBodies(messageIds: string[]): Promise<Ba
 
 export async function backendSearchMessageHits(
   query: string,
-  options?: { accountId?: string; limit?: number; cursor?: NonNullable<BackendMessageSearchResponse['next_cursor']> },
+  options?: {
+    accountId?: string;
+    limit?: number;
+    cursor?: NonNullable<BackendMessageSearchResponse['next_cursor']>;
+    /** Only hits whose thread is in this list, as the list itself decides. */
+    listScope?: BackendSearchListScope;
+  },
 ): Promise<BackendMessageSearchResponse> {
   return invoke<BackendMessageSearchResponse>('search_message_hits', {
     input: {
@@ -68,6 +76,7 @@ export async function backendSearchMessageHits(
       account_id: options?.accountId ?? null,
       limit: options?.limit ?? null,
       cursor: options?.cursor ?? null,
+      list_scope: options?.listScope ?? null,
     },
   });
 }

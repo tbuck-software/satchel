@@ -1,6 +1,11 @@
 import { computed, ref, shallowRef, watch } from 'vue';
-import { backendCommandsAvailable, backendGetThreads } from '@/services/backend';
+import {
+  backendCommandsAvailable,
+  backendGetThreads,
+  type BackendSearchListScope,
+} from '@/services/backend';
 import { useSearch } from '@/composables/useSearch';
+import { threadListInput } from '@/stores/threads/load-state';
 import { useAccountsStore } from '@/stores/accounts';
 import { useListSearchStore } from '@/stores/listSearch';
 import { useThreadsStore } from '@/stores/threads';
@@ -24,47 +29,31 @@ export interface ListSearchMailbox {
   activeContactEmail: string;
 }
 
-/** Hits per backend page. Larger than the full search's 50 because a mailbox
- *  scope may discard part of each page. */
+/** Hits per backend page. */
 export const LIST_SEARCH_PAGE_SIZE = 100;
-/** A filtered search keeps paging on its own until it has this many rows… */
-export const LIST_SEARCH_FILL_TARGET = 30;
-/** …but stops after this many extra pages, so a common word in a small
- *  mailbox does not walk the whole archive. */
-export const LIST_SEARCH_MAX_FILL_PAGES = 4;
 
 /**
- * The backend operator that narrows a search to the mailbox, when one says
- * exactly that. `null` leaves the narrowing to `threadMatchesListSearch`:
- * the Inbox is `inbox` *and* `todo`, and custom folders, contacts,
- * notifications and blocked senders have no operator at all.
+ * The list a narrowed search runs in, in the words of that list's own
+ * request: the backend tests each hit's thread exactly as it builds the list
+ * — the Inbox's inbox-and-todo threads with mail in the inbox folder, a
+ * custom folder, a contact — so no page of hits is thrown away here.
  */
-export function mailboxSearchOperator(mailbox: ListSearchMailbox): string | null {
-  if (mailbox.activeContactEmail) return null;
-  const { workflowFilter, mailboxFilter } = mailbox;
-  if (workflowFilter !== 'all') {
-    return mailboxFilter.kind === 'all' || !mailboxFilter.value ? `in:${workflowFilter}` : null;
-  }
-  if (mailboxFilter.kind !== 'section') return null;
-  switch (mailboxFilter.value) {
-    case 'archive':
-      return 'in:done';
-    case 'snoozed':
-    case 'aside':
-    case 'sent':
-    case 'drafts':
-    case 'trash':
-    case 'spam':
-      return `in:${mailboxFilter.value}`;
-    default:
-      return null;
-  }
+export function listSearchScope(mailbox: ListSearchMailbox): BackendSearchListScope {
+  const input = threadListInput({ ...mailbox, activeSmartBucketId: '' }, 0);
+  return {
+    contact_email: input.contact_email ?? null,
+    mailbox_kind: input.mailbox_kind ?? null,
+    mailbox_value: input.mailbox_value ?? null,
+    workflow_state: input.workflow_state ?? null,
+  };
 }
 
 /**
- * Whether a thread belongs to the list being searched — the same test the
- * thread store applies to its own page, minus the category tabs and the muted
- * filter: a search should find what those only tuck away.
+ * Whether a thread still belongs to the list being searched — the same test
+ * the thread store applies to its own page, minus the category tabs and the
+ * muted filter: a search should find what those only tuck away. The backend
+ * has already narrowed the hits; this drops a row whose store copy has since
+ * left the list, an archive from the results for one.
  */
 export function threadMatchesListSearch(thread: Thread, mailbox: ListSearchMailbox): boolean {
   if (mailbox.accountId && thread.accountId !== mailbox.accountId) return false;
@@ -98,15 +87,10 @@ export function useListSearch(options: { mailbox: () => ListSearchMailbox }) {
   // "All mail" means every account too, like the scope bar in Apple Mail.
   const accountFilter = computed(() => (store.scope === 'all' ? '' : options.mailbox().accountId));
 
-  const search = useSearch({ accountFilter, liveUpdates: true, limit: LIST_SEARCH_PAGE_SIZE });
+  const listScope = computed(() => (narrowed.value ? listSearchScope(options.mailbox()) : null));
 
-  const effectiveQuery = computed(() => {
-    const raw = store.query.trim();
-    if (!raw) return '';
-    const operator = narrowed.value ? mailboxSearchOperator(options.mailbox()) : null;
-    return operator ? `${operator} ${raw}` : raw;
-  });
-  watch(effectiveQuery, (query) => { search.query.value = query; }, { immediate: true, flush: 'sync' });
+  const search = useSearch({ accountFilter, listScope, liveUpdates: true, limit: LIST_SEARCH_PAGE_SIZE });
+  watch(() => store.query.trim(), (query) => { search.query.value = query; }, { immediate: true, flush: 'sync' });
 
   // Hits name threads; the list needs the threads. Fetched once per id and
   // kept while the search lives, so a row does not vanish when the store
@@ -155,41 +139,8 @@ export function useListSearch(options: { mailbox: () => ListSearchMailbox }) {
     resultThreads.value.map((thread) => ({ kind: 'thread', id: `thread-${thread.id}`, thread })),
   );
 
-  // A narrowed search may keep only part of each page. Fill the list a few
-  // pages deep on its own; past that the scope switch is the way on.
-  let fillPages = 0;
-  watch(effectiveQuery, () => { fillPages = 0; });
-  watch(accountFilter, () => { fillPages = 0; });
-  const fillExhausted = ref(false);
-  watch(
-    [resultThreads, search.hasMore, search.loading, search.loadingMore, fetching],
-    () => {
-      fillExhausted.value = false;
-      if (!narrowed.value || !search.hasMore.value) return;
-      if (search.loading.value || search.loadingMore.value || fetching.value) return;
-      if (resultThreads.value.length >= LIST_SEARCH_FILL_TARGET) return;
-      if (fillPages >= LIST_SEARCH_MAX_FILL_PAGES) {
-        fillExhausted.value = true;
-        return;
-      }
-      fillPages += 1;
-      void search.loadMore();
-    },
-  );
-
-  /**
-   * The list asks for more near its end — and also whenever it is shorter
-   * than the viewport. A narrowed, still short list is the filler's job;
-   * answering here as well would page through the whole archive.
-   */
-  function loadMore() {
-    if (narrowed.value && resultThreads.value.length < LIST_SEARCH_FILL_TARGET) return;
-    void search.loadMore();
-  }
-
   const loading = computed(() =>
-    resultThreads.value.length === 0
-      && (search.loading.value || fetching.value || (narrowed.value && search.hasMore.value && !fillExhausted.value)),
+    resultThreads.value.length === 0 && (search.loading.value || fetching.value),
   );
 
   return {
@@ -204,6 +155,6 @@ export function useListSearch(options: { mailbox: () => ListSearchMailbox }) {
     pendingCount: search.pendingCount,
     refresh: search.refresh,
     narrowed,
-    loadMore,
+    loadMore: search.loadMore,
   };
 }

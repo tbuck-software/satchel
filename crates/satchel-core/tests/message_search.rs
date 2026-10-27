@@ -3,6 +3,7 @@ use sqlx::SqlitePool;
 
 use satchel_core::db::data_repairs::{is_pending, run_repair, CC_INDEX};
 use satchel_core::db::messages::{MessageSearchRepository, SearchQuery};
+use satchel_core::db::threads::{ThreadListRequest, ThreadListScope, ThreadRepository};
 
 async fn pool() -> SqlitePool {
     let pool = SqlitePoolOptions::new()
@@ -127,6 +128,7 @@ fn query(raw: &str) -> SearchQuery {
         account_id: None,
         limit: None,
         cursor: None,
+        list_scope: None,
     }
 }
 
@@ -1122,4 +1124,313 @@ async fn concurrent_searches_share_the_search_slot() {
         .map(|result| result.unwrap().hits.len())
         .collect::<Vec<_>>();
     assert_eq!(counts, vec![1, 1, 1, 0, 1]);
+}
+
+/// One message in its own folder and thread, for the list-scope tests.
+async fn seed_listed(
+    pool: &SqlitePool,
+    (account, folder, thread, state): (&str, &str, &str, &str),
+    (id, subject, date, is_read): (&str, &str, &str, bool),
+) {
+    sqlx::query(
+        "INSERT OR IGNORE INTO threads (id, account_id, subject, last_message_date, message_count, unread_count, has_attachments, participants, snippet, workflow_state, workflow_changed_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, 0, 0, '[]', '', ?, '2026-01-01', '2026-01-01', '2026-01-01')",
+    )
+    .bind(thread)
+    .bind(account)
+    .bind(subject)
+    .bind(date)
+    .bind(state)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, from_address, from_name, to_addresses, subject, date, body_text, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'sender@example.com', 'Sender', '[]', ?, ?, 'Body', 'Body', ?, 0, 0, 0, 0, '2026-01-01', '2026-01-01')",
+    )
+    .bind(id)
+    .bind(account)
+    .bind(folder)
+    .bind(thread)
+    .bind(format!("<{id}@example.com>"))
+    .bind(subject)
+    .bind(date)
+    .bind(is_read)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE threads SET
+             last_message_date = (SELECT MAX(date) FROM messages WHERE thread_id = ?1),
+             message_count = (SELECT COUNT(*) FROM messages WHERE thread_id = ?1),
+             unread_count = (SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND is_read = 0)
+         WHERE id = ?1",
+    )
+    .bind(thread)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Two accounts, the second resting, and Inbox candidates that differ from
+/// `in:inbox` in every way the Inbox list cares about.
+async fn seed_inbox_scope(pool: &SqlitePool) {
+    seed_account(pool).await;
+    sqlx::raw_sql(
+        "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, sync_state, color, is_active, created_at, updated_at)
+         VALUES ('acc-2', 'Work', 'work@example.com', 'imap', '{}', '', '{}', '#000', 1, '2026-01-01', '2026-01-01');
+         INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, message_count, unread_count, sync_enabled, sort_order, created_at, updated_at)
+         VALUES ('fld-archive', 'acc-1', 'Archive', 'Archive', 'archive', 'Archive', 0, 0, 1, 1, '2026-01-01', '2026-01-01'),
+                ('fld-child', 'acc-1', 'Receipts', 'INBOX/Receipts', 'inbox', 'INBOX/Receipts', 0, 0, 1, 2, '2026-01-01', '2026-01-01'),
+                ('fld-work', 'acc-2', 'Inbox', 'INBOX', 'inbox', 'INBOX', 0, 0, 1, 0, '2026-01-01', '2026-01-01');
+         INSERT INTO app_settings (key, value, updated_at)
+         VALUES ('account.visibility.acc-2', '{\"mode\":\"manual\"}', '2026-01-01');",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let inbox = |thread, state| ("acc-1", "fld-inbox", thread, state);
+    seed_listed(
+        pool,
+        inbox("th-inbox", "inbox"),
+        ("m-inbox", "Invoice one", "2026-01-02T00:00:00Z", false),
+    )
+    .await;
+    // The Inbox is inbox *and* todo; `in:inbox` alone says only the first.
+    seed_listed(
+        pool,
+        inbox("th-todo", "todo"),
+        ("m-todo", "Invoice two", "2026-01-03T00:00:00Z", true),
+    )
+    .await;
+    seed_listed(
+        pool,
+        inbox("th-done", "done"),
+        ("m-done", "Invoice three", "2026-01-04T00:00:00Z", false),
+    )
+    .await;
+    // In the inbox state, but nowhere near the inbox folder.
+    seed_listed(
+        pool,
+        ("acc-1", "fld-archive", "th-elsewhere", "inbox"),
+        ("m-elsewhere", "Invoice four", "2026-01-05T00:00:00Z", false),
+    )
+    .await;
+    // A child folder of the inbox is not the Inbox.
+    seed_listed(
+        pool,
+        ("acc-1", "fld-child", "th-child", "inbox"),
+        ("m-child", "Invoice five", "2026-01-06T00:00:00Z", false),
+    )
+    .await;
+    // The hit is the archived message; the thread is still in the Inbox.
+    seed_listed(
+        pool,
+        ("acc-1", "fld-archive", "th-mixed", "inbox"),
+        ("m-mixed-old", "Invoice six", "2025-12-01T00:00:00Z", false),
+    )
+    .await;
+    seed_listed(
+        pool,
+        inbox("th-mixed", "inbox"),
+        ("m-mixed-new", "Thanks", "2026-01-07T00:00:00Z", true),
+    )
+    .await;
+    // A resting account stays out of a search over all accounts.
+    seed_listed(
+        pool,
+        ("acc-2", "fld-work", "th-work", "inbox"),
+        ("m-work", "Invoice seven", "2026-01-08T00:00:00Z", false),
+    )
+    .await;
+    // Newer matches outside the Inbox, enough to bury an Inbox hit behind
+    // several pages of an unscoped search.
+    for index in 0..30 {
+        let thread = format!("th-buried-{index:02}");
+        let id = format!("m-buried-{index:02}");
+        let date = format!("2026-02-{:02}T00:00:00Z", 1 + index % 28);
+        seed_listed(
+            pool,
+            ("acc-1", "fld-inbox", &thread, "done"),
+            (&id, "Invoice archived", &date, false),
+        )
+        .await;
+    }
+}
+
+fn inbox_scope() -> ThreadListScope {
+    ThreadListScope {
+        mailbox_kind: Some("section".into()),
+        mailbox_value: Some("inbox".into()),
+        ..Default::default()
+    }
+}
+
+async fn scoped_thread_ids(
+    pool: &SqlitePool,
+    raw: &str,
+    account_id: Option<&str>,
+    scope: ThreadListScope,
+) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = MessageSearchRepository::new(pool)
+            .search(&SearchQuery {
+                query: raw.into(),
+                account_id: account_id.map(str::to_string),
+                limit: Some(2),
+                cursor,
+                list_scope: Some(scope.clone()),
+            })
+            .await
+            .unwrap();
+        ids.extend(page.hits.into_iter().map(|hit| hit.thread_id));
+        if !page.has_more {
+            break;
+        }
+        cursor = page.next_cursor;
+    }
+    ids.sort();
+    ids
+}
+
+async fn listed_thread_ids(
+    pool: &SqlitePool,
+    account_id: Option<&str>,
+    scope: ThreadListScope,
+) -> Vec<String> {
+    let mut ids = ThreadRepository::new(pool)
+        .list(ThreadListRequest {
+            account_id: account_id.map(str::to_string),
+            contact_email: scope.contact_email,
+            mailbox_kind: scope.mailbox_kind,
+            mailbox_value: scope.mailbox_value,
+            workflow_state: scope.workflow_state,
+            limit: Some(1_000),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .threads
+        .into_iter()
+        .map(|thread| thread.id)
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids
+}
+
+#[tokio::test]
+async fn inbox_scope_finds_what_the_inbox_list_shows() {
+    let pool = pool().await;
+    seed_inbox_scope(&pool).await;
+
+    let listed = listed_thread_ids(&pool, None, inbox_scope()).await;
+    assert_eq!(listed, ["th-inbox", "th-mixed", "th-todo"]);
+
+    // Free text (the ranked fast path), operators, and the thread-flag path:
+    // every Inbox thread that matches, nothing else, across pages of two.
+    assert_eq!(
+        scoped_thread_ids(&pool, "invoice", None, inbox_scope()).await,
+        listed
+    );
+    assert_eq!(
+        scoped_thread_ids(
+            &pool,
+            "invoice from:sender@example.com",
+            None,
+            inbox_scope()
+        )
+        .await,
+        listed
+    );
+    assert_eq!(
+        scoped_thread_ids(&pool, "is:unread", None, inbox_scope()).await,
+        ["th-inbox", "th-mixed"]
+    );
+
+    // The operator stays what it was: one workflow state, no folder.
+    let operator =
+        scoped_thread_ids(&pool, "invoice in:inbox", None, ThreadListScope::default()).await;
+    assert!(operator.contains(&"th-elsewhere".to_string()));
+    assert!(!operator.contains(&"th-todo".to_string()));
+}
+
+#[tokio::test]
+async fn inbox_scope_reaches_an_inbox_hit_behind_newer_matches() {
+    let pool = pool().await;
+    seed_inbox_scope(&pool).await;
+
+    let first = MessageSearchRepository::new(&pool)
+        .search(&SearchQuery {
+            query: "invoice".into(),
+            limit: Some(3),
+            list_scope: Some(inbox_scope()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let mut ids = first
+        .hits
+        .iter()
+        .map(|hit| hit.thread_id.as_str())
+        .collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(ids, ["th-inbox", "th-mixed", "th-todo"]);
+    assert!(!first.has_more);
+}
+
+#[tokio::test]
+async fn list_scope_keeps_resting_accounts_out_of_all_accounts() {
+    let pool = pool().await;
+    seed_inbox_scope(&pool).await;
+
+    let everywhere = scoped_thread_ids(&pool, "invoice", None, inbox_scope()).await;
+    assert!(!everywhere.contains(&"th-work".to_string()));
+    // Asked for by name, the resting account answers, as its list does.
+    assert_eq!(
+        scoped_thread_ids(&pool, "invoice", Some("acc-2"), inbox_scope()).await,
+        ["th-work"]
+    );
+    assert_eq!(
+        listed_thread_ids(&pool, Some("acc-2"), inbox_scope()).await,
+        ["th-work"]
+    );
+}
+
+#[tokio::test]
+async fn list_scope_follows_folders_and_workflow_lists() {
+    let pool = pool().await;
+    seed_inbox_scope(&pool).await;
+
+    for scope in [
+        ThreadListScope {
+            mailbox_kind: Some("folder".into()),
+            mailbox_value: Some("INBOX/Receipts".into()),
+            ..Default::default()
+        },
+        ThreadListScope {
+            mailbox_kind: Some("section".into()),
+            mailbox_value: Some("archive".into()),
+            ..Default::default()
+        },
+        ThreadListScope {
+            workflow_state: Some("todo".into()),
+            ..Default::default()
+        },
+        ThreadListScope {
+            contact_email: Some("Sender@Example.com".into()),
+            ..Default::default()
+        },
+    ] {
+        // Every seeded thread mentions an invoice, so the hits are the list.
+        let listed = listed_thread_ids(&pool, Some("acc-1"), scope.clone()).await;
+        assert!(!listed.is_empty(), "{scope:?}");
+        assert_eq!(
+            scoped_thread_ids(&pool, "invoice", Some("acc-1"), scope.clone()).await,
+            listed,
+            "{scope:?}"
+        );
+    }
 }

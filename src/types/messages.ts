@@ -4,6 +4,7 @@ import type { MessageBodyDto as WireMessageBodyDto } from '../services/backend/g
 import type { MessageSearchHitDto as WireMessageSearchHitDto } from '../services/backend/generated/core/db/messages/MessageSearchHitDto';
 import type { SearchWarningDto as WireSearchWarningDto } from '../services/backend/generated/core/db/messages/SearchWarningDto';
 import type { MessageSearchResponseDto as WireMessageSearchResponseDto } from '../services/backend/generated/core/db/messages/MessageSearchResponseDto';
+import type { ThreadListScope as WireThreadListScope } from '../services/backend/generated/core/db/threads/ThreadListScope';
 import type { UnsubscribeResult as WireUnsubscribeResult } from '../services/backend/generated/app/commands/unsubscribe/UnsubscribeResult';
 import type { AttachmentDto as WireAttachmentDto } from '../services/backend/generated/app/commands/attachments/AttachmentDto';
 import type { DownloadAttachmentResult as WireDownloadAttachmentResult } from '../services/backend/generated/app/commands/attachments/DownloadAttachmentResult';
@@ -22,6 +23,9 @@ export type BackendMessageSearchHit = WireMessageSearchHitDto;
 export type BackendSearchWarning = WireSearchWarningDto;
 
 export type BackendMessageSearchResponse = WireMessageSearchResponseDto;
+
+/** The list a search is narrowed to: what that list's own request names. */
+export type BackendSearchListScope = WireThreadListScope;
 
 export type BackendUnsubscribeResult = WireUnsubscribeResult;
 

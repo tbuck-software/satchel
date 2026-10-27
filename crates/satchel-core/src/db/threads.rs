@@ -143,6 +143,176 @@ pub struct ThreadListRequest {
     pub limit: Option<i64>,
 }
 
+impl ThreadListRequest {
+    /// The list this request draws from, without account, bucket or paging.
+    pub fn scope(&self) -> ThreadListScope {
+        ThreadListScope {
+            contact_email: self.contact_email.clone(),
+            mailbox_kind: self.mailbox_kind.clone(),
+            mailbox_value: self.mailbox_value.clone(),
+            workflow_state: self.workflow_state.clone(),
+        }
+    }
+}
+
+/// Which thread list a thread belongs to: the contact, workflow state and
+/// mailbox of a `ThreadListRequest`, without account, bucket or paging.
+///
+/// Message search narrows to a list through this, so a search "in the Inbox"
+/// finds what the Inbox shows — inbox *and* todo threads with a message in
+/// the top-level inbox folder — and not what a single `in:` operator says.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ipc-types", ts(export, export_to = "core/db/threads/", optional_fields = nullable))]
+pub struct ThreadListScope {
+    #[serde(default)]
+    pub contact_email: Option<String>,
+    #[serde(default)]
+    pub mailbox_kind: Option<String>,
+    #[serde(default)]
+    pub mailbox_value: Option<String>,
+    #[serde(default)]
+    pub workflow_state: Option<String>,
+}
+
+impl ThreadListScope {
+    fn trimmed(value: &Option<String>) -> Option<&str> {
+        value
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
+    fn contact(&self) -> Option<String> {
+        Self::trimmed(&self.contact_email)
+            .and_then(|value| normalize_participant_email(Some(value)))
+    }
+
+    fn workflow(&self) -> Option<&str> {
+        Self::trimmed(&self.workflow_state).filter(|value| *value != "all")
+    }
+
+    fn mailbox(&self) -> (Option<&str>, Option<&str>) {
+        (
+            Self::trimmed(&self.mailbox_kind),
+            self.mailbox_value.as_deref().map(str::trim),
+        )
+    }
+
+    /// True when the scope says nothing a thread could fail.
+    pub fn is_unbounded(&self) -> bool {
+        self.contact().is_none()
+            && self.workflow().is_none()
+            && match self.mailbox() {
+                (Some("folder"), Some(folder)) => folder.is_empty(),
+                (Some("section"), Some(section)) => {
+                    section != "inbox" && mailbox_section_predicate(section).is_none()
+                }
+                _ => true,
+            }
+    }
+
+    /// Whether the contact filter needs the address index.
+    pub fn needs_addresses(&self) -> bool {
+        self.contact().is_some()
+    }
+
+    /// Whether this is the plain Inbox, which has its own covering index.
+    fn is_dense_inbox(&self) -> bool {
+        self.contact().is_none() && self.mailbox() == (Some("section"), Some("inbox"))
+    }
+}
+
+/// How a mailbox filter finds the threads with a message in that mailbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FolderLookup {
+    /// One indexed probe per thread: right when the caller already holds a
+    /// short candidate set (a dense Inbox page, search matches).
+    PerThread,
+    /// Collect the mailbox's threads first: right for a list that starts
+    /// from the whole thread table.
+    Candidates,
+}
+
+/// Appends the membership test of `scope` as ` AND …` clauses on a row of
+/// `threads` named `threads`. The thread list and message search share it,
+/// so the two cannot disagree about what a list contains. Account scope is
+/// the caller's: each has its own visibility rule for "all accounts".
+pub(crate) fn push_thread_scope_filters(
+    query: &mut QueryBuilder<'_, Sqlite>,
+    scope: &ThreadListScope,
+    addresses_ready: bool,
+    folders: FolderLookup,
+) {
+    if let Some(workflow_state) = scope.workflow() {
+        query.push(" AND threads.workflow_state = ");
+        query.push_bind(workflow_state.to_string());
+    }
+
+    if let Some(contact_email) = scope.contact() {
+        push_contact_filter(query, &contact_email, addresses_ready);
+    }
+
+    match scope.mailbox() {
+        (Some("folder"), Some(folder)) if !folder.is_empty() => {
+            let folder = folder.to_string();
+            match folders {
+                FolderLookup::PerThread => {
+                    push_per_thread_folder_exists(query);
+                    query
+                        .push(" AND (mailbox_folders.name = ")
+                        .push_bind(folder.clone());
+                    query
+                        .push(" OR mailbox_folders.full_path = ")
+                        .push_bind(folder);
+                    query.push("))");
+                }
+                FolderLookup::Candidates => {
+                    query.push(" AND threads.id IN (");
+                    push_folder_candidates(query);
+                    query
+                        .push(" AND (mailbox_folders.name = ")
+                        .push_bind(folder.clone());
+                    query
+                        .push(" OR mailbox_folders.full_path = ")
+                        .push_bind(folder);
+                    query.push("))");
+                }
+            }
+        }
+        (Some("section"), Some(section)) => {
+            if let Some(predicate) = mailbox_section_predicate(section) {
+                match folders {
+                    FolderLookup::PerThread => {
+                        push_per_thread_folder_exists(query);
+                        query.push(" AND ").push(predicate).push(")");
+                    }
+                    FolderLookup::Candidates => {
+                        query.push(" AND threads.id IN (");
+                        push_folder_candidates(query);
+                        query.push(" AND ").push(predicate).push(")");
+                    }
+                }
+            }
+            if section == "inbox" {
+                query.push(" AND threads.workflow_state IN ('inbox', 'todo')");
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Opens `EXISTS (… WHERE <a message of this thread is in mailbox_folders>`;
+/// the caller appends the folder predicate and the closing parenthesis.
+fn push_per_thread_folder_exists(query: &mut QueryBuilder<'_, Sqlite>) {
+    query.push(
+        " AND EXISTS (SELECT 1 FROM messages mailbox_messages
+            INDEXED BY idx_messages_thread_effective_folder_read
+            JOIN folders mailbox_folders ON mailbox_folders.id = COALESCE(mailbox_messages.pending_folder_id, mailbox_messages.folder_id)
+            WHERE mailbox_messages.thread_id = threads.id",
+    );
+}
+
 /// Keyset cursor over `(threads.last_message_date DESC, threads.id DESC)`.
 ///
 /// Offset pagination would skip or duplicate rows whenever a sync inserts a
@@ -1745,6 +1915,7 @@ mod tests {
                 account_id: None,
                 limit: None,
                 cursor: None,
+                list_scope: None,
             };
             let search = crate::db::messages::MessageSearchRepository::new(&pool);
             assert!(
@@ -6156,12 +6327,7 @@ fn thread_list_query(
     let mut query = QueryBuilder::<Sqlite>::new(
         "WITH listed_thread_ids AS MATERIALIZED (SELECT threads.id FROM threads",
     );
-    let dense_inbox = input.mailbox_kind.as_deref().map(str::trim) == Some("section")
-        && input.mailbox_value.as_deref().map(str::trim) == Some("inbox")
-        && input
-            .contact_email
-            .as_deref()
-            .is_none_or(|email| email.trim().is_empty())
+    let dense_inbox = input.scope().is_dense_inbox()
         && input
             .smart_bucket
             .as_deref()
@@ -6201,59 +6367,16 @@ fn thread_list_query(
             ));
     }
 
-    if let Some(workflow_state) = input
-        .workflow_state
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && *value != "all")
-    {
-        query.push(" AND threads.workflow_state = ");
-        query.push_bind(workflow_state.to_string());
-    }
-
-    if let Some(contact_email) = input
-        .contact_email
-        .as_deref()
-        .and_then(|value| normalize_participant_email(Some(value)))
-    {
-        push_contact_filter(&mut query, &contact_email, addresses_ready);
-    }
-
-    match (
-        input.mailbox_kind.as_deref().map(str::trim),
-        input.mailbox_value.as_deref().map(str::trim),
-    ) {
-        (Some("folder"), Some(folder)) if !folder.is_empty() => {
-            query.push(" AND threads.id IN (");
-            push_folder_candidates(&mut query);
-            query
-                .push(" AND (mailbox_folders.name = ")
-                .push_bind(folder.to_string());
-            query
-                .push(" OR mailbox_folders.full_path = ")
-                .push_bind(folder.to_string());
-            query.push("))");
-        }
-        (Some("section"), Some(section)) => {
-            if let Some(predicate) = mailbox_section_predicate(section) {
-                if dense_inbox {
-                    query.push(" AND EXISTS (SELECT 1 FROM messages mailbox_messages
-                        INDEXED BY idx_messages_thread_effective_folder_read
-                        JOIN folders mailbox_folders ON mailbox_folders.id = COALESCE(mailbox_messages.pending_folder_id, mailbox_messages.folder_id)
-                        WHERE mailbox_messages.thread_id = threads.id AND ");
-                    query.push(predicate).push(")");
-                } else {
-                    query.push(" AND threads.id IN (");
-                    push_folder_candidates(&mut query);
-                    query.push(" AND ").push(predicate).push(")");
-                }
-            }
-            if section == "inbox" {
-                query.push(" AND threads.workflow_state IN ('inbox', 'todo')");
-            }
-        }
-        _ => {}
-    }
+    push_thread_scope_filters(
+        &mut query,
+        &input.scope(),
+        addresses_ready,
+        if dense_inbox {
+            FolderLookup::PerThread
+        } else {
+            FolderLookup::Candidates
+        },
+    );
 
     if let Some(bucket) = input
         .smart_bucket

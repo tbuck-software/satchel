@@ -223,6 +223,7 @@ async fn prefix_backfill_keeps_search_live_and_survives_update_delete_and_resume
                 account_id: None,
                 limit: None,
                 cursor: None,
+                list_scope: None,
             })
             .await
             .unwrap()
@@ -248,6 +249,7 @@ async fn prefix_backfill_keeps_search_live_and_survives_update_delete_and_resume
                 account_id: None,
                 limit: None,
                 cursor: None,
+                list_scope: None,
             })
             .await
             .unwrap()
@@ -261,6 +263,7 @@ async fn prefix_backfill_keeps_search_live_and_survives_update_delete_and_resume
             account_id: None,
             limit: None,
             cursor: None,
+            list_scope: None,
         })
         .await
         .unwrap()
@@ -280,6 +283,7 @@ async fn prefix_backfill_keeps_search_live_and_survives_update_delete_and_resume
             account_id: None,
             limit: None,
             cursor: None,
+            list_scope: None,
         })
         .await
         .unwrap()
