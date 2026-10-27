@@ -32,6 +32,10 @@ export type ThreadRecord = {
     is_muted: boolean;
     is_starred: boolean;
     snooze_until: string | null;
+    /**
+     * When the thread last changed workflow state: "waiting since" in Later.
+     */
+    workflow_changed_at: string | null;
     sender_known: boolean;
     has_invite: boolean;
     invite_status: string | null;

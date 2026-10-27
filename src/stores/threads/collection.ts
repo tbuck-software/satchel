@@ -195,6 +195,7 @@ export function createThreadCollection(
       id: mutation.threadId,
       values: {
         workflowState: mutation.state,
+        workflowChangedAt: new Date().toISOString(),
         snoozeUntil: mutation.state === 'snoozed'
           ? mutation.snoozeUntil || new Date(Date.now() + 2 * 60 * 60_000).toISOString()
           : undefined,

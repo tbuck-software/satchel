@@ -1434,3 +1434,41 @@ async fn list_scope_follows_folders_and_workflow_lists() {
         );
     }
 }
+
+#[tokio::test]
+async fn later_scope_finds_snoozed_and_waiting_mail_like_the_later_list() {
+    let pool = pool().await;
+    seed_inbox_scope(&pool).await;
+    for (thread, state, date) in [
+        ("th-snoozed", "snoozed", "2026-03-01T00:00:00Z"),
+        ("th-waiting", "waiting", "2026-03-02T00:00:00Z"),
+        ("th-aside", "aside", "2026-03-03T00:00:00Z"),
+    ] {
+        seed_listed(
+            &pool,
+            ("acc-1", "fld-inbox", thread, state),
+            (&format!("m-{thread}"), "Invoice later", date, false),
+        )
+        .await;
+    }
+    let later = ThreadListScope {
+        workflow_state: Some("later".into()),
+        ..Default::default()
+    };
+
+    let listed = listed_thread_ids(&pool, Some("acc-1"), later.clone()).await;
+    assert_eq!(listed, ["th-snoozed", "th-waiting"]);
+    assert_eq!(
+        scoped_thread_ids(&pool, "invoice", Some("acc-1"), later.clone()).await,
+        listed
+    );
+    // The flag-only and operator paths narrow the same way.
+    assert_eq!(
+        scoped_thread_ids(&pool, "is:unread", Some("acc-1"), later.clone()).await,
+        listed
+    );
+    assert_eq!(
+        scoped_thread_ids(&pool, "from:sender@example.com", Some("acc-1"), later).await,
+        listed
+    );
+}

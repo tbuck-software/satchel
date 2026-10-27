@@ -1228,6 +1228,7 @@ export function toThreadModel(input: BackendThread, accounts: readonly Account[]
     isMuted: Boolean(input.is_muted),
     isStarred: Boolean(input.is_starred),
     snoozeUntil: input.snooze_until ?? undefined,
+    workflowChangedAt: input.workflow_changed_at ?? undefined,
     senderKnown: Boolean(input.sender_known),
     hasInvite: Boolean(input.has_invite),
     inviteStatus: input.invite_status ?? undefined,

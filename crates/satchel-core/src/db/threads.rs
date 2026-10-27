@@ -96,6 +96,9 @@ pub struct ThreadRecord {
     pub is_muted: bool,
     pub is_starred: bool,
     pub snooze_until: Option<String>,
+    /// When the thread last changed workflow state: "waiting since" in Later.
+    #[serde(default)]
+    pub workflow_changed_at: Option<String>,
     pub sender_known: bool,
     pub has_invite: bool,
     pub invite_status: Option<String>,
@@ -245,8 +248,14 @@ pub(crate) fn push_thread_scope_filters(
     folders: FolderLookup,
 ) {
     if let Some(workflow_state) = scope.workflow() {
-        query.push(" AND threads.workflow_state = ");
-        query.push_bind(workflow_state.to_string());
+        // `later` is a view, not a state: snoozed mail and mail waiting for
+        // a reply share one list.
+        if workflow_state == LATER_VIEW {
+            query.push(" AND threads.workflow_state IN ('snoozed', 'waiting')");
+        } else {
+            query.push(" AND threads.workflow_state = ");
+            query.push_bind(workflow_state.to_string());
+        }
     }
 
     if let Some(contact_email) = scope.contact() {
@@ -1535,6 +1544,7 @@ struct ThreadRow {
     is_muted: i64,
     is_starred: i64,
     snooze_until: Option<String>,
+    workflow_changed_at: Option<String>,
     sender_known: i64,
     has_invite: i64,
     invite_status: Option<String>,
@@ -5022,6 +5032,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn later_view_lists_snoozed_and_waiting_threads_with_their_change_time() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory pool");
+        crate::db::init(&pool).await.expect("migrations");
+        sqlx::query(
+            "INSERT INTO accounts(id, display_name, email, provider, config, credentials_ref, is_active, created_at, updated_at)
+             VALUES('acc', 'A', 'a@x.test', 'gmail', '{}', '', 1, '2026-01-01', '2026-01-01')",
+        )
+        .execute(&pool)
+        .await
+        .expect("account");
+        sqlx::query(
+            "INSERT INTO folders(id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES('inbox', 'acc', 'Inbox', 'INBOX', 'inbox', 'INBOX', '2026-01-01', '2026-01-01')",
+        )
+        .execute(&pool)
+        .await
+        .expect("folder");
+        for (index, id, state) in [
+            (1, "snoozed", "snoozed"),
+            (2, "waiting", "waiting"),
+            (3, "aside", "aside"),
+            (4, "inbox", "inbox"),
+        ] {
+            sqlx::query(
+                "INSERT INTO threads
+                 (id, account_id, subject, last_message_date, message_count, unread_count,
+                  workflow_state, workflow_changed_at, created_at, updated_at)
+                 VALUES (?, 'acc', ?, ?, 1, 0, ?, '2026-07-20T08:00:00Z', '2026-01-01', '2026-01-01')",
+            )
+            .bind(id)
+            .bind(id)
+            .bind(format!("2026-07-{index:02}T10:00:00Z"))
+            .bind(state)
+            .execute(&pool)
+            .await
+            .expect("thread");
+            sqlx::query(
+                "INSERT INTO messages
+                 (id, account_id, folder_id, thread_id, from_address, from_name, to_addresses,
+                  subject, date, is_read, created_at, updated_at)
+                 VALUES (?, 'acc', 'inbox', ?, 'a@example.com', 'A', '[]', ?, ?, 1, '2026-01-01', '2026-01-01')",
+            )
+            .bind(format!("message-{id}"))
+            .bind(id)
+            .bind(id)
+            .bind(format!("2026-07-{index:02}T10:00:00Z"))
+            .execute(&pool)
+            .await
+            .expect("message");
+        }
+
+        let page = ThreadRepository::new(&pool)
+            .list(ThreadListRequest {
+                account_id: Some("acc".into()),
+                workflow_state: Some(LATER_VIEW.into()),
+                ..Default::default()
+            })
+            .await
+            .expect("later page");
+        let mut ids = page
+            .threads
+            .iter()
+            .map(|thread| thread.id.as_str())
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        assert_eq!(ids, vec!["snoozed", "waiting"]);
+        assert!(page.threads.iter().all(|thread| {
+            thread.workflow_changed_at.as_deref() == Some("2026-07-20T08:00:00Z")
+        }));
+    }
+
+    #[tokio::test]
     async fn smart_inbox_summary_and_filter_keep_priority_and_pinning_independent() {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -5677,6 +5763,8 @@ struct ParticipantProjection {
 /// the bound is generous. Without it a 300-recipient reply-all thread shipped
 /// its whole recipient list (16 KB) with every list refresh.
 const THREAD_PARTICIPANT_LIMIT: usize = 25;
+/// The list scope for snoozed mail and mail waiting for a reply together.
+pub const LATER_VIEW: &str = "later";
 
 /// Merges message participants and the stored thread participants, latest
 /// sender first, and keeps the first `THREAD_PARTICIPANT_LIMIT`. `keep_email`
@@ -5941,6 +6029,7 @@ const THREAD_RECORD_SQL: &str = "
             threads.is_muted,
             threads.is_starred,
             threads.snooze_until,
+            threads.workflow_changed_at,
             EXISTS (
               SELECT 1 FROM calendar_invites
               JOIN messages invite_messages ON invite_messages.id = calendar_invites.message_id
@@ -6059,6 +6148,7 @@ fn thread_record_from_row(row: ThreadRow) -> ThreadRecord {
         is_muted: row.is_muted > 0,
         is_starred: row.is_starred > 0,
         snooze_until: row.snooze_until,
+        workflow_changed_at: row.workflow_changed_at,
         sender_known: row.sender_known > 0,
         has_invite: row.has_invite > 0,
         invite_status: row.invite_status,
@@ -6515,6 +6605,7 @@ fn thread_list_query(
             threads.is_muted,
             threads.is_starred,
             threads.snooze_until,
+            threads.workflow_changed_at,
             EXISTS (
               SELECT 1 FROM calendar_invites
               JOIN messages invite_messages ON invite_messages.id = calendar_invites.message_id
@@ -6662,6 +6753,7 @@ async fn list_threads_inner(
             is_muted: row.is_muted > 0,
             is_starred: row.is_starred > 0,
             snooze_until: row.snooze_until,
+            workflow_changed_at: row.workflow_changed_at,
             sender_known: row.sender_known > 0,
             has_invite: row.has_invite > 0,
             invite_status: row.invite_status,

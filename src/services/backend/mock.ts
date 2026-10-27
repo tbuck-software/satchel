@@ -32,7 +32,7 @@ import type { BackendMessage, BackendMessageBody } from '@/types/messages';
 import type { BackendCalendarEvent, BackendCalendarSource } from '@/types/calendar';
 import type { BackendOutboxItem } from '@/types/outbox';
 import type { BackendTopic, BackendTopicTimelineItem } from '@/types/topics';
-import type { WorkflowState } from '@/types/workflow';
+import { matchesWorkflowFilter, type WorkflowFilter, type WorkflowState } from '@/types/workflow';
 import { classifySmartBucket } from '@/utils/threadList';
 
 export function backendCommandsAvailable(): boolean {
@@ -445,6 +445,7 @@ function threadDto(thread: Thread) {
     is_muted: Boolean(thread.isMuted),
     is_starred: Boolean(thread.isStarred),
     snooze_until: thread.snoozeUntil ?? null,
+    workflow_changed_at: thread.workflowChangedAt ?? null,
     sender_known: Boolean(thread.senderKnown),
     has_invite: Boolean(thread.hasInvite),
     invite_status: thread.inviteStatus ?? null,
@@ -536,7 +537,7 @@ function findThread(threadId: string): Thread | undefined {
 function inThreadList(thread: Thread, scope: Record<string, unknown>): boolean {
   const contact = String(scope.contact_email ?? '').toLowerCase();
   const mailbox = String(scope.mailbox_value ?? '');
-  if (scope.workflow_state && scope.workflow_state !== 'all' && thread.workflowState !== scope.workflow_state) return false;
+  if (scope.workflow_state && !matchesWorkflowFilter(thread.workflowState, scope.workflow_state as WorkflowFilter)) return false;
   if (contact && !thread.participants.some(person => person.email.toLowerCase() === contact)) return false;
   const folders = thread.mailboxNames ?? [];
   if (scope.mailbox_kind === 'folder' && mailbox && !folders.includes(mailbox)) return false;
@@ -727,6 +728,7 @@ const handlers: Record<string, Handler> = {
       const thread = findThread(row.thread_id);
       if (!thread) continue;
       thread.workflowState = scope.to as WorkflowState;
+      thread.workflowChangedAt = new Date().toISOString();
       thread.snoozeUntil = (scope.snooze_until as string | null) ?? undefined;
       // Done includes Read, committed with the transition like the backend does.
       if (scope.to === 'done') {
@@ -923,7 +925,7 @@ const handlers: Record<string, Handler> = {
     }).filter((token) => {
       if (!token.value) return false;
       let valid = true;
-      if (token.operator === 'in') valid = ['inbox', 'todo', 'waiting', 'aside', 'done', 'snoozed', 'sent', 'drafts', 'trash', 'archive', 'spam'].includes(token.value);
+      if (token.operator === 'in') valid = ['inbox', 'todo', 'waiting', 'aside', 'done', 'snoozed', 'later', 'sent', 'drafts', 'trash', 'archive', 'spam'].includes(token.value);
       if (token.operator === 'is') valid = ['unread', 'starred', 'flagged'].includes(token.value);
       if (token.operator === 'has') valid = token.value === 'attachment';
       if (token.operator === 'before' || token.operator === 'after') {
@@ -953,8 +955,8 @@ const handlers: Record<string, Handler> = {
           case 'cc': return message.cc?.some((person) => `${person.name} ${person.email}`.toLowerCase().includes(value)) ?? false;
           case 'is': return value === 'unread' ? !message.isRead : ['starred', 'flagged'].includes(value) ? thread.isStarred : false;
           case 'has': return value === 'attachment' && (thread.hasAttachments || message.attachments.length > 0);
-          case 'in': return ['inbox', 'todo', 'waiting', 'aside', 'done', 'snoozed'].includes(value)
-            ? value === thread.workflowState : thread.mailboxNames.some((name) => name.toLowerCase() === value);
+          case 'in': return ['inbox', 'todo', 'waiting', 'aside', 'done', 'snoozed', 'later'].includes(value)
+            ? matchesWorkflowFilter(thread.workflowState, value as WorkflowFilter) : thread.mailboxNames.some((name) => name.toLowerCase() === value);
           case 'tag': return thread.tags?.some((tag) => tag.toLowerCase().includes(value)) ?? false;
           case 'before': return message.timestamp < value;
           case 'after': return message.timestamp > value;

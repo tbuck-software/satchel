@@ -12,7 +12,7 @@ import { invoke } from './core';
 import type { ThreadSmartBucket } from '@/types/mail';
 import type { BatchTransitionInput, BatchTransitionResult } from './misc';
 
-export type BackendThread = RefinedWireFields<OptionalWireFields<WireThreadDto, 'sort_date' | 'has_draft' | 'draft_snippet' | 'board_position' | 'tags' | 'assignee' | 'shared_with' | 'sent_participants' | 'category' | 'smart_bucket' | 'is_muted' | 'is_starred' | 'snooze_until' | 'sender_known' | 'has_invite' | 'invite_status' | 'invite_cancelled'>, { smart_bucket?: ThreadSmartBucket }>;
+export type BackendThread = RefinedWireFields<OptionalWireFields<WireThreadDto, 'sort_date' | 'has_draft' | 'draft_snippet' | 'board_position' | 'tags' | 'assignee' | 'shared_with' | 'sent_participants' | 'category' | 'smart_bucket' | 'is_muted' | 'is_starred' | 'snooze_until' | 'workflow_changed_at' | 'sender_known' | 'has_invite' | 'invite_status' | 'invite_cancelled'>, { smart_bucket?: ThreadSmartBucket }>;
 
 
 export type BackendThreadCursor = WireThreadCursor;

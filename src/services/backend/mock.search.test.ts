@@ -55,9 +55,15 @@ describe('mock message search pagination', () => {
     await sendCommand('transition_threads', { input: {
       threads: [{ thread_id: todo!.thread_id, from: 'inbox' }], to: 'todo',
     } });
+    // Nor any mail waiting for a reply, which Later shows next to snoozed mail.
+    const [waiting] = await search({ workflow_state: 'done' });
+    await sendCommand('transition_threads', { input: {
+      threads: [{ thread_id: waiting!.thread_id, from: 'done' }], to: 'waiting',
+    } });
     for (const scope of [
       { mailbox_kind: 'section', mailbox_value: 'inbox' },
       { workflow_state: 'done' },
+      { workflow_state: 'later' },
       { mailbox_kind: 'folder', mailbox_value: 'Archive' },
     ]) {
       const listed: { threads: Array<{ id: string; workflow_state: string }> } = await sendCommand('list_threads', {
@@ -74,5 +80,8 @@ describe('mock message search pagination', () => {
     // The Inbox is inbox *and* todo — what `in:inbox` alone does not say.
     const inbox = await search({ mailbox_kind: 'section', mailbox_value: 'inbox' });
     expect(new Set(inbox.map((hit) => hit.workflow_state))).toEqual(new Set(['inbox', 'todo']));
+    // Later is snoozed *and* waiting — no single state says both.
+    const later = await search({ workflow_state: 'later' });
+    expect(new Set(later.map((hit) => hit.workflow_state))).toEqual(new Set(['snoozed', 'waiting']));
   });
 });

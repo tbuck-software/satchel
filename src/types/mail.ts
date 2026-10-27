@@ -127,6 +127,8 @@ export interface Thread {
   sharedWith?: string[];
   dueDate?: string;
   snoozeUntil?: string;
+  /** When the thread last changed workflow state; "waiting since" in Later. */
+  workflowChangedAt?: string;
   /** Kept on the thread only; `messages.category` is unused (ADR 0013). */
   category?: ThreadCategory | null;
   /** Backend projection shared with smart-folder counts and queries. */

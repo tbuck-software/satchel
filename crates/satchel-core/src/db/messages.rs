@@ -865,6 +865,9 @@ fn push_search_filters(
                 query.push(" AND t.workflow_state = ");
                 query.push_bind(in_state.clone());
             }
+            crate::db::threads::LATER_VIEW => {
+                query.push(" AND t.workflow_state IN ('snoozed', 'waiting')");
+            }
             "sent" | "drafts" | "trash" | "archive" | "spam" => {
                 query.push(
                     " AND EXISTS (
@@ -1002,8 +1005,8 @@ fn parse_search_query(raw: &str) -> ParsedSearchQuery {
             let value = value.to_lowercase();
             match value.as_str() {
                 // Workflow states and folder types; must match push_search_filters.
-                "inbox" | "todo" | "waiting" | "aside" | "done" | "snoozed" | "sent" | "drafts"
-                | "trash" | "archive" | "spam" => parsed.in_state = Some(value),
+                "inbox" | "todo" | "waiting" | "aside" | "done" | "snoozed" | "later" | "sent"
+                | "drafts" | "trash" | "archive" | "spam" => parsed.in_state = Some(value),
                 _ => parsed.warnings.push(SearchWarningDto {
                     operator: "in".into(),
                     value,
@@ -1481,6 +1484,7 @@ mod tests {
             "is:starred",
             "tag:wichtig",
             "in:sent",
+            "in:later",
             "after:2026-01-01",
         ] {
             assert!(
