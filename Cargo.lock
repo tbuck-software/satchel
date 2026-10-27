@@ -6161,6 +6161,7 @@ dependencies = [
  "rustls-platform-verifier",
  "satchel-core",
  "scraper",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

@@ -29,6 +29,27 @@ beforeEach(() => {
 });
 
 describe('About Satchel', () => {
+  it.each(['0.1.14', '0.1.15-nightly.27'])(
+    'shows installed %s separately from the followed nightly channel',
+    async version => {
+      backend.backendAppBuildInfo.mockResolvedValue({ version, commit: '48b6d7c', os: 'macos', arch: 'aarch64', debug: false });
+      backend.backendGetAppUpdatePreferences.mockResolvedValue({ channel: 'nightly', supported: true });
+      const wrapper = mount(AboutPane);
+      await flushPromises();
+      const build = wrapper.get('[data-testid="about-build"]');
+      expect(build.text()).toContain('Installed version');
+      expect(build.text()).toContain(version);
+      expect(wrapper.text()).toContain('Following nightly and stable releases, whichever is newer.');
+      expect(wrapper.get<HTMLInputElement>('input[role="switch"]').element.checked).toBe(true);
+    },
+  );
+
+  it('shows when the installed app follows only stable releases', async () => {
+    const wrapper = mount(AboutPane);
+    await flushPromises();
+    expect(wrapper.text()).toContain('Following stable releases only.');
+  });
+
   it('switches the same installed app to nightly updates', async () => {
     const wrapper = mount(AboutPane);
     await flushPromises();

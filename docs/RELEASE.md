@@ -217,8 +217,12 @@ curl -fLsS https://github.com/tbuck-software/satchel/releases/latest/download/in
 
 Stable and nightly releases both install `Satchel.app` and use the regular
 `de.tbuck.satchel` profile. In Settings → About Satchel, turn on **Nightly
-updates** to receive daily builds in the same app with the same accounts and
-data. Turn it off to follow stable releases again; an older stable version is
+updates** to receive daily builds and stable releases, whichever is newer, in the
+same app with the same accounts and data. The app checks both feeds, so a newer
+stable release is offered even before the next nightly build. Installing a stable
+release keeps the saved nightly preference. About Satchel shows the installed
+version separately from the channel it follows.
+Turn it off to follow stable releases again; an older stable version is
 never installed over a newer nightly. Stable resumes when its version catches up.
 
 For a first nightly installation, download the installer from the latest versioned
@@ -271,7 +275,12 @@ from Applications.
 Nightly is a release channel of the regular app. Both channels use the same bundle
 identity, installation path, profile and credential keychain entries. The selected
 channel lives in `app_settings` under `updates.channel`. Only the backend chooses
-the fixed feed URL; switching clears any pending package from the previous channel.
+the fixed feed URLs; nightly checks both feeds and stable checks only the stable
+feed. Each candidate must match its source feed's channel and app identity.
+The updater uses semantic version ordering, with a stable release newer than a
+nightly of the same base version. If one feed is unavailable, a nightly check
+can still offer an update from the other. Switching clears any pending package
+from the previous channel.
 
 The regular app's nightly feed is `nightly/satchel.json`. The former released
 Satchel Daily app's `nightly/latest.json` is left untouched, so those installations

@@ -195,10 +195,25 @@ fn permitted_release(
     url: &reqwest::Url,
 ) -> bool {
     let tag = format!("v{version}");
-    manifest
-        .get("app_identifier")
-        .and_then(serde_json::Value::as_str)
-        == Some("de.tbuck.satchel")
+    // These are the stable/nightly forms ordered by compareReleaseVersions in
+    // scripts/release-model.mjs. Their ordering is ordinary SemVer ordering.
+    let valid_version = semver::Version::parse(version).is_ok_and(|version| {
+        version.build.is_empty()
+            && match channel {
+                "stable" => version.pre.is_empty(),
+                "nightly" => version
+                    .pre
+                    .as_str()
+                    .strip_prefix("nightly.")
+                    .is_some_and(|run| run.parse::<u64>().is_ok()),
+                _ => false,
+            }
+    });
+    valid_version
+        && manifest
+            .get("app_identifier")
+            .and_then(serde_json::Value::as_str)
+            == Some("de.tbuck.satchel")
         && manifest.get("channel").and_then(serde_json::Value::as_str) == Some(channel)
         && manifest
             .get("release_tag")
@@ -215,6 +230,72 @@ fn permitted_release(
             .starts_with(&format!("/tbuck-software/satchel/releases/download/{tag}/"))
 }
 
+// Keep feed selection independent of transport so failures and version ordering
+// can be tested without network access or a running desktop app.
+#[cfg(desktop)]
+async fn check_release_feeds<T, F, Fut>(
+    channel: UpdateChannel,
+    check_feed: F,
+    version: impl Fn(&T) -> semver::Version,
+) -> Result<Option<T>, &'static str>
+where
+    F: Fn(UpdateChannel) -> Fut,
+    Fut: std::future::Future<Output = Result<Option<T>, &'static str>>,
+{
+    if channel == UpdateChannel::Stable {
+        return check_feed(UpdateChannel::Stable).await;
+    }
+    // Updater endpoint lists are failover lists, not a search for the newest
+    // release. Check independently so a stale nightly cannot hide a stable.
+    let (stable, nightly) = tokio::join!(
+        check_feed(UpdateChannel::Stable),
+        check_feed(UpdateChannel::Nightly)
+    );
+    match (stable, nightly) {
+        (Ok(Some(stable)), Ok(Some(nightly))) => {
+            Ok(Some(if version(&nightly) > version(&stable) {
+                nightly
+            } else {
+                stable
+            }))
+        }
+        (Ok(Some(update)), _) | (_, Ok(Some(update))) => Ok(Some(update)),
+        (Ok(None), _) | (_, Ok(None)) => Ok(None),
+        (Err(error), Err(_)) => Err(error),
+    }
+}
+
+#[cfg(desktop)]
+async fn check_feed(
+    app: &tauri::AppHandle,
+    channel: UpdateChannel,
+) -> Result<Option<tauri_plugin_updater::Update>, &'static str> {
+    use tauri_plugin_updater::UpdaterExt;
+    let channel = channel.as_str();
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![feed_url(channel).parse().expect("static update URL")])
+        .map_err(|_| "backend.errors.updateCheckFailed")?
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|_| "backend.errors.updateCheckFailed")?;
+    let update = updater.check().await.map_err(|error| {
+        tracing::debug!(%error, "update feed unavailable");
+        "backend.errors.updateCheckFailed"
+    })?;
+    if update.as_ref().is_some_and(|update| {
+        !permitted_release(
+            channel,
+            &update.version,
+            &update.raw_json,
+            &update.download_url,
+        )
+    }) {
+        return Err("backend.errors.updateCheckFailed");
+    }
+    Ok(update)
+}
+
 #[tauri::command]
 pub async fn check_app_update(
     app: tauri::AppHandle,
@@ -222,7 +303,6 @@ pub async fn check_app_update(
 ) -> CommandResult<AppUpdateCheck> {
     #[cfg(desktop)]
     {
-        use tauri_plugin_updater::UpdaterExt;
         if !updates_supported(&app) {
             return Ok(AppUpdateCheck {
                 channel: None,
@@ -235,34 +315,30 @@ pub async fn check_app_update(
         let channel = saved_channel(pool.inner())
             .await
             .map_err(|_| "backend.errors.updateCheckFailed")?;
-        let channel = channel.as_str();
         // A periodic check must not discard a downloaded update or race installation.
         if let Some(pending) = pending.as_ref() {
             return Ok(AppUpdateCheck {
-                channel: Some(channel.into()),
+                channel: Some(channel.as_str().into()),
                 version: Some(pending.update.version.clone()),
             });
         }
-        let updater = app
-            .updater_builder()
-            .endpoints(vec![feed_url(channel).parse().expect("static update URL")])
-            .map_err(|_| "backend.errors.updateCheckFailed")?
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|_| "backend.errors.updateCheckFailed")?;
-        let update = updater.check().await.map_err(|error| {
-            tracing::debug!(%error, "update feed unavailable");
-            "backend.errors.updateCheckFailed"
-        })?;
-        if update.as_ref().is_some_and(|update| {
-            !permitted_release(
-                channel,
-                &update.version,
-                &update.raw_json,
-                &update.download_url,
-            )
-        }) {
-            return Err("backend.errors.updateCheckFailed".into());
+        let update = check_release_feeds(
+            channel,
+            |feed| check_feed(&app, feed),
+            |update| {
+                update
+                    .version
+                    .parse()
+                    .expect("updater parses release versions")
+            },
+        )
+        .await?;
+        if update.is_some() {
+            // A first nightly install can inherit its channel from the build.
+            // Keep that choice when the offered package is a stable build.
+            save_channel(pool.inner(), channel)
+                .await
+                .map_err(|_| "backend.errors.updateCheckFailed")?;
         }
         let version = update.as_ref().map(|update| update.version.clone());
         *pending = update.map(|update| PendingUpdate {
@@ -273,7 +349,7 @@ pub async fn check_app_update(
             installed_bundle: None,
         });
         Ok(AppUpdateCheck {
-            channel: Some(channel.into()),
+            channel: Some(channel.as_str().into()),
             version,
         })
     }
@@ -517,6 +593,180 @@ pub(crate) fn install_on_exit(app: &tauri::AppHandle) -> bool {
 mod tests {
     use super::*;
 
+    async fn offered(
+        channel: UpdateChannel,
+        installed: &str,
+        stable: Result<&str, &'static str>,
+        nightly: Result<&str, &'static str>,
+    ) -> Result<Option<String>, &'static str> {
+        let installed: semver::Version = installed.parse().unwrap();
+        check_release_feeds(
+            channel,
+            |feed| {
+                let result = match feed {
+                    UpdateChannel::Stable => stable,
+                    UpdateChannel::Nightly => nightly,
+                };
+                let installed = &installed;
+                async move {
+                    result.map(|candidate| {
+                        (candidate.parse::<semver::Version>().unwrap() > *installed)
+                            .then(|| candidate.to_owned())
+                    })
+                }
+            },
+            |version| version.parse().unwrap(),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn nightly_offers_stable_when_the_rolling_nightly_is_older() {
+        assert_eq!(
+            offered(
+                UpdateChannel::Nightly,
+                "0.1.11-nightly.26",
+                Ok("0.1.14"),
+                Ok("0.1.11-nightly.26")
+            )
+            .await,
+            Ok(Some("0.1.14".into()))
+        );
+    }
+
+    #[tokio::test]
+    async fn nightly_offers_the_newer_nightly_and_orders_run_numbers_numerically() {
+        assert_eq!(
+            offered(
+                UpdateChannel::Nightly,
+                "0.1.11-nightly.26",
+                Ok("0.1.14"),
+                Ok("0.1.15-nightly.27")
+            )
+            .await,
+            Ok(Some("0.1.15-nightly.27".into()))
+        );
+        assert_eq!(
+            offered(
+                UpdateChannel::Nightly,
+                "0.1.15-nightly.9",
+                Ok("0.1.14"),
+                Ok("0.1.15-nightly.10")
+            )
+            .await,
+            Ok(Some("0.1.15-nightly.10".into()))
+        );
+    }
+
+    #[tokio::test]
+    async fn stable_supersedes_a_nightly_of_the_same_base_version() {
+        assert_eq!(
+            offered(
+                UpdateChannel::Nightly,
+                "0.1.14-nightly.26",
+                Ok("0.1.14"),
+                Ok("0.1.14-nightly.27")
+            )
+            .await,
+            Ok(Some("0.1.14".into()))
+        );
+    }
+
+    #[tokio::test]
+    async fn equal_and_older_releases_are_not_offered() {
+        for installed in ["0.1.14", "0.1.15-nightly.27"] {
+            assert_eq!(
+                offered(
+                    UpdateChannel::Nightly,
+                    installed,
+                    Ok("0.1.14"),
+                    Ok("0.1.11-nightly.26")
+                )
+                .await,
+                Ok(None)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn stable_never_checks_the_nightly_feed() {
+        let result = check_release_feeds(
+            UpdateChannel::Stable,
+            |feed| async move {
+                assert_eq!(feed, UpdateChannel::Stable);
+                Ok(Some("0.1.14".to_owned()))
+            },
+            |version| version.parse().unwrap(),
+        )
+        .await;
+        assert_eq!(result, Ok(Some("0.1.14".into())));
+        assert_eq!(
+            offered(
+                UpdateChannel::Stable,
+                "0.1.14",
+                Ok("0.1.14"),
+                Ok("0.1.15-nightly.27")
+            )
+            .await,
+            Ok(None)
+        );
+    }
+
+    #[tokio::test]
+    async fn either_feed_can_fail_without_hiding_an_available_update() {
+        assert_eq!(
+            offered(
+                UpdateChannel::Nightly,
+                "0.1.11-nightly.26",
+                Err("unreachable"),
+                Ok("0.1.15-nightly.27")
+            )
+            .await,
+            Ok(Some("0.1.15-nightly.27".into()))
+        );
+        assert_eq!(
+            offered(
+                UpdateChannel::Nightly,
+                "0.1.11-nightly.26",
+                Ok("0.1.14"),
+                Err("unreachable")
+            )
+            .await,
+            Ok(Some("0.1.14".into()))
+        );
+        assert_eq!(
+            offered(
+                UpdateChannel::Nightly,
+                "0.1.15-nightly.27",
+                Err("unreachable"),
+                Ok("0.1.15-nightly.27")
+            )
+            .await,
+            Ok(None)
+        );
+        assert_eq!(
+            offered(
+                UpdateChannel::Nightly,
+                "0.1.14",
+                Err("unreachable"),
+                Err("unreachable")
+            )
+            .await,
+            Err("unreachable")
+        );
+    }
+
+    #[tokio::test]
+    async fn equal_candidates_prefer_the_stable_feed() {
+        let result = check_release_feeds(
+            UpdateChannel::Nightly,
+            |feed| async move { Ok(Some((feed, "0.1.14"))) },
+            |(_, version)| version.parse().unwrap(),
+        )
+        .await;
+        assert_eq!(result, Ok(Some((UpdateChannel::Stable, "0.1.14"))));
+    }
+
     #[test]
     fn only_expected_windows_in_the_current_round_can_acknowledge() {
         let mut round = FlushRound {
@@ -552,6 +802,27 @@ mod tests {
         foreign = url.clone();
         foreign.set_query(Some("token=fixture"));
         assert!(!permitted_release("stable", "0.1.1", &manifest, &foreign));
+    }
+
+    #[test]
+    fn feed_metadata_cannot_relabel_a_prerelease_as_stable() {
+        for (channel, version) in [
+            ("stable", "0.1.15-nightly.27"),
+            ("nightly", "0.1.14"),
+            ("nightly", "0.1.15-beta.1"),
+            ("nightly", "0.1.15-nightly.27+other"),
+        ] {
+            let manifest = serde_json::json!({
+                "channel": channel,
+                "release_tag": format!("v{version}"),
+                "app_identifier": "de.tbuck.satchel"
+            });
+            let url = reqwest::Url::parse(&format!(
+                "https://github.com/tbuck-software/satchel/releases/download/v{version}/app.tar.gz"
+            ))
+            .unwrap();
+            assert!(!permitted_release(channel, version, &manifest, &url));
+        }
     }
 
     #[test]

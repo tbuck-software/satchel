@@ -92,6 +92,9 @@ onMounted(() => { void loadBuild(); void updates.loadPreferences(); });
         {{ $t('app.update.nightly') }}
       </ToggleSwitch>
       <p>{{ $t('app.update.nightlyHint') }}</p>
+      <p v-if="updates.preferencesLoaded && updates.supported">
+        {{ $t(updates.channel === 'nightly' ? 'app.update.followingNightly' : 'app.update.followingStable') }}
+      </p>
       <p v-if="updates.preferencesLoaded && !updates.supported">{{ $t('app.update.sourceBuild') }}</p>
       <div class="about-pane__actions">
         <AppButton :disabled="!updates.supported || updates.changingChannel || updates.checking || updates.visible" @click="updates.checkForUpdates()">

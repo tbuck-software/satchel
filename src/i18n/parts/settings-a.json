@@ -309,7 +309,7 @@
       "about": {
         "name": "Satchel",
         "description": "A keyboard-driven, local-first email client.",
-        "version": "Version",
+        "version": "Installed version",
         "commit": "Build commit",
         "loading": "Loading version information…",
         "loadFailed": "Version information could not be loaded.",
@@ -791,7 +791,7 @@
       "about": {
         "name": "Satchel",
         "description": "Ein tastaturgesteuerter, local-first Mail-Client.",
-        "version": "Version",
+        "version": "Installierte Version",
         "commit": "Build-Commit",
         "loading": "Versionsinformation wird geladen…",
         "loadFailed": "Die Versionsinformation konnte nicht geladen werden.",

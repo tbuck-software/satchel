@@ -92,8 +92,10 @@
       "checking": "Checking for updates…",
       "downloading": "Downloading {progress}%",
       "failedRetry": "Update failed, retry",
+      "followingNightly": "Following nightly and stable releases, whichever is newer.",
+      "followingStable": "Following stable releases only.",
       "nightly": "Nightly updates",
-      "nightlyHint": "Get daily updates when changes are available. Your accounts and data stay in this app. Updates download in the background and install when you quit.",
+      "nightlyHint": "Get daily builds or stable releases, whichever is newer. Your accounts and data stay in this app. Updates download in the background and install when you quit.",
       "ready": "Satchel {version} downloaded. Restart to update.",
       "restart": "Restart to update",
       "restartNow": "Restart now",
@@ -1819,7 +1821,7 @@
       "sourceCode": "Source code",
       "thirdParty": "Third-party licenses",
       "updates": "Updates",
-      "version": "Version"
+      "version": "Installed version"
     },
     "accounts": {
       "addAccount": "Add email account",
