@@ -25,6 +25,7 @@
         "outbox": "The outbox could not be loaded",
         "sync": "Mail sync failed",
         "threads": "The conversations could not be loaded",
+        "topics": "Topics could not be loaded",
         "unknown": "Something in Satchel stopped working"
       },
       "unsupportedRuntime": {
@@ -330,6 +331,7 @@
         "outbox": "Der Postausgang konnte nicht geladen werden",
         "sync": "Der Mail-Abgleich ist fehlgeschlagen",
         "threads": "Die Konversationen konnten nicht geladen werden",
+        "topics": "Themen konnten nicht geladen werden",
         "unknown": "In Satchel hat etwas aufgehört zu funktionieren"
       },
       "unsupportedRuntime": {

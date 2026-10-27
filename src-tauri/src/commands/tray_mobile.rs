@@ -28,11 +28,12 @@ pub(crate) fn show_main(_app: &AppHandle) {}
 
 pub async fn open_unread_count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT COUNT(1)
+        &format!("SELECT COUNT(1)
          FROM threads
          WHERE workflow_state = 'inbox'
            AND unread_count > 0
            AND COALESCE(is_muted, 0) = 0
+           AND {}
            AND EXISTS (
              SELECT 1
              FROM messages inbox_messages
@@ -47,11 +48,13 @@ pub async fn open_unread_count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
                    AND LOWER(TRIM(COALESCE(inbox_folders.full_path, inbox_folders.name))) NOT LIKE 'inbox/%'
                  )
                )
-           )",
+           )", crate::db::account_visibility::visible_account_sql("threads.account_id")),
     )
     .fetch_one(pool)
     .await
 }
+
+pub async fn refresh_account_visibility(_app: &AppHandle, _pool: &SqlitePool) {}
 
 pub async fn load_pending_thread_ids(_pool: &SqlitePool) -> Vec<String> {
     Vec::new()

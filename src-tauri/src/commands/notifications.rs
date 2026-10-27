@@ -163,6 +163,7 @@ fn default_body_window_days() -> i64 {
 pub mod reason {
     pub const SETTING_DISABLED: &str = "setting_disabled";
     pub const FILTER_MESSAGE_GONE: &str = "filter_message_gone";
+    pub const FILTER_ACCOUNT_RESTING: &str = "filter_account_resting";
     pub const FILTER_ACCOUNT_INACTIVE: &str = "filter_account_inactive";
     pub const FILTER_NOT_INBOX: &str = "filter_not_inbox";
     pub const FILTER_OWN_SENT: &str = "filter_own_sent";
@@ -390,6 +391,16 @@ pub async fn show_mail_notification(
     thread_id: &str,
     sound: bool,
 ) -> Result<MailDeliveryOutcome, String> {
+    use tauri::Manager;
+    let pool = app.state::<SqlitePool>();
+    if !crate::db::account_visibility::is_visible(pool.inner(), account_id)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        return Ok(MailDeliveryOutcome::Suppressed(
+            reason::FILTER_ACCOUNT_RESTING.into(),
+        ));
+    }
     let sender = decode_html_entities(sender);
     let subject = decode_html_entities(subject);
     let preview = decode_html_entities(preview);
@@ -482,15 +493,15 @@ pub async fn show_mail_notification(
 /// `detail` and `predicate` are SQL fragments evaluated per row. Keeping the
 /// detail in SQL is what makes the Diagnose entry name the folder or the sender
 /// that decided the case instead of repeating the reason code.
-struct DismissalRule {
+struct DismissalRule<'a> {
     code: &'static str,
     detail: &'static str,
-    predicate: &'static str,
+    predicate: &'a str,
 }
 
 /// Evaluated in order; the first match owns the row, so the most specific
 /// reason wins. Every later rule only sees rows still `pending`.
-const DISMISSAL_RULES: &[DismissalRule] = &[
+const DISMISSAL_RULES: &[DismissalRule<'static>] = &[
     DismissalRule {
         code: reason::FILTER_MESSAGE_GONE,
         detail: "notification_outbox.message_id",
@@ -568,7 +579,7 @@ async fn dismiss_with_reason(
     pool: &SqlitePool,
     now: &str,
     message_id: Option<&str>,
-    rule: &DismissalRule,
+    rule: &DismissalRule<'_>,
 ) -> Result<u64, String> {
     let sql = format!(
         "UPDATE notification_outbox
@@ -751,6 +762,13 @@ async fn pending_mail_notifications_since(
             "mail notification claims returned to pending"
         );
     }
+
+    let visibility = DismissalRule {
+        code: reason::FILTER_ACCOUNT_RESTING,
+        detail: "(SELECT account_id FROM messages WHERE id = notification_outbox.message_id)",
+        predicate: &format!("EXISTS (SELECT 1 FROM messages m WHERE m.id = notification_outbox.message_id AND NOT ({}))", crate::db::account_visibility::visible_account_sql("m.account_id")),
+    };
+    dismiss_with_reason(pool, &now, message_id, &visibility).await?;
 
     for rule in DISMISSAL_RULES {
         dismiss_with_reason(pool, &now, message_id, rule).await?;
@@ -1175,6 +1193,30 @@ mod tests {
         message_id: Option<&str>,
     ) -> Result<Vec<PendingMailNotification>, String> {
         pending_mail_notifications_since(pool, message_id, Some("2000-01-01T00:00:00Z")).await
+    }
+
+    #[tokio::test]
+    async fn resting_accounts_dismiss_mail_without_catchup_when_shown_again() {
+        let pool = notification_pool(None).await;
+        insert_message(&pool, "resting", &fresh()).await;
+        setting(&pool, "account.visibility.account", r#"{"mode":"manual"}"#).await;
+        assert!(pending_mail_notifications(&pool, None)
+            .await
+            .unwrap()
+            .is_empty());
+        let row = outbox(&pool, "resting").await.unwrap();
+        assert_eq!(row.0, "dismissed");
+        assert!(row.1.unwrap().starts_with("filter_account_resting"));
+        setting(&pool, "account.visibility.account", r#"{"mode":"always"}"#).await;
+        assert!(pending_mail_notifications(&pool, None)
+            .await
+            .unwrap()
+            .is_empty());
+        insert_message(&pool, "awake", &fresh()).await;
+        assert_eq!(
+            pending_mail_notifications(&pool, None).await.unwrap().len(),
+            1
+        );
     }
 
     async fn notification_pool(last_sync_at: Option<&str>) -> SqlitePool {

@@ -352,3 +352,71 @@ mod tests {
         assert!(!serde_json::to_string(&error).unwrap().contains(detail));
     }
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/accounts/")
+)]
+pub struct AccountVisibilityStatus {
+    pub account_id: String,
+    pub policy: satchel_core::db::account_visibility::AccountVisibilityPolicy,
+    pub visible: bool,
+    pub local_date: String,
+}
+
+#[tauri::command]
+pub async fn get_account_visibility(
+    pool: tauri::State<'_, crate::db::ReadPool>,
+) -> CommandResult<Vec<AccountVisibilityStatus>> {
+    let rows = sqlx::query_as::<_, (String, Option<String>, bool, String)>(&format!(
+        "SELECT a.id, s.value, {}, date('now', 'localtime') FROM accounts a
+         LEFT JOIN app_settings s ON s.key = 'account.visibility.' || a.id
+         WHERE a.is_active = 1",
+        crate::db::account_visibility::visible_account_sql("a.id")
+    ))
+    .fetch_all(pool.inner().as_ref())
+    .await
+    .map_err(CommandError::unexpected)?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(account_id, raw, visible, local_date)| AccountVisibilityStatus {
+                account_id,
+                policy: raw
+                    .and_then(|raw| serde_json::from_str(&raw).ok())
+                    .unwrap_or_default(),
+                visible,
+                local_date,
+            },
+        )
+        .collect())
+}
+
+#[tauri::command]
+pub async fn set_account_visibility(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, SqlitePool>,
+    account_id: String,
+    policy: satchel_core::db::account_visibility::AccountVisibilityPolicy,
+) -> CommandResult<()> {
+    if !policy.valid() {
+        return Err(CommandError::new("backend.errors.accountVisibilityInvalid"));
+    }
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM accounts WHERE id = ?)")
+        .bind(&account_id)
+        .fetch_one(pool.inner())
+        .await
+        .map_err(CommandError::unexpected)?;
+    if !exists {
+        return Err(CommandError::new("backend.errors.accountNotFound"));
+    }
+    sqlx::query("INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+        .bind(format!("{}{}", crate::db::account_visibility::KEY_PREFIX, account_id))
+        .bind(serde_json::to_string(&policy).map_err(CommandError::unexpected)?)
+        .execute(pool.inner()).await.map_err(CommandError::unexpected)?;
+    crate::commands::tray::refresh_account_visibility(&app, pool.inner()).await;
+    Ok(())
+}

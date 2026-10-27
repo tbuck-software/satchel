@@ -1,4 +1,25 @@
 {
+  "accountVisibility": {
+    "accounts": "Konten",
+    "always": "Immer",
+    "from": "Von, optional",
+    "help": "Ruhende Konten synchronisieren weiter. Die Mails erscheinen nicht in gemeinsamen Ansichten, Zählern und Benachrichtigungen. Öffne das Konto zum Nachsehen oder wähle Heute anzeigen bis zur lokalen Mitternacht.",
+    "hide": "Ausblenden",
+    "hideAccount": "{account} ausblenden",
+    "invalidTime": "Das Ende muss am selben Tag nach dem Beginn liegen.",
+    "localTime": "Ortszeit · leer lassen für ganztägig",
+    "manual": "Nur bei Bedarf",
+    "openAccount": "{account} öffnen, auch ruhende Mails",
+    "resting": "Ruht",
+    "saveFailed": "Die Sichtbarkeit des Kontos konnte nicht gespeichert werden.",
+    "schedule": "Nach Zeitplan",
+    "showAccount": "{account} jetzt anzeigen",
+    "showToday": "Heute anzeigen",
+    "title": "Sichtbarkeit",
+    "to": "Bis, optional",
+    "visible": "Sichtbar",
+    "weekdays": "Wochentage"
+  },
   "app": {
     "crash": {
       "copied": "Absturzbericht kopiert",
@@ -85,6 +106,7 @@
       "accountPasswordUnavailable": "Für dieses Konto ist kein wiederverwendbares Passwort gespeichert.",
       "accountPersistenceFailed": "Kontodaten sind momentan nicht verfügbar. Bitte versuche es erneut.",
       "accountSyncFailed": "Die Synchronisierung für {account} ist fehlgeschlagen: {message}",
+      "accountVisibilityInvalid": "Wähle gültige Wochentage und ein Zeitfenster, das am selben Tag später endet.",
       "aliasPersistenceFailed": "Aliase sind momentan nicht verfügbar. Bitte versuche es erneut.",
       "asideFolderCreatedRefreshFailed": "Der Aside-Ordner für {account} wurde angelegt, aber die Ordnerliste konnte noch nicht aktualisiert werden: {message}",
       "asideFolderCreatedRefreshPending": "Der Aside-Ordner für {account} wurde angelegt, wird aber vom Anbieter noch nicht in der Ordnerliste zurückgegeben.",
@@ -930,6 +952,7 @@
       "outbox": "Der Postausgang konnte nicht geladen werden",
       "sync": "Der Mail-Abgleich ist fehlgeschlagen",
       "threads": "Die Konversationen konnten nicht geladen werden",
+      "topics": "Themen konnten nicht geladen werden",
       "unknown": "In Satchel hat etwas aufgehört zu funktionieren"
     },
     "technicalDetails": "Technische Details",
@@ -2075,6 +2098,7 @@
           "dispatch_error": "Fehler beim Anzeigen",
           "dispatch_timeout": "Zustellung nicht bestätigt",
           "filter_account_inactive": "Konto inaktiv",
+          "filter_account_resting": "Konto ruht",
           "filter_already_read": "Schon gelesen",
           "filter_before_session": "Vor dem Öffnen der App eingetroffen",
           "filter_coalesced": "Teil eines Schwalls, in einer Sammelmeldung gezeigt",

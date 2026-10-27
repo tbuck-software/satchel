@@ -1,3 +1,4 @@
+import { watch } from 'vue';
 import { defineStore } from 'pinia';
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { useAccountsStore } from '@/stores/accounts';
@@ -59,6 +60,7 @@ export const useThreadsStore = defineStore('threads', () => {
     threads: collection.threads,
     accounts: () => accountsStore.accounts,
     activeAccountId: () => accountsStore.activeAccountId,
+    isAccountVisible: (id) => accountsStore.isVisible(id),
     inboxSenderBuckets: () => settingsStore.inboxSenderBuckets,
     acceptedSenders: () => settingsStore.acceptedSenders,
     acceptedDomains: () => settingsStore.acceptedDomains,
@@ -100,6 +102,12 @@ export const useThreadsStore = defineStore('threads', () => {
   });
   filterBuckets.onScopeChange(() => void persistence.surface.load());
 
+  watch(() => accountsStore.visibilityKey, () => {
+    loadState.smartInboxSummary.value = null;
+    selection.surface.clearSelection();
+    if (!accountsStore.activeAccountId) selection.surface.activeThreadId.value = '';
+    void persistence.surface.load();
+  });
   filterBuckets.startWatching();
   selection.startWatching();
 

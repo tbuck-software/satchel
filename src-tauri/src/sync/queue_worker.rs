@@ -45,6 +45,11 @@ pub fn spawn_queue_worker(state: AppState, pool: SqlitePool, app: AppHandle) {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
             loop {
                 interval.tick().await;
+                crate::commands::tray::refresh_account_visibility(
+                    &app_for_ticker,
+                    &pool_for_ticker,
+                )
+                .await;
                 let snapshot = crate::connection_state::database_snapshot(&pool_for_ticker).await;
                 let unread = crate::commands::tray::open_unread_count(&pool_for_ticker)
                     .await

@@ -8,6 +8,7 @@ import {
   backendCommandsAvailable,
   type BackendMailbox,
 } from '@/services/backend';
+import { useAccountsStore } from '@/stores/accounts';
 import { useConnectionStore } from '@/stores/connection';
 import { mailboxesPersistence } from '@/persistence/mailboxes';
 const HIDDEN_CUSTOM_FOLDER_PATTERNS = [
@@ -221,6 +222,7 @@ function favoritePathsForAccount(keys: string[], accountId: string): Set<string>
 
 export const useMailboxesStore = defineStore('mailboxes', () => {
   const connectionStore = useConnectionStore();
+  const accounts = useAccountsStore();
   const mailboxes = ref<BackendMailbox[]>([]);
   const favoriteFolderKeys = ref<string[]>(mailboxesPersistence.favoriteFolderKeys.read());
 
@@ -370,14 +372,14 @@ export const useMailboxesStore = defineStore('mailboxes', () => {
   function countForMailboxType(mailboxType: string, accountId?: string | null): number {
     return mailboxes.value
       .filter((mailbox) => mailbox.mailbox_type === mailboxType)
-      .filter((mailbox) => (accountId ? mailbox.account_id === accountId : true))
+      .filter((mailbox) => (accountId ? mailbox.account_id === accountId : accounts.isVisible(mailbox.account_id)))
       .reduce((sum, mailbox) => sum + mailbox.unread_count, 0);
   }
 
   function threadCountForMailboxType(mailboxType: string, accountId?: string | null): number {
     return mailboxes.value
       .filter((mailbox) => mailbox.mailbox_type === mailboxType)
-      .filter((mailbox) => (accountId ? mailbox.account_id === accountId : true))
+      .filter((mailbox) => (accountId ? mailbox.account_id === accountId : accounts.isVisible(mailbox.account_id)))
       .reduce((sum, mailbox) => sum + mailbox.thread_count, 0);
   }
 
@@ -385,7 +387,7 @@ export const useMailboxesStore = defineStore('mailboxes', () => {
     const normalized = normalizeFolderPath(path);
     return browsableFolders.value
       .filter((folder) => folder.path === normalized)
-      .filter((folder) => (accountId ? folder.accountId === accountId : true))
+      .filter((folder) => (accountId ? folder.accountId === accountId : accounts.isVisible(folder.accountId)))
       .reduce((sum, folder) => sum + folder.unreadCount, 0);
   }
 

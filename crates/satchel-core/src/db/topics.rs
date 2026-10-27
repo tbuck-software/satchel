@@ -287,9 +287,9 @@ const TOPIC_SELECT: &str = "SELECT
           SELECT COUNT(*) FROM topic_items ti
           WHERE ti.topic_id = topics.id AND (
             (ti.item_type = 'thread'
-              AND EXISTS (SELECT 1 FROM threads t WHERE t.id = ti.item_id))
+              AND EXISTS (SELECT 1 FROM threads t WHERE t.id = ti.item_id AND {visible_t}))
             OR (ti.item_type = 'message'
-              AND EXISTS (SELECT 1 FROM messages m WHERE m.id = ti.item_id))
+              AND EXISTS (SELECT 1 FROM messages m WHERE m.id = ti.item_id AND {visible_m}))
             OR ti.item_type = 'event'
           )
         ) AS item_count,
@@ -297,19 +297,19 @@ const TOPIC_SELECT: &str = "SELECT
         (
           SELECT COALESCE(SUM(t.unread_count), 0) FROM topic_items ti
           JOIN threads t ON t.id = ti.item_id
-          WHERE ti.topic_id = topics.id AND ti.item_type = 'thread'
+          WHERE ti.topic_id = topics.id AND ti.item_type = 'thread' AND {visible_t}
         ) AS unread_count,
         (
           SELECT linked.from_name FROM (
             SELECT m.from_name, m.date, m.id
             FROM topic_items ti
             JOIN messages m ON m.thread_id = ti.item_id
-            WHERE ti.topic_id = topics.id AND ti.item_type = 'thread' AND m.is_draft = 0
+            WHERE ti.topic_id = topics.id AND ti.item_type = 'thread' AND m.is_draft = 0 AND {visible_m}
             UNION ALL
             SELECT m.from_name, m.date, m.id
             FROM topic_items ti
             JOIN messages m ON m.id = ti.item_id
-            WHERE ti.topic_id = topics.id AND ti.item_type = 'message' AND m.is_draft = 0
+            WHERE ti.topic_id = topics.id AND ti.item_type = 'message' AND m.is_draft = 0 AND {visible_m}
           ) linked
           ORDER BY linked.date DESC, linked.id DESC LIMIT 1
         ) AS last_sender_name,
@@ -318,17 +318,29 @@ const TOPIC_SELECT: &str = "SELECT
             SELECT m.from_address, m.date, m.id
             FROM topic_items ti
             JOIN messages m ON m.thread_id = ti.item_id
-            WHERE ti.topic_id = topics.id AND ti.item_type = 'thread' AND m.is_draft = 0
+            WHERE ti.topic_id = topics.id AND ti.item_type = 'thread' AND m.is_draft = 0 AND {visible_m}
             UNION ALL
             SELECT m.from_address, m.date, m.id
             FROM topic_items ti
             JOIN messages m ON m.id = ti.item_id
-            WHERE ti.topic_id = topics.id AND ti.item_type = 'message' AND m.is_draft = 0
+            WHERE ti.topic_id = topics.id AND ti.item_type = 'message' AND m.is_draft = 0 AND {visible_m}
           ) linked
           ORDER BY linked.date DESC, linked.id DESC LIMIT 1
         ) AS last_sender_email,
         topics.created_at, topics.updated_at
      FROM topics";
+
+fn topic_select() -> String {
+    TOPIC_SELECT
+        .replace(
+            "{visible_t}",
+            &crate::db::account_visibility::visible_account_sql("t.account_id"),
+        )
+        .replace(
+            "{visible_m}",
+            &crate::db::account_visibility::visible_account_sql("m.account_id"),
+        )
+}
 
 const DELETE_THREAD_LINKS_SQL: &str =
     "DELETE FROM topic_items WHERE item_type = 'thread' AND item_id = ?";
@@ -478,7 +490,8 @@ impl<'a> TopicRepository<'a> {
 
     pub async fn list(&self) -> Result<Vec<TopicRecord>, TopicError> {
         let rows = sqlx::query_as::<_, TopicRow>(&format!(
-            "{TOPIC_SELECT} ORDER BY topics.name COLLATE NOCASE ASC"
+            "{} ORDER BY topics.name COLLATE NOCASE ASC",
+            topic_select()
         ))
         .fetch_all(self.pool)
         .await?;
@@ -518,7 +531,7 @@ impl<'a> TopicRepository<'a> {
         .bind(&now)
         .execute(self.pool)
         .await?;
-        let row = sqlx::query_as::<_, TopicRow>(&format!("{TOPIC_SELECT} WHERE topics.id = ?"))
+        let row = sqlx::query_as::<_, TopicRow>(&format!("{} WHERE topics.id = ?", topic_select()))
             .bind(&id)
             .fetch_one(self.pool)
             .await?;
@@ -694,7 +707,7 @@ impl<'a> TopicRepository<'a> {
         &self,
         topic_id: &str,
     ) -> Result<Vec<TopicTimelineItemRecord>, TopicError> {
-        let rows = sqlx::query_as::<_, TopicTimelineItemRow>(
+        let rows = sqlx::query_as::<_, TopicTimelineItemRow>(&format!(
             "SELECT * FROM (
                SELECT 'thread' AS item_type,
                       threads.id AS item_id,
@@ -724,7 +737,7 @@ impl<'a> TopicRepository<'a> {
                       threads.unread_count AS unread_count
                FROM topic_items pi
                JOIN threads ON threads.id = pi.item_id
-               WHERE pi.topic_id = ? AND pi.item_type = 'thread'
+               WHERE pi.topic_id = ? AND pi.item_type = 'thread' AND {}
                UNION ALL
                SELECT 'message', messages.id, messages.thread_id, messages.subject,
                       messages.snippet, NULL, messages.from_address, messages.date,
@@ -732,14 +745,16 @@ impl<'a> TopicRepository<'a> {
                       CASE WHEN messages.is_read = 0 THEN 1 ELSE 0 END
                FROM topic_items pi
                JOIN messages ON messages.id = pi.item_id
-               WHERE pi.topic_id = ? AND pi.item_type = 'message'
+               WHERE pi.topic_id = ? AND pi.item_type = 'message' AND {}
                UNION ALL
                SELECT 'note', n.id, NULL, NULL, substr(n.content, 1, 200), n.content,
                       NULL, n.created_at, n.created_at, 'user', 0, 0
                FROM topic_notes n
                WHERE n.topic_id = ?
              ) ORDER BY sort_date DESC, item_id DESC",
-        )
+            crate::db::account_visibility::visible_account_sql("threads.account_id"),
+            crate::db::account_visibility::visible_account_sql("messages.account_id")
+        ))
         .bind(topic_id)
         .bind(topic_id)
         .bind(topic_id)
@@ -899,7 +914,8 @@ mod tests {
             .expect("migrations");
 
         let plan = sqlx::query_as::<_, (i64, i64, i64, String)>(&format!(
-            "EXPLAIN QUERY PLAN {TOPIC_SELECT} WHERE topics.id = ?"
+            "EXPLAIN QUERY PLAN {} WHERE topics.id = ?",
+            topic_select()
         ))
         .bind("topic-1")
         .fetch_all(&pool)

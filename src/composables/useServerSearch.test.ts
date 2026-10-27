@@ -6,7 +6,7 @@ const harness = vi.hoisted(() => ({
   search: vi.fn(),
   fetch: vi.fn(),
   native: vi.fn(() => true),
-  accounts: { accounts: [] as Array<{ id: string; provider: string }> },
+  accounts: { isVisible: (_id: string): boolean => true, accounts: [] as Array<{ id: string; provider: string }> },
   threads: {
     ensureThreadLoaded: vi.fn(),
     selectThread: vi.fn(),
@@ -64,6 +64,7 @@ function setup() {
 beforeEach(() => {
   vi.clearAllMocks();
   harness.accounts = reactive({
+    isVisible: (_id: string): boolean => true,
     accounts: [
       account('gmail-1', 'gmail'),
       account('outlook-1', 'outlook'),
@@ -101,6 +102,18 @@ describe('useServerSearch', () => {
     await actions.searchServer();
     expect(harness.search).toHaveBeenCalledTimes(3);
     expect(harness.search).toHaveBeenLastCalledWith({ accountId: 'outlook-1', query: 'invoice' });
+  });
+
+  it('keeps resting accounts out of shared server search but allows an explicit account', async () => {
+    harness.accounts.isVisible = id => id !== 'gmail-1';
+    const { accountFilter, actions } = setup();
+    await actions.searchServer();
+    expect(harness.search).toHaveBeenCalledTimes(1);
+    expect(harness.search).toHaveBeenCalledWith({ accountId: 'outlook-1', query: 'invoice' });
+    accountFilter.value = 'gmail-1';
+    await nextTick();
+    await actions.searchServer();
+    expect(harness.search).toHaveBeenLastCalledWith({ accountId: 'gmail-1', query: 'invoice' });
   });
 
   it('does not call native search when the runtime has no native capability', async () => {

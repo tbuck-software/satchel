@@ -192,7 +192,7 @@ const resolvedSections = computed<ResolvedSection[]>(() =>
 );
 
 const favoriteFolderGroups = computed(() =>
-  mailboxes.favoriteFolderGroups.map((group) => ({
+  mailboxes.favoriteFolderGroups.filter(group => accounts.activeAccountId ? group.accountId === accounts.activeAccountId : accounts.isVisible(group.accountId)).map((group) => ({
     ...group,
     rows: flattenFavoriteTree(group, group.tree),
   })),
@@ -209,7 +209,7 @@ const activeNodeId = computed(() =>
 
 function countWorkflowThreads(state: WorkflowState, accountId?: string | null): number {
   return threads.threads.filter((thread) => {
-    const accountMatch = accountId ? thread.accountId === accountId : true;
+    const accountMatch = accountId ? thread.accountId === accountId : accounts.isVisible(thread.accountId);
     return accountMatch && thread.workflowState === state;
   }).length;
 }

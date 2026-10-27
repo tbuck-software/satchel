@@ -22,6 +22,7 @@ import SyncButton from './SyncButton.vue';
 
 // Route-specific sidebars used to pull calendar grids and the complete
 // settings navigation into the Inbox bundle even though their v-if was false.
+const SidebarAccounts = defineAsyncComponent(() => import('./SidebarAccounts.vue'));
 const CalendarSidebar = defineAsyncComponent(() => import('@/components/calendar/CalendarSidebar.vue'));
 const ContactsSidebar = defineAsyncComponent(() => import('@/components/contacts/ContactsSidebar.vue'));
 const SettingsSidebar = defineAsyncComponent(() => import('@/components/settings/SettingsSidebar.vue'));
@@ -42,6 +43,7 @@ const smartFolders = useSmartFoldersStore();
 const composeWindow = useComposeWindow(router);
 const foldersPanelOpen = ref(false);
 const globalFrequentContacts = ref<ContactThreadSummary[]>([]);
+watch(() => accounts.visibilityKey, () => { globalFrequentContacts.value = []; });
 
 /** Pinned contacts first (in pin order), then the genuinely frequent ones. */
 const frequentContacts = computed(() => {
@@ -204,6 +206,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
       <CalendarSidebar v-else-if="calendarModuleActive" />
       <ContactsSidebar v-else-if="contactsModuleActive" />
       <template v-else>
+      <SidebarAccounts />
       <nav class="px-3">
         <MailboxTree @open-folders-panel="foldersPanelOpen = true" @navigate="ui.closeMobileSidebar()" />
         <PluginSlotHost slot-name="sidebar_section" />

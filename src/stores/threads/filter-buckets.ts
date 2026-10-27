@@ -46,6 +46,7 @@ interface ThreadFilterDependencies {
   threads: Ref<Thread[]>;
   accounts: () => readonly Account[];
   activeAccountId: () => string;
+  isAccountVisible?: (accountId: string) => boolean;
   inboxSenderBuckets: () => Record<string, InboxSenderBucket>;
   acceptedSenders: () => Record<string, true>;
   acceptedDomains: () => Record<string, true>;
@@ -121,6 +122,7 @@ export function createThreadFilterBuckets({
   threads,
   accounts,
   activeAccountId,
+  isAccountVisible = () => true,
   inboxSenderBuckets,
   acceptedSenders,
   acceptedDomains,
@@ -152,7 +154,7 @@ export function createThreadFilterBuckets({
   const accountScopedThreads = computed(() =>
     activeAccountId()
       ? threads.value.filter((thread) => thread.accountId === activeAccountId())
-      : threads.value,
+      : threads.value.filter(thread => isAccountVisible(thread.accountId)),
   );
   const contactSummaries = computed(() =>
     buildContactSummaries(accountScopedThreads.value, ownAccountEmails.value),
@@ -176,12 +178,13 @@ export function createThreadFilterBuckets({
    * Anything that is mounted on every route must use a narrower projection:
    * this one walks every loaded thread a second time.
    */
+  const attentionThreads = computed(() => threads.value.filter(thread => isAccountVisible(thread.accountId) || thread.accountId === activeAccountId()));
   const allContactSummaries = computed(() =>
-    buildContactSummaries(threads.value, ownAccountEmails.value),
+    buildContactSummaries(attentionThreads.value, ownAccountEmails.value),
   );
   /** Pins are cross-account, so their names resolve over every account. */
   const pinnedContactSummaries = computed(() =>
-    buildPinnedContactSummaries(threads.value, ownAccountEmails.value, pinnedContacts()),
+    buildPinnedContactSummaries(attentionThreads.value, ownAccountEmails.value, pinnedContacts()),
   );
   // Read on every Inbox render; without the guard it kept the full contact
   // projection evaluated when no contact filter was set.
@@ -200,6 +203,7 @@ export function createThreadFilterBuckets({
     // chained filters allocated and traversed up to six intermediate arrays
     // before the virtual list could render the same result.
     for (const thread of threads.value) {
+      if (!accountId && !isAccountVisible(thread.accountId)) continue;
       if (accountId && thread.accountId !== accountId) continue;
 
       if (contactEmail) {

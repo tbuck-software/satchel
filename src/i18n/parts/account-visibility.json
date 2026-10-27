@@ -1,0 +1,48 @@
+{
+  "en": {
+    "accountVisibility": {
+      "accounts": "Accounts",
+      "title": "Visibility",
+      "always": "Always",
+      "schedule": "On a schedule",
+      "manual": "Only when I open it",
+      "visible": "Visible",
+      "resting": "Resting",
+      "showToday": "Show today",
+      "hide": "Hide",
+      "showAccount": "Show {account} now",
+      "hideAccount": "Hide {account}",
+      "openAccount": "Open {account}, including resting mail",
+      "weekdays": "Days of the week",
+      "from": "From, optional",
+      "to": "To, optional",
+      "localTime": "Local time · leave blank for all day",
+      "invalidTime": "The end must be later than the start, on the same day.",
+      "help": "Resting accounts stay in sync. Their mail is hidden from shared views, badges and notifications. Open the account to look in, or choose Show today until local midnight.",
+      "saveFailed": "Could not save account visibility."
+    }
+  },
+  "de": {
+    "accountVisibility": {
+      "accounts": "Konten",
+      "title": "Sichtbarkeit",
+      "always": "Immer",
+      "schedule": "Nach Zeitplan",
+      "manual": "Nur bei Bedarf",
+      "visible": "Sichtbar",
+      "resting": "Ruht",
+      "showToday": "Heute anzeigen",
+      "hide": "Ausblenden",
+      "showAccount": "{account} jetzt anzeigen",
+      "hideAccount": "{account} ausblenden",
+      "openAccount": "{account} öffnen, auch ruhende Mails",
+      "weekdays": "Wochentage",
+      "from": "Von, optional",
+      "to": "Bis, optional",
+      "localTime": "Ortszeit · leer lassen für ganztägig",
+      "invalidTime": "Das Ende muss am selben Tag nach dem Beginn liegen.",
+      "help": "Ruhende Konten synchronisieren weiter. Die Mails erscheinen nicht in gemeinsamen Ansichten, Zählern und Benachrichtigungen. Öffne das Konto zum Nachsehen oder wähle Heute anzeigen bis zur lokalen Mitternacht.",
+      "saveFailed": "Die Sichtbarkeit des Kontos konnte nicht gespeichert werden."
+    }
+  }
+}

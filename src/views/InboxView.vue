@@ -271,6 +271,7 @@ const rememberSelectedSenders = ref(false);
 const categoryCounts = computed(() => {
   const buckets = { all: 0, personal: 0, updates: 0, promotions: 0, social: 0 };
   for (const t of threads.threads) {
+    if (!accounts.activeAccountId && !accounts.isVisible(t.accountId)) continue;
     if (accounts.activeAccountId && t.accountId !== accounts.activeAccountId) continue;
     if (threads.mailboxFilter.kind !== 'section' || threads.mailboxFilter.value !== 'inbox') continue;
     if (t.workflowState !== 'inbox') continue;

@@ -1,8 +1,12 @@
-import { computed, ref } from 'vue';
+import { computed, onScopeDispose, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type { Account } from '@/types/mail';
 import {
   backendCommandsAvailable,
+  backendGetAccountVisibility,
+  backendSetAccountVisibility,
+  type BackendAccountVisibilityPolicy,
+  type BackendAccountVisibilityStatus,
   backendClearAccountOauthError,
   backendCredentialsStatus,
   backendGetSourceCapabilities,
@@ -15,6 +19,7 @@ import {
 import { openOAuthAuthorizationUrl } from '@/utils/mobileOAuth';
 import { useConnectionStore } from '@/stores/connection';
 import { t } from '@/i18n/runtime';
+import { useToast } from '@/composables/useToast';
 
 function normalizeProvider(input: string): Account['provider'] {
   return input || 'imap';
@@ -24,7 +29,82 @@ export const useAccountsStore = defineStore('accounts', () => {
   const connectionStore = useConnectionStore();
   const accounts = ref<Account[]>([]);
   const activeAccountId = ref('');
+  let accountSelectionExplicit = false;
   const capabilities = ref<Record<string, SourceCapabilities>>({});
+  const visibility = ref<BackendAccountVisibilityStatus[]>([]);
+  const visibilityReady = ref(false);
+  const visibilityBusy = ref(false);
+  const toast = useToast();
+  const restingAccountIds = computed(() => new Set(visibility.value.filter(row => !row.visible).map(row => row.account_id)));
+  const visibilityKey = computed(() => [...restingAccountIds.value].sort().join(','));
+  function isVisible(accountId: string): boolean {
+    return !restingAccountIds.value.has(accountId);
+  }
+  function visibilityFor(accountId: string): BackendAccountVisibilityStatus | undefined {
+    return visibility.value.find(row => row.account_id === accountId);
+  }
+  let visibilityRequest = 0;
+  let visibilityTimer: ReturnType<typeof setInterval> | undefined;
+  async function refreshVisibility() {
+    if (!backendCommandsAvailable()) return false;
+    const request = ++visibilityRequest;
+    try {
+      const next = await backendGetAccountVisibility();
+      if (request !== visibilityRequest) return false;
+      if (JSON.stringify(next) !== JSON.stringify(visibility.value)) visibility.value = next;
+      // A single mailbox is selected automatically at startup. That is not
+      // an explicit request to keep looking at it after its window ends.
+      if (!accountSelectionExplicit && next.some(row => row.account_id === activeAccountId.value && !row.visible)) {
+        activeAccountId.value = '';
+      }
+      visibilityReady.value = true;
+      if (!visibilityTimer) {
+        visibilityTimer = setInterval(() => void refreshVisibility(), 15_000);
+        if (typeof window !== 'undefined') {
+          window.addEventListener('focus', refreshVisibility);
+          document.addEventListener('visibilitychange', refreshVisibility);
+        }
+      }
+      return true;
+    } catch (error) {
+      connectionStore.reportBackendError('accounts', error);
+      return false;
+    }
+  }
+  onScopeDispose(() => {
+    if (visibilityTimer) clearInterval(visibilityTimer);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('focus', refreshVisibility);
+      document.removeEventListener('visibilitychange', refreshVisibility);
+    }
+  });
+  async function setVisibility(accountId: string, policy: BackendAccountVisibilityPolicy): Promise<boolean> {
+    if (visibilityBusy.value) return false;
+    visibilityBusy.value = true;
+    ++visibilityRequest;
+    try {
+      await backendSetAccountVisibility(accountId, policy);
+      if (!await refreshVisibility()) {
+        toast.error(t('accountVisibility.saveFailed'));
+        return false;
+      }
+      connectionStore.clearBackendError('accounts');
+      return true;
+    } catch (error) {
+      connectionStore.reportBackendError('accounts', error);
+      toast.error(t('accountVisibility.saveFailed'));
+      return false;
+    } finally {
+      visibilityBusy.value = false;
+    }
+  }
+  async function showToday(accountId: string, visible: boolean) {
+    if (!await refreshVisibility()) return false;
+    const row = visibilityFor(accountId);
+    if (!row) return;
+    return setVisibility(accountId, { ...row.policy, override_date: row.local_date, override_visible: visible });
+  }
+
 
   const fallbackCapabilities: SourceCapabilities = {
     can_reply: false,
@@ -78,6 +158,7 @@ export const useAccountsStore = defineStore('accounts', () => {
   function setActiveAccount(accountId: string) {
     if (!accountId || accounts.value.some((account) => account.id === accountId)) {
       activeAccountId.value = accountId;
+      accountSelectionExplicit = true;
     }
   }
 
@@ -126,7 +207,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     const requestId = ++loadRequestId;
     void loadCredentialLock();
     try {
-      const rows = await backendListAccounts();
+      const [rows] = await Promise.all([backendListAccounts(), refreshVisibility()]);
       const nextCapabilities = await backendGetSourceCapabilities().catch(() => null);
       if (requestId !== loadRequestId) return;
       if (nextCapabilities) capabilities.value = nextCapabilities;
@@ -153,7 +234,10 @@ export const useAccountsStore = defineStore('accounts', () => {
       }
 
       if (!rows.some((account) => account.id === activeAccountId.value)) {
-        activeAccountId.value = rows.length > 1 ? '' : (rows[0]?.id ?? '');
+        if (!activeAccountId.value && accountSelectionExplicit) return;
+        accountSelectionExplicit = false;
+        const soleAccount = rows.length === 1 ? rows[0] : undefined;
+        activeAccountId.value = soleAccount && isVisible(soleAccount.id) ? soleAccount.id : '';
       }
     } catch (error) {
       if (requestId !== loadRequestId) return;
@@ -218,6 +302,15 @@ export const useAccountsStore = defineStore('accounts', () => {
 
   return {
     accounts,
+    visibility,
+    visibilityReady,
+    visibilityBusy,
+    visibilityKey,
+    isVisible,
+    visibilityFor,
+    refreshVisibility,
+    setVisibility,
+    showToday,
     activeAccountId,
     activeAccount,
     accountScopeLabel,

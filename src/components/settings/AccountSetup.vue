@@ -21,6 +21,7 @@ import {
 } from '@/services/backend';
 import { useConfirm } from '@/composables/useConfirm';
 import { transportErrorLabel, transportErrorText } from '@/utils/transportLabels';
+import AccountVisibilitySettings from './AccountVisibilitySettings.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 
@@ -541,6 +542,7 @@ async function removeAccount(accountId: string, email: string) {
             <path d="M4 4l.6 9a1 1 0 001 1h4.8a1 1 0 001-1L12 4" />
           </svg>
         </IconButton>
+        <AccountVisibilitySettings :account-id="account.id" />
       </article>
     </div>
 
@@ -691,6 +693,7 @@ async function removeAccount(accountId: string, email: string) {
 
 .account-card {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 12px 16px;

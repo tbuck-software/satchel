@@ -47,7 +47,7 @@ export function useServerSearch(options: {
     accounts.accounts.filter(
       (account) =>
         (account.provider === 'gmail' || account.provider === 'outlook')
-        && (!options.accountFilter.value || account.id === options.accountFilter.value),
+        && (options.accountFilter.value ? account.id === options.accountFilter.value : accounts.isVisible(account.id)),
     ),
   );
 

@@ -413,6 +413,17 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       keywords: t('commands.keywords.editShortcuts'),
       run: () => router.push({ name: 'settings', query: { section: 'shortcuts' } }),
     },
+    ...accounts.emailAccounts.map((account): OmniCommand => ({
+      id: `account:visibility:${account.id}`,
+      icon: 'account',
+      title: accounts.isVisible(account.id)
+        ? t('accountVisibility.hideAccount', { account: account.displayName })
+        : t('accountVisibility.showAccount', { account: account.displayName }),
+      context: 'app',
+      keywords: account.email,
+      searchOnly: true,
+      run: () => accounts.showToday(account.id, !accounts.isVisible(account.id)),
+    })),
     // One per section, found by name or by what the section is for.
     ...availableSettingsSections().flatMap((group) => group.items).map((section) => ({
       id: `settings:section:${section}`,

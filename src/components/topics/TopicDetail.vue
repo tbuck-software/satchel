@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useConnectionStore } from '@/stores/connection';
+import { useAccountsStore } from '@/stores/accounts';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -20,6 +22,11 @@ import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import SkeletonRow from '@/components/ui/SkeletonRow.vue';
 import SnoozePicker from '@/components/navigation/SnoozePicker.vue';
 import TopicFeedItem from '@/components/topics/TopicFeedItem.vue';
+
+const accounts = useAccountsStore();
+const connection = useConnectionStore();
+watch(() => accounts.visibilityKey, () => { timeline.value = []; void loadTimeline(); });
+let timelineRequest = 0;
 
 const props = defineProps<{
   topicId: string;
@@ -229,11 +236,20 @@ async function deleteTopicFile(file: TopicFile) {
 
 async function loadTimeline(jumpToEnd = false) {
   if (!topicId.value) return;
+  const request = ++timelineRequest;
+  const scope = accounts.visibilityKey;
+  const id = topicId.value;
   timelineLoading.value = true;
   try {
-    timeline.value = await topics.fetchTimeline(topicId.value);
+    const rows = await topics.fetchTimeline(id);
+    if (request !== timelineRequest || scope !== accounts.visibilityKey || id !== topicId.value) return;
+    timeline.value = rows;
+    connection.clearBackendError('topics');
+  } catch (error) {
+    if (request === timelineRequest) connection.reportBackendError('topics', error);
+    return;
   } finally {
-    timelineLoading.value = false;
+    if (request === timelineRequest) timelineLoading.value = false;
   }
   void loadTopicFiles();
   if (jumpToEnd) {

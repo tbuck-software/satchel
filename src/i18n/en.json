@@ -1,4 +1,25 @@
 {
+  "accountVisibility": {
+    "accounts": "Accounts",
+    "always": "Always",
+    "from": "From, optional",
+    "help": "Resting accounts stay in sync. Their mail is hidden from shared views, badges and notifications. Open the account to look in, or choose Show today until local midnight.",
+    "hide": "Hide",
+    "hideAccount": "Hide {account}",
+    "invalidTime": "The end must be later than the start, on the same day.",
+    "localTime": "Local time · leave blank for all day",
+    "manual": "Only when I open it",
+    "openAccount": "Open {account}, including resting mail",
+    "resting": "Resting",
+    "saveFailed": "Could not save account visibility.",
+    "schedule": "On a schedule",
+    "showAccount": "Show {account} now",
+    "showToday": "Show today",
+    "title": "Visibility",
+    "to": "To, optional",
+    "visible": "Visible",
+    "weekdays": "Days of the week"
+  },
   "app": {
     "crash": {
       "copied": "Crash report copied",
@@ -85,6 +106,7 @@
       "accountPasswordUnavailable": "This account has no password that can be reused.",
       "accountPersistenceFailed": "Account data is currently unavailable. Please try again.",
       "accountSyncFailed": "Sync for {account} failed: {message}",
+      "accountVisibilityInvalid": "Choose valid weekdays and a time window that ends later on the same day.",
       "aliasPersistenceFailed": "Aliases are currently unavailable. Please try again.",
       "asideFolderCreatedRefreshFailed": "The Aside folder for {account} was created, but the folder list could not be refreshed yet: {message}",
       "asideFolderCreatedRefreshPending": "The Aside folder for {account} was created, but the provider has not returned it in the folder list yet.",
@@ -930,6 +952,7 @@
       "outbox": "The outbox could not be loaded",
       "sync": "Mail sync failed",
       "threads": "The conversations could not be loaded",
+      "topics": "Topics could not be loaded",
       "unknown": "Something in Satchel stopped working"
     },
     "technicalDetails": "Technical details",
@@ -2075,6 +2098,7 @@
           "dispatch_error": "Display failed",
           "dispatch_timeout": "Delivery not confirmed",
           "filter_account_inactive": "Account inactive",
+          "filter_account_resting": "Account resting",
           "filter_already_read": "Already read",
           "filter_before_session": "Arrived before the app was opened",
           "filter_coalesced": "Part of a burst, shown in one summary",

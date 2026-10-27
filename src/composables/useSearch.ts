@@ -343,7 +343,7 @@ export function useSearch(options?: {
   }
 
   watch(
-    [trimmedQuery, () => accountsStore.activeAccountId, () => accountFilter?.value],
+    [trimmedQuery, () => accountsStore.activeAccountId, () => accountFilter?.value, () => accountsStore.visibilityKey],
     ([next]) => {
       if (debounceHandle) clearTimeout(debounceHandle);
       if (liveHandle) clearTimeout(liveHandle);

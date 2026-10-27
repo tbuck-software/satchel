@@ -248,3 +248,14 @@ export async function backendOauthStatus(accountId: string): Promise<BackendOaut
   return invoke('oauth_status', { accountId });
 }
 
+
+export type BackendAccountVisibilityPolicy = import('./generated/core/db/account_visibility/AccountVisibilityPolicy').AccountVisibilityPolicy;
+export type BackendAccountVisibilityStatus = import('./generated/app/commands/accounts/AccountVisibilityStatus').AccountVisibilityStatus;
+
+export function backendGetAccountVisibility(): Promise<BackendAccountVisibilityStatus[]> {
+  return invoke('get_account_visibility');
+}
+
+export function backendSetAccountVisibility(accountId: string, policy: BackendAccountVisibilityPolicy): Promise<void> {
+  return invoke('set_account_visibility', { accountId, policy });
+}

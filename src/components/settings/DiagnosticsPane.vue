@@ -113,6 +113,7 @@ function reasonLabel(value: string | null): string {
   switch (value) {
     case 'setting_disabled': return t('settings.diagnostics.outbox.reasons.setting_disabled');
     case 'filter_message_gone': return t('settings.diagnostics.outbox.reasons.filter_message_gone');
+    case 'filter_account_resting': return t('settings.diagnostics.outbox.reasons.filter_account_resting');
     case 'filter_account_inactive': return t('settings.diagnostics.outbox.reasons.filter_account_inactive');
     case 'filter_not_inbox': return t('settings.diagnostics.outbox.reasons.filter_not_inbox');
     case 'filter_own_sent': return t('settings.diagnostics.outbox.reasons.filter_own_sent');

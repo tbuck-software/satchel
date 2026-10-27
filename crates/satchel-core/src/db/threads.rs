@@ -1453,6 +1453,22 @@ async fn load_thread_list_snapshot(
         return Ok(None);
     }
 
+    // A shared snapshot can predate a policy boundary in either direction.
+    // Policies are rare; bypass this first-paint cache whenever one exists.
+    if request
+        .account_id
+        .as_deref()
+        .is_none_or(|id| id.trim().is_empty())
+    {
+        let has_policy: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM app_settings WHERE key GLOB 'account.visibility.*')",
+        )
+        .fetch_one(pool)
+        .await?;
+        if has_policy {
+            return Ok(None);
+        }
+    }
     let cache_key = thread_list_snapshot_key(request)?;
     let row = sqlx::query_as::<_, (String, String)>(
         "SELECT page_json, updated_at FROM thread_list_snapshots WHERE cache_key = ?",
@@ -1629,6 +1645,134 @@ mod tests {
             insert_thread(&pool, id, "acc").await;
         }
         assert_eq!(repository.get_many(&ids).await.unwrap().len(), 1001);
+    }
+
+    #[tokio::test]
+    async fn resting_account_is_excluded_before_pagination_but_direct_access_survives() {
+        let pool = migrated_pool().await;
+        seed_thread(&pool).await;
+        insert_message(
+            &pool,
+            "visible-message",
+            "thread-1",
+            "inbox",
+            None,
+            "1",
+            "2026-08-01T00:00:00Z",
+            false,
+            true,
+            false,
+            false,
+            "Visibility",
+            "Visibility",
+        )
+        .await;
+        sqlx::query("UPDATE threads SET is_starred = 1, unread_count = 1 WHERE id = 'thread-1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let repository = ThreadRepository::new(&pool);
+        assert_eq!(
+            repository
+                .list(ThreadListRequest::default())
+                .await
+                .unwrap()
+                .threads
+                .len(),
+            1
+        );
+        assert_eq!(
+            repository
+                .smart_inbox_summary(None)
+                .await
+                .unwrap()
+                .total_count,
+            1
+        );
+        sqlx::query("INSERT INTO app_settings (key, value, updated_at) VALUES ('account.visibility.acc', '{\"mode\":\"manual\"}', '')")
+            .execute(&pool).await.unwrap();
+        assert!(repository
+            .list(ThreadListRequest {
+                limit: Some(1),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .threads
+            .is_empty());
+        assert!(repository
+            .list_cached(ThreadListRequest::default())
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            repository
+                .smart_inbox_summary(None)
+                .await
+                .unwrap()
+                .total_count,
+            0
+        );
+        assert_eq!(
+            repository
+                .smart_inbox_summary(Some("acc"))
+                .await
+                .unwrap()
+                .total_count,
+            1
+        );
+        assert_eq!(
+            repository
+                .list(ThreadListRequest {
+                    account_id: Some("acc".into()),
+                    ..Default::default()
+                })
+                .await
+                .unwrap()
+                .threads
+                .len(),
+            1
+        );
+        assert_eq!(repository.get("thread-1").await.unwrap().id, "thread-1");
+        for query in [
+            "Visibility",
+            "is:starred",
+            "from:sender@example.com",
+            "Visibility from:sender@example.com",
+        ] {
+            let request = crate::db::messages::SearchQuery {
+                query: query.into(),
+                account_id: None,
+                limit: None,
+                cursor: None,
+            };
+            let search = crate::db::messages::MessageSearchRepository::new(&pool);
+            assert!(
+                search.search(&request).await.unwrap().hits.is_empty(),
+                "{query}"
+            );
+            assert_eq!(
+                search
+                    .search(&crate::db::messages::SearchQuery {
+                        account_id: Some("acc".into()),
+                        ..request
+                    })
+                    .await
+                    .unwrap()
+                    .hits
+                    .len(),
+                1,
+                "{query}"
+            );
+        }
+        sqlx::query("INSERT INTO topics (id, name, created_at, updated_at) VALUES ('topic', 'Collection', '', '');
+                     INSERT INTO topic_items (topic_id, item_type, item_id, added_at, added_by) VALUES ('topic', 'thread', 'thread-1', '', 'user')")
+            .execute(&pool).await.unwrap();
+        let topics = crate::db::topics::TopicRepository::new(&pool);
+        let topic = topics.list().await.unwrap().remove(0);
+        assert_eq!(topic.item_count, 0);
+        assert_eq!(topic.unread_count, 0);
+        assert!(topics.timeline("topic").await.unwrap().is_empty());
     }
 
     async fn seed_thread(pool: &sqlx::SqlitePool) {
@@ -5880,7 +6024,9 @@ fn smart_inbox_summary_query(account_id: Option<&str>) -> QueryBuilder<'static, 
             .push("threads.account_id = ")
             .push_bind(account_id.to_string());
     } else {
-        query.push("1 = 1");
+        query.push(crate::db::account_visibility::visible_account_sql(
+            "threads.account_id",
+        ));
     }
     query.push(
         ") AND EXISTS (
@@ -6047,6 +6193,12 @@ fn thread_list_query(
     {
         query.push(" AND threads.account_id = ");
         query.push_bind(account_id.to_string());
+    } else {
+        query
+            .push(" AND ")
+            .push(crate::db::account_visibility::visible_account_sql(
+                "threads.account_id",
+            ));
     }
 
     if let Some(workflow_state) = input

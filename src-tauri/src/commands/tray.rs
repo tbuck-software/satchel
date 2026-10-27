@@ -451,11 +451,12 @@ fn err_str<E: std::fmt::Display>(err: E) -> String {
 /// below `INBOX.*` are regular folders, not the primary inbox.
 pub async fn open_unread_count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT COUNT(1)
+        &format!("SELECT COUNT(1)
          FROM threads
          WHERE workflow_state = 'inbox'
            AND unread_count > 0
            AND COALESCE(is_muted, 0) = 0
+           AND {}
            AND EXISTS (
              SELECT 1
              FROM messages inbox_messages
@@ -470,7 +471,7 @@ pub async fn open_unread_count(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
                    AND LOWER(TRIM(COALESCE(inbox_folders.full_path, inbox_folders.name))) NOT LIKE 'inbox/%'
                  )
                )
-           )",
+           )", crate::db::account_visibility::visible_account_sql("threads.account_id")),
     )
     .fetch_one(pool)
     .await
@@ -485,18 +486,33 @@ pub async fn load_pending_thread_ids(pool: &SqlitePool) -> Vec<String> {
         .await
         .ok()
         .flatten();
-    raw.and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
+    let ids = raw
+        .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
         .unwrap_or_default()
         .into_iter()
         .filter(|id| !id.trim().is_empty() && id.len() <= 512)
         .take(MAX_PENDING_THREADS)
-        .collect()
+        .collect::<Vec<_>>();
+    visible_pending_thread_ids(pool, &ids)
+        .await
+        .unwrap_or_default()
 }
 
 /// Record genuinely new mail, but stay quiet while the user is already looking
 /// at Satchel. Unlike unread state this survives filing and read-flag changes.
 pub async fn mark_new_mail(app: &AppHandle, pool: &SqlitePool, thread_id: &str) {
     if thread_id.trim().is_empty() || thread_id.len() > 512 || user_is_viewing_satchel(app) {
+        return;
+    }
+    let visible: bool = sqlx::query_scalar(&format!(
+        "SELECT EXISTS (SELECT 1 FROM threads WHERE id = ? AND {})",
+        crate::db::account_visibility::visible_account_sql("threads.account_id")
+    ))
+    .bind(thread_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(false);
+    if !visible {
         return;
     }
     let Some(state) = app.try_state::<TrayPreferences>() else {
@@ -506,6 +522,32 @@ pub async fn mark_new_mail(app: &AppHandle, pool: &SqlitePool, thread_id: &str) 
     set_attention(app, true);
     if let Err(err) = persist_current_pending_thread_ids(app, pool).await {
         tracing::warn!(%err, "failed to persist tray attention state");
+    }
+}
+
+async fn visible_pending_thread_ids(
+    pool: &SqlitePool,
+    ids: &[String],
+) -> Result<Vec<String>, String> {
+    sqlx::query_scalar(&format!(
+        "SELECT threads.id FROM json_each(?) pending JOIN threads ON threads.id = pending.value
+         WHERE {} ORDER BY CAST(pending.key AS INTEGER)",
+        crate::db::account_visibility::visible_account_sql("threads.account_id")
+    ))
+    .bind(serde_json::to_string(ids).map_err(|error| error.to_string())?)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())
+}
+
+pub async fn refresh_account_visibility(app: &AppHandle, pool: &SqlitePool) {
+    let ids = app
+        .try_state::<TrayPreferences>()
+        .map(|state| state.snapshot())
+        .unwrap_or_default();
+    match visible_pending_thread_ids(pool, &ids).await {
+        Ok(ids) => set_attention(app, !ids.is_empty()),
+        Err(error) => tracing::warn!(%error, "could not refresh visible tray attention"),
     }
 }
 
@@ -595,7 +637,7 @@ async fn load_tray_threads(
     let mut rows = Vec::new();
     for thread_id in thread_ids {
         let row = sqlx::query_as::<_, TrayThreadDto>(
-            "SELECT
+            &format!("SELECT
                 threads.id,
                 COALESCE(NULLIF(TRIM(latest.from_name), ''), NULLIF(TRIM(latest.from_address), ''), '') AS sender_name,
                 COALESCE(latest.from_address, '') AS sender_address,
@@ -610,7 +652,7 @@ async fn load_tray_threads(
                  ORDER BY messages.date DESC, messages.id DESC
                  LIMIT 1
              )
-             WHERE threads.id = ?",
+             WHERE threads.id = ? AND {}", crate::db::account_visibility::visible_account_sql("threads.account_id")),
         )
         .bind(thread_id)
         .fetch_optional(pool)
@@ -703,7 +745,7 @@ pub async fn tray_snapshot(
     let Some(state) = app.try_state::<TrayPreferences>() else {
         return Ok(TraySnapshotDto::default());
     };
-    let pending = state.snapshot();
+    let pending = visible_pending_thread_ids(pool.inner().as_ref(), &state.snapshot()).await?;
     let briefed = briefing_slice(&pending);
     let new_threads = load_tray_threads(pool.inner().as_ref(), briefed).await?;
     let upcoming_events = load_upcoming_calendar_events(pool.inner().as_ref()).await?;
@@ -711,9 +753,9 @@ pub async fn tray_snapshot(
     // Only what the briefing had room for. Acknowledging the whole queue meant
     // that twelve new mails turned into three senders, once, and the
     // attention dot went out over the nine nobody ever saw.
-    let remaining = state.acknowledge(briefed);
+    state.acknowledge(briefed);
     persist_current_pending_thread_ids(&app, write_pool.inner()).await?;
-    set_attention(&app, !remaining.is_empty());
+    refresh_account_visibility(&app, write_pool.inner()).await;
 
     Ok(TraySnapshotDto {
         new_threads,
@@ -1072,7 +1114,8 @@ mod tests {
             .await
             .expect("in-memory sqlite");
         sqlx::query(
-            "CREATE TABLE threads (id TEXT PRIMARY KEY, workflow_state TEXT, unread_count INTEGER, is_muted INTEGER);
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT);
+             CREATE TABLE threads (id TEXT PRIMARY KEY, account_id TEXT DEFAULT 'acc', workflow_state TEXT, unread_count INTEGER, is_muted INTEGER);
              CREATE TABLE folders (id TEXT PRIMARY KEY, name TEXT, full_path TEXT, folder_type TEXT);
              CREATE TABLE messages (id TEXT PRIMARY KEY, thread_id TEXT, folder_id TEXT, is_read INTEGER);",
         )
@@ -1128,6 +1171,30 @@ mod tests {
         }
 
         assert_eq!(open_unread_count(&pool).await.expect("badge count"), 2);
+        sqlx::query(
+            r#"INSERT INTO app_settings VALUES ('account.visibility.acc', '{"mode":"manual"}')"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(open_unread_count(&pool).await.unwrap(), 0);
+        assert!(
+            super::visible_pending_thread_ids(&pool, &["open".into(), "localized".into()])
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        sqlx::query("DELETE FROM app_settings")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(open_unread_count(&pool).await.unwrap(), 2);
+        assert_eq!(
+            super::visible_pending_thread_ids(&pool, &["localized".into(), "open".into()])
+                .await
+                .unwrap(),
+            vec!["localized", "open"]
+        );
     }
 
     #[tokio::test]
@@ -1239,7 +1306,8 @@ mod tests {
             .await
             .expect("in-memory sqlite");
         sqlx::query(
-            "CREATE TABLE accounts (id TEXT PRIMARY KEY, kind TEXT);
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT);
+             CREATE TABLE accounts (id TEXT PRIMARY KEY, kind TEXT);
              CREATE TABLE threads (
                id TEXT PRIMARY KEY, account_id TEXT, subject TEXT,
                last_message_date TEXT, unread_count INTEGER

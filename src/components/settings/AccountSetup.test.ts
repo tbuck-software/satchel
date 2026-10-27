@@ -41,6 +41,8 @@ vi.mock('@/stores/threads', () => ({
 }));
 vi.mock('@/stores/ui', () => ({ useUiStore: () => ({ openAccountSetup: vi.fn() }) }));
 
+vi.mock('./AccountVisibilitySettings.vue', () => ({ default: { template: '<div />' } }));
+
 import AccountSetup from './AccountSetup.vue';
 
 beforeEach(() => {

@@ -1,3 +1,4 @@
+pub mod account_visibility;
 pub mod accounts;
 pub mod aliases;
 pub mod blocked_senders;

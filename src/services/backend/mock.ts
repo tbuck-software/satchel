@@ -1,3 +1,5 @@
+import { createPersistedSlot, persistence } from '@/persistence';
+import type { BackendAccountVisibilityPolicy } from './accounts';
 import { splitSubjectPrefixes } from '@/utils/composerText';
 import { joinComposerTextHistory, splitComposerTextHistory, splitComposerHtmlHistory } from '@/utils/composerHistory';
 /**
@@ -49,9 +51,52 @@ const threads: Thread[] = mockThreads.map((thread) => ({ ...thread }));
 const messages: Record<string, Message[]> = Object.fromEntries(
   Object.entries(mockMessagesByThread).map(([id, list]) => [id, list.map((m) => ({ ...m }))]),
 );
+const visibilitySlot = createPersistedSlot<Record<string, BackendAccountVisibilityPolicy>>('satchel.mock.accountVisibility', {
+  fallback: () => ({}),
+  decode: raw => JSON.parse(raw),
+  encode: value => JSON.stringify(value),
+});
+const visibilityPolicies = persistence.read(visibilitySlot);
+function defaultVisibilityPolicy(): BackendAccountVisibilityPolicy {
+  return { mode: 'always', weekdays: [1, 2, 3, 4, 5], from: null, to: null, override_date: null, override_visible: null };
+}
+function localDate(now: Date): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+function accountVisible(accountId: string, now = new Date()): boolean {
+  const policy = visibilityPolicies[accountId] ?? defaultVisibilityPolicy();
+  if (policy.override_date === localDate(now) && policy.override_visible !== null) return policy.override_visible;
+  if (policy.mode === 'always') return true;
+  const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  return policy.mode === 'schedule' && policy.weekdays.includes(now.getDay())
+    && time >= (policy.from ?? '00:00') && time < (policy.to ?? '24:00');
+}
+// A second mailbox for visibility walkthroughs; all policy behavior still runs
+// through the same command handlers as the ordinary fixture.
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockVisibility')) {
+  accounts.push({ ...accounts[0]!, id: 'acc-personal', displayName: 'Personal', email: 'tom@example.net', color: '#4cd68a' });
+  for (const [index, subject] of ['Sunday lunch at our place', 'Your weekend reading', 'Photos from the coast'].entries()) {
+    const template = threads.find(thread => thread.id === 'th-1')!;
+    const id = `th-personal-${index}`;
+    threads.push({ ...template, id, accountId: 'acc-personal', subject, priority: 0, messageCount: 1, senderKnown: true, hasAttachments: false,
+      snippet: 'A quiet weekend, with time to catch up.', tags: [], dueDate: undefined,
+      participants: [{ name: 'Alex', email: 'alex@example.net' }, { name: 'Tom', email: 'tom@example.net' }],
+      lastMessageAt: new Date(Date.now() - (index + 1) * 3600_000).toISOString(),
+      lastMessageAtMs: Date.now() - (index + 1) * 3600_000,
+    });
+    messages[id] = [{ ...messages['th-1']![0]!, id: `${id}-m`, threadId: id, subject,
+      from: { name: 'Alex', email: 'alex@example.net' }, to: [{ name: 'Tom', email: 'tom@example.net' }],
+      attachments: [],
+      bodyText: 'Hi Tom, a quiet weekend, with time to catch up. See you on Sunday! Alex',
+      bodyHtml: '<p>Hi Tom,</p><p>A quiet weekend, with time to catch up.</p><p>See you on Sunday!<br>Alex</p>',
+    }];
+  }
+  visibilityPolicies['acc-work'] ??= { ...defaultVisibilityPolicy(), mode: 'schedule', weekdays: [1, 2, 4, 5], from: '09:00', to: '17:00' };
+}
 const trashReceipts = new Map<string, Thread[]>();
 let nextTrashReceipt = 0;
 const outbox: BackendOutboxItem[] = mockOutboxItems.map((item) => ({ ...item }));
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockVisibility')) outbox.splice(0);
 /*
  * `?mockLongThread=120` adds one HTML conversation of that many messages on
  * top of the Inbox, and `?mockExtraThreads=40` that many short threads below
@@ -539,6 +584,14 @@ const handlers: Record<string, Handler> = {
   acknowledge_app_update_flush: () => null,
   /* --- accounts ------------------------------------------------------- */
   list_accounts: () => accounts.map(accountDto),
+  get_account_visibility: () => accounts.map(account => ({
+    account_id: account.id, policy: visibilityPolicies[account.id] ?? defaultVisibilityPolicy(),
+    visible: accountVisible(account.id), local_date: localDate(new Date()),
+  })),
+  set_account_visibility: (payload) => {
+    visibilityPolicies[payload.accountId as string] = JSON.parse(JSON.stringify(payload.policy)) as BackendAccountVisibilityPolicy;
+    persistence.write(visibilitySlot, visibilityPolicies);
+  },
   // MX answers for the onboarding preselection; every other domain has none.
   detect_mail_provider: ({ domain }) => ({
     'acme-workspace.test': 'gmail',
@@ -573,7 +626,7 @@ const handlers: Record<string, Handler> = {
     const contact = String(scope.contact_email ?? '').toLowerCase();
     const mailbox = String(scope.mailbox_value ?? '');
     const rows = threads.filter(thread => {
-      if (accountId && thread.accountId !== accountId) return false;
+      if (accountId ? thread.accountId !== accountId : !accountVisible(thread.accountId)) return false;
       if (scope.workflow_state && thread.workflowState !== scope.workflow_state) return false;
       if (contact && !thread.participants.some(person => person.email.toLowerCase() === contact)) return false;
       if (scope.smart_bucket && (scope.smart_bucket === 'pinned'
@@ -632,7 +685,7 @@ const handlers: Record<string, Handler> = {
   list_smart_inbox_summary: (payload) => {
     const accountId = payload.accountId as string | null | undefined;
     const inbox = threads
-      .filter((thread) => thread.workflowState === 'inbox' && (!accountId || thread.accountId === accountId))
+      .filter((thread) => thread.workflowState === 'inbox' && (accountId ? thread.accountId === accountId : accountVisible(thread.accountId)))
       .sort(byDateDesc);
     const keys = ['priority', 'pinned', 'invitations', 'notifications', 'newsletter'] as const;
     const buckets = keys.flatMap((key) => {
@@ -875,7 +928,7 @@ const handlers: Record<string, Handler> = {
     const seen = new Set<string>();
     const hits = Object.values(messages).flat().filter((message) => {
       const thread = findThread(message.threadId);
-      if (!query || !filters.some((token) => token.operator || !token.value.startsWith('-')) || !thread || (accountId && thread.accountId !== accountId)) return false;
+      if (!query || !filters.some((token) => token.operator || !token.value.startsWith('-')) || !thread || (accountId ? thread.accountId !== accountId : !accountVisible(thread.accountId))) return false;
       const text = `${message.subject} ${message.bodyText} ${message.from.name} ${message.from.email}`.toLowerCase();
       return filters.every(({ operator, value }) => {
         switch (operator) {
@@ -969,8 +1022,23 @@ const handlers: Record<string, Handler> = {
   },
 
   /* --- topics --------------------------------------------------------- */
-  list_topics: () => topics.map((topic) => ({ ...topic })),
-  get_topic_timeline: (payload) => topicTimeline[payload.topicId as string] ?? [],
+  list_topics: () => topics.map((topic) => {
+    const timeline = topicTimeline[topic.id] ?? [];
+    const hidden = timeline.filter(item => {
+      const thread = item.thread_id ? findThread(item.thread_id) : undefined;
+      return thread && !accountVisible(thread.accountId);
+    });
+    return hidden.length ? { ...topic,
+      item_count: Math.max(0, topic.item_count - hidden.length),
+      unread_count: Math.max(0, topic.unread_count - hidden.reduce((sum, item) => sum + item.unread_count, 0)),
+      last_sender_name: null, last_sender_email: null,
+    } : { ...topic };
+  }),
+  get_topic_timeline: (payload) => (topicTimeline[payload.topicId as string] ?? []).filter(item => {
+    if (!item.thread_id) return true;
+    const thread = findThread(item.thread_id);
+    return thread ? accountVisible(thread.accountId) : true;
+  }),
   list_topic_memberships: () => [],
   add_topic_items: () => undefined,
   remove_topic_item: () => undefined,
@@ -1103,6 +1171,7 @@ const handlers: Record<string, Handler> = {
     failures: [],
   }),
   current_connection_state: () => ({
+    unread_count: threads.filter(thread => accountVisible(thread.accountId) && thread.workflowState === 'inbox' && thread.unreadCount > 0 && !thread.isMuted && thread.mailboxNames?.some(name => name.toLowerCase() === 'inbox')).length,
     online: true,
     syncing: false,
     last_sync_at: null,
@@ -1165,7 +1234,20 @@ const handlers: Record<string, Handler> = {
   list_plugins: () => [],
   list_plugin_metrics: () => [],
   list_plugin_audit_log: () => [],
-  list_mailboxes: () => [],
+  list_mailboxes: () => accounts.filter(account => account.kind === 'email').flatMap(account => {
+    const rows = threads.filter(thread => thread.accountId === account.id);
+    const folders = [...new Set(rows.flatMap(thread => thread.mailboxNames ?? []))];
+    return folders.map(name => {
+      const type = /^inbox$/i.test(name) ? 'inbox' : /^sent$/i.test(name) ? 'sent'
+        : /^drafts?$/i.test(name) ? 'drafts' : /^trash$/i.test(name) ? 'trash'
+          : /^archive$/i.test(name) ? 'archive' : 'custom';
+      const included = rows.filter(thread => thread.mailboxNames?.includes(name)
+        && !(type === 'inbox' && ['aside', 'done', 'snoozed'].includes(thread.workflowState)));
+      return { id: `${account.id}:${name}`, account_id: account.id, account_email: account.email,
+        name, mailbox_type: type, thread_count: included.length,
+        unread_count: included.filter(thread => thread.unreadCount > 0).length };
+    });
+  }),
   list_smart_folders: () => [],
   list_follow_ups: () => [],
   list_invites: () => [],

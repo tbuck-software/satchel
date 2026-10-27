@@ -743,6 +743,10 @@ export default {
                 }
             }
         },
+        "get_account_visibility": {
+            "kind": "object",
+            "fields": {}
+        },
         "get_app_update_preferences": {
             "kind": "object",
             "fields": {}
@@ -1730,6 +1734,24 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "app::commands::server_search::ServerSearchInput"
+                    }
+                }
+            }
+        },
+        "set_account_visibility": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "policy": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "core::db::account_visibility::AccountVisibilityPolicy"
                     }
                 }
             }
@@ -4900,6 +4922,62 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "core::db::account_visibility::AccountVisibilityPolicy": {
+            "kind": "object",
+            "fields": {
+                "from": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "mode": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "override_date": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "override_visible": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "to": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "weekdays": {
+                    "required": false,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
                     }
                 }
             }

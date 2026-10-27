@@ -483,6 +483,12 @@ fn unfiltered_text_ranking_query(
     if let Some(account_id) = &account_id {
         query.push(" AND sp.account_id = ");
         query.push_bind(account_id.clone());
+    } else {
+        query
+            .push(" AND ")
+            .push(crate::db::account_visibility::visible_account_sql(
+                "sp.account_id",
+            ));
     }
     // The date of the `candidate_cap`-th newest match, or '' (every match) when
     // there are fewer. Finding it reads only doclist rowids and the compact
@@ -499,6 +505,12 @@ fn unfiltered_text_ranking_query(
     if let Some(account_id) = account_id {
         query.push(" AND cap.account_id = ");
         query.push_bind(account_id);
+    } else {
+        query
+            .push(" AND ")
+            .push(crate::db::account_visibility::visible_account_sql(
+                "cap.account_id",
+            ));
     }
     query.push(" ORDER BY cap.date DESC LIMIT 1 OFFSET ");
     query.push_bind(candidate_cap.max(1) - 1);
@@ -683,6 +695,12 @@ async fn search_thread_flag_hits(
     if let Some(account_id) = input.account_id.as_deref().filter(|id| !id.is_empty()) {
         query.push(" AND t.account_id = ");
         query.push_bind(account_id.to_string());
+    } else {
+        query
+            .push(" AND ")
+            .push(crate::db::account_visibility::visible_account_sql(
+                "t.account_id",
+            ));
     }
     if parsed.has_attachment {
         query.push(" AND t.has_attachments = 1");
@@ -729,6 +747,12 @@ fn push_search_filters(
     if let Some(account_id) = account_id.filter(|id| !id.is_empty()) {
         query.push(" AND m.account_id = ");
         query.push_bind(account_id.to_string());
+    } else {
+        query
+            .push(" AND ")
+            .push(crate::db::account_visibility::visible_account_sql(
+                "m.account_id",
+            ));
     }
 
     if let Some(from) = &parsed.from {

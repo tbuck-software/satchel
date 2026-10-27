@@ -25,6 +25,8 @@ const COMMANDS: &[&str] = &[
     "install_app_update",
     "acknowledge_app_update_flush",
     "list_accounts",
+    "get_account_visibility",
+    "set_account_visibility",
     "add_account",
     "deactivate_account",
     "delete_account",

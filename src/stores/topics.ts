@@ -1,5 +1,7 @@
+import { useConnectionStore } from '@/stores/connection';
+import { useAccountsStore } from '@/stores/accounts';
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import {
   backendAddTopicFile,
   backendAddTopicItems,
@@ -46,6 +48,18 @@ function membershipKey(itemType: TopicItemType, itemId: string): string {
 }
 
 export const useTopicsStore = defineStore('topics', () => {
+  const accounts = useAccountsStore();
+  const connection = useConnectionStore();
+  watch(() => accounts.visibilityKey, () => {
+    for (const topic of items.value) {
+      topic.item_count = 0;
+      topic.unread_count = 0;
+      topic.last_sender_name = null;
+      topic.last_sender_email = null;
+    }
+    void load();
+  });
+  let loadRequest = 0;
   const items = ref<BackendTopic[]>([]);
   const loading = ref(false);
   /** `${itemType}:${itemId}` -> topic ids; optimistic source of truth for chips and picker. */
@@ -67,11 +81,18 @@ export const useTopicsStore = defineStore('topics', () => {
 
   async function load() {
     if (!backendCommandsAvailable()) return;
+    const request = ++loadRequest;
+    const scope = accounts.visibilityKey;
     loading.value = true;
     try {
-      items.value = await backendListTopics();
+      const rows = await backendListTopics();
+      if (request !== loadRequest || scope !== accounts.visibilityKey) return;
+      items.value = rows;
+      connection.clearBackendError('topics');
+    } catch (error) {
+      if (request === loadRequest && scope === accounts.visibilityKey) connection.reportBackendError('topics', error);
     } finally {
-      loading.value = false;
+      if (request === loadRequest) loading.value = false;
     }
   }
 
