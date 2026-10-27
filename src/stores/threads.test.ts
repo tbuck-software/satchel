@@ -335,11 +335,17 @@ describe('threads store interactions', () => {
     useSettingsStore().setInboxGroupingMode('classic');
     const store = useThreadsStore();
     const sender = [{ name: 'CODE.EXAMPLE', email: 'gitlab@code.example' }];
+    // Fixed, distinct times: the fixture default is "now", which can cross a
+    // millisecond between rows and reorder them.
+    const at = (minute: number) => ({
+      lastMessageAt: `2026-07-11T12:0${minute}:00.000Z`,
+      lastMessageAtMs: Date.parse(`2026-07-11T12:0${minute}:00.000Z`),
+    });
     store.threads = [
-      thread({ id: 'pipeline-new', participants: sender, subject: 'CLI | Failed pipeline for main | d7ade544' }),
-      thread({ id: 'unrelated', participants: sender, subject: 'Other project | Merge request (!350)' }),
-      thread({ id: 'pipeline-middle', participants: sender, subject: 'CLI | Failed pipeline for main | 6d404a27' }),
-      thread({ id: 'pipeline-old', participants: sender, subject: 'CLI | Failed pipeline for main | 15acb27a' }),
+      thread({ id: 'pipeline-new', participants: sender, subject: 'CLI | Failed pipeline for main | d7ade544', ...at(4) }),
+      thread({ id: 'unrelated', participants: sender, subject: 'Other project | Merge request (!350)', ...at(3) }),
+      thread({ id: 'pipeline-middle', participants: sender, subject: 'CLI | Failed pipeline for main | 6d404a27', ...at(2) }),
+      thread({ id: 'pipeline-old', participants: sender, subject: 'CLI | Failed pipeline for main | 15acb27a', ...at(1) }),
     ];
     const bundle = () => store.listEntries.find((entry) => entry.kind === 'group');
     const before = bundle();
