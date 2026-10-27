@@ -9,6 +9,7 @@ import { useUiStore } from '@/stores/ui';
 import { useThreadsStore } from '@/stores/threads';
 import { useAccountsStore } from '@/stores/accounts';
 import { useContactsStore } from '@/stores/contacts';
+import { useListSearchStore } from '@/stores/listSearch';
 import { useSearch, type SearchResult } from '@/composables/useSearch';
 import { useCommands, type OmniCommand } from '@/composables/useCommands';
 import { useRecentSearches } from '@/composables/useRecentSearches';
@@ -57,6 +58,7 @@ interface OmniGroup {
 const { t } = useI18n();
 const ui = useUiStore();
 const router = useRouter();
+const listSearch = useListSearchStore();
 const threads = useThreadsStore();
 const accounts = useAccountsStore();
 const contactsStore = useContactsStore();
@@ -300,15 +302,15 @@ function close() {
 function showAll() {
   const raw = query.value.trim();
   if (!raw) return;
-  pushRecent(raw);
-  close();
-  void router.push({ name: 'search', query: { q: raw } });
+  openSearchWith(raw);
 }
 
+/** Every result, as the list search over all mail — one search UI, not two. */
 function openSearchWith(raw: string) {
   pushRecent(raw);
   close();
-  void router.push({ name: 'search', query: { q: raw } });
+  listSearch.open(raw, 'all');
+  void router.push({ name: 'inbox' });
 }
 
 function activate(item: OmniItem) {

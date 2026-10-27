@@ -466,7 +466,6 @@ Reusable building blocks — use these instead of hand-rolled buttons/rows:
 | `CardButton`        | A button that is a *region* — an attachment card, a row, a tile. Contributes the reset and the behaviour, no padding, fill, radius or border: the look stays with the caller |
 | `FilterPill`        | One pill in a filter strip: pressed state, optional identity dot and count. `pressed`, not `active` — a strip is a set of toggles |
 | `SearchInput`       | Editable search/filter field with a search glyph, optional trailing control, and exposed focus/select methods. Uses `--input-height` at 38px desktop and 44px below 1020px |
-| `SearchField`       | Search entry in the sidebar or mobile list. A button shaped like a field that opens the shared omni search |
 | `CountBadge`        | Rounded count badge, tones neutral/accent/danger               |
 | `KeyCap`            | One key as the keyboard prints it (`⌘K`, `Ctrl+K`, `g`). Palette, shortcut help and hints share it; a sequence or a set of alternatives is several caps, laid out by the caller. Labels come from `bindingKeycaps` |
 | `SectionHeading`    | Group label ("Heute", "Ordner") with optional count/trailing slot |
@@ -572,7 +571,7 @@ highlighted while the flyout is open.
 - Workflow states: blue=inbox, amber=todo, cyan=waiting, green=done, purple=snoozed
 
 ### Inputs
-- Editable search and filter fields use `SearchInput`; `SearchField` opens omni search.
+- Editable search and filter fields use `SearchInput`. The list search above every thread list is one (`ListSearchBar`); the command palette has no field of its own outside its overlay.
 - Height: `--input-height` at 38px desktop, 44px below 1020px; horizontal inset: `--space-md`.
 - Border: `--border-color`, radius: `--radius-sm`
 - Background: `--bg-raised`

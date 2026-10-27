@@ -71,6 +71,7 @@ vi.mock('./useThreadMessageKeyboardNavigation', () => ({
 
 import { useKeyboard } from './useKeyboard';
 import { registerSettingsFilterField } from './settingsFilterFocus';
+import { registerListSearchField } from './listSearchFocus';
 
 let mounted: ReturnType<typeof mount> | null = null;
 
@@ -358,5 +359,35 @@ describe('Settings keys', () => {
 
     expect(harness.router.push).toHaveBeenCalledWith({ name: 'inbox' });
     filter.remove();
+  });
+});
+
+describe('mail list search key', () => {
+  beforeEach(() => {
+    harness.route = { name: 'inbox' };
+  });
+
+  it('focuses the list search with / instead of opening the palette', () => {
+    const focus = vi.fn();
+    const unregister = registerListSearchField(focus);
+    mountKeyboard();
+
+    press('/');
+
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(harness.ui.openOmni).not.toHaveBeenCalled();
+    unregister();
+  });
+
+  it('keeps Cmd/Ctrl+K on the palette above a list', () => {
+    const focus = vi.fn();
+    const unregister = registerListSearchField(focus);
+    mountKeyboard();
+
+    press('k', { ctrlKey: true });
+
+    expect(harness.ui.openOmni).toHaveBeenCalledTimes(1);
+    expect(focus).not.toHaveBeenCalled();
+    unregister();
   });
 });

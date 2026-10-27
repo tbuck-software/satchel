@@ -1023,14 +1023,27 @@
         "title": "No replies pending"
       }
     },
+    "filterAccounts": "Account",
+    "filterMenu": "Filter and view",
     "filterStrip": "Filter the list",
+    "listSearch": {
+      "advanced": "Advanced",
+      "advancedTitle": "Open the full search with operators and server search",
+      "clear": "Clear search",
+      "label": "Search this list",
+      "loadedResultCount": "{count}+ result | {count}+ results",
+      "noResultsIn": "Nothing in {mailbox} matches. Search all mail to look further.",
+      "placeholder": "Search {mailbox}…",
+      "resultCount": "{count} result | {count} results",
+      "results": "Search results",
+      "scope": "Search in",
+      "searchAllMail": "Search all mail"
+    },
     "mailCount": "{count} message | {count} messages",
     "markedReadToast": "{count} message marked as read | {count} messages marked as read",
     "newsletter": "Newsletter",
     "rememberSender": "Remember sender",
     "resizeList": "Adjust the message list width",
-    "searchPlaceholder": "Search",
-    "searchTitle": "Search (/)",
     "smartFolder": "Smart folder",
     "snooze": "Snooze",
     "topics": {
@@ -1420,6 +1433,7 @@
     },
     "backToMail": "Back to mail",
     "calendar": "Calendar",
+    "commandPalette": "Search & commands",
     "composeMessage": "Write a new message",
     "composeNewWindow": "New email (Shift-click for a separate window)",
     "contactLabel": "{name}, {count} conversations",
@@ -1459,8 +1473,8 @@
       "waiting": "Waiting for a reply"
     },
     "frequent": "Frequent",
-    "mailboxFilter": "Filter mailboxes",
     "modules": "Areas",
+    "newMessage": "New message",
     "omni": {
       "activateAccount": "Switch to account",
       "ariaLabel": "Search and commands",
@@ -1491,7 +1505,7 @@
       "results": "Search results",
       "searching": "Searching",
       "searchingState": "Searching…",
-      "showAll": "Open full search",
+      "showAll": "Show all results in the list",
       "syntaxHint": "Narrow mail with"
     },
     "pinContact": "Pin contact",
@@ -3071,9 +3085,11 @@
       "newMail": "New email",
       "paletteGroups": "Jump between result groups",
       "prevNextThread": "Previous / next thread",
+      "searchList": "Search the mail list",
       "selectRange": "Select a range"
     },
     "keys": {
+      "inMailList": "above a mail list",
       "inReader": "in the reader",
       "or": "or"
     },

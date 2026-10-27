@@ -82,24 +82,30 @@ test('sync button fits beside the logo in the narrow native macOS header', async
   expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 });
 
-test('mobile mailbox controls stay open until a destination is selected', async ({ page }) => {
+test('the phone list searches and filters above itself, not in the drawer', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
+  const filter = page.locator('.list-pane').getByRole('button', { name: 'Filter and view' });
+  await filter.click();
+  const menu = page.getByRole('menu', { name: 'Filter and view' });
+  await menu.getByRole('menuitemcheckbox', { name: 'All accounts' }).click();
+  await expect(page.locator('.pane-header')).toContainText('All accounts');
+
+  const field = page.getByRole('searchbox', { name: 'Search this list' });
+  await field.fill('Google');
+  const results = page.getByRole('region', { name: 'Search results' });
+  await results.getByText('Google AI Studio quota warning').click();
+  await expect(page).toHaveURL(/\/thread\//);
+  await page.goBack();
+  await expect(field).toHaveValue('Google');
+  await expect(results.getByText('Google AI Studio quota warning')).toBeVisible();
+
   await page.getByRole('button', { name: 'Menu', exact: true }).click();
   const drawer = page.locator('.mobile-sidebar-panel');
   await expect(drawer).toBeVisible();
-  await drawer.getByRole('button', { name: 'Filter mailboxes' }).click();
-  const filter = page.getByRole('menu', { name: 'Filter mailboxes' });
-  await expect(filter).toBeVisible();
-  await expect(drawer).toBeVisible();
-  await filter.getByRole('menuitemcheckbox').nth(1).click();
-  await expect(drawer).not.toBeVisible();
-
-  await page.getByRole('button', { name: 'Menu', exact: true }).click();
-  await drawer.getByRole('button', { name: 'Filter mailboxes' }).click();
-  await filter.getByRole('menuitemcheckbox', { name: 'All accounts' }).click();
-  await expect(drawer).not.toBeVisible();
-  await expect(page.locator('.pane-header')).toContainText('All accounts');
+  await expect(drawer.getByRole('searchbox')).toHaveCount(0);
+  await expect(drawer.getByRole('button', { name: 'Settings' })).toBeVisible();
+  await expect(drawer.getByRole('button', { name: 'Calendar' })).toBeVisible();
 });
 
 test('saved wide panes switch to a reachable single-pane layout and back', async ({ page }) => {

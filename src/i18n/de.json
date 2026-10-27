@@ -1023,14 +1023,27 @@
         "title": "Keine Antworten offen"
       }
     },
+    "filterAccounts": "Konto",
+    "filterMenu": "Filtern und Ansicht",
     "filterStrip": "Liste filtern",
+    "listSearch": {
+      "advanced": "Erweitert",
+      "advancedTitle": "Vollständige Suche mit Operatoren und Serversuche öffnen",
+      "clear": "Suche leeren",
+      "label": "Diese Liste durchsuchen",
+      "loadedResultCount": "{count}+ Treffer | {count}+ Treffer",
+      "noResultsIn": "In {mailbox} passt nichts. Durchsuche alle E-Mails, um weiterzusuchen.",
+      "placeholder": "{mailbox} durchsuchen …",
+      "resultCount": "{count} Treffer | {count} Treffer",
+      "results": "Suchergebnisse",
+      "scope": "Suchen in",
+      "searchAllMail": "Alle E-Mails durchsuchen"
+    },
     "mailCount": "{count} Mail | {count} Mails",
     "markedReadToast": "{count} Mail gelesen | {count} Mails gelesen",
     "newsletter": "Newsletter",
     "rememberSender": "Absender merken",
     "resizeList": "Breite der Nachrichtenliste anpassen",
-    "searchPlaceholder": "Suchen",
-    "searchTitle": "Suchen (/)",
     "smartFolder": "Smart Folder",
     "snooze": "Auf Wiedervorlage",
     "topics": {
@@ -1420,6 +1433,7 @@
     },
     "backToMail": "Zurück zu Mail",
     "calendar": "Kalender",
+    "commandPalette": "Suche & Befehle",
     "composeMessage": "Neue Nachricht schreiben",
     "composeNewWindow": "Neue E-Mail (Shift+Klick für eigenes Fenster)",
     "contactLabel": "{name}, {count} Konversationen",
@@ -1459,8 +1473,8 @@
       "waiting": "Warten auf Antwort"
     },
     "frequent": "Häufig",
-    "mailboxFilter": "Postfächer filtern",
     "modules": "Bereiche",
+    "newMessage": "Neue E-Mail",
     "omni": {
       "activateAccount": "Konto aktivieren",
       "ariaLabel": "Suche und Befehle",
@@ -1491,7 +1505,7 @@
       "results": "Suchergebnisse",
       "searching": "Suche läuft",
       "searchingState": "Suche läuft …",
-      "showAll": "Vollständige Suche öffnen",
+      "showAll": "Alle Treffer in der Liste zeigen",
       "syntaxHint": "Mails eingrenzen mit"
     },
     "pinContact": "Kontakt anpinnen",
@@ -3071,9 +3085,11 @@
       "newMail": "Neue Mail",
       "paletteGroups": "Zwischen Ergebnisgruppen springen",
       "prevNextThread": "Vorheriger / nächster Thread",
+      "searchList": "Mailliste durchsuchen",
       "selectRange": "Bereich auswählen"
     },
     "keys": {
+      "inMailList": "über einer Mailliste",
       "inReader": "im Reader",
       "or": "oder"
     },

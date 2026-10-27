@@ -134,7 +134,8 @@ const fixedGroups = computed<ShortcutGroup[]>(() => {
     {
       title: t('shortcuts.groups.search'),
       items: [
-        { keys: either('mod+k', 'mod+f', '/'), description: t('shortcuts.actions.openCommandPalette.label') },
+        { keys: either('/'), description: t('shortcuts.helper.searchList'), scope: t('shortcuts.keys.inMailList') },
+        { keys: either('mod+k', 'mod+f'), description: t('shortcuts.actions.openCommandPalette.label') },
         { keys: either('mod+enter'), description: t('nav.omni.showAll') },
         { keys: either('tab'), description: t('shortcuts.helper.paletteGroups') },
       ],

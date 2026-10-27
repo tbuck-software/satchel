@@ -7,7 +7,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('renders the inbox and opens a thread', async ({ page }) => {
-  await page.getByRole('button', { name: 'View', exact: true }).click();
+  await page.getByRole('button', { name: 'Filter and view', exact: true }).click();
   await page.getByRole('menuitemradio', { name: 'List', exact: true }).click();
   await page.getByText('Google Cloud billing threshold reached', { exact: true }).first().click();
   await expect(page.getByText('Your configured billing threshold for Project Atlas has been reached.').first()).toBeVisible();
@@ -72,7 +72,7 @@ test('archives the active thread and advances to the next one', async ({ page })
 });
 
 test('searches the local mailbox deterministically', async ({ page }) => {
-  await page.getByTitle('Search (/)').click();
+  await page.keyboard.press('ControlOrMeta+k');
   const search = page.getByLabel('Search term');
   await search.fill('Invoice March');
   const results = page.getByRole('listbox', { name: 'Search results' });
@@ -81,11 +81,10 @@ test('searches the local mailbox deterministically', async ({ page }) => {
   ).toBeVisible();
 });
 
-test('filters mailboxes from the sidebar and restores the global scope', async ({ page }) => {
-  const sidebar = page.locator('aside').first();
-  const filter = sidebar.getByRole('button', { name: 'Filter mailboxes' });
+test('filters the list by account and restores the global scope', async ({ page }) => {
+  const filter = page.locator('.list-pane').getByRole('button', { name: 'Filter and view' });
   await filter.click();
-  const menu = page.getByRole('menu', { name: 'Filter mailboxes' });
+  const menu = page.getByRole('menu', { name: 'Filter and view' });
   const account = menu.getByRole('menuitemcheckbox').nth(1);
   const accountEmail = await account.getAttribute('title');
   await account.click();
@@ -99,19 +98,19 @@ test('filters mailboxes from the sidebar and restores the global scope', async (
   await expect(filter).toBeFocused();
 });
 
-test('composes from the sidebar plus button', async ({ page }) => {
-  await page.locator('aside').first().getByRole('button', { name: 'Write a new message' }).click();
+test('composes from the sidebar button', async ({ page }) => {
+  await page.locator('aside').first().getByRole('button', { name: 'New message' }).click();
   await expect(page.getByRole('dialog', { name: 'Compose email' })).toBeVisible();
 });
 
 test('reports no hits instead of failing silently', async ({ page }) => {
-  await page.getByTitle('Search (/)').click();
+  await page.keyboard.press('ControlOrMeta+k');
   await page.getByLabel('Search term').fill('zzz-definitely-not-in-this-mailbox');
   await expect(page.getByText('No hits found.')).toBeVisible();
 });
 
 test('opens a search hit in the thread view', async ({ page }) => {
-  await page.getByTitle('Search (/)').click();
+  await page.keyboard.press('ControlOrMeta+k');
   await page.getByLabel('Search term').fill('Invoice March');
   const results = page.getByRole('listbox', { name: 'Search results' });
   await results.getByRole('option').first().click();
@@ -151,12 +150,43 @@ test('scrolls the selected command clear of the omni footer', async ({ page }) =
   await expect(panel.getByText('Narrow mail with')).toBeInViewport();
 });
 
-test('hands a query over to the full search page', async ({ page }) => {
-  await page.getByTitle('Search (/)').click();
+test('hands a palette query over to the list search', async ({ page }) => {
+  await page.keyboard.press('ControlOrMeta+k');
   await page.getByLabel('Search term').fill('Invoice');
-  await page.getByRole('option', { name: /Open full search/ }).click();
+  await page.getByRole('option', { name: /Show all results in the list/ }).click();
+  await expect(page.getByRole('searchbox', { name: 'Search this list' })).toHaveValue('Invoice');
+  const results = page.getByRole('region', { name: 'Search results' });
+  await expect(results.getByRole('button', { name: 'All mail', pressed: true })).toBeVisible();
+  await expect(results.getByText('Invoice March (waiting for vendor correction)').first()).toBeVisible();
+});
+
+test('searches the list in place and gives it back on Escape', async ({ page }) => {
+  await page.keyboard.press('/');
+  const field = page.getByRole('searchbox', { name: 'Search this list' });
+  await expect(field).toBeFocused();
+  await field.fill('Google');
+  const results = page.getByRole('region', { name: 'Search results' });
+  await expect(results.getByText('4 results')).toBeVisible();
+  await expect(results.getByText('Google Maps Platform key restriction reminder')).toBeVisible();
+  await expect(results.getByText('Staging login 500 after deployment')).toHaveCount(0);
+
+  // Down hands the keyboard to the hits; j walks them and the reader follows.
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('j');
+  await expect(page.locator('.detail-pane h1, .detail-pane h2').filter({ hasText: 'Google AI Studio quota warning' }).first()).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(results).toHaveCount(0);
+  await expect(field).toHaveValue('');
+  await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();
+});
+
+test('keeps the full search page one step behind the list search', async ({ page }) => {
+  const field = page.getByRole('searchbox', { name: 'Search this list' });
+  await field.fill('Invoice');
+  await page.getByRole('region', { name: 'Search results' }).getByRole('button', { name: 'Advanced' }).click();
   await expect(page.getByRole('heading', { name: 'Search', exact: true })).toBeVisible();
-  await expect(page.getByText('Invoice March (waiting for vendor correction)').first()).toBeVisible();
+  await expect(page.getByLabel('Search term')).toHaveValue('Invoice');
 });
 
 /**
@@ -166,15 +196,23 @@ test('hands a query over to the full search page', async ({ page }) => {
  * a tick later. This pins the destination, not the mechanism.
  */
 test('stays on the page an overlay navigated to', async ({ page }) => {
-  await page.getByTitle('Search (/)').click();
+  await page.locator('aside').first().getByRole('button', { name: 'Calendar', exact: true }).click();
+  await expect(page).toHaveURL(/\/calendar/);
+  const panel = page.getByRole('dialog', { name: 'Search and commands' });
+  // The calendar loads lazily; keep asking until the palette answers.
+  await expect(async () => {
+    await page.keyboard.press('ControlOrMeta+k');
+    await expect(panel).toBeVisible({ timeout: 1000 });
+  }).toPass();
   await page.getByLabel('Search term').fill('Invoice');
-  await page.getByRole('option', { name: /Open full search/ }).click();
-  await expect(page.getByRole('heading', { name: 'Search', exact: true })).toBeVisible();
+  await page.getByRole('option', { name: /Show all results in the list/ }).click();
+  const field = page.getByRole('searchbox', { name: 'Search this list' });
+  await expect(field).toHaveValue('Invoice');
 
   // Long enough for a rewind scheduled on the next tick to have fired.
   await page.waitForTimeout(500);
-  await expect(page).toHaveURL(/\/search/);
-  await expect(page.getByRole('heading', { name: 'Search', exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/inbox/);
+  await expect(field).toHaveValue('Invoice');
 });
 
 /*
@@ -279,9 +317,11 @@ test('asks the backend for nothing it cannot answer', async ({ page }) => {
 
   await page.goto('/');
   await page.getByText('Google Cloud billing threshold reached', { exact: true }).first().click();
-  await page.getByTitle('Search (/)').click();
+  await page.keyboard.press('ControlOrMeta+k');
   await page.getByLabel('Search term').fill('Invoice');
   await page.keyboard.press('Escape');
+  await page.getByRole('searchbox', { name: 'Search this list' }).fill('Invoice');
+  await expect(page.getByRole('region', { name: 'Search results' })).toBeVisible();
   await page.goto('/outbox');
   await page.goto('/drafts');
 

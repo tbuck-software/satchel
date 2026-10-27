@@ -11,6 +11,7 @@ import { useMessageLinks } from './useMessageLinks';
 import { useUndoFab } from './useUndoFab';
 import { activeThreadReaderCommands } from './useThreadReaderCommands';
 import { focusSettingsFilter } from './settingsFilterFocus';
+import { focusListSearch } from './listSearchFocus';
 import { t } from '@/i18n/runtime';
 import {
   bindingFor,
@@ -240,6 +241,12 @@ export function useKeyboard() {
 
     // In Settings, `/` filters the sections instead.
     if (event.key === '/' && scope.route === 'settings' && !scope.covered && focusSettingsFilter()) {
+      return true;
+    }
+
+    // Above a mail list, `/` searches that list — the key every mail client
+    // gives its search field. The palette keeps Cmd/Ctrl+K and `:`.
+    if (event.key === '/' && !scope.covered && focusListSearch()) {
       return true;
     }
 

@@ -88,8 +88,6 @@
       "newsletter": "Newsletter",
       "rememberSender": "Remember sender",
       "resizeList": "Adjust the message list width",
-      "searchPlaceholder": "Search",
-      "searchTitle": "Search (/)",
       "smartFolder": "Smart folder",
       "snooze": "Snooze",
       "topics": {
@@ -105,6 +103,21 @@
       "view": "View",
       "viewGrouped": "Grouped",
       "viewList": "List",
+      "filterMenu": "Filter and view",
+      "filterAccounts": "Account",
+      "listSearch": {
+        "label": "Search this list",
+        "placeholder": "Search {mailbox}…",
+        "clear": "Clear search",
+        "scope": "Search in",
+        "results": "Search results",
+        "resultCount": "{count} result | {count} results",
+        "loadedResultCount": "{count}+ result | {count}+ results",
+        "advanced": "Advanced",
+        "advancedTitle": "Open the full search with operators and server search",
+        "noResultsIn": "Nothing in {mailbox} matches. Search all mail to look further.",
+        "searchAllMail": "Search all mail"
+      },
       "empty": {
         "waiting": {
           "title": "No replies pending",
@@ -394,8 +407,6 @@
       "newsletter": "Newsletter",
       "rememberSender": "Absender merken",
       "resizeList": "Breite der Nachrichtenliste anpassen",
-      "searchPlaceholder": "Suchen",
-      "searchTitle": "Suchen (/)",
       "smartFolder": "Smart Folder",
       "snooze": "Auf Wiedervorlage",
       "topics": {
@@ -411,6 +422,21 @@
       "view": "Ansicht",
       "viewGrouped": "Gruppiert",
       "viewList": "Liste",
+      "filterMenu": "Filtern und Ansicht",
+      "filterAccounts": "Konto",
+      "listSearch": {
+        "label": "Diese Liste durchsuchen",
+        "placeholder": "{mailbox} durchsuchen …",
+        "clear": "Suche leeren",
+        "scope": "Suchen in",
+        "results": "Suchergebnisse",
+        "resultCount": "{count} Treffer | {count} Treffer",
+        "loadedResultCount": "{count}+ Treffer | {count}+ Treffer",
+        "advanced": "Erweitert",
+        "advancedTitle": "Vollständige Suche mit Operatoren und Serversuche öffnen",
+        "noResultsIn": "In {mailbox} passt nichts. Durchsuche alle E-Mails, um weiterzusuchen.",
+        "searchAllMail": "Alle E-Mails durchsuchen"
+      },
       "empty": {
         "waiting": {
           "title": "Keine Antworten offen",

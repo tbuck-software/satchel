@@ -8,6 +8,7 @@ import { useAccountsStore } from '@/stores/accounts';
 import { useSmartFoldersStore } from '@/stores/smartFolders';
 import { useSettingsStore } from '@/stores/settings';
 import { useUiStore } from '@/stores/ui';
+import { useListSearchStore } from '@/stores/listSearch';
 import { useThreadsStore, type ContactThreadSummary } from '@/stores/threads';
 import { useComposerStore } from '@/stores/composer';
 import { useComposeWindow } from '@/composables/useComposeWindow';
@@ -40,6 +41,7 @@ const settings = useSettingsStore();
 const ui = useUiStore();
 const composer = useComposerStore();
 const smartFolders = useSmartFoldersStore();
+const listSearch = useListSearchStore();
 const composeWindow = useComposeWindow(router);
 const foldersPanelOpen = ref(false);
 const globalFrequentContacts = ref<ContactThreadSummary[]>([]);
@@ -87,17 +89,14 @@ function openSource(id: string) {
 }
 
 /**
- * A smart folder is a saved search, so it belongs on the search page.
- *
- * It used to push the query into `threads.searchQuery`, which is only ever
- * applied as a lowercase substring test over the already-loaded page — the
- * operator syntax the editor advertises (`from:`, `has:attachment`, …) is
- * parsed exclusively in the backend's `parse_search_query`. A saved folder
- * therefore matched the literal string and reliably came up empty.
+ * A smart folder is a saved search: it opens as the list search over all
+ * mail, the same backend search with its operator syntax (`from:`,
+ * `has:attachment`, …) that `parse_search_query` understands.
  */
 function openSmartFolder(query: string) {
   ui.closeMobileSidebar();
-  void router.push({ name: 'search', query: { q: query } });
+  listSearch.open(query, 'all');
+  void router.push({ name: 'inbox' });
 }
 
 async function onComposeClick(event: MouseEvent) {
@@ -153,13 +152,14 @@ watch(
 );
 
 /**
- * A contact click opens the (FTS-backed, instant) search scoped to the
+ * A contact click opens the (FTS-backed, instant) list search for the
  * person — not the heavyweight contact filter that reloads the thread list.
+ * Contacts span accounts, so it searches all mail.
  */
 function openContact(contact: ContactThreadSummary) {
   ui.closeMobileSidebar();
-  // Contacts span accounts — start this search global (no account chip).
-  void router.push({ name: 'search', query: { q: `from:${contact.email}`, global: '1' } });
+  listSearch.open(`from:${contact.email}`, 'all');
+  void router.push({ name: 'inbox' });
 }
 
 function normalizeEmail(email?: string | null): string {

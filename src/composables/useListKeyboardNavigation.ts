@@ -4,7 +4,16 @@ export interface ListKeyboardNavigationController {
   back: () => boolean;
 }
 
-let activeController: ListKeyboardNavigationController | null = null;
+/*
+ * A stack, not a slot: the search results register over the Inbox list and
+ * must hand the keyboard back to it when they close, without the Inbox having
+ * to register again.
+ */
+const controllers: ListKeyboardNavigationController[] = [];
+
+function activeController(): ListKeyboardNavigationController | undefined {
+  return controllers.at(-1);
+}
 
 /**
  * Connects the global keyboard handler to whichever list workspace is mounted.
@@ -17,20 +26,21 @@ let activeController: ListKeyboardNavigationController | null = null;
 export function registerListKeyboardNavigation(
   controller: ListKeyboardNavigationController,
 ): () => void {
-  activeController = controller;
+  controllers.push(controller);
   return () => {
-    if (activeController === controller) activeController = null;
+    const index = controllers.lastIndexOf(controller);
+    if (index >= 0) controllers.splice(index, 1);
   };
 }
 
 export function moveListKeyboardFocus(delta: 1 | -1, extendSelection = false): boolean {
-  return activeController?.move(delta, extendSelection) ?? false;
+  return activeController()?.move(delta, extendSelection) ?? false;
 }
 
 export function openListKeyboardFocus(): boolean {
-  return activeController?.open() ?? false;
+  return activeController()?.open() ?? false;
 }
 
 export function leaveListKeyboardLevel(): boolean {
-  return activeController?.back() ?? false;
+  return activeController()?.back() ?? false;
 }

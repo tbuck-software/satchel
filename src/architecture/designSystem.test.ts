@@ -138,15 +138,10 @@ const KNOWN_RAW_COLORS: KnownViolation[] = [
     count: 1,
     reason: 'Drop-shadow under the draft pencil.',
   },
-  {
-    file: 'src/views/InboxView.vue',
-    count: 2,
-    reason: 'Floating-toolbar shadow stack, hand-mixed.',
-  },
 ];
 
 // Only ever lower this. See KNOWN_RAW_COLORS.
-const MAX_KNOWN_RAW_COLORS = 27;
+const MAX_KNOWN_RAW_COLORS = 25;
 
 // ---------------------------------------------------------------------------
 // Rule 2 — no Tailwind default palette, only the classes bridged in tailwind.css.

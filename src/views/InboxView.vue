@@ -2,7 +2,6 @@
 import AppIcon from '@/components/ui/AppIcon.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import CardButton from '@/components/ui/CardButton.vue';
-import MenuItem from '@/components/ui/MenuItem.vue';
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useNewSenderActions } from '@/composables/useNewSenderActions';
@@ -10,7 +9,8 @@ import { useThreadActions } from '@/composables/useThreadActions';
 import { useToast } from '@/composables/useToast';
 import { useAccountsStore } from '@/stores/accounts';
 import { useConnectionStore } from '@/stores/connection';
-import { useSettingsStore, type InboxGroupingMode, type InboxSenderBucket } from '@/stores/settings';
+import { useSettingsStore, type InboxSenderBucket } from '@/stores/settings';
+import { useListSearchStore } from '@/stores/listSearch';
 import { useThreadsStore, type NewSenderDomainSuggestion, type NewSenderGroup } from '@/stores/threads';
 import { useTopicsStore } from '@/stores/topics';
 import { THREAD_LIST_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
@@ -21,6 +21,8 @@ import type { ThreadCategory } from '@/types/mail';
 import type { WorkflowState } from '@/types/workflow';
 import SmartBucketIcon from '@/components/mail/SmartBucketIcon.vue';
 import ThreadGroupList from '@/components/mail/ThreadGroupList.vue';
+import ListSearchBar from '@/components/mail/ListSearchBar.vue';
+import ListFilterMenu from '@/components/mail/ListFilterMenu.vue';
 import ThreadPaneSkeleton from '@/components/mail/ThreadPaneSkeleton.vue';
 import TopicsFolderCard from '@/components/topics/TopicsFolderCard.vue';
 import Avatar from '@/components/common/Avatar.vue';
@@ -29,7 +31,6 @@ import CountBadge from '@/components/ui/CountBadge.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
 import FilterPill from '@/components/ui/FilterPill.vue';
-import SearchField from '@/components/ui/SearchField.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import PaneResizeHandle from '@/components/ui/PaneResizeHandle.vue';
 import { registerListKeyboardNavigation } from '@/composables/useListKeyboardNavigation';
@@ -46,6 +47,8 @@ const ThreadView = defineAsyncComponent({
 });
 const TopicDetail = defineAsyncComponent(() => import('@/components/topics/TopicDetail.vue'));
 const SnoozePicker = defineAsyncComponent(() => import('@/components/navigation/SnoozePicker.vue'));
+// The search machinery loads with the first query, not with the Inbox.
+const ListSearchResults = defineAsyncComponent(() => import('@/components/mail/ListSearchResults.vue'));
 
 const router = useRouter();
 const { t } = useI18n();
@@ -59,6 +62,7 @@ const topicsStore = useTopicsStore();
 const threadActions = useThreadActions();
 const newSenderActions = useNewSenderActions();
 const toast = useToast();
+const listSearch = useListSearchStore();
 
 watch(
   () => threads.workflowFilter,
@@ -118,6 +122,14 @@ const activeThreadPosition = computed(() => {
 
 /** The pointer's version of j and k: one step through the list behind the pane. */
 function stepThread(delta: number) {
+  if (searchActive.value) {
+    const ids = listSearch.resultThreadIds;
+    const target = ids[ids.indexOf(searchOpenThreadId.value) + delta];
+    if (!target || ids.indexOf(searchOpenThreadId.value) < 0) return;
+    listSearch.openThreadId = target;
+    threads.selectThread(target);
+    return;
+  }
   const list = threads.scopedVisibleThreads;
   const index = list.findIndex((thread) => thread.id === activeId.value);
   const target = list[index + delta];
@@ -377,6 +389,51 @@ const listScope = computed(() => {
   return accounts.accountScopeLabel;
 });
 
+// ── List search: the field above the list narrows it in place ──
+const searchActive = computed(() => listSearch.active && !activeBundle.value);
+const searchMailbox = computed(() => ({
+  accountId: accounts.activeAccountId,
+  workflowFilter: threads.workflowFilter,
+  mailboxFilter: threads.mailboxFilter,
+  activeContactEmail: threads.activeContactEmail,
+}));
+/** The result in the reading pane: the one opened, else the first hit. */
+const searchOpenThreadId = computed(() => {
+  const ids = listSearch.resultThreadIds;
+  if (listSearch.openThreadId && ids.includes(listSearch.openThreadId)) return listSearch.openThreadId;
+  return ui.isSinglePane ? '' : ids[0] ?? '';
+});
+watch(searchOpenThreadId, (id) => {
+  if (id && searchActive.value) void threads.ensureThreadLoaded(id, { retainAcrossListLoads: true });
+});
+const detailThreadId = computed(() => (searchActive.value ? searchOpenThreadId.value : activeId.value));
+const detailPosition = computed(() =>
+  searchActive.value ? listSearch.resultThreadIds.indexOf(searchOpenThreadId.value) + 1 : activeThreadPosition.value,
+);
+const detailTotal = computed(() =>
+  searchActive.value ? listSearch.resultThreadIds.length : threads.scopedVisibleThreads.length,
+);
+
+// Esc gives the list back as it was: the mailbox list stays mounted under
+// the results (scroll position included), and the open thread returns.
+let threadBeforeSearch = '';
+watch(() => listSearch.active, (active) => {
+  if (active) {
+    threadBeforeSearch = threads.activeThreadId;
+    return;
+  }
+  if (threadBeforeSearch && threads.scopedVisibleThreads.some((thread) => thread.id === threadBeforeSearch)) {
+    threads.selectThread(threadBeforeSearch);
+  }
+  threadBeforeSearch = '';
+});
+
+// Picking another list in the sidebar means "show me that list".
+watch(
+  [() => threads.mailboxFilter, () => threads.workflowFilter, () => threads.activeContactEmail],
+  () => listSearch.clear(),
+);
+
 const bundleTitle = computed(() => {
   if (activeGroup.value) {
     return activeGroup.value.ciProject
@@ -391,11 +448,6 @@ const bundleSubtitle = computed(() => {
     return activeGroup.value.title;
   }
   return t('inbox.smartFolder');
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener('pointerdown', onViewMenuPointerDown);
-  document.removeEventListener('keydown', onViewMenuKeydown);
 });
 
 function onActivate(payload: { threadId: string; shiftKey: boolean; metaKey: boolean; ctrlKey: boolean; keyboard?: boolean }) {
@@ -454,46 +506,6 @@ async function runActiveGroupDone() {
   if (activeGroup.value) {
     threads.closeSimilarGroup();
   }
-}
-
-const viewMenuOpen = ref(false);
-const viewMenuRef = ref<HTMLElement | null>(null);
-
-function toggleViewMenu() {
-  viewMenuOpen.value = !viewMenuOpen.value;
-}
-
-function closeViewMenu() {
-  viewMenuOpen.value = false;
-}
-
-function onViewMenuPointerDown(event: PointerEvent) {
-  if (!viewMenuRef.value?.contains(event.target as Node)) closeViewMenu();
-}
-
-function onViewMenuKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') closeViewMenu();
-}
-
-watch(viewMenuOpen, (open) => {
-  if (open) {
-    document.addEventListener('pointerdown', onViewMenuPointerDown);
-    document.addEventListener('keydown', onViewMenuKeydown);
-  } else {
-    document.removeEventListener('pointerdown', onViewMenuPointerDown);
-    document.removeEventListener('keydown', onViewMenuKeydown);
-  }
-});
-
-function chooseGroupingMode(mode: InboxGroupingMode) {
-  settings.setInboxGroupingMode(mode);
-  if (mode === 'classic') {
-    threads.closeSmartBucket();
-  }
-  if (mode === 'smart') {
-    threads.categoryFilter = 'all';
-  }
-  closeViewMenu();
 }
 
 function openGroup(groupId: string) {
@@ -752,7 +764,7 @@ function acceptExistingSenders() {
 <template>
   <section class="inbox-layout" :class="{ 'inbox-layout--single': ui.isSinglePane }" :style="{ '--list-w': `${ui.threadListWidth}px` }">
     <!-- Thread List Pane -->
-    <article class="list-pane min-h-0 grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_auto_1fr] overflow-hidden bg-list border-r border-border-muted">
+    <article class="list-pane min-h-0 grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] overflow-hidden bg-list border-r border-border-muted">
       <!-- Topics view: inside the folder, topics listed like mails -->
       <template v-if="topicsViewOpen">
         <PaneHeader :title="$t('inbox.topics.title')" :count="topicsStore.activeTopics.length">
@@ -879,40 +891,6 @@ function acceptExistingSenders() {
         :subtitle="listScope"
         :count="listCount"
       >
-        <template #actions>
-          <div v-if="!folderViewActive" ref="viewMenuRef" class="view-menu-wrap">
-            <IconButton
-              :title="$t('inbox.view')"
-              :active="viewMenuOpen"
-              aria-haspopup="menu"
-              :aria-expanded="viewMenuOpen"
-              @click="toggleViewMenu"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                <path d="M3 4.5h10" />
-                <path d="M4.75 8h6.5" />
-                <path d="M6.5 11.5h3" />
-              </svg>
-            </IconButton>
-            <Transition name="menu-pop">
-              <div v-if="viewMenuOpen" class="view-menu" role="menu" :aria-label="$t('inbox.view')">
-                <p class="view-menu-label">{{ $t('inbox.view') }}</p>
-                <MenuItem
-                  :label="$t('inbox.viewGrouped')"
-                  selection="radio"
-                  :checked="settings.inboxGroupingMode === 'smart'"
-                  @select="chooseGroupingMode('smart')"
-                />
-                <MenuItem
-                  :label="$t('inbox.viewList')"
-                  selection="radio"
-                  :checked="settings.inboxGroupingMode === 'classic'"
-                  @select="chooseGroupingMode('classic')"
-                />
-              </div>
-            </Transition>
-          </div>
-        </template>
       </PaneHeader>
 
       <PaneHeader
@@ -953,18 +931,14 @@ function acceptExistingSenders() {
         </template>
       </PaneHeader>
 
-      <div v-if="ui.isMobile && !activeBundle" class="list-search">
-        <SearchField
-          :label="$t('inbox.searchPlaceholder')"
-          :title="$t('inbox.searchTitle')"
-          @click="ui.openOmni()"
-        />
-      </div>
+      <ListSearchBar v-if="!activeBundle" :mailbox-label="listTitle">
+        <ListFilterMenu :show-layout="!folderViewActive" />
+      </ListSearchBar>
 
       <!-- One strip: which mailbox the list is drawn from, then how it is
            sliced. Accounts only when there is more than one to choose. -->
       <nav
-        v-if="!activeBundle && (accountFilterVisible || categoryFilterVisible)"
+        v-if="!activeBundle && !searchActive && (accountFilterVisible || categoryFilterVisible)"
         class="filter-strip"
         :aria-label="$t('inbox.filterStrip')"
       >
@@ -1029,11 +1003,20 @@ function acceptExistingSenders() {
         @close="bulkSnoozePickerOpen = false"
       />
 
-      <!-- Thread list cell: topics folder on top, the virtualised list below -->
-      <div class="min-h-0 min-w-0 overflow-hidden flex flex-col">
+      <!-- Thread list cell: topics folder on top, the virtualised list below.
+           Search results cover both; the list stays mounted underneath so
+           leaving the search returns to the same scroll position. -->
+      <div class="list-cell relative row-start-5 min-h-0 min-w-0 overflow-hidden flex flex-col">
+      <ListSearchResults
+        v-if="searchActive"
+        class="list-search-overlay"
+        :mailbox-label="listTitle"
+        :mailbox="searchMailbox"
+        :open-thread-id="searchOpenThreadId"
+      />
       <!-- Topics folder: cross-source collections, opened in the detail pane.
            Only rendered here when the list has no smart folder section to join. -->
-      <div v-if="!activeBundle && !smartFolderRowVisible && !(workflowEmpty && listItems.length === 0)" class="topics-folder no-drag shrink-0">
+      <div v-if="!activeBundle && !smartFolderRowVisible && !(workflowEmpty && listItems.length === 0)" class="topics-folder no-drag shrink-0" :inert="searchActive || undefined">
         <TopicsFolderCard
           :topics="topicsStore.activeTopics"
           target-key="topics"
@@ -1044,7 +1027,7 @@ function acceptExistingSenders() {
       </div>
 
       <!-- Thread List -->
-      <div class="min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div class="min-h-0 min-w-0 flex-1 overflow-hidden" :inert="searchActive || undefined">
         <ThreadGroupList
           :items="listItems"
           :loading="threads.threadLoadInFlight"
@@ -1119,10 +1102,10 @@ function acceptExistingSenders() {
       />
       <ThreadView
         v-else
-        :thread-id="activeId"
-        :collapse-to-latest="threads.mailboxFilter.kind === 'section' && threads.mailboxFilter.value === 'drafts'"
-        :position="activeThreadPosition"
-        :total="threads.scopedVisibleThreads.length"
+        :thread-id="detailThreadId"
+        :collapse-to-latest="!searchActive && threads.mailboxFilter.kind === 'section' && threads.mailboxFilter.value === 'drafts'"
+        :position="detailPosition"
+        :total="detailTotal"
         @previous="stepThread(-1)"
         @next="stepThread(1)"
       />
@@ -1150,10 +1133,6 @@ function acceptExistingSenders() {
 
 .detail-pane {
   grid-row: 1;
-}
-
-.view-menu-wrap {
-  position: relative;
 }
 
 /* ── Topics folder above the thread list, same card as the smart folders ── */
@@ -1215,49 +1194,6 @@ function acceptExistingSenders() {
   font-weight: var(--weight-bold);
 }
 
-.view-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 80;
-  width: 212px;
-  display: grid;
-  gap: 2px;
-  padding: 7px;
-  border: 1px solid color-mix(in srgb, var(--border-color) 84%, white 7%);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-raised) 96%, transparent);
-  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.025);
-  backdrop-filter: blur(22px) saturate(125%);
-  -webkit-backdrop-filter: blur(22px) saturate(125%);
-}
-
-.view-menu-label {
-  margin: 3px 10px 3px;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.menu-pop-enter-active,
-.menu-pop-leave-active {
-  transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-normal) var(--ease-out);
-  transform-origin: top right;
-}
-
-.menu-pop-enter-from,
-.menu-pop-leave-to {
-  opacity: 0;
-  transform: translateY(-4px) scale(0.98);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .menu-pop-enter-active,
-  .menu-pop-leave-active { transition: none; }
-}
-
 .list-resize {
   grid-row: 1;
 }
@@ -1276,9 +1212,12 @@ function acceptExistingSenders() {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.list-search {
-  padding: 0 var(--space-lg) var(--space-2-5);
-  background: var(--bg-list);
+/* Opaque and on top; the list underneath is only made inert. Toggling its
+   visibility left WebKit with unpainted rows when the search closed. */
+.list-search-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
 }
 
 .filter-strip {

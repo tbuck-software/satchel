@@ -157,7 +157,6 @@
       "backToMail": "Back to mail",
       "calendar": "Calendar",
       "composeMessage": "Write a new message",
-      "mailboxFilter": "Filter mailboxes",
       "composeNewWindow": "New email (Shift-click for a separate window)",
       "contactLabel": "{name}, {count} conversations",
       "contactPinned": "Pinned",
@@ -197,6 +196,8 @@
       },
       "frequent": "Frequent",
       "modules": "Areas",
+      "newMessage": "New message",
+      "commandPalette": "Search & commands",
       "omni": {
         "activateAccount": "Switch to account",
         "ariaLabel": "Search and commands",
@@ -227,7 +228,7 @@
         "results": "Search results",
         "searching": "Searching",
         "searchingState": "Searching…",
-        "showAll": "Open full search",
+        "showAll": "Show all results in the list",
         "syntaxHint": "Narrow mail with"
       },
       "pinContact": "Pin contact",
@@ -417,6 +418,7 @@
       },
       "helper": {
         "insertTemplate": "Insert a template",
+        "searchList": "Search the mail list",
         "moveThroughMail": "Move through mail and folders",
         "moveThroughMessages": "Move through messages and drafts",
         "newMail": "New email",
@@ -426,6 +428,7 @@
       },
       "keys": {
         "inReader": "in the reader",
+        "inMailList": "above a mail list",
         "or": "or"
       },
       "sequence": {
@@ -610,7 +613,6 @@
       "backToMail": "Zurück zu Mail",
       "calendar": "Kalender",
       "composeMessage": "Neue Nachricht schreiben",
-      "mailboxFilter": "Postfächer filtern",
       "composeNewWindow": "Neue E-Mail (Shift+Klick für eigenes Fenster)",
       "contactLabel": "{name}, {count} Konversationen",
       "contactPinned": "Angepinnt",
@@ -650,6 +652,8 @@
       },
       "frequent": "Häufig",
       "modules": "Bereiche",
+      "newMessage": "Neue E-Mail",
+      "commandPalette": "Suche & Befehle",
       "omni": {
         "activateAccount": "Konto aktivieren",
         "ariaLabel": "Suche und Befehle",
@@ -680,7 +684,7 @@
         "results": "Suchergebnisse",
         "searching": "Suche läuft",
         "searchingState": "Suche läuft …",
-        "showAll": "Vollständige Suche öffnen",
+        "showAll": "Alle Treffer in der Liste zeigen",
         "syntaxHint": "Mails eingrenzen mit"
       },
       "pinContact": "Kontakt anpinnen",
@@ -870,6 +874,7 @@
       },
       "helper": {
         "insertTemplate": "Vorlage einfügen",
+        "searchList": "Mailliste durchsuchen",
         "moveThroughMail": "Durch Mails und Ordner bewegen",
         "moveThroughMessages": "Durch Nachrichten und Entwürfe bewegen",
         "newMail": "Neue Mail",
@@ -879,6 +884,7 @@
       },
       "keys": {
         "inReader": "im Reader",
+        "inMailList": "über einer Mailliste",
         "or": "oder"
       },
       "sequence": {

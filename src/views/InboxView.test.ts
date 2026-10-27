@@ -32,6 +32,7 @@ const harness = vi.hoisted(() => ({
   settings: null as Record<string, unknown> | null,
   ui: null as Record<string, unknown> | null,
   topics: null as Record<string, unknown> | null,
+  listSearch: null as Record<string, unknown> | null,
 }));
 
 vi.mock('vue-router', () => ({
@@ -64,6 +65,23 @@ vi.mock('@/stores/ui', () => ({
   useUiStore: () => harness.ui,
 }));
 
+vi.mock('@/stores/listSearch', () => ({
+  useListSearchStore: () => harness.listSearch,
+}));
+
+// The real results load the FTS client; the view only places them.
+vi.mock('@/components/mail/ListSearchResults.vue', async () => {
+  const { defineComponent: define } = await import('vue');
+  return {
+    __esModule: true,
+    default: define({
+      name: 'ListSearchResults',
+      props: { mailboxLabel: String, openThreadId: String },
+      template: '<section data-test="search-results" :data-mailbox="mailboxLabel" :data-open="openThreadId" />',
+    }),
+  };
+});
+
 vi.mock('@/stores/topics', () => ({
   useTopicsStore: () => harness.topics,
 }));
@@ -90,7 +108,7 @@ vi.mock('@/composables/useListKeyboardNavigation', () => ({
 }));
 
 import InboxView from './InboxView.vue';
-import SidebarMailTools from '@/components/layout/SidebarMailTools.vue';
+import ListFilterMenu from '@/components/mail/ListFilterMenu.vue';
 
 enableAutoUnmount(afterEach);
 
@@ -198,6 +216,7 @@ function setup(options: {
     newSenderStack: null,
     selectFromInteraction: harness.selectFromInteraction,
     selectThread: harness.selectThread,
+    ensureThreadLoaded: vi.fn(),
     loadMore: harness.loadMore,
     closeSimilarGroup: vi.fn(),
     closeSmartBucket: vi.fn(),
@@ -236,6 +255,26 @@ function setup(options: {
     // Context menus register while open.
     registerOverlay: vi.fn(() => vi.fn()),
   });
+  const listSearch = reactive({
+    query: '',
+    scope: 'mailbox',
+    openThreadId: '',
+    resultThreadIds: [] as string[],
+    get active() {
+      return listSearch.query.trim().length > 0;
+    },
+    // Closures, like the store's: the view passes them on unbound.
+    setQuery: (next: string) => { listSearch.query = next; },
+    setScope: (next: string) => { listSearch.scope = next; },
+    open: vi.fn(),
+    clear: () => {
+      listSearch.query = '';
+      listSearch.scope = 'mailbox';
+      listSearch.openThreadId = '';
+      listSearch.resultThreadIds = [];
+    },
+  });
+  harness.listSearch = listSearch;
   harness.topics = reactive({
     activeTopics: [],
     finishedTopics: [],
@@ -506,8 +545,7 @@ describe('InboxView', () => {
     expect(harness.setActiveAccount).toHaveBeenCalledWith('account-2');
   });
 
-  it('offers desktop account filtering in the sidebar popover', async () => {
-    harness.route.name = 'search';
+  it('offers account and layout filtering in one list filter menu', async () => {
     setup({
       accounts: [
         { id: 'account-1', displayName: 'Work' },
@@ -516,29 +554,98 @@ describe('InboxView', () => {
     });
     expect(render().findAll('.filter-pill').map((pill) => pill.text())).not.toContain('Work');
 
-    const wrapper = mount(SidebarMailTools, {
+    const wrapper = mount(ListFilterMenu, {
+      props: { showLayout: true },
       global: {
         mocks: { $t: (key: string) => key },
         stubs: { teleport: true },
       },
     });
-    expect(wrapper.get('.search-field').attributes('aria-current')).toBe('page');
 
     await wrapper.get('[aria-haspopup="menu"]').trigger('click');
     // The menu loads on first open.
     await vi.waitFor(() => expect(wrapper.findAll('[role="menuitemcheckbox"]')).toHaveLength(3));
-    expect(harness.ui!.closeMobileSidebar).not.toHaveBeenCalled();
     const items = wrapper.findAll('[role="menuitemcheckbox"]');
     expect(items.map((item) => item.text())).toEqual(['folders.allAccounts', 'Work', 'Uni']);
     expect(items[1]!.attributes('aria-checked')).toBe('true');
+    expect(wrapper.findAll('[role="menuitemradio"]').map((item) => item.text()))
+      .toEqual(['inbox.viewGrouped', 'inbox.viewList']);
     await items[2]!.trigger('click');
     expect(harness.setActiveAccount).toHaveBeenCalledWith('account-2');
-    expect(harness.ui!.closeMobileSidebar).toHaveBeenCalledOnce();
     expect(wrapper.find('[role="menu"]').exists()).toBe(false);
 
     await wrapper.get('[aria-haspopup="menu"]').trigger('click');
-    await wrapper.get('[role="menuitemcheckbox"]').trigger('click');
-    expect(harness.setActiveAccount).toHaveBeenCalledWith('');
-    expect(harness.ui!.closeMobileSidebar).toHaveBeenCalledTimes(2);
+    await wrapper.findAll('[role="menuitemradio"]')[0]!.trigger('click');
+    expect(harness.settings!.setInboxGroupingMode).toHaveBeenCalledWith('smart');
+  });
+
+  it('hides the filter menu when there is nothing to choose', () => {
+    setup({ accounts: [] });
+    const wrapper = mount(ListFilterMenu, {
+      props: { showLayout: false },
+      global: { mocks: { $t: (key: string) => key }, stubs: { teleport: true } },
+    });
+    expect(wrapper.find('[aria-haspopup="menu"]').exists()).toBe(false);
+  });
+
+  it('puts a search field above the list instead of the palette launcher', () => {
+    setup();
+    const wrapper = render();
+
+    const field = wrapper.get('input[type="search"]');
+    expect(field.attributes('aria-label')).toBe('inbox.listSearch.label');
+    expect(wrapper.find('.search-field').exists()).toBe(false);
+    expect(wrapper.find('[data-test="search-results"]').exists()).toBe(false);
+  });
+
+  it('replaces the list with search results and opens a hit in the reader', async () => {
+    setup();
+    const wrapper = render();
+
+    await wrapper.get('input[type="search"]').setValue('invoice');
+    harness.listSearch!.resultThreadIds = ['thread-7', 'thread-8'];
+    await flushPromises();
+
+    const results = wrapper.get('[data-test="search-results"]');
+    expect(results.attributes('data-mailbox')).toBe('folders.inbox');
+    // The first hit stands in until one is opened, like the list's own fallback.
+    expect(wrapper.get('[data-test="thread-detail"]').attributes('data-thread-id')).toBe('thread-7');
+
+    harness.listSearch!.openThreadId = 'thread-8';
+    await flushPromises();
+    expect(wrapper.get('[data-test="thread-detail"]').attributes('data-thread-id')).toBe('thread-8');
+    // The mailbox list stays mounted underneath, so its scroll survives.
+    expect(wrapper.find('[data-test="thread-list"]').exists()).toBe(true);
+  });
+
+  it('gives the previous thread back when Escape clears the search', async () => {
+    setup();
+    harness.threads!.activeThreadId = 'thread-1';
+    const wrapper = render();
+    const field = wrapper.get('input[type="search"]');
+
+    await field.setValue('invoice');
+    harness.listSearch!.resultThreadIds = ['thread-7'];
+    await flushPromises();
+    harness.selectThread.mockClear();
+
+    await field.trigger('keydown', { key: 'Escape' });
+    await flushPromises();
+
+    expect(harness.listSearch!.query).toBe('');
+    expect(wrapper.find('[data-test="search-results"]').exists()).toBe(false);
+    expect(harness.selectThread).toHaveBeenCalledWith('thread-1');
+    expect(wrapper.get('[data-test="thread-detail"]').attributes('data-thread-id')).toBe('thread-1');
+  });
+
+  it('ends the search when another mailbox is picked', async () => {
+    setup();
+    const wrapper = render();
+    await wrapper.get('input[type="search"]').setValue('invoice');
+    expect(harness.listSearch!.query).toBe('invoice');
+
+    harness.threads!.mailboxFilter = { kind: 'section', value: 'sent' };
+    await flushPromises();
+    expect(harness.listSearch!.query).toBe('');
   });
 });
