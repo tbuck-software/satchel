@@ -39,7 +39,10 @@ export default defineConfig(({ mode, command }) => {
           manualChunks(id) {
             if (!id.includes('node_modules')) return undefined;
             if (id.includes('@tiptap')) return 'vendor-editor';
-            if (id.includes('@tauri-apps')) return 'vendor-tauri';
+            // Native APIs have different lifetimes: event registration is part
+            // of startup, while file dialogs, transfers and extra windows load
+            // on use. Let Rollup preserve those dynamic import boundaries.
+            if (id.includes('@tauri-apps')) return undefined;
             if (
               id.includes('/node_modules/vue/')
               || id.includes('/node_modules/@vue/')

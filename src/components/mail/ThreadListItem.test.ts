@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { nextTick } from 'vue';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { mount, shallowMount } from '@vue/test-utils';
 import { useSettingsStore } from '@/stores/settings';
@@ -43,6 +43,7 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.useRealTimers());
+afterAll(() => vi.dynamicImportSettled());
 
 describe('thread row layout', () => {
   it('lifts the open thread onto a sheet and drops the unread weight', () => {
@@ -442,6 +443,7 @@ describe('thread row layout', () => {
     await wrapper.get('article').trigger('contextmenu', { clientX: 20, clientY: 30 });
     await contextMenusOpen();
 
+    expect(document.activeElement).toBe(document.body.querySelector('.context-menu button'));
     const actions = Array.from(document.body.querySelectorAll('.context-menu button'))
       .map((button) => button.textContent?.trim() ?? '');
     expect(actions).toEqual(expect.arrayContaining([

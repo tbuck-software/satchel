@@ -4,7 +4,6 @@ import { listen, type Event } from '@tauri-apps/api/event';
 import { onBeforeUnmount, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { onAction, registerActionTypes } from '@tauri-apps/plugin-notification';
 import { bootstrapPersistence } from '@/persistence/bootstrap';
 import {
   backendConsumePendingMobileNotification,
@@ -53,7 +52,6 @@ import { useTopicsStore } from '@/stores/topics';
 import { useUiStore } from '@/stores/ui';
 import { useWorkflowStore } from '@/stores/workflow';
 import { useFollowUpsStore } from '@/stores/followUps';
-import { flushOpenComposerDrafts } from '@/composables/useComposerDraftPersistence';
 import { useComposerStore } from '@/stores/composer';
 import { useAppUpdateStore } from '@/stores/appUpdate';
 import { useToast } from '@/composables/useToast';
@@ -202,6 +200,7 @@ function useDraftFlushOnExit(): void {
       const stop = await mod.listen('app:flush-drafts', async () => {
         let saved = false;
         try {
+          const { flushOpenComposerDrafts } = await import('@/composables/useComposerDraftPersistence');
           saved = await flushOpenComposerDrafts();
         } finally {
           await backendAcknowledgeDraftFlush(saved);
@@ -211,6 +210,7 @@ function useDraftFlushOnExit(): void {
       const stopUpdate = await mod.listen<string>('app-update:flush', async ({ payload }) => {
         let saved = false;
         try {
+          const { flushOpenComposerDrafts } = await import('@/composables/useComposerDraftPersistence');
           saved = await flushOpenComposerDrafts();
         } finally {
           await backendAcknowledgeAppUpdateFlush(payload, saved);
@@ -933,6 +933,7 @@ export function useAppBootstrap(): void {
             // emits `mail:focus-thread` instead. Both end at the same route.
             name: 'notification:action',
             register: async () => {
+              const { onAction, registerActionTypes } = await import('@tauri-apps/plugin-notification');
               // Registering the type is what makes the platform draw the buttons
               // on the notification; without it a notification is body-only. It
               // has to happen before `onAction`, which is why the two share one

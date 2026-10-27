@@ -1,9 +1,3 @@
-import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification,
-} from '@tauri-apps/plugin-notification';
-
 function runsInsideTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
@@ -17,6 +11,7 @@ function runsInsideTauri(): boolean {
  */
 export async function ensureNotificationPermission(): Promise<boolean> {
   if (runsInsideTauri()) {
+    const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification');
     if (await isPermissionGranted()) return true;
     return (await requestPermission()) === 'granted';
   }
@@ -33,6 +28,7 @@ export function useNotifications() {
     if (!(await ensureNotificationPermission())) return false;
 
     if (runsInsideTauri()) {
+      const { sendNotification } = await import('@tauri-apps/plugin-notification');
       sendNotification({ title, body });
     } else {
       new Notification(title, { body });

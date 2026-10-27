@@ -142,7 +142,8 @@ describe('mobile OAuth startup wiring', () => {
   it('installs the callback bridge from the application entry point', () => {
     const entry = readFileSync(new URL('../main.ts', import.meta.url), 'utf8');
 
-    expect(entry).toContain("import { installOAuthCallbackBridge } from '@/utils/mobileOAuth'");
+    expect(entry).toContain("import('@/utils/mobileOAuth')");
+    expect(entry).toContain("if (platform !== 'android' && platform !== 'ios') return;");
     expect(entry).toContain('installOAuthCallbackBridge()');
     expect(entry).toMatch(/installMobileOAuthBridge\(fallbackPlatform\)/);
   });

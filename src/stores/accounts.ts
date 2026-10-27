@@ -16,7 +16,6 @@ import {
   translateBackendError,
   type SourceCapabilities,
 } from '@/services/backend';
-import { openOAuthAuthorizationUrl } from '@/utils/mobileOAuth';
 import { useConnectionStore } from '@/stores/connection';
 import { t } from '@/i18n/runtime';
 import { useToast } from '@/composables/useToast';
@@ -259,7 +258,10 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
     const flow = await backendStartOauthFlow({ accountId, provider: account.provider, ...(purpose ? { purpose } : {}) });
     // A phone has no desktop session for the Rust opener; open it from the shell.
-    if (!flow.browser_opened) await openOAuthAuthorizationUrl(flow.authorization_url);
+    if (!flow.browser_opened) {
+      const { openOAuthAuthorizationUrl } = await import('@/utils/mobileOAuth');
+      await openOAuthAuthorizationUrl(flow.authorization_url);
+    }
     const recoveredAccountId = await waitForOAuthCompletion(flow.state);
     if (recoveredAccountId) connectionStore.clearAccountSyncFailure(recoveredAccountId);
     connectionStore.requestRetry();

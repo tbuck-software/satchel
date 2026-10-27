@@ -21,7 +21,6 @@ import {
   runtimeShellMetadata,
   type RuntimePlatform,
 } from '@/utils/runtimeShell';
-import { installOAuthCallbackBridge } from '@/utils/mobileOAuth';
 import { readTheme } from '@/persistence/theme';
 
 // Before mount: the settings store lands on the same value later, so a light
@@ -41,9 +40,11 @@ function installMobileOAuthBridge(platform: RuntimePlatform) {
   if (oauthBridgeInstalled) return;
   if (platform !== 'android' && platform !== 'ios') return;
   oauthBridgeInstalled = true;
-  void installOAuthCallbackBridge().catch((error) => {
-    console.error('OAuth deep-link handler could not be installed', error);
-  });
+  void import('@/utils/mobileOAuth')
+    .then(({ installOAuthCallbackBridge }) => installOAuthCallbackBridge())
+    .catch((error) => {
+      console.error('OAuth deep-link handler could not be installed', error);
+    });
 }
 
 function configureRuntimeShell() {

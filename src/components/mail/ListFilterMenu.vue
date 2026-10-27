@@ -4,10 +4,9 @@
  * how it is laid out. The account choice used to sit in the sidebar and the
  * layout behind a second funnel beside the title — two funnels for one list.
  */
-import { computed, defineAsyncComponent, nextTick, ref } from 'vue';
+import { computed, defineAsyncComponent, nextTick, ref, shallowRef } from 'vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
-import MenuItem from '@/components/ui/MenuItem.vue';
 import { useAccountsStore } from '@/stores/accounts';
 import { useSettingsStore, type InboxGroupingMode } from '@/stores/settings';
 import { useThreadsStore } from '@/stores/threads';
@@ -19,7 +18,16 @@ const props = defineProps<{
 }>();
 
 // Mounted on first open and then kept, so closing still plays its transition.
-const ContextMenu = defineAsyncComponent(() => import('@/components/ui/ContextMenu.vue'));
+// Resolve the items before mounting the menu, which measures and focuses them.
+const MenuItem = shallowRef<typeof import('@/components/ui/MenuItem.vue')['default']>();
+const ContextMenu = defineAsyncComponent(async () => {
+  const [menu, item] = await Promise.all([
+    import('@/components/ui/ContextMenu.vue'),
+    import('@/components/ui/MenuItem.vue'),
+  ]);
+  MenuItem.value = item.default;
+  return menu.default;
+});
 const menuMounted = ref(false);
 
 const accounts = useAccountsStore();

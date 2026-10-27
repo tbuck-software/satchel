@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from 'vue';
+import { computed, defineAsyncComponent, ref, shallowRef } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Thread } from '@/types/mail';
 import { formatListTime, localeFormatter } from '@/utils/listTime';
@@ -7,7 +7,6 @@ import Avatar from '@/components/common/Avatar.vue';
 import AvatarUnreadDot from '@/components/ui/AvatarUnreadDot.vue';
 import ListRowMeta from '@/components/ui/ListRowMeta.vue';
 import CountBadge from '@/components/ui/CountBadge.vue';
-import MenuItem from '@/components/ui/MenuItem.vue';
 import ThreadListQuickActions from '@/components/mail/ThreadListQuickActions.vue';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { useMessageLinks } from '@/composables/useMessageLinks';
@@ -24,7 +23,16 @@ import type { AnchorBox } from '@/utils/popoverPlacement';
 const SnoozePicker = defineAsyncComponent(() => import('@/components/navigation/SnoozePicker.vue'));
 // Both menus mount on first use (see `contextMenuMounted`), so neither is
 // loaded with the list.
-const ContextMenu = defineAsyncComponent(() => import('@/components/ui/ContextMenu.vue'));
+// Resolve the items before mounting the menu, which measures and focuses them.
+const MenuItem = shallowRef<typeof import('@/components/ui/MenuItem.vue')['default']>();
+const ContextMenu = defineAsyncComponent(async () => {
+  const [menu, item] = await Promise.all([
+    import('@/components/ui/ContextMenu.vue'),
+    import('@/components/ui/MenuItem.vue'),
+  ]);
+  MenuItem.value = item.default;
+  return menu.default;
+});
 const SenderFilingMenu = defineAsyncComponent(() => import('@/components/mail/SenderFilingMenu.vue'));
 
 defineOptions({ inheritAttrs: false });

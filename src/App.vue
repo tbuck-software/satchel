@@ -3,7 +3,6 @@ import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { RouterView, useRoute } from 'vue-router';
 import Sidebar from '@/components/layout/Sidebar.vue';
 import PaneResizeHandle from '@/components/ui/PaneResizeHandle.vue';
-import UndoFab from '@/components/ui/UndoFab.vue';
 import AccountReauthBanner from '@/components/settings/AccountReauthBanner.vue';
 import { useComposerStore } from '@/stores/composer';
 import { useToast } from '@/composables/useToast';
@@ -35,6 +34,7 @@ const standaloneCompose = computed(() =>
 const loadComposerHost = () => import('@/components/mail/ComposerHost.vue');
 const ComposerHost = defineAsyncComponent(loadComposerHost);
 const ToastStack = defineAsyncComponent(() => import('@/components/ui/ToastStack.vue'));
+const UndoFab = defineAsyncComponent(() => import('@/components/ui/UndoFab.vue'));
 const SyncStatusLine = defineAsyncComponent(() => import('@/components/layout/SyncStatusLine.vue'));
 const OmniSearch = defineAsyncComponent(loadOmniSearch);
 // Phone-only, and shown only while the backend reports trouble: neither is
@@ -142,7 +142,7 @@ if (standaloneCompose.value) {
     <ToastStack v-if="toastMounted" />
     <ConfirmDialog v-if="confirmState.pending" />
     <PromptDialog v-if="promptState.pending" />
-    <UndoFab :variant="ui.isSinglePane ? 'floating' : 'docked'" />
+    <UndoFab v-if="toastMounted" :variant="ui.isSinglePane ? 'floating' : 'docked'" />
   </div>
 </template>
 
