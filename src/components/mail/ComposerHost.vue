@@ -5,7 +5,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import ComposeView from '@/views/ComposeView.vue';
-import { useComposerStore, type ComposerRequest } from '@/stores/composer';
+import { composerModeTitleKey, useComposerStore, type ComposerRequest } from '@/stores/composer';
 import { useDraftsStore } from '@/stores/drafts';
 import { useUiStore } from '@/stores/ui';
 import { useToast } from '@/composables/useToast';
@@ -70,13 +70,7 @@ const trap = useFocusTrap(windowRef, {
   isOpen: () => composer.isOpen,
   moveFocusIn: () => false,
 });
-const composerHeading = computed(() => {
-  const mode = request.value?.mode;
-  if (mode === 'forward') return t('common.forward');
-  if (mode === 'resend') return t('compose.title.resend');
-  if (mode?.startsWith('reply')) return t('common.reply');
-  return t('compose.title.new');
-});
+const composerHeading = computed(() => t(composerModeTitleKey(request.value?.mode ?? 'new')));
 const windowStyle = computed(() => {
   if (maximized.value || ui.isMobile) {
     return {
@@ -412,6 +406,7 @@ onBeforeUnmount(() => {
           :initial-subject="request.subject ?? ''"
           :initial-body="request.body ?? ''"
           @update:title="composer.setTitle"
+          @update:mode="composer.adoptDraftMode"
           @sent="finishComposer"
           @close="finishComposer"
         />

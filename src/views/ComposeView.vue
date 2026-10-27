@@ -95,6 +95,8 @@ const emit = defineEmits<{
   sent: [];
   close: [];
   'update:title': [value: string];
+  /** What a draft opened as a new message turned out to be once it loaded. */
+  'update:mode': [value: ComposerMode];
 }>();
 
 const route = useRoute();
@@ -418,6 +420,8 @@ async function loadDraft() {
   if (!draft) return;
   if (draft.send_cancelled) toast.info(t('compose.schedule.editCancelled'));
   await applyDraft(draft);
+  // A reply carries the message it answers.
+  emit('update:mode', draft.send_options?.reply_to_message_id ? 'reply' : 'new');
 }
 
 async function applyDraft(draft: BackendDraft) {
@@ -1216,7 +1220,7 @@ defineExpose({
         :html="writingHtml"
         :disabled="sending"
         :autofocus="props.embedded && !startsInRecipients"
-        :focus-position="props.mode === 'reply' || props.mode === 'reply-all' || props.mode === 'forward' ? 'start' : 'end'"
+        :focus-position="!props.initialDraftId && (props.mode === 'reply' || props.mode === 'reply-all' || props.mode === 'forward') ? 'start' : 'end'"
         :min-height="historyHtml ? '1.68em' : '5.04em'"
         :placeholder="$t('compose.editor.placeholder')"
         @update:html="(v) => (writingHtml = v)"

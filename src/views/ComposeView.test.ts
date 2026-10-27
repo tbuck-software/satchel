@@ -756,3 +756,32 @@ it('retains HTML composition for an untouched new-message prefill', async () => 
   expect(harness.sendMessage.mock.calls[0]![0].bodyHtml).toBe(draft.bodyHtml);
   wrapper.unmount();
 });
+
+/**
+ * Reply, `r`, the draft card and the drafts list all open a saved draft as a
+ * new message; only the loaded draft knows it answers something. The thread
+ * draft in the mock used to carry neither HTML nor a signature nor the message
+ * it answers, so resuming it showed a bare plain-text form headed "New message".
+ */
+it('resumes the mock thread draft as the reply it was saved as', async () => {
+  const { mockDrafts } = await import('@/data/mock');
+  const saved = mockDrafts.find((draft) => draft.id === 'dr-offer')!;
+  harness.composePlainText = true;
+  harness.realEditor = true;
+  harness.fetchDraft.mockResolvedValue({ ...saved });
+  const wrapper = render([], true, { mode: 'new', initialDraftId: saved.id, initialBody: '' });
+  await flushPromises();
+
+  expect(wrapper.emitted('update:mode')).toEqual([['reply']]);
+  expect(wrapper.emitted('update:title')?.at(-1)).toEqual(['Re: Staging login 500 after deployment']);
+  expect(wrapper.find('textarea.plain-editor').exists()).toBe(false);
+  const [writing, history] = wrapper.findAll('.ProseMirror');
+  expect(writing!.text()).toBe('Der OAuth-Fix ist auf Staging. Kannst du den Login noch einmal gegenprüfen?');
+  expect(wrapper.find('[data-composer-history]').exists()).toBe(true);
+  expect(history!.text()).toContain('Users cannot sign in on staging since this morning.');
+
+  const input = harness.draftSetup.mock.calls[0]![0].buildInput()!;
+  expect(input.signatureId).toBe('signature-acc-work-0');
+  expect(input.sendOptions?.reply_to_message_id).toBe('m-1');
+  wrapper.unmount();
+});

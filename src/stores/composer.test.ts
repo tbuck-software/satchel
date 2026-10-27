@@ -107,3 +107,35 @@ describe('replacing an open composer', () => {
     expect(guard).not.toHaveBeenCalled();
   });
 });
+
+describe('resuming a draft', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('heads a draft that turns out to be a reply as one', async () => {
+    const composer = useComposerStore();
+    await composer.openDraft('draft-1');
+    expect(composer.title).toBe('New message');
+
+    composer.adoptDraftMode('reply');
+
+    expect(composer.request?.mode).toBe('reply');
+    expect(composer.title).toBe('Reply');
+  });
+
+  it('leaves new messages and requests that already know their mode alone', async () => {
+    const composer = useComposerStore();
+    await composer.openNew();
+    composer.adoptDraftMode('reply');
+    expect(composer.request?.mode).toBe('new');
+
+    await composer.open({ mode: 'forward', draftId: 'draft-2' });
+    composer.adoptDraftMode('reply');
+    expect(composer.request?.mode).toBe('forward');
+
+    await composer.openDraft('draft-3');
+    composer.adoptDraftMode('new');
+    expect(composer.request?.mode).toBe('new');
+  });
+});

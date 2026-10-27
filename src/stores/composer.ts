@@ -17,6 +17,14 @@ export interface ComposerRequest {
   bodyHtml?: string | null;
 }
 
+/** The message key of the heading a composer opened in `mode` carries. */
+export function composerModeTitleKey(mode: ComposerMode) {
+  if (mode === 'forward') return 'common.forward';
+  if (mode === 'resend') return 'compose.title.resend';
+  if (mode === 'reply' || mode === 'reply-all') return 'common.reply';
+  return 'compose.title.new';
+}
+
 /**
  * Asked before an open composer is replaced. `true` once it is closed (saved,
  * or pristine); `false` keeps it, and the new request is dropped.
@@ -27,13 +35,12 @@ export const useComposerStore = defineStore('composer', () => {
   const request = ref<ComposerRequest | null>(null);
   const instance = ref(0);
   /**
-   * A message key while the title is derived from the mode, a literal once the
-   * composer reports its subject. Storing the key keeps the derived title
-   * following a language change instead of freezing the one it opened in.
+   * Derived from the mode until the composer reports its subject. Translating
+   * on read keeps the derived title following a language change instead of
+   * freezing the one it opened in.
    */
-  const titleKey = ref('compose.title.new');
   const titleOverride = ref('');
-  const title = computed(() => titleOverride.value || t(titleKey.value));
+  const title = computed(() => titleOverride.value || t(composerModeTitleKey(request.value?.mode ?? 'new')));
 
   const isOpen = computed(() => request.value !== null);
 
@@ -79,15 +86,17 @@ export const useComposerStore = defineStore('composer', () => {
     if (ticket !== openTicket) return false;
     request.value = normalized;
     titleOverride.value = '';
-    titleKey.value = next.mode === 'forward'
-      ? 'common.forward'
-      : next.mode === 'resend'
-        ? 'compose.title.resend'
-      : next.mode === 'reply' || next.mode === 'reply-all'
-        ? 'common.reply'
-        : 'compose.title.new';
     instance.value += 1;
     return true;
+  }
+
+  /**
+   * Every way back into a draft opens it as a new message, because only the
+   * loaded draft knows what it answers. Once it has loaded, a reply draft
+   * says so in the heading instead of posing as a new message.
+   */
+  function adoptDraftMode(mode: ComposerMode) {
+    if (request.value?.draftId && request.value.mode === 'new') request.value.mode = mode;
   }
 
   function openNew() {
@@ -141,6 +150,7 @@ export const useComposerStore = defineStore('composer', () => {
     openForward,
     openResend,
     setTitle,
+    adoptDraftMode,
     close,
     setReplaceGuard,
   };

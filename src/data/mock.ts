@@ -519,6 +519,9 @@ export const mockThreads: Thread[] = mockThreadSeeds.map((seed) => ({
   lastMessageAtMs: Date.parse(seed.lastMessageAt),
 }));
 
+/** The words of the thread draft, shown on its card and resumed by Reply. */
+const OFFER_TEXT = 'Der OAuth-Fix ist auf Staging. Kannst du den Login noch einmal gegenprüfen?';
+
 const baseMessages: Message[] = [
   {
     id: 'm-1',
@@ -555,7 +558,7 @@ const baseMessages: Message[] = [
     from: { name: 'Tom', email: 'tom@satchel.dev' },
     to: [{ name: 'Sarah Kim', email: 'sarah@app.io' }],
     subject: 'Re: Staging login 500 after deployment',
-    bodyText: 'Der OAuth-Fix ist auf Staging. Kannst du den Login noch einmal gegenprüfen?',
+    bodyText: OFFER_TEXT,
     timestamp: new Date(Date.now() - 25 * 60_000).toISOString(),
     isRead: true,
     isDraft: true,
@@ -682,6 +685,27 @@ export const mockOutboxItems: BackendOutboxItem[] = [
   },
 ];
 
+/**
+ * The thread draft as the composer saves a reply: the answer, then the quoted
+ * conversation newest first, the signature as metadata beside the body and the
+ * message it answers in its send options. Resuming it has to bring back all
+ * of that, not only the words.
+ */
+const offerQuotes = baseMessages
+  .filter((message) => message.threadId === 'th-1' && !message.isDraft)
+  .reverse()
+  .map((message) => ({
+    intro: `On ${new Date(message.timestamp).toUTCString()}, ${message.from.name} <${message.from.email}> wrote:`,
+    lines: (message.bodyText ?? '').split('\n'),
+  }));
+const escapeHtml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const offerDraftBody = OFFER_TEXT + offerQuotes
+  .map((quote) => `\n\n${quote.intro}\n${quote.lines.map((line) => `> ${line}`).join('\n')}`)
+  .join('');
+const offerDraftHtml = `<p>${escapeHtml(OFFER_TEXT)}</p>` + offerQuotes
+  .map((quote) => `<blockquote>${[quote.intro, ...quote.lines].map((line) => `<p>${escapeHtml(line)}</p>`).join('')}</blockquote>`)
+  .join('');
+
 /** One scheduled and two ordinary drafts, so both groups are visible. */
 export const mockDrafts: BackendDraft[] = [
   {
@@ -703,7 +727,12 @@ export const mockDrafts: BackendDraft[] = [
     cc: [],
     bcc: [],
     subject: 'Re: Staging login 500 after deployment',
-    body: 'Der OAuth-Fix ist auf Staging. Kannst du den Login noch einmal gegenprüfen?',
+    body: offerDraftBody,
+    body_html: offerDraftHtml,
+    // Resolves with `?mockSignatures=1`; without it the account has none.
+    signature_id: 'signature-acc-work-0',
+    signature_variant: 'auto',
+    send_options: { reply_to_message_id: 'm-1' },
     updated_at: new Date(Date.now() - 25 * 60_000).toISOString(),
   },
   {
