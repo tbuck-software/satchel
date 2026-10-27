@@ -744,7 +744,7 @@
       "confirm": "Set",
       "custom": "Custom time",
       "mondayAt": "Monday {time}",
-      "title": "Send later",
+      "title": "Send later…",
       "tomorrowAt": "Tomorrow {time}"
     },
     "sender": "Sender",

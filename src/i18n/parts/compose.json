@@ -106,7 +106,7 @@
         "renderFailed": "Could not insert the template: {error}"
       },
       "sendLater": {
-        "title": "Send later",
+        "title": "Send later…",
         "tomorrowAt": "Tomorrow {time}",
         "mondayAt": "Monday {time}",
         "custom": "Custom time",
@@ -450,7 +450,7 @@
         "renderFailed": "Die Vorlage konnte nicht eingefügt werden: {error}"
       },
       "sendLater": {
-        "title": "Später senden",
+        "title": "Später senden …",
         "tomorrowAt": "Morgen {time}",
         "mondayAt": "Montag {time}",
         "custom": "Eigener Zeitpunkt",

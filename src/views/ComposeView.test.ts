@@ -251,7 +251,7 @@ describe('composer fields and actions', () => {
     const wrapper = render();
     await flushPromises();
 
-    for (const title of ['Attach file', 'Use template', 'Send later', 'More options']) {
+    for (const title of ['Attach file', 'Use template', 'Send later…', 'More options']) {
       expect(wrapper.get(`[title="${title}"]`).attributes('aria-label')).toBe(title);
     }
     expect(sendButton(wrapper).attributes('title')).toMatch(/^Send · /);
@@ -264,10 +264,31 @@ describe('composer fields and actions', () => {
 
     expect(wrapper.get('.compose-header').findAll('button')).toHaveLength(0);
     const footerLabels = wrapper.get('.footer').findAll('button').map((button) => button.text());
-    expect(footerLabels.slice(-2)).toEqual(['Save', 'Send']);
+    expect(footerLabels.slice(-3)).toEqual(['Save', 'Send', '']);
     expect(wrapper.get('[title="Attach file"]').text()).toBe('Attach');
-    expect(wrapper.get('[title="Send later"]').text()).toBe('Send later');
+    expect(wrapper.get('[title="Send later…"]').attributes('aria-haspopup')).toBe('dialog');
+    for (const button of wrapper.get('.footer-actions').findAll('button')) {
+      expect(button.find('svg').exists()).toBe(true);
+    }
   });
+});
+
+it.each(['reply', 'forward'] as const)('opens scheduling from the split control in an embedded %s', async (mode) => {
+  const wrapper = render(['boss@example.com'], true, { mode });
+  await flushPromises();
+  const secondary = wrapper.get('[aria-haspopup="dialog"]');
+  expect(secondary.attributes('aria-expanded')).toBe('false');
+  await secondary.trigger('click');
+  expect(secondary.attributes('aria-expanded')).toBe('true');
+  const picker = wrapper.getComponent({ name: 'SendLaterPicker' });
+  picker.vm.$emit('select', '2026-12-01T09:00:00Z');
+  await flushPromises();
+  expect(secondary.attributes('aria-expanded')).toBe('false');
+  expect(wrapper.get('.split-button__primary').text()).toBe('Schedule');
+  expect(wrapper.find('.split-button__primary circle').exists()).toBe(true);
+  await wrapper.get('.schedule-info button').trigger('click');
+  expect(sendButton(wrapper).find('svg path').exists()).toBe(true);
+  wrapper.unmount();
 });
 
 describe.each([true, false])('outgoing conversation history, plain text: %s', (plainText) => {
@@ -522,6 +543,9 @@ describe('composer send guard', () => {
     expect(wrapper.get('[data-testid="compose-send-wrap"]').attributes('title')).toBe(hint);
     const describedBy = sendButton(wrapper).attributes('aria-describedby');
     expect(wrapper.get(`#${describedBy}`).text()).toBe(hint);
+    const secondary = wrapper.get('[aria-haspopup="dialog"]');
+    expect(secondary.attributes('disabled')).toBeDefined();
+    expect(secondary.attributes('aria-describedby')).toBe(describedBy);
   });
 
   it('names the invalid address in the hint', async () => {

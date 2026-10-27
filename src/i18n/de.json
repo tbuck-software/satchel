@@ -744,7 +744,7 @@
       "confirm": "Festlegen",
       "custom": "Eigener Zeitpunkt",
       "mondayAt": "Montag {time}",
-      "title": "Später senden",
+      "title": "Später senden …",
       "tomorrowAt": "Morgen {time}"
     },
     "sender": "Absender",

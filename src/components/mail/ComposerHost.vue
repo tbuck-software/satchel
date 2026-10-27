@@ -11,7 +11,7 @@ import { useUiStore } from '@/stores/ui';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { useFocusTrap } from '@/composables/useFocusTrap';
-import { fitComposerRect, dockComposerRect, resizeComposerRect, type ResizeDirection } from '@/utils/composerGeometry';
+import { COMPOSER_DEFAULT_SIZE, COMPOSER_MINIMUM_SIZE, COMPOSER_DOCK_GAP, fitComposerRect, dockComposerRect, resizeComposerRect, type ResizeDirection } from '@/utils/composerGeometry';
 import { useComposeWindow } from '@/composables/useComposeWindow';
 import { refreshToastClearance } from '@/composables/useToastClearance';
 
@@ -22,11 +22,7 @@ interface ComposeViewHandle {
   currentDraftId: () => string | null;
 }
 
-const GAP = 18;
-const MIN_WIDTH = 520;
-const MIN_HEIGHT = 450;
-const DEFAULT_WIDTH = 760;
-const DEFAULT_HEIGHT = 650;
+const GAP = COMPOSER_DOCK_GAP;
 const RESIZE_DIRECTIONS: ResizeDirection[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
 /** Long enough to notice the toast and change your mind about the draft. */
 const UNDO_TIMEOUT_MS = 9000;
@@ -42,8 +38,8 @@ const composeWindow = useComposeWindow(router);
 const layerRef = ref<HTMLElement | null>(null);
 const windowRef = ref<HTMLElement | null>(null);
 const formRef = ref<ComposeViewHandle | null>(null);
-const width = ref(DEFAULT_WIDTH);
-const height = ref(DEFAULT_HEIGHT);
+const width = ref<number>(COMPOSER_DEFAULT_SIZE.width);
+const height = ref<number>(COMPOSER_DEFAULT_SIZE.height);
 const x = ref(GAP);
 const y = ref(GAP);
 const maximized = ref(false);
@@ -105,13 +101,13 @@ function fitIntoLayer() {
   const next = fitComposerRect(
     { x: x.value, y: y.value, width: width.value, height: height.value },
     layerBounds(),
-    { width: MIN_WIDTH, height: MIN_HEIGHT },
+    COMPOSER_MINIMUM_SIZE,
   );
   ({ x: x.value, y: y.value, width: width.value, height: height.value } = next);
 }
 
 function placeInitially() {
-  const next = dockComposerRect(layerBounds(), { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }, { width: MIN_WIDTH, height: MIN_HEIGHT }, GAP);
+  const next = dockComposerRect(layerBounds(), COMPOSER_DEFAULT_SIZE, COMPOSER_MINIMUM_SIZE, GAP);
   ({ x: x.value, y: y.value, width: width.value, height: height.value } = next);
 }
 
@@ -161,7 +157,7 @@ function moveResize(event: PointerEvent) {
     event.clientX - startPointerX,
     event.clientY - startPointerY,
     layerBounds(),
-    { width: MIN_WIDTH, height: MIN_HEIGHT },
+    COMPOSER_MINIMUM_SIZE,
   );
   x.value = next.x;
   y.value = next.y;

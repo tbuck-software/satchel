@@ -207,7 +207,7 @@ describe('composer placement', () => {
     const wrapper = mount(ComposerHost, { attachTo: document.body });
     await flushPromises();
     const section = wrapper.get('.composer-window');
-    expect(section.attributes('style')).toContain(`translate3d(${window.innerWidth - 760 - 18}px, ${window.innerHeight - 650 - 18}px, 0)`);
+    expect(section.attributes('style')).toContain(`translate3d(${window.innerWidth - 620 - 18}px, ${window.innerHeight - 540 - 18}px, 0)`);
     wrapper.unmount();
   });
 
@@ -217,7 +217,7 @@ describe('composer placement', () => {
     Object.defineProperty(window, 'innerWidth', { value: 1200, configurable: true });
     window.dispatchEvent(new Event('resize'));
     await flushPromises();
-    expect(wrapper.get('.composer-window').attributes('style')).toContain('translate3d(422px,');
+    expect(wrapper.get('.composer-window').attributes('style')).toContain('translate3d(562px,');
     Object.defineProperty(window, 'innerWidth', { value: oldWidth, configurable: true });
     wrapper.unmount();
   });

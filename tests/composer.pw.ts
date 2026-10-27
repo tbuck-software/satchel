@@ -10,12 +10,20 @@ for (const theme of ['dark', 'light'] as const) {
         await page.addInitScript((value) => localStorage.setItem('satchel.theme', value), theme);
         await page.goto('/?mockSignatures=1');
         await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();
-        if (mode === 'new') await page.keyboard.press('n');
+        if (mode === 'new') await page.getByRole('button', { name: 'Write a new message', exact: true }).click();
         else await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
         const composer = page.getByRole('dialog', { name: 'Compose email' });
         await expect(composer).toBeVisible();
         const writer = composer.locator('.ProseMirror').first();
         await writer.fill(mode === 'new' ? 'Hi Ada,\n\nThe release is ready for review.' : 'Thanks for the update. I will review the deployment today.');
+        if (mode === 'new') {
+          const recipient = composer.locator('.recipient-row input').first();
+          await recipient.fill('ada@example.com');
+          await recipient.press('Enter');
+        }
+        for (const dismiss of await page.getByRole('button', { name: 'Dismiss message', exact: true }).all()) {
+          await dismiss.click();
+        }
         const signature = composer.locator('[data-composer-signature]');
         await expect(signature).toContainText('Kind regards');
         await expect.poll(async () => {
@@ -24,8 +32,8 @@ for (const theme of ['dark', 'light'] as const) {
         }).toBe(18);
         const box = (await composer.boundingBox())!;
         expect(Math.round(viewport.height - box.y - box.height)).toBe(18);
-        expect(box.width).toBeCloseTo(760, 3);
-        expect(box.height).toBeCloseTo(650, 3);
+        expect(box.width).toBeCloseTo(620, 3);
+        expect(box.height).toBeCloseTo(540, 3);
         if (mode === 'reply') {
           const history = composer.locator('[data-composer-history]');
           await expect(history).toContainText(/On .+ wrote:/);
@@ -38,7 +46,27 @@ for (const theme of ['dark', 'light'] as const) {
           expect(signatureBox.y - writerBox.y - writerBox.height).toBeLessThan(32);
           expect(signatureBox.y + signatureBox.height).toBeLessThanOrEqual(historyBox.y);
         }
+        const send = composer.getByRole('button', { name: 'Send', exact: true });
+        const later = composer.getByRole('button', { name: 'Send later…', exact: true });
+        await expect(send).toBeEnabled();
+        await expect(later).toBeEnabled();
+        const signatureBox = (await signature.boundingBox())!;
+        const sendBox = (await send.boundingBox())!;
+        expect(signatureBox.y + signatureBox.height).toBeLessThanOrEqual(sendBox.y);
+        expect(sendBox.y + sendBox.height).toBeLessThan(box.y + box.height);
         await page.screenshot({ path: testInfo.outputPath(`${mode}-${theme}-${viewport.width}x${viewport.height}@2x.png`) });
+        await send.focus();
+        await page.keyboard.press('Tab');
+        await expect(later).toBeFocused();
+        await page.keyboard.press('Enter');
+        const picker = page.getByRole('dialog', { name: 'Send later…', exact: true });
+        await expect(picker).toBeVisible();
+        await expect(later).toHaveAttribute('aria-expanded', 'true');
+        await page.screenshot({ path: testInfo.outputPath(`${mode}-send-later-${theme}-${viewport.width}x${viewport.height}@2x.png`) });
+        await page.keyboard.press('Escape');
+        await expect(picker).toHaveCount(0);
+        await expect(later).toBeFocused();
+        await expect(later).toHaveAttribute('aria-expanded', 'false');
       });
     }
   }
@@ -81,9 +109,9 @@ test('phone ComposeFab opens a full-screen composer and returns to the mailbox',
 
 test('drag, resize, maximize and reopen keep the composer inside the window', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
+  await page.goto('/?mockSignatures=1');
   await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();
-  await page.keyboard.press('n');
+  await page.getByRole('button', { name: 'Write a new message', exact: true }).click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   await expect(composer).toBeVisible();
   // Docking runs after the first layout; measure once the window has settled
@@ -92,6 +120,7 @@ test('drag, resize, maximize and reopen keep the composer inside the window', as
     const box = (await composer.boundingBox())!;
     return Math.round(1440 - box.x - box.width);
   }).toBeLessThan(40);
+  await composer.locator('.ProseMirror').first().fill('Hi Ada,\n\nThe release is ready for review.');
   const initial = (await composer.boundingBox())!;
   const chrome = (await composer.locator('.composer-chrome').boundingBox())!;
   await page.mouse.move(chrome.x + 80, chrome.y + chrome.height / 2);
@@ -104,15 +133,25 @@ test('drag, resize, maximize and reopen keep the composer inside the window', as
   const resize = (await composer.locator('.composer-resize-zone--nw').boundingBox())!;
   await page.mouse.move(resize.x + 2, resize.y + 2);
   await page.mouse.down();
-  await page.mouse.move(resize.x + 62, resize.y + 42, { steps: 4 });
+  await page.mouse.move(resize.x + 102, resize.y + 92, { steps: 4 });
   await page.mouse.up();
   const resized = (await composer.boundingBox())!;
-  expect(Math.round(resized.width)).toBe(700);
-  expect(Math.round(resized.height)).toBe(610);
+  expect(Math.round(resized.width)).toBe(520);
+  expect(Math.round(resized.height)).toBe(500);
+  const signature = (await composer.locator('[data-composer-signature]').boundingBox())!;
+  const footer = (await composer.locator('.footer').boundingBox())!;
+  expect(signature.y + signature.height).toBeLessThanOrEqual(footer.y);
+  await composer.getByRole('button', { name: 'Cc/Bcc', exact: true }).click();
+  await composer.locator('input[type="file"]').setInputFiles({
+    name: 'release.txt', mimeType: 'text/plain', buffer: Buffer.from('Release notes'),
+  });
+  await expect(composer.locator('.compose-attachments')).toContainText('release.txt');
+  const expandedFooter = (await composer.locator('.footer').boundingBox())!;
+  expect(expandedFooter.y + expandedFooter.height).toBeLessThanOrEqual(resized.y + resized.height);
   await composer.getByRole('button', { name: 'Maximise composer' }).click();
   await expect.poll(async () => Math.round((await composer.boundingBox())!.width)).toBe(1404);
   await composer.getByRole('button', { name: 'Restore window' }).click();
-  await expect.poll(async () => Math.round((await composer.boundingBox())!.width)).toBe(700);
+  await expect.poll(async () => Math.round((await composer.boundingBox())!.width)).toBe(520);
   await page.setViewportSize({ width: 800, height: 500 });
   await expect.poll(async () => {
     const box = (await composer.boundingBox())!;
@@ -128,5 +167,5 @@ test('drag, resize, maximize and reopen keep the composer inside the window', as
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.keyboard.press('n');
   await expect(composer).toBeVisible();
-  await expect.poll(async () => Math.round((await composer.boundingBox())!.x)).toBe(662);
+  await expect.poll(async () => Math.round((await composer.boundingBox())!.x)).toBe(802);
 });

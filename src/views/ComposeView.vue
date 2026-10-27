@@ -26,6 +26,7 @@ import ComposerThreadContext from '@/components/mail/ComposerThreadContext.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import AppBanner from '@/components/ui/AppBanner.vue';
 import AppButton from '@/components/ui/AppButton.vue';
+import SplitButton from '@/components/ui/SplitButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import { composerHtmlFromText, hasComposerHtmlHistory, hasComposerTextHistory } from '@/utils/composerHistory';
@@ -1216,7 +1217,7 @@ defineExpose({
         :disabled="sending"
         :autofocus="props.embedded && !startsInRecipients"
         :focus-position="props.mode === 'reply' || props.mode === 'reply-all' || props.mode === 'forward' ? 'start' : 'end'"
-        :min-height="historyHtml ? '1.68em' : '120px'"
+        :min-height="historyHtml ? '1.68em' : '5.04em'"
         :placeholder="$t('compose.editor.placeholder')"
         @update:html="(v) => (writingHtml = v)"
         @inline-image-added="composerInlineAttachments.onInlineImageAdded"
@@ -1296,22 +1297,17 @@ defineExpose({
       </div>
       <p v-if="scheduledFor" class="schedule-info">
         {{ $t('compose.schedule.scheduled', { time: formatScheduled(scheduledFor) }) }}
-        <AppButton size="sm" variant="ghost" @click="scheduledFor = null">{{ $t('compose.schedule.remove') }}</AppButton>
+        <AppButton size="sm" variant="ghost" @click="scheduledFor = null"><template #icon><AppIcon><path d="m4 4 8 8M12 4l-8 8"/></AppIcon></template>{{ $t('compose.schedule.remove') }}</AppButton>
       </p>
       <p v-if="followUpAt" class="schedule-info">
         {{ $t('compose.schedule.followUp', { time: formatScheduled(followUpAt) }) }}
-        <AppButton size="sm" variant="ghost" @click="followUpAt = null">{{ $t('compose.schedule.remove') }}</AppButton>
+        <AppButton size="sm" variant="ghost" @click="followUpAt = null"><template #icon><AppIcon><path d="m4 4 8 8M12 4l-8 8"/></AppIcon></template>{{ $t('compose.schedule.remove') }}</AppButton>
       </p>
       <div class="footer-actions">
-        <!-- The two actions a message most often needs say their name; the
-             label folds away when the composer is narrow. -->
+        <!-- The attachment label folds away when the composer is narrow. -->
         <AppButton variant="ghost" class="tool-button" :title="$t('compose.toolbar.attach')" :aria-label="$t('compose.toolbar.attach')" @click="attachmentZoneRef?.openPicker()">
           <template #icon><AppIcon size="lg"><path d="M13.5 7.5l-6.2 6.2a3.5 3.5 0 01-5-5l6.5-6.5a2.5 2.5 0 013.5 3.5L5.8 12.2a1.5 1.5 0 01-2.1-2.1l6.1-6.1"/></AppIcon></template>
           <span class="tool-label">{{ $t('compose.toolbar.attachShort') }}</span>
-        </AppButton>
-        <AppButton variant="ghost" class="tool-button" :title="$t('compose.sendLater.title')" :aria-label="$t('compose.sendLater.title')" @click="showSendLater = true">
-          <template #icon><AppIcon size="lg"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></AppIcon></template>
-          <span class="tool-label">{{ $t('compose.sendLater.title') }}</span>
         </AppButton>
         <IconButton size="lg" v-if="supportsBackend" :title="$t('compose.toolbar.template')" :aria-label="$t('compose.toolbar.template')" @click="showTemplatePicker = true">
           <AppIcon size="lg"><path d="M3 1.5h7l3 3v10H3z"/><path d="M10 1.5v3h3M5.5 8h5M5.5 11h4"/></AppIcon>
@@ -1379,6 +1375,7 @@ defineExpose({
                 :disabled="sending || discarding"
                 @click="discardDraft()"
               >
+                <template #icon><AppIcon><path d="M2.5 4.5h11M6 2h4l.5 2.5h-5L6 2ZM4 4.5l.5 9h7l.5-9M6.5 7v4M9.5 7v4"/></AppIcon></template>
                 {{ $t('compose.discardDraft') }}
               </AppButton>
             </template>
@@ -1391,19 +1388,26 @@ defineExpose({
           :disabled="sending || discarding"
           @click="persistDraft({})"
         >
+          <template #icon><AppIcon><path d="M2.5 2h9l2 2v10h-11z"/><path d="M5 2v4h6V2M5 14V9h6v5"/></AppIcon></template>
           {{ $t('common.save') }}
         </AppButton>
         <!-- A disabled button gets no hover of its own; the wrapper carries the tooltip. -->
         <span class="send-wrap" :title="sendBlockedHint ?? undefined" data-testid="compose-send-wrap">
-          <AppButton
-            variant="primary"
-            class="send-button"
-            :title="sendBlockedHint ?? $t('compose.send')"
+          <SplitButton
+            :secondary-label="$t('compose.sendLater.title')"
+            :expanded="showSendLater"
+            popup="dialog"
+            :title="sendBlockedHint ?? (sending ? $t('compose.sending') : scheduledFor ? $t('compose.schedule.submit') : $t('compose.send'))"
             :shortcut="canSend ? sendShortcut : null"
             :disabled="!canSend"
-            :aria-describedby="sendBlockedHint ? sendHintId : undefined"
+            :description-id="sendBlockedHint ? sendHintId : undefined"
             @click="send"
+            @open="showSendLater = true"
           >
+            <template #icon>
+              <AppIcon v-if="scheduledFor"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></AppIcon>
+              <AppIcon v-else><path d="m14 2-4.5 12L7 9 2 6.5 14 2ZM7 9l4-4"/></AppIcon>
+            </template>
             {{
               sending
                 ? $t('compose.sending')
@@ -1411,7 +1415,7 @@ defineExpose({
                 ? $t('compose.schedule.submit')
                 : $t('compose.send')
             }}
-          </AppButton>
+          </SplitButton>
           <span v-if="sendBlockedHint" :id="sendHintId" class="sr-only">{{ sendBlockedHint }}</span>
         </span>
       </div>
@@ -1711,7 +1715,7 @@ textarea:focus {
 
 .compose .body {
   flex: 1 1 auto;
-  min-height: 150px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: auto;
@@ -1739,6 +1743,11 @@ textarea:focus {
   padding: 0;
   border: 0;
   background: transparent;
+}
+
+/* Reserve three writing lines so the signature also fits at minimum height. */
+.compose .body > .plain-editor {
+  min-height: 5.04em;
 }
 
 /* The signature follows the answer's last line, including in plain-text mode. */
@@ -1967,7 +1976,7 @@ textarea:focus {
   pointer-events: none;
 }
 
-.send-wrap :deep(.send-button:disabled) {
+.send-wrap :deep(.split-button button:disabled) {
   opacity: 1;
   background: color-mix(in srgb, var(--accent-primary) 75%, var(--bg-raised));
   color: var(--text-on-accent);

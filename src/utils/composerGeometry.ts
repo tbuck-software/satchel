@@ -1,3 +1,7 @@
+export const COMPOSER_DEFAULT_SIZE = { width: 620, height: 540 } as const;
+export const COMPOSER_MINIMUM_SIZE = { width: 520, height: 500 } as const;
+export const COMPOSER_DOCK_GAP = 18;
+
 export type ResizeDirection = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw';
 
 export interface ComposerRect {
