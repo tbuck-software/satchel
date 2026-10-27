@@ -86,6 +86,12 @@ test('drag, resize, maximize and reopen keep the composer inside the window', as
   await page.keyboard.press('n');
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   await expect(composer).toBeVisible();
+  // Docking runs after the first layout; measure once the window has settled
+  // against the bottom-right corner, not while it is still at its first frame.
+  await expect.poll(async () => {
+    const box = (await composer.boundingBox())!;
+    return Math.round(1440 - box.x - box.width);
+  }).toBeLessThan(40);
   const initial = (await composer.boundingBox())!;
   const chrome = (await composer.locator('.composer-chrome').boundingBox())!;
   await page.mouse.move(chrome.x + 80, chrome.y + chrome.height / 2);
