@@ -39,6 +39,9 @@ const applyWorkflowStatesMock = vi.fn((mutations: Array<Record<string, unknown>>
 });
 
 const threadState = {
+  activeThreadId: 'thread-1',
+  selectedThreadIds: [] as string[],
+  selectThread: vi.fn((id: string) => { threadState.activeThreadId = id; }),
   threads: [] as Array<Record<string, unknown>>,
   find: (threadId: string) => threadState.threads.find((entry) => entry.id === threadId),
   ensureThreadLoaded: vi.fn(),
@@ -133,6 +136,8 @@ vi.mock('@/composables/useToast', () => ({
 }));
 
 import { useThreadActions } from './useThreadActions';
+import { registerListKeyboardNavigation } from './useListKeyboardNavigation';
+
 
 function seedThread(overrides: Record<string, unknown> = {}) {
   return {
@@ -179,8 +184,68 @@ describe('useThreadActions', () => {
     setWorkflowStateMock.mockClear();
     applyWorkflowStatesMock.mockClear();
     markReadMock.mockClear();
+    threadState.activeThreadId = 'thread-1';
+    threadState.selectedThreadIds = [];
     threadState.threads = [seedThread()];
     mailboxState.mailboxes = [{ id: 'folder-inbox', account_id: 'acc-1', mailbox_type: 'inbox' }];
+  });
+
+  it.each([{ ids: ['thread-1'] }, { ids: ['thread-1', 'thread-2'] }])('restores the reader and selection after navigation: $ids', async ({ ids }) => {
+    threadState.threads = ids.map(id => seedThread({ id }));
+    threadState.selectedThreadIds = [...ids];
+    await useThreadActions().archive(ids);
+    threadState.activeThreadId = 'next-thread';
+    threadState.selectedThreadIds = ['next-thread'];
+
+    await toasts[0]?.action?.handler();
+
+    expect(threadState.activeThreadId).toBe(ids[0]);
+    expect(threadState.selectedThreadIds).toEqual(ids.length > 1 ? ids : []);
+  });
+
+  it('hands focus to the list after refresh and reselects after revealing a folder', async () => {
+    const focusThread = vi.fn(() => {
+      threadState.selectedThreadIds = [];
+      return true;
+    });
+    const unregister = registerListKeyboardNavigation({
+      move: () => false, open: () => false, back: () => false, focusThread,
+    });
+    try {
+      threadState.threads = [seedThread(), seedThread({ id: 'thread-2' })];
+      await useThreadActions().archive(['thread-1', 'thread-2']);
+      await toasts[0]?.action?.handler();
+      expect(focusThread).toHaveBeenCalledWith('thread-1');
+      expect(focusThread.mock.invocationCallOrder[0]).toBeGreaterThan(refreshHeadMock.mock.invocationCallOrder.at(-1)!);
+      expect(threadState.selectedThreadIds).toEqual(['thread-1', 'thread-2']);
+    } finally { unregister(); }
+  });
+
+  it('restores the reader and selection after trash undo', async () => {
+    threadState.threads = [seedThread(), seedThread({ id: 'thread-2' })];
+    trashMock.mockResolvedValueOnce({ undo_token: 'receipt', undo_thread_ids: ['thread-1', 'thread-2'], permanently_deleted: [] });
+    await useThreadActions().trash(['thread-1', 'thread-2']);
+    threadState.activeThreadId = 'next-thread';
+    await toasts[0]?.action?.handler();
+    expect(threadState.activeThreadId).toBe('thread-1');
+    expect(threadState.selectedThreadIds).toEqual(['thread-1', 'thread-2']);
+  });
+
+  it('selects only threads whose workflow restore succeeded', async () => {
+    threadState.threads = [seedThread(), seedThread({ id: 'thread-2' })];
+    await useThreadActions().archive(['thread-1', 'thread-2']);
+    transitionManyMock.mockResolvedValueOnce(['thread-2']);
+    await toasts[0]?.action?.handler();
+    expect(threadState.activeThreadId).toBe('thread-2');
+    expect(threadState.selectedThreadIds).toEqual([]);
+  });
+
+  it('offers undo for an explicit read action without changing already read threads', async () => {
+    threadState.threads = [seedThread({ unreadCount: 1 }), seedThread({ id: 'thread-2' })];
+    readMock.mockResolvedValue(undefined);
+    await useThreadActions().setRead(['thread-1', 'thread-2'], true, { undo: true });
+    await toasts[0]?.action?.handler();
+    expect(readMock).toHaveBeenLastCalledWith(['thread-1'], false);
   });
 
   it('serializes one thread across action instances and snapshots its latest state', async () => {
@@ -496,6 +561,14 @@ describe('useThreadActions', () => {
     expect(starMock).toHaveBeenCalledWith(['thread-1'], true);
     expect(threadState.threads[0]!.isStarred).toBe(true);
     expect(refreshHeadMock).toHaveBeenCalled();
+  });
+
+  it('restores the entire mixed selection while undoing only changed pins', async () => {
+    threadState.threads = [seedThread(), seedThread({ id: 'thread-2', isStarred: true })];
+    await useThreadActions().setPinned(['thread-1', 'thread-2'], true);
+    await toasts[0]?.action?.handler();
+    expect(starMock).toHaveBeenLastCalledWith(['thread-1'], false);
+    expect(threadState.selectedThreadIds).toEqual(['thread-1', 'thread-2']);
   });
 
   it('skips threads that already carry the requested star', async () => {

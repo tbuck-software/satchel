@@ -1,6 +1,12 @@
 {
   "en": {
     "thread": {
+      "selection": {
+        "label": "{count} selected",
+        "done": "Done ({count})",
+        "file": "File…",
+        "action": "{action} ({count})"
+      },
       "actions": {
         "addToTopic": "Add to topic…",
         "aside": "Aside",
@@ -148,6 +154,9 @@
         "to": "Reply to {name}…"
       },
       "result": {
+        "readChanged": "Read status changed",
+        "pinChanged": "Pin updated",
+        "muteChanged": "Mute updated",
         "addToTopicFailed": "Assigning failed.",
         "addedToTopic": "Thread added to topic “{topic}” | {count} threads added to topic “{topic}”",
         "aside": "Email set aside | {count} emails set aside",
@@ -243,6 +252,12 @@
   },
   "de": {
     "thread": {
+      "selection": {
+        "label": "{count} ausgewählt",
+        "done": "Erledigt ({count})",
+        "file": "Ablegen…",
+        "action": "{action} ({count})"
+      },
       "actions": {
         "addToTopic": "Zu Thema hinzufügen …",
         "aside": "Beiseite",
@@ -390,6 +405,9 @@
         "to": "An {name} antworten …"
       },
       "result": {
+        "readChanged": "Lesestatus geändert",
+        "pinChanged": "Markierung geändert",
+        "muteChanged": "Stummschaltung geändert",
         "addToTopicFailed": "Zuordnung fehlgeschlagen.",
         "addedToTopic": "Thread zu Thema „{topic}“ hinzugefügt | {count} Threads zu Thema „{topic}“ hinzugefügt",
         "aside": "E-Mail beiseitegelegt | {count} E-Mails beiseitegelegt",

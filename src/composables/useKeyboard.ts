@@ -5,6 +5,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useThreadsStore } from '@/stores/threads';
 import { useTopicsStore } from '@/stores/topics';
 import { useComposerStore } from '@/stores/composer';
+import { threadActionTargets } from './threadActionTargets';
 import { useThreadActions } from './useThreadActions';
 import { useThreadReply } from './useThreadReply';
 import { useMessageLinks } from './useMessageLinks';
@@ -78,10 +79,7 @@ export function useKeyboard() {
   let scope: ShortcutScope = { route: null, covered: false };
 
   function targetIds(): string[] {
-    if (threads.selectedThreadIds.length > 0) {
-      return [...threads.selectedThreadIds];
-    }
-    return threads.activeThreadId ? [threads.activeThreadId] : [];
+    return threadActionTargets(threads.selectedThreadIds, threads.activeThreadId);
   }
 
   function keyFor(action: string): string {
@@ -383,7 +381,7 @@ export function useKeyboard() {
         const thread = threads.find(id);
         return (thread?.unreadCount ?? 0) > 0;
       });
-      void actions.setRead(ids, anyUnread);
+      void actions.setRead(ids, anyUnread, { undo: true });
       return true;
     }
 
@@ -426,7 +424,10 @@ export function useKeyboard() {
     }
 
     if (threadId && matches(event, 'pin')) {
-      void actions.togglePinned(threadId);
+      const ids = targetIds();
+      if (threads.selectedThreadIds.length > 0) {
+        void actions.setPinned(ids, !ids.every(id => threads.find(id)?.isStarred));
+      } else void actions.togglePinned(threadId);
       return true;
     }
 
@@ -447,7 +448,8 @@ export function useKeyboard() {
     }
 
     if (threadId && matches(event, 'toggleMute')) {
-      void actions.setMuted(threadId, !threads.find(threadId)?.isMuted);
+      const ids = targetIds();
+      void actions.setMuted(ids, !ids.every(id => threads.find(id)?.isMuted));
       return true;
     }
 

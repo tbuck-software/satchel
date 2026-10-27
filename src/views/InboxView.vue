@@ -9,7 +9,7 @@ import { useThreadActions } from '@/composables/useThreadActions';
 import { useToast } from '@/composables/useToast';
 import { useAccountsStore } from '@/stores/accounts';
 import { useConnectionStore } from '@/stores/connection';
-import { useSettingsStore, type InboxSenderBucket } from '@/stores/settings';
+import { useSettingsStore } from '@/stores/settings';
 import { useListSearchStore } from '@/stores/listSearch';
 import { useThreadsStore, type NewSenderDomainSuggestion, type NewSenderGroup } from '@/stores/threads';
 import { useTopicsStore } from '@/stores/topics';
@@ -17,7 +17,6 @@ import { THREAD_LIST_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
 import { useFollowUpsStore } from '@/stores/followUps';
 import { formatListTime } from '@/utils/listTime';
 import { NEW_SENDER_PREVIEW_LIMIT } from '@/utils/threadList';
-import type { ThreadCategory } from '@/types/mail';
 import type { WorkflowState } from '@/types/workflow';
 import SmartBucketIcon from '@/components/mail/SmartBucketIcon.vue';
 import ThreadGroupList from '@/components/mail/ThreadGroupList.vue';
@@ -46,7 +45,7 @@ const ThreadView = defineAsyncComponent({
   delay: 80,
 });
 const TopicDetail = defineAsyncComponent(() => import('@/components/topics/TopicDetail.vue'));
-const SnoozePicker = defineAsyncComponent(() => import('@/components/navigation/SnoozePicker.vue'));
+const SelectionToolbar = defineAsyncComponent(() => import('@/components/mail/SelectionToolbar.vue'));
 // The search machinery loads with the first query, not with the Inbox.
 const ListSearchResults = defineAsyncComponent(() => import('@/components/mail/ListSearchResults.vue'));
 
@@ -277,8 +276,6 @@ const listCount = computed(() => {
   if (smartInboxActive.value) return threads.smartInboxTotalCount;
   return threads.visibleThreads.length;
 });
-const selectedCategory = ref<ThreadCategory>('updates');
-const rememberSelectedSenders = ref(false);
 
 const categoryCounts = computed(() => {
   const buckets = { all: 0, personal: 0, updates: 0, promotions: 0, social: 0 };
@@ -313,20 +310,6 @@ const categoryFilterVisible = computed(
     && threads.mailboxFilter.value === 'inbox',
 );
 
-const classificationOptions = computed<Array<{
-  label: string;
-  category: ThreadCategory;
-  senderBucket: InboxSenderBucket;
-}>>(() => [
-  { label: t('thread.bucket.personal'), category: 'personal', senderBucket: 'personal' },
-  { label: t('thread.bucket.notifications'), category: 'updates', senderBucket: 'notifications' },
-  { label: t('thread.bucket.newsletter'), category: 'promotions', senderBucket: 'newsletter' },
-]);
-
-const selectedCountLabel = computed(() => {
-  const count = threads.selectedThreadIds.length;
-  return t('inbox.mailCount', count);
-});
 const bulkBusy = ref(false);
 
 const mailboxSectionLabelKeys: Record<string, string> = {
@@ -628,10 +611,30 @@ function leaveKeyboardLevel(): boolean {
   return false;
 }
 
+async function focusRestoredThread(threadId: string): Promise<boolean> {
+  const key = `thread:${threadId}`;
+  if (!keyboardTargets.value.some(target => target.key === key)) {
+    // A smart-folder action can close its folder when the last member leaves.
+    const bucket = threads.smartInboxBuckets.find(entry => entry.threads.some(thread => thread.id === threadId));
+    if (bucket) threads.openSmartBucket(bucket.id);
+    const group = threads.similarThreadGroups.find(entry => entry.threads.some(thread => thread.id === threadId));
+    if (group) threads.openSimilarGroup(group.id);
+    await nextTick();
+  }
+  if (!keyboardTargets.value.some(target => target.key === key)) return false;
+  keyboardNavigationActive.value = false;
+  await nextTick();
+  keyboardFocusKey.value = key;
+  keyboardNavigationActive.value = true;
+  await nextTick();
+  return true;
+}
+
 onBeforeUnmount(registerListKeyboardNavigation({
   move: moveKeyboardFocus,
   open: openKeyboardFocus,
   back: leaveKeyboardLevel,
+  focusThread: focusRestoredThread,
 }));
 
 // These screens are store state rather than routes. Register each level with
@@ -661,44 +664,6 @@ onBeforeUnmount(ui.registerBackNavigation({
   isOpen: () => ui.isSinglePane && Boolean(topicsStore.activeTopicId),
   dismiss: () => topicsStore.closeTopicDetail(),
 }));
-
-async function classifySelected() {
-  const option = classificationOptions.value.find((entry) => entry.category === selectedCategory.value);
-  if (!option || threads.selectedThreadIds.length === 0 || bulkBusy.value) {
-    return;
-  }
-
-  const selectedThreads = threads.selectedThreads;
-  bulkBusy.value = true;
-  const applied = await threadActions.attempt(async () => {
-    // Wait for every write, including failures, before releasing the selection.
-    const outcomes = await Promise.allSettled(
-      selectedThreads.map((thread) => rememberSelectedSenders.value
-        ? threads.setSenderCategory(thread.id, option.category, option.senderBucket)
-        : threads.setThreadCategory(thread.id, option.category)),
-    );
-    const failed = outcomes.find((outcome) => outcome.status === 'rejected');
-    if (failed?.status === 'rejected') throw failed.reason;
-  });
-  bulkBusy.value = false;
-  if (!applied) return;
-  threads.clearSelection();
-  toast.success(t('inbox.classifiedToast', selectedThreads.length));
-}
-
-const bulkSnoozePickerOpen = ref(false);
-const bulkSnoozeIds = ref<string[]>([]);
-
-function openBulkSnooze() {
-  bulkSnoozeIds.value = [...threads.selectedThreadIds];
-  bulkSnoozePickerOpen.value = bulkSnoozeIds.value.length > 0;
-}
-
-async function applyBulkSnooze(date: string) {
-  bulkSnoozePickerOpen.value = false;
-  await threadActions.snoozeAt(bulkSnoozeIds.value, date);
-  bulkSnoozeIds.value = [];
-}
 
 async function onBucketAction(payload: { threadIds: string[]; action: 'done' | 'read' }) {
   if (payload.action === 'done') {
@@ -970,38 +935,7 @@ function acceptExistingSenders() {
         </template>
       </nav>
 
-      <div v-if="!activeBundle && threads.selectedThreadIds.length > 0" class="selection-tools no-drag">
-        <span class="selection-count">{{ selectedCountLabel }}</span>
-        <select v-model="selectedCategory" class="selection-select" :aria-label="$t('inbox.classifyAs')">
-          <option
-            v-for="option in classificationOptions"
-            :key="option.category"
-            :value="option.category"
-          >
-            {{ option.label }}
-          </option>
-        </select>
-        <label class="remember-senders">
-          <input v-model="rememberSelectedSenders" type="checkbox" />
-          <span>{{ $t('inbox.rememberSender') }}</span>
-        </label>
-        <AppButton variant="primary" size="sm" :disabled="bulkBusy" @click="void classifySelected()">
-          {{ $t('inbox.classify') }}
-        </AppButton>
-        <IconButton :title="$t('inbox.snooze')" :disabled="bulkBusy" @click="openBulkSnooze">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2.2 1.3"/></svg>
-        </IconButton>
-        <IconButton :title="$t('common.done')" :disabled="bulkBusy" @click="void threadActions.archive([...threads.selectedThreadIds])">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.4l2.5 2.5 6.5-6.8"/></svg>
-        </IconButton>
-      </div>
-
-      <SnoozePicker
-        v-if="bulkSnoozePickerOpen"
-        :open="bulkSnoozePickerOpen"
-        @choose="applyBulkSnooze"
-        @close="bulkSnoozePickerOpen = false"
-      />
+      <SelectionToolbar v-if="threads.selectedThreadIds.length > 0" :busy="bulkBusy" />
 
       <!-- Thread list cell: topics folder on top, the virtualised list below.
            Search results cover both; the list stays mounted underneath so
@@ -1245,53 +1179,6 @@ function acceptExistingSenders() {
 .category-tab.active .count {
   background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
   color: var(--accent-primary);
-}
-
-.selection-tools {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color-muted);
-  background: color-mix(in srgb, var(--accent-primary) 7%, var(--bg-base));
-  overflow-x: auto;
-}
-
-.selection-count {
-  flex: 0 0 auto;
-  color: var(--text-primary);
-  font-size: var(--font-size-xs);
-  font-weight: var(--weight-bold);
-}
-
-.selection-select {
-  flex: 0 0 auto;
-  min-width: 132px;
-  height: 32px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
-  color: var(--text-primary);
-  padding: 0 8px;
-  font-size: var(--font-size-xs);
-}
-
-.remember-senders {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-  white-space: nowrap;
-}
-
-.remember-senders input {
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: var(--accent-primary);
 }
 
 </style>

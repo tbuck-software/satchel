@@ -50,3 +50,46 @@ test('keeps a text selection in the mail while the shortcuts work again', async 
   await page.keyboard.press('j');
   await expect(page.locator('.list-target--keyboard-focused, .thread-row--keyboard-focused')).toHaveCount(1);
 });
+
+for (const undo of ['keyboard', 'toast'] as const) {
+  test(`undo restores the visible row, reader and focus through ${undo}`, async ({ page }) => {
+    const row = page.locator('[data-list-target-key="thread:th-7"]');
+    await page.keyboard.press('e');
+    await expect(row).toHaveCount(0);
+    await page.keyboard.press('j');
+    await page.keyboard.press('k');
+    if (undo === 'keyboard') await page.keyboard.press('z');
+    else await page.locator('.undo-fab__main').first().click();
+    await expect(row).toBeFocused();
+    await expect(row).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('h1', { hasText: 'Google AI Studio quota warning' })).toBeVisible();
+  });
+}
+
+for (const trigger of ['keyboard', 'reader'] as const) {
+  test(`bulk Done through ${trigger} and undo keep the same selection`, async ({ page }) => {
+    await page.keyboard.press('k');
+    await page.keyboard.press('k');
+    await page.keyboard.press('x');
+    await page.keyboard.press('j');
+    await page.keyboard.press('x');
+    await page.keyboard.press('j');
+    await page.keyboard.press('x');
+    const bar = page.locator('.selection-tools');
+    await expect(bar.getByText('3 selected', { exact: true })).toBeVisible();
+    await expect(page.locator('.thread-toolbar__done')).toHaveText('Done (3)');
+    if (trigger === 'keyboard') await page.keyboard.press('d');
+    else await page.locator('.thread-toolbar__done').click();
+    for (const id of ['th-1', 'th-6', 'th-7']) {
+      await expect(page.locator(`[data-list-target-key="thread:${id}"]`)).toHaveCount(0);
+    }
+    await page.keyboard.press('j');
+    await page.keyboard.press('z');
+    await expect(bar.getByText('3 selected', { exact: true })).toBeVisible();
+    await expect(page.locator('[data-list-target-key="thread:th-1"]')).toBeFocused();
+    for (const id of ['th-1', 'th-6', 'th-7']) {
+      await expect(page.locator(`[data-list-target-key="thread:${id}"]`)).toHaveAttribute('aria-selected', 'true');
+    }
+    await expect(page.locator('h1', { hasText: 'Staging login 500 after deployment' })).toBeVisible();
+  });
+}

@@ -2,6 +2,7 @@ export interface ListKeyboardNavigationController {
   move: (delta: 1 | -1, extendSelection?: boolean) => boolean;
   open: () => boolean;
   back: () => boolean;
+  focusThread?: (threadId: string) => boolean | Promise<boolean>;
 }
 
 /*
@@ -43,4 +44,9 @@ export function openListKeyboardFocus(): boolean {
 
 export function leaveListKeyboardLevel(): boolean {
   return activeController()?.back() ?? false;
+}
+
+/** Reveal a restored mail through the mounted list, including virtual rows. */
+export async function focusListThread(threadId: string): Promise<boolean> {
+  return await activeController()?.focusThread?.(threadId) ?? false;
 }

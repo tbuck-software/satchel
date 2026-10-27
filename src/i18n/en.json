@@ -3284,9 +3284,12 @@
       "done": "Email done | {count} emails done",
       "fallback": "{label} | {count} emails → {label}",
       "inbox": "Email in the inbox | {count} emails in the inbox",
+      "muteChanged": "Mute updated",
       "permanentlyDeleted": "Thread permanently deleted | {count} threads permanently deleted",
+      "pinChanged": "Pin updated",
       "pinFailed": "Pinning failed.",
       "priorityFailed": "Changing the priority failed.",
+      "readChanged": "Read status changed",
       "removeFromTopicFailed": "Removing failed.",
       "removedFromTopic": "Removed from topic “{topic}”",
       "restoreEmpty": "No conversations could be restored.",
@@ -3309,6 +3312,12 @@
       "sender": "Sender",
       "senderMenuLabel": "File sender {email}",
       "senderToRecipient": "{sender} to {recipient}"
+    },
+    "selection": {
+      "action": "{action} ({count})",
+      "done": "Done ({count})",
+      "file": "File…",
+      "label": "{count} selected"
     },
     "state": {
       "aside": "Set aside",

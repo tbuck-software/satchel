@@ -16,6 +16,7 @@ const harness = vi.hoisted(() => {
   };
   return {
     thread,
+    selectedThreadIds: [] as string[],
     messages: [] as Array<Record<string, unknown>>,
     messagesLoading: false,
     messagesError: null as string | null,
@@ -53,6 +54,7 @@ vi.mock('@/stores/mailboxes', () => ({
 vi.mock('@/stores/threads', () => ({
   useThreadsStore: () => ({
     threads: [harness.thread],
+    selectedThreadIds: harness.selectedThreadIds,
     find(this: { threads: Array<{ id: string }> }, id: string) {
       return this.threads.find((thread) => thread.id === id);
     },
@@ -131,6 +133,7 @@ function render() {
 beforeEach(() => {
   vi.clearAllMocks();
   harness.thread.workflowState = 'inbox';
+  harness.selectedThreadIds = [];
   harness.messages = [];
   harness.messagesLoading = false;
   harness.loadMessages.mockResolvedValue(undefined);
@@ -154,6 +157,16 @@ describe('mobile Done action', () => {
     await flushPromises();
 
     expect(wrapper.emitted('back')).toHaveLength(1);
+  });
+
+  it('shows and acts on the selection even when another conversation is open', async () => {
+    harness.selectedThreadIds = ['thread-2', 'thread-3', 'thread-4'];
+    const wrapper = render();
+    await flushPromises();
+    await wrapper.get('.bar-done').trigger('click');
+    expect(wrapper.get('.bar-done').text()).toBe('Done (3)');
+    expect(harness.archive).toHaveBeenCalledWith(['thread-2', 'thread-3', 'thread-4']);
+    wrapper.unmount();
   });
 
   it('does not wait for a failed background transition before leaving', async () => {

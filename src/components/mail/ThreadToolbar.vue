@@ -18,6 +18,7 @@ const props = withDefaults(
   defineProps<{
     threadId: string;
     subject: string;
+    selectionCount?: number;
     isUnread?: boolean;
     isStarred?: boolean;
     isAside?: boolean;
@@ -42,6 +43,7 @@ const props = withDefaults(
     total?: number;
   }>(),
   {
+    selectionCount: 0,
     isUnread: false,
     isStarred: false,
     isAside: false,
@@ -108,6 +110,10 @@ const SUBMENU_LABELS: Record<Submenu, string> = {
   export: 'thread.toolbar.exportTo',
 };
 const submenuLabel = computed(() => (activeSubmenu.value ? t(SUBMENU_LABELS[activeSubmenu.value]) : ''));
+
+function targetLabel(action: string): string {
+  return props.selectionCount ? t('thread.selection.action', { action, count: props.selectionCount }) : action;
+}
 
 function openMenu() {
   const rect = moreRef.value?.getBoundingClientRect();
@@ -224,19 +230,19 @@ function runExport(format: ExportFormat) {
         v-else
         variant="primary"
         class="thread-toolbar__done"
-        :title="$t('common.done')"
+        :title="targetLabel($t('common.done'))"
         :shortcut="hint('markDone')"
         @click="emit('archive')"
       >
         <template #icon>
           <AppIcon size="lg"><path d="M3 8.5l3.2 3.2L13 5"/></AppIcon>
         </template>
-        {{ $t('common.done') }}
+        {{ selectionCount ? $t('thread.selection.done', { count: selectionCount }) : $t('common.done') }}
       </AppButton>
-      <IconButton size="lg" :title="$t('thread.toolbar.setReminder')" :shortcut="hint('moveSnoozed')" @click="emit('snooze')">
+      <IconButton size="lg" :title="targetLabel($t('thread.toolbar.setReminder'))" :shortcut="hint('moveSnoozed')" @click="emit('snooze')">
         <AppIcon size="lg"><circle cx="8" cy="8" r="6"/><path d="M8 4v4l2.5 1.5"/></AppIcon>
       </IconButton>
-      <IconButton size="lg" tone="danger" :title="$t('common.delete')" :shortcut="hint('trash')" @click="emit('delete')">
+      <IconButton size="lg" tone="danger" :title="targetLabel($t('common.delete'))" :shortcut="hint('trash')" @click="emit('delete')">
         <AppIcon size="lg"><path d="M2 4h12M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4"/><path d="M13 4v9.5a1.5 1.5 0 01-1.5 1.5h-7A1.5 1.5 0 013 13.5V4"/></AppIcon>
       </IconButton>
     </div>
@@ -318,7 +324,7 @@ function runExport(format: ExportFormat) {
         <template #icon><AppIcon :grid="20"><path d="M3 5h14M3 10h14M3 15h14" /><circle cx="7" cy="5" r="1.5" /><circle cx="13" cy="10" r="1.5" /><circle cx="9" cy="15" r="1.5" /></AppIcon></template>
       </MenuItem>
       <MenuItem
-        :label="isUnread ? $t('thread.actions.markRead') : $t('thread.actions.markUnread')"
+        :label="targetLabel(isUnread ? $t('thread.actions.markRead') : $t('thread.actions.markUnread'))"
         :aria-keyshortcuts="hint('toggleRead')?.aria"
         @mouseenter="closeSubmenu"
         @select="run('toggleRead')"
@@ -327,7 +333,7 @@ function runExport(format: ExportFormat) {
         <template v-if="hint('toggleRead')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('toggleRead')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
-        :label="isStarred ? $t('thread.actions.unpin') : $t('thread.actions.pin')"
+        :label="targetLabel(isStarred ? $t('thread.actions.unpin') : $t('thread.actions.pin'))"
         :aria-keyshortcuts="hint('pin')?.aria"
         @mouseenter="closeSubmenu"
         @select="run('togglePin')"
@@ -336,7 +342,7 @@ function runExport(format: ExportFormat) {
         <template v-if="hint('pin')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('pin')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
-        :label="isAside ? $t('thread.actions.moveToInbox') : $t('thread.actions.setAside')"
+        :label="targetLabel(isAside ? $t('thread.actions.moveToInbox') : $t('thread.actions.setAside'))"
         :aria-keyshortcuts="hint(isAside ? 'moveInbox' : 'setAside')?.aria"
         @mouseenter="closeSubmenu"
         @select="run('setAside')"
@@ -345,7 +351,7 @@ function runExport(format: ExportFormat) {
         <template v-if="hint(isAside ? 'moveInbox' : 'setAside')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint(isAside ? 'moveInbox' : 'setAside')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
-        :label="isMuted ? $t('thread.actions.unmute') : $t('thread.actions.mute')"
+        :label="targetLabel(isMuted ? $t('thread.actions.unmute') : $t('thread.actions.mute'))"
         :aria-keyshortcuts="hint('toggleMute')?.aria"
         @mouseenter="closeSubmenu"
         @select="run('toggleMuted')"
@@ -366,7 +372,7 @@ function runExport(format: ExportFormat) {
         <template #icon><AppIcon :grid="20"><path d="M6 4.5A6.5 6.5 0 0 1 16.5 10M5 7H2.5v4H5l3 3V6L5 7Z" /><path d="m4 3 13 14" /></AppIcon></template>
       </MenuItem>
       <MenuItem
-        :label="$t('thread.toolbar.move')"
+        :label="targetLabel($t('thread.toolbar.move'))"
         submenu
         :expanded="activeSubmenu === 'move'"
         @mouseenter="openSubmenu('move', $event)"
@@ -375,7 +381,7 @@ function runExport(format: ExportFormat) {
         <template #icon><AppIcon :grid="20"><path d="M2.5 6h6l1.7 2H17v8.5H2.5V6Z" /></AppIcon></template>
       </MenuItem>
       <MenuItem
-        :label="$t('thread.toolbar.markSpam')"
+        :label="targetLabel($t('thread.toolbar.markSpam'))"
         tone="danger"
         :aria-keyshortcuts="hint('markSpam')?.aria"
         @mouseenter="closeSubmenu"
@@ -479,7 +485,7 @@ function runExport(format: ExportFormat) {
     @close="closeSubmenu"
   >
     <template v-if="activeSubmenu === 'organize'">
-      <MenuItem :label="$t('thread.actions.addToTopic')" :aria-keyshortcuts="hint('addToTopic')?.aria" @select="run('addToTopic')">
+      <MenuItem :label="targetLabel($t('thread.actions.addToTopic'))" :aria-keyshortcuts="hint('addToTopic')?.aria" @select="run('addToTopic')">
         <template v-if="hint('addToTopic')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('addToTopic')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem :label="$t('thread.toolbar.editTags')" @select="runOrganize('tags')" />

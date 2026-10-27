@@ -1,3 +1,5 @@
+import { nextTick } from 'vue';
+import { focusListThread } from './useListKeyboardNavigation';
 import { useRoute, useRouter } from 'vue-router';
 import type { WorkflowState } from '@/types/workflow';
 import {
@@ -72,6 +74,24 @@ export function useThreadActions() {
     });
   }
 
+  async function restorePlace(threadIds: string[]) {
+    const ids = [...new Set(threadIds)];
+    const first = ids[0];
+    if (!first) return;
+    for (const id of ids) {
+      if (!threads.find(id)) await threads.ensureThreadLoaded(id);
+    }
+    // Flush projection watchers before restoring selection. Revealing a bucket
+    // can clear selection too, so the list gets its turn before we reselect.
+    await nextTick();
+    await focusListThread(first);
+    threads.selectThread(first);
+    threads.selectedThreadIds = ids.length > 1 ? ids : [];
+    if (route?.name === 'thread') {
+      await router?.replace({ name: 'thread', params: { id: first } });
+    }
+  }
+
   async function restoreStatesNow(snapshot: StateSnapshot[]) {
     if (snapshot.length === 0) return false;
     // Batch only threads whose previous state and wake time both match.
@@ -101,6 +121,8 @@ export function useThreadActions() {
       return false;
     }
     await refreshLists();
+    const restoredIds = new Set(restored.flat());
+    await restorePlace(snapshot.filter(entry => restoredIds.has(entry.threadId)).map(entry => entry.threadId));
     return true;
   }
 
@@ -346,6 +368,7 @@ export function useThreadActions() {
             try {
               await backendUndoTrash(undoToken);
               await refreshLists();
+              await restorePlace(receipt.undo_thread_ids);
               return true;
             } catch (err) {
               toast.error(err instanceof Error ? err.message : t('thread.result.restoreFailed'));
@@ -462,6 +485,18 @@ export function useThreadActions() {
     );
     if (!applied) return;
 
+    toast.success(t('thread.result.pinChanged'), {
+      timeout: UNDO_TIMEOUT_MS,
+      action: {
+        label: t('thread.actions.undo'),
+        present: 'fab',
+        handler: () => attempt(async () => {
+          await threads.setThreadsStarred(targets, !pinned);
+          await threads.refreshHead();
+          await restorePlace(threadIds);
+        }),
+      },
+    });
     threads.deselectThreads(threadIds);
     await threads.refreshHead();
   }
@@ -497,8 +532,51 @@ export function useThreadActions() {
     );
   }
 
-  const setRead = (ids: string[], read: boolean) => attempt(() => threads.setThreadsRead(ids, read));
-  const setMuted = (id: string, muted: boolean) => attempt(() => threads.setThreadMuted(id, muted));
+  async function setRead(ids: string[], read: boolean, options: { undo?: boolean } = {}) {
+    const changed = ids.filter(id => {
+      const thread = threads.find(id);
+      return thread && (thread.unreadCount > 0) === read;
+    });
+    const applied = await attempt(() => threads.setThreadsRead(ids, read));
+    if (applied && options.undo && changed.length > 0) {
+      toast.success(t('thread.result.readChanged'), {
+        timeout: UNDO_TIMEOUT_MS,
+        action: {
+          label: t('thread.actions.undo'),
+          present: 'fab',
+          handler: () => attempt(async () => {
+            await threads.setThreadsRead(changed, !read);
+            await threads.refreshHead();
+            await restorePlace(ids);
+          }),
+        },
+      });
+    }
+    return applied;
+  }
+  async function setMuted(target: string | string[], muted: boolean) {
+    const ids = typeof target === 'string' ? [target] : target;
+    const changed = ids.filter(id => {
+      const thread = threads.find(id);
+      return thread && Boolean(thread.isMuted) !== muted;
+    });
+    const applied = await attempt(() => Promise.all(changed.map(id => threads.setThreadMuted(id, muted))));
+    if (applied && changed.length > 0) {
+      toast.success(t('thread.result.muteChanged'), {
+        timeout: UNDO_TIMEOUT_MS,
+        action: {
+          label: t('thread.actions.undo'),
+          present: 'fab',
+          handler: () => attempt(async () => {
+            await Promise.all(changed.map(id => threads.setThreadMuted(id, !muted)));
+            await threads.refreshHead();
+            await restorePlace(ids);
+          }),
+        },
+      });
+    }
+    return applied;
+  }
 
   return {
     attempt,

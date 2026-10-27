@@ -13,6 +13,7 @@ const props = defineProps<{
   isStarred: boolean;
   isAside: boolean;
   isDone: boolean;
+  selectionCount?: number;
 }>();
 
 const emit = defineEmits<{
@@ -130,7 +131,7 @@ function sheetAction(action: SheetAction) {
           <path d="M3 8.5l3.5 3.5L13 5" />
         </AppIcon>
       </template>
-      {{ $t('common.done') }}
+      {{ selectionCount ? $t('thread.selection.done', { count: selectionCount }) : $t('common.done') }}
     </AppButton>
   </div>
 

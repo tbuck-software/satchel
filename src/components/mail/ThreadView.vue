@@ -25,6 +25,7 @@ import ErrorState from '@/components/ui/ErrorState.vue';
 import ThreadMessageList from './ThreadMessageList.vue';
 import ThreadPaneSkeleton from './ThreadPaneSkeleton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { threadActionTargets } from '@/composables/threadActionTargets';
 import ThreadToolbar from './ThreadToolbar.vue';
 import ThreadPrintSheet from './ThreadPrintSheet.vue';
 import ThreadMobileActions from './ThreadMobileActions.vue';
@@ -101,7 +102,6 @@ const threadTopics = computed(() => {
     .map((id) => topicsStore.byId(id))
     .filter((topic): topic is NonNullable<typeof topic> => topic !== undefined);
 });
-const isUnread = computed(() => (thread.value?.unreadCount ?? 0) > 0);
 const messages = computed(() => (props.threadId ? messagesStore.getByThread(props.threadId) : []));
 const messagesLoading = computed(() =>
   props.threadId ? messagesStore.isLoading?.(props.threadId) ?? false : false,
@@ -556,15 +556,21 @@ async function reloadMessages() {
   await messagesStore.loadByThread(props.threadId);
 }
 
+const actionIds = computed(() => threadActionTargets(threadsStore.selectedThreadIds, props.threadId));
+const selectionCount = computed(() => threadsStore.selectedThreadIds?.length ?? 0);
+const actionUnread = computed(() => actionIds.value.some(id => (threadsStore.find(id)?.unreadCount ?? 0) > 0));
+const actionPinned = computed(() => actionIds.value.every(id => threadsStore.find(id)?.isStarred));
+const snoozeTargetIds = ref<string[]>([]);
+
 function archiveThread() {
   const current = thread.value;
-  if (!current || current.workflowState === 'done') return;
+  if (!current || (!selectionCount.value && current.workflowState === 'done')) return;
 
   // The shared action applies its optimistic list state before its first await. A
   // routed phone detail can therefore close in the same tap while archive and
   // persistence continue in the background (and roll back with a toast on
   // failure).
-  void threadActions.archive([current.id]);
+  void threadActions.archive(actionIds.value);
   if (props.showBack) {
     emit('back');
   }
@@ -572,7 +578,7 @@ function archiveThread() {
 
 async function moveToInbox() {
   if (!thread.value) return;
-  await threadActions.moveToInbox([thread.value.id]);
+  await threadActions.moveToInbox(actionIds.value);
 }
 
 /**
@@ -589,20 +595,20 @@ async function discardDraft(messageId: string) {
 
 async function deleteThread() {
   if (!thread.value) return;
-  threadsStore.focusNeighborThread(thread.value.id);
   // Shared with the list and the keyboard path: undo toast on success, error
   // toast on failure. Calling the store directly used to reject unhandled,
   // which rolled the thread back into the list without a word.
-  await threadActions.trash([thread.value.id]);
+  await threadActions.trash(actionIds.value);
 }
 
 function snoozeThread() {
+  snoozeTargetIds.value = [...actionIds.value];
   snoozePickerOpen.value = true;
 }
 
 function openTopicPicker() {
   if (!thread.value) return;
-  topicsStore.openPicker({ itemType: 'thread', itemIds: [thread.value.id] });
+  topicsStore.openPicker({ itemType: 'thread', itemIds: actionIds.value });
 }
 
 function openTopic(topicId: string) {
@@ -617,7 +623,7 @@ function removeFromTopic(topicId: string) {
 function applySnooze(date: string) {
   if (!thread.value) return;
   snoozePickerOpen.value = false;
-  void threadActions.snoozeAt([thread.value.id], date);
+  void threadActions.snoozeAt(snoozeTargetIds.value, date);
 }
 
 async function organizeThread(kind: 'tags' | 'assignee' | 'sharing') {
@@ -661,7 +667,7 @@ async function organizeThread(kind: 'tags' | 'assignee' | 'sharing') {
 
 async function toggleReadState() {
   if (!thread.value) return;
-  await threadActions.setRead([thread.value.id], isUnread.value);
+  await threadActions.setRead(actionIds.value, actionUnread.value, { undo: true });
 }
 
 function replyThread() {
@@ -681,25 +687,26 @@ function resendThread() {
 
 async function toggleMuted() {
   if (!thread.value) return;
-  await threadActions.setMuted(thread.value.id, !thread.value.isMuted);
+  await threadActions.setMuted(actionIds.value, !actionIds.value.every(id => threadsStore.find(id)?.isMuted));
 }
 
 async function markSpam() {
   if (!thread.value) return;
-  await threadActions.markSpam([thread.value.id]);
+  await threadActions.markSpam(actionIds.value);
 }
 
 async function togglePin() {
   if (!thread.value) return;
-  await threadActions.togglePinned(thread.value.id);
+  if (selectionCount.value) await threadActions.setPinned(actionIds.value, !actionPinned.value);
+  else await threadActions.togglePinned(thread.value.id);
 }
 
 async function toggleAside() {
   if (!thread.value) return;
-  if (thread.value.workflowState === 'aside') {
-    await threadActions.moveToInbox([thread.value.id]);
+  if (!selectionCount.value && thread.value.workflowState === 'aside') {
+    await threadActions.moveToInbox(actionIds.value);
   } else {
-    await threadActions.setAside([thread.value.id]);
+    await threadActions.setAside(actionIds.value);
   }
 }
 
@@ -741,7 +748,7 @@ async function moveThread(targetFolderId: string) {
   const currentId = thread.value.id;
   threadsStore.focusNeighborThread(currentId);
   await threadActions.moveToFolder(
-    [currentId],
+    actionIds.value,
     targetFolderId,
     target?.label,
   );
@@ -927,11 +934,12 @@ function showEntireThread() {
       <ThreadToolbar
         :thread-id="thread.id"
         :subject="thread.subject"
-        :is-unread="isUnread"
-        :is-starred="thread.isStarred"
-        :is-aside="thread.workflowState === 'aside'"
-        :is-done="thread.workflowState === 'done'"
-        :is-muted="thread.isMuted"
+        :is-unread="actionUnread"
+        :selection-count="selectionCount"
+        :is-starred="selectionCount ? actionPinned : thread.isStarred"
+        :is-aside="!selectionCount && thread.workflowState === 'aside'"
+        :is-done="!selectionCount && thread.workflowState === 'done'"
+        :is-muted="actionIds.every(id => threadsStore.find(id)?.isMuted)"
         :show-back="showBack"
         :position="props.position ?? 0"
         :total="props.total ?? 0"
@@ -1086,10 +1094,11 @@ function showEntireThread() {
     <ThreadMobileActions
       :visible="ui.isMobile"
       :can-reply="canReply"
-      :is-unread="isUnread"
-      :is-starred="Boolean(thread.isStarred)"
-      :is-aside="thread.workflowState === 'aside'"
-      :is-done="thread.workflowState === 'done'"
+      :is-unread="actionUnread"
+      :selection-count="selectionCount"
+      :is-starred="selectionCount ? actionPinned : Boolean(thread.isStarred)"
+      :is-aside="!selectionCount && thread.workflowState === 'aside'"
+      :is-done="!selectionCount && thread.workflowState === 'done'"
       @archive="archiveThread"
       @move-to-inbox="void moveToInbox()"
       @reply="replyThread"

@@ -78,6 +78,14 @@ describe('thread toolbar filing actions', () => {
     expect(wrapper.text()).toContain('Back to the inbox');
   });
 
+  it('names the selection targeted by primary and destructive actions', async () => {
+    const wrapper = render({ selectionCount: 3 });
+    expect(wrapper.get('.thread-toolbar__done').text()).toBe('Done (3)');
+    expect(wrapper.find('button[aria-label="Delete (3)"]').exists()).toBe(true);
+    await wrapper.get('.thread-toolbar__done').trigger('click');
+    expect(wrapper.emitted('archive')).toHaveLength(1);
+  });
+
   it('turns the primary action into its inverse on a done thread', async () => {
     const open = render();
     await open.get('.thread-toolbar__done').trigger('click');
