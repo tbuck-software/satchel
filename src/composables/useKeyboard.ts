@@ -6,6 +6,7 @@ import { useThreadsStore } from '@/stores/threads';
 import { useTopicsStore } from '@/stores/topics';
 import { useComposerStore } from '@/stores/composer';
 import { useThreadActions } from './useThreadActions';
+import { useThreadReply } from './useThreadReply';
 import { useMessageLinks } from './useMessageLinks';
 import { useUndoFab } from './useUndoFab';
 import { activeThreadReaderCommands } from './useThreadReaderCommands';
@@ -66,6 +67,7 @@ export function useKeyboard() {
   const threads = useThreadsStore();
   const topics = useTopicsStore();
   const composer = useComposerStore();
+  const threadReply = useThreadReply();
   const actions = useThreadActions();
   const messageLinks = useMessageLinks();
   const undoFab = useUndoFab();
@@ -345,7 +347,8 @@ export function useKeyboard() {
 
     if (matches(event, 'reply')) {
       if (!threadId) return false;
-      composer.openReply(threadId);
+      // An unsent draft in the thread is the reply; `r` goes back into it.
+      threadReply.reply(threadId);
       return true;
     }
 

@@ -3,6 +3,7 @@ import { useRouter } from 'vue-router';
 import { useThreadsStore } from '@/stores/threads';
 import { useAccountsStore } from '@/stores/accounts';
 import { useComposerStore } from '@/stores/composer';
+import { useThreadReply } from '@/composables/useThreadReply';
 import { useSettingsStore } from '@/stores/settings';
 import { useTopicsStore } from '@/stores/topics';
 import { useThreadActions } from '@/composables/useThreadActions';
@@ -42,6 +43,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
   const threads = useThreadsStore();
   const accounts = useAccountsStore();
   const composer = useComposerStore();
+  const threadReply = useThreadReply();
   const settings = useSettingsStore();
   const topics = useTopicsStore();
   const threadActions = useThreadActions();
@@ -205,7 +207,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         context: 'mail' as const,
         shortcut: hint('reply'),
         keywords: t('commands.keywords.reply'),
-        run: () => threads.activeThreadId && composer.openReply(threads.activeThreadId),
+        run: () => threads.activeThreadId && threadReply.reply(threads.activeThreadId),
       },
       {
         id: 'thread:reply-all',

@@ -3,7 +3,7 @@ import CardButton from '@/components/ui/CardButton.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { saveAttachmentWithDialog } from '@/utils/saveAttachment';
-import { useComposerStore } from '@/stores/composer';
+import { useThreadReply } from '@/composables/useThreadReply';
 import { useMessagesStore } from '@/stores/messages';
 import { useTopicsStore, type TopicFile, type TopicTimelineItem } from '@/stores/topics';
 import { useToast } from '@/composables/useToast';
@@ -34,7 +34,7 @@ const emit = defineEmits<{
 
 const topics = useTopicsStore();
 const messagesStore = useMessagesStore();
-const composer = useComposerStore();
+const threadReply = useThreadReply();
 const toast = useToast();
 const { locale, t } = useI18n();
 
@@ -472,7 +472,7 @@ function openThread(threadId: string) {
 
 /** Reply without leaving the topic — the composer opens on the thread. */
 function replyToThread(threadId: string) {
-  composer.openReply(threadId);
+  threadReply.reply(threadId);
 }
 
 // ── Wiedervorlage: a follow-up date, like snoozing a thread ────────────────
