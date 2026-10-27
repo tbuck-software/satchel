@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, useId } from 'vue';
+import { computed, ref, useId } from 'vue';
 import type { Message } from '@/types/mail';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
+import { useToastClearance } from '@/composables/useToastClearance';
 import { draftPreviewText } from '@/utils/draftPreview';
 import { formatMessageTimestamp } from '@/utils/listTime';
 
@@ -41,10 +42,15 @@ const emit = defineEmits<{
 const previewId = useId();
 const preview = computed(() => draftPreviewText(props.message));
 const savedAt = computed(() => formatMessageTimestamp(props.message.timestamp));
+
+// In place of the reply bar, the card ends the reader in the toast stack's corner.
+const cardRef = ref<HTMLElement | null>(null);
+useToastClearance(cardRef);
 </script>
 
 <template>
   <article
+    ref="cardRef"
     class="draft-card"
     :class="{ 'draft-card--keyboard-focused': props.keyboardFocused }"
     :data-thread-message-id="props.message.id"

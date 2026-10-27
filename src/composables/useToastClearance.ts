@@ -1,8 +1,9 @@
 import { onBeforeUnmount, onMounted, ref, shallowReactive, type Ref } from 'vue';
 
 /**
- * Owners register the whole composer and reply bar. The lower-left toast stack
- * measures their bounds when notifications or layout change, then clears them.
+ * Owners register the whole composer, the reply bar and the draft card. The
+ * lower-left toast stack measures their bounds when notifications or layout
+ * change, then clears them.
  */
 
 export interface ClearanceRect {

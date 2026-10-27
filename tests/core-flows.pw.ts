@@ -422,12 +422,21 @@ async function isUncovered(locator: Locator) {
  */
 test('keeps error toasts off the draft card, the reply bar and the send button', async ({ page }) => {
   await expect(page.locator('.toast--error').first()).toBeVisible();
+  // Queue failures announce themselves for seven seconds. Keep them up until
+  // the composer has opened, so its send row is checked against them.
+  await page.evaluate(async () => {
+    const modulePath = '/src/composables/useToast.ts';
+    const { useToast } = await import(modulePath) as { useToast: () => { state: { toasts: { expiresAt: number }[] } } };
+    for (const item of useToast().state.toasts) item.expiresAt = Date.now() + 60_000;
+  });
   // The active thread carries an unsent draft, so it ends in the draft card.
   const resume = page.locator('.draft-card').getByRole('button', { name: 'Continue editing', exact: true });
   await expect.poll(() => isUncovered(resume)).toBe(true);
 
   await page.setViewportSize({ width: 900, height: 700 });
   await page.getByText('Staging login 500 after deployment', { exact: true }).first().click();
+  // The reader's foot sits in the stack's corner here; the card must win.
+  await expect.poll(() => isUncovered(resume)).toBe(true);
   await resume.click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   await expect(page.locator('.toast--error').first()).toBeVisible();

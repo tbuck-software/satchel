@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Message } from '@/types/mail';
+import { toastObstacleRects } from '@/composables/useToastClearance';
 import ThreadDraftCard from './ThreadDraftCard.vue';
 
 function draft(overrides: Partial<Message> = {}): Message {
@@ -64,5 +65,25 @@ describe('ThreadDraftCard', () => {
 
     await wrapper.setProps({ busy: true });
     expect(discard().attributes('disabled')).toBeDefined();
+  });
+
+  /*
+   * The card replaces the reply bar at the foot of the reader, in the corner
+   * the toast stack starts in. At 900x700 the stack lay on Continue editing.
+   */
+  it('keeps the toast stack off itself while it is mounted', () => {
+    const rect = { top: 540, right: 860, bottom: 700, left: 280, width: 580, height: 160, x: 280, y: 540 };
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        return (this.classList.contains('draft-card') ? rect : { ...rect, width: 0, height: 0 }) as DOMRect;
+      });
+    // Cards the tests above mounted are still registered.
+    const before = toastObstacleRects().length;
+    const wrapper = render();
+    expect(toastObstacleRects()).toHaveLength(before + 1);
+    expect(toastObstacleRects()).toContainEqual(rect);
+    wrapper.unmount();
+    expect(toastObstacleRects()).toHaveLength(before);
+    spy.mockRestore();
   });
 });
