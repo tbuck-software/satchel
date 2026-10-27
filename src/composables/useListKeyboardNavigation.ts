@@ -3,6 +3,19 @@ export interface ListKeyboardNavigationController {
   open: () => boolean;
   back: () => boolean;
   focusThread?: (threadId: string) => boolean | Promise<boolean>;
+  /**
+   * The mails the mail keys (`e`, `s`, `r`, …) act on, for a list that shows
+   * mail the thread store has not selected: search hits, a topic's feed, a
+   * sender under review. Leave it out and the keys act on the store's
+   * selection, as in the Inbox.
+   */
+  targets?: () => string[];
+  /**
+   * The list checks rows in the thread store's selection, as the list search
+   * does over the Inbox: `x`, select-all and Esc work there, and a checked
+   * selection outranks `targets`, which then name only the row in focus.
+   */
+  sharesSelection?: boolean;
 }
 
 /*
@@ -40,6 +53,16 @@ export function moveListKeyboardFocus(delta: 1 | -1, extendSelection = false): b
 
 export function openListKeyboardFocus(): boolean {
   return activeController()?.open() ?? false;
+}
+
+/** The active list's own targets, or null when the thread store's selection applies. */
+export function listKeyboardTargets(): string[] | null {
+  return activeController()?.targets?.() ?? null;
+}
+
+/** Whether the active list's checked rows live in the thread store's selection. */
+export function listKeyboardSharesSelection(): boolean {
+  return activeController()?.sharesSelection ?? false;
 }
 
 export function leaveListKeyboardLevel(): boolean {

@@ -171,30 +171,6 @@
         "keywords": "forward weiterleiten",
         "label": "Weiterleiten"
       },
-      "goCalendar": {
-        "keywords": "go calendar kalender",
-        "label": "Zum Kalender"
-      },
-      "goContacts": {
-        "keywords": "go people contacts kontakte",
-        "label": "Zu Kontakten"
-      },
-      "goDrafts": {
-        "keywords": "go drafts entwuerfe entwürfe",
-        "label": "Zu Entwürfen"
-      },
-      "goFollowUps": {
-        "keywords": "go followups nachfassen warten antwort",
-        "label": "Zu „Warten auf Antwort“"
-      },
-      "goInbox": {
-        "keywords": "go inbox posteingang",
-        "label": "Zur Inbox"
-      },
-      "goOutbox": {
-        "keywords": "go outbox postausgang",
-        "label": "Zum Postausgang"
-      },
       "help": {
         "keywords": "help shortcuts hilfe",
         "label": "Tastaturhilfe anzeigen"
@@ -301,7 +277,8 @@
       "mail": "E-Mail fokussiert",
       "mailbox": "Mailbox fokussiert",
       "navigation": "Navigation"
-    }
+    },
+    "goTo": "{view} öffnen"
   },
   "swipe": {
     "aside": "Beiseitelegen",

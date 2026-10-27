@@ -17,12 +17,28 @@ export interface KeybindingSpec {
    */
   aliasOf?: string;
   /**
-   * A `g` sequence: the route it opens and the label it shares with the
-   * sidebar, so the help, the hint and the palette name it the same way.
-   * `aliasKeys` are other names the view is found by.
+   * A `g` sequence: the route it opens. Its label is the sidebar's
+   * (`viewLabelKey`), so the help, the hint and the palette name it the same way.
    */
-  view?: { route: string; labelKey: string; aliasKeys?: readonly string[] };
+  view?: string;
 }
+
+const VIEW_LABEL_KEYS: Readonly<Record<string, string>> = {
+  'new-senders': 'newSenders.title',
+  calendar: 'nav.calendar',
+  contacts: 'nav.contacts',
+};
+
+/** The name a view shares with the sidebar; the mail lists are `nav.folders.<route>`. */
+export function viewLabelKey(route: string): string {
+  return VIEW_LABEL_KEYS[route] ?? `nav.folders.${route}`;
+}
+
+/** Older names a view is still found by in the palette and the shortcut editor. */
+export const VIEW_ALIAS_KEYS: Readonly<Record<string, readonly string[]>> = {
+  later: ['folders.snoozed', 'folders.waitingForReply'],
+  done: ['folders.archive'],
+};
 
 export const KEYBINDING_SPECS: readonly KeybindingSpec[] = [
   { action: 'openCommandPalette', defaultBinding: ':', context: 'global' },
@@ -57,12 +73,16 @@ export const KEYBINDING_SPECS: readonly KeybindingSpec[] = [
   { action: 'toggleMute', defaultBinding: 'm', context: 'mail' },
   { action: 'markSpam', defaultBinding: '!', context: 'mail' },
   { action: 'print', defaultBinding: 'mod+p', context: 'mail' },
-  { action: 'goInbox', defaultBinding: 'g i', context: 'navigation' },
-  { action: 'goDrafts', defaultBinding: 'g d', context: 'navigation' },
-  { action: 'goOutbox', defaultBinding: 'g o', context: 'navigation' },
-  { action: 'goCalendar', defaultBinding: 'g c', context: 'navigation' },
-  { action: 'goFollowUps', defaultBinding: 'g f', context: 'navigation' },
-  { action: 'goContacts', defaultBinding: 'g p', context: 'navigation' },
+  { action: 'goInbox', defaultBinding: 'g i', context: 'navigation', view: 'inbox' },
+  { action: 'goLater', defaultBinding: 'g l', context: 'navigation', view: 'later' },
+  { action: 'goAside', defaultBinding: 'g b', context: 'navigation', view: 'aside' },
+  { action: 'goDone', defaultBinding: 'g e', context: 'navigation', view: 'done' },
+  { action: 'goSent', defaultBinding: 'g t', context: 'navigation', view: 'sent' },
+  { action: 'goDrafts', defaultBinding: 'g d', context: 'navigation', view: 'drafts' },
+  { action: 'goOutbox', defaultBinding: 'g o', context: 'navigation', view: 'outbox' },
+  { action: 'goNewSenders', defaultBinding: 'g n', context: 'navigation', view: 'new-senders' },
+  { action: 'goCalendar', defaultBinding: 'g c', context: 'navigation', view: 'calendar' },
+  { action: 'goContacts', defaultBinding: 'g p', context: 'navigation', view: 'contacts' },
 ] as const;
 
 export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string>> = Object.freeze(

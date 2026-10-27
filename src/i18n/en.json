@@ -485,9 +485,6 @@
       "mute": "mute silence notifications",
       "oauthGmail": "oauth google sign in login",
       "oauthOutlook": "oauth microsoft sign in login",
-      "openCalendar": "calendar events",
-      "openFollowUps": "followups waiting reply",
-      "openInbox": "inbox list",
       "openSettingsSection": "settings preferences options",
       "pin": "pin flag star",
       "print": "print paper pdf",
@@ -517,9 +514,6 @@
     "oauthOpened": "{provider} sign-in opened in the browser.",
     "oauthOutlook": "Start OAuth (Outlook)",
     "oauthStarted": "{provider} sign-in started: {url}",
-    "openCalendar": "Open calendar",
-    "openFollowUps": "Open Waiting for a reply",
-    "openInbox": "Open inbox",
     "openSettingsSection": "Settings: {section}",
     "pin": "Pin or unpin",
     "printConversation": "Print conversation",
@@ -2950,30 +2944,6 @@
         "keywords": "forward",
         "label": "Forward"
       },
-      "goCalendar": {
-        "keywords": "go calendar",
-        "label": "Go to calendar"
-      },
-      "goContacts": {
-        "keywords": "go people contacts",
-        "label": "Go to contacts"
-      },
-      "goDrafts": {
-        "keywords": "go drafts",
-        "label": "Go to drafts"
-      },
-      "goFollowUps": {
-        "keywords": "go followups waiting reply",
-        "label": "Go to Waiting for a reply"
-      },
-      "goInbox": {
-        "keywords": "go inbox",
-        "label": "Go to inbox"
-      },
-      "goOutbox": {
-        "keywords": "go outbox",
-        "label": "Go to outbox"
-      },
       "help": {
         "keywords": "help shortcuts keys",
         "label": "Show keyboard help"
@@ -3084,6 +3054,7 @@
     },
     "editBindings": "Edit shortcuts",
     "footerHint": "shows actions for the focused email right in the command palette.",
+    "goTo": "Go to {view}",
     "groups": {
       "compose": "Compose",
       "more": "Fixed combinations",
@@ -3105,14 +3076,6 @@
       "inMailList": "above a mail list",
       "inReader": "in the reader",
       "or": "or"
-    },
-    "sequence": {
-      "calendar": "C Calendar",
-      "contacts": "P Contacts",
-      "drafts": "D Drafts",
-      "followUps": "F Waiting for a reply",
-      "inbox": "I Inbox",
-      "outbox": "O Outbox"
     },
     "subtitle": "Everything that matters stays under your fingers.",
     "title": "Keyboard shortcuts"

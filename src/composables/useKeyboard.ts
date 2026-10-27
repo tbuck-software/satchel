@@ -23,9 +23,12 @@ import {
   matchesKeybinding,
   type ShortcutScope,
 } from '@/config/keybindings';
-import { KEYBINDING_SPECS, type KeybindingContext } from '@/config/keybindingDefaults';
+import { KEYBINDING_SPECS, viewLabelKey, type KeybindingContext } from '@/config/keybindingDefaults';
+import { openView } from '@/router/mailViews';
 import {
   leaveListKeyboardLevel,
+  listKeyboardSharesSelection,
+  listKeyboardTargets,
   moveListKeyboardFocus,
   openListKeyboardFocus,
 } from './useListKeyboardNavigation';
@@ -49,6 +52,8 @@ function isEditableTarget(target: EventTarget | null): boolean {
   const tag = el.tagName.toLowerCase();
   return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
 }
+
+const VIEW_SPECS = KEYBINDING_SPECS.filter((spec) => spec.view);
 
 const CONTEXT_BY_ACTION: ReadonlyMap<string, KeybindingContext> = new Map(
   KEYBINDING_SPECS.map((spec) => [spec.action, spec.context]),
@@ -79,7 +84,18 @@ export function useKeyboard() {
   let scope: ShortcutScope = { route: null, covered: false };
 
   function targetIds(): string[] {
-    return threadActionTargets(threads.selectedThreadIds, threads.activeThreadId);
+    const listTargets = listKeyboardTargets();
+    if (listTargets && !listKeyboardSharesSelection()) return listTargets;
+    return threadActionTargets(
+      threads.selectedThreadIds,
+      listTargets ? listTargets[0] ?? '' : threads.activeThreadId,
+    );
+  }
+
+  /** The one mail single-mail keys (`r`, `*`, Enter) act on. */
+  function currentThreadId(): string {
+    const listTargets = listKeyboardTargets();
+    return listTargets ? listTargets[0] ?? '' : threads.activeThreadId;
   }
 
   function keyFor(action: string): string {
@@ -122,20 +138,13 @@ export function useKeyboard() {
     sequenceTimer = null;
   }
 
-  function goTo(name: 'inbox' | 'drafts' | 'outbox' | 'calendar' | 'followups' | 'contacts') {
+  function goTo(route: string) {
     clearSequence();
-    void router.push({ name });
+    void openView(router, route);
   }
 
   function handleNavigationSequence(event: KeyboardEvent): boolean {
-    const destinations = [
-      { action: 'goInbox', route: 'inbox' as const, label: t('shortcuts.sequence.inbox') },
-      { action: 'goDrafts', route: 'drafts' as const, label: t('shortcuts.sequence.drafts') },
-      { action: 'goOutbox', route: 'outbox' as const, label: t('shortcuts.sequence.outbox') },
-      { action: 'goCalendar', route: 'calendar' as const, label: t('shortcuts.sequence.calendar') },
-      { action: 'goFollowUps', route: 'followups' as const, label: t('shortcuts.sequence.followUps') },
-      { action: 'goContacts', route: 'contacts' as const, label: t('shortcuts.sequence.contacts') },
-    ].filter((destination) => available(destination.action));
+    const destinations = VIEW_SPECS.filter((spec) => available(spec.action));
     const stroke = keyboardEventStroke(event);
 
     if (pendingSequence) {
@@ -144,7 +153,7 @@ export function useKeyboard() {
         (destination) => keyFor(destination.action) === candidate,
       );
       if (match) {
-        goTo(match.route);
+        goTo(match.view!);
         return true;
       }
       clearSequence();
@@ -156,7 +165,10 @@ export function useKeyboard() {
     if (!isPrefix) return false;
 
     pendingSequence = stroke;
-    ui.showKeySequenceHint(destinations.map((destination) => destination.label).join(' · '));
+    // The hint names the second key as bound, so a rebinding shows up here too.
+    ui.showKeySequenceHint(destinations
+      .map((destination) => `${(bindingStrokes(keyFor(destination.action))[1] ?? '').toUpperCase()} ${t(viewLabelKey(destination.view!))}`)
+      .join(' · '));
     // A chord must not stay armed after the user has mentally moved on. This
     // window is deliberately longer than a double-click but shorter than the
     // transient hint, making both fast and deliberate two-key input reliable.
@@ -273,8 +285,9 @@ export function useKeyboard() {
       if (event.key === 'Enter') {
         if (router.currentRoute.value.name === 'thread' && openThreadMessageFocus()) return true;
         if (openListKeyboardFocus()) return true;
-        if (!threads.activeThreadId) return false;
-        void router.push({ name: 'thread', params: { id: threads.activeThreadId } });
+        const threadId = currentThreadId();
+        if (!threadId) return false;
+        void router.push({ name: 'thread', params: { id: threadId } });
         return true;
       }
     }
@@ -323,7 +336,7 @@ export function useKeyboard() {
 
     if (matches(event, 'openItem')) {
       if (openListKeyboardFocus()) return true;
-      const threadId = threads.activeThreadId;
+      const threadId = currentThreadId();
       if (!threadId) return false;
       void router.push({ name: 'thread', params: { id: threadId } });
       return true;
@@ -333,7 +346,15 @@ export function useKeyboard() {
       return leaveCurrentLevel();
     }
 
-    const threadId = threads.activeThreadId;
+    const listTargets = listKeyboardTargets();
+    const threadId = currentThreadId();
+
+    // Lists with their own targets have no multi-select: the store's
+    // selection would be mail the user cannot see. The list search checks
+    // its hits in that selection, so it keeps them.
+    if (listTargets && !listKeyboardSharesSelection() && (matches(event, 'toggleSelection') || matches(event, 'selectAll') || matches(event, 'clearSelection'))) {
+      return false;
+    }
 
     if (threadId && matches(event, 'toggleSelection')) {
       threads.toggleSelectionForThread(threadId);

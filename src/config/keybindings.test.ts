@@ -51,8 +51,6 @@ describe('keybindings', () => {
 });
 
 describe('keybinding contexts', () => {
-  const inbox = { route: 'inbox', covered: false };
-
   it('keeps global and navigation bindings on every page', () => {
     for (const route of ['inbox', 'settings', 'calendar', 'contacts', 'drafts', 'search']) {
       expect(keybindingContextActive('global', { route, covered: false }), route).toBe(true);
@@ -60,11 +58,12 @@ describe('keybinding contexts', () => {
     }
   });
 
-  it('limits mailbox and mail bindings to the list and the reader', () => {
+  it('limits mailbox and mail bindings to mail lists and the reader', () => {
     for (const context of ['mailbox', 'mail'] as const) {
-      expect(keybindingContextActive(context, inbox)).toBe(true);
-      expect(keybindingContextActive(context, { route: 'thread', covered: false })).toBe(true);
-      for (const route of ['settings', 'calendar', 'contacts', 'drafts', 'search', null]) {
+      for (const route of ['inbox', 'thread', 'search', 'topic', 'new-senders']) {
+        expect(keybindingContextActive(context, { route, covered: false }), `${context} on ${route}`).toBe(true);
+      }
+      for (const route of ['settings', 'calendar', 'contacts', 'drafts', null]) {
         expect(keybindingContextActive(context, { route, covered: false }), `${context} on ${route}`).toBe(false);
       }
     }

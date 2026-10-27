@@ -55,6 +55,8 @@ vi.mock('./useListKeyboardNavigation', () => ({
   moveListKeyboardFocus: () => false,
   openListKeyboardFocus: () => false,
   leaveListKeyboardLevel: () => false,
+  listKeyboardTargets: () => null,
+  listKeyboardSharesSelection: () => false,
 }));
 vi.mock('./useThreadMessageKeyboardNavigation', () => ({
   moveThreadMessageFocus: () => false,

@@ -97,9 +97,6 @@
         "moveToInbox": "move inbox",
         "oauthGmail": "oauth google sign in login",
         "oauthOutlook": "oauth microsoft sign in login",
-        "openCalendar": "calendar events",
-        "openFollowUps": "followups waiting reply",
-        "openInbox": "inbox list",
         "pin": "pin flag star",
         "reply": "reply",
         "replyAll": "reply all",
@@ -131,9 +128,6 @@
       "oauthOpened": "{provider} sign-in opened in the browser.",
       "oauthOutlook": "Start OAuth (Outlook)",
       "oauthStarted": "{provider} sign-in started: {url}",
-      "openCalendar": "Open calendar",
-      "openFollowUps": "Open Waiting for a reply",
-      "openInbox": "Open inbox",
       "pin": "Pin or unpin",
       "setAside": "Set aside",
       "showShortcuts": "Show keyboard shortcuts",
@@ -282,30 +276,6 @@
           "keywords": "forward",
           "label": "Forward"
         },
-        "goCalendar": {
-          "keywords": "go calendar",
-          "label": "Go to calendar"
-        },
-        "goContacts": {
-          "keywords": "go people contacts",
-          "label": "Go to contacts"
-        },
-        "goDrafts": {
-          "keywords": "go drafts",
-          "label": "Go to drafts"
-        },
-        "goFollowUps": {
-          "keywords": "go followups waiting reply",
-          "label": "Go to Waiting for a reply"
-        },
-        "goInbox": {
-          "keywords": "go inbox",
-          "label": "Go to inbox"
-        },
-        "goOutbox": {
-          "keywords": "go outbox",
-          "label": "Go to outbox"
-        },
         "help": {
           "keywords": "help shortcuts keys",
           "label": "Show keyboard help"
@@ -442,16 +412,9 @@
         "inMailList": "above a mail list",
         "or": "or"
       },
-      "sequence": {
-        "calendar": "C Calendar",
-        "contacts": "P Contacts",
-        "drafts": "D Drafts",
-        "followUps": "F Waiting for a reply",
-        "inbox": "I Inbox",
-        "outbox": "O Outbox"
-      },
       "subtitle": "Everything that matters stays under your fingers.",
-      "title": "Keyboard shortcuts"
+      "title": "Keyboard shortcuts",
+      "goTo": "Go to {view}"
     },
     "ui": {
       "dismissToast": "Dismiss message",
@@ -564,9 +527,6 @@
         "moveToInbox": "move inbox postfach",
         "oauthGmail": "oauth google anmelden login",
         "oauthOutlook": "oauth microsoft anmelden login",
-        "openCalendar": "calendar termine",
-        "openFollowUps": "followups nachfassen warten antwort",
-        "openInbox": "inbox liste list",
         "pin": "pin flag anheften lösen",
         "reply": "reply antwort",
         "replyAll": "reply all allen antworten",
@@ -598,9 +558,6 @@
       "oauthOpened": "{provider}-Anmeldung im Browser geöffnet.",
       "oauthOutlook": "OAuth starten (Outlook)",
       "oauthStarted": "{provider}-Anmeldung gestartet: {url}",
-      "openCalendar": "Kalender öffnen",
-      "openFollowUps": "„Warten auf Antwort“ öffnen",
-      "openInbox": "Inbox öffnen",
       "pin": "Anheften oder lösen",
       "setAside": "Beiseitelegen",
       "showShortcuts": "Tastenkürzel anzeigen",
@@ -749,30 +706,6 @@
           "keywords": "forward weiterleiten",
           "label": "Weiterleiten"
         },
-        "goCalendar": {
-          "keywords": "go calendar kalender",
-          "label": "Zum Kalender"
-        },
-        "goContacts": {
-          "keywords": "go people contacts kontakte",
-          "label": "Zu Kontakten"
-        },
-        "goDrafts": {
-          "keywords": "go drafts entwuerfe entwürfe",
-          "label": "Zu Entwürfen"
-        },
-        "goFollowUps": {
-          "keywords": "go followups nachfassen warten antwort",
-          "label": "Zu „Warten auf Antwort“"
-        },
-        "goInbox": {
-          "keywords": "go inbox posteingang",
-          "label": "Zur Inbox"
-        },
-        "goOutbox": {
-          "keywords": "go outbox postausgang",
-          "label": "Zum Postausgang"
-        },
         "help": {
           "keywords": "help shortcuts hilfe",
           "label": "Tastaturhilfe anzeigen"
@@ -909,16 +842,9 @@
         "inMailList": "über einer Mailliste",
         "or": "oder"
       },
-      "sequence": {
-        "calendar": "C Kalender",
-        "contacts": "P Kontakte",
-        "drafts": "D Entwürfe",
-        "followUps": "F Warten auf Antwort",
-        "inbox": "I Inbox",
-        "outbox": "O Postausgang"
-      },
       "subtitle": "Alles Wichtige bleibt direkt unter den Fingern.",
-      "title": "Tastenkürzel"
+      "title": "Tastenkürzel",
+      "goTo": "{view} öffnen"
     },
     "ui": {
       "dismissToast": "Meldung schließen",

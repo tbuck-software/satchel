@@ -56,6 +56,11 @@ const harness = vi.hoisted(() => ({
   threads: {
     ensureThreadLoaded: vi.fn(),
     selectThread: vi.fn(),
+    states: {} as Record<string, string>,
+    find(id: string) {
+      const state = harness.threads.states[id];
+      return state ? { id, workflowState: state } : undefined;
+    },
   },
   pushRecent: vi.fn(),
   ui: { isSinglePane: false, registerBackNavigation: vi.fn((_entry: { isOpen: () => boolean; dismiss: () => void }) => vi.fn()) },
@@ -90,6 +95,7 @@ vi.mock('@/stores/threads', () => ({
 }));
 
 import SearchView from './SearchView.vue';
+import { listKeyboardTargets, moveListKeyboardFocus } from '@/composables/useListKeyboardNavigation';
 
 const AppButtonStub = defineComponent({
   inheritAttrs: false,
@@ -188,6 +194,7 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  harness.threads.states = reactive({});
   harness.ui.isSinglePane = false;
   harness.router.replace.mockReset();
   harness.threads.ensureThreadLoaded.mockResolvedValue(undefined);
@@ -358,6 +365,37 @@ describe('SearchView', () => {
     expect(harness.pushRecent).toHaveBeenCalledWith('invoice');
     expect(harness.threads.ensureThreadLoaded).toHaveBeenCalledWith('thread-2');
     expect(harness.threads.selectThread).toHaveBeenCalledWith('thread-2');
+    expect(wrapper.get('.thread-view-stub').attributes('data-thread-id')).toBe('thread-2');
+  });
+
+  it('steps through the hits with the keyboard and acts on the one shown', async () => {
+    const wrapper = mountView();
+    harness.searchState!.results.value = [
+      result('message-1', 'thread-1'),
+      result('message-2', 'thread-1'),
+      result('message-3', 'thread-2'),
+    ];
+    await nextTick();
+
+    expect(listKeyboardTargets()).toEqual(['thread-1']);
+    expect(moveListKeyboardFocus(1)).toBe(true);
+    await nextTick();
+    // Two hits in one conversation are one step.
+    expect(wrapper.get('.thread-view-stub').attributes('data-thread-id')).toBe('thread-2');
+    expect(listKeyboardTargets()).toEqual(['thread-2']);
+  });
+
+  it('moves on to the next hit once the one shown is filed', async () => {
+    const wrapper = mountView();
+    harness.threads.states['thread-1'] = 'inbox';
+    harness.threads.states['thread-2'] = 'inbox';
+    harness.searchState!.results.value = [result('message-1', 'thread-1'), result('message-2', 'thread-2')];
+    await nextTick();
+
+    harness.threads.states['thread-1'] = 'done';
+    await nextTick();
+    await nextTick();
+
     expect(wrapper.get('.thread-view-stub').attributes('data-thread-id')).toBe('thread-2');
   });
 

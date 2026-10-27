@@ -93,3 +93,24 @@ describe('reader actions in the palette', () => {
     expect(command('thread:print-conversation')).toBeUndefined();
   });
 });
+
+describe('views in the palette', () => {
+  /** Typing a view's name found nothing for Drafts, Snoozed or Done. */
+  it('offers every view with a g key, under its sidebar name and its key', () => {
+    const titles = new Map(useCommands().commands.value.map((entry) => [entry.id, entry]));
+
+    expect(titles.get('view:drafts')?.title).toBe('Go to Drafts');
+    expect(titles.get('view:done')?.title).toBe('Go to Done');
+    expect(titles.get('view:later')?.title).toBe('Go to Later');
+    expect(titles.get('view:later')?.shortcut?.keys).toEqual(['g', 'l']);
+    // The old names still find the merged view.
+    expect(titles.get('view:later')?.keywords).toContain('Snoozed');
+    expect(titles.get('view:later')?.keywords).toContain('Waiting for a reply');
+  });
+
+  it('offers File… instead of a topic-only entry', () => {
+    expect(command('thread:topic')).toBeUndefined();
+    expect(command('thread:file')?.title).toBe('File…');
+    expect(command('thread:file')?.shortcut?.keys).toEqual(['v']);
+  });
+});

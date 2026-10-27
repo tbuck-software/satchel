@@ -485,9 +485,6 @@
       "mute": "stumm stummschalten mute",
       "oauthGmail": "oauth google anmelden login",
       "oauthOutlook": "oauth microsoft anmelden login",
-      "openCalendar": "calendar termine",
-      "openFollowUps": "followups nachfassen warten antwort",
-      "openInbox": "inbox liste list",
       "openSettingsSection": "settings einstellungen optionen",
       "pin": "pin flag anheften lösen",
       "print": "drucken print pdf",
@@ -517,9 +514,6 @@
     "oauthOpened": "{provider}-Anmeldung im Browser geöffnet.",
     "oauthOutlook": "OAuth starten (Outlook)",
     "oauthStarted": "{provider}-Anmeldung gestartet: {url}",
-    "openCalendar": "Kalender öffnen",
-    "openFollowUps": "„Warten auf Antwort“ öffnen",
-    "openInbox": "Inbox öffnen",
     "openSettingsSection": "Einstellungen: {section}",
     "pin": "Anheften oder lösen",
     "printConversation": "Unterhaltung drucken",
@@ -2950,30 +2944,6 @@
         "keywords": "forward weiterleiten",
         "label": "Weiterleiten"
       },
-      "goCalendar": {
-        "keywords": "go calendar kalender",
-        "label": "Zum Kalender"
-      },
-      "goContacts": {
-        "keywords": "go people contacts kontakte",
-        "label": "Zu Kontakten"
-      },
-      "goDrafts": {
-        "keywords": "go drafts entwuerfe entwürfe",
-        "label": "Zu Entwürfen"
-      },
-      "goFollowUps": {
-        "keywords": "go followups nachfassen warten antwort",
-        "label": "Zu „Warten auf Antwort“"
-      },
-      "goInbox": {
-        "keywords": "go inbox posteingang",
-        "label": "Zur Inbox"
-      },
-      "goOutbox": {
-        "keywords": "go outbox postausgang",
-        "label": "Zum Postausgang"
-      },
       "help": {
         "keywords": "help shortcuts hilfe",
         "label": "Tastaturhilfe anzeigen"
@@ -3084,6 +3054,7 @@
     },
     "editBindings": "Kürzel bearbeiten",
     "footerHint": "zeigt Aktionen für die fokussierte E-Mail direkt in der Befehlspalette.",
+    "goTo": "{view} öffnen",
     "groups": {
       "compose": "Verfassen",
       "more": "Feste Kombinationen",
@@ -3105,14 +3076,6 @@
       "inMailList": "über einer Mailliste",
       "inReader": "im Reader",
       "or": "oder"
-    },
-    "sequence": {
-      "calendar": "C Kalender",
-      "contacts": "P Kontakte",
-      "drafts": "D Entwürfe",
-      "followUps": "F Warten auf Antwort",
-      "inbox": "I Inbox",
-      "outbox": "O Postausgang"
     },
     "subtitle": "Alles Wichtige bleibt direkt unter den Fingern.",
     "title": "Tastenkürzel"

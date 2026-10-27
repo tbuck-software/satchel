@@ -89,7 +89,7 @@ describe('shortcut helper', () => {
   it('splits a sequence into one keycap per stroke', () => {
     const inboxRow = open()
       .findAll('.groups li')
-      .find((row) => row.text().includes('Go to inbox'))!;
+      .find((row) => row.text().includes('Go to Inbox'))!;
 
     expect(caps(inboxRow)).toEqual(['g', 'i']);
     expect(inboxRow.findAll('.keys__or')).toHaveLength(0);

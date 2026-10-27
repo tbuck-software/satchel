@@ -3,7 +3,9 @@ import AppButton from '@/components/ui/AppButton.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import DrawerButton from '@/components/layout/DrawerButton.vue';
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { registerListKeyboardNavigation } from '@/composables/useListKeyboardNavigation';
 import { useNewSenderActions } from '@/composables/useNewSenderActions';
 import { useSettingsStore } from '@/stores/settings';
 import { useThreadsStore, type NewSenderGroup } from '@/stores/threads';
@@ -41,6 +43,42 @@ function acceptExisting() {
   settings.completeSenderReviewSetup(senders.map((sender) => sender.senderEmail));
 }
 
+function openSender(sender: NewSenderGroup) {
+  threads.selectThread(sender.topThreadId);
+  void router.push({ name: 'inbox' });
+}
+
+// ── Keyboard: j/k between senders; the mail keys act on that sender's mail ──
+const senders = computed(() => threads.newSenderStack?.senders ?? []);
+const focusIndex = ref(-1);
+const listRef = ref<HTMLElement | null>(null);
+
+/** The sender the keys act on; a handled sender leaves the list and the next one moves up. */
+function focusedSender(): NewSenderGroup | undefined {
+  const list = senders.value;
+  return list.length > 0 && focusIndex.value >= 0 ? list[Math.min(focusIndex.value, list.length - 1)] : undefined;
+}
+
+function moveFocus(delta: 1 | -1): boolean {
+  const count = senders.value.length;
+  if (count === 0) return false;
+  focusIndex.value = focusIndex.value < 0 ? 0 : Math.min(count - 1, Math.max(0, focusIndex.value + delta));
+  void nextTick(() => listRef.value?.querySelectorAll<HTMLElement>('.sender-copy')[focusIndex.value]?.focus());
+  return true;
+}
+
+onBeforeUnmount(registerListKeyboardNavigation({
+  move: moveFocus,
+  open: () => {
+    const sender = focusedSender();
+    if (!sender) return false;
+    openSender(sender);
+    return true;
+  },
+  back: () => false,
+  targets: () => focusedSender()?.threadIds ?? [],
+}));
+
 async function block(sender: NewSenderGroup) {
   await newSenderActions.blockSender(
     sender,
@@ -73,10 +111,10 @@ async function block(sender: NewSenderGroup) {
       <AppButton v-else class="primary" @click="acceptAll" variant="primary" size="sm">{{ $t('newSenders.bulk.acceptAll') }}</AppButton>
     </div>
 
-    <div v-if="threads.newSenderStack?.senders.length" class="sender-list">
-      <article v-for="sender in threads.newSenderStack.senders" :key="sender.id">
+    <div v-if="senders.length" ref="listRef" class="sender-list">
+      <article v-for="(sender, index) in senders" :key="sender.id">
         <Avatar :name="sender.senderName" :email="sender.senderEmail" :size="42" />
-        <CardButton class="sender-copy" @click="threads.selectThread(sender.topThreadId); router.push({ name: 'inbox' })">
+        <CardButton class="sender-copy" @focus="focusIndex = index" @click="openSender(sender)">
           <strong>{{ sender.senderName }}</strong>
           <span>{{ sender.senderEmail }}</span>
           <span v-if="sender.spoofingText" class="spoofing">{{ sender.spoofingText }}</span>

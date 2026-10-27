@@ -10,7 +10,7 @@ import trayEn from './tray.en.json';
 import viewerDe from './viewer.de.json';
 import viewerEn from './viewer.en.json';
 import { localeFromLanguageTag, resolveLocale, systemLocale } from './locale';
-import { KEYBINDING_SPECS } from '@/config/keybindingDefaults';
+import { KEYBINDING_SPECS, VIEW_ALIAS_KEYS, viewLabelKey } from '@/config/keybindingDefaults';
 import { MAILBOX_SECTIONS } from '@/config/mailboxSections';
 import { settingsSectionIcons } from '@/components/settings/settingsSections';
 
@@ -38,7 +38,7 @@ describe('message catalogue', () => {
     for (const { action, view } of KEYBINDING_SPECS) {
       // A view's label and keywords are built from the sidebar's names.
       if (view) {
-        for (const key of [view.labelKey, ...(view.aliasKeys ?? [])]) dynamicKeys.add(key);
+        for (const key of [viewLabelKey(view), ...(VIEW_ALIAS_KEYS[view] ?? [])]) dynamicKeys.add(key);
         continue;
       }
       dynamicKeys.add(`shortcuts.actions.${action}.label`);

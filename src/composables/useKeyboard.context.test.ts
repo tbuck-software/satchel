@@ -6,6 +6,8 @@ import { useToast } from './useToast';
 
 const harness = vi.hoisted(() => ({
   route: { name: 'inbox' as string },
+  listTargets: null as string[] | null,
+  listSharesSelection: false,
   settings: { singleKeyShortcuts: true, keybindings: {} as Record<string, string> },
   ui: {
     omniOpen: false,
@@ -28,6 +30,8 @@ const harness = vi.hoisted(() => ({
     toggleSelectionForThread: vi.fn(),
     selectAllVisibleThreads: vi.fn(),
     clearSelection: vi.fn(),
+    workflowFilter: 'all',
+    setMailboxFilter: vi.fn(),
   },
   actions: {
     archive: vi.fn(),
@@ -61,6 +65,8 @@ vi.mock('./useListKeyboardNavigation', () => ({
   moveListKeyboardFocus: () => false,
   openListKeyboardFocus: () => false,
   leaveListKeyboardLevel: () => false,
+  listKeyboardTargets: () => harness.listTargets,
+  listKeyboardSharesSelection: () => harness.listSharesSelection,
 }));
 vi.mock('./useThreadMessageKeyboardNavigation', () => ({
   moveThreadMessageFocus: () => false,
@@ -108,6 +114,10 @@ function expectNoMailAction() {
 beforeEach(() => {
   vi.clearAllMocks();
   harness.route = { name: 'inbox' };
+  harness.listTargets = null;
+  harness.listSharesSelection = false;
+  harness.threads.selectedThreadIds = [];
+  harness.threads.workflowFilter = 'all';
   harness.settings.singleKeyShortcuts = true;
   harness.settings.keybindings = {};
   harness.ui.omniOpen = false;
@@ -123,7 +133,7 @@ afterEach(() => {
 });
 
 describe('shortcut context', () => {
-  it.each(['settings', 'calendar', 'contacts', 'drafts', 'search'])(
+  it.each(['settings', 'calendar', 'contacts', 'drafts'])(
     'leaves the inbox thread alone on %s',
     (route) => {
       harness.route = { name: route };
@@ -149,6 +159,41 @@ describe('shortcut context', () => {
     expect(harness.ui.openOmni).toHaveBeenCalledTimes(1);
     expect(harness.router.push).toHaveBeenCalledWith({ name: 'inbox' });
     expect(harness.composer.openNew).toHaveBeenCalledTimes(1);
+  });
+
+  it('acts on the hit a search page shows, not the inbox thread behind it', () => {
+    harness.route = { name: 'search' };
+    harness.listTargets = ['hit-1'];
+    mountKeyboard();
+    press('e');
+    press('x');
+
+    expect(harness.actions.archive).toHaveBeenCalledWith(['hit-1']);
+    expect(harness.threads.toggleSelectionForThread).not.toHaveBeenCalled();
+  });
+
+  it('keeps checking hits in the list search, which shares the selection', () => {
+    harness.listTargets = ['hit-1'];
+    harness.listSharesSelection = true;
+    mountKeyboard();
+    press('x');
+    press('e');
+    harness.threads.selectedThreadIds = ['hit-1', 'hit-2'];
+    press('#');
+
+    expect(harness.threads.toggleSelectionForThread).toHaveBeenCalledWith('hit-1');
+    expect(harness.actions.archive).toHaveBeenCalledWith(['hit-1']);
+    expect(harness.actions.trash).toHaveBeenCalledWith(['hit-1', 'hit-2']);
+  });
+
+  it('opens a named list with its g key', () => {
+    mountKeyboard();
+    press('g');
+    press('l');
+
+    expect(harness.threads.workflowFilter).toBe('later');
+    expect(harness.threads.setMailboxFilter).toHaveBeenCalledWith({ kind: 'all', value: null });
+    expect(harness.router.push).toHaveBeenCalledWith({ name: 'inbox' });
   });
 
   it('acts on the active thread in the inbox and the reader', () => {

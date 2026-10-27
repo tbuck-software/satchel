@@ -5,12 +5,13 @@ import { highlightMatches, searchHighlightTerms } from '@/utils/highlight';
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import DrawerButton from '@/components/layout/DrawerButton.vue';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { SEARCH_DEBOUNCE_MS, useSearch, type SearchResult } from '@/composables/useSearch';
 import { useServerSearch } from '@/composables/useServerSearch';
 import { useRecentSearches } from '@/composables/useRecentSearches';
 import { useThreadsStore } from '@/stores/threads';
+import { registerListKeyboardNavigation } from '@/composables/useListKeyboardNavigation';
 import { useUiStore } from '@/stores/ui';
 import { useAccountsStore } from '@/stores/accounts';
 import Avatar from '@/components/common/Avatar.vue';
@@ -154,6 +155,54 @@ watch(results, (rows) => {
 function closeDetail() {
   selectedThreadId.value = '';
 }
+
+// ── Keyboard: j/k step through the hits, the mail keys act on the one shown ──
+/** Thread ids in result order, once each: what j/k step through. */
+const resultThreadIds = computed(() => [...new Set(results.value.map((result) => result.threadId))]);
+
+function showHit(threadId: string) {
+  void threads.ensureThreadLoaded(threadId);
+  selectedThreadId.value = threadId;
+  void nextTick(() => document.querySelector('.result-row--active')?.scrollIntoView({ block: 'nearest' }));
+}
+
+function stepHit(delta: number): boolean {
+  const ids = resultThreadIds.value;
+  const index = ids.indexOf(selectedThreadId.value);
+  const next = ids[index < 0 ? 0 : Math.min(ids.length - 1, Math.max(0, index + delta))];
+  if (!next) return false;
+  showHit(next);
+  return true;
+}
+
+onBeforeUnmount(registerListKeyboardNavigation({
+  move: stepHit,
+  open: () => {
+    if (!selectedThreadId.value) return false;
+    void router.push({ name: 'thread', params: { id: selectedThreadId.value } });
+    return true;
+  },
+  back: () => {
+    if (!ui.isSinglePane || !selectedThreadId.value) return false;
+    closeDetail();
+    return true;
+  },
+  targets: () => (selectedThreadId.value ? [selectedThreadId.value] : []),
+}));
+
+// Filed (done, snoozed, deleted, …) from here: the hit stays in the results,
+// so move on to the next one — "search, then e e e" is how a search is cleared.
+watch(
+  () => [selectedThreadId.value, threads.find(selectedThreadId.value)?.workflowState ?? null] as const,
+  ([id, state], [previousId, previousState]) => {
+    if (!id || id !== previousId || !previousState || state === previousState) return;
+    const ids = resultThreadIds.value;
+    const index = ids.indexOf(id);
+    const next = ids[index + 1] ?? ids[index - 1];
+    if (next) showHit(next);
+    else closeDetail();
+  },
+);
 
 onBeforeUnmount(ui.registerBackNavigation({
   isOpen: () => ui.isSinglePane && Boolean(selectedThreadId.value),

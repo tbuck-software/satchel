@@ -10,6 +10,7 @@ import { useThreadActions } from '@/composables/useThreadActions';
 import { useMessageLinks } from '@/composables/useMessageLinks';
 import { useShortcutHints, type ShortcutHint } from '@/composables/useShortcutHints';
 import { activeThreadReaderCommands } from '@/composables/useThreadReaderCommands';
+import { listKeyboardTargets } from '@/composables/useListKeyboardNavigation';
 import { useUndoFab } from '@/composables/useUndoFab';
 import { useToast } from '@/composables/useToast';
 import { useMailSync } from '@/composables/useMailSync';
@@ -19,6 +20,30 @@ import { transportErrorCause } from '@/utils/transportLabels';
 import { t } from '@/i18n/runtime';
 import { availableSettingsSections } from '@/components/settings/settingsSections';
 import type { CommandIconName } from '@/components/navigation/commandIcons';
+import { KEYBINDING_SPECS, viewLabelKey } from '@/config/keybindingDefaults';
+import { viewKeywords } from '@/config/keybindings';
+import { MAILBOX_SECTIONS } from '@/config/mailboxSections';
+import { useMailboxesStore } from '@/stores/mailboxes';
+import { openView, showMailList } from '@/router/mailViews';
+
+
+/** The glyph each view wears in the sidebar, by route or section id. */
+const VIEW_ICONS: Partial<Record<string, CommandIconName>> = {
+  inbox: 'inbox',
+  later: 'clock',
+  aside: 'aside',
+  done: 'done',
+  sent: 'forward',
+  drafts: 'compose',
+  outbox: 'export',
+  'new-senders': 'account',
+  calendar: 'calendar',
+  contacts: 'account',
+  trash: 'trash',
+  spam: 'spam',
+  notifications: 'envelope',
+  blocked: 'block',
+};
 
 export interface OmniCommand {
   id: string;
@@ -46,6 +71,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
   const threadReply = useThreadReply();
   const settings = useSettingsStore();
   const topics = useTopicsStore();
+  const mailboxes = useMailboxesStore();
   const threadActions = useThreadActions();
   const messageLinks = useMessageLinks();
   const toast = useToast();
@@ -54,7 +80,11 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
   const { hint } = useShortcutHints();
   const undoFab = useUndoFab();
 
+  // A list with its own targets (search page, topic, sender review) is what
+  // the palette acts on, like the keys; otherwise the store's selection.
   function targetIds(): string[] {
+    const listTargets = listKeyboardTargets();
+    if (listTargets) return listTargets;
     return threads.selectedThreadIds.length > 0
       ? [...threads.selectedThreadIds]
       : threads.activeThreadId
@@ -62,10 +92,14 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         : [];
   }
 
+  function currentId(): string {
+    return listKeyboardTargets()?.[0] ?? threads.activeThreadId;
+  }
+
   /** Reader-only actions, offered while the reader shows the thread the palette acts on. */
   function readerCommands(): OmniCommand[] {
     const reader = activeThreadReaderCommands();
-    if (!reader?.threadId || reader.threadId !== threads.activeThreadId) return [];
+    if (!reader?.threadId || reader.threadId !== currentId()) return [];
     return [
       {
         id: 'thread:block-address',
@@ -136,6 +170,66 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     ];
   }
 
+  /**
+   * Every place the sidebar leads to, found by name: the views with a `g`
+   * key first (their shortcut shown), then the remaining sidebar sections,
+   * then folders and topics once the user types.
+   */
+  function viewCommands(): OmniCommand[] {
+    const keyed = new Set<string>();
+    const views = KEYBINDING_SPECS.flatMap(({ action, view }): OmniCommand[] => {
+      if (!view) return [];
+      keyed.add(view);
+      return [{
+        id: `view:${view}`,
+        icon: VIEW_ICONS[view],
+        title: t('shortcuts.goTo', { view: t(viewLabelKey(view)) }),
+        context: 'navigation',
+        shortcut: hint(action),
+        keywords: viewKeywords(view),
+        run: () => openView(router, view),
+      }];
+    });
+    const sections = MAILBOX_SECTIONS
+      .filter((section) => section.mailboxType && !keyed.has(section.id) && mailboxes.hasMailboxType(section.mailboxType))
+      .map((section): OmniCommand => ({
+        id: `view:section:${section.id}`,
+        icon: VIEW_ICONS[section.id],
+        title: t('shortcuts.goTo', { view: t(section.labelKey) }),
+        context: 'navigation',
+        keywords: section.id,
+        run: () => {
+          showMailList('all', { kind: 'section', value: section.mailboxType! });
+          return router.push({ name: 'inbox' });
+        },
+      }));
+    const folders = mailboxes.browsableFolders
+      .filter((folder) => folder.path && accounts.isVisible(folder.accountId))
+      .map((folder): OmniCommand => ({
+        id: `view:folder:${folder.accountId}:${folder.path}`,
+        icon: 'folder',
+        title: t('shortcuts.goTo', { view: folder.path }),
+        context: 'navigation',
+        keywords: folder.accountEmail,
+        searchOnly: true,
+        run: () => {
+          accounts.setActiveAccount(folder.accountId);
+          showMailList('all', { kind: 'folder', value: folder.path });
+          return router.push({ name: 'inbox' });
+        },
+      }));
+    const topicViews = topics.activeTopics.map((topic): OmniCommand => ({
+      id: `view:topic:${topic.id}`,
+      icon: 'topic',
+      title: t('shortcuts.goTo', { view: topic.name }),
+      context: 'navigation',
+      keywords: t('topics.title'),
+      searchOnly: true,
+      run: () => router.push({ name: 'topic', params: { id: topic.id } }),
+    }));
+    return [...views, ...sections, ...folders, ...topicViews];
+  }
+
   function activeEmailAccountId(): string | undefined {
     return (
       accounts.emailAccounts.find((account) => account.id === accounts.activeAccountId)?.id
@@ -166,30 +260,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
   }
 
   const commands = computed<OmniCommand[]>(() => [
-    {
-      id: 'view:inbox',
-      icon: 'inbox',
-      title: t('commands.openInbox'),
-      context: 'navigation',
-      keywords: t('commands.keywords.openInbox'),
-      run: () => router.push({ name: 'inbox' }),
-    },
-    {
-      id: 'view:calendar',
-      icon: 'calendar',
-      title: t('commands.openCalendar'),
-      context: 'navigation',
-      keywords: t('commands.keywords.openCalendar'),
-      run: () => router.push({ name: 'calendar' }),
-    },
-    {
-      id: 'view:followups',
-      icon: 'waiting',
-      title: t('commands.openFollowUps'),
-      context: 'navigation',
-      keywords: t('commands.keywords.openFollowUps'),
-      run: () => router.push({ name: 'followups' }),
-    },
+    ...viewCommands(),
     {
       id: 'compose:new',
       icon: 'compose',
@@ -207,7 +278,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         context: 'mail' as const,
         shortcut: hint('reply'),
         keywords: t('commands.keywords.reply'),
-        run: () => threads.activeThreadId && threadReply.reply(threads.activeThreadId),
+        run: () => currentId() && threadReply.reply(currentId()),
       },
       {
         id: 'thread:reply-all',
@@ -216,7 +287,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         context: 'mail' as const,
         shortcut: hint('replyAll'),
         keywords: t('commands.keywords.replyAll'),
-        run: () => threads.activeThreadId && composer.openReply(threads.activeThreadId, true),
+        run: () => currentId() && composer.openReply(currentId(), true),
       },
       {
         id: 'thread:forward',
@@ -225,7 +296,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         context: 'mail' as const,
         shortcut: hint('forward'),
         keywords: t('commands.keywords.forward'),
-        run: () => threads.activeThreadId && composer.openForward(threads.activeThreadId),
+        run: () => currentId() && composer.openForward(currentId()),
       },
       {
         id: 'thread:done',
@@ -296,7 +367,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         context: 'mail' as const,
         shortcut: hint('pin'),
         keywords: t('commands.keywords.pin'),
-        run: () => threads.activeThreadId && void threadActions.togglePinned(threads.activeThreadId),
+        run: () => currentId() && void threadActions.togglePinned(currentId()),
       },
       {
         id: 'thread:file',
@@ -314,7 +385,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         context: 'mail' as const,
         shortcut: hint('copyLink'),
         keywords: t('commands.keywords.copyLink'),
-        run: () => threads.activeThreadId && void messageLinks.copy(threads.activeThreadId),
+        run: () => currentId() && void messageLinks.copy(currentId()),
       },
       {
         id: 'thread:trash',
@@ -330,14 +401,14 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       {
         id: 'thread:mute',
         icon: 'mute' as const,
-        title: threads.activeThreadId && threads.find(threads.activeThreadId)?.isMuted
+        title: currentId() && threads.find(currentId())?.isMuted
           ? t('thread.actions.unmute')
           : t('thread.actions.mute'),
         context: 'mail' as const,
         shortcut: hint('toggleMute'),
         keywords: t('commands.keywords.mute'),
         run: () => {
-          const id = threads.activeThreadId;
+          const id = currentId();
           if (id) void threadActions.setMuted(id, !threads.find(id)?.isMuted);
         },
       },

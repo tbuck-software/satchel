@@ -2,6 +2,8 @@ import { t } from '@/i18n/runtime';
 import {
   DEFAULT_KEYBINDINGS,
   KEYBINDING_SPECS,
+  VIEW_ALIAS_KEYS,
+  viewLabelKey,
   type KeybindingContext,
 } from './keybindingDefaults';
 import type { ShortcutHint } from '@/types/shortcuts';
@@ -27,16 +29,25 @@ export interface KeybindingDefinition {
  * strings would freeze the language at import time.
  */
 export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = KEYBINDING_SPECS.map(
-  (spec) => ({
+  ({ view, ...spec }) => ({
     ...spec,
     get label() {
-      return t(`shortcuts.actions.${spec.action}.label`);
+      return view
+        ? t('shortcuts.goTo', { view: t(viewLabelKey(view)) })
+        : t(`shortcuts.actions.${spec.action}.label`);
     },
     get keywords() {
-      return t(`shortcuts.actions.${spec.action}.keywords`);
+      return view
+        ? viewKeywords(view)
+        : t(`shortcuts.actions.${spec.action}.keywords`);
     },
   }),
 );
+
+/** What a view is found by besides its label: the route and its other names. */
+export function viewKeywords(route: string): string {
+  return ['go', route, ...(VIEW_ALIAS_KEYS[route] ?? []).map((key) => t(key))].join(' ');
+}
 
 export const KEYBINDING_CONTEXT_LABELS: Record<KeybindingContext, string> = {
   get global() {
@@ -117,8 +128,13 @@ export const FIXED_KEYBINDINGS: readonly FixedKeybinding[] = [
 /** Bare keys that stay on with the single-key switch off: they lead back to everything else. */
 const ALWAYS_AVAILABLE_ACTIONS: ReadonlySet<string> = new Set(['openCommandPalette', 'help']);
 
-/** Routes that show a mail list or reader, where `mailbox` and `mail` bindings apply. */
-export const MAIL_ROUTES: ReadonlySet<string> = new Set(['inbox', 'thread']);
+/**
+ * Routes that show a mail list or reader, where `mailbox` and `mail` bindings
+ * apply. Later, Set aside, Done and folders are scopes of `inbox`; the search
+ * page, a topic and the sender review hand their own targets to the keyboard
+ * (`registerListKeyboardNavigation`).
+ */
+export const MAIL_ROUTES: ReadonlySet<string> = new Set(['inbox', 'thread', 'search', 'topic', 'new-senders']);
 
 export interface ShortcutScope {
   route: string | null | undefined;

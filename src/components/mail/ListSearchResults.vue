@@ -127,7 +127,15 @@ function back(): boolean {
   return true;
 }
 
-onBeforeUnmount(registerListKeyboardNavigation({ move, open, back }));
+/** The hit the keys act on: the one stepped to, else the one in the reader. */
+function targets(): string[] {
+  const id = keyboardNavigationActive.value
+    ? keyboardFocusKey.value.replace(/^thread:/, '')
+    : props.openThreadId ?? '';
+  return id ? [id] : [];
+}
+
+onBeforeUnmount(registerListKeyboardNavigation({ move, open, back, targets, sharesSelection: true }));
 
 function dismissKeyboardNavigation() {
   keyboardNavigationActive.value = false;
