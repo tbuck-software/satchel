@@ -2,12 +2,10 @@
 import { computed, defineAsyncComponent, watch } from 'vue';
 import { RouterView, useRoute } from 'vue-router';
 import Sidebar from '@/components/layout/Sidebar.vue';
-import ComposeFab from '@/components/layout/ComposeFab.vue';
 import ToastStack from '@/components/ui/ToastStack.vue';
 import PaneResizeHandle from '@/components/ui/PaneResizeHandle.vue';
 import UndoFab from '@/components/ui/UndoFab.vue';
 import AccountReauthBanner from '@/components/settings/AccountReauthBanner.vue';
-import ConnectionBanner from '@/components/layout/ConnectionBanner.vue';
 import SyncStatusLine from '@/components/layout/SyncStatusLine.vue';
 import { useComposerStore } from '@/stores/composer';
 import { useConfirm } from '@/composables/useConfirm';
@@ -35,6 +33,10 @@ const standaloneCompose = computed(() =>
 const loadComposerHost = () => import('@/components/mail/ComposerHost.vue');
 const ComposerHost = defineAsyncComponent(loadComposerHost);
 const OmniSearch = defineAsyncComponent(loadOmniSearch);
+// Phone-only, and shown only while the backend reports trouble: neither is
+// needed to draw the first desktop frame.
+const ComposeFab = defineAsyncComponent(() => import('@/components/layout/ComposeFab.vue'));
+const ConnectionBanner = defineAsyncComponent(() => import('@/components/layout/ConnectionBanner.vue'));
 const ShortcutHelper = defineAsyncComponent(() => import('@/components/navigation/ShortcutHelper.vue'));
 const TopicPickerOverlay = defineAsyncComponent(() => import('@/components/topics/TopicPickerOverlay.vue'));
 const OnboardingFlow = defineAsyncComponent(() => import('@/components/onboarding/OnboardingFlow.vue'));
