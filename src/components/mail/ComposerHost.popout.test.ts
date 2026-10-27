@@ -200,3 +200,25 @@ describe('a close that cannot save the draft', () => {
     expect(useComposerStore().isOpen).toBe(false);
   });
 });
+
+describe('composer placement', () => {
+  it('places the first composer when App mounts the host after opening', async () => {
+    await useComposerStore().openNew();
+    const wrapper = mount(ComposerHost, { attachTo: document.body });
+    await flushPromises();
+    const section = wrapper.get('.composer-window');
+    expect(section.attributes('style')).toContain(`translate3d(${window.innerWidth - 760 - 18}px, ${window.innerHeight - 650 - 18}px, 0)`);
+    wrapper.unmount();
+  });
+
+  it('redocks an untouched composer after the window changes size', async () => {
+    const wrapper = await mountOpenComposer();
+    const oldWidth = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { value: 1200, configurable: true });
+    window.dispatchEvent(new Event('resize'));
+    await flushPromises();
+    expect(wrapper.get('.composer-window').attributes('style')).toContain('translate3d(422px,');
+    Object.defineProperty(window, 'innerWidth', { value: oldWidth, configurable: true });
+    wrapper.unmount();
+  });
+});

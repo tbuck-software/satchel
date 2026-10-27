@@ -9,7 +9,7 @@ import type { BackendSignature } from '@/types/composer';
 import { placePopoverAgainstAnchor, type PopoverPlacement } from '@/utils/popoverPlacement';
 
 /**
- * Signature block at the bottom of the composer, Spark-style: the signature is
+ * Signature block between the writing area and quoted history. The signature is
  * a visible, separate area of the message. The header carries a switcher
  * popover (which signature, which variant), the content itself is editable —
  * edits apply to this message only and are reported upward as an override.
@@ -59,7 +59,7 @@ const variantOptions = computed(() => [
 ] as const);
 
 /**
- * The signature sits at the bottom of the composer's scroll container, so a
+ * The signature sits inside the composer's scroll container, so a
  * menu anchored inside it is clipped by that container long before it reaches
  * the viewport. It lives in a Teleport instead, placed against the button's
  * viewport rect.

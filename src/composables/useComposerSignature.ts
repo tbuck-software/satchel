@@ -49,8 +49,8 @@ export function useComposerSignature(options: ComposerSignatureOptions) {
         options.transport.resolvedSignature.value?.attachments ?? [],
       );
     }
-    if (signaturePreviewHtml.value) return signaturePreviewHtml.value;
-    const text = options.transport.resolvedSignature.value?.body_text ?? '';
+    if (signatureOverrideText.value === null && signaturePreviewHtml.value) return signaturePreviewHtml.value;
+    const text = signatureOverrideText.value ?? options.transport.resolvedSignature.value?.body_text ?? '';
     if (!text.trim()) return null;
     return text
       .replace(/&/g, '&amp;')

@@ -1,4 +1,5 @@
 import { splitSubjectPrefixes } from '@/utils/composerText';
+import { joinComposerTextHistory, splitComposerTextHistory, splitComposerHtmlHistory } from '@/utils/composerHistory';
 /**
  * Stand-in command transport for `dev:mock` and the browser E2E suite.
  *
@@ -24,7 +25,7 @@ import {
 } from '@/data/mock';
 import type { Account, Message, Thread } from '@/types/mail';
 import type { BackendContact } from '@/types/contacts';
-import type { BackendDraft } from '@/types/composer';
+import type { BackendDraft, BackendSignature, BackendResolvedSignature } from '@/types/composer';
 import type { BackendMessage, BackendMessageBody } from '@/types/messages';
 import type { BackendCalendarEvent, BackendCalendarSource } from '@/types/calendar';
 import type { BackendOutboxItem } from '@/types/outbox';
@@ -60,6 +61,53 @@ function searchNumber(name: string, maximum = 1_000): number {
   if (typeof window === 'undefined') return 0;
   const raw = Number(new URLSearchParams(window.location.search).get(name) ?? 0);
   return Number.isFinite(raw) ? Math.min(Math.max(Math.trunc(raw), 0), maximum) : 0;
+}
+
+// Opt-in composer fixtures also exercise signature switching and plain-text mode.
+const signatures: BackendSignature[] = searchNumber('mockSignatures', 1) ? accounts
+  .filter((account) => account.kind === 'email')
+  .flatMap((account) => ['Default', 'Brief'].map((name, index) => ({
+    id: `signature-${account.id}-${index}`,
+    account_id: account.id,
+    name,
+    body_text: index ? `Thanks,\n${account.displayName}` : `Kind regards,\n${account.displayName}\n${account.email}`,
+    body_html: index ? `<p>Thanks,<br>${account.displayName}</p>` : `<p>Kind regards,<br><strong>${account.displayName}</strong><br>${account.email}</p>`,
+    short_body_text: `Thanks,\n${account.displayName}`,
+    short_body_html: `<p>Thanks,<br>${account.displayName}</p>`,
+    assets: [],
+    is_default: index === 0 ? 1 : 0,
+    created_at: '',
+    updated_at: '',
+  }))) : [];
+
+function resolveMockSignature(scope: Payload): BackendResolvedSignature | null {
+  if (scope.preference === 'none' || scope.signature_variant === 'none') return null;
+  const selected = signatures.find((signature) => signature.id === scope.signature_id);
+  if (!selected) return null;
+  const variant = scope.preference === 'short' || scope.signature_variant === 'short' ? 'short' : 'long';
+  return {
+    signature_id: selected.id,
+    variant,
+    body_text: variant === 'short' ? selected.short_body_text : selected.body_text,
+    body_html: variant === 'short' ? selected.short_body_html ?? null : selected.body_html ?? null,
+    attachments: [],
+  };
+}
+
+function mockSignedBody(scope: Payload) {
+  const resolved = resolveMockSignature(scope);
+  const body = (scope.body as string) ?? '';
+  const bodyHtml = (scope.body_html as string | null) ?? null;
+  if (!resolved) return { body, bodyHtml };
+  const text = (scope.signature_override_text as string | null) ?? resolved.body_text;
+  const html = (scope.signature_override_html as string | null) ?? resolved.body_html;
+  const parts = splitComposerTextHistory(body);
+  const signed = text.trim() ? `${parts.writing.trimEnd()}\n\n-- \n${text}` : parts.writing;
+  const htmlParts = bodyHtml === null ? null : splitComposerHtmlHistory(bodyHtml);
+  return {
+    body: joinComposerTextHistory(signed, parts.history),
+    bodyHtml: htmlParts ? `${htmlParts.writing}<div data-satchel-signature="${resolved.signature_id}">${html ?? text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</div>${htmlParts.history}` : null,
+  };
 }
 
 function seedMeasurementThreads() {
@@ -940,6 +988,7 @@ const handlers: Record<string, Handler> = {
     const account = accounts.find((entry) => entry.id === accountId);
     const threadId = (scope.thread_id as string | null) || nextId('th');
     const now = new Date().toISOString();
+    const signed = mockSignedBody(scope);
     const sent: Message = {
       id: messageId,
       threadId,
@@ -949,8 +998,8 @@ const handlers: Record<string, Handler> = {
       },
       to: recipients.map((email) => ({ name: email, email })),
       subject: (scope.subject as string) ?? '',
-      bodyText: (scope.body as string) ?? '',
-      bodyHtml: (scope.body_html as string | null) ?? undefined,
+      bodyText: signed.body,
+      bodyHtml: signed.bodyHtml ?? undefined,
       bodyLoaded: true,
       timestamp: now,
       isRead: true,
@@ -990,8 +1039,8 @@ const handlers: Record<string, Handler> = {
 
     return { status: 'sent', thread_id: threadId, message_id: messageId, queued_id: null };
   },
-  resolve_signature: () => null,
-  list_signatures: () => [],
+  resolve_signature: (payload) => resolveMockSignature(input(payload)),
+  list_signatures: (payload) => signatures.filter((signature) => !payload.accountId || signature.account_id === payload.accountId),
   list_signature_assignments: () => [],
   list_signature_suggestions: () => [],
   list_templates: () => [],

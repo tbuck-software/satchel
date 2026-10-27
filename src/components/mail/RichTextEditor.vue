@@ -20,7 +20,7 @@ import type { InlineImagePayload } from '@/types/composer';
 import { bytesToBase64 } from '@/utils/base64';
 import { useDismissable } from '@/composables/useDismissable';
 import ModalShell from '@/components/ui/ModalShell.vue';
-import { isComposerHistoryIntro } from '@/utils/composerHistory';
+import { composerHtmlFromText, isComposerHistoryIntro } from '@/utils/composerHistory';
 
 type ImageAlignment = 'left' | 'center' | 'right' | 'wrap-left' | 'wrap-right';
 
@@ -273,11 +273,7 @@ onBeforeUnmount(() => {
 });
 
 function htmlFromText(text: string): string {
-  if (!text) return '';
-  return text
-    .split(/\r?\n/)
-    .map((line) => `<p>${escapeHtml(line)}</p>`)
-    .join('');
+  return composerHtmlFromText(text);
 }
 
 function escapeHtml(s: string) {

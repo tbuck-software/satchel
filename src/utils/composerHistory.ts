@@ -49,3 +49,47 @@ export function removeComposerTextHistory(text: string): string {
   }
   return result.trimEnd();
 }
+
+/** The first generated history header starts the outgoing history section. */
+export function splitComposerTextHistory(text: string): { writing: string; history: string } {
+  const from = historyTextRanges(text)[0]?.from;
+  return from === undefined
+    ? { writing: text, history: '' }
+    : { writing: text.slice(0, from).trimEnd(), history: text.slice(from) };
+}
+
+export function joinComposerTextHistory(writing: string, history: string): string {
+  return history ? `${writing.trimEnd()}\n\n${history}` : writing;
+}
+
+/** Parse in an inert template: restored mail must never fetch remote resources. */
+export function splitComposerHtmlHistory(html: string): { writing: string; history: string } {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  const quote = [...template.content.querySelectorAll('blockquote')]
+    .find((node) => isComposerHistoryIntro(node.firstElementChild?.textContent ?? ''));
+  if (!quote) return { writing: html, history: '' };
+  const before = document.createRange();
+  before.selectNodeContents(template.content);
+  before.setEndBefore(quote);
+  const after = document.createRange();
+  after.selectNodeContents(template.content);
+  after.setStartBefore(quote);
+  const serialize = (range: Range) => {
+    const container = document.createElement('template');
+    container.content.append(range.cloneContents());
+    return container.innerHTML;
+  };
+  return { writing: serialize(before), history: serialize(after) };
+}
+
+/** Plain-text drafts regain a structural quote when reopened in rich mode. */
+export function composerHtmlFromText(text: string): string {
+  const { writing, history } = splitComposerTextHistory(text);
+  const paragraphs = (value: string) => value.split(/\r?\n/).map((line) => {
+    const p = document.createElement('p');
+    p.textContent = line;
+    return p.outerHTML;
+  }).join('');
+  return paragraphs(writing) + (history ? `<blockquote>${paragraphs(history)}</blockquote>` : '');
+}

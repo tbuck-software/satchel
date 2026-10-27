@@ -39,7 +39,7 @@ test('tabs from addressing through the subject to the message body', async ({ pa
 test('keeps long composer text from covering the conversation history', async ({ page }) => {
   await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
-  const editor = composer.locator('.ProseMirror');
+  const editor = composer.locator('.ProseMirror').first();
   const historyToggle = composer.getByRole('button', { name: /Show history/ });
 
   await editor.fill(Array.from({ length: 12 }, (_, index) => `Absatz ${index + 1}`).join('\n\n'));
@@ -179,7 +179,7 @@ test('stays on the page an overlay navigated to', async ({ page }) => {
 test('sends a reply and shows it in the conversation', async ({ page }) => {
   await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
-  await composer.locator('.ProseMirror').fill('The OAuth fix is live on staging.');
+  await composer.locator('.ProseMirror').first().fill('The OAuth fix is live on staging.');
 
   await composer.getByRole('button', { name: 'Send', exact: true }).click();
 
@@ -198,7 +198,7 @@ test('keeps the draft and reports the failure when the send command refuses', as
 
   await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
-  await composer.locator('.ProseMirror').fill('This one must not silently vanish.');
+  await composer.locator('.ProseMirror').first().fill('This one must not silently vanish.');
   await composer.getByRole('button', { name: 'Send', exact: true }).click();
 
   await expect(composer).toBeVisible();

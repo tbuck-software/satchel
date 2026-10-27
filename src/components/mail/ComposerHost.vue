@@ -11,7 +11,7 @@ import { useUiStore } from '@/stores/ui';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { useFocusTrap } from '@/composables/useFocusTrap';
-import { resizeComposerRect, type ResizeDirection } from '@/utils/composerGeometry';
+import { fitComposerRect, dockComposerRect, resizeComposerRect, type ResizeDirection } from '@/utils/composerGeometry';
 import { useComposeWindow } from '@/composables/useComposeWindow';
 import { refreshToastClearance } from '@/composables/useToastClearance';
 
@@ -50,7 +50,9 @@ const maximized = ref(false);
 const dragging = ref(false);
 const resizing = ref(false);
 const resizeDirection = ref<ResizeDirection>('se');
-const hasPosition = ref(false);
+// Geometry belongs to this open composer. Closing resets the next message to
+// the bottom-right dock; dragging or resizing only affects the current message.
+const manuallyPlaced = ref(false);
 const popoutError = ref('');
 const closeBusy = ref(false);
 
@@ -94,26 +96,23 @@ const windowStyle = computed(() => {
 function layerBounds() {
   const rect = layerRef.value?.getBoundingClientRect();
   return {
-    width: rect?.width ?? window.innerWidth,
-    height: rect?.height ?? window.innerHeight,
+    width: rect?.width || window.innerWidth,
+    height: rect?.height || window.innerHeight,
   };
 }
 
 function fitIntoLayer() {
-  const bounds = layerBounds();
-  width.value = Math.min(Math.max(MIN_WIDTH, width.value), Math.max(MIN_WIDTH, bounds.width));
-  height.value = Math.min(Math.max(MIN_HEIGHT, height.value), Math.max(MIN_HEIGHT, bounds.height));
-  x.value = Math.max(0, Math.min(x.value, bounds.width - width.value));
-  y.value = Math.max(0, Math.min(y.value, bounds.height - height.value));
+  const next = fitComposerRect(
+    { x: x.value, y: y.value, width: width.value, height: height.value },
+    layerBounds(),
+    { width: MIN_WIDTH, height: MIN_HEIGHT },
+  );
+  ({ x: x.value, y: y.value, width: width.value, height: height.value } = next);
 }
 
 function placeInitially() {
-  const bounds = layerBounds();
-  width.value = Math.min(DEFAULT_WIDTH, Math.max(MIN_WIDTH, bounds.width - GAP * 2));
-  height.value = Math.min(DEFAULT_HEIGHT, Math.max(MIN_HEIGHT, bounds.height - GAP * 2));
-  x.value = Math.max(GAP, bounds.width - width.value - GAP);
-  y.value = Math.max(GAP, bounds.height - height.value - GAP);
-  hasPosition.value = true;
+  const next = dockComposerRect(layerBounds(), { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }, { width: MIN_WIDTH, height: MIN_HEIGHT }, GAP);
+  ({ x: x.value, y: y.value, width: width.value, height: height.value } = next);
 }
 
 function beginDrag(event: PointerEvent) {
@@ -137,7 +136,7 @@ function moveDrag(event: PointerEvent) {
 function endDrag() {
   dragging.value = false;
   window.removeEventListener('pointermove', moveDrag);
-  hasPosition.value = true;
+  manuallyPlaced.value = true;
 }
 
 function beginResize(event: PointerEvent, direction: ResizeDirection) {
@@ -174,7 +173,7 @@ function endResize() {
   resizing.value = false;
   window.removeEventListener('pointermove', moveResize);
   fitIntoLayer();
-  hasPosition.value = true;
+  manuallyPlaced.value = true;
 }
 
 /**
@@ -272,7 +271,8 @@ function toggleMaximize() {
   maximized.value = !maximized.value;
   if (!maximized.value) {
     nextTick(() => {
-      fitIntoLayer();
+      if (manuallyPlaced.value) fitIntoLayer();
+      else placeInitially();
     });
   }
 }
@@ -302,7 +302,8 @@ function finishComposer() {
 
 function onResize() {
   if (!maximized.value && composer.isOpen) {
-    fitIntoLayer();
+    if (manuallyPlaced.value) fitIntoLayer();
+    else placeInitially();
   }
 }
 
@@ -312,18 +313,19 @@ watch(
     if (!composer.isOpen) return;
     popoutError.value = '';
     closeBusy.value = false;
-    maximized.value = ui.isMobile;
+    maximized.value = false;
     await nextTick();
-    if (!hasPosition.value) placeInitially();
-    else {
-      fitIntoLayer();
-    }
+    manuallyPlaced.value = false;
+    placeInitially();
   },
+  // App mounts this host only after opening, so the initial request already
+  // exists when setup runs. A non-immediate watcher never places that window.
+  { immediate: true },
 );
 
 // A drag moves the send row by transform, which no layout event reports;
 // a toast that is already up has to follow it.
-watch([x, y, width, height, maximized], refreshToastClearance);
+watch([x, y, width, height, maximized], refreshToastClearance, { flush: 'post' });
 
 if (typeof window !== 'undefined') window.addEventListener('resize', onResize);
 
@@ -434,6 +436,8 @@ onBeforeUnmount(() => {
 
 .composer-window {
   position: absolute;
+  top: 0;
+  left: 0;
   display: flex;
   flex-direction: column;
   min-width: 0;

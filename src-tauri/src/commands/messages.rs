@@ -1,3 +1,5 @@
+mod composer_body;
+
 use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use satchel_core::db::accounts::AccountRepository;
@@ -1640,24 +1642,13 @@ async fn apply_selected_signature(
         }
     }
 
-    let message_body_text = input.body.clone();
-    if !resolved.body_text.trim().is_empty() {
-        input.body = format!("{}\n\n-- \n{}", input.body.trim_end(), resolved.body_text);
-    }
-    if resolved.body_html.is_some() || input.body_html.is_some() {
-        let message_html = input
-            .body_html
-            .clone()
-            .unwrap_or_else(|| format!("<div>{}</div>", plain_text_to_html(&message_body_text)));
-        let signature_html = resolved
-            .body_html
-            .clone()
-            .unwrap_or_else(|| plain_text_to_html(&resolved.body_text));
-        input.body_html = Some(format!(
-            "{message_html}<div data-satchel-signature=\"{}\">{signature_html}</div>",
-            html_attribute_escape(&resolved.signature_id)
-        ));
-    }
+    (input.body, input.body_html) = composer_body::with_signature(
+        &input.body,
+        input.body_html.as_deref(),
+        &resolved.signature_id,
+        &resolved.body_text,
+        resolved.body_html.as_deref(),
+    );
     input
         .attachments
         .extend(
@@ -1681,24 +1672,6 @@ async fn apply_selected_signature(
         .into(),
     );
     Ok(())
-}
-
-fn plain_text_to_html(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\n', "<br>")
-}
-
-fn html_attribute_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
 }
 
 pub use satchel_core::drafts::outgoing::recipient_display_names;

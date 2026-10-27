@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useTextareaAutosize } from '@vueuse/core';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
 import { attachmentBytes, encodeBase64 } from '@/utils/attachmentBytes';
 import { useI18n } from 'vue-i18n';
@@ -27,7 +28,8 @@ import AppBanner from '@/components/ui/AppBanner.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
-import { hasComposerHtmlHistory, hasComposerTextHistory, removeComposerTextHistory } from '@/utils/composerHistory';
+import { composerHtmlFromText, hasComposerHtmlHistory, hasComposerTextHistory } from '@/utils/composerHistory';
+import { useComposerBody } from '@/composables/useComposerBody';
 import type { ComposerMode } from '@/stores/composer';
 import { useAttachmentActions } from '@/composables/useAttachmentActions';
 import { useComposerCloseGuard } from '@/composables/useComposerCloseGuard';
@@ -39,7 +41,7 @@ import {
   useComposerCrypto,
   type ComposerCryptoMethod,
 } from '@/composables/useComposerCrypto';
-import { useComposerInlineAttachments } from '@/composables/useComposerInlineAttachments';
+import { useComposerInlineAttachments, type ComposerInlineAttachmentEditor } from '@/composables/useComposerInlineAttachments';
 import { useComposerLocalBackup } from '@/composables/useComposerLocalBackup';
 import { useDraftEditorClaim } from '@/composables/useDraftEditorClaim';
 import { useComposerSignature } from '@/composables/useComposerSignature';
@@ -119,6 +121,9 @@ const showCcBcc = ref(cc.value.length > 0 || bcc.value.length > 0);
 const subject = ref(props.initialSubject);
 const body = ref(props.initialBody);
 const bodyHtml = ref<string | null>(props.initialBodyHtml);
+const { writingText, writingHtml, historyText, historyHtml, removeHistory } = useComposerBody(body, bodyHtml);
+const { textarea: writingTextarea } = useTextareaAutosize({ input: writingText });
+const { textarea: historyTextarea } = useTextareaAutosize({ input: historyText });
 const contextThreadId = ref<string | null>(props.threadId);
 const replyToMessageId = ref<string | null>(null);
 const attachments = ref<BackendOutgoingAttachment[]>([]);
@@ -137,6 +142,7 @@ const priority = ref<'high' | 'normal' | 'low'>('normal');
  */
 const plainTextCompose = ref(settings.composePlainText);
 const richEditorRef = ref<InstanceType<typeof RichTextEditor> | null>(null);
+const historyEditorRef = ref<InstanceType<typeof RichTextEditor> | null>(null);
 /**
  * Finding the quote parses the whole body, so it is looked for once typing
  * pauses rather than on every keystroke.
@@ -151,12 +157,7 @@ const quotedHistory = deferredChangeTracker(
 const hasQuotedHistory = ref(quotedHistory.current());
 
 async function removeQuotedHistory() {
-  if (plainTextCompose.value) {
-    body.value = removeComposerTextHistory(body.value);
-    bodyHtml.value = null;
-  } else {
-    richEditorRef.value?.removeQuotedHistory();
-  }
+  removeHistory();
   await nextTick();
   quotedHistory.settle();
 }
@@ -178,7 +179,13 @@ const footerRef = ref<HTMLElement | null>(null);
 useToastClearance(footerRef);
 const composerInlineAttachments = useComposerInlineAttachments(
   attachments,
-  () => richEditorRef.value,
+  (): ComposerInlineAttachmentEditor => ({
+    insertAttachmentImage: (image) => richEditorRef.value?.insertAttachmentImage(image),
+    removeAttachmentImage: (image) => {
+      richEditorRef.value?.removeAttachmentImage(image);
+      historyEditorRef.value?.removeAttachmentImage(image);
+    },
+  }),
 );
 const initialized = ref(false);
 // A loaded reply or draft shows its history control at once, not after a pause.
@@ -427,6 +434,7 @@ async function applyDraft(draft: BackendDraft) {
   showCcBcc.value = cc.value.length > 0 || bcc.value.length > 0;
   subject.value = draft.subject ?? '';
   body.value = draft.body ?? '';
+  plainTextCompose.value = !draft.body_html;
   attachments.value = draft.attachments ?? [];
   bodyHtml.value = composerInlineAttachments.hydrateInlineImages(
     draft.body_html ?? null,
@@ -853,7 +861,7 @@ async function send() {
       body: body.value,
       bodyHtml: plainTextCompose.value
         ? null
-        : composerInlineAttachments.serializeInlineImages(bodyHtml.value),
+        : composerInlineAttachments.serializeInlineImages(bodyHtml.value ?? composerHtmlFromText(body.value)),
       threadId: contextThreadId.value,
       replyToMessageId: replyToMessageId.value,
       attachments: attachments.value,
@@ -973,7 +981,7 @@ function currentDraftState(): ComposerDraftState {
     bcc: bcc.value,
     subject: subject.value,
     body: body.value,
-    bodyHtml: plainTextCompose.value ? null : composerInlineAttachments.serializeInlineImages(bodyHtml.value),
+    bodyHtml: plainTextCompose.value ? null : composerInlineAttachments.serializeInlineImages(bodyHtml.value ?? composerHtmlFromText(body.value)),
     plainText: plainTextCompose.value,
     scheduledFor: scheduledFor.value,
     signatureId: selectedSignatureId.value,
@@ -1186,10 +1194,11 @@ defineExpose({
       </IconButton>
     </div>
 
-    <div class="body" @click="focusComposeBody">
+    <div class="body" :class="{ 'body--with-history': plainTextCompose ? historyText : historyHtml }" @click="focusComposeBody">
       <textarea
         v-if="plainTextCompose"
-        v-model="body"
+        ref="writingTextarea"
+        v-model="writingText"
         class="plain-editor"
         :disabled="sending"
         :placeholder="$t('compose.editor.placeholder')"
@@ -1202,14 +1211,14 @@ defineExpose({
       <RichTextEditor
         v-else
         ref="richEditorRef"
-        v-model="body"
-        :html="bodyHtml"
+        v-model="writingText"
+        :html="writingHtml"
         :disabled="sending"
         :autofocus="props.embedded && !startsInRecipients"
         :focus-position="props.mode === 'reply' || props.mode === 'reply-all' || props.mode === 'forward' ? 'start' : 'end'"
-        min-height="120px"
+        :min-height="historyHtml ? '1.68em' : '120px'"
         :placeholder="$t('compose.editor.placeholder')"
-        @update:html="(v) => (bodyHtml = v)"
+        @update:html="(v) => (writingHtml = v)"
         @inline-image-added="composerInlineAttachments.onInlineImageAdded"
         @image-to-attachment="composerInlineAttachments.onImageToAttachment"
         @paste-files="composerInlineAttachments.addPastedFiles"
@@ -1231,6 +1240,34 @@ defineExpose({
         @edit="onSignatureEdit"
         @reset="clearSignatureOverride"
       />
+      <div v-if="plainTextCompose ? historyText : historyHtml" class="quoted-history" data-composer-history>
+        <textarea
+          v-if="plainTextCompose"
+          ref="historyTextarea"
+          v-model="historyText"
+          class="plain-editor"
+          :disabled="sending"
+          :aria-label="$t('compose.context.included')"
+          spellcheck="true"
+          @input="bodyHtml = null"
+          @keydown.meta.enter.prevent="send"
+          @keydown.ctrl.enter.prevent="send"
+        />
+        <RichTextEditor
+          v-else
+          ref="historyEditorRef"
+          v-model="historyText"
+          :html="historyHtml"
+          :disabled="sending"
+          :aria-label="$t('compose.context.included')"
+          min-height="0"
+          @update:html="(v) => (historyHtml = v)"
+          @inline-image-added="composerInlineAttachments.onInlineImageAdded"
+          @image-to-attachment="composerInlineAttachments.onImageToAttachment"
+          @paste-files="composerInlineAttachments.addPastedFiles"
+          @submit="send"
+        />
+      </div>
       <ComposerThreadContext v-if="contextThreadId" :thread-id="contextThreadId" />
     </div>
 
@@ -1702,6 +1739,22 @@ textarea:focus {
   padding: 0;
   border: 0;
   background: transparent;
+}
+
+/* The signature follows the answer's last line, including in plain-text mode. */
+.compose .body--with-history > :deep(.rt-editor),
+.compose .body--with-history > .plain-editor {
+  flex: none;
+}
+
+.compose .body--with-history .plain-editor {
+  min-height: 0;
+  resize: none;
+}
+
+.quoted-history {
+  flex: none;
+  margin-top: var(--space-lg);
 }
 
 .compose .body :deep(.content) {

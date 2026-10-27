@@ -378,6 +378,7 @@ it('keeps edits to the quoted history when switching between plain text and HTML
   await flushPromises();
   await wrapper.get('input[type="checkbox"]').setValue(true);
   await wrapper.get('.plain-editor').setValue('Reply with the history removed');
+  await wrapper.get('[data-composer-history] .plain-editor').setValue('');
   await wrapper.get('input[type="checkbox"]').setValue(false);
   expect(wrapper.get('.ProseMirror').text()).toBe('Reply with the history removed');
   await send(wrapper);
@@ -717,4 +718,17 @@ describe('sending from a popout', () => {
     expect(harness.closePopout).not.toHaveBeenCalled();
     expect(harness.push).toHaveBeenCalledWith({ name: 'thread', params: { id: 'thread-1' } });
   });
+});
+
+it('retains HTML composition for an untouched new-message prefill', async () => {
+  harness.composePlainText = false;
+  harness.realEditor = true;
+  harness.sendMessage.mockResolvedValue({ status: 'sent', thread_id: 'new', message_id: 'new' });
+  const wrapper = render(undefined, true, { initialBody: 'Prefilled new message', initialBodyHtml: null });
+  await flushPromises();
+  const draft = harness.draftSetup.mock.calls[0]![0].buildInput()!;
+  expect(draft.bodyHtml).toBe('<p>Prefilled new message</p>');
+  await send(wrapper);
+  expect(harness.sendMessage.mock.calls[0]![0].bodyHtml).toBe(draft.bodyHtml);
+  wrapper.unmount();
 });

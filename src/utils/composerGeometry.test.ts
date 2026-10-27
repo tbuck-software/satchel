@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resizeComposerRect, type ResizeDirection } from './composerGeometry';
+import { dockComposerRect, fitComposerRect, resizeComposerRect, type ResizeDirection } from './composerGeometry';
 
 const start = { x: 100, y: 80, width: 600, height: 500 };
 const bounds = { width: 1200, height: 900 };
@@ -34,5 +34,27 @@ describe('resizeComposerRect', () => {
       width: 1100,
       height: 820,
     });
+  });
+});
+
+describe('composer docking', () => {
+  const size = { width: 760, height: 650 };
+  it('opens at the bottom-right with the standard gap', () => {
+    expect(dockComposerRect({ width: 1440, height: 900 }, size, minimum, 18)).toEqual({ x: 662, y: 232, ...size });
+    expect(dockComposerRect({ width: 1100, height: 700 }, size, minimum, 18)).toEqual({ x: 322, y: 32, ...size });
+  });
+  it('reduces the gap before reducing the minimum size', () => {
+    expect(dockComposerRect({ width: 1100, height: 470 }, size, minimum, 18)).toEqual({ x: 322, y: 10, width: 760, height: 450 });
+  });
+  it('fits short windows even when they cannot hold the minimum height', () => {
+    expect(dockComposerRect({ width: 540, height: 400 }, size, minimum, 18)).toEqual({ x: 10, y: 0, width: 520, height: 400 });
+    expect(fitComposerRect(start, { width: 500, height: 400 }, minimum)).toEqual({ x: 0, y: 0, width: 500, height: 400 });
+  });
+  it('keeps manually placed geometry while it fits', () => {
+    expect(fitComposerRect(start, bounds, minimum)).toEqual(start);
+  });
+  it('can resize after fitting below the nominal minimum', () => {
+    const small = { x: 0, y: 0, width: 500, height: 400 };
+    expect(resizeComposerRect(small, 'nw', 100, 100, { width: 500, height: 400 }, minimum)).toEqual(small);
   });
 });
