@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { applyLocalePreference } from '@/i18n/runtime';
 import type { Message } from '@/types/mail';
 import {
   buildForwardBody,
+  buildReplyBody,
   bytesToBase64,
   formatTimestamp,
   mergeRecipients,
@@ -130,11 +132,19 @@ describe('prefixSubject', () => {
 });
 
 describe('formatTimestamp', () => {
-  it('formats a valid timestamp as en-US in the current time zone', () => {
-    const timestamp = '2026-01-01T10:00:00Z';
+  afterEach(() => applyLocalePreference('en', false));
+
+  it.each(['en', 'de'] as const)('uses the %s locale and minute precision for reply and forward headers', async (locale) => {
+    await applyLocalePreference(locale, false);
+    const timestamp = new Date(2026, 9, 27, 7, 53, 54).toISOString();
     const formatted = formatTimestamp(timestamp);
-    expect(formatted).not.toBe(timestamp);
-    expect(formatted).toBe(new Date(timestamp).toLocaleString('en-US'));
+    expect(formatted).toContain('07:53');
+    expect(formatted).toContain('2026');
+    expect(formatted).not.toContain(':54');
+    expect(formatted).not.toMatch(/AM|PM/);
+    const source = message({ timestamp });
+    expect(buildReplyBody(source)).toContain(locale === 'de' ? `Am ${formatted}` : `On ${formatted}`);
+    expect(buildForwardBody(source)).toContain(formatted);
   });
 
   /**

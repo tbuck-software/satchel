@@ -43,7 +43,10 @@ describe('SplitButton', () => {
     expect(wrapper.emitted('open')).toBeUndefined();
     await secondary!.trigger('click');
     await secondary!.trigger('keydown', { key: 'ArrowDown' });
-    expect(wrapper.emitted('open')).toHaveLength(2);
+    await secondary!.trigger('keydown', { key: 'ArrowUp' });
+    expect(wrapper.emitted('open')).toHaveLength(3);
+    expect(wrapper.emitted('open')![0]![0]).toBeInstanceOf(MouseEvent);
+    expect(wrapper.emitted('open')![1]![0]).toBeInstanceOf(KeyboardEvent);
     expect(wrapper.emitted('click')).toHaveLength(1);
   });
 

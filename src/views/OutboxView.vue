@@ -132,7 +132,7 @@ function markerTone(item: BackendOutboxItem): OutboxTone {
 function exactTime(value?: string | null): string {
   if (!value) return '';
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale.value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale.value, { dateStyle: 'medium', timeStyle: 'short', hour12: false });
 }
 
 function isOverdue(item: BackendOutboxItem): boolean {

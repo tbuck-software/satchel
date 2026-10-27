@@ -16,7 +16,7 @@ withDefaults(defineProps<{
 
 const emit = defineEmits<{
   click: [event: MouseEvent];
-  open: [];
+  open: [event: MouseEvent | KeyboardEvent];
 }>();
 </script>
 
@@ -44,8 +44,9 @@ const emit = defineEmits<{
       :aria-expanded="expanded"
       :aria-controls="controls"
       :aria-describedby="descriptionId"
-      @click="emit('open')"
-      @keydown.down.prevent="!disabled && emit('open')"
+      @click="emit('open', $event)"
+      @keydown.down.prevent="!disabled && emit('open', $event)"
+      @keydown.up.prevent="!disabled && emit('open', $event)"
     >
       <AppIcon><path d="m4.5 6.5 3.5 3.5 3.5-3.5" /></AppIcon>
     </AppButton>

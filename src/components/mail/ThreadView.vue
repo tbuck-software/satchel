@@ -789,7 +789,7 @@ function cleanupPrintView() {
 
 function formatPrintDate(value: string) {
   try {
-    return new Date(value).toLocaleString(locale.value);
+    return new Date(value).toLocaleString(locale.value, { dateStyle: 'medium', timeStyle: 'short', hour12: false });
   } catch {
     return value;
   }

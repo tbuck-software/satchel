@@ -22,8 +22,10 @@ const props = withDefaults(
     nested?: boolean;
     /** Move focus to the first item on open. Defaults to on for top-level menus. */
     focusFirst?: boolean;
+    /** Skip the fade for controls whose popup should appear immediately. */
+    animated?: boolean;
   }>(),
-  { width: 232, nested: false, focusFirst: undefined },
+  { width: 232, nested: false, focusFirst: undefined, animated: true },
 );
 
 const emit = defineEmits<{ close: [] }>();
@@ -184,7 +186,7 @@ onBeforeUnmount(() => {
       @contextmenu.prevent="emit('close')"
     />
     <!-- `appear`: rows mount their menu on first open, already open. -->
-    <Transition name="context-menu" appear>
+    <Transition name="context-menu" :css="props.animated" appear>
       <div
         v-if="props.open"
         ref="menuRef"

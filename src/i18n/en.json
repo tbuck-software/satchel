@@ -759,6 +759,7 @@
       "confirm": "Set",
       "custom": "Custom time",
       "mondayAt": "Monday {time}",
+      "pickDateTime": "Pick date & time…",
       "title": "Send later…",
       "tomorrowAt": "Tomorrow {time}"
     },

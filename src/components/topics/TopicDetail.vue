@@ -542,7 +542,7 @@ async function copyAsMarkdown() {
     const message = entry.message;
     if (!message) continue;
     lines.push(
-      `## ${message.from.name || message.from.email} <${message.from.email}> · ${new Date(message.timestamp).toLocaleString(locale.value)}`,
+      `## ${message.from.name || message.from.email} <${message.from.email}> · ${new Date(message.timestamp).toLocaleString(locale.value, { dateStyle: 'medium', timeStyle: 'short', hour12: false })}`,
       '',
       message.bodyText?.trim() || entry.item.snippet || '',
       '',

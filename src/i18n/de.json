@@ -759,6 +759,7 @@
       "confirm": "Festlegen",
       "custom": "Eigener Zeitpunkt",
       "mondayAt": "Montag {time}",
+      "pickDateTime": "Datum und Uhrzeit wählen …",
       "title": "Später senden …",
       "tomorrowAt": "Morgen {time}"
     },

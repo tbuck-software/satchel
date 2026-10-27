@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useTextareaAutosize } from '@vueuse/core';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
+import { defineAsyncComponent, computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
+import type { AnchorBox } from '@/utils/popoverPlacement';
 import { attachmentBytes, encodeBase64 } from '@/utils/attachmentBytes';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
@@ -18,7 +19,6 @@ import { useTemplatesStore } from '@/stores/templates';
 import { useThreadsStore } from '@/stores/threads';
 import RecipientChips from '@/components/mail/RecipientChips.vue';
 import AttachmentDropZone from '@/components/mail/AttachmentDropZone.vue';
-import SendLaterPicker from '@/components/mail/SendLaterPicker.vue';
 import TemplatePicker from '@/components/mail/TemplatePicker.vue';
 import RichTextEditor from '@/components/mail/RichTextEditor.vue';
 import ComposerSignature from '@/components/mail/ComposerSignature.vue';
@@ -66,6 +66,8 @@ import {
 } from '@/utils/composerThreadPrefill';
 import { composerDraftInput, composerDraftSnapshot, composerRecoveryContent, type ComposerDraftState } from '@/utils/composerDraftState';
 import type { ComposerBackup, ComposerBackupContent } from '@/persistence/composerBackup';
+
+const SendLaterMenu = defineAsyncComponent(() => import('@/components/mail/SendLaterMenu.vue'));
 
 const props = withDefaults(defineProps<{
   embedded?: boolean;
@@ -137,6 +139,15 @@ const scheduledFor = ref<string | null>(null);
 const followUpAt = ref<string | null>(null);
 const showTemplatePicker = ref(false);
 const showSendLater = ref(false);
+const sendLaterAnchor = ref<AnchorBox | null>(null);
+
+function openSendLater(event: MouseEvent | KeyboardEvent) {
+  const trigger = event.currentTarget as HTMLElement;
+  trigger.focus({ preventScroll: true });
+  const rect = trigger.getBoundingClientRect();
+  sendLaterAnchor.value = { left: rect.right, right: rect.right, top: rect.top, bottom: rect.top };
+  showSendLater.value = true;
+}
 const priority = ref<'high' | 'normal' | 'low'>('normal');
 /**
  * Plain-text composition. Seeded from the global preference but switchable per
@@ -1342,7 +1353,7 @@ defineExpose({
               <div class="panel-field">
                 <input
                   class="follow-input"
-                  type="datetime-local"
+                  type="datetime-local" step="60"
                   :aria-label="$t('compose.options.followUpAriaLabel')"
                   @change="followUpAt = ($event.target as HTMLInputElement).value ? new Date(($event.target as HTMLInputElement).value).toISOString() : null"
                 />
@@ -1400,13 +1411,13 @@ defineExpose({
           <SplitButton
             :secondary-label="$t('compose.sendLater.title')"
             :expanded="showSendLater"
-            popup="dialog"
+            popup="menu"
             :title="sendBlockedHint ?? (sending ? $t('compose.sending') : scheduledFor ? $t('compose.schedule.submit') : $t('compose.send'))"
             :shortcut="canSend ? sendShortcut : null"
             :disabled="!canSend"
             :description-id="sendBlockedHint ? sendHintId : undefined"
             @click="send"
-            @open="showSendLater = true"
+            @open="openSendLater"
           >
             <template #icon>
               <AppIcon v-if="scheduledFor"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></AppIcon>
@@ -1432,8 +1443,10 @@ defineExpose({
       @apply="onTemplateApply"
       @close="showTemplatePicker = false"
     />
-    <SendLaterPicker
-      v-if="showSendLater"
+    <SendLaterMenu
+      v-if="sendLaterAnchor"
+      :open="showSendLater"
+      :anchor="sendLaterAnchor"
       :value="scheduledFor"
       @select="onSendLaterChosen"
       @close="showSendLater = false"

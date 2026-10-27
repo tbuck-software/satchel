@@ -1,3 +1,4 @@
+import { datetimeFormats } from '@/i18n/formats';
 import REPLY_PREFIXES from '../../crates/satchel-core/src/email/reply-prefixes.json';
 import FORWARD_PREFIXES from '../../crates/satchel-core/src/email/forward-prefixes.json';
 import { currentLocale, t } from '@/i18n/runtime';
@@ -109,7 +110,7 @@ export function prefixSubject(value: string, prefix: 'Re' | 'Fwd'): string {
 export function formatTimestamp(value: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString(currentLocale());
+  return parsed.toLocaleString(currentLocale(), { ...datetimeFormats[currentLocale()]!.dateTime, year: 'numeric' });
 }
 
 /**

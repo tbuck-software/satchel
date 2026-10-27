@@ -95,7 +95,7 @@ function syncStatusLabel(account: (typeof accounts.accounts)[number]): string {
   if (status === 'error') return t('settings.accounts.sync.error');
   if (account.lastSyncAt) {
     return t('settings.accounts.sync.lastAt', {
-      time: new Date(account.lastSyncAt).toLocaleString(locale.value),
+      time: new Date(account.lastSyncAt).toLocaleString(locale.value, { dateStyle: 'medium', timeStyle: 'short', hour12: false }),
     });
   }
   return t('settings.accounts.sync.never');

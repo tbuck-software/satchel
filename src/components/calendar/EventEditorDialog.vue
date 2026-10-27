@@ -188,11 +188,11 @@ useDismissable(() => props.draft !== null, () => emit('close'));
             <div class="field-row">
               <label class="field">
                 <span>{{ $t('calendar.event.start') }}</span>
-                <input v-model="startInput" :type="allDay ? 'date' : 'datetime-local'" />
+                <input v-model="startInput" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
               </label>
               <label class="field">
                 <span>{{ $t('calendar.event.end') }}</span>
-                <input v-model="endInput" :type="allDay ? 'date' : 'datetime-local'" />
+                <input v-model="endInput" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
               </label>
             </div>
 

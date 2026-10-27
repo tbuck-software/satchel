@@ -192,7 +192,7 @@ function render(
         RecipientChips: true,
         RichTextEditor: !harness.realEditor,
         SegmentedControl: true,
-        SendLaterPicker: true,
+        SendLaterMenu: true,
         TemplatePicker: true,
       },
     },
@@ -266,7 +266,7 @@ describe('composer fields and actions', () => {
     const footerLabels = wrapper.get('.footer').findAll('button').map((button) => button.text());
     expect(footerLabels.slice(-3)).toEqual(['Save', 'Send', '']);
     expect(wrapper.get('[title="Attach file"]').text()).toBe('Attach');
-    expect(wrapper.get('[title="Send later…"]').attributes('aria-haspopup')).toBe('dialog');
+    expect(wrapper.get('[title="Send later…"]').attributes('aria-haspopup')).toBe('menu');
     for (const button of wrapper.get('.footer-actions').findAll('button')) {
       expect(button.find('svg').exists()).toBe(true);
     }
@@ -276,11 +276,11 @@ describe('composer fields and actions', () => {
 it.each(['reply', 'forward'] as const)('opens scheduling from the split control in an embedded %s', async (mode) => {
   const wrapper = render(['boss@example.com'], true, { mode });
   await flushPromises();
-  const secondary = wrapper.get('[aria-haspopup="dialog"]');
+  const secondary = wrapper.get('.split-button__secondary');
   expect(secondary.attributes('aria-expanded')).toBe('false');
   await secondary.trigger('click');
   expect(secondary.attributes('aria-expanded')).toBe('true');
-  const picker = wrapper.getComponent({ name: 'SendLaterPicker' });
+  const picker = wrapper.getComponent({ name: 'SendLaterMenu' });
   picker.vm.$emit('select', '2026-12-01T09:00:00Z');
   await flushPromises();
   expect(secondary.attributes('aria-expanded')).toBe('false');
@@ -301,7 +301,7 @@ describe.each([true, false])('outgoing conversation history, plain text: %s', (p
         from: { name: 'Client', email: 'client@example.com' },
         to: [{ name: 'Me', email: 'me@example.com' }],
         subject: 'Project update', bodyText: 'Preview only', bodyLoaded: false,
-        timestamp: '2026-10-13T10:00:00Z', isRead: true, attachments: [],
+        timestamp: '2026-10-13T10:00:54Z', isRead: true, attachments: [],
       },
       {
         id: 'sent', threadId: 'thread-1',
@@ -339,6 +339,7 @@ describe.each([true, false])('outgoing conversation history, plain text: %s', (p
     }));
     const payload = harness.sendMessage.mock.calls[0]![0];
     expect(payload.body).toContain('Tuesday works for me.');
+    expect(payload.body).not.toMatch(/\d{1,2}:\d{2}:\d{2}/);
     expect(payload.body).toContain('Text before loading');
     expect(payload.body).toContain('client@example.com');
     expect(payload.body).toContain('me@example.com');
@@ -543,7 +544,7 @@ describe('composer send guard', () => {
     expect(wrapper.get('[data-testid="compose-send-wrap"]').attributes('title')).toBe(hint);
     const describedBy = sendButton(wrapper).attributes('aria-describedby');
     expect(wrapper.get(`#${describedBy}`).text()).toBe(hint);
-    const secondary = wrapper.get('[aria-haspopup="dialog"]');
+    const secondary = wrapper.get('.split-button__secondary');
     expect(secondary.attributes('disabled')).toBeDefined();
     expect(secondary.attributes('aria-describedby')).toBe(describedBy);
   });
@@ -654,7 +655,7 @@ describe('where a fresh composer starts typing', () => {
           RecipientChips: RecipientChipsStub,
           RichTextEditor: true,
           SegmentedControl: true,
-          SendLaterPicker: true,
+          SendLaterMenu: true,
           TemplatePicker: true,
         },
       },

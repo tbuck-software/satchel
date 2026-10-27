@@ -161,7 +161,7 @@ function previewText(draft: BackendDraft): string {
 function exactTime(value?: string | null): string {
   if (!value) return '';
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale.value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale.value, { dateStyle: 'medium', timeStyle: 'short', hour12: false });
 }
 
 async function discardDraft(id: string) {

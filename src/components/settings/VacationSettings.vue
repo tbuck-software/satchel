@@ -113,11 +113,11 @@ async function save() {
     <div class="row">
       <label class="field">
         <span>{{ $t('common.from') }}</span>
-        <input v-model="startsAt" type="datetime-local" :disabled="!enabled" />
+        <input v-model="startsAt" type="datetime-local" step="60" :disabled="!enabled" />
       </label>
       <label class="field">
         <span>{{ $t('settings.vacation.until') }}</span>
-        <input v-model="endsAt" type="datetime-local" :disabled="!enabled" />
+        <input v-model="endsAt" type="datetime-local" step="60" :disabled="!enabled" />
       </label>
     </div>
 

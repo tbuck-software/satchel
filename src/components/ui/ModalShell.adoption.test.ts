@@ -111,9 +111,9 @@ describe('send-later picker on the shell', () => {
     wrapper = mount(SendLaterPicker, { attachTo: document.body, props: { value: null } });
   });
 
-  it('renders its presets inside the shared dialog frame', () => {
+  it('renders the custom minute picker inside the shared dialog frame', () => {
     expect(panel().getAttribute('role')).toBe('dialog');
-    expect(panel().querySelectorAll('.presets button')).toHaveLength(3);
+    expect(panel().querySelector('input')?.getAttribute('step')).toBe('60');
   });
 
   it('still closes on the backdrop', () => {

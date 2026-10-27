@@ -13,7 +13,7 @@ const accounts = useAccountsStore();
 const draft = ref<BackendAccountVisibilityPolicy>({ mode: 'always', weekdays: [1, 2, 3, 4, 5], from: null, to: null, override_date: null, override_visible: null });
 const dirty = ref(false);
 watch(() => accounts.visibilityFor(props.accountId)?.policy, (policy) => {
-  if (policy && !dirty.value) draft.value = { ...policy, weekdays: [...policy.weekdays] };
+  if (policy && !dirty.value) draft.value = { ...policy, weekdays: [...policy.weekdays], from: policy.from?.slice(0, 5) ?? null, to: policy.to?.slice(0, 5) ?? null };
 }, { immediate: true });
 const modes = computed(() => [
   { value: 'always', label: t('accountVisibility.always') },
@@ -33,7 +33,7 @@ function toggleDay(day: number) {
   dirty.value = true;
 }
 function setTime(field: 'from' | 'to', event: Event) {
-  draft.value[field] = (event.target as HTMLInputElement).value || null;
+  draft.value[field] = (event.target as HTMLInputElement).value.slice(0, 5) || null;
   dirty.value = true;
 }
 async function save() {
@@ -58,8 +58,8 @@ async function save() {
         <FilterPill v-for="day in weekdays" :key="day.value" :label="day.label" :title="day.title" :aria-label="day.title" :pressed="draft.weekdays.includes(day.value)" @click="toggleDay(day.value)" />
       </div>
       <div class="visibility-settings__times">
-        <label>{{ t('accountVisibility.from') }}<input type="time" :value="draft.from ?? ''" @input="setTime('from', $event)" /></label>
-        <label>{{ t('accountVisibility.to') }}<input type="time" :value="draft.to ?? ''" @input="setTime('to', $event)" /></label>
+        <label>{{ t('accountVisibility.from') }}<input type="time" step="60" :value="draft.from?.slice(0, 5) ?? ''" @input="setTime('from', $event)" /></label>
+        <label>{{ t('accountVisibility.to') }}<input type="time" step="60" :value="draft.to?.slice(0, 5) ?? ''" @input="setTime('to', $event)" /></label>
         <span>{{ t('accountVisibility.localTime') }}</span>
       </div>
       <p v-if="!valid" class="visibility-settings__error" role="alert">{{ t('accountVisibility.invalidTime') }}</p>

@@ -110,6 +110,7 @@
         "tomorrowAt": "Tomorrow {time}",
         "mondayAt": "Monday {time}",
         "custom": "Custom time",
+        "pickDateTime": "Pick date & time…",
         "clear": "Remove schedule",
         "confirm": "Set"
       },
@@ -454,6 +455,7 @@
         "tomorrowAt": "Morgen {time}",
         "mondayAt": "Montag {time}",
         "custom": "Eigener Zeitpunkt",
+        "pickDateTime": "Datum und Uhrzeit wählen …",
         "clear": "Plan entfernen",
         "confirm": "Festlegen"
       },

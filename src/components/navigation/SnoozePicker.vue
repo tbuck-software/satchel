@@ -175,7 +175,7 @@ const { onTab } = useFocusTrap(picker, { isOpen: () => props.open, restingFocus:
         <span class="section-label">{{ $t('nav.snooze.manual') }}</span>
         <input
           v-model="selected"
-          type="datetime-local"
+          type="datetime-local" step="60"
           :min="minManualValue"
           :aria-invalid="manualInPast ? 'true' : undefined"
           :aria-describedby="manualInPast ? errorId : undefined"

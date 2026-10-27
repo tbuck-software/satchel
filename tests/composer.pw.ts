@@ -48,6 +48,7 @@ for (const theme of ['dark', 'light'] as const) {
         if (mode === 'reply') {
           const history = composer.locator('[data-composer-history]');
           await expect(history).toContainText(/On .+ wrote:/);
+          await expect(history.locator('p').first()).not.toContainText(/\d{1,2}:\d{2}:\d{2}/);
           const order = await composer.locator('.body').evaluate((body) => Array.from(body.children).map((element) => element.hasAttribute('data-composer-signature') ? 'signature' : element.hasAttribute('data-composer-history') ? 'history' : 'writing'));
           expect(order.slice(0, 3)).toEqual(['writing', 'signature', 'history']);
           const writerBox = (await writer.boundingBox())!;
@@ -71,14 +72,45 @@ for (const theme of ['dark', 'light'] as const) {
         await page.keyboard.press('Tab');
         await expect(later).toBeFocused();
         await page.keyboard.press('Enter');
-        const picker = page.getByRole('dialog', { name: 'Send later…', exact: true });
+        const picker = page.getByRole('menu', { name: 'Send later…', exact: true });
         await expect(picker).toBeVisible();
+        await expect(picker).toHaveCSS('opacity', '1');
+        await expect(picker).toHaveClass('context-menu');
+        await expect(later).toHaveAttribute('aria-haspopup', 'menu');
+        const options = picker.getByRole('menuitem');
+        await expect(options).toHaveCount(4);
+        await expect(options.first()).toBeFocused();
+        await expect.poll(async () => {
+          const menuBox = (await picker.boundingBox())!;
+          const triggerBox = (await later.boundingBox())!;
+          return Math.abs(menuBox.y + menuBox.height - triggerBox.y);
+        }).toBeLessThan(32);
+        await page.keyboard.press('ArrowDown');
+        await expect(options.nth(1)).toBeFocused();
+        await page.keyboard.press('ArrowUp');
+        await expect(options.first()).toBeFocused();
         await expect(later).toHaveAttribute('aria-expanded', 'true');
         await page.screenshot({ path: testInfo.outputPath(`${mode}-send-later-${theme}-${viewport.width}x${viewport.height}@2x.png`) });
         await page.keyboard.press('Escape');
         await expect(picker).toHaveCount(0);
         await expect(later).toBeFocused();
         await expect(later).toHaveAttribute('aria-expanded', 'false');
+        await later.press('ArrowDown');
+        await expect(picker).toBeVisible();
+        await page.keyboard.press('End');
+        await page.keyboard.press('Enter');
+        const custom = page.getByRole('dialog', { name: 'Send later…', exact: true });
+        await expect(custom).toBeVisible();
+        await expect(custom.locator('input')).toHaveAttribute('step', '60');
+        await page.keyboard.press('Escape');
+        await expect(custom).toHaveCount(0);
+        await expect(later).toBeFocused();
+        await later.press('ArrowDown');
+        await expect(options.first()).toBeFocused();
+        await page.keyboard.press('Enter');
+        await expect(picker).toHaveCount(0);
+        await expect(composer.locator('.schedule-info')).toContainText('Scheduled');
+        await expect(composer.locator('.split-button__primary')).toContainText('Schedule');
       });
     }
   }
