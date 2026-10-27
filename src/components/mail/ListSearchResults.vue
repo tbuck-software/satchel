@@ -36,9 +36,15 @@ const search = useListSearch({ mailbox: () => props.mailbox });
 
 watch(
   search.resultThreads,
-  (rows) => { store.resultThreadIds = rows.map((thread) => thread.id); },
+  (rows) => {
+    store.resultThreadIds = rows.map((thread) => thread.id);
+    // Checking rows, ranges and select-all run over the results while they
+    // cover the list; the selection bar and its actions stay the Inbox's.
+    threads.setSelectionList(rows);
+  },
   { immediate: true },
 );
+onBeforeUnmount(() => threads.setSelectionList(null));
 
 const scopeOptions = computed(() => [
   { value: 'mailbox', label: props.mailboxLabel },
@@ -63,13 +69,32 @@ function show(threadId: string) {
   threads.selectThread(threadId);
 }
 
-function onActivate(payload: { threadId: string; keyboard?: boolean }) {
+interface RowPointer {
+  threadId: string;
+  shiftKey: boolean;
+  metaKey: boolean;
+  ctrlKey: boolean;
+}
+
+function modifiers({ shiftKey, metaKey, ctrlKey }: RowPointer) {
+  return { shiftKey, metaKey, ctrlKey };
+}
+
+function onActivate(payload: RowPointer & { keyboard?: boolean }) {
   keyboardFocusKey.value = `thread:${payload.threadId}`;
   keyboardNavigationActive.value = payload.keyboard ?? false;
+  // As in the list: a plain click opens and clears the selection, a
+  // modified one extends it.
+  threads.selectFromInteraction(payload.threadId, modifiers(payload), true);
   show(payload.threadId);
   if (ui.isSinglePane || payload.keyboard) {
     void router.push({ name: 'thread', params: { id: payload.threadId } });
   }
+}
+
+/** The avatar checks a row, as in the list, instead of opening it. */
+function onCheck(payload: RowPointer) {
+  threads.selectFromInteraction(payload.threadId, modifiers(payload), false);
 }
 
 function move(delta: 1 | -1): boolean {
@@ -92,7 +117,7 @@ function move(delta: 1 | -1): boolean {
 function open(): boolean {
   const id = keyboardFocusKey.value.replace(/^thread:/, '') || props.openThreadId || store.resultThreadIds[0];
   if (!id) return false;
-  onActivate({ threadId: id, keyboard: true });
+  onActivate({ threadId: id, keyboard: true, shiftKey: false, metaKey: false, ctrlKey: false });
   return true;
 }
 
@@ -158,11 +183,11 @@ function openAdvancedSearch() {
         :active-thread-id="ui.isSinglePane ? undefined : props.openThreadId"
         :focused-target-key="keyboardFocusKey"
         :keyboard-navigation-active="keyboardNavigationActive"
-        :selected-thread-ids="[]"
+        :selected-thread-ids="threads.selectedThreadIds"
         :sender-review-setup-complete="true"
         :bulk-busy="false"
         @activate="onActivate"
-        @check="onActivate"
+        @check="onCheck"
         @load-more="search.loadMore()"
       >
         <template #empty>

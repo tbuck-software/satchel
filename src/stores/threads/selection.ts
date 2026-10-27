@@ -1,4 +1,4 @@
-import { computed, ref, watch, type ComputedRef, type Ref } from 'vue';
+import { computed, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue';
 import type { Thread } from '@/types/mail';
 import type { WorkflowState } from '@/types/workflow';
 import { recordFrontendDiagnostic } from '@/utils/diagnostics';
@@ -23,6 +23,13 @@ export interface ThreadSelectionSurface {
     openThread: boolean,
   ): void;
   toggleSelectionForThread(threadId: string): void;
+  /**
+   * Select within a list drawn over the store's own — the list search's
+   * results — or `null` to return to the store's list. While set, ranges,
+   * select-all and pruning follow its order, and a row the store has not
+   * loaded is taken in when selected, so the actions find it.
+   */
+  setSelectionList(rows: readonly Thread[] | null): void;
   focusNeighborThread(threadId: string): void;
   nextThread(): void;
   prevThread(): void;
@@ -60,6 +67,8 @@ export function createVisibleThreadProjection(): VisibleThreadProjection {
 interface ThreadSelectionDependencies {
   threads: Ref<Thread[]>;
   find(threadId: string): Thread | undefined;
+  /** Take rows into the collection, as a search hit opened in the reader is. */
+  adopt(rows: Thread[]): void;
   projection: VisibleThreadProjection;
 }
 
@@ -70,6 +79,7 @@ interface ThreadSelectionDependencies {
 export function createThreadSelection({
   threads,
   find,
+  adopt,
   projection,
 }: ThreadSelectionDependencies): ThreadSelection {
   const activeThreadId = ref<string>(threads.value[0]?.id ?? '');
@@ -84,6 +94,31 @@ export function createThreadSelection({
   const leavingThreadIds = ref<string[]>([]);
   /** Destination drives the right visual cue (check, snooze, set aside). */
   const leavingThreadStates = ref<Partial<Record<string, WorkflowState>>>({});
+
+  const selectionList = shallowRef<readonly Thread[] | null>(null);
+  const selectionListOrder = computed(() => selectionList.value?.map((thread) => thread.id) ?? null);
+
+  /** The order selection follows: the list drawn on screen. */
+  function selectionOrder(): string[] {
+    return selectionListOrder.value ?? projection.visibleThreadOrder();
+  }
+
+  function setSelectionList(rows: readonly Thread[] | null) {
+    selectionList.value = rows;
+  }
+
+  /** Rows of the drawn list the store does not hold yet join it. */
+  function adoptListed(threadIds: readonly string[]): string[] {
+    const rows = selectionList.value;
+    if (!rows) return threadIds.filter((id) => Boolean(find(id)));
+    const listed = new Map(rows.map((thread) => [thread.id, thread]));
+    const missing = threadIds.flatMap((id) => {
+      const row = listed.get(id);
+      return !find(id) && row ? [row] : [];
+    });
+    if (missing.length > 0) adopt(missing);
+    return threadIds.filter((id) => Boolean(find(id)));
+  }
 
   const activeThread = computed(() => find(activeThreadId.value));
   const selectedThreadSet = computed(() => new Set(selectedThreadIds.value));
@@ -131,12 +166,11 @@ export function createThreadSelection({
   }
 
   function setSelection(threadIds: string[]) {
-    const unique = Array.from(new Set(threadIds));
-    selectedThreadIds.value = unique.filter((id) => Boolean(find(id)));
+    selectedThreadIds.value = adoptListed(Array.from(new Set(threadIds)));
   }
 
   function selectAllVisibleThreads() {
-    const order = projection.visibleThreadOrder();
+    const order = selectionOrder();
     setSelection(order);
     selectionAnchorId.value = order[0] ?? '';
   }
@@ -146,11 +180,12 @@ export function createThreadSelection({
       selectedThreadIds.value = selectedThreadIds.value.filter((id) => id !== threadId);
       return;
     }
+    adoptListed([threadId]);
     selectedThreadIds.value = [...selectedThreadIds.value, threadId];
   }
 
   function rangeSelection(fromThreadId: string, toThreadId: string): string[] {
-    const order = projection.visibleThreadOrder();
+    const order = selectionOrder();
     const fromIndex = order.indexOf(fromThreadId);
     const toIndex = order.indexOf(toThreadId);
     if (fromIndex < 0 || toIndex < 0) {
@@ -263,7 +298,7 @@ export function createThreadSelection({
       { immediate: true },
     );
 
-    watch(() => projection.visibleThreadOrder(), (nextOrder) => {
+    watch(() => selectionOrder(), (nextOrder) => {
       const orderSet = new Set(nextOrder);
       selectedThreadIds.value = selectedThreadIds.value.filter((id) => orderSet.has(id));
       if (selectionAnchorId.value && !orderSet.has(selectionAnchorId.value)) {
@@ -286,6 +321,7 @@ export function createThreadSelection({
       selectAllVisibleThreads,
       selectFromInteraction,
       toggleSelectionForThread,
+      setSelectionList,
       focusNeighborThread,
       nextThread,
       prevThread,

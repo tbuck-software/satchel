@@ -71,6 +71,26 @@ describe('thread row layout', () => {
     expect(wrapper.html()).not.toContain('font-[650]');
   });
 
+  it('checks the row from its avatar and opens it from anywhere else', async () => {
+    const thread = {
+      id: 'thread', accountId: 'account', subject: 'Betreff',
+      participants: [{ name: 'Absender', email: 'sender@example.com' }], snippet: 'Vorschau',
+      lastMessageAt: '2026-08-06T12:00:00Z', lastMessageAtMs: Date.parse('2026-08-06T12:00:00Z'),
+      messageCount: 1, unreadCount: 0, hasAttachments: false, workflowState: 'inbox' as const,
+      priority: 1 as const, mailboxNames: ['INBOX'], tags: [],
+    };
+    const wrapper = shallowMount(ThreadListItem, {
+      props: { thread, active: false, selected: false, selectionMode: false },
+    });
+
+    await wrapper.get('[data-test="thread-row-check"]').trigger('click', { shiftKey: true });
+    expect(wrapper.emitted('check')).toEqual([[{ threadId: 'thread', shiftKey: true, metaKey: false, ctrlKey: false }]]);
+    expect(wrapper.emitted('activate')).toBeUndefined();
+
+    await wrapper.get('article').trigger('click');
+    expect(wrapper.emitted('activate')).toHaveLength(1);
+  });
+
   it('draws the mute and attachment icons at full tertiary, not faded below 3:1', () => {
     const thread = {
       id: 'thread',

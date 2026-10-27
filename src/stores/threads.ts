@@ -45,6 +45,7 @@ export const useThreadsStore = defineStore('threads', () => {
   const selection = createThreadSelection({
     threads: collection.threads,
     find: collection.find,
+    adopt: collection.appendUnique,
     projection,
   });
   const selectionBridge = {

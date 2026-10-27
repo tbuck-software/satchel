@@ -1,4 +1,5 @@
 import { createPinia, setActivePinia } from 'pinia';
+import { nextTick } from 'vue';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Thread } from '@/types/mail';
 import { createThreadCollection } from '@/stores/threads/collection';
@@ -151,6 +152,52 @@ describe('deselecting acted-on threads', () => {
 
     store.deselectThreads(['th-0', 'th-1']);
 
+    expect(store.selectedThreadIds).toEqual(['th-2']);
+  });
+});
+
+describe('selection over a list drawn on top of the store', () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it('ranges over the drawn order and takes in rows the store has not loaded', async () => {
+    const store = useThreadsStore();
+    store.threads = seedThreads(5);
+    // Search results: one loaded row between hits the page never reached.
+    const done = { ...seedThread(70), workflowState: 'done' as const };
+    const results = [seedThread(80), seedThread(2), done];
+    store.setSelectionList(results);
+    await nextTick();
+
+    store.selectFromInteraction('th-80', { metaKey: false, ctrlKey: false, shiftKey: false }, false);
+    store.selectFromInteraction('th-70', { metaKey: false, ctrlKey: false, shiftKey: true }, false);
+
+    expect(store.selectedThreadIds).toEqual(['th-80', 'th-2', 'th-70']);
+    // The actions read the store; the hits are there now.
+    expect(store.find('th-80')?.id).toBe('th-80');
+    expect(store.find('th-70')?.workflowState).toBe('done');
+    expect(store.selectedThreads.map((thread) => thread.id)).toEqual(expect.arrayContaining(['th-80', 'th-70']));
+
+    store.selectAllVisibleThreads();
+    expect(store.selectedThreadIds).toEqual(['th-80', 'th-2', 'th-70']);
+  });
+
+  it('keeps what the drawn list shows and drops the rest when it goes', async () => {
+    const store = useThreadsStore();
+    store.threads = seedThreads(5);
+    store.toggleSelectionForThread('th-1');
+    store.toggleSelectionForThread('th-2');
+
+    store.setSelectionList([seedThread(2), { ...seedThread(70), workflowState: 'done' }]);
+    await nextTick();
+    // Selected rows the results do not show are not acted on unseen.
+    expect(store.selectedThreadIds).toEqual(['th-2']);
+
+    store.toggleSelectionForThread('th-70');
+    expect(store.selectedThreadIds).toEqual(['th-2', 'th-70']);
+
+    store.setSelectionList(null);
+    await nextTick();
+    // Back in the Inbox, a done hit is not part of the list.
     expect(store.selectedThreadIds).toEqual(['th-2']);
   });
 });

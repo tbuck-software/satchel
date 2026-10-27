@@ -225,6 +225,18 @@ function emitActivate(event: MouseEvent | KeyboardEvent) {
   });
 }
 
+/** The avatar checks the row for a bulk action instead of opening it. */
+function emitCheck(event: MouseEvent) {
+  if (shouldSuppressClick()) return;
+  closeContextMenu();
+  emit('check', {
+    threadId: props.thread.id,
+    shiftKey: event.shiftKey,
+    metaKey: event.metaKey,
+    ctrlKey: event.ctrlKey,
+  });
+}
+
 function openContextMenu(event: MouseEvent) {
   contextMenuAnchor.value = {
     left: event.clientX,
@@ -445,6 +457,8 @@ function onDragStart(event: DragEvent) {
 
     <span
       class="thread-row__avatar relative h-9 w-9 shrink-0 rounded-full"
+      data-test="thread-row-check"
+      @click.stop="emitCheck"
     >
       <Avatar
         :name="primaryParticipantName"
