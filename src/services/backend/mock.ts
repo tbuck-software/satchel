@@ -252,12 +252,40 @@ function draftFromInput(scope: Record<string, unknown>): BackendDraft {
   };
 }
 
+/**
+ * A draft that belongs to a thread is also a message in it, as in the
+ * database. Deleting the draft takes the message out of the thread; saving it
+ * again (an undo) puts it back where it was.
+ */
+const removedDraftMessages = new Map<string, Message>();
+
+function syncDraftMessage(draft: BackendDraft) {
+  const threadId = draft.thread_id;
+  if (!threadId) return;
+  const list = messages[threadId] ?? [];
+  const current = list.find((message) => message.id === draft.id) ?? removedDraftMessages.get(draft.id);
+  if (!current) return;
+  removedDraftMessages.delete(draft.id);
+  const updated = { ...current, bodyText: draft.body, timestamp: draft.updated_at };
+  messages[threadId] = [...list.filter((message) => message.id !== draft.id), updated];
+}
+
+function removeDraftMessage(id: string) {
+  for (const [threadId, list] of Object.entries(messages)) {
+    const message = list.find((entry) => entry.id === id && entry.isDraft);
+    if (!message) continue;
+    removedDraftMessages.set(id, message);
+    messages[threadId] = list.filter((entry) => entry !== message);
+  }
+}
+
 function putDraft(draft: BackendDraft) {
   const index = drafts.findIndex((entry) => entry.id === draft.id);
   const revision = (index >= 0 ? drafts[index]!.revision ?? 0 : 0) + 1;
   const stored = { ...draft, revision };
   if (index >= 0) drafts.splice(index, 1, stored);
   else drafts.unshift(stored);
+  syncDraftMessage(stored);
   return { ...stored };
 }
 
@@ -937,6 +965,7 @@ const handlers: Record<string, Handler> = {
     }
     const index = drafts.findIndex((draft) => draft.id === payload.id);
     if (index >= 0) drafts.splice(index, 1);
+    removeDraftMessage(payload.id as string);
   },
 
   /* --- topics --------------------------------------------------------- */
@@ -1031,10 +1060,13 @@ const handlers: Record<string, Handler> = {
       });
     }
 
+    // A sent draft is gone, from the drafts list and from its thread.
     const draftId = scope.draft_id as string | null;
     if (draftId) {
       const index = drafts.findIndex((draft) => draft.id === draftId);
       if (index >= 0) drafts.splice(index, 1);
+      removeDraftMessage(draftId);
+      removedDraftMessages.delete(draftId);
     }
 
     return { status: 'sent', thread_id: threadId, message_id: messageId, queued_id: null };
