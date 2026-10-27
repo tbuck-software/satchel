@@ -15,6 +15,7 @@ import { useToast } from '@/composables/useToast';
 import { useWorkflow } from '@/composables/useWorkflow';
 import { createThreadActionQueue } from './threadActionQueue';
 import { t, tc } from '@/i18n/runtime';
+import { openView } from '@/router/mailViews';
 
 interface StateSnapshot {
   threadId: string;
@@ -218,6 +219,7 @@ export function useThreadActions() {
 
       // One receipt with one deadline for the whole batch, and one Undo payload.
       showWorkflowUndo(snapshot, nextState, label);
+      if (nextState === 'waiting') showWhereWaitingWent();
 
       // A smart-folder close can publish an older Inbox page during persistence.
       // Reassert confirmed states before refreshing that projection.
@@ -235,6 +237,15 @@ export function useThreadActions() {
       // Each successful transition already started its own visible Undo period.
       // A slow list refresh must not consume the user's chance to cancel it.
       await refreshLists();
+    });
+  }
+
+  /** Waiting mail leaves the list; say where it went, unless that is on screen. */
+  function showWhereWaitingWent() {
+    if (threads.workflowFilter === 'later') return;
+    toast.info(t('thread.result.inLater'), {
+      groupKey: 'later:show',
+      action: { label: t('common.show'), handler: () => openView(router, 'later') },
     });
   }
 

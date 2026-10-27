@@ -8,12 +8,17 @@ const harness = vi.hoisted(() => ({
   addItemsToTopic: vi.fn(),
   closePicker: vi.fn(),
   create: vi.fn(),
+  pickerTarget: { itemType: 'message', itemIds: ['message-1'] } as { itemType: 'message' | 'thread'; itemIds: string[] },
+  moveToFolder: vi.fn(),
+  focusNeighborThread: vi.fn(),
+  threads: {} as Record<string, { accountId: string; mailboxNames: string[] }>,
+  mailboxes: [] as Array<{ id: string; name: string; account_id: string }>,
 }));
 
 vi.mock('@/stores/topics', () => ({
   useTopicsStore: () => ({
     activeTopics: harness.activeTopics,
-    pickerTarget: { itemType: 'message', itemIds: ['message-1'] },
+    get pickerTarget() { return harness.pickerTarget; },
     addItemsToTopic: harness.addItemsToTopic,
     byId: () => undefined,
     closePicker: harness.closePicker,
@@ -22,19 +27,31 @@ vi.mock('@/stores/topics', () => ({
   }),
 }));
 
+vi.mock('@/stores/threads', () => ({
+  useThreadsStore: () => ({
+    activeThreadId: 'thread-1',
+    find: (id: string) => harness.threads[id],
+    focusNeighborThread: harness.focusNeighborThread,
+  }),
+}));
+
+vi.mock('@/stores/mailboxes', () => ({
+  useMailboxesStore: () => ({ mailboxes: harness.mailboxes }),
+}));
+
 vi.mock('@/stores/ui', () => ({
   useUiStore: () => ({ registerOverlay: () => vi.fn() }),
 }));
 
 vi.mock('@/composables/useThreadActions', () => ({
-  useThreadActions: () => ({ addToTopic: vi.fn(), removeFromTopic: vi.fn() }),
+  useThreadActions: () => ({ addToTopic: vi.fn(), removeFromTopic: vi.fn(), moveToFolder: harness.moveToFolder }),
 }));
 
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ error: vi.fn(), success: vi.fn() }),
 }));
 
-import TopicPickerOverlay from './TopicPickerOverlay.vue';
+import FilePickerOverlay from './FilePickerOverlay.vue';
 
 const topic = {
   id: 'topic-1',
@@ -54,7 +71,7 @@ const topic = {
 };
 
 function render(attach = false) {
-  return mount(TopicPickerOverlay, {
+  return mount(FilePickerOverlay, {
     ...(attach ? { attachTo: document.body } : {}),
     global: { stubs: { Teleport: true, Transition: false } },
   });
@@ -134,5 +151,46 @@ describe('keyboard containment', () => {
     wrapper.unmount();
     expect(document.activeElement).toBe(opener);
     opener.remove();
+  });
+});
+
+describe('folders and topics in one picker', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    harness.activeTopics.length = 0;
+    harness.activeTopics.push(topic);
+    harness.pickerTarget = { itemType: 'thread', itemIds: ['thread-1'] };
+    harness.threads = { 'thread-1': { accountId: 'acc', mailboxNames: ['INBOX'] } };
+    harness.mailboxes = [
+      { id: 'f-inbox', name: 'INBOX', account_id: 'acc' },
+      { id: 'f-projects', name: 'Projects', account_id: 'acc' },
+      { id: 'f-other', name: 'Elsewhere', account_id: 'other' },
+    ];
+  });
+
+  it('lists the other folders of the account above the topics', () => {
+    const wrapper = render();
+
+    expect(wrapper.findAll('.group-label').map((label) => label.text())).toEqual(['Folders', 'Topics']);
+    expect(wrapper.findAll('.row').map((row) => row.text())).toEqual(['Projects', topic.name]);
+  });
+
+  it('moves the mail and closes when a folder is chosen', async () => {
+    const wrapper = render();
+
+    await wrapper.findAll('.row')[0]!.trigger('click');
+
+    expect(harness.closePicker).toHaveBeenCalledTimes(1);
+    expect(harness.focusNeighborThread).toHaveBeenCalledWith('thread-1');
+    expect(harness.moveToFolder).toHaveBeenCalledWith(['thread-1'], 'f-projects', 'Projects');
+  });
+
+  it('offers topics only for mail from several accounts', () => {
+    harness.pickerTarget = { itemType: 'thread', itemIds: ['thread-1', 'thread-2'] };
+    harness.threads['thread-2'] = { accountId: 'other', mailboxNames: [] };
+
+    const wrapper = render();
+
+    expect(wrapper.findAll('.row').map((row) => row.text())).toEqual([topic.name]);
   });
 });

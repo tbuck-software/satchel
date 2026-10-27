@@ -10,7 +10,7 @@ import PluginSlotHost from '@/components/plugins/PluginSlotHost.vue';
 import { useShortcutHints } from '@/composables/useShortcutHints';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 
-type Submenu = 'block' | 'move' | 'organize' | 'print' | 'markdown' | 'export';
+type Submenu = 'block' | 'organize' | 'print' | 'markdown' | 'export';
 type MessageScope = 'latest' | 'conversation';
 type ExportFormat = 'eml' | 'markdown' | 'text';
 
@@ -27,7 +27,6 @@ const props = withDefaults(
     isMuted?: boolean;
     showBack?: boolean;
     senderAddress?: string;
-    moveTargets?: Array<{ id: string; label: string }>;
     canReply?: boolean;
     /**
      * The reader offers the reply itself: a reply foot, or the card of an
@@ -51,7 +50,6 @@ const props = withDefaults(
     isMuted: false,
     showBack: false,
     senderAddress: '',
-    moveTargets: () => [],
     canReply: true,
     replyInReader: false,
     attachmentCount: 0,
@@ -75,7 +73,6 @@ const emit = defineEmits<{
   toggleMuted: [];
   spam: [];
   block: [scope: 'address' | 'domain'];
-  move: [targetId: string];
   print: [scope: MessageScope];
   copyMarkdown: [scope: MessageScope];
   copyLink: [];
@@ -87,8 +84,8 @@ const emit = defineEmits<{
   resend: [];
   forward: [];
   allActions: [];
-  organize: [kind: 'tags' | 'assignee' | 'sharing'];
-  addToTopic: [];
+  organize: [kind: 'assignee' | 'sharing'];
+  fileTo: [];
 }>();
 
 const { t } = useI18n();
@@ -103,7 +100,6 @@ const moreRef = ref<HTMLElement | null>(null);
 
 const SUBMENU_LABELS: Record<Submenu, string> = {
   block: 'thread.actions.blockSender',
-  move: 'thread.toolbar.moveToFolder',
   organize: 'thread.toolbar.organize',
   print: 'thread.toolbar.print',
   markdown: 'thread.toolbar.copyMarkdown',
@@ -148,7 +144,7 @@ function openSubmenu(submenu: Submenu, event: Event) {
   activeSubmenu.value = submenu;
 }
 
-function run(action: 'toggleRead' | 'togglePin' | 'setAside' | 'forward' | 'toggleMuted' | 'spam' | 'reply' | 'resend' | 'allActions' | 'copyLink' | 'addToTopic') {
+function run(action: 'toggleRead' | 'togglePin' | 'setAside' | 'forward' | 'toggleMuted' | 'spam' | 'reply' | 'resend' | 'allActions' | 'copyLink' | 'fileTo') {
   closeMenu();
   if (action === 'toggleRead') emit('toggleRead');
   if (action === 'togglePin') emit('togglePin');
@@ -160,7 +156,7 @@ function run(action: 'toggleRead' | 'togglePin' | 'setAside' | 'forward' | 'togg
   if (action === 'resend') emit('resend');
   if (action === 'allActions') emit('allActions');
   if (action === 'copyLink') emit('copyLink');
-  if (action === 'addToTopic') emit('addToTopic');
+  if (action === 'fileTo') emit('fileTo');
 }
 
 function runBlock(scope: 'address' | 'domain') {
@@ -168,12 +164,7 @@ function runBlock(scope: 'address' | 'domain') {
   emit('block', scope);
 }
 
-function runMove(targetId: string) {
-  closeMenu();
-  emit('move', targetId);
-}
-
-function runOrganize(kind: 'tags' | 'assignee' | 'sharing') {
+function runOrganize(kind: 'assignee' | 'sharing') {
   closeMenu();
   emit('organize', kind);
 }
@@ -315,13 +306,13 @@ function runExport(format: ExportFormat) {
 
     <div class="menu-group">
       <MenuItem
-        :label="$t('thread.toolbar.organize')"
-        submenu
-        :expanded="activeSubmenu === 'organize'"
-        @mouseenter="openSubmenu('organize', $event)"
-        @select="openSubmenu('organize', $event)"
+        :label="targetLabel($t('thread.actions.fileTo'))"
+        :aria-keyshortcuts="hint('fileTo')?.aria"
+        @mouseenter="closeSubmenu"
+        @select="run('fileTo')"
       >
-        <template #icon><AppIcon :grid="20"><path d="M3 5h14M3 10h14M3 15h14" /><circle cx="7" cy="5" r="1.5" /><circle cx="13" cy="10" r="1.5" /><circle cx="9" cy="15" r="1.5" /></AppIcon></template>
+        <template #icon><AppIcon :grid="20"><path d="M2.5 6h6l1.7 2H17v8.5H2.5V6Z" /></AppIcon></template>
+        <template v-if="hint('fileTo')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('fileTo')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
         :label="targetLabel(isUnread ? $t('thread.actions.markRead') : $t('thread.actions.markUnread'))"
@@ -372,13 +363,13 @@ function runExport(format: ExportFormat) {
         <template #icon><AppIcon :grid="20"><path d="M6 4.5A6.5 6.5 0 0 1 16.5 10M5 7H2.5v4H5l3 3V6L5 7Z" /><path d="m4 3 13 14" /></AppIcon></template>
       </MenuItem>
       <MenuItem
-        :label="targetLabel($t('thread.toolbar.move'))"
+        :label="$t('thread.toolbar.organize')"
         submenu
-        :expanded="activeSubmenu === 'move'"
-        @mouseenter="openSubmenu('move', $event)"
-        @select="openSubmenu('move', $event)"
+        :expanded="activeSubmenu === 'organize'"
+        @mouseenter="openSubmenu('organize', $event)"
+        @select="openSubmenu('organize', $event)"
       >
-        <template #icon><AppIcon :grid="20"><path d="M2.5 6h6l1.7 2H17v8.5H2.5V6Z" /></AppIcon></template>
+        <template #icon><AppIcon :grid="20"><circle cx="8" cy="7" r="3" /><path d="M2.5 16a5.5 5.5 0 0 1 11 0" /><path d="M14 8.5h4M16 6.5v4" /></AppIcon></template>
       </MenuItem>
       <MenuItem
         :label="targetLabel($t('thread.toolbar.markSpam'))"
@@ -485,10 +476,6 @@ function runExport(format: ExportFormat) {
     @close="closeSubmenu"
   >
     <template v-if="activeSubmenu === 'organize'">
-      <MenuItem :label="targetLabel($t('thread.actions.addToTopic'))" :aria-keyshortcuts="hint('addToTopic')?.aria" @select="run('addToTopic')">
-        <template v-if="hint('addToTopic')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('addToTopic')?.label }}</kbd></template>
-      </MenuItem>
-      <MenuItem :label="$t('thread.toolbar.editTags')" @select="runOrganize('tags')" />
       <MenuItem :label="$t('thread.toolbar.changeAssignee')" @select="runOrganize('assignee')" />
       <MenuItem :label="$t('thread.toolbar.changeSharing')" @select="runOrganize('sharing')" />
     </template>
@@ -502,19 +489,6 @@ function runExport(format: ExportFormat) {
       <MenuItem :label="$t('thread.toolbar.blockDomain')" @select="runBlock('domain')">
         <template #icon><AppIcon :grid="20"><circle cx="10" cy="10" r="7" /><path d="M3 10h14M10 3a11 11 0 0 1 0 14M10 3a11 11 0 0 0 0 14" /></AppIcon></template>
       </MenuItem>
-    </template>
-
-    <template v-else-if="activeSubmenu === 'move'">
-      <p class="submenu-title">{{ $t('thread.toolbar.moveToFolder') }}</p>
-      <MenuItem
-        v-for="target in props.moveTargets"
-        :key="target.id"
-        :label="target.label"
-        @select="runMove(target.id)"
-      >
-        <template #icon><AppIcon :grid="20"><path d="M2.5 6h6l1.7 2H17v8.5H2.5V6Z" /></AppIcon></template>
-      </MenuItem>
-      <p v-if="props.moveTargets.length === 0" class="submenu-empty">{{ $t('thread.toolbar.noOtherFolders') }}</p>
     </template>
 
     <template v-else-if="activeSubmenu === 'print'">
@@ -653,12 +627,6 @@ function runExport(format: ExportFormat) {
   font-weight: var(--weight-bold);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-}
-
-.submenu-empty {
-  margin: 9px 10px;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
 }
 
 .stacked-label {

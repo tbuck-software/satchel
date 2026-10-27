@@ -606,7 +606,7 @@ function snoozeThread() {
   snoozePickerOpen.value = true;
 }
 
-function openTopicPicker() {
+function openFilePicker() {
   if (!thread.value) return;
   topicsStore.openPicker({ itemType: 'thread', itemIds: actionIds.value });
 }
@@ -626,21 +626,14 @@ function applySnooze(date: string) {
   void threadActions.snoozeAt(snoozeTargetIds.value, date);
 }
 
-async function organizeThread(kind: 'tags' | 'assignee' | 'sharing') {
+// Tags are not offered here: topics are the collections in the UI, tags stay
+// a backend and rules matter.
+async function organizeThread(kind: 'assignee' | 'sharing') {
   if (!thread.value) return;
   try {
     // The thread may change while the dialog is open; save to the one asked about.
     const threadId = thread.value.id;
-    if (kind === 'tags') {
-      const next = await prompt.ask({
-        title: t('thread.toolbar.editTags'),
-        label: t('thread.organize.tagsPrompt'),
-        initialValue: thread.value.tags.join(', '),
-        confirmLabel: t('common.save'),
-      });
-      if (next === null) return;
-      await threadsStore.setTagsForThread(threadId, next.split(','));
-    } else if (kind === 'assignee') {
+    if (kind === 'assignee') {
       const next = await prompt.ask({
         title: t('thread.toolbar.changeAssignee'),
         label: t('thread.organize.assigneePrompt'),
@@ -944,7 +937,6 @@ function showEntireThread() {
         :position="props.position ?? 0"
         :total="props.total ?? 0"
         :sender-address="latestSenderAddress"
-        :move-targets="moveTargets"
         :can-reply="canReply"
         :reply-in-reader="replyInReader"
         @back="emit('back')"
@@ -960,7 +952,6 @@ function showEntireThread() {
         @toggle-muted="toggleMuted"
         @spam="markSpam"
         @block="blockSender"
-        @move="moveThread"
         @print="printThread"
         :attachment-count="downloadableAttachments.length"
         :reader-zoom="settings.readerZoom"
@@ -974,7 +965,7 @@ function showEntireThread() {
         @forward="forwardThread"
         @all-actions="ui.openOmni()"
         @organize="void organizeThread($event)"
-        @add-to-topic="openTopicPicker"
+        @file-to="openFilePicker"
       />
     </div>
 

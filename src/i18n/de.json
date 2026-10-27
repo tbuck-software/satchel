@@ -464,7 +464,6 @@
     }
   },
   "commands": {
-    "addToTopic": "Zu einem Thema hinzufügen …",
     "blockAddress": "Diesen Absender blockieren",
     "blockDomain": "Ganze Domain des Absenders blockieren",
     "compose": "Neue E-Mail verfassen",
@@ -474,7 +473,6 @@
     "exportMarkdown": "Unterhaltung als Markdown exportieren",
     "exportText": "Unterhaltung als Text exportieren",
     "keywords": {
-      "addToTopic": "topic thema organize",
       "block": "blockieren block absender domain",
       "compose": "compose new mail schreiben",
       "copyLink": "link url teilen satchel",
@@ -510,7 +508,7 @@
     "markDoneMany": "{count} E-Mails erledigen",
     "markRead": "Als gelesen markieren",
     "markUnread": "Als ungelesen markieren",
-    "moveToFolder": "Nach {folder} bewegen",
+    "moveToFolder": "Nach {folder} verschieben",
     "moveToInbox": "In die Inbox verschieben",
     "noEmailAccount": "Kein E-Mail-Konto vorhanden.",
     "oauthFailed": "{provider}-Anmeldung konnte nicht gestartet werden.",
@@ -1028,16 +1026,12 @@
     "conversationCount": "{count} Konversation | {count} Konversationen",
     "empty": {
       "aside": {
-        "description": "Beiseitegelegte Unterhaltungen bleiben hier, bis du sie brauchst.",
+        "description": "Beiseitegelegte Mails haben keinen Termin und bleiben hier, bis du sie brauchst.",
         "title": "Nichts beiseitegelegt"
       },
-      "snoozed": {
-        "description": "Zurückgestellte Unterhaltungen warten hier bis zu ihrer Rückkehr.",
-        "title": "Nichts zurückgestellt"
-      },
-      "waiting": {
-        "description": "Hier erscheinen Unterhaltungen, die auf eine Antwort warten.",
-        "title": "Keine Antworten offen"
+      "later": {
+        "description": "Mails auf Wiedervorlage kommen zur gewählten Zeit zurück, wartende Mails, sobald die Antwort da ist.",
+        "title": "Nichts für später"
       }
     },
     "filterAccounts": "Konto",
@@ -1224,7 +1218,7 @@
       "discardDraft": "Diesen Entwurf verwerfen",
       "draftNotSent": "Entwurf · nicht gesendet",
       "expand": "Nachricht ausklappen",
-      "fileSender": "{name} einordnen",
+      "fileSender": "{name} einordnen …",
       "inlineImagesFailed": "Eingebettete Bilder konnten nicht geladen werden.",
       "loading": "Nachricht wird geladen",
       "loadingImages": "Lädt…",
@@ -1479,14 +1473,13 @@
       "done": "Erledigt",
       "drafts": "Entwürfe",
       "inbox": "Inbox",
+      "later": "Später",
       "notifications": "Benachrichtigungen",
       "outbox": "Postausgang",
       "sent": "Gesendet",
-      "snoozed": "Auf Wiedervorlage",
       "spam": "Spam",
       "title": "Ordner",
-      "trash": "Papierkorb",
-      "waiting": "Warten auf Antwort"
+      "trash": "Papierkorb"
     },
     "frequent": "Häufig",
     "mail": "E-Mail",
@@ -1763,8 +1756,7 @@
     },
     "failed": "Suche fehlgeschlagen.",
     "hints": {
-      "subject": "subject:Rechnung",
-      "tag": "tag:wichtig"
+      "subject": "subject:Rechnung"
     },
     "hitCount": "{count} Treffer | {count} Treffer",
     "intro": {
@@ -2950,6 +2942,10 @@
         "keywords": "link url teilen",
         "label": "Link zu dieser E-Mail kopieren"
       },
+      "fileTo": {
+        "keywords": "ablegen verschieben ordner thema label file move",
+        "label": "In Ordner oder Thema ablegen"
+      },
       "forward": {
         "keywords": "forward weiterleiten",
         "label": "Weiterleiten"
@@ -3131,9 +3127,9 @@
   },
   "thread": {
     "actions": {
-      "addToTopic": "Zu Thema hinzufügen …",
       "aside": "Beiseite",
       "blockSender": "Absender blockieren",
+      "fileTo": "Ablegen …",
       "inbox": "Inbox",
       "markRead": "Als gelesen markieren",
       "markUnread": "Als ungelesen markieren",
@@ -3266,8 +3262,7 @@
       "assigneePrompt": "Zuweisung (Name oder E-Mail)",
       "saveFailed": "Organisation konnte nicht gespeichert werden: {error}",
       "saved": "Organisation gespeichert.",
-      "sharingPrompt": "Freigaben (E-Mail-Adressen, durch Kommas getrennt)",
-      "tagsPrompt": "Tags (durch Kommas getrennt)"
+      "sharingPrompt": "Freigaben (E-Mail-Adressen, durch Kommas getrennt)"
     },
     "print": {
       "failed": "Drucken konnte nicht gestartet werden."
@@ -3282,6 +3277,7 @@
       "aside": "E-Mail beiseitegelegt | {count} E-Mails beiseitegelegt",
       "done": "E-Mail erledigt | {count} E-Mails erledigt",
       "fallback": "{label} | {count} E-Mails → {label}",
+      "inLater": "Wartet in „Später“",
       "inbox": "E-Mail in der Inbox | {count} E-Mails in der Inbox",
       "muteChanged": "Stummschaltung geändert",
       "permanentlyDeleted": "Thread endgültig gelöscht | {count} Threads endgültig gelöscht",
@@ -3301,6 +3297,7 @@
       "waiting": "E-Mail wartet auf Antwort | {count} E-Mails warten auf Antwort"
     },
     "row": {
+      "back": "Zurück {time}",
       "draftPrefix": "Entwurf,",
       "hasAttachment": "mit Anhang",
       "hasDraft": "Entwurf vorhanden",
@@ -3308,14 +3305,14 @@
       "messages": "{count} Nachricht | {count} Nachrichten",
       "noSubject": "(kein Betreff)",
       "pinned": "angeheftet",
-      "sender": "Absender",
-      "senderMenuLabel": "Absender {email} einordnen",
-      "senderToRecipient": "{sender} an {recipient}"
+      "sender": "Absender einordnen …",
+      "senderMenuLabel": "Absender {email} einordnen …",
+      "senderToRecipient": "{sender} an {recipient}",
+      "waitingSince": "Seit {time}"
     },
     "selection": {
       "action": "{action} ({count})",
       "done": "Erledigt ({count})",
-      "file": "Ablegen…",
       "label": "{count} ausgewählt"
     },
     "state": {
@@ -3339,7 +3336,6 @@
       "copyMarkdown": "Als Markdown kopieren",
       "currentSender": "Aktueller Absender",
       "decreaseText": "Text verkleinern",
-      "editTags": "Tags bearbeiten",
       "exportTo": "Exportieren nach",
       "increaseText": "Text vergrößern",
       "larger": "Größer",
@@ -3347,11 +3343,8 @@
       "latestMessageOnly": "Nur die letzte E-Mail",
       "markSpam": "Als Spam markieren",
       "moreActions": "Weitere Aktionen",
-      "move": "Bewegen",
-      "moveToFolder": "In Ordner bewegen",
       "next": "Nächste Unterhaltung",
-      "noOtherFolders": "Keine anderen Ordner verfügbar",
-      "organize": "Organisieren",
+      "organize": "Zuweisen und teilen",
       "position": "{position} von {total}",
       "previous": "Vorige Unterhaltung",
       "print": "Drucken",
@@ -3453,7 +3446,8 @@
       "createFailed": "Thema konnte nicht erstellt werden.",
       "createRow": "Neues Thema „{name}“ erstellen",
       "empty": "Noch keine Themen — einfach einen Namen eintippen.",
-      "hintAssign": "↵ zuweisen/entfernen",
+      "fileSearchPlaceholder": "Ordner oder Thema …",
+      "hintAssign": "↵ ablegen",
       "hintClose": "Esc schließen",
       "hintSelect": "↑↓ wählen",
       "messageAdded": "Nachricht zu Thema „{name}“ hinzugefügt",

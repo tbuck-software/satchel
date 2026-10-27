@@ -16,6 +16,12 @@ export interface KeybindingSpec {
    * help lists it on the row of the action it triggers.
    */
   aliasOf?: string;
+  /**
+   * A `g` sequence: the route it opens and the label it shares with the
+   * sidebar, so the help, the hint and the palette name it the same way.
+   * `aliasKeys` are other names the view is found by.
+   */
+  view?: { route: string; labelKey: string; aliasKeys?: readonly string[] };
 }
 
 export const KEYBINDING_SPECS: readonly KeybindingSpec[] = [
@@ -45,7 +51,8 @@ export const KEYBINDING_SPECS: readonly KeybindingSpec[] = [
   { action: 'toggleRead', defaultBinding: 'u', context: 'mail' },
   { action: 'trash', defaultBinding: '#', context: 'mail' },
   { action: 'pin', defaultBinding: '*', context: 'mail' },
-  { action: 'addToTopic', defaultBinding: 't', context: 'mail' },
+  { action: 'fileTo', defaultBinding: 'v', context: 'mail' },
+  { action: 'addToTopic', defaultBinding: 't', context: 'mail', aliasOf: 'fileTo' },
   { action: 'copyLink', defaultBinding: 'y', context: 'mail' },
   { action: 'toggleMute', defaultBinding: 'm', context: 'mail' },
   { action: 'markSpam', defaultBinding: '!', context: 'mail' },

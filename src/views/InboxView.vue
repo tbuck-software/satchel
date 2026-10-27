@@ -66,7 +66,7 @@ const listSearch = useListSearchStore();
 watch(
   () => threads.workflowFilter,
   (filter) => {
-    if (filter === 'waiting') void followUps.load();
+    if (filter === 'later') void followUps.load();
   },
   { immediate: true },
 );
@@ -140,9 +140,12 @@ const activeBucket = computed(() => threads.activeSmartBucket);
 const activeBundle = computed(() => activeGroup.value ?? activeBucket.value);
 const contactViewActive = computed(() => Boolean(threads.activeContact));
 const folderViewActive = computed(() => threads.mailboxFilter.kind === 'folder');
+// Later is two sections by return time; bundles would hide exactly that.
+const laterViewActive = computed(() => threads.workflowFilter === 'later' && !contactViewActive.value);
 const smartInboxActive = computed(() =>
   !folderViewActive.value
     && !contactViewActive.value
+    && !laterViewActive.value
     && (settings.inboxGroupingMode === 'smart' || Boolean(activeBucket.value)),
 );
 const listItems = computed(() =>
@@ -152,6 +155,11 @@ const listItems = computed(() =>
 // otherwise (classic list, empty smart inbox) it keeps its spot above the list.
 const smartFolderRowVisible = computed(() =>
   listItems.value.some((item) => item.kind === 'folder-row'),
+);
+
+// The topics card above the list; Later keeps to the mail that comes back.
+const topicsCardVisible = computed(() =>
+  !activeBundle.value && !smartFolderRowVisible.value && !laterViewActive.value,
 );
 
 type KeyboardListTargetKind = 'thread' | 'bucket' | 'group' | 'topics' | 'new-senders' | 'new-sender';
@@ -191,7 +199,7 @@ onBeforeUnmount(() => {
 const keyboardTargets = computed<KeyboardListTarget[]>(() => {
   const targets: KeyboardListTarget[] = [];
 
-  if (!activeBundle.value && !smartFolderRowVisible.value) {
+  if (topicsCardVisible.value) {
     targets.push({ key: 'topics', kind: 'topics', id: 'topics' });
   }
 
@@ -342,6 +350,7 @@ const listTitle = computed(() => {
     inbox: 'folders.inbox',
     todo: 'folders.todo',
     waiting: 'folders.waitingForReply',
+    later: 'nav.folders.later',
     aside: 'folders.aside',
     done: 'thread.state.done',
     snoozed: 'folders.snoozedLong',
@@ -355,8 +364,7 @@ const listTitle = computed(() => {
 const workflowEmpty = computed(() => {
   if (activeBundle.value || threads.activeContact || threads.mailboxFilter.kind !== 'all') return null;
   switch (threads.workflowFilter) {
-    case 'waiting': return { title: t('inbox.empty.waiting.title'), description: t('inbox.empty.waiting.description'), icon: 'waiting' };
-    case 'snoozed': return { title: t('inbox.empty.snoozed.title'), description: t('inbox.empty.snoozed.description'), icon: 'clock' };
+    case 'later': return { title: t('inbox.empty.later.title'), description: t('inbox.empty.later.description'), icon: 'clock' };
     case 'aside': return { title: t('inbox.empty.aside.title'), description: t('inbox.empty.aside.description'), icon: 'aside' };
     default: return null;
   }
@@ -930,7 +938,7 @@ function acceptExistingSenders() {
       />
       <!-- Topics folder: cross-source collections, opened in the detail pane.
            Only rendered here when the list has no smart folder section to join. -->
-      <div v-if="!activeBundle && !smartFolderRowVisible && !(workflowEmpty && listItems.length === 0)" class="topics-folder no-drag shrink-0" :inert="searchActive || undefined">
+      <div v-if="topicsCardVisible && !(workflowEmpty && listItems.length === 0)" class="topics-folder no-drag shrink-0" :inert="searchActive || undefined">
         <TopicsFolderCard
           :topics="topicsStore.activeTopics"
           target-key="topics"
@@ -984,7 +992,6 @@ function acceptExistingSenders() {
             <EmptyState :title="workflowEmpty.title" :description="workflowEmpty.description">
               <template #icon>
                 <AppIcon v-if="workflowEmpty.icon === 'clock'" size="lg"><circle cx="8" cy="8" r="6" /><path d="M8 4v4l3 2" /></AppIcon>
-                <AppIcon v-else-if="workflowEmpty.icon === 'waiting'" size="lg"><path d="M2 3h12v8H8l-4 3v-3H2zM5 6h6M5 8h3" /></AppIcon>
                 <AppIcon v-else size="lg"><rect x="2" y="4" width="12" height="9" rx="1" /><path d="M6 4V2h4v2M2 7h12M6 9h4" /></AppIcon>
               </template>
             </EmptyState>

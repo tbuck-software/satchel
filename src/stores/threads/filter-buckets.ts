@@ -4,9 +4,11 @@ import type { InboxGroupingMode, InboxSenderBucket } from '@/stores/settings';
 import type { Account, Thread } from '@/types/mail';
 import { smartInboxSummaryScopeKey, type ThreadLoadState } from '@/stores/threads/load-state';
 import type { VisibleThreadProjection } from '@/stores/threads/selection';
-import type { WorkflowState } from '@/types/workflow';
+import { matchesWorkflowFilter, type WorkflowFilter } from '@/types/workflow';
 import {
   buildContactSummaries,
+  buildLaterSections,
+  compareLaterThreads,
   buildTopContactSummaries,
   buildDateGroupedEntries,
   buildDateScopedSimilarGroups,
@@ -65,7 +67,7 @@ interface ThreadFilterDependencies {
 export interface ThreadFilterBucketsSurface {
   activeSimilarGroupId: Ref<string>;
   activeSmartBucketId: Ref<string>;
-  workflowFilter: Ref<WorkflowState | 'all'>;
+  workflowFilter: Ref<WorkflowFilter>;
   mailboxFilter: Ref<MailboxFilter>;
   categoryFilter: Ref<'all' | 'personal' | 'updates' | 'promotions' | 'social'>;
   activeContactEmail: Ref<string>;
@@ -143,7 +145,7 @@ export function createThreadFilterBuckets({
   const activeSimilarGroupId = ref('');
   const openedSimilarGroup = ref<SimilarThreadGroup | null>(null);
   const activeSmartBucketId = ref('');
-  const workflowFilter = ref<WorkflowState | 'all'>('all');
+  const workflowFilter = ref<WorkflowFilter>('all');
   const mailboxFilter = ref<MailboxFilter>({ kind: 'section', value: 'inbox' });
   const categoryFilter = ref<'all' | 'personal' | 'updates' | 'promotions' | 'social'>('all');
   const activeContactEmail = ref('');
@@ -211,7 +213,7 @@ export function createThreadFilterBuckets({
         continue;
       }
 
-      if (workflowFilter.value !== 'all' && thread.workflowState !== workflowFilter.value) continue;
+      if (!matchesWorkflowFilter(thread.workflowState, workflowFilter.value)) continue;
       if (!matchesMailboxFilter(thread, mailboxFilter.value)) continue;
       if (!isVisibleInCurrentScope(thread, workflowFilter.value, mailboxFilter.value)) continue;
       // Treat threads without a category as 'personal' so the personal tab feels right out of the box.
@@ -227,9 +229,8 @@ export function createThreadFilterBuckets({
       visible.push(thread);
     }
 
-    return visible.sort(contactEmail
-      ? (a, b) => b.lastMessageAtMs - a.lastMessageAtMs
-      : compareThreads);
+    if (contactEmail) return visible.sort((a, b) => b.lastMessageAtMs - a.lastMessageAtMs);
+    return visible.sort(workflowFilter.value === 'later' ? compareLaterThreads : compareThreads);
   });
 
   /**
@@ -246,7 +247,11 @@ export function createThreadFilterBuckets({
    * One projection feeds both the bundle list and the row list. Building the
    * date sections per consumer ran the whole grouping pass twice per recompute.
    */
-  const visibleDateSections = computed(() => buildThreadDateSections(visibleThreads.value));
+  const visibleDateSections = computed(() =>
+    workflowFilter.value === 'later' && !activeContactEmail.value
+      ? buildLaterSections(visibleThreads.value)
+      : buildThreadDateSections(visibleThreads.value),
+  );
   const similarThreadGroups = computed<SimilarThreadGroup[]>(() =>
     sectionSimilarGroups(visibleDateSections.value),
   );

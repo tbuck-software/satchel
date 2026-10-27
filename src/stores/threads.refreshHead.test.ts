@@ -23,7 +23,6 @@ vi.mock('@/services/backend', () => ({
   backendSetThreadMuted: vi.fn(),
   backendSetThreadsRead: vi.fn(),
   backendSetThreadsStarred: vi.fn(),
-  backendSetThreadTags: vi.fn(),
   backendTrashThreads: vi.fn(),
   backendUpdateThreadOrganization: vi.fn(),
 }));

@@ -24,7 +24,11 @@ import { describe, expect, it } from 'vitest';
  * entry turns the guard off for a live command, so the tests below check the
  * allowlist itself.
  */
-const KNOWN_UNWIRED: Record<string, string> = {};
+const KNOWN_UNWIRED: Record<string, string> = {
+  set_thread_tags:
+    'Tags left the mail UI (topics are the collections there) but stay in the backend and in rules. '
+    + 'Goes when tags come back to the UI, or when the command is removed with them.',
+};
 
 /**
  * Exported helpers that legitimately have no UI caller. Same contract as

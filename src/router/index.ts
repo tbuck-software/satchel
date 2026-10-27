@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import InboxView from '@/views/InboxView.vue';
+import { MAIL_LIST_VIEWS, selectMailListView } from './mailViews';
 
 // Inbox is the default route and stays in the startup bundle. Every secondary
 // workspace is loaded on first navigation so settings, calendar and composer
@@ -11,7 +12,6 @@ const SettingsView = () => import('@/views/SettingsView.vue');
 const DraftsView = () => import('@/views/DraftsView.vue');
 const OutboxView = () => import('@/views/OutboxView.vue');
 const CalendarView = () => import('@/views/CalendarView.vue');
-const FollowUpsView = () => import('@/views/FollowUpsView.vue');
 const ContactsView = () => import('@/views/ContactsView.vue');
 const NewSendersView = () => import('@/views/NewSendersView.vue');
 const TopicView = () => import('@/views/TopicView.vue');
@@ -26,7 +26,17 @@ export const router = createRouter({
     { path: '/drafts', name: 'drafts', component: DraftsView },
     { path: '/outbox', name: 'outbox', component: OutboxView },
     { path: '/calendar', name: 'calendar', component: CalendarView },
-    { path: '/follow-ups', name: 'followups', component: FollowUpsView },
+    // Named lists are scopes of the inbox route; their paths are deep links.
+    ...MAIL_LIST_VIEWS.filter((view) => view !== 'inbox').map((view) => ({
+      path: `/${view}`,
+      name: view,
+      redirect: () => {
+        selectMailListView(view);
+        return { name: 'inbox' };
+      },
+    })),
+    // Waiting for a reply lives in Later now.
+    { path: '/follow-ups', name: 'followups', redirect: { name: 'later' } },
     { path: '/contacts', name: 'contacts', component: ContactsView },
     { path: '/new-senders', name: 'new-senders', component: NewSendersView },
     { path: '/topics/:id', name: 'topic', component: TopicView },

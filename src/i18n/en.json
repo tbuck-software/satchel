@@ -464,7 +464,6 @@
     }
   },
   "commands": {
-    "addToTopic": "Add to a topic…",
     "blockAddress": "Block this sender",
     "blockDomain": "Block the sender's whole domain",
     "compose": "Compose new email",
@@ -474,7 +473,6 @@
     "exportMarkdown": "Export conversation as Markdown",
     "exportText": "Export conversation as text",
     "keywords": {
-      "addToTopic": "topic organize",
       "block": "block sender domain",
       "compose": "compose new mail write",
       "copyLink": "link url share satchel",
@@ -1023,21 +1021,17 @@
       "updates": "Updates"
     },
     "classifiedToast": "{count} message filed | {count} messages filed",
-    "classify": "File",
-    "classifyAs": "File as",
+    "classify": "Sort",
+    "classifyAs": "Sort as",
     "conversationCount": "{count} conversation | {count} conversations",
     "empty": {
       "aside": {
-        "description": "Conversations you set aside stay here until you need them.",
+        "description": "Set-aside mail has no return date: it stays here until you need it.",
         "title": "Nothing set aside"
       },
-      "snoozed": {
-        "description": "Snoozed conversations wait here until their return time.",
-        "title": "Nothing snoozed"
-      },
-      "waiting": {
-        "description": "Conversations marked as waiting for a reply appear here.",
-        "title": "No replies pending"
+      "later": {
+        "description": "Snoozed mail comes back at the time you picked, mail waiting for a reply when the reply arrives.",
+        "title": "Nothing for later"
       }
     },
     "filterAccounts": "Account",
@@ -1224,7 +1218,7 @@
       "discardDraft": "Discard this draft",
       "draftNotSent": "Draft · not sent",
       "expand": "Expand message",
-      "fileSender": "File {name}",
+      "fileSender": "Sort {name} into…",
       "inlineImagesFailed": "Embedded images could not be loaded.",
       "loading": "Loading message",
       "loadingImages": "Loading…",
@@ -1479,14 +1473,13 @@
       "done": "Done",
       "drafts": "Drafts",
       "inbox": "Inbox",
+      "later": "Later",
       "notifications": "Notifications",
       "outbox": "Outbox",
       "sent": "Sent",
-      "snoozed": "Snoozed",
       "spam": "Spam",
       "title": "Folders",
-      "trash": "Trash",
-      "waiting": "Waiting for a reply"
+      "trash": "Trash"
     },
     "frequent": "Frequent",
     "mail": "Mail",
@@ -1763,8 +1756,7 @@
     },
     "failed": "Search failed.",
     "hints": {
-      "subject": "subject:invoice",
-      "tag": "tag:important"
+      "subject": "subject:invoice"
     },
     "hitCount": "{count} result | {count} results",
     "intro": {
@@ -2950,6 +2942,10 @@
         "keywords": "link url share",
         "label": "Copy link to this email"
       },
+      "fileTo": {
+        "keywords": "file move folder topic label",
+        "label": "File in a folder or topic"
+      },
       "forward": {
         "keywords": "forward",
         "label": "Forward"
@@ -3131,9 +3127,9 @@
   },
   "thread": {
     "actions": {
-      "addToTopic": "Add to topic…",
       "aside": "Aside",
       "blockSender": "Block sender",
+      "fileTo": "File…",
       "inbox": "Inbox",
       "markRead": "Mark as read",
       "markUnread": "Mark as unread",
@@ -3266,8 +3262,7 @@
       "assigneePrompt": "Assignee (name or email)",
       "saveFailed": "Organisation could not be saved: {error}",
       "saved": "Organisation saved.",
-      "sharingPrompt": "Shared with (email addresses, comma separated)",
-      "tagsPrompt": "Tags (comma separated)"
+      "sharingPrompt": "Shared with (email addresses, comma separated)"
     },
     "print": {
       "failed": "Printing could not be started."
@@ -3282,6 +3277,7 @@
       "aside": "Email set aside | {count} emails set aside",
       "done": "Email done | {count} emails done",
       "fallback": "{label} | {count} emails → {label}",
+      "inLater": "Waiting in Later",
       "inbox": "Email in the inbox | {count} emails in the inbox",
       "muteChanged": "Mute updated",
       "permanentlyDeleted": "Thread permanently deleted | {count} threads permanently deleted",
@@ -3301,6 +3297,7 @@
       "waiting": "Email waiting for a reply | {count} emails waiting for a reply"
     },
     "row": {
+      "back": "Back {time}",
       "draftPrefix": "Draft,",
       "hasAttachment": "with attachment",
       "hasDraft": "draft saved",
@@ -3308,14 +3305,14 @@
       "messages": "{count} message | {count} messages",
       "noSubject": "(no subject)",
       "pinned": "pinned",
-      "sender": "Sender",
-      "senderMenuLabel": "File sender {email}",
-      "senderToRecipient": "{sender} to {recipient}"
+      "sender": "Sort sender into…",
+      "senderMenuLabel": "Sort sender {email} into…",
+      "senderToRecipient": "{sender} to {recipient}",
+      "waitingSince": "Since {time}"
     },
     "selection": {
       "action": "{action} ({count})",
       "done": "Done ({count})",
-      "file": "File…",
       "label": "{count} selected"
     },
     "state": {
@@ -3339,7 +3336,6 @@
       "copyMarkdown": "Copy as Markdown",
       "currentSender": "Current sender",
       "decreaseText": "Decrease text size",
-      "editTags": "Edit tags",
       "exportTo": "Export to",
       "increaseText": "Increase text size",
       "larger": "Larger",
@@ -3347,11 +3343,8 @@
       "latestMessageOnly": "Latest email only",
       "markSpam": "Mark as spam",
       "moreActions": "More actions",
-      "move": "Move",
-      "moveToFolder": "Move to folder",
       "next": "Next conversation",
-      "noOtherFolders": "No other folders available",
-      "organize": "Organise",
+      "organize": "Assign and share",
       "position": "{position} of {total}",
       "previous": "Previous conversation",
       "print": "Print",
@@ -3453,7 +3446,8 @@
       "createFailed": "The topic could not be created.",
       "createRow": "Create new topic “{name}”",
       "empty": "No topics yet — just type a name.",
-      "hintAssign": "↵ assign/remove",
+      "fileSearchPlaceholder": "Folder or topic…",
+      "hintAssign": "↵ file",
       "hintClose": "Esc close",
       "hintSelect": "↑↓ select",
       "messageAdded": "Message added to topic “{name}”",

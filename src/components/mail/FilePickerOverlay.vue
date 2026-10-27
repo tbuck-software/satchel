@@ -1,17 +1,27 @@
 <script setup lang="ts">
+/*
+ * File…: one picker for where a mail belongs. A folder moves it (one place,
+ * the picker closes); topics collect it (several at once, the picker stays
+ * open). Messages have no folder of their own here, so they get topics only.
+ */
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useUiStore } from '@/stores/ui';
 import { useTopicsStore } from '@/stores/topics';
+import { useThreadsStore } from '@/stores/threads';
+import { useMailboxesStore } from '@/stores/mailboxes';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { useFocusTrap } from '@/composables/useFocusTrap';
 import { useToast } from '@/composables/useToast';
 
 const topics = useTopicsStore();
+const threads = useThreadsStore();
+const mailboxes = useMailboxesStore();
 const threadActions = useThreadActions();
 const toast = useToast();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const query = ref('');
 const activeIndex = ref(0);
@@ -29,14 +39,38 @@ const trap = useFocusTrap(panelRef, {
 });
 
 type PickerRow =
+  | { kind: 'folder'; id: string; name: string }
   | { kind: 'topic'; id: string; name: string; color: string | null; icon: string | null; checked: boolean; partial: boolean }
   | { kind: 'create'; id: 'create'; name: string };
+
+/**
+ * Folders of the account the mails are in, minus the one a single mail sits
+ * in already. Mails from several accounts share no folder, so none are offered.
+ */
+const folderRows = computed<PickerRow[]>(() => {
+  const target = topics.pickerTarget;
+  if (target?.itemType !== 'thread') return [];
+  const targetThreads = target.itemIds.flatMap((id) => threads.find(id) ?? []);
+  const accountIds = new Set(targetThreads.map((thread) => thread.accountId));
+  if (accountIds.size !== 1) return [];
+  const [accountId] = accountIds;
+  const current = new Set(
+    targetThreads.length === 1 ? targetThreads[0]!.mailboxNames.map((name) => name.trim().toLowerCase()) : [],
+  );
+  const term = query.value.trim().toLowerCase();
+  return mailboxes.mailboxes
+    .filter((mailbox) => mailbox.account_id === accountId && !current.has(mailbox.name.trim().toLowerCase()))
+    .filter((mailbox) => !term || mailbox.name.toLowerCase().includes(term))
+    .map((mailbox) => ({ kind: 'folder' as const, id: mailbox.id, name: mailbox.name }))
+    .sort((left, right) => left.name.localeCompare(right.name, locale.value, { sensitivity: 'base' }));
+});
 
 const rows = computed<PickerRow[]>(() => {
   const target = topics.pickerTarget;
   if (!target) return [];
   const term = query.value.trim().toLowerCase();
-  const list: PickerRow[] = topics.activeTopics
+  const list: PickerRow[] = [...folderRows.value];
+  list.push(...topics.activeTopics
     .filter((topic) => !term || topic.name.toLowerCase().includes(term))
     .map((topic) => {
       const memberCount = target.itemIds.filter((itemId) =>
@@ -51,7 +85,7 @@ const rows = computed<PickerRow[]>(() => {
         checked: memberCount === target.itemIds.length,
         partial: memberCount > 0 && memberCount < target.itemIds.length,
       };
-    });
+    }));
   const name = query.value.trim();
   const exactMatch = topics.activeTopics.some(
     (topic) => topic.name.toLowerCase() === name.toLowerCase(),
@@ -95,9 +129,33 @@ function close() {
 const ui = useUiStore();
 onBeforeUnmount(ui.registerOverlay({ isOpen: () => open.value, dismiss: close }));
 
+/** A row's group heading, shown above the first row of each group. */
+function groupLabel(index: number): string {
+  const row = rows.value[index];
+  const group = row?.kind === 'folder' ? 'folder' : 'topic';
+  const previous = rows.value[index - 1];
+  if (previous && (previous.kind === 'folder' ? 'folder' : 'topic') === group) return '';
+  return group === 'folder' ? t('nav.folders.title') : t('topics.title');
+}
+
+function moveTo(folder: { id: string; name: string }) {
+  const target = topics.pickerTarget;
+  if (!target) return;
+  close();
+  // Like Done: the reader moves on instead of showing a mail that left.
+  if (target.itemIds.length === 1 && target.itemIds[0] === threads.activeThreadId) {
+    threads.focusNeighborThread(target.itemIds[0]);
+  }
+  void threadActions.moveToFolder(target.itemIds, folder.id, folder.name);
+}
+
 function activate(row: PickerRow) {
   const target = topics.pickerTarget;
   if (!target) return;
+  if (row.kind === 'folder') {
+    moveTo(row);
+    return;
+  }
   if (row.kind === 'create') {
     const key = row.name.trim().toLowerCase();
     if (pendingCreateNames.has(key)) return;
@@ -156,7 +214,7 @@ function onEnter() {
           class="panel"
           role="dialog"
           aria-modal="true"
-          :aria-label="topics.pickerTarget?.itemType === 'message' ? $t('topics.picker.titleMessage') : $t('topics.picker.title')"
+          :aria-label="topics.pickerTarget?.itemType === 'message' ? $t('topics.picker.titleMessage') : $t('thread.actions.fileTo')"
           @keydown.esc.stop.prevent="close"
           @keydown.tab="trap.onTab"
         >
@@ -169,7 +227,7 @@ function onEnter() {
               ref="inputRef"
               v-model="query"
               type="text"
-              :placeholder="$t('topics.picker.searchPlaceholder')"
+              :placeholder="folderRows.length > 0 ? $t('topics.picker.fileSearchPlaceholder') : $t('topics.picker.searchPlaceholder')"
               :aria-label="$t('topics.picker.searchLabel')"
               role="combobox"
               aria-expanded="true"
@@ -181,11 +239,11 @@ function onEnter() {
             />
           </div>
 
-          <div v-if="rows.length > 0" id="topic-picker-list" class="list" role="listbox" :aria-label="$t('topics.title')">
+          <div v-if="rows.length > 0" id="topic-picker-list" class="list" role="listbox" :aria-label="$t('thread.actions.fileTo')">
+            <template v-for="(row, index) in rows" :key="`${row.kind}:${row.id}`">
+            <p v-if="groupLabel(index)" class="group-label" role="presentation">{{ groupLabel(index) }}</p>
             <CardButton
-              v-for="(row, index) in rows"
               :id="`topic-picker-item-${index}`"
-              :key="row.id"
               role="option"
               :aria-selected="index === activeIndex"
               class="row"
@@ -193,7 +251,11 @@ function onEnter() {
               @click="activate(row)"
               @mouseenter="activeIndex = index"
             >
-              <template v-if="row.kind === 'topic'">
+              <template v-if="row.kind === 'folder'">
+                <AppIcon class="row-folder"><path d="M2 4.5h4l1.2 1.5H14v6.5a1 1 0 01-1 1H3a1 1 0 01-1-1z" /></AppIcon>
+                <span class="row-title">{{ row.name }}</span>
+              </template>
+              <template v-else-if="row.kind === 'topic'">
                 <span class="row-check" :class="{ 'row-check--on': row.checked, 'row-check--partial': row.partial }" aria-hidden="true">
                   <svg v-if="row.checked" width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M2.5 8.5L6.5 12.5L13.5 4" />
@@ -213,6 +275,7 @@ function onEnter() {
                 <span class="row-title">{{ $t('topics.picker.createRow', { name: row.name }) }}</span>
               </template>
             </CardButton>
+            </template>
           </div>
           <p v-else class="empty-hint">{{ $t('topics.picker.empty') }}</p>
 
@@ -305,6 +368,19 @@ function onEnter() {
 .row.active {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.group-label {
+  margin: 0;
+  padding: 6px 9px 2px;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--weight-strong);
+}
+
+.row-folder {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
 }
 
 .row-check {

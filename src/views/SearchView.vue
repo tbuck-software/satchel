@@ -28,7 +28,6 @@ const operatorHints = computed(() => [
   'from:name@example.com',
   'to:name@example.com',
   t('search.hints.subject'),
-  t('search.hints.tag'),
   'in:sent',
   'has:attachment',
   'is:unread',

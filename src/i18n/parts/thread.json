@@ -4,11 +4,9 @@
       "selection": {
         "label": "{count} selected",
         "done": "Done ({count})",
-        "file": "File…",
         "action": "{action} ({count})"
       },
       "actions": {
-        "addToTopic": "Add to topic…",
         "aside": "Aside",
         "blockSender": "Block sender",
         "inbox": "Inbox",
@@ -26,7 +24,8 @@
         "unmute": "Unmute",
         "unpin": "Unpin",
         "unpinMenu": "Remove pin",
-        "unread": "Unread"
+        "unread": "Unread",
+        "fileTo": "File…"
       },
       "attachments": {
         "filenameFallback": "attachment",
@@ -143,8 +142,7 @@
         "assigneePrompt": "Assignee (name or email)",
         "saveFailed": "Organisation could not be saved: {error}",
         "saved": "Organisation saved.",
-        "sharingPrompt": "Shared with (email addresses, comma separated)",
-        "tagsPrompt": "Tags (comma separated)"
+        "sharingPrompt": "Shared with (email addresses, comma separated)"
       },
       "print": {
         "failed": "Printing could not be started."
@@ -175,7 +173,8 @@
         "waiting": "Email waiting for a reply | {count} emails waiting for a reply",
         "restoreEmpty": "No conversations could be restored.",
         "spammed": "Thread marked as spam | {count} threads marked as spam",
-        "spamFailed": "Marking as spam failed."
+        "spamFailed": "Marking as spam failed.",
+        "inLater": "Waiting in Later"
       },
       "row": {
         "draftPrefix": "Draft,",
@@ -185,9 +184,11 @@
         "messages": "{count} message | {count} messages",
         "noSubject": "(no subject)",
         "pinned": "pinned",
-        "sender": "Sender",
-        "senderMenuLabel": "File sender {email}",
-        "senderToRecipient": "{sender} to {recipient}"
+        "sender": "Sort sender into…",
+        "senderMenuLabel": "Sort sender {email} into…",
+        "senderToRecipient": "{sender} to {recipient}",
+        "back": "Back {time}",
+        "waitingSince": "Since {time}"
       },
       "state": {
         "aside": "Set aside",
@@ -210,7 +211,6 @@
         "copyMarkdown": "Copy as Markdown",
         "currentSender": "Current sender",
         "decreaseText": "Decrease text size",
-        "editTags": "Edit tags",
         "exportTo": "Export to",
         "increaseText": "Increase text size",
         "larger": "Larger",
@@ -218,11 +218,8 @@
         "latestMessageOnly": "Latest email only",
         "markSpam": "Mark as spam",
         "moreActions": "More actions",
-        "move": "Move",
-        "moveToFolder": "Move to folder",
         "next": "Next conversation",
-        "noOtherFolders": "No other folders available",
-        "organize": "Organise",
+        "organize": "Assign and share",
         "position": "{position} of {total}",
         "previous": "Previous conversation",
         "print": "Print",
@@ -255,11 +252,9 @@
       "selection": {
         "label": "{count} ausgewählt",
         "done": "Erledigt ({count})",
-        "file": "Ablegen…",
         "action": "{action} ({count})"
       },
       "actions": {
-        "addToTopic": "Zu Thema hinzufügen …",
         "aside": "Beiseite",
         "blockSender": "Absender blockieren",
         "inbox": "Inbox",
@@ -277,7 +272,8 @@
         "unmute": "Stummschaltung aufheben",
         "unpin": "Lösen",
         "unpinMenu": "Nicht mehr anheften",
-        "unread": "Ungelesen"
+        "unread": "Ungelesen",
+        "fileTo": "Ablegen …"
       },
       "attachments": {
         "filenameFallback": "anhang",
@@ -394,8 +390,7 @@
         "assigneePrompt": "Zuweisung (Name oder E-Mail)",
         "saveFailed": "Organisation konnte nicht gespeichert werden: {error}",
         "saved": "Organisation gespeichert.",
-        "sharingPrompt": "Freigaben (E-Mail-Adressen, durch Kommas getrennt)",
-        "tagsPrompt": "Tags (durch Kommas getrennt)"
+        "sharingPrompt": "Freigaben (E-Mail-Adressen, durch Kommas getrennt)"
       },
       "print": {
         "failed": "Drucken konnte nicht gestartet werden."
@@ -426,7 +421,8 @@
         "waiting": "E-Mail wartet auf Antwort | {count} E-Mails warten auf Antwort",
         "restoreEmpty": "Keine Konversation konnte wiederhergestellt werden.",
         "spammed": "Thread als Spam markiert | {count} Threads als Spam markiert",
-        "spamFailed": "Als Spam markieren fehlgeschlagen."
+        "spamFailed": "Als Spam markieren fehlgeschlagen.",
+        "inLater": "Wartet in „Später“"
       },
       "row": {
         "draftPrefix": "Entwurf,",
@@ -436,9 +432,11 @@
         "messages": "{count} Nachricht | {count} Nachrichten",
         "noSubject": "(kein Betreff)",
         "pinned": "angeheftet",
-        "sender": "Absender",
-        "senderMenuLabel": "Absender {email} einordnen",
-        "senderToRecipient": "{sender} an {recipient}"
+        "sender": "Absender einordnen …",
+        "senderMenuLabel": "Absender {email} einordnen …",
+        "senderToRecipient": "{sender} an {recipient}",
+        "back": "Zurück {time}",
+        "waitingSince": "Seit {time}"
       },
       "state": {
         "aside": "Beiseitegelegt",
@@ -461,7 +459,6 @@
         "copyMarkdown": "Als Markdown kopieren",
         "currentSender": "Aktueller Absender",
         "decreaseText": "Text verkleinern",
-        "editTags": "Tags bearbeiten",
         "exportTo": "Exportieren nach",
         "increaseText": "Text vergrößern",
         "larger": "Größer",
@@ -469,11 +466,8 @@
         "latestMessageOnly": "Nur die letzte E-Mail",
         "markSpam": "Als Spam markieren",
         "moreActions": "Weitere Aktionen",
-        "move": "Bewegen",
-        "moveToFolder": "In Ordner bewegen",
         "next": "Nächste Unterhaltung",
-        "noOtherFolders": "Keine anderen Ordner verfügbar",
-        "organize": "Organisieren",
+        "organize": "Zuweisen und teilen",
         "position": "{position} von {total}",
         "previous": "Vorige Unterhaltung",
         "print": "Drucken",

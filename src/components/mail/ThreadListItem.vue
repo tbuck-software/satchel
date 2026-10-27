@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, ref, shallowRef } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Thread } from '@/types/mail';
-import { formatListTime, localeFormatter } from '@/utils/listTime';
+import { formatListTime, formatMessageTimestamp, localeFormatter } from '@/utils/listTime';
 import Avatar from '@/components/common/Avatar.vue';
 import AvatarUnreadDot from '@/components/ui/AvatarUnreadDot.vue';
 import ListRowMeta from '@/components/ui/ListRowMeta.vue';
@@ -171,11 +171,24 @@ const isFilingAside = computed(
   () => threadsStore.leavingThreadStates[props.thread.id] === 'aside',
 );
 const visibleSnippet = computed(() => props.thread.draftSnippet || props.thread.snippet);
+const inLater = computed(() => threadsStore.workflowFilter === 'later');
 const followUp = computed(() =>
-  threadsStore.workflowFilter === 'waiting'
+  inLater.value && props.thread.workflowState === 'waiting'
     ? followUps.forThread(props.thread.id)
     : null,
 );
+/** In Later, when the mail comes back or since when it waits — what the row is there for. */
+const laterLabel = computed(() => {
+  if (!inLater.value || followUp.value) return '';
+  const { workflowState, snoozeUntil, workflowChangedAt } = props.thread;
+  if (workflowState === 'snoozed' && snoozeUntil) {
+    return t('thread.row.back', { time: formatMessageTimestamp(snoozeUntil) });
+  }
+  if (workflowState === 'waiting' && workflowChangedAt) {
+    return t('thread.row.waitingSince', { time: formatMessageTimestamp(workflowChangedAt) });
+  }
+  return '';
+});
 const followUpDue = computed(() =>
   followUp.value?.status === 'due'
     || Boolean(followUp.value?.due_at && new Date(followUp.value.due_at).getTime() <= Date.now()),
@@ -208,6 +221,7 @@ const rowLabel = computed(() => {
   if (props.thread.hasAttachments) parts.push(t('thread.row.hasAttachment'));
   if (props.thread.isStarred) parts.push(t('thread.row.pinned'));
   if (followUpLabel.value) parts.push(followUpLabel.value);
+  if (laterLabel.value) parts.push(laterLabel.value);
   return parts.join(', ');
 });
 
@@ -297,7 +311,7 @@ function copyLink() {
   void messageLinks.copy(props.thread.id);
 }
 
-function addToTopic() {
+function fileTo() {
   closeContextMenu();
   const selected = threadsStore.selectedThreadIds;
   const itemIds = selected.includes(props.thread.id) ? [...selected] : [props.thread.id];
@@ -521,16 +535,16 @@ function onDragStart(event: DragEvent) {
 
       <div class="mt-0.5 flex min-w-0 items-center gap-2">
         <span
-          v-if="followUp"
+          v-if="followUp || laterLabel"
           class="follow-up-label"
-          :class="{ 'follow-up-label--due': followUpDue }"
-          :title="$d(new Date(followUp.due_at), 'long')"
+          :class="{ 'follow-up-label--due': followUpDue, 'follow-up-label--later': !followUp }"
+          :title="followUp ? $d(new Date(followUp.due_at), 'long') : undefined"
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="8" cy="8" r="5.5" />
             <path d="M8 5v3l2 1.5" />
           </svg>
-          {{ followUpLabel }}
+          {{ followUp ? followUpLabel : laterLabel }}
         </span>
         <span class="min-w-0 flex-1 truncate text-xs leading-[1.5] text-tertiary">
           {{ visibleSnippet }}
@@ -642,7 +656,7 @@ function onDragStart(event: DragEvent) {
         :checked="props.thread.priority >= 2"
         @select="toggleThreadPriority"
       />
-      <MenuItem icon="topic" :label="$t('thread.actions.addToTopic')" @select="addToTopic" />
+      <MenuItem icon="topic" :label="$t('thread.actions.fileTo')" @select="fileTo" />
       <MenuItem icon="link" :label="$t('thread.link.copy')" @select="copyLink" />
     </div>
 
@@ -691,6 +705,10 @@ function onDragStart(event: DragEvent) {
 
 .follow-up-label--due {
   color: var(--accent-red);
+}
+
+.follow-up-label--later {
+  color: var(--text-secondary);
 }
 
 .follow-up-label svg {

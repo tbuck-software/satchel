@@ -10,7 +10,8 @@ import trayEn from './tray.en.json';
 import viewerDe from './viewer.de.json';
 import viewerEn from './viewer.en.json';
 import { localeFromLanguageTag, resolveLocale, systemLocale } from './locale';
-import { DEFAULT_KEYBINDINGS } from '@/config/keybindings';
+import { KEYBINDING_SPECS } from '@/config/keybindingDefaults';
+import { MAILBOX_SECTIONS } from '@/config/mailboxSections';
 import { settingsSectionIcons } from '@/components/settings/settingsSections';
 
 function keyPaths(value: unknown, trail: string[] = []): string[] {
@@ -34,9 +35,19 @@ describe('message catalogue', () => {
   it('contains every key assembled dynamically at runtime', () => {
     const dynamicKeys = new Set<string>();
 
-    for (const action of Object.keys(DEFAULT_KEYBINDINGS)) {
+    for (const { action, view } of KEYBINDING_SPECS) {
+      // A view's label and keywords are built from the sidebar's names.
+      if (view) {
+        for (const key of [view.labelKey, ...(view.aliasKeys ?? [])]) dynamicKeys.add(key);
+        continue;
+      }
       dynamicKeys.add(`shortcuts.actions.${action}.label`);
       dynamicKeys.add(`shortcuts.actions.${action}.keywords`);
+    }
+
+    for (const section of MAILBOX_SECTIONS) {
+      dynamicKeys.add(section.labelKey);
+      if (section.hintKey) dynamicKeys.add(section.hintKey);
     }
 
     for (const section of Object.keys(settingsSectionIcons)) {
@@ -45,18 +56,6 @@ describe('message catalogue', () => {
     }
 
     [
-      'nav.folders.inbox',
-      'nav.folders.waiting',
-      'nav.folders.aside',
-      'nav.folders.drafts',
-      'nav.folders.outbox',
-      'nav.folders.sent',
-      'nav.folders.trash',
-      'nav.folders.done',
-      'nav.folders.snoozed',
-      'nav.folders.spam',
-      'nav.folders.notifications',
-      'nav.folders.blocked',
       'thread.state.inbox',
       'thread.state.todo',
       'thread.state.waiting',
@@ -158,7 +157,8 @@ describe('message catalogue', () => {
 
   it('includes the viewer keys assembled dynamically at runtime', () => {
     const viewerKeys = new Set(keyPaths(viewerEn));
-    for (const action of Object.keys(DEFAULT_KEYBINDINGS)) {
+    // `g` destinations are named after the sidebar; the viewer has none.
+    for (const { action } of KEYBINDING_SPECS.filter((spec) => !spec.view)) {
       expect(viewerKeys.has(`shortcuts.actions.${action}.label`)).toBe(true);
       expect(viewerKeys.has(`shortcuts.actions.${action}.keywords`)).toBe(true);
     }

@@ -19,12 +19,12 @@ import {
   type ThreadListEntry,
 } from '@/utils/threadList';
 import type { Thread } from '@/types/mail';
-import type { WorkflowState } from '@/types/workflow';
+import { matchesWorkflowFilter, type WorkflowFilter } from '@/types/workflow';
 
 /** The list the search narrows: what the thread store is showing. */
 export interface ListSearchMailbox {
   accountId: string;
-  workflowFilter: WorkflowState | 'all';
+  workflowFilter: WorkflowFilter;
   mailboxFilter: MailboxFilter;
   activeContactEmail: string;
 }
@@ -59,7 +59,7 @@ export function threadMatchesListSearch(thread: Thread, mailbox: ListSearchMailb
   if (mailbox.accountId && thread.accountId !== mailbox.accountId) return false;
   const contact = normalizedParticipantEmail(mailbox.activeContactEmail);
   if (contact) return threadHasParticipant(thread, contact);
-  if (mailbox.workflowFilter !== 'all' && thread.workflowState !== mailbox.workflowFilter) return false;
+  if (!matchesWorkflowFilter(thread.workflowState, mailbox.workflowFilter)) return false;
   return matchesMailboxFilter(thread, mailbox.mailboxFilter)
     && isVisibleInCurrentScope(thread, mailbox.workflowFilter, mailbox.mailboxFilter);
 }

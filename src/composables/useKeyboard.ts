@@ -431,7 +431,8 @@ export function useKeyboard() {
       return true;
     }
 
-    if (matches(event, 'addToTopic')) {
+    // `t` is the second key for File… (`aliasOf` in the registry).
+    if (matches(event, 'fileTo') || matches(event, 'addToTopic')) {
       const ids = targetIds();
       if (ids.length === 0) return false;
       topics.openPicker({ itemType: 'thread', itemIds: ids });

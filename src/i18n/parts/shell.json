@@ -85,12 +85,10 @@
       }
     },
     "commands": {
-      "addToTopic": "Add to a topic…",
       "compose": "Compose new email",
       "copyLink": "Copy link to this email",
       "editShortcuts": "Edit keyboard shortcuts",
       "keywords": {
-        "addToTopic": "topic organize",
         "compose": "compose new mail write",
         "copyLink": "link url share satchel",
         "editShortcuts": "keybindings shortcuts customize",
@@ -197,11 +195,10 @@
         "notifications": "Notifications",
         "outbox": "Outbox",
         "sent": "Sent",
-        "snoozed": "Snoozed",
         "spam": "Spam",
         "title": "Folders",
         "trash": "Trash",
-        "waiting": "Waiting for a reply"
+        "later": "Later"
       },
       "frequent": "Frequent",
       "modules": "Areas",
@@ -408,6 +405,10 @@
         "undo": {
           "keywords": "undo revert",
           "label": "Undo the last action"
+        },
+        "fileTo": {
+          "label": "File in a folder or topic",
+          "keywords": "file move folder topic label"
         }
       },
       "close": "Close keyboard shortcuts",
@@ -551,12 +552,10 @@
       }
     },
     "commands": {
-      "addToTopic": "Zu einem Thema hinzufügen …",
       "compose": "Neue E-Mail verfassen",
       "copyLink": "Link zu dieser E-Mail kopieren",
       "editShortcuts": "Tastenkürzel bearbeiten",
       "keywords": {
-        "addToTopic": "topic thema organize",
         "compose": "compose new mail schreiben",
         "copyLink": "link url teilen satchel",
         "editShortcuts": "keybindings shortcuts customize anpassen belegen",
@@ -621,7 +620,7 @@
       "exportEml": "Letzte E-Mail als EML exportieren",
       "exportMarkdown": "Unterhaltung als Markdown exportieren",
       "exportText": "Unterhaltung als Text exportieren",
-      "moveToFolder": "Nach {folder} bewegen",
+      "moveToFolder": "Nach {folder} verschieben",
       "undo": "Rückgängig: {label}",
       "openSettingsSection": "Einstellungen: {section}"
     },
@@ -663,11 +662,10 @@
         "notifications": "Benachrichtigungen",
         "outbox": "Postausgang",
         "sent": "Gesendet",
-        "snoozed": "Auf Wiedervorlage",
         "spam": "Spam",
         "title": "Ordner",
         "trash": "Papierkorb",
-        "waiting": "Warten auf Antwort"
+        "later": "Später"
       },
       "frequent": "Häufig",
       "modules": "Bereiche",
@@ -874,6 +872,10 @@
         "undo": {
           "keywords": "rückgängig undo",
           "label": "Letzte Aktion rückgängig machen"
+        },
+        "fileTo": {
+          "label": "In Ordner oder Thema ablegen",
+          "keywords": "ablegen verschieben ordner thema label file move"
         }
       },
       "close": "Tastenkürzel schließen",

@@ -8,6 +8,8 @@ import {
   buildTopContactSummaries,
   collectNewSenderThreadIds,
   buildPriorityCardEntry,
+  buildLaterSections,
+  compareLaterThreads,
   isNewSenderThread,
   PRIORITY_CARD_MAX_THREADS,
   threadSentParticipants,
@@ -386,5 +388,31 @@ describe('backend-normalized subject', () => {
     }, []);
     expect(model.subject).toBe('SV: Odp: Quarterly Plan');
     expect(model.normalizedSubject).toBe('Quarterly Plan');
+  });
+});
+
+describe('Later', () => {
+  const person = [{ name: 'Ada', email: 'ada@example.com' }];
+  const later = (id: string, values: Partial<Thread>) => Object.assign(thread({ id, participants: person }), values);
+
+  it('lists the next snoozed mail to return first, then the longest wait', () => {
+    const rows = [
+      later('waiting-new', { workflowState: 'waiting', workflowChangedAt: '2026-10-26T09:00:00Z' }),
+      later('snoozed-late', { workflowState: 'snoozed', snoozeUntil: '2026-11-02T08:00:00Z' }),
+      later('waiting-old', { workflowState: 'waiting', workflowChangedAt: '2026-10-20T09:00:00Z' }),
+      later('snoozed-soon', { workflowState: 'snoozed', snoozeUntil: '2026-10-28T08:00:00Z' }),
+    ].sort(compareLaterThreads);
+
+    expect(rows.map((row) => row.id)).toEqual(['snoozed-soon', 'snoozed-late', 'waiting-old', 'waiting-new']);
+    expect(buildLaterSections(rows).map((section) => [section.key, section.threads.length])).toEqual([
+      ['later-snoozed', 2],
+      ['later-waiting', 2],
+    ]);
+  });
+
+  it('leaves out a section with nothing in it', () => {
+    const rows = [later('waiting', { workflowState: 'waiting' })];
+
+    expect(buildLaterSections(rows).map((section) => section.key)).toEqual(['later-waiting']);
   });
 });

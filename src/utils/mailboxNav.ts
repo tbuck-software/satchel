@@ -1,4 +1,4 @@
-import type { WorkflowState } from '@/types/workflow';
+import type { WorkflowFilter } from '@/types/workflow';
 import type { MailboxFilter } from '@/utils/threadList';
 
 /**
@@ -10,14 +10,15 @@ const MAILBOX_ROUTES = new Set(['inbox', 'thread']);
 
 export interface MailboxNavState {
   routeName: string | null;
-  workflowFilter: WorkflowState | 'all';
+  workflowFilter: WorkflowFilter;
   mailboxFilter: MailboxFilter;
   activeAccountId: string | null;
 }
 
-export function sectionIdForWorkflow(state: WorkflowState): string {
+export function sectionIdForWorkflow(state: Exclude<WorkflowFilter, 'all'>): string {
   if (state === 'done') return 'archive';
-  if (state === 'snoozed') return 'snoozed';
+  // Snoozed and waiting mail have one home in the sidebar.
+  if (state === 'snoozed' || state === 'waiting') return 'later';
   return state;
 }
 

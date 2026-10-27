@@ -9,40 +9,13 @@ import { useThreadsStore, type MailboxFilter } from '@/stores/threads';
 import { useConnectionStore } from '@/stores/connection';
 import { useOutboxStore } from '@/stores/outbox';
 import { useThreadActions } from '@/composables/useThreadActions';
-import type { WorkflowState } from '@/types/workflow';
+import { matchesWorkflowFilter, type WorkflowFilter } from '@/types/workflow';
+import { MAILBOX_SECTIONS, type CounterMode, type SectionSpec } from '@/config/mailboxSections';
+import { showMailList } from '@/router/mailViews';
 import NavItem from '@/components/ui/NavItem.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import { outboxVisibleCount } from '@/utils/outboxLabels';
 import { activeMailboxNavNode } from '@/utils/mailboxNav';
-
-type SectionIcon =
-  | 'inbox'
-  | 'drafts'
-  | 'sent'
-  | 'outbox'
-  | 'trash'
-  | 'archive'
-  | 'clock'
-  | 'aside'
-  | 'spam'
-  | 'bell'
-  | 'blocked';
-
-type CounterMode = 'unread' | 'threads' | 'none';
-type SectionSource = 'mailbox' | 'workflow' | 'route';
-
-type SectionSpec = {
-  id: string;
-  labelKey: string;
-  icon: SectionIcon;
-  source: SectionSource;
-  counterMode: CounterMode;
-  mailboxType?: string;
-  workflowState?: WorkflowState;
-  routeName?: string;
-  forceVisible?: boolean;
-  defaultOpen?: boolean;
-};
 
 type ResolvedSection = SectionSpec & {
   total: number;
@@ -77,111 +50,8 @@ const openGroups = ref<Record<string, boolean>>({
   folders: true,
 });
 
-const builtInSections: SectionSpec[] = [
-  {
-    id: 'inbox',
-    labelKey: 'nav.folders.inbox',
-    icon: 'inbox',
-    source: 'mailbox',
-    mailboxType: 'inbox',
-    counterMode: 'unread',
-    forceVisible: true,
-    defaultOpen: true,
-  },
-  {
-    id: 'snoozed',
-    labelKey: 'nav.folders.snoozed',
-    icon: 'clock',
-    source: 'workflow',
-    workflowState: 'snoozed',
-    counterMode: 'threads',
-    forceVisible: true,
-  },
-  {
-    id: 'aside',
-    labelKey: 'nav.folders.aside',
-    icon: 'aside',
-    source: 'workflow',
-    workflowState: 'aside',
-    counterMode: 'threads',
-    forceVisible: true,
-  },
-  {
-    id: 'outbox',
-    labelKey: 'nav.folders.outbox',
-    icon: 'outbox',
-    source: 'route',
-    routeName: 'outbox',
-    counterMode: 'threads',
-    forceVisible: true,
-  },
-  {
-    id: 'archive',
-    labelKey: 'nav.folders.done',
-    icon: 'archive',
-    source: 'workflow',
-    workflowState: 'done',
-    // No counter: workflow sections can only count threads that happen to be
-    // loaded, so the number showed "checked off this session", not a mailbox
-    // stat. forceVisible keeps the section from popping in with the first
-    // archived mail — the sidebar must not move on a check-off.
-    counterMode: 'none',
-    forceVisible: true,
-    defaultOpen: true,
-  },
-  {
-    id: 'drafts',
-    labelKey: 'nav.folders.drafts',
-    icon: 'drafts',
-    source: 'mailbox',
-    mailboxType: 'drafts',
-    counterMode: 'threads',
-  },
-  {
-    id: 'sent',
-    labelKey: 'nav.folders.sent',
-    icon: 'sent',
-    source: 'mailbox',
-    mailboxType: 'sent',
-    counterMode: 'none',
-    defaultOpen: true,
-  },
-  {
-    id: 'trash',
-    labelKey: 'nav.folders.trash',
-    icon: 'trash',
-    source: 'mailbox',
-    mailboxType: 'trash',
-    counterMode: 'none',
-  },
-  {
-    id: 'spam',
-    labelKey: 'nav.folders.spam',
-    icon: 'spam',
-    source: 'mailbox',
-    mailboxType: 'spam',
-    counterMode: 'unread',
-  },
-  {
-    id: 'notifications',
-    labelKey: 'nav.folders.notifications',
-    icon: 'bell',
-    source: 'mailbox',
-    mailboxType: 'notifications',
-    counterMode: 'unread',
-  },
-  {
-    id: 'blocked',
-    labelKey: 'nav.folders.blocked',
-    icon: 'blocked',
-    source: 'mailbox',
-    mailboxType: 'blocked',
-    counterMode: 'unread',
-  },
-];
-
 const resolvedSections = computed<ResolvedSection[]>(() =>
-  builtInSections
+  MAILBOX_SECTIONS
     .filter((section) => section.forceVisible || sectionHasContent(section))
     .map((section) => {
       const total = sectionCount(section);
@@ -209,10 +79,10 @@ const activeNodeId = computed(() =>
   }),
 );
 
-function countWorkflowThreads(state: WorkflowState, accountId?: string | null): number {
+function countWorkflowThreads(state: WorkflowFilter, accountId?: string | null): number {
   return threads.threads.filter((thread) => {
     const accountMatch = accountId ? thread.accountId === accountId : accounts.isVisible(thread.accountId);
-    return accountMatch && thread.workflowState === state;
+    return accountMatch && matchesWorkflowFilter(thread.workflowState, state);
   }).length;
 }
 
@@ -286,15 +156,13 @@ function resetToInboxView() {
  */
 function applyMailboxSelection(accountId: string | null, filter: MailboxFilter) {
   if (accountId !== null) accounts.setActiveAccount(accountId);
-  threads.workflowFilter = 'all';
-  threads.setMailboxFilter(filter);
+  showMailList('all', filter);
   resetToInboxView();
 }
 
-function applyWorkflowSelection(accountId: string | null, workflowState: WorkflowState) {
+function applyWorkflowSelection(accountId: string | null, workflowState: WorkflowFilter) {
   if (accountId !== null) accounts.setActiveAccount(accountId);
-  threads.workflowFilter = workflowState;
-  threads.setMailboxFilter({ kind: 'all', value: null });
+  showMailList(workflowState, { kind: 'all', value: null });
   resetToInboxView();
 }
 
@@ -347,6 +215,7 @@ async function onDropToFolder(folderId: string, event: DragEvent) {
       <div>
         <NavItem
           :label="$t(section.labelKey)"
+          :title="section.hintKey ? $t(section.hintKey) : undefined"
           :active="activeNodeId === `section:${section.id}`"
           :count="section.showTotal ? section.total : undefined"
           :count-tone="section.id === 'outbox' && (connection.failedSends > 0 || outbox.failedSendCount > 0) ? 'danger' : 'neutral'"

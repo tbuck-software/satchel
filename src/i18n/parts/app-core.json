@@ -78,8 +78,8 @@
         "updates": "Updates"
       },
       "classifiedToast": "{count} message filed | {count} messages filed",
-      "classify": "File",
-      "classifyAs": "File as",
+      "classify": "Sort",
+      "classifyAs": "Sort as",
       "conversationCount": "{count} conversation | {count} conversations",
       "filterStrip": "Filter the list",
       "mailCount": "{count} message | {count} messages",
@@ -118,17 +118,13 @@
         "searchAllMail": "Search all mail"
       },
       "empty": {
-        "waiting": {
-          "title": "No replies pending",
-          "description": "Conversations marked as waiting for a reply appear here."
-        },
-        "snoozed": {
-          "title": "Nothing snoozed",
-          "description": "Snoozed conversations wait here until their return time."
-        },
         "aside": {
           "title": "Nothing set aside",
-          "description": "Conversations you set aside stay here until you need them."
+          "description": "Set-aside mail has no return date: it stays here until you need it."
+        },
+        "later": {
+          "title": "Nothing for later",
+          "description": "Snoozed mail comes back at the time you picked, mail waiting for a reply when the reply arrives."
         }
       }
     },
@@ -228,8 +224,7 @@
       },
       "failed": "Search failed.",
       "hints": {
-        "subject": "subject:invoice",
-        "tag": "tag:important"
+        "subject": "subject:invoice"
       },
       "hitCount": "{count} result | {count} results",
       "intro": {
@@ -436,17 +431,13 @@
         "searchAllMail": "Alle E-Mails durchsuchen"
       },
       "empty": {
-        "waiting": {
-          "title": "Keine Antworten offen",
-          "description": "Hier erscheinen Unterhaltungen, die auf eine Antwort warten."
-        },
-        "snoozed": {
-          "title": "Nichts zurückgestellt",
-          "description": "Zurückgestellte Unterhaltungen warten hier bis zu ihrer Rückkehr."
-        },
         "aside": {
           "title": "Nichts beiseitegelegt",
-          "description": "Beiseitegelegte Unterhaltungen bleiben hier, bis du sie brauchst."
+          "description": "Beiseitegelegte Mails haben keinen Termin und bleiben hier, bis du sie brauchst."
+        },
+        "later": {
+          "title": "Nichts für später",
+          "description": "Mails auf Wiedervorlage kommen zur gewählten Zeit zurück, wartende Mails, sobald die Antwort da ist."
         }
       }
     },
@@ -546,8 +537,7 @@
       },
       "failed": "Suche fehlgeschlagen.",
       "hints": {
-        "subject": "subject:Rechnung",
-        "tag": "tag:wichtig"
+        "subject": "subject:Rechnung"
       },
       "hitCount": "{count} Treffer | {count} Treffer",
       "intro": {

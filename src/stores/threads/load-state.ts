@@ -1,6 +1,6 @@
 import { ref, type Ref } from 'vue';
 import type { BackendListThreadsInput, BackendSmartInboxSummary } from '@/services/backend';
-import type { WorkflowState } from '@/types/workflow';
+import type { WorkflowFilter } from '@/types/workflow';
 import type { MailboxFilter } from '@/utils/threadList';
 
 /**
@@ -29,7 +29,7 @@ export function createThreadLoadState(): ThreadLoadState {
 export interface ThreadListScope {
   accountId: string;
   activeContactEmail: string;
-  workflowFilter: WorkflowState | 'all';
+  workflowFilter: WorkflowFilter;
   mailboxFilter: MailboxFilter;
   activeSmartBucketId: string;
 }

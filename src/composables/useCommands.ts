@@ -299,12 +299,12 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         run: () => threads.activeThreadId && void threadActions.togglePinned(threads.activeThreadId),
       },
       {
-        id: 'thread:topic',
-        icon: 'topic' as const,
-        title: t('commands.addToTopic'),
+        id: 'thread:file',
+        icon: 'folder' as const,
+        title: t('thread.actions.fileTo'),
         context: 'mail' as const,
-        shortcut: hint('addToTopic'),
-        keywords: t('commands.keywords.addToTopic'),
+        shortcut: hint('fileTo'),
+        keywords: t('shortcuts.actions.fileTo.keywords'),
         run: () => topics.openPicker({ itemType: 'thread', itemIds: targetIds() }),
       },
       {

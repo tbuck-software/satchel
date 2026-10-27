@@ -369,7 +369,7 @@ describe('InboxView', () => {
     expect(harness.threads!.load).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['waiting', 'snoozed', 'aside'])('uses one contextual empty state for %s without the topics card', (workflow) => {
+  it.each(['later', 'aside'])('uses one contextual empty state for %s without the topics card', (workflow) => {
     setup();
     harness.threads!.workflowFilter = workflow;
     harness.threads!.mailboxFilter = { kind: 'all', value: null };
@@ -411,8 +411,8 @@ describe('InboxView', () => {
     expect(harness.push).toHaveBeenCalledWith({ name: 'thread', params: { id: 'thread-2' } });
   });
 
-  it('loads follow-ups immediately when the waiting workflow is active', () => {
-    setup({ workflowFilter: 'waiting' });
+  it('loads follow-ups immediately when Later is open', () => {
+    setup({ workflowFilter: 'later' });
 
     render();
 

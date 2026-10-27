@@ -1,5 +1,5 @@
 import type { Account, Participant, Thread, ThreadSmartBucket } from '@/types/mail';
-import type { Priority, WorkflowState } from '@/types/workflow';
+import type { Priority, WorkflowFilter } from '@/types/workflow';
 import type { BackendSmartInboxBucket, BackendThread } from '@/services/backend';
 import type { InboxSenderBucket } from '@/stores/settings';
 import { t } from '@/i18n/runtime';
@@ -994,6 +994,34 @@ export function buildThreadDateSections(inputThreads: Thread[]): ThreadDateSecti
   }));
 }
 
+/**
+ * The order of the Later view: snoozed mail first, the next to come back on
+ * top; then mail waiting for a reply, the longest wait on top. Both put
+ * the mail that needs you soonest first.
+ */
+export function compareLaterThreads(a: Thread, b: Thread): number {
+  const aSnoozed = a.workflowState === 'snoozed';
+  if (aSnoozed !== (b.workflowState === 'snoozed')) return aSnoozed ? -1 : 1;
+  // Both times are ISO strings from one backend clock, so they sort as text.
+  const left = (aSnoozed ? a.snoozeUntil : a.workflowChangedAt) ?? '';
+  const right = (aSnoozed ? b.snoozeUntil : b.workflowChangedAt) ?? '';
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
+ * Later lists two sections where other lists show dates. Expects the
+ * threads in `compareLaterThreads` order. No sender bundles: each row carries
+ * its own return or waiting time, which a bundle would hide.
+ */
+export function buildLaterSections(inputThreads: Thread[]): ThreadDateSection[] {
+  const snoozed = inputThreads.filter((thread) => thread.workflowState === 'snoozed');
+  const waiting = inputThreads.filter((thread) => thread.workflowState !== 'snoozed');
+  return [
+    { key: 'later-snoozed', label: t('folders.snoozedLong'), threads: snoozed, similarGroups: [] },
+    { key: 'later-waiting', label: t('folders.waitingForReply'), threads: waiting, similarGroups: [] },
+  ].filter((section) => section.threads.length > 0);
+}
+
 export function sectionSimilarGroups(sections: readonly ThreadDateSection[]): SimilarThreadGroup[] {
   return sections.flatMap((section) => section.similarGroups);
 }
@@ -1271,10 +1299,10 @@ export function matchesMailboxFilter(thread: Thread, filter: MailboxFilter): boo
 
 export function isVisibleInCurrentScope(
   thread: Thread,
-  workflow: WorkflowState | 'all',
+  workflow: WorkflowFilter,
   mailbox: MailboxFilter,
 ): boolean {
-  if (workflow === 'done' || workflow === 'snoozed' || workflow === 'aside') {
+  if (workflow === 'done' || workflow === 'snoozed' || workflow === 'aside' || workflow === 'later') {
     return true;
   }
 

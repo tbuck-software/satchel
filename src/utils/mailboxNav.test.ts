@@ -32,6 +32,12 @@ describe('activeMailboxNavNode', () => {
     })).toBe('section:archive');
     expect(activeMailboxNavNode({
       routeName: 'inbox',
+      workflowFilter: 'later',
+      mailboxFilter: { kind: 'all', value: null },
+      activeAccountId: null,
+    })).toBe('section:later');
+    expect(activeMailboxNavNode({
+      routeName: 'inbox',
       workflowFilter: 'all',
       mailboxFilter: { kind: 'folder', value: 'Projects' },
       activeAccountId: 'acc-1',

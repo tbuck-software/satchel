@@ -206,12 +206,13 @@
         "createRow": "Create new topic “{name}”",
         "empty": "No topics yet — just type a name.",
         "hintSelect": "↑↓ select",
-        "hintAssign": "↵ assign/remove",
+        "hintAssign": "↵ file",
         "hintClose": "Esc close",
         "createFailed": "The topic could not be created.",
         "messageRemoved": "Message removed from topic “{name}”",
         "messageAdded": "Message added to topic “{name}”",
-        "assignFailed": "Assignment failed."
+        "assignFailed": "Assignment failed.",
+        "fileSearchPlaceholder": "Folder or topic…"
       },
       "detail": {
         "jumpToTop": "Jump to title, description and attachments",
@@ -610,12 +611,13 @@
         "createRow": "Neues Thema „{name}“ erstellen",
         "empty": "Noch keine Themen — einfach einen Namen eintippen.",
         "hintSelect": "↑↓ wählen",
-        "hintAssign": "↵ zuweisen/entfernen",
+        "hintAssign": "↵ ablegen",
         "hintClose": "Esc schließen",
         "createFailed": "Thema konnte nicht erstellt werden.",
         "messageRemoved": "Nachricht aus Thema „{name}“ entfernt",
         "messageAdded": "Nachricht zu Thema „{name}“ hinzugefügt",
-        "assignFailed": "Zuordnung fehlgeschlagen."
+        "assignFailed": "Zuordnung fehlgeschlagen.",
+        "fileSearchPlaceholder": "Ordner oder Thema …"
       },
       "detail": {
         "jumpToTop": "Zu Titel, Beschreibung und Anhängen springen",

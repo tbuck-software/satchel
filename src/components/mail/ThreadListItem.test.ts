@@ -569,7 +569,7 @@ describe('thread row layout', () => {
     expect(document.body.querySelector('[data-test="sender-menu"]')).toBeNull();
 
     const trigger = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.context-menu button'))
-      .find((button) => button.textContent?.trim() === 'Sender');
+      .find((button) => button.textContent?.trim() === 'Sort sender into…');
     expect(trigger?.getAttribute('aria-haspopup')).toBe('menu');
     trigger?.click();
     await contextMenusOpen(2);
@@ -615,7 +615,7 @@ describe('thread row layout', () => {
     expect(document.body.querySelector('.context-menu')).not.toBeNull();
 
     const trigger = Array.from(document.body.querySelectorAll<HTMLButtonElement>('.context-menu button'))
-      .find((button) => button.textContent?.trim() === 'Sender');
+      .find((button) => button.textContent?.trim() === 'Sort sender into…');
     trigger?.click();
     await contextMenusOpen(2);
     expect(wrapper.findAllComponents({ name: 'ContextMenu' })).toHaveLength(2);

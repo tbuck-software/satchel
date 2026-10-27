@@ -4,7 +4,6 @@ import {
   backendGetSenderPreference,
   backendListThreads,
   backendMarkThreadsSpam,
-  backendSetThreadTags,
   backendTrashThreads,
   backendDismissMobileNotifications,
   backendUpdateThreadOrganization,
@@ -19,7 +18,6 @@ vi.mock('@/services/backend', async (importOriginal) => {
     backendGetSenderPreference: vi.fn(),
     backendListThreads: vi.fn(),
     backendMarkThreadsSpam: vi.fn(),
-    backendSetThreadTags: vi.fn(),
     backendTrashThreads: vi.fn(),
     backendDismissMobileNotifications: vi.fn(),
     backendUpdateThreadOrganization: vi.fn(),
@@ -28,7 +26,6 @@ vi.mock('@/services/backend', async (importOriginal) => {
 
 const listThreadsMock = vi.mocked(backendListThreads);
 const getSenderPreferenceMock = vi.mocked(backendGetSenderPreference);
-const setTagsMock = vi.mocked(backendSetThreadTags);
 const updateOrganizationMock = vi.mocked(backendUpdateThreadOrganization);
 
 function backendThread(overrides: Record<string, unknown> = {}) {
@@ -63,7 +60,6 @@ describe('thread organization persistence', () => {
       has_more: false,
     });
     getSenderPreferenceMock.mockReset();
-    setTagsMock.mockReset().mockResolvedValue();
     updateOrganizationMock.mockReset().mockResolvedValue();
   });
 
@@ -113,15 +109,6 @@ describe('thread organization persistence', () => {
     updateOrganizationMock.mockRejectedValueOnce(new Error('offline'));
     await expect(store.setAssignee('thread-persisted', 'Neu')).rejects.toThrow('offline');
     expect(store.threads[0]!.assignee).toBe('Alex');
-  });
-
-  // The tag editor in ThreadView is the only writer; it sends the whole list.
-  it('normalizes the tags it persists for a thread', async () => {
-    const store = useThreadsStore();
-    await store.load();
-    await store.setTagsForThread('thread-persisted', ['rechnung', ' Wichtig ', 'RECHNUNG']);
-    expect(setTagsMock).toHaveBeenCalledWith(['thread-persisted'], ['rechnung', 'wichtig']);
-    expect(store.threads[0]!.tags).toEqual(['rechnung', 'wichtig']);
   });
 
   it('serializes organization writes so a refusal restores only its own field', async () => {
@@ -197,14 +184,6 @@ describe('thread organization persistence', () => {
     await expect(store.trashThreads(['newer'])).rejects.toThrow('offline');
 
     expect(store.threads.map((thread) => thread.id)).toEqual(['newer', 'older']);
-  });
-
-  it('rolls the tags back when the write fails', async () => {
-    const store = useThreadsStore();
-    await store.load();
-    setTagsMock.mockRejectedValueOnce(new Error('offline'));
-    await expect(store.setTagsForThread('thread-persisted', ['wichtig'])).rejects.toThrow('offline');
-    expect(store.threads[0]!.tags).toEqual(['rechnung']);
   });
 });
 

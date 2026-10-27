@@ -271,12 +271,12 @@ describe('SearchView', () => {
   it('shows chips before a query, then collapses them behind an accessible disclosure', async () => {
     const wrapper = mountView({ q: '' });
     await nextTick();
-    expect(wrapper.findAll('.operator-chip')).toHaveLength(9);
+    expect(wrapper.findAll('.operator-chip')).toHaveLength(8);
     await wrapper.get('.search-input').setValue('plan');
     expect(wrapper.findAll('.operator-chip')).toHaveLength(0);
     expect(wrapper.get('.search-tips').attributes('aria-expanded')).toBe('false');
     await wrapper.get('.search-tips').trigger('click');
-    expect(wrapper.findAll('.operator-chip')).toHaveLength(9);
+    expect(wrapper.findAll('.operator-chip')).toHaveLength(8);
     expect(wrapper.get('.search-tips').attributes('aria-expanded')).toBe('true');
     wrapper.unmount();
   });
@@ -305,7 +305,7 @@ describe('SearchView', () => {
     await wrapper.get('.search-clear').trigger('click');
     expect(harness.searchState!.query.value).toBe('');
     expect(wrapper.find('.search-clear').exists()).toBe(false);
-    expect(wrapper.findAll('.operator-chip')).toHaveLength(9);
+    expect(wrapper.findAll('.operator-chip')).toHaveLength(8);
     wrapper.unmount();
   });
 

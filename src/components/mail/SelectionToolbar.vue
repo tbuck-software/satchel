@@ -73,7 +73,7 @@ function openMenu(event: MouseEvent) {
   menuOpen.value = true;
 }
 
-/** Shared entry point until the combined folder/topic picker replaces it. */
+/** File…: one picker for folders and topics, the same one `v` opens. */
 function openFile() {
   topics.openPicker({ itemType: 'thread', itemIds: ids() });
 }
@@ -108,9 +108,9 @@ function run(action: 'pin' | 'aside' | 'waiting' | 'spam') {
         <template #icon><AppIcon><rect x="2" y="3" width="12" height="10" rx="2" /><path d="m2 5 6 4 6-4" /></AppIcon></template>
         {{ anyUnread ? t('thread.actions.markRead') : t('thread.actions.markUnread') }}
       </AppButton>
-      <AppButton variant="ghost" size="sm" :disabled="busy" :title="t('thread.selection.file')" :shortcut="hint('addToTopic')" @click="openFile">
+      <AppButton variant="ghost" size="sm" :disabled="busy" :title="t('thread.actions.fileTo')" :shortcut="hint('fileTo')" @click="openFile">
         <template #icon><AppIcon><path d="M2 4h5l2 2h5v7H2V4Z" /></AppIcon></template>
-        {{ t('thread.selection.file') }}
+        {{ t('thread.actions.fileTo') }}
       </AppButton>
       <IconButton :title="t('thread.toolbar.moreActions')" :disabled="busy" aria-haspopup="menu" :aria-expanded="menuOpen" @click="openMenu">
         <AppIcon><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>

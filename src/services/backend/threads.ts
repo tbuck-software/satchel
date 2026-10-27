@@ -115,13 +115,6 @@ export async function backendUpdateThreadOrganization(input: {
 }
 
 
-export async function backendSetThreadTags(threadIds: string[], tags: string[]): Promise<void> {
-  return invoke<void>('set_thread_tags', {
-    input: { thread_ids: threadIds, tags },
-  });
-}
-
-
 export type BackendTrashReceipt = TrashReceipt;
 
 export async function backendUndoTrash(receiptId: string): Promise<void> {

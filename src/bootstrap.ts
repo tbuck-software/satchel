@@ -280,7 +280,7 @@ export function useAppBootstrap(): void {
   useDraftFlushOnExit();
 
   function openWaitingForReply() {
-    threadsStore.workflowFilter = 'waiting';
+    threadsStore.workflowFilter = 'later';
     threadsStore.setMailboxFilter({ kind: 'all', value: null });
     void router.push({ name: 'inbox' });
   }

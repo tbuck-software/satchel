@@ -14,7 +14,6 @@ import {
   backendSetThreadMuted,
   backendSetThreadPriority,
   backendSetThreadsStarred,
-  backendSetThreadTags,
   backendSetThreadsRead,
   backendTrashThreads,
   backendUpdateThreadOrganization,
@@ -126,7 +125,6 @@ export interface ThreadPersistenceSurface {
   markThreadsSpam(threadIds: string[]): Promise<BackendTrashReceipt>;
   setThreadsRead(threadIds: string[], isRead: boolean): Promise<void>;
   trashThreads(threadIds: string[]): Promise<BackendTrashReceipt>;
-  setTagsForThread(threadId: string, tags: string[]): Promise<void>;
   setAssignee(threadId: string, assignee?: string): Promise<void>;
   setSharedWith(threadId: string, sharedWith: string[]): Promise<void>;
   load(): Promise<void>;
@@ -548,15 +546,6 @@ export function createThreadPersistence({
     // A refresh failure cannot roll back a committed action or lose its Undo receipt.
     await Promise.allSettled([backendDismissMobileNotifications(normalized), refreshHead(), reloadMailboxes()]);
     return receipt;
-  }
-
-  async function setTagsForThread(threadId: string, tags: string[]) {
-    if (!collection.find(threadId)) return;
-    const normalized = Array.from(
-      new Set(tags.map((tag) => tag.trim().toLowerCase()).filter(Boolean)),
-    );
-    await writeOptimistically([{ id: threadId, values: { tags: normalized } }],
-      () => backendSetThreadTags([threadId], normalized), { alwaysRollBack: true });
   }
 
   /*
@@ -1021,7 +1010,6 @@ export function createThreadPersistence({
       markThreadsSpam,
       setThreadsRead,
       trashThreads,
-      setTagsForThread,
       setAssignee,
       setSharedWith,
       load,

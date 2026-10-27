@@ -42,7 +42,7 @@ const OmniSearch = defineAsyncComponent(loadOmniSearch);
 const ComposeFab = defineAsyncComponent(() => import('@/components/layout/ComposeFab.vue'));
 const ConnectionBanner = defineAsyncComponent(() => import('@/components/layout/ConnectionBanner.vue'));
 const ShortcutHelper = defineAsyncComponent(() => import('@/components/navigation/ShortcutHelper.vue'));
-const TopicPickerOverlay = defineAsyncComponent(() => import('@/components/topics/TopicPickerOverlay.vue'));
+const FilePickerOverlay = defineAsyncComponent(() => import('@/components/mail/FilePickerOverlay.vue'));
 const OnboardingFlow = defineAsyncComponent(() => import('@/components/onboarding/OnboardingFlow.vue'));
 const SettingsModal = defineAsyncComponent(() => import('@/components/settings/SettingsModal.vue'));
 // The shared yes/no and one-line dialogs: their state lives in `useConfirm` /
@@ -130,7 +130,7 @@ if (standaloneCompose.value) {
 
     <OmniSearch v-if="ui.omniOpen" />
     <ShortcutHelper v-if="ui.shortcutsOpen" />
-    <TopicPickerOverlay v-if="topicsStore.pickerTarget" />
+    <FilePickerOverlay v-if="topicsStore.pickerTarget" />
     <SettingsModal v-if="ui.settingsOpen" />
     <OnboardingFlow v-if="!settingsStore.onboardingComplete || ui.accountSetupOpen" />
     <Transition name="key-sequence">

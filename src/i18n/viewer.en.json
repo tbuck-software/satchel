@@ -163,6 +163,10 @@
         "keywords": "link url share",
         "label": "Copy link to this email"
       },
+      "fileTo": {
+        "keywords": "file move folder topic label",
+        "label": "File in a folder or topic"
+      },
       "forward": {
         "keywords": "forward",
         "label": "Forward"

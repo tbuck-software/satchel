@@ -27,7 +27,7 @@ const STORE_KEYS = [
   'selectAllVisibleThreads', 'selectFromInteraction', 'selectThread', 'selectedThreadIds',
   'selectedThreads', 'setAssignee', 'setMailboxFilter', 'setPriority',
   'setSenderCategory', 'setSenderCategoryByEmail',
-  'setSelectionList', 'setSenderPriorityByEmail', 'setSharedWith', 'setTagsForThread', 'setThreadCategory',
+  'setSelectionList', 'setSenderPriorityByEmail', 'setSharedWith', 'setThreadCategory',
   'setThreadMuted', 'setThreadsRead', 'setThreadsStarred', 'setViewportStart',
   'similarThreadGroups', 'smartInboxBuckets', 'smartInboxTotalCount',
   'smartListEntries', 'threadLoadInFlight', 'threads', 'toggleSelectionForThread',

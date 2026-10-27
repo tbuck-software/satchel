@@ -434,7 +434,10 @@ describe('useThreadActions', () => {
       undefined,
       { refresh: false },
     );
-    expect(toasts.at(-1)?.message).toContain('waiting for a reply');
+    expect(toasts.at(-2)?.message).toContain('waiting for a reply');
+    // The mail left the list: the last toast says where it went and goes there.
+    expect(toasts.at(-1)?.message).toBe('Waiting in Later');
+    expect(toasts.at(-1)?.action?.label).toBe('Show');
   });
 
   it('offers undo using the backend receipt after trashing', async () => {

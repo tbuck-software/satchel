@@ -128,6 +128,8 @@ describe('thread toolbar menu actions', () => {
     ['Mute', 'toggleMuted', []],
     ['Mark as spam', 'spam', []],
     ['Copy link', 'copyLink', []],
+    // One picker for folders and topics; Move and Add to topic are gone.
+    ['File…', 'fileTo', []],
     ['Save all attachments (2)', 'saveAttachments', []],
     ['All actions', 'allActions', []],
   ];
@@ -144,18 +146,28 @@ describe('thread toolbar menu actions', () => {
   });
 
   const nested: Array<[string, string, string, unknown[]]> = [
-    ['Organise', 'Add to topic', 'addToTopic', []],
-    ['Organise', 'Edit tags', 'organize', ['tags']],
+    ['Assign and share', 'Change assignee', 'organize', ['assignee']],
+    ['Assign and share', 'Change sharing', 'organize', ['sharing']],
     ['Block', 'This address', 'block', ['address']],
     ['Block', 'Whole domain', 'block', ['domain']],
-    ['Move', 'Archive', 'move', ['folder-archive']],
     ['Print', 'Latest email only', 'print', ['latest']],
     ['Copy as Markdown', 'Copy conversation', 'copyMarkdown', ['conversation']],
     ['Export to', 'Latest email', 'export', ['eml']],
   ];
 
+  it('offers no tag editing and no separate Move flyout', async () => {
+    const wrapper = render();
+
+    await openMenu(wrapper);
+    expect(menuItem(wrapper, 'Move')).toBeUndefined();
+    expect(menuItem(wrapper, 'Organise')).toBeUndefined();
+    await menuItem(wrapper, 'Assign and share')!.trigger('click');
+    await settle();
+    expect(wrapper.text()).not.toContain('tags');
+  });
+
   it.each(nested)('"%s › %s" fires %s', async (parent, name, event, payload) => {
-    const wrapper = render({ moveTargets: [{ id: 'folder-archive', label: 'Archive' }] });
+    const wrapper = render();
 
     await openMenu(wrapper);
     const opener = menuItem(wrapper, parent);

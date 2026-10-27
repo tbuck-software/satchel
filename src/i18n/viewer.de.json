@@ -163,6 +163,10 @@
         "keywords": "link url teilen",
         "label": "Link zu dieser E-Mail kopieren"
       },
+      "fileTo": {
+        "keywords": "ablegen verschieben ordner thema label file move",
+        "label": "In Ordner oder Thema ablegen"
+      },
       "forward": {
         "keywords": "forward weiterleiten",
         "label": "Weiterleiten"

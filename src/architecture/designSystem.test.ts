@@ -229,7 +229,7 @@ const KNOWN_SCALE_LITERAL_GROUPS: KnownGroup[] = [
     reason: 'Contacts and topics surfaces predating the scale; UI-11 converts them.',
     files: {
       'src/components/topics/TopicDetail.vue': 2,
-      'src/components/topics/TopicPickerOverlay.vue': 1,
+      'src/components/mail/FilePickerOverlay.vue': 1,
     },
   },
   {
@@ -351,7 +351,7 @@ const KNOWN_FOCUS_SUPPRESSION_GROUPS: KnownGroup[] = [
       'src/components/mail/RecipientChips.vue': 1,
       'src/components/navigation/OmniSearch.vue': 1,
       'src/components/settings/KeybindingEditor.vue': 1,
-      'src/components/topics/TopicPickerOverlay.vue': 1,
+      'src/components/mail/FilePickerOverlay.vue': 1,
     },
   },
   {
