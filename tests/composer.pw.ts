@@ -26,9 +26,13 @@ for (const theme of ['dark', 'light'] as const) {
           await recipient.fill('ada@example.com');
           await recipient.press('Enter');
         }
-        for (const dismiss of await page.getByRole('button', { name: 'Dismiss message', exact: true }).all()) {
-          await dismiss.click();
-        }
+        // Toasts expire on their own meanwhile, so a list taken up front goes
+        // stale: dismiss whichever is still up until none is.
+        const dismiss = page.getByRole('button', { name: 'Dismiss message', exact: true });
+        await expect(async () => {
+          if (await dismiss.count()) await dismiss.first().click({ timeout: 1_000 });
+          await expect(dismiss).toHaveCount(0, { timeout: 0 });
+        }).toPass();
         const signature = composer.locator('[data-composer-signature]');
         await expect(signature).toContainText('Kind regards');
         await expect.poll(async () => {
