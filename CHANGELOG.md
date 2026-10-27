@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Patch the plugin cache to use fixed zstd dependencies and document a crypto-bigint audit exception through 2026-12-31 UTC.
 - Rework the interface across inbox, reader, composer, search, contacts, settings, calendar and command palette: quieter collections, one reading column with drafts in place, recipients before subject, grouped settings, shared search fields and keycaps.
 - Fix English labels showing German text, German weekdays in the week view, the sidebar highlighting the wrong page, and the calendar filter for local and CalDAV calendars.
 - Update the plugin runtime to Wasmtime 36.0.17 and patch ammonia and quinn-proto security advisories.

@@ -5,7 +5,10 @@ from pathlib import Path
 import tomllib
 
 
-REVIEW_DEADLINES = {"RUSTSEC-2023-0071": date(2026, 12, 31)}
+REVIEW_DEADLINES = {
+    "RUSTSEC-2023-0071": date(2026, 12, 31),
+    "RUSTSEC-2026-0387": date(2026, 12, 31),
+}
 
 
 def invalid_exceptions(today: date, config_path: Path) -> list[str]:

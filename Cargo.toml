@@ -31,6 +31,7 @@ debug = 0
 
 [patch.crates-io]
 lettre = { path = "vendor/lettre" }
+wasmtime-internal-cache = { path = "vendor/wasmtime-internal-cache" }
 
 # rustc 1.97.1 on macOS 27 mislinks sqlx-macros without debug line tables.
 # Apply this to local gates and CI alike, overriding the dependency wildcard.
