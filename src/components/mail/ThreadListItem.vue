@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, shallowRef } from 'vue';
+import { computed, defineAsyncComponent, inject, ref, shallowRef } from 'vue';
+import { LIST_HIGHLIGHT_TERMS } from '@/composables/listHighlight';
+import { highlightMatches } from '@/utils/highlight';
 import { useI18n } from 'vue-i18n';
 import type { Thread } from '@/types/mail';
 import { formatListTime, formatMessageTimestamp, localeFormatter } from '@/utils/listTime';
@@ -171,6 +173,10 @@ const isFilingAside = computed(
   () => threadsStore.leavingThreadStates[props.thread.id] === 'aside',
 );
 const visibleSnippet = computed(() => props.thread.draftSnippet || props.thread.snippet);
+const highlightTerms = inject(LIST_HIGHLIGHT_TERMS, null);
+const subjectSegments = computed(() =>
+  highlightMatches(props.thread.normalizedSubject ?? props.thread.subject, highlightTerms?.value ?? []));
+const snippetSegments = computed(() => highlightMatches(visibleSnippet.value, highlightTerms?.value ?? []));
 const inLater = computed(() => threadsStore.workflowFilter === 'later');
 const followUp = computed(() =>
   inLater.value && props.thread.workflowState === 'waiting'
@@ -538,7 +544,7 @@ function onDragStart(event: DragEvent) {
                 : 'font-medium text-secondary'
           "
         >
-          {{ props.thread.normalizedSubject ?? props.thread.subject }}
+          <template v-for="(segment, index) in subjectSegments" :key="index"><mark v-if="segment.marked" class="thread-row__match">{{ segment.text }}</mark><template v-else>{{ segment.text }}</template></template>
         </span>
         <CountBadge v-if="sentMessageCount > 1" :value="sentMessageCount" />
       </div>
@@ -557,7 +563,7 @@ function onDragStart(event: DragEvent) {
           {{ followUp ? followUpLabel : laterLabel }}
         </span>
         <span class="min-w-0 flex-1 truncate text-xs leading-[1.5] text-tertiary">
-          {{ visibleSnippet }}
+          <template v-for="(segment, index) in snippetSegments" :key="index"><mark v-if="segment.marked" class="thread-row__match">{{ segment.text }}</mark><template v-else>{{ segment.text }}</template></template>
         </span>
         <svg
           v-if="props.thread.isStarred"
@@ -730,6 +736,13 @@ function onDragStart(event: DragEvent) {
   /* The pane it sits on, opaque, so the swipe track below stays hidden until
      the surface actually moves. */
   background: var(--bg-list);
+}
+
+.thread-row__match {
+  border-radius: var(--radius-xs);
+  background: var(--bg-active);
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
 }
 
 .thread-row__draft-avatar {

@@ -198,7 +198,7 @@ test('resizes for async content growth and shrinks after replacing the mail docu
   ).toBeGreaterThan(initialHeight + 400);
   const grownHeight = await frame.evaluate((element) => element.getBoundingClientRect().height);
 
-  await setMail(page, '<p>Replacement content</p>', 'replacement-mail');
+  await setMail(page, '<p><em>Replacement</em> content</p>', 'replacement-mail');
   await expect(mail.getByText('Replacement content')).toBeVisible();
   await expect(page.locator('iframe.satchel-email-document')).toHaveCount(1);
   await expect.poll(
@@ -317,7 +317,7 @@ test('compares a link with the label the reader sees, hidden characters left out
  */
 test('drops the document frame and nested canvas background at phone width', async ({ page }) => {
   await page.setViewportSize({ width: 411, height: 900 });
-  await renderMail(page, '<p>Hallo</p>');
+  await renderMail(page, '<p><strong>Hallo</strong></p>');
 
   const shell = page.locator('.html-document-shell').first();
   await expect(shell).toBeVisible();
@@ -339,9 +339,22 @@ test('drops the document frame and nested canvas background at phone width', asy
   expect(style.background).toBe('rgba(0, 0, 0, 0)');
 });
 
+/**
+ * What the composer sends for a reply without formatting: paragraphs and line
+ * breaks. In the frame it took the frame's system font and padding and offered
+ * Original / Auto-dark / Text for one sentence; it reads as text instead.
+ */
+test('shows formatting-free HTML as text, without the frame or its view switch', async ({ page }) => {
+  await page.goto('/render-fidelity.html');
+  await setMail(page, '<p>Thanks for the notes.</p><p>Tom<br>Work</p>');
+  await expect(page.getByText(/^Thanks for the notes\./).first()).toBeVisible();
+  await expect(page.locator('iframe.satchel-email-document')).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'Auto-dark' })).toHaveCount(0);
+});
+
 test('keeps the document frame where there is room beside it', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await renderMail(page, '<p>Hallo</p>');
+  await renderMail(page, '<p><strong>Hallo</strong></p>');
 
   const shell = page.locator('.html-document-shell').first();
   const radius = await shell.evaluate(
