@@ -82,11 +82,11 @@ function openMenu(accountId: string, event: MouseEvent) {
         <template #leading>
           <AccountAvatar :name="account.displayName" :color="account.color" :avatar="account.avatar" :size="18" :resting="!accounts.isVisible(account.id)" />
         </template>
-        <!-- Resting: still listed, but asleep. No number pulls at you; a zZ
-             sits where it would be. -->
+        <!-- Resting: still listed, but asleep. No number pulls at you; a moon
+             (Lucide `moon`) sits where it would be. -->
         <template v-if="!accounts.isVisible(account.id)" #trailing>
           <span class="sidebar-accounts__asleep" role="img" :aria-label="t('accountVisibility.resting')">
-            <AppIcon><path d="M7.5 2.5h6l-6 6.5h6" /><path d="M2.5 9h3.5l-3.5 4.5h3.5" /></AppIcon>
+            <AppIcon :grid="24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" /></AppIcon>
           </span>
         </template>
       </NavItem>
