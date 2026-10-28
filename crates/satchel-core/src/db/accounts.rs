@@ -9,6 +9,21 @@ use crate::{
 };
 
 const DEFAULT_COLOR: &str = "#55a6ff";
+/// The swatches a new account takes its colour from, first unused first.
+/// `src/config/accountColors.ts` holds the same list for the picker.
+pub const ACCOUNT_COLORS: [&str; 8] = [
+    DEFAULT_COLOR,
+    "#4cd68a",
+    "#f0b232",
+    "#a97fff",
+    "#3ad4e5",
+    "#f06898",
+    "#ff9f43",
+    "#ff5a5a",
+];
+/// A 128px picture is a few kilobytes as WebP or JPEG; this leaves room for
+/// a PNG without letting a photo straight off the camera into every list.
+pub const MAX_AVATAR_BYTES: usize = 96 * 1024;
 const CREDENTIALS_REF: &str = "encrypted-in-config";
 const IMAP_PROVIDER: &str = "imap";
 const POP3_PROVIDER: &str = "pop3";
@@ -37,6 +52,7 @@ pub struct AccountSummary {
     pub last_sync_error: Option<String>,
     pub last_sync_error_at: Option<String>,
     pub sync_progress_json: Option<String>,
+    pub avatar: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,6 +203,10 @@ pub enum AccountError {
     OAuthImapConflict,
     #[error("oauth account configuration is invalid")]
     OAuthConfiguration { detail: String },
+    #[error("account colour must be #rrggbb")]
+    ColorInvalid,
+    #[error("account picture must be a small PNG, JPEG or WebP data URL")]
+    AvatarInvalid,
     #[error("account persistence failed")]
     Persistence(#[source] sqlx::Error),
 }
@@ -312,7 +332,7 @@ impl<'a> AccountRepository<'a> {
             "SELECT id, display_name, email, provider, kind, color,
                     last_oauth_error, last_oauth_error_at, last_sync_at,
                     sync_status, last_sync_error, last_sync_error_at,
-                    sync_progress_json
+                    sync_progress_json, avatar
              FROM accounts
              WHERE is_active = 1
              ORDER BY created_at ASC",
@@ -332,6 +352,7 @@ impl<'a> AccountRepository<'a> {
         wait_for_credentials().await?;
         let stored_config = encrypt_account_config(&id, &config.to_string())
             .map_err(|detail| AccountError::CredentialAccess { detail })?;
+        let color = next_account_color(self.pool).await?;
 
         sqlx::query_as::<_, AccountSummary>(
             "INSERT INTO accounts
@@ -341,7 +362,7 @@ impl<'a> AccountRepository<'a> {
              RETURNING id, display_name, email, provider, kind, color,
                        last_oauth_error, last_oauth_error_at, last_sync_at,
                        sync_status, last_sync_error, last_sync_error_at,
-                       sync_progress_json",
+                       sync_progress_json, avatar",
         )
         .bind(&id)
         .bind(&input.display_name)
@@ -351,7 +372,7 @@ impl<'a> AccountRepository<'a> {
         // Vestigial schema column. Credentials live in the encrypted config.
         .bind(CREDENTIALS_REF)
         .bind("{}")
-        .bind(DEFAULT_COLOR)
+        .bind(color)
         .bind(&now)
         .bind(&now)
         .fetch_one(self.pool)
@@ -369,6 +390,49 @@ impl<'a> AccountRepository<'a> {
         .bind(account_id)
         .execute(self.pool)
         .await?;
+        Ok(())
+    }
+
+    /// Recolour an account. The value is `#rrggbb`, stored as given.
+    pub async fn set_color(&self, account_id: &str, color: &str) -> Result<(), AccountError> {
+        if !valid_account_color(color) {
+            return Err(AccountError::ColorInvalid);
+        }
+        let color = color.to_ascii_lowercase();
+        self.update_appearance(account_id, "color", Some(&color))
+            .await
+    }
+
+    /// Set or clear the account's picture. The frontend scales it down to
+    /// 128px before it gets here; this only refuses what is not an image or
+    /// is too large to belong in every account list.
+    pub async fn set_avatar(
+        &self,
+        account_id: &str,
+        avatar: Option<&str>,
+    ) -> Result<(), AccountError> {
+        if avatar.is_some_and(|value| !valid_account_avatar(value)) {
+            return Err(AccountError::AvatarInvalid);
+        }
+        self.update_appearance(account_id, "avatar", avatar).await
+    }
+
+    async fn update_appearance(
+        &self,
+        account_id: &str,
+        column: &'static str,
+        value: Option<&str>,
+    ) -> Result<(), AccountError> {
+        let statement = format!("UPDATE accounts SET {column} = ?, updated_at = ? WHERE id = ?");
+        let result = sqlx::query(&statement)
+            .bind(value)
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(account_id)
+            .execute(self.pool)
+            .await?;
+        if result.rows_affected() == 0 {
+            return Err(AccountError::NotFound);
+        }
         Ok(())
     }
 
@@ -816,6 +880,7 @@ async fn insert_oauth_account(
     let stored_config = encrypt_oauth_config(&id, &config)?;
     let display_name =
         resolved_oauth_display_name(identity, &session_account.display_name, normalized_email);
+    let color = next_account_color(&mut **transaction).await?;
     sqlx::query(
         "INSERT INTO accounts
          (id, display_name, email, provider, config, credentials_ref, sync_state, color,
@@ -829,13 +894,58 @@ async fn insert_oauth_account(
     .bind(stored_config)
     .bind(CREDENTIALS_REF)
     .bind("{}")
-    .bind(DEFAULT_COLOR)
+    .bind(color)
     .bind(now)
     .bind(now)
     .execute(&mut **transaction)
     .await?;
 
     oauth_connection(&id, provider, &config)
+}
+
+/// The first palette colour no active account wears yet, so a second account
+/// does not arrive in the same blue as the first.
+async fn next_account_color<'e, E>(executor: E) -> Result<&'static str, AccountError>
+where
+    E: sqlx::Executor<'e, Database = Sqlite>,
+{
+    let used: Vec<Option<String>> =
+        sqlx::query_scalar("SELECT color FROM accounts WHERE is_active = 1")
+            .fetch_all(executor)
+            .await?;
+    let taken = |candidate: &str| {
+        used.iter()
+            .flatten()
+            .any(|color| color.eq_ignore_ascii_case(candidate))
+    };
+    Ok(ACCOUNT_COLORS
+        .iter()
+        .copied()
+        .find(|candidate| !taken(candidate))
+        .unwrap_or(ACCOUNT_COLORS[used.len() % ACCOUNT_COLORS.len()]))
+}
+
+pub fn valid_account_color(color: &str) -> bool {
+    color.len() == 7
+        && color.starts_with('#')
+        && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+pub fn valid_account_avatar(avatar: &str) -> bool {
+    use base64::Engine as _;
+    let Some(payload) = [
+        "data:image/png;base64,",
+        "data:image/jpeg;base64,",
+        "data:image/webp;base64,",
+    ]
+    .iter()
+    .find_map(|prefix| avatar.strip_prefix(prefix)) else {
+        return false;
+    };
+    avatar.len() <= MAX_AVATAR_BYTES
+        && base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .is_ok_and(|bytes| !bytes.is_empty())
 }
 
 fn oauth_connection(
@@ -1006,6 +1116,85 @@ mod tests {
             .expect("memory db");
         crate::db::init(&pool).await.expect("migrations");
         pool
+    }
+
+    async fn insert_plain_account(pool: &SqlitePool, id: &str, color: &str) {
+        sqlx::query(
+            "INSERT INTO accounts
+             (id, display_name, email, provider, config, credentials_ref, color, is_active,
+              created_at, updated_at)
+             VALUES (?, 'A', ?, 'imap', '{}', '', ?, 1, '2026-01-01', '2026-01-01')",
+        )
+        .bind(id)
+        .bind(format!("{id}@example.test"))
+        .bind(color)
+        .execute(pool)
+        .await
+        .expect("account");
+    }
+
+    #[tokio::test]
+    async fn a_new_account_takes_the_first_colour_nobody_wears() {
+        let pool = pool().await;
+        assert_eq!(
+            next_account_color(&pool).await.expect("colour"),
+            DEFAULT_COLOR
+        );
+        insert_plain_account(&pool, "acc-a", "#55A6FF").await;
+        insert_plain_account(&pool, "acc-b", ACCOUNT_COLORS[2]).await;
+        assert_eq!(
+            next_account_color(&pool).await.expect("colour"),
+            ACCOUNT_COLORS[1]
+        );
+    }
+
+    #[tokio::test]
+    async fn colour_and_picture_are_validated_and_listed() {
+        let pool = pool().await;
+        insert_plain_account(&pool, "acc-a", DEFAULT_COLOR).await;
+        let repository = AccountRepository::new(&pool);
+
+        repository
+            .set_color("acc-a", "#F06898")
+            .await
+            .expect("colour");
+        assert!(matches!(
+            repository.set_color("acc-a", "red").await,
+            Err(AccountError::ColorInvalid)
+        ));
+        assert!(matches!(
+            repository.set_color("missing", "#123456").await,
+            Err(AccountError::NotFound)
+        ));
+
+        let picture = "data:image/png;base64,iVBORw0KGgo=";
+        repository
+            .set_avatar("acc-a", Some(picture))
+            .await
+            .expect("picture");
+        for refused in [
+            "data:image/svg+xml;base64,PHN2Zz4=",
+            "https://example.test/me.png",
+            "data:image/png;base64,not base64!",
+        ] {
+            assert!(matches!(
+                repository.set_avatar("acc-a", Some(refused)).await,
+                Err(AccountError::AvatarInvalid)
+            ));
+        }
+        let oversized = format!("data:image/png;base64,{}", "A".repeat(MAX_AVATAR_BYTES));
+        assert!(matches!(
+            repository.set_avatar("acc-a", Some(&oversized)).await,
+            Err(AccountError::AvatarInvalid)
+        ));
+
+        let listed = repository.list_active().await.expect("accounts");
+        assert_eq!(listed[0].color.as_deref(), Some("#f06898"));
+        assert_eq!(listed[0].avatar.as_deref(), Some(picture));
+
+        repository.set_avatar("acc-a", None).await.expect("cleared");
+        let listed = repository.list_active().await.expect("accounts");
+        assert_eq!(listed[0].avatar, None);
     }
 
     /// Seed one account with a row in every table that hangs off it.

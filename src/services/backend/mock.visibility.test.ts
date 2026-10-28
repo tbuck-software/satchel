@@ -48,3 +48,29 @@ describe('mock account visibility transport', () => {
     expect((await sendCommand<BackendAccountVisibilityStatus[]>('get_account_visibility'))[0]!.visible).toBe(false);
   });
 });
+
+describe('mock account appearance transport', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    localStorage.clear();
+    window.history.replaceState({}, '', '/?mockVisibility=1');
+  });
+  afterEach(() => { localStorage.clear(); window.history.replaceState({}, '', '/'); });
+
+  it('refuses what the repository refuses and lists what it keeps', async () => {
+    const { sendCommand } = await import('./mock');
+    await sendCommand('set_account_color', { accountId: 'acc-personal', color: '#A97FFF' });
+    await expect(sendCommand('set_account_color', { accountId: 'acc-personal', color: 'purple' }))
+      .rejects.toThrow('backend.errors.accountColorInvalid');
+    await expect(sendCommand('set_account_avatar', { accountId: 'acc-personal', avatar: 'data:image/svg+xml;base64,PHN2Zz4=' }))
+      .rejects.toThrow('backend.errors.accountAvatarInvalid');
+    await sendCommand('set_account_avatar', { accountId: 'acc-club', avatar: null });
+
+    const accounts = await sendCommand<Array<{ id: string; color: string; avatar: string | null }>>('list_accounts');
+    expect(accounts.map(({ id, color, avatar }) => ({ id, color, avatar }))).toEqual([
+      { id: 'acc-work', color: '#55a6ff', avatar: null },
+      { id: 'acc-personal', color: '#a97fff', avatar: null },
+      { id: 'acc-club', color: '#f0b232', avatar: null },
+    ]);
+  });
+});

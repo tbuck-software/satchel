@@ -1738,6 +1738,43 @@ export default {
                 }
             }
         },
+        "set_account_avatar": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "avatar": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "set_account_color": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "color": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "set_account_visibility": {
             "kind": "object",
             "fields": {

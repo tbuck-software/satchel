@@ -13,4 +13,8 @@ export type AccountDto = {
     last_sync_error: string | null;
     last_sync_error_at: string | null;
     sync_progress_json: string | null;
+    /**
+     * A `data:` URL the user chose for the account, at most 128px.
+     */
+    avatar: string | null;
 };

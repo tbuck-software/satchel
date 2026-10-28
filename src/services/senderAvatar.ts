@@ -126,7 +126,7 @@ function resolveFaviconDomain(domain: string): string | null {
   return null;
 }
 
-function initialsFor(name: string): string {
+export function initialsFor(name: string): string {
   return name
     .split(/[\s._-]+/)
     .filter(Boolean)

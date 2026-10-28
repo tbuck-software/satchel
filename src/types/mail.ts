@@ -148,6 +148,8 @@ export interface Account {
   provider: string;
   kind: 'email' | 'webhook' | 'script' | 'rss';
   color: string;
+  /** A small `data:` URL the user chose; without it the account shows initials. */
+  avatar?: string | null;
   lastOauthError?: string | null;
   lastOauthErrorAt?: string | null;
   lastSyncAt?: string | null;

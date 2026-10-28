@@ -71,24 +71,39 @@ function accountVisible(accountId: string, now = new Date()): boolean {
   return policy.mode === 'schedule' && policy.weekdays.includes(now.getDay())
     && time >= (policy.from ?? '00:00') && time < (policy.to ?? '24:00');
 }
+// 96px PNG, a rowing boat at sunset: an account picture the user chose.
+const MOCK_CLUB_AVATAR = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAAASFBMVEX/8Mj+w278wm/7wW/6wHD5v3D4v3H3vnH1vXL0vHPzu3PyunTwuXXvuHXut3bttnbstnfrtXfqtHjos3nnsnlGgrQmXIwoHh7S40JTAAABZklEQVR42u2T21LDMAwFxb2QFGhx7P//Ux6apmAf2YosM03xvmlG3m3SmO4aQz1QDNw3pgfKgYfGtA88NuYGAk+NaR94bkxtgE5kFl5qoAvsio2eT5CZnynQTgulwDVDPyxcbYBIWKBXHUwALJr6QYHeVLCBdHP7gUEFG0g3/2tgkPoHGnUwAbA4WhbGLQVGmX+kvZrEj7f2ZgVm6b2GH3p2JSsIIZTmvD4fCCfEMw588MwC8Qyhon8xlGYm8MmyCIQzhg4si0A4YzKBw+V8EM36wPwrS7M6cD5fmnHgyLO85CCbIaKAcFYHpDMOfPHM58Uz5AYCjmcWiGcIAWM9XMDZ+6OAM/fHAWftd+Qjqv2RLwl4Wz8IeFM/CnhL/zkw/cLQbxvwfMDkFXlhIF4F81Qk/5nW+zMBgd+vgRr7wROsnIWB8rvU8leBdigC01T1mV5BYPv/Qb8H/R70e9DvQb8H/R6s5xsUyBEGcUIQNgAAAABJRU5ErkJggg==';
 // A second mailbox for visibility walkthroughs; all policy behavior still runs
 // through the same command handlers as the ordinary fixture.
 if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockVisibility')) {
-  accounts.push({ ...accounts[0]!, id: 'acc-personal', displayName: 'Personal', email: 'tom@example.net', color: '#4cd68a' });
-  for (const [index, subject] of ['Sunday lunch at our place', 'Your weekend reading', 'Photos from the coast'].entries()) {
+  // Three mailboxes in three colours, one of them with a picture of its own.
+  accounts.push(
+    { ...accounts[0]!, id: 'acc-personal', displayName: 'Personal', email: 'tom@example.net', color: '#4cd68a' },
+    { ...accounts[0]!, id: 'acc-club', displayName: 'Rowing club', email: 'kasse@ruderclub.example', color: '#f0b232', avatar: MOCK_CLUB_AVATAR },
+  );
+  const extra: Array<[string, string, string]> = [
+    ['acc-personal', 'Sunday lunch at our place', 'Alex'],
+    ['acc-personal', 'Your weekend reading', 'Alex'],
+    ['acc-personal', 'Photos from the coast', 'Alex'],
+    ['acc-club', 'Boat house keys for Saturday', 'Mia'],
+    ['acc-club', 'Membership fees 2027', 'Mia'],
+  ];
+  for (const [index, [accountId, subject, sender]] of extra.entries()) {
     const template = threads.find(thread => thread.id === 'th-1')!;
-    const id = `th-personal-${index}`;
-    threads.push({ ...template, id, accountId: 'acc-personal', subject, priority: 0, messageCount: 1, senderKnown: true, hasAttachments: false,
+    const id = `th-${accountId.slice(4)}-${index}`;
+    const owner = accounts.find(account => account.id === accountId)!;
+    const from = { name: sender, email: `${sender.toLowerCase()}@example.net` };
+    threads.push({ ...template, id, accountId, subject, priority: 0, messageCount: 1, senderKnown: true, hasAttachments: false,
       snippet: 'A quiet weekend, with time to catch up.', tags: [], dueDate: undefined,
-      participants: [{ name: 'Alex', email: 'alex@example.net' }, { name: 'Tom', email: 'tom@example.net' }],
+      participants: [from, { name: 'Tom', email: owner.email }],
       lastMessageAt: new Date(Date.now() - (index + 1) * 3600_000).toISOString(),
       lastMessageAtMs: Date.now() - (index + 1) * 3600_000,
     });
     messages[id] = [{ ...messages['th-1']![0]!, id: `${id}-m`, threadId: id, subject,
-      from: { name: 'Alex', email: 'alex@example.net' }, to: [{ name: 'Tom', email: 'tom@example.net' }],
+      from, to: [{ name: 'Tom', email: owner.email }],
       attachments: [],
-      bodyText: 'Hi Tom, a quiet weekend, with time to catch up. See you on Sunday! Alex',
-      bodyHtml: '<p>Hi Tom,</p><p>A quiet weekend, with time to catch up.</p><p>See you on Sunday!<br>Alex</p>',
+      bodyText: `Hi Tom, a quiet weekend, with time to catch up. See you on Sunday! ${sender}`,
+      bodyHtml: `<p>Hi Tom,</p><p>A quiet weekend, with time to catch up.</p><p>See you on Sunday!<br>${sender}</p>`,
     }];
   }
   visibilityPolicies['acc-work'] ??= { ...defaultVisibilityPolicy(), mode: 'schedule', weekdays: [1, 2, 4, 5], from: '09:00', to: '17:00' };
@@ -468,6 +483,7 @@ function accountDto(account: Account) {
     last_sync_error: account.lastSyncError ?? null,
     last_sync_error_at: account.lastSyncErrorAt ?? null,
     sync_progress_json: account.syncProgressJson ?? null,
+    avatar: account.avatar ?? null,
   };
 }
 
@@ -619,6 +635,20 @@ const handlers: Record<string, Handler> = {
     account_id: account.id, policy: visibilityPolicies[account.id] ?? defaultVisibilityPolicy(),
     visible: accountVisible(account.id), local_date: localDate(new Date()),
   })),
+  // The same refusals as AccountRepository::set_color / set_avatar.
+  set_account_color: ({ accountId, color }) => {
+    const account = accounts.find((item) => item.id === accountId);
+    if (!account) throw new Error('backend.errors.accountNotFound');
+    if (!/^#[0-9a-f]{6}$/i.test(String(color))) throw new Error('backend.errors.accountColorInvalid');
+    account.color = String(color).toLowerCase();
+  },
+  set_account_avatar: ({ accountId, avatar }) => {
+    const account = accounts.find((item) => item.id === accountId);
+    if (!account) throw new Error('backend.errors.accountNotFound');
+    if (avatar != null && (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(String(avatar))
+      || String(avatar).length > 96 * 1024)) throw new Error('backend.errors.accountAvatarInvalid');
+    account.avatar = (avatar as string | null | undefined) ?? null;
+  },
   set_account_visibility: (payload) => {
     visibilityPolicies[payload.accountId as string] = JSON.parse(JSON.stringify(payload.policy)) as BackendAccountVisibilityPolicy;
     persistence.write(visibilitySlot, visibilityPolicies);

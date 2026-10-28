@@ -471,6 +471,7 @@ Reusable building blocks — use these instead of hand-rolled buttons/rows:
 | `SectionHeading`    | Group label ("Heute", "Ordner") with optional count/trailing slot |
 | `PaneHeader`        | Pane top bar: title, subtitle, count, actions slot, drag region |
 | `SegmentedControl`  | Pill-shaped grouped toggle                                     |
+| `ColorSwatchPicker` | A row of colour swatches, one chosen: a radio group with arrow keys, or menu radio items inside a `ContextMenu` (`menu`). `customLabel` adds the system colour picker. The colours are stored data (an account's), not theme colours; set `--swatch-ring` to the surface it sits on |
 | `ModalShell`        | The frame every full modal shares: one scrim, focus trap, focus return, `aria-modal`, no page scroll behind it. Full bleed below the single-pane breakpoint |
 | `BottomSheet`       | The small transient surface: rises from the bottom edge on a phone, anchored popover on a desktop. Not a modal, on purpose |
 | `ToggleSwitch`      | On/off switch. `before-change` may return `false` to refuse the flip; the knob then stays where it was |

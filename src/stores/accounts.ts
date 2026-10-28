@@ -12,6 +12,8 @@ import {
   backendGetSourceCapabilities,
   backendListAccounts,
   backendPollOauthFlow,
+  backendSetAccountAvatar,
+  backendSetAccountColor,
   backendStartOauthFlow,
   translateBackendError,
   type SourceCapabilities,
@@ -19,6 +21,7 @@ import {
 import { useConnectionStore } from '@/stores/connection';
 import { t } from '@/i18n/runtime';
 import { useToast } from '@/composables/useToast';
+import { ACCOUNT_COLORS, DEFAULT_ACCOUNT_COLOR } from '@/config/accountColors';
 
 function normalizeProvider(input: string): Account['provider'] {
   return input || 'imap';
@@ -161,12 +164,9 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
   }
 
-  // Identity palette, same rationale as services/senderAvatar.ts.
-  const ACCENT_COLORS = ['#5196ff', '#4cd68a', '#f0b232', '#ff5a5a', '#a97fff', '#3ad4e5', '#f06898', '#ff9f43'];
-
   function addAccount(input: { displayName: string; email: string; provider: Account['provider'] }): Account {
     const id = `acc-${Date.now().toString(36)}`;
-    const colorIndex = accounts.value.length % ACCENT_COLORS.length;
+    const colorIndex = accounts.value.length % ACCOUNT_COLORS.length;
     const account: Account = {
       id,
       displayName: input.displayName || input.email.split('@')[0]!,
@@ -174,7 +174,7 @@ export const useAccountsStore = defineStore('accounts', () => {
       provider: input.provider,
       kind: 'email',
       // colorIndex is taken modulo the palette length.
-      color: ACCENT_COLORS[colorIndex] ?? 'blue',
+      color: ACCOUNT_COLORS[colorIndex]?.value ?? DEFAULT_ACCOUNT_COLOR,
     };
     accounts.value = [...accounts.value, account];
     activeAccountId.value = id;
@@ -216,7 +216,8 @@ export const useAccountsStore = defineStore('accounts', () => {
         email: row.email,
         provider: normalizeProvider(row.provider),
         kind: row.kind ?? 'email',
-        color: row.color || '#55a6ff',
+        color: row.color || DEFAULT_ACCOUNT_COLOR,
+        avatar: row.avatar ?? null,
         lastOauthError: row.last_oauth_error ?? null,
         lastOauthErrorAt: row.last_oauth_error_at ?? null,
         lastSyncAt: row.last_sync_at ?? null,
@@ -287,6 +288,35 @@ export const useAccountsStore = defineStore('accounts', () => {
     throw new Error(t('settings.accounts.reconnect.timeout'));
   }
 
+  /**
+   * Change how an account looks: shown at once, written behind it, put back
+   * with a toast if the backend refuses.
+   */
+  async function updateAppearance(accountId: string, change: { color: string } | { avatar: string | null }) {
+    const index = accounts.value.findIndex((account) => account.id === accountId);
+    const before = accounts.value[index];
+    if (!before) return false;
+    accounts.value[index] = { ...before, ...change };
+    try {
+      if ('color' in change) await backendSetAccountColor(accountId, change.color);
+      else await backendSetAccountAvatar(accountId, change.avatar);
+      return true;
+    } catch (error) {
+      const current = accounts.value.findIndex((account) => account.id === accountId);
+      if (current >= 0) accounts.value[current] = before;
+      toast.error(translateBackendError(error) || t('accountAppearance.saveFailed'));
+      return false;
+    }
+  }
+
+  function setColor(accountId: string, color: string) {
+    return updateAppearance(accountId, { color });
+  }
+
+  function setAvatar(accountId: string, avatar: string | null) {
+    return updateAppearance(accountId, { avatar });
+  }
+
   async function clearAuthError(accountId: string) {
     try {
       await backendClearAccountOauthError(accountId);
@@ -327,5 +357,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     load,
     startReauth,
     clearAuthError,
+    setColor,
+    setAvatar,
   };
 });

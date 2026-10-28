@@ -232,7 +232,9 @@
         "oauthCalendarPermissionRequired": "Google Calendar access was not granted. Please allow calendar access to synchronize calendars.",
         "oauthAccountMismatch": "Please choose the Google account you are connecting. Your existing account has not been changed.",
         "updateInstallLocationRequired": "Open Satchel from Applications before installing an update.",
-        "updateRestartPreparationFailed": "The verified update is installed, but macOS could not prepare it for restart. Try again."
+        "updateRestartPreparationFailed": "The verified update is installed, but macOS could not prepare it for restart. Try again.",
+        "accountColorInvalid": "Choose a colour as #rrggbb.",
+        "accountAvatarInvalid": "The picture must be a small PNG, JPEG or WebP image."
       }
     }
   },
@@ -469,7 +471,9 @@
         "oauthCalendarPermissionRequired": "Der Zugriff auf Google Kalender wurde nicht freigegeben. Bitte erlaube den Kalender-Zugriff, um Kalender zu synchronisieren.",
         "oauthAccountMismatch": "Bitte wähle das Google-Konto aus, das du verbinden möchtest. Dein bestehendes Konto wurde nicht verändert.",
         "updateInstallLocationRequired": "Öffne Satchel aus dem Programme-Ordner, bevor du ein Update installierst.",
-        "updateRestartPreparationFailed": "Das geprüfte Update ist installiert, aber macOS konnte den Neustart nicht vorbereiten. Versuche es erneut."
+        "updateRestartPreparationFailed": "Das geprüfte Update ist installiert, aber macOS konnte den Neustart nicht vorbereiten. Versuche es erneut.",
+        "accountColorInvalid": "Wähle eine Farbe im Format #rrggbb.",
+        "accountAvatarInvalid": "Das Bild muss ein kleines PNG-, JPEG- oder WebP-Bild sein."
       }
     }
   }

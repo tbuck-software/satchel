@@ -33,6 +33,8 @@ const COMMANDS: &[&str] = &[
     "test_imap_account_connection",
     "update_account_password",
     "clear_account_oauth_error",
+    "set_account_color",
+    "set_account_avatar",
     "list_mailboxes",
     "create_folder",
     "rename_folder",

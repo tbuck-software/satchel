@@ -1,4 +1,27 @@
 {
+  "accountAppearance": {
+    "choosePicture": "Choose picture…",
+    "color": "Colour",
+    "colorFor": "Colour for {account}",
+    "colors": {
+      "amber": "Amber",
+      "blue": "Blue",
+      "cyan": "Cyan",
+      "green": "Green",
+      "orange": "Orange",
+      "pink": "Pink",
+      "purple": "Purple",
+      "red": "Red"
+    },
+    "customColor": "Custom colour",
+    "picture": "Picture",
+    "pictureHelp": "Stays on this device, scaled down to 128 pixels. Without a picture the account shows its initials in its colour.",
+    "pictureUnreadable": "That file could not be read as an image.",
+    "removePicture": "Remove picture",
+    "saveFailed": "Could not save the account's appearance.",
+    "settings": "Account settings…",
+    "title": "Appearance"
+  },
   "accountVisibility": {
     "accounts": "Accounts",
     "always": "Always",
@@ -106,6 +129,8 @@
   },
   "backend": {
     "errors": {
+      "accountAvatarInvalid": "The picture must be a small PNG, JPEG or WebP image.",
+      "accountColorInvalid": "Choose a colour as #rrggbb.",
       "accountConfigNotEncrypted": "This account's stored sign-in was not written by Satchel and will not be used. Remove the account and add it again.",
       "accountConfigurationInvalid": "The account configuration is invalid.",
       "accountCredentialAccessFailed": "The saved account credentials could not be accessed. Please try again.",

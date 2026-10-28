@@ -11,7 +11,7 @@ import type { GroupwareSyncSummary as WireGroupwareSyncSummary } from './generat
 // Auto-split from services/backend.ts — domain module.
 import { invoke } from './core';
 
-export type BackendAccount = RefinedWireFields<OptionalWireFields<WireAccountDto, 'color' | 'last_oauth_error' | 'last_oauth_error_at' | 'last_sync_at' | 'sync_status' | 'last_sync_error' | 'last_sync_error_at' | 'sync_progress_json'>, { kind: 'email' | 'webhook' | 'script' | 'rss' }>;
+export type BackendAccount = RefinedWireFields<OptionalWireFields<WireAccountDto, 'color' | 'last_oauth_error' | 'last_oauth_error_at' | 'last_sync_at' | 'sync_status' | 'last_sync_error' | 'last_sync_error_at' | 'sync_progress_json' | 'avatar'>, { kind: 'email' | 'webhook' | 'script' | 'rss' }>;
 
 
 export type BackendDiscoveredService = OptionalWireFields<WireDiscoveredService, 'host' | 'port' | 'collections'>;
@@ -68,6 +68,17 @@ export async function backendDeleteAccount(accountId: string): Promise<void> {
 
 export async function backendClearAccountOauthError(accountId: string): Promise<void> {
   return invoke<void>('clear_account_oauth_error', { accountId });
+}
+
+
+/** Recolour an account; `color` is `#rrggbb`. */
+export async function backendSetAccountColor(accountId: string, color: string): Promise<void> {
+  return invoke<void>('set_account_color', { accountId, color });
+}
+
+/** Set the account's picture as a small data URL, or clear it with `null`. */
+export async function backendSetAccountAvatar(accountId: string, avatar: string | null): Promise<void> {
+  return invoke<void>('set_account_avatar', { accountId, avatar });
 }
 
 

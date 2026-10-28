@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Show each account in the sidebar with its unread Inbox count and an avatar: its initial on its colour, or a picture you chose; All accounts shows the visible accounts' colours. Change an account's colour from the sidebar's right-click menu or in its settings, and new accounts start in a colour no other account wears.
 - Merge Snoozed and Waiting into one Later view: snoozed mail by return time, mail waiting for a reply longest wait first.
 - File mail into folders and topics from one File… picker (`v`, `t` still works), in place of Move and Add to topic.
 - Take tags out of the mail interface; they stay in the backend and in rules.

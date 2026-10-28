@@ -1,4 +1,27 @@
 {
+  "accountAppearance": {
+    "choosePicture": "Bild auswählen …",
+    "color": "Farbe",
+    "colorFor": "Farbe für {account}",
+    "colors": {
+      "amber": "Bernstein",
+      "blue": "Blau",
+      "cyan": "Türkis",
+      "green": "Grün",
+      "orange": "Orange",
+      "pink": "Rosa",
+      "purple": "Lila",
+      "red": "Rot"
+    },
+    "customColor": "Eigene Farbe",
+    "picture": "Bild",
+    "pictureHelp": "Bleibt auf diesem Gerät, verkleinert auf 128 Pixel. Ohne Bild zeigt das Konto seine Initialen in seiner Farbe.",
+    "pictureUnreadable": "Die Datei ließ sich nicht als Bild lesen.",
+    "removePicture": "Bild entfernen",
+    "saveFailed": "Die Darstellung des Kontos konnte nicht gespeichert werden.",
+    "settings": "Kontoeinstellungen …",
+    "title": "Darstellung"
+  },
   "accountVisibility": {
     "accounts": "Konten",
     "always": "Immer",
@@ -106,6 +129,8 @@
   },
   "backend": {
     "errors": {
+      "accountAvatarInvalid": "Das Bild muss ein kleines PNG-, JPEG- oder WebP-Bild sein.",
+      "accountColorInvalid": "Wähle eine Farbe im Format #rrggbb.",
       "accountConfigNotEncrypted": "Die gespeicherte Anmeldung dieses Kontos stammt nicht von Satchel und wird nicht verwendet. Konto entfernen und neu hinzufügen.",
       "accountConfigurationInvalid": "Die Kontokonfiguration ist ungültig.",
       "accountCredentialAccessFailed": "Auf die gespeicherten Zugangsdaten des Kontos konnte nicht zugegriffen werden. Bitte versuche es erneut.",

@@ -684,6 +684,8 @@ pub fn run() {
             commands::accounts::test_imap_account_connection,
             commands::accounts::update_account_password,
             commands::accounts::clear_account_oauth_error,
+            commands::accounts::set_account_color,
+            commands::accounts::set_account_avatar,
             commands::mailboxes::list_mailboxes,
             commands::folders::create_folder,
             commands::folders::rename_folder,

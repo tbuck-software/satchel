@@ -15,7 +15,7 @@ export const mockAccounts: Account[] = [
     email: 'tom@satchel.dev',
     provider: 'imap',
     kind: 'email',
-    color: '#3b82f6',
+    color: '#55a6ff',
   },
 ];
 

@@ -21,8 +21,22 @@ for (const theme of ['dark', 'light']) {
       await page.screenshot({ path: `${artifactDir}/${name}-${theme}-${testInfo.project.name}.png` });
     };
     const inboxBadge = page.locator('aside').first().getByRole('button', { name: /^Inbox/ }).locator('.nav-item__count');
-    // Opening the first personal message marks it read after hydration.
-    await expect(inboxBadge).toHaveText('2');
+    // Opening the first personal message marks it read after hydration:
+    // two left in Personal, two in the rowing club.
+    await expect(inboxBadge).toHaveText('4');
+    // Each account carries its own share of that number, the resting one too.
+    const accountCount = (name: string | RegExp) => accountArea.getByRole('button', { name }).locator('.nav-item__count');
+    await expect(accountCount(/^All accounts/)).toHaveText('4');
+    await expect(accountCount(/^Personal/)).toHaveText('2');
+    await expect(accountCount(/^Rowing club/)).toHaveText('2');
+    await expect(accountCount(/^Work/)).toHaveText(/^[1-9]\d*$/);
+    // Right-click recolours an account in place.
+    const personal = accountArea.getByRole('button', { name: /^Personal/ });
+    await personal.click({ button: 'right' });
+    const accountMenu = page.getByRole('menu', { name: 'Personal', exact: true });
+    await accountMenu.getByRole('menuitemradio', { name: 'Purple', exact: true }).click();
+    await expect(accountMenu).toHaveCount(0);
+    await expect(personal.locator('.account-avatar')).toHaveAttribute('style', /--account-color: #a97fff/);
     const restingCount = Number(await inboxBadge.textContent());
     await screenshot('inbox-resting');
     await accountArea.getByRole('button', { name: 'Show today', exact: true }).hover();
@@ -31,7 +45,7 @@ for (const theme of ['dark', 'light']) {
     await accountArea.getByTitle('Open tom@satchel.dev, including resting mail').click();
     await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();
     await expect(accountArea.getByText('Resting', { exact: true })).toBeVisible();
-    await accountArea.getByRole('button', { name: 'All accounts', exact: true }).click();
+    await accountArea.getByRole('button', { name: /^All accounts/ }).click();
     await accountArea.getByRole('button', { name: 'Show today', exact: true }).click();
     await expect(accountArea.getByText('Resting', { exact: true })).toHaveCount(0);
     await expect.poll(async () => Number(await inboxBadge.textContent())).toBeGreaterThan(restingCount);

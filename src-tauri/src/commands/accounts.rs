@@ -30,6 +30,8 @@ pub struct AccountDto {
     pub last_sync_error: Option<String>,
     pub last_sync_error_at: Option<String>,
     pub sync_progress_json: Option<String>,
+    /// A `data:` URL the user chose for the account, at most 128px.
+    pub avatar: Option<String>,
 }
 
 impl From<AccountSummary> for AccountDto {
@@ -48,6 +50,7 @@ impl From<AccountSummary> for AccountDto {
             last_sync_error: account.last_sync_error,
             last_sync_error_at: account.last_sync_error_at,
             sync_progress_json: account.sync_progress_json,
+            avatar: account.avatar,
         }
     }
 }
@@ -93,6 +96,31 @@ pub async fn clear_account_oauth_error(
 ) -> CommandResult<()> {
     AccountRepository::new(pool.inner())
         .clear_oauth_error(&account_id)
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn set_account_color(
+    pool: tauri::State<'_, SqlitePool>,
+    account_id: String,
+    color: String,
+) -> CommandResult<()> {
+    AccountRepository::new(pool.inner())
+        .set_color(&account_id, &color)
+        .await
+        .map_err(Into::into)
+}
+
+/// `None` clears the picture and the account falls back to its initials.
+#[tauri::command]
+pub async fn set_account_avatar(
+    pool: tauri::State<'_, SqlitePool>,
+    account_id: String,
+    avatar: Option<String>,
+) -> CommandResult<()> {
+    AccountRepository::new(pool.inner())
+        .set_avatar(&account_id, avatar.as_deref())
         .await
         .map_err(Into::into)
 }
@@ -266,6 +294,8 @@ impl From<AccountError> for CommandError {
                 tracing::error!(%detail, "OAuth account configuration is invalid");
                 Self::new("backend.errors.oauthConfigurationInvalid")
             }
+            AccountError::ColorInvalid => Self::new("backend.errors.accountColorInvalid"),
+            AccountError::AvatarInvalid => Self::new("backend.errors.accountAvatarInvalid"),
             AccountError::Persistence(error) => {
                 tracing::error!(error = ?error, "account persistence failed");
                 Self::new("backend.errors.accountPersistenceFailed")

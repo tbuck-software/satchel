@@ -22,6 +22,8 @@ import {
 import { useConfirm } from '@/composables/useConfirm';
 import { transportErrorLabel, transportErrorText } from '@/utils/transportLabels';
 import AccountVisibilitySettings from './AccountVisibilitySettings.vue';
+import AccountAppearanceSettings from './AccountAppearanceSettings.vue';
+import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 
@@ -462,7 +464,7 @@ async function removeAccount(accountId: string, email: string) {
     <!-- Account Cards -->
     <div class="account-list">
       <article v-for="account in emailAccounts" :key="account.id" class="account-card">
-        <span class="account-color" :style="{ backgroundColor: account.color }" />
+        <AccountAvatar :name="account.displayName" :color="account.color" :avatar="account.avatar" :size="32" />
         <div class="account-info">
           <span class="account-name">{{ account.displayName }}</span>
           <span class="account-email">{{ account.email }}</span>
@@ -542,6 +544,7 @@ async function removeAccount(accountId: string, email: string) {
             <path d="M4 4l.6 9a1 1 0 001 1h4.8a1 1 0 001-1L12 4" />
           </svg>
         </IconButton>
+        <AccountAppearanceSettings :account-id="account.id" />
         <AccountVisibilitySettings :account-id="account.id" />
       </article>
     </div>
@@ -699,18 +702,13 @@ async function removeAccount(accountId: string, email: string) {
   padding: 12px 16px;
   border-radius: var(--radius-md);
   background: var(--bg-raised);
+  --swatch-ring: var(--bg-raised);
   transition: background var(--duration-fast) var(--ease-out);
 }
 
 .account-card:hover {
   background: var(--bg-overlay);
-}
-
-.account-color {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
+  --swatch-ring: var(--bg-overlay);
 }
 
 .account-info {

@@ -20,6 +20,29 @@
       "invalidTime": "The end must be later than the start, on the same day.",
       "help": "Resting accounts stay in sync. Their mail is hidden from shared views, badges and notifications. Open the account to look in, or choose Show today until local midnight.",
       "saveFailed": "Could not save account visibility."
+    },
+    "accountAppearance": {
+      "title": "Appearance",
+      "color": "Colour",
+      "colorFor": "Colour for {account}",
+      "customColor": "Custom colour",
+      "colors": {
+        "blue": "Blue",
+        "green": "Green",
+        "amber": "Amber",
+        "purple": "Purple",
+        "cyan": "Cyan",
+        "pink": "Pink",
+        "orange": "Orange",
+        "red": "Red"
+      },
+      "picture": "Picture",
+      "choosePicture": "Choose picture…",
+      "removePicture": "Remove picture",
+      "pictureHelp": "Stays on this device, scaled down to 128 pixels. Without a picture the account shows its initials in its colour.",
+      "pictureUnreadable": "That file could not be read as an image.",
+      "saveFailed": "Could not save the account's appearance.",
+      "settings": "Account settings…"
     }
   },
   "de": {
@@ -43,6 +66,29 @@
       "invalidTime": "Das Ende muss am selben Tag nach dem Beginn liegen.",
       "help": "Ruhende Konten synchronisieren weiter. Die Mails erscheinen nicht in gemeinsamen Ansichten, Zählern und Benachrichtigungen. Öffne das Konto zum Nachsehen oder wähle Heute anzeigen bis zur lokalen Mitternacht.",
       "saveFailed": "Die Sichtbarkeit des Kontos konnte nicht gespeichert werden."
+    },
+    "accountAppearance": {
+      "title": "Darstellung",
+      "color": "Farbe",
+      "colorFor": "Farbe für {account}",
+      "customColor": "Eigene Farbe",
+      "colors": {
+        "blue": "Blau",
+        "green": "Grün",
+        "amber": "Bernstein",
+        "purple": "Lila",
+        "cyan": "Türkis",
+        "pink": "Rosa",
+        "orange": "Orange",
+        "red": "Rot"
+      },
+      "picture": "Bild",
+      "choosePicture": "Bild auswählen …",
+      "removePicture": "Bild entfernen",
+      "pictureHelp": "Bleibt auf diesem Gerät, verkleinert auf 128 Pixel. Ohne Bild zeigt das Konto seine Initialen in seiner Farbe.",
+      "pictureUnreadable": "Die Datei ließ sich nicht als Bild lesen.",
+      "saveFailed": "Die Darstellung des Kontos konnte nicht gespeichert werden.",
+      "settings": "Kontoeinstellungen …"
     }
   }
 }
