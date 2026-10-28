@@ -48,7 +48,7 @@ test('keeps long composer text from covering the conversation history', async ({
   await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   const editor = composer.locator('.ProseMirror').first();
-  const historyToggle = composer.getByRole('button', { name: /Show history/ });
+  const historyToggle = composer.getByRole('button', { name: /Show conversation/ });
 
   await editor.fill(Array.from({ length: 12 }, (_, index) => `Absatz ${index + 1}`).join('\n\n'));
 
@@ -59,7 +59,7 @@ test('keeps long composer text from covering the conversation history', async ({
   expect(editorBox!.y + editorBox!.height).toBeLessThanOrEqual(toggleBox!.y);
 
   await historyToggle.click();
-  await expect(composer.getByRole('button', { name: 'Hide history' })).toBeVisible();
+  await expect(composer.getByRole('button', { name: 'Hide conversation' })).toBeVisible();
 });
 
 test('archives the active thread and advances to the next one', async ({ page }) => {

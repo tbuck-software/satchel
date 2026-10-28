@@ -637,13 +637,13 @@
     },
     "context": {
       "empty": "No messages in this conversation.",
-      "hide": "Hide history",
+      "hide": "Hide conversation",
       "included": "History is included",
       "loadFailed": "Could not load the conversation: {error}",
       "loading": "Loading history…",
       "noTextContent": "(No text content)",
       "remove": "Remove quoted history from this message",
-      "show": "Show history | Show history (1 message) | Show history ({count} messages)"
+      "show": "Show conversation | Show conversation (1 message) | Show conversation ({count} messages)"
     },
     "crypto": {
       "addRecipientsFirst": "Add recipients before encrypting.",
@@ -3288,6 +3288,7 @@
     "row": {
       "back": "Back {time}",
       "draftPrefix": "Draft,",
+      "drafts": "{count} draft | {count} drafts",
       "hasAttachment": "with attachment",
       "hasDraft": "draft saved",
       "menuLabel": "Actions for this email",

@@ -134,8 +134,8 @@
       "context": {
         "included": "History is included",
         "remove": "Remove quoted history from this message",
-        "hide": "Hide history",
-        "show": "Show history | Show history (1 message) | Show history ({count} messages)",
+        "hide": "Hide conversation",
+        "show": "Show conversation | Show conversation (1 message) | Show conversation ({count} messages)",
         "loading": "Loading history…",
         "empty": "No messages in this conversation.",
         "noTextContent": "(No text content)",
@@ -479,8 +479,8 @@
       "context": {
         "included": "Verlauf wird mitgesendet",
         "remove": "Zitierten Verlauf aus dieser Nachricht entfernen",
-        "hide": "Verlauf ausblenden",
-        "show": "Verlauf anzeigen | Verlauf anzeigen (1 Nachricht) | Verlauf anzeigen ({count} Nachrichten)",
+        "hide": "Unterhaltung ausblenden",
+        "show": "Unterhaltung anzeigen | Unterhaltung anzeigen (1 Nachricht) | Unterhaltung anzeigen ({count} Nachrichten)",
         "loading": "Verlauf wird geladen…",
         "empty": "Keine Nachrichten im Verlauf.",
         "noTextContent": "(Kein Textinhalt)",

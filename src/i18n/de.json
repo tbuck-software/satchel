@@ -637,13 +637,13 @@
     },
     "context": {
       "empty": "Keine Nachrichten im Verlauf.",
-      "hide": "Verlauf ausblenden",
+      "hide": "Unterhaltung ausblenden",
       "included": "Verlauf wird mitgesendet",
       "loadFailed": "Der Verlauf konnte nicht geladen werden: {error}",
       "loading": "Verlauf wird geladen…",
       "noTextContent": "(Kein Textinhalt)",
       "remove": "Zitierten Verlauf aus dieser Nachricht entfernen",
-      "show": "Verlauf anzeigen | Verlauf anzeigen (1 Nachricht) | Verlauf anzeigen ({count} Nachrichten)"
+      "show": "Unterhaltung anzeigen | Unterhaltung anzeigen (1 Nachricht) | Unterhaltung anzeigen ({count} Nachrichten)"
     },
     "crypto": {
       "addRecipientsFirst": "Zum Verschlüsseln zuerst Empfänger hinzufügen.",
@@ -3288,6 +3288,7 @@
     "row": {
       "back": "Zurück {time}",
       "draftPrefix": "Entwurf,",
+      "drafts": "{count} Entwurf | {count} Entwürfe",
       "hasAttachment": "mit Anhang",
       "hasDraft": "Entwurf vorhanden",
       "menuLabel": "Aktionen für diese Mail",

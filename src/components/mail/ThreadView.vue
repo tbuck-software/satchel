@@ -37,6 +37,7 @@ import PluginSlotHost from '@/components/plugins/PluginSlotHost.vue';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { isOwnEmail } from '@/utils/mailIdentity';
 import { threadMessageVisibility } from '@/utils/threadMessageVisibility';
+import { formatMessageTimestamp } from '@/utils/listTime';
 import {
   buildThreadExportDescriptor,
   renderThreadMarkdown,
@@ -114,6 +115,9 @@ const messageVisibility = computed(() =>
   }),
 );
 const hiddenMessageCount = computed(() => messageVisibility.value.hiddenMessageCount);
+// An unsent draft is not a message of the conversation; it gets its own count.
+const sentMessageCount = computed(() => messages.value.filter((message) => !message.isDraft).length);
+const draftMessageCount = computed(() => messages.value.length - sentMessageCount.value);
 const visibleMessages = computed(() => messageVisibility.value.visibleMessages);
 const draftMessages = computed(() => messageVisibility.value.draftMessages);
 /** Selected, but its load waits for the selection to settle. */
@@ -975,7 +979,7 @@ function showEntireThread() {
         <AppIcon size="lg"><path d="M10 3L5 8l5 5" /></AppIcon>
       </IconButton>
       <div class="mobile-top-meta">
-        <span class="mobile-top-count">{{ $t('thread.row.messages', { count: messages.length }) }}</span>
+        <span class="mobile-top-count">{{ $t('thread.row.messages', { count: sentMessageCount }) }}</span>
       </div>
     </div>
 
@@ -1009,7 +1013,14 @@ function showEntireThread() {
               />
               {{ threadAccount.displayName }}
             </span>
-            <span>{{ $t('thread.row.messages', { count: messages.length }) }}</span>
+            <span>{{ $t('thread.row.messages', { count: sentMessageCount }) }}</span>
+            <span v-if="draftMessageCount > 0">{{ $t('thread.row.drafts', { count: draftMessageCount }) }}</span>
+            <!-- In Later the list row says when it comes back; the reader keeps
+                 saying it once the row is out of sight. -->
+            <span v-if="thread.workflowState === 'snoozed' && thread.snoozeUntil" class="thread-state thread-state--later">
+              <AppIcon size="sm"><circle cx="8" cy="8" r="6" /><path d="M8 4.5V8l2.5 1.5" /></AppIcon>
+              {{ $t('thread.row.back', { time: formatMessageTimestamp(thread.snoozeUntil) }) }}
+            </span>
             <span v-if="thread.workflowState === 'done'" class="thread-state">
               <AppIcon size="sm"><path d="M3 8.5l3.5 3.5L13 5" /></AppIcon>
               {{ $t('common.done') }}
@@ -1188,6 +1199,10 @@ function showEntireThread() {
 
 .thread-state svg {
   color: var(--accent-green);
+}
+
+.thread-state--later svg {
+  color: var(--text-accent);
 }
 
 /* ── Mobile top bar ── */

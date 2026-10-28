@@ -1203,13 +1203,6 @@ defineExpose({
       />
     </div>
 
-    <div v-if="hasQuotedHistory" class="history-control">
-      <span>{{ $t('compose.context.included') }}</span>
-      <IconButton :title="$t('compose.context.remove')" :disabled="sending" size="sm" @click="removeQuotedHistory">
-        <AppIcon size="sm"><path d="m4 4 8 8M12 4l-8 8" /></AppIcon>
-      </IconButton>
-    </div>
-
     <div class="body" :class="{ 'body--with-history': plainTextCompose ? historyText : historyHtml }" @click="focusComposeBody">
       <textarea
         v-if="plainTextCompose"
@@ -1257,6 +1250,14 @@ defineExpose({
         @reset="clearSignatureOverride"
       />
       <div v-if="plainTextCompose ? historyText : historyHtml" class="quoted-history" data-composer-history>
+        <!-- The note heads the quote it is about, under the signature, instead
+             of sitting above the subject line, far from what it removes. -->
+        <div v-if="hasQuotedHistory" class="history-control" @click.stop>
+          <span>{{ $t('compose.context.included') }}</span>
+          <IconButton :title="$t('compose.context.remove')" :disabled="sending" size="sm" @click="removeQuotedHistory">
+            <AppIcon size="sm"><path d="m4 4 8 8M12 4l-8 8" /></AppIcon>
+          </IconButton>
+        </div>
         <textarea
           v-if="plainTextCompose"
           ref="historyTextarea"
@@ -1459,9 +1460,8 @@ defineExpose({
   display: flex;
   flex: none;
   align-items: center;
-  justify-content: flex-end;
   gap: var(--space-xs);
-  padding-block: var(--space-xs);
+  margin-bottom: var(--space-xs);
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
 }
