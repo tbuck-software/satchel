@@ -1800,6 +1800,14 @@ textarea:focus {
   line-height: 1.68;
 }
 
+/* The answer is what is being written; the history under it is reference.
+   At the answer's size it took most of the body and buried a short draft. */
+.compose .body .quoted-history :deep(.content) {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+}
+
 .compose .compose-attachments {
   flex: none;
   max-height: 132px;
