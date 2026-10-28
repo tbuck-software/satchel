@@ -988,7 +988,7 @@ function showEntireThread() {
       ref="scrollRoot"
       :class="[
         'flex-1 overflow-y-auto',
-        ui.isMobile ? 'px-4 py-5' : 'thread-reading-content',
+        ui.isMobile ? 'thread-reading-content--phone px-4 py-5' : 'thread-reading-content',
         { 'thread-reading-content--reply': showReplyFoot },
       ]"
       :style="showReplyFoot ? { '--reply-foot-h': `${replyFootHeight}px` } : undefined"
@@ -1163,6 +1163,15 @@ function showEntireThread() {
   width: 100%;
   max-width: 48rem;
   margin: 0 auto;
+}
+
+/* The phone's action bar sits right under the scroll area. Without a fade the
+   last card ended in a hard cut through its text, which read as clipped
+   rather than as more to scroll to. The mask reads only alpha; any opaque
+   token does. */
+.thread-reading-content--phone {
+  -webkit-mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-xl)), transparent);
+  mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-xl)), transparent);
 }
 
 /* The foot's box is the inset at the end of the thread: the last message

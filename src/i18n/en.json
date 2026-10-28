@@ -97,6 +97,7 @@
         "explanation": "Temporary connection problems retry automatically. These items need a review.",
         "label": "{count} item needs attention | {count} items need attention",
         "resolved": "Everything is up to date.",
+        "review": "Review",
         "title": "Needs attention",
         "unavailable": "Open Outbox to review the affected items."
       },
@@ -657,8 +658,6 @@
     },
     "discardDraft": "Discard draft",
     "draft": {
-      "discardFailed": "Could not discard the draft: {error}",
-      "discarded": "Draft discarded.",
       "openElsewhere": "This draft is already open in another window.",
       "saveFailedStaysOpen": "The draft could not be saved. The composer stays open.",
       "savedAsDraft": "Saved as draft."

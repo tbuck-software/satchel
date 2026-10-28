@@ -16,7 +16,9 @@ for (const theme of ['dark', 'light'] as const) {
         await expect(page.locator('.stack')).toBeAttached({ timeout: 30_000 });
         await expect(page.locator('.toast')).toHaveCount(0, { timeout: 20_000 });
         const indicator = viewport.width < 640
-          ? page.getByRole('button', { name: '2 items need attention', exact: true }).filter({ visible: true })
+          // The phone shows a banner that names the count, with Review as its way in.
+          ? page.getByRole('status').filter({ hasText: '2 items need attention' })
+            .getByRole('button', { name: 'Review', exact: true }).filter({ visible: true })
           : page.locator('.sync-button');
         await expect(indicator).toBeVisible();
         await expect(indicator).toHaveAttribute('aria-haspopup', 'dialog');

@@ -97,6 +97,7 @@
         "explanation": "Vorübergehende Verbindungsprobleme werden automatisch erneut versucht. Diese Einträge müssen geprüft werden.",
         "label": "{count} Eintrag benötigt Aufmerksamkeit | {count} Einträge benötigen Aufmerksamkeit",
         "resolved": "Alles ist auf dem neuesten Stand.",
+        "review": "Prüfen",
         "title": "Aufmerksamkeit erforderlich",
         "unavailable": "Öffne den Postausgang, um die betroffenen Einträge zu prüfen."
       },
@@ -657,8 +658,6 @@
     },
     "discardDraft": "Entwurf verwerfen",
     "draft": {
-      "discardFailed": "Entwurf konnte nicht verworfen werden: {error}",
-      "discarded": "Entwurf verworfen.",
       "openElsewhere": "Dieser Entwurf ist bereits in einem anderen Fenster geöffnet.",
       "saveFailedStaysOpen": "Der Entwurf konnte nicht gespeichert werden. Der Composer bleibt geöffnet.",
       "savedAsDraft": "Als Entwurf gespeichert."

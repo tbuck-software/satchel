@@ -29,8 +29,6 @@
       "draft": {
         "saveFailedStaysOpen": "The draft could not be saved. The composer stays open.",
         "savedAsDraft": "Saved as draft.",
-        "discarded": "Draft discarded.",
-        "discardFailed": "Could not discard the draft: {error}",
         "openElsewhere": "This draft is already open in another window."
       },
       "status": {
@@ -374,8 +372,6 @@
       "draft": {
         "saveFailedStaysOpen": "Der Entwurf konnte nicht gespeichert werden. Der Composer bleibt geöffnet.",
         "savedAsDraft": "Als Entwurf gespeichert.",
-        "discarded": "Entwurf verworfen.",
-        "discardFailed": "Entwurf konnte nicht verworfen werden: {error}",
         "openElsewhere": "Dieser Entwurf ist bereits in einem anderen Fenster geöffnet."
       },
       "status": {

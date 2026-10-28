@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { useUndoFab, type UndoFabEntry } from '@/composables/useUndoFab';
 import { useShortcutHints } from '@/composables/useShortcutHints';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import { refreshToastClearance, useToastClearance } from '@/composables/useToastClearance';
 
 const props = defineProps<{
   /**
@@ -88,6 +89,12 @@ const ringStyle = computed(() => {
 });
 
 const label = computed(() => activeEntry.value?.label ?? '');
+
+// Both share the bottom lane of the list column: an error toast arriving while
+// an undo is up stacks above it instead of covering it.
+const rootRef = ref<HTMLElement | null>(null);
+useToastClearance(rootRef);
+watch(() => Boolean(activeEntry.value), refreshToastClearance, { flush: 'post' });
 /** The undo key acts on the newest receipt, so only that one shows it. */
 const undoKey = computed(() =>
   activeEntry.value && activeEntry.value.key === entries.value.at(-1)?.key ? hint('undo') : null,
@@ -97,6 +104,7 @@ const undoKey = computed(() =>
 <template>
   <div
     v-if="activeEntry"
+    ref="rootRef"
     class="undo-fab"
     :class="`undo-fab--${props.variant}`"
   >
@@ -169,6 +177,29 @@ const undoKey = computed(() =>
   /* Pinned to the very bottom, aligned with the mail list column. */
   left: calc(var(--sidebar-w, 0px) + var(--space-lg, 20px));
   bottom: 20px;
+  /* One receipt, not a button with a label floating beside it: the ring, what
+     happened and the key share a single surface, like a toast does. */
+  padding: var(--space-2xs) var(--space-sm) var(--space-2xs) var(--space-2xs);
+  border: var(--border-default);
+  border-radius: var(--radius-full);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-md);
+}
+
+.undo-fab--docked .undo-fab__main {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  box-shadow: none;
+}
+
+.undo-fab--docked .undo-fab__receipt {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
 }
 
 .undo-fab__main {

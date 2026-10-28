@@ -52,6 +52,7 @@
         "failures": {
           "title": "Needs attention",
           "label": "{count} item needs attention | {count} items need attention",
+          "review": "Review",
           "explanation": "Temporary connection problems retry automatically. These items need a review.",
           "unavailable": "Open Outbox to review the affected items.",
           "resolved": "Everything is up to date."
@@ -482,6 +483,7 @@
         "failures": {
           "title": "Aufmerksamkeit erforderlich",
           "label": "{count} Eintrag benötigt Aufmerksamkeit | {count} Einträge benötigen Aufmerksamkeit",
+          "review": "Prüfen",
           "explanation": "Vorübergehende Verbindungsprobleme werden automatisch erneut versucht. Diese Einträge müssen geprüft werden.",
           "unavailable": "Öffne den Postausgang, um die betroffenen Einträge zu prüfen.",
           "resolved": "Alles ist auf dem neuesten Stand."

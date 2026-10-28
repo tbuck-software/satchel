@@ -314,7 +314,9 @@ function showPreviousCompactUndo() {
 <style scoped>
 .stack {
   position: fixed;
-  left: calc(var(--space-xl) + var(--satchel-safe-area-left));
+  /* In the content area, beside the sidebar: a receipt over the navigation
+     covered the agenda and the bottom row it is meant to leave usable. */
+  left: calc(var(--toast-inset-start, var(--sidebar-w, 0px)) + var(--space-xl) + var(--satchel-safe-area-left));
   /* Not transitioned: the lift is measured from the stack's own position. */
   bottom: calc(var(--space-xl) + var(--satchel-safe-area-bottom) + var(--toast-clearance, 0px));
   z-index: 1000;
@@ -322,7 +324,7 @@ function showPreviousCompactUndo() {
     440px,
     var(--toast-available-width, 440px),
     calc(
-      100vw - 2 * var(--space-xl) - var(--satchel-safe-area-left) -
+      100vw - var(--toast-inset-start, var(--sidebar-w, 0px)) - 2 * var(--space-xl) - var(--satchel-safe-area-left) -
         var(--satchel-safe-area-right)
     )
   );

@@ -100,6 +100,7 @@ if (standaloneCompose.value) {
         v-if="ui.isMobile && !standaloneCompose"
         class="mobile-sync-status"
         hide-idle
+        banner-failures
       />
 
       <main>
@@ -212,6 +213,8 @@ if (standaloneCompose.value) {
 .shell--composer-standalone {
   grid-template-columns: 1fr;
   grid-template-rows: 1fr;
+  /* No sidebar here for the receipts to step past. */
+  --toast-inset-start: 0px;
 }
 
 main {
