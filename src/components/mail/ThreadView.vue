@@ -23,6 +23,7 @@ import { saveTextExport } from '@/utils/saveTextExport';
 import { showInFolderAction } from '@/utils/showInFolderAction';
 import ErrorState from '@/components/ui/ErrorState.vue';
 import ThreadMessageList from './ThreadMessageList.vue';
+import ThreadSelectionSummary from './ThreadSelectionSummary.vue';
 import ThreadPaneSkeleton from './ThreadPaneSkeleton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import { threadActionTargets } from '@/composables/threadActionTargets';
@@ -569,6 +570,7 @@ async function reloadMessages() {
 
 const actionIds = computed(() => threadActionTargets(threadsStore.selectedThreadIds, props.threadId));
 const selectionCount = computed(() => threadsStore.selectedThreadIds?.length ?? 0);
+const showSelectionSummary = computed(() => selectionCount.value > 1 && !ui.isMobile);
 const actionUnread = computed(() => actionIds.value.some(id => (threadsStore.find(id)?.unreadCount ?? 0) > 0));
 const actionPinned = computed(() => actionIds.value.every(id => threadsStore.find(id)?.isStarred));
 const snoozeTargetIds = ref<string[]>([]);
@@ -1000,7 +1002,12 @@ function showEntireThread() {
       ]"
       :style="showReplyFoot ? { '--reply-foot-h': `${replyFootHeight}px` } : undefined"
     >
-      <div ref="readingColumn" :class="ui.isMobile ? '' : 'thread-reading-column'">
+      <!-- Several selected: the toolbar acts on all of them, so the pane shows
+           which ones instead of one of them in full. -->
+      <div v-if="showSelectionSummary" class="thread-reading-column">
+        <ThreadSelectionSummary />
+      </div>
+      <div v-show="!showSelectionSummary" ref="readingColumn" :class="ui.isMobile ? '' : 'thread-reading-column'">
         <PluginSlotHost
           slot-name="thread_view_panel"
           :context="{ threadId: thread.id, subject: thread.subject }"
@@ -1089,7 +1096,7 @@ function showEntireThread() {
       </div>
 
       <!-- The pane ends where an answer would begin. -->
-      <div v-if="showReplyFoot" ref="replyFoot" class="thread-reply-foot">
+      <div v-if="showReplyFoot && !showSelectionSummary" ref="replyFoot" class="thread-reply-foot">
         <div class="thread-reply-foot__column">
           <ThreadReplyBar
             :recipient="replyRecipientName"

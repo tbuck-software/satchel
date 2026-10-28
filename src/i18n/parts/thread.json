@@ -4,7 +4,11 @@
       "selection": {
         "label": "{count} selected",
         "done": "Done ({count})",
-        "action": "{action} ({count})"
+        "action": "{action} ({count})",
+        "summaryTitle": "{count} conversation selected | {count} conversations selected",
+        "summaryHint": "The actions above apply to all of them.",
+        "summaryMore": "and {count} more",
+        "clear": "Clear selection"
       },
       "actions": {
         "aside": "Aside",
@@ -253,7 +257,11 @@
       "selection": {
         "label": "{count} ausgewählt",
         "done": "Erledigt ({count})",
-        "action": "{action} ({count})"
+        "action": "{action} ({count})",
+        "summaryTitle": "{count} Unterhaltung ausgewählt | {count} Unterhaltungen ausgewählt",
+        "summaryHint": "Die Aktionen oben gelten für alle.",
+        "summaryMore": "und {count} weitere",
+        "clear": "Auswahl aufheben"
       },
       "actions": {
         "aside": "Beiseite",

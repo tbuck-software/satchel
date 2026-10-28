@@ -3305,8 +3305,12 @@
     },
     "selection": {
       "action": "{action} ({count})",
+      "clear": "Clear selection",
       "done": "Done ({count})",
-      "label": "{count} selected"
+      "label": "{count} selected",
+      "summaryHint": "The actions above apply to all of them.",
+      "summaryMore": "and {count} more",
+      "summaryTitle": "{count} conversation selected | {count} conversations selected"
     },
     "state": {
       "aside": "Set aside",

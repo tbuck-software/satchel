@@ -3305,8 +3305,12 @@
     },
     "selection": {
       "action": "{action} ({count})",
+      "clear": "Auswahl aufheben",
       "done": "Erledigt ({count})",
-      "label": "{count} ausgewählt"
+      "label": "{count} ausgewählt",
+      "summaryHint": "Die Aktionen oben gelten für alle.",
+      "summaryMore": "und {count} weitere",
+      "summaryTitle": "{count} Unterhaltung ausgewählt | {count} Unterhaltungen ausgewählt"
     },
     "state": {
       "aside": "Beiseitegelegt",
