@@ -148,6 +148,8 @@ const undoKey = computed(() =>
          live region in ToastStack announces it; this is for the eyes. -->
     <span v-if="props.variant === 'docked'" class="undo-fab__receipt" aria-hidden="true">
       <span class="undo-fab__label">{{ label }}</span>
+      <!-- Says what the ring does: an arrow and a bare key implied it. -->
+      <span class="undo-fab__action">{{ t('thread.actions.undo') }}</span>
       <span v-if="undoKey" class="undo-fab__key">
         <kbd>{{ undoKey.label }}</kbd>
       </span>
@@ -295,6 +297,11 @@ const undoKey = computed(() =>
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.undo-fab__action {
+  color: var(--text-accent);
+  font-weight: var(--weight-semibold);
 }
 
 .undo-fab__key kbd {

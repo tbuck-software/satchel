@@ -210,9 +210,9 @@ async function requestCloseComposer(): Promise<boolean> {
     composer.close();
     toast.info(t('compose.draft.savedAsDraft'), {
       timeout: UNDO_TIMEOUT_MS,
-      // The way back in, not a delete beside a success: the draft card and the
-      // Drafts list keep Discard where the draft itself is in view.
-      action: { label: t('common.open'), handler: () => void composer.openDraft(savedDraftId) },
+      // The way back in, not a delete beside a success, under the draft card's
+      // own name for it; the card and Drafts keep Discard where the draft is.
+      action: { label: t('thread.draft.continueEditing'), handler: () => void composer.openDraft(savedDraftId) },
     });
     return true;
   } finally {

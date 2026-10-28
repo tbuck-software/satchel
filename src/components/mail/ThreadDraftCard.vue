@@ -116,6 +116,7 @@ useToastClearance(cardRef);
 /* The frame is dashed, not drawn: the outline of something not yet there.
    It spans the reading column, the same edges the messages above keep. */
 .draft-card {
+  container: draft-card / inline-size;
   margin-top: var(--space-5);
   border: 1px dashed color-mix(in srgb, var(--accent-primary) 60%, var(--border-color));
   border-radius: var(--radius-md);
@@ -201,6 +202,15 @@ useToastClearance(cardRef);
   margin-inline-start: auto;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+
+/* A narrow reader: the saved time takes its own line instead of running into
+   the recipient and account. */
+@container draft-card (max-width: 560px) {
+  .draft-card__saved {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
 }
 
 /* Three lines are enough to recognise a draft; the composer has the rest. */

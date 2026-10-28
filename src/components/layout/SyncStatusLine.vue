@@ -62,7 +62,7 @@ const label = computed(() => {
     :title="t('app.sync.failures.label', { count: failureCount }, failureCount)"
   >
     <template #actions>
-      <AppButton size="sm" variant="ghost" aria-haspopup="dialog" :aria-expanded="failuresOpen" @click="openFailures">
+      <AppButton size="sm" variant="soft" aria-haspopup="dialog" :aria-expanded="failuresOpen" @click="openFailures">
         {{ t('app.sync.failures.review') }}
       </AppButton>
     </template>

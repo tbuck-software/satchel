@@ -101,7 +101,7 @@
         "explanation": "Vorübergehende Verbindungsprobleme werden automatisch erneut versucht. Diese Einträge müssen geprüft werden.",
         "label": "{count} Eintrag benötigt Aufmerksamkeit | {count} Einträge benötigen Aufmerksamkeit",
         "resolved": "Alles ist auf dem neuesten Stand.",
-        "review": "Prüfen",
+        "review": "Probleme prüfen",
         "title": "Aufmerksamkeit erforderlich",
         "unavailable": "Öffne den Postausgang, um die betroffenen Einträge zu prüfen."
       },
@@ -3267,7 +3267,7 @@
       "addToTopicFailed": "Zuordnung fehlgeschlagen.",
       "addedToTopic": "Thread zu Thema „{topic}“ hinzugefügt | {count} Threads zu Thema „{topic}“ hinzugefügt",
       "aside": "E-Mail beiseitegelegt | {count} E-Mails beiseitegelegt",
-      "done": "E-Mail erledigt | {count} E-Mails erledigt",
+      "done": "Als erledigt markiert | {count} als erledigt markiert",
       "fallback": "{label} | {count} E-Mails → {label}",
       "inLater": "Wartet in „Später“",
       "inbox": "E-Mail in der Inbox | {count} E-Mails in der Inbox",

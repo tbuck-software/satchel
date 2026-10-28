@@ -18,7 +18,7 @@ for (const theme of ['dark', 'light'] as const) {
         const indicator = viewport.width < 640
           // The phone shows a banner that names the count, with Review as its way in.
           ? page.getByRole('status').filter({ hasText: '2 items need attention' })
-            .getByRole('button', { name: 'Review', exact: true }).filter({ visible: true })
+            .getByRole('button', { name: 'Review issues', exact: true }).filter({ visible: true })
           : page.locator('.sync-button');
         await expect(indicator).toBeVisible();
         await expect(indicator).toHaveAttribute('aria-haspopup', 'dialog');

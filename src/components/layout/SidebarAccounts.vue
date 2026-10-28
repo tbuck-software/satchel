@@ -52,12 +52,12 @@ const stack = computed(() => {
 const menuAccountId = ref('');
 const menuAnchor = ref<AnchorBox | null>(null);
 function openMenu(accountId: string, event: MouseEvent) {
-  // The context-menu key fires at the focused row, not at a pointer.
-  const box = event.clientX || event.clientY
-    ? { left: event.clientX, top: event.clientY, right: event.clientX, bottom: event.clientY }
-    : (event.currentTarget as HTMLElement).getBoundingClientRect();
+  // Beside the row, not under the pointer: opened on top of it, the menu hid
+  // the row's own state ("Resting") and the accounts below it. The
+  // context-menu key fires at the focused row the same way.
+  const row = (event.currentTarget as HTMLElement).getBoundingClientRect();
   menuAccountId.value = accountId;
-  menuAnchor.value = { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+  menuAnchor.value = { left: row.right, top: row.top, right: row.right, bottom: row.top };
 }
 </script>
 

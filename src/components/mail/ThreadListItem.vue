@@ -489,7 +489,14 @@ function onDragStart(event: DragEvent) {
     >
       <!-- A draft row says so in the avatar's place: a darkened face with the
            pencil on top let the initials show through the glyph. -->
-      <span v-if="props.thread.hasDraft" class="thread-row__draft-avatar" aria-hidden="true" />
+      <!-- Selected: the avatar is the checkbox it already acts as, so it
+           shows the check. A tint alone read like a hover. -->
+      <span v-if="props.selected" class="thread-row__checked" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3.5 8.5 6.5 11.5 12.5 5" />
+        </svg>
+      </span>
+      <span v-else-if="props.thread.hasDraft" class="thread-row__draft-avatar" aria-hidden="true" />
       <Avatar
         v-else
         :name="primaryParticipantName"
@@ -498,7 +505,7 @@ function onDragStart(event: DragEvent) {
       />
       <AvatarUnreadDot v-if="isUnread" />
       <svg
-        v-if="props.thread.hasDraft"
+        v-if="props.thread.hasDraft && !props.selected"
         class="thread-row__draft-pencil absolute inset-[9px]"
         width="18"
         height="18"
@@ -740,9 +747,21 @@ function onDragStart(event: DragEvent) {
 
 .thread-row__match {
   border-radius: var(--radius-xs);
-  background: var(--bg-active);
+  /* The accent's tint: the active surface was barely off the row, and the
+     same as a selected row's fill, so the hit vanished once focused. */
+  background: color-mix(in srgb, var(--accent-primary) 26%, transparent);
   color: var(--text-primary);
   font-weight: var(--weight-semibold);
+}
+
+.thread-row__checked {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
 }
 
 .thread-row__draft-avatar {

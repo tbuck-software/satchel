@@ -101,7 +101,7 @@
         "explanation": "Temporary connection problems retry automatically. These items need a review.",
         "label": "{count} item needs attention | {count} items need attention",
         "resolved": "Everything is up to date.",
-        "review": "Review",
+        "review": "Review issues",
         "title": "Needs attention",
         "unavailable": "Open Outbox to review the affected items."
       },
@@ -3267,7 +3267,7 @@
       "addToTopicFailed": "Assigning failed.",
       "addedToTopic": "Thread added to topic “{topic}” | {count} threads added to topic “{topic}”",
       "aside": "Email set aside | {count} emails set aside",
-      "done": "Email done | {count} emails done",
+      "done": "Marked as done | {count} marked as done",
       "fallback": "{label} | {count} emails → {label}",
       "inLater": "Waiting in Later",
       "inbox": "Email in the inbox | {count} emails in the inbox",
