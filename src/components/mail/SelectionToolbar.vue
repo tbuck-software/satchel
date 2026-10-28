@@ -91,6 +91,8 @@ function run(action: 'pin' | 'aside' | 'waiting' | 'spam') {
 <template>
   <div class="selection-tools no-drag" role="group" :aria-label="t('thread.selection.label', { count: threads.selectedThreadIds.length })">
     <span class="selection-count">{{ t('thread.selection.label', { count: threads.selectedThreadIds.length }) }}</span>
+    <!-- Done and Snooze carry words; the rest are the toolbar's icons, so the
+         row fits the list column at every width instead of wrapping. -->
     <div class="selection-actions">
       <AppButton variant="primary" size="sm" :disabled="busy" :title="t('thread.selection.done', { count: threads.selectedThreadIds.length })" :shortcut="hint('markDone')" @click="void actions.archive(ids())">
         <template #icon><AppIcon><path d="M3 8.5 6.2 11.7 13 5" /></AppIcon></template>
@@ -100,18 +102,15 @@ function run(action: 'pin' | 'aside' | 'waiting' | 'spam') {
         <template #icon><AppIcon><circle cx="8" cy="8" r="6" /><path d="M8 4v4l2.5 1.5" /></AppIcon></template>
         {{ t('thread.actions.snooze') }}
       </AppButton>
-      <AppButton variant="ghost" size="sm" :disabled="busy" :title="t('common.delete')" :shortcut="hint('trash')" @click="void actions.trash(ids())">
-        <template #icon><AppIcon><path d="M2 4h12M6 4V2h4v2M4 4l1 10h6l1-10" /></AppIcon></template>
-        {{ t('common.delete') }}
-      </AppButton>
-      <AppButton variant="ghost" size="sm" :disabled="busy" :title="anyUnread ? t('thread.actions.markRead') : t('thread.actions.markUnread')" :shortcut="hint('toggleRead')" @click="void actions.setRead(ids(), anyUnread, { undo: true })">
-        <template #icon><AppIcon><rect x="2" y="3" width="12" height="10" rx="2" /><path d="m2 5 6 4 6-4" /></AppIcon></template>
-        {{ anyUnread ? t('thread.actions.markRead') : t('thread.actions.markUnread') }}
-      </AppButton>
-      <AppButton variant="ghost" size="sm" :disabled="busy" :title="t('thread.actions.fileTo')" :shortcut="hint('fileTo')" @click="openFile">
-        <template #icon><AppIcon><path d="M2 4h5l2 2h5v7H2V4Z" /></AppIcon></template>
-        {{ t('thread.actions.fileTo') }}
-      </AppButton>
+      <IconButton :title="t('common.delete')" :disabled="busy" :shortcut="hint('trash')" @click="void actions.trash(ids())">
+        <AppIcon><path d="M2 4h12M6 4V2h4v2M4 4l1 10h6l1-10" /></AppIcon>
+      </IconButton>
+      <IconButton :title="anyUnread ? t('thread.actions.markRead') : t('thread.actions.markUnread')" :disabled="busy" :shortcut="hint('toggleRead')" @click="void actions.setRead(ids(), anyUnread, { undo: true })">
+        <AppIcon><rect x="2" y="3" width="12" height="10" rx="2" /><path d="m2 5 6 4 6-4" /></AppIcon>
+      </IconButton>
+      <IconButton :title="t('thread.actions.fileTo')" :disabled="busy" :shortcut="hint('fileTo')" @click="openFile">
+        <AppIcon><path d="M2 4h5l2 2h5v7H2V4Z" /></AppIcon>
+      </IconButton>
       <IconButton :title="t('thread.toolbar.moreActions')" :disabled="busy" aria-haspopup="menu" :aria-expanded="menuOpen" @click="openMenu">
         <AppIcon><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>
       </IconButton>

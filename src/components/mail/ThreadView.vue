@@ -241,7 +241,14 @@ onBeforeUnmount(() => viewportObserver?.disconnect());
  * a second time, and a fresh reply from it a second answer beside the first.
  * Reply all and Forward stay in the toolbar menu and on their keys.
  */
-const showReplyFoot = computed(() => canReply.value && !ui.isMobile && !resumableDraft.value);
+// While the composer answers this thread it is the reply; a launcher under it
+// would offer the same answer a second time.
+const composingHere = computed(() => {
+  const request = composer.request;
+  if (!props.threadId || !request || request.threadId !== props.threadId) return false;
+  return request.mode === 'reply' || request.mode === 'reply-all';
+});
+const showReplyFoot = computed(() => canReply.value && !ui.isMobile && !resumableDraft.value && !composingHere.value);
 /** The reader offers the reply itself — the foot, or a draft card. */
 const replyInReader = computed(() => showReplyFoot.value || (canReply.value && Boolean(resumableDraft.value)));
 const replyFoot = ref<HTMLElement | null>(null);
