@@ -19,12 +19,15 @@ on:
 permissions:
   contents: read
 
-# One queue per channel. A newer nightly supersedes one still building, so
-# two pushes in a row cost one build, not two back to back. A stable run is
-# never cancelled: its version number is reserved before the build.
+# One queue per channel. A nightly started by hand supersedes one still
+# building, so two pushes in a row cost one build, not two back to back. The
+# scheduled nightly only queues: GitHub starts it hours late, and cancelling
+# then threw away a nearly finished build of the same main. Queued behind,
+# it finds main already released and skips. A stable run is never cancelled:
+# its version number is reserved before the build.
 concurrency:
   group: desktop-release-${{ github.event.schedule == '14 6 * * 1' && 'stable' || inputs.channel || 'nightly' }}
-  cancel-in-progress: ${{ (github.event.schedule == '14 6 * * 1' && 'stable' || inputs.channel || 'nightly') == 'nightly' }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'nightly' }}
 
 env:
   CARGO_TERM_COLOR: always

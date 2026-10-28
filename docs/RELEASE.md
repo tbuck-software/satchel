@@ -173,8 +173,10 @@ arm64/x64, Linux x64 AppImage, and Windows x64 NSIS. It uploads a release only
 after the check suite and all four desktop targets succeed. A failed check or an
 incomplete build publishes no update.
 
-Each channel has its own queue. A new nightly cancels a nightly that is still
-building, so the newest main is what ships. Stable runs are never cancelled.
+Each channel has its own queue. A nightly started by hand cancels a nightly
+that is still building, so the newest main is what ships. The scheduled
+nightly queues instead and skips if main is already released. Stable runs are
+never cancelled.
 
 Bundled WASI plugins use a separate Ed25519 plugin signature. The release-only
 secret `SATCHEL_PLUGIN_SIGNING_PRIVATE_KEY` must match the public key pinned in
