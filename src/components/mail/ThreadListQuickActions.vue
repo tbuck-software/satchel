@@ -17,6 +17,7 @@ const emit = defineEmits<{
       v-if="!bundleCount"
       :title="$t('thread.actions.snooze')"
       :aria-label="$t('thread.actions.snooze')"
+      size="sm"
       class="thread-quick-action"
       :disabled="busy"
       @click="emit('action', 'snooze', $event)"
@@ -30,6 +31,7 @@ const emit = defineEmits<{
     <IconButton
       :title="bundleCount ? $t('thread.bundle.checkAllTitle', { count: bundleCount }) : $t('common.done')"
       :aria-label="bundleCount ? $t('thread.bundle.checkAllAria', { count: bundleCount }) : $t('common.done')"
+      size="sm"
       class="thread-quick-action thread-quick-action--done"
       :disabled="busy"
       @click="emit('action', 'done', $event)"

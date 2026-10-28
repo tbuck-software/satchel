@@ -454,10 +454,10 @@ function onDragStart(event: DragEvent) {
         props.keyboardFocused
           ? 'thread-row__surface--keyboard-focused'
           : props.selected
-            ? 'bg-[color-mix(in_srgb,var(--accent-primary)_14%,var(--bg-list))]'
+            ? 'thread-row__surface--selected'
             : props.active
               ? 'thread-row__surface--open'
-              : 'bg-[var(--bg-list)] group-hover:bg-hover',
+              : 'thread-row__surface--idle',
       ]"
       :style="swipeSurfaceStyle"
     >
@@ -732,6 +732,10 @@ function onDragStart(event: DragEvent) {
 
 .thread-row__surface {
   z-index: 2;
+  /* One variable per state, so the quick actions can fade the text out
+     into the very fill the row has. */
+  --row-bg: var(--bg-list);
+  background: var(--row-bg);
   transition: transform var(--duration-slow) var(--ease-out),
     background-color var(--duration-normal) var(--ease-out);
   will-change: transform;
@@ -741,13 +745,21 @@ function onDragStart(event: DragEvent) {
    active nav item gets. On paper a fill alone is a 1.07:1 step, so the petrol
    ring says "this one" where the sheet alone only says "raised" — the same
    pair marks the open search result. */
+.thread-row:hover .thread-row__surface--idle {
+  --row-bg: var(--bg-hover);
+}
+
+.thread-row__surface--selected {
+  --row-bg: color-mix(in srgb, var(--accent-primary) 14%, var(--bg-list));
+}
+
 .thread-row__surface--open {
-  background: var(--bg-surface);
+  --row-bg: var(--bg-surface);
   box-shadow: var(--selection-edge), var(--shadow-sm);
 }
 
 .thread-row__surface--keyboard-focused {
-  background: color-mix(in srgb, var(--accent-primary) 16%, var(--bg-list));
+  --row-bg: color-mix(in srgb, var(--accent-primary) 16%, var(--bg-list));
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 44%, transparent),
     var(--shadow-glow);
@@ -966,6 +978,7 @@ function onDragStart(event: DragEvent) {
   position: absolute;
   top: 0;
   right: 0;
+  bottom: 0;
 }
 
 .thread-row-header {

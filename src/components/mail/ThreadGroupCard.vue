@@ -337,6 +337,15 @@ function onDragStart(event: DragEvent) {
   z-index: 2;
   right: var(--space-5);
   top: var(--space-md);
+  bottom: var(--space-md);
+}
+
+.bundle-card {
+  --row-bg: var(--bg-stack);
+}
+
+.bundle-card:has(.bundle-card__button:hover:not(:disabled)) {
+  --row-bg: var(--bg-stack-hover);
 }
 
 .bundle-card:hover,

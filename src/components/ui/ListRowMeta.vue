@@ -12,7 +12,7 @@ defineProps<{ time: string }>();
 <style scoped>
 .list-row-meta {
   width: calc(2 * var(--space-2xl) + var(--space-xs));
-  height: var(--space-5);
+  min-height: var(--space-5);
   pointer-events: none;
 }
 
@@ -31,12 +31,17 @@ defineProps<{ time: string }>();
   transition: opacity var(--duration-fast) var(--ease-out);
 }
 
+/* The time belongs to the sender line; the actions are centred on the whole
+   row, which leaves them room on every side. Where they cover the end of the
+   text, they fade it out into the row's own fill (`--row-bg`). */
 .list-row-meta__actions {
   position: absolute;
-  inset: 0;
+  inset: 0 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  padding-left: var(--space-xl);
+  background: linear-gradient(to right, transparent, var(--row-bg, transparent) var(--space-lg));
   opacity: var(--row-actions-visible, 0);
   pointer-events: var(--row-actions-events, none);
   transition: opacity var(--duration-fast) var(--ease-out);
