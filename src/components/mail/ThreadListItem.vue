@@ -207,6 +207,13 @@ const followUpLabel = computed(() => {
  * conveyed only by font weight and a decorative dot, and the subject/sender
  * are read as three unrelated fragments.
  */
+/**
+ * The thread's count includes its unsent draft row, as the core counts
+ * messages. The reader says "2 messages · 1 draft"; the row's badge has to
+ * agree, with the draft shown by its own prefix.
+ */
+const sentMessageCount = computed(() => props.thread.messageCount - (props.thread.hasDraft ? 1 : 0));
+
 const rowLabel = computed(() => {
   const parts = [
     isUnread.value ? t('thread.actions.unread') : t('thread.actions.read'),
@@ -214,8 +221,8 @@ const rowLabel = computed(() => {
     (props.thread.normalizedSubject ?? props.thread.subject) || t('thread.row.noSubject'),
     formattedTime.value,
   ];
-  if (props.thread.messageCount > 1) {
-    parts.push(t('thread.row.messages', props.thread.messageCount));
+  if (sentMessageCount.value > 1) {
+    parts.push(t('thread.row.messages', sentMessageCount.value));
   }
   if (props.thread.hasDraft) parts.push(t('thread.row.hasDraft'));
   if (props.thread.hasAttachments) parts.push(t('thread.row.hasAttachment'));
@@ -530,7 +537,7 @@ function onDragStart(event: DragEvent) {
         >
           {{ props.thread.normalizedSubject ?? props.thread.subject }}
         </span>
-        <CountBadge v-if="props.thread.messageCount > 1" :value="props.thread.messageCount" />
+        <CountBadge v-if="sentMessageCount > 1" :value="sentMessageCount" />
       </div>
 
       <div class="mt-0.5 flex min-w-0 items-center gap-2">
@@ -985,8 +992,11 @@ function onDragStart(event: DragEvent) {
   padding-right: calc(2 * var(--space-2xl) + var(--space-xs));
 }
 
+/* The pointer's shortcut, not the keyboard's: a row that is merely selected or
+   focused keeps its time and pin, which the keys never needed covered. Tabbing
+   onto the buttons themselves still shows them. */
 .thread-row:hover,
-.thread-row:focus-within {
+.thread-row:has(.list-row-meta__actions :focus-visible) {
   --row-actions-visible: 1;
   --row-actions-events: auto;
 }
