@@ -7,8 +7,8 @@ import { useMailboxesStore } from '@/stores/mailboxes';
 import { useThreadsStore } from '@/stores/threads';
 import { useUiStore } from '@/stores/ui';
 import NavItem from '@/components/ui/NavItem.vue';
-import AppButton from '@/components/ui/AppButton.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 
@@ -78,14 +78,18 @@ function openMenu(accountId: string, event: MouseEvent) {
       :class="{ 'sidebar-accounts__row--resting': !accounts.isVisible(account.id) }"
       @contextmenu.prevent="openMenu(account.id, $event)"
     >
-      <NavItem :label="account.displayName" :active="accounts.activeAccountId === account.id" :count="inboxCount(account.id)" :title="t('accountVisibility.openAccount', { account: account.email })" @click="open(account.id)">
+      <NavItem :label="account.displayName" :active="accounts.activeAccountId === account.id" :count="inboxCount(account.id)" :title="accounts.isVisible(account.id) ? t('accountVisibility.openAccount', { account: account.email }) : t('accountVisibility.restingHint', { account: account.email })" @click="open(account.id)">
         <template #leading>
           <AccountAvatar :name="account.displayName" :color="account.color" :avatar="account.avatar" :size="18" :resting="!accounts.isVisible(account.id)" />
         </template>
-        <span class="sidebar-accounts__identity"><span>{{ account.displayName }}</span><span v-if="!accounts.isVisible(account.id)" class="sidebar-accounts__status">{{ t('accountVisibility.resting') }}</span></span>
+        <!-- Resting: still listed, but asleep. No number pulls at you; a zZ
+             sits where it would be. -->
+        <template v-if="!accounts.isVisible(account.id)" #trailing>
+          <span class="sidebar-accounts__asleep" role="img" :aria-label="t('accountVisibility.resting')">
+            <AppIcon><path d="M7.5 2.5h6l-6 6.5h6" /><path d="M2.5 9h3.5l-3.5 4.5h3.5" /></AppIcon>
+          </span>
+        </template>
       </NavItem>
-      <AppButton v-if="!accounts.isVisible(account.id)" variant="link" size="sm" :disabled="accounts.visibilityBusy" :title="t('accountVisibility.showAccount', { account: account.displayName })" @click="accounts.showToday(account.id, true)">{{ t('accountVisibility.showToday') }}</AppButton>
-      <AppButton v-else-if="accounts.visibilityFor(account.id)?.policy.mode !== 'always' || accounts.visibilityFor(account.id)?.policy.override_date === accounts.visibilityFor(account.id)?.local_date" variant="link" size="sm" :disabled="accounts.visibilityBusy" :title="t('accountVisibility.hideAccount', { account: account.displayName })" @click="accounts.showToday(account.id, false)">{{ t('accountVisibility.hide') }}</AppButton>
     </div>
     <SidebarAccountMenu v-if="menuAccountId" :account-id="menuAccountId" :anchor="menuAnchor" @close="menuAnchor = null" />
   </nav>
@@ -93,14 +97,11 @@ function openMenu(accountId: string, event: MouseEvent) {
 
 <style scoped>
 .sidebar-accounts { display: grid; gap: var(--space-2xs); padding: var(--space-md) var(--space-md) var(--space-xs); }
-.sidebar-accounts__row { display: flex; align-items: center; min-width: 0; gap: var(--space-xs); }
+.sidebar-accounts__row { display: flex; align-items: center; min-width: 0; }
 .sidebar-accounts__row > :first-child { flex: 1; }
-.sidebar-accounts__row > :last-child { flex-shrink: 0; }
 .sidebar-accounts__row--resting { color: var(--text-tertiary); }
 .sidebar-accounts__row--resting :deep(.nav-item) { color: var(--text-tertiary); }
-.sidebar-accounts__identity { display: grid; min-width: 0; }
-.sidebar-accounts__identity > span { overflow: hidden; text-overflow: ellipsis; }
-.sidebar-accounts__status { font-size: var(--font-size-2xs); font-weight: var(--weight-regular); }
+.sidebar-accounts__asleep { display: inline-flex; color: var(--text-tertiary); }
 
 /* Rings cut each avatar out of the one behind it, in the row's own colour. */
 .sidebar-accounts { --avatar-ring: var(--bg-sidebar); }

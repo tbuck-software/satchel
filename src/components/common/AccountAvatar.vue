@@ -5,7 +5,6 @@
  * photo, no brand logo — so a Gmail account does not turn into the Gmail logo.
  */
 import { computed, ref, watch } from 'vue';
-import AppIcon from '@/components/ui/AppIcon.vue';
 import { DEFAULT_ACCOUNT_COLOR, isAccountColor, wantsDarkInk } from '@/config/accountColors';
 import { initialsFor } from '@/services/senderAvatar';
 
@@ -15,7 +14,7 @@ const props = withDefaults(
     color?: string | null;
     avatar?: string | null;
     size?: number;
-    /** Dimmed with a moon: the account is resting on its schedule. */
+    /** Dimmed: the account is resting on its schedule. The row says why. */
     resting?: boolean;
   }>(),
   { color: null, avatar: null, size: 20, resting: false },
@@ -46,9 +45,6 @@ const initials = computed(() => (props.size < 14 ? '' : initialsFor(props.name |
     <span class="account-avatar__face">
       <img v-if="showImage && avatar" :src="avatar" alt="" decoding="async" @error="imageFailed = true" />
       <span v-else>{{ initials }}</span>
-    </span>
-    <span v-if="resting" class="account-avatar__badge">
-      <AppIcon size="sm"><path d="M13.5 9.5A5.8 5.8 0 0 1 6.5 2 6 6 0 1 0 13.5 9.5Z" /></AppIcon>
     </span>
   </span>
 </template>
@@ -91,22 +87,5 @@ const initials = computed(() => (props.size < 14 ? '' : initialsFor(props.name |
   filter: saturate(0.4);
 }
 
-.account-avatar__badge {
-  position: absolute;
-  right: -3px;
-  bottom: -3px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  height: 12px;
-  border-radius: var(--radius-full);
-  background: var(--avatar-ring, var(--bg-sidebar));
-  color: var(--text-secondary);
-}
 
-.account-avatar__badge :deep(.app-icon) {
-  width: 9px;
-  height: 9px;
-}
 </style>

@@ -30,9 +30,9 @@ describe('AccountAvatar', () => {
     expect(wrapper.find('img').exists()).toBe(false);
   });
 
-  it('dims a resting account and badges it with the moon', () => {
+  it('dims a resting account and leaves the why to its row', () => {
     const wrapper = mount(AccountAvatar, { props: { name: 'Work', resting: true } });
     expect(wrapper.classes()).toContain('account-avatar--resting');
-    expect(wrapper.find('.account-avatar__badge svg').exists()).toBe(true);
+    expect(wrapper.find('svg').exists()).toBe(false);
   });
 });

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * Right-click on an account in the sidebar: its colour, and the way to the
- * rest of its settings (picture, custom colour, visibility). Loaded on the
- * first right-click, not with the sidebar.
+ * Right-click on an account in the sidebar: its colour, showing a resting
+ * account until midnight (or hiding it again), and the way to the rest of
+ * its settings. Loaded on the first right-click, not with the sidebar.
  */
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -30,6 +30,18 @@ function recolor(color: string) {
   void accounts.setColor(props.accountId, color);
 }
 
+const visible = computed(() => accounts.isVisible(props.accountId));
+// "Hide" only where it means something: a schedule, or a peek for today.
+const canHide = computed(() => {
+  const visibility = accounts.visibilityFor(props.accountId);
+  return visible.value && (visibility?.policy.mode !== 'always' || visibility?.policy.override_date === visibility?.local_date);
+});
+
+function setShown(shown: boolean) {
+  emit('close');
+  void accounts.showToday(props.accountId, shown);
+}
+
 function openSettings() {
   emit('close');
   ui.closeMobileSidebar();
@@ -49,6 +61,8 @@ function openSettings() {
         @update:model-value="recolor"
       />
     </div>
+    <MenuItem v-if="!visible" :label="t('accountVisibility.showToday')" :disabled="accounts.visibilityBusy" @select="setShown(true)" />
+    <MenuItem v-else-if="canHide" :label="t('accountVisibility.hide')" :disabled="accounts.visibilityBusy" @select="setShown(false)" />
     <MenuItem :label="t('accountAppearance.settings')" @select="openSettings" />
   </ContextMenu>
 </template>

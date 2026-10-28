@@ -9,8 +9,7 @@ for (const theme of ['dark', 'light']) {
     await page.addInitScript(theme => localStorage.setItem('satchel.theme', theme), theme);
     await page.goto('/?mockVisibility=1');
     const accountArea = page.getByRole('navigation', { name: 'Accounts', exact: true });
-    await expect(accountArea.getByText('Resting', { exact: true })).toBeVisible();
-    await expect(accountArea.getByRole('button', { name: 'Show today', exact: true })).toBeVisible();
+    await expect(accountArea.getByRole('img', { name: 'Resting', exact: true })).toBeVisible();
     await expect(page.getByText('Sunday lunch at our place', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Staging login 500 after deployment', { exact: true })).toHaveCount(0);
     await expect(page.frameLocator('iframe').first().getByText('Hi Tom,', { exact: true })).toBeVisible();
@@ -24,12 +23,13 @@ for (const theme of ['dark', 'light']) {
     // Opening the first personal message marks it read after hydration:
     // two left in Personal, two in the rowing club.
     await expect(inboxBadge).toHaveText('4');
-    // Each account carries its own share of that number, the resting one too.
+    // Each account carries its own share of that number; the resting one
+    // sleeps instead of counting.
     const accountCount = (name: string | RegExp) => accountArea.getByRole('button', { name }).locator('.nav-item__count');
     await expect(accountCount(/^All accounts/)).toHaveText('4');
     await expect(accountCount(/^Personal/)).toHaveText('2');
     await expect(accountCount(/^Rowing club/)).toHaveText('2');
-    await expect(accountCount(/^Work/)).toHaveText(/^[1-9]\d*$/);
+    await expect(accountCount(/^Work/)).toHaveCount(0);
     // Right-click recolours an account in place.
     const personal = accountArea.getByRole('button', { name: /^Personal/ });
     await personal.click({ button: 'right' });
@@ -39,22 +39,22 @@ for (const theme of ['dark', 'light']) {
     await expect(personal.locator('.account-avatar')).toHaveAttribute('style', /--account-color: #a97fff/);
     const restingCount = Number(await inboxBadge.textContent());
     await screenshot('inbox-resting');
-    await accountArea.getByRole('button', { name: 'Show today', exact: true }).hover();
-    await screenshot('sidebar-show-today');
     // Direct access does not wake the account or change the policy.
-    await accountArea.getByTitle('Open tom@satchel.dev, including resting mail').click();
+    await accountArea.getByRole('button', { name: /^Work/ }).click();
     await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();
-    await expect(accountArea.getByText('Resting', { exact: true })).toBeVisible();
+    await expect(accountArea.getByRole('img', { name: 'Resting', exact: true })).toBeVisible();
     await accountArea.getByRole('button', { name: /^All accounts/ }).click();
-    await accountArea.getByRole('button', { name: 'Show today', exact: true }).click();
-    await expect(accountArea.getByText('Resting', { exact: true })).toHaveCount(0);
+    // Waking a resting account is a right-click away, not a button in the row.
+    await accountArea.getByRole('button', { name: /^Work/ }).click({ button: 'right' });
+    await page.getByRole('menu', { name: 'Work', exact: true }).getByRole('menuitem', { name: 'Show until midnight', exact: true }).click();
+    await expect(accountArea.getByRole('img', { name: 'Resting', exact: true })).toHaveCount(0);
     await expect.poll(async () => Number(await inboxBadge.textContent())).toBeGreaterThan(restingCount);
     await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();
     await page.keyboard.press('ControlOrMeta+k');
     const palette = page.getByRole('dialog', { name: 'Search and commands' });
     await palette.getByRole('combobox').fill('Hide Work');
     await palette.getByRole('option', { name: /Hide Work/ }).click();
-    await expect(accountArea.getByText('Resting', { exact: true })).toBeVisible();
+    await expect(accountArea.getByRole('img', { name: 'Resting', exact: true })).toBeVisible();
     await expect(page.getByText('Staging login 500 after deployment', { exact: true })).toHaveCount(0);
     await expect(inboxBadge).toHaveText(String(restingCount));
     // Route inside the same app to retain the two-account fixture.
