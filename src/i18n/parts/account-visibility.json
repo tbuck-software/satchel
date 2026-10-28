@@ -20,7 +20,11 @@
       "localTime": "Local time · leave blank for all day",
       "invalidTime": "The end must be later than the start, on the same day.",
       "help": "Resting accounts stay in sync. Their mail is hidden from shared views, badges and notifications. Open the account to look in, or choose Show today until local midnight.",
-      "saveFailed": "Could not save account visibility."
+      "saveFailed": "Could not save account visibility.",
+      "stateResting": "Resting today",
+      "statePeek": "Shown until midnight",
+      "scopeResting": "{accounts} resting | {accounts} resting",
+      "shownUntilMidnight": "{account} is shown until midnight."
     },
     "accountAppearance": {
       "title": "Appearance",
@@ -67,7 +71,11 @@
       "localTime": "Ortszeit · leer lassen für ganztägig",
       "invalidTime": "Das Ende muss am selben Tag nach dem Beginn liegen.",
       "help": "Ruhende Konten synchronisieren weiter. Die Mails erscheinen nicht in gemeinsamen Ansichten, Zählern und Benachrichtigungen. Öffne das Konto zum Nachsehen oder wähle Heute anzeigen bis zur lokalen Mitternacht.",
-      "saveFailed": "Die Sichtbarkeit des Kontos konnte nicht gespeichert werden."
+      "saveFailed": "Die Sichtbarkeit des Kontos konnte nicht gespeichert werden.",
+      "stateResting": "Ruht heute",
+      "statePeek": "Bis Mitternacht eingeblendet",
+      "scopeResting": "{accounts} ruht | {accounts} ruhen",
+      "shownUntilMidnight": "{account} ist bis Mitternacht eingeblendet."
     },
     "accountAppearance": {
       "title": "Darstellung",

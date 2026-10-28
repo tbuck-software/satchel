@@ -52,6 +52,10 @@ vi.mock('@/stores/accounts', () => ({
   useAccountsStore: () => harness.accounts,
 }));
 
+vi.mock('@/stores/mailboxes', () => ({
+  useMailboxesStore: () => ({ countForMailboxType: () => 0 }),
+}));
+
 vi.mock('@/stores/connection', () => ({
   useConnectionStore: () => ({ backendErrorFor: harness.backendErrorFor }),
 }));
@@ -232,6 +236,8 @@ function setup(options: {
   harness.accounts = reactive({
     activeAccountId: options.activeAccountId ?? 'account-1',
     accounts: options.accounts ?? [{ id: 'account-1' }],
+    emailAccounts: options.accounts ?? [{ id: 'account-1' }],
+    isVisible: () => true,
     accountScopeLabel: 'account@example.org',
     setActiveAccount: harness.setActiveAccount,
   });

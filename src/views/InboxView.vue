@@ -8,6 +8,7 @@ import { useNewSenderActions } from '@/composables/useNewSenderActions';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { useToast } from '@/composables/useToast';
 import { useAccountsStore } from '@/stores/accounts';
+import { useMailboxesStore } from '@/stores/mailboxes';
 import { useConnectionStore } from '@/stores/connection';
 import { useSettingsStore } from '@/stores/settings';
 import { useListSearchStore } from '@/stores/listSearch';
@@ -370,12 +371,25 @@ const workflowEmpty = computed(() => {
   }
 });
 
+const mailboxes = useMailboxesStore();
 const listScope = computed(() => {
   if (threads.activeContact) {
     return `${threads.activeContact.email} · ${t('inbox.conversationCount', threads.activeContact.threadCount)}`;
   }
 
-  return accounts.accountScopeLabel;
+  const parts = [accounts.accountScopeLabel];
+  // "All accounts" while one sleeps would claim more than the list holds.
+  const resting = accounts.activeAccountId
+    ? []
+    : accounts.emailAccounts.filter((account) => !accounts.isVisible(account.id)).map((account) => account.displayName);
+  if (resting.length > 0) parts.push(t('accountVisibility.scopeResting', { accounts: resting.join(', ') }, resting.length));
+  // The title counts conversations, the sidebar unread ones; naming the second
+  // here puts the two numbers side by side instead of in contradiction.
+  if (threads.mailboxFilter.kind === 'section' && threads.mailboxFilter.value === 'inbox') {
+    const unread = mailboxes.countForMailboxType('inbox', accounts.activeAccountId || undefined);
+    if (unread > 0) parts.push(t('thread.list.unreadCount', { count: unread }));
+  }
+  return parts.join(' · ');
 });
 
 // ── List search: the field above the list narrows it in place ──

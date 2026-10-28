@@ -45,6 +45,12 @@ export const useAccountsStore = defineStore('accounts', () => {
   function visibilityFor(accountId: string): BackendAccountVisibilityStatus | undefined {
     return visibility.value.find(row => row.account_id === accountId);
   }
+  /** Shown today against its schedule, until local midnight. */
+  function isPeeked(accountId: string): boolean {
+    const row = visibilityFor(accountId);
+    return Boolean(row && isVisible(accountId) && row.policy.mode !== 'always'
+      && row.policy.override_date === row.local_date && row.policy.override_visible === true);
+  }
   let visibilityRequest = 0;
   let visibilityTimer: ReturnType<typeof setInterval> | undefined;
   async function refreshVisibility() {
@@ -339,6 +345,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     visibilityBusy,
     visibilityKey,
     isVisible,
+    isPeeked,
     visibilityFor,
     refreshVisibility,
     setVisibility,
