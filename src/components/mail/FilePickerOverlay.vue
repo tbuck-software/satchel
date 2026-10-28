@@ -1,8 +1,10 @@
 <script setup lang="ts">
 /*
  * File…: one picker for where a mail belongs. A folder moves it (one place,
- * the picker closes); topics collect it (several at once, the picker stays
- * open). Messages have no folder of their own here, so they get topics only.
+ * the picker closes). Enter on a topic files it there and closes as well, so
+ * the keyboard path ends like a folder; a click toggles the topic and leaves
+ * the picker open to collect several. Messages have no folder of their own
+ * here, so they get topics only.
  */
 import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
@@ -100,13 +102,16 @@ const activeId = computed(() =>
   rows.value.length > 0 ? `topic-picker-item-${activeIndex.value}` : undefined,
 );
 
+// App mounts the picker only once it has a target, so `open` is already true
+// on the first run: without `immediate` the field never took the focus and
+// the keys typed into it went to the list behind.
 watch(open, async (value) => {
   if (!value) return;
   query.value = '';
   activeIndex.value = 0;
   await nextTick();
   inputRef.value?.focus();
-});
+}, { immediate: true });
 
 watch(rows, (value) => {
   if (activeIndex.value >= value.length) activeIndex.value = Math.max(0, value.length - 1);
@@ -149,9 +154,14 @@ function moveTo(folder: { id: string; name: string }) {
   void threadActions.moveToFolder(target.itemIds, folder.id, folder.name);
 }
 
-function activate(row: PickerRow) {
+function activate(row: PickerRow, options: { close?: boolean } = {}) {
   const target = topics.pickerTarget;
   if (!target) return;
+  if (row.kind === 'topic' && options.close) {
+    close();
+    void assign(row.id, row.checked, target);
+    return;
+  }
   if (row.kind === 'folder') {
     moveTo(row);
     return;
@@ -175,8 +185,7 @@ function activate(row: PickerRow) {
 }
 
 /** Toggle membership for all target items; the picker stays open for multi-assign. */
-async function assign(topicId: string, currentlyChecked: boolean) {
-  const target = topics.pickerTarget;
+async function assign(topicId: string, currentlyChecked: boolean, target = topics.pickerTarget) {
   if (!target) return;
   if (target.itemType === 'thread') {
     if (currentlyChecked) await threadActions.removeFromTopic(target.itemIds, topicId);
@@ -201,7 +210,7 @@ async function assign(topicId: string, currentlyChecked: boolean) {
 
 function onEnter() {
   const row = rows.value[activeIndex.value];
-  if (row) void activate(row);
+  if (row) void activate(row, { close: true });
 }
 </script>
 

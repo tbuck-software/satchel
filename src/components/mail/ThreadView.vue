@@ -1060,6 +1060,7 @@ function showEntireThread() {
           :body-mounted-ids="bodyMountedIds"
           :focused-message-id="focusedMessageId"
           :keyboard-active="messageKeyboardActive"
+          :editing-draft-id="composer.request?.draftId ?? null"
           @reply="replyThread"
           @forward="forwardThread"
           @edit-draft="composer.openDraft($event)"

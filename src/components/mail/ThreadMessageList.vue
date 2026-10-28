@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { Message } from '@/types/mail';
 import ThreadMessageGroup from './ThreadMessageGroup.vue';
 import ThreadDraftCard from './ThreadDraftCard.vue';
@@ -18,6 +19,8 @@ const props = defineProps<{
   bodyMountedIds?: ReadonlySet<string>;
   focusedMessageId: string;
   keyboardActive: boolean;
+  /** The draft the composer has open, if it is one of these. */
+  editingDraftId?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -28,6 +31,10 @@ const emit = defineEmits<{
   focusMessage: [messageId: string];
   toggleCollapsed: [messageId: string];
 }>();
+
+// The composer holding a draft is the draft; a second copy beside it would
+// fall behind the typing.
+const shownDrafts = computed(() => props.draftMessages.filter((draft) => draft.id !== props.editingDraftId));
 </script>
 
 <template>
@@ -47,11 +54,11 @@ const emit = defineEmits<{
   <!-- The drafts end the thread, each one card that carries its own way back
        in, so the group needs no divider over it. -->
   <section
-    v-if="props.draftMessages.length > 0"
+    v-if="shownDrafts.length > 0"
     :aria-label="$t('thread.view.unsentDrafts')"
   >
     <ThreadDraftCard
-      v-for="draft in props.draftMessages"
+      v-for="draft in shownDrafts"
       :key="draft.id"
       :message="draft"
       :recipient="props.draftRecipient(draft)"

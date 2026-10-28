@@ -10,6 +10,7 @@ import {
   type BackendDraftInput,
 } from '@/services/backend';
 import { useConnectionStore } from '@/stores/connection';
+import { useMessagesStore } from '@/stores/messages';
 
 export const useDraftsStore = defineStore('drafts', () => {
   const items = ref<BackendDraft[]>([]);
@@ -49,6 +50,7 @@ export const useDraftsStore = defineStore('drafts', () => {
       const idx = items.value.findIndex((item) => item.id === draft.id);
       if (idx >= 0) items.value.splice(idx, 1, draft);
       else items.value.unshift(draft);
+      useMessagesStore().applySavedDraft(draft);
       return draft;
     } catch (err) {
       lastError.value = err instanceof Error ? err.message : String(err);
