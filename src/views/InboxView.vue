@@ -9,6 +9,7 @@ import { useThreadActions } from '@/composables/useThreadActions';
 import { useToast } from '@/composables/useToast';
 import { useAccountsStore } from '@/stores/accounts';
 import { useMailboxesStore } from '@/stores/mailboxes';
+import { useComposerStore } from '@/stores/composer';
 import { useConnectionStore } from '@/stores/connection';
 import { useSettingsStore } from '@/stores/settings';
 import { useListSearchStore } from '@/stores/listSearch';
@@ -372,6 +373,24 @@ const workflowEmpty = computed(() => {
 });
 
 const mailboxes = useMailboxesStore();
+
+/*
+ * Receipts start where the reader starts, not over the list: at the list's
+ * foot they covered the rows the action had just changed. With a composer
+ * open they keep the list column, where the stack already steps around the
+ * docked window.
+ */
+const composer = useComposerStore();
+watch(
+  () => (!ui.isSinglePane && !composer.isOpen ? ui.sidebarWidth + ui.threadListWidth + 2 : null),
+  (inset) => {
+    if (inset === null) document.documentElement.style.removeProperty('--toast-inset-start');
+    else document.documentElement.style.setProperty('--toast-inset-start', `${inset}px`);
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => document.documentElement.style.removeProperty('--toast-inset-start'));
+
 const listScope = computed(() => {
   if (threads.activeContact) {
     return `${threads.activeContact.email} · ${t('inbox.conversationCount', threads.activeContact.threadCount)}`;

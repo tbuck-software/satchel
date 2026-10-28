@@ -32,7 +32,7 @@ test('tabs from addressing through the subject to the message body', async ({ pa
   await page.goto('/compose');
   await page.getByLabel('Sender', { exact: true }).focus();
   await page.keyboard.press('Tab');
-  const to = page.getByPlaceholder('recipient@example.com');
+  const to = page.getByPlaceholder('Name or email').first();
   await expect(to).toBeFocused();
   await to.fill('person@example.com');
   await page.keyboard.press('Enter');
@@ -45,21 +45,22 @@ test('tabs from addressing through the subject to the message body', async ({ pa
 });
 
 test('keeps long composer text from covering the conversation history', async ({ page }) => {
+  await page.getByRole('region', { name: 'Unsent drafts' }).getByRole('button', { name: 'Discard', exact: true }).click();
   await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   const editor = composer.locator('.ProseMirror').first();
-  const historyToggle = composer.getByRole('button', { name: /Show conversation/ });
+  const history = composer.locator('[data-composer-history]');
 
   await editor.fill(Array.from({ length: 12 }, (_, index) => `Absatz ${index + 1}`).join('\n\n'));
 
   const editorBox = await editor.boundingBox();
-  const toggleBox = await historyToggle.boundingBox();
+  const historyBox = await history.boundingBox();
   expect(editorBox).not.toBeNull();
-  expect(toggleBox).not.toBeNull();
-  expect(editorBox!.y + editorBox!.height).toBeLessThanOrEqual(toggleBox!.y);
-
-  await historyToggle.click();
-  await expect(composer.getByRole('button', { name: 'Hide conversation' })).toBeVisible();
+  expect(historyBox).not.toBeNull();
+  expect(editorBox!.y + editorBox!.height).toBeLessThanOrEqual(historyBox!.y);
+  // The reply quotes the whole thread, so there is no second view of it.
+  await expect(history).toContainText('Sarah Kim');
+  await expect(composer.getByRole('button', { name: /Show conversation/ })).toHaveCount(0);
 });
 
 test('archives the active thread and advances to the next one', async ({ page }) => {

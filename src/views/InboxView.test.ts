@@ -52,6 +52,10 @@ vi.mock('@/stores/accounts', () => ({
   useAccountsStore: () => harness.accounts,
 }));
 
+vi.mock('@/stores/composer', () => ({
+  useComposerStore: () => ({ isOpen: false }),
+}));
+
 vi.mock('@/stores/mailboxes', () => ({
   useMailboxesStore: () => ({ countForMailboxType: () => 0 }),
 }));

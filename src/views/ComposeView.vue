@@ -29,7 +29,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import SplitButton from '@/components/ui/SplitButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
-import { composerHtmlFromText, hasComposerHtmlHistory, hasComposerTextHistory } from '@/utils/composerHistory';
+import { composerHtmlFromText, hasComposerHtmlHistory, hasComposerTextHistory, isComposerHistoryIntro } from '@/utils/composerHistory';
 import { useComposerBody } from '@/composables/useComposerBody';
 import type { ComposerMode } from '@/stores/composer';
 import { useAttachmentActions } from '@/composables/useAttachmentActions';
@@ -170,13 +170,15 @@ const quotedHistory = deferredChangeTracker(
 );
 const hasQuotedHistory = ref(quotedHistory.current());
 /**
- * A one-message thread that is already quoted below: "Show conversation" would
- * open the same message a second time.
+ * The quote below already holds every message of the thread (one intro line
+ * per quoted message): "Show conversation" would open them a second time.
  */
 const quoteHoldsWholeThread = computed(() => {
   const threadId = contextThreadId.value;
   if (!threadId || !hasQuotedHistory.value) return false;
-  return messagesStore.getByThread(threadId).filter((message) => !message.isDraft).length <= 1;
+  const sent = messagesStore.getByThread(threadId).filter((message) => !message.isDraft).length;
+  const quoted = historyText.value.split('\n').filter((line) => isComposerHistoryIntro(line.replace(/^>\s*/, ''))).length;
+  return sent <= Math.max(1, quoted);
 });
 
 async function removeQuotedHistory() {
@@ -1690,7 +1692,7 @@ textarea:focus {
   font-weight: var(--weight-semibold);
 }
 
-.compose-subject::placeholder { color: var(--text-tertiary); }
+.compose-subject::placeholder { color: var(--text-tertiary); font-weight: var(--weight-regular); }
 .compose-subject:focus { border-color: var(--border-color-muted); box-shadow: none; }
 
 .compose .row {
@@ -1700,6 +1702,15 @@ textarea:focus {
   gap: var(--space-sm);
   padding: var(--space-xs) 0;
   border-bottom: 1px solid var(--border-color);
+}
+
+/* Where typing goes: the focused field's rule and label take the accent. */
+.compose .row:focus-within {
+  border-bottom-color: var(--accent-primary);
+}
+
+.compose .row:focus-within .label {
+  color: var(--text-accent);
 }
 
 .compose .recipient-row {
@@ -1745,8 +1756,13 @@ textarea:focus {
   display: flex;
   flex-direction: column;
   overflow: auto;
-  padding: var(--space-md) 0 var(--space-xs) var(--compose-value-x);
+  padding: var(--space-md) 0 var(--space-xl) var(--compose-value-x);
   cursor: text;
+  /* The body scrolls under a fixed footer: without a fade its last line ended
+     in a hard cut ("Show conversation" sliced in half) that read as clipped
+     rather than as more to scroll to. The mask reads only alpha. */
+  -webkit-mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-lg)), transparent);
+  mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-lg)), transparent);
 }
 
 /* On the page, the writing area grows with the text and the action bar

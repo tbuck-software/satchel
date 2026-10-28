@@ -115,6 +115,12 @@ const visibleContacts = computed(() => {
   );
 });
 
+// "All" mixes the address book and correspondents; the source only says
+// something when the list holds more than one kind. Thirty identical
+// "Address book" tags were a column of noise.
+const showSource = computed(() =>
+  activeSection.value === 'all' && new Set(visibleContacts.value.map((contact) => contact.meta)).size > 1);
+
 const contactGroups = computed(() => {
   const query = search.value.trim().toLocaleLowerCase(locale.value);
   const contacts = visibleContacts.value
@@ -205,11 +211,11 @@ function openContact(email: string) {
               </span>
               <span v-if="contact.context" class="context">{{ contact.context }}</span>
             </span>
-            <span v-if="contact.pinned || activeSection === 'all'" class="row-meta">
+            <span v-if="contact.pinned || showSource" class="row-meta">
               <span v-if="contact.pinned" :aria-label="t('nav.contactPinned')">
                 <AppIcon size="sm"><path d="M6.5 2.5h3l-.4 4.1 2.4 2.1v1H4.5v-1l2.4-2.1zM8 9.7v3.8" /></AppIcon>
               </span>
-              <span v-if="activeSection === 'all'" class="source-tag">{{ contact.meta }}</span>
+              <span v-if="showSource" class="source-tag">{{ contact.meta }}</span>
             </span>
           </ListRowButton>
         </section>

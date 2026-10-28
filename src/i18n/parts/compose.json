@@ -43,9 +43,9 @@
         "technical": "Technical details"
       },
       "recipients": {
-        "toPlaceholder": "recipient{'@'}example.com",
-        "ccPlaceholder": "cc{'@'}example.com",
-        "bccPlaceholder": "bcc{'@'}example.com",
+        "toPlaceholder": "Name or email",
+        "ccPlaceholder": "Name or email",
+        "bccPlaceholder": "Name or email",
         "ccBcc": "Cc/Bcc",
         "showCcBcc": "Show Cc and Bcc",
         "collapseCcBcc": "Collapse Cc and Bcc",
@@ -386,9 +386,9 @@
         "technical": "Technische Details"
       },
       "recipients": {
-        "toPlaceholder": "empfänger{'@'}example.com",
-        "ccPlaceholder": "cc{'@'}example.com",
-        "bccPlaceholder": "bcc{'@'}example.com",
+        "toPlaceholder": "Name oder E-Mail",
+        "ccPlaceholder": "Name oder E-Mail",
+        "bccPlaceholder": "Name oder E-Mail",
         "ccBcc": "Cc/Bcc",
         "showCcBcc": "Cc und Bcc anzeigen",
         "collapseCcBcc": "Cc und Bcc einklappen",

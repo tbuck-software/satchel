@@ -8,6 +8,8 @@
  */
 import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
+import KeyCap from '@/components/ui/KeyCap.vue';
+import { formatBinding } from '@/config/keybindings';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useUiStore } from '@/stores/ui';
@@ -112,6 +114,16 @@ watch(open, async (value) => {
   await nextTick();
   inputRef.value?.focus();
 }, { immediate: true });
+
+const enterKeyLabel = formatBinding('enter');
+const escapeKeyLabel = formatBinding('escape');
+const enterAction = computed(() => {
+  const row = rows.value[activeIndex.value];
+  if (!row) return '';
+  if (row.kind === 'folder') return t('topics.picker.actionMove', { name: row.name });
+  if (row.kind === 'create') return t('topics.picker.actionCreate');
+  return row.checked ? t('topics.picker.actionRemove', { name: row.name }) : t('topics.picker.actionAdd', { name: row.name });
+});
 
 watch(rows, (value) => {
   if (activeIndex.value >= value.length) activeIndex.value = Math.max(0, value.length - 1);
@@ -289,9 +301,12 @@ function onEnter() {
           <p v-else class="empty-hint">{{ $t('topics.picker.empty') }}</p>
 
           <footer class="hint-row" aria-hidden="true">
-            <span>{{ $t('topics.picker.hintSelect') }}</span>
-            <span>{{ $t('topics.picker.hintAssign') }}</span>
-            <span>{{ $t('topics.picker.hintClose') }}</span>
+            <span><KeyCap>↑</KeyCap><KeyCap>↓</KeyCap> {{ $t('nav.omni.hints.navigate') }}</span>
+            <!-- What Enter does to the highlighted row: a folder moves, a topic
+                 is added or taken off. One "file" for all three left the
+                 empty checkbox under the highlight unexplained. -->
+            <span v-if="enterAction" class="hint-action"><KeyCap>{{ enterKeyLabel }}</KeyCap> {{ enterAction }}</span>
+            <span><KeyCap>{{ escapeKeyLabel }}</KeyCap> {{ $t('common.close') }}</span>
           </footer>
         </section>
       </div>
@@ -448,12 +463,27 @@ function onEnter() {
 
 .hint-row {
   display: flex;
+  align-items: center;
   gap: 14px;
   justify-content: center;
   padding: 7px 12px;
   border-top: 1px solid var(--border-color-muted);
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
+}
+
+.hint-row > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.hint-action {
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
 }
 
 .fade-enter-active,

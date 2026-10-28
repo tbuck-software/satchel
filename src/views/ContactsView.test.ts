@@ -233,7 +233,11 @@ describe('ContactsView', () => {
 
   it('omits redundant source tags in address book and frequent views', () => {
     harness.addressBook.contacts = [{ email: 'alice@example.com', display_name: 'Alice' }];
-    expect(render().get('.source-tag').text()).toBe('Address book');
+    // One source for everyone says nothing; the tag appears once they differ.
+    expect(render().find('.source-tag').exists()).toBe(false);
+    harness.threads.allContactSummaries = [{ email: 'bob@example.com', name: 'Bob', threadCount: 3, previewText: '' }];
+    expect(render().findAll('.source-tag').map((tag) => tag.text())).toContain('Address book');
+    harness.threads.allContactSummaries = [];
     harness.route.query = { section: 'address-book' };
     expect(render().find('.source-tag').exists()).toBe(false);
     harness.route.query = { section: 'frequent' };

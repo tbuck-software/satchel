@@ -744,15 +744,15 @@
     },
     "recipients": {
       "backspaceAgain": "{address} ausgewählt. Erneut Rücktaste drücken, um die Adresse zu entfernen.",
-      "bccPlaceholder": "bcc{'@'}example.com",
+      "bccPlaceholder": "Name oder E-Mail",
       "ccBcc": "Cc/Bcc",
-      "ccPlaceholder": "cc{'@'}example.com",
+      "ccPlaceholder": "Name oder E-Mail",
       "collapseCcBcc": "Cc und Bcc einklappen",
       "invalid": "Das ist keine gültige E-Mail-Adresse.",
       "invalidMarker": "(keine gültige Adresse)",
       "remove": "{address} entfernen",
       "showCcBcc": "Cc und Bcc anzeigen",
-      "toPlaceholder": "empfänger{'@'}example.com"
+      "toPlaceholder": "Name oder E-Mail"
     },
     "replace": {
       "body": "Die Nachricht, an der du schreibst, wird als Entwurf gespeichert und geschlossen.",
@@ -3439,14 +3439,15 @@
       "thread": "Konversation"
     },
     "picker": {
+      "actionAdd": "Zu {name} hinzufügen",
+      "actionCreate": "Thema anlegen",
+      "actionMove": "Nach {name} verschieben",
+      "actionRemove": "Aus {name} entfernen",
       "assignFailed": "Zuordnung fehlgeschlagen.",
       "createFailed": "Thema konnte nicht erstellt werden.",
       "createRow": "Neues Thema „{name}“ erstellen",
       "empty": "Noch keine Themen — einfach einen Namen eintippen.",
       "fileSearchPlaceholder": "Ordner oder Thema …",
-      "hintAssign": "↵ ablegen",
-      "hintClose": "Esc schließen",
-      "hintSelect": "↑↓ wählen",
       "messageAdded": "Nachricht zu Thema „{name}“ hinzugefügt",
       "messageRemoved": "Nachricht aus Thema „{name}“ entfernt",
       "searchLabel": "Thema suchen",
