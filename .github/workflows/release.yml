@@ -19,9 +19,12 @@ on:
 permissions:
   contents: read
 
+# One queue per channel. A newer nightly supersedes one still building, so
+# two pushes in a row cost one build, not two back to back. A stable run is
+# never cancelled: its version number is reserved before the build.
 concurrency:
-  group: desktop-release
-  cancel-in-progress: false
+  group: desktop-release-${{ github.event.schedule == '14 6 * * 1' && 'stable' || inputs.channel || 'nightly' }}
+  cancel-in-progress: ${{ (github.event.schedule == '14 6 * * 1' && 'stable' || inputs.channel || 'nightly') == 'nightly' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -108,8 +111,11 @@ jobs:
           cargo fmt --all --check
           cargo clippy -p satchel -p satchel-core --all-targets -- -D warnings
 
+  # Builds run beside verify instead of after it; publish still needs both,
+  # so nothing unverified ships. A failed verify costs build minutes, not
+  # twenty minutes of every release.
   build:
-    needs: [prepare, verify]
+    needs: [prepare, secrets]
     if: needs.prepare.outputs.build == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
