@@ -520,7 +520,7 @@ function onDragStart(event: DragEvent) {
         <span class="flex min-w-0 items-center gap-1.5">
           <span
             v-if="props.thread.hasDraft"
-            class="shrink-0 text-sm font-strong text-accent-primary"
+            class="thread-row__draft-label shrink-0 text-sm font-strong"
           >
             {{ $t('thread.row.draftPrefix') }}
           </span>
@@ -752,6 +752,12 @@ function onDragStart(event: DragEvent) {
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--accent-primary) 16%, var(--bg-surface));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 34%, transparent);
+}
+
+.thread-row__draft-label {
+  /* The text tone of the accent, not its fill: on a selected dark row the
+     fill tone sank into the row. */
+  color: var(--text-accent);
 }
 
 .thread-row__draft-pencil {
