@@ -481,18 +481,21 @@ function onDragStart(event: DragEvent) {
       data-test="thread-row-check"
       @click.stop="emitCheck"
     >
+      <!-- A draft row says so in the avatar's place: a darkened face with the
+           pencil on top let the initials show through the glyph. -->
+      <span v-if="props.thread.hasDraft" class="thread-row__draft-avatar" aria-hidden="true" />
       <Avatar
+        v-else
         :name="primaryParticipantName"
         :email="primaryParticipantEmail"
         :size="36"
-        :class="props.thread.hasDraft ? 'brightness-[0.42] saturate-[0.8]' : ''"
       />
       <AvatarUnreadDot v-if="isUnread" />
       <svg
         v-if="props.thread.hasDraft"
-        class="absolute inset-[9px] text-on-accent drop-shadow-[0_1px_2px_rgba(0,0,0,0.7)]"
-        width="20"
-        height="20"
+        class="thread-row__draft-pencil absolute inset-[9px]"
+        width="18"
+        height="18"
         viewBox="0 0 20 20"
         fill="none"
         stroke="currentColor"
@@ -727,6 +730,19 @@ function onDragStart(event: DragEvent) {
   /* The pane it sits on, opaque, so the swipe track below stays hidden until
      the surface actually moves. */
   background: var(--bg-list);
+}
+
+.thread-row__draft-avatar {
+  display: block;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent-primary) 16%, var(--bg-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 34%, transparent);
+}
+
+.thread-row__draft-pencil {
+  color: var(--text-accent);
 }
 
 .thread-row__surface--open .thread-row__avatar {

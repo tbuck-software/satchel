@@ -169,6 +169,15 @@ const quotedHistory = deferredChangeTracker(
   250,
 );
 const hasQuotedHistory = ref(quotedHistory.current());
+/**
+ * A one-message thread that is already quoted below: "Show conversation" would
+ * open the same message a second time.
+ */
+const quoteHoldsWholeThread = computed(() => {
+  const threadId = contextThreadId.value;
+  if (!threadId || !hasQuotedHistory.value) return false;
+  return messagesStore.getByThread(threadId).filter((message) => !message.isDraft).length <= 1;
+});
 
 async function removeQuotedHistory() {
   removeHistory();
@@ -1285,7 +1294,7 @@ defineExpose({
           @submit="send"
         />
       </div>
-      <ComposerThreadContext v-if="contextThreadId" :thread-id="contextThreadId" />
+      <ComposerThreadContext v-if="contextThreadId && !quoteHoldsWholeThread" :thread-id="contextThreadId" />
     </div>
 
     <AttachmentDropZone
