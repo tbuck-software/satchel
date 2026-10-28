@@ -52,12 +52,12 @@ const stack = computed(() => {
 const menuAccountId = ref('');
 const menuAnchor = ref<AnchorBox | null>(null);
 function openMenu(accountId: string, event: MouseEvent) {
-  // The context-menu key fires at the focused row, not at a pointer.
-  const box = event.clientX || event.clientY
-    ? { left: event.clientX, top: event.clientY, right: event.clientX, bottom: event.clientY }
-    : (event.currentTarget as HTMLElement).getBoundingClientRect();
+  // Beside the row, not under the pointer: opened on top of it, the menu hid
+  // the row's own state ("Resting") and the accounts below it. The
+  // context-menu key fires at the focused row the same way.
+  const row = (event.currentTarget as HTMLElement).getBoundingClientRect();
   menuAccountId.value = accountId;
-  menuAnchor.value = { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+  menuAnchor.value = { left: row.right, top: row.top, right: row.right, bottom: row.top };
 }
 </script>
 
@@ -86,8 +86,17 @@ function openMenu(accountId: string, event: MouseEvent) {
              (Lucide `moon`) sits where it would be. -->
         <template v-if="!accounts.isVisible(account.id)" #trailing>
           <span class="sidebar-accounts__asleep" role="img" :aria-label="t('accountVisibility.resting')">
+            <span class="sidebar-accounts__asleep-label" aria-hidden="true">{{ t('accountVisibility.resting') }}</span>
             <AppIcon :grid="24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401" /></AppIcon>
           </span>
+        </template>
+        <!-- Shown for today against its schedule: a clock beside the count says
+             the number is borrowed until midnight. -->
+        <template v-else-if="accounts.isPeeked(account.id)" #trailing>
+          <span class="sidebar-accounts__peek" role="img" :aria-label="t('accountVisibility.statePeek')" :title="t('accountVisibility.statePeek')">
+            <AppIcon><circle cx="8" cy="8" r="5.6" /><path d="M8 4.8V8l2.3 1.4" /></AppIcon>
+          </span>
+          <span v-if="inboxCount(account.id) > 0" class="sidebar-accounts__count">{{ inboxCount(account.id) }}</span>
         </template>
       </NavItem>
     </div>
@@ -101,7 +110,16 @@ function openMenu(accountId: string, event: MouseEvent) {
 .sidebar-accounts__row > :first-child { flex: 1; }
 .sidebar-accounts__row--resting { color: var(--text-tertiary); }
 .sidebar-accounts__row--resting :deep(.nav-item) { color: var(--text-tertiary); }
-.sidebar-accounts__asleep { display: inline-flex; color: var(--text-tertiary); }
+.sidebar-accounts__asleep { display: inline-flex; align-items: center; gap: var(--space-xs); color: var(--text-tertiary); }
+.sidebar-accounts__asleep-label { font-size: var(--font-size-xs); }
+.sidebar-accounts__peek { display: inline-flex; color: var(--text-accent); }
+/* NavItem's own count, kept beside the clock that took its slot. */
+.sidebar-accounts__count {
+  margin-left: var(--space-xs);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
 
 /* Rings cut each avatar out of the one behind it, in the row's own colour. */
 .sidebar-accounts { --avatar-ring: var(--bg-sidebar); }

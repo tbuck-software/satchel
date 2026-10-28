@@ -12,7 +12,8 @@ for (const theme of ['dark', 'light']) {
     await expect(accountArea.getByRole('img', { name: 'Resting', exact: true })).toBeVisible();
     await expect(page.getByText('Sunday lunch at our place', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Staging login 500 after deployment', { exact: true })).toHaveCount(0);
-    await expect(page.frameLocator('iframe').first().getByText('Hi Tom,', { exact: true })).toBeVisible();
+    // The fixture's body is paragraphs only, which the reader shows as text.
+    await expect(page.locator('.plain-document-group').getByText(/^Hi Tom,/).first()).toBeVisible();
     const artifactDir = process.env.SATCHEL_VISIBILITY_SCREENSHOTS;
     const screenshot = async (name: string) => {
       if (!artifactDir) return;

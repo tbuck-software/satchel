@@ -23,10 +23,13 @@ const loading = ref(false);
 
 const messages = computed(() => messagesStore.getByThread(props.threadId));
 
+// The conversation's messages, not the unsent draft lying at its end.
+const sentCount = computed(() => messages.value.filter((message) => !message.isDraft).length);
+
 const toggleLabel = computed(() =>
   expanded.value
     ? t('compose.context.hide')
-    : t('compose.context.show', messages.value.length),
+    : t('compose.context.show', sentCount.value),
 );
 
 async function toggle() {

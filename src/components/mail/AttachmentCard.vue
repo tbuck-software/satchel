@@ -178,7 +178,11 @@ onBeforeUnmount(() => {
 <style scoped>
 .attachment-card {
   position: relative;
-  width: 216px;
+  /* Wraps by its basis, so the basis is the narrow width and the card grows
+     back to its usual 216px where there is room: at 216px fixed, two cards
+     stacked into a column on a laptop's reader for want of a few pixels. */
+  flex: 1 1 180px;
+  max-width: 216px;
   border: var(--border-default);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--bg-raised) 60%, var(--bg-surface));

@@ -29,8 +29,6 @@
       "draft": {
         "saveFailedStaysOpen": "The draft could not be saved. The composer stays open.",
         "savedAsDraft": "Saved as draft.",
-        "discarded": "Draft discarded.",
-        "discardFailed": "Could not discard the draft: {error}",
         "openElsewhere": "This draft is already open in another window."
       },
       "status": {
@@ -45,9 +43,9 @@
         "technical": "Technical details"
       },
       "recipients": {
-        "toPlaceholder": "recipient{'@'}example.com",
-        "ccPlaceholder": "cc{'@'}example.com",
-        "bccPlaceholder": "bcc{'@'}example.com",
+        "toPlaceholder": "Name or email",
+        "ccPlaceholder": "Name or email",
+        "bccPlaceholder": "Name or email",
         "ccBcc": "Cc/Bcc",
         "showCcBcc": "Show Cc and Bcc",
         "collapseCcBcc": "Collapse Cc and Bcc",
@@ -134,8 +132,8 @@
       "context": {
         "included": "History is included",
         "remove": "Remove quoted history from this message",
-        "hide": "Hide history",
-        "show": "Show history | Show history (1 message) | Show history ({count} messages)",
+        "hide": "Hide conversation",
+        "show": "Show conversation | Show conversation (1 message) | Show conversation ({count} messages)",
         "loading": "Loading history…",
         "empty": "No messages in this conversation.",
         "noTextContent": "(No text content)",
@@ -374,8 +372,6 @@
       "draft": {
         "saveFailedStaysOpen": "Der Entwurf konnte nicht gespeichert werden. Der Composer bleibt geöffnet.",
         "savedAsDraft": "Als Entwurf gespeichert.",
-        "discarded": "Entwurf verworfen.",
-        "discardFailed": "Entwurf konnte nicht verworfen werden: {error}",
         "openElsewhere": "Dieser Entwurf ist bereits in einem anderen Fenster geöffnet."
       },
       "status": {
@@ -390,9 +386,9 @@
         "technical": "Technische Details"
       },
       "recipients": {
-        "toPlaceholder": "empfänger{'@'}example.com",
-        "ccPlaceholder": "cc{'@'}example.com",
-        "bccPlaceholder": "bcc{'@'}example.com",
+        "toPlaceholder": "Name oder E-Mail",
+        "ccPlaceholder": "Name oder E-Mail",
+        "bccPlaceholder": "Name oder E-Mail",
         "ccBcc": "Cc/Bcc",
         "showCcBcc": "Cc und Bcc anzeigen",
         "collapseCcBcc": "Cc und Bcc einklappen",
@@ -479,8 +475,8 @@
       "context": {
         "included": "Verlauf wird mitgesendet",
         "remove": "Zitierten Verlauf aus dieser Nachricht entfernen",
-        "hide": "Verlauf ausblenden",
-        "show": "Verlauf anzeigen | Verlauf anzeigen (1 Nachricht) | Verlauf anzeigen ({count} Nachrichten)",
+        "hide": "Unterhaltung ausblenden",
+        "show": "Unterhaltung anzeigen | Unterhaltung anzeigen (1 Nachricht) | Unterhaltung anzeigen ({count} Nachrichten)",
         "loading": "Verlauf wird geladen…",
         "empty": "Keine Nachrichten im Verlauf.",
         "noTextContent": "(Kein Textinhalt)",

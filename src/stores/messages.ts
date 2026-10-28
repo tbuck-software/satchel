@@ -27,6 +27,7 @@ import {
   backendUnsubscribe,
   backendGetMessageSource,
   type BackendAttachmentDto,
+  type BackendDraft,
   type BackendMessage,
   type BackendMessageBody,
   type BackendMessageSource,
@@ -905,6 +906,22 @@ export const useMessagesStore = defineStore('messages', () => {
     };
   }
 
+  /**
+   * A draft is a message row under the draft's id. Saving it does not raise a
+   * thread event, so the card at the end of the thread kept the words and the
+   * time it was loaded with after the composer had saved newer ones.
+   */
+  function applySavedDraft(draft: Pick<BackendDraft, 'id' | 'thread_id' | 'body' | 'body_html' | 'updated_at'>) {
+    const threadId = draft.thread_id;
+    if (!threadId || !messagesByThread.value[threadId]?.some((message) => message.id === draft.id && message.isDraft)) return;
+    patchMessage(threadId, draft.id, (message) => ({
+      ...message,
+      bodyText: draft.body,
+      bodyHtml: draft.body_html ?? undefined,
+      timestamp: draft.updated_at || message.timestamp,
+    }));
+  }
+
   async function hydrateMessageAttachments(
     threadId: string,
     messageIds: string[],
@@ -1037,6 +1054,7 @@ export const useMessagesStore = defineStore('messages', () => {
     openThread,
     prefetchThread,
     refreshThread,
+    applySavedDraft,
     retainThread,
     markThreadsStale,
     reloadPgpMessages,

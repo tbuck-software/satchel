@@ -4,7 +4,11 @@
       "selection": {
         "label": "{count} selected",
         "done": "Done ({count})",
-        "action": "{action} ({count})"
+        "action": "{action} ({count})",
+        "summaryTitle": "{count} conversation selected | {count} conversations selected",
+        "summaryHint": "The actions above apply to all of them.",
+        "summaryMore": "and {count} more",
+        "clear": "Clear selection"
       },
       "actions": {
         "aside": "Aside",
@@ -158,7 +162,7 @@
         "addToTopicFailed": "Assigning failed.",
         "addedToTopic": "Thread added to topic “{topic}” | {count} threads added to topic “{topic}”",
         "aside": "Email set aside | {count} emails set aside",
-        "done": "Email done | {count} emails done",
+        "done": "Marked as done | {count} marked as done",
         "fallback": "{label} | {count} emails → {label}",
         "inbox": "Email in the inbox | {count} emails in the inbox",
         "pinFailed": "Pinning failed.",
@@ -181,6 +185,7 @@
         "hasAttachment": "with attachment",
         "hasDraft": "draft saved",
         "menuLabel": "Actions for this email",
+        "drafts": "{count} draft | {count} drafts",
         "messages": "{count} message | {count} messages",
         "noSubject": "(no subject)",
         "pinned": "pinned",
@@ -252,7 +257,11 @@
       "selection": {
         "label": "{count} ausgewählt",
         "done": "Erledigt ({count})",
-        "action": "{action} ({count})"
+        "action": "{action} ({count})",
+        "summaryTitle": "{count} Unterhaltung ausgewählt | {count} Unterhaltungen ausgewählt",
+        "summaryHint": "Die Aktionen oben gelten für alle.",
+        "summaryMore": "und {count} weitere",
+        "clear": "Auswahl aufheben"
       },
       "actions": {
         "aside": "Beiseite",
@@ -406,7 +415,7 @@
         "addToTopicFailed": "Zuordnung fehlgeschlagen.",
         "addedToTopic": "Thread zu Thema „{topic}“ hinzugefügt | {count} Threads zu Thema „{topic}“ hinzugefügt",
         "aside": "E-Mail beiseitegelegt | {count} E-Mails beiseitegelegt",
-        "done": "E-Mail erledigt | {count} E-Mails erledigt",
+        "done": "Als erledigt markiert | {count} als erledigt markiert",
         "fallback": "{label} | {count} E-Mails → {label}",
         "inbox": "E-Mail in der Inbox | {count} E-Mails in der Inbox",
         "pinFailed": "Anheften fehlgeschlagen.",
@@ -429,6 +438,7 @@
         "hasAttachment": "mit Anhang",
         "hasDraft": "Entwurf vorhanden",
         "menuLabel": "Aktionen für diese Mail",
+        "drafts": "{count} Entwurf | {count} Entwürfe",
         "messages": "{count} Nachricht | {count} Nachrichten",
         "noSubject": "(kein Betreff)",
         "pinned": "angeheftet",

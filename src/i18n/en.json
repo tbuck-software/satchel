@@ -37,8 +37,12 @@
     "restingHint": "{account} is resting: no counts, no notifications. Click to look in; right-click to show it until midnight.",
     "saveFailed": "Could not save account visibility.",
     "schedule": "On a schedule",
+    "scopeResting": "{accounts} resting | {accounts} resting",
     "showAccount": "Show {account} now",
     "showToday": "Show until midnight",
+    "shownUntilMidnight": "{account} is shown until midnight.",
+    "statePeek": "Shown until midnight",
+    "stateResting": "Resting today",
     "title": "Visibility",
     "to": "To, optional",
     "visible": "Visible",
@@ -97,6 +101,7 @@
         "explanation": "Temporary connection problems retry automatically. These items need a review.",
         "label": "{count} item needs attention | {count} items need attention",
         "resolved": "Everything is up to date.",
+        "review": "Review issues",
         "title": "Needs attention",
         "unavailable": "Open Outbox to review the affected items."
       },
@@ -637,13 +642,13 @@
     },
     "context": {
       "empty": "No messages in this conversation.",
-      "hide": "Hide history",
+      "hide": "Hide conversation",
       "included": "History is included",
       "loadFailed": "Could not load the conversation: {error}",
       "loading": "Loading history…",
       "noTextContent": "(No text content)",
       "remove": "Remove quoted history from this message",
-      "show": "Show history | Show history (1 message) | Show history ({count} messages)"
+      "show": "Show conversation | Show conversation (1 message) | Show conversation ({count} messages)"
     },
     "crypto": {
       "addRecipientsFirst": "Add recipients before encrypting.",
@@ -657,8 +662,6 @@
     },
     "discardDraft": "Discard draft",
     "draft": {
-      "discardFailed": "Could not discard the draft: {error}",
-      "discarded": "Draft discarded.",
       "openElsewhere": "This draft is already open in another window.",
       "saveFailedStaysOpen": "The draft could not be saved. The composer stays open.",
       "savedAsDraft": "Saved as draft."
@@ -741,15 +744,15 @@
     },
     "recipients": {
       "backspaceAgain": "{address} selected. Press Backspace again to remove it.",
-      "bccPlaceholder": "bcc{'@'}example.com",
+      "bccPlaceholder": "Name or email",
       "ccBcc": "Cc/Bcc",
-      "ccPlaceholder": "cc{'@'}example.com",
+      "ccPlaceholder": "Name or email",
       "collapseCcBcc": "Collapse Cc and Bcc",
       "invalid": "This is not a valid email address.",
       "invalidMarker": "(not a valid address)",
       "remove": "Remove {address}",
       "showCcBcc": "Show Cc and Bcc",
-      "toPlaceholder": "recipient{'@'}example.com"
+      "toPlaceholder": "Name or email"
     },
     "replace": {
       "body": "The message you are writing will be saved as a draft and closed.",
@@ -3264,7 +3267,7 @@
       "addToTopicFailed": "Assigning failed.",
       "addedToTopic": "Thread added to topic “{topic}” | {count} threads added to topic “{topic}”",
       "aside": "Email set aside | {count} emails set aside",
-      "done": "Email done | {count} emails done",
+      "done": "Marked as done | {count} marked as done",
       "fallback": "{label} | {count} emails → {label}",
       "inLater": "Waiting in Later",
       "inbox": "Email in the inbox | {count} emails in the inbox",
@@ -3288,6 +3291,7 @@
     "row": {
       "back": "Back {time}",
       "draftPrefix": "Draft,",
+      "drafts": "{count} draft | {count} drafts",
       "hasAttachment": "with attachment",
       "hasDraft": "draft saved",
       "menuLabel": "Actions for this email",
@@ -3301,8 +3305,12 @@
     },
     "selection": {
       "action": "{action} ({count})",
+      "clear": "Clear selection",
       "done": "Done ({count})",
-      "label": "{count} selected"
+      "label": "{count} selected",
+      "summaryHint": "The actions above apply to all of them.",
+      "summaryMore": "and {count} more",
+      "summaryTitle": "{count} conversation selected | {count} conversations selected"
     },
     "state": {
       "aside": "Set aside",
@@ -3431,14 +3439,15 @@
       "thread": "Conversation"
     },
     "picker": {
+      "actionAdd": "Add to {name}",
+      "actionCreate": "Create topic",
+      "actionMove": "Move to {name}",
+      "actionRemove": "Remove from {name}",
       "assignFailed": "Assignment failed.",
       "createFailed": "The topic could not be created.",
       "createRow": "Create new topic “{name}”",
       "empty": "No topics yet — just type a name.",
       "fileSearchPlaceholder": "Folder or topic…",
-      "hintAssign": "↵ file",
-      "hintClose": "Esc close",
-      "hintSelect": "↑↓ select",
       "messageAdded": "Message added to topic “{name}”",
       "messageRemoved": "Message removed from topic “{name}”",
       "searchLabel": "Search topics",

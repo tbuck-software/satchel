@@ -352,11 +352,8 @@ onBeforeUnmount(() => {
   gap: 1px;
   min-width: 0;
   margin: 0 1px;
-  padding: 3px 6px;
+  padding: 3px 6px 3px 10px;
   border: 0;
-  /* Source edges stay stable while invite responses change the fill. */
-  border-left: 2px solid
-    color-mix(in srgb, var(--chip-accent, var(--accent-primary)) 72%, var(--text-primary));
   border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--chip-accent, var(--accent-primary)) 22%, var(--bg-surface));
   color: var(--text-primary);
@@ -431,9 +428,27 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--accent-purple) 32%, var(--bg-surface));
 }
 
+/* The source's edge, inset and straight: as a border on the rounded block it
+   bent with the corners. It stays put while an invite's answer changes the
+   fill. */
+.week__event::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: 3px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--chip-accent, var(--accent-primary)) 72%, var(--text-primary));
+}
+
+.week__event--declined::before,
+.week__event--cancelled::before {
+  background: var(--border-color);
+}
+
 .week__event--declined,
 .week__event--cancelled {
-  border-left-color: var(--border-color);
   background: var(--bg-raised);
   color: var(--text-tertiary);
 }

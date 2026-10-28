@@ -29,7 +29,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import SplitButton from '@/components/ui/SplitButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
-import { composerHtmlFromText, hasComposerHtmlHistory, hasComposerTextHistory } from '@/utils/composerHistory';
+import { composerHtmlFromText, hasComposerHtmlHistory, hasComposerTextHistory, isComposerHistoryIntro } from '@/utils/composerHistory';
 import { useComposerBody } from '@/composables/useComposerBody';
 import type { ComposerMode } from '@/stores/composer';
 import { useAttachmentActions } from '@/composables/useAttachmentActions';
@@ -169,6 +169,17 @@ const quotedHistory = deferredChangeTracker(
   250,
 );
 const hasQuotedHistory = ref(quotedHistory.current());
+/**
+ * The quote below already holds every message of the thread (one intro line
+ * per quoted message): "Show conversation" would open them a second time.
+ */
+const quoteHoldsWholeThread = computed(() => {
+  const threadId = contextThreadId.value;
+  if (!threadId || !hasQuotedHistory.value) return false;
+  const sent = messagesStore.getByThread(threadId).filter((message) => !message.isDraft).length;
+  const quoted = historyText.value.split('\n').filter((line) => isComposerHistoryIntro(line.replace(/^>\s*/, ''))).length;
+  return sent <= Math.max(1, quoted);
+});
 
 async function removeQuotedHistory() {
   removeHistory();
@@ -1203,13 +1214,6 @@ defineExpose({
       />
     </div>
 
-    <div v-if="hasQuotedHistory" class="history-control">
-      <span>{{ $t('compose.context.included') }}</span>
-      <IconButton :title="$t('compose.context.remove')" :disabled="sending" size="sm" @click="removeQuotedHistory">
-        <AppIcon size="sm"><path d="m4 4 8 8M12 4l-8 8" /></AppIcon>
-      </IconButton>
-    </div>
-
     <div class="body" :class="{ 'body--with-history': plainTextCompose ? historyText : historyHtml }" @click="focusComposeBody">
       <textarea
         v-if="plainTextCompose"
@@ -1257,6 +1261,14 @@ defineExpose({
         @reset="clearSignatureOverride"
       />
       <div v-if="plainTextCompose ? historyText : historyHtml" class="quoted-history" data-composer-history>
+        <!-- The note heads the quote it is about, under the signature, instead
+             of sitting above the subject line, far from what it removes. -->
+        <div v-if="hasQuotedHistory" class="history-control" @click.stop>
+          <span>{{ $t('compose.context.included') }}</span>
+          <IconButton :title="$t('compose.context.remove')" :disabled="sending" size="sm" @click="removeQuotedHistory">
+            <AppIcon size="sm"><path d="m4 4 8 8M12 4l-8 8" /></AppIcon>
+          </IconButton>
+        </div>
         <textarea
           v-if="plainTextCompose"
           ref="historyTextarea"
@@ -1284,7 +1296,7 @@ defineExpose({
           @submit="send"
         />
       </div>
-      <ComposerThreadContext v-if="contextThreadId" :thread-id="contextThreadId" />
+      <ComposerThreadContext v-if="contextThreadId && !quoteHoldsWholeThread" :thread-id="contextThreadId" />
     </div>
 
     <AttachmentDropZone
@@ -1459,9 +1471,8 @@ defineExpose({
   display: flex;
   flex: none;
   align-items: center;
-  justify-content: flex-end;
   gap: var(--space-xs);
-  padding-block: var(--space-xs);
+  margin-bottom: var(--space-xs);
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
 }
@@ -1681,7 +1692,7 @@ textarea:focus {
   font-weight: var(--weight-semibold);
 }
 
-.compose-subject::placeholder { color: var(--text-tertiary); }
+.compose-subject::placeholder { color: var(--text-tertiary); font-weight: var(--weight-regular); }
 .compose-subject:focus { border-color: var(--border-color-muted); box-shadow: none; }
 
 .compose .row {
@@ -1691,6 +1702,15 @@ textarea:focus {
   gap: var(--space-sm);
   padding: var(--space-xs) 0;
   border-bottom: 1px solid var(--border-color);
+}
+
+/* Where typing goes: the focused field's rule and label take the accent. */
+.compose .row:focus-within {
+  border-bottom-color: var(--accent-primary);
+}
+
+.compose .row:focus-within .label {
+  color: var(--text-accent);
 }
 
 .compose .recipient-row {
@@ -1736,8 +1756,13 @@ textarea:focus {
   display: flex;
   flex-direction: column;
   overflow: auto;
-  padding: var(--space-md) 0 var(--space-xs) var(--compose-value-x);
+  padding: var(--space-md) 0 var(--space-xl) var(--compose-value-x);
   cursor: text;
+  /* The body scrolls under a fixed footer: without a fade its last line ended
+     in a hard cut ("Show conversation" sliced in half) that read as clipped
+     rather than as more to scroll to. The mask reads only alpha. */
+  -webkit-mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-lg)), transparent);
+  mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-lg)), transparent);
 }
 
 /* On the page, the writing area grows with the text and the action bar
@@ -1789,6 +1814,14 @@ textarea:focus {
   cursor: text;
   font-size: var(--font-size-lg);
   line-height: 1.68;
+}
+
+/* The answer is what is being written; the history under it is reference.
+   At the answer's size it took most of the body and buried a short draft. */
+.compose .body .quoted-history :deep(.content) {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
 }
 
 .compose .compose-attachments {

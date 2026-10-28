@@ -4,7 +4,7 @@
  * a query. Loaded on the first keystroke: the FTS client, live updates and
  * thread resolution are not startup code.
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, provide, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import AppButton from '@/components/ui/AppButton.vue';
@@ -17,6 +17,8 @@ import { registerListKeyboardNavigation } from '@/composables/useListKeyboardNav
 import { useListSearchStore, type ListSearchScope } from '@/stores/listSearch';
 import { useThreadsStore } from '@/stores/threads';
 import { useUiStore } from '@/stores/ui';
+import { LIST_HIGHLIGHT_TERMS } from '@/composables/listHighlight';
+import { searchHighlightTerms } from '@/utils/highlight';
 
 const props = defineProps<{
   /** Name of the list being searched, for the scope switch. */
@@ -29,6 +31,8 @@ const props = defineProps<{
 const { t } = useI18n();
 const router = useRouter();
 const store = useListSearchStore();
+// The rows mark what was found, as the full search page does.
+provide(LIST_HIGHLIGHT_TERMS, computed(() => searchHighlightTerms(store.query)));
 const threads = useThreadsStore();
 const ui = useUiStore();
 

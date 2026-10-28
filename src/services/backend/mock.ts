@@ -430,6 +430,10 @@ function forcedFailures(): Set<string> {
 /* DTO conversion                                                             */
 /* -------------------------------------------------------------------------- */
 
+function threadDrafts(threadId: string): Message[] {
+  return (messages[threadId] ?? []).filter((message) => message.isDraft);
+}
+
 function threadDto(thread: Thread) {
   return {
     id: thread.id,
@@ -443,8 +447,10 @@ function threadDto(thread: Thread) {
     workflow_state: thread.workflowState,
     unread_count: thread.unreadCount,
     has_attachments: thread.hasAttachments,
-    has_draft: Boolean(thread.hasDraft),
-    draft_snippet: thread.draftSnippet ?? null,
+    // As the core reads them: from the thread's unsent draft messages, so a
+    // draft saved, resumed or discarded here shows in the row like it would.
+    has_draft: Boolean(thread.hasDraft) || threadDrafts(thread.id).length > 0,
+    draft_snippet: thread.draftSnippet ?? (threadDrafts(thread.id).at(-1)?.bodyText.slice(0, 180) || null),
     priority: thread.priority,
     board_position: thread.boardPosition ?? null,
     tags: thread.tags ?? [],

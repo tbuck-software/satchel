@@ -36,7 +36,9 @@ const display = computed(() => (props.value > props.max ? `${props.max}+` : `${p
 }
 
 .count-badge--neutral {
-  background: var(--bg-overlay);
+  /* The overlay surface with a touch of ink: on paper the overlay alone is the
+     same white as a selected row, and the badge vanished into it. */
+  background: color-mix(in srgb, var(--text-primary) 9%, var(--bg-overlay));
   color: var(--text-secondary);
 }
 

@@ -27,6 +27,7 @@ import SafeMarkdownBody from './SafeMarkdownBody.vue';
 import IsolatedEmailDocument from './IsolatedEmailDocument.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import { useUiStore } from '@/stores/ui';
+import { formattingFreeText, isFormattingFreeHtml } from '@/utils/formattingFreeHtml';
 
 const settings = useSettingsStore();
 const ui = useUiStore();
@@ -229,12 +230,16 @@ const preferPlainText = computed(
  */
 const plainTextCandidate = computed(() => prepared.value.plainText);
 
-const displayText = computed(() =>
-  preferPlainText.value ? plainTextCandidate.value : extractedBody.value.currentText,
-);
+// HTML that only wraps its text in paragraphs reads as the text it is.
+const formattingFree = computed(() => isFormattingFreeHtml(renderHtml.value));
+
+const displayText = computed(() => {
+  if (!preferPlainText.value) return extractedBody.value.currentText;
+  return formattingFree.value ? formattingFreeText(renderHtml.value) : plainTextCandidate.value;
+});
 
 /** Only offer the toggle when there is actually HTML to switch away from. */
-const htmlAvailable = computed(() => Boolean(renderHtml.value.trim()));
+const htmlAvailable = computed(() => Boolean(renderHtml.value.trim()) && !formattingFree.value);
 /**
  * Markdown is detected in the text view. An HTML message only has one once the
  * reader switches to a text mode, so the option joins the toggle then: asking

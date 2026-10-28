@@ -115,8 +115,8 @@ const KNOWN_RAW_COLORS: KnownViolation[] = [
   },
   {
     file: 'src/components/mail/ThreadListItem.vue',
-    count: 3,
-    reason: 'White-alpha selection fills plus an arbitrary drop-shadow class.',
+    count: 2,
+    reason: 'White-alpha selection fills.',
   },
   {
     file: 'src/components/onboarding/OnboardingFlow.vue',
@@ -141,7 +141,7 @@ const KNOWN_RAW_COLORS: KnownViolation[] = [
 ];
 
 // Only ever lower this. See KNOWN_RAW_COLORS.
-const MAX_KNOWN_RAW_COLORS = 25;
+const MAX_KNOWN_RAW_COLORS = 24;
 
 // ---------------------------------------------------------------------------
 // Rule 2 — no Tailwind default palette, only the classes bridged in tailwind.css.

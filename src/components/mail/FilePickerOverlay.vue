@@ -1,11 +1,15 @@
 <script setup lang="ts">
 /*
  * File…: one picker for where a mail belongs. A folder moves it (one place,
- * the picker closes); topics collect it (several at once, the picker stays
- * open). Messages have no folder of their own here, so they get topics only.
+ * the picker closes). Enter on a topic files it there and closes as well, so
+ * the keyboard path ends like a folder; a click toggles the topic and leaves
+ * the picker open to collect several. Messages have no folder of their own
+ * here, so they get topics only.
  */
 import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
+import KeyCap from '@/components/ui/KeyCap.vue';
+import { formatBinding } from '@/config/keybindings';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useUiStore } from '@/stores/ui';
@@ -100,12 +104,25 @@ const activeId = computed(() =>
   rows.value.length > 0 ? `topic-picker-item-${activeIndex.value}` : undefined,
 );
 
+// App mounts the picker only once it has a target, so `open` is already true
+// on the first run: without `immediate` the field never took the focus and
+// the keys typed into it went to the list behind.
 watch(open, async (value) => {
   if (!value) return;
   query.value = '';
   activeIndex.value = 0;
   await nextTick();
   inputRef.value?.focus();
+}, { immediate: true });
+
+const enterKeyLabel = formatBinding('enter');
+const escapeKeyLabel = formatBinding('escape');
+const enterAction = computed(() => {
+  const row = rows.value[activeIndex.value];
+  if (!row) return '';
+  if (row.kind === 'folder') return t('topics.picker.actionMove', { name: row.name });
+  if (row.kind === 'create') return t('topics.picker.actionCreate');
+  return row.checked ? t('topics.picker.actionRemove', { name: row.name }) : t('topics.picker.actionAdd', { name: row.name });
 });
 
 watch(rows, (value) => {
@@ -149,9 +166,14 @@ function moveTo(folder: { id: string; name: string }) {
   void threadActions.moveToFolder(target.itemIds, folder.id, folder.name);
 }
 
-function activate(row: PickerRow) {
+function activate(row: PickerRow, options: { close?: boolean } = {}) {
   const target = topics.pickerTarget;
   if (!target) return;
+  if (row.kind === 'topic' && options.close) {
+    close();
+    void assign(row.id, row.checked, target);
+    return;
+  }
   if (row.kind === 'folder') {
     moveTo(row);
     return;
@@ -175,8 +197,7 @@ function activate(row: PickerRow) {
 }
 
 /** Toggle membership for all target items; the picker stays open for multi-assign. */
-async function assign(topicId: string, currentlyChecked: boolean) {
-  const target = topics.pickerTarget;
+async function assign(topicId: string, currentlyChecked: boolean, target = topics.pickerTarget) {
   if (!target) return;
   if (target.itemType === 'thread') {
     if (currentlyChecked) await threadActions.removeFromTopic(target.itemIds, topicId);
@@ -201,7 +222,7 @@ async function assign(topicId: string, currentlyChecked: boolean) {
 
 function onEnter() {
   const row = rows.value[activeIndex.value];
-  if (row) void activate(row);
+  if (row) void activate(row, { close: true });
 }
 </script>
 
@@ -280,9 +301,12 @@ function onEnter() {
           <p v-else class="empty-hint">{{ $t('topics.picker.empty') }}</p>
 
           <footer class="hint-row" aria-hidden="true">
-            <span>{{ $t('topics.picker.hintSelect') }}</span>
-            <span>{{ $t('topics.picker.hintAssign') }}</span>
-            <span>{{ $t('topics.picker.hintClose') }}</span>
+            <span><KeyCap>↑</KeyCap><KeyCap>↓</KeyCap> {{ $t('nav.omni.hints.navigate') }}</span>
+            <!-- What Enter does to the highlighted row: a folder moves, a topic
+                 is added or taken off. One "file" for all three left the
+                 empty checkbox under the highlight unexplained. -->
+            <span v-if="enterAction" class="hint-action"><KeyCap>{{ enterKeyLabel }}</KeyCap> {{ enterAction }}</span>
+            <span><KeyCap>{{ escapeKeyLabel }}</KeyCap> {{ $t('common.close') }}</span>
           </footer>
         </section>
       </div>
@@ -439,12 +463,27 @@ function onEnter() {
 
 .hint-row {
   display: flex;
+  align-items: center;
   gap: 14px;
   justify-content: center;
   padding: 7px 12px;
   border-top: 1px solid var(--border-color-muted);
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
+}
+
+.hint-row > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.hint-action {
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
 }
 
 .fade-enter-active,

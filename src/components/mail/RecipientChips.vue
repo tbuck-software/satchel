@@ -356,8 +356,11 @@ input {
   font-family: inherit;
   box-shadow: none !important;
 }
+/* A hint, not a value: in the secondary ink "Name or email" read like a
+   recipient already entered. */
 input::placeholder {
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
+  font-weight: var(--weight-regular);
   opacity: 1;
 }
 </style>

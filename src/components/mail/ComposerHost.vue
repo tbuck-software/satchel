@@ -6,7 +6,6 @@ import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import ComposeView from '@/views/ComposeView.vue';
 import { composerModeTitleKey, useComposerStore, type ComposerRequest } from '@/stores/composer';
-import { useDraftsStore } from '@/stores/drafts';
 import { useUiStore } from '@/stores/ui';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
@@ -29,7 +28,6 @@ const UNDO_TIMEOUT_MS = 9000;
 
 const { t } = useI18n();
 const composer = useComposerStore();
-const draftsStore = useDraftsStore();
 const toast = useToast();
 const confirm = useConfirm();
 const ui = useUiStore();
@@ -212,7 +210,9 @@ async function requestCloseComposer(): Promise<boolean> {
     composer.close();
     toast.info(t('compose.draft.savedAsDraft'), {
       timeout: UNDO_TIMEOUT_MS,
-      action: { label: t('common.discard'), handler: () => void discardSavedDraft(savedDraftId) },
+      // The way back in, not a delete beside a success, under the draft card's
+      // own name for it; the card and Drafts keep Discard where the draft is.
+      action: { label: t('thread.draft.continueEditing'), handler: () => void composer.openDraft(savedDraftId) },
     });
     return true;
   } finally {
@@ -244,19 +244,6 @@ async function confirmReplace(next: ComposerRequest): Promise<boolean> {
 }
 
 onBeforeUnmount(composer.setReplaceGuard(confirmReplace));
-
-async function discardSavedDraft(draftId: string) {
-  try {
-    await draftsStore.remove(draftId);
-    toast.info(t('compose.draft.discarded'));
-  } catch (error) {
-    toast.error(
-      t('compose.draft.discardFailed', {
-        error: error instanceof Error ? error.message : String(error),
-      }),
-    );
-  }
-}
 
 function toggleMaximize() {
   maximized.value = !maximized.value;

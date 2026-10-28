@@ -18,6 +18,9 @@ export function useQueueFailureToasts() {
     (failures) => {
       const fresh = failures.filter((item) => !previous.has(item.id));
       previous = new Set(failures.map((item) => item.id));
+      // The Outbox lists these items itself; a toast pointing there from there
+      // only covers the page it names.
+      if (router.currentRoute.value.name === 'outbox') return;
       for (const send of [true, false]) {
         const count = fresh.filter((item) => item.send === send).length;
         if (count === 0) continue;

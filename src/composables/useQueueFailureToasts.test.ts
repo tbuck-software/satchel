@@ -9,14 +9,15 @@ import { useOutboxStore } from '@/stores/outbox';
 import type { BackendOutboxItem } from '@/types/outbox';
 
 const push = vi.fn();
-vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }));
+const currentRoute = { value: { name: 'inbox' as string } };
+vi.mock('vue-router', () => ({ useRouter: () => ({ push, currentRoute }) }));
 const toast = useToast();
 const Host = defineComponent({ setup() { useQueueFailureToasts(); return () => null; } });
 function failed(id: string, action_type = 'send_message'): BackendOutboxItem {
   return { id, account_id: 'a', action_type, status: 'failed', retry_count: 6,
     created_at: '', updated_at: '', recipients: [], last_error: 'invalid recipient' };
 }
-beforeEach(() => { setActivePinia(createPinia()); vi.useFakeTimers(); push.mockClear(); });
+beforeEach(() => { setActivePinia(createPinia()); vi.useFakeTimers(); push.mockClear(); currentRoute.value = { name: 'inbox' }; });
 afterEach(() => { toast.clear(); vi.useRealTimers(); });
 
 it('expires the announcement while keeping the persistent queue state and action', async () => {
@@ -55,5 +56,19 @@ it('announces new identities, not count decreases, and allows a later failure tr
   outbox.items = [failed('c')];
   await nextTick();
   expect(toast.state.toasts).toHaveLength(1);
+  wrapper.unmount();
+});
+
+/** The Outbox lists the failed items itself; a toast there only covered it. */
+it('stays quiet on the Outbox and does not announce those failures later', async () => {
+  currentRoute.value = { name: 'outbox' };
+  const outbox = useOutboxStore();
+  outbox.items = [failed('send')];
+  const wrapper = mount(Host);
+  expect(toast.state.toasts).toHaveLength(0);
+  currentRoute.value = { name: 'inbox' };
+  outbox.items = outbox.items.map((item) => ({ ...item }));
+  await nextTick();
+  expect(toast.state.toasts).toHaveLength(0);
   wrapper.unmount();
 });

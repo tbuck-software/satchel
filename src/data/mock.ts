@@ -7,6 +7,7 @@ import type {
   BackendTopicTimelineItem,
 } from '@/services/backend';
 import type { Account, Message, Thread } from '@/types/mail';
+import { datetimeFormats } from '@/i18n/formats';
 
 export const mockAccounts: Account[] = [
   {
@@ -695,7 +696,8 @@ const offerQuotes = baseMessages
   .filter((message) => message.threadId === 'th-1' && !message.isDraft)
   .reverse()
   .map((message) => ({
-    intro: `On ${new Date(message.timestamp).toUTCString()}, ${message.from.name} <${message.from.email}> wrote:`,
+    // The intro the composer writes (`compose.reply.intro`, `formatTimestamp`).
+    intro: `On ${new Date(message.timestamp).toLocaleString('en', { ...datetimeFormats.en!.dateTime, year: 'numeric' })}, ${message.from.name} <${message.from.email}> wrote:`,
     lines: (message.bodyText ?? '').split('\n'),
   }));
 const escapeHtml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

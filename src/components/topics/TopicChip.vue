@@ -55,7 +55,9 @@ defineEmits<{
   padding: 1px 4px 1px 8px;
   border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--chip-color) 12%, transparent);
-  color: var(--chip-color);
+  /* The topic's colour leans toward the ink: pure blue on its own pale tint
+     was the weakest text in the header. */
+  color: color-mix(in srgb, var(--chip-color) 55%, var(--text-primary));
   font-size: var(--font-size-xs);
   font-weight: var(--weight-medium);
   max-width: 180px;

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const harness = vi.hoisted(() => ({
   activeTopics: [] as Array<typeof topic>,
   addItemsToTopic: vi.fn(),
+  addToTopic: vi.fn(),
   closePicker: vi.fn(),
   create: vi.fn(),
   pickerTarget: { itemType: 'message', itemIds: ['message-1'] } as { itemType: 'message' | 'thread'; itemIds: string[] },
@@ -44,7 +45,7 @@ vi.mock('@/stores/ui', () => ({
 }));
 
 vi.mock('@/composables/useThreadActions', () => ({
-  useThreadActions: () => ({ addToTopic: vi.fn(), removeFromTopic: vi.fn(), moveToFolder: harness.moveToFolder }),
+  useThreadActions: () => ({ addToTopic: harness.addToTopic, removeFromTopic: vi.fn(), moveToFolder: harness.moveToFolder }),
 }));
 
 vi.mock('@/composables/useToast', () => ({
@@ -192,5 +193,29 @@ describe('folders and topics in one picker', () => {
     const wrapper = render();
 
     expect(wrapper.findAll('.row').map((row) => row.text())).toEqual([topic.name]);
+  });
+
+  /**
+   * App mounts the picker only once it has a target. The focus used to wait
+   * for the target to change, which it never did, so `v` + typing went to the
+   * list behind and Enter opened the thread instead of filing it.
+   */
+  it('takes the focus when it mounts already open', async () => {
+    const wrapper = render(true);
+    await flushPromises();
+
+    expect(document.activeElement).toBe(wrapper.get('input').element);
+    wrapper.unmount();
+  });
+
+  it('files into the filtered topic and closes on Enter', async () => {
+    const wrapper = render();
+    const input = wrapper.get('input');
+    await input.setValue('Hunter');
+
+    await input.trigger('keydown', { key: 'Enter' });
+
+    expect(harness.closePicker).toHaveBeenCalledTimes(1);
+    expect(harness.addToTopic).toHaveBeenCalledWith(['thread-1'], topic.id);
   });
 });

@@ -9,6 +9,7 @@ import {
 } from '@/services/backend';
 import { useDraftsStore } from './drafts';
 import { useConnectionStore } from './connection';
+import { useMessagesStore } from './messages';
 
 vi.mock('@/services/backend', () => ({
   backendCommandsAvailable: vi.fn(() => true),
@@ -148,5 +149,22 @@ describe('drafts store', () => {
 
     expect(saveMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'draft-1' }));
     expect(drafts.items.map((draft) => draft.id)).toEqual(['draft-1']);
+  });
+
+  /**
+   * A thread draft is a message under the draft's id. Without this the card at
+   * the end of the thread kept the text and time it was loaded with after the
+   * composer had saved newer ones.
+   */
+  it('brings the draft message in its thread up to the saved text and time', async () => {
+    const messages = useMessagesStore();
+    messages.messagesByThread = {
+      'thread-1': [{ id: 'draft-1', threadId: 'thread-1', isDraft: true, bodyText: 'Hallo', timestamp: '2026-08-01T09:00:00Z' } as never],
+    };
+    saveMock.mockResolvedValueOnce(storedDraft({ thread_id: 'thread-1', body: 'Hallo Mara, danke!', updated_at: '2026-08-01T10:30:00Z' }));
+
+    await useDraftsStore().save(draftInput({ id: 'draft-1', threadId: 'thread-1' }));
+
+    expect(messages.getByThread('thread-1')[0]).toMatchObject({ bodyText: 'Hallo Mara, danke!', timestamp: '2026-08-01T10:30:00Z' });
   });
 });

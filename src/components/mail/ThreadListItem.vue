@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, shallowRef } from 'vue';
+import { computed, defineAsyncComponent, inject, ref, shallowRef } from 'vue';
+import { LIST_HIGHLIGHT_TERMS } from '@/composables/listHighlight';
+import { highlightMatches } from '@/utils/highlight';
 import { useI18n } from 'vue-i18n';
 import type { Thread } from '@/types/mail';
 import { formatListTime, formatMessageTimestamp, localeFormatter } from '@/utils/listTime';
@@ -171,6 +173,10 @@ const isFilingAside = computed(
   () => threadsStore.leavingThreadStates[props.thread.id] === 'aside',
 );
 const visibleSnippet = computed(() => props.thread.draftSnippet || props.thread.snippet);
+const highlightTerms = inject(LIST_HIGHLIGHT_TERMS, null);
+const subjectSegments = computed(() =>
+  highlightMatches(props.thread.normalizedSubject ?? props.thread.subject, highlightTerms?.value ?? []));
+const snippetSegments = computed(() => highlightMatches(visibleSnippet.value, highlightTerms?.value ?? []));
 const inLater = computed(() => threadsStore.workflowFilter === 'later');
 const followUp = computed(() =>
   inLater.value && props.thread.workflowState === 'waiting'
@@ -207,6 +213,13 @@ const followUpLabel = computed(() => {
  * conveyed only by font weight and a decorative dot, and the subject/sender
  * are read as three unrelated fragments.
  */
+/**
+ * The thread's count includes its unsent draft row, as the core counts
+ * messages. The reader says "2 messages · 1 draft"; the row's badge has to
+ * agree, with the draft shown by its own prefix.
+ */
+const sentMessageCount = computed(() => props.thread.messageCount - (props.thread.hasDraft ? 1 : 0));
+
 const rowLabel = computed(() => {
   const parts = [
     isUnread.value ? t('thread.actions.unread') : t('thread.actions.read'),
@@ -214,8 +227,8 @@ const rowLabel = computed(() => {
     (props.thread.normalizedSubject ?? props.thread.subject) || t('thread.row.noSubject'),
     formattedTime.value,
   ];
-  if (props.thread.messageCount > 1) {
-    parts.push(t('thread.row.messages', props.thread.messageCount));
+  if (sentMessageCount.value > 1) {
+    parts.push(t('thread.row.messages', sentMessageCount.value));
   }
   if (props.thread.hasDraft) parts.push(t('thread.row.hasDraft'));
   if (props.thread.hasAttachments) parts.push(t('thread.row.hasAttachment'));
@@ -474,18 +487,28 @@ function onDragStart(event: DragEvent) {
       data-test="thread-row-check"
       @click.stop="emitCheck"
     >
+      <!-- A draft row says so in the avatar's place: a darkened face with the
+           pencil on top let the initials show through the glyph. -->
+      <!-- Selected: the avatar is the checkbox it already acts as, so it
+           shows the check. A tint alone read like a hover. -->
+      <span v-if="props.selected" class="thread-row__checked" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3.5 8.5 6.5 11.5 12.5 5" />
+        </svg>
+      </span>
+      <span v-else-if="props.thread.hasDraft" class="thread-row__draft-avatar" aria-hidden="true" />
       <Avatar
+        v-else
         :name="primaryParticipantName"
         :email="primaryParticipantEmail"
         :size="36"
-        :class="props.thread.hasDraft ? 'brightness-[0.42] saturate-[0.8]' : ''"
       />
       <AvatarUnreadDot v-if="isUnread" />
       <svg
-        v-if="props.thread.hasDraft"
-        class="absolute inset-[9px] text-on-accent drop-shadow-[0_1px_2px_rgba(0,0,0,0.7)]"
-        width="20"
-        height="20"
+        v-if="props.thread.hasDraft && !props.selected"
+        class="thread-row__draft-pencil absolute inset-[9px]"
+        width="18"
+        height="18"
         viewBox="0 0 20 20"
         fill="none"
         stroke="currentColor"
@@ -504,7 +527,7 @@ function onDragStart(event: DragEvent) {
         <span class="flex min-w-0 items-center gap-1.5">
           <span
             v-if="props.thread.hasDraft"
-            class="shrink-0 text-sm font-strong text-accent-primary"
+            class="thread-row__draft-label shrink-0 text-sm font-strong"
           >
             {{ $t('thread.row.draftPrefix') }}
           </span>
@@ -528,9 +551,9 @@ function onDragStart(event: DragEvent) {
                 : 'font-medium text-secondary'
           "
         >
-          {{ props.thread.normalizedSubject ?? props.thread.subject }}
+          <template v-for="(segment, index) in subjectSegments" :key="index"><mark v-if="segment.marked" class="thread-row__match">{{ segment.text }}</mark><template v-else>{{ segment.text }}</template></template>
         </span>
-        <CountBadge v-if="props.thread.messageCount > 1" :value="props.thread.messageCount" />
+        <CountBadge v-if="sentMessageCount > 1" :value="sentMessageCount" />
       </div>
 
       <div class="mt-0.5 flex min-w-0 items-center gap-2">
@@ -547,7 +570,7 @@ function onDragStart(event: DragEvent) {
           {{ followUp ? followUpLabel : laterLabel }}
         </span>
         <span class="min-w-0 flex-1 truncate text-xs leading-[1.5] text-tertiary">
-          {{ visibleSnippet }}
+          <template v-for="(segment, index) in snippetSegments" :key="index"><mark v-if="segment.marked" class="thread-row__match">{{ segment.text }}</mark><template v-else>{{ segment.text }}</template></template>
         </span>
         <svg
           v-if="props.thread.isStarred"
@@ -720,6 +743,44 @@ function onDragStart(event: DragEvent) {
   /* The pane it sits on, opaque, so the swipe track below stays hidden until
      the surface actually moves. */
   background: var(--bg-list);
+}
+
+.thread-row__match {
+  border-radius: var(--radius-xs);
+  /* The accent's tint: the active surface was barely off the row, and the
+     same as a selected row's fill, so the hit vanished once focused. */
+  background: color-mix(in srgb, var(--accent-primary) 26%, transparent);
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.thread-row__checked {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+}
+
+.thread-row__draft-avatar {
+  display: block;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent-primary) 16%, var(--bg-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 34%, transparent);
+}
+
+.thread-row__draft-label {
+  /* The text tone of the accent, not its fill: on a selected dark row the
+     fill tone sank into the row. */
+  color: var(--text-accent);
+}
+
+.thread-row__draft-pencil {
+  color: var(--text-accent);
 }
 
 .thread-row__surface--open .thread-row__avatar {
@@ -985,8 +1046,11 @@ function onDragStart(event: DragEvent) {
   padding-right: calc(2 * var(--space-2xl) + var(--space-xs));
 }
 
+/* The pointer's shortcut, not the keyboard's: a row that is merely selected or
+   focused keeps its time and pin, which the keys never needed covered. Tabbing
+   onto the buttons themselves still shows them. */
 .thread-row:hover,
-.thread-row:focus-within {
+.thread-row:has(.list-row-meta__actions :focus-visible) {
   --row-actions-visible: 1;
   --row-actions-events: auto;
 }

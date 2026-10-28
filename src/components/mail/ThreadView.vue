@@ -23,6 +23,7 @@ import { saveTextExport } from '@/utils/saveTextExport';
 import { showInFolderAction } from '@/utils/showInFolderAction';
 import ErrorState from '@/components/ui/ErrorState.vue';
 import ThreadMessageList from './ThreadMessageList.vue';
+import ThreadSelectionSummary from './ThreadSelectionSummary.vue';
 import ThreadPaneSkeleton from './ThreadPaneSkeleton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import { threadActionTargets } from '@/composables/threadActionTargets';
@@ -37,6 +38,7 @@ import PluginSlotHost from '@/components/plugins/PluginSlotHost.vue';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { isOwnEmail } from '@/utils/mailIdentity';
 import { threadMessageVisibility } from '@/utils/threadMessageVisibility';
+import { formatMessageTimestamp } from '@/utils/listTime';
 import {
   buildThreadExportDescriptor,
   renderThreadMarkdown,
@@ -114,6 +116,9 @@ const messageVisibility = computed(() =>
   }),
 );
 const hiddenMessageCount = computed(() => messageVisibility.value.hiddenMessageCount);
+// An unsent draft is not a message of the conversation; it gets its own count.
+const sentMessageCount = computed(() => messages.value.filter((message) => !message.isDraft).length);
+const draftMessageCount = computed(() => messages.value.length - sentMessageCount.value);
 const visibleMessages = computed(() => messageVisibility.value.visibleMessages);
 const draftMessages = computed(() => messageVisibility.value.draftMessages);
 /** Selected, but its load waits for the selection to settle. */
@@ -237,7 +242,14 @@ onBeforeUnmount(() => viewportObserver?.disconnect());
  * a second time, and a fresh reply from it a second answer beside the first.
  * Reply all and Forward stay in the toolbar menu and on their keys.
  */
-const showReplyFoot = computed(() => canReply.value && !ui.isMobile && !resumableDraft.value);
+// While the composer answers this thread it is the reply; a launcher under it
+// would offer the same answer a second time.
+const composingHere = computed(() => {
+  const request = composer.request;
+  if (!props.threadId || !request || request.threadId !== props.threadId) return false;
+  return request.mode === 'reply' || request.mode === 'reply-all';
+});
+const showReplyFoot = computed(() => canReply.value && !ui.isMobile && !resumableDraft.value && !composingHere.value);
 /** The reader offers the reply itself — the foot, or a draft card. */
 const replyInReader = computed(() => showReplyFoot.value || (canReply.value && Boolean(resumableDraft.value)));
 const replyFoot = ref<HTMLElement | null>(null);
@@ -558,6 +570,7 @@ async function reloadMessages() {
 
 const actionIds = computed(() => threadActionTargets(threadsStore.selectedThreadIds, props.threadId));
 const selectionCount = computed(() => threadsStore.selectedThreadIds?.length ?? 0);
+const showSelectionSummary = computed(() => selectionCount.value > 1 && !ui.isMobile);
 const actionUnread = computed(() => actionIds.value.some(id => (threadsStore.find(id)?.unreadCount ?? 0) > 0));
 const actionPinned = computed(() => actionIds.value.every(id => threadsStore.find(id)?.isStarred));
 const snoozeTargetIds = ref<string[]>([]);
@@ -975,7 +988,7 @@ function showEntireThread() {
         <AppIcon size="lg"><path d="M10 3L5 8l5 5" /></AppIcon>
       </IconButton>
       <div class="mobile-top-meta">
-        <span class="mobile-top-count">{{ $t('thread.row.messages', { count: messages.length }) }}</span>
+        <span class="mobile-top-count">{{ $t('thread.row.messages', { count: sentMessageCount }) }}</span>
       </div>
     </div>
 
@@ -984,12 +997,17 @@ function showEntireThread() {
       ref="scrollRoot"
       :class="[
         'flex-1 overflow-y-auto',
-        ui.isMobile ? 'px-4 py-5' : 'thread-reading-content',
+        ui.isMobile ? 'thread-reading-content--phone px-4 py-5' : 'thread-reading-content',
         { 'thread-reading-content--reply': showReplyFoot },
       ]"
       :style="showReplyFoot ? { '--reply-foot-h': `${replyFootHeight}px` } : undefined"
     >
-      <div ref="readingColumn" :class="ui.isMobile ? '' : 'thread-reading-column'">
+      <!-- Several selected: the toolbar acts on all of them, so the pane shows
+           which ones instead of one of them in full. -->
+      <div v-if="showSelectionSummary" class="thread-reading-column">
+        <ThreadSelectionSummary />
+      </div>
+      <div v-show="!showSelectionSummary" ref="readingColumn" :class="ui.isMobile ? '' : 'thread-reading-column'">
         <PluginSlotHost
           slot-name="thread_view_panel"
           :context="{ threadId: thread.id, subject: thread.subject }"
@@ -1009,7 +1027,14 @@ function showEntireThread() {
               />
               {{ threadAccount.displayName }}
             </span>
-            <span>{{ $t('thread.row.messages', { count: messages.length }) }}</span>
+            <span>{{ $t('thread.row.messages', { count: sentMessageCount }) }}</span>
+            <span v-if="draftMessageCount > 0">{{ $t('thread.row.drafts', { count: draftMessageCount }) }}</span>
+            <!-- In Later the list row says when it comes back; the reader keeps
+                 saying it once the row is out of sight. -->
+            <span v-if="thread.workflowState === 'snoozed' && thread.snoozeUntil" class="thread-state thread-state--later">
+              <AppIcon size="sm"><circle cx="8" cy="8" r="6" /><path d="M8 4.5V8l2.5 1.5" /></AppIcon>
+              {{ $t('thread.row.back', { time: formatMessageTimestamp(thread.snoozeUntil) }) }}
+            </span>
             <span v-if="thread.workflowState === 'done'" class="thread-state">
               <AppIcon size="sm"><path d="M3 8.5l3.5 3.5L13 5" /></AppIcon>
               {{ $t('common.done') }}
@@ -1060,6 +1085,7 @@ function showEntireThread() {
           :body-mounted-ids="bodyMountedIds"
           :focused-message-id="focusedMessageId"
           :keyboard-active="messageKeyboardActive"
+          :editing-draft-id="composer.request?.draftId ?? null"
           @reply="replyThread"
           @forward="forwardThread"
           @edit-draft="composer.openDraft($event)"
@@ -1070,7 +1096,7 @@ function showEntireThread() {
       </div>
 
       <!-- The pane ends where an answer would begin. -->
-      <div v-if="showReplyFoot" ref="replyFoot" class="thread-reply-foot">
+      <div v-if="showReplyFoot && !showSelectionSummary" ref="replyFoot" class="thread-reply-foot">
         <div class="thread-reply-foot__column">
           <ThreadReplyBar
             :recipient="replyRecipientName"
@@ -1153,6 +1179,15 @@ function showEntireThread() {
   margin: 0 auto;
 }
 
+/* The phone's action bar sits right under the scroll area. Without a fade the
+   last card ended in a hard cut through its text, which read as clipped
+   rather than as more to scroll to. The mask reads only alpha; any opaque
+   token does. */
+.thread-reading-content--phone {
+  -webkit-mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-xl)), transparent);
+  mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-xl)), transparent);
+}
+
 /* The foot's box is the inset at the end of the thread: the last message
    stops above it, and scrolled-to messages stop above it too. */
 .thread-reading-content--reply {
@@ -1187,6 +1222,10 @@ function showEntireThread() {
 
 .thread-state svg {
   color: var(--accent-green);
+}
+
+.thread-state--later svg {
+  color: var(--text-accent);
 }
 
 /* ── Mobile top bar ── */

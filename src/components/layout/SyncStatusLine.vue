@@ -15,13 +15,20 @@ import { computed, defineAsyncComponent, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useConnectionStore } from '@/stores/connection';
 import { useOutboxStore } from '@/stores/outbox';
+import AppBanner from '@/components/ui/AppBanner.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import { formatListTime } from '@/utils/listTime';
 
 const props = withDefaults(defineProps<{
   /** Drop the resting "last synced" sentence, for places that are not a footer. */
   hideIdle?: boolean;
-}>(), { hideIdle: false });
+  /**
+   * Show failed items as a banner with a way in, for the phone, where this
+   * line is the only sync control on screen. Bare red text there read as
+   * leaked debug output.
+   */
+  bannerFailures?: boolean;
+}>(), { hideIdle: false, bannerFailures: false });
 
 const SyncFailures = defineAsyncComponent(() => import('./SyncFailures.vue'));
 const failuresOpen = ref(false);
@@ -49,7 +56,18 @@ const label = computed(() => {
 
 <template>
   <div v-if="failureCount > 0 || visible">
-  <AppButton v-if="failureCount > 0" variant="link" class="sync-failure-status" aria-haspopup="dialog" :aria-expanded="failuresOpen" @click="openFailures">
+  <AppBanner
+    v-if="failureCount > 0 && props.bannerFailures"
+    class="sync-failure-banner"
+    :title="t('app.sync.failures.label', { count: failureCount }, failureCount)"
+  >
+    <template #actions>
+      <AppButton size="sm" variant="soft" aria-haspopup="dialog" :aria-expanded="failuresOpen" @click="openFailures">
+        {{ t('app.sync.failures.review') }}
+      </AppButton>
+    </template>
+  </AppBanner>
+  <AppButton v-else-if="failureCount > 0" variant="link" class="sync-failure-status" aria-haspopup="dialog" :aria-expanded="failuresOpen" @click="openFailures">
     {{ t('app.sync.failures.label', { count: failureCount }, failureCount) }}
   </AppButton>
   <p v-else-if="visible" class="sync-status" :class="`sync-status--${connection.syncStatus}`" role="status">

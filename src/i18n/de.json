@@ -37,8 +37,12 @@
     "restingHint": "{account} ruht: keine Zähler, keine Mitteilungen. Klick schaut hinein, Rechtsklick blendet es bis Mitternacht ein.",
     "saveFailed": "Die Sichtbarkeit des Kontos konnte nicht gespeichert werden.",
     "schedule": "Nach Zeitplan",
+    "scopeResting": "{accounts} ruht | {accounts} ruhen",
     "showAccount": "{account} jetzt anzeigen",
     "showToday": "Bis Mitternacht einblenden",
+    "shownUntilMidnight": "{account} ist bis Mitternacht eingeblendet.",
+    "statePeek": "Bis Mitternacht eingeblendet",
+    "stateResting": "Ruht heute",
     "title": "Sichtbarkeit",
     "to": "Bis, optional",
     "visible": "Sichtbar",
@@ -97,6 +101,7 @@
         "explanation": "Vorübergehende Verbindungsprobleme werden automatisch erneut versucht. Diese Einträge müssen geprüft werden.",
         "label": "{count} Eintrag benötigt Aufmerksamkeit | {count} Einträge benötigen Aufmerksamkeit",
         "resolved": "Alles ist auf dem neuesten Stand.",
+        "review": "Probleme prüfen",
         "title": "Aufmerksamkeit erforderlich",
         "unavailable": "Öffne den Postausgang, um die betroffenen Einträge zu prüfen."
       },
@@ -637,13 +642,13 @@
     },
     "context": {
       "empty": "Keine Nachrichten im Verlauf.",
-      "hide": "Verlauf ausblenden",
+      "hide": "Unterhaltung ausblenden",
       "included": "Verlauf wird mitgesendet",
       "loadFailed": "Der Verlauf konnte nicht geladen werden: {error}",
       "loading": "Verlauf wird geladen…",
       "noTextContent": "(Kein Textinhalt)",
       "remove": "Zitierten Verlauf aus dieser Nachricht entfernen",
-      "show": "Verlauf anzeigen | Verlauf anzeigen (1 Nachricht) | Verlauf anzeigen ({count} Nachrichten)"
+      "show": "Unterhaltung anzeigen | Unterhaltung anzeigen (1 Nachricht) | Unterhaltung anzeigen ({count} Nachrichten)"
     },
     "crypto": {
       "addRecipientsFirst": "Zum Verschlüsseln zuerst Empfänger hinzufügen.",
@@ -657,8 +662,6 @@
     },
     "discardDraft": "Entwurf verwerfen",
     "draft": {
-      "discardFailed": "Entwurf konnte nicht verworfen werden: {error}",
-      "discarded": "Entwurf verworfen.",
       "openElsewhere": "Dieser Entwurf ist bereits in einem anderen Fenster geöffnet.",
       "saveFailedStaysOpen": "Der Entwurf konnte nicht gespeichert werden. Der Composer bleibt geöffnet.",
       "savedAsDraft": "Als Entwurf gespeichert."
@@ -741,15 +744,15 @@
     },
     "recipients": {
       "backspaceAgain": "{address} ausgewählt. Erneut Rücktaste drücken, um die Adresse zu entfernen.",
-      "bccPlaceholder": "bcc{'@'}example.com",
+      "bccPlaceholder": "Name oder E-Mail",
       "ccBcc": "Cc/Bcc",
-      "ccPlaceholder": "cc{'@'}example.com",
+      "ccPlaceholder": "Name oder E-Mail",
       "collapseCcBcc": "Cc und Bcc einklappen",
       "invalid": "Das ist keine gültige E-Mail-Adresse.",
       "invalidMarker": "(keine gültige Adresse)",
       "remove": "{address} entfernen",
       "showCcBcc": "Cc und Bcc anzeigen",
-      "toPlaceholder": "empfänger{'@'}example.com"
+      "toPlaceholder": "Name oder E-Mail"
     },
     "replace": {
       "body": "Die Nachricht, an der du schreibst, wird als Entwurf gespeichert und geschlossen.",
@@ -3264,7 +3267,7 @@
       "addToTopicFailed": "Zuordnung fehlgeschlagen.",
       "addedToTopic": "Thread zu Thema „{topic}“ hinzugefügt | {count} Threads zu Thema „{topic}“ hinzugefügt",
       "aside": "E-Mail beiseitegelegt | {count} E-Mails beiseitegelegt",
-      "done": "E-Mail erledigt | {count} E-Mails erledigt",
+      "done": "Als erledigt markiert | {count} als erledigt markiert",
       "fallback": "{label} | {count} E-Mails → {label}",
       "inLater": "Wartet in „Später“",
       "inbox": "E-Mail in der Inbox | {count} E-Mails in der Inbox",
@@ -3288,6 +3291,7 @@
     "row": {
       "back": "Zurück {time}",
       "draftPrefix": "Entwurf,",
+      "drafts": "{count} Entwurf | {count} Entwürfe",
       "hasAttachment": "mit Anhang",
       "hasDraft": "Entwurf vorhanden",
       "menuLabel": "Aktionen für diese Mail",
@@ -3301,8 +3305,12 @@
     },
     "selection": {
       "action": "{action} ({count})",
+      "clear": "Auswahl aufheben",
       "done": "Erledigt ({count})",
-      "label": "{count} ausgewählt"
+      "label": "{count} ausgewählt",
+      "summaryHint": "Die Aktionen oben gelten für alle.",
+      "summaryMore": "und {count} weitere",
+      "summaryTitle": "{count} Unterhaltung ausgewählt | {count} Unterhaltungen ausgewählt"
     },
     "state": {
       "aside": "Beiseitegelegt",
@@ -3431,14 +3439,15 @@
       "thread": "Konversation"
     },
     "picker": {
+      "actionAdd": "Zu {name} hinzufügen",
+      "actionCreate": "Thema anlegen",
+      "actionMove": "Nach {name} verschieben",
+      "actionRemove": "Aus {name} entfernen",
       "assignFailed": "Zuordnung fehlgeschlagen.",
       "createFailed": "Thema konnte nicht erstellt werden.",
       "createRow": "Neues Thema „{name}“ erstellen",
       "empty": "Noch keine Themen — einfach einen Namen eintippen.",
       "fileSearchPlaceholder": "Ordner oder Thema …",
-      "hintAssign": "↵ ablegen",
-      "hintClose": "Esc schließen",
-      "hintSelect": "↑↓ wählen",
       "messageAdded": "Nachricht zu Thema „{name}“ hinzugefügt",
       "messageRemoved": "Nachricht aus Thema „{name}“ entfernt",
       "searchLabel": "Thema suchen",

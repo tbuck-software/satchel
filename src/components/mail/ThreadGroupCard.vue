@@ -348,8 +348,10 @@ function onDragStart(event: DragEvent) {
   --row-bg: var(--bg-stack-hover);
 }
 
+/* Like a thread row: shown for the pointer, or for the keyboard on the
+   buttons themselves, never over the time of a card that is only focused. */
 .bundle-card:hover,
-.bundle-card:focus-within {
+.bundle-card:has(.list-row-meta__actions :focus-visible) {
   --row-actions-visible: 1;
   --row-actions-events: auto;
 }

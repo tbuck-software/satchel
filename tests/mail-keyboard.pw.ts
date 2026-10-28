@@ -90,6 +90,8 @@ for (const trigger of ['keyboard', 'reader'] as const) {
     for (const id of ['th-1', 'th-6', 'th-7']) {
       await expect(page.locator(`[data-list-target-key="thread:${id}"]`)).toHaveAttribute('aria-selected', 'true');
     }
-    await expect(page.locator('h1', { hasText: 'Staging login 500 after deployment' })).toBeVisible();
+    // Three are selected again, so the reader names them rather than showing one.
+    await expect(page.locator('h1', { hasText: '3 conversations selected' })).toBeVisible();
+    await expect(page.locator('.selection-summary').getByText('Staging login 500 after deployment')).toBeVisible();
   });
 }
