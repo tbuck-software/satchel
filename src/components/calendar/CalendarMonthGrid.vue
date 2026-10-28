@@ -168,6 +168,9 @@ function createOn(day: Date, event: MouseEvent) {
 
 .month__cell--muted .month__daynum {
   color: var(--text-tertiary);
+  /* The tertiary ink has to keep 4.5:1, which on dark leaves it bright; the
+     lighter weight is what lets the other month's days step back. */
+  font-weight: var(--weight-regular);
 }
 
 .month__daynum {

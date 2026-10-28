@@ -30,11 +30,15 @@ function onClick(event: MouseEvent) {
 <template>
   <CardButton
     class="event-chip"
-    :class="`event-chip--${item.status}`"
+    :class="[`event-chip--${item.status}`, { 'event-chip--span': !timeLabel }]"
     :style="item.color ? { '--chip-accent': item.color } : undefined"
     :title="item.title"
     @click.stop="onClick"
   >
+    <!-- A timed event is a dot and its time; only what spans the day (all-day,
+         or a later day of a longer event) takes a tinted bar. A coloured
+         left border on a rounded chip bent with the corners. -->
+    <span v-if="timeLabel" class="event-chip__dot" aria-hidden="true" />
     <span v-if="timeLabel" class="event-chip__time">{{ timeLabel }}</span>
     <span class="event-chip__title">{{ item.title }}</span>
   </CardButton>
@@ -42,18 +46,18 @@ function onClick(event: MouseEvent) {
 
 <style scoped>
 .event-chip {
+  /* The source calendar's colour; an invite's answer overrides it below. */
+  --chip-tone: var(--chip-accent, var(--accent-primary));
   display: flex;
   align-items: center;
   gap: 4px;
   width: 100%;
   min-width: 0;
   border: 0;
-  border-left: 2px solid var(--chip-accent, var(--accent-primary));
   flex-shrink: 0;
   border-radius: var(--radius-xs);
   padding: var(--space-2xs) var(--space-xs);
-  /* Own events are tinted by their source calendar; invites override below. */
-  background: color-mix(in srgb, var(--chip-accent, var(--accent-primary)) 18%, transparent);
+  background: transparent;
   color: var(--text-primary);
   font-size: var(--font-size-2xs);
   line-height: 1.5;
@@ -63,7 +67,30 @@ function onClick(event: MouseEvent) {
 }
 
 .event-chip:hover {
-  background: color-mix(in srgb, var(--chip-accent, var(--accent-primary)) 30%, transparent);
+  background: color-mix(in srgb, var(--chip-tone) 14%, transparent);
+}
+
+.event-chip:not(.event-chip--span) {
+  /* No fill to pad: the dot starts at the chip's edge and the title keeps
+     the width a bar and its inset used to take. */
+  gap: 3px;
+  padding-inline: 2px;
+}
+
+.event-chip--span {
+  background: color-mix(in srgb, var(--chip-tone) 20%, transparent);
+}
+
+.event-chip--span:hover {
+  background: color-mix(in srgb, var(--chip-tone) 30%, transparent);
+}
+
+.event-chip__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--chip-tone);
 }
 
 .event-chip__time {
@@ -84,30 +111,26 @@ function onClick(event: MouseEvent) {
 }
 
 .event-chip--accepted {
-  background: color-mix(in srgb, var(--accent-green) 18%, transparent);
-}
-.event-chip--accepted:hover {
-  background: color-mix(in srgb, var(--accent-green) 30%, transparent);
+  --chip-tone: var(--accent-green);
 }
 
 .event-chip--tentative {
-  background: color-mix(in srgb, var(--accent-amber) 18%, transparent);
-}
-.event-chip--tentative:hover {
-  background: color-mix(in srgb, var(--accent-amber) 30%, transparent);
+  --chip-tone: var(--accent-amber);
 }
 
 .event-chip--needs-action {
-  background: color-mix(in srgb, var(--accent-purple) 18%, transparent);
-}
-.event-chip--needs-action:hover {
-  background: color-mix(in srgb, var(--accent-purple) 30%, transparent);
+  --chip-tone: var(--accent-purple);
 }
 
 .event-chip--declined,
 .event-chip--cancelled {
-  background: var(--bg-raised);
+  --chip-tone: var(--text-tertiary);
   color: var(--text-tertiary);
+}
+
+.event-chip--declined.event-chip--span,
+.event-chip--cancelled.event-chip--span {
+  background: var(--bg-raised);
 }
 
 .event-chip--declined .event-chip__title,
