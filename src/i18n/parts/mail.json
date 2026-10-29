@@ -94,6 +94,8 @@
       "invite": {
         "accept": "Accept",
         "acceptSeries": "Accept series",
+        "allDay": "{date} · All day",
+        "allDayRange": "{start} – {end} · All day",
         "cancelledNote": "The organiser cancelled this event.",
         "decline": "Decline",
         "declineSeries": "Decline series",
@@ -431,6 +433,8 @@
       "invite": {
         "accept": "Zusagen",
         "acceptSeries": "Serie zusagen",
+        "allDay": "{date} · Ganztägig",
+        "allDayRange": "{start} – {end} · Ganztägig",
         "cancelledNote": "Der Organisator hat diesen Termin abgesagt.",
         "decline": "Absagen",
         "declineSeries": "Serie absagen",

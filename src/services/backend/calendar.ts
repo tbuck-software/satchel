@@ -42,11 +42,15 @@ export async function backendListCalendarSources(accountId?: string): Promise<Ba
 
 export async function backendCreateCalendarEvent(input: {
   id?: string | null;
+  /** Original editor revision; detects concurrent calendar updates. */
+  expectedUpdatedAt?: string | null;
   accountId: string;
   title: string;
   description?: string | null;
   location?: string | null;
+  /** YYYY-MM-DD for all-day events; RFC3339 for timed events. */
   startsAt: string;
+  /** Exclusive end in the same representation as startsAt. */
   endsAt: string;
   allDay?: boolean;
   attendees?: string[];
@@ -55,6 +59,7 @@ export async function backendCreateCalendarEvent(input: {
   return invoke<BackendCalendarEvent>('create_calendar_event', {
     input: {
       id: input.id ?? null,
+      expected_updated_at: input.expectedUpdatedAt ?? null,
       account_id: input.accountId,
       title: input.title,
       description: input.description ?? null,

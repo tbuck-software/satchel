@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { parseCalendarBoundary } from '@/utils/calendarDates';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import Avatar from '@/components/common/Avatar.vue';
@@ -101,7 +102,7 @@ function localDayStart(value: Date): Date {
 
 function eventDay(event: BackendTrayCalendarEvent): string {
   const today = localDayStart(new Date(now.value));
-  const start = localDayStart(new Date(event.starts_at));
+  const start = localDayStart(parseCalendarBoundary(event.starts_at, event.all_day));
   const days = Math.round((start.getTime() - today.getTime()) / 86_400_000);
   if (days === 0) return t('common.today');
   if (days === 1) return t('common.tomorrow');
@@ -114,8 +115,8 @@ function eventDay(event: BackendTrayCalendarEvent): string {
 
 function eventStatus(event: BackendTrayCalendarEvent): string {
   const currentTime = now.value;
-  const start = Date.parse(event.starts_at);
-  const end = Date.parse(event.ends_at);
+  const start = parseCalendarBoundary(event.starts_at, event.all_day).getTime();
+  const end = parseCalendarBoundary(event.ends_at, event.all_day).getTime();
   if (start <= currentTime && end > currentTime) {
     const minutes = Math.max(1, Math.ceil((end - currentTime) / 60_000));
     if (minutes < 60) return t('tray.event.runningMinutes', { count: minutes });

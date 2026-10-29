@@ -1,5 +1,7 @@
 import type { BackendCalendarEvent, BackendCalendarInvite } from '@/services/backend';
 import { currentLocale, d, t } from '@/i18n/runtime';
+import { parseCalendarBoundary } from './calendarDates';
+export { parseCalendarBoundary, toDateInput } from './calendarDates';
 
 /**
  * Shared model and date math for the calendar views. Invites and locally
@@ -21,9 +23,12 @@ export interface CalendarItem {
   kind: 'event' | 'invite';
   id: string;
   uid: string;
+  updatedAt?: string;
   title: string;
   location: string | null;
   description: string | null;
+  /** Stored content used when opening the editor, before display conversion. */
+  editorDescription?: string | null;
   organizer: string | null;
   attendees: string[];
   start: Date;
@@ -54,8 +59,8 @@ const MINUTE_MS = 60_000;
 const DEFAULT_DURATION_MS = 60 * MINUTE_MS;
 
 export function itemFromEvent(event: BackendCalendarEvent): CalendarItem {
-  const start = new Date(event.starts_at);
-  let end = new Date(event.ends_at);
+  const start = parseCalendarBoundary(event.starts_at, event.all_day === 1);
+  let end = parseCalendarBoundary(event.ends_at, event.all_day === 1);
   if (!Number.isFinite(end.getTime()) || end.getTime() <= start.getTime()) {
     end = new Date(start.getTime() + DEFAULT_DURATION_MS);
   }
@@ -67,9 +72,11 @@ export function itemFromEvent(event: BackendCalendarEvent): CalendarItem {
     kind: 'event',
     id: event.id,
     uid: event.uid,
+    updatedAt: event.updated_at,
     title: event.title.trim() || t('calendar.event.untitled'),
     location: event.location ?? null,
     description: descriptionToText(event.description),
+    editorDescription: event.description ?? null,
     organizer: null,
     attendees: parseAttendees(event.attendees_json),
     start,
@@ -83,9 +90,9 @@ export function itemFromEvent(event: BackendCalendarEvent): CalendarItem {
 /** Invites without a start date cannot be placed on the grid → null. */
 export function itemFromInvite(invite: BackendCalendarInvite): CalendarItem | null {
   if (!invite.starts_at) return null;
-  const start = new Date(invite.starts_at);
+  const start = parseCalendarBoundary(invite.starts_at, invite.all_day === 1);
   if (!Number.isFinite(start.getTime())) return null;
-  let end = invite.ends_at ? new Date(invite.ends_at) : null;
+  let end = invite.ends_at ? parseCalendarBoundary(invite.ends_at, invite.all_day === 1) : null;
   if (!end || !Number.isFinite(end.getTime()) || end.getTime() <= start.getTime()) {
     end = new Date(start.getTime() + DEFAULT_DURATION_MS);
   }
@@ -505,6 +512,7 @@ export function formatItemRange(item: CalendarItem): string {
 export interface CalendarEventDraft {
   /** Set when editing an existing local event. */
   id: string | null;
+  expectedUpdatedAt?: string | null;
   title: string;
   location: string;
   description: string;
@@ -534,9 +542,10 @@ export function emptyDraft(at: Date): CalendarEventDraft {
 export function draftFromItem(item: CalendarItem): CalendarEventDraft {
   return {
     id: item.kind === 'event' ? item.id : null,
+    expectedUpdatedAt: item.kind === 'event' ? item.updatedAt ?? null : null,
     title: item.title,
     location: item.location ?? '',
-    description: item.description ?? '',
+    description: item.editorDescription ?? item.description ?? '',
     allDay: item.allDay,
     start: new Date(item.start),
     end: new Date(item.end),
@@ -549,10 +558,4 @@ export function draftFromItem(item: CalendarItem): CalendarEventDraft {
 export function toDateTimeLocalInput(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-/** Value for an `<input type="date">`, in local time. */
-export function toDateInput(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }

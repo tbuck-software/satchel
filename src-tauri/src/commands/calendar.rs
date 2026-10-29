@@ -11,7 +11,7 @@ pub use crate::db::calendar::{
     CalendarSourceRecord as CalendarSourceDto,
 };
 use crate::email::calendar::{build_invite_reply_ics, extract_ics_block, parse_invite};
-use crate::sync::outbox::{build_idempotent_send_action, build_send_action};
+use crate::sync::outbox::build_idempotent_send_action;
 use crate::AppState;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -20,6 +20,8 @@ use crate::AppState;
 pub struct CalendarEventInput {
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub expected_updated_at: Option<String>,
     pub account_id: String,
     pub title: String,
     #[serde(default)]
@@ -67,6 +69,7 @@ impl From<CalendarError> for CommandError {
             CalendarError::InviteNotFound => "backend.errors.calendarInviteNotFound",
             CalendarError::EventOwnership => "backend.errors.calendarEventOwnership",
             CalendarError::EventNotFound => "backend.errors.calendarEventNotFound",
+            CalendarError::EventChanged => "backend.errors.calendarEventChanged",
             CalendarError::Persistence(error) => {
                 tracing::error!(%error, "calendar persistence failed");
                 "backend.errors.calendarPersistenceFailed"
@@ -83,7 +86,15 @@ impl From<satchel_core::calendar::SaveError> for CommandError {
             SaveError::Validation(key) => Self::new(key),
             SaveError::Account(error) => error.into(),
             SaveError::Calendar(error) => error.into(),
-            SaveError::Remote(_) => Self::new("backend.errors.groupwareCalendarSyncFailed"),
+            SaveError::Remote(_) => Self::new("backend.errors.calendarRemoteWriteFailed"),
+            SaveError::RemoteCommittedLocalFailed(error) => {
+                tracing::error!(%error, "calendar remote write succeeded but local persistence failed");
+                Self::new("backend.errors.calendarRemoteSavedSyncRequired")
+            }
+            SaveError::Invitation(error) => {
+                tracing::error!(%error, "calendar invitation could not be built");
+                Self::new("backend.errors.calendarPersistenceFailed")
+            }
         }
     }
 }
@@ -192,10 +203,12 @@ pub async fn create_calendar_event(
     pool: tauri::State<'_, SqlitePool>,
     input: CalendarEventInput,
 ) -> CommandResult<CalendarEventDto> {
-    let saved = satchel_core::calendar::save_event(
+    satchel_core::calendar::save_event(
         pool.inner(),
+        &state.queue,
         satchel_core::calendar::EventInput {
             id: input.id,
+            expected_updated_at: input.expected_updated_at,
             account_id: input.account_id,
             title: input.title,
             description: input.description,
@@ -207,41 +220,8 @@ pub async fn create_calendar_event(
             send_invites: input.send_invites,
         },
     )
-    .await?;
-    if let Some(invitation) = saved.invitation {
-        let ics_b64 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            invitation.ics.as_bytes(),
-        );
-        let outgoing_input = OutgoingMessageInput {
-            to: invitation.attendees,
-            subject: invitation.title.clone(),
-            body: invitation.description.unwrap_or(invitation.title),
-            attachments: vec![OutgoingAttachmentInput {
-                filename: "invite.ics".into(),
-                mime_type: "text/calendar; method=REQUEST; charset=UTF-8".into(),
-                content_base64: ics_b64,
-                content_id: None,
-                inline: false,
-            }],
-            ..Default::default()
-        };
-        let mut action =
-            build_send_action(invitation.account_id, outgoing_input, None).map_err(|error| {
-                tracing::error!(%error, "calendar invitation could not be queued");
-                CommandError::new("backend.errors.calendarPersistenceFailed")
-            })?;
-        action.status = "pending".into();
-        state
-            .queue
-            .enqueue(pool.inner(), action)
-            .await
-            .map_err(|error| {
-                tracing::error!(%error, "calendar invitation queue write failed");
-                CommandError::new("backend.errors.calendarPersistenceFailed")
-            })?;
-    }
-    Ok(saved.event)
+    .await
+    .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -249,30 +229,9 @@ pub async fn delete_calendar_event(
     pool: tauri::State<'_, SqlitePool>,
     id: String,
 ) -> CommandResult<()> {
-    let repository = CalendarRepository::new(pool.inner());
-    let remote = repository
-        .event_sync_state_by_id(&id)
-        .await?
-        .ok_or(CalendarError::EventNotFound)?;
-    if remote.source == "caldav" {
-        if let Some(href) = remote.remote_href.as_deref() {
-            let account = AccountRepository::new(pool.inner())
-                .calendar_connection(&remote.account_id)
-                .await?;
-            crate::providers::dav::delete_calendar_event_remote(
-                &account.config,
-                href,
-                remote.remote_etag.as_deref(),
-            )
-            .await
-            .map_err(|error| {
-                tracing::warn!(%error, account_id = %remote.account_id, "CalDAV event deletion failed");
-                CommandError::new("backend.errors.groupwareCalendarSyncFailed")
-            })?;
-        }
-    }
-    repository.delete_event(&remote.account_id, &id).await?;
-    Ok(())
+    satchel_core::calendar::delete_event(pool.inner(), &id)
+        .await
+        .map_err(Into::into)
 }
 
 #[tauri::command]

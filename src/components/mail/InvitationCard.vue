@@ -5,6 +5,7 @@ import { useConfirm } from '@/composables/useConfirm';
 import type { BackendCalendarInvite } from '@/types/calendar';
 import { useInvitesStore } from '@/stores/invites';
 import { icsDescriptionToText } from '@/utils/inviteText';
+import { parseCalendarBoundary } from '@/utils/calendarDates';
 import { useLinkOpener } from '@/composables/useLinkOpener';
 import AppButton from '@/components/ui/AppButton.vue';
 import ExternalLinkDialog from './ExternalLinkDialog.vue';
@@ -55,7 +56,7 @@ const stateLabel = computed(() => {
 });
 
 const startDate = computed(() =>
-  props.invite.starts_at ? new Date(props.invite.starts_at) : null,
+  props.invite.starts_at ? parseCalendarBoundary(props.invite.starts_at, props.invite.all_day === 1) : null,
 );
 
 const leafMonth = computed(() =>
@@ -69,7 +70,16 @@ const leafDay = computed(() => (startDate.value ? startDate.value.getDate() : nu
 const when = computed(() => {
   const start = startDate.value;
   if (!start) return '';
-  const end = props.invite.ends_at ? new Date(props.invite.ends_at) : null;
+  const allDay = props.invite.all_day === 1;
+  const end = props.invite.ends_at ? parseCalendarBoundary(props.invite.ends_at, allDay) : null;
+  const day = (date: Date) => date.toLocaleDateString(locale.value, { day: 'numeric', month: 'short', year: 'numeric' });
+  if (allDay) {
+    const last = new Date(end && end.getTime() > start.getTime() ? end : start);
+    if (end && end.getTime() > start.getTime()) last.setDate(last.getDate() - 1);
+    return start.toDateString() === last.toDateString()
+      ? t('mail.invite.allDay', { date: day(start) })
+      : t('mail.invite.allDayRange', { start: day(start), end: day(last) });
+  }
   const time = (date: Date) => date.toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit' });
   if (!end) {
     return `${start.toLocaleDateString(locale.value, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}, ${time(start)}`;
@@ -77,7 +87,6 @@ const when = computed(() => {
   if (start.toDateString() === end.toDateString()) {
     return `${start.toLocaleDateString(locale.value, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}, ${time(start)} – ${time(end)}`;
   }
-  const day = (date: Date) => date.toLocaleDateString(locale.value, { day: 'numeric', month: 'short', year: 'numeric' });
   return `${day(start)}, ${time(start)} – ${day(end)}, ${time(end)}`;
 });
 

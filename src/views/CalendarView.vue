@@ -188,7 +188,8 @@ function editItem(item: CalendarItem) {
 
 async function quickSave(title: string) {
   if (!quick.value) return;
-  const { draft } = quick.value;
+  const current = quick.value;
+  const { draft } = current;
   const saved = await saveEvent({
     id: null,
     title,
@@ -200,7 +201,7 @@ async function quickSave(title: string) {
     attendees: [],
     sendInvites: false,
   });
-  if (saved) quick.value = null;
+  if (saved && quick.value === current) quick.value = null;
 }
 
 function quickMore(title: string) {
@@ -261,6 +262,8 @@ async function removeItem(item: CalendarItem) {
 }
 
 async function saveEvent(payload: EventEditorPayload): Promise<boolean> {
+  if (saving.value) return false;
+  const draft = editorDraft.value;
   const accountId =
     accounts.emailAccounts.find((account) => account.id === accounts.activeAccountId)?.id ||
     accounts.emailAccounts[0]?.id;
@@ -272,6 +275,7 @@ async function saveEvent(payload: EventEditorPayload): Promise<boolean> {
   try {
     await invites.createEvent({
       id: payload.id,
+      expectedUpdatedAt: payload.expectedUpdatedAt,
       accountId,
       title: payload.title,
       description: payload.description,
@@ -282,7 +286,7 @@ async function saveEvent(payload: EventEditorPayload): Promise<boolean> {
       attendees: payload.attendees,
       sendInvites: payload.sendInvites,
     });
-    editorDraft.value = null;
+    if (editorDraft.value === draft) editorDraft.value = null;
     toast.success(t(payload.id ? 'calendar.toast.eventUpdated' : 'calendar.toast.eventCreated'));
     return true;
   } catch (err) {
