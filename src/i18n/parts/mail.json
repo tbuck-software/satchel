@@ -288,7 +288,12 @@
         "tabHtml": "HTML",
         "tabSource": "Original",
         "tabText": "Text",
-        "title": "Source"
+        "title": "Source",
+        "defaultFilename": "Message",
+        "fileType": "Email message",
+        "exportEml": "Save as EML…",
+        "exporting": "Exporting…",
+        "exported": "The complete message was exported."
       },
       "spoofing": {
         "auth": "Sender authentication failed ({mechanisms}). Be careful with links and attachments.",
@@ -620,7 +625,12 @@
         "tabHtml": "HTML",
         "tabSource": "Original",
         "tabText": "Text",
-        "title": "Quelltext"
+        "title": "Quelltext",
+        "defaultFilename": "Nachricht",
+        "fileType": "E-Mail-Nachricht",
+        "exportEml": "Als EML speichern…",
+        "exporting": "Wird exportiert…",
+        "exported": "Die vollständige Nachricht wurde exportiert."
       },
       "spoofing": {
         "auth": "Absenderauthentifizierung fehlgeschlagen ({mechanisms}). Vorsicht bei Links und Anhängen.",

@@ -676,6 +676,23 @@ export default {
                 }
             }
         },
+        "export_message": {
+            "kind": "object",
+            "fields": {
+                "messageId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "path": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "export_platform_data": {
             "kind": "object",
             "fields": {

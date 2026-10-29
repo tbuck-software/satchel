@@ -26,6 +26,8 @@ import {
   backendCommandsAvailable,
   backendUnsubscribe,
   backendGetMessageSource,
+  backendChooseSavePath,
+  backendExportMessage,
   type BackendAttachmentDto,
   type BackendDraft,
   type BackendMessage,
@@ -39,6 +41,7 @@ import { isOwnEmail } from '@/utils/mailIdentity';
 import { recordFrontendDiagnostic } from '@/utils/diagnostics';
 import { useConnectionStore } from '@/stores/connection';
 import { t } from '@/i18n/runtime';
+import { sanitizeThreadFilename } from '@/utils/threadExport';
 import { createCoalescingRunner, type CoalescingRunner } from '@/utils/coalescingRunner';
 
 function normalizeLineBreaks(input: string): string {
@@ -741,6 +744,18 @@ export const useMessagesStore = defineStore('messages', () => {
     return backendGetMessageSource(messageId);
   }
 
+  async function exportMessage(messageId: string, subject: string): Promise<boolean> {
+    if (!backendCommandsAvailable()) throw new Error(t('mail.source.desktopOnly'));
+    const path = await backendChooseSavePath({
+      suggestedName: `${sanitizeThreadFilename(subject, t('mail.source.defaultFilename'))}.eml`,
+      filterName: t('mail.source.fileType'),
+      extensions: ['eml'],
+    });
+    if (!path) return false;
+    await backendExportMessage({ path, messageId });
+    return true;
+  }
+
   async function unsubscribe(messageId: string): Promise<BackendUnsubscribeResult> {
     return backendUnsubscribe(messageId);
   }
@@ -1049,6 +1064,7 @@ export const useMessagesStore = defineStore('messages', () => {
     isBodyLoading,
     needsDetails,
     loadMessageSource,
+    exportMessage,
     unsubscribe,
     loadByThread,
     openThread,

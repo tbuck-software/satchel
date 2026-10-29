@@ -234,7 +234,8 @@
         "updateInstallLocationRequired": "Open Satchel from Applications before installing an update.",
         "updateRestartPreparationFailed": "The verified update is installed, but macOS could not prepare it for restart. Try again.",
         "accountColorInvalid": "Choose a colour as #rrggbb.",
-        "accountAvatarInvalid": "The picture must be a small PNG, JPEG or WebP image."
+        "accountAvatarInvalid": "The picture must be a small PNG, JPEG or WebP image.",
+        "exportOriginalUnavailable": "Cannot export \"{subject}\" because its complete original message is unavailable. Connect the account and try again. A partial message will not be exported."
       }
     }
   },
@@ -473,7 +474,8 @@
         "updateInstallLocationRequired": "Öffne Satchel aus dem Programme-Ordner, bevor du ein Update installierst.",
         "updateRestartPreparationFailed": "Das geprüfte Update ist installiert, aber macOS konnte den Neustart nicht vorbereiten. Versuche es erneut.",
         "accountColorInvalid": "Wähle eine Farbe im Format #rrggbb.",
-        "accountAvatarInvalid": "Das Bild muss ein kleines PNG-, JPEG- oder WebP-Bild sein."
+        "accountAvatarInvalid": "Das Bild muss ein kleines PNG-, JPEG- oder WebP-Bild sein.",
+        "exportOriginalUnavailable": "\"{subject}\" kann nicht exportiert werden, weil die vollständige Originalnachricht nicht verfügbar ist. Verbinde das Konto und versuche es erneut. Es wird keine unvollständige Nachricht exportiert."
       }
     }
   }

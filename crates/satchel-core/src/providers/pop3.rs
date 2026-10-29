@@ -215,6 +215,23 @@ impl Pop3Provider {
         )
     }
 
+    /// Retrieve an existing message by its stable UIDL without deleting it.
+    pub async fn fetch_raw_message(&self, uidl: &str) -> Result<Vec<u8>, String> {
+        let mut session = self.connect().await?;
+        let listing = parse_uidl_listing(&session.multiline_command("UIDL").await?);
+        let number = listing
+            .iter()
+            .find(|(_, listed)| listed == uidl)
+            .map(|(number, _)| *number)
+            .ok_or_else(|| "backend.errors.exportOriginalUnavailable".to_string())?;
+        let result = match session.retr(number).await? {
+            Retrieved::Body(lines) => Ok(join_crlf(&lines)),
+            Retrieved::Rejected(reason) => Err(reason),
+        };
+        let _ = session.quit().await;
+        result
+    }
+
     fn cfg(&self) -> Result<&Pop3RuntimeConfig, String> {
         self.config
             .as_ref()
@@ -408,7 +425,11 @@ fn parse_uidl_listing<L: AsRef<[u8]>>(lines: &[L]) -> Vec<(u32, String)> {
 
 /// Join a multi-line response back into one raw message.
 fn join_crlf(lines: &[Vec<u8>]) -> Vec<u8> {
-    lines.join(&b"\r\n"[..])
+    let mut raw = lines.join(&b"\r\n"[..]);
+    if !lines.is_empty() {
+        raw.extend_from_slice(b"\r\n");
+    }
+    raw
 }
 
 /// Split a raw message into its header block and the body offset.
@@ -446,6 +467,7 @@ fn envelope_from_raw(uidl: &str, raw: &[u8], receiver: &str) -> MessageEnvelope 
         remote_id: uidl.to_string(),
         remote_uidvalidity: None,
         remote_thread_id: None,
+        original_source: Some(raw.to_vec()),
         mailbox_ids: vec![POP3_FOLDER.to_string()],
         message_id_header: parse_header_value(&header, "Message-ID"),
         in_reply_to: parse_header_value(&header, "In-Reply-To"),
@@ -532,6 +554,7 @@ impl MailProvider for Pop3Provider {
 
         let mut messages = Vec::new();
         let mut fetched_uidls = Vec::new();
+        let mut source_bytes = 0usize;
         for (number, uidl) in pending.iter().take(fetch_limit()) {
             let raw = match session.retr(*number).await {
                 Ok(Retrieved::Body(lines)) => join_crlf(&lines),
@@ -552,6 +575,7 @@ impl MailProvider for Pop3Provider {
                     return Err(format!("pop3 RETR failed for {uidl}: {err}").into());
                 }
             };
+            source_bytes = source_bytes.saturating_add(raw.len());
             messages.push(envelope_from_raw(
                 uidl,
                 &raw,
@@ -561,6 +585,11 @@ impl MailProvider for Pop3Provider {
                     .unwrap_or_default(),
             ));
             fetched_uidls.push(uidl.clone());
+            // Originals now live until the batch commits. Bound the batch by
+            // bytes too; 200 large attachments must not accumulate in RAM.
+            if source_bytes >= 64 * 1024 * 1024 {
+                break;
+            }
         }
 
         let _ = session.quit().await;
@@ -895,6 +924,7 @@ mod tests {
         let envelope = envelope_from_raw("uidl-1", raw.as_bytes(), "unknown");
 
         assert_eq!(envelope.remote_id, "uidl-1");
+        assert_eq!(envelope.original_source.as_deref(), Some(raw.as_bytes()));
         assert_eq!(envelope.subject, "Angebot");
         assert_eq!(envelope.from_address, "alice@example.test");
         assert_eq!(envelope.from_name.as_deref(), Some("Alice"));
@@ -1077,6 +1107,14 @@ BODY-OF-MSG-{index} Gr"
 
     fn seen_uidls(batch: &SyncBatch) -> Vec<String> {
         Pop3CursorState::from_checkpoint(&batch.next).seen_uidls
+    }
+
+    #[tokio::test]
+    async fn retrieves_original_bytes_by_uidl_instead_of_sequence_position() {
+        let expected = latin1_message(2);
+        let port = spawn_fake_server(vec![plain_message(1), expected.clone()], None, None).await;
+        let raw = provider_on(port).fetch_raw_message("UIDL-2").await.unwrap();
+        assert_eq!(raw, [expected.as_slice(), b"\r\n"].concat());
     }
 
     /// The regression: an 8-bit body used to abort RETR after its bytes were

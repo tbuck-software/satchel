@@ -1050,6 +1050,7 @@ mod tests {
             remote_id: remote_id.to_string(),
             remote_uidvalidity: None,
             remote_thread_id: None,
+            original_source: None,
             mailbox_ids: Vec::new(),
             message_id_header: None,
             in_reply_to: None,

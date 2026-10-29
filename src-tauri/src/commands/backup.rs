@@ -237,17 +237,14 @@ where
     Ok(columns)
 }
 
-/// Message rows one export page holds.
-///
-/// A page is what the exporter has in memory at once, bodies included. The old
-/// `fetch_all` over the whole table meant a 20-GB mailbox could not be
-/// exported at all.
+/// Page only lightweight message metadata. Bodies, draft payloads and source
+/// blobs are loaded individually so large attachments cannot fill a page.
 const EXPORT_PAGE_ROWS: i64 = 500;
 
-/// What the mbox writer needs of a message. The database keeps parsed bodies
-/// rather than complete source MIME, so complex messages are rebuilt below.
+/// Page metadata and the editable fields used only when exporting drafts.
+/// Original source blobs are loaded individually, never as a whole page.
 #[derive(sqlx::FromRow)]
-struct MboxExportRow {
+struct MessageExportRow {
     id: String,
     date: String,
     from_address: String,
@@ -264,6 +261,15 @@ struct MboxExportRow {
     references_header: Option<String>,
     draft_attachments_json: Option<String>,
     has_attachments: i64,
+    is_draft: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct ExportPageRow {
+    id: String,
+    date: String,
+    from_address: String,
+    subject: Option<String>,
 }
 
 // Count export pages within the test task without observing parallel exports.
@@ -278,16 +284,13 @@ async fn fetch_export_page(
     account_id: Option<&str>,
     cursor: Option<&(String, String)>,
     limit: i64,
-) -> Result<Vec<MboxExportRow>, String> {
+) -> Result<Vec<ExportPageRow>, String> {
     #[cfg(test)]
     let _ = EXPORT_PAGE_QUERIES.try_with(|count| count.set(count.get() + 1));
 
     let mut query = sqlx::QueryBuilder::new(
-        "SELECT id, date, from_address, COALESCE(from_name, '') AS from_name, to_addresses,
-                cc_addresses, bcc_addresses, reply_to, subject, body_text, body_html,
-                message_id_header, in_reply_to, references_header, draft_attachments_json,
-                has_attachments
-         FROM messages WHERE 1 = 1",
+        "SELECT id, date, from_address, subject
+         FROM messages WHERE account_id IN (SELECT id FROM accounts WHERE kind = 'email')",
     );
     if let Some(account) = account_id {
         query.push(" AND account_id = ");
@@ -308,7 +311,7 @@ async fn fetch_export_page(
     query.push_bind(limit);
 
     query
-        .build_query_as::<MboxExportRow>()
+        .build_query_as::<ExportPageRow>()
         .fetch_all(pool)
         .await
         .map_err(|err| err.to_string())
@@ -326,7 +329,7 @@ struct MboxAttachmentRow {
 
 async fn export_attachments(
     pool: &SqlitePool,
-    row: &MboxExportRow,
+    row: &MessageExportRow,
 ) -> Result<Vec<crate::providers::traits::OutgoingAttachment>, String> {
     use crate::providers::traits::OutgoingAttachment;
 
@@ -396,10 +399,10 @@ fn export_attachment_error(filename: &str) -> String {
         .encoded()
 }
 
-fn build_mime_mbox_entry(
-    row: &MboxExportRow,
+fn build_draft_message(
+    row: &MessageExportRow,
     attachments: Vec<crate::providers::traits::OutgoingAttachment>,
-) -> Result<(String, String), String> {
+) -> Result<Vec<u8>, String> {
     use crate::providers::traits::OutgoingMessage;
     let addresses = |raw: Option<&str>| -> Vec<String> {
         raw.and_then(|value| serde_json::from_str(value).ok())
@@ -445,122 +448,193 @@ fn build_mime_mbox_entry(
             }
         })
         .collect::<Vec<_>>()
-        .join("\n")
-        + "\n\n";
-    Ok((header, body.replace("\r\n", "\n")))
+        .join("\r\n");
+    Ok(format!("{header}\r\n\r\n{body}").into_bytes())
 }
 
-/// Stream locally cached messages into an mbox file at the given path. A
-/// missing attachment aborts the export, leaving the destination untouched.
-/// Mbox-O format (with `>From ` line escaping and a `From <sender> <date>` line
-/// per message). Compatible with Apple Mail, Thunderbird, mutt, mu, etc.
-///
-/// The order is `date ASC` as before, with `id` as the tiebreak the cursor
-/// needs; for distinct dates the output is unchanged.
+/// Export original MIME one message at a time. Local drafts have no original
+/// wire representation yet and are built from their current editable state.
+async fn export_message_source(
+    pool: &SqlitePool,
+    row: &MessageExportRow,
+) -> Result<Vec<u8>, String> {
+    if row.is_draft != 0 {
+        let attachments = export_attachments(pool, row).await?;
+        return build_draft_message(row, attachments);
+    }
+    match crate::commands::messages::fetch_remote_message_source(pool, &row.id).await {
+        Ok(Some(raw)) if valid_export_source(&raw) => Ok(raw),
+        result => {
+            if let Err(error) = result {
+                tracing::warn!(message_id = %row.id, %error, "original message unavailable for export");
+            }
+            Err(original_export_error(row.subject.as_deref()))
+        }
+    }
+}
+
+fn valid_export_source(raw: &[u8]) -> bool {
+    !raw.starts_with(&[0xd0, 0xcf, 0x11, 0xe0])
+        && (raw
+            .windows(4)
+            .position(|part| part == b"\r\n\r\n")
+            .is_some_and(|position| position > 0)
+            || raw
+                .windows(2)
+                .position(|part| part == b"\n\n")
+                .is_some_and(|position| position > 0))
+}
+
+fn original_export_error(subject: Option<&str>) -> String {
+    CommandError::new("backend.errors.exportOriginalUnavailable")
+        .with_param("subject", subject.unwrap_or_default())
+        .encoded()
+}
+
 async fn write_mailbox_export(
     pool: &SqlitePool,
     path: &str,
     account_id: Option<&str>,
 ) -> Result<ExportResult, String> {
-    let pending = format!("{path}.satchel-partial-{}", uuid::Uuid::new_v4());
-    let result = write_mailbox_export_to_path(pool, &pending, account_id).await;
-    let mut result = match result {
-        Ok(result) => result,
-        Err(error) => {
-            let _ = tokio::fs::remove_file(&pending).await;
-            return Err(error);
-        }
-    };
-    if let Err(error) = tokio::fs::rename(&pending, path).await {
-        let _ = tokio::fs::remove_file(&pending).await;
-        return Err(format!("finish {path}: {error}"));
-    }
-    result.path = path.to_string();
-    Ok(result)
+    write_mailbox_export_with_source(pool, path, account_id, |id| async move {
+        let row = fetch_export_message(pool, &id).await?;
+        export_message_source(pool, &row).await
+    })
+    .await
 }
 
-async fn write_mailbox_export_to_path(
+async fn fetch_export_message(pool: &SqlitePool, id: &str) -> Result<MessageExportRow, String> {
+    sqlx::query_as(
+        "SELECT id, date, from_address, COALESCE(from_name, '') AS from_name,
+        to_addresses, cc_addresses, bcc_addresses, reply_to, subject, body_text, body_html,
+        message_id_header, in_reply_to, references_header, draft_attachments_json,
+        has_attachments, is_draft FROM messages WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .map_err(|error| error.to_string())
+}
+
+/// Both production and transport tests use the same atomic writer. A failed
+/// download or disk write never replaces a previously completed export.
+async fn write_mailbox_export_with_source<F, Fut>(
     pool: &SqlitePool,
     path: &str,
     account_id: Option<&str>,
-) -> Result<ExportResult, String> {
+    mut source: F,
+) -> Result<ExportResult, String>
+where
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<u8>, String>>,
+{
     use tokio::io::AsyncWriteExt;
-
-    let file = tokio::fs::File::create(path)
-        .await
-        .map_err(|err| format!("create {path}: {err}"))?;
+    let destination = Path::new(path);
+    let directory = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let staging = tempfile::Builder::new()
+        .prefix(".satchel-export-")
+        .tempfile_in(directory)
+        .map_err(|error| error.to_string())?;
+    let file = tokio::fs::File::from_std(staging.reopen().map_err(|error| error.to_string())?);
     let mut out = tokio::io::BufWriter::new(file);
-
-    let mut count = 0usize;
-    let mut bytes = 0u64;
-    let mut cursor: Option<(String, String)> = None;
+    let mut count = 0;
+    let mut bytes = 0;
+    let mut cursor = None;
     loop {
         let rows = fetch_export_page(pool, account_id, cursor.as_ref(), EXPORT_PAGE_ROWS).await?;
         if rows.is_empty() {
             break;
         }
-        let last = rows.len() < EXPORT_PAGE_ROWS as usize;
         for row in &rows {
-            let from_line = format!(
-                "From {} {}\n",
-                row.from_address,
-                reformat_date_for_mbox(&row.date)
-            );
-            out.write_all(from_line.as_bytes())
+            let raw = source(row.id.clone()).await?;
+            if !valid_export_source(&raw) {
+                return Err(original_export_error(row.subject.as_deref()));
+            }
+            let sender: String = row
+                .from_address
+                .chars()
+                .filter(|character| !character.is_whitespace() && !character.is_control())
+                .collect();
+            let sender = if sender.is_empty() {
+                "MAILER-DAEMON"
+            } else {
+                &sender
+            };
+            let envelope = format!("From {sender} {}\n", reformat_date_for_mbox(&row.date));
+            out.write_all(envelope.as_bytes())
                 .await
-                .map_err(|err| err.to_string())?;
-            bytes += from_line.len() as u64;
-
-            let attachments = export_attachments(pool, row).await?;
-            let (header, body) =
-                if attachments.is_empty() && row.body_html.as_deref().is_none_or(str::is_empty) {
-                    (
-                        build_mbox_headers(
-                            &row.from_address,
-                            &row.from_name,
-                            row.to_addresses.as_deref(),
-                            row.cc_addresses.as_deref(),
-                            row.subject.as_deref(),
-                            row.message_id_header.as_deref(),
-                            row.in_reply_to.as_deref(),
-                            row.references_header.as_deref(),
-                            &row.date,
-                        ),
-                        row.body_text.clone().unwrap_or_default(),
-                    )
-                } else {
-                    build_mime_mbox_entry(row, attachments)?
-                };
-            out.write_all(header.as_bytes())
+                .map_err(|error| error.to_string())?;
+            bytes += envelope.len() as u64;
+            bytes += crate::email::mbox::write_message(&mut out, &raw)
                 .await
-                .map_err(|err| err.to_string())?;
-            bytes += header.len() as u64;
-
-            let escaped = escape_mbox_body(&body);
-            out.write_all(escaped.as_bytes())
-                .await
-                .map_err(|err| err.to_string())?;
-            bytes += escaped.len() as u64;
-            out.write_all(b"\n\n")
-                .await
-                .map_err(|err| err.to_string())?;
-            bytes += 2;
+                .map_err(|error| error.to_string())?;
             count += 1;
         }
-        if last {
+        let tail = rows.last().expect("non-empty page");
+        cursor = Some((tail.date.clone(), tail.id.clone()));
+        if rows.len() < EXPORT_PAGE_ROWS as usize {
             break;
         }
-        let tail = rows.last().expect("a non-empty page has a last row");
-        cursor = Some((tail.date.clone(), tail.id.clone()));
     }
-
-    out.flush().await.map_err(|err| err.to_string())?;
-
+    out.flush().await.map_err(|error| error.to_string())?;
+    out.get_ref()
+        .sync_all()
+        .await
+        .map_err(|error| error.to_string())?;
+    drop(out);
+    staging
+        .persist(destination)
+        .map_err(|error| error.to_string())?;
     Ok(ExportResult {
         path: path.to_string(),
         message_count: count,
         bytes_written: bytes,
     })
+}
+
+async fn write_message_export(
+    pool: &SqlitePool,
+    path: &str,
+    message_id: &str,
+) -> Result<(), String> {
+    let row = fetch_export_message(pool, message_id).await?;
+    let raw = export_message_source(pool, &row).await?;
+    let destination = Path::new(path);
+    let directory = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let staging = tempfile::Builder::new()
+        .prefix(".satchel-export-")
+        .tempfile_in(directory)
+        .map_err(|error| error.to_string())?;
+    use tokio::io::AsyncWriteExt;
+    let mut file = tokio::fs::File::from_std(staging.reopen().map_err(|error| error.to_string())?);
+    file.write_all(&raw)
+        .await
+        .map_err(|error| error.to_string())?;
+    file.sync_all().await.map_err(|error| error.to_string())?;
+    drop(file);
+    staging
+        .persist(destination)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn export_message(
+    state: tauri::State<'_, crate::AppState>,
+    pool: tauri::State<'_, SqlitePool>,
+    path: String,
+    message_id: String,
+) -> CommandResult<()> {
+    state.write_grants.take(std::path::Path::new(&path))?;
+    write_message_export(pool.inner(), &path, &message_id)
+        .await
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -834,113 +908,9 @@ fn reformat_date_for_mbox(rfc3339: &str) -> String {
         })
 }
 
-/// One header line for the mbox writer: no injection, folded at 78 octets.
-///
-/// Every value here comes from a stored message, and a stored message comes
-/// from the network. A `Subject` holding a newline used to end the header and
-/// begin whatever the sender wrote next — `Bcc:`, a second `From:`, a body.
-/// CR and LF are folded away to a single space; the rest is folded at
-/// whitespace per RFC 5322 §2.2.3, with LF continuations because this file uses
-/// LF throughout.
-fn mbox_header(name: &str, value: &str) -> String {
-    let flattened = value
-        .split(['\r', '\n'])
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-
-    let line = format!("{name}: {flattened}");
-    if line.len() <= 78 {
-        return format!("{line}\n");
-    }
-
-    let mut out = String::with_capacity(line.len() + line.len() / 78 * 2);
-    let mut used = 0usize;
-    for (index, word) in line.split(' ').enumerate() {
-        if index > 0 {
-            if used + 1 + word.len() > 78 {
-                out.push_str("\n ");
-                used = 1;
-            } else {
-                out.push(' ');
-                used += 1;
-            }
-        }
-        out.push_str(word);
-        used += word.len();
-    }
-    out.push('\n');
-    out
-}
-
-fn build_mbox_headers(
-    from: &str,
-    from_name: &str,
-    to: Option<&str>,
-    cc: Option<&str>,
-    subject: Option<&str>,
-    msg_id: Option<&str>,
-    in_reply_to: Option<&str>,
-    references: Option<&str>,
-    date: &str,
-) -> String {
-    let mut s = String::new();
-    let from_line = if from_name.is_empty() {
-        mbox_header("From", from)
-    } else {
-        mbox_header("From", &format!("\"{from_name}\" <{from}>"))
-    };
-    s.push_str(&from_line);
-    if let Some(to) = to.and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok()) {
-        if !to.is_empty() {
-            s.push_str(&mbox_header("To", &to.join(", ")));
-        }
-    }
-    if let Some(cc) = cc.and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok()) {
-        if !cc.is_empty() {
-            s.push_str(&mbox_header("Cc", &cc.join(", ")));
-        }
-    }
-    if let Some(subject) = subject {
-        s.push_str(&mbox_header("Subject", subject));
-    }
-    if let Some(msg_id) = msg_id {
-        s.push_str(&mbox_header("Message-ID", msg_id));
-    }
-    if let Some(reply) = in_reply_to {
-        if !reply.is_empty() {
-            s.push_str(&mbox_header("In-Reply-To", reply));
-        }
-    }
-    if let Some(references) = references {
-        if !references.is_empty() {
-            s.push_str(&mbox_header("References", references));
-        }
-    }
-    let formatted_date = chrono::DateTime::parse_from_rfc3339(date)
-        .map(|dt| dt.to_rfc2822())
-        .unwrap_or_else(|_| chrono::Utc::now().to_rfc2822());
-    s.push_str(&format!("Date: {formatted_date}\n"));
-    s.push_str("MIME-Version: 1.0\n");
-    s.push_str("Content-Type: text/plain; charset=UTF-8\n\n");
-    s
-}
-
-fn escape_mbox_body(body: &str) -> String {
-    body.lines()
-        .map(|line| {
-            if line.starts_with("From ") {
-                format!(">{line}")
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-use crate::email::mbox::{strip_mbox_from_line, MboxEntries};
+#[cfg(test)]
+use crate::email::mbox::strip_mbox_from_line;
+use crate::email::mbox::MboxEntries;
 
 #[tauri::command]
 pub async fn import_mbox(
@@ -984,6 +954,35 @@ pub async fn import_mbox(
         });
     }
 
+    if Path::new(&path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("eml"))
+    {
+        crate::commands::file_limits::guard_import_size(Path::new(&path)).await?;
+        let raw = tokio::fs::read(&path)
+            .await
+            .map_err(|error| error.to_string())?;
+        let imported = import_one_message(
+            &app,
+            pool.inner(),
+            &account_id,
+            &account.0,
+            &folder_id,
+            &raw,
+        )
+        .await?;
+        satchel_core::db::maintenance::request_fts_check(pool.inner())
+            .await
+            .map_err(|error| error.to_string())?;
+        return Ok(ImportResult {
+            path,
+            message_count: usize::from(imported),
+            skipped: usize::from(!imported),
+            cancelled: false,
+        });
+    }
+
     let bytes_total = tokio::fs::metadata(&path)
         .await
         .map(|meta| meta.len())
@@ -1006,7 +1005,7 @@ pub async fn import_mbox(
     let mut count = 0usize;
     let mut skipped = 0usize;
     let mut cancelled = false;
-    while let Some(entry) = entries.next_entry().await? {
+    while let Some(entry) = entries.next_message_bytes().await? {
         match import_one_message(
             &app,
             pool.inner(),
@@ -1105,10 +1104,10 @@ async fn import_one_message(
     account_id: &str,
     account_email: &str,
     folder_id: &str,
-    raw: &str,
+    raw: &[u8],
 ) -> Result<bool, String> {
-    let message = strip_mbox_from_line(raw);
-    let parsed = crate::providers::imap::parse_raw_rfc822(message.as_bytes())?;
+    let message = raw;
+    let parsed = crate::providers::imap::parse_raw_rfc822(message)?;
     import_parsed_message(
         app,
         pool,
@@ -1116,7 +1115,7 @@ async fn import_one_message(
         account_email,
         folder_id,
         parsed,
-        message.as_bytes(),
+        message,
     )
     .await
 }
@@ -1865,75 +1864,6 @@ mod tests {
     use super::*;
     use crate::email::mbox::MAX_MESSAGE_BYTES;
 
-    /// A stored subject comes from the network. Before folding, a newline in it
-    /// ended the header and started whatever the sender wrote next.
-    #[test]
-    fn a_subject_cannot_inject_a_header_line() {
-        let headers = build_mbox_headers(
-            "sender@example.test",
-            "",
-            None,
-            None,
-            Some("Rechnung\nBcc: attacker@example.test\nX-Spoof: yes"),
-            None,
-            None,
-            None,
-            "2026-01-01T00:00:00Z",
-        );
-
-        assert!(headers.contains("Subject: Rechnung Bcc: attacker@example.test X-Spoof: yes"));
-        for line in headers.lines() {
-            assert!(
-                !line.starts_with("Bcc:") && !line.starts_with("X-Spoof:"),
-                "injected header survived: {line}"
-            );
-        }
-    }
-
-    /// Folding must be reversible: unfolding restores the value.
-    #[test]
-    fn a_long_header_folds_at_whitespace_and_unfolds_again() {
-        let subject = "Quartalsbericht ".repeat(12);
-        let folded = mbox_header("Subject", subject.trim());
-
-        assert!(
-            folded.lines().count() > 1,
-            "a 190-octet header must fold: {folded}"
-        );
-        for line in folded.lines().skip(1) {
-            assert!(
-                line.starts_with(' '),
-                "continuation needs leading WSP: {line}"
-            );
-        }
-        let unfolded = folded.replace("\n ", " ");
-        assert_eq!(unfolded.trim_end(), format!("Subject: {}", subject.trim()));
-    }
-
-    /// A name with a newline must not escape the From line either.
-    #[test]
-    fn a_display_name_cannot_inject_a_header_line() {
-        let headers = build_mbox_headers(
-            "sender@example.test",
-            "Buck\nTo: victim@example.test",
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            "2026-01-01T00:00:00Z",
-        );
-
-        assert_eq!(
-            headers
-                .lines()
-                .filter(|line| line.starts_with("To:"))
-                .count(),
-            0
-        );
-    }
-
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use std::str::FromStr;
 
@@ -2555,9 +2485,9 @@ mod tests {
             sqlx::query(
                 "INSERT INTO messages
                  (id, account_id, folder_id, from_address, from_name, to_addresses, subject,
-                  date, body_text, created_at, updated_at)
+                  date, body_text, is_draft, created_at, updated_at)
                  VALUES (?, 'account', 'folder', 'sender@example.test', 'Sender',
-                         '[\"rcpt@example.test\"]', ?, ?, ?, '', '')",
+                         '[\"rcpt@example.test\"]', ?, ?, ?, 1, '', '')",
             )
             .bind(format!("message-{index:05}"))
             .bind(format!("Subject {index}"))
@@ -2572,6 +2502,184 @@ mod tests {
             .expect("message");
         }
         tx.commit().await.expect("commit");
+    }
+
+    #[tokio::test]
+    async fn export_keeps_original_headers_encodings_and_signature_parts() {
+        let pool = migrated_pool().await;
+        seed_exportable_messages(&pool, 1).await;
+        let raw = b"Received: from original.example.test\r\n\
+From: sender@example.test\r\nSubject: Original\r\n\
+Content-Type: multipart/signed; boundary=signature\r\n\r\n\
+--signature\r\nContent-Type: text/plain; charset=windows-1252\r\n\
+Content-Transfer-Encoding: 8bit\r\n\r\nGr\xfc\xdfe\r\n\
+--signature\r\nContent-Type: application/pkcs7-signature\r\n\r\nSignature bytes\r\n\
+--signature--\r\n";
+        sqlx::query("UPDATE messages SET is_draft = 0, original_source = ?, body_html = '<p>Sanitized display</p>' WHERE id = 'message-00000'")
+            .bind(raw.as_slice()).execute(&pool).await.unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let path = target.path().join("original.mbox");
+        write_mailbox_export(&pool, &path.to_string_lossy(), None)
+            .await
+            .unwrap();
+        let exported = std::fs::read(path).unwrap();
+        assert!(
+            exported.windows(raw.len()).any(|part| part == raw),
+            "the complete original MIME must survive unchanged"
+        );
+    }
+
+    #[tokio::test]
+    async fn original_source_exports_without_a_local_attachment_cache() {
+        let pool = migrated_pool().await;
+        seed_exportable_messages(&pool, 1).await;
+        sqlx::query("UPDATE messages SET is_draft = 0, original_source = ?, has_attachments = 1 WHERE id = 'message-00000'")
+            .bind(b"Subject: Complete source\r\n\r\nOriginal MIME attachment bytes".as_slice())
+            .execute(&pool).await.unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let path = target.path().join("complete.mbox");
+        write_mailbox_export(&pool, &path.to_string_lossy(), None)
+            .await
+            .expect("original MIME already contains the attachment");
+    }
+
+    #[tokio::test]
+    async fn eml_export_is_byte_exact_and_unavailable_originals_leave_existing_files_intact() {
+        let pool = migrated_pool().await;
+        seed_exportable_messages(&pool, 1).await;
+        let original = b"Received: original\r\nSubject: Exact\r\n\r\nFrom literal\r\n>From quoted\r\n\xff\0\r\n\r\n";
+        sqlx::query(
+            "UPDATE messages SET is_draft = 0, original_source = ? WHERE id = 'message-00000'",
+        )
+        .bind(original.as_slice())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let path = target.path().join("original.eml");
+        write_message_export(&pool, &path.to_string_lossy(), "message-00000")
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        sqlx::query("UPDATE messages SET original_source = NULL")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let error = write_message_export(&pool, &path.to_string_lossy(), "message-00000")
+            .await
+            .unwrap_err();
+        assert!(error.contains("exportOriginalUnavailable"));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(std::fs::read_dir(target.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn uncached_sources_are_loaded_one_at_a_time_and_failed_downloads_are_atomic() {
+        let pool = migrated_pool().await;
+        seed_exportable_messages(&pool, 2).await;
+        let target = tempfile::tempdir().unwrap();
+        let path = target.path().join("mailbox.mbox");
+        let original = b"Subject: From the provider\r\n\r\nFull attachment MIME\r\n";
+        let result =
+            write_mailbox_export_with_source(&pool, &path.to_string_lossy(), None, |_| async {
+                Ok(original.to_vec())
+            })
+            .await
+            .unwrap();
+        assert_eq!(result.message_count, 2);
+        let previous = std::fs::read(&path).unwrap();
+        let mut entries = MboxEntries::new(tokio::io::BufReader::new(previous.as_slice()));
+        assert_eq!(
+            entries.next_message_bytes().await.unwrap().unwrap(),
+            original
+        );
+        assert_eq!(
+            entries.next_message_bytes().await.unwrap().unwrap(),
+            original
+        );
+        let result = write_mailbox_export_with_source(
+            &pool,
+            &path.to_string_lossy(),
+            None,
+            |id| async move {
+                if id == "message-00000" {
+                    Ok(original.to_vec())
+                } else {
+                    Err("download interrupted".into())
+                }
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), previous);
+        assert_eq!(std::fs::read_dir(target.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn eml_downloads_uncached_originals_and_refuses_a_different_message() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        for matches in [true, false] {
+            let pool = migrated_pool().await;
+            seed_exportable_messages(&pool, 1).await;
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let raw = b"Message-ID: <original@example.test>\r\nSubject: Full original\r\n\r\nAttachment bytes: \xff\0\r\n";
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut reader = BufReader::new(stream);
+                reader.get_mut().write_all(b"+OK ready\r\n").await.unwrap();
+                loop {
+                    let mut request = String::new();
+                    if reader.read_line(&mut request).await.unwrap() == 0 {
+                        break;
+                    }
+                    let response: &[u8] = match request.trim() {
+                        "UIDL" => b"+OK\r\n1 different-uidl\r\n2 original-uidl\r\n.\r\n",
+                        "RETR 2" => {
+                            reader
+                                .get_mut()
+                                .write_all(b"+OK original\r\n")
+                                .await
+                                .unwrap();
+                            reader.get_mut().write_all(raw).await.unwrap();
+                            b".\r\n"
+                        }
+                        "QUIT" => {
+                            reader.get_mut().write_all(b"+OK bye\r\n").await.unwrap();
+                            break;
+                        }
+                        command if command.starts_with("USER ") || command.starts_with("PASS ") => {
+                            b"+OK\r\n"
+                        }
+                        _ => panic!("unexpected POP3 export command"),
+                    };
+                    reader.get_mut().write_all(response).await.unwrap();
+                }
+            });
+            let config = crate::commands::accounts::encrypt_account_config("account", &serde_json::json!({
+                "pop3": { "host": "127.0.0.1", "port": port, "tls": false, "username": "fixture", "password": "fixture" }
+            }).to_string()).unwrap();
+            sqlx::query("UPDATE accounts SET provider = 'pop3', config = ?")
+                .bind(config)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE messages SET is_draft = 0, has_attachments = 1, remote_id = 'original-uidl', message_id_header = ?")
+                .bind(if matches { "<original@example.test>" } else { "<different@example.test>" }).execute(&pool).await.unwrap();
+            let target = tempfile::tempdir().unwrap();
+            let path = target.path().join("download.eml");
+            std::fs::write(&path, b"previous complete export").unwrap();
+            let result =
+                write_message_export(&pool, &path.to_string_lossy(), "message-00000").await;
+            if matches {
+                result.unwrap();
+                assert_eq!(std::fs::read(&path).unwrap(), raw);
+            } else {
+                assert!(result.unwrap_err().contains("exportOriginalUnavailable"));
+                assert_eq!(std::fs::read(&path).unwrap(), b"previous complete export");
+            }
+            server.await.unwrap();
+        }
     }
 
     /// 2500 messages must not be one `fetch_all`: five full pages and the
@@ -2626,50 +2734,25 @@ mod tests {
         }
     }
 
-    /// The mbox bytes are a compatibility surface: this pins them.
     #[tokio::test]
-    async fn the_mbox_output_is_byte_for_byte_what_it_was() {
+    async fn drafts_export_complete_mime_with_bcc_and_from_lines() {
         let pool = migrated_pool().await;
-        seed_exportable_messages(&pool, 2).await;
-        sqlx::query(
-            "UPDATE messages SET body_text = 'From the desk of Sender' WHERE id = 'message-00001'",
-        )
-        .execute(&pool)
-        .await
-        .expect("body with a From line");
-        let target = tempfile::tempdir().expect("dir");
+        seed_exportable_messages(&pool, 1).await;
+        sqlx::query("UPDATE messages SET bcc_addresses = '[\"hidden@example.test\"]', body_text = 'From the desk of Sender' WHERE id = 'message-00000'")
+            .execute(&pool).await.unwrap();
+        let target = tempfile::tempdir().unwrap();
         let path = target.path().join("export.mbox");
-
         write_mailbox_export(&pool, &path.to_string_lossy(), None)
             .await
-            .expect("export");
-
-        let written = std::fs::read_to_string(&path).expect("export file");
-        assert_eq!(
-            written,
-            concat!(
-                "From sender@example.test Thu Jan  1 00:00:00 2026\n",
-                "From: \"Sender\" <sender@example.test>\n",
-                "To: rcpt@example.test\n",
-                "Subject: Subject 0\n",
-                "Date: Thu, 1 Jan 2026 00:00:00 +0000\n",
-                "MIME-Version: 1.0\n",
-                "Content-Type: text/plain; charset=UTF-8\n",
-                "\n",
-                "Body 0\n",
-                "\n",
-                "From sender@example.test Thu Jan  1 00:00:01 2026\n",
-                "From: \"Sender\" <sender@example.test>\n",
-                "To: rcpt@example.test\n",
-                "Subject: Subject 1\n",
-                "Date: Thu, 1 Jan 2026 00:00:01 +0000\n",
-                "MIME-Version: 1.0\n",
-                "Content-Type: text/plain; charset=UTF-8\n",
-                "\n",
-                ">From the desk of Sender\n",
-                "\n",
-            )
-        );
+            .unwrap();
+        let raw = std::fs::read(path).unwrap();
+        let mut entries = MboxEntries::new(tokio::io::BufReader::new(raw.as_slice()));
+        let mime = entries.next_message_bytes().await.unwrap().unwrap();
+        let parsed = crate::providers::imap::parse_raw_rfc822(&mime).unwrap();
+        assert_eq!(parsed.body_text.as_deref(), Some("From the desk of Sender"));
+        assert!(String::from_utf8(mime)
+            .unwrap()
+            .contains("Bcc: hidden@example.test\r\n"));
     }
 
     #[tokio::test]

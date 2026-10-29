@@ -57,6 +57,31 @@ beforeEach(async () => {
 });
 
 describe('message file viewer', () => {
+  it('offers inline parts for saving when their bytes cannot be embedded', async () => {
+    backend.openMessageFile.mockResolvedValue({
+      subject: 'Large inline photo',
+      from_address: 'sender@example.test',
+      to_addresses: [],
+      cc_addresses: [],
+      date_rfc3339: null,
+      body_html: '<img src="cid:large-photo">',
+      body_text: null,
+      attachments: [
+        { index: 0, filename: 'large-photo.jpg', content_type: 'image/jpeg', size: 24_403_635,
+          content_id: 'large-photo', is_inline: true, data_url: null },
+        { index: 1, filename: 'logo.png', content_type: 'image/png', size: 4,
+          content_id: 'logo', is_inline: true, data_url: 'data:image/png;base64,AQIDBA==' },
+      ],
+    });
+
+    const wrapper = mountViewer();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('large-photo.jpg');
+    expect(wrapper.text()).not.toContain('logo.png');
+    expect(wrapper.findAll('button').filter((button) => button.text().includes('Save'))).toHaveLength(1);
+  });
+
   it('translates a command error instead of showing the key', async () => {
     backend.openMessageFile.mockRejectedValue({
       key: 'backend.errors.unexpected',

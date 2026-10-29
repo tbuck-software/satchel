@@ -140,6 +140,31 @@ async fn body_window_evicts_the_unsanitized_original_but_keeps_imports() {
 }
 
 #[tokio::test]
+async fn body_window_keeps_download_only_pop3_originals() {
+    let pool = fixture().await;
+    sqlx::query("UPDATE accounts SET provider = 'pop3'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    message(&pool, "downloaded", "Only local copy").await;
+    sqlx::query("UPDATE messages SET original_source = ?")
+        .bind(b"Subject: Original\r\n\r\n\xff".as_slice())
+        .execute(&pool)
+        .await
+        .unwrap();
+    body_window::set_days(&pool, 90, 0).await.unwrap();
+    data_repairs::run_repair(&pool, &BODY_WINDOW, 10, None, |_| {})
+        .await
+        .unwrap();
+    let stored: Vec<u8> =
+        sqlx::query_scalar("SELECT original_source FROM messages WHERE id = 'downloaded'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, b"Subject: Original\r\n\r\n\xff");
+}
+
+#[tokio::test]
 async fn disabling_or_changing_the_body_window_cancels_or_restarts_its_cursor() {
     let pool = fixture().await;
     message(&pool, "a", "Body").await;

@@ -7,6 +7,7 @@ const harness = vi.hoisted(() => ({
   messagesLoading: false,
   messagesError: null as string | null,
   loadMessages: vi.fn().mockResolvedValue(undefined),
+  exportMessage: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('@/stores/connection', () => ({
@@ -20,6 +21,7 @@ vi.mock('@/stores/accounts', () => ({
 vi.mock('@/stores/messages', () => ({
   useMessagesStore: () => ({
     getByThread: () => harness.messages,
+    exportMessage: harness.exportMessage,
     isLoading: () => harness.messagesLoading,
     loadByThread: harness.loadMessages,
     openThread: harness.loadMessages,
@@ -109,6 +111,7 @@ vi.mock('@/utils/perf', () => ({ perfStart: () => undefined }));
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 import ThreadView from './ThreadView.vue';
+import { activeThreadReaderCommands } from '@/composables/useThreadReaderCommands';
 
 function render() {
   return mount(ThreadView, {
@@ -136,6 +139,17 @@ beforeEach(() => {
 });
 
 describe('reader load failure', () => {
+  it('routes the existing EML menu action to the complete original export', async () => {
+    harness.messages = [{ id: 'original-message', from: { email: 'sender@example.test' }, to: [],
+      bodyText: 'Display text only', bodyHtml: '<p>Original is richer</p>', bodyLoaded: true,
+      isDraft: false, isRead: true, timestamp: '2026-08-13T18:00:00Z', attachments: [] }];
+    const wrapper = render();
+    await flushPromises();
+    await activeThreadReaderCommands()!.exportThread('eml');
+    expect(harness.exportMessage).toHaveBeenCalledExactlyOnceWith('original-message', 'Design review');
+    wrapper.unmount();
+  });
+
   it('replaces the blank message area with the failure and a way back', async () => {
     harness.messagesError = 'backend.errors.messageReadFailed';
     const wrapper = render();

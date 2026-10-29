@@ -25,6 +25,41 @@ test('moves through the list with j after a click into the mail body', async ({ 
   await expect(keyboardFocus).toHaveCount(1);
 });
 
+test('keeps the tab focus ring inside the clipped virtual row', async ({ page }) => {
+  const row = page.locator('[data-list-target-key="thread:th-6"]');
+  // Tab focus is independent of the j/k navigation state. The native outline
+  // used to spill out of the fixed-height slot and lose its top and bottom.
+  await page.keyboard.press('Tab');
+  await row.focus();
+  await expect(row).toBeFocused();
+  const ring = await row.evaluate((element) => {
+    const slot = element.closest('.thread-list-row')!;
+    // The sliding surface paints over the article. The ring must live on
+    // that surface so an unopened row cannot hide its focus underneath it.
+    const surface = element.querySelector('.thread-row__surface')!;
+    const rect = surface.getBoundingClientRect();
+    const clip = slot.getBoundingClientRect();
+    const style = getComputedStyle(surface);
+    const outset = style.outlineStyle === 'none'
+      ? 0
+      : Math.max(0, parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset));
+    return {
+      focusVisible: element.matches(':focus-visible'),
+      outlineWidth: parseFloat(style.outlineWidth),
+      nativeOutline: getComputedStyle(element).outlineStyle,
+      top: rect.top - outset,
+      bottom: rect.bottom + outset,
+      clipTop: clip.top,
+      clipBottom: clip.bottom,
+    };
+  });
+  expect(ring.focusVisible).toBe(true);
+  expect(ring.outlineWidth).toBeGreaterThan(0);
+  expect(ring.nativeOutline).toBe('none');
+  expect(ring.top).toBeGreaterThanOrEqual(ring.clipTop);
+  expect(ring.bottom).toBeLessThanOrEqual(ring.clipBottom);
+});
+
 test('keeps a text selection in the mail while the shortcuts work again', async ({ page, browserName }) => {
   // In Chromium a mouse drag inside the scriptless frame never resolves under
   // Playwright, with or without the refocus; WebKit is the engine at issue.

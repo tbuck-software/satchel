@@ -1788,6 +1788,7 @@ fn map_graph_message(message: GraphMessage) -> MessageEnvelope {
         remote_id: remote_id.clone(),
         remote_uidvalidity: None,
         remote_thread_id: message.conversation_id,
+        original_source: None,
         mailbox_ids: Vec::new(),
         message_id_header: message.internet_message_id,
         in_reply_to,
