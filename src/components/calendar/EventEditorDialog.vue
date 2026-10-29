@@ -4,6 +4,7 @@ import { useFocusTrap } from '@/composables/useFocusTrap';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import {
   addDays,
+  formatTime,
   startOfDay,
   toDateInput,
   toDateTimeLocalInput,
@@ -13,6 +14,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
 import { useI18n } from 'vue-i18n';
+import { useUiStore } from '@/stores/ui';
 
 export interface EventEditorPayload {
   id: string | null;
@@ -36,7 +38,8 @@ const emit = defineEmits<{
   save: [payload: EventEditorPayload];
 }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
+const ui = useUiStore();
 
 const title = ref('');
 const location = ref('');
@@ -80,6 +83,20 @@ watch(allDay, (value) => {
   const { start, end } = parseInputs(!value);
   if (start && end) syncDateInputs(start, end, value);
 });
+
+/**
+ * The phone's reading of a start or end: "Tue, Oct 27 · 11:00". WebKit
+ * draws its own date fields as "10/27/2026, 11:00:00 AM", seconds included,
+ * whatever the step; the native field stays on top, invisible, so a tap
+ * still opens the platform's picker.
+ */
+function whenLabel(value: string): string {
+  if (!value) return '';
+  const date = new Date(allDay.value ? `${value}T00:00` : value);
+  if (!Number.isFinite(date.getTime())) return value;
+  const day = date.toLocaleDateString(locale.value, { weekday: 'short', month: 'short', day: 'numeric' });
+  return allDay.value ? day : `${day} · ${formatTime(date)}`;
+}
 
 function syncDateInputs(start: Date, end: Date, wholeDay: boolean) {
   if (wholeDay) {
@@ -194,11 +211,19 @@ useDismissable(() => props.draft !== null, () => emit('close'));
             <div class="field-row">
               <label class="field">
                 <span>{{ $t('calendar.event.start') }}</span>
-                <input v-model="startInput" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
+                <span v-if="ui.isMobile" class="when">
+                  <span class="when__value" aria-hidden="true">{{ whenLabel(startInput) }}</span>
+                  <input v-model="startInput" class="when__native" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
+                </span>
+                <input v-else v-model="startInput" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
               </label>
               <label class="field">
                 <span>{{ $t('calendar.event.end') }}</span>
-                <input v-model="endInput" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
+                <span v-if="ui.isMobile" class="when">
+                  <span class="when__value" aria-hidden="true">{{ whenLabel(endInput) }}</span>
+                  <input v-model="endInput" class="when__native" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
+                </span>
+                <input v-else v-model="endInput" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
               </label>
             </div>
 
@@ -317,6 +342,32 @@ useDismissable(() => props.draft !== null, () => emit('close'));
 
 .field textarea {
   resize: vertical;
+}
+
+.when {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: var(--input-height, 36px);
+  border: var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  padding: 8px 10px;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.when:focus-within {
+  outline: var(--border-focus);
+  outline-offset: var(--focus-outline-offset);
+}
+
+.field .when__native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
 }
 
 .event-editor__error {
