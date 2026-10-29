@@ -57,7 +57,7 @@
           "unavailable": "Open Outbox to review the affected items.",
           "resolved": "Everything is up to date."
         },
-        "mutationsFailed": "{count} change could not be synced to the server. | {count} changes could not be synced to the server.",
+        "mutationsFailed": "{count} change didn't reach the server. | {count} changes didn't reach the server.",
         "retryFailed": "Re-sync failed: {error}",
         "retryQueued": "{count} change is being synced again. | {count} changes are being synced again.",
         "status": {
@@ -427,6 +427,7 @@
       "undoAria": "{label} — undo, {seconds} seconds remaining",
       "toastQueueAria": "{count} undo actions, show the previous one",
       "toastQueue": "{count} undo actions – show the previous one",
+      "toastQueuePosition": "{index} of {count}",
       "undoAnnouncement": "{label}. Press {key} to undo.",
       "undoKeyHint": "{key} to undo"
     }
@@ -489,7 +490,7 @@
           "unavailable": "Öffne den Postausgang, um die betroffenen Einträge zu prüfen.",
           "resolved": "Alles ist auf dem neuesten Stand."
         },
-        "mutationsFailed": "{count} Änderung konnte nicht mit dem Server abgeglichen werden. | {count} Änderungen konnten nicht mit dem Server abgeglichen werden.",
+        "mutationsFailed": "{count} Änderung ist nicht beim Server angekommen. | {count} Änderungen sind nicht beim Server angekommen.",
         "retryFailed": "Erneuter Abgleich fehlgeschlagen: {error}",
         "retryQueued": "{count} Änderung wird erneut abgeglichen. | {count} Änderungen werden erneut abgeglichen.",
         "status": {
@@ -859,6 +860,7 @@
       "undoAria": "{label} — Rückgängig machen, {seconds} Sekunden verbleiben",
       "toastQueueAria": "{count} Rückgängig-Aktionen, vorherige anzeigen",
       "toastQueue": "{count} Rückgängig-Aktionen – vorherige anzeigen",
+      "toastQueuePosition": "{index} von {count}",
       "undoAnnouncement": "{label}. Mit {key} rückgängig machen.",
       "undoKeyHint": "{key} macht rückgängig"
     }

@@ -105,7 +105,7 @@
         "title": "Aufmerksamkeit erforderlich",
         "unavailable": "Öffne den Postausgang, um die betroffenen Einträge zu prüfen."
       },
-      "mutationsFailed": "{count} Änderung konnte nicht mit dem Server abgeglichen werden. | {count} Änderungen konnten nicht mit dem Server abgeglichen werden.",
+      "mutationsFailed": "{count} Änderung ist nicht beim Server angekommen. | {count} Änderungen sind nicht beim Server angekommen.",
       "retryFailed": "Erneuter Abgleich fehlgeschlagen: {error}",
       "retryQueued": "{count} Änderung wird erneut abgeglichen. | {count} Änderungen werden erneut abgeglichen.",
       "status": {
@@ -3548,6 +3548,7 @@
     "send": "Senden",
     "toastQueue": "{count} Rückgängig-Aktionen – vorherige anzeigen",
     "toastQueueAria": "{count} Rückgängig-Aktionen, vorherige anzeigen",
+    "toastQueuePosition": "{index} von {count}",
     "undoAnnouncement": "{label}. Mit {key} rückgängig machen.",
     "undoAria": "{label} — Rückgängig machen, {seconds} Sekunden verbleiben",
     "undoKeyHint": "{key} macht rückgängig",

@@ -291,6 +291,7 @@
   "ui": {
     "dismissToast": "Meldung schließen",
     "toastQueue": "{count} Rückgängig-Aktionen – vorherige anzeigen",
+    "toastQueuePosition": "{index} von {count}",
     "undoAnnouncement": "{label}. Mit {key} rückgängig machen."
   },
   "viewer": {

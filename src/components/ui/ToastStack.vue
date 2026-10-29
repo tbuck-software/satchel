@@ -235,6 +235,11 @@ async function runPresentedAction(item: PresentedToast) {
   await toast.runActions(item.sourceIds, item.sourceActions);
 }
 
+/** Where this toast sits among the actions the compact stack cycles through. */
+function compactPosition(item: PresentedToast): number {
+  return Math.max(0, compactActionableToasts.value.findIndex((entry) => entry.id === item.id)) + 1;
+}
+
 function showPreviousCompactUndo() {
   const actions = compactActionableToasts.value;
   if (actions.length < 2) return;
@@ -282,30 +287,33 @@ function showPreviousCompactUndo() {
 
         <span class="toast__message">{{ item.message }}</span>
 
-        <button
-          v-if="item.action"
-          type="button"
-          class="toast__action"
-          @click="void runPresentedAction(item)"
-        >
-          {{ item.action.label }}
-        </button>
-
-        <button
-          v-if="isCompact && compactActionableToasts.length > 1"
-          type="button"
-          class="toast__queue"
-          :title="$t('ui.toastQueue', { count: compactActionableToasts.length })"
-          @click="showPreviousCompactUndo"
-        >
-          {{ compactActionableToasts.length }}
-        </button>
-
-        <IconButton size="sm" :title="$t('ui.dismissToast')" @click="dismissPresented(item)">
+        <IconButton class="toast__dismiss" size="sm" :title="$t('ui.dismissToast')" @click="dismissPresented(item)">
           <AppIcon size="sm">
             <path d="M4 4l8 8M12 4l-8 8" />
           </AppIcon>
         </IconButton>
+
+        <!-- On a phone this is a row of its own under the message: beside it,
+             action, counter and close squeezed the copy to three lines. -->
+        <span v-if="item.action || (isCompact && compactActionableToasts.length > 1)" class="toast__actions">
+          <button
+            v-if="isCompact && compactActionableToasts.length > 1"
+            type="button"
+            class="toast__queue"
+            :title="$t('ui.toastQueue', { count: compactActionableToasts.length })"
+            @click="showPreviousCompactUndo"
+          >
+            {{ $t('ui.toastQueuePosition', { index: compactPosition(item), count: compactActionableToasts.length }) }}
+          </button>
+          <button
+            v-if="item.action"
+            type="button"
+            class="toast__action"
+            @click="void runPresentedAction(item)"
+          >
+            {{ item.action.label }}
+          </button>
+        </span>
       </div>
     </TransitionGroup>
   </div>
@@ -416,20 +424,29 @@ function showPreviousCompactUndo() {
   background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
 }
 
+.toast__actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-xs);
+  /* After the message, before the close button, as one row on the desktop. */
+  order: 1;
+}
+
+.toast__dismiss {
+  order: 2;
+}
+
 .toast__queue {
-  display: grid;
-  place-items: center;
-  flex: 0 0 26px;
-  width: 26px;
   height: 26px;
-  padding: 0;
-  border: var(--border-default);
-  border-radius: var(--radius-full);
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
+  padding: 0 var(--space-xs);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
   font: inherit;
   font-size: var(--font-size-xs);
-  font-weight: var(--weight-strong);
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
 
@@ -469,9 +486,24 @@ function showPreviousCompactUndo() {
   }
 
   .toast {
+    flex-wrap: wrap;
     min-height: 56px;
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
+  }
+
+  /* Message and close share the first row; the actions take the next one,
+     right-aligned under the message. */
+  .toast__actions {
+    order: 3;
+    flex-basis: 100%;
+    justify-content: flex-end;
+    margin-top: calc(-1 * var(--space-xs));
+  }
+
+  .toast__action,
+  .toast__queue {
+    height: 36px;
   }
 }
 
