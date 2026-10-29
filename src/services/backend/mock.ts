@@ -116,7 +116,9 @@ const outbox: BackendOutboxItem[] = mockOutboxItems.map((item) => ({
   last_error: item.id === 'failed-move' ? 'backend.errors.queueFolderChanged'
     : item.id === 'ob-failed' ? 'backend.errors.queueMessageTooLarge' : item.last_error,
 }));
-if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockVisibility')) outbox.splice(0);
+// `?mockOutbox=0` starts with a clean Outbox, for screens that are not about it.
+if (typeof window !== 'undefined' && (new URLSearchParams(window.location.search).has('mockVisibility')
+  || new URLSearchParams(window.location.search).get('mockOutbox') === '0')) outbox.splice(0);
 /*
  * `?mockLongThread=120` adds one HTML conversation of that many messages on
  * top of the Inbox, and `?mockExtraThreads=40` that many short threads below
