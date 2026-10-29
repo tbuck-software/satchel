@@ -2616,6 +2616,15 @@ export default {
                         "kind": "value"
                     }
                 },
+                "expected_updated_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
                 "id": {
                     "required": false,
                     "shape": {

@@ -1,6 +1,7 @@
 // Generated from Rust. Run pnpm ipc:generate.
 export type CalendarEventInput = {
     id?: string | null;
+    expected_updated_at?: string | null;
     account_id: string;
     title: string;
     description?: string | null;

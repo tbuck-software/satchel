@@ -131,6 +131,30 @@ describe('recurring invitation safety', () => {
   });
 });
 
+describe('all-day invitation dates', () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  for (const [label, start, end, first, last, exclusive] of [
+    ['DATE', '2026-03-29', '2026-03-30', '29', '29', '30'],
+    ['legacy', '2026-03-29T00:00:00Z', '2026-03-30T00:00:00Z', '29', '29', '30'],
+    ['range', '2026-03-28', '2026-03-31', '28', '30', '31'],
+  ] as const) {
+    it(`shows ${label} on the written dates with an inclusive final day`, () => {
+      const wrapper = render({ starts_at: start, ends_at: end, all_day: 1 });
+      try {
+        expect(wrapper.get('.leaf__day').text()).toBe(first);
+        const when = wrapper.get('.when').text();
+        expect(when).toContain(last);
+        expect(when).not.toContain(exclusive);
+        expect(when).toContain('All day');
+        expect(when).not.toMatch(/\d{1,2}:\d{2}/);
+      } finally {
+        wrapper.unmount();
+      }
+    });
+  }
+});
+
 // #125: the location opened unassessed and the notes asked through `window.confirm`.
 describe('invitation links', () => {
   beforeEach(() => {

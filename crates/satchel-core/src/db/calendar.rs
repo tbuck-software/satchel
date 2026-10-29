@@ -85,6 +85,15 @@ pub struct CalendarEventSyncState {
     pub remote_etag: Option<String>,
 }
 
+#[derive(Debug, Clone, FromRow)]
+pub struct CalendarEventEditState {
+    #[sqlx(flatten)]
+    pub event: CalendarEventRecord,
+    pub raw_ics: Option<String>,
+    pub remote_href: Option<String>,
+    pub remote_etag: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CalendarEventWrite<'a> {
     pub id: &'a str,
@@ -142,6 +151,8 @@ pub enum CalendarError {
     EventOwnership,
     #[error("calendar event was not found")]
     EventNotFound,
+    #[error("calendar event changed during editing")]
+    EventChanged,
     #[error("calendar persistence failed")]
     Persistence(#[source] sqlx::Error),
 }
@@ -152,8 +163,8 @@ impl From<sqlx::Error> for CalendarError {
     }
 }
 
-/// Owns calendar persistence. Network calls, mail delivery and ICS rendering
-/// remain with the provider and app orchestration modules.
+/// Owns calendar persistence. The calendar application service coordinates
+/// ICS editing, provider calls and invitation queue transactions.
 pub struct CalendarRepository<'a> {
     pool: &'a SqlitePool,
 }
@@ -318,6 +329,50 @@ impl<'a> CalendarRepository<'a> {
             .await
     }
 
+    /// Keep the resource body, form projection and DAV precondition together.
+    pub async fn event_edit_state(
+        &self,
+        account_id: &str,
+        id: &str,
+    ) -> Result<Option<CalendarEventEditState>, CalendarError> {
+        let state = sqlx::query_as::<_, CalendarEventEditState>(
+            "SELECT * FROM calendar_events WHERE id = ? LIMIT 1",
+        )
+        .bind(id)
+        .fetch_optional(self.pool)
+        .await?;
+        match state {
+            Some(state) if state.event.account_id != account_id => {
+                Err(CalendarError::EventOwnership)
+            }
+            state => Ok(state),
+        }
+    }
+
+    /// Recheck the snapshot after provider I/O, while holding the writer lock.
+    pub async fn require_event_version(
+        &self,
+        transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        expected: &CalendarEventEditState,
+    ) -> Result<(), CalendarError> {
+        let unchanged: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM calendar_events WHERE id = ? AND account_id = ?
+             AND updated_at = ? AND raw_ics IS ? AND remote_etag IS ?)",
+        )
+        .bind(&expected.event.id)
+        .bind(&expected.event.account_id)
+        .bind(&expected.event.updated_at)
+        .bind(expected.raw_ics.as_deref())
+        .bind(expected.remote_etag.as_deref())
+        .fetch_one(&mut **transaction)
+        .await?;
+        if unchanged {
+            Ok(())
+        } else {
+            Err(CalendarError::EventChanged)
+        }
+    }
+
     pub async fn event_sync_state(
         &self,
         account_id: &str,
@@ -354,6 +409,35 @@ impl<'a> CalendarRepository<'a> {
         &self,
         event: CalendarEventWrite<'_>,
     ) -> Result<CalendarEventRecord, CalendarError> {
+        let mut connection = self.pool.acquire().await?;
+        Self::write_event(&mut connection, event).await
+    }
+
+    pub async fn upsert_event_in_transaction(
+        &self,
+        transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        event: CalendarEventWrite<'_>,
+    ) -> Result<CalendarEventRecord, CalendarError> {
+        Self::write_event(transaction, event).await
+    }
+
+    async fn write_event(
+        connection: &mut sqlx::SqliteConnection,
+        event: CalendarEventWrite<'_>,
+    ) -> Result<CalendarEventRecord, CalendarError> {
+        // Providers may still supply legacy UTC-midnight mirrors of DATE
+        // values. Normalize every writer, so a sync cannot reverse an edit's
+        // representation and invalidate the editor revision without a change.
+        let starts_at = if event.all_day {
+            event.starts_at.get(..10).unwrap_or(event.starts_at)
+        } else {
+            event.starts_at
+        };
+        let ends_at = if event.all_day {
+            event.ends_at.get(..10).unwrap_or(event.ends_at)
+        } else {
+            event.ends_at
+        };
         let now = chrono::Utc::now().to_rfc3339();
         let result = sqlx::query(
             "INSERT INTO calendar_events
@@ -375,7 +459,17 @@ impl<'a> CalendarRepository<'a> {
                 remote_etag = excluded.remote_etag,
                 collection_href = excluded.collection_href,
                 raw_ics = excluded.raw_ics,
-                updated_at = excluded.updated_at
+                updated_at = CASE WHEN
+                    (calendar_events.uid, calendar_events.title, calendar_events.description,
+                     calendar_events.location, calendar_events.starts_at, calendar_events.ends_at,
+                     calendar_events.all_day, calendar_events.attendees_json, calendar_events.source,
+                     calendar_events.remote_href, calendar_events.remote_etag,
+                     calendar_events.collection_href, calendar_events.raw_ics)
+                    IS (excluded.uid, excluded.title, excluded.description, excluded.location,
+                        excluded.starts_at, excluded.ends_at, excluded.all_day,
+                        excluded.attendees_json, excluded.source, excluded.remote_href,
+                        excluded.remote_etag, excluded.collection_href, excluded.raw_ics)
+                    THEN calendar_events.updated_at ELSE excluded.updated_at END
              WHERE calendar_events.account_id = excluded.account_id",
         )
         .bind(event.id)
@@ -384,8 +478,8 @@ impl<'a> CalendarRepository<'a> {
         .bind(event.title)
         .bind(event.description)
         .bind(event.location)
-        .bind(event.starts_at)
-        .bind(event.ends_at)
+        .bind(starts_at)
+        .bind(ends_at)
         .bind(if event.all_day { 1_i64 } else { 0_i64 })
         .bind(event.attendees_json)
         .bind(event.source)
@@ -395,12 +489,19 @@ impl<'a> CalendarRepository<'a> {
         .bind(event.raw_ics)
         .bind(&now)
         .bind(&now)
-        .execute(self.pool)
+        .execute(&mut *connection)
         .await?;
         if result.rows_affected() == 0 {
             return Err(CalendarError::EventOwnership);
         }
-        self.get_event(event.account_id, event.id).await
+        sqlx::query_as::<_, CalendarEventRecord>(&format!(
+            "{EVENT_SELECT} WHERE account_id = ? AND id = ?"
+        ))
+        .bind(event.account_id)
+        .bind(event.id)
+        .fetch_optional(&mut *connection)
+        .await?
+        .ok_or(CalendarError::EventNotFound)
     }
 
     pub async fn get_event(
@@ -544,13 +645,15 @@ impl<'a> CalendarRepository<'a> {
         Ok(true)
     }
 
+    /// Include a one-day margin for DATE ends. The caller interprets those
+    /// calendar dates in the viewer's timezone and filters the exact boundary.
     pub async fn upcoming(&self, now: &str) -> Result<Vec<UpcomingCalendarRecord>, CalendarError> {
         sqlx::query_as::<_, UpcomingCalendarRecord>(
             "SELECT title, starts_at, ends_at, all_day, location, raw_ics
              FROM (
                  SELECT title, starts_at, ends_at, all_day, location, raw_ics
                  FROM calendar_events
-                 WHERE datetime(ends_at) >= datetime(?)
+                 WHERE CASE WHEN all_day = 1 THEN datetime(substr(ends_at, 1, 10), '+1 day') ELSE datetime(ends_at) END >= datetime(?)
                     OR (
                         raw_ics IS NOT NULL
                         AND instr(upper(substr(raw_ics, instr(raw_ics, 'BEGIN:VEVENT'))), 'RRULE:') > 0
@@ -562,7 +665,7 @@ impl<'a> CalendarRepository<'a> {
                  FROM calendar_invites invites
                  WHERE invites.starts_at IS NOT NULL
                    AND invites.ends_at IS NOT NULL
-                   AND datetime(invites.ends_at) >= datetime(?)
+                   AND CASE WHEN invites.all_day = 1 THEN datetime(substr(invites.ends_at, 1, 10), '+1 day') ELSE datetime(invites.ends_at) END >= datetime(?)
                    AND COALESCE(invites.cancelled, 0) = 0
                    AND invites.rsvp_status != 'declined'
                    AND NOT EXISTS (

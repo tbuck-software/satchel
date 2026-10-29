@@ -77,6 +77,7 @@
         "descriptionPlaceholder": "Notes, agenda, …",
         "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
         "sendInvites": "Send ICS invitations by mail",
+        "serverNotifications": "CalDAV servers may notify guests even when mail invitations are turned off.",
         "submit": "Create event",
         "add": "Add",
         "errors": {
@@ -487,6 +488,7 @@
         "descriptionPlaceholder": "Notizen, Agenda, …",
         "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
         "sendInvites": "ICS-Einladungen per Mail senden",
+        "serverNotifications": "CalDAV-Server können Gäste auch dann benachrichtigen, wenn Einladungen per E-Mail ausgeschaltet sind.",
         "submit": "Termin erstellen",
         "add": "Hinzufügen",
         "errors": {

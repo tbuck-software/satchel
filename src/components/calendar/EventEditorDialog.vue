@@ -5,6 +5,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import {
   addDays,
   formatTime,
+  parseCalendarBoundary,
   startOfDay,
   toDateInput,
   toDateTimeLocalInput,
@@ -18,6 +19,7 @@ import { useUiStore } from '@/stores/ui';
 
 export interface EventEditorPayload {
   id: string | null;
+  expectedUpdatedAt?: string | null;
   title: string;
   location: string | null;
   description: string | null;
@@ -82,7 +84,7 @@ watch(
 watch(allDay, (value) => {
   const { start, end } = parseInputs(!value);
   if (start && end) syncDateInputs(start, end, value);
-});
+}, { flush: 'sync' });
 
 /**
  * The phone's reading of a start or end: "Tue, Oct 27 · 11:00". WebKit
@@ -102,7 +104,10 @@ function syncDateInputs(start: Date, end: Date, wholeDay: boolean) {
   if (wholeDay) {
     startInput.value = toDateInput(start);
     // The stored end is exclusive; the form shows the inclusive last day.
-    const lastDay = end.getTime() > start.getTime() ? addDays(end, -1) : start;
+    const endDay = startOfDay(end);
+    const lastDay = end.getTime() > start.getTime()
+      ? (end.getTime() > endDay.getTime() ? endDay : addDays(endDay, -1))
+      : start;
     endInput.value = toDateInput(lastDay.getTime() < start.getTime() ? start : lastDay);
   } else {
     startInput.value = toDateTimeLocalInput(start);
@@ -113,17 +118,25 @@ function syncDateInputs(start: Date, end: Date, wholeDay: boolean) {
 }
 
 function parseInputs(wholeDay: boolean): { start: Date | null; end: Date | null } {
-  const start = new Date(startInput.value);
-  const end = new Date(endInput.value);
+  let start = parseCalendarBoundary(startInput.value, wholeDay);
+  let end = parseCalendarBoundary(endInput.value, wholeDay);
+  // datetime-local displays minutes. An untouched field must retain seconds
+  // and the original offset choice during a repeated DST hour.
+  const draft = props.draft;
+  if (!wholeDay && draft?.id && !draft.allDay) {
+    if (startInput.value === toDateTimeLocalInput(draft.start)) start = new Date(draft.start);
+    if (endInput.value === toDateTimeLocalInput(draft.end)) end = new Date(draft.end);
+  }
   if (!startInput.value || !Number.isFinite(start.getTime())) return { start: null, end: null };
   if (!endInput.value || !Number.isFinite(end.getTime())) return { start, end: null };
   if (wholeDay) {
-    return { start: startOfDay(start), end: addDays(startOfDay(end), 1) };
+    return { start, end: addDays(end, 1) };
   }
   return { start, end };
 }
 
 function submit() {
+  if (props.saving) return;
   if (!title.value.trim()) {
     error.value = t('calendar.editor.errors.titleRequired');
     return;
@@ -143,12 +156,13 @@ function submit() {
     .filter(Boolean);
   emit('save', {
     id: props.draft?.id ?? null,
+    expectedUpdatedAt: props.draft?.expectedUpdatedAt ?? null,
     title: title.value.trim(),
-    location: location.value.trim() || null,
-    description: description.value.trim() || null,
+    location: (location.value === props.draft?.location ? location.value : location.value.trim()) || null,
+    description: (description.value === props.draft?.description ? description.value : description.value.trim()) || null,
     allDay: allDay.value,
-    startsAt: start.toISOString(),
-    endsAt: end.toISOString(),
+    startsAt: allDay.value ? toDateInput(start) : start.toISOString(),
+    endsAt: allDay.value ? toDateInput(end) : end.toISOString(),
     attendees: attendeeList,
     sendInvites: sendInvites.value && attendeeList.length > 0,
   });
@@ -203,46 +217,47 @@ useDismissable(() => props.draft !== null, () => emit('close'));
           <div class="event-editor__form">
             <label class="field">
               <span>{{ $t('calendar.event.title') }}</span>
-              <input ref="titleField" v-model="title" :placeholder="$t('calendar.editor.titlePlaceholder')" />
+              <input :disabled="saving" ref="titleField" v-model="title" :placeholder="$t('calendar.editor.titlePlaceholder')" />
             </label>
 
-            <ToggleSwitch v-model="allDay">{{ $t('calendar.event.allDay') }}</ToggleSwitch>
+            <ToggleSwitch :disabled="saving" v-model="allDay">{{ $t('calendar.event.allDay') }}</ToggleSwitch>
 
             <div class="field-row">
               <label class="field">
                 <span>{{ $t('calendar.event.start') }}</span>
                 <span v-if="ui.isMobile" class="when">
                   <span class="when__value" aria-hidden="true">{{ whenLabel(startInput) }}</span>
-                  <input v-model="startInput" class="when__native" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
+                  <input :disabled="saving" v-model="startInput" class="when__native" :key="allDay ? 'date' : 'datetime-local'" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
                 </span>
-                <input v-else v-model="startInput" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
+                <input :disabled="saving" v-else v-model="startInput" :key="allDay ? 'date' : 'datetime-local'" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
               </label>
               <label class="field">
                 <span>{{ $t('calendar.event.end') }}</span>
                 <span v-if="ui.isMobile" class="when">
                   <span class="when__value" aria-hidden="true">{{ whenLabel(endInput) }}</span>
-                  <input v-model="endInput" class="when__native" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
+                  <input :disabled="saving" v-model="endInput" class="when__native" :key="allDay ? 'date' : 'datetime-local'" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
                 </span>
-                <input v-else v-model="endInput" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
+                <input :disabled="saving" v-else v-model="endInput" :key="allDay ? 'date' : 'datetime-local'" :type="allDay ? 'date' : 'datetime-local'" :step="allDay ? undefined : 60" />
               </label>
             </div>
 
             <label class="field">
               <span>{{ $t('calendar.event.location') }}</span>
-              <input v-model="location" :placeholder="$t('calendar.editor.locationPlaceholder')" />
+              <input :disabled="saving" v-model="location" :placeholder="$t('calendar.editor.locationPlaceholder')" />
             </label>
 
             <label class="field">
               <span>{{ $t('common.description') }}</span>
-              <textarea v-model="description" rows="3" :placeholder="$t('calendar.editor.descriptionPlaceholder')"></textarea>
+              <textarea :disabled="saving" v-model="description" rows="3" :placeholder="$t('calendar.editor.descriptionPlaceholder')"></textarea>
             </label>
 
             <label class="field">
               <span>{{ $t('calendar.event.attendees') }}</span>
-              <input v-model="attendees" :placeholder="$t('calendar.editor.attendeesPlaceholder')" />
+              <input :disabled="saving" v-model="attendees" :placeholder="$t('calendar.editor.attendeesPlaceholder')" />
             </label>
 
-            <ToggleSwitch v-model="sendInvites">{{ $t('calendar.editor.sendInvites') }}</ToggleSwitch>
+            <ToggleSwitch :disabled="saving" v-model="sendInvites">{{ $t('calendar.editor.sendInvites') }}</ToggleSwitch>
+            <p class="event-editor__hint">{{ $t('calendar.editor.serverNotifications') }}</p>
 
             <p v-if="error" class="event-editor__error" role="alert">{{ error }}</p>
           </div>
@@ -368,6 +383,12 @@ useDismissable(() => props.draft !== null, () => emit('close'));
   width: 100%;
   height: 100%;
   opacity: 0;
+}
+
+.event-editor__hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
 }
 
 .event-editor__error {

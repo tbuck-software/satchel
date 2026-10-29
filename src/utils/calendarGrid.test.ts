@@ -417,3 +417,21 @@ describe('weekdayLabels', () => {
     expect(weekdayLabels('de', 'narrow')).toEqual(['M', 'D', 'M', 'D', 'F', 'S', 'S']);
   });
 });
+
+describe('all-day mirror boundaries', () => {
+  it('places legacy UTC-midnight mirrors on their written calendar dates', () => {
+    const event = itemFromEvent({ id: 'all-day', uid: 'uid', account_id: 'a', title: 'Holiday',
+      starts_at: '2026-03-28T00:00:00Z', ends_at: '2026-03-31T00:00:00Z', all_day: 1,
+      attendees_json: '[]', source: 'caldav', collection_href: null,
+      description: null, location: null, created_at: '', updated_at: '' });
+    expect(itemsForDay([event], new Date(2026, 2, 27))).toHaveLength(0);
+    expect(itemsForDay([event], new Date(2026, 2, 28))).toHaveLength(1);
+    expect(itemsForDay([event], new Date(2026, 2, 30))).toHaveLength(1);
+    expect(itemsForDay([event], new Date(2026, 2, 31))).toHaveLength(0);
+    const dateOnly = itemFromEvent({ id: 'date', uid: 'date', account_id: 'a', title: 'Date',
+      starts_at: '2026-03-28', ends_at: '2026-03-31', all_day: 1, attendees_json: '[]',
+      source: 'local', collection_href: null, description: null, location: null, created_at: '', updated_at: '' });
+    expect(dateOnly.start).toEqual(event.start);
+    expect(dateOnly.end).toEqual(event.end);
+  });
+});

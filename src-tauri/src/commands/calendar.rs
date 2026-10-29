@@ -5,13 +5,13 @@ use std::{future::Future, pin::Pin};
 use crate::commands::error::{CommandError, CommandResult};
 use crate::commands::messages::{OutgoingAttachmentInput, OutgoingMessageInput};
 use crate::db::accounts::AccountRepository;
-use crate::db::calendar::{CalendarError, CalendarEventWrite, CalendarRepository};
+use crate::db::calendar::{CalendarError, CalendarRepository};
 pub use crate::db::calendar::{
     CalendarEventRecord as CalendarEventDto, CalendarInviteRecord as CalendarInviteDto,
     CalendarSourceRecord as CalendarSourceDto,
 };
 use crate::email::calendar::{build_invite_reply_ics, extract_ics_block, parse_invite};
-use crate::sync::outbox::{build_idempotent_send_action, build_send_action};
+use crate::sync::outbox::build_idempotent_send_action;
 use crate::AppState;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -20,6 +20,8 @@ use crate::AppState;
 pub struct CalendarEventInput {
     #[serde(default)]
     pub id: Option<String>,
+    #[serde(default)]
+    pub expected_updated_at: Option<String>,
     pub account_id: String,
     pub title: String,
     #[serde(default)]
@@ -67,12 +69,33 @@ impl From<CalendarError> for CommandError {
             CalendarError::InviteNotFound => "backend.errors.calendarInviteNotFound",
             CalendarError::EventOwnership => "backend.errors.calendarEventOwnership",
             CalendarError::EventNotFound => "backend.errors.calendarEventNotFound",
+            CalendarError::EventChanged => "backend.errors.calendarEventChanged",
             CalendarError::Persistence(error) => {
                 tracing::error!(%error, "calendar persistence failed");
                 "backend.errors.calendarPersistenceFailed"
             }
         };
         Self::new(key)
+    }
+}
+
+impl From<satchel_core::calendar::SaveError> for CommandError {
+    fn from(error: satchel_core::calendar::SaveError) -> Self {
+        use satchel_core::calendar::SaveError;
+        match error {
+            SaveError::Validation(key) => Self::new(key),
+            SaveError::Account(error) => error.into(),
+            SaveError::Calendar(error) => error.into(),
+            SaveError::Remote(_) => Self::new("backend.errors.calendarRemoteWriteFailed"),
+            SaveError::RemoteCommittedLocalFailed(error) => {
+                tracing::error!(%error, "calendar remote write succeeded but local persistence failed");
+                Self::new("backend.errors.calendarRemoteSavedSyncRequired")
+            }
+            SaveError::Invitation(error) => {
+                tracing::error!(%error, "calendar invitation could not be built");
+                Self::new("backend.errors.calendarPersistenceFailed")
+            }
+        }
     }
 }
 
@@ -180,126 +203,25 @@ pub async fn create_calendar_event(
     pool: tauri::State<'_, SqlitePool>,
     input: CalendarEventInput,
 ) -> CommandResult<CalendarEventDto> {
-    let starts_at = parse_calendar_time(&input.starts_at, "starts_at")?;
-    let ends_at = parse_calendar_time(&input.ends_at, "ends_at")?;
-    if ends_at <= starts_at {
-        return Err(CommandError::new("backend.errors.calendarEventEndInvalid"));
-    }
-    let title = input.title.trim();
-    if title.is_empty() {
-        return Err(CommandError::new("backend.errors.calendarTitleRequired"));
-    }
-
-    let account = AccountRepository::new(pool.inner())
-        .calendar_connection(&input.account_id)
-        .await?;
-
-    let id = input
-        .id
-        .clone()
-        .unwrap_or_else(|| format!("cal-{}", uuid::Uuid::new_v4()));
-    let repository = CalendarRepository::new(pool.inner());
-    let existing = repository.event_sync_state(&input.account_id, &id).await?;
-    let uid = existing
-        .as_ref()
-        .map(|row| row.uid.clone())
-        .unwrap_or_else(|| format!("{}@satchel.local", uuid::Uuid::new_v4()));
-    let attendees = normalize_attendees(&input.attendees);
-    let server_attendees: &[String] = if input.send_invites { &attendees } else { &[] };
-    let ics = build_request_ics(
-        &uid,
-        title,
-        input.description.as_deref(),
-        input.location.as_deref(),
-        starts_at,
-        ends_at,
-        input.all_day,
-        &account.email,
-        account.display_name.as_deref(),
-        server_attendees,
-    );
-    let existing_remote = existing.as_ref().filter(|row| row.source == "caldav");
-    let remote = crate::providers::dav::put_calendar_event(
-        &account.config,
-        &uid,
-        &ics,
-        existing_remote.and_then(|row| row.remote_href.as_deref()),
-        existing_remote.and_then(|row| row.remote_etag.as_deref()),
+    satchel_core::calendar::save_event(
+        pool.inner(),
+        &state.queue,
+        satchel_core::calendar::EventInput {
+            id: input.id,
+            expected_updated_at: input.expected_updated_at,
+            account_id: input.account_id,
+            title: input.title,
+            description: input.description,
+            location: input.location,
+            starts_at: input.starts_at,
+            ends_at: input.ends_at,
+            all_day: input.all_day,
+            attendees: input.attendees,
+            send_invites: input.send_invites,
+        },
     )
     .await
-    .map_err(|error| {
-        tracing::warn!(%error, account_id = %input.account_id, "CalDAV event write failed");
-        CommandError::new("backend.errors.groupwareCalendarSyncFailed")
-    })?;
-    let source = if remote.is_some() { "caldav" } else { "local" };
-    let stored_attendees = if remote.is_some() {
-        server_attendees
-    } else {
-        attendees.as_slice()
-    };
-    let attendees_json =
-        serde_json::to_string(stored_attendees).unwrap_or_else(|_| "[]".to_string());
-
-    let starts_at_text = starts_at.to_rfc3339();
-    let ends_at_text = ends_at.to_rfc3339();
-    let event = repository
-        .upsert_event(CalendarEventWrite {
-            id: &id,
-            account_id: &input.account_id,
-            uid: &uid,
-            title,
-            description: input.description.as_deref(),
-            location: input.location.as_deref(),
-            starts_at: &starts_at_text,
-            ends_at: &ends_at_text,
-            all_day: input.all_day,
-            attendees_json: &attendees_json,
-            source,
-            remote_href: remote.as_ref().map(|value| value.href.as_str()),
-            remote_etag: remote.as_ref().and_then(|value| value.etag.as_deref()),
-            collection_href: remote.as_ref().map(|value| value.collection_href.as_str()),
-            raw_ics: Some(&ics),
-        })
-        .await?;
-
-    if remote.is_none() && input.send_invites && !attendees.is_empty() {
-        let ics_b64 =
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, ics.as_bytes());
-        let outgoing_input = OutgoingMessageInput {
-            to: attendees.clone(),
-            subject: title.to_string(),
-            body: input
-                .description
-                .clone()
-                .unwrap_or_else(|| title.to_string()),
-            attachments: vec![OutgoingAttachmentInput {
-                filename: "invite.ics".into(),
-                mime_type: "text/calendar; method=REQUEST; charset=UTF-8".into(),
-                content_base64: ics_b64,
-                content_id: None,
-                inline: false,
-            }],
-            ..Default::default()
-        };
-        let mut action = build_send_action(input.account_id.clone(), outgoing_input, None)
-            .map_err(|error| {
-                tracing::error!(%error, "calendar invitation could not be queued");
-                CommandError::new("backend.errors.calendarPersistenceFailed")
-            })?;
-        // This path persists and returns; it does not execute immediate sends
-        // inline like send_message does. The worker must be able to claim it.
-        action.status = "pending".into();
-        state
-            .queue
-            .enqueue(pool.inner(), action)
-            .await
-            .map_err(|error| {
-                tracing::error!(%error, "calendar invitation queue write failed");
-                CommandError::new("backend.errors.calendarPersistenceFailed")
-            })?;
-    }
-
-    Ok(event)
+    .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -307,30 +229,9 @@ pub async fn delete_calendar_event(
     pool: tauri::State<'_, SqlitePool>,
     id: String,
 ) -> CommandResult<()> {
-    let repository = CalendarRepository::new(pool.inner());
-    let remote = repository
-        .event_sync_state_by_id(&id)
-        .await?
-        .ok_or(CalendarError::EventNotFound)?;
-    if remote.source == "caldav" {
-        if let Some(href) = remote.remote_href.as_deref() {
-            let account = AccountRepository::new(pool.inner())
-                .calendar_connection(&remote.account_id)
-                .await?;
-            crate::providers::dav::delete_calendar_event_remote(
-                &account.config,
-                href,
-                remote.remote_etag.as_deref(),
-            )
-            .await
-            .map_err(|error| {
-                tracing::warn!(%error, account_id = %remote.account_id, "CalDAV event deletion failed");
-                CommandError::new("backend.errors.groupwareCalendarSyncFailed")
-            })?;
-        }
-    }
-    repository.delete_event(&remote.account_id, &id).await?;
-    Ok(())
+    satchel_core::calendar::delete_event(pool.inner(), &id)
+        .await
+        .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -479,93 +380,6 @@ fn build_reply_ics(
     let parsed = parse_invite(&invite.raw_ics)
         .ok_or_else(|| "stored invitation no longer contains a VEVENT".to_string())?;
     build_invite_reply_ics(&parsed, account_email, account_name, partstat)
-}
-
-fn parse_calendar_time(raw: &str, _field: &str) -> CommandResult<chrono::DateTime<chrono::Utc>> {
-    chrono::DateTime::parse_from_rfc3339(raw)
-        .map(|dt| dt.with_timezone(&chrono::Utc))
-        .map_err(|_| CommandError::new("backend.errors.calendarTimeInvalid"))
-}
-
-fn normalize_attendees(input: &[String]) -> Vec<String> {
-    let mut out = input
-        .iter()
-        .map(|value| value.trim().trim_matches(['<', '>']).to_ascii_lowercase())
-        .filter(|value| value.contains('@'))
-        .collect::<Vec<_>>();
-    out.sort();
-    out.dedup();
-    out
-}
-
-fn build_request_ics(
-    uid: &str,
-    title: &str,
-    description: Option<&str>,
-    location: Option<&str>,
-    starts_at: chrono::DateTime<chrono::Utc>,
-    ends_at: chrono::DateTime<chrono::Utc>,
-    all_day: bool,
-    organizer_email: &str,
-    organizer_name: Option<&str>,
-    attendees: &[String],
-) -> String {
-    let dtstamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
-    let mut ics = String::new();
-    ics.push_str("BEGIN:VCALENDAR\r\n");
-    ics.push_str("PRODID:-//Satchel//EN\r\n");
-    ics.push_str("VERSION:2.0\r\n");
-    ics.push_str("METHOD:REQUEST\r\n");
-    ics.push_str("BEGIN:VEVENT\r\n");
-    ics.push_str(&format!("UID:{}\r\n", escape_ics(uid)));
-    ics.push_str(&format!("DTSTAMP:{dtstamp}\r\n"));
-    if all_day {
-        ics.push_str(&format!(
-            "DTSTART;VALUE=DATE:{}\r\n",
-            starts_at.format("%Y%m%d")
-        ));
-        ics.push_str(&format!(
-            "DTEND;VALUE=DATE:{}\r\n",
-            ends_at.format("%Y%m%d")
-        ));
-    } else {
-        ics.push_str(&format!(
-            "DTSTART:{}\r\n",
-            starts_at.format("%Y%m%dT%H%M%SZ")
-        ));
-        ics.push_str(&format!("DTEND:{}\r\n", ends_at.format("%Y%m%dT%H%M%SZ")));
-    }
-    ics.push_str(&format!("SUMMARY:{}\r\n", escape_ics(title)));
-    if let Some(description) = description.filter(|value| !value.trim().is_empty()) {
-        ics.push_str(&format!("DESCRIPTION:{}\r\n", escape_ics(description)));
-    }
-    if let Some(location) = location.filter(|value| !value.trim().is_empty()) {
-        ics.push_str(&format!("LOCATION:{}\r\n", escape_ics(location)));
-    }
-    let cn = organizer_name.unwrap_or(organizer_email);
-    ics.push_str(&format!(
-        "ORGANIZER;CN={}:mailto:{}\r\n",
-        escape_ics(cn),
-        organizer_email
-    ));
-    for attendee in attendees {
-        ics.push_str(&format!(
-            "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:{}\r\n",
-            attendee
-        ));
-    }
-    ics.push_str("END:VEVENT\r\n");
-    ics.push_str("END:VCALENDAR\r\n");
-    ics
-}
-
-fn escape_ics(input: &str) -> String {
-    input
-        .replace('\\', "\\\\")
-        .replace(';', "\\;")
-        .replace(',', "\\,")
-        .replace('\n', "\\n")
-        .replace('\r', "")
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

@@ -470,6 +470,38 @@ describe('CalendarView', () => {
     expect(wrapper.find('[data-test="event-editor"]').exists()).toBe(false);
   });
 
+  it('saves only once while an event write is pending', async () => {
+    let finish!: () => void;
+    harness.invites!.createEvent.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const wrapper = render();
+    await wrapper.findAll('.app-button').find((button) => button.text() === 'New event')!.trigger('click');
+    try {
+      await wrapper.get('[data-test="editor-save"]').trigger('click');
+      await wrapper.get('[data-test="editor-save"]').trigger('click');
+      expect(harness.invites!.createEvent).toHaveBeenCalledOnce();
+    } finally {
+      finish();
+      await flushPromises();
+    }
+  });
+
+  it('keeps a newer editor open when an earlier write completes', async () => {
+    let finish!: () => void;
+    harness.invites!.createEvent.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const wrapper = render();
+    const open = () => wrapper.findAll('.app-button').find((button) => button.text() === 'New event')!.trigger('click');
+    await open();
+    await wrapper.get('[data-test="editor-save"]').trigger('click');
+    wrapper.findComponent(EventEditorDialogStub).vm.$emit('close');
+    await nextTick();
+    await open();
+    const draft = wrapper.findComponent(EventEditorDialogStub).props('draft');
+    finish();
+    await flushPromises();
+    expect(wrapper.find('[data-test="event-editor"]').exists()).toBe(true);
+    expect(wrapper.findComponent(EventEditorDialogStub).props('draft')).toBe(draft);
+  });
+
   it('imports an ICS file and reports the imported summary', async () => {
     const wrapper = render();
     const file = new File(['BEGIN:VCALENDAR\nEND:VCALENDAR'], 'meeting.ics', {

@@ -79,6 +79,19 @@ describe('tray briefing', () => {
     });
   });
 
+  it('labels all-day DATE values on their calendar day west of UTC', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(new Date(2026, 2, 28, 12).getTime());
+    traySnapshot.mockResolvedValueOnce({ new_threads: [], upcoming_events: [{
+      title: 'All-day holiday', starts_at: '2026-03-29', ends_at: '2026-03-30', all_day: true, location: null,
+    }] });
+    const wrapper = mountPopover();
+    await flushPromises();
+    expect(wrapper.text()).toContain('Tomorrow');
+    expect(wrapper.text()).toContain('All day');
+    wrapper.unmount();
+    now.mockRestore();
+  });
+
   it('loads only when the hidden popover is actually shown and refreshes on reopen', async () => {
     tauriWindow.isVisible.mockResolvedValueOnce(false);
     const wrapper = mountPopover();

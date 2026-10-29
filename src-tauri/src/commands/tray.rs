@@ -668,7 +668,13 @@ async fn load_tray_threads(
 async fn load_upcoming_calendar_events(
     pool: &SqlitePool,
 ) -> Result<Vec<TrayCalendarEventDto>, crate::db::calendar::CalendarError> {
-    let now = chrono::Utc::now();
+    load_upcoming_calendar_events_at(pool, chrono::Utc::now()).await
+}
+
+async fn load_upcoming_calendar_events_at(
+    pool: &SqlitePool,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<TrayCalendarEventDto>, crate::db::calendar::CalendarError> {
     let now_text = now.to_rfc3339();
     let rows = crate::db::calendar::CalendarRepository::new(pool)
         .upcoming(&now_text)
@@ -676,13 +682,20 @@ async fn load_upcoming_calendar_events(
 
     let mut events = Vec::new();
     for row in rows {
+        // DATE recurrences use nominal calendar boundaries, so compare against
+        // the viewer's local date/time rather than the current UTC date/time.
+        let recurrence_now = if row.all_day {
+            now.with_timezone(&chrono::Local).naive_local().and_utc()
+        } else {
+            now
+        };
         let recurrences = row
             .raw_ics
             .as_deref()
             .map(|raw| {
                 crate::email::calendar::upcoming_recurrence_occurrences(
                     raw,
-                    now,
+                    recurrence_now,
                     MAX_UPCOMING_EVENTS,
                 )
             })
@@ -702,13 +715,19 @@ async fn load_upcoming_calendar_events(
             continue;
         }
 
-        let Some(start) = parse_calendar_timestamp(&row.starts_at) else {
+        let Some(start) = parse_calendar_timestamp(&row.starts_at, row.all_day) else {
             continue;
         };
-        let Some(end) = parse_calendar_timestamp(&row.ends_at) else {
+        let Some(end) = parse_calendar_timestamp(&row.ends_at, row.all_day) else {
             continue;
         };
-        if end < now || end < start || end - start > chrono::Duration::days(7) {
+        let duration = if row.all_day {
+            end.with_timezone(&chrono::Local).date_naive()
+                - start.with_timezone(&chrono::Local).date_naive()
+        } else {
+            end - start
+        };
+        if end < now || end < start || duration > chrono::Duration::days(7) {
             continue;
         }
         events.push(TrayCalendarEventDto {
@@ -720,7 +739,15 @@ async fn load_upcoming_calendar_events(
         });
     }
 
-    events.sort_by(|left, right| left.starts_at.cmp(&right.starts_at));
+    // Keep DATE and legacy mirrors equivalent at the tray boundary. Sorting
+    // their raw strings would compare nominal dates against timed UTC values.
+    for event in &mut events {
+        if event.all_day {
+            event.starts_at.truncate(10);
+            event.ends_at.truncate(10);
+        }
+    }
+    events.sort_by_cached_key(|event| parse_calendar_timestamp(&event.starts_at, event.all_day));
     events.dedup_by(|left, right| {
         left.title == right.title
             && left.starts_at == right.starts_at
@@ -730,7 +757,22 @@ async fn load_upcoming_calendar_events(
     Ok(events)
 }
 
-fn parse_calendar_timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+fn parse_calendar_timestamp(value: &str, all_day: bool) -> Option<chrono::DateTime<chrono::Utc>> {
+    use chrono::TimeZone;
+    if all_day {
+        let midnight = chrono::NaiveDate::parse_from_str(value.get(..10)?, "%Y-%m-%d")
+            .ok()?
+            .and_hms_opt(0, 0, 0)?;
+        // Some zones skip midnight. Use the first valid local minute of the
+        // date rather than dropping an otherwise valid all-day event.
+        return (0..24 * 60).find_map(|minute| {
+            let local = midnight.checked_add_signed(chrono::Duration::minutes(minute))?;
+            chrono::Local
+                .from_local_datetime(&local)
+                .earliest()
+                .map(|date| date.with_timezone(&chrono::Utc))
+        });
+    }
     chrono::DateTime::parse_from_rfc3339(value)
         .ok()
         .map(|value| value.with_timezone(&chrono::Utc))
@@ -1002,8 +1044,8 @@ mod tests {
 
     use super::{
         attention_tray_icon, briefing_slice, load_tray_threads, load_upcoming_calendar_events,
-        open_unread_count, resolve_autostart, TrayPreferences, MAX_BRIEFING_THREADS,
-        MAX_PENDING_THREADS,
+        load_upcoming_calendar_events_at, open_unread_count, resolve_autostart, TrayPreferences,
+        MAX_BRIEFING_THREADS, MAX_PENDING_THREADS,
     };
     use crate::{
         commands::workflow, sync::remote_mutations::RemoteMutationPayload,
@@ -1416,5 +1458,129 @@ mod tests {
         assert_eq!(events[0].location.as_deref(), Some("Meet"));
         assert_eq!(events[1].title, "Regeltermin");
         assert_eq!(events[2].title, "Späterer Termin");
+
+        // DATE and legacy UTC-midnight rows share the local calendar-day end.
+        // Run this test under UTC, America/Los_Angeles and Europe/Berlin.
+        use chrono::TimeZone;
+        sqlx::query("DELETE FROM calendar_events")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM calendar_invites")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let midnight = chrono::Local
+            .with_ymd_and_hms(2026, 3, 29, 0, 0, 0)
+            .earliest()
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        for (id, title, start, end, all_day) in [
+            (
+                "date",
+                "Holiday",
+                "2026-03-29".to_string(),
+                "2026-03-30".to_string(),
+                true,
+            ),
+            (
+                "legacy",
+                "Holiday",
+                "2026-03-29T00:00:00Z".to_string(),
+                "2026-03-30T00:00:00Z".to_string(),
+                true,
+            ),
+            (
+                "before",
+                "Before",
+                (midnight - chrono::Duration::minutes(30)).to_rfc3339(),
+                (midnight - chrono::Duration::minutes(15)).to_rfc3339(),
+                false,
+            ),
+            (
+                "after",
+                "After",
+                (midnight + chrono::Duration::minutes(30)).to_rfc3339(),
+                (midnight + chrono::Duration::minutes(45)).to_rfc3339(),
+                false,
+            ),
+        ] {
+            sqlx::query("INSERT INTO calendar_events (id, account_id, uid, title, starts_at, ends_at, all_day) VALUES (?, 'account', ?, ?, ?, ?, ?)")
+                .bind(id).bind(id).bind(title).bind(start).bind(end).bind(all_day)
+                .execute(&pool).await.unwrap();
+        }
+        let ordered =
+            load_upcoming_calendar_events_at(&pool, midnight - chrono::Duration::hours(1))
+                .await
+                .unwrap();
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|event| event.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Before", "Holiday", "After"]
+        );
+        assert_eq!(ordered[1].starts_at, "2026-03-29");
+        assert_eq!(ordered[1].ends_at, "2026-03-30");
+        sqlx::query("DELETE FROM calendar_events")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        for (year, month, day) in [(2026, 3, 9), (2026, 3, 30), (2026, 10, 26), (2026, 11, 2)] {
+            let end_date = chrono::NaiveDate::from_ymd_opt(year, month, day).unwrap();
+            let end_utc = chrono::Local
+                .with_ymd_and_hms(year, month, day, 0, 0, 0)
+                .earliest()
+                .unwrap()
+                .with_timezone(&chrono::Utc);
+            for span_days in [1, 7] {
+                let current_start = end_date - chrono::Duration::days(span_days);
+                for legacy in [false, true] {
+                    for recurring in [false, true] {
+                        // The recurring anchor is already past; the final occurrence
+                        // must survive until its own local end, without a fallback.
+                        let start = if recurring {
+                            current_start.pred_opt().unwrap()
+                        } else {
+                            current_start
+                        };
+                        let end = start + chrono::Duration::days(span_days);
+                        let start_text = if legacy {
+                            format!("{start}T00:00:00Z")
+                        } else {
+                            start.to_string()
+                        };
+                        let end_text = if legacy {
+                            format!("{end}T00:00:00Z")
+                        } else {
+                            end.to_string()
+                        };
+                        let raw = recurring.then(|| format!(
+                            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:date-boundary\r\nSUMMARY:All day\r\nDTSTART;VALUE=DATE:{}\r\nDTEND;VALUE=DATE:{}\r\nRRULE:FREQ=DAILY;COUNT=2\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+                            start.format("%Y%m%d"), end.format("%Y%m%d"),
+                        ));
+                        sqlx::query("INSERT INTO calendar_events (id, account_id, uid, title, starts_at, ends_at, all_day, raw_ics) VALUES ('date-boundary', 'account', 'date-boundary', 'All day', ?, ?, 1, ?) ON CONFLICT(id) DO UPDATE SET starts_at = excluded.starts_at, ends_at = excluded.ends_at, raw_ics = excluded.raw_ics")
+                            .bind(start_text).bind(end_text).bind(raw).execute(&pool).await.unwrap();
+                        let before = load_upcoming_calendar_events_at(
+                            &pool,
+                            end_utc - chrono::Duration::hours(1),
+                        )
+                        .await
+                        .unwrap();
+                        assert_eq!(before.len(), 1, "legacy={legacy}, recurring={recurring}, days={span_days}, end={end_date}");
+                        assert_eq!(before[0].starts_at, current_start.to_string());
+                        let after = load_upcoming_calendar_events_at(
+                            &pool,
+                            end_utc + chrono::Duration::hours(1),
+                        )
+                        .await
+                        .unwrap();
+                        assert!(after.is_empty(), "legacy={legacy}, recurring={recurring}, days={span_days}, end={end_date}");
+                    }
+                }
+            }
+        }
     }
 }
