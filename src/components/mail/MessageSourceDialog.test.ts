@@ -100,6 +100,16 @@ describe('message source dialog', () => {
     expect(document.body.querySelector('pre')?.textContent).toBe('New source');
   });
 
+  it.each(['imapUidValidityChanged', 'imapUidValidityMissing'])('shows localized recovery for %s', async (key) => {
+    loadMessageSource.mockRejectedValue({ key: `backend.errors.${key}`, params: { folder: 'INBOX' } });
+    wrapper = mount(MessageSourceDialog, { attachTo: document.body, props: { open: true, messageId: 'message-1' } });
+    await flushPromises();
+    const alert = document.body.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('INBOX');
+    expect(alert?.textContent).toMatch(/sync.*folder/i);
+    expect(alert?.textContent).not.toContain('backend.errors');
+  });
+
   it('opens on the original RFC 822 source when the provider returns it', async () => {
     loadMessageSource.mockResolvedValue({
       message_id: 'message-1',

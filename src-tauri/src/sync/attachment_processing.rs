@@ -16,6 +16,7 @@ pub(crate) async fn process_special_attachment(
     local_message_id: &str,
     message_remote_id: &str,
     folder_remote_id: &str,
+    source_uidvalidity: Option<u32>,
     attachment_id: &str,
     attachment: &RemoteAttachment,
 ) {
@@ -35,12 +36,26 @@ pub(crate) async fn process_special_attachment(
         return;
     }
 
+    let Ok(reference) =
+        crate::db::remote_content::ContentReference::load(pool, local_message_id).await
+    else {
+        return;
+    };
+    if reference.account_id != account_id
+        || reference.remote_id.as_deref() != Some(message_remote_id)
+        || (provider_kind == "imap"
+            && (reference.uidvalidity() != source_uidvalidity
+                || reference.source_folder.as_deref() != Some(folder_remote_id)))
+    {
+        return;
+    }
     let Ok(bytes) = attachment_bytes(
         provider_kind,
         account_config,
         account_email,
         message_remote_id,
         folder_remote_id,
+        source_uidvalidity,
         attachment,
     )
     .await
@@ -51,9 +66,19 @@ pub(crate) async fn process_special_attachment(
     if is_calendar {
         let raw = String::from_utf8_lossy(&bytes).into_owned();
         if let Some(invite) = crate::email::calendar::parse_invite(&raw) {
-            let _ = crate::db::calendar::CalendarRepository::new(pool)
-                .upsert_invite(account_id, Some(local_message_id), &invite)
-                .await;
+            if let Ok(mut tx) = reference.begin_write(pool).await {
+                if crate::db::calendar::CalendarRepository::upsert_invite_on_connection(
+                    &mut tx,
+                    account_id,
+                    Some(local_message_id),
+                    &invite,
+                )
+                .await
+                .is_ok()
+                {
+                    let _ = tx.commit().await;
+                }
+            }
         }
     }
 
@@ -63,7 +88,8 @@ pub(crate) async fn process_special_attachment(
             // losing them here means every reader re-fetches the same part. That
             // is precisely how this failure stayed invisible for so long.
             if let Err(err) =
-                cache_attachment_bytes(app, pool, attachment_id, attachment, &bytes).await
+                cache_attachment_bytes(app, pool, &reference, attachment_id, attachment, &bytes)
+                    .await
             {
                 tracing::warn!("caching inline image {attachment_id} failed: {err}");
             }
@@ -74,6 +100,7 @@ pub(crate) async fn process_special_attachment(
 async fn cache_attachment_bytes(
     app: &AppHandle,
     pool: &SqlitePool,
+    reference: &crate::db::remote_content::ContentReference,
     attachment_id: &str,
     attachment: &RemoteAttachment,
     bytes: &[u8],
@@ -91,19 +118,25 @@ async fn cache_attachment_bytes(
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("inline-image");
-    let path =
-        crate::commands::attachments::attachment_cache_path(&cache_dir, attachment_id, filename);
+    let path = crate::commands::attachments::attachment_cache_path(
+        &cache_dir,
+        &reference.attachment_cache_id(attachment_id),
+        &format!("{}-{filename}", uuid::Uuid::new_v4()),
+    );
     tokio::fs::write(&path, bytes)
         .await
         .map_err(|err| format!("write attachment cache: {err}"))?;
     let path_string = path.to_string_lossy().to_string();
     let size = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
-    sqlx::query("UPDATE attachments SET cached_path = ?, size = ? WHERE id = ?")
-        .bind(path_string)
-        .bind(size)
-        .bind(attachment_id)
-        .execute(pool)
-        .await
-        .map_err(|err| err.to_string())?;
+    let mut tx = reference.begin_write(pool).await?;
+    crate::commands::attachments::set_attachment_cache(
+        &mut tx,
+        attachment_id,
+        &reference.message_id,
+        &path_string,
+        size,
+    )
+    .await?;
+    tx.commit().await.map_err(|err| err.to_string())?;
     Ok(())
 }

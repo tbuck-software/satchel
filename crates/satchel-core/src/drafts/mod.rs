@@ -148,18 +148,17 @@ struct DraftRow {
 
 #[derive(Debug, FromRow)]
 struct ImportedDraftAttachmentRow {
+    id: String,
     filename: Option<String>,
     content_type: String,
     content_id: Option<String>,
     is_inline: i64,
     cached_path: Option<String>,
-    remote_message_id: Option<String>,
     remote_part_id: Option<String>,
     provider: String,
     account_id: String,
     account_email: String,
     config: String,
-    source_folder: Option<String>,
 }
 
 impl From<DraftRow> for DraftDto {
@@ -858,12 +857,11 @@ async fn hydrate_imported_draft_attachments(
     draft_id: &str,
     draft: &mut DraftDto,
 ) -> Result<(), String> {
+    let reference = crate::db::remote_content::ContentReference::load(read, draft_id).await?;
     let rows = sqlx::query_as::<_, ImportedDraftAttachmentRow>(
-        "SELECT a.filename, a.content_type, a.content_id, a.is_inline, a.cached_path,
-                COALESCE(a.remote_uid, m.remote_id) AS remote_message_id,
+        "SELECT a.id, a.filename, a.content_type, a.content_id, a.is_inline, a.cached_path,
                 a.remote_part_id, acc.provider, acc.id AS account_id, acc.email AS account_email,
-                acc.config,
-                COALESCE(f.remote_id, f.full_path) AS source_folder
+                acc.config
          FROM attachments a
          JOIN messages m ON m.id = a.message_id
          JOIN accounts acc ON acc.id = m.account_id
@@ -878,23 +876,23 @@ async fn hydrate_imported_draft_attachments(
     if rows.is_empty() {
         return Ok(());
     }
+    reference.validate_cached_read()?;
 
     let mut attachments = Vec::with_capacity(rows.len());
     for row in rows {
         let cached = if let Some(path) = row.cached_path.as_deref() {
-            tokio::fs::read(path).await.ok()
+            if reference.owns_attachment_cache(path, &row.id) {
+                tokio::fs::read(path).await.ok()
+            } else {
+                None
+            }
         } else {
             None
         };
         let (bytes, fetched_filename, fetched_type) = if let Some(bytes) = cached {
             (bytes, None, None)
         } else {
-            let remote_message_id = row.remote_message_id.as_deref().ok_or_else(|| {
-                format!(
-                    "draft attachment {} has no remote message id",
-                    row.filename.as_deref().unwrap_or("(unnamed)")
-                )
-            })?;
+            let message = reference.message_ref()?;
             let remote_part_id = row.remote_part_id.as_deref().ok_or_else(|| {
                 format!(
                     "draft attachment {} has no remote part id",
@@ -905,14 +903,7 @@ async fn hydrate_imported_draft_attachments(
             let provider = provider_for_account(&row.provider, &config, &row.account_email, None)?;
             let fetched = tokio::time::timeout(
                 std::time::Duration::from_secs(60),
-                provider.fetch_attachment(
-                    &crate::providers::traits::MessageRef {
-                        remote_id: remote_message_id.to_string(),
-                        source_folder: row.source_folder.clone(),
-                        source_uidvalidity: None,
-                    },
-                    remote_part_id,
-                ),
+                provider.fetch_attachment(&message, remote_part_id),
             )
             .await
             .map_err(|_| "draft attachment fetch timed out".to_string())?
@@ -941,6 +932,7 @@ async fn hydrate_imported_draft_attachments(
         });
     }
 
+    let mut tx = reference.begin_write(write).await?;
     let serialized = serde_json::to_string(&attachments).map_err(|err| err.to_string())?;
     sqlx::query(
         "UPDATE messages SET draft_attachments_json = ?, updated_at = ?
@@ -949,9 +941,10 @@ async fn hydrate_imported_draft_attachments(
     .bind(serialized)
     .bind(chrono::Utc::now().to_rfc3339())
     .bind(draft_id)
-    .execute(write)
+    .execute(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
+    tx.commit().await.map_err(|err| err.to_string())?;
     draft.attachments = attachments;
     Ok(())
 }
@@ -1840,6 +1833,39 @@ mod tests {
         .await
         .expect("attachment");
 
+        let error = load_draft_inner(&pool, &pool, "draft").await.unwrap_err();
+        assert!(error.contains("imapUidValidityMissing"));
+        sqlx::raw_sql(
+            "UPDATE messages SET remote_uidvalidity = 7;
+            UPDATE folders SET uidvalidity = 8;",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let error = load_draft_inner(&pool, &pool, "draft").await.unwrap_err();
+        assert!(error.contains("imapUidValidityChanged"));
+
+        // A verified cache remains usable without downloading the draft again.
+        use sha2::{Digest, Sha256};
+        let prefix: String = Sha256::digest(b"attachment:imap:7")
+            .iter()
+            .take(12)
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let verified_path =
+            cache_path.with_file_name(format!("{prefix}-{}-note.txt", uuid::Uuid::new_v4()));
+        tokio::fs::rename(&cache_path, &verified_path)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE attachments SET cached_path = ?")
+            .bind(verified_path.to_string_lossy().as_ref())
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE folders SET uidvalidity = 7")
+            .execute(&pool)
+            .await
+            .unwrap();
         let draft = load_draft_inner(&pool, &pool, "draft")
             .await
             .expect("load")
@@ -1854,7 +1880,7 @@ mod tests {
                 .await
                 .expect("stored attachments");
         assert!(stored.contains("note.txt"));
-        let _ = tokio::fs::remove_file(cache_path).await;
+        let _ = tokio::fs::remove_file(verified_path).await;
     }
 
     /// attachments.message_id carries no ON DELETE clause, so discarding a

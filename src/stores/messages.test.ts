@@ -1060,6 +1060,120 @@ describe('opening, refreshing and prefetching a thread', () => {
     expect(attachmentsMock).toHaveBeenLastCalledWith(['m-3']);
   });
 
+  it.each([[7, 8], [undefined, 7], [7, undefined]])('discards body and inline caches when saved generation changes from %s to %s', async (oldGeneration, newGeneration) => {
+    const html = '<img src="cid:image001.jpg@01DD16D4.C2220470">';
+    previewMock.mockResolvedValue([backendMessage({ remote_uidvalidity: oldGeneration })] as never);
+    bodiesMock.mockResolvedValue([{ ...inlineBody(html), remote_uidvalidity: oldGeneration }] as never);
+    attachmentsMock.mockResolvedValue([inlineAttachmentRow()] as never);
+    downloadAttachmentMock.mockResolvedValue({ filename: 'old.jpg', mime_type: 'image/jpeg', data_base64: 'b2xk', remote_uidvalidity: oldGeneration } as never);
+    const messages = useMessagesStore();
+    await messages.openThread('th-live');
+    await vi.waitFor(() => expect(messages.getByThread('th-live')[0]?.attachments[0]?.dataUrl).toContain('b2xk'));
+
+    previewMock.mockResolvedValue([backendMessage({ remote_uidvalidity: newGeneration })] as never);
+    bodiesMock.mockResolvedValue([{ ...inlineBody(html), body_text: 'Verified new body', remote_uidvalidity: newGeneration }] as never);
+    downloadAttachmentMock.mockResolvedValue({ filename: 'new.jpg', mime_type: 'image/jpeg', data_base64: 'bmV3', remote_uidvalidity: newGeneration } as never);
+    await messages.refreshThread('th-live');
+    await vi.waitFor(() => expect(messages.getByThread('th-live')[0]?.attachments[0]?.dataUrl).toContain('bmV3'));
+    expect(messages.getByThread('th-live')[0]?.bodyText).toBe('Verified new body');
+    expect(downloadAttachmentMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a verified body and inline cache when the saved generation still matches', async () => {
+    previewMock.mockResolvedValue([backendMessage({ remote_uidvalidity: 7 })] as never);
+    bodiesMock.mockResolvedValue([{ ...inlineBody('<img src="cid:image001.jpg@01DD16D4.C2220470">'), remote_uidvalidity: 7 }] as never);
+    attachmentsMock.mockResolvedValue([inlineAttachmentRow()] as never);
+    downloadAttachmentMock.mockResolvedValue({ filename: 'image.jpg', mime_type: 'image/jpeg', data_base64: 'b2xk', remote_uidvalidity: 7 } as never);
+    const messages = useMessagesStore();
+    await messages.openThread('th-live');
+    await vi.waitFor(() => expect(messages.getByThread('th-live')[0]?.attachments[0]?.dataUrl).toContain('b2xk'));
+    await messages.refreshThread('th-live');
+    expect(messages.getByThread('th-live')[0]?.bodyText).toBe('Hydrated body');
+    expect(messages.getByThread('th-live')[0]?.attachments[0]?.dataUrl).toContain('b2xk');
+    expect(bodiesMock).toHaveBeenCalledTimes(1);
+    expect(downloadAttachmentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([[7, 8], [8, 7]])('rejects a body snapshot from generation %s/%s until its preview is refreshed', async (previewGeneration, responseGeneration) => {
+    let releasePreview!: (rows: never) => void;
+    previewMock.mockResolvedValueOnce([backendMessage({ subject: 'Old envelope', remote_uidvalidity: previewGeneration })] as never);
+    previewMock.mockImplementationOnce(() => new Promise(resolve => { releasePreview = resolve; }));
+    bodiesMock.mockResolvedValueOnce([{ ...inlineBody(''), body_text: 'Unmatched body', remote_uidvalidity: responseGeneration }] as never);
+    bodiesMock.mockResolvedValue([{ ...inlineBody(''), body_text: 'New body', remote_uidvalidity: 8 }] as never);
+    const messages = useMessagesStore();
+    await messages.openThread('th-live');
+    await vi.waitFor(() => expect(previewMock).toHaveBeenCalledTimes(2));
+    expect(messages.getByThread('th-live')[0]?.bodyText).not.toBe('Unmatched body');
+    expect(messages.getByThread('th-live')[0]?.subject).toBe('Old envelope');
+
+    releasePreview([backendMessage({ subject: 'New envelope', remote_uidvalidity: 8 })] as never);
+    await vi.waitFor(() => expect(messages.getByThread('th-live')[0]?.bodyText).toBe('New body'));
+    expect(messages.getByThread('th-live')[0]?.subject).toBe('New envelope');
+  });
+
+  it.each([[7, 8], [8, 7]])('rejects a remote body from generation %s/%s until its preview is refreshed', async (previewGeneration, responseGeneration) => {
+    let releasePreview!: (rows: never) => void;
+    previewMock.mockResolvedValueOnce([backendMessage({ remote_uidvalidity: previewGeneration })] as never);
+    previewMock.mockImplementationOnce(() => new Promise(resolve => { releasePreview = resolve; }));
+    bodiesMock.mockResolvedValueOnce([{ ...inlineBody(''), body_text: '', body_loaded: false, remote_uidvalidity: previewGeneration }] as never);
+    bodiesMock.mockResolvedValue([{ ...inlineBody(''), body_text: 'Verified new body', remote_uidvalidity: 8 }] as never);
+    loadBodyMock.mockResolvedValue({ body_text: 'Unmatched body', body_html: null, fetched: true, remote_uidvalidity: responseGeneration });
+    const messages = useMessagesStore();
+    await messages.openThread('th-live');
+    await vi.waitFor(() => expect(previewMock).toHaveBeenCalledTimes(2));
+    expect(messages.getByThread('th-live')[0]?.bodyText).not.toBe('Unmatched body');
+    expect(messages.isBodyLoading('m-live')).toBe(false);
+
+    releasePreview([backendMessage({ remote_uidvalidity: 8 })] as never);
+    await vi.waitFor(() => expect(messages.getByThread('th-live')[0]?.bodyText).toBe('Verified new body'));
+  });
+
+  it.each([[7, 8], [8, 7]])('rejects an inline download from generation %s/%s before publishing its data URL', async (previewGeneration, responseGeneration) => {
+    const html = '<img src="cid:image001.jpg@01DD16D4.C2220470">';
+    let releasePreview!: (rows: never) => void;
+    previewMock.mockResolvedValueOnce([backendMessage({ remote_uidvalidity: previewGeneration })] as never);
+    previewMock.mockImplementationOnce(() => new Promise(resolve => { releasePreview = resolve; }));
+    bodiesMock.mockResolvedValue([{ ...inlineBody(html), remote_uidvalidity: previewGeneration }] as never);
+    attachmentsMock.mockResolvedValue([inlineAttachmentRow()] as never);
+    downloadAttachmentMock.mockResolvedValueOnce({ filename: 'unmatched.jpg', mime_type: 'image/jpeg', data_base64: 'b2xk', remote_uidvalidity: responseGeneration } as never);
+    downloadAttachmentMock.mockResolvedValue({ filename: 'new.jpg', mime_type: 'image/jpeg', data_base64: 'bmV3', remote_uidvalidity: 8 } as never);
+    const messages = useMessagesStore();
+    await messages.openThread('th-live');
+    await vi.waitFor(() => expect(previewMock).toHaveBeenCalledTimes(2));
+    expect(messages.getByThread('th-live')[0]?.attachments[0]?.dataUrl).toBeUndefined();
+
+    bodiesMock.mockResolvedValue([{ ...inlineBody(html), remote_uidvalidity: 8 }] as never);
+    releasePreview([backendMessage({ remote_uidvalidity: 8 })] as never);
+    await vi.waitFor(() => expect(messages.getByThread('th-live')[0]?.attachments[0]?.dataUrl).toContain('bmV3'));
+  });
+
+  it('does not let an old inline request overwrite a new generation or release its claim', async () => {
+    const html = '<img src="cid:image001.jpg@01DD16D4.C2220470">';
+    let finishOld!: (value: never) => void;
+    let finishNew!: (value: never) => void;
+    previewMock.mockResolvedValue([backendMessage({ remote_uidvalidity: 7 })] as never);
+    bodiesMock.mockResolvedValue([{ ...inlineBody(html), remote_uidvalidity: 7 }] as never);
+    attachmentsMock.mockResolvedValue([inlineAttachmentRow()] as never);
+    downloadAttachmentMock.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+    downloadAttachmentMock.mockImplementationOnce(() => new Promise(resolve => { finishNew = resolve; }));
+    const messages = useMessagesStore();
+    await messages.openThread('th-live');
+    await vi.waitFor(() => expect(downloadAttachmentMock).toHaveBeenCalledTimes(1));
+
+    previewMock.mockResolvedValue([backendMessage({ remote_uidvalidity: 8 })] as never);
+    bodiesMock.mockResolvedValue([{ ...inlineBody(html), remote_uidvalidity: 8 }] as never);
+    await messages.refreshThread('th-live');
+    await vi.waitFor(() => expect(downloadAttachmentMock).toHaveBeenCalledTimes(2));
+    finishOld({ filename: 'old.jpg', mime_type: 'image/jpeg', data_base64: 'b2xk', remote_uidvalidity: 7 } as never);
+    await messages.loadAttachmentsForMessages('th-live', ['m-live']);
+    expect(messages.getByThread('th-live')[0]?.attachments[0]?.dataUrl).toBeUndefined();
+    expect(messages.needsDetails('m-live')).toBe(false);
+    expect(downloadAttachmentMock).toHaveBeenCalledTimes(2);
+
+    finishNew({ filename: 'new.jpg', mime_type: 'image/jpeg', data_base64: 'bmV3', remote_uidvalidity: 8 } as never);
+    await vi.waitFor(() => expect(messages.getByThread('th-live')[0]?.attachments[0]?.dataUrl).toContain('bmV3'));
+  });
+
   it('reloads a stale cached thread on open, behind the cached view', async () => {
     seedThread(['m-1']);
     const messages = useMessagesStore();
@@ -1160,6 +1274,20 @@ describe('a message whose full body is not stored', () => {
     const store = useMessagesStore();
     await store.loadByThread('th-live');
     expect(loadBodyMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['imapUidValidityChanged', 'imapUidValidityMissing'])('keeps localized recovery when body fetch fails with %s', async (key) => {
+    previewMock.mockResolvedValue([backendMessage({ id: 'm-generation' })] as never);
+    bodiesMock.mockResolvedValue([
+      { id: 'm-generation', snippet: '', body_text: '', body_html: null, body_loaded: true },
+    ] as never);
+    loadBodyMock.mockRejectedValue({ key: `backend.errors.${key}`, params: { folder: 'INBOX' } });
+    const store = useMessagesStore();
+    await store.loadByThread('th-live');
+    const error = store.messagesByThread['th-live']?.[0]?.bodyLoadError;
+    expect(error).toContain('INBOX');
+    expect(error).toMatch(/sync.*folder/i);
+    expect(error).not.toContain('backend.errors');
   });
 
   it('says so when the server cannot supply it either', async () => {

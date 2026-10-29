@@ -93,7 +93,7 @@ async function load(messageId: string) {
     activeTab.value = tabs.value.find((tab) => tab.available)?.id ?? 'source';
   } catch (err) {
     if (loadRequest !== request) return;
-    errorText.value = err instanceof Error ? err.message : t('mail.source.loadFailed');
+    errorText.value = backendErrorLabel(err);
   } finally {
     if (loadRequest === request) loading.value = false;
   }

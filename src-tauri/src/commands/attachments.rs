@@ -7,7 +7,8 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     commands::error::{CommandError, CommandResult},
-    providers::{provider_for_account, traits::MessageRef},
+    db::remote_content::ContentReference,
+    providers::provider_for_account,
 };
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -46,6 +47,13 @@ pub async fn list_attachments_for_messages(
         .map_err(CommandError::unexpected)
 }
 
+#[derive(FromRow)]
+struct AttachmentListingRow {
+    #[sqlx(flatten)]
+    attachment: AttachmentDto,
+    cache_id: String,
+}
+
 async fn attachments_for_messages(
     pool: &SqlitePool,
     message_ids: &[String],
@@ -56,31 +64,37 @@ async fn attachments_for_messages(
     let mut rows = Vec::new();
     for chunk in message_ids.chunks(MAX_ATTACHMENT_LISTING_IDS) {
         let mut query = sqlx::QueryBuilder::new(
-            "SELECT id, message_id, filename, content_type, size, content_id, is_inline, cached_path
-             FROM attachments WHERE message_id IN (",
+            "SELECT a.id, a.message_id, a.filename, a.content_type, a.size, a.content_id, a.is_inline, a.cached_path,
+                    CASE WHEN acc.provider = 'imap' AND NULLIF(m.remote_id, '') IS NOT NULL THEN a.id || ':imap:' || COALESCE(m.remote_uidvalidity, 0)
+                         ELSE a.id END AS cache_id
+             FROM attachments a JOIN messages m ON m.id = a.message_id
+             JOIN accounts acc ON acc.id = m.account_id WHERE a.message_id IN (",
         );
         let mut ids = query.separated(", ");
         for id in chunk {
             ids.push_bind(id);
         }
-        query.push(") ORDER BY message_id, filename");
+        query.push(") ORDER BY a.message_id, a.filename");
         rows.extend(
             query
-                .build_query_as::<AttachmentDto>()
+                .build_query_as::<AttachmentListingRow>()
                 .fetch_all(pool)
                 .await?,
         );
     }
-    for row in &mut rows {
-        row.filename = row.filename.as_deref().map(strip_filename_controls);
-        if row
-            .cached_path
-            .as_deref()
-            .is_some_and(|path| !cache_path_is_owned_by(path, &row.id, &row.message_id))
-        {
-            row.cached_path = None;
-        }
-    }
+    let rows = rows
+        .into_iter()
+        .map(|listing| {
+            let mut row = listing.attachment;
+            row.filename = row.filename.as_deref().map(strip_filename_controls);
+            if row.cached_path.as_deref().is_some_and(|path| {
+                !cache_path_is_owned_by(path, &listing.cache_id, &row.message_id)
+            }) {
+                row.cached_path = None;
+            }
+            row
+        })
+        .collect();
     Ok(rows)
 }
 
@@ -127,6 +141,9 @@ const MAX_BASE64_PAYLOAD_BYTES: usize = 4 * 1024 * 1024;
     ts(export, export_to = "app/commands/attachments/")
 )]
 pub struct DownloadAttachmentResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
+    pub remote_uidvalidity: Option<u32>,
     pub filename: String,
     pub mime_type: String,
     /// Base64 payload, only up to [`MAX_BASE64_PAYLOAD_BYTES`]. Above that it
@@ -142,6 +159,9 @@ pub struct DownloadAttachmentResult {
     ts(export, export_to = "app/commands/attachments/")
 )]
 pub struct PreparedAttachmentResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
+    pub remote_uidvalidity: Option<u32>,
     pub filename: String,
     pub mime_type: String,
     pub size: i64,
@@ -187,6 +207,7 @@ pub async fn download_attachment_inner(
     };
 
     Ok(DownloadAttachmentResult {
+        remote_uidvalidity: prepared.remote_uidvalidity,
         filename: prepared.filename,
         mime_type: prepared.mime_type,
         data_base64,
@@ -194,39 +215,48 @@ pub async fn download_attachment_inner(
     })
 }
 
+#[derive(FromRow)]
+struct AttachmentTarget {
+    id: String,
+    filename: Option<String>,
+    mime: String,
+    cached_path: Option<String>,
+    account_id: String,
+    provider_kind: String,
+    config: String,
+    remote_part_id: Option<String>,
+    account_email: String,
+    message_id: String,
+    content_base64: Option<String>,
+}
+
 pub async fn prepare_attachment_inner(
     app: &AppHandle,
     pool: &SqlitePool,
     input: DownloadAttachmentInput,
 ) -> Result<PreparedAttachmentResult, String> {
-    let row: Option<(
-        String,
-        Option<String>,
-        String,
-        Option<String>,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        String,
-        Option<String>,
-        String,
-        String,
-        Option<String>,
-    )> = sqlx::query_as(
-        "SELECT a.id, a.filename, a.content_type, a.cached_path, m.account_id, acc.provider, acc.config, COALESCE(a.remote_uid, m.remote_id), a.remote_part_id, acc.email, f.remote_id, f.full_path, m.id, a.content_base64
+    let message_id: String = sqlx::query_scalar("SELECT message_id FROM attachments WHERE id = ?")
+        .bind(&input.attachment_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| "backend.errors.messageNotAvailableLocally".to_string())?;
+    let reference = ContentReference::load(pool, &message_id).await?;
+    reference.validate_cached_read()?;
+    let row: Option<AttachmentTarget> = sqlx::query_as(
+        "SELECT a.id, a.filename, a.content_type AS mime, a.cached_path, m.account_id,
+                acc.provider AS provider_kind, acc.config, a.remote_part_id,
+                acc.email AS account_email, m.id AS message_id, a.content_base64
          FROM attachments a
          JOIN messages m ON m.id = a.message_id
          JOIN accounts acc ON acc.id = m.account_id
-         JOIN folders f ON f.id = m.folder_id
          WHERE a.id = ?",
     )
     .bind(&input.attachment_id)
     .fetch_optional(pool)
     .await
     .map_err(|err| err.to_string())?;
-    let Some((
+    let Some(AttachmentTarget {
         id,
         filename,
         mime,
@@ -234,17 +264,17 @@ pub async fn prepare_attachment_inner(
         account_id,
         provider_kind,
         config,
-        remote_uid,
         remote_part_id,
         account_email,
-        folder_remote_id,
-        folder_path,
         message_id,
         content_base64,
-    )) = row
+    }) = row
     else {
-        return Err("attachment not found".into());
+        return Err("backend.errors.messageNotAvailableLocally".into());
     };
+    if message_id != reference.message_id {
+        return Err(reference.changed_error());
+    }
     let filename = strip_filename_controls(&filename.unwrap_or_else(|| "attachment".into()));
     let cache_dir = app
         .path()
@@ -254,10 +284,14 @@ pub async fn prepare_attachment_inner(
         .await
         .map_err(|err| format!("create attachment cache: {err}"))?;
 
+    let cache_id = reference.attachment_cache_id(&id);
     if let Some(path) = cached_path.as_deref() {
-        if cache_path_is_owned_by(path, &id, &message_id) {
+        if cache_path_is_owned_by(path, &cache_id, &message_id) {
             if let Some(size) = validated_cached_file_size(&cache_dir, path).await {
+                let mut tx = pool.begin().await.map_err(|err| err.to_string())?;
+                reference.ensure_current(&mut tx).await?;
                 return Ok(PreparedAttachmentResult {
+                    remote_uidvalidity: reference.uidvalidity(),
                     filename,
                     mime_type: mime,
                     size,
@@ -275,12 +309,6 @@ pub async fn prepare_attachment_inner(
                 .map_err(|error| format!("attachment payload decode failed: {error}"))?,
         }
     } else {
-        let remote_uid = remote_uid.ok_or_else(|| {
-            format!(
-                "attachment {} has no remote message id; re-sync the message first",
-                input.attachment_id
-            )
-        })?;
         let remote_part_id = remote_part_id.ok_or_else(|| {
             format!(
                 "attachment {} has no remote part id; re-sync the message first",
@@ -290,14 +318,7 @@ pub async fn prepare_attachment_inner(
         let config = crate::commands::accounts::decrypt_account_config(&account_id, &config)?;
         let provider = provider_for_account(&provider_kind, &config, &account_email, None)?;
         provider
-            .fetch_attachment(
-                &MessageRef {
-                    remote_id: remote_uid.clone(),
-                    source_folder: folder_remote_id.or(Some(folder_path)),
-                    source_uidvalidity: None,
-                },
-                &remote_part_id,
-            )
+            .fetch_attachment(&reference.message_ref()?, &remote_part_id)
             .await
             .map_err(|error| error.to_string())?
     };
@@ -312,7 +333,13 @@ pub async fn prepare_attachment_inner(
         fetched.content_type
     };
     let final_filename = fetched.filename.unwrap_or(filename.clone());
-    let path = attachment_cache_path(&cache_dir, &id, &final_filename);
+    // Each request owns its file. A late request must never overwrite a file
+    // already published by a replacement row or another fetch.
+    let path = attachment_cache_path(
+        &cache_dir,
+        &cache_id,
+        &format!("{}-{final_filename}", uuid::Uuid::new_v4()),
+    );
     if tokio::fs::symlink_metadata(&path)
         .await
         .is_ok_and(|metadata| metadata.file_type().is_symlink())
@@ -326,7 +353,8 @@ pub async fn prepare_attachment_inner(
         .map_err(|err| format!("write attachment cache: {err}"))?;
     let path_string = path.to_string_lossy().to_string();
     let size = i64::try_from(fetched.bytes.len()).unwrap_or(i64::MAX);
-    set_attachment_cache(pool, &id, &path_string, size).await?;
+    let mut tx = reference.begin_write(pool).await?;
+    set_attachment_cache(&mut tx, &id, &message_id, &path_string, size).await?;
     sqlx::query(
         "UPDATE attachments
          SET filename = ?, content_type = ?
@@ -335,11 +363,14 @@ pub async fn prepare_attachment_inner(
     .bind(&final_filename)
     .bind(&mime_type)
     .bind(&id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
 
+    tx.commit().await.map_err(|err| err.to_string())?;
+
     Ok(PreparedAttachmentResult {
+        remote_uidvalidity: reference.uidvalidity(),
         filename: final_filename,
         mime_type,
         size,
@@ -347,19 +378,26 @@ pub async fn prepare_attachment_inner(
     })
 }
 
-async fn set_attachment_cache(
-    pool: &SqlitePool,
+pub(crate) async fn set_attachment_cache(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     id: &str,
+    message_id: &str,
     path: &str,
     size: i64,
 ) -> Result<(), String> {
-    sqlx::query("UPDATE attachments SET cached_path = ?, size = ? WHERE id = ?")
-        .bind(path)
-        .bind(size)
-        .bind(id)
-        .execute(pool)
-        .await
-        .map_err(|err| err.to_string())?;
+    let result = sqlx::query(
+        "UPDATE attachments SET cached_path = ?, size = ? WHERE id = ? AND message_id = ?",
+    )
+    .bind(path)
+    .bind(size)
+    .bind(id)
+    .bind(message_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|err| err.to_string())?;
+    if result.rows_affected() != 1 {
+        return Err("backend.errors.messageNotAvailableLocally".into());
+    }
     Ok(())
 }
 
@@ -789,6 +827,11 @@ mod tests {
         .execute(&pool)
         .await
         .expect("schema");
+        sqlx::raw_sql("CREATE TABLE accounts (id TEXT PRIMARY KEY, provider TEXT);
+            CREATE TABLE messages (id TEXT PRIMARY KEY, account_id TEXT, remote_id TEXT, remote_uidvalidity INTEGER);
+            INSERT INTO accounts VALUES ('acc', 'gmail');
+            INSERT INTO messages (id, account_id) VALUES ('m1', 'acc'), ('m2', 'acc'), ('m3', 'acc');")
+            .execute(&pool).await.unwrap();
         for (id, message, name) in [
             ("a1", "m1", "b.pdf"),
             ("a2", "m1", "a.png"),
@@ -822,6 +865,43 @@ mod tests {
         assert_eq!(rows[0].cached_path.as_deref(), shared.to_str());
         assert_eq!(rows[2].filename.as_deref(), Some("c.txt"));
         assert_eq!(rows[1].cached_path, None, "a1 must not expose a2's bytes");
+        sqlx::raw_sql(
+            "UPDATE accounts SET provider = 'imap';
+            UPDATE messages SET remote_id = '42', remote_uidvalidity = 7;",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let rows = super::attachments_for_messages(&pool, &["m1".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            rows[0].cached_path, None,
+            "a legacy cache has no verified generation"
+        );
+        let verified =
+            super::attachment_cache_path(std::path::Path::new("/cache"), "a2:imap:7", "a.png");
+        sqlx::query("UPDATE attachments SET cached_path = ? WHERE id = 'a2'")
+            .bind(verified.to_str().unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let rows = super::attachments_for_messages(&pool, &["m1".into()])
+            .await
+            .unwrap();
+        assert_eq!(rows[0].cached_path.as_deref(), verified.to_str());
+        sqlx::query("UPDATE messages SET remote_uidvalidity = 8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let rows = super::attachments_for_messages(&pool, &["m1".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            rows[0].cached_path, None,
+            "a reused UID cannot expose the previous generation's file"
+        );
+
         assert!(super::attachments_for_messages(&pool, &[])
             .await
             .expect("empty")
@@ -891,14 +971,25 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("pool");
-        sqlx::query("CREATE TABLE attachments (id TEXT PRIMARY KEY, remote_uid TEXT, remote_part_id TEXT, cached_path TEXT, size INTEGER)")
+        sqlx::query("CREATE TABLE attachments (id TEXT PRIMARY KEY, message_id TEXT, remote_uid TEXT, remote_part_id TEXT, cached_path TEXT, size INTEGER)")
             .execute(&pool).await.expect("schema");
-        sqlx::query("INSERT INTO attachments (id, remote_uid, remote_part_id) VALUES ('inbox', '42', '1'), ('archive', '42', '1')")
+        sqlx::query("INSERT INTO attachments (id, message_id, remote_uid, remote_part_id) VALUES ('inbox', 'message-inbox', '42', '1'), ('archive', 'message-archive', '42', '1')")
             .execute(&pool).await.expect("rows");
 
-        super::set_attachment_cache(&pool, "inbox", "/cache/inbox.pdf", 4)
+        let mut tx = pool.begin().await.unwrap();
+        assert!(super::set_attachment_cache(
+            &mut tx,
+            "inbox",
+            "replacement-message",
+            "/cache/stale.pdf",
+            9
+        )
+        .await
+        .is_err());
+        super::set_attachment_cache(&mut tx, "inbox", "message-inbox", "/cache/inbox.pdf", 4)
             .await
             .expect("cache inbox");
+        tx.commit().await.unwrap();
 
         let other: Option<String> =
             sqlx::query_scalar("SELECT cached_path FROM attachments WHERE id = 'archive'")

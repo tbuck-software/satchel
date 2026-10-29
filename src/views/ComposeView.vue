@@ -52,6 +52,7 @@ import { useComposerTransport } from '@/composables/useComposerTransport';
 import { useToast } from '@/composables/useToast';
 import { useToastClearance } from '@/composables/useToastClearance';
 import { outboxErrorLabel } from '@/utils/outboxLabels';
+import { translateBackendError } from '@/utils/backendErrors';
 import {
   formatTimestamp,
   mergeRecipients,
@@ -680,7 +681,8 @@ onMounted(async () => {
       if (fromDraft) await loadDraft();
       else await initializeThreadContext();
     } catch (err) {
-      const text = outboxErrorLabel(err instanceof Error ? err.message : String(err));
+      const text = translateBackendError(err)
+        ?? outboxErrorLabel(err instanceof Error ? err.message : String(err));
       status.value = { tone: 'error', text };
       toast.error(text);
       draftLoadFailed.value = fromDraft;

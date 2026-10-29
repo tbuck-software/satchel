@@ -413,6 +413,23 @@ it('keeps edits to the quoted history when switching between plain text and HTML
  * tracking, no autosave, no close guard, and ten minutes of typing gone.
  */
 describe('composer setup', () => {
+  it.each(['imapUidValidityChanged', 'imapUidValidityMissing'].flatMap(key =>
+    ['Drafts', 'offline'].map(folder => [key, folder]),
+  ))('shows folder recovery when an imported draft fails with %s in %s', async (key, folder) => {
+    harness.fetchDraft.mockRejectedValue({ key: `backend.errors.${key}`, params: { folder } });
+    const wrapper = render([], true, { initialDraftId: 'draft-1', initialBody: '' });
+    try {
+      await flushPromises();
+      const error = harness.toastError.mock.calls[0]![0] as string;
+      expect(error).toContain(folder);
+      expect(error).toMatch(/sync.*folder/i);
+      expect(error).not.toContain('[object Object]');
+      expect(sendButton(wrapper).attributes('disabled')).toBeDefined();
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it('keeps autosave and the close guard when a side load fails, and offers a retry', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     harness.templatesLoad.mockRejectedValueOnce(new Error('list_templates timed out'));

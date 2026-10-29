@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
+import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import IconButton from '@/components/ui/IconButton.vue';
 import { useDismissable } from '@/composables/useDismissable';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
@@ -61,7 +62,7 @@ onMounted(async () => {
     bytes.value = await attachmentBytes(data.value);
     prepareObjectUrl(data.value, bytes.value);
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err);
+    error.value = backendErrorLabel(err);
   } finally {
     loading.value = false;
   }
@@ -124,7 +125,7 @@ async function openWithSystem() {
   try {
     await attachmentActions.openAttachmentDefault(props.attachmentId);
   } catch (err) {
-    toast.error(t('mail.attachment.openFailed', { error: String(err) }));
+    toast.error(t('mail.attachment.openFailed', { error: backendErrorLabel(err) }));
   } finally {
     openingExternal.value = false;
   }

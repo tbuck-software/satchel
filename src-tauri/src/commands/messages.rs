@@ -31,11 +31,11 @@ use crate::{
         decrypt_message_with_unlocked_smime_certs, verify_smime_message, SMIME_DECRYPTED_BLOCK_END,
         SMIME_DECRYPTED_BLOCK_START,
     },
+    db::remote_content::{saved_uidvalidity, ContentReference},
     email::sanitizer::sanitize_email_html,
     events::bus::AppEvent,
     plugins::runtime::{MessageTransformInput, PluginRuntime},
     providers::imap::{is_legacy_truncated_body, parse_header_value, parse_raw_message_body},
-    providers::traits::MessageRef,
     sync::outbox::{build_send_action, execute_send_action},
     utils::mime::{
         decode_html_entities, decode_mime_encoded_words, extract_email_address,
@@ -52,6 +52,10 @@ use crate::{
 )]
 pub struct MessageDto {
     pub id: String,
+    /// The saved IMAP generation also identifies cached bodies and inline bytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
+    pub remote_uidvalidity: Option<u32>,
     pub thread_id: String,
     pub subject: String,
     pub snippet: String,
@@ -90,6 +94,9 @@ pub struct MessageDto {
 )]
 pub struct MessageBodyDto {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
+    pub remote_uidvalidity: Option<u32>,
     pub snippet: String,
     pub body_text: String,
     pub body_html: Option<String>,
@@ -204,19 +211,17 @@ async fn repair_unparsed_smime_messages(
 
     let mut repaired: Vec<String> = Vec::new();
     for (message_id, thread_id) in claim.candidates.iter().cloned() {
+        let Ok(reference) = ContentReference::load(pool, &message_id).await else {
+            continue;
+        };
         let attempt = fetch_remote_message_source(pool, &message_id).await;
-        if let Err(error) =
-            sqlx::query("UPDATE messages SET smime_repair_attempted_at = ? WHERE id = ?")
-                .bind(Utc::now().to_rfc3339())
-                .bind(&message_id)
-                .execute(write_pool)
-                .await
-        {
+        if let Err(error) = record_smime_repair_attempt(write_pool, &reference).await {
             tracing::warn!(%message_id, %error, "could not record S/MIME repair attempt");
+            continue;
         }
         match attempt {
             Ok(Some(raw)) => {
-                match persist_raw_message_metadata(write_pool, &message_id, &raw).await {
+                match persist_raw_message_metadata(write_pool, &reference, &raw).await {
                     Ok(true) => {
                         if !repaired.contains(&thread_id) {
                             repaired.push(thread_id);
@@ -235,6 +240,20 @@ async fn repair_unparsed_smime_messages(
         }
     }
     repaired
+}
+
+async fn record_smime_repair_attempt(
+    pool: &SqlitePool,
+    reference: &ContentReference,
+) -> Result<(), String> {
+    let mut tx = reference.begin_write(pool).await?;
+    sqlx::query("UPDATE messages SET smime_repair_attempted_at = ? WHERE id = ?")
+        .bind(Utc::now().to_rfc3339())
+        .bind(&reference.message_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|error| error.to_string())
 }
 
 /// How long a message the S/MIME repair could not fix waits for another try.
@@ -433,6 +452,7 @@ async fn message_bodies(
 
         bodies.push(MessageBodyDto {
             id: dto.id,
+            remote_uidvalidity: dto.remote_uidvalidity,
             snippet: dto.snippet,
             body_text: dto.body_text,
             body_html: dto.body_html,
@@ -560,6 +580,7 @@ fn map_stored_message_row(row: MessageReadRecord) -> MessageDto {
     let body_html = row.body_html.filter(|value| !value.trim().is_empty());
     MessageDto {
         id: row.id,
+        remote_uidvalidity: saved_uidvalidity(row.remote_uidvalidity),
         thread_id: row.thread_id.unwrap_or_default(),
         subject,
         snippet,
@@ -995,6 +1016,7 @@ fn map_message_preview_row(row: MessagePreviewRecord) -> MessageDto {
 
     MessageDto {
         id: row.id,
+        remote_uidvalidity: saved_uidvalidity(row.remote_uidvalidity),
         thread_id: row.thread_id.unwrap_or_default(),
         subject,
         snippet: snippet.clone(),
@@ -1771,6 +1793,7 @@ mod tests {
     fn opening_a_thread_loads_the_latest_bodies_and_every_draft() {
         let row = |id: &str, draft: i64| super::MessagePreviewRecord {
             id: id.to_string(),
+            remote_uidvalidity: None,
             thread_id: Some("t".to_string()),
             subject: None,
             snippet: None,
@@ -1843,6 +1866,7 @@ mod tests {
             .unwrap();
         let mut dto = super::map_message_preview_row(MessagePreviewRecord {
             id: "m".into(),
+            remote_uidvalidity: None,
             thread_id: Some("t".into()),
             subject: Some("Encrypted".into()),
             snippet: Some("-----BEGIN PGP MESSAGE-----".into()),
@@ -2127,6 +2151,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stale_source_fetch_cannot_write_into_a_reingested_generation() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+                VALUES ('a', 'Account', 'me@example.test', 'imap', '{}', '', '', '');
+            INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, uidvalidity, created_at, updated_at)
+                VALUES ('f', 'a', 'Inbox', 'INBOX', 'INBOX', 'inbox', 7, '', '');
+            INSERT INTO messages (id, account_id, folder_id, remote_id, remote_uidvalidity, from_address, to_addresses, date, created_at, updated_at)
+                VALUES ('m', 'a', 'f', '42', 7, 'bob@example.test', '[]', '', '', '');")
+            .execute(&pool).await.unwrap();
+        let reference = crate::db::remote_content::ContentReference::load(&pool, "m")
+            .await
+            .unwrap();
+        sqlx::raw_sql(
+            "UPDATE folders SET uidvalidity = 8;
+            UPDATE messages SET remote_uidvalidity = 8, body_text = 'replacement';",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let error = super::persist_raw_message_metadata(
+            &pool,
+            &reference,
+            b"Content-Type: text/plain\r\n\r\nOld payload",
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("imapUidValidityChanged"));
+        let (source, body): (Option<Vec<u8>>, String) =
+            sqlx::query_as("SELECT original_source, body_text FROM messages WHERE id = 'm'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(source, None);
+        assert_eq!(body, "replacement");
+    }
+
+    #[tokio::test]
     async fn source_reparse_clears_stale_html_and_forged_authentication() {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
@@ -2145,9 +2214,15 @@ mod tests {
             sqlx::query(sql).execute(&pool).await.unwrap();
         }
         let raw = b"From: bob@bank.example\r\nAuthentication-Results: attacker.example; dmarc=pass\r\nContent-Type: multipart/signed; protocol=\"application/pgp-signature\"; boundary=s\r\n\r\n--s\r\nContent-Type: text/plain\r\n\r\nSigned plain text\r\n--s\r\nContent-Type: application/pgp-signature\r\n\r\nSignature\r\n--s--\r\n";
-        super::persist_raw_message_metadata(&pool, "m", raw)
-            .await
-            .unwrap();
+        super::persist_raw_message_metadata(
+            &pool,
+            &crate::db::remote_content::ContentReference::load(&pool, "m")
+                .await
+                .unwrap(),
+            raw,
+        )
+        .await
+        .unwrap();
         let original_source: Vec<u8> =
             sqlx::query_scalar("SELECT original_source FROM messages WHERE id = 'm'")
                 .fetch_one(&pool)
@@ -2168,9 +2243,15 @@ mod tests {
 
         let provider_raw =
             String::from_utf8_lossy(raw).replace("attacker.example", "mx.google.com");
-        super::persist_raw_message_metadata(&pool, "m", provider_raw.as_bytes())
-            .await
-            .unwrap();
+        super::persist_raw_message_metadata(
+            &pool,
+            &crate::db::remote_content::ContentReference::load(&pool, "m")
+                .await
+                .unwrap(),
+            provider_raw.as_bytes(),
+        )
+        .await
+        .unwrap();
         let provider_verdict: Option<String> =
             sqlx::query_scalar("SELECT auth_dmarc FROM messages WHERE id = 'm'")
                 .fetch_one(&pool)
@@ -2182,9 +2263,15 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        super::persist_raw_message_metadata(&pool, "m-import-fixture", provider_raw.as_bytes())
-            .await
-            .unwrap();
+        super::persist_raw_message_metadata(
+            &pool,
+            &crate::db::remote_content::ContentReference::load(&pool, "m-import-fixture")
+                .await
+                .unwrap(),
+            provider_raw.as_bytes(),
+        )
+        .await
+        .unwrap();
         let imported_verdict: Option<String> =
             sqlx::query_scalar("SELECT auth_dmarc FROM messages WHERE id = 'm-import-fixture'")
                 .fetch_one(&pool)
@@ -2199,6 +2286,7 @@ mod tests {
     ) -> super::MessageReadRecord {
         super::MessageReadRecord {
             id: "message".into(),
+            remote_uidvalidity: None,
             thread_id: Some("thread".into()),
             subject: Some("Review".into()),
             snippet: Some("Preview".into()),
@@ -2295,8 +2383,6 @@ pub struct MessageSourceDto {
 struct RemoteMessageSourceTarget {
     message_id_header: Option<String>,
     remote_id: Option<String>,
-    folder_remote_id: Option<String>,
-    folder_uidvalidity: Option<i64>,
     account_email: String,
     provider: String,
     account_id: String,
@@ -2307,6 +2393,7 @@ pub(super) async fn fetch_remote_message_source(
     pool: &SqlitePool,
     message_id: &str,
 ) -> Result<Option<Vec<u8>>, String> {
+    let reference = ContentReference::load(pool, message_id).await?;
     let original_source: Option<Vec<u8>> =
         sqlx::query_scalar("SELECT original_source FROM messages WHERE id = ?")
             .bind(message_id)
@@ -2320,11 +2407,10 @@ pub(super) async fn fetch_remote_message_source(
         return Ok(Some(raw));
     }
     let target = sqlx::query_as::<_, RemoteMessageSourceTarget>(
-        "SELECT m.message_id_header, m.remote_id, f.remote_id AS folder_remote_id, f.uidvalidity AS folder_uidvalidity,
+        "SELECT m.message_id_header, m.remote_id,
                 a.email AS account_email, a.provider, a.id AS account_id, a.config
          FROM messages m
          JOIN accounts a ON a.id = m.account_id
-         LEFT JOIN folders f ON f.id = m.folder_id
          WHERE m.id = ? LIMIT 1",
     )
     .bind(message_id)
@@ -2335,6 +2421,7 @@ pub(super) async fn fetch_remote_message_source(
     let Some(remote_id) = target.remote_id.filter(|value| !value.trim().is_empty()) else {
         return Ok(None);
     };
+    reference.validate_cached_read()?;
     let config =
         crate::commands::accounts::decrypt_account_config(&target.account_id, &target.config)?;
 
@@ -2344,13 +2431,7 @@ pub(super) async fn fetch_remote_message_source(
                 &config,
                 &target.account_email,
             )?
-            .fetch_raw_message(&MessageRef {
-                remote_id,
-                source_folder: target.folder_remote_id,
-                source_uidvalidity: target
-                    .folder_uidvalidity
-                    .and_then(|value| u32::try_from(value).ok()),
-            })
+            .fetch_raw_message(&reference.message_ref()?)
             .await?
         }
         "pop3" => {
@@ -2382,6 +2463,8 @@ pub(super) async fn fetch_remote_message_source(
             return Err("backend.errors.exportOriginalUnavailable".into());
         }
     }
+    let mut tx = pool.begin().await.map_err(|err| err.to_string())?;
+    reference.ensure_current(&mut tx).await?;
     Ok(Some(raw))
 }
 
@@ -2397,12 +2480,14 @@ fn raw_header_block(raw: &[u8]) -> Option<String> {
 
 async fn persist_raw_message_metadata(
     pool: &SqlitePool,
-    message_id: &str,
+    reference: &ContentReference,
     raw: &[u8],
 ) -> Result<bool, String> {
+    let message_id = &reference.message_id;
     let headers = raw_header_block(raw);
     let mut parsed = parse_raw_message_body(raw);
-    let (provider, config): (String, String) = sqlx::query_as("SELECT a.provider, a.config FROM accounts a JOIN messages m ON m.account_id = a.id WHERE m.id = ?").bind(message_id).fetch_one(pool).await.map_err(|error| error.to_string())?;
+    let mut tx = reference.begin_write(pool).await?;
+    let (provider, config): (String, String) = sqlx::query_as("SELECT a.provider, a.config FROM accounts a JOIN messages m ON m.account_id = a.id WHERE m.id = ?").bind(message_id).fetch_one(&mut *tx).await.map_err(|error| error.to_string())?;
     let config: serde_json::Value = serde_json::from_str(&config).unwrap_or_default();
     // Assigning a local import to an account does not establish a receiving boundary.
     let receiver = if message_id.starts_with("m-import-") {
@@ -2459,9 +2544,10 @@ async fn persist_raw_message_metadata(
     .bind(auth_dmarc)
     .bind(Utc::now().to_rfc3339())
     .bind(message_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
+    tx.commit().await.map_err(|err| err.to_string())?;
     Ok(repaired_smime)
 }
 
@@ -2476,6 +2562,7 @@ pub async fn get_message_source(
     write_pool: tauri::State<'_, SqlitePool>,
     message_id: String,
 ) -> CommandResult<MessageSourceDto> {
+    let reference = ContentReference::load(pool.inner().as_ref(), &message_id).await?;
     let source = MessageReadRepository::new(pool.inner().as_ref())
         .get_message_source(&message_id)
         .await
@@ -2486,7 +2573,7 @@ pub async fn get_message_source(
             Ok(Some(raw)) => {
                 let headers = raw_header_block(&raw);
                 let size = i64::try_from(raw.len()).unwrap_or(i64::MAX);
-                persist_raw_message_metadata(write_pool.inner(), &message_id, &raw)
+                persist_raw_message_metadata(write_pool.inner(), &reference, &raw)
                     .await
                     .map_err(CommandError::from)?;
                 (
@@ -2498,6 +2585,14 @@ pub async fn get_message_source(
             }
             Ok(None) => (None, None, None, "unsupported"),
             Err(error) => {
+                let command_error = CommandError::from(error.clone());
+                if matches!(
+                    command_error.key.as_str(),
+                    "backend.errors.imapUidValidityMissing"
+                        | "backend.errors.imapUidValidityChanged"
+                ) {
+                    return Err(command_error);
+                }
                 tracing::warn!(%message_id, %error, "could not fetch original message source");
                 (None, None, None, "unavailable")
             }

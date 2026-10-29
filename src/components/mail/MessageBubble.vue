@@ -70,6 +70,8 @@ const topicsStore = useTopicsStore();
 const messagesStore = useMessagesStore();
 const invitesStore = useInvitesStore();
 const accountsStore = useAccountsStore();
+const bodyCacheKey = computed(() =>
+  `${props.message.id}:uidvalidity:${props.message.remoteUidValidity ?? 'local'}`);
 const { t } = useI18n();
 const sourceDialogOpen = ref(false);
 const messageActionsOpen = ref(false);
@@ -609,7 +611,7 @@ function openSenderDetails() {
           :trusted-dmarc-pass="props.message.authDmarc === 'pass'"
           :attachments="props.message.attachments"
           :normalize-quotes="settings.collapseQuotedHistory"
-          :cache-key="props.message.id"
+          :cache-key="bodyCacheKey"
         />
       </template>
       <EmailRenderer
@@ -624,7 +626,7 @@ function openSenderDetails() {
         :trusted-dmarc-pass="props.message.authDmarc === 'pass'"
         :attachments="props.message.attachments"
         :normalize-quotes="settings.collapseQuotedHistory"
-        :cache-key="props.message.id"
+        :cache-key="bodyCacheKey"
         @request-unlock="handleUnlock"
       />
     </div>
@@ -644,6 +646,7 @@ function openSenderDetails() {
       class="mt-4"
       tone="danger"
       :title="$t('mail.message.bodyLoadFailed')"
+      :detail="props.message.bodyLoadError"
     />
 
     <!-- Attachments -->

@@ -184,6 +184,7 @@ mod tests {
         connections: AtomicUsize,
         logins: AtomicUsize,
         fetches: AtomicUsize,
+        generation: AtomicUsize,
     }
 
     /// Answers LOGIN, SELECT, UID FETCH and LOGOUT like a small server would.
@@ -193,6 +194,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let counters = Arc::new(Counters::default());
+        counters.generation.store(7, Ordering::SeqCst);
         let shared = Arc::clone(&counters);
         tokio::spawn(async move {
             loop {
@@ -224,13 +226,17 @@ mod tests {
                                 if drop_after_first_fetch && served > 0 {
                                     return;
                                 }
-                                format!("* 3 EXISTS\r\n* OK [UIDVALIDITY 7] ok\r\n{tag} OK [READ-WRITE] SELECT completed\r\n")
+                                format!("* 3 EXISTS\r\n* OK [UIDVALIDITY {}] ok\r\n{tag} OK [READ-WRITE] SELECT completed\r\n", counters.generation.load(Ordering::SeqCst))
                             }
                             "UID" => {
                                 counters.fetches.fetch_add(1, Ordering::SeqCst);
                                 served += 1;
                                 let header = "Content-Type: text/plain; charset=utf-8\r\n\r\n";
-                                let text = "Body from the fake server";
+                                let text = if counters.generation.load(Ordering::SeqCst) == 7 {
+                                    "Body from the fake server"
+                                } else {
+                                    "Payload of another message after UID reuse"
+                                };
                                 format!(
                                     "* 1 FETCH (UID 42 BODY[HEADER] {{{}}}\r\n{header} BODY[TEXT] {{{}}}\r\n{text})\r\n{tag} OK FETCH completed\r\n",
                                     header.len(),
@@ -281,12 +287,32 @@ mod tests {
             pool,
             "fake:993/user",
             || plain_login(address),
-            |session| fetch_body_on_session(session, "INBOX".to_string(), "42".to_string()),
+            |session| {
+                fetch_body_on_session(session, "INBOX".to_string(), "42".to_string(), Some(7))
+            },
             |mut session: PlainSession| async move {
                 let _ = session.logout().await;
             },
         )
         .await
+    }
+
+    #[tokio::test]
+    async fn pooled_body_fetch_rejects_uid_reuse_after_folder_reset() {
+        let (address, counters) = fake_server(false).await;
+        let pool = Arc::new(SessionPool::new(IDLE_SESSION_TTL));
+        read_body(&pool, address).await.unwrap();
+        counters.generation.store(8, Ordering::SeqCst);
+        let result = read_body(&pool, address).await;
+        assert!(
+            result.is_err(),
+            "UID 42 now belongs to another message: {result:?}"
+        );
+        assert_eq!(
+            counters.fetches.load(Ordering::SeqCst),
+            1,
+            "generation must be checked before fetching another message's body"
+        );
     }
 
     /// Holding `j` through 30 old threads fetches 30 bodies: one login.

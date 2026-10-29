@@ -1,6 +1,7 @@
 // Generated from Rust. Run pnpm ipc:generate.
 export type MessageBodyDto = {
     id: string;
+    remote_uidvalidity?: number | null;
     snippet: string;
     body_text: string;
     body_html: string | null;

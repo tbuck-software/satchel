@@ -535,6 +535,35 @@ async fn persist_provider_message(
     .await
     .map_err(|err| err.to_string())?;
 
+    if provider_kind == "imap" {
+        // A legacy row can retain its local id when sync verifies it again.
+        // Content from its unverified or earlier generation must not survive
+        // COALESCE in the upsert, even when this envelope is header-only.
+        sqlx::query(
+            "UPDATE attachments SET cached_path = NULL, content_base64 = NULL, calendar_scan_at = NULL
+            WHERE message_id = ? AND EXISTS (SELECT 1 FROM messages
+                WHERE id = ? AND remote_uidvalidity IS NOT ?)",
+        )
+        .bind(&message_id)
+        .bind(&message_id)
+        .bind(message.remote_uidvalidity.map(i64::from))
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| error.to_string())?;
+        sqlx::query(
+            "UPDATE messages SET body_text = NULL, body_html = NULL,
+                original_body_html = NULL, original_source = NULL, raw_headers = NULL, raw_size = NULL,
+                draft_attachments_json = NULL,
+                smime_repair_attempted_at = NULL
+            WHERE id = ? AND remote_uidvalidity IS NOT ?",
+        )
+        .bind(&message_id)
+        .bind(message.remote_uidvalidity.map(i64::from))
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+
     // `has_attachments` only ever rises. A re-sync that returns the envelope
     // without its parts is missing information, not reporting a message that
     // lost its attachments — mail is immutable on the server.
@@ -641,6 +670,14 @@ async fn persist_provider_message(
     .execute(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
+
+    // Stamp the generation from the fetched envelope, never from current folder state.
+    sqlx::query("UPDATE messages SET remote_uidvalidity = ? WHERE id = ?")
+        .bind(message.remote_uidvalidity.map(i64::from))
+        .bind(&message_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| error.to_string())?;
 
     remember_provider_thread_connection(
         &mut *tx,
@@ -810,6 +847,7 @@ async fn finish_provider_message(
             &message_id,
             &message.remote_id,
             folder_remote_id,
+            message.remote_uidvalidity,
             attachment_id,
             attachment,
         )
@@ -2622,6 +2660,67 @@ mod tests {
                 .unwrap(),
             2
         );
+    }
+
+    #[tokio::test]
+    async fn verifying_a_new_generation_discards_old_bodies_and_attachment_caches() {
+        let pool = ingest_pool().await;
+        let mut message = envelope("42");
+        message.remote_uidvalidity = Some(7);
+        message.body_text = Some("old body".into());
+        message.attachments.push(RemoteAttachment {
+            remote_part_id: "part.1".into(),
+            filename: Some("file.bin".into()),
+            content_type: "application/octet-stream".into(),
+            size: Some(3),
+            content_id: None,
+            is_inline: false,
+            content_base64: Some("b2xk".into()),
+        });
+        ingest_identity_fixture(&pool, "imap", "inbox", "INBOX", &message).await;
+        let original_id: String = sqlx::query_scalar("SELECT id FROM messages")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE attachments SET cached_path = '/cache/old', calendar_scan_at = 'old generation'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE messages SET raw_headers = 'old headers', raw_size = 99")
+            .execute(&pool)
+            .await
+            .unwrap();
+        message.remote_uidvalidity = Some(8);
+        message.body_text = None;
+        message.body_html = None;
+        message.original_source = None;
+        message.attachments.clear();
+        ingest_identity_fixture(&pool, "imap", "inbox", "INBOX", &message).await;
+        let (id, generation, body): (String, i64, Option<String>) =
+            sqlx::query_as("SELECT id, remote_uidvalidity, body_text FROM messages")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            id, original_id,
+            "retaining a local id must still invalidate its content"
+        );
+        assert_eq!(generation, 8);
+        assert_eq!(body, None);
+        let source: (Option<String>, Option<i64>) =
+            sqlx::query_as("SELECT raw_headers, raw_size FROM messages")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(source, (None, None));
+        let (path, payload, scan): (Option<String>, Option<String>, Option<String>) =
+            sqlx::query_as("SELECT cached_path, content_base64, calendar_scan_at FROM attachments")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(path, None);
+        assert_eq!(payload, None);
+        assert_eq!(scan, None);
     }
 
     #[tokio::test]
