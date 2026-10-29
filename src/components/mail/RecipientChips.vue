@@ -341,13 +341,22 @@ defineExpose({ focus: () => inputRef.value?.focus() });
   padding: 0 2px;
 }
 
+/* A touch target without a tall chip: the 44px hit area reaches past the
+   chip's edges instead of stretching the To row to two lines. */
+@media (pointer: coarse) {
+  .chip-remove {
+    margin-block: -10px;
+    margin-inline-end: -8px;
+  }
+}
+
 .chip-remove:hover {
   color: var(--text-primary);
 }
 
 input {
-  flex: 1 1 100px;
-  min-width: 100px;
+  flex: 1 1 64px;
+  min-width: 64px;
   border: 0 !important;
   background: transparent !important;
   outline: none;
