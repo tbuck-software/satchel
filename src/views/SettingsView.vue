@@ -119,7 +119,7 @@ onBeforeUnmount(() => unregisterFilter?.());
     <PaneHeader
       :class="{ 'settings-view__header': !ui.isSinglePane }"
       :title="showOverview ? $t('common.settings') : (ui.isSinglePane ? activeLabel : $t('common.settings'))"
-      :subtitle="showOverview ? $t('settings.overview.subtitle') : (ui.isSinglePane ? $t('common.settings') : undefined)"
+      :subtitle="showOverview ? (ui.isMobile ? undefined : $t('settings.overview.subtitle')) : (ui.isSinglePane ? $t('common.settings') : undefined)"
       :no-menu="ui.isSinglePane"
     >
       <template v-if="ui.isSinglePane" #leading>
