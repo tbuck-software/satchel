@@ -1,4 +1,5 @@
 mod composer_body;
+pub mod eml_attachments;
 
 use base64::Engine as _;
 use chrono::{DateTime, Utc};

@@ -713,6 +713,11 @@
       "strike": "Durchgestrichen",
       "textColor": "Textfarbe"
     },
+    "emlDrop": {
+      "hint": "Loslassen, um als .eml anzuhängen",
+      "loading": "Nachrichten werden angehängt …",
+      "unavailable": "Das Original einer Nachricht ließ sich nicht laden; sie wurde nicht angehängt. | Die Originale von {count} Nachrichten ließen sich nicht laden; sie wurden nicht angehängt."
+    },
     "forward": {
       "cc": "Cc: {value}",
       "date": "Datum: {value}",

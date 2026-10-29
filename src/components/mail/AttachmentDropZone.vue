@@ -4,6 +4,12 @@ import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { BackendOutgoingAttachment } from '@/types/composer';
 import { formatBytes } from '@/utils/formatBytes';
+import {
+  attachmentsSize,
+  encodedAttachmentSize as encodedSize,
+  MAX_ATTACHMENT_BYTES as MAX_BYTES,
+  MAX_TOTAL_ATTACHMENT_BYTES as MAX_TOTAL_BYTES,
+} from '@/utils/attachmentLimits';
 
 const props = withDefaults(defineProps<{
   modelValue: BackendOutgoingAttachment[];
@@ -26,26 +32,11 @@ const isOver = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const errorText = ref('');
 
-const MAX_BYTES = 25_000_000;
-/**
- * Total budget across all attachments. Most providers reject well before this
- * (Gmail ~25 MB, Graph ~35 MB) and base64 adds ~33 % on the wire, so refusing
- * here is far kinder than a failed send after a long upload.
- */
-const MAX_TOTAL_BYTES = 20_000_000;
-
 const visibleAttachments = computed(() =>
   props.modelValue.map((attachment, index) => ({ attachment, index })),
 );
 
-/** Approximate original byte size of an already-encoded attachment. */
-function encodedSize(attachment: BackendOutgoingAttachment): number {
-  return Math.floor((attachment.content_base64.length * 3) / 4);
-}
-
-const usedBytes = computed(() =>
-  props.modelValue.reduce((sum, attachment) => sum + encodedSize(attachment), 0),
-);
+const usedBytes = computed(() => attachmentsSize(props.modelValue));
 
 async function readFile(file: File, alreadyUsed: number): Promise<BackendOutgoingAttachment | null> {
   if (file.size > MAX_BYTES) {

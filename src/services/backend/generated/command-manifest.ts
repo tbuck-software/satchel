@@ -2137,6 +2137,20 @@ export default {
                 }
             }
         },
+        "thread_eml_attachments": {
+            "kind": "object",
+            "fields": {
+                "threadIds": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
         "toggle_attachment_quick_look": {
             "kind": "object",
             "fields": {

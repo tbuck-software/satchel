@@ -221,3 +221,20 @@ test('drag, resize, maximize and reopen keep the composer inside the window', as
   await expect(composer).toBeVisible();
   await expect.poll(async () => Math.round((await composer.boundingBox())!.x)).toBe(802);
 });
+
+test('a thread dragged from the list onto the composer arrives as an .eml attachment', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?mockSignatures=1');
+  const row = page.getByRole('option').filter({ hasText: 'Staging login 500 after deployment' }).first();
+  await expect(row).toBeVisible();
+  await page.getByRole('button', { name: 'New message', exact: true }).click();
+  const composer = page.getByRole('dialog', { name: 'Compose email' });
+  const writer = composer.locator('.ProseMirror').first();
+  await expect(writer).toBeVisible();
+  // Dropped on the editor on purpose: the composer must take it before the
+  // editor pastes the drag as text.
+  await row.dragTo(writer);
+  await expect(composer.locator('.compose-attachments')).toContainText('Staging login 500 after deployment.eml');
+  await expect(writer).toHaveText('');
+  await expect(composer.locator('.compose-eml-drop')).toHaveCount(0);
+});
