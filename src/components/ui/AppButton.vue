@@ -86,26 +86,14 @@ defineEmits<{
   color: var(--text-on-accent);
 }
 
-.app-button--primary:hover:not(:disabled) {
-  background: var(--accent-primary-hover);
-}
-
 .app-button--neutral {
   background: var(--action-neutral);
   color: var(--action-neutral-ink);
 }
 
-.app-button--neutral:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--action-neutral) 90%, var(--bg-base));
-}
-
 .app-button--soft {
   background: var(--bg-raised);
   color: var(--text-primary);
-}
-
-.app-button--soft:hover:not(:disabled) {
-  background: var(--bg-overlay);
 }
 
 /* The outlined twin of soft: same footprint, no fill. It replaces the
@@ -117,18 +105,9 @@ defineEmits<{
   border: 1px solid var(--border-color);
 }
 
-.app-button--secondary:hover:not(:disabled) {
-  background: var(--bg-hover);
-}
-
 .app-button--ghost {
   background: transparent;
   color: var(--text-secondary);
-}
-
-.app-button--ghost:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
 }
 
 /* Inline actions share the surrounding text metrics and keep the kit's
@@ -144,17 +123,9 @@ defineEmits<{
   white-space: normal;
 }
 
-.app-button--link:hover:not(:disabled) {
-  text-decoration: underline;
-}
-
 .app-button--danger {
   background: color-mix(in srgb, var(--accent-red) 14%, var(--bg-raised));
   color: var(--accent-red);
-}
-
-.app-button--danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent-red) 24%, var(--bg-raised));
 }
 
 .app-button:disabled {
@@ -165,6 +136,53 @@ defineEmits<{
 @media (prefers-reduced-motion: reduce) {
   .app-button {
     transition: none;
+  }
+}
+
+/* A tap leaves WebKit's :hover on the button under the finger; the link
+   variant kept its underline after the thread opened under it. */
+@media (hover: hover) {
+  .app-button--primary:hover:not(:disabled) {
+    background: var(--accent-primary-hover);
+  }
+
+  .app-button--neutral:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--action-neutral) 90%, var(--bg-base));
+  }
+
+  .app-button--soft:hover:not(:disabled) {
+    background: var(--bg-overlay);
+  }
+
+  .app-button--secondary:hover:not(:disabled) {
+    background: var(--bg-hover);
+  }
+
+  .app-button--ghost:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .app-button--link:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+
+  .app-button--danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent-red) 24%, var(--bg-raised));
+  }
+}
+
+/* Touch: the small pill is 30px; its hit area reaches 44px without the pill
+   growing, so rows and headers keep their rhythm. */
+@media (pointer: coarse) {
+  .app-button--sm {
+    position: relative;
+  }
+
+  .app-button--sm::after {
+    content: '';
+    position: absolute;
+    inset: -7px 0;
   }
 }
 </style>

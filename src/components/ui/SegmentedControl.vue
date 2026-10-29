@@ -72,4 +72,12 @@ defineEmits<{
   color: var(--text-primary);
   box-shadow: var(--shadow-sm);
 }
+
+/* Touch: the track's padding brings a 36px option to a thumb's 44px. */
+@media (pointer: coarse) {
+  .segmented__option {
+    height: 36px;
+    padding-inline: var(--space-md);
+  }
+}
 </style>

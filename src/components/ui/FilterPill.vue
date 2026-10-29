@@ -90,4 +90,10 @@ defineEmits<{
 .filter-pill--pressed .filter-pill__count {
   color: var(--action-neutral-ink);
 }
+
+@media (pointer: coarse) {
+  .filter-pill {
+    height: 36px;
+  }
+}
 </style>
