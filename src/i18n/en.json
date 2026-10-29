@@ -377,6 +377,9 @@
     }
   },
   "calendar": {
+    "agenda": {
+      "empty": "No events"
+    },
     "createHint": "Click an empty day or time slot to create an event.",
     "editor": {
       "add": "Add",

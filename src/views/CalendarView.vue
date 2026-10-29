@@ -5,6 +5,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useInvitesStore } from '@/stores/invites';
 import { useAccountsStore } from '@/stores/accounts';
 import { useCalendarUiStore } from '@/stores/calendarUi';
+import { useUiStore } from '@/stores/ui';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import {
@@ -24,6 +25,7 @@ import {
 } from '@/utils/calendarGrid';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 import CalendarMonthGrid from '@/components/calendar/CalendarMonthGrid.vue';
+import CalendarDayAgenda from '@/components/calendar/CalendarDayAgenda.vue';
 import CalendarWeekGrid from '@/components/calendar/CalendarWeekGrid.vue';
 import CalendarPopover from '@/components/calendar/CalendarPopover.vue';
 import EventDetailsPopover from '@/components/calendar/EventDetailsPopover.vue';
@@ -51,6 +53,14 @@ const toast = useToast();
 const { ask } = useConfirm();
 
 const viewMode = computed(() => calendarUi.viewMode);
+const ui = useUiStore();
+/** The phone's month: a compact grid plus the picked day's agenda below it. */
+const phoneMonth = computed(() => ui.isMobile && viewMode.value === 'month');
+const agendaDays = computed(() => [anchor.value]);
+
+function pickDay(day: Date) {
+  calendarUi.setAnchor(day);
+}
 const anchor = computed(() => calendarUi.anchor);
 const selected = ref<{ item: CalendarItem; anchor: AnchorBox } | null>(null);
 const quick = ref<{ draft: CalendarEventDraft; anchor: AnchorBox } | null>(null);
@@ -324,11 +334,21 @@ function onKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <section class="calendar">
+  <section class="calendar" :class="{ 'calendar--phone': ui.isMobile }">
     <header class="calendar__toolbar">
       <div class="calendar__heading">
-        <DrawerButton /><h2>{{ $t('calendar.title') }}</h2>
+        <DrawerButton /><h2 v-if="!ui.isMobile">{{ $t('calendar.title') }}</h2>
         <span class="calendar__range">{{ rangeLabel }}</span>
+      </div>
+      <!-- A phone has no room for a text toolbar: Import and New event become
+           the two icons at the end of the title row, like a native app bar. -->
+      <div v-if="ui.isMobile" class="calendar__phone-actions">
+        <IconButton :title="$t('calendar.importIcs')" :aria-label="$t('calendar.importIcs')" @click="filePicker?.click()">
+          <AppIcon><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 11v2.5h11V11" /></AppIcon>
+        </IconButton>
+        <IconButton tone="accent" :title="$t('calendar.newEvent')" :aria-label="$t('calendar.newEvent')" @click="newEvent">
+          <AppIcon><path d="M8 3v10M3 8h10" /></AppIcon>
+        </IconButton>
       </div>
       <div class="calendar__nav">
         <IconButton size="sm" :title="$t('calendar.nav.previous')" @click="navigate(-1)"><AppIcon><path d="m10 3-5 5 5 5" /></AppIcon></IconButton>
@@ -342,10 +362,10 @@ function onKeydown(event: KeyboardEvent) {
           :aria-label="$t('calendar.view.label')"
           @update:model-value="setViewMode"
         />
-        <AppButton variant="ghost" size="sm" :title="$t('calendar.importIcsHint')" @click="filePicker?.click()">
+        <AppButton v-if="!ui.isMobile" variant="ghost" size="sm" :title="$t('calendar.importIcsHint')" @click="filePicker?.click()">
           {{ $t('calendar.importIcs') }}
         </AppButton>
-        <AppButton variant="primary" size="sm" :title="$t('calendar.createHint')" @click="newEvent">{{ $t('calendar.newEvent') }}</AppButton>
+        <AppButton v-if="!ui.isMobile" variant="primary" size="sm" :title="$t('calendar.createHint')" @click="newEvent">{{ $t('calendar.newEvent') }}</AppButton>
         <input
           ref="filePicker"
           type="file"
@@ -380,9 +400,18 @@ function onKeydown(event: KeyboardEvent) {
         v-if="viewMode === 'month'"
         :anchor="anchor"
         :items="items"
+        :compact="phoneMonth"
         @select="selectItem"
         @create-at="createAt"
         @open-day="openDay"
+        @pick-day="pickDay"
+      />
+      <CalendarDayAgenda
+        v-if="phoneMonth"
+        class="calendar__agenda"
+        :days="agendaDays"
+        :items="items"
+        @select="selectItem"
       />
       <CalendarWeekGrid
         v-else
@@ -524,5 +553,57 @@ function onKeydown(event: KeyboardEvent) {
 .calendar__grid {
   flex: 1;
   min-height: 0;
+}
+
+/* Phone: the title row carries the month and two icons; view switch and
+   arrows share the row under it. Grid and agenda scroll together. */
+.calendar--phone {
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-md) 0;
+}
+
+.calendar--phone .calendar__toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-xs) var(--space-sm);
+}
+
+.calendar--phone .calendar__heading {
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.calendar--phone .calendar__range {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--font-size-xl);
+  font-weight: var(--weight-bold);
+  text-overflow: ellipsis;
+}
+
+.calendar__phone-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+.calendar--phone .calendar__actions {
+  grid-row: 2;
+  grid-column: 1;
+  margin-left: 0;
+}
+
+.calendar--phone .calendar__nav {
+  grid-row: 2;
+  grid-column: 2;
+}
+
+.calendar--phone .calendar__grid {
+  overflow-y: auto;
+  padding-bottom: var(--space-lg);
+}
+
+.calendar__agenda {
+  margin-top: var(--space-md);
 }
 </style>

@@ -57,6 +57,9 @@ vi.mock('@/stores/accounts', () => ({
   useAccountsStore: () => harness.accounts,
 }));
 
+vi.mock('@/stores/ui', () => ({
+  useUiStore: () => ({ isMobile: false }),
+}));
 vi.mock('@/stores/calendarUi', () => ({
   useCalendarUiStore: () => harness.calendarUi,
 }));

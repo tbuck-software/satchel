@@ -377,6 +377,9 @@
     }
   },
   "calendar": {
+    "agenda": {
+      "empty": "Keine Termine"
+    },
     "createHint": "Klicke auf einen freien Tag oder eine freie Uhrzeit, um einen Termin anzulegen.",
     "editor": {
       "add": "Hinzufügen",

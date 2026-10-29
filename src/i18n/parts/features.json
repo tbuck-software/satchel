@@ -6,6 +6,9 @@
       "newEvent": "New event",
       "hint": "Clicking an empty day or time slot creates an event. Events from mails with an {ics} attachment are detected automatically.",
       "more": "+{count} more",
+      "agenda": {
+        "empty": "No events"
+      },
       "view": {
         "label": "Calendar view",
         "month": "Month",
@@ -413,6 +416,9 @@
       "newEvent": "Neuer Termin",
       "hint": "Klick auf einen freien Tag oder eine freie Uhrzeit legt einen Termin an. Auto-erkannt werden Termine aus Mails mit {ics}-Anhang.",
       "more": "+{count} weitere",
+      "agenda": {
+        "empty": "Keine Termine"
+      },
       "view": {
         "label": "Kalenderansicht",
         "month": "Monat",
