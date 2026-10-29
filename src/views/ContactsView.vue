@@ -175,7 +175,7 @@ function openContact(email: string) {
     <PaneHeader
       class="contact-header"
       :title="currentCopy.title"
-      :subtitle="currentCopy.subtitle"
+      :subtitle="ui.isMobile ? undefined : currentCopy.subtitle"
       :count="filteredCount"
     >
       <template #actions>

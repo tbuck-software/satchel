@@ -15,6 +15,12 @@ import { useAppBootstrap, useComposeWindowBootstrap } from '@/bootstrap';
 import { loadOmniSearch } from '@/components/navigation/loadOmniSearch';
 
 const route = useRoute();
+/**
+ * Screens without the compose FAB: a thread has its own action bar, and
+ * Settings, Calendar and Contacts have a primary action of their own that a
+ * mail pencil would only compete with.
+ */
+const COMPOSE_FAB_HIDDEN_ON = new Set(['thread', 'settings', 'calendar', 'contacts']);
 const topicsStore = useTopicsStore();
 const settingsStore = useSettingsStore();
 const ui = useUiStore();
@@ -116,7 +122,7 @@ if (standaloneCompose.value) {
          belongs under the thumb at the top-left of the header — so the bar
          itself had nothing left to carry. -->
     <ComposeFab
-      v-if="ui.isMobile && !standaloneCompose && route.name !== 'thread' && route.name !== 'settings'"
+      v-if="ui.isMobile && !standaloneCompose && !COMPOSE_FAB_HIDDEN_ON.has(String(route.name))"
     />
 
     <!-- Mobile: sidebar overlay -->
