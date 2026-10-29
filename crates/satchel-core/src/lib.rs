@@ -18,6 +18,7 @@
 
 pub mod accounts;
 pub mod backup;
+pub mod calendar;
 pub mod db;
 pub mod drafts;
 pub mod email;
