@@ -12,6 +12,7 @@ function state(overrides: Partial<ComposerSendState> = {}): ComposerSendState {
     bcc: [],
     body: '',
     attachmentCount: 0,
+    scheduledFor: null,
     ...overrides,
   };
 }
@@ -48,4 +49,15 @@ describe('composerSendBlocker', () => {
       ...text,
     }))).toEqual({ reason: 'invalidRecipients', invalid: ['"Buck', 'not-an-address'] });
   });
+});
+
+
+it('requires an explicitly selected send time to stay in the future', () => {
+  const now = Date.parse('2026-10-29T12:00:00Z');
+  for (const scheduledFor of ['2026-10-29T11:59:00Z', '2026-10-29T12:00:00Z', 'invalid', '']) {
+    expect(composerSendBlocker(state({ to: ['a@example.com'], ...text, scheduledFor }), now)?.reason).toBe('invalidSchedule');
+  }
+  for (const scheduledFor of [null, '2026-10-29T12:01:00Z']) {
+    expect(composerSendBlocker(state({ to: ['a@example.com'], ...text, scheduledFor }), now)).toBeNull();
+  }
 });

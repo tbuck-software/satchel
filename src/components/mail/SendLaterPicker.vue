@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
 import { useDismissable } from '@/composables/useDismissable';
-import { ref } from 'vue';
+import { computed, ref, useId } from 'vue';
+import { useActionClock } from '@/composables/useActionClock';
 import ModalShell from '@/components/ui/ModalShell.vue';
 import { toLocalMinute } from '@/utils/sendLater';
 
@@ -14,7 +15,15 @@ const emit = defineEmits<{
   (e: 'close'): void;
 }>();
 
+const { now, refresh } = useActionClock(() => true);
+const errorId = useId();
 const customDate = ref(props.value ? toLocalMinute(new Date(props.value)) : defaultLocal());
+
+const invalidDate = computed(() => {
+  const time = new Date(customDate.value).getTime();
+  return !Number.isFinite(time) || time <= now.value;
+});
+const minDate = computed(() => toLocalMinute(new Date(now.value + 60_000)));
 
 function defaultLocal() {
   const d = new Date();
@@ -23,9 +32,9 @@ function defaultLocal() {
 }
 
 function chooseCustom() {
-  if (!customDate.value) return;
+  refresh();
+  if (invalidDate.value) return;
   const local = new Date(customDate.value);
-  if (Number.isNaN(local.getTime())) return;
   emit('select', local.toISOString());
 }
 
@@ -44,8 +53,13 @@ useDismissable(() => true, () => emit('close'));
       <h3>{{ $t('compose.sendLater.title') }}</h3>
       <label class="custom">
         <span>{{ $t('compose.sendLater.custom') }}</span>
-        <input v-model="customDate" type="datetime-local" step="60" />
+        <input v-model="customDate" type="datetime-local" step="60"
+          :min="minDate"
+          :aria-invalid="invalidDate ? 'true' : undefined"
+          :aria-describedby="invalidDate ? errorId : undefined"
+        />
       </label>
+      <p v-if="invalidDate" :id="errorId" class="date-error" role="alert">{{ $t('compose.sendLater.pastDate') }}</p>
       <div class="actions">
         <AppButton v-if="props.value" class="link" @click="emit('select', null)" variant="ghost" size="sm">
           {{ $t('compose.sendLater.clear') }}
@@ -86,6 +100,12 @@ h3 {
   padding: 8px 10px;
   color: var(--text-primary);
   font-family: inherit;
+}
+
+.date-error {
+  margin: 0;
+  color: var(--accent-red-soft);
+  font-size: var(--font-size-sm);
 }
 
 .actions {

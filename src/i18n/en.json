@@ -306,6 +306,7 @@
       "restoreSearchIndexInvalid": "The backup's search index does not match its messages. Make a fresh backup instead of restoring this one.",
       "restoreStagingChanged": "The staged backup is incomplete or has changed. Stage the backup again.",
       "revealTargetBlocked": "This target cannot be opened in the file manager.",
+      "scheduledTimeInvalid": "Choose a valid send time in the future.",
       "senderAddressNotOwned": "\"{address}\" is neither this account's address nor one of its aliases. Pick a different sender.",
       "senderPreferenceAccountInvalid": "The account for this sender preference is invalid.",
       "senderPreferenceCategoryInvalid": "Choose a valid sender category.",
@@ -784,6 +785,7 @@
       "draftLoadFailed": "The draft could not be loaded, so it cannot be sent.",
       "empty": "Write a message or attach a file.",
       "invalidRecipients": "Not a valid email address: {addresses}",
+      "invalidSchedule": "Choose a future send time or remove the schedule to send now.",
       "noAccount": "Add an email account to send.",
       "noRecipients": "Add a recipient under To, Cc or Bcc."
     },
@@ -792,6 +794,7 @@
       "confirm": "Set",
       "custom": "Custom time",
       "mondayAt": "Monday {time}",
+      "pastDate": "Choose a time in the future.",
       "pickDateTime": "Pick date & time…",
       "title": "Send later…",
       "tomorrowAt": "Tomorrow {time}"

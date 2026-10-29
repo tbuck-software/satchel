@@ -306,6 +306,7 @@
       "restoreSearchIndexInvalid": "Der Suchindex der Sicherung passt nicht zu ihren Nachrichten. Lege lieber eine frische Sicherung an, statt diese zurückzuspielen.",
       "restoreStagingChanged": "Die vorgemerkte Sicherung ist unvollständig oder wurde verändert. Merke die Sicherung erneut vor.",
       "revealTargetBlocked": "Dieses Ziel kann nicht im Dateimanager geöffnet werden.",
+      "scheduledTimeInvalid": "Wähle einen gültigen Sendezeitpunkt in der Zukunft.",
       "senderAddressNotOwned": "\"{address}\" ist weder die Adresse dieses Kontos noch einer seiner Aliase. Wähle einen anderen Absender.",
       "senderPreferenceAccountInvalid": "Das Konto für diese Absenderpräferenz ist ungültig.",
       "senderPreferenceCategoryInvalid": "Wähle eine gültige Absenderkategorie.",
@@ -784,6 +785,7 @@
       "draftLoadFailed": "Der Entwurf konnte nicht geladen werden und kann daher nicht gesendet werden.",
       "empty": "Schreib eine Nachricht oder hänge eine Datei an.",
       "invalidRecipients": "Keine gültige E-Mail-Adresse: {addresses}",
+      "invalidSchedule": "Wähle einen zukünftigen Sendezeitpunkt oder entferne die Planung, um jetzt zu senden.",
       "noAccount": "Füge ein E-Mail-Konto hinzu, um zu senden.",
       "noRecipients": "Füge einen Empfänger unter An, Cc oder Bcc hinzu."
     },
@@ -792,6 +794,7 @@
       "confirm": "Festlegen",
       "custom": "Eigener Zeitpunkt",
       "mondayAt": "Montag {time}",
+      "pastDate": "Wähle einen Zeitpunkt in der Zukunft.",
       "pickDateTime": "Datum und Uhrzeit wählen …",
       "title": "Später senden …",
       "tomorrowAt": "Morgen {time}"

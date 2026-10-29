@@ -64,3 +64,17 @@ describe('SplitButton', () => {
     expect(wrapper.emitted('open')).toHaveLength(1);
   });
 });
+
+
+it('allows repairing a blocked primary action through an enabled popup', async () => {
+  const wrapper = render(true);
+  await wrapper.setProps({ secondaryDisabled: false });
+  const [primary, secondary] = wrapper.findAll('button');
+  expect(primary!.attributes('disabled')).toBeDefined();
+  expect(secondary!.attributes('disabled')).toBeUndefined();
+  await secondary!.trigger('click');
+  await secondary!.trigger('keydown', { key: 'ArrowDown' });
+  expect(wrapper.emitted('open')).toHaveLength(2);
+  expect(wrapper.emitted('click')).toBeUndefined();
+  wrapper.unmount();
+});

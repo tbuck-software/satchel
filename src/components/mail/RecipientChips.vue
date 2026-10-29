@@ -14,6 +14,9 @@ import type { BackendContact } from '@/types/contacts';
 
 const props = defineProps<{
   modelValue: string[];
+  /** Persistent accessible name, independent of the empty-field placeholder. */
+  label: string;
+  inputId?: string;
   placeholder?: string;
 }>();
 
@@ -30,6 +33,7 @@ const inputRef = ref<HTMLInputElement | null>(null);
 const suggestions = ref<BackendContact[]>([]);
 const suggestionOpen = ref(false);
 const activeSuggestionIndex = ref(-1);
+const generatedInputId = `recipient-input-${useId()}`;
 const listboxId = `recipient-suggestions-${useId()}`;
 /**
  * The chip a first Backspace in the empty field selected. The second one
@@ -108,7 +112,9 @@ function onKey(event: KeyboardEvent) {
   }
 }
 
-function onBlur() {
+function onBlur(event: FocusEvent) {
+  // Touch and keyboard focus may move to an option before its click arrives.
+  if (event.relatedTarget instanceof Element && document.getElementById(listboxId)?.contains(event.relatedTarget)) return;
   commitDraft();
   pendingRemoval.value = null;
 }
@@ -152,6 +158,7 @@ function pickSuggestion(contact: BackendContact) {
   suggestions.value = [];
   suggestionOpen.value = false;
   activeSuggestionIndex.value = -1;
+  inputRef.value?.focus();
 }
 
 function onPaste(event: ClipboardEvent) {
@@ -212,6 +219,8 @@ defineExpose({ focus: () => inputRef.value?.focus() });
     </span>
     <input
       ref="inputRef"
+      :id="inputId ?? generatedInputId"
+      :aria-label="label"
       v-model="draft"
       :placeholder="chips.length === 0 ? props.placeholder ?? '' : ''"
       type="text"
@@ -237,7 +246,10 @@ defineExpose({ focus: () => inputRef.value?.focus() });
       :aria-selected="index === activeSuggestionIndex"
       :class="{ active: index === activeSuggestionIndex }"
       @mouseenter="activeSuggestionIndex = index"
-      @mousedown.prevent="pickSuggestion(contact)"
+      tabindex="-1"
+      @pointerdown.prevent
+      @mousedown.prevent
+      @click="pickSuggestion(contact)"
     >
       <span>{{ contact.display_name || contact.email }}</span>
       <small>{{ contact.email }}</small>

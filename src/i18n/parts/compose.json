@@ -9,6 +9,7 @@
       "send": "Send",
       "sending": "Sending…",
       "sendBlocked": {
+        "invalidSchedule": "Choose a future send time or remove the schedule to send now.",
         "draftLoadFailed": "The draft could not be loaded, so it cannot be sent.",
         "noAccount": "Add an email account to send.",
         "noRecipients": "Add a recipient under To, Cc or Bcc.",
@@ -104,6 +105,7 @@
         "renderFailed": "Could not insert the template: {error}"
       },
       "sendLater": {
+        "pastDate": "Choose a time in the future.",
         "title": "Send later…",
         "tomorrowAt": "Tomorrow {time}",
         "mondayAt": "Monday {time}",
@@ -357,6 +359,7 @@
       "send": "Senden",
       "sending": "Sende…",
       "sendBlocked": {
+        "invalidSchedule": "Wähle einen zukünftigen Sendezeitpunkt oder entferne die Planung, um jetzt zu senden.",
         "draftLoadFailed": "Der Entwurf konnte nicht geladen werden und kann daher nicht gesendet werden.",
         "noAccount": "Füge ein E-Mail-Konto hinzu, um zu senden.",
         "noRecipients": "Füge einen Empfänger unter An, Cc oder Bcc hinzu.",
@@ -452,6 +455,7 @@
         "renderFailed": "Die Vorlage konnte nicht eingefügt werden: {error}"
       },
       "sendLater": {
+        "pastDate": "Wähle einen Zeitpunkt in der Zukunft.",
         "title": "Später senden …",
         "tomorrowAt": "Morgen {time}",
         "mondayAt": "Montag {time}",
