@@ -38,12 +38,10 @@ describe('installKeyboardInset', () => {
     viewport.height = 516;
     viewport.dispatchEvent(new Event('resize'));
     expect(root.style.getPropertyValue('--satchel-safe-area-bottom')).toBe('336px');
-    expect(root.dataset.keyboard).toBe('open');
 
     viewport.height = 852;
     viewport.dispatchEvent(new Event('resize'));
     expect(root.style.getPropertyValue('--satchel-safe-area-bottom')).toBe('');
-    expect(root.dataset.keyboard).toBeUndefined();
     dispose();
   });
 });

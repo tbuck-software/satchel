@@ -48,11 +48,9 @@ export function installKeyboardInset(win: Window = window): () => void {
     if (inset) {
       root.style.setProperty(PROPERTY, `${inset}px`);
       root.style.setProperty(KEYBOARD_PROPERTY, `${inset}px`);
-      root.dataset.keyboard = 'open';
     } else {
       root.style.removeProperty(PROPERTY);
       root.style.removeProperty(KEYBOARD_PROPERTY);
-      delete root.dataset.keyboard;
     }
     // iOS scrolls the whole page to bring a focused field into view. The
     // shell has already shrunk around the field, so that scroll only pushes
@@ -68,6 +66,5 @@ export function installKeyboardInset(win: Window = window): () => void {
     viewport.removeEventListener('scroll', update);
     root.style.removeProperty(PROPERTY);
     root.style.removeProperty(KEYBOARD_PROPERTY);
-    delete root.dataset.keyboard;
   };
 }
