@@ -262,21 +262,25 @@ main {
 }
 
 /* Mobile sidebar overlay */
+/* Full bleed like a native drawer: the panel runs under the status bar and
+   the gesture pill and pads its own content, and the backdrop dims the whole
+   screen. Inset by the safe areas, the clock row stayed bright and the panel
+   floated with a strip of the list above it. */
 .mobile-sidebar-overlay {
   position: fixed;
-  inset:
-    var(--satchel-safe-area-top)
-    var(--satchel-safe-area-right)
-    var(--satchel-safe-area-bottom)
-    var(--satchel-safe-area-left);
+  inset: 0;
   z-index: 300;
   display: flex;
 }
 
 .mobile-sidebar-panel {
-  width: 300px;
-  max-width: 80vw;
+  width: min(320px, 86vw);
   height: 100%;
+  padding:
+    var(--satchel-safe-area-top)
+    0
+    var(--satchel-safe-area-bottom)
+    var(--satchel-safe-area-left);
   background: var(--bg-sidebar);
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
   z-index: 1;

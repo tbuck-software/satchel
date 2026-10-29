@@ -299,11 +299,50 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
     <!-- Kept outside the scroll container so every primary destination stays
          anchored to the bottom, even with a long mailbox tree. -->
     <footer class="sidebar-footer">
-      <Suspense v-if="!contextualSidebarActive">
+      <Suspense v-if="!contextualSidebarActive && !ui.isMobile">
         <SidebarAgenda />
       </Suspense>
       <!-- One row: the areas on the left, the app on the right. -->
-      <div class="sidebar-footer__row">
+      <!-- The phone's areas, named: four bare icons were a guessing game. -->
+      <nav v-if="ui.isMobile" class="sidebar-tabs" :aria-label="$t('nav.modules')">
+        <CardButton
+          class="sidebar-tab"
+          :class="{ 'sidebar-tab--active': !contextualSidebarActive }"
+          :aria-current="!contextualSidebarActive ? 'page' : undefined"
+          @click="returnToMail"
+        >
+          <AppIcon><rect x="2" y="3.5" width="12" height="9" rx="1.5" /><path d="m2.5 4.5 5.5 4 5.5-4" /></AppIcon>
+          <span>{{ $t('nav.mail') }}</span>
+        </CardButton>
+        <CardButton
+          class="sidebar-tab"
+          :class="{ 'sidebar-tab--active': calendarModuleActive }"
+          :aria-current="calendarModuleActive ? 'page' : undefined"
+          @click="goTo('calendar')"
+        >
+          <AppIcon><rect x="2" y="3" width="12" height="11" rx="2" /><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" /></AppIcon>
+          <span>{{ $t('nav.calendar') }}</span>
+        </CardButton>
+        <CardButton
+          class="sidebar-tab"
+          :class="{ 'sidebar-tab--active': contactsModuleActive }"
+          :aria-current="contactsModuleActive ? 'page' : undefined"
+          @click="goTo('contacts')"
+        >
+          <AppIcon><circle cx="6" cy="5.5" r="2.5" /><path d="M1.5 13.5c0-2.2 2-4 4.5-4s4.5 1.8 4.5 4M10.5 3.2a2.5 2.5 0 0 1 0 4.6M11.5 9.7c1.7.5 3 2 3 3.8" /></AppIcon>
+          <span>{{ $t('nav.contacts') }}</span>
+        </CardButton>
+        <CardButton
+          class="sidebar-tab"
+          :class="{ 'sidebar-tab--active': settingsModuleActive }"
+          :aria-current="settingsModuleActive ? 'page' : undefined"
+          @click="goTo('settings')"
+        >
+          <AppIcon><circle cx="8" cy="8" r="2" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" /></AppIcon>
+          <span>{{ $t('common.settings') }}</span>
+        </CardButton>
+      </nav>
+      <div v-if="!ui.isMobile" class="sidebar-footer__row">
         <nav class="sidebar-footer__areas" :aria-label="$t('nav.modules')">
           <IconButton
             :title="$t('nav.mail')"
@@ -471,6 +510,30 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
   padding: 8px;
   border-top: 1px solid var(--border-color-muted);
   background: var(--bg-sidebar);
+}
+
+.sidebar-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2xs);
+}
+
+.sidebar-tab {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 3px;
+  min-height: 52px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--weight-semibold);
+}
+
+.sidebar-tab--active {
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  color: var(--accent-primary);
 }
 
 .sidebar-footer__row {

@@ -192,6 +192,7 @@
         "sent": "Sent",
         "spam": "Spam",
         "title": "Folders",
+        "all": "All folders",
         "trash": "Trash",
         "later": "Later"
       },
@@ -623,6 +624,7 @@
         "sent": "Gesendet",
         "spam": "Spam",
         "title": "Ordner",
+        "all": "Alle Ordner",
         "trash": "Papierkorb",
         "later": "Später"
       },
