@@ -21,6 +21,7 @@ import { useFollowUpsStore } from '@/stores/followUps';
 import { isOwnEmail, participantDisplayName } from '@/utils/mailIdentity';
 import { transportErrorLabel } from '@/utils/transportLabels';
 import type { AnchorBox } from '@/utils/popoverPlacement';
+import { startThreadDrag } from '@/utils/threadDrag';
 
 const SnoozePicker = defineAsyncComponent(() => import('@/components/navigation/SnoozePicker.vue'));
 // Both menus mount on first use (see `contextMenuMounted`), so neither is
@@ -376,8 +377,7 @@ function onDragStart(event: DragEvent) {
   const ids = selectedSet.has(props.thread.id)
     ? Array.from(selectedSet)
     : [props.thread.id];
-  event.dataTransfer.setData('application/x-satchel-thread-ids', ids.join(','));
-  event.dataTransfer.effectAllowed = 'move';
+  startThreadDrag(event, ids);
 }
 </script>
 

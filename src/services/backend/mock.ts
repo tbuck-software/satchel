@@ -1,6 +1,7 @@
 import { createPersistedSlot, persistence } from '@/persistence';
 import type { BackendAccountVisibilityPolicy } from './accounts';
 import { splitSubjectPrefixes } from '@/utils/composerText';
+import { bytesToBase64 } from '@/utils/base64';
 import { joinComposerTextHistory, splitComposerTextHistory, splitComposerHtmlHistory } from '@/utils/composerHistory';
 /**
  * Stand-in command transport for `dev:mock` and the browser E2E suite.
@@ -947,6 +948,28 @@ const handlers: Record<string, Handler> = {
       truncated: false,
     };
   },
+  thread_eml_attachments: (payload) => [...new Set(payload.threadIds as string[])].flatMap((threadId) => {
+    const message = (messages[threadId] ?? [])
+      .filter((entry) => !entry.isDraft)
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
+    if (!message) return [];
+    const raw = [
+      `From: ${message.from.name} <${message.from.email}>`,
+      `To: ${message.to.map((participant) => participant.email).join(', ')}`,
+      `Subject: ${message.subject}`,
+      `Date: ${new Date(message.timestamp).toUTCString()}`,
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      message.bodyText,
+    ].join('\r\n');
+    return [{
+      filename: `${message.subject.replace(/[\\/:*?"<>|]/g, '_').trim() || 'message'}.eml`,
+      mime_type: 'message/rfc822',
+      content_base64: bytesToBase64(new TextEncoder().encode(raw)),
+      content_id: null,
+      inline: false,
+    }];
+  }),
   search_message_hits: (payload) => {
     const request = input(payload);
     const query = String(request.query ?? '').trim().toLowerCase();

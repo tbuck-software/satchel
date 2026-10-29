@@ -48,6 +48,7 @@ const COMMANDS: &[&str] = &[
     "list_message_bodies",
     "load_thread_messages",
     "get_message_source",
+    "thread_eml_attachments",
     "search_message_hits",
     "server_search",
     "fetch_server_search_hit",

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Drag a mail from the list onto the composer to attach the original as an `.eml` file, one per selected conversation.
 - File mail from the keyboard: `v` focuses the File… picker, Enter files into the highlighted folder or topic, and the footer says what Enter will do.
 - Keep a thread's draft card in step with the composer: it shows the saved text and time after closing, and steps aside while the draft is open. Rows mark drafts with "Draft," and a pencil, and counts leave the draft out.
 - Show a multi-selection as what it holds: the reader lists the selected conversations instead of one of them under "Done (n)". Selected rows show a check.

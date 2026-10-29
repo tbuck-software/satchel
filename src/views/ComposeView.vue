@@ -43,6 +43,7 @@ import {
   type ComposerCryptoMethod,
 } from '@/composables/useComposerCrypto';
 import { useComposerInlineAttachments, type ComposerInlineAttachmentEditor } from '@/composables/useComposerInlineAttachments';
+import { useThreadEmlDrop } from '@/composables/useThreadEmlDrop';
 import { useComposerLocalBackup } from '@/composables/useComposerLocalBackup';
 import { useDraftEditorClaim } from '@/composables/useDraftEditorClaim';
 import { useComposerSignature } from '@/composables/useComposerSignature';
@@ -211,6 +212,26 @@ const composerInlineAttachments = useComposerInlineAttachments(
       historyEditorRef.value?.removeAttachmentImage(image);
     },
   }),
+);
+// Threads dragged from the list arrive as their original `.eml`.
+let emlDropStatus: ComposerStatus | null = null;
+const threadEmlDrop = useThreadEmlDrop(
+  attachments,
+  {
+    loading: (text) => {
+      emlDropStatus = { tone: 'info', text };
+      status.value = emlDropStatus;
+    },
+    done: () => {
+      if (status.value === emlDropStatus) status.value = null;
+      emlDropStatus = null;
+    },
+    error: (text) => {
+      emlDropStatus = null;
+      status.value = { tone: 'error', text };
+    },
+  },
+  () => sending.value,
 );
 const initialized = ref(false);
 // A loaded reply or draft shows its history control at once, not after a pause.
@@ -1079,7 +1100,16 @@ defineExpose({
 </script>
 
 <template>
-  <section :class="['compose', { 'compose--embedded': props.embedded }]">
+  <section
+    :class="['compose', { 'compose--embedded': props.embedded }]"
+    @dragenter.capture="threadEmlDrop.onDragEnter"
+    @dragover.capture="threadEmlDrop.onDragOver"
+    @dragleave.capture="threadEmlDrop.onDragLeave"
+    @drop.capture="threadEmlDrop.onDrop"
+  >
+    <div v-if="threadEmlDrop.dropActive.value" class="compose-eml-drop" aria-hidden="true">
+      <span>{{ $t('compose.emlDrop.hint') }}</span>
+    </div>
     <!-- The header carries the title alone. Template and Save live in the
          footer beside Send, Discard in the options panel. -->
     <header v-if="!props.embedded" class="compose-header">
@@ -1677,6 +1707,23 @@ textarea:focus {
 
 .compose--embedded {
   height: 100%;
+}
+
+/* Covers the composer while a thread from the list hovers it; events pass
+   through so the drop still lands on the composer root. */
+.compose-eml-drop {
+  position: absolute;
+  inset: var(--space-xs);
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--accent-primary);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-base));
+  color: var(--accent-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  pointer-events: none;
 }
 
 .compose-subject {

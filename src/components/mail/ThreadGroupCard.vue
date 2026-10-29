@@ -11,6 +11,7 @@ import ThreadListQuickActions from './ThreadListQuickActions.vue';
 import { useRowSwipe } from '@/composables/useRowSwipe';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { formatListTime } from '@/utils/listTime';
+import { startThreadDrag } from '@/utils/threadDrag';
 
 const props = defineProps<{
   group: SimilarThreadGroup;
@@ -121,9 +122,7 @@ function openGroup() {
 }
 
 function onDragStart(event: DragEvent) {
-  if (!event.dataTransfer) return;
-  event.dataTransfer.setData('application/x-satchel-thread-ids', threadIds.value.join(','));
-  event.dataTransfer.effectAllowed = 'move';
+  startThreadDrag(event, threadIds.value);
 }
 </script>
 

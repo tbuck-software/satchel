@@ -713,6 +713,11 @@
       "strike": "Strikethrough",
       "textColor": "Text colour"
     },
+    "emlDrop": {
+      "hint": "Drop to attach as .eml",
+      "loading": "Attaching messages…",
+      "unavailable": "The original of one message could not be loaded; it was not attached. | The originals of {count} messages could not be loaded; they were not attached."
+    },
     "forward": {
       "cc": "Cc: {value}",
       "date": "Date: {value}",

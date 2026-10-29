@@ -16,6 +16,7 @@ import NavItem from '@/components/ui/NavItem.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import { outboxVisibleCount } from '@/utils/outboxLabels';
 import { activeMailboxNavNode } from '@/utils/mailboxNav';
+import { draggedThreadIds, isThreadDrag } from '@/utils/threadDrag';
 
 type ResolvedSection = SectionSpec & {
   total: number;
@@ -191,12 +192,16 @@ function onDragLeave(key: string) {
   }
 }
 
+function onDragOverFolder(key: string, event: DragEvent) {
+  dragHoverFolderKey.value = key;
+  // The row allows copy as well (for the composer); a folder always moves.
+  if (event.dataTransfer && isThreadDrag(event)) event.dataTransfer.dropEffect = 'move';
+}
+
 async function onDropToFolder(folderId: string, event: DragEvent) {
   dragHoverFolderKey.value = '';
   if (!folderId) return;
-  const data = event.dataTransfer?.getData('application/x-satchel-thread-ids');
-  if (!data) return;
-  const ids = data.split(',').filter(Boolean);
+  const ids = draggedThreadIds(event);
   if (ids.length === 0) return;
   const target = mailboxes.browsableFolders.find((folder) => folder.folderId === folderId);
   await threadActions.moveToFolder(ids, folderId, target?.label);
@@ -321,7 +326,7 @@ async function onDropToFolder(folderId: string, event: DragEvent) {
             class="grid grid-cols-[16px_minmax(0,1fr)] items-center gap-1"
             :class="{ 'drop-target rounded-lg': dragHoverFolderKey === `${row.accountId}:${row.node.id}` }"
             :style="{ paddingLeft: `${row.depth * 16}px` }"
-            @dragover.prevent="dragHoverFolderKey = `${row.accountId}:${row.node.id}`"
+            @dragover.prevent="onDragOverFolder(`${row.accountId}:${row.node.id}`, $event)"
             @dragleave="onDragLeave(`${row.accountId}:${row.node.id}`)"
             @drop.prevent="onDropToFolder(row.node.folderId ?? '', $event)"
           >
