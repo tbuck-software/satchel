@@ -219,7 +219,7 @@ export function createThreadSelection({
       toggleThreadSelection(threadId);
       selectionAnchorId.value = threadId;
     } else if (!openThread) {
-      setSelection([threadId]);
+      toggleThreadSelection(threadId);
       selectionAnchorId.value = threadId;
     }
 
