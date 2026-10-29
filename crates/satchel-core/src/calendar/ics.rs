@@ -4,7 +4,7 @@
 //! stored resource. Never round-trip a DAV resource through a reduced DTO.
 use super::{normalize_attendees, EventInput, SaveError};
 use crate::db::calendar::CalendarEventRecord;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use std::collections::BTreeMap;
 
 const UNSUPPORTED: &str = "backend.errors.calendarEditUnsupported";
@@ -87,10 +87,22 @@ fn datetime_value(
             if line[colon + 1..].ends_with('Z') {
                 return Err(unsupported());
             }
-            return Ok(instant
+            let value = instant
                 .with_timezone(&zone)
                 .format("%Y%m%dT%H%M%S")
-                .to_string());
+                .to_string();
+            let local = NaiveDateTime::parse_from_str(&value, "%Y%m%dT%H%M%S")
+                .map_err(|_| unsupported())?;
+            // The reader resolves repeated local times to their first occurrence.
+            // Reject an edit that would read back as a different instant.
+            let round_trip = zone
+                .from_local_datetime(&local)
+                .earliest()
+                .map(|value| value.with_timezone(&Utc));
+            if round_trip != Some(instant) {
+                return Err(unsupported());
+            }
+            return Ok(value);
         }
         // A floating time has no stable UTC interpretation for other viewers.
         if !line[colon + 1..].ends_with('Z') {

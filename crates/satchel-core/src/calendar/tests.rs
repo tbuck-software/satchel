@@ -568,6 +568,108 @@ async fn moving_a_single_zoned_event_keeps_its_timezone_across_dst() {
     assert!(ics.contains("DTEND;TZID=Europe/Berlin:20260329T120000"));
 }
 
+async fn single_zoned_event(pool: &SqlitePool, zone: chrono_tz::Tz) -> String {
+    let event = input();
+    create_event(pool, event.clone()).await;
+    let mut original = raw(pool).await;
+    for (key, value) in [("DTSTART", &event.starts_at), ("DTEND", &event.ends_at)] {
+        let instant = chrono::DateTime::parse_from_rfc3339(value).unwrap();
+        original = original.replace(
+            &format!("{key}:{}", instant.format("%Y%m%dT%H%M%SZ")),
+            &format!(
+                "{key};TZID={zone}:{}",
+                instant.with_timezone(&zone).format("%Y%m%dT%H%M%S")
+            ),
+        );
+    }
+    sqlx::query("UPDATE calendar_events SET raw_ics = ? WHERE id = 'event'")
+        .bind(&original)
+        .execute(pool)
+        .await
+        .unwrap();
+    original
+}
+
+#[tokio::test]
+async fn zoned_fall_back_second_occurrence_is_rejected_without_changing_event_or_queue() {
+    for (zone, first, second, end) in [
+        (
+            chrono_tz::Europe::Berlin,
+            "2026-10-25T00:15:00Z",
+            "2026-10-25T01:15:00Z",
+            "2026-10-25T01:45:00Z",
+        ),
+        (
+            chrono_tz::America::Los_Angeles,
+            "2026-11-01T08:15:00Z",
+            "2026-11-01T09:15:00Z",
+            "2026-11-01T09:45:00Z",
+        ),
+    ] {
+        let pool = pool().await;
+        let original = single_zoned_event(&pool, zone).await;
+        let repository = CalendarRepository::new(&pool);
+        let before = repository.get_event("a", "event").await.unwrap();
+        // Check DTSTART, then a representable DTSTART with an ambiguous DTEND.
+        for start in [second, first] {
+            let mut edit = input();
+            edit.starts_at = start.into();
+            edit.ends_at = end.into();
+            edit.send_invites = true;
+            assert!(
+                matches!(
+                    save_event(&pool, &SyncQueue::new(), edit).await,
+                    Err(SaveError::Validation(
+                        "backend.errors.calendarEditUnsupported"
+                    ))
+                ),
+                "{zone}: {start} to {end}"
+            );
+            assert_eq!(raw(&pool).await, original);
+            let after = repository.get_event("a", "event").await.unwrap();
+            assert_eq!(after.starts_at, before.starts_at);
+            assert_eq!(after.ends_at, before.ends_at);
+            assert_eq!(after.updated_at, before.updated_at);
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_queue")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap(),
+                0
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn zoned_fall_back_first_occurrence_round_trips_without_shifting() {
+    for (zone, start, end) in [
+        (
+            chrono_tz::Europe::Berlin,
+            "2026-10-25T00:15:00Z",
+            "2026-10-25T00:45:00Z",
+        ),
+        (
+            chrono_tz::America::Los_Angeles,
+            "2026-11-01T08:15:00Z",
+            "2026-11-01T08:45:00Z",
+        ),
+    ] {
+        let pool = pool().await;
+        single_zoned_event(&pool, zone).await;
+        let mut edit = input();
+        edit.starts_at = start.into();
+        edit.ends_at = end.into();
+        save_event(&pool, &SyncQueue::new(), edit).await.unwrap();
+        let ics = raw(&pool).await;
+        assert!(ics.contains(&format!("DTSTART;TZID={zone}:")));
+        assert!(ics.contains(&format!("DTEND;TZID={zone}:")));
+        let parsed = crate::email::calendar::parse_invite(&ics).unwrap();
+        assert_eq!(parsed.starts_at.as_deref(), Some(start));
+        assert_eq!(parsed.ends_at.as_deref(), Some(end));
+    }
+}
+
 #[tokio::test]
 async fn floating_and_unknown_zone_time_changes_are_refused_without_loss() {
     for start in [
