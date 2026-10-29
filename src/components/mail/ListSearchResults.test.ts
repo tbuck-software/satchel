@@ -67,6 +67,26 @@ beforeEach(() => {
 });
 
 describe('list search results and the selection', () => {
+  it('deselects a result on another avatar click and keeps other results selected', async () => {
+    const wrapper = render();
+    await flushPromises();
+    const threads = useThreadsStore();
+
+    await wrapper.get('[data-row="th-hit-1"]').trigger('click');
+    await wrapper.get('[data-row="th-hit-2"]').trigger('click');
+    expect(threads.selectedThreadIds).toEqual(['th-hit-1', 'th-hit-2']);
+
+    await wrapper.get('[data-row="th-hit-1"]').trigger('click');
+    expect(wrapper.get('[data-row="th-hit-1"]').attributes('data-checked')).toBe('false');
+    expect(threads.selectedThreadIds).toEqual(['th-hit-2']);
+
+    await wrapper.get('[data-row="th-hit-2"]').trigger('click');
+    expect(threads.selectedThreadIds).toEqual([]);
+    expect(harness.push).not.toHaveBeenCalled();
+    expect(useListSearchStore().openThreadId).toBe('');
+    wrapper.unmount();
+  });
+
   it('checks a result from its avatar instead of opening it', async () => {
     const wrapper = render();
     await flushPromises();

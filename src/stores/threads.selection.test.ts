@@ -156,6 +156,33 @@ describe('deselecting acted-on threads', () => {
   });
 });
 
+describe('avatar selection', () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it('toggles individual rows and clears the selection after the last deselection', () => {
+    const store = useThreadsStore();
+    store.threads = seedThreads(3);
+    store.selectThread('th-2');
+    const modifiers = { metaKey: false, ctrlKey: false, shiftKey: false };
+
+    store.selectFromInteraction('th-0', modifiers, false);
+    expect(store.selectedThreadIds).toEqual(['th-0']);
+
+    store.selectFromInteraction('th-0', modifiers, false);
+    expect(store.selectedThreadIds).toEqual([]);
+
+    store.selectFromInteraction('th-0', modifiers, false);
+    store.selectFromInteraction('th-1', modifiers, false);
+    expect(store.selectedThreadIds).toEqual(['th-0', 'th-1']);
+
+    store.selectFromInteraction('th-0', modifiers, false);
+    expect(store.selectedThreadIds).toEqual(['th-1']);
+    store.selectFromInteraction('th-1', modifiers, false);
+    expect(store.selectedThreadIds).toEqual([]);
+    expect(store.activeThreadId).toBe('th-2');
+  });
+});
+
 describe('selection over a list drawn on top of the store', () => {
   beforeEach(() => setActivePinia(createPinia()));
 
