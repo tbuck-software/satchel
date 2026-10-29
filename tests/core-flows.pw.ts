@@ -392,10 +392,14 @@ test('normalizes localized reply chains for display while retaining reply spelli
 test('filters Settings from the keyboard and leaves them with Escape', async ({ page }) => {
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page).toHaveURL(/\/settings/);
+  const nav = page.getByRole('navigation', { name: 'Settings' });
+  // The URL changes before the lazy settings view mounts and claims `/`.
+  const filter = nav.getByRole('searchbox', { name: 'Filter settings' });
+  await expect(filter).toBeVisible();
 
   await page.keyboard.press('/');
+  await expect(filter).toBeFocused();
   await page.keyboard.type('undo');
-  const nav = page.getByRole('navigation', { name: 'Settings' });
   await expect(nav.getByRole('button', { name: /^Sending/ })).toBeVisible();
   await expect(nav.getByRole('button', { name: /^Swipe gestures/ })).toHaveCount(0);
   await page.keyboard.press('Enter');
