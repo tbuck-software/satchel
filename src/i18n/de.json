@@ -379,6 +379,7 @@
   "calendar": {
     "createHint": "Klicke auf einen freien Tag oder eine freie Uhrzeit, um einen Termin anzulegen.",
     "editor": {
+      "add": "Hinzufügen",
       "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
       "descriptionPlaceholder": "Notizen, Agenda, …",
       "editTitle": "Termin bearbeiten",

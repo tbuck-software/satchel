@@ -75,6 +75,7 @@
         "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
         "sendInvites": "Send ICS invitations by mail",
         "submit": "Create event",
+        "add": "Add",
         "errors": {
           "titleRequired": "Please enter a title.",
           "invalidDates": "Start and end do not contain a valid date.",
@@ -481,6 +482,7 @@
         "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
         "sendInvites": "ICS-Einladungen per Mail senden",
         "submit": "Termin erstellen",
+        "add": "Hinzufügen",
         "errors": {
           "titleRequired": "Bitte einen Titel angeben.",
           "invalidDates": "Start und Ende enthalten kein gültiges Datum.",

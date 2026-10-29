@@ -173,8 +173,14 @@ useDismissable(() => props.draft !== null, () => emit('close'));
           @keydown.tab="trap.onTab"
         >
           <header class="event-editor__header">
+            <!-- On a phone the sheet is a screen: Cancel and the action sit in
+                 its navigation bar, as in iOS Calendar, clear of the keyboard. -->
+            <AppButton class="event-editor__bar-action" variant="ghost" size="sm" @click="emit('close')">{{ $t('common.cancel') }}</AppButton>
             <h2 id="event-editor-title">{{ isEdit ? $t('calendar.editor.editTitle') : $t('calendar.editor.newTitle') }}</h2>
-            <IconButton size="sm" :title="$t('common.close')" @click="emit('close')">✕</IconButton>
+            <IconButton class="event-editor__close" size="sm" :title="$t('common.close')" @click="emit('close')">✕</IconButton>
+            <AppButton class="event-editor__bar-action" variant="primary" size="sm" :disabled="saving" @click="submit">
+              {{ saving ? $t('common.saving') : isEdit ? $t('common.save') : $t('calendar.editor.add') }}
+            </AppButton>
           </header>
 
           <div class="event-editor__form">
@@ -257,6 +263,10 @@ useDismissable(() => props.draft !== null, () => emit('close'));
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 14px;
+}
+
+.event-editor__bar-action {
+  display: none;
 }
 
 .event-editor__header h2 {
@@ -353,8 +363,47 @@ useDismissable(() => props.draft !== null, () => emit('close'));
 /* A dialog needs room around it; a phone screen has none to give. Below the
    breakpoint that splits list from detail, it is the screen instead. */
 @media (max-width: 1020px) {
+  /* Flex, not a centring grid: a grid row sizes to its content, so the
+     sheet grew past the keyboard instead of shrinking above it. */
   .event-editor-backdrop {
+    display: flex;
+    align-items: stretch;
     padding: 0;
+  }
+
+  .event-editor__form {
+    flex: 1 1 auto;
+  }
+
+  .event-editor__header {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    margin: -8px -8px 14px;
+  }
+
+  .event-editor__header h2 {
+    font-size: var(--font-size-lg);
+    text-align: center;
+  }
+
+  .event-editor__header .event-editor__bar-action {
+    display: inline-flex;
+    justify-self: start;
+    min-height: 40px;
+  }
+
+  .event-editor__header .event-editor__bar-action:last-child {
+    justify-self: end;
+  }
+
+  .event-editor__close,
+  .event-editor__actions {
+    display: none;
+  }
+
+  /* Side by side, a phone cut both dates off before the time. */
+  .field-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .event-editor {

@@ -379,6 +379,7 @@
   "calendar": {
     "createHint": "Click an empty day or time slot to create an event.",
     "editor": {
+      "add": "Add",
       "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
       "descriptionPlaceholder": "Notes, agenda, …",
       "editTitle": "Edit event",
