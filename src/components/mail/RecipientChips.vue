@@ -7,6 +7,7 @@ import { useContactsStore } from '@/stores/contacts';
 import {
   hasOpenRecipientToken,
   isValidRecipient,
+  recipientChipLabel,
   splitRecipientList,
 } from '@/utils/recipients';
 import type { BackendContact } from '@/types/contacts';
@@ -203,9 +204,9 @@ defineExpose({ focus: () => inputRef.value?.focus() });
       :key="value + index"
       class="chip"
       :class="{ 'chip--invalid': !isValidRecipient(value), 'chip--pending-removal': pendingRemoval === index }"
-      :title="isValidRecipient(value) ? undefined : t('compose.recipients.invalid')"
+      :title="isValidRecipient(value) ? value : t('compose.recipients.invalid')"
     >
-      {{ value }}
+      {{ recipientChipLabel(value) }}
       <span v-if="!isValidRecipient(value)" class="sr-only">{{ t('compose.recipients.invalidMarker') }}</span>
       <IconButton :title="t('compose.recipients.remove', { address: value })" class="chip-remove" @click.stop="remove(index)">×</IconButton>
     </span>

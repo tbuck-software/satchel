@@ -1741,6 +1741,8 @@ textarea:focus {
 
 .compose-subject::placeholder { color: var(--text-tertiary); font-weight: var(--weight-regular); }
 .compose-subject:focus { border-color: var(--border-color-muted); box-shadow: none; }
+/* A long inherited subject ends in an ellipsis instead of being cut at the edge. */
+.compose-subject:not(:focus) { text-overflow: ellipsis; }
 
 .compose .row {
   flex: none;
