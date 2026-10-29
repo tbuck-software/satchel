@@ -731,20 +731,37 @@ function openSenderDetails() {
 
 <style scoped>
 /* The avatar is the affordance, so the button adds only a focus/open ring —
-   a bordered wrapper would put a second circle around a circle. */
+   a bordered wrapper would put a second circle around a circle.
+   It must not shrink: `CardButton` allows it, and a long address squeezed
+   the button under the avatar into an ellipse the avatar half covered. */
 .sender-avatar-trigger {
+  position: relative;
   display: inline-flex;
+  flex-shrink: 0;
   padding: 0;
   border: 0;
   border-radius: var(--radius-full);
   background: transparent;
   cursor: pointer;
+}
+
+/* Drawn inside the avatar's edge, over it: the surface is `overflow-hidden`
+   with no side padding, so a ring outside the avatar lost its left half. */
+.sender-avatar-trigger::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 2px transparent;
+  pointer-events: none;
   transition: box-shadow var(--duration-fast) var(--ease-out);
 }
 
-.sender-avatar-trigger:hover,
-.sender-avatar-trigger--open {
-  box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px color-mix(in srgb, var(--accent-primary) 55%, transparent);
+.sender-avatar-trigger:hover::after,
+.sender-avatar-trigger--open::after {
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--accent-primary) 70%, transparent),
+    inset 0 0 0 4px var(--bg-surface);
 }
 
 /* The body, attachments and banners line up under the sender's name; the
