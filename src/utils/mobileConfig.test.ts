@@ -228,23 +228,36 @@ describe("mobile build configuration", () => {
     const macMenuBarIcon = readFileSync(
       new URL("../../src-tauri/icons/trayTemplate.png", import.meta.url),
     );
-    const adaptiveIcon = readFileSync(
-      new URL(
-        "../../src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml",
-        import.meta.url,
+    const adaptiveIcons = ["ic_launcher", "ic_launcher_round"].map((name) =>
+      readFileSync(
+        new URL(
+          `../../src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/${name}.xml`,
+          import.meta.url,
+        ),
+        "utf8",
       ),
-      "utf8",
     );
     const colors = readFileSync(
       new URL("../../src-tauri/gen/android/app/src/main/res/values/colors.xml", import.meta.url),
       "utf8",
     );
+    const brandMark = readFileSync(
+      new URL("../../public/branding/satchel-smile-check.svg", import.meta.url),
+      "utf8",
+    );
+    const brandTile = /id="background"[^>]*fill="#([0-9A-F]{6})"/i.exec(brandMark)?.[1];
 
     expect(manifest).toContain('android:icon="@mipmap/ic_launcher"');
     expect(manifest).toContain('android:roundIcon="@mipmap/ic_launcher_round"');
     expect(notificationIcon).toEqual(macMenuBarIcon);
-    expect(adaptiveIcon).toContain('@color/satchel_icon_background');
-    expect(adaptiveIcon).toContain('@mipmap/ic_launcher_foreground');
+    // The vector mark sits inside the safe zone; a full-bleed PNG foreground
+    // lost its corners to the launcher's circle mask.
+    for (const adaptiveIcon of adaptiveIcons) {
+      expect(adaptiveIcon).toContain('@color/satchel_icon_tile');
+      expect(adaptiveIcon).toContain('@drawable/ic_launcher_mark');
+    }
+    expect(brandTile).toBeDefined();
+    expect(colors).toContain(`<color name="satchel_icon_tile">#FF${brandTile}</color>`);
     expect(colors).not.toContain("purple_500");
   });
 

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Satchel mark from public/branding/satchel-smile-check.svg, scaled into
+  the adaptive icon's 66dp safe zone (farthest corner at 28dp from centre).
+  The launcher masks the 108dp layer to a circle, squircle or rounded square;
+  anything outside the safe zone can be cut away.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.07946"
+        android:scaleY="0.07946"
+        android:translateX="13.3165"
+        android:translateY="13.3165">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M300,312 H724 C767,312 793,337 800,384 L835,605 C844,670 813,712 742,712 H282 C211,712 180,670 189,605 L224,384 C231,337 257,312 300,312 Z" />
+        <path
+            android:pathData="M318,482 C345,526 412,582 450,582 C512,582 676,490 712,442"
+            android:strokeColor="@color/satchel_icon_tile"
+            android:strokeWidth="40"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>
