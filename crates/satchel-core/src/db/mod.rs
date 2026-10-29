@@ -103,23 +103,33 @@ async fn has_search_index(pool: &SqlitePool) -> Result<bool, String> {
 ///
 /// `messages_fts` is external-content FTS5 held in step by triggers, which
 /// `PRAGMA integrity_check` never looks at. FTS5's own `integrity-check` needs
-/// a writable connection and, in the SQLite linked here, does not compare
-/// index against content table — hence the second, row-count half.
+/// a writable connection. `rank = 1` also compares its terms against the
+/// external content table: structure and document counts alone miss changed
+/// text in an otherwise intact index.
 pub async fn message_index_intact(pool: &SqlitePool) -> Result<bool, String> {
     if !has_search_index(pool).await? {
         return Ok(true);
     }
-    let structure_ok =
-        match sqlx::query("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')")
-            .execute(pool)
-            .await
+    let content_ok = match sqlx::query(
+        "INSERT INTO messages_fts(messages_fts, rank) VALUES('integrity-check', 1)",
+    )
+    .execute(pool)
+    .await
+    {
+        Ok(_) => true,
+        // SQLITE_CORRUPT (11), including SQLITE_CORRUPT_VTAB (267), proves
+        // corruption. Busy, read-only and I/O failures must remain retryable.
+        Err(sqlx::Error::Database(err))
+            if err
+                .code()
+                .and_then(|code| code.parse::<i32>().ok())
+                .is_some_and(|code| code & 0xff == 11) =>
         {
-            Ok(_) => true,
-            // A damaged index is reported as a query error, not as a row.
-            Err(sqlx::Error::Database(_)) => false,
-            Err(err) => return Err(err.to_string()),
-        };
-    Ok(structure_ok && message_index_matches_row_count(pool).await?)
+            false
+        }
+        Err(err) => return Err(err.to_string()),
+    };
+    Ok(content_ok && message_index_matches_row_count(pool).await?)
 }
 
 /// Indexed documents against message rows. Coarser than
@@ -139,15 +149,13 @@ pub async fn message_index_matches_row_count(pool: &SqlitePool) -> Result<bool, 
     if shadow == 0 {
         return Ok(true);
     }
-    let indexed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages_fts_docsize")
-        .fetch_one(pool)
-        .await
-        .map_err(|err| err.to_string())?;
-    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages")
-        .fetch_one(pool)
-        .await
-        .map_err(|err| err.to_string())?;
-    Ok(indexed == rows)
+    // Both counts need the same snapshot, even while sync inserts messages.
+    sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM messages_fts_docsize) = (SELECT COUNT(*) FROM messages)",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|err| err.to_string())
 }
 
 /// Apply only a completely published restore before opening the profile pool.

@@ -58,6 +58,13 @@ const messageSourceMock = vi.mocked(backendGetMessageSource);
 const unsubscribeMock = vi.mocked(backendUnsubscribe);
 const openMock = vi.mocked(backendLoadThreadMessages);
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
 function backendMessage(overrides: Record<string, unknown> = {}) {
   return {
     id: 'm-live',
@@ -653,6 +660,152 @@ describe('messages store', () => {
       await vi.advanceTimersByTimeAsync(THREAD_RETENTION_IDLE_MS + 100);
       expect(messages.getByThread('thread-5')).toEqual([]);
       expect(messages.cacheStats().threadCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('releases request bookkeeping after many threads expire', async () => {
+    vi.useFakeTimers();
+    try {
+      previewMock.mockImplementation(async (threadId) => [
+        backendMessage({ id: `message-${threadId}`, thread_id: threadId }) as never,
+      ]);
+      bodiesMock.mockImplementation(async (ids) => ids.map((id) => ({
+        ...inlineBody(''), id,
+      })));
+      const messages = useMessagesStore();
+      for (let batch = 0; batch < 20; batch += 1) {
+        for (let i = 0; i < 10; i += 1) await messages.loadByThread(`visited-${batch}-${i}`);
+        await vi.advanceTimersByTimeAsync(THREAD_RETENTION_IDLE_MS + 100);
+      }
+      expect(messages.cacheStats()).toMatchObject({
+        threadCount: 0, messageCount: 0, bodyChars: 0, requestGenerationCount: 0,
+      });
+      await messages.openThread('visited-0-0');
+      expect(messages.getByThread('visited-0-0')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['resolve', 'reject'] as const)('ignores a stale body %s after budget eviction and reopening', async (outcome) => {
+    const oldBodies = deferred<Awaited<ReturnType<typeof backendListMessageBodies>>>();
+    previewMock.mockResolvedValue([
+      backendMessage({ id: 'hidden' }) as never,
+      backendMessage({ id: 'middle' }) as never,
+      backendMessage() as never,
+    ]);
+    bodiesMock.mockResolvedValue([inlineBody('')] as never);
+    const messages = useMessagesStore();
+    await messages.loadByThread('th-live');
+    bodiesMock.mockReturnValueOnce(oldBodies.promise);
+    const expanded = messages.loadAttachmentsForMessages('th-live', ['hidden']);
+    // Evict while the expanded message's body request is still in flight.
+    previewMock.mockResolvedValueOnce([backendMessage({ id: 'large', thread_id: 'large-thread' })] as never);
+    bodiesMock.mockResolvedValueOnce([{ ...inlineBody(''), id: 'large', body_text: 'x'.repeat(12_000_001) }] as never);
+    await messages.loadByThread('large-thread');
+    expect(messages.hasThread('th-live')).toBe(false);
+    previewMock.mockResolvedValueOnce([backendMessage({ id: 'hidden' })] as never);
+    bodiesMock.mockResolvedValueOnce([{
+      ...inlineBody(''), id: 'hidden', body_text: 'Current body',
+      source_payload: JSON.stringify({ kind: 'rss', level: 'info', url: 'https://example.com/current' }),
+    }] as never);
+    await messages.openThread('th-live');
+    if (outcome === 'resolve') oldBodies.resolve([{
+      ...inlineBody(''), id: 'hidden', body_text: 'Stale body',
+      source_payload: JSON.stringify({ kind: 'rss', level: 'info', url: 'https://example.com/stale' }),
+    }] as never);
+    else oldBodies.reject(new Error('Old load failed'));
+    await expanded;
+    expect(messages.getByThread('th-live')[0]).toMatchObject({
+      bodyText: 'Current body', bodyLoaded: true, bodyLoadError: undefined,
+      sourcePayload: { url: 'https://example.com/current' },
+    });
+  });
+
+  it('keeps original-source requests independent of cache eviction and reopening', async () => {
+    vi.useFakeTimers();
+    try {
+      commandsAvailableMock.mockReturnValue(true);
+      previewMock.mockResolvedValue([backendMessage()] as never);
+      bodiesMock.mockResolvedValue([inlineBody('')] as never);
+      const messages = useMessagesStore();
+      await messages.loadByThread('th-live');
+      const original = deferred<Awaited<ReturnType<typeof backendGetMessageSource>>>();
+      messageSourceMock.mockReturnValueOnce(original.promise);
+      const sourceRequest = messages.loadMessageSource('m-live');
+      await vi.advanceTimersByTimeAsync(THREAD_RETENTION_IDLE_MS + 100);
+      expect(messages.hasThread('th-live')).toBe(false);
+      bodiesMock.mockResolvedValueOnce([{ ...inlineBody(''), body_text: 'Current display' }] as never);
+      await messages.openThread('th-live');
+      const source = { message_id: 'm-live', raw_source: 'Subject: Original\r\n\r\nOriginal bytes' } as never;
+      original.resolve(source);
+      await expect(sourceRequest).resolves.toEqual(source);
+      expect(messages.getByThread('th-live')[0]?.bodyText).toBe('Current display');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not let an evicted remote body finalizer clear a reopened load', async () => {
+    previewMock.mockResolvedValue([
+      backendMessage({ id: 'hidden' }) as never,
+      backendMessage({ id: 'middle' }) as never,
+      backendMessage() as never,
+    ]);
+    bodiesMock.mockResolvedValue([inlineBody('')] as never);
+    const messages = useMessagesStore();
+    await messages.loadByThread('th-live');
+    const oldBody = deferred<Awaited<ReturnType<typeof backendLoadMessageBody>>>();
+    const newBody = deferred<Awaited<ReturnType<typeof backendLoadMessageBody>>>();
+    loadBodyMock.mockReset();
+    loadBodyMock.mockReturnValueOnce(oldBody.promise).mockReturnValueOnce(newBody.promise);
+    bodiesMock.mockResolvedValueOnce([{ ...inlineBody(''), id: 'hidden', body_text: '', body_loaded: false }] as never);
+    const oldExpanded = messages.loadAttachmentsForMessages('th-live', ['hidden']);
+    await vi.waitFor(() => expect(loadBodyMock).toHaveBeenCalledTimes(1));
+    previewMock.mockResolvedValueOnce([backendMessage({ id: 'large', thread_id: 'large-thread' })] as never);
+    bodiesMock.mockResolvedValueOnce([{ ...inlineBody(''), id: 'large', body_text: 'x'.repeat(12_000_001) }] as never);
+    await messages.loadByThread('large-thread');
+    await messages.openThread('th-live');
+    bodiesMock.mockResolvedValueOnce([{ ...inlineBody(''), id: 'hidden', body_text: '', body_loaded: false }] as never);
+    const newExpanded = messages.loadAttachmentsForMessages('th-live', ['hidden']);
+    await vi.waitFor(() => expect(loadBodyMock).toHaveBeenCalledTimes(2));
+    oldBody.resolve({ body_text: 'Old remote body', body_html: null } as never);
+    await oldExpanded;
+    expect(messages.isBodyLoading('hidden')).toBe(true);
+    newBody.resolve({ body_text: 'New remote body', body_html: null } as never);
+    await newExpanded;
+    expect(messages.isBodyLoading('hidden')).toBe(false);
+    expect(messages.getByThread('th-live')[0]?.bodyText).toBe('New remote body');
+  });
+
+  it('keeps a reopened inline download owned by its current request', async () => {
+    vi.useFakeTimers();
+    try {
+      previewMock.mockResolvedValue([backendMessage()] as never);
+      bodiesMock.mockResolvedValue([inlineBody('<img src="cid:logo">')] as never);
+      attachmentsMock.mockResolvedValue([inlineAttachmentRow({ content_id: 'logo' })] as never);
+      const oldDownload = deferred<Awaited<ReturnType<typeof backendDownloadAttachment>>>();
+      const newDownload = deferred<Awaited<ReturnType<typeof backendDownloadAttachment>>>();
+      downloadAttachmentMock.mockReturnValueOnce(oldDownload.promise).mockReturnValueOnce(newDownload.promise);
+      const messages = useMessagesStore();
+      await messages.loadByThread('th-live');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(downloadAttachmentMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(THREAD_RETENTION_IDLE_MS + 100);
+      expect(messages.hasThread('th-live')).toBe(false);
+      await messages.openThread('th-live');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(downloadAttachmentMock).toHaveBeenCalledTimes(2);
+      oldDownload.resolve({ filename: 'old.jpg', mime_type: 'image/jpeg', data_base64: 'OLD', cached_path: null });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(messages.getByThread('th-live')[0]?.attachments).toEqual([]);
+      expect(messages.needsDetails('m-live')).toBe(false);
+      newDownload.resolve({ filename: 'new.jpg', mime_type: 'image/jpeg', data_base64: 'NEW', cached_path: null });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(messages.getByThread('th-live')[0]?.attachments[0]?.dataUrl).toContain('NEW');
+      expect(messages.needsDetails('m-live')).toBe(false);
     } finally {
       vi.useRealTimers();
     }
