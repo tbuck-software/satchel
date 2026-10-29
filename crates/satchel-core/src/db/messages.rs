@@ -217,6 +217,45 @@ impl<'a> MessageSearchRepository<'a> {
         Self { pool }
     }
 
+    /// Which candidate provider IDs also match the local query in this account.
+    /// Existence alone is insufficient: retained headers may have no indexed body,
+    /// and provider search syntax can match mail that local search does not.
+    pub async fn matching_remote_ids(
+        &self,
+        account_id: &str,
+        query: &str,
+        remote_ids: &[String],
+    ) -> Result<Vec<String>, MessageSearchError> {
+        let parsed = parse_search_query(query);
+        let fts_match = build_fts_query(&parsed.text_terms, true);
+        if remote_ids.is_empty()
+            || parsed.is_empty()
+            || (fts_match.is_empty() && !parsed.has_filters())
+        {
+            return Ok(Vec::new());
+        }
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT DISTINCT m.remote_id FROM messages m
+             LEFT JOIN threads t ON t.id = m.thread_id
+             JOIN accounts acc ON acc.id = m.account_id AND acc.is_active = 1
+             WHERE m.remote_id IN (",
+        );
+        let mut ids = query.separated(", ");
+        for id in remote_ids {
+            ids.push_bind(id);
+        }
+        query.push(")");
+        if !fts_match.is_empty() {
+            query.push(" AND EXISTS (SELECT 1 FROM messages_fts WHERE rowid = m.rowid AND messages_fts MATCH ");
+            query.push_bind(fts_match);
+            query.push(")");
+        }
+        let cc_index_ready = parsed.cc.is_none()
+            || !data_repairs::is_pending(self.pool, &data_repairs::CC_INDEX).await?;
+        push_search_filters(&mut query, &parsed, Some(account_id), cc_index_ready);
+        Ok(query.build_query_scalar().fetch_all(self.pool).await?)
+    }
+
     pub async fn search(
         &self,
         input: &SearchQuery,

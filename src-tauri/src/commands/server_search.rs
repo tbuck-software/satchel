@@ -57,37 +57,29 @@ pub async fn server_search(
         // knows. Returning empty keeps the frontend on local results.
         _ => Vec::new(),
     };
-    // Only server-only mail is interesting: everything already synced is found
-    // (and ranked) by the local search.
-    drop_locally_known_hits(pool.inner(), &input.account_id, hits)
+    // Retained headers need not match locally when their bodies were evicted.
+    drop_local_query_matches(pool.inner(), &input.account_id, &input.query, hits)
         .await
         .map_err(CommandError::from)
 }
 
-/// Removes hits whose remote id already exists as a local message.
-pub(crate) async fn drop_locally_known_hits(
+/// Removes hits only when the same message matches the local query.
+pub(crate) async fn drop_local_query_matches(
     pool: &SqlitePool,
     account_id: &str,
+    query: &str,
     hits: Vec<ServerSearchHit>,
 ) -> Result<Vec<ServerSearchHit>, String> {
     if hits.is_empty() {
         return Ok(hits);
     }
 
-    let mut query = QueryBuilder::<Sqlite>::new(
-        "SELECT remote_id FROM messages WHERE remote_id IS NOT NULL AND account_id = ",
-    );
-    query.push_bind(account_id.to_string());
-    query.push(" AND remote_id IN (");
-    let mut ids = query.separated(", ");
-    for hit in &hits {
-        ids.push_bind(hit.remote_id.clone());
-    }
-    query.push(")");
-
-    let known: HashSet<String> = query
-        .build_query_scalar::<String>()
-        .fetch_all(pool)
+    let ids = hits
+        .iter()
+        .map(|hit| hit.remote_id.clone())
+        .collect::<Vec<_>>();
+    let known: HashSet<String> = crate::db::messages::MessageSearchRepository::new(pool)
+        .matching_remote_ids(account_id, query, &ids)
         .await
         .map_err(|err| err.to_string())?
         .into_iter()
@@ -135,8 +127,17 @@ pub(crate) async fn fetch_server_search_hit_impl(
     pool: &SqlitePool,
     input: &FetchServerHitInput,
 ) -> Result<FetchedServerHit, String> {
-    // A sync run may have caught up in the meantime — then there is nothing to do.
+    // Keep the existing identity and local state. The normal body loader also
+    // handles retained headers whose bodies have been evicted, and short-circuits
+    // for cached bodies without contacting the provider.
     if let Some(existing) = find_local_message(pool, &input.account_id, &input.remote_id).await? {
+        crate::commands::message_body::load_message_body_with_pools(
+            pool,
+            pool,
+            &existing.message_id,
+        )
+        .await
+        .map_err(|err| err.to_string())?;
         return Ok(existing);
     }
 

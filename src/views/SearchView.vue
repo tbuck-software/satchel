@@ -8,7 +8,7 @@ import DrawerButton from '@/components/layout/DrawerButton.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { SEARCH_DEBOUNCE_MS, useSearch, type SearchResult } from '@/composables/useSearch';
-import { useServerSearch } from '@/composables/useServerSearch';
+import { serverHitKey, useServerSearch } from '@/composables/useServerSearch';
 import { useRecentSearches } from '@/composables/useRecentSearches';
 import { useThreadsStore } from '@/stores/threads';
 import { registerListKeyboardNavigation } from '@/composables/useListKeyboardNavigation';
@@ -393,17 +393,17 @@ function appendOperator(token: string) {
               :disabled="serverLoading"
               @click="searchServer"
             >
-              {{ serverLoading ? $t('search.server.running') : $t('search.server.action') }}
+              {{ serverLoading ? $t('search.server.running') : serverError ? $t('search.server.retry') : $t('search.server.action') }}
             </AppButton>
             <span class="server-hint">{{ $t('search.server.hint') }}</span>
           </div>
 
           <p v-if="serverError" class="state state--error" role="alert">{{ serverError }}</p>
 
-          <template v-else-if="serverHits.length > 0">
+          <template v-if="serverHits.length > 0">
             <p class="result-count" role="status">{{ $t('search.server.hitCount', serverHits.length) }}</p>
             <ul class="results" :aria-label="$t('search.server.results')">
-              <li v-for="entry in serverHits" :key="entry.hit.remote_id">
+              <li v-for="entry in serverHits" :key="serverHitKey(entry)">
                 <CardButton
                   class="result-row"
                   :disabled="Boolean(fetchingHitId)"
@@ -428,7 +428,7 @@ function appendOperator(token: string) {
                       </template>
                     </span>
                     <span class="result-server-note">
-                      {{ fetchingHitId === entry.hit.remote_id
+                      {{ fetchingHitId === serverHitKey(entry)
                         ? $t('search.server.fetching')
                         : $t('search.server.note') }}
                     </span>
@@ -438,7 +438,7 @@ function appendOperator(token: string) {
             </ul>
           </template>
 
-          <p v-else-if="serverQueried && !serverLoading" class="state">
+          <p v-else-if="serverQueried && !serverLoading && !serverError" class="state">
             {{ $t('search.server.noMore') }}
           </p>
         </template>
