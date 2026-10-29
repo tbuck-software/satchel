@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { useSettingsStore } from '@/stores/settings';
+import { useUiStore } from '@/stores/ui';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
 import LanguageSelector from './LanguageSelector.vue';
 
 const settings = useSettingsStore();
+const ui = useUiStore();
 
 function setTheme(value: string) {
   if (value === 'light' || value === 'dark') settings.theme = value;
@@ -49,7 +51,7 @@ function setAttachmentOpenBehavior(value: string) {
                second card with no heading of its own. -->
           <LanguageSelector />
 
-          <div class="setting-row">
+          <div v-if="!ui.isMobile" class="setting-row">
             <div class="setting-info">
               <span class="setting-label">{{ $t('settings.theme.singleKeyShortcuts') }}</span>
               <span class="setting-hint">{{ $t('settings.theme.singleKeyShortcutsHint') }}</span>

@@ -48,3 +48,22 @@
   font-size: var(--font-size-sm);
   line-height: 1.45;
 }
+
+/* Phone: a row whose control is a segmented choice stacks it under its copy,
+   full width. Side by side, the copy wrapped to five lines in a third of
+   the row while the control took the rest. Switches stay inline. */
+@media (max-width: 767px) {
+  .setting-row:has(> .segmented) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-sm);
+  }
+
+  .setting-row > .segmented:last-child {
+    display: flex;
+    justify-self: stretch;
+  }
+
+  .setting-row > .segmented :deep(.segmented__option) {
+    flex: 1;
+  }
+}
