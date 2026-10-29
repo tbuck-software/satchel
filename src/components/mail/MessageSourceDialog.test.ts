@@ -5,9 +5,10 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import MessageSourceDialog from './MessageSourceDialog.vue';
 
 const loadMessageSource = vi.hoisted(() => vi.fn());
+const exportMessage = vi.hoisted(() => vi.fn().mockResolvedValue(false));
 
 vi.mock('@/stores/messages', () => ({
-  useMessagesStore: () => ({ loadMessageSource }),
+  useMessagesStore: () => ({ loadMessageSource, exportMessage }),
 }));
 
 let wrapper: VueWrapper | null = null;
@@ -45,6 +46,16 @@ describe('message source dialog', () => {
     expect(dialog?.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Original');
     expect(dialog?.querySelector('pre')?.textContent).toContain('Content-Type: text/plain');
     expect(dialog?.querySelector('.source-notice')).toBeNull();
+  });
+
+  it('saves an EML through the original-message export command', async () => {
+    loadMessageSource.mockResolvedValue({ message_id: 'message-1', subject: 'Original', raw_source_status: 'loaded', raw_source: 'Original MIME' });
+    wrapper = mount(MessageSourceDialog, { attachTo: document.body, props: { open: true, messageId: 'message-1' } });
+    await flushPromises();
+    const button = [...document.body.querySelectorAll('button')].find(element => element.textContent?.includes('Save as EML'))!;
+    button.click();
+    await flushPromises();
+    expect(exportMessage).toHaveBeenCalledExactlyOnceWith('message-1', 'Original');
   });
 
   it('keeps decoded content available when the original cannot be fetched', async () => {

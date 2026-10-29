@@ -5,6 +5,8 @@ import {
   backendCommandsAvailable,
   backendDownloadAttachment,
   backendGetMessageSource,
+  backendChooseSavePath,
+  backendExportMessage,
   backendListAttachmentsForMessages,
   backendListMessageBodies,
   backendListMessagesPreview,
@@ -22,6 +24,8 @@ vi.mock('@/services/backend', () => ({
   backendSupportsNativeCommands: vi.fn(() => false),
   backendDownloadAttachment: vi.fn(),
   backendGetMessageSource: vi.fn(),
+  backendChooseSavePath: vi.fn(),
+  backendExportMessage: vi.fn(),
   backendListAttachmentsForMessages: vi.fn(async () => []),
   backendListMessageBodies: vi.fn(async () => []),
   backendListMessagesPreview: vi.fn(),
@@ -129,7 +133,28 @@ describe('messages store', () => {
     downloadAttachmentMock.mockReset();
     openMock.mockClear();
     messageSourceMock.mockReset();
+    vi.mocked(backendChooseSavePath).mockReset();
+    vi.mocked(backendExportMessage).mockReset();
     unsubscribeMock.mockReset();
+  });
+
+  it('exports complete EML through the backend rather than rebuilding display data', async () => {
+    commandsAvailableMock.mockReturnValue(true);
+    vi.mocked(backendChooseSavePath).mockResolvedValue('/exports/message.eml');
+    vi.mocked(backendExportMessage).mockResolvedValue(undefined);
+    const messages = useMessagesStore();
+    await expect(messages.exportMessage('message-original', 'Report / original')).resolves.toBe(true);
+    expect(backendChooseSavePath).toHaveBeenCalledWith(expect.objectContaining({
+      suggestedName: 'Report original.eml', extensions: ['eml'],
+    }));
+    expect(backendExportMessage).toHaveBeenCalledExactlyOnceWith({ path: '/exports/message.eml', messageId: 'message-original' });
+  });
+
+  it('does not write an EML when the save dialog is cancelled', async () => {
+    commandsAvailableMock.mockReturnValue(true);
+    vi.mocked(backendChooseSavePath).mockResolvedValue(null);
+    await expect(useMessagesStore().exportMessage('message', 'Subject')).resolves.toBe(false);
+    expect(backendExportMessage).not.toHaveBeenCalled();
   });
 
   it('reprocesses cached PGP bodies after keys change, including older expanded mail', async () => {

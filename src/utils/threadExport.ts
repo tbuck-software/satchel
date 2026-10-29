@@ -1,7 +1,7 @@
 import type { Message } from '@/types/mail';
 
 export type ThreadExportScope = 'latest' | 'conversation';
-export type ThreadExportFormat = 'eml' | 'markdown' | 'text';
+export type ThreadExportFormat = 'markdown' | 'text';
 
 export interface ThreadExportLabels {
   from: string;
@@ -85,28 +85,6 @@ export function renderThreadText(
     .trimEnd() + '\n';
 }
 
-export function sanitizeThreadHeader(value: string): string {
-  return value.replace(/[\r\n]+/g, ' ').trim();
-}
-
-export function renderLatestThreadMessageEml(messages: readonly Message[]): string {
-  const message = selectThreadExportMessages(messages, 'latest')[0];
-  if (!message) return '';
-  const cc = formatThreadParticipantLine(message, 'cc');
-  return [
-    `From: ${sanitizeThreadHeader(formatThreadParticipantLine(message, 'from'))}`,
-    `To: ${sanitizeThreadHeader(formatThreadParticipantLine(message, 'to'))}`,
-    ...(cc ? [`Cc: ${sanitizeThreadHeader(cc)}`] : []),
-    `Date: ${new Date(message.timestamp).toUTCString()}`,
-    `Subject: ${sanitizeThreadHeader(message.subject)}`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: 8bit',
-    '',
-    message.bodyText ?? '',
-  ].join('\r\n');
-}
-
 export function sanitizeThreadFilename(value: string, fallback: string): string {
   // Filenames must omit ASCII controls on every supported filesystem.
   // oxlint-disable-next-line no-control-regex
@@ -121,14 +99,6 @@ export function buildThreadExportDescriptor(
   options: ThreadExportRenderOptions & { filenameFallback: string },
 ): ThreadExportDescriptor {
   const base = sanitizeThreadFilename(subject, options.filenameFallback);
-  if (format === 'eml') {
-    return {
-      filename: `${base}.eml`,
-      content: renderLatestThreadMessageEml(messages),
-      mime: 'message/rfc822',
-      extension: 'eml',
-    };
-  }
   if (format === 'markdown') {
     return {
       filename: `${base}.md`,

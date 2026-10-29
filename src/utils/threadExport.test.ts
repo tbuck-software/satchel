@@ -3,11 +3,9 @@ import type { Message } from '@/types/mail';
 import {
   buildThreadExportDescriptor,
   formatThreadParticipantLine,
-  renderLatestThreadMessageEml,
   renderThreadMarkdown,
   renderThreadText,
   sanitizeThreadFilename,
-  sanitizeThreadHeader,
   selectThreadExportMessages,
 } from './threadExport';
 
@@ -120,30 +118,7 @@ describe('thread export formatting', () => {
       `);
   });
 
-  it('renders the latest message as an RFC 822 text EML with folded-header protection', () => {
-    const mail = message('latest', {
-      from: { name: 'Sender\nInjected', email: 'sender@example.com' },
-      to: [{ name: 'Recipient', email: 'recipient@example.com' }],
-      subject: 'Subject\r\nBcc: attacker@example.com',
-      bodyText: 'Body',
-      timestamp: '2026-08-31T10:00:00.000Z',
-    });
-
-    expect(renderLatestThreadMessageEml([mail])).toBe(
-      'From: Sender Injected <sender@example.com>\r\n'
-      + 'To: Recipient <recipient@example.com>\r\n'
-      + 'Date: Mon, 31 Aug 2026 10:00:00 GMT\r\n'
-      + 'Subject: Subject Bcc: attacker@example.com\r\n'
-      + 'MIME-Version: 1.0\r\n'
-      + 'Content-Type: text/plain; charset=UTF-8\r\n'
-      + 'Content-Transfer-Encoding: 8bit\r\n'
-      + '\r\n'
-      + 'Body',
-    );
-  });
-
   it('preserves filename sanitization, fallback, truncation, MIME, and extensions', () => {
-    expect(sanitizeThreadHeader('  Subject\r\nInjected  ')).toBe('Subject Injected');
     expect(sanitizeThreadFilename('  <Bad>:/\\Name?*  ', 'Untitled')).toBe('Bad Name');
     expect(sanitizeThreadFilename('   ', 'Untitled')).toBe('Untitled');
     expect(sanitizeThreadFilename('', 'Fallback'.repeat(30))).toHaveLength(90);
@@ -159,11 +134,6 @@ describe('thread export formatting', () => {
       mime: 'text/markdown',
       extension: 'md',
     });
-    expect(buildThreadExportDescriptor('eml', 'Subject', [message('one')], {
-      labels,
-      formatDate,
-      filenameFallback: 'Untitled',
-    })).toMatchObject({ mime: 'message/rfc822', extension: 'eml', filename: 'Subject.eml' });
     expect(buildThreadExportDescriptor('text', 'Subject', [message('one')], {
       labels,
       formatDate,
@@ -176,6 +146,5 @@ describe('thread export formatting', () => {
       .toBe('# Empty\n');
     expect(renderThreadText('Empty', [], 'conversation', { labels, formatDate }))
       .toBe('Empty\n\n========\n');
-    expect(renderLatestThreadMessageEml([])).toBe('');
   });
 });

@@ -32,6 +32,11 @@ export async function backendExportMailbox(input: {
 }
 
 
+export async function backendExportMessage(input: { path: string; messageId: string }): Promise<void> {
+  return invoke<void>('export_message', input);
+}
+
+
 export async function backendImportMbox(input: {
   path: string;
   accountId: string;

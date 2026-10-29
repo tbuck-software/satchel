@@ -539,8 +539,8 @@ async fn persist_provider_message(
     // without its parts is missing information, not reporting a message that
     // lost its attachments — mail is immutable on the server.
     sqlx::query(
-        "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, in_reply_to, references_header, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, date, body_text, body_html, original_body_html, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, remote_uid, remote_id, raw_size, raw_headers, remote_draft_id, category, provider_labels, list_unsubscribe, list_unsubscribe_post, auth_spf, auth_dkim, auth_dmarc, smime_encrypted, smime_signed, pgp_signed, trust_metadata, created_at, updated_at, received_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, in_reply_to, references_header, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, date, body_text, body_html, original_body_html, original_source, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, remote_uid, remote_id, raw_size, raw_headers, remote_draft_id, category, provider_labels, list_unsubscribe, list_unsubscribe_post, auth_spf, auth_dkim, auth_dmarc, smime_encrypted, smime_signed, pgp_signed, trust_metadata, created_at, updated_at, received_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             folder_id = excluded.folder_id,
             thread_id = excluded.thread_id,
@@ -561,6 +561,7 @@ async fn persist_provider_message(
             body_text = CASE WHEN json_extract(excluded.trust_metadata, '$.root_crypto') THEN excluded.body_text ELSE COALESCE(excluded.body_text, messages.body_text) END,
             body_html = CASE WHEN json_extract(excluded.trust_metadata, '$.root_crypto') THEN excluded.body_html ELSE COALESCE(excluded.body_html, messages.body_html) END,
             original_body_html = CASE WHEN json_extract(excluded.trust_metadata, '$.root_crypto') THEN excluded.original_body_html ELSE COALESCE(excluded.original_body_html, messages.original_body_html) END,
+            original_source = COALESCE(excluded.original_source, messages.original_source),
             snippet = excluded.snippet,
             is_read = CASE WHEN ? THEN messages.is_read ELSE excluded.is_read END,
             is_starred = CASE WHEN ? THEN messages.is_starred ELSE excluded.is_starred END,
@@ -609,6 +610,7 @@ async fn persist_provider_message(
     .bind(message.body_text.as_deref())
     .bind(body_html)
     .bind(message.body_html.as_deref())
+    .bind(message.original_source.as_deref())
     .bind(&message.snippet)
     .bind(message_is_read)
     .bind(message_is_starred)
@@ -1046,6 +1048,7 @@ mod tests {
             remote_id: remote_id.to_string(),
             remote_uidvalidity: None,
             remote_thread_id: None,
+            original_source: None,
             mailbox_ids: Vec::new(),
             message_id_header: None,
             in_reply_to: None,
@@ -1077,6 +1080,24 @@ mod tests {
             auth_dmarc: None,
             attachments: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn retains_download_only_original_bytes_across_envelope_refreshes() {
+        let pool = ingest_pool().await;
+        let mut message = envelope("pop-original");
+        let raw = b"Subject: Original\r\n\r\n\xff\0\r\n".to_vec();
+        message.original_source = Some(raw.clone());
+        ingest(&pool, "inbox", &message).await.unwrap();
+        message.original_source = None;
+        ingest(&pool, "inbox", &message).await.unwrap();
+        let stored: Vec<u8> = sqlx::query_scalar(
+            "SELECT original_source FROM messages WHERE remote_id = 'pop-original'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(stored, raw);
     }
 
     #[tokio::test]
@@ -3065,6 +3086,7 @@ mod tests {
             remote_id: "gmail-message".to_string(),
             remote_uidvalidity: None,
             remote_thread_id: Some("gmail-thread".to_string()),
+            original_source: None,
             mailbox_ids: vec!["INBOX".to_string()],
             message_id_header: Some("<gmail@example.com>".to_string()),
             in_reply_to: None,
@@ -3258,6 +3280,7 @@ mod tests {
             remote_id: "immutable-id".to_string(),
             remote_uidvalidity: None,
             remote_thread_id: Some("conversation".to_string()),
+            original_source: None,
             mailbox_ids: Vec::new(),
             message_id_header: Some("<message@example.com>".to_string()),
             in_reply_to: None,
@@ -3350,6 +3373,7 @@ mod tests {
             remote_id: "remote-message".to_string(),
             remote_uidvalidity: None,
             remote_thread_id: Some("remote-thread".to_string()),
+            original_source: None,
             mailbox_ids: vec!["DRAFT".to_string()],
             message_id_header: Some("<draft@example.com>".to_string()),
             in_reply_to: Some("<parent@example.com>".to_string()),

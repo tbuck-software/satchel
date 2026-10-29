@@ -844,6 +844,7 @@ pub fn run() {
             commands::topics::download_topic_file,
             commands::topics::delete_topic_file,
             commands::backup::export_mailbox,
+            commands::backup::export_message,
             commands::backup::import_mbox,
             commands::backup::export_platform_data,
             commands::backup::import_platform_data,

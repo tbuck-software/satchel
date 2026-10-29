@@ -2227,6 +2227,7 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         remote_id: message.id,
         remote_uidvalidity: None,
         remote_thread_id: message.thread_id,
+        original_source: None,
         mailbox_ids,
         message_id_header,
         in_reply_to,

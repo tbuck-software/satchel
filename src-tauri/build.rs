@@ -193,6 +193,7 @@ const COMMANDS: &[&str] = &[
     "download_topic_file",
     "delete_topic_file",
     "export_mailbox",
+    "export_message",
     "import_mbox",
     "export_platform_data",
     "import_platform_data",

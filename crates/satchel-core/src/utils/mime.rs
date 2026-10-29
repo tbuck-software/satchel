@@ -14,13 +14,14 @@ pub(crate) enum AddressListDecodeStrategy {
     MimeEncodedWords,
 }
 
-/// Normalize comma-separated address-list items while preserving provider
-/// specific decoding semantics at the call site.
+/// Normalize address-list items without splitting quoted display names,
+/// preserving provider-specific decoding semantics at the call site.
 pub(crate) fn parse_address_list_tokens(
     raw: &str,
     strategy: AddressListDecodeStrategy,
 ) -> Vec<String> {
-    raw.split(',')
+    top_level_segments(raw)
+        .into_iter()
         .filter_map(|item| {
             let decoded = match strategy {
                 AddressListDecodeStrategy::AlreadyDecoded => item.trim().to_string(),
@@ -381,13 +382,8 @@ pub fn extract_email_address(raw: &str) -> Option<String> {
         return None;
     }
 
-    if let (Some(start), Some(end)) = (trimmed.find('<'), trimmed.rfind('>')) {
-        if end > start {
-            let candidate = trimmed[start + 1..end].trim();
-            if is_likely_email(candidate) {
-                return Some(candidate.to_string());
-            }
-        }
+    if let Some(address) = bracketed_addresses(trimmed).into_iter().next() {
+        return Some(address);
     }
 
     for token in trimmed.split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | ';')) {
@@ -482,9 +478,15 @@ fn display_name_of(segment: &str) -> Option<String> {
 fn bracketed_addresses(raw: &str) -> Vec<String> {
     let mut found = Vec::new();
     let mut quoted = false;
+    let mut escaped = false;
     let mut current: Option<String> = None;
     for character in raw.chars() {
-        if character == '"' && current.is_none() {
+        if escaped {
+            escaped = false;
+            continue;
+        } else if character == '\\' && quoted {
+            escaped = true;
+        } else if character == '"' && current.is_none() {
             quoted = !quoted;
         } else if quoted {
             continue;

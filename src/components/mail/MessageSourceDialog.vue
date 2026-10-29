@@ -5,6 +5,7 @@ import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useToast } from '@/composables/useToast';
 import AppButton from '@/components/ui/AppButton.vue';
+import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import ModalShell from '@/components/ui/ModalShell.vue';
 import { useMessagesStore } from '@/stores/messages';
 import { formatBytes } from '@/utils/formatBytes';
@@ -25,6 +26,7 @@ const loading = ref(false);
 const errorText = ref('');
 const activeTab = ref<Tab>('source');
 const rawSource = ref('');
+const exporting = ref(false);
 const rawSourceStatus = ref<'loaded' | 'unavailable' | 'unsupported'>('unsupported');
 const rawHeaders = ref('');
 const bodyText = ref('');
@@ -92,6 +94,20 @@ watch(
   { immediate: true },
 );
 
+async function exportMessage() {
+  if (!props.messageId || exporting.value) return;
+  exporting.value = true;
+  try {
+    if (await messages.exportMessage(props.messageId, subject.value)) {
+      toast.success(t('mail.source.exported'));
+    }
+  } catch (error) {
+    toast.error(backendErrorLabel(error));
+  } finally {
+    exporting.value = false;
+  }
+}
+
 async function copyToClipboard() {
   try {
     await navigator.clipboard.writeText(activeContent.value);
@@ -153,6 +169,9 @@ useDismissable(() => props.open, () => emit('close'));
           <pre v-else class="source" tabindex="0">{{ activeContent }}</pre>
 
           <footer class="panel-footer">
+            <AppButton variant="soft" size="sm" :disabled="loading || exporting || !props.messageId" @click="void exportMessage()">
+              {{ exporting ? $t('mail.source.exporting') : $t('mail.source.exportEml') }}
+            </AppButton>
             <AppButton v-if="activeContent" variant="soft" size="sm" @click="void copyToClipboard()">
               {{ $t('common.copy') }}
             </AppButton>

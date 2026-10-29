@@ -70,9 +70,9 @@ const rendererAttachments = computed<Attachment[]>(() =>
   })),
 );
 
-/** Everything the user would plausibly want on disk — inline images are body. */
+/** Inline parts without an embedded preview must remain available to save. */
 const listedAttachments = computed(() =>
-  (preview.value?.attachments ?? []).filter((attachment) => !attachment.is_inline),
+  (preview.value?.attachments ?? []).filter((attachment) => !attachment.is_inline || !attachment.data_url),
 );
 
 const recipients = computed(() => {

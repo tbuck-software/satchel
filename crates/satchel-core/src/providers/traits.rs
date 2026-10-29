@@ -51,6 +51,10 @@ pub struct MessageEnvelope {
     #[serde(default)]
     pub remote_uidvalidity: Option<u32>,
     pub remote_thread_id: Option<String>,
+    /// Complete wire source for download-only providers whose server copy may
+    /// be removed after ingestion. Other providers fetch originals on demand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_source: Option<Vec<u8>>,
     /// Provider mailbox/label ids currently attached to this message.
     /// Gmail uses these to prevent account-wide history events from being
     /// persisted into whichever folder cursor happened to observe them.

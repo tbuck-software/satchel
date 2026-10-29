@@ -2095,6 +2095,12 @@ mod tests {
         super::persist_raw_message_metadata(&pool, "m", raw)
             .await
             .unwrap();
+        let original_source: Vec<u8> =
+            sqlx::query_scalar("SELECT original_source FROM messages WHERE id = 'm'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(original_source, raw);
         let (text, html, auth, trust): (String, Option<String>, Option<String>, String) =
             sqlx::query_as("SELECT body_text, body_html, auth_dmarc, trust_metadata FROM messages WHERE id = 'm'")
                 .fetch_one(&pool)
@@ -2234,6 +2240,7 @@ pub struct MessageSourceDto {
 
 #[derive(sqlx::FromRow)]
 struct RemoteMessageSourceTarget {
+    message_id_header: Option<String>,
     remote_id: Option<String>,
     folder_remote_id: Option<String>,
     folder_uidvalidity: Option<i64>,
@@ -2243,7 +2250,7 @@ struct RemoteMessageSourceTarget {
     config: String,
 }
 
-async fn fetch_remote_message_source(
+pub(super) async fn fetch_remote_message_source(
     pool: &SqlitePool,
     message_id: &str,
 ) -> Result<Option<Vec<u8>>, String> {
@@ -2254,11 +2261,13 @@ async fn fetch_remote_message_source(
             .await
             .map_err(|error| error.to_string())?
             .flatten();
-    if let Some(raw) = original_source.filter(|raw| !raw.starts_with(&[0xd0, 0xcf, 0x11, 0xe0])) {
+    if let Some(raw) = original_source.filter(|raw| {
+        !raw.starts_with(&[0xd0, 0xcf, 0x11, 0xe0]) && raw_header_block(raw).is_some()
+    }) {
         return Ok(Some(raw));
     }
     let target = sqlx::query_as::<_, RemoteMessageSourceTarget>(
-        "SELECT m.remote_id, f.remote_id AS folder_remote_id, f.uidvalidity AS folder_uidvalidity,
+        "SELECT m.message_id_header, m.remote_id, f.remote_id AS folder_remote_id, f.uidvalidity AS folder_uidvalidity,
                 a.email AS account_email, a.provider, a.id AS account_id, a.config
          FROM messages m
          JOIN accounts a ON a.id = m.account_id
@@ -2291,6 +2300,14 @@ async fn fetch_remote_message_source(
             })
             .await?
         }
+        "pop3" => {
+            crate::providers::pop3::Pop3Provider::from_account_config(
+                &config,
+                &target.account_email,
+            )?
+            .fetch_raw_message(&remote_id)
+            .await?
+        }
         "gmail" => crate::providers::gmail::GmailProvider::from_account_config(&config)
             .fetch_raw_message(&remote_id)
             .await
@@ -2301,6 +2318,17 @@ async fn fetch_remote_message_source(
             .map_err(|error| error.to_string())?,
         _ => return Ok(None),
     };
+    if let Some(expected) = target.message_id_header.as_deref().filter(|id| {
+        !id.trim().is_empty()
+            && !id.ends_with(&format!("@{}.satchel.local>", target.provider))
+            && !id.ends_with(&format!("@{}.flowmail.local>", target.provider))
+    }) {
+        let actual =
+            raw_header_block(&raw).and_then(|headers| parse_header_value(&headers, "Message-ID"));
+        if actual.as_deref().map(str::trim) != Some(expected.trim()) {
+            return Err("backend.errors.exportOriginalUnavailable".into());
+        }
+    }
     Ok(Some(raw))
 }
 
@@ -2347,7 +2375,8 @@ async fn persist_raw_message_metadata(
 
     sqlx::query(
         "UPDATE messages
-         SET raw_headers = COALESCE(?, raw_headers),
+         SET original_source = ?,
+             raw_headers = COALESCE(?, raw_headers),
              raw_size = ?,
              smime_encrypted = ?,
              smime_signed = ?,
@@ -2361,6 +2390,7 @@ async fn persist_raw_message_metadata(
              updated_at = ?
          WHERE id = ?",
     )
+    .bind(raw)
     .bind(headers)
     .bind(raw_size)
     .bind(parsed.smime_encrypted)

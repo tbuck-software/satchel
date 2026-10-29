@@ -2,7 +2,7 @@
 ///
 /// The stream holds one message at a time, so the limit belongs on the message
 /// rather than on the file — a legitimate mbox export is arbitrarily large.
-pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 
 /// One `From `-separated mbox entry at a time.
 ///
@@ -18,6 +18,9 @@ pub struct MboxEntries<R> {
     oversize: bool,
     /// A `From ` separator has been seen, so what came before it is preamble.
     separated: bool,
+    /// A leading RFC header identifies a bare EML, whose body may contain
+    /// unescaped From lines without becoming another mbox entry.
+    bare: bool,
     done: bool,
     /// Entries dropped for exceeding [`MAX_MESSAGE_BYTES`].
     pub dropped: usize,
@@ -39,6 +42,7 @@ impl<R: tokio::io::AsyncBufRead + Unpin> MboxEntries<R> {
             current: Vec::new(),
             oversize: false,
             separated: false,
+            bare: false,
             done: false,
             dropped: 0,
             bytes_read: 0,
@@ -50,6 +54,48 @@ impl<R: tokio::io::AsyncBufRead + Unpin> MboxEntries<R> {
     /// Bytes are decoded per message, so a file that is not valid UTF-8 costs
     /// one lossy copy of one message rather than of the whole file.
     pub async fn next_entry(&mut self) -> Result<Option<String>, String> {
+        Ok(self.next_raw_entry().await?.map(|raw| {
+            let text = String::from_utf8_lossy(&raw);
+            if raw.starts_with(b"From ") {
+                text.trim_matches(['\r', '\n']).to_string()
+            } else {
+                text.into_owned()
+            }
+        }))
+    }
+
+    /// Read MIME bytes without changing encodings, line endings or signatures.
+    /// Bare EML files are not subject to mbox framing or From-line unescaping.
+    pub async fn next_message_bytes(&mut self) -> Result<Option<Vec<u8>>, String> {
+        let Some(raw) = self.next_raw_entry().await? else {
+            return Ok(None);
+        };
+        if !raw.starts_with(b"From ") {
+            return Ok(Some(raw));
+        }
+        let start = raw
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(raw.len(), |at| at + 1);
+        let message = &raw[start..];
+        // Our writer adds two LF bytes independently of the original ending.
+        let message = message.strip_suffix(b"\n\n").unwrap_or(message);
+        let mut decoded = Vec::with_capacity(message.len());
+        for line in message.split_inclusive(|byte| *byte == b'\n') {
+            let unquoted = line
+                .iter()
+                .position(|byte| *byte != b'>')
+                .unwrap_or(line.len());
+            if unquoted > 0 && line[unquoted..].starts_with(b"From ") {
+                decoded.extend_from_slice(&line[1..]);
+            } else {
+                decoded.extend_from_slice(line);
+            }
+        }
+        Ok(Some(decoded))
+    }
+
+    async fn next_raw_entry(&mut self) -> Result<Option<Vec<u8>>, String> {
         use tokio::io::AsyncBufReadExt;
 
         loop {
@@ -70,7 +116,15 @@ impl<R: tokio::io::AsyncBufRead + Unpin> MboxEntries<R> {
                 }
                 return Ok(None);
             }
-            if line.starts_with(b"From ") {
+            if self.bytes_read == read as u64 {
+                self.bare = line
+                    .iter()
+                    .position(|byte| *byte == b':')
+                    .is_some_and(|end| {
+                        end > 0 && line[..end].iter().all(|byte| byte.is_ascii_graphic())
+                    });
+            }
+            if !self.bare && line.starts_with(b"From ") {
                 let previous = self.take_entry(false);
                 self.separated = true;
                 self.push(&line);
@@ -97,7 +151,7 @@ impl<R: tokio::io::AsyncBufRead + Unpin> MboxEntries<R> {
 
     /// Close off the entry being assembled. `at_end` allows the whole-file
     /// fallback, which only applies when no separator was ever seen.
-    fn take_entry(&mut self, at_end: bool) -> Option<String> {
+    fn take_entry(&mut self, at_end: bool) -> Option<Vec<u8>> {
         let raw = std::mem::take(&mut self.current);
         let separated = self.separated;
         let oversize = std::mem::replace(&mut self.oversize, false);
@@ -110,18 +164,18 @@ impl<R: tokio::io::AsyncBufRead + Unpin> MboxEntries<R> {
         }
         if !separated {
             // Preamble: a message only if the file holds nothing else.
-            let text = String::from_utf8_lossy(&raw);
-            if !at_end || !text.contains("\n\n") {
+            if !at_end
+                || !(raw.windows(2).any(|part| part == b"\n\n")
+                    || raw.windows(4).any(|part| part == b"\r\n\r\n"))
+            {
                 return None;
             }
-            return Some(text.into_owned());
+            return Some(raw);
         }
-        let text = String::from_utf8_lossy(&raw);
-        let trimmed = text.trim_matches(['\r', '\n']);
-        if trimmed.is_empty() {
+        if raw.iter().all(|byte| matches!(byte, b'\r' | b'\n')) {
             return None;
         }
-        Some(trimmed.to_string())
+        Some(raw)
     }
 }
 
@@ -130,4 +184,28 @@ pub fn strip_mbox_from_line(raw: &str) -> &str {
         return raw;
     }
     raw.split_once('\n').map(|(_, rest)| rest).unwrap_or("")
+}
+
+/// Write reversible mboxrd quoting while retaining the original MIME bytes.
+/// The envelope separator is supplied by the caller.
+pub async fn write_message<W: tokio::io::AsyncWrite + Unpin>(
+    writer: &mut W,
+    raw: &[u8],
+) -> std::io::Result<u64> {
+    use tokio::io::AsyncWriteExt;
+    let mut written = 0;
+    for line in raw.split_inclusive(|byte| *byte == b'\n') {
+        let unquoted = line
+            .iter()
+            .position(|byte| *byte != b'>')
+            .unwrap_or(line.len());
+        if line[unquoted..].starts_with(b"From ") {
+            writer.write_all(b">").await?;
+            written += 1;
+        }
+        writer.write_all(line).await?;
+        written += line.len() as u64;
+    }
+    writer.write_all(b"\n\n").await?;
+    Ok(written + 2)
 }

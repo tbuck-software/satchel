@@ -826,8 +826,15 @@ function onDragStart(event: DragEvent) {
     var(--shadow-glow);
 }
 
-.thread-row--keyboard-focused:focus-visible {
+/* The sliding surface paints over the article. Draw tab focus on that
+   surface, inside the fixed-height slot, so it is neither hidden nor clipped. */
+.thread-row:focus-visible {
   outline: none;
+}
+
+.thread-row:focus-visible:not(.thread-row--keyboard-focused) .thread-row__surface {
+  outline: var(--border-focus);
+  outline-offset: calc(-1 * var(--space-2xs));
 }
 
 .thread-row--swiping .thread-row__surface {

@@ -939,6 +939,7 @@ const handlers: Record<string, Handler> = {
       cached_path: null,
     };
   },
+  export_message: () => null,
   get_message_source: (payload) => {
     const id = payload.messageId as string;
     const message = Object.values(messages).flat().find((entry) => entry.id === id);

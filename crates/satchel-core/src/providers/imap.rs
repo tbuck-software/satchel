@@ -64,6 +64,7 @@ async fn fetch_one_on_session<T>(
     uid: &str,
     query: &str,
     operation: &str,
+    expected_uidvalidity: Option<u32>,
 ) -> SessionOutcome<async_imap::Session<T>, Option<async_imap::types::Fetch>>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
@@ -71,7 +72,12 @@ where
     let selected = match timeout(ImapProvider::op_timeout(), session.select(folder)).await {
         Err(_) => Err(format!("imap SELECT {folder} timed out")),
         Ok(Err(err)) => Err(format!("imap SELECT {folder} failed: {err}")),
-        Ok(Ok(_)) => Ok(()),
+        Ok(Ok(mailbox)) => match expected_uidvalidity {
+            Some(expected) if mailbox.uid_validity != Some(expected) => {
+                Err("backend.errors.imapUidValidityChanged".to_string())
+            }
+            _ => Ok(()),
+        },
     };
     if let Err(error) = selected {
         return (None, Err(error));
@@ -103,6 +109,7 @@ where
         &uid,
         "(BODY.PEEK[HEADER] BODY.PEEK[TEXT])",
         "UID FETCH body",
+        None,
     )
     .await;
     let parsed = fetched.and_then(|entry| {
@@ -534,6 +541,13 @@ impl ImapProvider {
     /// repair cryptographic metadata need the exact headers, MIME boundaries
     /// and transfer encodings, not the decoded display body.
     pub async fn fetch_raw_message(&self, message: &MessageRef) -> Result<Vec<u8>, String> {
+        if message
+            .source_uidvalidity
+            .filter(|value| *value != 0)
+            .is_none()
+        {
+            return Err("backend.errors.imapUidValidityMissing".into());
+        }
         let folder = message.source_folder.as_deref().unwrap_or("INBOX");
         read_with_pool(
             &READ_SESSIONS,
@@ -546,6 +560,7 @@ impl ImapProvider {
                     &message.remote_id,
                     "(BODY.PEEK[])",
                     "UID FETCH source",
+                    message.source_uidvalidity,
                 )
                 .await;
                 let raw = fetched.and_then(|entry| {
@@ -618,6 +633,7 @@ impl ImapProvider {
                     remote_id,
                     "(BODY.PEEK[HEADER] BODY.PEEK[TEXT])",
                     "UID FETCH attachment",
+                    None,
                 )
                 .await;
                 let parts = fetched.and_then(|entry| {
@@ -3344,10 +3360,18 @@ fn collect_attachment_parts(
     let filename = extract_filename_param(disposition.unwrap_or_default())
         .or_else(|| extract_filename_param(content_type))
         .map(|value| decode_mime_encoded_words(&value));
-    let is_inline_content = lowered_disposition.contains("inline")
-        || (content_id.is_some() && lowered_content_type.starts_with("image/"));
-    let is_attachment =
-        lowered_disposition.contains("attachment") || filename.is_some() || is_inline_content;
+    let disposition_type = lowered_disposition
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim();
+    // Outlook gives regular image attachments a Content-ID too. An explicit
+    // attachment disposition takes precedence over that inline-image hint.
+    let is_inline_content = disposition_type == "inline"
+        || (disposition_type != "attachment"
+            && content_id.is_some()
+            && lowered_content_type.starts_with("image/"));
+    let is_attachment = disposition_type == "attachment" || filename.is_some() || is_inline_content;
     if !is_attachment || lowered_content_type.starts_with("text/calendar") {
         return;
     }
@@ -3870,6 +3894,7 @@ fn envelope_from_fetch(
         remote_id,
         remote_uidvalidity: Some(server_uidvalidity),
         remote_thread_id: None,
+        original_source: None,
         mailbox_ids: Vec::new(),
         message_id_header,
         in_reply_to,

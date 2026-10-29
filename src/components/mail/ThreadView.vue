@@ -908,13 +908,17 @@ async function saveAllAttachments() {
 async function exportThread(format: 'eml' | 'markdown' | 'text') {
   const currentThread = thread.value;
   if (!currentThread) return;
-  const options = buildThreadExportDescriptor(
-    format,
-    currentThread.subject,
-    threadMessages(),
-    threadExportOptions(),
-  );
   try {
+    if (format === 'eml') {
+      const latest = selectThreadExportMessages(threadMessages(), 'latest')[0];
+      if (latest && await messagesStore.exportMessage(latest.id, currentThread.subject)) {
+        toast.success(t('mail.source.exported'));
+      }
+      return;
+    }
+    const options = buildThreadExportDescriptor(
+      format, currentThread.subject, threadMessages(), threadExportOptions(),
+    );
     const saved = await saveTextExport(options.filename, options.content, options.mime, options.extension);
     if (saved) {
       toast.success(t('thread.export.exported', { filename: options.filename }), {
@@ -922,7 +926,7 @@ async function exportThread(format: 'eml' | 'markdown' | 'text') {
       });
     }
   } catch (error) {
-    toast.error(t('thread.export.failed', { error: error instanceof Error ? error.message : String(error) }));
+    toast.error(t('thread.export.failed', { error: backendErrorLabel(error) }));
   }
 }
 
