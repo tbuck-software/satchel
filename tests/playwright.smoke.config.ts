@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@playwright/test';
 
 const smokePort = process.env.SATCHEL_SMOKE_PORT ?? '4178';
@@ -9,7 +10,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: 'line',
-  outputDir: '/tmp/satchel-playwright-smoke-results',
+  // Keep independent checkouts from deleting each other's traces and results.
+  outputDir: process.env.SATCHEL_SMOKE_OUTPUT_DIR ?? fileURLToPath(new URL('../output/playwright/smoke', import.meta.url)),
   /*
    * Playwright considers Vite ready after the HTML endpoint responds. On a
    * cold cache Vite still has to transform the main client module graph, which

@@ -64,6 +64,8 @@ describe('send-later menu', () => {
   });
 
   it('opens only the custom picker with a local minute value', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 9, 26, 12));
     const saved = new Date(2026, 9, 27, 9, 15, 54);
     const items = await render(saved.toISOString());
     items[3]!.focus();

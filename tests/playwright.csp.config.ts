@@ -10,7 +10,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: 'line',
-  outputDir: '/tmp/satchel-playwright-csp-results',
+  outputDir: process.env.SATCHEL_CSP_OUTPUT_DIR ?? fileURLToPath(new URL('../output/playwright/csp', import.meta.url)),
   use: {
     baseURL: cspBaseUrl,
     browserName: 'chromium',
