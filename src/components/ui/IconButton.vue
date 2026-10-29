@@ -72,32 +72,36 @@ defineEmits<{
   height: 38px;
 }
 
-.icon-button:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
 .icon-button--accent {
   color: var(--accent-primary);
-}
-
-.icon-button--accent:hover:not(:disabled) {
-  color: var(--accent-primary);
-  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
-}
-
-.icon-button--danger:hover:not(:disabled) {
-  color: var(--accent-red);
-  background: color-mix(in srgb, var(--accent-red) 12%, transparent);
 }
 
 .icon-button--warning {
   color: var(--accent-amber);
 }
 
-.icon-button--warning:hover:not(:disabled) {
-  color: var(--accent-amber);
-  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+/* A tap leaves WebKit's :hover on the button under the finger — the drawer
+   button kept a filled tile after coming back from a thread. */
+@media (hover: hover) {
+  .icon-button:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .icon-button--accent:hover:not(:disabled) {
+    color: var(--accent-primary);
+    background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  }
+
+  .icon-button--danger:hover:not(:disabled) {
+    color: var(--accent-red);
+    background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+  }
+
+  .icon-button--warning:hover:not(:disabled) {
+    color: var(--accent-amber);
+    background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+  }
 }
 
 .icon-button--active {

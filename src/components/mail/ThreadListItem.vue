@@ -806,8 +806,12 @@ function onDragStart(event: DragEvent) {
    active nav item gets. On paper a fill alone is a 1.07:1 step, so the petrol
    ring says "this one" where the sheet alone only says "raised" — the same
    pair marks the open search result. */
-.thread-row:hover .thread-row__surface--idle {
-  --row-bg: var(--bg-hover);
+/* Hover only where there is a pointer that hovers: a tap leaves WebKit's
+   :hover stuck on the row under the finger, which then showed its actions. */
+@media (hover: hover) {
+  .thread-row:hover .thread-row__surface--idle {
+    --row-bg: var(--bg-hover);
+  }
 }
 
 .thread-row__surface--selected {
@@ -1056,10 +1060,16 @@ function onDragStart(event: DragEvent) {
 /* The pointer's shortcut, not the keyboard's: a row that is merely selected or
    focused keeps its time and pin, which the keys never needed covered. Tabbing
    onto the buttons themselves still shows them. */
-.thread-row:hover,
 .thread-row:has(.list-row-meta__actions :focus-visible) {
   --row-actions-visible: 1;
   --row-actions-events: auto;
+}
+
+@media (hover: hover) {
+  .thread-row:hover {
+    --row-actions-visible: 1;
+    --row-actions-events: auto;
+  }
 }
 /* Inside the row only: the wrapper height comes from the virtualizer's
    constants, and a container query that moved it drifted the scrolling. */
