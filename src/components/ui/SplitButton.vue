@@ -1,18 +1,23 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import AppButton from './AppButton.vue';
 import AppIcon from './AppIcon.vue';
 import type { ShortcutHint } from '@/types/shortcuts';
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   secondaryLabel: string;
   expanded: boolean;
   popup?: 'menu' | 'dialog';
   controls?: string;
   disabled?: boolean;
+  /** Allow the popup to repair a blocked primary action. Inherits the primary disabled state unless overridden. */
+  secondaryDisabled?: boolean;
   title?: string;
   descriptionId?: string;
   shortcut?: ShortcutHint | null;
-}>(), { popup: 'menu', disabled: false });
+}>(), { popup: 'menu', disabled: false, secondaryDisabled: undefined });
+
+const popupDisabled = computed(() => props.secondaryDisabled ?? props.disabled);
 
 const emit = defineEmits<{
   click: [event: MouseEvent];
@@ -37,16 +42,16 @@ const emit = defineEmits<{
     <AppButton
       variant="primary"
       class="split-button__secondary"
-      :disabled="disabled"
-      :title="disabled ? title ?? secondaryLabel : secondaryLabel"
+      :disabled="popupDisabled"
+      :title="popupDisabled ? title ?? secondaryLabel : secondaryLabel"
       :aria-label="secondaryLabel"
       :aria-haspopup="popup"
       :aria-expanded="expanded"
       :aria-controls="controls"
       :aria-describedby="descriptionId"
       @click="emit('open', $event)"
-      @keydown.down.prevent="!disabled && emit('open', $event)"
-      @keydown.up.prevent="!disabled && emit('open', $event)"
+      @keydown.down.prevent="!popupDisabled && emit('open', $event)"
+      @keydown.up.prevent="!popupDisabled && emit('open', $event)"
     >
       <AppIcon><path d="m4.5 6.5 3.5 3.5 3.5-3.5" /></AppIcon>
     </AppButton>

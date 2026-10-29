@@ -46,7 +46,7 @@ describe('RecipientChips address parsing', () => {
   });
 
   async function paste(text: string, modelValue: string[] = []) {
-    const wrapper = mount(RecipientChips, { props: { modelValue } });
+    const wrapper = mount(RecipientChips, { props: { label: 'To', modelValue } });
     await wrapper.get('input').element.dispatchEvent(pasteEvent(text));
     const emitted = wrapper.emitted('update:modelValue');
     wrapper.unmount();
@@ -73,7 +73,7 @@ describe('RecipientChips address parsing', () => {
 
   it('marks a chip that holds no address as invalid', () => {
     const wrapper = mount(RecipientChips, {
-      props: { modelValue: ['a@x.de', '"Buck'] },
+      props: { label: 'To', modelValue: ['a@x.de', '"Buck'] },
     });
     const chips = wrapper.findAll('.chip');
     expect(chips[0]!.classes()).not.toContain('chip--invalid');
@@ -82,7 +82,7 @@ describe('RecipientChips address parsing', () => {
   });
 
   it('does not commit on a comma typed inside a quoted display name', async () => {
-    const wrapper = mount(RecipientChips, { props: { modelValue: [] } });
+    const wrapper = mount(RecipientChips, { props: { label: 'To', modelValue: [] } });
     const input = wrapper.get('input');
     await input.setValue('"Buck');
     await input.trigger('keydown', { key: ',' });
@@ -110,7 +110,7 @@ describe('RecipientChips contact suggestions', () => {
 
   it('waits 120ms before asking the contacts store and renders its result', async () => {
     searchMock.mockResolvedValue([alice]);
-    const wrapper = mount(RecipientChips, { props: { modelValue: [] } });
+    const wrapper = mount(RecipientChips, { props: { label: 'To', modelValue: [] } });
     const input = wrapper.get('input');
 
     await input.setValue('al');
@@ -130,7 +130,7 @@ describe('RecipientChips contact suggestions', () => {
     searchMock
       .mockImplementationOnce(() => new Promise<BackendContact[]>((resolve) => { resolveAlice = resolve; }))
       .mockImplementationOnce(() => new Promise<BackendContact[]>((resolve) => { resolveBob = resolve; }));
-    const wrapper = mount(RecipientChips, { props: { modelValue: [] } });
+    const wrapper = mount(RecipientChips, { props: { label: 'To', modelValue: [] } });
     const input = wrapper.get('input');
 
     await input.setValue('al');
@@ -152,7 +152,7 @@ describe('RecipientChips contact suggestions', () => {
 
   it('clears short drafts and backend failures without an unhandled rejection', async () => {
     searchMock.mockRejectedValue(new Error('search failed'));
-    const wrapper = mount(RecipientChips, { props: { modelValue: [] } });
+    const wrapper = mount(RecipientChips, { props: { label: 'To', modelValue: [] } });
     const input = wrapper.get('input');
 
     await input.setValue('a');
@@ -174,7 +174,7 @@ describe('RecipientChips keyboard and screen readers', () => {
   });
 
   it('names the address on each remove button and says which chips are invalid', () => {
-    const wrapper = mount(RecipientChips, { props: { modelValue: ['a@x.de', '"Buck'] } });
+    const wrapper = mount(RecipientChips, { props: { label: 'To', modelValue: ['a@x.de', '"Buck'] } });
     const buttons = wrapper.findAll('.chip-remove');
     expect(buttons[0]!.attributes('aria-label')).toBe('Remove a@x.de');
     expect(buttons[1]!.attributes('aria-label')).toBe('Remove "Buck');
@@ -185,7 +185,7 @@ describe('RecipientChips keyboard and screen readers', () => {
   });
 
   it('selects the last chip on the first Backspace and removes it on the second', async () => {
-    const wrapper = mount(RecipientChips, { props: { modelValue: ['a@x.de', 'b@y.de'] } });
+    const wrapper = mount(RecipientChips, { props: { label: 'To', modelValue: ['a@x.de', 'b@y.de'] } });
     const input = wrapper.get('input');
 
     await input.trigger('keydown', { key: 'Backspace' });
@@ -199,7 +199,7 @@ describe('RecipientChips keyboard and screen readers', () => {
   });
 
   it('forgets the selection when another key comes in between', async () => {
-    const wrapper = mount(RecipientChips, { props: { modelValue: ['a@x.de'] } });
+    const wrapper = mount(RecipientChips, { props: { label: 'To', modelValue: ['a@x.de'] } });
     const input = wrapper.get('input');
 
     await input.trigger('keydown', { key: 'Backspace' });
@@ -210,7 +210,7 @@ describe('RecipientChips keyboard and screen readers', () => {
   });
 
   it.each(['metaKey', 'ctrlKey'] as const)('turns the typed address into a chip, then submits on %s+Enter', async (modifier) => {
-    const wrapper = mount(RecipientChips, { props: { modelValue: [] } });
+    const wrapper = mount(RecipientChips, { props: { label: 'To', modelValue: [] } });
     const input = wrapper.get('input');
     await input.setValue('c@z.de');
 
@@ -220,4 +220,37 @@ describe('RecipientChips keyboard and screen readers', () => {
     expect(wrapper.emitted('submit')).toHaveLength(1);
     wrapper.unmount();
   });
+});
+
+
+it('keeps distinct accessible names and input IDs when chips hide the placeholder', () => {
+  setActivePinia(createPinia());
+  const wrapper = mount({
+    components: { RecipientChips },
+    template: `<RecipientChips label="To" :model-value="['a@example.com']" placeholder="Name or email" />
+      <RecipientChips label="Bcc" :model-value="['b@example.com']" />`,
+  });
+  const [first, second] = wrapper.findAll('input');
+  expect(first!.attributes('aria-label')).toBe('To');
+  expect(second!.attributes('aria-label')).toBe('Bcc');
+  expect(first!.attributes('id')).toBeTruthy();
+  expect(first!.attributes('id')).not.toBe(second!.attributes('id'));
+  wrapper.unmount();
+});
+
+it('activates a suggestion through semantic click without committing the search text on blur', async () => {
+  setActivePinia(createPinia());
+  vi.useFakeTimers();
+  searchMock.mockResolvedValue([alice]);
+  const wrapper = mount(RecipientChips, { attachTo: document.body, props: { label: 'To', modelValue: [] } });
+  const input = wrapper.get('input');
+  await input.setValue('al');
+  await vi.advanceTimersByTimeAsync(120);
+  await flushPromises();
+  const option = wrapper.get('[role="option"]');
+  await input.trigger('blur', { relatedTarget: option.element });
+  await option.trigger('click');
+  expect(wrapper.emitted('update:modelValue')).toEqual([[['Alice <alice@example.com>']]]);
+  wrapper.unmount();
+  vi.useRealTimers();
 });

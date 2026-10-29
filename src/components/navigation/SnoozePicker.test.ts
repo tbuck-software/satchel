@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { createPinia } from 'pinia';
 import {
@@ -29,6 +29,7 @@ afterEach(() => {
   restoreProvider?.();
   restoreProvider = undefined;
   document.body.innerHTML = '';
+  vi.useRealTimers();
 });
 
 describe('SnoozePicker', () => {
@@ -116,4 +117,85 @@ describe('SnoozePicker', () => {
       '2099-01-02T10:00:00.000Z',
     ]);
   });
+});
+
+
+it('refreshes tomorrow and the manual minimum when the mounted picker reopens after midnight', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-29T23:59:00'));
+  wrapper = mount(SnoozePicker, { attachTo: document.body, props: { open: true }, global: { plugins: [createPinia()] } });
+  const tomorrow = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.preset')).find(button => button.textContent?.includes('Tomorrow'))!;
+  // Read the preset before closing, so a computed cache already exists.
+  expect(tomorrow()).toBeDefined();
+  await wrapper.setProps({ open: false });
+  vi.setSystemTime(new Date('2026-10-30T00:01:00'));
+  await wrapper.setProps({ open: true });
+  expect(document.querySelector('input')?.getAttribute('min')).toBe('2026-10-30T00:02');
+  tomorrow().click();
+  expect(wrapper.emitted('choose')?.[0]).toEqual([new Date('2026-10-31T08:00:00').toISOString()]);
+});
+
+it('removes expired recents and presets and explains a manual time expiring while open', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-29T13:59:00'));
+  restoreProvider = setPersistenceStorageProvider(() => memoryStorage({
+    'satchel.waitingRecentDates': JSON.stringify([
+      new Date('2026-10-29T13:58:00').toISOString(),
+      new Date('2026-10-29T14:00:00').toISOString(),
+    ]),
+  }));
+  wrapper = mount(SnoozePicker, { attachTo: document.body, props: { open: true }, global: { plugins: [createPinia()] } });
+  expect(document.querySelectorAll('.recent-item')).toHaveLength(1);
+  const input = document.querySelector<HTMLInputElement>('input')!;
+  input.value = '2026-10-29T14:00';
+  input.dispatchEvent(new Event('input'));
+  await wrapper.vm.$nextTick();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(document.querySelectorAll('.recent-item')).toHaveLength(0);
+  expect(document.querySelector('.presets')?.textContent).not.toContain('Today');
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('future');
+  expect(wrapper.emitted('choose')).toBeUndefined();
+});
+
+it('explains a recent choice that expires between the last clock update and activation', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-29T13:59:00'));
+  const storage = memoryStorage({
+    'satchel.waitingRecentDates': JSON.stringify([new Date('2026-10-29T14:00:00').toISOString()]),
+  });
+  restoreProvider = setPersistenceStorageProvider(() => storage);
+  wrapper = mount(SnoozePicker, { attachTo: document.body, props: { open: true }, global: { plugins: [createPinia()] } });
+  const recent = document.querySelector<HTMLButtonElement>('.recent-item')!;
+  vi.setSystemTime(new Date('2026-10-29T14:00:00'));
+  recent.click();
+  await wrapper.vm.$nextTick();
+  expect(wrapper.emitted('choose')).toBeUndefined();
+  expect(wrapper.emitted('close')).toBeUndefined();
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('future');
+});
+
+
+it('keeps a valid manual choice available after an expired recent choice', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-29T13:59:00'));
+  const storage = memoryStorage({
+    'satchel.waitingRecentDates': JSON.stringify([new Date('2026-10-29T14:00:00').toISOString()]),
+  });
+  restoreProvider = setPersistenceStorageProvider(() => storage);
+  wrapper = mount(SnoozePicker, { attachTo: document.body, props: { open: true }, global: { plugins: [createPinia()] } });
+  const input = document.querySelector<HTMLInputElement>('input')!;
+  input.value = '2026-10-29T14:30';
+  input.dispatchEvent(new Event('input'));
+  await wrapper.vm.$nextTick();
+  const recent = document.querySelector<HTMLButtonElement>('.recent-item')!;
+  vi.setSystemTime(new Date('2026-10-29T14:00:00'));
+  recent.click();
+  await wrapper.vm.$nextTick();
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('future');
+  expect(input.getAttribute('aria-invalid')).toBeNull();
+  const apply = document.querySelectorAll<HTMLButtonElement>('.actions button')[1]!;
+  expect(apply.disabled).toBe(false);
+  apply.click();
+  await wrapper.vm.$nextTick();
+  expect(wrapper.emitted('choose')?.[0]).toEqual([new Date('2026-10-29T14:30').toISOString()]);
 });

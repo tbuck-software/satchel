@@ -238,3 +238,75 @@ test('a thread dragged from the list onto the composer arrives as an .eml attach
   await expect(writer).toHaveText('');
   await expect(composer.locator('.compose-eml-drop')).toHaveCount(0);
 });
+
+
+test.describe('recipient field accessibility', () => {
+  test.use({ hasTouch: true });
+
+  for (const activation of ['semantic click', 'mouse', 'keyboard', 'touch'] as const) {
+    test(`names populated recipient inputs and selects suggestions by ${activation}`, async ({ page }) => {
+      await page.goto('/');
+      await page.getByRole('button', { name: 'New message', exact: true }).click();
+      const composer = page.getByRole('dialog', { name: 'Compose email' });
+      await composer.getByRole('button', { name: 'Cc/Bcc', exact: true }).click();
+      for (const name of ['To', 'Cc', 'Bcc']) {
+        const input = composer.getByRole('combobox', { name, exact: true });
+        await input.fill(`${name.toLowerCase()}@example.com`);
+        await input.press('Enter');
+        await expect(input).toHaveAccessibleName(name);
+        await expect(input).toHaveAttribute('placeholder', '');
+        const label = composer.locator('label').filter({ hasText: new RegExp(`^${name}$`) });
+        expect(await label.getAttribute('for')).toBe(await input.getAttribute('id'));
+        await label.click();
+        await expect(input).toBeFocused();
+      }
+      const input = composer.getByRole('combobox', { name: 'To', exact: true });
+      await input.fill('example');
+      const option = composer.getByRole('listbox').getByRole('option').first();
+      await expect(option).toBeVisible();
+      const email = await option.locator('small').innerText();
+      if (activation === 'semantic click') await option.dispatchEvent('click');
+      else if (activation === 'mouse') await option.click();
+      else if (activation === 'touch') await option.tap();
+      else await input.press('Enter');
+      const chips = composer.locator('.recipient-row .chip');
+      await expect(chips).toHaveCount(2);
+      expect(await chips.last().getAttribute('title')).toContain(email);
+      await expect(input).toHaveValue('');
+      await expect(composer.getByRole('listbox').getByRole('option')).toHaveCount(0);
+    });
+  }
+});
+
+test('requires a future send time even when it expires with the composer open', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2030-10-29T12:00:00'));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New message', exact: true }).click();
+  const composer = page.getByRole('dialog', { name: 'Compose email' });
+  const to = composer.getByRole('combobox', { name: 'To', exact: true });
+  await to.fill('recipient@example.com');
+  await to.press('Enter');
+  await composer.locator('.ProseMirror').first().fill('Send only at the selected time.');
+  await composer.getByRole('button', { name: 'Send later…', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Pick date & time…', exact: true }).click();
+  const picker = page.getByRole('dialog', { name: 'Send later…', exact: true });
+  await picker.locator('input').fill('2030-10-29T11:59');
+  await picker.getByRole('button', { name: 'Set', exact: true }).click();
+  await expect(picker.getByRole('alert')).toContainText('future');
+  await expect(picker.locator('input')).toHaveAttribute('aria-invalid', 'true');
+  await picker.locator('input').fill('2030-10-29T12:01');
+  await picker.getByRole('button', { name: 'Set', exact: true }).click();
+  await expect(picker).toHaveCount(0);
+  const schedule = composer.getByRole('button', { name: 'Schedule', exact: true });
+  await expect(schedule).toBeEnabled();
+  await page.clock.setFixedTime(new Date('2030-10-29T12:01:00'));
+  await expect(schedule).toBeDisabled();
+  await expect(composer.locator('[data-testid="compose-send-wrap"]')).toHaveAttribute('title', /future/);
+  const later = composer.getByRole('button', { name: 'Send later…', exact: true });
+  await expect(later).toBeEnabled();
+  await later.click();
+  await page.getByRole('menu', { name: 'Send later…', exact: true }).getByRole('menuitem').first().click();
+  await expect(schedule).toBeEnabled();
+  await composer.locator('.schedule-info').getByRole('button').click();
+  await expect(composer.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+});

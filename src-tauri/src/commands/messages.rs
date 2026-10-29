@@ -1449,15 +1449,16 @@ async fn read_undo_send_seconds(pool: &SqlitePool) -> i64 {
     .unwrap_or(5)
 }
 
+/// Validate new submissions only; due outbox actions execute without this check.
 fn parse_scheduled_for(raw: Option<&str>) -> Result<Option<DateTime<Utc>>, String> {
     let Some(raw) = raw.map(str::trim).filter(|raw| !raw.is_empty()) else {
         return Ok(None);
     };
     let parsed = DateTime::parse_from_rfc3339(raw)
-        .map_err(|err| format!("invalid scheduled_for timestamp: {err}"))?
+        .map_err(|_| "backend.errors.scheduledTimeInvalid".to_string())?
         .with_timezone(&Utc);
     if parsed <= Utc::now() {
-        return Ok(None);
+        return Err("backend.errors.scheduledTimeInvalid".to_string());
     }
     Ok(Some(parsed))
 }
@@ -1714,6 +1715,58 @@ fn log_perf(operation: &str, started_at: Instant, detail: String) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn newly_submitted_expired_schedule_is_rejected() {
+        for raw in [
+            "2001-01-01T10:00:00Z".to_string(),
+            chrono::Utc::now().to_rfc3339(),
+            "invalid".to_string(),
+        ] {
+            let error = super::parse_scheduled_for(Some(&raw)).unwrap_err();
+            assert_eq!(
+                super::CommandError::from(error).key,
+                "backend.errors.scheduledTimeInvalid"
+            );
+        }
+    }
+
+    #[test]
+    fn unscheduled_and_future_submissions_keep_their_meaning() {
+        assert_eq!(super::parse_scheduled_for(None).unwrap(), None);
+        assert_eq!(super::parse_scheduled_for(Some("  ")).unwrap(), None);
+        let future = chrono::Utc::now() + chrono::Duration::hours(1);
+        assert_eq!(
+            super::parse_scheduled_for(Some(&future.to_rfc3339())).unwrap(),
+            Some(future)
+        );
+    }
+
+    #[tokio::test]
+    async fn overdue_queued_schedule_is_still_claimed_for_execution() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        satchel_core::db::init(&pool).await.unwrap();
+        let queue = crate::sync::queue::SyncQueue::new();
+        let past = chrono::Utc::now() - chrono::Duration::minutes(1);
+        let input = super::OutgoingMessageInput {
+            to: vec!["recipient@example.com".into()],
+            body: "Scheduled message".into(),
+            scheduled_for: Some(past.to_rfc3339()),
+            ..Default::default()
+        };
+        let action = super::build_send_action("account".into(), input, Some(past)).unwrap();
+        assert_eq!(action.status, "scheduled");
+        queue.enqueue(&pool, action).await.unwrap();
+        let claimed = queue.claim_next(&pool).await.unwrap().expect("due send");
+        let payload: crate::sync::outbox::SendActionPayload =
+            serde_json::from_value(claimed.payload).unwrap();
+        assert_eq!(payload.scheduled_for, Some(past.to_rfc3339()));
+        assert_eq!(payload.input.scheduled_for, Some(past.to_rfc3339()));
+    }
+
     #[test]
     fn opening_a_thread_loads_the_latest_bodies_and_every_draft() {
         let row = |id: &str, draft: i64| super::MessagePreviewRecord {

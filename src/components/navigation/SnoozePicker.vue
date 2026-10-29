@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
 import CardButton from '@/components/ui/CardButton.vue';
+import { useActionClock } from '@/composables/useActionClock';
 import { useDismissable } from '@/composables/useDismissable';
 import { useFocusTrap } from '@/composables/useFocusTrap';
 import { MAX_RECENT_SNOOZE_DATES } from '@/config/historyLimits';
@@ -23,9 +24,13 @@ const selected = ref('');
 const picker = ref<HTMLElement | null>(null);
 const titleId = useId();
 const errorId = useId();
-/** Set when the custom time is not in the future; Apply used to do nothing. */
-const manualInPast = ref(false);
+/** A suggestion can expire between the last clock update and activation. */
+const invalidChoice = ref(false);
+const { now, refresh } = useActionClock(() => props.open);
+const manualInPast = computed(() => selected.value !== '' && isPast(selected.value, now.value));
+const showDateError = computed(() => invalidChoice.value || manualInPast.value);
 const recentManual = ref<string[]>(readRecentManualDates());
+const futureRecentManual = computed(() => recentManual.value.filter(value => !isPast(value, now.value)));
 
 type SnoozePreset = {
   id: string;
@@ -80,46 +85,48 @@ function formatDate(value: string | Date): string {
 }
 
 const presets = computed<SnoozePreset[]>(() => {
-  const now = new Date();
-  const todayAtTwo = atTime(now, 14);
-  const tomorrow = addDays(now, 1);
+  const current = new Date(now.value);
+  const todayAtTwo = atTime(current, 14);
+  const tomorrow = addDays(current, 1);
   return [
     { id: 'today-14', label: t('nav.snooze.today14'), date: todayAtTwo },
     { id: 'tomorrow-8', label: t('nav.snooze.tomorrow8'), date: atTime(tomorrow, 8) },
     { id: 'tomorrow-14', label: t('nav.snooze.tomorrow14'), date: atTime(tomorrow, 14) },
-    { id: 'next-week', label: t('nav.snooze.nextWeek'), date: nextMondayAtEight(now) },
-    { id: 'next-month', label: t('nav.snooze.nextMonth'), date: firstDayNextMonthAtEight(now) },
-  ].filter((preset) => preset.date.getTime() > now.getTime());
+    { id: 'next-week', label: t('nav.snooze.nextWeek'), date: nextMondayAtEight(current) },
+    { id: 'next-month', label: t('nav.snooze.nextMonth'), date: firstDayNextMonthAtEight(current) },
+  ].filter((preset) => preset.date.getTime() > current.getTime());
 });
 
-const minManualValue = computed(() => toDatetimeLocalValue(new Date()));
+const minManualValue = computed(() => toDatetimeLocalValue(new Date(now.value + 60_000)));
 
 function chooseDate(date: Date | string) {
+  refresh();
   const target = new Date(date);
-  if (target.getTime() <= Date.now()) {
+  if (Number.isNaN(target.getTime()) || target.getTime() <= now.value) {
+    invalidChoice.value = true;
     return;
   }
   emit('choose', target.toISOString());
   emit('close');
 }
 
-function isPast(value: string): boolean {
+function isPast(value: string, current = Date.now()): boolean {
   const time = new Date(value).getTime();
-  return Number.isNaN(time) || time <= Date.now();
+  return Number.isNaN(time) || time <= current;
 }
 
-watch(selected, (value) => {
-  manualInPast.value = value !== '' && isPast(value);
-});
+watch(selected, () => { invalidChoice.value = false; });
+watch(() => props.open, () => { invalidChoice.value = false; });
 
 function submit() {
+  refresh();
   if (!selected.value) {
     return;
   }
   // Checked again here: a time that was ahead when it was typed can have
   // passed by the time Apply is pressed.
   if (isPast(selected.value)) {
-    manualInPast.value = true;
+    invalidChoice.value = true;
     return;
   }
   const manualDate = new Date(selected.value);
@@ -160,10 +167,10 @@ const { onTab } = useFocusTrap(picker, { isOpen: () => props.open, restingFocus:
           <small>{{ formatDate(preset.date) }}</small>
         </CardButton>
       </div>
-      <div v-if="recentManual.length > 0" class="recent">
+      <div v-if="futureRecentManual.length > 0" class="recent">
         <span class="section-label">{{ $t('nav.snooze.recent') }}</span>
         <CardButton
-          v-for="date in recentManual"
+          v-for="date in futureRecentManual"
           :key="date"
           class="recent-item"
           @click="chooseDate(date)"
@@ -178,10 +185,10 @@ const { onTab } = useFocusTrap(picker, { isOpen: () => props.open, restingFocus:
           type="datetime-local" step="60"
           :min="minManualValue"
           :aria-invalid="manualInPast ? 'true' : undefined"
-          :aria-describedby="manualInPast ? errorId : undefined"
+          :aria-describedby="showDateError ? errorId : undefined"
         />
       </label>
-      <p v-if="manualInPast" :id="errorId" class="manual-error" role="alert">
+      <p v-if="showDateError" :id="errorId" class="manual-error" role="alert">
         {{ $t('nav.snooze.pastDate') }}
       </p>
       <div class="actions">

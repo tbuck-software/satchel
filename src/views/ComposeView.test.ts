@@ -802,3 +802,46 @@ it('resumes the mock thread draft as the reply it was saved as', async () => {
   expect(input.sendOptions?.reply_to_message_id).toBe('m-1');
   wrapper.unmount();
 });
+
+
+it.each(['restored', 'tick', 'submit'])('blocks an expired schedule on %s', async (mode) => {
+  const restored = mode === 'restored';
+  vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+  vi.setSystemTime(new Date('2026-10-29T12:00:00Z'));
+  if (restored) harness.fetchDraft.mockResolvedValue({
+    id: 'expired', account_id: 'account-1', to: ['boss@example.com'], cc: [], bcc: [],
+    subject: 'Expired schedule', body: DRAFT_BODY, scheduled_for: '2026-10-29T11:59:00Z',
+  });
+  const wrapper = render(undefined, true, restored ? { initialDraftId: 'expired' } : {});
+  await flushPromises();
+  if (!restored) {
+    await wrapper.get('.split-button__secondary').trigger('click');
+    await flushPromises();
+    wrapper.getComponent({ name: 'SendLaterMenu' }).vm.$emit('select', '2026-10-29T12:01:00Z');
+    await flushPromises();
+    expect(wrapper.get('.split-button__primary').attributes('disabled')).toBeUndefined();
+    if (mode === 'tick') await vi.advanceTimersByTimeAsync(60_000);
+    else {
+      // Submission must revalidate even between clock updates or after sleep.
+      vi.setSystemTime(new Date('2026-10-29T12:01:00Z'));
+      wrapper.getComponent({ name: 'RecipientChips' }).vm.$emit('submit');
+      await flushPromises();
+    }
+  }
+  expect(wrapper.get('.split-button__primary').attributes('disabled')).toBeDefined();
+  expect(wrapper.get('[data-testid="compose-send-wrap"]').attributes('title')).toContain('future');
+  wrapper.getComponent({ name: 'RecipientChips' }).vm.$emit('submit');
+  await flushPromises();
+  expect(harness.sendMessage).not.toHaveBeenCalled();
+  const later = wrapper.get('.split-button__secondary');
+  expect(later.attributes('disabled')).toBeUndefined();
+  await later.trigger('click');
+  await flushPromises();
+  wrapper.getComponent({ name: 'SendLaterMenu' }).vm.$emit('select', '2026-10-29T13:00:00Z');
+  await flushPromises();
+  expect(wrapper.get('.split-button__primary').attributes('disabled')).toBeUndefined();
+  await wrapper.get('.schedule-info button').trigger('click');
+  expect(sendButton(wrapper).attributes('disabled')).toBeUndefined();
+  wrapper.unmount();
+  vi.useRealTimers();
+});

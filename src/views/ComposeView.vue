@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useActionClock } from '@/composables/useActionClock';
 import { useTextareaAutosize } from '@vueuse/core';
 import { defineAsyncComponent, computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
 import type { AnchorBox } from '@/utils/popoverPlacement';
@@ -137,6 +138,7 @@ const sending = ref(false);
 const discarding = ref(false);
 const status = ref<ComposerStatus | null>(null);
 const scheduledFor = ref<string | null>(null);
+const scheduleClock = useActionClock(() => scheduledFor.value !== null);
 const followUpAt = ref<string | null>(null);
 const showTemplatePicker = ref(false);
 const showSendLater = ref(false);
@@ -411,7 +413,8 @@ const sendBlocker = computed(() => composerSendBlocker({
   bcc: bcc.value,
   body: body.value,
   attachmentCount: attachments.value.length,
-}));
+  scheduledFor: scheduledFor.value,
+}, scheduleClock.now.value));
 const canSend = computed(() => sendBlocker.value === null);
 /** What the sender can do about a disabled Send button, if anything. */
 const sendBlockedHint = computed(() => {
@@ -423,11 +426,15 @@ const sendBlockedHint = computed(() => {
     case 'noRecipients': return t('compose.sendBlocked.noRecipients');
     case 'invalidRecipients':
       return t('compose.sendBlocked.invalidRecipients', { addresses: blocker.invalid.join(', ') });
+    case 'invalidSchedule': return t('compose.sendBlocked.invalidSchedule');
     case 'empty': return t('compose.sendBlocked.empty');
     default: return null;
   }
 });
 const sendHintId = `compose-send-hint-${useId()}`;
+const toFieldId = `compose-to-${useId()}`;
+const ccFieldId = `compose-cc-${useId()}`;
+const bccFieldId = `compose-bcc-${useId()}`;
 const senderFieldId = `compose-sender-${useId()}`;
 const subjectFieldId = `compose-subject-${useId()}`;
 const sendShortcut = {
@@ -902,6 +909,7 @@ function announceAfterClose(tone: 'success' | 'info' | 'warning', text: string) 
 }
 
 async function send() {
+  scheduleClock.refresh();
   if (!canSend.value || !activeAccount.value) {
     // The shortcut has no greyed-out button to look at; say why nothing happened.
     if (sendBlockedHint.value) status.value = { tone: 'warning', text: sendBlockedHint.value };
@@ -1227,8 +1235,8 @@ defineExpose({
     </div>
 
     <div class="row recipient-row">
-      <label class="label">{{ $t('common.to') }}</label>
-      <RecipientChips ref="toFieldRef" v-model="to" :placeholder="$t('compose.recipients.toPlaceholder')" class="field" @submit="send" />
+      <label class="label" :for="toFieldId">{{ $t('common.to') }}</label>
+      <RecipientChips ref="toFieldRef" v-model="to" :input-id="toFieldId" :label="$t('common.to')" :placeholder="$t('compose.recipients.toPlaceholder')" class="field" @submit="send" />
       <AppButton size="sm" variant="ghost" class="cc-link"
         :aria-expanded="showCcBcc"
         :title="showCcBcc ? $t('compose.recipients.collapseCcBcc') : $t('compose.recipients.showCcBcc')"
@@ -1241,12 +1249,12 @@ defineExpose({
 
     <template v-if="showCcBcc">
       <div class="row">
-        <label class="label">{{ $t('common.cc') }}</label>
-        <RecipientChips v-model="cc" :placeholder="$t('compose.recipients.ccPlaceholder')" class="field" @submit="send" />
+        <label class="label" :for="ccFieldId">{{ $t('common.cc') }}</label>
+        <RecipientChips v-model="cc" :input-id="ccFieldId" :label="$t('common.cc')" :placeholder="$t('compose.recipients.ccPlaceholder')" class="field" @submit="send" />
       </div>
       <div class="row">
-        <label class="label">{{ $t('common.bcc') }}</label>
-        <RecipientChips v-model="bcc" :placeholder="$t('compose.recipients.bccPlaceholder')" class="field" @submit="send" />
+        <label class="label" :for="bccFieldId">{{ $t('common.bcc') }}</label>
+        <RecipientChips v-model="bcc" :input-id="bccFieldId" :label="$t('common.bcc')" :placeholder="$t('compose.recipients.bccPlaceholder')" class="field" @submit="send" />
       </div>
     </template>
 
@@ -1476,6 +1484,7 @@ defineExpose({
             :title="sendBlockedHint ?? (sending ? $t('compose.sending') : scheduledFor ? $t('compose.schedule.submit') : $t('compose.send'))"
             :shortcut="canSend ? sendShortcut : null"
             :disabled="!canSend"
+            :secondary-disabled="!canSend && sendBlocker?.reason !== 'invalidSchedule'"
             :description-id="sendBlockedHint ? sendHintId : undefined"
             @click="send"
             @open="openSendLater"

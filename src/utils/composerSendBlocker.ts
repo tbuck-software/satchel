@@ -10,6 +10,7 @@ export interface ComposerSendState {
   bcc: readonly string[];
   body: string;
   attachmentCount: number;
+  scheduledFor: string | null;
 }
 
 export type ComposerSendBlocker =
@@ -19,7 +20,8 @@ export type ComposerSendBlocker =
   | { reason: 'noAccount' }
   | { reason: 'noRecipients' }
   | { reason: 'invalidRecipients'; invalid: string[] }
-  | { reason: 'empty' };
+  | { reason: 'empty' }
+  | { reason: 'invalidSchedule' };
 
 /**
  * Why Send is unavailable, or `null` when it is not.
@@ -27,7 +29,7 @@ export type ComposerSendBlocker =
  * Any of To, Cc and Bcc is enough — the backend puts all three into the
  * envelope — and a message may consist of attachments alone.
  */
-export function composerSendBlocker(state: ComposerSendState): ComposerSendBlocker | null {
+export function composerSendBlocker(state: ComposerSendState, now = Date.now()): ComposerSendBlocker | null {
   if (!state.initialized) return { reason: 'loading' };
   if (state.sending) return { reason: 'sending' };
   // A draft that could not be loaded must not be sent as an empty message.
@@ -39,5 +41,9 @@ export function composerSendBlocker(state: ComposerSendState): ComposerSendBlock
   const invalid = recipients.filter((recipient) => !isValidRecipient(recipient));
   if (invalid.length > 0) return { reason: 'invalidRecipients', invalid };
   if (state.body.trim().length === 0 && state.attachmentCount === 0) return { reason: 'empty' };
+  if (state.scheduledFor != null) {
+    const scheduled = new Date(state.scheduledFor).getTime();
+    if (!Number.isFinite(scheduled) || scheduled <= now) return { reason: 'invalidSchedule' };
+  }
   return null;
 }
