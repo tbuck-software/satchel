@@ -105,7 +105,7 @@
         "title": "Aufmerksamkeit erforderlich",
         "unavailable": "Öffne den Postausgang, um die betroffenen Einträge zu prüfen."
       },
-      "mutationsFailed": "{count} Änderung konnte nicht mit dem Server abgeglichen werden. | {count} Änderungen konnten nicht mit dem Server abgeglichen werden.",
+      "mutationsFailed": "{count} Änderung ist nicht beim Server angekommen. | {count} Änderungen sind nicht beim Server angekommen.",
       "retryFailed": "Erneuter Abgleich fehlgeschlagen: {error}",
       "retryQueued": "{count} Änderung wird erneut abgeglichen. | {count} Änderungen werden erneut abgeglichen.",
       "status": {
@@ -377,8 +377,12 @@
     }
   },
   "calendar": {
+    "agenda": {
+      "empty": "Keine Termine"
+    },
     "createHint": "Klicke auf einen freien Tag oder eine freie Uhrzeit, um einen Termin anzulegen.",
     "editor": {
+      "add": "Hinzufügen",
       "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
       "descriptionPlaceholder": "Notizen, Agenda, …",
       "editTitle": "Termin bearbeiten",
@@ -1502,6 +1506,7 @@
       "title": "Favoriten aus allen Ordnern"
     },
     "folders": {
+      "all": "Alle Ordner",
       "aside": "Beiseitegelegt",
       "blocked": "Blockiert",
       "done": "Erledigt",
@@ -3543,6 +3548,7 @@
     "send": "Senden",
     "toastQueue": "{count} Rückgängig-Aktionen – vorherige anzeigen",
     "toastQueueAria": "{count} Rückgängig-Aktionen, vorherige anzeigen",
+    "toastQueuePosition": "{index} von {count}",
     "undoAnnouncement": "{label}. Mit {key} rückgängig machen.",
     "undoAria": "{label} — Rückgängig machen, {seconds} Sekunden verbleiben",
     "undoKeyHint": "{key} macht rückgängig",

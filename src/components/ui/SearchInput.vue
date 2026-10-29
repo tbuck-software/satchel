@@ -23,6 +23,7 @@ const input = ref<HTMLInputElement | null>(null);
 defineExpose({
   focus: () => input.value?.focus(),
   select: () => input.value?.select(),
+  blur: () => input.value?.blur(),
 });
 </script>
 

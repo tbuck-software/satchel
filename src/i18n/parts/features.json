@@ -6,6 +6,9 @@
       "newEvent": "New event",
       "hint": "Clicking an empty day or time slot creates an event. Events from mails with an {ics} attachment are detected automatically.",
       "more": "+{count} more",
+      "agenda": {
+        "empty": "No events"
+      },
       "view": {
         "label": "Calendar view",
         "month": "Month",
@@ -75,6 +78,7 @@
         "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
         "sendInvites": "Send ICS invitations by mail",
         "submit": "Create event",
+        "add": "Add",
         "errors": {
           "titleRequired": "Please enter a title.",
           "invalidDates": "Start and end do not contain a valid date.",
@@ -412,6 +416,9 @@
       "newEvent": "Neuer Termin",
       "hint": "Klick auf einen freien Tag oder eine freie Uhrzeit legt einen Termin an. Auto-erkannt werden Termine aus Mails mit {ics}-Anhang.",
       "more": "+{count} weitere",
+      "agenda": {
+        "empty": "Keine Termine"
+      },
       "view": {
         "label": "Kalenderansicht",
         "month": "Monat",
@@ -481,6 +488,7 @@
         "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
         "sendInvites": "ICS-Einladungen per Mail senden",
         "submit": "Termin erstellen",
+        "add": "Hinzufügen",
         "errors": {
           "titleRequired": "Bitte einen Titel angeben.",
           "invalidDates": "Start und Ende enthalten kein gültiges Datum.",

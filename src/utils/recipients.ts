@@ -74,6 +74,18 @@ export function recipientAddress(token: string): string | null {
   return isValidEmailAddress(candidate) ? candidate : null;
 }
 
+/**
+ * What a recipient chip shows: the display name of a `Name <addr>` token,
+ * unquoted, or the token itself. The full token stays in the chip's title.
+ */
+export function recipientChipLabel(token: string): string {
+  const trimmed = token.trim();
+  const open = trimmed.lastIndexOf('<');
+  if (open <= 0 || recipientAddress(trimmed) === null) return trimmed;
+  const name = trimmed.slice(0, open).trim().replace(/^"(.*)"$/, '$1').trim();
+  return name || trimmed;
+}
+
 export function isValidRecipient(token: string): boolean {
   return recipientAddress(token) !== null;
 }

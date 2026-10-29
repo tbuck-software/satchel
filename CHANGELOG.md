@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- On a phone, keep Send, Add and the other docked actions above the on-screen keyboard; the compose button stays behind it.
+- Give the phone a calendar that fits: the month title with Import and + in the app bar, a month of dots, and the picked day's events listed below. New and edited events have Cancel and Add in their bar and show times as "Tue, Oct 27 · 11:00".
+- Run the phone drawer edge to edge with Mail, Calendar, Contacts and Settings named at its foot, an "All folders" row, and no keyboard-only controls.
+- Make the Inbox's search field the phone's app bar; while a search runs, the title gives way and Cancel ends it.
+- Give touch screens thumb-sized targets for rows, segmented controls and small buttons, and show hover states only where a pointer can hover.
+- Confirm a send with "Mail sent." after the docked composer closes, and give a phone toast's action a row of its own.
+- Stack settings choices under their description on a phone and name the section once; drop the mail button from Calendar and Contacts.
+
 - Drag a mail from the list onto the composer to attach the original as an `.eml` file, one per selected conversation.
 - File mail from the keyboard: `v` focuses the File… picker, Enter files into the highlighted folder or topic, and the footer says what Enter will do.
 - Keep a thread's draft card in step with the composer: it shows the saved text and time after closing, and steps aside while the draft is open. Rows mark drafts with "Draft," and a pencil, and counts leave the draft out.

@@ -13,21 +13,29 @@ import type { AnchorBox } from '@/utils/popoverPlacement';
 import CalendarEventChip from './CalendarEventChip.vue';
 import { useI18n } from 'vue-i18n';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   anchor: Date;
   items: CalendarItem[];
-}>();
+  /**
+   * The phone's grid: a cell is a day number and dots, and tapping it picks
+   * the day whose events the agenda below lists. Titles do not fit a seventh
+   * of a phone.
+   */
+  compact?: boolean;
+}>(), { compact: false });
 
 const emit = defineEmits<{
   select: [item: CalendarItem, anchor: AnchorBox];
   createAt: [date: Date, anchor: AnchorBox];
   openDay: [date: Date];
+  pickDay: [date: Date];
 }>();
 
 const { locale } = useI18n();
 
 const weekdayHeaders = computed(() => weekdayLabels(locale.value));
 const MAX_VISIBLE = 3;
+const narrowWeekdayHeaders = computed(() => weekdayLabels(locale.value, 'narrow'));
 
 const today = new Date();
 
@@ -39,6 +47,7 @@ const cells = computed(() =>
       key: day.toISOString(),
       inMonth: day.getMonth() === props.anchor.getMonth(),
       isToday: isSameDay(day, today),
+      isPicked: isSameDay(day, props.anchor),
       visible: dayItems.slice(0, MAX_VISIBLE),
       overflow: Math.max(0, dayItems.length - MAX_VISIBLE),
     };
@@ -46,6 +55,7 @@ const cells = computed(() =>
 );
 
 const rowCount = computed(() => cells.value.length / 7);
+
 
 function createOn(day: Date, event: MouseEvent) {
   const at = new Date(day);
@@ -56,7 +66,34 @@ function createOn(day: Date, event: MouseEvent) {
 </script>
 
 <template>
-  <div class="month" role="grid" :aria-label="$t('calendar.view.monthGrid')">
+  <div v-if="compact" class="month month--compact" role="grid" :aria-label="$t('calendar.view.monthGrid')">
+    <div class="month__weekdays" role="row">
+      <span v-for="(label, index) in narrowWeekdayHeaders" :key="index" role="columnheader">{{ label }}</span>
+    </div>
+    <div class="month__grid">
+      <CardButton
+        v-for="cell in cells"
+        :key="cell.key"
+        class="day"
+        :class="{ 'day--muted': !cell.inMonth, 'day--today': cell.isToday, 'day--picked': cell.isPicked }"
+        role="gridcell"
+        :aria-selected="cell.isPicked"
+        :aria-label="cell.day.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long' })"
+        @click="emit('pickDay', cell.day)"
+      >
+        <span class="day__num">{{ cell.day.getDate() }}</span>
+        <span class="day__dots" aria-hidden="true">
+          <span
+            v-for="item in cell.visible"
+            :key="item.key"
+            class="day__dot"
+            :style="item.color ? { background: item.color } : undefined"
+          />
+        </span>
+      </CardButton>
+    </div>
+  </div>
+  <div v-else class="month" role="grid" :aria-label="$t('calendar.view.monthGrid')">
     <div class="month__weekdays" role="row">
       <span v-for="label in weekdayHeaders" :key="label" role="columnheader">{{ label }}</span>
     </div>
@@ -230,5 +267,84 @@ function createOn(day: Date, event: MouseEvent) {
 
 .month__more:hover {
   color: var(--text-primary);
+}
+
+/* Phone: no lines, no chips. A day is a number and up to three dots; the
+   picked day wears the filled circle, today the accent ink. */
+.month--compact {
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.month--compact .month__weekdays {
+  border-bottom: 0;
+  background: transparent;
+}
+
+.month--compact .month__weekdays span {
+  padding: 0 0 var(--space-2xs);
+  text-align: center;
+  letter-spacing: 0;
+}
+
+.month--compact .month__grid {
+  grid-template-rows: none;
+  grid-auto-rows: 48px;
+}
+
+.day {
+  display: grid;
+  grid-template-rows: 32px 8px;
+  place-items: center;
+  align-content: center;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.day__num {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.day--muted .day__num {
+  color: var(--text-tertiary);
+}
+
+.day--today .day__num {
+  color: var(--accent-primary);
+  font-weight: var(--weight-bold);
+}
+
+.day--picked .day__num {
+  background: var(--text-primary);
+  color: var(--bg-surface);
+  font-weight: var(--weight-bold);
+}
+
+.day--picked.day--today .day__num {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+}
+
+.day__dots {
+  display: flex;
+  gap: 3px;
+}
+
+.day__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: var(--accent-primary);
 }
 </style>

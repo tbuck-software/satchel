@@ -119,7 +119,11 @@ const DESK_ROWS: RowMetrics = { thread: 72, dateHeader: 32, folderCard: 64, bann
  * tokens.css lifts every font token by 2px at 1020px and below. Three-line
  * rows at 72px then had no room left: snippet and next sender touched.
  */
-const PHONE_ROWS: RowMetrics = { thread: 88, dateHeader: 28, folderCard: 72, banner: 52 };
+/*
+ * The review banner is a 44px thumb row on the phone too: at 52px with 16px
+ * around it, sender review took a fifth of a small screen before any mail.
+ */
+const PHONE_ROWS: RowMetrics = { thread: 88, dateHeader: 28, folderCard: 72, banner: 44 };
 const PHONE_TYPE_QUERY = '(max-width: 1020px)';
 
 const BUCKET_HEIGHT = 76;
@@ -128,8 +132,9 @@ const CARD_HEADER_HEIGHT = 32;
 const PHONE_CARD_HEADER_HEIGHT = 32;
 /** Priority group `pt-1 pb-2`: it has no card, only its header and rows. */
 const PRIORITY_SECTION_PADDING = 12;
-/** New-sender section `py-2` around its card. */
+/** New-sender section `py-2` around its card; `py-1` on the phone. */
 const REVIEW_SECTION_PADDING = 16;
+const PHONE_REVIEW_SECTION_PADDING = 8;
 /** Expanded review card `pb-1`. */
 const REVIEW_CARD_BOTTOM_PADDING = 4;
 const FOLDER_CARD_GAP = 2;
@@ -221,7 +226,8 @@ function itemHeight(item: ThreadListEntry): number {
   if (item.kind === 'date-header') return dateHeader;
   if (item.kind === 'bucket') return BUCKET_HEIGHT;
   if (item.kind === 'new-sender-stack') {
-    const collapsed = REVIEW_SECTION_PADDING + rows.value.banner;
+    const padding = phoneTypeScale.value ? PHONE_REVIEW_SECTION_PADDING : REVIEW_SECTION_PADDING;
+    const collapsed = padding + rows.value.banner;
     if (!props.newSendersExpanded) return collapsed;
     const footer = newSenderFooter(item.stack);
     return collapsed
@@ -934,7 +940,8 @@ onBeforeUnmount(() => {
 
             <section
               v-else-if="item.kind === 'new-sender-stack'"
-              class="bg-list px-2 py-2"
+              class="bg-list px-2"
+              :class="phoneTypeScale ? 'py-1' : 'py-2'"
               :style="{ height: `${itemHeight(item)}px` }"
               :aria-label="$t('thread.newSenders.title')"
             >
@@ -1244,10 +1251,6 @@ onBeforeUnmount(() => {
   transition: background-color var(--duration-fast) var(--ease-out);
 }
 
-.priority-group__header:hover {
-  background: var(--bg-hover);
-}
-
 .priority-group__bolt {
   color: var(--accent-amber);
 }
@@ -1261,11 +1264,6 @@ onBeforeUnmount(() => {
   padding-inline-start: 60px;
   color: var(--text-tertiary);
   transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
-}
-
-.priority-group__more:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
 }
 
 /* The one triage card in the list, and a quiet one: the collection fill with
@@ -1295,18 +1293,9 @@ onBeforeUnmount(() => {
   color: var(--text-accent);
 }
 
-.review-card__row:hover {
-  background: var(--bg-stack-hover);
-}
-
 .review-card__more {
   color: var(--text-tertiary);
   transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
-}
-
-.review-card__more:hover {
-  background: var(--bg-stack-hover);
-  color: var(--text-primary);
 }
 
 .new-sender-actions__allow :deep(svg) {
@@ -1386,5 +1375,27 @@ onBeforeUnmount(() => {
   padding: var(--space-lg) var(--space-xl);
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
+}
+
+/* Rows answer a hovering pointer only: a tap left WebKit's :hover on the row
+   under the finger, and "+3 more" stayed lit after the composer closed. */
+@media (hover: hover) {
+  .priority-group__header:hover {
+    background: var(--bg-hover);
+  }
+
+  .priority-group__more:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .review-card__row:hover {
+    background: var(--bg-stack-hover);
+  }
+
+  .review-card__more:hover {
+    background: var(--bg-stack-hover);
+    color: var(--text-primary);
+  }
 }
 </style>

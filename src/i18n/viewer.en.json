@@ -291,6 +291,7 @@
   "ui": {
     "dismissToast": "Dismiss message",
     "toastQueue": "{count} undo actions – show the previous one",
+    "toastQueuePosition": "{index} of {count}",
     "undoAnnouncement": "{label}. Press {key} to undo."
   },
   "viewer": {

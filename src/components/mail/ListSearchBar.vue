@@ -5,6 +5,7 @@
  * field and gives the list back as it was.
  */
 import { onBeforeUnmount, ref } from 'vue';
+import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import KeyCap from '@/components/ui/KeyCap.vue';
@@ -48,6 +49,12 @@ function enterResults(event: KeyboardEvent) {
   if (moveListKeyboardFocus(1)) (event.target as HTMLElement).blur();
 }
 
+/** The phone's way out of a search: empty it and put the keyboard away. */
+function cancel() {
+  store.clear();
+  input.value?.blur();
+}
+
 function clear() {
   store.clear();
   input.value?.focus();
@@ -56,6 +63,7 @@ function clear() {
 
 <template>
   <div class="list-search-bar">
+    <slot name="leading" />
     <SearchInput
       ref="input"
       :model-value="store.query"
@@ -76,7 +84,12 @@ function clear() {
         <KeyCap v-else-if="!focused && !ui.isMobile" class="list-search-bar__hint" aria-hidden="true">/</KeyCap>
       </template>
     </SearchInput>
-    <slot />
+    <!-- While a search runs on the phone, Cancel (as on iOS) takes the
+         filter's place: the way out of the search, not into a menu. -->
+    <AppButton v-if="ui.isMobile && store.active" variant="ghost" size="sm" @click="cancel">
+      {{ $t('common.cancel') }}
+    </AppButton>
+    <slot v-else />
   </div>
 </template>
 

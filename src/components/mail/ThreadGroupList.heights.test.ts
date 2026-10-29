@@ -132,7 +132,7 @@ describe('thread list row heights', () => {
         ['--folder-card-h', '72px'],
         ['--card-header-h', '32px'],
         ['--review-row-h', '84px'],
-        ['--review-banner-h', '52px'],
+        ['--review-banner-h', '44px'],
       ]) {
         expect(style).toContain(`${name}: ${value}`);
       }

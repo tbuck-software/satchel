@@ -13,6 +13,7 @@ import { matchesWorkflowFilter, type WorkflowFilter } from '@/types/workflow';
 import { MAILBOX_SECTIONS, type CounterMode, type SectionSpec } from '@/config/mailboxSections';
 import { showMailList } from '@/router/mailViews';
 import NavItem from '@/components/ui/NavItem.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import { outboxVisibleCount } from '@/utils/outboxLabels';
 import { activeMailboxNavNode } from '@/utils/mailboxNav';
@@ -301,7 +302,19 @@ async function onDropToFolder(folderId: string, event: DragEvent) {
 
     <!-- Favorite folders -->
     <div v-if="mailboxes.hasVisibleCustomFolders" class="grid gap-1">
-      <div class="px-2.5 pt-1">
+      <NavItem
+        v-if="favoriteFolderGroups.length === 0"
+        :label="$t('nav.folders.all')"
+        @click="emit('openFoldersPanel')"
+      >
+        <template #icon>
+          <AppIcon><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" /></AppIcon>
+        </template>
+        <template #trailing>
+          <AppIcon><path d="m6 3.5 4.5 4.5L6 12.5" /></AppIcon>
+        </template>
+      </NavItem>
+      <div v-else class="px-2.5 pt-1">
         <SectionHeading :label="$t('nav.folders.title')">
           <template #trailing>
             <AppButton

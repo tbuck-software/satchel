@@ -9,6 +9,7 @@ import ErrorState from '@/components/ui/ErrorState.vue';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import IconButton from '@/components/ui/IconButton.vue';
 import SearchInput from '@/components/ui/SearchInput.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import { useUiStore } from '@/stores/ui';
@@ -175,7 +176,7 @@ function openContact(email: string) {
     <PaneHeader
       class="contact-header"
       :title="currentCopy.title"
-      :subtitle="currentCopy.subtitle"
+      :subtitle="ui.isMobile ? undefined : currentCopy.subtitle"
       :count="filteredCount"
     >
       <template #actions>
@@ -183,7 +184,18 @@ function openContact(email: string) {
           <template #icon><AppIcon><path d="M3 2.5h10v11H3zM5.5 5h5M5.5 8h5" /></AppIcon></template>
           <span class="contact-settings-label">{{ t('contacts.addressBookSettings') }}</span>
         </AppButton>
-        <AppButton variant="primary" size="sm" @click="addingContact = true">
+        <!-- On the phone a + in the app bar, as in iOS Contacts; the pill
+             crowded the title row. -->
+        <IconButton
+          v-if="ui.isMobile"
+          tone="accent"
+          :title="t('contacts.add.title')"
+          :aria-label="t('contacts.add.title')"
+          @click="addingContact = true"
+        >
+          <AppIcon><path d="M8 2v12M2 8h12" /></AppIcon>
+        </IconButton>
+        <AppButton v-else variant="primary" size="sm" @click="addingContact = true">
           <template #icon><AppIcon><path d="M8 2v12M2 8h12" /></AppIcon></template>
           {{ t('contacts.add.title') }}
         </AppButton>

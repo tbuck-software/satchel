@@ -34,7 +34,9 @@ const paletteHint = computed(() => {
       <template #icon><AppIcon><path d="M8 3v10M3 8h10" /></AppIcon></template>
       {{ $t('nav.newMessage') }}
     </AppButton>
+    <!-- The palette is a keyboard tool; a phone has no ⌘ to press. -->
     <IconButton
+      v-if="!ui.isMobile"
       size="lg"
       class="sidebar-mail-tools__palette"
       :title="$t('nav.commandPalette')"
@@ -52,6 +54,10 @@ const paletteHint = computed(() => {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-1-5);
   padding: 0 var(--space-md) var(--space-5);
+}
+
+.sidebar-mail-tools:not(:has(.sidebar-mail-tools__palette)) {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .sidebar-mail-tools__compose {

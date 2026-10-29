@@ -105,7 +105,7 @@
         "title": "Needs attention",
         "unavailable": "Open Outbox to review the affected items."
       },
-      "mutationsFailed": "{count} change could not be synced to the server. | {count} changes could not be synced to the server.",
+      "mutationsFailed": "{count} change didn't reach the server. | {count} changes didn't reach the server.",
       "retryFailed": "Re-sync failed: {error}",
       "retryQueued": "{count} change is being synced again. | {count} changes are being synced again.",
       "status": {
@@ -377,8 +377,12 @@
     }
   },
   "calendar": {
+    "agenda": {
+      "empty": "No events"
+    },
     "createHint": "Click an empty day or time slot to create an event.",
     "editor": {
+      "add": "Add",
       "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
       "descriptionPlaceholder": "Notes, agenda, …",
       "editTitle": "Edit event",
@@ -1502,6 +1506,7 @@
       "title": "Favourites from all folders"
     },
     "folders": {
+      "all": "All folders",
       "aside": "Set aside",
       "blocked": "Blocked",
       "done": "Done",
@@ -3543,6 +3548,7 @@
     "send": "Send",
     "toastQueue": "{count} undo actions – show the previous one",
     "toastQueueAria": "{count} undo actions, show the previous one",
+    "toastQueuePosition": "{index} of {count}",
     "undoAnnouncement": "{label}. Press {key} to undo.",
     "undoAria": "{label} — undo, {seconds} seconds remaining",
     "undoKeyHint": "{key} to undo",

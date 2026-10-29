@@ -22,6 +22,7 @@ import {
   type RuntimePlatform,
 } from '@/utils/runtimeShell';
 import { readTheme } from '@/persistence/theme';
+import { installKeyboardInset } from '@/mobile/keyboardInset';
 
 // Before mount: the settings store lands on the same value later, so a light
 // user never sees a dark first frame.
@@ -88,6 +89,7 @@ function mountApp() {
   }
 
   configureRuntimeShell();
+  installKeyboardInset();
   installInteractionDiagnostics();
   const app = createApp(App).use(createPinia()).use(i18n).use(router);
   installGlobalErrorHandlers(app, {

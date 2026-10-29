@@ -494,6 +494,20 @@ onBeforeUnmount(() => {
 
 .composer-chrome:active { cursor: grabbing; }
 
+/* On a phone the chrome is a navigation bar: Back, then what this screen is.
+   Pushed to the far end, the title sat where an action belongs. */
+.composer-window--maximized .composer-chrome:has(.composer-back) {
+  justify-content: flex-start;
+  gap: 4px;
+  height: 52px;
+  padding: 0 12px 0 4px;
+  cursor: default;
+}
+
+.composer-window--maximized .composer-chrome:has(.composer-back) .composer-heading strong {
+  font-size: var(--font-size-lg);
+}
+
 .composer-heading { min-width: 0; }
 
 .composer-heading strong {

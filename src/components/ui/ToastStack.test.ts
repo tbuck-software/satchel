@@ -62,9 +62,11 @@ describe('ToastStack on compact screens', () => {
     expect(wrapper.findAll('.toast')).toHaveLength(1);
     expect(wrapper.get('.stack').text()).toContain('Zweite Aktion');
     const navigator = wrapper.get('.toast__queue');
-    expect(navigator.text()).toBe('2');
+    // A counter that says what it counts, not a bare "2" beside the action.
+    expect(navigator.text()).toBe('2 of 2');
     await navigator.trigger('click');
     expect(wrapper.get('.stack').text()).toContain('Erste Aktion');
+    expect(wrapper.get('.toast__queue').text()).toBe('1 of 2');
     expect(wrapper.findAll('.toast')).toHaveLength(1);
     wrapper.unmount();
   });

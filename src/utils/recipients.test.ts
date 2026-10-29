@@ -5,6 +5,7 @@ import {
   isValidEmailAddress,
   isValidRecipient,
   recipientAddress,
+  recipientChipLabel,
   splitRecipientList,
 } from './recipients';
 
@@ -66,5 +67,15 @@ describe('recipient validity', () => {
     expect(hasOnlyValidRecipients(['a@x.de', 'Anna <b@y.de>'])).toBe(true);
     expect(hasOnlyValidRecipients(['a@x.de', '"Buck'])).toBe(false);
     expect(hasOnlyValidRecipients([])).toBe(true);
+  });
+});
+
+describe('recipientChipLabel', () => {
+  it('shows the display name and leaves bare or broken tokens alone', () => {
+    expect(recipientChipLabel('Sarah Kim <sarah@app.io>')).toBe('Sarah Kim');
+    expect(recipientChipLabel('"Morgan, Alex" <a.morgan@example.com>')).toBe('Morgan, Alex');
+    expect(recipientChipLabel('sarah@app.io')).toBe('sarah@app.io');
+    expect(recipientChipLabel('<sarah@app.io>')).toBe('<sarah@app.io>');
+    expect(recipientChipLabel('Sarah <not-an-address>')).toBe('Sarah <not-an-address>');
   });
 });

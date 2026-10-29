@@ -56,6 +56,13 @@ defineEmits<{
 </template>
 
 <style scoped>
+/* A phone row is a thumb's height, not a pointer's. */
+@media (pointer: coarse) {
+  .nav-item {
+    min-height: 44px;
+  }
+}
+
 .nav-item {
   display: flex;
   align-items: center;

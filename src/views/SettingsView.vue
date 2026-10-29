@@ -119,7 +119,7 @@ onBeforeUnmount(() => unregisterFilter?.());
     <PaneHeader
       :class="{ 'settings-view__header': !ui.isSinglePane }"
       :title="showOverview ? $t('common.settings') : (ui.isSinglePane ? activeLabel : $t('common.settings'))"
-      :subtitle="showOverview ? $t('settings.overview.subtitle') : (ui.isSinglePane ? $t('common.settings') : undefined)"
+      :subtitle="ui.isMobile ? undefined : showOverview ? $t('settings.overview.subtitle') : (ui.isSinglePane ? $t('common.settings') : undefined)"
       :no-menu="ui.isSinglePane"
     >
       <template v-if="ui.isSinglePane" #leading>
@@ -362,6 +362,19 @@ onBeforeUnmount(() => unregisterFilter?.());
 @media (max-width: 700px) {
   .settings-view__content {
     padding: var(--space-xl) var(--space-lg) var(--space-2xl);
+  }
+}
+
+/* Phone: the nav bar already names the section; a second, larger heading
+   under it said "General" twice. The section's description stays. */
+@media (max-width: 767px) {
+  .settings-view__content :deep(.section-header > h2),
+  .settings-view__content :deep(.section-header > h3) {
+    display: none;
+  }
+
+  .settings-view__content :deep(.section-header > p) {
+    margin-top: 0;
   }
 }
 </style>

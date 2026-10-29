@@ -412,6 +412,15 @@ const listScope = computed(() => {
 });
 
 // ── List search: the field above the list narrows it in place ──
+/**
+ * The Inbox on a phone: the search field is the app bar, drawer button and
+ * filter at its ends, as in Gmail. Other lists keep their title, which is
+ * the only thing telling you where you are.
+ */
+const searchAppBar = computed(() => ui.isMobile
+  && threads.mailboxFilter.kind === 'section'
+  && threads.mailboxFilter.value === 'inbox'
+  && !threads.activeContact);
 const searchActive = computed(() => listSearch.active && !activeBundle.value);
 const searchMailbox = computed(() => ({
   accountId: accounts.activeAccountId,
@@ -890,6 +899,7 @@ function acceptExistingSenders() {
       <template v-else>
       <PaneHeader
         v-if="!activeBundle"
+        v-show="!searchAppBar && !(ui.isMobile && searchActive)"
         class="inbox-header"
         :title="listTitle"
         :subtitle="listScope"
@@ -935,7 +945,12 @@ function acceptExistingSenders() {
         </template>
       </PaneHeader>
 
-      <ListSearchBar v-if="!activeBundle" :mailbox-label="listTitle">
+      <ListSearchBar v-if="!activeBundle" :mailbox-label="listTitle" :class="{ 'inbox-search--app-bar': searchAppBar || (ui.isMobile && searchActive) }">
+        <template v-if="searchAppBar" #leading>
+          <IconButton :title="$t('common.menu')" @click="ui.toggleMobileSidebar()">
+            <AppIcon size="lg"><path d="M2 4h12M2 8h12M2 12h12" /></AppIcon>
+          </IconButton>
+        </template>
         <ListFilterMenu :show-layout="!folderViewActive" />
       </ListSearchBar>
 
@@ -1193,4 +1208,9 @@ function acceptExistingSenders() {
   color: var(--accent-primary);
 }
 
+
+/* The search field as app bar sits under the status bar like a title would. */
+.inbox-search--app-bar {
+  padding-top: var(--space-sm);
+}
 </style>

@@ -33,8 +33,10 @@ function compose() {
 .fab {
   position: fixed;
   right: calc(20px + var(--satchel-safe-area-right));
-  /* Clear of the gesture bar, not merely of the screen edge. */
-  bottom: calc(20px + var(--satchel-safe-area-bottom));
+  /* Clear of the gesture bar, not merely of the screen edge. The keyboard
+     counts into the safe area so docked bars ride on it; this button stays
+     behind it instead, where a native FAB goes while you type. */
+  bottom: calc(20px + var(--satchel-safe-area-bottom) - var(--satchel-keyboard-inset, 0px));
   z-index: 60;
   display: flex;
   align-items: center;
