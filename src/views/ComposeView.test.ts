@@ -508,6 +508,22 @@ describe('composer send failure', () => {
     expect(harness.toastError).not.toHaveBeenCalled();
     expect(wrapper.emitted('sent')).toHaveLength(1);
   });
+
+  it('confirms the send after the docked composer closes', async () => {
+    harness.sendMessage.mockResolvedValue({
+      status: 'sent',
+      thread_id: 'thread-1',
+      message_id: 'message-1',
+    } as BackendSendMessageResult);
+    harness.toastSuccess.mockClear();
+    const wrapper = render();
+    await flushPromises();
+
+    await send(wrapper);
+
+    // The status line closes with the window; the toast outlives it.
+    expect(harness.toastSuccess).toHaveBeenCalledWith('Mail sent.');
+  });
 });
 
 describe('composer send guard', () => {

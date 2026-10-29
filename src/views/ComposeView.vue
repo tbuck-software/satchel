@@ -889,6 +889,18 @@ watch(subject, (value) => {
   emit('update:title', value || defaultComposerTitle());
 });
 
+/**
+ * The composer closes on success, and its status line with it: in the docked
+ * composer that line was the only sign a mail went out. Repeat the outcome as
+ * a toast, which outlives the window. A page or pop-out keeps its own line.
+ */
+function announceAfterClose(tone: 'success' | 'info' | 'warning', text: string) {
+  if (!props.embedded) return;
+  if (tone === 'success') toast.success(text);
+  else if (tone === 'warning') toast.warning(text);
+  else toast.info(text);
+}
+
 async function send() {
   if (!canSend.value || !activeAccount.value) {
     // The shortcut has no greyed-out button to look at; say why nothing happened.
@@ -939,6 +951,8 @@ async function send() {
         tone: 'success',
         text: t('compose.status.sentFrom', { address: fromAddress.value }),
       };
+      // The words the queue's `outbox:sent` toast uses for a delivered mail.
+      announceAfterClose('success', t('app.mail.sent'));
       await Promise.all([
         accountsStore.load(),
         threadsStore.load(),
@@ -952,6 +966,7 @@ async function send() {
       await leaveAfterSend(result, { name: 'outbox' });
     } else if (result.status === 'delivered') {
       status.value = { tone: 'warning', text: t('compose.status.sentLocalSaveFailed') };
+      announceAfterClose('warning', status.value.text);
       emit('sent');
       await leaveAfterSend(result, { name: 'outbox' });
     } else if (result.status === 'scheduled') {
@@ -959,10 +974,14 @@ async function send() {
         tone: 'info',
         text: t('compose.status.scheduledFor', { time: formatScheduled(scheduledFor.value) }),
       };
+      announceAfterClose('info', status.value.text);
       emit('sent');
       await leaveAfterSend(result, { name: 'inbox' });
     } else {
       status.value = { tone: 'info', text: t('compose.status.queued') };
+      // With an undo window the native `outbox:undo-window` event raises the
+      // Undo toast; a second toast would only repeat it.
+      if (!result.undo_until) announceAfterClose('info', status.value.text);
       emit('sent');
       await leaveAfterSend(result, { name: 'inbox' });
     }
