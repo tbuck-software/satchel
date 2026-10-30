@@ -510,6 +510,7 @@ function messageDto(message: Message): BackendMessage {
     date: message.timestamp,
     // Like `list_messages_preview`: no body; `list_message_bodies` brings it.
     body_text: message.bodyText.slice(0, 180),
+    body_segments: null,
     body_html: null,
     body_loaded: false,
     is_read: message.isRead,
@@ -532,6 +533,7 @@ function messageBodyDto(message: Message): BackendMessageBody {
     id: message.id,
     snippet: message.bodyText.slice(0, 180),
     body_text: message.bodyText,
+    body_segments: message.bodySegments ?? null,
     body_html: message.bodyHtml ?? null,
     body_loaded: hasCachedBody(message),
     list_unsubscribe: message.listUnsubscribe ?? null,

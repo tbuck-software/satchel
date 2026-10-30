@@ -22,15 +22,11 @@ use crate::{
     commands::pgp::{
         decrypt_message_with_unlocked_keys, verify_incoming_cleartext_signature,
         verify_incoming_detached_signature, IncomingPgpDetachedSignature, IncomingPgpSignature,
-        PGP_DECRYPTED_BLOCK_END, PGP_DECRYPTED_BLOCK_START,
     },
     commands::signatures::{
         resolve_signature_for_compose, ResolveSignatureInput, SignaturePreference, SignatureVariant,
     },
-    commands::smime::{
-        decrypt_message_with_unlocked_smime_certs, verify_smime_message, SMIME_DECRYPTED_BLOCK_END,
-        SMIME_DECRYPTED_BLOCK_START,
-    },
+    commands::smime::{decrypt_message_with_unlocked_smime_certs, verify_smime_message},
     email::sanitizer::sanitize_email_html,
     events::bus::AppEvent,
     plugins::runtime::{MessageTransformInput, PluginRuntime},
@@ -43,6 +39,20 @@ use crate::{
     },
     AppState,
 };
+
+/// Transient content provenance. Never reconstructed from persisted body text.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/messages/")
+)]
+#[serde(tag = "kind", content = "content", rename_all = "snake_case")]
+pub enum BodySegment {
+    Text(String),
+    PgpDecrypted(String),
+    SmimeDecrypted(String),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
@@ -62,6 +72,7 @@ pub struct MessageDto {
     pub reply_to: Option<String>,
     pub date: String,
     pub body_text: String,
+    pub body_segments: Option<Vec<BodySegment>>,
     pub body_html: Option<String>,
     pub body_loaded: bool,
     pub is_read: bool,
@@ -92,6 +103,7 @@ pub struct MessageBodyDto {
     pub id: String,
     pub snippet: String,
     pub body_text: String,
+    pub body_segments: Option<Vec<BodySegment>>,
     pub body_html: Option<String>,
     pub body_loaded: bool,
     pub pgp_state: Option<String>,
@@ -435,6 +447,7 @@ async fn message_bodies(
             id: dto.id,
             snippet: dto.snippet,
             body_text: dto.body_text,
+            body_segments: dto.body_segments,
             body_html: dto.body_html,
             body_loaded,
             pgp_state: dto.pgp_state,
@@ -570,6 +583,7 @@ fn map_stored_message_row(row: MessageReadRecord) -> MessageDto {
         reply_to: row.reply_to,
         date: row.date.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
         body_text,
+        body_segments: None,
         body_html,
         body_loaded: true,
         is_read: row.is_read.unwrap_or(1) > 0,
@@ -648,10 +662,7 @@ async fn map_message_row(
             persist_automatic_plugin_stop(app, pool, &plugin_id).await;
         }
     }
-    if dto.body_text.contains("-----BEGIN PGP MESSAGE-----")
-        || dto.body_text.contains(PGP_DECRYPTED_BLOCK_START)
-        || dto.body_text.contains(SMIME_DECRYPTED_BLOCK_START)
-    {
+    if dto.body_text.contains("-----BEGIN PGP MESSAGE-----") {
         dto.body_html = None;
     }
 
@@ -661,7 +672,7 @@ async fn map_message_row(
             .starts_with("-----BEGIN PGP MESSAGE-----")
     {
         match decrypt_message_with_unlocked_keys(app, state, pool, &original_body_text).await {
-            Ok(Some(decrypted)) if !decrypted.display_body.trim().is_empty() => {
+            Ok(Some(decrypted)) if !decrypted.plaintext.trim().is_empty() => {
                 let parsed =
                     crate::providers::imap::parse_raw_message_body(decrypted.plaintext.as_bytes());
                 if let Err(error) =
@@ -672,13 +683,29 @@ async fn map_message_row(
                 let readable_text = parsed
                     .text
                     .filter(|text| !text.trim().is_empty())
-                    .unwrap_or(decrypted.display_body);
+                    .unwrap_or(decrypted.plaintext);
                 dto.snippet = first_non_empty_line(&readable_text).unwrap_or(dto.snippet.clone());
-                dto.body_text = readable_text;
-                dto.body_html = parsed.html.filter(|html| !html.trim().is_empty());
+                let whole_body_decrypted =
+                    decrypted.prefix.trim().is_empty() && decrypted.suffix.trim().is_empty();
+                let segments = vec![
+                    BodySegment::Text(decrypted.prefix.clone()),
+                    BodySegment::PgpDecrypted(readable_text.clone()),
+                    BodySegment::Text(decrypted.suffix.clone()),
+                ];
+                dto.body_text =
+                    format!("{}{}{}", decrypted.prefix, readable_text, decrypted.suffix);
+                dto.body_segments = Some(segments);
+                dto.body_html = if whole_body_decrypted {
+                    parsed.html.filter(|html| !html.trim().is_empty())
+                } else {
+                    None
+                };
                 if let Some(inner_signed) = parsed.pgp_signed.as_deref() {
                     apply_incoming_pgp_signed_status(&mut dto, app, pool, inner_signed).await;
-                    apply_signature_scope(&mut dto.pgp_state, parsed.trust.root_crypto);
+                    apply_signature_scope(
+                        &mut dto.pgp_state,
+                        parsed.trust.root_crypto && whole_body_decrypted,
+                    );
                 } else {
                     dto.pgp_state = Some("decrypted".to_string());
                     dto.pgp_error_detail = None;
@@ -768,11 +795,51 @@ async fn map_message_row(
     if let Some(ciphertext) = smime_encrypted.as_deref() {
         dto.body_html = None;
         match decrypt_message_with_unlocked_smime_certs(app, state, pool, ciphertext).await {
-            Ok(Some(decrypted_text)) if !decrypted_text.trim().is_empty() => {
-                dto.snippet = first_non_empty_line(&decrypted_text).unwrap_or(dto.snippet.clone());
-                dto.body_text = decrypted_text;
-                dto.smime_state = Some("decrypted".to_string());
-                dto.smime_error_detail = None;
+            Ok(Some(decrypted)) => {
+                match satchel_core::email::smime::parse_decrypted_body(&decrypted) {
+                    Ok(parsed) => {
+                        if let Err(error) = persist_decrypted_pgp_attachments(
+                            app,
+                            pool,
+                            &dto.id,
+                            &parsed.body.attachments,
+                        )
+                        .await
+                        {
+                            tracing::warn!(message_id = %dto.id, %error, "could not cache decrypted S/MIME attachments");
+                        }
+                        dto.body_text = parsed.body.text.unwrap_or_default();
+                        dto.body_html = parsed.body.html;
+                        dto.snippet =
+                            first_non_empty_line(&dto.body_text).unwrap_or(dto.snippet.clone());
+                        dto.body_segments =
+                            Some(vec![BodySegment::SmimeDecrypted(dto.body_text.clone())]);
+                        dto.smime_state = Some("decrypted".into());
+                        dto.smime_error_detail = None;
+                        for (payload, root_crypto) in parsed.signatures {
+                            let verified = verify_smime_message(
+                                app,
+                                pool,
+                                &dto.id,
+                                &payload,
+                                &dto.from_address,
+                            )
+                            .await;
+                            dto.smime_state = Some(verified.state);
+                            apply_signature_scope(&mut dto.smime_state, root_crypto);
+                            dto.smime_signer_email = verified.signer_email;
+                            dto.smime_signer_cn = verified.signer_cn;
+                            dto.smime_error_detail = verified.error_detail;
+                            if !matches!(dto.smime_state.as_deref(), Some("signature_valid")) {
+                                break;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        dto.smime_state = Some("error".into());
+                        dto.smime_error_detail = Some(error);
+                    }
+                }
             }
             Ok(_) => {
                 dto.smime_state = Some(if has_smime_private_cert {
@@ -1005,6 +1072,7 @@ fn map_message_preview_row(row: MessagePreviewRecord) -> MessageDto {
         reply_to: row.reply_to,
         date: row.date.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
         body_text: snippet,
+        body_segments: None,
         body_html: None,
         body_loaded: false,
         is_read: row.is_read.unwrap_or(1) > 0,
@@ -1166,13 +1234,7 @@ async fn has_any_private_smime_cert(pool: &SqlitePool) -> bool {
 fn first_non_empty_line(text: &str) -> Option<String> {
     text.lines()
         .map(str::trim)
-        .find(|line| {
-            !line.is_empty()
-                && *line != PGP_DECRYPTED_BLOCK_START
-                && *line != PGP_DECRYPTED_BLOCK_END
-                && *line != SMIME_DECRYPTED_BLOCK_START
-                && *line != SMIME_DECRYPTED_BLOCK_END
-        })
+        .find(|line| !line.is_empty())
         .map(|line| line.to_string())
 }
 
@@ -2191,6 +2253,17 @@ mod tests {
                 .await
                 .unwrap();
         assert!(imported_verdict.is_none());
+    }
+
+    #[test]
+    fn stored_marker_pairs_never_acquire_decryption_provenance() {
+        for protocol in ["PGP", "SMIME"] {
+            let text = format!("[[SATCHEL_{protocol}_DECRYPTED_BLOCK_START]]fake[[SATCHEL_{protocol}_DECRYPTED_BLOCK_END]]");
+            let dto = super::map_stored_message_row(stored_body_record(Some(text.clone()), None));
+            assert_eq!(dto.body_text, text);
+            assert!(dto.body_segments.is_none());
+            assert!(dto.pgp_state.is_none() && dto.smime_state.is_none());
+        }
     }
 
     fn stored_body_record(

@@ -515,16 +515,14 @@ async fn apply_smime_send_transform(
         Some(fallback_from_address),
         Some(fallback_from_name),
     )?;
-    let mut crypto_payload = original.clone().into_bytes();
+    let signing = match outgoing.smime_sign_with_cert_id.as_deref() {
+        Some(cert_id) => {
+            Some(smime::load_private_signing_material(app, state, pool, cert_id).await?)
+        }
+        None => None,
+    };
 
-    if let Some(cert_id) = outgoing.smime_sign_with_cert_id.as_deref() {
-        let (key, cert, passphrase) =
-            smime::load_private_signing_material(app, state, pool, cert_id).await?;
-        crypto_payload =
-            crate::utils::smime_engine::sign(&key, &cert, passphrase.as_deref(), &crypto_payload)?;
-    }
-
-    if outgoing.smime_encrypt_to_recipients {
+    let recipients = if outgoing.smime_encrypt_to_recipients {
         let recipients = crypto_recipients(outgoing);
         let mut certs = smime::resolve_recipient_certs(pool, &recipients)
             .await
@@ -544,8 +542,17 @@ async fn apply_smime_send_transform(
                 certs.push(pem);
             }
         }
-        crypto_payload = crate::utils::smime_engine::encrypt(&certs, &crypto_payload)?;
-    }
+        Some(certs)
+    } else {
+        None
+    };
+    let crypto_payload = crate::email::smime::protect_message(
+        original.as_bytes(),
+        signing
+            .as_ref()
+            .map(|(key, cert, passphrase)| (key.as_str(), cert.as_str(), passphrase.as_deref())),
+        recipients.as_deref(),
+    )?;
 
     let crypto = String::from_utf8_lossy(&crypto_payload).to_string();
     outgoing.raw_rfc822_override = Some(merge_delivery_headers(&original, &crypto));

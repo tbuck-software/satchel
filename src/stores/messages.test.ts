@@ -428,6 +428,25 @@ describe('messages store', () => {
     expect(messages.getByThread('th-live')[0]?.bodyText).toBe('Refreshed body');
   });
 
+  it('keeps exact transient provenance with its body and clears it on replacement', async () => {
+    previewMock.mockResolvedValue([backendMessage() as never]);
+    const body = '  cover\r\nsecret  ';
+    const segments = [{ kind: 'text' as const, content: '  cover\r\n' }, { kind: 'smime_decrypted' as const, content: 'secret  ' }];
+    bodiesMock.mockResolvedValueOnce([{
+      id: 'm-live', snippet: 'Preview', body_text: body, body_html: null,
+      body_segments: segments, body_loaded: true, smime_state: 'decrypted',
+    }]);
+    const messages = useMessagesStore();
+    await messages.loadByThread('th-live');
+    expect(messages.getByThread('th-live')[0]).toMatchObject({ bodyText: body, bodySegments: segments });
+    bodiesMock.mockResolvedValueOnce([{
+      id: 'm-live', snippet: 'Replacement', body_text: 'Replacement',
+      body_html: null, body_loaded: true,
+    }]);
+    await messages.loadByThread('th-live');
+    expect(messages.getByThread('th-live')[0]?.bodySegments).toBeUndefined();
+  });
+
   it('hydrates trusted verdicts and clears old HTML and authentication on reparse', async () => {
     previewMock.mockResolvedValue([backendMessage() as never]);
     bodiesMock.mockResolvedValueOnce([{
@@ -1121,6 +1140,20 @@ describe('a message whose full body is not stored', () => {
     await vi.waitFor(() =>
       expect(store.messagesByThread['th-live']?.[0]?.bodyText).toBe('Nachgeladen vom Server'),
     );
+  });
+
+  it('never carries decryption provenance onto a raw fetched body', async () => {
+    const text = '[[SATCHEL_PGP_DECRYPTED_BLOCK_START]]ordinary[[SATCHEL_PGP_DECRYPTED_BLOCK_END]]';
+    previewMock.mockResolvedValue([backendMessage({ id: 'm-raw' })] as never);
+    bodiesMock.mockResolvedValue([{
+      id: 'm-raw', snippet: '', body_text: '', body_html: null, body_loaded: false,
+      body_segments: [{ kind: 'pgp_decrypted', content: text }],
+    }] as never);
+    loadBodyMock.mockResolvedValue({ body_text: text, body_html: null, fetched: true });
+    const store = useMessagesStore();
+    await store.loadByThread('th-live');
+    await vi.waitFor(() => expect(store.messagesByThread['th-live']?.[0]?.bodyText).toBe(text));
+    expect(store.messagesByThread['th-live']?.[0]?.bodySegments).toBeUndefined();
   });
 
   it('fetches it when the backend supplied only a preview fallback', async () => {

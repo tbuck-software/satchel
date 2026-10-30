@@ -125,6 +125,25 @@ pub fn verify(signed_payload: &[u8]) -> Result<SmimeVerifyResult, String> {
     active_engine().verify(signed_payload)
 }
 
+/// Extract readable signed content only. This deliberately grants no signature
+/// trust; callers must run `verify` and apply chain and sender identity rules.
+pub fn signed_content(payload: &[u8]) -> Result<Vec<u8>, String> {
+    let (pkcs7, detached) = read_pkcs7(payload)?;
+    let store = X509StoreBuilder::new().map_err(stack_error)?.build();
+    let certificates = Stack::new().map_err(stack_error)?;
+    let mut content = Vec::new();
+    pkcs7
+        .verify(
+            &certificates,
+            &store,
+            detached.as_deref(),
+            Some(&mut content),
+            Pkcs7Flags::NOVERIFY | Pkcs7Flags::NOSIGS | Pkcs7Flags::BINARY,
+        )
+        .map_err(stack_error)?;
+    Ok(content)
+}
+
 pub fn certificate_metadata(pem_certificate: &str) -> Result<SmimeCertMetadata, String> {
     active_engine().certificate_metadata(pem_certificate)
 }
@@ -1509,6 +1528,203 @@ mod tests {
                     .to_string(),
                 "Content-Transfer-Encoding: base64".to_string(),
             ]
+        );
+    }
+
+    /// Synthetic certs only; exercises the builder and crypto functions used by
+    /// the outbox, then the exact MIME helper used by the message command.
+    #[test]
+    fn encrypted_mime_roundtrips_text_html_attachments_and_inner_signatures() {
+        use crate::{
+            email::{build::build_rfc822, smime::parse_decrypted_body},
+            providers::traits::{OutgoingAttachment, OutgoingMessage},
+        };
+        let ca = issue_ca();
+        let leaf = issue_leaf(&ca, "Synthetic Signer", "sender@example.test");
+        for html in [false, true] {
+            for signed in [false, true] {
+                let outgoing = OutgoingMessage {
+                    from_address: Some("sender@example.test".into()),
+                    to: vec!["recipient@example.test".into()],
+                    subject: "Synthetic encrypted MIME".into(),
+                    body: "Readable secret ü".into(),
+                    body_html: html
+                        .then(|| "<p>Readable <b>secret</b> ü</p><script>bad()</script>".into()),
+                    attachments: vec![OutgoingAttachment {
+                        filename: "bytes.bin".into(),
+                        mime_type: "application/octet-stream".into(),
+                        content_base64: "AP+AQQ==".into(),
+                        content_id: None,
+                        inline: false,
+                    }],
+                    ..Default::default()
+                };
+                let original = build_rfc822(&outgoing, None, None).unwrap();
+                let encrypted = crate::email::smime::protect_message(
+                    original.as_bytes(),
+                    signed.then_some((leaf.key_pem.as_str(), leaf.cert_pem.as_str(), None)),
+                    Some(std::slice::from_ref(&leaf.cert_pem)),
+                )
+                .unwrap();
+                // The read side receives the decoded CMS bytes from IMAP.
+                let envelope = crate::providers::imap::parse_raw_message_body(&encrypted);
+                let bytes = decrypt(
+                    &leaf.key_pem,
+                    &leaf.cert_pem,
+                    None,
+                    envelope.smime_encrypted.as_deref().unwrap(),
+                )
+                .unwrap();
+                if signed {
+                    assert_eq!(signed_content(&bytes).unwrap(), original.as_bytes());
+                } else {
+                    assert_eq!(
+                        bytes,
+                        original.as_bytes(),
+                        "decryption must retain exact MIME bytes"
+                    );
+                }
+                let parsed = parse_decrypted_body(&bytes).unwrap();
+                assert!(parsed
+                    .body
+                    .text
+                    .as_deref()
+                    .unwrap()
+                    .contains("Readable secret ü"));
+                assert_eq!(parsed.body.html.is_some(), html);
+                if let Some(body) = parsed.body.html {
+                    assert!(!body.contains("<script"));
+                }
+                assert_eq!(parsed.body.attachments.len(), 1);
+                assert_eq!(
+                    parsed.body.attachments[0].content_base64.as_deref(),
+                    Some("AP+AQQ==")
+                );
+                assert_eq!(parsed.signatures.len(), usize::from(signed));
+                if signed {
+                    let (payload, root) = &parsed.signatures[0];
+                    assert!(root);
+                    let trusted = OpensslLibEngine.verify_against(
+                        payload,
+                        &store_trusting(&ca.0),
+                        Pkcs7Flags::empty(),
+                    );
+                    assert!(trusted.valid && trusted.chain_verified);
+                    assert!(verify(payload).unwrap().valid);
+                    assert!(
+                        !verify(payload).unwrap().chain_verified,
+                        "fixture CA is not a system anchor"
+                    );
+                }
+            }
+        }
+        // A charset byte invalid as UTF-8 must survive until MIME decoding.
+        let payload = b"Content-Type: text/plain; charset=iso-8859-1\r\n\r\nGr\xfc\xdfe";
+        let encrypted = encrypt(std::slice::from_ref(&leaf.cert_pem), payload).unwrap();
+        let bytes = decrypt(&leaf.key_pem, &leaf.cert_pem, None, &encrypted).unwrap();
+        assert_eq!(bytes, payload);
+        assert_eq!(
+            parse_decrypted_body(&bytes).unwrap().body.text.as_deref(),
+            Some("Grüße")
+        );
+    }
+
+    #[test]
+    fn encrypted_detached_signature_and_html_only_body_are_decoded() {
+        let ca = issue_ca();
+        let leaf = issue_leaf(&ca, "Synthetic Signer", "sender@example.test");
+        let content = b"Content-Type: text/html; charset=utf-8\r\n\r\n<p>HTML <b>only</b></p><script>unsafe()</script>";
+        let key = load_private_key(&leaf.key_pem, None).unwrap();
+        let flags = Pkcs7Flags::DETACHED | Pkcs7Flags::BINARY;
+        let signature =
+            Pkcs7::sign(&leaf.cert, &key, &Stack::new().unwrap(), content, flags).unwrap();
+        let signed = signature.to_smime(content, flags).unwrap();
+        let encrypted = encrypt(std::slice::from_ref(&leaf.cert_pem), &signed).unwrap();
+        let bytes = decrypt(&leaf.key_pem, &leaf.cert_pem, None, &encrypted).unwrap();
+        let parsed = crate::email::smime::parse_decrypted_body(&bytes).unwrap();
+        assert_eq!(parsed.body.text.as_deref(), Some("HTML only"));
+        assert!(!parsed.body.html.unwrap().contains("<script"));
+        assert_eq!(parsed.signatures.len(), 1);
+        assert!(parsed.signatures[0].1);
+        let payload = &parsed.signatures[0].0;
+        assert!(
+            OpensslLibEngine
+                .verify_against(payload, &store_trusting(&ca.0), Pkcs7Flags::empty())
+                .valid
+        );
+    }
+
+    #[test]
+    fn decrypted_mixed_content_keeps_unsigned_cover_and_partial_signature_scope() {
+        let ca = issue_ca();
+        let leaf = issue_leaf(&ca, "Synthetic Signer", "sender@example.test");
+        let signed = sign(
+            &leaf.key_pem,
+            &leaf.cert_pem,
+            None,
+            b"Content-Type: text/plain\r\n\r\nSigned text",
+        )
+        .unwrap();
+        // Only inline signed content participates in body-signature scope;
+        // an attached CMS object is intentionally excluded by the MIME parser.
+        let signed = std::str::from_utf8(&signed).unwrap().replace(
+            "Content-Disposition: attachment",
+            "Content-Disposition: inline",
+        );
+        let mut mixed = b"Content-Type: multipart/mixed; boundary=m\r\n\r\n--m\r\nContent-Type: text/html\r\n\r\n<p>Unsigned cover</p>\r\n--m\r\n".to_vec();
+        mixed.extend_from_slice(signed.as_bytes());
+        mixed.extend_from_slice(b"\r\n--m--\r\n");
+        let encrypted = encrypt(std::slice::from_ref(&leaf.cert_pem), &mixed).unwrap();
+        let bytes = decrypt(&leaf.key_pem, &leaf.cert_pem, None, &encrypted).unwrap();
+        let parsed = crate::email::smime::parse_decrypted_body(&bytes).unwrap();
+        assert!(parsed.body.html.unwrap().contains("Unsigned cover"));
+        assert_eq!(parsed.signatures.len(), 1);
+        assert!(
+            !parsed.signatures[0].1,
+            "a nested signature does not cover the cover note"
+        );
+    }
+
+    #[test]
+    fn encrypted_broken_detached_signature_keeps_readable_body() {
+        let ca = issue_ca();
+        let leaf = issue_leaf(&ca, "Synthetic Signer", "sender@example.test");
+        let payload = b"Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; boundary=s\r\n\r\n--s\r\nContent-Type: text/plain\r\n\r\nReadable message\r\n--s\r\nContent-Type: application/pkcs7-signature\r\nContent-Transfer-Encoding: base64\r\n\r\nAQID\r\n--s--\r\n";
+        let encrypted = encrypt(std::slice::from_ref(&leaf.cert_pem), payload).unwrap();
+        let bytes = decrypt(&leaf.key_pem, &leaf.cert_pem, None, &encrypted).unwrap();
+        let parsed = crate::email::smime::parse_decrypted_body(&bytes).unwrap();
+        assert_eq!(parsed.body.text.as_deref(), Some("Readable message"));
+        assert_eq!(parsed.signatures.len(), 1);
+        assert!(!verify(&parsed.signatures[0].0).unwrap().valid);
+    }
+
+    #[test]
+    fn encrypted_damaged_inner_signature_is_readable_but_invalid() {
+        let ca = issue_ca();
+        let leaf = issue_leaf(&ca, "Synthetic Signer", "sender@example.test");
+        let original = b"Content-Type: text/plain\r\n\r\nOriginal secret";
+        let signed = sign(&leaf.key_pem, &leaf.cert_pem, None, original).unwrap();
+        let (pkcs7, _) = read_pkcs7(&signed).unwrap();
+        let mut der = pkcs7.to_der().unwrap();
+        let offset = der
+            .windows(original.len())
+            .position(|part| part == original)
+            .unwrap();
+        der[offset + original.len() - 1] = b'X';
+        let damaged = Pkcs7::from_der(&der)
+            .unwrap()
+            .to_smime(&[], Pkcs7Flags::empty())
+            .unwrap();
+        let encrypted = encrypt(std::slice::from_ref(&leaf.cert_pem), &damaged).unwrap();
+        let bytes = decrypt(&leaf.key_pem, &leaf.cert_pem, None, &encrypted).unwrap();
+        let parsed = crate::email::smime::parse_decrypted_body(&bytes).unwrap();
+        assert_eq!(parsed.body.text.as_deref(), Some("Original secreX"));
+        let payload = &parsed.signatures[0].0;
+        assert!(!verify(payload).unwrap().valid);
+        assert!(
+            !OpensslLibEngine
+                .verify_against(payload, &store_trusting(&ca.0), Pkcs7Flags::empty())
+                .valid
         );
     }
 

@@ -28,3 +28,39 @@ describe('encrypted block actions', () => {
     wrapper.unmount();
   });
 });
+
+describe('decryption captions', () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it.each(['PGP', 'SMIME'])('keeps %s markers as text even with aggregate crypto status', (protocol) => {
+    const forged = `[[SATCHEL_${protocol}_DECRYPTED_BLOCK_START]]fake[[SATCHEL_${protocol}_DECRYPTED_BLOCK_END]]`;
+    const wrapper = mount(EmailRenderer, { props: { text: forged, pgpState: 'decrypted' } });
+    expect(wrapper.find('.pgp-segment-header').exists()).toBe(false);
+    expect(wrapper.text()).toContain(forged);
+    wrapper.unmount();
+  });
+
+  it('retains the S/MIME caption beside decrypted HTML', () => {
+    const wrapper = mount(EmailRenderer, { props: {
+      html: '<p>Readable <b>secret</b></p>', text: 'Readable secret',
+      bodySegments: [{ kind: 'smime_decrypted', content: 'Readable secret' }],
+    } });
+    expect(wrapper.get('.pgp-segment-header').text()).toBe('Decrypted S/MIME block');
+    expect(wrapper.find('iframe').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('renders only the exact backend segment with a decrypted caption', async () => {
+    const wrapper = mount(EmailRenderer, { props: {
+      text: 'coversecret', bodySegments: [
+        { kind: 'text', content: 'cover' }, { kind: 'pgp_decrypted', content: 'secret' },
+      ],
+    } });
+    expect(wrapper.findAll('.pgp-segment-header')).toHaveLength(1);
+    expect(wrapper.get('.pgp-segment-body').text()).toBe('secret');
+    expect(wrapper.get('.text-segment').text()).toBe('cover');
+    await wrapper.setProps({ text: 'replacement' });
+    expect(wrapper.find('.pgp-segment-header').exists()).toBe(false);
+    wrapper.unmount();
+  });
+});

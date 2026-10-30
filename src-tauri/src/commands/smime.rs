@@ -19,9 +19,6 @@ use crate::{
     AppState, UnlockedSmimeSession,
 };
 
-pub const SMIME_DECRYPTED_BLOCK_START: &str = "[[SATCHEL_SMIME_DECRYPTED_BLOCK_START]]";
-pub const SMIME_DECRYPTED_BLOCK_END: &str = "[[SATCHEL_SMIME_DECRYPTED_BLOCK_END]]";
-
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/smime/"))]
@@ -344,7 +341,7 @@ pub async fn decrypt_message_with_unlocked_smime_certs(
     state: &AppState,
     pool: &SqlitePool,
     ciphertext: &[u8],
-) -> Result<Option<String>, String> {
+) -> Result<Option<Vec<u8>>, String> {
     let sessions = state.smime_unlock_sessions.lock().await;
     if sessions.is_empty() {
         return Ok(None);
@@ -387,7 +384,7 @@ pub async fn decrypt_message_with_unlocked_smime_certs(
 fn try_unlocked_certificates(
     materials: &[(String, String, Option<String>)],
     ciphertext: &[u8],
-) -> Result<Option<String>, String> {
+) -> Result<Option<Vec<u8>>, String> {
     for (pem_private_key, pem_certificate, passphrase) in materials {
         if let Ok(decrypted) = smime_engine::decrypt(
             pem_private_key,
@@ -395,9 +392,8 @@ fn try_unlocked_certificates(
             passphrase.as_deref(),
             ciphertext,
         ) {
-            let text = String::from_utf8_lossy(&decrypted).trim().to_string();
-            if !text.is_empty() {
-                return Ok(Some(render_decrypted_block(&text)));
+            if !decrypted.is_empty() {
+                return Ok(Some(decrypted));
             }
         }
     }
@@ -691,13 +687,6 @@ async fn auto_import_public_certificate(
     Ok(())
 }
 
-fn render_decrypted_block(decrypted: &str) -> String {
-    format!(
-        "{SMIME_DECRYPTED_BLOCK_START}\n{}\n{SMIME_DECRYPTED_BLOCK_END}\n",
-        decrypted.trim()
-    )
-}
-
 fn first_pem_block(input: &str, label: &str) -> Option<String> {
     let begin = format!("-----BEGIN {label}-----");
     let end = format!("-----END {label}-----");
@@ -755,6 +744,29 @@ fn format_fingerprint(raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unlocked_decryption_preserves_non_utf8_mime_bytes() {
+        let key = super::smime_engine::generate_keypair(&super::GenerateSmimeRequest {
+            name: "Synthetic",
+            email: "recipient@example.test",
+            passphrase: None,
+        })
+        .unwrap();
+        let payload = b"Content-Type: text/plain; charset=iso-8859-1\r\n\r\nGr\xfc\xdfe";
+        let encrypted =
+            super::smime_engine::encrypt(std::slice::from_ref(&key.pem_certificate), payload)
+                .unwrap();
+        let bytes = super::try_unlocked_certificates(
+            &[(key.pem_private_key, key.pem_certificate, None)],
+            &encrypted,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(bytes, payload);
+        let body = satchel_core::email::smime::parse_decrypted_body(&bytes).unwrap();
+        assert_eq!(body.body.text.as_deref(), Some("Grüße"));
+    }
+
     use std::collections::HashSet;
 
     use satchel_core::db::smime::{SmimeCertificateMetadataRecord, SmimeRepositoryError};

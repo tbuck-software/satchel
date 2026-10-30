@@ -18,7 +18,7 @@ import type { QuotePart } from '@/utils/emailQuotes';
 import { missingInlineImageSource } from '@/utils/emailInlineImages';
 import { prepareEmailBody } from '@/utils/preparedEmailBody';
 import { isPersonalMailboxDomain, senderDomain } from '@/utils/senderDomains';
-import { splitRenderSegments, type RenderSegment } from '@/utils/emailSegments';
+import { matchingBodySegments, splitRenderSegments, type RenderSegment } from '@/utils/emailSegments';
 import { hasHoverCapablePointer } from '@/utils/pointerCapabilities';
 import ExternalLinkDialog from './ExternalLinkDialog.vue';
 import LinkDestinationPreview, { type LinkPreviewStatus } from './LinkDestinationPreview.vue';
@@ -36,6 +36,7 @@ const { t } = useI18n();
 const props = withDefaults(defineProps<{
   html?: string;
   text?: string;
+  bodySegments?: RenderSegment[];
   pgpState?: PgpMessageState | null;
   /** Only a host with a connected decrypt action may offer the button. */
   canDecrypt?: boolean;
@@ -168,11 +169,17 @@ function onQuotesToggle(event: Event) {
 
 const missingImageSource = computed(() => missingInlineImageSource(t('errors.inlineImageUnavailable')));
 
+const trustedSegments = computed(() => matchingBodySegments(props.text ?? '', props.bodySegments));
+const fullBodyDecryption = computed(() => {
+  const meaningful = trustedSegments.value?.filter((segment) => segment.content.trim());
+  return meaningful?.length === 1 ? meaningful[0]?.kind : undefined;
+});
+
 const prepared = computed(() => prepareEmailBody(props.cacheKey, {
   html: props.html,
   text: props.text,
   attachments: props.attachments,
-  normalizeQuotes: props.normalizeQuotes,
+  normalizeQuotes: trustedSegments.value ? false : props.normalizeQuotes,
   missingImageSource: missingImageSource.value,
 }));
 // Keeps the body's inline image URLs valid while this renderer shows it.
@@ -360,7 +367,10 @@ onBeforeUnmount(() => {
   if (linkErrorTimer) clearTimeout(linkErrorTimer);
 });
 
-const segments = computed<RenderSegment[]>(() => splitRenderSegments(displayText.value));
+const segments = computed<RenderSegment[]>(() => splitRenderSegments(
+  trustedSegments.value ? (props.text ?? '') : displayText.value,
+  trustedSegments.value,
+));
 
 const hasPgpSegments = computed(() =>
   segments.value.some((segment) => segment.kind !== 'text'),
@@ -428,6 +438,8 @@ const hasPgpSegments = computed(() =>
       </template>
     </div>
     <div v-if="isolatedDocument" class="html-document-group">
+      <header v-if="fullBodyDecryption === 'pgp_decrypted'" class="pgp-segment-header">{{ $t('mail.pgpBlock.decryptedPgp') }}</header>
+      <header v-else-if="fullBodyDecryption === 'smime_decrypted'" class="pgp-segment-header">{{ $t('mail.pgpBlock.decryptedSmime') }}</header>
       <SegmentedControl
         v-if="props.showViewModeToggle && viewModeOptions.length > 1"
         class="view-mode-toggle"

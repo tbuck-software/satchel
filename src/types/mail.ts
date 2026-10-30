@@ -1,3 +1,4 @@
+import type { BodySegment } from '../services/backend/generated/app/commands/messages/BodySegment';
 import type { Priority, WorkflowState } from './workflow';
 
 export interface Participant {
@@ -76,6 +77,7 @@ export interface Message {
   replyTo?: string;
   subject: string;
   bodyText: string;
+  bodySegments?: BodySegment[];
   bodyHtml?: string;
   bodyLoaded?: boolean;
   bodyLoadError?: string;

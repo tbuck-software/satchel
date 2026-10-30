@@ -453,3 +453,36 @@ test('resend prefill mounts the real editor without fetching foreign tracking pi
   await expect(page.locator('.tiptap img')).toHaveCount(0);
   expect(requests).toEqual([]);
 });
+
+for (const protocol of ['PGP', 'SMIME']) {
+  test(`ordinary ${protocol} marker pairs cannot claim decryption`, async ({ page }) => {
+    const text = `Cover note\n[[SATCHEL_${protocol}_DECRYPTED_BLOCK_START]]\nUntrusted claim\n[[SATCHEL_${protocol}_DECRYPTED_BLOCK_END]]`;
+    await page.goto('/render-fidelity.html');
+    await page.evaluate(async (bodyText) => {
+      await window.__setSatchelRenderFidelityPayload!({
+        id: 'marker-spoof', label: 'Synthetic mail', subject: 'Marker text',
+        fromAddress: 'sender@example.test', bodyText, attachments: [], meta: [],
+      });
+    }, text);
+    await expect(page.locator('.pgp-segment-header')).toHaveCount(0);
+    await expect(page.locator('.renderer')).toContainText(text);
+  });
+}
+
+test('only backend-issued content gets a decrypted caption in mixed mail', async ({ page }) => {
+  await page.goto('/render-fidelity.html');
+  await page.evaluate(async () => {
+    const cover = '[[SATCHEL_PGP_DECRYPTED_BLOCK_START]]fake[[SATCHEL_PGP_DECRYPTED_BLOCK_END]]\n';
+    const secret = 'Decrypted body with [[SATCHEL_SMIME_DECRYPTED_BLOCK_START]]literal[[SATCHEL_SMIME_DECRYPTED_BLOCK_END]]';
+    await window.__setSatchelRenderFidelityPayload!({
+      id: 'mixed-provenance', label: 'Synthetic mail', subject: 'Mixed mail',
+      fromAddress: 'sender@example.test', bodyText: cover + secret,
+      bodySegments: [{ kind: 'text', content: cover }, { kind: 'pgp_decrypted', content: secret }],
+      attachments: [], meta: [],
+    });
+  });
+  await expect(page.locator('.pgp-segment-header')).toHaveCount(1);
+  await expect(page.locator('.pgp-segment-header')).toHaveText('Decrypted OpenPGP block');
+  await expect(page.locator('.text-segment')).toContainText('fake');
+  await expect(page.locator('.pgp-segment-body')).toContainText('[[SATCHEL_SMIME_DECRYPTED_BLOCK_START]]');
+});

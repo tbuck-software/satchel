@@ -151,7 +151,8 @@ function mapBackendMessage(row: BackendMessage, threadId: string): Message {
         : undefined,
     replyTo: row.reply_to || undefined,
     subject: row.subject,
-    bodyText: fallbackText,
+    bodyText: row.body_segments ? row.body_text : fallbackText,
+    bodySegments: row.body_segments ?? undefined,
     bodyHtml: htmlCandidate || undefined,
     bodyLoaded: row.body_loaded,
     bodyLoadError: undefined,
@@ -189,7 +190,8 @@ function applyMessageBody(message: Message, body: BackendMessageBody): Message {
   return {
     ...message,
     sourcePayload: parseSourcePayload(body.source_payload) ?? message.sourcePayload,
-    bodyText: fallbackText,
+    bodyText: body.body_segments ? body.body_text : fallbackText,
+    bodySegments: body.body_segments ?? undefined,
     bodyHtml: htmlCandidate || undefined,
     bodyLoaded: body.body_loaded,
     bodyLoadError: undefined,
@@ -221,6 +223,7 @@ function mergeMessagePreview(preview: Message, existing?: Message): Message {
   return {
     ...preview,
     bodyText: existing.bodyText,
+    bodySegments: existing.bodySegments,
     bodyHtml: existing.bodyHtml,
     bodyLoaded: existing.bodyLoaded,
     bodyLoadError: existing.bodyLoadError,
@@ -394,6 +397,7 @@ export const useMessagesStore = defineStore('messages', () => {
   function messageBodyChars(message: Message): number {
     return message.bodyText.length
       + (message.bodyHtml?.length ?? 0)
+      + (message.bodySegments?.reduce((sum, segment) => sum + segment.content.length, 0) ?? 0)
       + message.attachments.reduce((sum, attachment) => sum + (attachment.dataUrl?.length ?? 0), 0);
   }
 
@@ -912,6 +916,8 @@ export const useMessagesStore = defineStore('messages', () => {
         applyMessageBody(message, {
           ...(row ?? { id, snippet: '', body_text: '', body_loaded: true }),
           id,
+          // This endpoint returns raw stored/fetched bodies, never decryption results.
+          body_segments: null,
           body_text: loaded.body_text,
           body_html: loaded.body_html,
           body_loaded: true,

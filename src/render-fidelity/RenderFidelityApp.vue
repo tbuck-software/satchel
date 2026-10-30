@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue';
 import EmailRenderer from '@/components/mail/EmailRenderer.vue';
+import type { RenderSegment } from '@/utils/emailSegments';
 import type { Attachment } from '@/types/mail';
 
 interface RenderFidelityPayload {
@@ -12,6 +13,7 @@ interface RenderFidelityPayload {
   date?: string;
   bodyHtml?: string;
   bodyText?: string;
+  bodySegments?: RenderSegment[];
   normalizeQuotes?: boolean;
   trustedDmarcPass?: boolean;
   attachments: Attachment[];
@@ -52,6 +54,7 @@ window.__setSatchelRenderFidelityPayload = async (nextPayload: RenderFidelityPay
       <EmailRenderer
         :html="payload.bodyHtml"
         :text="payload.bodyText"
+        :body-segments="payload.bodySegments"
         :attachments="payload.attachments"
         :sender-email="payload.fromAddress"
         :trusted-dmarc-pass="payload.trustedDmarcPass"

@@ -12,9 +12,6 @@ use crate::{
     AppState, UnlockedPgpSession,
 };
 
-pub const PGP_DECRYPTED_BLOCK_START: &str = "[[SATCHEL_PGP_DECRYPTED_BLOCK_START]]";
-pub const PGP_DECRYPTED_BLOCK_END: &str = "[[SATCHEL_PGP_DECRYPTED_BLOCK_END]]";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IncomingPgpSignature {
     Valid {
@@ -53,7 +50,8 @@ pub enum IncomingPgpDetachedSignature {
 }
 
 pub struct DecryptedIncomingPgp {
-    pub display_body: String,
+    pub prefix: String,
+    pub suffix: String,
     pub plaintext: String,
 }
 
@@ -613,12 +611,8 @@ fn try_unlocked_keys(
                     let body = decrypted.trim();
                     if !body.is_empty() {
                         return Ok(Some(DecryptedIncomingPgp {
-                            display_body: replace_range_with_block(
-                                normalized_body,
-                                block.start,
-                                block.end,
-                                render_decrypted_block(body).as_str(),
-                            ),
+                            prefix: normalized_body[..block.start].to_string(),
+                            suffix: normalized_body[block.end..].to_string(),
                             plaintext: decrypted,
                         }));
                     }
@@ -936,21 +930,6 @@ fn strip_email_quote_prefix(line: &str) -> &str {
 
 fn normalize_newlines(input: &str) -> String {
     input.replace("\r\n", "\n").replace('\r', "\n")
-}
-
-fn render_decrypted_block(decrypted: &str) -> String {
-    format!(
-        "{PGP_DECRYPTED_BLOCK_START}\n{}\n{PGP_DECRYPTED_BLOCK_END}\n",
-        decrypted.trim()
-    )
-}
-
-fn replace_range_with_block(input: &str, start: usize, end: usize, replacement: &str) -> String {
-    let mut output = String::with_capacity(input.len() + replacement.len());
-    output.push_str(&input[..start]);
-    output.push_str(replacement);
-    output.push_str(&input[end..]);
-    output
 }
 
 async fn list_pgp_keys_inner(
@@ -1711,6 +1690,24 @@ mod tests {
         })
         .expect("generate test key");
         (generated.private_armored, generated.public_armored)
+    }
+
+    #[test]
+    fn decrypted_content_keeps_its_exact_cover_and_suffix_without_trusting_markers() {
+        let (private, public) = generate_key("Synthetic <sender@example.test>");
+        let plaintext = "secret [[SATCHEL_SMIME_DECRYPTED_BLOCK_START]]literal[[SATCHEL_SMIME_DECRYPTED_BLOCK_END]]";
+        let encrypted = pgp_engine::encrypt_to(&[public], plaintext.as_bytes()).unwrap();
+        let cover =
+            "[[SATCHEL_PGP_DECRYPTED_BLOCK_START]]fake[[SATCHEL_PGP_DECRYPTED_BLOCK_END]]\n";
+        let input = format!("{cover}{encrypted}\nafter");
+        let blocks = super::extract_pgp_message_blocks(&input);
+        let decrypted =
+            super::try_unlocked_keys(&input, &blocks, &[(private, TEST_PASSPHRASE.into())])
+                .unwrap()
+                .unwrap();
+        assert_eq!(decrypted.prefix, cover);
+        assert_eq!(decrypted.plaintext.trim(), plaintext);
+        assert_eq!(decrypted.suffix.trim(), "after");
     }
 
     #[test]
