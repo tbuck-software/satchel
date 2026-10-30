@@ -38,6 +38,7 @@ import {
   primarySenderEmail,
   toThreadModel,
 } from '@/utils/threadList';
+import { backendErrorKey } from '@/utils/backendErrors';
 
 /** The filter state and projections Persistence reads. Built before it. */
 type PersistenceFilter = Pick<
@@ -90,6 +91,13 @@ interface EnsureThreadLoadedOptions {
   retainAcrossListLoads?: boolean;
 }
 
+/**
+ * Whether the row is in the store now. `missing` is the backend's answer that
+ * the thread does not exist; `unavailable` is any other failure, which a later
+ * attempt may get past.
+ */
+export type ThreadLoadResult = 'loaded' | 'missing' | 'unavailable';
+
 /** What the threads store exposes of Persistence. */
 export interface ThreadPersistenceSurface {
   threadLoadInFlight: Ref<boolean>;
@@ -99,7 +107,7 @@ export interface ThreadPersistenceSurface {
   loadMoreFailed: Ref<boolean>;
   loadPreviousFailed: Ref<boolean>;
   hasPreviousThreads: Ref<boolean>;
-  ensureThreadLoaded(threadId: string, options?: EnsureThreadLoadedOptions): Promise<void>;
+  ensureThreadLoaded(threadId: string, options?: EnsureThreadLoadedOptions): Promise<ThreadLoadResult>;
   releaseRetainedThread(threadId: string): void;
   setPriority(threadId: string, priority: Thread['priority']): Promise<void>;
   setThreadMuted(threadId: string, muted: boolean): Promise<void>;
@@ -230,20 +238,23 @@ export function createThreadPersistence({
   async function ensureThreadLoaded(
     threadId: string,
     options: EnsureThreadLoadedOptions = {},
-  ) {
+  ): Promise<ThreadLoadResult> {
     if (options.retainAcrossListLoads) {
       retainedDetailThreadId = threadId;
     }
-    if (!threadId || threads.value.some((thread) => thread.id === threadId)) return;
-    if (!backendCommandsAvailable()) return;
+    if (!threadId) return 'missing';
+    if (threads.value.some((thread) => thread.id === threadId)) return 'loaded';
+    if (!backendCommandsAvailable()) return 'unavailable';
     try {
       const dto = await backendGetThread(threadId);
       if (!threads.value.some((thread) => thread.id === dto.id)) {
         collection.appendUnique([toThreadModel(dto, accounts())]);
       }
-    } catch {
+      return 'loaded';
+    } catch (error) {
       // The hit may point at a thread deleted meanwhile; the pane shows its
       // own fallback in that case.
+      return backendErrorKey(error) === 'backend.errors.threadNotFound' ? 'missing' : 'unavailable';
     }
   }
 

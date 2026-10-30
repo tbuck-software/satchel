@@ -12,8 +12,14 @@ export interface ConfirmRequest {
   tone?: 'default' | 'danger';
 }
 
+/**
+ * How a question ended. `preempted` means a newer question took the dialog
+ * before anyone answered this one.
+ */
+export type ConfirmDecision = 'confirmed' | 'declined' | 'preempted';
+
 interface PendingConfirm extends ConfirmRequest {
-  resolve: (confirmed: boolean) => void;
+  resolve: (decision: ConfirmDecision) => void;
 }
 
 const state = reactive({ pending: null as PendingConfirm | null });
@@ -29,19 +35,27 @@ const state = reactive({ pending: null as PendingConfirm | null });
  * to exist in WKWebView and cannot be styled or translated.
  */
 export function useConfirm() {
-  function ask(request: ConfirmRequest): Promise<boolean> {
+  /**
+   * `ask`, for a caller that must not read a question nobody answered as a
+   * no: content that exists nowhere else waits for a real answer.
+   */
+  function decide(request: ConfirmRequest): Promise<ConfirmDecision> {
     // A second question would otherwise orphan the first one's promise.
-    state.pending?.resolve(false);
-    return new Promise<boolean>((resolve) => {
+    state.pending?.resolve('preempted');
+    return new Promise<ConfirmDecision>((resolve) => {
       state.pending = { ...request, resolve };
     });
+  }
+
+  async function ask(request: ConfirmRequest): Promise<boolean> {
+    return (await decide(request)) === 'confirmed';
   }
 
   function answer(confirmed: boolean) {
     const pending = state.pending;
     state.pending = null;
-    pending?.resolve(confirmed);
+    pending?.resolve(confirmed ? 'confirmed' : 'declined');
   }
 
-  return { state, ask, answer };
+  return { state, ask, decide, answer };
 }

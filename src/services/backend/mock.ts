@@ -808,7 +808,7 @@ const handlers: Record<string, Handler> = {
     .flatMap(id => { const thread = findThread(id); return thread ? [threadDto(thread)] : []; }),
   get_thread: (payload) => {
     const thread = findThread(payload.threadId as string);
-    if (!thread) throw new Error('thread not found');
+    if (!thread) throw new Error('backend.errors.threadNotFound');
     return threadDto(thread);
   },
   // The fixture has no Message-ID header; one per thread is enough to link to.
@@ -1477,6 +1477,8 @@ const handlers: Record<string, Handler> = {
   ].join('\n'),
   take_pending_notification_thread: () => null,
   consume_pending_mobile_notification: () => ({ threadId: null, actionId: null }),
+  // No native notification gate retains responses here.
+  mobile_notification_response_handled: () => undefined,
   list_plugins: () => [],
   list_plugin_metrics: () => [],
   list_plugin_audit_log: () => [],

@@ -15,6 +15,12 @@ export interface ComposerRequest {
   subject?: string;
   body?: string;
   bodyHtml?: string | null;
+  /**
+   * `body` is text the user wrote outside the composer, such as a notification
+   * reply, and exists nowhere else until it is saved. The host asks and saves
+   * it before a replacement, even while the form reports it untouched.
+   */
+  unsavedBody?: boolean;
 }
 
 /** The message key of the heading a composer opened in `mode` carries. */
@@ -26,10 +32,29 @@ export function composerModeTitleKey(mode: ComposerMode) {
 }
 
 /**
- * Asked before an open composer is replaced. `true` once it is closed (saved,
- * or pristine); `false` keeps it, and the new request is dropped.
+ * The host's answer before an open composer is replaced: `replaced` once it is
+ * closed (saved, or pristine), `kept` when it stays by choice, `unsaved` when
+ * it had to stay because its draft could not be saved, `interrupted` when
+ * nobody answered: another question took the dialog, or no host came up to
+ * ask. Only `replaced` lets the new request in.
  */
-export type ComposerReplaceGuard = (next: ComposerRequest) => Promise<boolean>;
+export type ComposerReplaceOutcome = 'replaced' | 'kept' | 'unsaved' | 'interrupted';
+
+export type ComposerReplaceGuard = (next: ComposerRequest) => Promise<ComposerReplaceOutcome>;
+
+/**
+ * What became of an open request. `focused` found its draft in another window.
+ * `kept` is the user's refusal. Neither `unsaved` (accepted, but the open draft
+ * could not be saved to make room) nor `interrupted` (nobody answered) is.
+ */
+export type ComposerOpenOutcome = 'opened' | 'focused' | 'kept' | 'unsaved' | 'interrupted';
+
+/**
+ * How long a request waits for the host's guard before a body that exists
+ * nowhere else. App.vue loads the host as a chunk once the first request is
+ * open; this only runs out when that chunk never arrives.
+ */
+export const REPLACE_GUARD_WAIT_MS = 10_000;
 
 export const useComposerStore = defineStore('composer', () => {
   const request = ref<ComposerRequest | null>(null);
@@ -45,13 +70,34 @@ export const useComposerStore = defineStore('composer', () => {
   const isOpen = computed(() => request.value !== null);
 
   let replaceGuard: ComposerReplaceGuard | null = null;
-  let openTicket = 0;
+  /** Requests waiting for a host to register its guard, or for the composer to close. */
+  const hostWaiters = new Set<() => void>();
+  /** Settles once every request so far is decided; `null` while idle. */
+  let openTail: Promise<void> | null = null;
 
   function setReplaceGuard(guard: ComposerReplaceGuard): () => void {
     replaceGuard = guard;
+    wakeHostWaiters();
     return () => {
       if (replaceGuard === guard) replaceGuard = null;
     };
+  }
+
+  function wakeHostWaiters() {
+    for (const wake of hostWaiters) wake();
+  }
+
+  /** Settles once a guard registers or the composer closes, at the latest after REPLACE_GUARD_WAIT_MS. */
+  function waitForHost(): Promise<void> {
+    return new Promise((resolve) => {
+      const wake = () => {
+        clearTimeout(timer);
+        hostWaiters.delete(wake);
+        resolve();
+      };
+      const timer = setTimeout(wake, REPLACE_GUARD_WAIT_MS);
+      hostWaiters.add(wake);
+    });
   }
 
   /**
@@ -61,7 +107,16 @@ export const useComposerStore = defineStore('composer', () => {
    * Resolves `false` when nothing opened.
    */
   async function open(next: ComposerRequest = { mode: 'new' }): Promise<boolean> {
-    const ticket = ++openTicket;
+    return (await openWithOutcome(next)) === 'opened';
+  }
+
+  /**
+   * `open`, for a caller that has to tell a refusal from a failure: content
+   * that exists nowhere else, such as a notification reply, may only be let go
+   * when the user kept the open draft. Not when saving it failed, and not when
+   * nobody answered.
+   */
+  function openWithOutcome(next: ComposerRequest = { mode: 'new' }): Promise<ComposerOpenOutcome> {
     const normalized: ComposerRequest = {
       mode: next.mode,
       threadId: next.threadId ?? null,
@@ -72,22 +127,44 @@ export const useComposerStore = defineStore('composer', () => {
       subject: next.subject ?? '',
       body: next.body ?? '',
       bodyHtml: next.bodyHtml ?? null,
+      ...(next.unsavedBody ? { unsavedBody: true } : {}),
     };
+    // One request at a time, in arrival order. A second one waits for the
+    // answer to the first instead of taking its question away, then meets the
+    // composer that answer left open. An idle store starts at once.
+    const turn = openTail ? openTail.then(() => openNow(normalized)) : openNow(normalized);
+    const tail = turn.then(() => {}, () => {});
+    openTail = tail;
+    void tail.then(() => {
+      if (openTail === tail) openTail = null;
+    });
+    return turn;
+  }
+
+  async function openNow(normalized: ComposerRequest): Promise<ComposerOpenOutcome> {
     // One window per draft: a draft open in a popout is brought forward there.
     if (normalized.draftId && backendCommandsAvailable()) {
       try {
-        if (await backendFocusDraftEditor(normalized.draftId)) return false;
+        if (await backendFocusDraftEditor(normalized.draftId)) return 'focused';
       } catch (error) {
         console.warn('draft editor lookup failed', error);
       }
     }
-    if (request.value && replaceGuard && !(await replaceGuard(normalized))) return false;
-    // A newer request arrived while this one waited.
-    if (ticket !== openTicket) return false;
+    // The host mounts, and registers its guard, only after the first request
+    // opened. Text that exists nowhere else waits for it instead of being
+    // replaced unasked; if no host comes, it stays and nobody answered.
+    if (request.value?.unsavedBody && !replaceGuard) {
+      await waitForHost();
+      if (request.value?.unsavedBody && !replaceGuard) return 'interrupted';
+    }
+    if (request.value && replaceGuard) {
+      const replaced = await replaceGuard(normalized);
+      if (replaced !== 'replaced') return replaced;
+    }
     request.value = normalized;
     titleOverride.value = '';
     instance.value += 1;
-    return true;
+    return 'opened';
   }
 
   /**
@@ -135,6 +212,7 @@ export const useComposerStore = defineStore('composer', () => {
 
   function close() {
     request.value = null;
+    wakeHostWaiters();
   }
 
   return {
@@ -143,6 +221,7 @@ export const useComposerStore = defineStore('composer', () => {
     title,
     isOpen,
     open,
+    openWithOutcome,
     openNew,
     openEmail,
     openDraft,

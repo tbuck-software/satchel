@@ -8,6 +8,10 @@ src-tauri/target/
 # Ignore only what `tauri android init` regenerates; new Kotlin sources under
 # app/src must be picked up without `git add -f` (one already got lost that way).
 src-tauri/gen/apple/
+# build.rs copies tauri's Swift package here for src-tauri/ios/Package.swift;
+# SwiftPM writes the lock file of that build next to the manifest.
+src-tauri/.tauri/
+src-tauri/ios/Package.resolved
 src-tauri/gen/android/build/
 src-tauri/gen/android/.gradle/
 src-tauri/gen/android/.idea/

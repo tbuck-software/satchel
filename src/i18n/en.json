@@ -83,8 +83,11 @@
       "undoWindow": "Sending in {seconds}s — you can still undo"
     },
     "notifications": {
+      "actionFailed": "The action from the notification could not be completed. Try it again in Satchel.",
+      "mailGone": "Satchel no longer has the email from this notification.",
       "read": "Read",
-      "replyPlaceholder": "Write a reply…"
+      "replyPlaceholder": "Write a reply…",
+      "replyWaiting": "Your reply from the notification is kept. Satchel offers it again once the open dialog or draft is closed."
     },
     "outbox": {
       "needsAttention": "{count} email needs attention in Outbox. | {count} emails need attention in Outbox.",
@@ -245,6 +248,7 @@
       "messagesQuarantined": "{count} messages in {folder} could not be stored for {account}. Sync continues with the remaining messages.",
       "noActiveAccount": "Set up an active account first.",
       "notAMessageFile": "Only .eml and .msg files can be opened this way.",
+      "notificationReplyWaiting": "A reply from a notification could not be opened. Satchel keeps it until you try again.",
       "oauthAccountConflict": "This address already belongs to an IMAP account and cannot be replaced with OAuth.",
       "oauthAccountMismatch": "Please choose the Google account you are connecting. Your existing account has not been changed.",
       "oauthAuthorizationCancelled": "The sign-in was cancelled.",
@@ -1011,6 +1015,7 @@
       "drafts": "Your drafts could not be loaded",
       "mailboxes": "Your mailboxes could not be loaded",
       "messages": "The messages could not be loaded",
+      "notifications": "Notification handling failed",
       "outbox": "The outbox could not be loaded",
       "smartFolders": "Your smart folders could not be loaded",
       "sync": "Mail sync failed",
