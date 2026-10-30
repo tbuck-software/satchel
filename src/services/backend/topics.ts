@@ -60,8 +60,8 @@ export async function backendAddTopicItems(input: {
   itemType: TopicItemType;
   itemIds: string[];
   addedBy?: 'user' | 'rule' | 'llm';
-}): Promise<void> {
-  return invoke<void>('add_topic_items', {
+}): Promise<string[]> {
+  return invoke<string[]>('add_topic_items', {
     input: {
       topic_id: input.topicId,
       item_type: input.itemType,
@@ -76,8 +76,8 @@ export async function backendRemoveTopicItem(input: {
   topicId: string;
   itemType: TopicItemType;
   itemId: string;
-}): Promise<void> {
-  return invoke<void>('remove_topic_item', {
+}): Promise<boolean> {
+  return invoke<boolean>('remove_topic_item', {
     input: {
       topic_id: input.topicId,
       item_type: input.itemType,

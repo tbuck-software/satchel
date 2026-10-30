@@ -406,25 +406,13 @@ export function useThreadActions() {
     });
   }
 
-  /** Memberships decide what an Undo may revert; read unknown ones first. */
-  async function ensureTopicMemberships(threadIds: string[]) {
-    const unknown = threadIds.filter((threadId) => !topics.hasMembershipsFor('thread', threadId));
-    if (unknown.length === 0) return;
-    try {
-      await topics.loadMembershipsFor('thread', unknown);
-    } catch {
-      // Unknown memberships count as absent; the write itself still applies.
-    }
-  }
-
-  /** Link threads to a topic; the store applies the optimistic membership. */
+  /** Link threads to a topic; only the database receipt authorizes Undo. */
   async function addToTopic(threadIds: string[], topicId: string): Promise<void> {
     threadIds = Array.from(new Set(threadIds));
     if (threadIds.length === 0) return;
     const topicName = topics.byId(topicId)?.name ?? '';
     let added: string[];
     try {
-      await ensureTopicMemberships(threadIds);
       added = await topics.addItemsToTopic(topicId, 'thread', threadIds);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('thread.result.addToTopicFailed'));
@@ -456,7 +444,6 @@ export function useThreadActions() {
     const topicName = topics.byId(topicId)?.name ?? '';
     let removed: string[];
     try {
-      await ensureTopicMemberships(threadIds);
       const wasMember = await Promise.all(
         threadIds.map((threadId) => topics.removeItemFromTopic(topicId, 'thread', threadId)),
       );

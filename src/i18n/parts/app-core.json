@@ -26,7 +26,9 @@
         "sync": "Mail sync failed",
         "threads": "The conversations could not be loaded",
         "topics": "Topics could not be loaded",
-        "unknown": "Something in Satchel stopped working"
+        "unknown": "Something in Satchel stopped working",
+        "templates": "Your templates could not be loaded",
+        "smartFolders": "Your smart folders could not be loaded"
       },
       "unsupportedRuntime": {
         "android": "On Android you update the engine via <strong>Android System WebView</strong> in the Play Store. Restarting Satchel afterwards is enough.",
@@ -342,7 +344,9 @@
         "sync": "Der Mail-Abgleich ist fehlgeschlagen",
         "threads": "Die Konversationen konnten nicht geladen werden",
         "topics": "Themen konnten nicht geladen werden",
-        "unknown": "In Satchel hat etwas aufgehört zu funktionieren"
+        "unknown": "In Satchel hat etwas aufgehört zu funktionieren",
+        "templates": "Deine Vorlagen konnten nicht geladen werden",
+        "smartFolders": "Deine intelligenten Ordner konnten nicht geladen werden"
       },
       "unsupportedRuntime": {
         "android": "Auf Android aktualisierst du die Engine über <strong>Android System WebView</strong> im Play Store. Danach reicht ein Neustart von Satchel.",

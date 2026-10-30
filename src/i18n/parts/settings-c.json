@@ -200,7 +200,8 @@
           "updates": "Updates",
           "promotions": "Promotions",
           "social": "Social"
-        }
+        },
+        "duplicateCondition": "Use each condition field only once."
       },
       "smime": {
         "title": "S/MIME certificates",
@@ -292,7 +293,8 @@
         "bccAuto": "Add Bcc automatically (optional)",
         "bccPlaceholder": "archive{'@'}example.com",
         "nameRequired": "Please enter a name.",
-        "saved": "Saved."
+        "saved": "Saved.",
+        "loadFailed": "Could not load templates. Try again."
       }
     }
   },
@@ -497,7 +499,8 @@
           "updates": "Updates",
           "promotions": "Werbung",
           "social": "Social"
-        }
+        },
+        "duplicateCondition": "Jedes Bedingungsfeld darf nur einmal verwendet werden."
       },
       "smime": {
         "title": "S/MIME-Zertifikate",
@@ -589,7 +592,8 @@
         "bccAuto": "Bcc automatisch einfügen (optional)",
         "bccPlaceholder": "archive{'@'}example.com",
         "nameRequired": "Bitte Name angeben.",
-        "saved": "Gespeichert."
+        "saved": "Gespeichert.",
+        "loadFailed": "Vorlagen konnten nicht geladen werden. Bitte erneut versuchen."
       }
     }
   }

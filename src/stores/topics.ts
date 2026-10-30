@@ -1,3 +1,4 @@
+import { orderedLoad } from './internal/orderedLoad';
 import { useConnectionStore } from '@/stores/connection';
 import { useAccountsStore } from '@/stores/accounts';
 import { defineStore } from 'pinia';
@@ -47,6 +48,20 @@ function membershipKey(itemType: TopicItemType, itemId: string): string {
   return `${itemType}:${itemId}`;
 }
 
+/** Register every reader guard before starting a bulk write, without nesting calls. */
+function guardedWrite<T>(guards: ReturnType<typeof orderedLoad>[], write: () => Promise<T>): Promise<T> {
+  let start!: () => void;
+  const pending = new Promise<T>((resolve, reject) => {
+    start = () => {
+      try { resolve(write()); }
+      catch (error) { reject(error); }
+    };
+  });
+  const protectedWrites = Promise.all(guards.map((guard) => guard.mutate(() => pending)));
+  start();
+  return protectedWrites.then(() => pending);
+}
+
 export const useTopicsStore = defineStore('topics', () => {
   const accounts = useAccountsStore();
   const connection = useConnectionStore();
@@ -59,11 +74,12 @@ export const useTopicsStore = defineStore('topics', () => {
     }
     void load();
   });
-  let loadRequest = 0;
+  const loader = orderedLoad(() => accounts.visibilityKey);
   const items = ref<BackendTopic[]>([]);
-  const loading = ref(false);
-  /** `${itemType}:${itemId}` -> topic ids; optimistic source of truth for chips and picker. */
+  const { loading } = loader;
+  /** `${itemType}:${itemId}` -> topic ids shared by chips and picker. */
   const memberships = ref<Record<string, string[]>>({});
+  const loadedMemberships = new Set<string>();
   /** Non-null while the "add to topic" picker overlay is open. */
   const pickerTarget = ref<TopicPickerTarget | null>(null);
   /** Topic shown in the inbox detail pane instead of a thread; '' = none. */
@@ -71,6 +87,7 @@ export const useTopicsStore = defineStore('topics', () => {
   /** Concurrent creates from keyboard/pointer retries share one local topic and write. */
   const pendingCreates = new Map<string, OptimisticTopicCreation>();
   const pendingCreatesById = new Map<string, Promise<BackendTopic>>();
+  const pendingTopicDeletes = new Set<Promise<void>>();
 
   const activeTopics = computed(() => items.value.filter((t) => t.status === 'active'));
   const finishedTopics = computed(() => items.value.filter((t) => t.status !== 'active'));
@@ -81,19 +98,9 @@ export const useTopicsStore = defineStore('topics', () => {
 
   async function load() {
     if (!backendCommandsAvailable()) return;
-    const request = ++loadRequest;
-    const scope = accounts.visibilityKey;
-    loading.value = true;
-    try {
-      const rows = await backendListTopics();
-      if (request !== loadRequest || scope !== accounts.visibilityKey) return;
-      items.value = rows;
-      connection.clearBackendError('topics');
-    } catch (error) {
-      if (request === loadRequest && scope === accounts.visibilityKey) connection.reportBackendError('topics', error);
-    } finally {
-      if (request === loadRequest) loading.value = false;
-    }
+    await loader.load(backendListTopics, (rows) => { items.value = rows; },
+      (error) => connection.reportBackendError('topics', error),
+      () => connection.clearBackendError('topics'));
   }
 
   function reconcile(topic: BackendTopic) {
@@ -105,7 +112,7 @@ export const useTopicsStore = defineStore('topics', () => {
 
   async function persist(input: TopicUpsertInput) {
     if (input.id) await pendingCreatesById.get(input.id);
-    return reconcile(await backendUpsertTopic(input));
+    return loader.mutate(async () => reconcile(await backendUpsertTopic(input)));
   }
 
   function createKey(input: TopicCreateInput): string {
@@ -143,7 +150,7 @@ export const useTopicsStore = defineStore('topics', () => {
     };
     items.value.push(optimistic);
 
-    const persisted = backendUpsertTopic({ ...input, id: optimistic.id })
+    const persisted = loader.mutate(() => backendUpsertTopic({ ...input, id: optimistic.id })
       .then(reconcile)
       .catch((error) => {
         items.value = items.value.filter((topic) => topic.id !== optimistic.id);
@@ -153,7 +160,7 @@ export const useTopicsStore = defineStore('topics', () => {
       .finally(() => {
         pendingCreates.delete(key);
         pendingCreatesById.delete(optimistic.id);
-      });
+      }));
     const creation = { topic: optimistic, persisted };
     pendingCreates.set(key, creation);
     pendingCreatesById.set(optimistic.id, persisted);
@@ -166,75 +173,112 @@ export const useTopicsStore = defineStore('topics', () => {
   }
 
   async function remove(id: string) {
-    await backendDeleteTopic(id);
-    items.value = items.value.filter((t) => t.id !== id);
-    for (const key of Object.keys(memberships.value)) {
-      memberships.value[key] = (memberships.value[key] ?? []).filter((topicId) => topicId !== id);
+    const pending = loader.mutate(async () => {
+      const guards = [fileLoader(id), ...membershipLoads.values()];
+      const remove = async () => {
+        await backendDeleteTopic(id);
+        items.value = items.value.filter((t) => t.id !== id);
+        delete files.value[id];
+        for (const key of Object.keys(memberships.value)) {
+          memberships.value[key] = (memberships.value[key] ?? []).filter((topicId) => topicId !== id);
+        }
+      };
+      membershipRevision++;
+      await guardedWrite(guards, () => remove().finally(() => { membershipRevision++; }));
+    });
+    pendingTopicDeletes.add(pending);
+    void pending.finally(() => pendingTopicDeletes.delete(pending)).catch(() => {});
+    return pending;
+  }
+
+  let membershipRevision = 0;
+  // Per item guards allow disjoint chip/picker reads to finish independently.
+  const membershipLoads = new Map<string, ReturnType<typeof orderedLoad>>();
+  function membershipLoader(itemType: TopicItemType, itemId: string) {
+    const key = membershipKey(itemType, itemId);
+    if (!membershipLoads.has(key)) {
+      const guard = orderedLoad();
+      membershipLoads.set(key, guard);
+      // Deletes also affect items first requested while the delete is pending.
+      for (const pending of pendingTopicDeletes) {
+        // The delete caller reports errors; this promise only delays readers.
+        void guard.mutate(() => pending).catch(() => {});
+      }
     }
+    return membershipLoads.get(key)!;
   }
 
   async function loadMembershipsFor(itemType: TopicItemType, itemIds: string[]) {
     if (!backendCommandsAvailable() || itemIds.length === 0) return;
-    const rows = await backendListTopicMemberships(itemType, itemIds);
-    const next: Record<string, string[]> = {};
-    for (const id of itemIds) next[membershipKey(itemType, id)] = [];
-    for (const row of rows) next[membershipKey(itemType, row.item_id)]?.push(row.topic_id);
-    memberships.value = { ...memberships.value, ...next };
+    let batch: ReturnType<typeof backendListTopicMemberships> | undefined;
+    let batchRevision = -1;
+    const read = () => {
+      if (!batch || batchRevision !== membershipRevision) {
+        batchRevision = membershipRevision;
+        batch = backendListTopicMemberships(itemType, itemIds);
+      }
+      return batch;
+    };
+    await Promise.all(itemIds.map((id) => membershipLoader(itemType, id).load(
+      read,
+      (loaded) => {
+        memberships.value[membershipKey(itemType, id)] = loaded
+          .filter((row) => row.item_id === id).map((row) => row.topic_id);
+        loadedMemberships.add(membershipKey(itemType, id));
+      },
+    )));
   }
 
   function hasMembershipsFor(itemType: TopicItemType, itemId: string): boolean {
-    return membershipKey(itemType, itemId) in memberships.value;
+    return loadedMemberships.has(membershipKey(itemType, itemId));
   }
 
   function topicIdsFor(itemType: TopicItemType, itemId: string): string[] {
     return memberships.value[membershipKey(itemType, itemId)] ?? [];
   }
 
-  /**
-   * Link items to a topic. Resolves with the ids that were not members before,
-   * so an undo can unlink exactly those and leave earlier memberships alone.
-   */
+  // Serialize writes to the same topic. Receipts come from SQLite, never from
+  // a cached or failed membership lookup. Different topics remain independent.
+  const membershipWrites = new Map<string, Promise<unknown>>();
+  function writeMemberships<T>(topicId: string, itemType: TopicItemType, itemIds: string[], write: () => Promise<T>): Promise<T> {
+    const previous = membershipWrites.get(topicId);
+    const run = () => loader.mutate(() => {
+      membershipRevision++;
+      // Invalidate the shared batch before any per-item guard releases readers.
+      return guardedWrite(itemIds.map((id) => membershipLoader(itemType, id)),
+        () => write().finally(() => { membershipRevision++; }));
+    });
+    const pending = previous ? previous.catch(() => {}).then(run) : run();
+    membershipWrites.set(topicId, pending);
+    void pending.finally(() => {
+      if (membershipWrites.get(topicId) === pending) membershipWrites.delete(topicId);
+    }).catch(() => {});
+    return pending;
+  }
+
   async function addItemsToTopic(topicId: string, itemType: TopicItemType, itemIds: string[]): Promise<string[]> {
-    const added: string[] = [];
-    for (const itemId of new Set(itemIds)) {
-      const key = membershipKey(itemType, itemId);
-      const current = memberships.value[key] ?? [];
-      if (!current.includes(topicId)) {
-        memberships.value[key] = [...current, topicId];
-        added.push(itemId);
+    const ids = [...new Set(itemIds)];
+    return writeMemberships(topicId, itemType, ids, async () => {
+      const added = await backendAddTopicItems({ topicId, itemType, itemIds: ids });
+      for (const id of ids) {
+        const key = membershipKey(itemType, id);
+        memberships.value[key] = [...new Set([...(memberships.value[key] ?? []), topicId])];
       }
-    }
-    try {
-      await backendAddTopicItems({ topicId, itemType, itemIds });
       const topic = byId(topicId);
       if (topic) topic.item_count += added.length;
       return added;
-    } catch (error) {
-      // Roll back only this topic: another topic change on the same item may
-      // have committed meanwhile.
-      for (const itemId of added) {
-        const key = membershipKey(itemType, itemId);
-        memberships.value[key] = (memberships.value[key] ?? []).filter((id) => id !== topicId);
-      }
-      throw error;
-    }
+    });
   }
 
-  /** Unlink one item. Resolves with whether it was a member before. */
   async function removeItemFromTopic(topicId: string, itemType: TopicItemType, itemId: string): Promise<boolean> {
-    const key = membershipKey(itemType, itemId);
-    const wasMember = (memberships.value[key] ?? []).includes(topicId);
-    memberships.value[key] = (memberships.value[key] ?? []).filter((id) => id !== topicId);
-    try {
-      await backendRemoveTopicItem({ topicId, itemType, itemId });
+    return writeMemberships(topicId, itemType, [itemId], async () => {
+      const removed = await backendRemoveTopicItem({ topicId, itemType, itemId });
+      const key = membershipKey(itemType, itemId);
+      memberships.value[key] = (memberships.value[key] ?? []).filter((id) => id !== topicId);
       const topic = byId(topicId);
-      if (topic && wasMember) topic.item_count = Math.max(0, topic.item_count - 1);
-      return wasMember;
-    } catch (error) {
-      const now = memberships.value[key] ?? [];
-      if (wasMember && !now.includes(topicId)) memberships.value[key] = [...now, topicId];
-      throw error;
-    }
+      if (topic && removed) topic.item_count = Math.max(0, topic.item_count - 1);
+      return removed;
+    });
   }
 
   async function fetchTimeline(topicId: string): Promise<BackendTopicTimelineItem[]> {
@@ -243,16 +287,20 @@ export const useTopicsStore = defineStore('topics', () => {
   }
 
   async function upsertNote(input: Parameters<typeof backendUpsertTopicNote>[0]) {
-    const note = await backendUpsertTopicNote(input);
-    const topic = byId(input.topicId);
-    if (topic && !input.id) topic.note_count += 1;
-    return note;
+    return loader.mutate(async () => {
+      const note = await backendUpsertTopicNote(input);
+      const topic = byId(input.topicId);
+      if (topic && !input.id) topic.note_count += 1;
+      return note;
+    });
   }
 
   async function deleteNote(topicId: string, noteId: string) {
-    await backendDeleteTopicNote(noteId);
-    const topic = byId(topicId);
-    if (topic) topic.note_count = Math.max(0, topic.note_count - 1);
+    return loader.mutate(async () => {
+      await backendDeleteTopicNote(noteId);
+      const topic = byId(topicId);
+      if (topic) topic.note_count = Math.max(0, topic.note_count - 1);
+    });
   }
 
   /**
@@ -263,6 +311,11 @@ export const useTopicsStore = defineStore('topics', () => {
    * in the other.
    */
   const files = ref<Record<string, BackendTopicFile[]>>({});
+  const fileLoads = new Map<string, ReturnType<typeof orderedLoad>>();
+  function fileLoader(topicId: string) {
+    if (!fileLoads.has(topicId)) fileLoads.set(topicId, orderedLoad());
+    return fileLoads.get(topicId)!;
+  }
   const filesInFlight = new Map<string, Promise<void>>();
 
   function filesFor(topicId: string): BackendTopicFile[] {
@@ -278,8 +331,8 @@ export const useTopicsStore = defineStore('topics', () => {
     if (!backendCommandsAvailable() || !topicId) return Promise.resolve();
     const running = filesInFlight.get(topicId);
     if (running) return running;
-    const request = backendListTopicFiles(topicId)
-      .then((loaded) => setFiles(topicId, loaded))
+    const request = fileLoader(topicId).load(() => backendListTopicFiles(topicId),
+      (loaded) => setFiles(topicId, loaded), (error) => { throw error; })
       .finally(() => filesInFlight.delete(topicId));
     filesInFlight.set(topicId, request);
     return request;
@@ -287,14 +340,18 @@ export const useTopicsStore = defineStore('topics', () => {
 
   async function addFile(input: Parameters<typeof backendAddTopicFile>[0]): Promise<BackendTopicFile | null> {
     if (!backendCommandsAvailable()) return null;
-    const added = await backendAddTopicFile(input);
-    setFiles(input.topicId, [...filesFor(input.topicId).filter((file) => file.id !== added.id), added]);
-    return added;
+    return fileLoader(input.topicId).mutate(async () => {
+      const added = await backendAddTopicFile(input);
+      setFiles(input.topicId, [...filesFor(input.topicId).filter((file) => file.id !== added.id), added]);
+      return added;
+    });
   }
 
   async function deleteFile(topicId: string, fileId: string) {
-    await backendDeleteTopicFile(fileId);
-    setFiles(topicId, filesFor(topicId).filter((file) => file.id !== fileId));
+    return fileLoader(topicId).mutate(async () => {
+      await backendDeleteTopicFile(fileId);
+      setFiles(topicId, filesFor(topicId).filter((file) => file.id !== fileId));
+    });
   }
 
   function downloadFile(fileId: string) {

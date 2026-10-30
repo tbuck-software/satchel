@@ -1,3 +1,4 @@
+import { orderedLoad } from './internal/orderedLoad';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import {
@@ -14,8 +15,10 @@ import { useMessagesStore } from '@/stores/messages';
 
 export const useDraftsStore = defineStore('drafts', () => {
   const items = ref<BackendDraft[]>([]);
-  const loading = ref(false);
+  const loader = orderedLoad();
+  const { loading } = loader;
   const lastError = ref<string | null>(null);
+  let saveErrorRevision = 0;
   const connectionStore = useConnectionStore();
 
   const sorted = computed(() =>
@@ -28,34 +31,32 @@ export const useDraftsStore = defineStore('drafts', () => {
 
   async function load() {
     if (!backendCommandsAvailable()) return;
-    loading.value = true;
-    try {
-      items.value = await backendListDrafts();
-      lastError.value = null;
-      connectionStore.clearBackendError('drafts');
-    } catch (err) {
-      // `items` stays as it was: a failed list says nothing about the drafts.
-      // The view reads the connection channel to tell this from "no drafts".
-      lastError.value = err instanceof Error ? err.message : String(err);
+    const errorRevision = saveErrorRevision;
+    await loader.load(backendListDrafts, (rows) => { items.value = rows; }, (err) => {
+      if (errorRevision === saveErrorRevision) lastError.value = err instanceof Error ? err.message : String(err);
       connectionStore.reportBackendError('drafts', err);
-    } finally {
-      loading.value = false;
-    }
+    }, () => {
+      if (errorRevision === saveErrorRevision) lastError.value = null;
+      connectionStore.clearBackendError('drafts');
+    });
   }
 
   async function save(input: BackendDraftInput): Promise<BackendDraft | null> {
     if (!backendCommandsAvailable()) return null;
-    try {
-      const draft = await backendSaveDraft(input);
-      const idx = items.value.findIndex((item) => item.id === draft.id);
-      if (idx >= 0) items.value.splice(idx, 1, draft);
-      else items.value.unshift(draft);
-      useMessagesStore().applySavedDraft(draft);
-      return draft;
-    } catch (err) {
-      lastError.value = err instanceof Error ? err.message : String(err);
-      throw err;
-    }
+    return loader.mutate(async () => {
+      try {
+        const draft = await backendSaveDraft(input);
+        const idx = items.value.findIndex((item) => item.id === draft.id);
+        if (idx >= 0) items.value.splice(idx, 1, draft);
+        else items.value.unshift(draft);
+        useMessagesStore().applySavedDraft(draft);
+        return draft;
+      } catch (err) {
+        saveErrorRevision++;
+        lastError.value = err instanceof Error ? err.message : String(err);
+        throw err;
+      }
+    });
   }
 
   async function fetchOne(id: string): Promise<BackendDraft | null> {
@@ -65,8 +66,10 @@ export const useDraftsStore = defineStore('drafts', () => {
 
   async function remove(id: string) {
     if (!backendCommandsAvailable()) return;
-    await backendDeleteDraft(id);
-    items.value = items.value.filter((item) => item.id !== id);
+    await loader.mutate(async () => {
+      await backendDeleteDraft(id);
+      items.value = items.value.filter((item) => item.id !== id);
+    });
   }
 
   /**

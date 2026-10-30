@@ -307,6 +307,10 @@ for (const item of outbox.filter((entry) => entry.status === 'scheduled')) {
 }
 const topics: BackendTopic[] = mockTopics.map((topic) => ({ ...topic }));
 const topicTimeline: Record<string, BackendTopicTimelineItem[]> = { ...mockTopicTimeline };
+const topicLinks: { topic_id: string; item_type: string; item_id: string }[] = Object.entries(topicTimeline)
+  .flatMap(([topicId, rows]) => rows.filter((row) => row.item_type !== 'note').map((row) => ({
+    topic_id: topicId, item_type: row.item_type, item_id: row.item_id,
+  })));
 function draftFromInput(scope: Record<string, unknown>): BackendDraft {
   return {
     ...scope,
@@ -1196,9 +1200,32 @@ const handlers: Record<string, Handler> = {
     const thread = findThread(item.thread_id);
     return thread ? accountVisible(thread.accountId) : true;
   }),
-  list_topic_memberships: () => [],
-  add_topic_items: () => undefined,
-  remove_topic_item: () => undefined,
+  list_topic_memberships: (payload) => {
+    const scope = input(payload);
+    return topicLinks.filter((link) => link.item_type === scope.item_type
+      && (scope.item_ids as string[]).includes(link.item_id)).map(({ topic_id, item_id }) => ({ topic_id, item_id }));
+  },
+  add_topic_items: (payload) => {
+    const scope = input(payload);
+    const added: string[] = [];
+    for (const id of scope.item_ids as string[]) {
+      if (topicLinks.some((link) => link.topic_id === scope.topic_id && link.item_type === scope.item_type && link.item_id === id)) continue;
+      topicLinks.push({ topic_id: scope.topic_id as string, item_type: scope.item_type as string, item_id: id });
+      added.push(id);
+    }
+    const topic = topics.find((topic) => topic.id === scope.topic_id);
+    if (topic) topic.item_count += added.length;
+    return added;
+  },
+  remove_topic_item: (payload) => {
+    const scope = input(payload);
+    const index = topicLinks.findIndex((link) => link.topic_id === scope.topic_id && link.item_type === scope.item_type && link.item_id === scope.item_id);
+    if (index < 0) return false;
+    topicLinks.splice(index, 1);
+    const topic = topics.find((topic) => topic.id === scope.topic_id);
+    if (topic) topic.item_count = Math.max(0, topic.item_count - 1);
+    return true;
+  },
   list_topic_files: () => [],
 
   /* --- composer ------------------------------------------------------- */

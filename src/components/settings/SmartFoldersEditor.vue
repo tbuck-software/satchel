@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CollectionLoadState from '@/components/ui/CollectionLoadState.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { onMounted, ref } from 'vue';
@@ -80,7 +81,14 @@ async function remove(id: string) {
       >{{ $t('settings.smartFolders.hintTail') }}
     </p>
 
-    <ul v-if="smart.items.length > 0" class="list">
+    <CollectionLoadState
+      :loading="smart.loading"
+      :failed="smart.loadFailed"
+      :has-content="smart.items.length > 0"
+      :error-label="$t('settings.smartFolders.loadFailed')"
+      @retry="smart.load()"
+    />
+    <ul v-if="smart.items.length > 0" class="list" :aria-busy="smart.loading">
       <li v-for="f in smart.items" :key="f.id">
         <CardButton class="row" @click="edit(f.id)">
           <span class="ico">{{ f.icon || '🔍' }}</span>
@@ -92,7 +100,7 @@ async function remove(id: string) {
         <AppButton class="delete" @click="remove(f.id)" variant="danger" size="sm">{{ $t('common.delete') }}</AppButton>
       </li>
     </ul>
-    <p v-else class="empty">{{ $t('settings.smartFolders.empty') }}</p>
+    <p v-else-if="!smart.loading && !smart.loadFailed" class="empty">{{ $t('settings.smartFolders.empty') }}</p>
 
     <div class="editor">
       <h4>{{ editingId ? $t('settings.smartFolders.editTitle') : $t('settings.smartFolders.newTitle') }}</h4>

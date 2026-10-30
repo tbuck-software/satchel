@@ -546,12 +546,18 @@ impl<'a> TopicRepository<'a> {
         Ok(())
     }
 
-    pub async fn add_items(&self, request: AddTopicItemsRequest) -> Result<(), TopicError> {
+    /// Returns only links inserted by this transaction, with each item listed once.
+    /// Callers can undo this receipt without guessing the previous membership.
+    pub async fn add_items(
+        &self,
+        request: AddTopicItemsRequest,
+    ) -> Result<Vec<String>, TopicError> {
         let added_by = request.added_by.unwrap_or(TopicAddedBy::User);
         let now = chrono::Utc::now().to_rfc3339();
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut added = Vec::new();
         for item_id in &request.item_ids {
-            sqlx::query(
+            let result = sqlx::query(
                 "INSERT OR IGNORE INTO topic_items (topic_id, item_type, item_id, added_at, added_by)
                  VALUES (?, ?, ?, ?, ?)",
             )
@@ -562,19 +568,25 @@ impl<'a> TopicRepository<'a> {
             .bind(added_by.as_str())
             .execute(&mut *tx)
             .await?;
+            if result.rows_affected() > 0 {
+                added.push(item_id.clone());
+            }
         }
         tx.commit().await?;
-        Ok(())
+        Ok(added)
     }
 
-    pub async fn remove_item(&self, request: RemoveTopicItemRequest) -> Result<(), TopicError> {
-        sqlx::query("DELETE FROM topic_items WHERE topic_id = ? AND item_type = ? AND item_id = ?")
-            .bind(&request.topic_id)
-            .bind(request.item_type.as_str())
-            .bind(&request.item_id)
-            .execute(self.pool)
-            .await?;
-        Ok(())
+    /// Returns whether a link was actually deleted.
+    pub async fn remove_item(&self, request: RemoveTopicItemRequest) -> Result<bool, TopicError> {
+        let result = sqlx::query(
+            "DELETE FROM topic_items WHERE topic_id = ? AND item_type = ? AND item_id = ?",
+        )
+        .bind(&request.topic_id)
+        .bind(request.item_type.as_str())
+        .bind(&request.item_id)
+        .execute(self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     /// Remove every thread link for a thread that is being deleted.

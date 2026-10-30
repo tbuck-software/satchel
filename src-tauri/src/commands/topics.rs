@@ -352,7 +352,7 @@ pub async fn delete_topic(
 pub async fn add_topic_items(
     pool: tauri::State<'_, sqlx::SqlitePool>,
     input: AddTopicItemsInput,
-) -> CommandResult<()> {
+) -> CommandResult<Vec<String>> {
     let request = map_add_items(input).map_err(CommandError::from)?;
     TopicRepository::new(pool.inner())
         .add_items(request)
@@ -364,7 +364,7 @@ pub async fn add_topic_items(
 pub async fn remove_topic_item(
     pool: tauri::State<'_, sqlx::SqlitePool>,
     input: RemoveTopicItemInput,
-) -> CommandResult<()> {
+) -> CommandResult<bool> {
     let request = map_remove_item(input).map_err(CommandError::from)?;
     TopicRepository::new(pool.inner())
         .remove_item(request)

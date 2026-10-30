@@ -1,6 +1,6 @@
 use satchel_core::db::topics::{
-    AddTopicItemsRequest, TopicAddedBy, TopicError, TopicFileWriteRequest, TopicItemType,
-    TopicMembershipsQuery, TopicNoteWriteRequest, TopicRepository, TopicStatus,
+    AddTopicItemsRequest, RemoveTopicItemRequest, TopicAddedBy, TopicError, TopicFileWriteRequest,
+    TopicItemType, TopicMembershipsQuery, TopicNoteWriteRequest, TopicRepository, TopicStatus,
     TopicTimelineItemKind, TopicUpsertRequest,
 };
 use sqlx::sqlite::SqlitePoolOptions;
@@ -692,4 +692,25 @@ async fn files_default_mime_support_empty_content_and_report_missing_downloads()
 fn timeline_item_kind_keeps_notes_outside_membership_item_types() {
     assert_eq!(TopicTimelineItemKind::Note.as_str(), "note");
     assert!(TopicItemType::try_from("note").is_err());
+}
+
+#[tokio::test]
+async fn membership_receipts_cover_duplicates_concurrent_adds_and_removals() {
+    let pool = pool().await;
+    seed_thread(&pool).await;
+    let repository = TopicRepository::new(&pool);
+    let topic = repository.upsert(topic_input("Receipt")).await.unwrap();
+    let (first, second) = tokio::join!(
+        repository.add_items(add_input(&topic.id, "thread", &["th-1", "th-1"])),
+        repository.add_items(add_input(&topic.id, "thread", &["th-1"]))
+    );
+    let receipts: Vec<String> = first.unwrap().into_iter().chain(second.unwrap()).collect();
+    assert_eq!(receipts, vec!["th-1"]);
+    let remove = || RemoveTopicItemRequest {
+        topic_id: topic.id.clone(),
+        item_type: TopicItemType::Thread,
+        item_id: "th-1".into(),
+    };
+    assert!(repository.remove_item(remove()).await.unwrap());
+    assert!(!repository.remove_item(remove()).await.unwrap());
 }
