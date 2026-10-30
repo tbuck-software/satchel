@@ -10,9 +10,13 @@ use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use std::time::Duration;
 
 async fn fixture() -> SqlitePool {
+    fixture_at("sqlite::memory:").await
+}
+
+async fn fixture_at(url: &str) -> SqlitePool {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
-        .connect("sqlite::memory:")
+        .connect(url)
         .await
         .unwrap();
     db::init(&pool).await.unwrap();
@@ -179,6 +183,186 @@ async fn disabling_or_changing_the_body_window_cancels_or_restarts_its_cursor() 
         .contains("\"after\":\"\""));
     assert!(body_window::set_days(&pool, 0, 0).await.unwrap());
     assert!(marker(&pool, &BODY_WINDOW.marker_key()).await.is_none());
+}
+
+#[tokio::test]
+async fn recurring_body_window_resumes_across_ticks_and_reopening_the_database() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let url = format!("sqlite://{}", file.path().display());
+    let pool = fixture_at(&url).await;
+    for id in ["a", "b", "c"] {
+        message(&pool, id, "Uniqueevictedterm").await;
+    }
+    // An already-stored policy, including upgraded profiles with no schedule.
+    sqlx::query("INSERT INTO app_settings VALUES ('sync.body_window_days', '30', '')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let now = chrono::DateTime::parse_from_rfc3339("2026-10-01T12:00:00Z")
+        .unwrap()
+        .to_utc();
+    assert!(body_window::schedule_due(&pool, 0, now).await.unwrap());
+    data_repairs::run_repair(&pool, &BODY_WINDOW, 1, Some(1), |_| {})
+        .await
+        .unwrap();
+    let saved = marker(&pool, &BODY_WINDOW.marker_key()).await;
+    assert!(
+        !body_window::schedule_due(&pool, 0, now + chrono::Duration::days(2))
+            .await
+            .unwrap()
+    );
+    assert_eq!(marker(&pool, &BODY_WINDOW.marker_key()).await, saved);
+    pool.close().await;
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .unwrap();
+    assert!(
+        !body_window::schedule_due(&pool, 0, now + chrono::Duration::days(2))
+            .await
+            .unwrap()
+    );
+    assert_eq!(marker(&pool, &BODY_WINDOW.marker_key()).await, saved);
+    data_repairs::run_repair(&pool, &BODY_WINDOW, 1, Some(1), |_| {})
+        .await
+        .unwrap();
+    assert!(marker(&pool, &BODY_WINDOW.marker_key())
+        .await
+        .unwrap()
+        .contains("\"after\":\"b\""));
+    data_repairs::run_repair(&pool, &BODY_WINDOW, 1, None, |_| {})
+        .await
+        .unwrap();
+    assert!(
+        !body_window::schedule_due(&pool, 0, now + chrono::Duration::hours(23))
+            .await
+            .unwrap()
+    );
+    assert!(
+        body_window::schedule_due(&pool, 0, now + chrono::Duration::days(2))
+            .await
+            .unwrap()
+    );
+    assert!(body_window::set_days(&pool, 0, 0).await.unwrap());
+    assert!(
+        !body_window::schedule_due(&pool, 30, now + chrono::Duration::days(3))
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        data_repairs::run_repair(&pool, &BODY_WINDOW, 1, None, |_| {})
+            .await
+            .unwrap(),
+        RepairRun::NotPending
+    );
+}
+
+#[tokio::test]
+async fn recurring_body_window_preserves_local_sources_and_evicts_attachments_and_fts_together() {
+    let pool = fixture().await;
+    for id in ["remote", "draft", "import", "local"] {
+        message(&pool, id, "Uniqueevictedterm").await;
+        sqlx::query("INSERT INTO attachments (id, message_id, filename, content_type, cached_path, created_at) VALUES (?, ?, 'file.txt', 'text/plain', '/cache/file', '')")
+            .bind(format!("att-{id}")).bind(id).execute(&pool).await.unwrap();
+    }
+    sqlx::query("UPDATE messages SET is_draft = 1 WHERE id = 'draft'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE messages SET remote_id = 'import-123' WHERE id = 'import'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE messages SET remote_id = '' WHERE id = 'local'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let now = chrono::DateTime::parse_from_rfc3339("2026-10-01T12:00:00Z")
+        .unwrap()
+        .to_utc();
+    // Mobile's default policy must run even before the first settings save.
+    assert!(body_window::schedule_due(&pool, 30, now).await.unwrap());
+    data_repairs::run_repair(&pool, &BODY_WINDOW, 2, None, |_| {})
+        .await
+        .unwrap();
+    let cached: Vec<String> = sqlx::query_scalar(
+        "SELECT message_id FROM attachments WHERE cached_path IS NOT NULL ORDER BY message_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(cached, ["draft", "import", "local"]);
+    let matches: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'Uniqueevictedterm'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(matches, 3);
+    assert!(db::message_index_intact(&pool).await.unwrap());
+    sqlx::query("UPDATE accounts SET provider = 'local'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    message(&pool, "unknown-provider", "Only copy").await;
+    assert!(
+        body_window::schedule_due(&pool, 30, now + chrono::Duration::days(1))
+            .await
+            .unwrap()
+    );
+    data_repairs::run_repair(&pool, &BODY_WINDOW, 10, None, |_| {})
+        .await
+        .unwrap();
+    let body: Option<String> =
+        sqlx::query_scalar("SELECT body_text FROM messages WHERE id = 'unknown-provider'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(body.as_deref(), Some("Only copy"));
+}
+
+#[tokio::test]
+async fn retention_scheduler_cannot_revive_a_concurrently_disabled_policy() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let url = format!("sqlite://{}", file.path().display());
+    let pool = fixture_at(&url).await;
+    let scheduler_pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .unwrap();
+    message(&pool, "a", "Keep after disable").await;
+    sqlx::query("UPDATE messages SET date = ?")
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let later = chrono::Utc::now() + chrono::Duration::days(100);
+    for _ in 0..4 {
+        body_window::set_days(&pool, 30, 0).await.unwrap();
+        data_repairs::run_repair(&pool, &BODY_WINDOW, 10, None, |_| {})
+            .await
+            .unwrap();
+        let (scheduled, disabled) = tokio::join!(
+            body_window::schedule_due(&scheduler_pool, 0, later),
+            body_window::set_days(&pool, 0, 0),
+        );
+        scheduled.unwrap();
+        assert!(disabled.unwrap());
+        assert!(marker(&pool, &BODY_WINDOW.marker_key()).await.is_none());
+        assert_eq!(
+            data_repairs::run_repair(&pool, &BODY_WINDOW, 1, None, |_| {})
+                .await
+                .unwrap(),
+            RepairRun::NotPending
+        );
+    }
+    let body: Option<String> = sqlx::query_scalar("SELECT body_text FROM messages WHERE id = 'a'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(body.as_deref(), Some("Keep after disable"));
 }
 
 #[tokio::test]

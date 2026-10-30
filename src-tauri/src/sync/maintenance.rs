@@ -101,9 +101,26 @@ struct DataRepairProgress {
 
 async fn run_data_repairs(
     pool: &SqlitePool,
+    report: impl FnMut(DataRepairProgress),
+) -> Result<(), String> {
+    run_data_repairs_at(pool, chrono::Utc::now(), report).await
+}
+
+async fn run_data_repairs_at(
+    pool: &SqlitePool,
+    now: chrono::DateTime<chrono::Utc>,
     mut report: impl FnMut(DataRepairProgress),
 ) -> Result<(), String> {
-    let mut failure = None;
+    let mut failure = satchel_core::db::body_window::schedule_due(
+        pool,
+        crate::commands::notifications::default_body_window_days(),
+        now,
+    )
+    .await
+    .err();
+    if let Some(err) = &failure {
+        warn!(target: "satchel::maintenance", %err, "body retention scheduling failed");
+    }
     use satchel_core::db::data_repairs::{
         is_pending, registered_repairs, run_repair, DEFAULT_BLOCK_SIZE,
     };
@@ -559,20 +576,11 @@ async fn rebuild_search_projection(pool: &SqlitePool) -> Result<(), String> {
 #[cfg(test)]
 async fn body_window_cleanup(pool: &SqlitePool) -> Result<u64, String> {
     use satchel_core::db::{
-        body_window::{set_days, BODY_WINDOW},
+        body_window::{schedule_due, BODY_WINDOW},
         data_repairs::run_repair,
     };
-    let days: String =
-        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'sync.body_window_days'")
-            .fetch_one(pool)
-            .await
-            .map_err(|err| err.to_string())?;
     let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE NULLIF(body_text, '') IS NOT NULL OR NULLIF(body_html, '') IS NOT NULL").fetch_one(pool).await.map_err(|err| err.to_string())?;
-    sqlx::query("DELETE FROM app_settings WHERE key = 'sync.body_window_days'")
-        .execute(pool)
-        .await
-        .map_err(|err| err.to_string())?;
-    set_days(pool, days.parse().unwrap(), 0)
+    schedule_due(pool, 0, chrono::Utc::now())
         .await
         .map_err(|err| err.to_string())?;
     run_repair(pool, &BODY_WINDOW, 1000, None, |_| {})
@@ -819,6 +827,28 @@ mod body_window_tests {
     }
 
     #[tokio::test]
+    async fn production_repairs_evict_newly_aged_bodies_without_a_setting_change() {
+        let pool = pool_with_messages().await;
+        let now = chrono::Utc::now();
+        satchel_core::db::body_window::set_days(&pool, 1, 0)
+            .await
+            .unwrap();
+        super::run_data_repairs_at(&pool, now, |_| {})
+            .await
+            .unwrap();
+        assert!(body_of(&pool, "recent").await.is_some());
+        super::run_data_repairs_at(&pool, now + chrono::Duration::days(2), |_| {})
+            .await
+            .unwrap();
+        assert!(
+            body_of(&pool, "recent").await.is_none(),
+            "rolling retention must advance without another settings save"
+        );
+        assert!(body_of(&pool, "old-local").await.is_some());
+        assert!(body_of(&pool, "old-draft").await.is_some());
+    }
+
+    #[tokio::test]
     async fn clears_old_bodies_that_can_be_fetched_again() {
         let pool = pool_with_messages().await;
         let cleared = super::body_window_cleanup(&pool).await.expect("cleanup");
@@ -1011,6 +1041,67 @@ mod body_window_tests {
         .await
         .expect("projection");
         assert_eq!(projected, 1);
+    }
+
+    #[tokio::test]
+    async fn same_count_content_drift_is_detected_and_repaired() {
+        let pool = pool_with_messages().await;
+        sqlx::query("UPDATE messages SET body_text = 'Oldterm' WHERE id = 'recent'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DROP TRIGGER messages_au")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE messages SET body_text = 'Newterm' WHERE id = 'recent'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(satchel_core::db::message_index_matches_row_count(&pool)
+            .await
+            .unwrap());
+        assert_eq!(fts_hits(&pool, "Oldterm").await, 1);
+        assert_eq!(fts_hits(&pool, "Newterm").await, 0);
+        assert!(!satchel_core::db::message_index_intact(&pool).await.unwrap());
+        assert!(super::verify_and_repair_fts(&pool).await.unwrap());
+        assert_eq!(fts_hits(&pool, "Oldterm").await, 0);
+        assert_eq!(fts_hits(&pool, "Newterm").await, 1);
+        assert!(!super::verify_and_repair_fts(&pool).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn read_only_fts_check_is_an_error_not_a_corruption_verdict() {
+        let pool = pool_with_messages().await;
+        satchel_core::db::maintenance::request_fts_check(&pool)
+            .await
+            .unwrap();
+        sqlx::query("PRAGMA query_only = ON")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(satchel_core::db::message_index_matches_row_count(&pool)
+            .await
+            .unwrap());
+        assert!(satchel_core::db::message_index_intact(&pool).await.is_err());
+        assert!(super::run_pending_fts_check(&pool).await.is_err());
+        let pending: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM app_settings WHERE key = 'maintenance.fts_check_pending'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(pending, 1, "an operational failure must stay retryable");
+        sqlx::query("PRAGMA query_only = OFF")
+            .execute(&pool)
+            .await
+            .unwrap();
+        super::run_pending_fts_check(&pool).await.unwrap();
+        assert!(!super::verify_and_repair_fts(&pool).await.unwrap());
     }
 
     #[tokio::test]

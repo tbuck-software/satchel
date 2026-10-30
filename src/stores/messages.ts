@@ -370,13 +370,16 @@ export const useMessagesStore = defineStore('messages', () => {
   const accountsStore = useAccountsStore();
   const connectionStore = useConnectionStore();
   const messagesByThread = ref<Record<string, Message[]>>({});
-  const threadLoadVersions = ref<Record<string, number>>({});
+  // Opaque identities are never reused, even after eviction and reopening.
+  // Entries live only as long as their cached thread, not its browsing history.
+  const threadLoadVersions = new Map<string, symbol>();
   const loadingThreadIds = ref<string[]>([]);
   const loadingBodyMessageIds = ref<string[]>([]);
   const threadLoadPromises = new Map<string, Promise<void>>();
   const threadRefreshRunners = new Map<string, CoalescingRunner<void>>();
   const hydratedAttachmentMessageIds = new Set<string>();
-  const hydratingAttachmentMessageIds = new Set<string>();
+  const hydratingAttachmentMessageIds = new Map<string, symbol>();
+  const bodyLoadOwners = new Map<string, symbol>();
   const retained = new Map<string, RetainedThread>();
   let sweepTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -394,20 +397,21 @@ export const useMessagesStore = defineStore('messages', () => {
       + message.attachments.reduce((sum, attachment) => sum + (attachment.dataUrl?.length ?? 0), 0);
   }
 
-  function nextVersion(threadId: string): number {
-    const version = (threadLoadVersions.value[threadId] ?? 0) + 1;
-    threadLoadVersions.value = { ...threadLoadVersions.value, [threadId]: version };
+  function nextVersion(threadId: string): symbol {
+    const version = Symbol();
+    threadLoadVersions.set(threadId, version);
     return version;
   }
 
   function evictThread(threadId: string) {
     retained.delete(threadId);
     const evictedMessages = messagesByThread.value[threadId] ?? [];
-    nextVersion(threadId);
+    threadLoadVersions.delete(threadId);
     const evictedIds = new Set(evictedMessages.map((message) => message.id));
     for (const id of evictedIds) {
       hydratedAttachmentMessageIds.delete(id);
       hydratingAttachmentMessageIds.delete(id);
+      bodyLoadOwners.delete(id);
     }
     loadingBodyMessageIds.value = loadingBodyMessageIds.value.filter((id) => !evictedIds.has(id));
     delete messagesByThread.value[threadId];
@@ -517,6 +521,7 @@ export const useMessagesStore = defineStore('messages', () => {
       await trackLoad(threadId, async () => {
         const version = nextVersion(threadId);
         await hydrateMessageBodies(threadId, ids, version);
+        if (threadLoadVersions.get(threadId) !== version) return;
         // Decryption may reveal attachments that were absent from the ciphertext.
         for (const id of ids) hydratedAttachmentMessageIds.delete(id);
         await hydrateMessageAttachments(threadId, ids, version);
@@ -531,6 +536,7 @@ export const useMessagesStore = defineStore('messages', () => {
     return {
       threadCount: [...retained.keys()].filter((threadId) => messagesByThread.value[threadId]).length,
       messageCount: cachedMessages.length,
+      requestGenerationCount: threadLoadVersions.size,
       bodyChars: cachedMessages.reduce(
         (total, message) => total + messageBodyChars(message),
         0,
@@ -554,7 +560,7 @@ export const useMessagesStore = defineStore('messages', () => {
       const endPreview = perfStart(`messages.open:${threadId}`);
       const opened = await backendLoadThreadMessages(threadId, OPEN_BODY_COUNT);
       endPreview?.();
-      if (threadLoadVersions.value[threadId] !== version) {
+      if (threadLoadVersions.get(threadId) !== version) {
         endTotal?.();
         return;
       }
@@ -588,7 +594,7 @@ export const useMessagesStore = defineStore('messages', () => {
       // a body. Otherwise a duplicate reload can invalidate this request after
       // the preview, then fail and leave the UI on "Loading full message...".
       await applyBodyRows(threadId, prioritizedIds, opened.bodies, version, options);
-      if (threadLoadVersions.value[threadId] !== version) {
+      if (threadLoadVersions.get(threadId) !== version) {
         endTotal?.();
         return;
       }
@@ -603,7 +609,7 @@ export const useMessagesStore = defineStore('messages', () => {
       endTotal?.();
     } catch (error) {
       endTotal?.();
-      if (threadLoadVersions.value[threadId] !== version) return;
+      if (threadLoadVersions.get(threadId) !== version) return;
       if (backendCommandsAvailable()) {
         connectionStore.reportBackendError('messages', error);
       }
@@ -698,11 +704,11 @@ export const useMessagesStore = defineStore('messages', () => {
       try {
         rows = await backendListMessagesPreview(threadId);
       } catch (error) {
-        if (threadLoadVersions.value[threadId] !== version) return;
+        if (threadLoadVersions.get(threadId) !== version) return;
         if (backendCommandsAvailable()) connectionStore.reportBackendError('messages', error);
         return;
       }
-      if (threadLoadVersions.value[threadId] !== version) return;
+      if (threadLoadVersions.get(threadId) !== version) return;
       entryFor(threadId).stale = false;
       const previousById = new Map(
         (messagesByThread.value[threadId] ?? []).map((message) => [message.id, message]),
@@ -763,9 +769,9 @@ export const useMessagesStore = defineStore('messages', () => {
   async function hydrateMessageBodies(
     threadId: string,
     messageIds: string[],
-    version: number,
+    version: symbol,
   ) {
-    if (messageIds.length === 0) {
+    if (messageIds.length === 0 || threadLoadVersions.get(threadId) !== version) {
       return;
     }
 
@@ -779,7 +785,7 @@ export const useMessagesStore = defineStore('messages', () => {
       );
     } catch (error) {
       endBodies?.();
-      if (threadLoadVersions.value[threadId] !== version) {
+      if (threadLoadVersions.get(threadId) !== version) {
         return;
       }
       const message = error instanceof Error ? error.message : String(error);
@@ -812,10 +818,10 @@ export const useMessagesStore = defineStore('messages', () => {
     threadId: string,
     requestedIds: string[],
     rows: BackendMessageBody[],
-    version: number,
+    version: symbol,
     options: { remote: boolean },
   ) {
-    if (threadLoadVersions.value[threadId] !== version) {
+    if (threadLoadVersions.get(threadId) !== version) {
       return;
     }
 
@@ -868,12 +874,14 @@ export const useMessagesStore = defineStore('messages', () => {
     threadId: string,
     messageIds: string[],
     rows: BackendMessageBody[],
-    version: number,
+    version: symbol,
   ) {
     const rowsById = new Map(rows.map((row) => [row.id, row]));
     for (const id of messageIds) {
-      if (isBodyLoading(id)) continue;
-      loadingBodyMessageIds.value = [...loadingBodyMessageIds.value, id];
+      if (threadLoadVersions.get(threadId) !== version) return;
+      if (bodyLoadOwners.get(id) === version) continue;
+      bodyLoadOwners.set(id, version);
+      if (!isBodyLoading(id)) loadingBodyMessageIds.value = [...loadingBodyMessageIds.value, id];
       let loaded: Awaited<ReturnType<typeof backendLoadMessageBody>>;
       try {
         loaded = await withTimeout(
@@ -882,7 +890,7 @@ export const useMessagesStore = defineStore('messages', () => {
           t('errors.messageLoadTimeout'),
         );
       } catch (error) {
-        if (threadLoadVersions.value[threadId] !== version) return;
+        if (threadLoadVersions.get(threadId) !== version) return;
         const detail = error instanceof Error ? error.message : String(error);
         patchMessage(threadId, id, (message) => ({
           ...message,
@@ -891,11 +899,14 @@ export const useMessagesStore = defineStore('messages', () => {
         }));
         continue;
       } finally {
-        loadingBodyMessageIds.value = loadingBodyMessageIds.value.filter(
-          (messageId) => messageId !== id,
-        );
+        if (bodyLoadOwners.get(id) === version) {
+          bodyLoadOwners.delete(id);
+          loadingBodyMessageIds.value = loadingBodyMessageIds.value.filter(
+            (messageId) => messageId !== id,
+          );
+        }
       }
-      if (threadLoadVersions.value[threadId] !== version) return;
+      if (threadLoadVersions.get(threadId) !== version) return;
       const row = rowsById.get(id);
       patchMessage(threadId, id, (message) =>
         applyMessageBody(message, {
@@ -940,18 +951,18 @@ export const useMessagesStore = defineStore('messages', () => {
   async function hydrateMessageAttachments(
     threadId: string,
     messageIds: string[],
-    version: number,
+    version: symbol,
   ) {
     if (messageIds.length === 0) {
       return;
     }
 
     const pending = messageIds.filter((messageId) =>
-      !hydratedAttachmentMessageIds.has(messageId) && !hydratingAttachmentMessageIds.has(messageId));
-    if (threadLoadVersions.value[threadId] !== version || pending.length === 0) {
+      !hydratedAttachmentMessageIds.has(messageId) && hydratingAttachmentMessageIds.get(messageId) !== version);
+    if (threadLoadVersions.get(threadId) !== version || pending.length === 0) {
       return;
     }
-    for (const messageId of pending) hydratingAttachmentMessageIds.add(messageId);
+    for (const messageId of pending) hydratingAttachmentMessageIds.set(messageId, version);
 
     // One round trip for the whole thread; a per-message listing made a topic
     // feed of twenty threads cost 160 invokes before a single image loaded.
@@ -971,7 +982,7 @@ export const useMessagesStore = defineStore('messages', () => {
 
     try {
       for (const messageId of pending) {
-        if (threadLoadVersions.value[threadId] !== version) {
+        if (threadLoadVersions.get(threadId) !== version) {
           return;
         }
 
@@ -990,9 +1001,11 @@ export const useMessagesStore = defineStore('messages', () => {
           attachments = hydrated.map((entry) => entry.attachment);
           hydrationError = hydrated.find((entry) => entry.error)?.error;
         }
-        hydratingAttachmentMessageIds.delete(messageId);
+        if (hydratingAttachmentMessageIds.get(messageId) === version) {
+          hydratingAttachmentMessageIds.delete(messageId);
+        }
 
-        if (threadLoadVersions.value[threadId] !== version) {
+        if (threadLoadVersions.get(threadId) !== version) {
           return;
         }
         // Only a clean pass counts as done. A failed one stays retryable, both
@@ -1014,7 +1027,11 @@ export const useMessagesStore = defineStore('messages', () => {
     } finally {
       // A superseded load stops early; what it did not get to has to stay
       // claimable by the next one.
-      for (const messageId of pending) hydratingAttachmentMessageIds.delete(messageId);
+      for (const messageId of pending) {
+        if (hydratingAttachmentMessageIds.get(messageId) === version) {
+          hydratingAttachmentMessageIds.delete(messageId);
+        }
+      }
     }
     enforceCacheBudget(threadId);
   }
@@ -1025,7 +1042,7 @@ export const useMessagesStore = defineStore('messages', () => {
    * resolve on their own.
    */
   async function retryInlineImages(threadId: string, messageId: string): Promise<void> {
-    const version = threadLoadVersions.value[threadId];
+    const version = threadLoadVersions.get(threadId);
     if (!version) {
       return;
     }
@@ -1035,7 +1052,7 @@ export const useMessagesStore = defineStore('messages', () => {
 
   /** Bodies and inline images for messages the reader is about to show. */
   async function loadAttachmentsForMessages(threadId: string, messageIds: string[]): Promise<void> {
-    const version = threadLoadVersions.value[threadId];
+    const version = threadLoadVersions.get(threadId);
     if (!version) {
       return;
     }

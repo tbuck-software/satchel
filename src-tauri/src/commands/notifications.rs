@@ -149,7 +149,7 @@ impl Default for NotificationPreferences {
 ///
 /// Thirty days is what Gmail for Android and Outlook Mobile both default to,
 /// and Outlook refuses to go beyond ninety at all.
-fn default_body_window_days() -> i64 {
+pub(crate) fn default_body_window_days() -> i64 {
     if cfg!(any(target_os = "android", target_os = "ios")) {
         30
     } else {
