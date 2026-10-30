@@ -36,7 +36,7 @@ jobs:
           java-version: 21
 
       - name: Install Android command-line tools
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
           # The default also requests the retired `tools` package, which sdkmanager rejects.
           packages: platform-tools
