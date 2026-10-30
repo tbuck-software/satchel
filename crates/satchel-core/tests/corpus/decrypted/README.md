@@ -46,9 +46,17 @@ run time. `signed-entity-in-preamble.eml` carries a signature by the
 | `nested-inline-envelope.eml` | `RemainingEncryption`: an envelope shown inline, below a cover note |
 | `missing-multipart-boundary.eml` | `MalformedMime`: `multipart/mixed` without a boundary |
 | `signed-part-labelled-by-description.eml` | `MalformedSigned`: the second part names the signature protocol only in `Content-Description`, not in its `Content-Type` |
+| `signed-entity-bare-cr.eml` | `MalformedSigned`: an S/MIME signed entity whose line breaks are CR CR LF. OpenSSL reads each as one line break and verifies the signature; the decoder would find no header in the entity and show it as text |
 
 Opaque signed-data shown inline below a cover note fails with `UndecodedPart`;
 the test builds that payload at run time, because it needs a real signature.
+
+`signed-entity-bare-cr.eml` is the one file here without CRLF line endings, and
+the outbox round trip cannot carry it: the outbox encrypts in text mode, which
+rewrites every line break to CRLF. Its test in `src/utils/smime_engine.rs`
+puts a real signature in place of the truncated one, wraps the file in a
+binary envelope, and checks that the same entity with CRLF or LF line breaks
+still verifies.
 
 Before these cases existed, every "must fail" file decoded successfully and
 returned the cover note alone, or nothing at all. Before the "must decode"

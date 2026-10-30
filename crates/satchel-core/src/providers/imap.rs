@@ -3815,12 +3815,19 @@ impl<'a> SignedParts<'a> {
     /// `None` unless the body holds exactly one content part and one signature
     /// part, and the signature part's own `Content-Type` is the declared
     /// protocol.
+    ///
+    /// An S/MIME entity must not hold a CR outside a CRLF. OpenSSL reads
+    /// CR CR LF as one line break, the decoder reads a CR and a line break,
+    /// so the two would split the entity's header from its body differently.
     fn split(content_type: &str, body: &'a [u8], boundary: &str) -> Option<Self> {
         let protocol = SignatureProtocol::of(&extract_header_param(content_type, "protocol")?)?;
         let [entity, signature] = exact_multipart_parts(body, boundary)[..] else {
             return None;
         };
         if entity.trim_ascii().is_empty() {
+            return None;
+        }
+        if protocol == SignatureProtocol::Smime && has_bare_cr(entity) {
             return None;
         }
         let (signature_header, _) = split_exact_part(signature);
@@ -3882,6 +3889,11 @@ impl<'a> SignedParts<'a> {
             SignatureProtocol::Smime => DetachedSignature::Smime(bundle),
         })
     }
+}
+
+/// Whether `bytes` holds a CR that is not followed by LF.
+fn has_bare_cr(bytes: &[u8]) -> bool {
+    memchr::memchr_iter(b'\r', bytes).any(|index| bytes.get(index + 1) != Some(&b'\n'))
 }
 
 /// The parts of a multipart body as a signature covers them: from the line

@@ -2127,6 +2127,68 @@ mod tests {
         );
     }
 
+    /// OpenSSL reads CR CR LF as one line break; the decoder does not, so it
+    /// finds no header in the entity and shows the header as text. The
+    /// signature still verifies over that entity, so it is refused.
+    #[test]
+    fn a_signed_entity_with_a_bare_cr_is_refused() {
+        use crate::email::decrypted::{parse_decrypted_body, DecodeError};
+        use base64::Engine;
+        let ca = issue_ca();
+        let leaf = issue_leaf(&ca, "Synthetic Signer", "sender@example.test");
+        let content = b"Content-Type: text/plain; charset=utf-8\r\n\r\nSigned text";
+        let key = load_private_key(&leaf.key_pem, None).unwrap();
+        let flags = Pkcs7Flags::DETACHED | Pkcs7Flags::BINARY;
+        let signature = Pkcs7::sign(&leaf.cert, &key, &Stack::new().unwrap(), content, flags)
+            .unwrap()
+            .to_der()
+            .unwrap();
+        let signature = base64::engine::general_purpose::STANDARD
+            .encode(signature)
+            .as_bytes()
+            .chunks(64)
+            .map(|line| std::str::from_utf8(line).unwrap())
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        // The corpus file with a real signature in place of its truncated one.
+        let signed = std::str::from_utf8(smime_corpus!("signed-entity-bare-cr.eml"))
+            .unwrap()
+            .replace("MIAGCSqGSIb3DQEHAqCAMIACAQEx", &signature);
+        let valid = |payload: &[u8]| {
+            OpensslLibEngine
+                .verify_against(payload, &store_trusting(&ca.0), Pkcs7Flags::empty())
+                .valid
+        };
+        // The outbox encrypts in text mode, which rewrites every line break
+        // to CRLF; a binary envelope, as another client may send, keeps them.
+        let decrypted = |payload: &[u8]| {
+            let mut recipients = Stack::new().unwrap();
+            recipients.push(leaf.cert.clone()).unwrap();
+            let flags = Pkcs7Flags::BINARY;
+            let encrypted = Pkcs7::encrypt(&recipients, payload, Cipher::aes_256_cbc(), flags)
+                .unwrap()
+                .to_smime(payload, flags)
+                .unwrap();
+            let bytes = decrypt(&leaf.key_pem, &leaf.cert_pem, None, &encrypted).unwrap();
+            assert_eq!(bytes, payload);
+            parse_decrypted_body(&bytes)
+        };
+
+        assert!(valid(signed.as_bytes()), "OpenSSL accepts the entity");
+        assert_eq!(
+            decrypted(signed.as_bytes()).err(),
+            Some(DecodeError::MalformedSigned)
+        );
+
+        for line_break in ["\r\n", "\n"] {
+            let payload = signed.replace("\r\r\n", "\r\n").replace("\r\n", line_break);
+            let parsed = decrypted(payload.as_bytes()).unwrap();
+            assert_eq!(parsed.body.text_parts, ["Signed text"], "{line_break:?}");
+            assert_eq!(parsed.signatures.len(), 1, "{line_break:?}");
+            assert!(valid(&parsed.signatures[0].0), "{line_break:?}");
+        }
+    }
+
     #[test]
     fn encrypted_broken_detached_signature_keeps_readable_body() {
         let ca = issue_ca();
