@@ -31,7 +31,10 @@ addition to compiling the integration. Xcode 16 Debug builds link the code into
 stub that loads it; `dlsym(RTLD_DEFAULT, …)` searches that dylib too.
 `scripts/verify-ios-hook-exports.mjs` takes the image from
 `xcodebuild -showBuildSettings`: the debug dylib when one was built, otherwise
-the executable. It reports every missing hook and fails on any.
+the executable. That dylib exports every symbol of libapp.a, more than a 64 MiB
+output buffer holds, so the script reads `dyld_info -exports` line by line and
+keeps only the hooks. It reports every missing hook and fails on any, and on a
+failed `dyld_info`.
 
 `mobile_notifications_frontend_ready` reserves a native listener lease when
 `listenerId` is null. The frontend registers its route callback, then activates

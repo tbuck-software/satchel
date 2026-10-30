@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
 /**
@@ -47,30 +49,66 @@ export function codeImage(settings, exists) {
 }
 
 /**
- * One line per hook that `exports` (the output of `dyld_info -exports`) lacks.
- * @param {string} image
- * @param {string} exports
+ * The hooks among the lines `dyld_info -exports` prints, one symbol per line
+ * after its offset. The debug dylib exports every symbol of libapp.a, more
+ * than any output buffer holds, so the lines are read as they arrive and only
+ * the hooks are kept.
+ * @param {Iterable<string> | AsyncIterable<string>} lines
+ * @returns {Promise<Set<string>>}
  */
-export function hookExportProblems(image, exports) {
+export async function exportedHooks(lines) {
+  const wanted = new Map(NATIVE_HOOKS.map((name) => [`_${name}`, name]));
+  const found = new Set();
+  for await (const line of lines) {
+    for (const token of line.trim().split(/\s+/)) {
+      const hook = wanted.get(token);
+      if (hook) found.add(hook);
+    }
+  }
+  return found;
+}
+
+/**
+ * One line per hook missing from `exported`.
+ * @param {string} image
+ * @param {Set<string>} exported
+ */
+export function hookExportProblems(image, exported) {
   return NATIVE_HOOKS
-    .filter((name) => !new RegExp(`(^|\\s)_${name}(\\s|$)`, 'm').test(exports))
+    .filter((name) => !exported.has(name))
     .map((name) => `${image} does not export _${name}`);
 }
 
+/** @param {string} image */
+async function imageExports(image) {
+  const listing = spawn('xcrun', ['dyld_info', '-exports', image], { stdio: ['ignore', 'pipe', 'inherit'] });
+  // Rejects on a spawn error too; handled once the listing has been read.
+  const exited = once(listing, 'close');
+  exited.catch(() => {});
+  const exported = await exportedHooks(createInterface({ input: listing.stdout, crlfDelay: Infinity }));
+  const [code, signal] = await exited;
+  if (code !== 0) throw new Error(`xcrun dyld_info -exports failed (${signal ?? `exit ${code}`})`);
+  return exported;
+}
+
 /** @param {string[]} xcodebuildArgs the arguments the app was built with */
-export function verifyIosHookExports(xcodebuildArgs) {
-  /** @param {...string} args */
-  const xcrun = (...args) => execFileSync('xcrun', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  const settings = appBuildSettings(xcrun('xcodebuild', '-showBuildSettings', '-json', ...xcodebuildArgs));
+export async function verifyIosHookExports(xcodebuildArgs) {
+  const settings = appBuildSettings(execFileSync(
+    'xcrun',
+    ['xcodebuild', '-showBuildSettings', '-json', ...xcodebuildArgs],
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  ));
   const image = codeImage(settings, existsSync);
   if (!existsSync(image)) throw new Error(`no built image at ${image}`);
   console.log(`Checking native notification hook exports in ${image}`);
-  const problems = hookExportProblems(image, xcrun('dyld_info', '-exports', image));
+  const problems = hookExportProblems(image, await imageExports(image));
   if (problems.length) throw new Error(problems.join('\n'));
   console.log(`Verified ${NATIVE_HOOKS.length} native notification hook exports in ${image}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  try { verifyIosHookExports(process.argv.slice(2)); }
-  catch (error) { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; }
+  verifyIosHookExports(process.argv.slice(2)).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
 }
