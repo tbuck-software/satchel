@@ -182,7 +182,7 @@ struct ImapSyncState {
     snapshot_resolutions: HashMap<String, HashSet<String>>,
     /// A lookup can still name its source after a presence-listing race.
     /// Do not rediscover completed copies while this snapshot remains pending.
-    /// Explicit owed IDs and quarantine work bypass this exclusion.
+    /// Explicit owed IDs and quarantine retries bypass this exclusion.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     resolved_snapshot_copies: HashMap<String, HashSet<String>>,
 }
@@ -335,7 +335,7 @@ async fn reconcile_gmail_snapshot(
                   AND remote_id NOT IN (SELECT value FROM json_each(?))
                 UNION SELECT value FROM json_each(?)
                 UNION SELECT q.remote_id FROM sync_quarantine q
-                WHERE q.account_id = ? AND EXISTS (
+                WHERE q.account_id = ? AND q.attempts < ? AND EXISTS (
                     SELECT 1 FROM messages m WHERE m.account_id = q.account_id
                     AND m.remote_id = q.remote_id
                 )
@@ -347,6 +347,9 @@ async fn reconcile_gmail_snapshot(
         .bind(&resolved_json)
         .bind(&owed_json)
         .bind(&context.account.id)
+        // An exhausted target refuses every lookup's result. Its source folder
+        // still finds it absent, so only retry work joins every snapshot.
+        .bind(satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS)
         .bind(&after)
         .fetch_all(pool)
         .await
@@ -548,31 +551,11 @@ async fn ingest_messages_into_folder(
         .map_err(|error| error.to_string())?;
     let mut candidates = Vec::new();
     for message in messages {
+        // An exhausted Gmail relabel follows the same skip policy. Its old copy
+        // survives without holding the cursor: snapshots delete only after a
+        // 404 and replace only after every target committed.
         if quarantine.is_exhausted(&message.remote_id) {
             outcome.skipped += 1;
-            if account.provider.eq_ignore_ascii_case("gmail") {
-                let labels = gmail_target_mailbox_ids(&message.mailbox_ids);
-                let labels = serde_json::to_string(&labels).map_err(|error| error.to_string())?;
-                let has_old_copy: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(
-                       SELECT 1 FROM messages m JOIN folders f ON f.id = m.folder_id
-                       WHERE m.account_id = ? AND m.remote_id = ?
-                         AND NOT EXISTS (SELECT 1 FROM json_each(?) label
-                             WHERE LOWER(TRIM(label.value)) = LOWER(TRIM(f.remote_id)))
-                     )",
-                )
-                .bind(&account.id)
-                .bind(&message.remote_id)
-                .bind(labels)
-                .fetch_one(pool)
-                .await
-                .map_err(|error| error.to_string())?;
-                // Only an unfinished relabel holds progress after exhaustion.
-                // New poison messages retain the normal quarantine skip policy.
-                if has_old_copy {
-                    outcome.failed += 1;
-                }
-            }
         } else {
             candidates.push(message.clone());
         }
@@ -1154,8 +1137,9 @@ pub(crate) async fn sync_mailboxes(
                 )
                 .await?;
                 messages_synced += ingest.ingested;
-                // A failed/quarantined replacement must retain its old copy.
-                // Presence reconciliation cannot delete it before retry.
+                // Let a failing replacement retry before snapshots run. This
+                // lasts at most MAX_INGEST_ATTEMPTS runs: an exhausted message
+                // counts as skipped, not failed.
                 if account.provider.eq_ignore_ascii_case("gmail") && ingest.failed > 0 {
                     snapshot_sync_complete = false;
                 }

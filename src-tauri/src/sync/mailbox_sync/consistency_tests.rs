@@ -389,10 +389,11 @@ async fn gmail_failed_target_savepoint_retains_old_copy_and_retries_after_restar
         .unwrap();
     let exhausted = ingest(&pool, message(&["TRASH"])).await;
     assert_eq!(exhausted.skipped, 1);
-    assert!(
-        !exhausted.cursor_may_advance(),
-        "quarantine must not authorize deletion of the old copy"
-    );
+    // Neither the folder cursor nor the account's snapshots wait for it.
+    // Gmail snapshots delete only after a 404 and replace only after the
+    // target commits, so the old copy survives the skip.
+    assert_eq!(exhausted.failed, 0);
+    assert!(exhausted.cursor_may_advance());
     assert_organization(&pool, &thread, &["INBOX"]).await;
     // An explicit quarantine retry is durable and permits the replacement.
     sqlx::query("DELETE FROM sync_quarantine")
@@ -916,6 +917,7 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
         "target",
         "listing-before-target",
         "quarantine",
+        "quarantine-retry",
         "pending",
         "pending-deleted",
     ] {
@@ -995,19 +997,24 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
             .await
             .unwrap();
         }
-        if scenario == "quarantine" {
+        if scenario.starts_with("quarantine") {
             let (folder, _) = ensure_gmail_label_folder(&pool, "account", "Label_one")
                 .await
                 .unwrap();
             let repo = SyncQuarantineRepository::new(&pool);
-            for _ in 0..satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS {
+            let attempts = if scenario == "quarantine" {
+                satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS
+            } else {
+                1
+            };
+            for _ in 0..attempts {
                 repo.record_failure("account", &folder, "A", "fixture")
                     .await
                     .unwrap();
             }
         }
         let mut state = ImapSyncState::default();
-        if scenario == "quarantine" {
+        if scenario == "quarantine-retry" {
             // A later partial delivery must override an earlier completion.
             state
                 .resolved_snapshot_copies
@@ -2013,6 +2020,72 @@ async fn gmail_blocked_snapshot_ids_stay_owed_without_starving_the_folder() {
     let done = persisted_state(&pool).await;
     assert!(!done.pending_snapshots.contains("INBOX"));
     assert!(!done.snapshot_resolutions.contains_key("INBOX"));
+    std::env::remove_var("SATCHEL_GMAIL_API_BASE");
+    task.abort();
+}
+
+/// Gmail snapshots DRAFT on every poll. An exhausted quarantine cannot be
+/// resolved by a lookup, so other folders' snapshots must not fetch it again
+/// and again. Retry work below the limit is still picked up.
+#[tokio::test]
+async fn gmail_exhausted_quarantine_is_not_refetched_by_every_folder_snapshot() {
+    let _guard = PROVIDER_HTTP_FIXTURES.lock().await;
+    let (base, requests, task) = server(|line, _| {
+        if line.contains("/messages?") {
+            return ("200 OK", json!({"messages":[]}).to_string());
+        }
+        let id = line
+            .split("/messages/")
+            .nth(1)
+            .unwrap()
+            .split('?')
+            .next()
+            .unwrap();
+        ("200 OK", labelled_response(id, &["Label_one"]))
+    })
+    .await;
+    std::env::set_var("SATCHEL_GMAIL_API_BASE", &base);
+    let pool = pool().await;
+    for id in ["A", "B"] {
+        assert_eq!(ingest(&pool, delivery(id)).await.ingested, 1);
+    }
+    let (label_one, _) = ensure_gmail_label_folder(&pool, "account", "Label_one")
+        .await
+        .unwrap();
+    let (drafts, _) = ensure_gmail_label_folder(&pool, "account", "DRAFT")
+        .await
+        .unwrap();
+    let quarantine = SyncQuarantineRepository::new(&pool);
+    for _ in 0..satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS {
+        quarantine
+            .record_failure("account", &label_one, "A", "fixture")
+            .await
+            .unwrap();
+    }
+    quarantine
+        .record_failure("account", &label_one, "B", "fixture")
+        .await
+        .unwrap();
+    let provider = crate::providers::gmail::GmailProvider::from_account_config(&config());
+    let queue = SyncQueue::new();
+    let mut state = ImapSyncState::default();
+    let progress = reconcile_test_snapshot(
+        &pool, &provider, "account", &drafts, "DRAFT", &mut state, &queue,
+    )
+    .await
+    .unwrap();
+    assert!(progress.deferred.is_empty(), "{progress:?}");
+    assert_eq!(fetched_ids(&requests), ["B"]);
+    assert_eq!(
+        locations(&pool).await,
+        [
+            ("A".into(), "INBOX".into()),
+            ("B".into(), "Label_one".into()),
+        ]
+    );
+    let persisted = persisted_state(&pool).await;
+    assert!(!persisted.pending_snapshots.contains("DRAFT"));
+    assert!(!persisted.snapshot_resolutions.contains_key("DRAFT"));
     std::env::remove_var("SATCHEL_GMAIL_API_BASE");
     task.abort();
 }
