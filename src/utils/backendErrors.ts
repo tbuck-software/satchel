@@ -61,7 +61,17 @@ export function translateBackendError(error: unknown): string | null {
   const payload = findCommandErrorPayload(error);
   if (!payload) return null;
   if (!te(payload.key) && te(FALLBACK_KEY)) return t(FALLBACK_KEY);
-  return t(payload.key, payload.params);
+  return t(payload.key, withTranslatedCause(payload.params));
+}
+
+/**
+ * Envelopes such as `accountSyncFailed` carry their cause as `message`. When
+ * Rust already named that cause with a key, it reads as a sentence too; a
+ * provider's own wording stays verbatim.
+ */
+function withTranslatedCause(params?: Record<string, unknown>): Record<string, unknown> | undefined {
+  const cause = typeof params?.message === 'string' ? commandErrorPayload(params.message) : null;
+  return cause ? { ...params, message: translateBackendError(cause) } : params;
 }
 
 /** Return the stable message key without coupling callers to Tauri's wrapper shape. */

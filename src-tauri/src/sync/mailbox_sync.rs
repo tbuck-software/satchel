@@ -14,7 +14,7 @@ use crate::providers::{
     folder_mapping::provider_folder_type,
     imap::imap_checkpoint,
     pop3::POP3_FOLDER,
-    provider_for_account,
+    provider_for_stored_account,
     traits::{MessageEnvelope, MessageRef, RemoteFolder, SyncCheckpoint},
 };
 use crate::sync::folder_reconcile::{
@@ -41,7 +41,6 @@ use crate::sync::thread_resolution::{
     deduplicate_cached_draft_autosaves, reconcile_sent_draft_autosaves,
     refresh_provider_thread_projections,
 };
-use crate::utils::oauth::{ensure_fresh_account_config, OAuthProvider};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AccountSelection<'a> {
@@ -518,33 +517,14 @@ pub(crate) async fn sync_mailboxes(
 
         let account_sync_result: Result<(usize, usize, bool, usize, usize), String> = async {
             replay_ingest_effects(pool, &account.id).await?;
-            let mut config =
-                crate::commands::accounts::decrypt_account_config(&account.id, &account.config)?;
-            if let Ok(oauth_provider) = OAuthProvider::parse(&account.provider) {
-                if let Some(updated_config) =
-                    ensure_fresh_account_config(oauth_provider, &config).await?
-                {
-                    let now = chrono::Utc::now().to_rfc3339();
-                    sqlx::query(
-                        "UPDATE accounts
-                         SET config = ?, updated_at = ?, last_oauth_error = NULL, last_oauth_error_at = NULL
-                         WHERE id = ?",
-                    )
-                        .bind(crate::commands::accounts::encrypt_account_config(
-                            &account.id,
-                            &updated_config,
-                        )?)
-                        .bind(&now)
-                        .bind(&account.id)
-                        .execute(pool)
-                        .await
-                        .map_err(|err| err.to_string())?;
-                    config = crate::commands::accounts::AccountConfig::from_plaintext(updated_config);
-                }
-            }
+            let config = crate::utils::oauth::refresh_account_config(pool, &account.id, &account.provider, &account.config).await.map_err(|err| err.encoded())?;
 
+            // Built once for a run of up to ten minutes; it renews an expiring
+            // token from the stored account.
             let provider =
-                provider_for_account(
+                provider_for_stored_account(
+                    pool,
+                    &account.id,
                     &account.provider,
                     &config,
                     &account.email,
