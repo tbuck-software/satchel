@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import {
-  copyFileSync,
   existsSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -14,6 +14,9 @@ import process from "node:process";
 const root = resolve(process.cwd());
 const apple = join(root, "src-tauri", "gen", "apple");
 const projectPath = join(apple, "project.yml");
+// The Swift side is a package that src-tauri/build.rs links into libapp.a:
+// it imports `Tauri`, which only the Rust build has (see Package.swift).
+const swiftPackageSources = join(root, "src-tauri", "ios", "Sources", "SatchelIOS");
 const swiftSources = [
   "SatchelMobileIntegration.swift",
   "SatchelNotificationRouting.swift",
@@ -36,16 +39,18 @@ function readRequired(path) {
 }
 /**
  * @param {string} directory
- * @param {string} filename
+ * @param {string | ((entry: string) => boolean)} filename
  * @returns {string[]}
  */
 function filesBelow(directory, filename) {
+  const matches =
+    typeof filename === "string" ? (/** @type {string} */ entry) => entry === filename : filename;
   const found = [];
   for (const entry of readdirSync(directory)) {
     const path = join(directory, entry);
     const stat = statSync(path);
-    if (stat.isDirectory()) found.push(...filesBelow(path, filename));
-    else if (entry === filename) found.push(path);
+    if (stat.isDirectory()) found.push(...filesBelow(path, matches));
+    else if (matches(entry)) found.push(path);
   }
   return found;
 }
@@ -110,9 +115,11 @@ main = main.replace('\nextern "C" void satchel_mobile_install(void);\n', "");
 main = main.replace("\tsatchel_mobile_install();\n", "");
 if (main.includes("satchel_mobile_install"))
   fail("unexpected legacy delegate installation");
-// Mach-O's `used` attribute retains this table and its referenced public Swift
-// C entry points even with dead stripping/LTO. It never calls the initializer:
-// plugin setup still installs the delegate after the notification plugin.
+// The Swift entry points live in libapp.a, and the linker loads an archive
+// member only when something references it. Rust resolves them with dlsym, so
+// this table is that reference; Mach-O's `used` attribute keeps it through dead
+// stripping/LTO. It never calls the initializer: plugin setup still installs
+// the delegate after the notification plugin.
 const hooksStart = "// Satchel notification native hooks: begin";
 const hooksEnd = "// Satchel notification native hooks: end";
 if (main.includes(hooksStart) !== main.includes(hooksEnd)
@@ -146,13 +153,17 @@ ${hooksEnd}
 main = main.replace(include, include + hooks);
 writeFileSync(mainPath, main);
 
+// Earlier generations copied the Swift into the app target. A second copy there
+// cannot import `Tauri` and would define the entry points twice.
 for (const filename of swiftSources) {
-  const template = join(root, "src-tauri", "ios", filename);
-  readRequired(template);
-  copyFileSync(template, join(dirname(mainPath), filename));
+  rmSync(join(dirname(mainPath), filename), { force: true });
+}
+for (const swift of filesBelow(join(apple, "Sources"), (entry) => entry.endsWith(".swift"))) {
+  if (/^\s*import\s+Tauri\b/m.test(readFileSync(swift, "utf8")))
+    fail(`${relative(root, swift)} imports Tauri, which the Xcode target cannot see`);
 }
 
-// The Swift file is new to the generated project; xcodegen has to see it.
+// The removed files must leave the generated project too; xcodegen rewrites it.
 const xcodeProjects = readdirSync(apple).filter((entry) =>
   entry.endsWith(".xcodeproj"),
 );
@@ -176,9 +187,16 @@ for (const required of [
   "satchel_mobile_response_handled",
 ]) {
   const all = swiftSources
-    .map((name) => readRequired(join(dirname(mainPath), name)))
+    .map((name) => readRequired(join(swiftPackageSources, name)))
     .join("\n");
   if (!all.includes(required)) fail(`verification failed for ${required}`);
+}
+for (const required of [
+  '.package(name: "Tauri", path: "../.tauri/tauri-api")',
+  'name: "SatchelIOS"',
+]) {
+  if (!readRequired(join(root, "src-tauri", "ios", "Package.swift")).includes(required))
+    fail(`Package.swift verification failed for ${required}`);
 }
 
 for (const scheme of schemes) {

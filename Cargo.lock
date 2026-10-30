@@ -6176,6 +6176,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tauri-utils",
  "tempfile",
  "tokio",
  "toml 0.8.23",

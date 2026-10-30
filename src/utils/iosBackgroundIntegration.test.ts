@@ -2,9 +2,11 @@ import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   writeFileSync,
 } from "node:fs";
@@ -54,9 +56,16 @@ function apply(root: string, extraEnv: Record<string, string> = {}): void {
   );
 }
 
-const swiftTemplate = ["SatchelMobileIntegration.swift", "SatchelNotificationRouting.swift"]
-  .map(name => readFileSync(new URL(`../../src-tauri/ios/${name}`, import.meta.url), "utf8"))
+const swiftSources = ["SatchelMobileIntegration.swift", "SatchelNotificationRouting.swift"];
+const swiftTemplate = swiftSources
+  .map(name => readFileSync(new URL(`../../src-tauri/ios/Sources/SatchelIOS/${name}`, import.meta.url), "utf8"))
   .join("\n");
+
+function swiftFilesBelow(directory: string): string[] {
+  return readdirSync(directory, { recursive: true, encoding: "utf8" })
+    .filter((entry) => entry.endsWith(".swift"))
+    .map((entry) => join(directory, entry));
+}
 
 describe("generated iOS native integration", () => {
   it("regenerates an existing Xcode project after installing the Swift source", () => {
@@ -97,6 +106,42 @@ printf "%s\\n" "$@" > "$SATCHEL_XCODEGEN_ARGS"
     expect(workflow).toContain("brew install xcodegen");
   });
 
+  /**
+   * `tauri ios init` generates an app target that links libapp.a and nothing
+   * else: the `Tauri` Swift module exists only inside the Rust build, where
+   * tauri's build script links it. A Swift file in that target that imports it
+   * fails with "no such module 'Tauri'", so the plugin is a Swift package that
+   * the app's build script links, the way plugin crates link theirs.
+   */
+  it("builds the Tauri plugin as a linked Swift package, outside the Xcode target", () => {
+    const root = generatedAppleFixture();
+    apply(root);
+    const apple = join(root, "src-tauri/gen/apple");
+    for (const path of swiftFilesBelow(apple)) {
+      expect(readFileSync(path, "utf8"), path).not.toMatch(/^\s*import\s+Tauri\b/m);
+    }
+    expect(swiftTemplate).toMatch(/^import Tauri$/m);
+    expect(swiftTemplate).toMatch(/: Plugin \{/);
+
+    const manifest = readFileSync(new URL("../../src-tauri/ios/Package.swift", import.meta.url), "utf8");
+    expect(manifest).toContain('.package(name: "Tauri", path: "../.tauri/tauri-api")');
+    expect(manifest).toMatch(/\.library\(\s*name: "SatchelIOS",\s*type: \.static,\s*targets: \["SatchelIOS"\]\)/);
+    expect(manifest).toContain('path: "Sources/SatchelIOS"');
+    const build = readFileSync(new URL("../../src-tauri/build.rs", import.meta.url), "utf8");
+    expect(build).toContain('tauri_utils::build::link_apple_library("SatchelIOS"');
+    expect(build).toContain("DEP_TAURI_IOS_LIBRARY_PATH");
+    const ignored = readFileSync(new URL("../../.gitignore", import.meta.url), "utf8");
+    expect(ignored).toMatch(/^src-tauri\/\.tauri\/$/m);
+  });
+
+  it("removes the Swift copies an earlier generation put into the Xcode target", () => {
+    const root = generatedAppleFixture();
+    const sources = join(root, "src-tauri/gen/apple/Sources/satchel");
+    for (const name of swiftSources) writeFileSync(join(sources, name), "import Tauri\n");
+    apply(root);
+    for (const name of swiftSources) expect(existsSync(join(sources, name)), name).toBe(false);
+  });
+
   it("talks to no server: no push registration, background tasks or keychain", () => {
     expect(swiftTemplate).not.toMatch(/relay/i);
     expect(swiftTemplate).not.toContain("registerForRemoteNotifications");
@@ -110,26 +155,18 @@ printf "%s\\n" "$@" > "$SATCHEL_XCODEGEN_ARGS"
     apply(root);
     const projectPath = join(root, "src-tauri/gen/apple/project.yml");
     const mainPath = join(root, "src-tauri/gen/apple/Sources/satchel/main.mm");
-    const swiftPath = join(
-      root,
-      "src-tauri/gen/apple/Sources/satchel/SatchelMobileIntegration.swift",
-    );
-    const routingPath = join(root, "src-tauri/gen/apple/Sources/satchel/SatchelNotificationRouting.swift");
-    const first = [projectPath, mainPath, swiftPath, routingPath].map((path) =>
-      readFileSync(path, "utf8"),
-    );
+    const first = [projectPath, mainPath].map((path) => readFileSync(path, "utf8"));
 
     // project.yml is left alone: no background modes, no APNs entitlement.
     expect(first[0]).not.toContain("UIBackgroundModes");
     expect(first[0]).not.toContain("BGTaskSchedulerPermittedIdentifiers");
     expect(first[1]).not.toContain("satchel_mobile_install");
-    expect(readFileSync(join(root, "src-tauri/gen/apple/Sources/satchel/SatchelNotificationRouting.swift"), "utf8")).toContain("__EXTRA__");
-    expect(first[2]).toContain("UNUserNotificationCenterDelegate");
+    expect(first[1]).toContain("satchel_notification_native_hooks");
+    expect(swiftTemplate).toContain("__EXTRA__");
+    expect(swiftTemplate).toContain("UNUserNotificationCenterDelegate");
 
     apply(root);
-    expect(
-      [projectPath, mainPath, swiftPath, routingPath].map((path) => readFileSync(path, "utf8")),
-    ).toEqual(first);
+    expect([projectPath, mainPath].map((path) => readFileSync(path, "utf8"))).toEqual(first);
   });
 
   it("removes an earlier pre-plugin delegate installation and remains idempotent", () => {

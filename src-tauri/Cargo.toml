@@ -104,3 +104,5 @@ satchel-core = { path = "../crates/satchel-core", features = ["test-support"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Links the iOS notification plugin's Swift package (see build.rs).
+tauri-utils = { version = "2", features = ["build-2"] }

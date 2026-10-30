@@ -79,8 +79,9 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let builder = builder.setup(|_app, api| {
         // lib.rs registers this plugin after tauri-plugin-notification. Native
         // registration is synchronous, so its delegate is installed before ours.
-        // This Swift initializer belongs to the final Xcode executable, not
-        // Rust's cdylib. Resolve it at setup rather than linking against it.
+        // build.rs links this Swift initializer into libapp.a, and main.mm's
+        // hook table carries it into the final executable. Rust's cdylib link
+        // never loads it, so resolve it at setup rather than linking against it.
         let initialize = unsafe {
             ios_native_symbol::<IosPluginInitializer>(c"init_plugin_satchel_mail_notifications")
         }

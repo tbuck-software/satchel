@@ -76,7 +76,7 @@ jobs:
 
       - name: Exercise notification payload and cold/warm delivery
         run: |
-          swiftc src-tauri/ios/SatchelNotificationRouting.swift tests/ios-notification-routing/main.swift -o "$RUNNER_TEMP/satchel-notification-routing"
+          swiftc src-tauri/ios/Sources/SatchelIOS/SatchelNotificationRouting.swift tests/ios-notification-routing/main.swift -o "$RUNNER_TEMP/satchel-notification-routing"
           "$RUNNER_TEMP/satchel-notification-routing"
 
       - name: Build for the Apple Silicon iOS simulator through Tauri

@@ -6,15 +6,27 @@ plugin. It decodes local `satchel.mail` responses itself, including persisted
 handler, which relies on process-local notification records. Unrelated
 notifications and foreground presentation still go through the previous delegate.
 
-The Swift initializer belongs to the final Xcode executable. Rust resolves its
-C entry point at plugin setup and fails setup if it is missing. A Rust ABI wrapper
-passes the returned NSObject pointer to Tauri's registration API, with the same
-ownership convention as the pinned notification plugin. There is no link-time
-initializer reference from the Rust cdylib. The generated `main.mm` retains a
-table of public Swift C entry points using Clang's
-[`used` attribute](https://clang.llvm.org/docs/AttributeReference.html#used).
-The table never calls the initializer. Simulator CI checks the final executable's
-export trie, in addition to compiling the integration.
+The delegate registers as a Tauri `Plugin`, so its Swift imports the `Tauri`
+module. That module exists only inside the Rust build: tauri's build script
+links it into libapp.a. The Xcode target `tauri ios init` generates links
+libapp.a and has no `Tauri` module, so Swift compiled there fails with
+"no such module 'Tauri'". The sources are therefore a Swift package,
+`src-tauri/ios/Package.swift`, which `src-tauri/build.rs` builds and links into
+libapp.a the way plugin crates link theirs. It resolves `Tauri` from
+`src-tauri/.tauri/tauri-api`, a copy of the package tauri publishes as
+`DEP_TAURI_IOS_LIBRARY_PATH`. `scripts/apply-ios-integration.mjs` copies no
+Swift into the Xcode target and fails if a Swift file there imports `Tauri`.
+
+Rust resolves the initializer's C entry point at plugin setup and fails setup
+if it is missing. A Rust ABI wrapper passes the returned NSObject pointer to
+Tauri's registration API, with the same ownership convention as the pinned
+notification plugin. There is no link-time initializer reference from Rust.
+The linker loads an archive member only when something references it, so the
+generated `main.mm` holds a table of the public Swift C entry points, retained
+with Clang's [`used` attribute](https://clang.llvm.org/docs/AttributeReference.html#used).
+That table is what carries the package into the final executable; it never
+calls the initializer. Simulator CI checks the final executable's export trie,
+in addition to compiling the integration.
 
 `mobile_notifications_frontend_ready` reserves a native listener lease when
 `listenerId` is null. The frontend registers its route callback, then activates
