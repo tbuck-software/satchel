@@ -22,6 +22,8 @@ use crate::{
     utils::crypto,
 };
 
+pub mod publication;
+
 const READY: &str = "satchel.restore-ready.json";
 const APPLYING: &str = "satchel.restore-applying.json";
 const DATABASE: &str = "satchel.db";

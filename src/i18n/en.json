@@ -161,6 +161,7 @@
       "backupPassphraseRejected": "That passphrase does not open this backup's master key.",
       "backupPassphraseRequired": "This backup's master key is wrapped. Enter the passphrase it was created with.",
       "backupPassphraseTooShort": "Use at least 12 characters for the backup passphrase.",
+      "backupPublicationFailed": "The backup could not be completed. Existing backups have been kept.",
       "blockedSenderOwnAddress": "Your own address or domain cannot be blocked.",
       "blockedSenderPatternEmpty": "Enter an email address or domain to block.",
       "blockedSenderPersistenceFailed": "Blocked senders are currently unavailable. Please try again.",
