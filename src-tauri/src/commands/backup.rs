@@ -2654,22 +2654,8 @@ mod tests {
 
     #[tokio::test]
     async fn published_snapshot_includes_committed_wal_data() {
-        let profile = tempfile::tempdir().unwrap();
+        let (profile, pool) = backup_source_pool().await;
         let root = tempfile::tempdir().unwrap();
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(
-                SqliteConnectOptions::new()
-                    .filename(profile.path().join("satchel.db"))
-                    .create_if_missing(true)
-                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
-            )
-            .await
-            .unwrap();
-        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
-            .run(&pool)
-            .await
-            .unwrap();
         sqlx::query("CREATE TABLE snapshot_probe (value TEXT)")
             .execute(&pool)
             .await

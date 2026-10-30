@@ -11,6 +11,7 @@ use std::{collections::BTreeMap, fs, path::Path};
 pub const PUBLICATION_FAILED: &str = "backend.errors.backupPublicationFailed";
 
 const COMPLETED: &str = "satchel-backup-complete.json";
+const PENDING_COMPLETION: &str = ".satchel-backup-complete.pending";
 const STAGING_PREFIX: &str = ".satchel-backup-";
 
 #[derive(Serialize, Deserialize)]
@@ -52,6 +53,14 @@ impl StagedBackup {
     /// Call only after snapshot inspection and successful portable key export.
     /// Sync every artifact before publishing the whole directory in one rename.
     pub fn publish(self, manifest: &BackupManifest) -> Result<std::path::PathBuf, String> {
+        self.publish_with_parent_sync(manifest, sync_directory)
+    }
+
+    fn publish_with_parent_sync(
+        self,
+        manifest: &BackupManifest,
+        sync_parent: impl FnOnce(&Path) -> Result<(), String>,
+    ) -> Result<std::path::PathBuf, String> {
         super::write_backup_manifest(self.path(), manifest).map_err(publication_failed)?;
         let files = inventory(self.path()).ok_or(PUBLICATION_FAILED)?;
         if !files.contains_key("satchel.db") || !files.contains_key(MASTER_KEY_FILES[0]) {
@@ -73,7 +82,7 @@ impl StagedBackup {
             files,
         };
         atomic_write(
-            &self.path().join(COMPLETED),
+            &self.path().join(PENDING_COMPLETION),
             &serde_json::to_vec(&completion).map_err(publication_failed)?,
         )
         .map_err(publication_failed)?;
@@ -86,7 +95,16 @@ impl StagedBackup {
         rename_noreplace(self.path(), &destination).map_err(publication_failed)?;
         // The staging path no longer belongs to us after the rename.
         let _ = self.directory.keep();
-        sync_directory(&root).map_err(publication_failed)?;
+        sync_parent(&root).map_err(publication_failed)?;
+        // Retention cannot see a completion record until the snapshot, keys,
+        // metadata and published directory entry are durable. Nothing fallible
+        // follows this eligibility transition. Losing only this final rename
+        // after a crash conservatively retains the already durable backup.
+        rename_noreplace(
+            &destination.join(PENDING_COMPLETION),
+            &destination.join(COMPLETED),
+        )
+        .map_err(publication_failed)?;
         Ok(destination)
     }
 }
@@ -216,6 +234,80 @@ pub fn retention_eligible(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_parent_sync_never_grants_retention_eligibility() {
+        let root = tempfile::tempdir().unwrap();
+        let time = chrono::Utc::now();
+        let manifest = BackupManifest {
+            created_at: time.to_rfc3339(),
+            ..BackupManifest::default()
+        };
+        let stage = || {
+            let staging = StagedBackup::new(root.path(), time).unwrap();
+            fs::write(staging.path().join("satchel.db"), b"snapshot").unwrap();
+            fs::write(staging.path().join(MASTER_KEY_FILES[0]), b"synthetic key").unwrap();
+            staging
+        };
+        let valid = stage().publish(&manifest).unwrap();
+        for _ in 0..6 {
+            let staging = stage();
+            let destination = root.path().join(&staging.name);
+            let result = staging.publish_with_parent_sync(&manifest, |parent| {
+                assert!(destination.is_dir());
+                // This is also what concurrent pruning observes before sync.
+                assert!(!retention_eligible(&destination));
+                assert_eq!(parent, root.path());
+                Err("injected directory sync failure".into())
+            });
+            assert_eq!(result.unwrap_err(), PUBLICATION_FAILED);
+            assert!(!retention_eligible(&destination));
+            assert_eq!(
+                fs::read(destination.join("satchel.db")).unwrap(),
+                b"snapshot"
+            );
+        }
+        let eligible = fs::read_dir(root.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| retention_eligible(path))
+            .collect::<Vec<_>>();
+        assert_eq!(eligible, vec![valid]);
+    }
+
+    #[test]
+    fn retention_is_enabled_only_after_successful_parent_sync() {
+        let root = tempfile::tempdir().unwrap();
+        let time = chrono::Utc::now();
+        let staging = StagedBackup::new(root.path(), time).unwrap();
+        let destination = root.path().join(&staging.name);
+        fs::write(staging.path().join("satchel.db"), b"snapshot").unwrap();
+        fs::write(staging.path().join(MASTER_KEY_FILES[0]), b"synthetic key").unwrap();
+        let published = staging
+            .publish_with_parent_sync(
+                &BackupManifest {
+                    created_at: time.to_rfc3339(),
+                    ..BackupManifest::default()
+                },
+                |parent| {
+                    assert!(!retention_eligible(&destination));
+                    sync_directory(parent)?;
+                    assert!(!retention_eligible(&destination));
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert!(retention_eligible(&published));
+        // If the last marker rename is lost after a crash, the durable backup
+        // remains available but no longer consumes a retention slot.
+        fs::rename(
+            published.join(COMPLETED),
+            published.join(PENDING_COMPLETION),
+        )
+        .unwrap();
+        assert!(is_backup_directory(&published));
+        assert!(!retention_eligible(&published));
+    }
 
     #[test]
     fn exclusive_publication_never_replaces_an_existing_directory() {
