@@ -665,15 +665,19 @@ async fn persist_provider_message(
                 .collect::<Vec<_>>(),
         )
         .map_err(|err| err.to_string())?;
+        // Parts of decrypted content have no remote part, so no envelope
+        // names them; they belong to the decrypted body, not the server's list.
         sqlx::query(
             "DELETE FROM attachments
              WHERE message_id = ?
+               AND id NOT LIKE ?
                AND NOT EXISTS (
                  SELECT 1 FROM json_each(?) current_attachment
                  WHERE current_attachment.value = attachments.remote_part_id
                )",
         )
         .bind(&message_id)
+        .bind(satchel_core::email::decrypted::attachment_id_pattern())
         .bind(remote_attachment_parts)
         .execute(&mut **tx)
         .await
@@ -1950,6 +1954,54 @@ mod tests {
             .await
             .expect("thread flag");
         assert_eq!(thread_has_attachments, 1);
+    }
+
+    /// Rows for parts of decrypted content carry no remote part, so the
+    /// envelope's part list never names them. Dropping them on every resync
+    /// left the message without its decrypted images until it was opened
+    /// again.
+    #[tokio::test]
+    async fn a_resync_keeps_the_parts_of_decrypted_content() {
+        let pool = ingest_pool().await;
+        let mut message = envelope("43");
+        message.date_rfc3339 = "2026-01-01T00:00:00Z".to_string();
+        message.attachments = vec![RemoteAttachment {
+            remote_part_id: "2".into(),
+            filename: Some("encrypted.asc".into()),
+            content_type: "application/octet-stream".into(),
+            size: Some(12),
+            content_id: None,
+            is_inline: false,
+            content_base64: None,
+        }];
+        ingest(&pool, "inbox", &message)
+            .await
+            .expect("first ingest");
+        let message_id: String = sqlx::query_scalar("SELECT id FROM messages")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let decrypted = satchel_core::email::decrypted::attachment_id(&message_id, "mime-2");
+        sqlx::query(
+            "INSERT INTO attachments
+             (id, message_id, filename, content_type, is_inline, cached_path, remote_part_id,
+              created_at)
+             VALUES (?, ?, 'logo.png', 'image/png', 1, '/cache/logo.png', NULL, '')",
+        )
+        .bind(&decrypted)
+        .bind(&message_id)
+        .execute(&pool)
+        .await
+        .expect("decrypted part");
+
+        ingest(&pool, "inbox", &message).await.expect("resync");
+
+        let ids: Vec<String> = sqlx::query_scalar("SELECT id FROM attachments ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(ids.len(), 2, "{ids:?}");
+        assert!(ids.contains(&decrypted), "{ids:?}");
     }
 
     /// A `Date` far in the future used to win the `last_message_date >= …`
