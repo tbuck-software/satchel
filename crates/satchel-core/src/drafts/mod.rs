@@ -601,7 +601,14 @@ async fn restore_queued_draft_tx(
         .fetch_one(&mut **tx)
         .await
         .map_err(DraftError::unexpected)?;
-        if !restorable || !owned {
+        // The upsert files the draft under the account's Drafts folder and keeps
+        // its UID. A row synced into another folder carries that folder's UID,
+        // even within the same generation. A renamed Drafts folder is still
+        // the save target, so it passes.
+        let drafts_folder =
+            ensure_drafts_folder(tx, &account_id, &chrono::Utc::now().to_rfc3339()).await?;
+        let in_drafts = current.folder_id.as_deref() == Some(drafts_folder.as_str());
+        if !restorable || !owned || !in_drafts {
             return Err(DraftError::QueuedDraftNotRestorable);
         }
     }
@@ -2949,8 +2956,93 @@ mod queued_send_tests {
                     "{open}/{change}"
                 );
                 assert!(queue.list_mail_outbox(&pool).await.unwrap().is_empty());
+                if change == "renamed" {
+                    let row: (String, Option<String>) =
+                        sqlx::query_as("SELECT folder_id, remote_id FROM messages")
+                            .fetch_one(&pool)
+                            .await
+                            .unwrap();
+                    assert_eq!(row, ("renamed".into(), Some("41".into())), "{open}");
+                }
             }
         }
+    }
+
+    /// A draft trashed and synced keeps its generation when both folders share
+    /// a UIDVALIDITY value, but its UID now names a Trash message. Restoring
+    /// it would file that UID under Drafts.
+    #[tokio::test]
+    async fn queued_restoration_refuses_a_draft_moved_out_of_drafts() {
+        for open in [false, true] {
+            let (pool, queue) = fixture().await;
+            let action = action(Some("saved"));
+            let input = draft_input_for_send("a", &action_input(&action), None).unwrap();
+            save(&pool, &queue, &input).await.unwrap();
+            sqlx::raw_sql(
+                "UPDATE folders SET uidvalidity = 7;
+                UPDATE messages SET remote_id = '41', remote_uidvalidity = 7;",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            enqueue_send_with_draft(&pool, &queue, &action)
+                .await
+                .unwrap();
+            sqlx::raw_sql(
+                "INSERT INTO folders (id, account_id, name, full_path, folder_type, uidvalidity, created_at, updated_at)
+                    VALUES ('trash', 'a', 'Trash', 'Trash', 'trash', 7, '', '');
+                UPDATE messages SET folder_id = 'trash', remote_id = '5', remote_uidvalidity = 7;",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            let result = if open {
+                load(&pool, &pool, &queue, "saved").await.map(|_| ())
+            } else {
+                restore_queued_draft(&pool, &queue, &action.id)
+                    .await
+                    .map(|_| ())
+            };
+            assert!(
+                matches!(result, Err(DraftError::QueuedDraftNotRestorable)),
+                "{open}"
+            );
+            assert_eq!(queue.list_mail_outbox(&pool).await.unwrap().len(), 1);
+            let row: (String, Option<String>) =
+                sqlx::query_as("SELECT folder_id, remote_id FROM messages")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(row, ("trash".into(), Some("5".into())), "{open}");
+        }
+    }
+
+    /// The restore target is the folder the save writes to, not a folder
+    /// type: drafts filed under a legacy, untyped Drafts folder stay editable.
+    #[tokio::test]
+    async fn queued_restoration_keeps_a_legacy_untyped_drafts_folder() {
+        let (pool, queue) = fixture().await;
+        sqlx::query("INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, uidvalidity, created_at, updated_at) VALUES ('drafts-legacy', 'a', 'Drafts', 'Drafts', 'Drafts', 'custom', 7, '', '')")
+            .execute(&pool).await.unwrap();
+        let action = action(Some("saved"));
+        let input = draft_input_for_send("a", &action_input(&action), None).unwrap();
+        save(&pool, &queue, &input).await.unwrap();
+        sqlx::query("UPDATE messages SET remote_id = '41', remote_uidvalidity = 7")
+            .execute(&pool)
+            .await
+            .unwrap();
+        enqueue_send_with_draft(&pool, &queue, &action)
+            .await
+            .unwrap();
+        let draft = restore_queued_draft(&pool, &queue, &action.id)
+            .await
+            .unwrap();
+        assert_eq!(draft.body, "Latest edits before autosave");
+        let folder: String = sqlx::query_scalar("SELECT folder_id FROM messages")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(folder, "drafts-legacy");
     }
 
     #[tokio::test]
