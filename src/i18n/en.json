@@ -202,6 +202,7 @@
       "exportAttachmentListUnavailable": "A message has attachments whose details are missing locally. Sync the message and try the export again.",
       "exportAttachmentMetadataInvalid": "A saved draft's attachment data is damaged. Reopen the draft and attach the files again.",
       "exportAttachmentUnavailable": "Cannot export \"{filename}\" because its local copy is missing or cannot be verified. Download the attachment and try again.",
+      "exportMailboxChanged": "Messages were removed or replaced while the export was running, so nothing was saved. Run the export again.",
       "exportOriginalUnavailable": "Cannot export \"{subject}\" because its complete original message is unavailable. Connect the account and try again. A partial message will not be exported.",
       "folderAccountMismatch": "Choose a folder belonging to the same account.",
       "folderContainsChildren": "The folder \"{name}\" still contains subfolders ({count}).",

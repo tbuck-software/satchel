@@ -202,6 +202,7 @@
       "exportAttachmentListUnavailable": "Für eine Nachricht fehlen lokale Angaben zu ihren Anhängen. Gleiche die Nachricht ab und versuche den Export erneut.",
       "exportAttachmentMetadataInvalid": "Die Anhangsdaten eines gespeicherten Entwurfs sind beschädigt. Öffne den Entwurf erneut und hänge die Dateien noch einmal an.",
       "exportAttachmentUnavailable": "\"{filename}\" kann nicht exportiert werden, weil die lokale Kopie fehlt oder nicht verifiziert werden kann. Lade den Anhang herunter und versuche es erneut.",
+      "exportMailboxChanged": "Während des Exports wurden Nachrichten entfernt oder ersetzt, deshalb wurde nichts gespeichert. Starte den Export erneut.",
       "exportOriginalUnavailable": "\"{subject}\" kann nicht exportiert werden, weil die vollständige Originalnachricht nicht verfügbar ist. Verbinde das Konto und versuche es erneut. Es wird keine unvollständige Nachricht exportiert.",
       "folderAccountMismatch": "Wähle einen Ordner desselben Kontos.",
       "folderContainsChildren": "Der Ordner \"{name}\" enthält noch Unterordner ({count}).",
