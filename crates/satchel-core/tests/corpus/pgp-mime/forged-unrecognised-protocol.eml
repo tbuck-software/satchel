@@ -1,0 +1,36 @@
+From: Satchel GPG Fixture <gpg-fixture@example.test>
+To: reader@example.test
+Subject: Re: build failure
+Date: Thu, 3 Sep 2026 11:30:00 +0200
+MIME-Version: 1.0
+Content-Type: multipart/signed; protocol="application/x-nothing"; boundary="OUT"
+
+--OUT
+Content-Type: text/plain
+
+Forged text: wire the money to the new account.
+--OUT
+Content-Type: multipart/signed; micalg=pgp-sha256; protocol="application/pgp-signature"; boundary="INNER"
+
+--INNER
+Content-Type: text/plain; charset=us-ascii
+Content-Disposition: inline
+
+The fix is on the branch.
+--
+Satchel GPG Fixture
+
+--INNER
+Content-Type: application/pgp-signature
+
+-----BEGIN PGP SIGNATURE-----
+
+iHUEARYIAB0WIQTCkWCwutyFV+X+8wxaTn2RJ4W/XAUCauTAqwAKCRBaTn2RJ4W/
+XAd5AQCAd8+yzjW+owwRHY5qLRsJpnuhaGxw8MfN1NkXbCv4kAD+K6V8THR0vOGA
+IhAaEteQukXzywoj7ZyAMs+SwP3TVQA=
+=aLHu
+-----END PGP SIGNATURE-----
+
+--INNER--
+
+--OUT--

@@ -74,7 +74,14 @@ async fn attachments_for_messages(
         for id in chunk {
             ids.push_bind(id);
         }
-        query.push(") ORDER BY a.message_id, a.filename");
+        // Beside a root signature, rows from older listing rules may name
+        // parts from outside the signed entity; they wait for their rebuild.
+        // `id` breaks filename ties: the renderer resolves `cid:` references
+        // by position.
+        query.push(format!(
+            ") AND NOT {} ORDER BY a.message_id, a.filename, a.id",
+            satchel_core::db::signed_attachments::HIDDEN_BESIDE_ROOT_SIGNATURE
+        ));
         rows.extend(
             query
                 .build_query_as::<AttachmentListingRow>()
@@ -836,6 +843,119 @@ mod tests {
         }
     }
 
+    /// The parts a strict signed entity lists are served from the generation
+    /// they were synced in, the signature part not at all.
+    #[tokio::test]
+    async fn an_attachment_under_a_signature_is_served_only_within_its_generation() {
+        use super::{
+            download_prepared_attachment, prepare_referenced_attachment, DownloadAttachmentInput,
+        };
+        use crate::db::remote_content::ContentReference;
+        let parsed = crate::providers::imap::parse_raw_message_body(include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp-mime/thunderbird-mixed-attachment.eml"
+        ));
+        assert!(parsed.trust.root_crypto && parsed.trust.signed_binding);
+        let [figures] = parsed.attachments.as_slice() else {
+            panic!(
+                "expected only the signed attachment: {:?}",
+                parsed.attachments
+            );
+        };
+        assert_eq!(figures.filename.as_deref(), Some("figures.csv"));
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id,display_name,email,provider,config,credentials_ref,created_at,updated_at)
+            VALUES ('a','A','me@example.test','imap','{}','','','');
+            INSERT INTO folders (id,account_id,name,full_path,remote_id,folder_type,uidvalidity,created_at,updated_at)
+            VALUES ('f','a','Inbox','INBOX','INBOX','inbox',7,'','');")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO messages (id,account_id,folder_id,remote_id,remote_uidvalidity,from_address,to_addresses,date,pgp_signed,trust_metadata,created_at,updated_at)
+            VALUES ('m','a','f','42',7,'sender@example.test','[]','',?,?,'','')")
+            .bind(parsed.pgp_signed.as_deref())
+            .bind(serde_json::to_string(&parsed.trust).unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        // The part as sync lists it today, and the signature part as an older
+        // sync stored it, under a name its unsigned headers chose.
+        sqlx::query("INSERT INTO attachments (id,message_id,filename,content_type,remote_part_id,listing_rules,created_at)
+            VALUES ('att', 'm', ?, ?, ?, 1, ''), ('phantom', 'm', 'Invoice.pdf', 'application/pgp-signature', '3', 0, '')")
+            .bind(figures.filename.as_deref())
+            .bind(&figures.content_type)
+            .bind(&figures.remote_part_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let reference = ContentReference::load(&pool, "m").await.unwrap();
+        let path = super::attachment_cache_path(
+            dir.path(),
+            &reference.attachment_cache_id("att"),
+            "figures.csv",
+        );
+        std::fs::write(&path, b"q1,q2").unwrap();
+        sqlx::query("UPDATE attachments SET cached_path = ? WHERE id = 'att'")
+            .bind(path.to_str().unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let input = || DownloadAttachmentInput {
+            attachment_id: "att".into(),
+        };
+
+        let listed = super::attachments_for_messages(&pool, &["m".into()])
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1, "the signature part is not listed");
+        assert_eq!(listed[0].cached_path.as_deref(), path.to_str());
+        let served = download_prepared_attachment(
+            &pool,
+            prepare_referenced_attachment(dir.path(), &pool, input())
+                .await
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(served.data_base64.as_deref(), Some("cTEscTI="));
+
+        // A reset after preparation refuses the bytes already read.
+        let prepared = prepare_referenced_attachment(dir.path(), &pool, input())
+            .await
+            .unwrap();
+        sqlx::query("UPDATE folders SET uidvalidity = 8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(download_prepared_attachment(&pool, prepared)
+            .await
+            .unwrap_err()
+            .contains("imapUidValidityChanged"));
+        assert!(prepare_referenced_attachment(dir.path(), &pool, input())
+            .await
+            .err()
+            .unwrap()
+            .contains("imapUidValidityChanged"));
+
+        // Synced again in the new generation, the earlier file is no longer
+        // this attachment's, and the signature part stays hidden.
+        sqlx::query("UPDATE messages SET remote_uidvalidity = 8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let listed = super::attachments_for_messages(&pool, &["m".into()])
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "att");
+        assert_eq!(listed[0].cached_path, None);
+    }
+
     #[test]
     fn the_final_cache_name_is_the_opening_gate() {
         let original = format!("{}.jar{}", "A".repeat(116), "X".repeat(16));
@@ -900,19 +1020,11 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("pool");
-        sqlx::query(
-            "CREATE TABLE attachments (id TEXT PRIMARY KEY, message_id TEXT NOT NULL,
-             filename TEXT, content_type TEXT NOT NULL, size INTEGER, content_id TEXT,
-             is_inline INTEGER NOT NULL DEFAULT 0, cached_path TEXT)",
-        )
-        .execute(&pool)
-        .await
-        .expect("schema");
-        sqlx::raw_sql("CREATE TABLE accounts (id TEXT PRIMARY KEY, provider TEXT);
-            CREATE TABLE messages (id TEXT PRIMARY KEY, account_id TEXT, remote_id TEXT, remote_uidvalidity INTEGER);
-            INSERT INTO accounts VALUES ('acc', 'gmail');
-            INSERT INTO messages (id, account_id) VALUES ('m1', 'acc'), ('m2', 'acc'), ('m3', 'acc');")
-            .execute(&pool).await.unwrap();
+        attachment_schema(&pool).await;
+        sqlx::query("INSERT INTO messages (id, account_id) VALUES ('m1', 'acc'), ('m2', 'acc'), ('m3', 'acc')")
+            .execute(&pool)
+            .await
+            .unwrap();
         for (id, message, name) in [
             ("a1", "m1", "b.pdf"),
             ("a2", "m1", "a.png"),
@@ -987,6 +1099,135 @@ mod tests {
             .await
             .expect("empty")
             .is_empty());
+    }
+
+    async fn attachment_schema(pool: &sqlx::SqlitePool) {
+        for sql in [
+            "CREATE TABLE attachments (id TEXT PRIMARY KEY, message_id TEXT NOT NULL,
+             filename TEXT, content_type TEXT NOT NULL, size INTEGER, content_id TEXT,
+             is_inline INTEGER NOT NULL DEFAULT 0, cached_path TEXT,
+             listing_rules INTEGER NOT NULL DEFAULT 0)",
+            "CREATE TABLE accounts (id TEXT PRIMARY KEY, provider TEXT)",
+            "CREATE TABLE messages (id TEXT PRIMARY KEY, account_id TEXT, remote_id TEXT,
+             remote_uidvalidity INTEGER, trust_metadata TEXT, pgp_signed BLOB, smime_signed BLOB)",
+            "INSERT INTO accounts VALUES ('acc', 'gmail')",
+        ] {
+            sqlx::query(sql).execute(pool).await.expect("schema");
+        }
+    }
+
+    const SIGNED_WITH_ATTACHMENT: &[u8] = include_bytes!(
+        "../../../crates/satchel-core/tests/corpus/pgp-mime/thunderbird-mixed-attachment.eml"
+    );
+
+    /// An older sync could list parts from outside the signed entity next to
+    /// a root signature: a signature part under a name its unsigned headers
+    /// chose, or an outer part whose Content-ID fills the signed HTML. Those
+    /// rows stay hidden, so no `cid:` resolves from them, until the repair has
+    /// rebuilt them from the bundle. Rows written under the current rules stay
+    /// listed, also once a refetched body has cleared the signed binding.
+    #[tokio::test]
+    async fn legacy_rows_beside_a_root_signature_stay_hidden_until_rebuilt() {
+        let bundle = crate::providers::imap::parse_raw_message_body(SIGNED_WITH_ATTACHMENT)
+            .pgp_signed
+            .unwrap();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+                VALUES ('a', 'Account', 'me@example.test', 'gmail', '{}', '', '', '');
+            INSERT INTO folders (id, account_id, name, full_path, folder_type, created_at, updated_at)
+                VALUES ('f', 'a', 'Inbox', 'INBOX', 'inbox', '', '');")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for (id, trust, signed) in [
+            ("legacy", Some(r#"{"root_crypto":true}"#), true),
+            (
+                "refetched",
+                Some(r#"{"root_crypto":true,"signed_binding":false}"#),
+                true,
+            ),
+            ("nested", Some(r#"{"root_crypto":false}"#), true),
+            ("plain", None, false),
+        ] {
+            sqlx::query("INSERT INTO messages (id, account_id, folder_id, from_address, to_addresses, date, trust_metadata, pgp_signed, created_at, updated_at)
+                VALUES (?, 'a', 'f', 'sender@example.test', '[]', '', ?, ?, '', '')")
+                .bind(id)
+                .bind(trust)
+                .bind(signed.then_some(bundle.as_slice()))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::raw_sql("INSERT INTO attachments (id, message_id, filename, content_type, content_id, is_inline, listing_rules, created_at) VALUES
+                ('phantom', 'legacy', 'Invoice.pdf', 'application/pgp-signature', NULL, 0, 0, ''),
+                ('outer-logo', 'legacy', 'logo.png', 'image/png', 'logo@example.test', 1, 0, ''),
+                ('current', 'refetched', 'figures.csv', 'text/csv', NULL, 0, 1, ''),
+                ('nested-old', 'nested', 'outer.pdf', 'application/pdf', NULL, 0, 0, ''),
+                ('plain-old', 'plain', 'notes.txt', 'text/plain', NULL, 0, 0, '');")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let ids = || async {
+            super::attachments_for_messages(
+                &pool,
+                &[
+                    "legacy".into(),
+                    "refetched".into(),
+                    "nested".into(),
+                    "plain".into(),
+                ],
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| (row.message_id, row.filename.unwrap_or_default()))
+            .collect::<Vec<_>>()
+        };
+        let pair = |message: &str, name: &str| (message.to_string(), name.to_string());
+        assert_eq!(
+            ids().await,
+            [
+                pair("nested", "outer.pdf"),
+                pair("plain", "notes.txt"),
+                pair("refetched", "figures.csv"),
+            ]
+        );
+
+        let repair = satchel_core::db::signed_attachments::SIGNED_ENTITY_ATTACHMENTS;
+        satchel_core::db::data_repairs::run_repair(&pool, &repair, 100, None, |_| {})
+            .await
+            .unwrap();
+        assert_eq!(
+            ids().await,
+            [
+                pair("legacy", "figures.csv"),
+                pair("nested", "outer.pdf"),
+                pair("plain", "notes.txt"),
+                pair("refetched", "figures.csv"),
+            ]
+        );
+        // The rebuilt row carries the bytes of the signed entity.
+        let (payload, remote_part): (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT content_base64, remote_part_id FROM attachments WHERE message_id = 'legacy'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let bytes =
+            crate::sync::attachment_fetch::decode_attachment_base64(&payload.unwrap()).unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains(','), "{bytes:?}");
+        assert_eq!(remote_part, None);
+        let current: String =
+            sqlx::query_scalar("SELECT id FROM attachments WHERE message_id = 'refetched'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(current, "current");
     }
 
     use super::{attachment_cache_path, attachment_open_risk, safe_filename, MAX_CACHE_NAME_BYTES};

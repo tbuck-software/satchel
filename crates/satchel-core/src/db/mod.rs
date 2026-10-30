@@ -20,6 +20,7 @@ pub mod queries;
 pub mod remote_content;
 pub mod sender_preferences;
 pub mod signatures;
+pub mod signed_attachments;
 pub mod smart_folders;
 pub mod smime;
 pub mod sync_quarantine;

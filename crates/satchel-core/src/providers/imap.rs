@@ -13,6 +13,7 @@ use tokio::net::TcpStream;
 use tokio::time::{timeout, Duration};
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
+use crate::email::signed_mime::{self, SignedProtocol};
 use crate::providers::{
     cursor,
     imap_sessions::{read_with_pool, SessionOutcome, SessionPool, IDLE_SESSION_TTL},
@@ -2530,6 +2531,11 @@ fn is_trycreate_response(error: &str) -> bool {
 }
 
 pub fn parse_header_value(header: &str, key: &str) -> Option<String> {
+    parse_raw_header_value(header, key).map(|value| decode_mime_encoded_words(&value))
+}
+
+/// The unfolded value of a header, encoded words left as they are.
+pub(crate) fn parse_raw_header_value(header: &str, key: &str) -> Option<String> {
     let mut collecting = false;
     let mut value = String::new();
 
@@ -2561,11 +2567,7 @@ pub fn parse_header_value(header: &str, key: &str) -> Option<String> {
         }
     }
 
-    if collecting {
-        Some(decode_mime_encoded_words(&value))
-    } else {
-        None
-    }
+    collecting.then_some(value)
 }
 
 pub fn parse_from_address(header: &str) -> Option<String> {
@@ -2781,8 +2783,15 @@ fn merge_extracted_imap_fallback(
             parsed_body.html = extracted.html;
         }
     }
-    if parsed_body.attachments.is_empty() {
+    // A signed root's attachments are its signed entity's; another parser's
+    // list is not bound to that entity.
+    if parsed_body.attachments.is_empty() && !parsed_body.trust.signed_binding {
         parsed_body.attachments = extracted.attachments;
+        if parsed_body.trust.root_crypto {
+            parsed_body.attachments.retain(|attachment| {
+                !signed_mime::is_signature_media_type(&attachment.content_type)
+            });
+        }
     }
 }
 
@@ -3076,35 +3085,11 @@ fn parse_body_part(
     }
 
     if lowered_content_type.starts_with("multipart/") {
-        if lowered_content_type.starts_with("multipart/signed")
-            && (lowered_content_type.contains("application/pgp-signature")
-                || lowered_content_type.contains("application/pkcs7-signature")
-                || lowered_content_type.contains("application/x-pkcs7-signature"))
-        {
-            let sections = extract_header_param(content_type, "boundary")
-                .map(|boundary| split_multipart_sections(raw_body, &boundary))
-                .unwrap_or_default();
-            if sections.len() != 2 {
-                return ParsedBody::default();
+        let signed_container = lowered_content_type.starts_with("multipart/signed");
+        if signed_container && SignedProtocol::declared(content_type).is_some() {
+            if let Some(parsed) = parse_signed_body(content_type, raw_body, depth) {
+                return parsed;
             }
-            let (part_header, part_body) = split_header_and_body(sections[0]);
-            let part_header = String::from_utf8_lossy(part_header);
-            let part_type = parse_header_value(&part_header, "Content-Type")
-                .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
-            let part_encoding = parse_header_value(&part_header, "Content-Transfer-Encoding")
-                .unwrap_or_else(|| "8bit".to_string());
-            let mut parsed = parse_body_part(&part_type, &part_encoding, part_body, depth + 1);
-            let mut bundle = format!("Content-Type: {content_type}\r\n\r\n").into_bytes();
-            bundle.extend_from_slice(raw_body);
-            parsed.smime_encrypted = None;
-            parsed.smime_signed = None;
-            parsed.pgp_signed = None;
-            if lowered_content_type.contains("application/pgp-signature") {
-                parsed.pgp_signed = Some(bundle);
-            } else {
-                parsed.smime_signed = Some(bundle);
-            }
-            return parsed;
         }
         if lowered_content_type.starts_with("multipart/encrypted")
             && lowered_content_type.contains("application/pgp-encrypted")
@@ -3208,6 +3193,13 @@ fn parse_body_part(
                     parsed.text = Some(fallback);
                 }
             }
+            if signed_container {
+                // The strict splitter did not take this container, so it is
+                // shown like any multipart, unsigned. A signature found inside
+                // covers one nested entity, never what the walk above shows.
+                parsed.smime_signed = None;
+                parsed.pgp_signed = None;
+            }
             return parsed;
         }
     }
@@ -3258,6 +3250,50 @@ fn parse_body_part(
     }
 }
 
+/// Display exactly the entity a `multipart/signed` signature covers, and keep
+/// the bundle that verification later reads it back from.
+///
+/// Both sides take the entity from `signed_mime`. What it refuses comes back
+/// as `None` and is shown as an unsigned multipart, so no signature state can
+/// attach to it. At the root, the result is marked as bound: its body is the
+/// signed entity's display, written together with its bundle.
+fn parse_signed_body(content_type: &str, raw_body: &[u8], depth: usize) -> Option<ParsedBody> {
+    let parts = signed_mime::split(content_type, raw_body).ok()?;
+    let mut bundle = format!("Content-Type: {content_type}\r\n\r\n").into_bytes();
+    bundle.extend_from_slice(raw_body);
+    // Verification splits the stored bundle, not this body. Show nothing it
+    // would not find there byte for byte.
+    if signed_mime::split_bundle(&bundle).map(|stored| stored.entity) != Ok(parts.entity) {
+        return None;
+    }
+
+    let mut parsed = display_signed_entity(parts.entity, depth + 1);
+    parsed.smime_encrypted = None;
+    parsed.smime_signed = None;
+    parsed.pgp_signed = None;
+    parsed.trust = super::traits::MessageTrust {
+        signed_binding: depth == 0,
+        ..Default::default()
+    };
+    match parts.protocol {
+        SignedProtocol::OpenPgp => parsed.pgp_signed = Some(bundle),
+        SignedProtocol::Smime => parsed.smime_signed = Some(bundle),
+    }
+    Some(parsed)
+}
+
+/// What the reader is shown of a signed entity: its headers name the type
+/// and transfer encoding of the content that follows them.
+pub(crate) fn display_signed_entity(entity: &[u8], depth: usize) -> ParsedBody {
+    let (part_header, part_body) = signed_mime::entity_header_and_body(entity);
+    let part_header = String::from_utf8_lossy(part_header);
+    let part_type = parse_header_value(&part_header, "Content-Type")
+        .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
+    let part_encoding = parse_header_value(&part_header, "Content-Transfer-Encoding")
+        .unwrap_or_else(|| "8bit".to_string());
+    parse_body_part(&part_type, &part_encoding, part_body, depth)
+}
+
 pub(super) fn root_crypto_trust(
     content_type: &str,
     body: &ParsedBody,
@@ -3281,19 +3317,127 @@ pub(super) fn root_crypto_trust(
         || ((inline || mime == "multipart/encrypted")
             && text.starts_with("-----BEGIN PGP MESSAGE-----")
             && text.ends_with("-----END PGP MESSAGE-----"));
+    // Only the strict splitter, run on this very root, makes it signed. A
+    // bundle found anywhere else signs a nested entity, never the message.
+    let signed_binding = mime == "multipart/signed"
+        && body.trust.signed_binding
+        && (body.smime_signed.is_some() || body.pgp_signed.is_some());
     let root_crypto = root_encryption
         || root_inline_signature
-        || match mime.as_str() {
-            "multipart/signed" => body.smime_signed.is_some() || body.pgp_signed.is_some(),
-            "application/pkcs7-mime" | "application/x-pkcs7-mime" => body.smime_signed.is_some(),
-            _ => false,
-        };
+        || signed_binding
+        || (matches!(
+            mime.as_str(),
+            "application/pkcs7-mime" | "application/x-pkcs7-mime"
+        ) && body.smime_signed.is_some());
     super::traits::MessageTrust {
         root_crypto,
         root_encryption,
         root_inline_signature,
+        signed_binding,
         ..Default::default()
     }
+}
+
+/// Whether a walk offers files of a signature type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SignatureFiles {
+    /// No: the walk lists what a parse of the message lists.
+    Skip,
+    /// Those inside the walked entity, sent as files: the detached signature
+    /// of a download. A signature part beside an entity is never reached.
+    Keep,
+}
+
+/// The attachments of a stored bundle's signed entity, bytes included: the
+/// parts verification reads, found the way a parse of the message finds them.
+pub fn signed_entity_attachments(
+    bundle: &[u8],
+) -> Result<Vec<RemoteAttachment>, signed_mime::SignedMimeError> {
+    entity_attachments(bundle, SignatureFiles::Skip)
+}
+
+fn entity_attachments(
+    bundle: &[u8],
+    signature_files: SignatureFiles,
+) -> Result<Vec<RemoteAttachment>, signed_mime::SignedMimeError> {
+    let parts = signed_mime::split_bundle(bundle)?;
+    let (header, body) = signed_mime::entity_header_and_body(parts.entity);
+    let mut counter = 0usize;
+    let mut found = Vec::new();
+    collect_section_attachments(header, body, 0, signature_files, &mut counter, &mut found);
+    Ok(found
+        .into_iter()
+        .map(|attachment| remote_attachment_from(attachment, EmbedPolicy::All))
+        .collect())
+}
+
+/// What a provider's attachment size counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProviderSize {
+    /// The part's decoded bytes, as Gmail reports them.
+    Decoded,
+    /// Something else: Graph sizes its own attachment item.
+    Unrelated,
+}
+
+/// Keep only the attachments a provider listed by its own parse that match a
+/// part of the signed entity, under a root the strict splitter took as signed.
+///
+/// The provider knows a part by headers nobody signed and serves it by its
+/// own id. Each listed attachment has to match an entity part no other one
+/// took: type and file name, Content-ID where both name one, size where the
+/// provider counts decoded bytes, bytes where it sent them. It then carries
+/// that part's description and bytes, so a download serves what the
+/// signature covers. A signature part under any name, and a part the entity
+/// does not hold, are not listed; neither is anything when the bundle does
+/// not split.
+pub(super) fn bind_to_signed_entity(
+    attachments: &mut Vec<RemoteAttachment>,
+    trust: &super::traits::MessageTrust,
+    bundle: Option<&[u8]>,
+    sizes: ProviderSize,
+) {
+    if !trust.signed_binding {
+        return;
+    }
+    let listed = std::mem::take(attachments);
+    let Some(mut entity) =
+        bundle.and_then(|bundle| entity_attachments(bundle, SignatureFiles::Keep).ok())
+    else {
+        return;
+    };
+    for attachment in listed {
+        let Some(index) = entity
+            .iter()
+            .position(|part| same_part(&attachment, part, sizes))
+        else {
+            continue;
+        };
+        attachments.push(RemoteAttachment {
+            remote_part_id: attachment.remote_part_id,
+            ..entity.remove(index)
+        });
+    }
+}
+
+fn same_part(listed: &RemoteAttachment, part: &RemoteAttachment, sizes: ProviderSize) -> bool {
+    use crate::email::mime_type::normalize_mime_type;
+    let decoded = |payload: &str| {
+        base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .ok()
+    };
+    normalize_mime_type(&listed.content_type) == normalize_mime_type(&part.content_type)
+        && listed.filename == part.filename
+        && match (listed.content_id.as_deref(), part.content_id.as_deref()) {
+            (Some(listed), Some(part)) => listed.trim_matches(['<', '>']) == part,
+            _ => true,
+        }
+        && (sizes == ProviderSize::Unrelated || listed.size.is_none() || listed.size == part.size)
+        && listed.content_base64.as_deref().is_none_or(|payload| {
+            decoded(payload).is_some()
+                && decoded(payload) == part.content_base64.as_deref().and_then(decoded)
+        })
 }
 
 fn merge_parsed_body(target: &mut ParsedBody, candidate: ParsedBody) {
@@ -3330,6 +3474,7 @@ fn parse_attachments_from_body(
         None,
         None,
         0,
+        SignatureFiles::Skip,
         &mut counter,
         &mut out,
     );
@@ -3344,6 +3489,7 @@ fn collect_attachment_parts(
     disposition: Option<&str>,
     content_id: Option<String>,
     depth: usize,
+    signature_files: SignatureFiles,
     counter: &mut usize,
     out: &mut Vec<ParsedAttachment>,
 ) {
@@ -3354,25 +3500,31 @@ fn collect_attachment_parts(
 
     let lowered_content_type = content_type.to_ascii_lowercase();
     if lowered_content_type.starts_with("multipart/") {
+        // A signed body offers the attachments of the entity its signature
+        // covers, as the display path splits it. The signature part's own
+        // headers are not signed and name nothing to open.
+        if lowered_content_type.starts_with("multipart/signed") {
+            if let Ok(parts) = signed_mime::split(content_type, raw_body) {
+                let (part_header, part_body) = signed_mime::entity_header_and_body(parts.entity);
+                collect_section_attachments(
+                    part_header,
+                    part_body,
+                    depth,
+                    signature_files,
+                    counter,
+                    out,
+                );
+                return;
+            }
+        }
         if let Some(boundary) = extract_header_param(content_type, "boundary") {
             for section in split_multipart_sections(raw_body, &boundary) {
                 let (part_header, part_body) = split_header_and_body(section);
-                let part_header = String::from_utf8_lossy(part_header);
-                let part_type = parse_header_value(&part_header, "Content-Type")
-                    .unwrap_or_else(|| "application/octet-stream".to_string());
-                let part_disposition = parse_header_value(&part_header, "Content-Disposition");
-                let part_encoding = parse_header_value(&part_header, "Content-Transfer-Encoding")
-                    .unwrap_or_else(|| "8bit".to_string());
-                let part_content_id = parse_header_value(&part_header, "Content-ID")
-                    .map(|value| value.trim_matches(['<', '>']).to_string())
-                    .filter(|value| !value.is_empty());
-                collect_attachment_parts(
-                    &part_type,
-                    &part_encoding,
+                collect_section_attachments(
+                    part_header,
                     part_body,
-                    part_disposition.as_deref(),
-                    part_content_id,
-                    depth + 1,
+                    depth,
+                    signature_files,
                     counter,
                     out,
                 );
@@ -3414,6 +3566,7 @@ fn collect_attachment_parts(
             disposition,
             content_id,
             depth + 1,
+            signature_files,
             counter,
             out,
         );
@@ -3421,15 +3574,17 @@ fn collect_attachment_parts(
     }
 
     let lowered_disposition = disposition.unwrap_or_default().to_ascii_lowercase();
-    if lowered_content_type.starts_with("application/pgp-signature")
-        || lowered_content_type.starts_with("application/pkcs7-signature")
-        || lowered_content_type.starts_with("application/x-pkcs7-signature")
-    {
-        return;
-    }
     let filename = extract_filename_param(disposition.unwrap_or_default())
         .or_else(|| extract_filename_param(content_type))
         .map(|value| decode_mime_encoded_words(&value));
+    if (lowered_content_type.starts_with("application/pgp-signature")
+        || lowered_content_type.starts_with("application/pkcs7-signature")
+        || lowered_content_type.starts_with("application/x-pkcs7-signature"))
+        && !(signature_files == SignatureFiles::Keep
+            && (filename.is_some() || lowered_disposition.starts_with("attachment")))
+    {
+        return;
+    }
     let disposition_type = lowered_disposition
         .split(';')
         .next()
@@ -3464,6 +3619,37 @@ fn collect_attachment_parts(
         is_inline: is_inline_content,
         bytes,
     });
+}
+
+/// The attachments of one body part of a multipart at `depth`.
+fn collect_section_attachments(
+    part_header: &[u8],
+    part_body: &[u8],
+    depth: usize,
+    signature_files: SignatureFiles,
+    counter: &mut usize,
+    out: &mut Vec<ParsedAttachment>,
+) {
+    let part_header = String::from_utf8_lossy(part_header);
+    let part_type = parse_header_value(&part_header, "Content-Type")
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    let part_disposition = parse_header_value(&part_header, "Content-Disposition");
+    let part_encoding = parse_header_value(&part_header, "Content-Transfer-Encoding")
+        .unwrap_or_else(|| "8bit".to_string());
+    let part_content_id = parse_header_value(&part_header, "Content-ID")
+        .map(|value| value.trim_matches(['<', '>']).to_string())
+        .filter(|value| !value.is_empty());
+    collect_attachment_parts(
+        &part_type,
+        &part_encoding,
+        part_body,
+        part_disposition.as_deref(),
+        part_content_id,
+        depth + 1,
+        signature_files,
+        counter,
+        out,
+    );
 }
 
 fn is_tnef_part(lowered_content_type: &str, filename: Option<&str>) -> bool {
@@ -3623,7 +3809,7 @@ fn split_header_and_body(section: &[u8]) -> (&[u8], &[u8]) {
     (b"", section)
 }
 
-fn extract_header_param(input: &str, key: &str) -> Option<String> {
+pub(crate) fn extract_header_param(input: &str, key: &str) -> Option<String> {
     let needle = key.to_ascii_lowercase();
     for raw_part in input.split(';').skip(1) {
         // An empty or valueless segment is not the end of the header. Bounce
@@ -3884,10 +4070,10 @@ pub fn parse_message_date(
 ///
 /// The fallback re-parses the whole message, and `merge_extracted_imap_fallback`
 /// only ever fills a gap: a missing text or HTML body (not on a root crypto
-/// part) or an empty attachment list. Without a gap its result would be
-/// thrown away.
+/// part) or an empty attachment list (not on a signed root). Without a gap its
+/// result would be thrown away.
 fn extracted_fallback_could_help(parsed: &ParsedBody) -> bool {
-    parsed.attachments.is_empty()
+    (parsed.attachments.is_empty() && !parsed.trust.signed_binding)
         || (!parsed.trust.root_crypto && (parsed.text.is_none() || parsed.html.is_none()))
 }
 
@@ -4971,6 +5157,98 @@ AQID\r\n\
         assert!(parsed.pgp_signed.is_none());
         assert_eq!(parsed.text.as_deref(), Some("Signed body"));
         assert!(parsed.attachments.is_empty());
+    }
+
+    #[test]
+    fn a_signed_structure_the_stored_bundle_cannot_reproduce_shows_unsigned() {
+        let body = b"--s\r\nContent-Type: text/plain\r\n\r\nSigned body\r\n\
+--s\r\nContent-Type: application/pgp-signature\r\n\r\nSignature\r\n--s--\r\n";
+        let plain = "multipart/signed; protocol=\"application/pgp-signature\"; boundary=s";
+        let signed = parse_message_body(&format!("Content-Type: {plain}\r\n"), Some(body));
+        assert!(signed.pgp_signed.is_some());
+        assert!(signed.trust.root_crypto && signed.trust.signed_binding);
+
+        // Decoded once for display, the type gains line breaks; written into
+        // the bundle and read back, it would name a different structure.
+        let header = format!("Content-Type: {plain}; x=\"=?us-ascii?q?=0D=0A=0D=0A?=\"\r\n");
+        let parsed = parse_message_body(&header, Some(body));
+        assert!(parsed.pgp_signed.is_none());
+        assert_eq!(parsed.text.as_deref(), Some("Signed body"));
+        assert!(!parsed.trust.root_crypto);
+        assert!(!parsed.trust.signed_binding);
+    }
+
+    #[test]
+    fn a_signed_container_without_a_known_protocol_adopts_no_inner_signature() {
+        let inner = "Content-Type: multipart/signed; protocol=\"application/pgp-signature\"; boundary=i\r\n\r\n\
+--i\r\nContent-Type: text/plain\r\n\r\nSigned body\r\n\
+--i\r\nContent-Type: application/pgp-signature\r\n\r\nSignature\r\n--i--\r\n";
+        let body = format!(
+            "--o\r\nContent-Type: text/plain\r\n\r\nForged text\r\n--o\r\n{inner}\r\n--o--\r\n"
+        );
+        for outer in [
+            "multipart/signed; boundary=o",
+            "multipart/signed; protocol=\"application/x-unknown\"; boundary=o",
+        ] {
+            let parsed =
+                parse_message_body(&format!("Content-Type: {outer}\r\n"), Some(body.as_bytes()));
+            assert!(parsed.pgp_signed.is_none(), "{outer}");
+            assert!(parsed.smime_signed.is_none(), "{outer}");
+            assert!(!parsed.trust.root_crypto, "{outer}");
+            assert_eq!(parsed.text.as_deref(), Some("Forged text"), "{outer}");
+        }
+    }
+
+    /// The signature part's headers are not signed: nothing they name may
+    /// turn into an attachment next to a valid signature.
+    #[test]
+    fn a_signed_root_offers_no_attachment_from_its_signature_part() {
+        let raw =
+            include_bytes!("../../tests/corpus/pgp-mime/forged-signature-part-attachment.eml");
+        let (header, body) = super::split_header_and_body(raw);
+        let header = String::from_utf8_lossy(header);
+        let mut parsed = parse_message_body(&header, Some(body));
+        assert!(parsed.trust.root_crypto);
+        if super::extracted_fallback_could_help(&parsed) {
+            super::merge_extracted_imap_fallback(
+                &mut parsed,
+                parse_extracted_imap_email(
+                    &header,
+                    Some(body),
+                    SourceId::new("imap/account-1"),
+                    "INBOX",
+                    77,
+                    42,
+                ),
+            );
+        }
+        let names: Vec<_> = parsed
+            .attachments
+            .iter()
+            .map(|attachment| (attachment.filename.clone(), attachment.content_type.clone()))
+            .collect();
+        assert!(
+            parsed.attachments.iter().all(|attachment| {
+                attachment.filename.as_deref() != Some("Invoice.pdf")
+                    && !super::signed_mime::is_signature_media_type(&attachment.content_type)
+            }),
+            "{names:?}"
+        );
+    }
+
+    /// Attachments of a signed root come from its signed entity, the bytes
+    /// the signature covers, and keep the part numbers the download resolves.
+    #[test]
+    fn signed_attachments_are_listed_from_the_signed_entity() {
+        let raw = include_bytes!("../../tests/corpus/pgp-mime/thunderbird-mixed-attachment.eml");
+        let (header, body) = super::split_header_and_body(raw);
+        let header = String::from_utf8_lossy(header);
+        let content_type = super::parse_header_value(&header, "Content-Type").unwrap();
+        let listed = parse_message_body(&header, Some(body)).attachments;
+        let resolved = parse_attachments_from_body(&content_type, "7bit", body);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].filename.as_deref(), Some("figures.csv"));
+        assert_eq!(listed[0].remote_part_id, resolved[0].remote_part_id);
     }
 
     #[test]

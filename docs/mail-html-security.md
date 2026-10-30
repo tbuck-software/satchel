@@ -40,3 +40,77 @@ fingerprints replace stale per-message entries when bodies, signatures, sender
 identity or verification keys change. S/MIME includes local certificate and
 trust-origin data; the expiry bounds changes to the operating-system trust
 store and certificate validity between calls.
+
+## Signed mail
+
+A signature state only appears over the bytes it was verified on. For
+`multipart/signed`, `email::signed_mime` is the one splitter for display and
+verification. A container it does not take, because the protocol is missing
+or unknown or the structure is ambiguous, is shown unsigned. That container
+never takes over a signature from a nested part either. A signature below the
+root only ever gives a partial state.
+
+Stored rows show their verdict by construction, not by comparison:
+
+- Ingest marks a root that the strict splitter wrote together with its bundle
+  (`MessageTrust::signed_binding`). Only such a row shows its stored body under
+  the signature.
+- Every other root-signed row shows the entity decoded from its stored bundle,
+  the same bytes verification reads. This covers rows from before the marker,
+  evicted bodies, and bodies rewritten later (body fetch, legacy repair, both
+  of which drop the marker). If the bundle does not split, no verdict is shown.
+- Opaque S/MIME (`application/pkcs7-mime`, signed-data) shows the content the
+  engine read while verifying. Without that content there is no body and no
+  verdict, never the stored body, the snippet or the subject. A body fetched
+  later is read back through the same path before a verdict sits next to it.
+  A stored bundle is detached only if it opens with its `Content-Type` line,
+  as every writer puts it; opaque DER is never split for a header inside it.
+- A signed entity that displays nothing (an encrypted part, say) leaves the
+  signature without a body: no verdict, `signedContentUnavailable`.
+- A body fetched on its own is written back only into the IMAP generation it
+  was fetched from, in the same writer transaction that drops the marker.
+
+Attachments next to a root signature:
+
+- IMAP, POP3 and imported mail list them from the signed entity as the
+  splitter cut it; part numbers resolve the same way when the bytes are
+  fetched.
+- The signature part's headers are not signed, so that part is never offered.
+- Gmail and Outlook list parts from their own parse and serve them by their
+  own id. Under a root signature that list is a whitelist against the signed
+  entity the strict splitter cut from the stored bundle: each listed part has
+  to match an entity part no other listed part took, on media type and file
+  name, on Content-ID where both name one, on size where the provider counts
+  decoded bytes (Gmail; Graph sizes its own item), and on bytes where the
+  provider sent them inline. A matched row takes the entity part's type,
+  name, Content-ID, inline flag, size and bytes; the provider id stays only
+  as the row's key, and a download serves the entity's bytes. A signature
+  part under any name (Graph's own, "Untitled"), and a part the entity does
+  not hold, are not listed. If the bundle does not split, nothing is.
+- Gmail keeps the MIME tree, so it is also held to RFC 1847's shape: the root
+  `multipart/signed` has exactly two parts, the second of the declared
+  signature type. Only parts under the first are candidates. A tree of any
+  other shape lists no attachments.
+- A file of a signature type inside the signed entity, the detached
+  signature of a download, is an entity part and stays listed for Gmail and
+  Outlook. IMAP, POP3 and import do not list signature-typed parts at all,
+  inside the entity or not.
+- `attachments.listing_rules` records the rules a row was written under. Rows
+  from before (`0`) may name parts from outside the signed entity, including
+  ones whose Content-ID fills the signed HTML. Beside a root signature they
+  are not listed, so no `cid:` resolves from them, until the
+  `signed_entity_attachments` repair has replaced them with the entity's own
+  parts, their bytes taken from the bundle, and set the message's and its
+  thread's attachment flag from the rows it leaves. A repair block stops after
+  16 MiB of bundles (at least one). The binding marker cannot stand in for
+  this: a refetched body drops it and leaves the attachments as they were.
+- What stays unbound: which provider id a row keeps. Two entity parts the
+  provider describes alike (same type, name and, for Graph, no size check)
+  may swap ids; each row still serves its own entity part's bytes. An entity
+  part the provider names differently from its headers, or lists not at all,
+  is not offered: the listing fails closed rather than fall back to the
+  provider's description.
+- A signature below the root (a forwarded signed part, a list footer added
+  around one) only reaches the partial state. Its card says the text shown may
+  not be the signed part: the display shows the message's first text, which
+  need not be the one signed.

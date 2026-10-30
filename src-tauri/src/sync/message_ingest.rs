@@ -904,8 +904,8 @@ async fn persist_provider_message(
             .fetch_optional(&mut **tx).await.map_err(|error| error.to_string())?
             .unwrap_or_else(|| provider_local_id("att", provider_kind, &[&message_id, &attachment.remote_part_id]));
         sqlx::query(
-            "INSERT INTO attachments (id, message_id, filename, content_type, size, content_id, storage_path, is_inline, cached_path, remote_uid, remote_part_id, created_at, content_base64)
-             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?)
+            "INSERT INTO attachments (id, message_id, filename, content_type, size, content_id, storage_path, is_inline, cached_path, remote_uid, remote_part_id, created_at, content_base64, listing_rules)
+             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                 filename = excluded.filename,
                 content_type = excluded.content_type,
@@ -918,7 +918,8 @@ async fn persist_provider_message(
                 END,
                 remote_uid = excluded.remote_uid,
                 remote_part_id = excluded.remote_part_id,
-                content_base64 = COALESCE(excluded.content_base64, attachments.content_base64)",
+                content_base64 = COALESCE(excluded.content_base64, attachments.content_base64),
+                listing_rules = excluded.listing_rules",
         )
         .bind(&attachment_id)
         .bind(&message_id)
@@ -931,6 +932,7 @@ async fn persist_provider_message(
         .bind(&attachment.remote_part_id)
         .bind(&now)
         .bind(attachment.content_base64.as_deref())
+        .bind(satchel_core::db::signed_attachments::LISTING_RULES)
         .execute(&mut **tx)
         .await
         .map_err(|err| err.to_string())?;
@@ -2144,6 +2146,15 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(stored_name, "report.pdf");
+        // Sync lists by today's rules, so a root signature never hides these.
+        let rules: Vec<i64> = sqlx::query_scalar("SELECT listing_rules FROM attachments")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            rules,
+            [satchel_core::db::signed_attachments::LISTING_RULES; 2]
+        );
         sqlx::query("UPDATE attachments SET cached_path = '/cache/' || id")
             .execute(&pool)
             .await

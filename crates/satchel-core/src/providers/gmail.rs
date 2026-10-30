@@ -2275,7 +2275,6 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         };
         body.calendar = parsed.calendar.clone().or(body.calendar);
     }
-    let attachments = extract_attachments(&payload);
     let snippet = decode_html_entities(&decode_mime_encoded_words(
         message
             .snippet
@@ -2319,6 +2318,23 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         });
     trust.auth_verified = auth_spf.is_some() || auth_dkim.is_some() || auth_dmarc.is_some();
     let pgp_signed = raw_body.and_then(|parsed| parsed.pgp_signed);
+    // Under a root the strict splitter took as signed, only the signed
+    // entity's parts are offered. Gmail keeps the MIME tree, so the entity is
+    // known by position: the root's first part, beside the signature part.
+    // What Gmail lists there is then matched against the entity itself.
+    let mut attachments = if trust.signed_binding {
+        signed_entity_payload(&payload)
+            .map(extract_attachments)
+            .unwrap_or_default()
+    } else {
+        extract_attachments(&payload)
+    };
+    super::imap::bind_to_signed_entity(
+        &mut attachments,
+        &trust,
+        pgp_signed.as_deref().or(smime_signed.as_deref()),
+        super::imap::ProviderSize::Decoded,
+    );
 
     MessageEnvelope {
         remote_id: message.id,
@@ -2665,6 +2681,26 @@ fn extract_bodies_recursive(payload: &GmailPayload, result: &mut ExtractedBody) 
     }
 }
 
+/// The signed entity of a `multipart/signed` root, if Gmail's tree has the
+/// shape RFC 1847 gives it: exactly two parts, the second of the declared
+/// signature type. Any other tree does not say which part the signature
+/// covers.
+fn signed_entity_payload(payload: &GmailPayload) -> Option<&GmailPayload> {
+    let content_type = payload
+        .headers
+        .as_deref()
+        .and_then(|headers| header_value(headers, "Content-Type"))?;
+    let protocol = crate::email::signed_mime::SignedProtocol::declared(&content_type)?;
+    let [entity, signature] = payload.parts.as_deref()? else {
+        return None;
+    };
+    protocol
+        .accepts(&crate::email::mime_type::normalize_mime_type(
+            signature.mime_type.as_deref().unwrap_or_default(),
+        ))
+        .then_some(entity)
+}
+
 fn extract_attachments(payload: &GmailPayload) -> Vec<RemoteAttachment> {
     let mut result = Vec::new();
     extract_attachments_recursive(payload, &mut result);
@@ -2808,12 +2844,12 @@ mod tests {
     use super::{
         build_gmail_raw_message, cost, decode_gmail_part, gmail_message_needs_raw_crypto,
         gmail_move_label_changes, is_rate_limited, map_gmail_message, rate_limit_delay,
-        BackfillStep, GmailCursorState, GmailHeader, GmailHistoryResponse, GmailMessageResponse,
-        GmailPayload, GmailProvider, Priority, QuotaPacer, BACKGROUND_COOLDOWN,
-        BACKGROUND_UNITS_PER_SECOND, BLOCK_LAPSE_MARGIN, MAX_BLOCK_WAIT, MAX_RATE_LIMIT_WAIT,
-        QUOTA_BURST_UNITS, QUOTA_UNITS_PER_SECOND, REPEAT_BLOCK_WINDOW,
+        BackfillStep, GmailBody, GmailCursorState, GmailHeader, GmailHistoryResponse,
+        GmailMessageResponse, GmailPayload, GmailProvider, Priority, QuotaPacer,
+        BACKGROUND_COOLDOWN, BACKGROUND_UNITS_PER_SECOND, BLOCK_LAPSE_MARGIN, MAX_BLOCK_WAIT,
+        MAX_RATE_LIMIT_WAIT, QUOTA_BURST_UNITS, QUOTA_UNITS_PER_SECOND, REPEAT_BLOCK_WINDOW,
     };
-    use crate::providers::traits::{MessageRef, OutgoingMessage, SyncCheckpoint};
+    use crate::providers::traits::{MessageEnvelope, MessageRef, OutgoingMessage, SyncCheckpoint};
     use base64::Engine;
 
     #[test]
@@ -2942,6 +2978,226 @@ mod tests {
 
         assert!(mapped.smime_signed.is_some());
         assert!(mapped.pgp_signed.is_none());
+    }
+
+    /// Gmail lists every part with an attachment id, the signature part too.
+    /// Its headers are not signed, so they must not add an attachment to a
+    /// message shown with a signature.
+    #[test]
+    fn a_signed_root_drops_the_signature_part_gmail_lists() {
+        let raw =
+            include_bytes!("../../tests/corpus/pgp-mime/forged-signature-part-attachment.eml");
+        let mut payload = payload_with_headers(
+            "multipart/signed",
+            &[(
+                "Content-Type",
+                "multipart/signed; micalg=pgp-sha256; protocol=\"application/pgp-signature\"; boundary=\"Apple-Mail=_4B1E2C3D-5F60-4A7B-8C9D-0E1F2A3B4C5D\"",
+            )],
+        );
+        let part =
+            |mime_type: &str, filename: Option<&str>, attachment_id: Option<&str>| GmailPayload {
+                filename: filename.map(str::to_string),
+                mime_type: Some(mime_type.to_string()),
+                headers: None,
+                body: Some(GmailBody {
+                    data: None,
+                    attachment_id: attachment_id.map(str::to_string),
+                    size: Some(99),
+                }),
+                parts: None,
+            };
+        payload.parts = Some(vec![
+            part("text/plain", None, None),
+            part(
+                "application/pgp-signature",
+                Some("Invoice.pdf"),
+                Some("sig-part"),
+            ),
+        ]);
+        let message = GmailMessageResponse {
+            id: "signed-message".to_string(),
+            thread_id: None,
+            history_id: None,
+            label_ids: None,
+            snippet: None,
+            internal_date: None,
+            payload: Some(payload),
+            raw: Some(base64url(raw)),
+        };
+
+        let mapped = map_gmail_message(message);
+
+        assert!(mapped.trust.root_crypto);
+        assert!(mapped.pgp_signed.is_some());
+        assert!(mapped.attachments.is_empty(), "{:?}", mapped.attachments);
+    }
+
+    /// A signed entity that carries a file of a signature type, the detached
+    /// signature of a download, beside a signature part that names itself an
+    /// attachment.
+    const SIGNATURE_FILE_IN_ENTITY: &[u8] = b"From: releases@example.test\r\n\
+        Content-Type: multipart/signed; micalg=pgp-sha256; protocol=\"application/pgp-signature\"; boundary=\"S\"\r\n\r\n\
+--S\r\nContent-Type: multipart/mixed; boundary=\"M\"\r\n\r\n\
+--M\r\nContent-Type: text/plain\r\n\r\nRelease 2.1 is out; its signature file is attached.\r\n\
+--M\r\nContent-Type: application/pgp-signature; name=\"release.tar.gz.asc\"\r\nContent-Disposition: attachment; filename=\"release.tar.gz.asc\"\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\nBBBB\r\n-----END PGP SIGNATURE-----\r\n--M--\r\n\
+--S\r\nContent-Type: application/pgp-signature; name=\"Invoice.pdf\"\r\nContent-Disposition: attachment; filename=\"Invoice.pdf\"\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\nAAAA\r\n-----END PGP SIGNATURE-----\r\n--S--\r\n";
+
+    /// The decoded size of the signature file inside `SIGNATURE_FILE_IN_ENTITY`.
+    const SIGNATURE_FILE_SIZE: i64 = 64;
+
+    fn leaf(
+        mime_type: &str,
+        filename: Option<&str>,
+        attachment_id: Option<&str>,
+        size: i64,
+    ) -> GmailPayload {
+        GmailPayload {
+            filename: filename.map(str::to_string),
+            mime_type: Some(mime_type.to_string()),
+            headers: None,
+            body: Some(GmailBody {
+                data: None,
+                attachment_id: attachment_id.map(str::to_string),
+                size: Some(size),
+            }),
+            parts: None,
+        }
+    }
+
+    fn signed_root(parts: Vec<GmailPayload>) -> GmailMessageResponse {
+        let mut payload = payload_with_headers(
+            "multipart/signed",
+            &[(
+                "Content-Type",
+                "multipart/signed; micalg=pgp-sha256; protocol=\"application/pgp-signature\"; boundary=\"S\"",
+            )],
+        );
+        payload.parts = Some(parts);
+        GmailMessageResponse {
+            id: "signed-message".to_string(),
+            thread_id: None,
+            history_id: None,
+            label_ids: None,
+            snippet: None,
+            internal_date: None,
+            payload: Some(payload),
+            raw: Some(base64url(SIGNATURE_FILE_IN_ENTITY)),
+        }
+    }
+
+    fn entity(parts: Vec<GmailPayload>) -> GmailPayload {
+        let mut entity = payload_with_headers("multipart/mixed", &[]);
+        entity.parts = Some(parts);
+        entity
+    }
+
+    fn listed_ids(mapped: &MessageEnvelope) -> Vec<&str> {
+        mapped
+            .attachments
+            .iter()
+            .map(|attachment| attachment.remote_part_id.as_str())
+            .collect()
+    }
+
+    /// Only the signature part is dropped, known by its position: the root's
+    /// second part. A signature-typed file inside the signed entity stays.
+    #[test]
+    fn a_signed_root_keeps_signature_typed_files_inside_its_entity() {
+        let message = signed_root(vec![
+            entity(vec![
+                leaf("text/plain", None, None, 10),
+                leaf(
+                    "application/pgp-signature",
+                    Some("release.tar.gz.asc"),
+                    Some("file-asc"),
+                    SIGNATURE_FILE_SIZE,
+                ),
+            ]),
+            leaf(
+                "application/pgp-signature",
+                Some("Invoice.pdf"),
+                Some("sig-part"),
+                99,
+            ),
+        ]);
+
+        let mapped = map_gmail_message(message);
+
+        assert!(mapped.trust.signed_binding);
+        assert_eq!(listed_ids(&mapped), ["file-asc"]);
+    }
+
+    /// Gmail's tree under the first part is matched against the entity the
+    /// strict splitter cut: a part Gmail places there that the entity does
+    /// not hold, or holds at another size, stays out. A listed file carries
+    /// the entity's bytes.
+    #[test]
+    fn a_signed_root_lists_only_gmail_parts_that_match_its_entity() {
+        let message = signed_root(vec![
+            entity(vec![
+                leaf("text/plain", None, None, 10),
+                leaf(
+                    "application/pgp-signature",
+                    Some("release.tar.gz.asc"),
+                    Some("file-asc"),
+                    SIGNATURE_FILE_SIZE,
+                ),
+                leaf("application/pdf", Some("Invoice.pdf"), Some("outside"), 99),
+                leaf(
+                    "application/pgp-signature",
+                    Some("release.tar.gz.asc"),
+                    Some("resized"),
+                    99,
+                ),
+            ]),
+            leaf(
+                "application/pgp-signature",
+                Some("Invoice.pdf"),
+                Some("sig-part"),
+                99,
+            ),
+        ]);
+
+        let mapped = map_gmail_message(message);
+
+        assert!(mapped.trust.signed_binding);
+        assert_eq!(listed_ids(&mapped), ["file-asc"]);
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(mapped.attachments[0].content_base64.as_deref().unwrap())
+            .unwrap();
+        assert_eq!(
+            bytes,
+            b"-----BEGIN PGP SIGNATURE-----\r\nBBBB\r\n-----END PGP SIGNATURE-----"
+        );
+    }
+
+    /// A root whose Gmail tree is not the signed entity followed by a part of
+    /// the declared signature type lists nothing: its first part need not be
+    /// the entity the signature covers.
+    #[test]
+    fn a_signed_root_of_another_shape_lists_nothing() {
+        let file = || {
+            leaf(
+                "application/pgp-signature",
+                Some("release.tar.gz.asc"),
+                Some("file-asc"),
+                SIGNATURE_FILE_SIZE,
+            )
+        };
+        let signature = || leaf("application/pgp-signature", None, Some("sig-part"), 99);
+        for parts in [
+            vec![entity(vec![file()]), signature(), signature()],
+            vec![entity(vec![file()])],
+            vec![
+                entity(vec![file()]),
+                leaf("application/pdf", None, Some("pdf"), 99),
+            ],
+        ] {
+            let mapped = map_gmail_message(signed_root(parts));
+
+            assert!(mapped.trust.signed_binding);
+            assert!(mapped.attachments.is_empty(), "{:?}", mapped.attachments);
+        }
     }
 
     #[test]

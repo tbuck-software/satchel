@@ -28,14 +28,19 @@ use crate::{
         resolve_signature_for_compose, ResolveSignatureInput, SignaturePreference, SignatureVariant,
     },
     commands::smime::{
-        decrypt_message_with_unlocked_smime_certs, verify_smime_message, SMIME_DECRYPTED_BLOCK_END,
-        SMIME_DECRYPTED_BLOCK_START,
+        decrypt_message_with_unlocked_smime_certs, verify_smime_message, SmimeVerifyMessageResult,
+        SMIME_DECRYPTED_BLOCK_END, SMIME_DECRYPTED_BLOCK_START,
     },
     db::remote_content::{saved_uidvalidity, ContentReference},
     email::sanitizer::sanitize_email_html,
+    email::signed_mime::{self, EntityDisplay, SignedMimeError, StoredSignedBody},
     events::bus::AppEvent,
     plugins::runtime::{MessageTransformInput, PluginRuntime},
-    providers::imap::{is_legacy_truncated_body, parse_header_value, parse_raw_message_body},
+    providers::imap::{
+        build_snippet, is_legacy_truncated_body, parse_header_value, parse_raw_message_body,
+        ParsedBody,
+    },
+    providers::traits::MessageTrust,
     sync::outbox::{build_send_action, execute_send_action},
     utils::mime::{
         decode_html_entities, decode_mime_encoded_words, extract_email_address,
@@ -474,22 +479,6 @@ async fn message_bodies(
             .get(&row.id)
             .ok_or_else(|| CommandError::new("backend.errors.messageNotAvailableLocally"))?;
         let content_error = gate_cached_body(&mut row, reference);
-        // Keep this state from the stored columns. `map_message_row` replaces
-        // a missing body with the snippet so list views always have readable
-        // text. Old IMAP bodies at the former 64-KiB cutoff likewise remain
-        // readable as a cached prefix while the full body is fetched.
-        let has_stored_body = row
-            .body_text
-            .as_deref()
-            .is_some_and(|text| !text.trim().is_empty())
-            || row
-                .body_html
-                .as_deref()
-                .is_some_and(|html| !html.trim().is_empty());
-        let body_loaded = has_stored_body
-            && !(row.id.starts_with("m-imap-")
-                && (is_legacy_truncated_body(row.body_text.as_deref())
-                    || is_legacy_truncated_body(row.body_html.as_deref())));
         let dto = if content_error.is_some() {
             map_stored_message_row(row)
         } else {
@@ -507,7 +496,7 @@ async fn message_bodies(
             .await
         };
 
-        let body_loaded = body_loaded || content_error.is_some();
+        let body_loaded = dto.body_loaded || content_error.is_some();
         bodies.push(MessageBodyDto {
             id: dto.id,
             remote_uidvalidity: dto.remote_uidvalidity,
@@ -546,6 +535,15 @@ async fn message_bodies(
             body.snippet.clear();
             body.source_payload = None;
             body.body_loaded = true;
+            // A verdict covers the body it was shown with, which is gone.
+            body.pgp_state = None;
+            body.pgp_error_detail = None;
+            body.pgp_signer_name = None;
+            body.pgp_signer_fingerprint = None;
+            body.smime_state = None;
+            body.smime_signer_email = None;
+            body.smime_signer_cn = None;
+            body.smime_error_detail = None;
         }
     }
     log_perf(
@@ -711,8 +709,19 @@ async fn map_message_row(
         .filter(|_| trust.root_encryption);
     let smime_signed = row.smime_signed.clone();
     let pgp_signed = row.pgp_signed.clone();
+    let has_stored_body = row_has_body(&row);
+    // `map_stored_message_row` replaces a missing body with the snippet so
+    // list views always have readable text; whether the body is really there
+    // comes from the stored columns. Old IMAP bodies at the former 64-KiB
+    // cutoff likewise remain readable as a cached prefix while the full body
+    // is fetched.
+    let body_loaded = has_stored_body
+        && !(row.id.starts_with("m-imap-")
+            && (is_legacy_truncated_body(row.body_text.as_deref())
+                || is_legacy_truncated_body(row.body_html.as_deref())));
 
     let mut dto = map_stored_message_row(row);
+    dto.body_loaded = body_loaded;
     let original_body_text = dto.body_text.clone();
 
     if (trust.root_encryption || trust.root_inline_signature)
@@ -767,16 +776,21 @@ async fn map_message_row(
                 {
                     tracing::warn!(message_id = %dto.id, %error, "could not cache decrypted PGP attachments");
                 }
-                let readable_text = parsed
-                    .text
-                    .filter(|text| !text.trim().is_empty())
-                    .unwrap_or(decrypted.display_body);
+                let inner_signed = parsed.pgp_signed.clone();
+                let inner_root_signed = parsed.trust.root_crypto;
+                let (readable_text, readable_html) =
+                    decrypted_display(parsed, decrypted.display_body);
                 dto.snippet = first_non_empty_line(&readable_text).unwrap_or(dto.snippet.clone());
                 dto.body_text = readable_text;
-                dto.body_html = parsed.html.filter(|html| !html.trim().is_empty());
-                if let Some(inner_signed) = parsed.pgp_signed.as_deref() {
-                    apply_incoming_pgp_signed_status(&mut dto, app, pool, inner_signed).await;
-                    apply_signature_scope(&mut dto.pgp_state, parsed.trust.root_crypto);
+                dto.body_html = readable_html;
+                if let Some(inner_signed) = inner_signed.as_deref() {
+                    if shows_nothing(&dto.body_text, dto.body_html.as_deref()) {
+                        dto.snippet.clear();
+                        mark_pgp_signed_content_unavailable(&mut dto);
+                    } else {
+                        apply_incoming_pgp_signed_status(&mut dto, app, pool, inner_signed).await;
+                        apply_signature_scope(&mut dto.pgp_state, inner_root_signed);
+                    }
                 } else {
                     dto.pgp_state = Some("decrypted".to_string());
                     dto.pgp_error_detail = None;
@@ -859,8 +873,17 @@ async fn map_message_row(
     }
 
     if let Some(signed_bundle) = pgp_signed.as_deref() {
-        apply_incoming_pgp_signed_status(&mut dto, app, pool, signed_bundle).await;
-        apply_signature_scope(&mut dto.pgp_state, trust.root_crypto);
+        match show_signed_body(&mut dto, signed_bundle, &trust, has_stored_body).await {
+            SignedDisplay::Covered => {
+                apply_incoming_pgp_signed_status(&mut dto, app, pool, signed_bundle).await;
+                apply_signature_scope(&mut dto.pgp_state, trust.root_crypto);
+            }
+            SignedDisplay::Unavailable => mark_pgp_signed_content_unavailable(&mut dto),
+            // OpenPGP has no opaque form: such a bundle signs nothing shown.
+            SignedDisplay::Encapsulated | SignedDisplay::Malformed => {
+                mark_pgp_signed_malformed(&mut dto)
+            }
+        }
     }
 
     if let Some(ciphertext) = smime_encrypted.as_deref() {
@@ -888,8 +911,21 @@ async fn map_message_row(
     }
 
     if let Some(signed_payload) = smime_signed.as_deref() {
-        let verified =
-            verify_smime_message(app, pool, &dto.id, signed_payload, &dto.from_address).await;
+        let verified = match show_signed_body(&mut dto, signed_payload, &trust, has_stored_body)
+            .await
+        {
+            SignedDisplay::Covered => {
+                verify_smime_message(app, pool, &dto.id, signed_payload, &dto.from_address).await
+            }
+            SignedDisplay::Encapsulated => {
+                let verified =
+                    verify_smime_message(app, pool, &dto.id, signed_payload, &dto.from_address)
+                        .await;
+                show_encapsulated_body(&mut dto, verified).await
+            }
+            SignedDisplay::Unavailable => SmimeVerifyMessageResult::content_unavailable(),
+            SignedDisplay::Malformed => SmimeVerifyMessageResult::malformed(),
+        };
         dto.smime_state = Some(verified.state);
         apply_signature_scope(&mut dto.smime_state, trust.root_crypto);
         dto.smime_signer_email = verified.signer_email;
@@ -911,6 +947,183 @@ async fn map_message_row(
     dto
 }
 
+/// Whether the row stores a body at all. A stored empty string counts as absent.
+fn row_has_body(row: &MessageReadRecord) -> bool {
+    let present = |value: Option<&str>| value.is_some_and(|value| !value.trim().is_empty());
+    present(row.body_text.as_deref()) || present(row.body_html.as_deref())
+}
+
+/// What a stored signature may be shown next to, once the DTO holds the body.
+#[derive(Debug, PartialEq, Eq)]
+enum SignedDisplay {
+    /// The DTO shows what the signature covers.
+    Covered,
+    /// Opaque S/MIME: only the engine reads the content, while verifying.
+    Encapsulated,
+    /// The signed entity displays nothing, so no verdict may stand over it.
+    Unavailable,
+    /// The bundle does not split; it signs nothing shown.
+    Malformed,
+}
+
+/// Put on the DTO the body a stored signature covers, before it is verified.
+///
+/// A row the strict splitter wrote with its bundle keeps its body. Every other
+/// root-signed row shows the entity decoded from the bundle, the bytes
+/// verification reads, so display and verdict cannot part.
+async fn show_signed_body(
+    dto: &mut MessageDto,
+    bundle: &[u8],
+    trust: &MessageTrust,
+    has_stored_body: bool,
+) -> SignedDisplay {
+    static CACHE: std::sync::LazyLock<
+        std::sync::Mutex<
+            super::message_processing::ProcessingCache<
+                Result<(StoredSignedBody, String), SignedMimeError>,
+            >,
+        >,
+    > = std::sync::LazyLock::new(|| std::sync::Mutex::new(Default::default()));
+    let message_id = dto.id.clone();
+    let subject = dto.subject.clone();
+    let bundle = bundle.to_vec();
+    let trust = trust.clone();
+    let shown = tokio::task::spawn_blocking(move || {
+        let fingerprint = super::message_processing::fingerprint(&[
+            &bundle,
+            &[
+                u8::from(trust.root_crypto),
+                u8::from(trust.signed_binding),
+                u8::from(has_stored_body),
+            ],
+            subject.as_bytes(),
+        ]);
+        super::message_processing::cached(&CACHE, message_id, fingerprint, || {
+            let shown =
+                signed_mime::stored_signed_body(&bundle, &trust, has_stored_body).map(|shown| {
+                    let snippet = match &shown {
+                        StoredSignedBody::Entity(entity) => {
+                            build_snippet(&subject, entity.text.as_deref(), entity.html.as_deref())
+                        }
+                        _ => String::new(),
+                    };
+                    (shown, snippet)
+                });
+            (shown, bundle.len())
+        })
+    })
+    .await
+    .unwrap_or_else(|error| {
+        tracing::warn!(%error, "signed body task failed");
+        Err(SignedMimeError::NotSigned)
+    });
+    match shown {
+        Ok((StoredSignedBody::Entity(entity), _))
+            if shows_nothing(
+                entity.text.as_deref().unwrap_or_default(),
+                entity.html.as_deref(),
+            ) =>
+        {
+            show_entity(dto, EntityDisplay::default(), String::new());
+            dto.snippet.clear();
+            SignedDisplay::Unavailable
+        }
+        Ok((StoredSignedBody::Entity(entity), snippet)) => {
+            show_entity(dto, entity, snippet);
+            SignedDisplay::Covered
+        }
+        Ok((StoredSignedBody::Stored, _)) => SignedDisplay::Covered,
+        Ok((StoredSignedBody::Encapsulated, _)) => SignedDisplay::Encapsulated,
+        Err(error) => {
+            tracing::debug!(message_id = %dto.id, %error, "stored signed bundle rejected");
+            SignedDisplay::Malformed
+        }
+    }
+}
+
+/// Whether a signed display has nothing for a verdict to stand over.
+fn shows_nothing(text: &str, html: Option<&str>) -> bool {
+    text.trim().is_empty() && html.is_none_or(|html| html.trim().is_empty())
+}
+
+/// The DTO shows exactly this signed entity: nothing of the stored body, the
+/// snippet or the subject stands in for a part it does not display.
+fn show_entity(dto: &mut MessageDto, entity: EntityDisplay, snippet: String) {
+    dto.body_text = entity.text.unwrap_or_default();
+    dto.body_html = entity.html;
+    if !snippet.is_empty() {
+        dto.snippet = snippet;
+    }
+    // A body fetched again would not be what this verdict covers.
+    dto.body_loaded = true;
+}
+
+/// Opaque S/MIME carries its content inside the signature. Show what the
+/// engine read there while verifying, or no body and no verdict.
+async fn show_encapsulated_body(
+    dto: &mut MessageDto,
+    mut verified: SmimeVerifyMessageResult,
+) -> SmimeVerifyMessageResult {
+    let content = verified.content.take();
+    let entity = tokio::task::spawn_blocking(move || {
+        content
+            .as_deref()
+            .map(signed_mime::display_entity)
+            .filter(|entity| entity.text.is_some() || entity.html.is_some())
+    })
+    .await
+    .ok()
+    .flatten();
+    match entity {
+        Some(entity) => {
+            let snippet = entity
+                .text
+                .as_deref()
+                .and_then(first_non_empty_line)
+                .unwrap_or_default();
+            show_entity(dto, entity, snippet);
+            verified
+        }
+        None => {
+            show_entity(dto, EntityDisplay::default(), String::new());
+            if verified.state == "error" {
+                verified
+            } else {
+                SmimeVerifyMessageResult::content_unavailable()
+            }
+        }
+    }
+}
+
+/// What a decrypted message shows. Under a signature found inside it, only
+/// what the parser displayed of the signed structure: the decrypted plaintext
+/// as a whole is not what was signed.
+fn decrypted_display(parsed: ParsedBody, display_body: String) -> (String, Option<String>) {
+    let text = parsed.text.filter(|text| !text.trim().is_empty());
+    let html = parsed.html.filter(|html| !html.trim().is_empty());
+    if parsed.pgp_signed.is_some() || parsed.smime_signed.is_some() {
+        (text.unwrap_or_default(), html)
+    } else {
+        (text.unwrap_or(display_body), html)
+    }
+}
+
+fn mark_pgp_signed_malformed(dto: &mut MessageDto) {
+    mark_pgp_signed_without_verdict(dto, "backend.errors.signedMessageMalformed");
+}
+
+/// The signed entity shows nothing: nothing else may stand in for it.
+fn mark_pgp_signed_content_unavailable(dto: &mut MessageDto) {
+    mark_pgp_signed_without_verdict(dto, "backend.errors.signedContentUnavailable");
+}
+
+fn mark_pgp_signed_without_verdict(dto: &mut MessageDto, key: &str) {
+    dto.pgp_state = Some("error".to_string());
+    dto.pgp_error_detail = Some(CommandError::new(key).encoded());
+    dto.pgp_signer_name = None;
+    dto.pgp_signer_fingerprint = None;
+}
+
 fn apply_signature_scope(state: &mut Option<String>, root_crypto: bool) {
     if !root_crypto
         && matches!(
@@ -929,20 +1142,25 @@ async fn apply_incoming_pgp_signed_status(
     signed_bundle: &[u8],
 ) {
     let from_address = dto.from_address.clone();
-    let verification = match crate::email::pgp_mime::parse_signed_message(signed_bundle) {
-        Ok(parsed) => {
-            verify_incoming_detached_signature(
-                app,
-                pool,
-                &dto.id,
-                &parsed.signed_entity,
-                &parsed.armored_signature,
-                &from_address,
-            )
-            .await
+    let parsed = match crate::email::pgp_mime::parse_signed_message(signed_bundle) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            // No key is consulted for a structure that does not tie the
+            // signature to the displayed entity.
+            tracing::debug!(message_id = %dto.id, %error, "OpenPGP signed structure rejected");
+            mark_pgp_signed_malformed(dto);
+            return;
         }
-        Err(error) => Err(error),
     };
+    let verification = verify_incoming_detached_signature(
+        app,
+        pool,
+        &dto.id,
+        &parsed.signed_entity,
+        &parsed.armored_signature,
+        &from_address,
+    )
+    .await;
 
     match verification {
         Ok(IncomingPgpDetachedSignature::Valid {
@@ -1067,8 +1285,8 @@ async fn persist_decrypted_attachments_in_dir(
             sqlx::query(
                 "INSERT INTO attachments
              (id, message_id, filename, content_type, size, content_id, storage_path, is_inline,
-              cached_path, remote_uid, remote_part_id, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, NULL, ?)
+              cached_path, remote_uid, remote_part_id, created_at, listing_rules)
+             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, NULL, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                filename = excluded.filename,
                content_type = excluded.content_type,
@@ -1076,7 +1294,8 @@ async fn persist_decrypted_attachments_in_dir(
                content_id = excluded.content_id,
                is_inline = excluded.is_inline,
                cached_path = excluded.cached_path,
-               remote_part_id = NULL, content_base64 = NULL",
+               remote_part_id = NULL, content_base64 = NULL,
+               listing_rules = excluded.listing_rules",
             )
             .bind(&attachment_id)
             .bind(message_id)
@@ -1087,6 +1306,7 @@ async fn persist_decrypted_attachments_in_dir(
             .bind(if attachment.is_inline { 1 } else { 0 })
             .bind(&path)
             .bind(&now)
+            .bind(satchel_core::db::signed_attachments::LISTING_RULES)
             .execute(&mut *tx)
             .await
             .map_err(|error| error.to_string())?;
@@ -2216,7 +2436,7 @@ mod tests {
 
     use satchel_core::db::messages::{MessageReadError, SentMessageError};
 
-    use super::{is_owned_sender, normalize_recipients, raw_header_block};
+    use super::{is_owned_sender, normalize_recipients, parse_raw_message_body, raw_header_block};
 
     #[cfg(desktop)]
     #[test]
@@ -2602,6 +2822,45 @@ mod tests {
         assert_eq!(body, "replacement");
     }
 
+    /// A source read again can turn a row into root-signed mail. The rows an
+    /// older parse listed beside it give way to the signed entity's parts.
+    #[tokio::test]
+    async fn a_source_reparse_rebuilds_older_attachment_rows_from_the_bundle() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+                VALUES ('a', 'Account', 'me@example.test', 'gmail', '{}', '', '', '');
+            INSERT INTO folders (id, account_id, name, full_path, folder_type, created_at, updated_at)
+                VALUES ('f', 'a', 'Inbox', 'Inbox', 'inbox', '', '');
+            INSERT INTO messages (id, account_id, folder_id, from_address, to_addresses, date, created_at, updated_at)
+                VALUES ('m', 'a', 'f', 'sender@example.test', '[]', '', '', '');
+            INSERT INTO attachments (id, message_id, filename, content_type, listing_rules, created_at)
+                VALUES ('old-signature', 'm', 'Invoice.pdf', 'application/pgp-signature', 0, '');")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let raw = include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp-mime/thunderbird-mixed-attachment.eml"
+        );
+        let reference = crate::db::remote_content::ContentReference::load(&pool, "m")
+            .await
+            .unwrap();
+        super::persist_raw_message_metadata(&pool, &reference, raw)
+            .await
+            .unwrap();
+        let rows: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT filename, listing_rules FROM attachments WHERE message_id = 'm'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows, [("figures.csv".to_string(), 1)]);
+    }
+
     #[tokio::test]
     async fn source_reparse_clears_stale_html_and_forged_authentication() {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
@@ -2718,6 +2977,195 @@ mod tests {
             trust_metadata: None,
             source_payload: None,
         }
+    }
+
+    const FORGED_PGP_ROOT: &[u8] = include_bytes!(
+        "../../../crates/satchel-core/tests/corpus/pgp-mime/forged-missing-protocol.eml"
+    );
+    const FORGED_SMIME_HTML_ROOT: &[u8] = include_bytes!(
+        "../../../crates/satchel-core/tests/corpus/smime-signed/forged-html-link-swapped.eml"
+    );
+    const MUTT_SIGNED: &[u8] =
+        include_bytes!("../../../crates/satchel-core/tests/corpus/pgp-mime/mutt-crlf.eml");
+
+    /// The bundle an older parser kept for a forged root: the nested,
+    /// genuinely signed part.
+    fn legacy_bundle(forged: &[u8]) -> Vec<u8> {
+        let text = std::str::from_utf8(forged).unwrap();
+        let start = text
+            .find("--OUT\r\nContent-Type: multipart/signed")
+            .unwrap()
+            + 7;
+        text.as_bytes()[start..text.rfind("\r\n--OUT--").unwrap()].to_vec()
+    }
+
+    fn trust(json: &str) -> crate::providers::traits::MessageTrust {
+        serde_json::from_str(json).unwrap()
+    }
+
+    /// Rows synced before the strict splitter keep the body an older parser
+    /// chose. Whatever it is, the signature is shown over its own entity.
+    #[tokio::test]
+    async fn a_legacy_signed_row_shows_its_signed_entity_not_its_stored_body() {
+        let legacy = trust(r#"{"root_crypto":true}"#);
+        let padded = format!("Forged text {}", "x".repeat(65534 - 12));
+        assert!(super::is_legacy_truncated_body(Some(&padded)));
+        for stored in [
+            "Forged text: wire the money to the new account.".to_string(),
+            padded,
+        ] {
+            let bundle = legacy_bundle(FORGED_PGP_ROOT);
+            let mut dto = super::map_stored_message_row(stored_body_record(Some(stored), None));
+            dto.body_loaded = false;
+            let shown = super::show_signed_body(&mut dto, &bundle, &legacy, true).await;
+            assert_eq!(shown, super::SignedDisplay::Covered);
+            assert!(
+                dto.body_text.starts_with("The fix is on the branch."),
+                "{}",
+                dto.body_text
+            );
+            assert!(!dto.body_text.contains("Forged"));
+            assert!(!dto.snippet.contains("Forged"));
+            assert!(dto.body_loaded);
+        }
+
+        // A swapped link in stored HTML does not survive either.
+        let bundle = legacy_bundle(FORGED_SMIME_HTML_ROOT);
+        let mut dto = super::map_stored_message_row(stored_body_record(
+            None,
+            Some(r#"<p>Please review the invoice at <a href="https://evil.example/login">the bank portal</a> before Friday.</p>"#.into()),
+        ));
+        assert_eq!(
+            super::show_signed_body(&mut dto, &bundle, &legacy, true).await,
+            super::SignedDisplay::Covered
+        );
+        let html = dto.body_html.unwrap_or_default();
+        assert!(html.contains("https://bank.example/invoice/42"), "{html}");
+        assert!(!html.contains("evil.example"));
+    }
+
+    #[tokio::test]
+    async fn a_signed_row_written_with_its_bundle_keeps_its_body_until_evicted() {
+        let parsed = parse_raw_message_body(MUTT_SIGNED);
+        assert!(parsed.trust.signed_binding);
+        let bundle = parsed.pgp_signed.clone().unwrap();
+        let stored = parsed.text.clone();
+
+        let mut dto = super::map_stored_message_row(stored_body_record(stored.clone(), None));
+        let shown = super::show_signed_body(&mut dto, &bundle, &parsed.trust, true).await;
+        assert_eq!(shown, super::SignedDisplay::Covered);
+        assert_eq!(Some(dto.body_text), stored);
+
+        // Evicted: the snippet must not stand in for the body.
+        let mut dto = super::map_stored_message_row(stored_body_record(None, None));
+        assert_eq!(dto.body_text, "Preview");
+        dto.body_loaded = false;
+        assert_eq!(
+            super::show_signed_body(&mut dto, &bundle, &parsed.trust, false).await,
+            super::SignedDisplay::Covered
+        );
+        assert_eq!(Some(dto.body_text), stored);
+        assert!(dto.body_loaded);
+    }
+
+    #[tokio::test]
+    async fn opaque_smime_shows_the_verified_content_or_no_body_and_no_verdict() {
+        let content = b"Content-Type: text/plain\r\n\r\nThe opaque contract text.\r\n".to_vec();
+        let verified = |content: Option<Vec<u8>>| super::SmimeVerifyMessageResult {
+            state: "signature_valid".into(),
+            signer_email: Some("signer@example.test".into()),
+            signer_cn: None,
+            error_detail: None,
+            content,
+        };
+
+        let mut dto = super::map_stored_message_row(stored_body_record(None, None));
+        let result = super::show_encapsulated_body(&mut dto, verified(Some(content))).await;
+        assert_eq!(result.state, "signature_valid");
+        assert_eq!(dto.body_text, "The opaque contract text.");
+
+        // The subject or snippet never stands in for content that is missing.
+        let mut dto = super::map_stored_message_row(stored_body_record(None, None));
+        let result = super::show_encapsulated_body(&mut dto, verified(None)).await;
+        assert_eq!(result.state, "error");
+        assert!(result
+            .error_detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("backend.errors.signedContentUnavailable")));
+        assert!(dto.body_text.is_empty());
+        assert!(dto.body_html.is_none());
+    }
+
+    /// A signed entity that is itself encrypted displays nothing here.
+    const SIGNED_ENCRYPTED_ENTITY: &[u8] = b"Content-Type: multipart/signed; micalg=pgp-sha256; protocol=\"application/pgp-signature\"; boundary=\"S\"\r\n\r\n\
+        --S\r\nContent-Type: multipart/encrypted; protocol=\"application/pgp-encrypted\"; boundary=\"E\"\r\n\r\n\
+        --E\r\nContent-Type: application/pgp-encrypted\r\n\r\nVersion: 1\r\n\
+        --E\r\nContent-Type: application/octet-stream\r\n\r\n-----BEGIN PGP MESSAGE-----\r\nhQEMA\r\n-----END PGP MESSAGE-----\r\n--E--\r\n\
+        --S\r\nContent-Type: application/pgp-signature\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\nAAAA\r\n-----END PGP SIGNATURE-----\r\n--S--\r\n";
+
+    /// A verdict needs a body it covers. A signed entity that displays nothing
+    /// leaves the signature without one, whatever the row stored.
+    #[tokio::test]
+    async fn a_signed_entity_that_shows_nothing_carries_no_verdict() {
+        let parsed = parse_raw_message_body(SIGNED_ENCRYPTED_ENTITY);
+        assert!(parsed.trust.root_crypto && parsed.trust.signed_binding);
+        let bundle = parsed.pgp_signed.clone().unwrap();
+        let legacy = trust(r#"{"root_crypto":true}"#);
+        for (stored, trust) in [
+            (None, &parsed.trust),
+            (Some("Forged text".to_string()), &legacy),
+        ] {
+            let has_stored_body = stored.is_some();
+            let mut dto = super::map_stored_message_row(stored_body_record(stored, None));
+            let shown = super::show_signed_body(&mut dto, &bundle, trust, has_stored_body).await;
+            assert_eq!(shown, super::SignedDisplay::Unavailable);
+            assert!(dto.body_text.is_empty(), "{}", dto.body_text);
+            assert!(dto.body_html.is_none());
+            assert!(dto.snippet.is_empty(), "{}", dto.snippet);
+        }
+
+        let mut dto = super::map_stored_message_row(stored_body_record(None, None));
+        dto.pgp_state = Some("signature_valid".into());
+        dto.pgp_signer_name = Some("Signer".into());
+        super::mark_pgp_signed_content_unavailable(&mut dto);
+        assert_eq!(dto.pgp_state.as_deref(), Some("error"));
+        assert!(dto
+            .pgp_error_detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("backend.errors.signedContentUnavailable")));
+        assert!(dto.pgp_signer_name.is_none());
+
+        // Decrypted, the same structure leaves its inner signature nothing.
+        let (text, html) = super::decrypted_display(
+            parse_raw_message_body(SIGNED_ENCRYPTED_ENTITY),
+            "Plaintext".into(),
+        );
+        assert!(super::shows_nothing(&text, html.as_deref()));
+        assert!(!super::shows_nothing("Signed text", None));
+        assert!(!super::shows_nothing("", Some("<p>Signed</p>")));
+    }
+
+    /// The decrypted plaintext as a whole is not what a signature inside it
+    /// covers, so it never stands in for the signed part.
+    #[test]
+    fn a_decrypted_signed_message_shows_only_its_signed_display() {
+        let inner = parse_raw_message_body(MUTT_SIGNED);
+        let (text, _) = super::decrypted_display(inner, "Whole plaintext".into());
+        assert!(text.starts_with("The fix is on the branch."));
+
+        let mut empty = parse_raw_message_body(MUTT_SIGNED);
+        empty.text = None;
+        let (text, html) = super::decrypted_display(empty, "Forged plaintext".into());
+        assert_eq!((text.as_str(), html), ("", None));
+
+        let plain = parse_raw_message_body(b"Content-Type: image/png\r\n\r\nAAAA");
+        let (text, _) = super::decrypted_display(plain, "Readable plaintext".into());
+        assert_eq!(text, "Readable plaintext");
+
+        // A signed part inside the decrypted message signs only that part.
+        let forged = parse_raw_message_body(FORGED_PGP_ROOT);
+        assert!(forged.pgp_signed.is_none());
+        assert!(!forged.trust.root_crypto);
     }
 
     #[test]
@@ -2925,6 +3373,14 @@ async fn persist_raw_message_metadata(
             .unwrap_or_default()
     };
     let repaired_smime = parsed.smime_signed.is_some();
+    // The rows an older parse listed beside what is now a root signature are
+    // settled with the bundle that signature comes with.
+    let legacy_rows = parsed
+        .pgp_signed
+        .as_deref()
+        .or(parsed.smime_signed.as_deref())
+        .filter(|_| parsed.trust.root_crypto)
+        .map(satchel_core::db::signed_attachments::LegacyRows::from_bundle);
     let (auth_spf, auth_dkim, auth_dmarc) = headers
         .as_deref()
         .and_then(|value| parse_header_value(value, "Authentication-Results"))
@@ -2969,6 +3425,11 @@ async fn persist_raw_message_metadata(
     .execute(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
+    if let Some(legacy_rows) = legacy_rows {
+        satchel_core::db::signed_attachments::settle_legacy_rows(&mut tx, message_id, &legacy_rows)
+            .await
+            .map_err(|err| err.to_string())?;
+    }
     tx.commit().await.map_err(|err| err.to_string())?;
     Ok(repaired_smime)
 }

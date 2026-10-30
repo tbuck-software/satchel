@@ -1489,8 +1489,8 @@ async fn import_parsed_message_inner(
 
     for cached in cached_attachments {
         sqlx::query(
-            "INSERT INTO attachments (id, message_id, filename, content_type, size, content_id, storage_path, is_inline, created_at, cached_path, remote_uid, remote_part_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO attachments (id, message_id, filename, content_type, size, content_id, storage_path, is_inline, created_at, cached_path, remote_uid, remote_part_id, listing_rules)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&cached.id)
         .bind(&message_id)
@@ -1504,6 +1504,7 @@ async fn import_parsed_message_inner(
         .bind(cached.cached_path.as_deref())
         .bind(&remote_id)
         .bind(&cached.remote_part_id)
+        .bind(satchel_core::db::signed_attachments::LISTING_RULES)
         .execute(&mut *tx)
         .await
         .map_err(|err| err.to_string())?;

@@ -190,6 +190,11 @@ function mapBackendMessage(row: BackendMessage, threadId: string): Message {
   });
 }
 
+/** Whether a body row carries a signature or encryption state. */
+function hasSecurityState(row: BackendMessageBody): boolean {
+  return Boolean(mapPgpStatus(row) || mapSmimeStatus(row));
+}
+
 /**
  * The body keeps its `cid:` references; the bytes live once, on the
  * attachment, and the renderer resolves them. A refreshed body therefore keeps
@@ -203,7 +208,11 @@ function applyMessageBody(message: Message, body: BackendMessageBody): Message {
     ? normalizeLineBreaks(rawBodyText)
     : cleanDisplayBody(rawBodyText);
   const snippetCandidate = cleanDisplayBody((body.snippet || '').trim());
-  const fallbackText = bodyTextCandidate || snippetCandidate || message.subject;
+  // Under a security card the backend decided the body; a snippet or the
+  // subject in its place would be text the card does not speak for.
+  const fallbackText = pgpStatus || smimeStatus
+    ? bodyTextCandidate
+    : bodyTextCandidate || snippetCandidate || message.subject;
   const htmlCandidate = (body.body_html || '').trim();
 
   return withoutInvalidContent({
@@ -958,10 +967,12 @@ export const useMessagesStore = defineStore('messages', () => {
     // A message whose complete body is not stored either comes back empty or
     // explicitly marked as incomplete (for example, an old 64-KiB IMAP
     // prefix). Fetch it now instead of showing the blank page or cached prefix.
+    // A loaded body under a security card is settled, even when empty: a
+    // server copy would not be what that card covers.
     const emptyIds = rows
       .filter((row) => !row.content_error && !staleBodyIds.has(row.id) && requested.has(row.id) && (
         !row.body_loaded
-        || (!(row.body_html ?? '').trim() && !row.body_text.trim())
+        || (!(row.body_html ?? '').trim() && !row.body_text.trim() && !hasSecurityState(row))
       ))
       .map((row) => row.id);
     if (emptyIds.length > 0 && options.remote) {
@@ -1025,6 +1036,19 @@ export const useMessagesStore = defineStore('messages', () => {
         continue;
       }
       const row = rowsById.get(id);
+      if (loaded.fetched && row && hasSecurityState(row)) {
+        // The row's verdict was worked out for the body it had then. Read it
+        // again, so the fetched body comes with a verdict of its own.
+        const reread = await backendListMessageBodies([id]).catch(() => []);
+        if (threadLoadVersions.get(threadId) !== version) return;
+        const fresh = reread.find((candidate) => candidate.id === id);
+        patchMessage(threadId, id, (message) =>
+          applyMessageBody(message, fresh
+            ? { ...fresh, body_loaded: true }
+            : { id, snippet: row.snippet, body_text: loaded.body_text, body_html: loaded.body_html, body_loaded: true }),
+        );
+        continue;
+      }
       patchMessage(threadId, id, (message) =>
         applyMessageBody(message, {
           ...(row ?? { id, snippet: '', body_text: '', body_loaded: true }),

@@ -159,6 +159,14 @@ pub(crate) async fn load_message_body_with_pools(
     })
 }
 
+/// Write a body fetched on its own into the row it was fetched for.
+///
+/// The writer transaction re-checks the saved reference, so a body fetched
+/// before a mailbox reset never lands on the row that replaced it.
+///
+/// The row's signature bundle is not refetched with it, so the body is no
+/// longer the one the strict splitter wrote with that bundle: the binding mark
+/// goes, and a signature verdict shows the bundle's own entity from now on.
 async fn persist_loaded_body(
     write: &SqlitePool,
     reference: &ContentReference,
@@ -169,7 +177,10 @@ async fn persist_loaded_body(
     let mut tx = reference.begin_write(write).await?;
     sqlx::query(
         "UPDATE messages
-         SET body_text = ?, body_html = ?, original_body_html = ?, updated_at = ?
+         SET body_text = ?, body_html = ?, original_body_html = ?, updated_at = ?,
+             trust_metadata = CASE WHEN json_valid(trust_metadata)
+                 THEN json_set(trust_metadata, '$.signed_binding', json('false'))
+                 ELSE trust_metadata END
          WHERE id = ?",
     )
     .bind(body_text)
@@ -208,7 +219,106 @@ fn has_body(target: &BodyTarget) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{has_body, BodyTarget};
+    use super::{has_body, persist_loaded_body, BodyTarget};
+    use crate::db::remote_content::ContentReference;
+    use crate::email::signed_mime::{self, StoredSignedBody};
+    use crate::providers::traits::MessageTrust;
+
+    const MUTT_SIGNED: &[u8] =
+        include_bytes!("../../../crates/satchel-core/tests/corpus/pgp-mime/mutt-crlf.eml");
+
+    /// A body fetched on its own is published only into the generation it was
+    /// fetched from, and there it gives up the signed binding: the verdict then
+    /// covers the entity the strict splitter decodes from the stored bundle.
+    #[tokio::test]
+    async fn a_refetched_signed_body_loses_the_binding_only_within_its_generation() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        let parsed = crate::providers::imap::parse_raw_message_body(MUTT_SIGNED);
+        assert!(parsed.trust.root_crypto && parsed.trust.signed_binding);
+        let bundle = parsed.pgp_signed.clone().unwrap();
+        let signed_text = parsed.text.clone().unwrap();
+        assert!(signed_text.starts_with("The fix is on the branch."));
+        sqlx::raw_sql("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+                VALUES ('a', 'Account', 'me@example.test', 'imap', '{}', '', '', '');
+            INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, uidvalidity, created_at, updated_at)
+                VALUES ('f', 'a', 'Inbox', 'INBOX', 'INBOX', 'inbox', 7, '', '');
+            INSERT INTO messages (id, account_id, folder_id, remote_id, remote_uidvalidity, from_address, to_addresses, date, created_at, updated_at)
+                VALUES ('plain', 'a', 'f', '43', 7, 'bob@example.test', '[]', '', '', '');")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO messages (id, account_id, folder_id, remote_id, remote_uidvalidity, from_address, to_addresses, date, body_text, pgp_signed, trust_metadata, created_at, updated_at)
+             VALUES ('signed', 'a', 'f', '42', 7, 'bob@example.test', '[]', '', ?, ?, ?, '', '')",
+        )
+        .bind(&signed_text)
+        .bind(&bundle)
+        .bind(serde_json::to_string(&parsed.trust).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let stored = |id: &'static str| {
+            let pool = pool.clone();
+            async move {
+                let (body, trust): (String, Option<String>) =
+                    sqlx::query_as("SELECT body_text, trust_metadata FROM messages WHERE id = ?")
+                        .bind(id)
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap();
+                let trust =
+                    trust.map(|trust| serde_json::from_str::<MessageTrust>(&trust).unwrap());
+                (body, trust)
+            }
+        };
+        let (_, trust) = stored("signed").await;
+        assert_eq!(
+            signed_mime::stored_signed_body(&bundle, &trust.unwrap(), true),
+            Ok(StoredSignedBody::Stored)
+        );
+
+        // A mailbox reset between fetch and publication refuses the write; the
+        // row the new generation wrote keeps its body and its binding.
+        let stale = ContentReference::load(&pool, "signed").await.unwrap();
+        sqlx::raw_sql(
+            "UPDATE folders SET uidvalidity = 8;
+            UPDATE messages SET remote_uidvalidity = 8;",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let error = persist_loaded_body(&pool, &stale, "Refetched", None, None)
+            .await
+            .unwrap_err();
+        assert!(error.contains("imapUidValidityChanged"), "{error}");
+        let (body, trust) = stored("signed").await;
+        assert_eq!(body, signed_text);
+        assert!(trust.unwrap().signed_binding);
+
+        for id in ["signed", "plain"] {
+            let current = ContentReference::load(&pool, id).await.unwrap();
+            persist_loaded_body(&pool, &current, "Refetched", None, None)
+                .await
+                .unwrap();
+        }
+        let (body, trust) = stored("signed").await;
+        assert_eq!(body, "Refetched");
+        let trust = trust.unwrap();
+        assert!(trust.root_crypto && !trust.signed_binding);
+        match signed_mime::stored_signed_body(&bundle, &trust, true) {
+            Ok(StoredSignedBody::Entity(entity)) => {
+                assert_eq!(entity.text.as_deref(), Some(signed_text.as_str()));
+            }
+            other => panic!("expected the bundle's entity, got {other:?}"),
+        }
+        assert!(crate::email::pgp_mime::parse_signed_message(&bundle).is_ok());
+        assert_eq!(stored("plain").await, ("Refetched".to_string(), None));
+    }
 
     fn target(provider: &str, body_html: Option<String>) -> BodyTarget {
         BodyTarget {
