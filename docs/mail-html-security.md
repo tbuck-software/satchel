@@ -76,23 +76,40 @@ Attachments next to a root signature:
   splitter cut it; part numbers resolve the same way when the bytes are
   fetched.
 - The signature part's headers are not signed, so that part is never offered.
-  Gmail keeps the MIME tree: only parts under the root's first child, the
-  signed entity, are listed. Graph lists parts without their position: the
-  part with the signature part's own type and file name is dropped. A file
-  of a signature type inside the signed entity, the detached signature of a
-  download, stays.
+- Gmail and Outlook list parts from their own parse and serve them by their
+  own id. Under a root signature that list is a whitelist against the signed
+  entity the strict splitter cut from the stored bundle: each listed part has
+  to match an entity part no other listed part took, on media type and file
+  name, on Content-ID where both name one, on size where the provider counts
+  decoded bytes (Gmail; Graph sizes its own item), and on bytes where the
+  provider sent them inline. A matched row takes the entity part's type,
+  name, Content-ID, inline flag, size and bytes; the provider id stays only
+  as the row's key, and a download serves the entity's bytes. A signature
+  part under any name (Graph's own, "Untitled"), and a part the entity does
+  not hold, are not listed. If the bundle does not split, nothing is.
+- Gmail keeps the MIME tree, so it is also held to RFC 1847's shape: the root
+  `multipart/signed` has exactly two parts, the second of the declared
+  signature type. Only parts under the first are candidates. A tree of any
+  other shape lists no attachments.
+- A file of a signature type inside the signed entity, the detached
+  signature of a download, is an entity part and stays listed for Gmail and
+  Outlook. IMAP, POP3 and import do not list signature-typed parts at all,
+  inside the entity or not.
 - `attachments.listing_rules` records the rules a row was written under. Rows
   from before (`0`) may name parts from outside the signed entity, including
   ones whose Content-ID fills the signed HTML. Beside a root signature they
   are not listed, so no `cid:` resolves from them, until the
   `signed_entity_attachments` repair has replaced them with the entity's own
-  parts, their bytes taken from the bundle. The binding marker cannot stand
-  in for this: a refetched body drops it and leaves the attachments as they
-  were.
-- Residual gap: Gmail and Outlook list the remaining attachments from their
-  own MIME parse and serve the bytes by their own part id. Those bytes are not
-  checked against the signed entity. A provider that splits a message
-  differently from Satchel could offer a part the signature does not cover.
+  parts, their bytes taken from the bundle, and set the message's and its
+  thread's attachment flag from the rows it leaves. A repair block stops after
+  16 MiB of bundles (at least one). The binding marker cannot stand in for
+  this: a refetched body drops it and leaves the attachments as they were.
+- What stays unbound: which provider id a row keeps. Two entity parts the
+  provider describes alike (same type, name and, for Graph, no size check)
+  may swap ids; each row still serves its own entity part's bytes. An entity
+  part the provider names differently from its headers, or lists not at all,
+  is not offered: the listing fails closed rather than fall back to the
+  provider's description.
 - A signature below the root (a forwarded signed part, a list footer added
   around one) only reaches the partial state. Its card says the text shown may
   not be the signed part: the display shows the message's first text, which

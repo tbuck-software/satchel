@@ -34,7 +34,7 @@ impl SignedProtocol {
 
     /// Whether a signature part of this media type belongs to the protocol.
     /// The two S/MIME spellings are interchangeable in practice.
-    fn accepts(self, media_type: &str) -> bool {
+    pub fn accepts(self, media_type: &str) -> bool {
         match self {
             Self::OpenPgp => media_type == "application/pgp-signature",
             Self::Smime => matches!(

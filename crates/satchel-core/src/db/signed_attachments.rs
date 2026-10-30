@@ -2,7 +2,7 @@
 //!
 //! A message shown with a root signature offers only parts of the entity that
 //! signature covers: the strict splitter's entity for IMAP, POP3 and import,
-//! the provider's own list without the signature part for Gmail and Outlook.
+//! the provider's own list matched against that entity for Gmail and Outlook.
 //! Rows written that way carry `listing_rules = 1`.
 //!
 //! Rows written before (`0`) may name parts from outside that entity: the
@@ -83,9 +83,35 @@ pub async fn settle_legacy_rows(
         .bind(LISTING_RULES)
         .execute(&mut *connection)
         .await?;
-    if listed {
-        return Ok(());
+    if !listed {
+        insert_entity_rows(&mut *connection, message_id, attachments).await?;
     }
+    // The flag counted the rows just replaced, perhaps only the signature
+    // part. Like sync, it counts every listed row, inline ones too.
+    sqlx::query(
+        "UPDATE messages SET has_attachments =
+             EXISTS(SELECT 1 FROM attachments WHERE message_id = messages.id)
+         WHERE id = ?",
+    )
+    .bind(message_id)
+    .execute(&mut *connection)
+    .await?;
+    sqlx::query(
+        "UPDATE threads SET has_attachments =
+             (SELECT COALESCE(MAX(has_attachments), 0) FROM messages WHERE thread_id = threads.id)
+         WHERE id = (SELECT thread_id FROM messages WHERE id = ?)",
+    )
+    .bind(message_id)
+    .execute(&mut *connection)
+    .await?;
+    Ok(())
+}
+
+async fn insert_entity_rows(
+    connection: &mut SqliteConnection,
+    message_id: &str,
+    attachments: &[RemoteAttachment],
+) -> Result<(), sqlx::Error> {
     let now = chrono::Utc::now().to_rfc3339();
     for attachment in attachments {
         // The bytes come from the bundle. No part id goes with them: a fetch
@@ -137,6 +163,11 @@ pub const SIGNED_ENTITY_ATTACHMENTS: DataRepair = DataRepair {
 /// their bundles in memory until the block has run.
 const SCAN_LIMIT: i64 = 200;
 
+/// Bundle bytes a block reads before it ends early, so one large bundle
+/// cannot keep a block slow or its memory high. The first bundle is read
+/// whatever its size.
+const BLOCK_BYTES: usize = 16 * 1024 * 1024;
+
 struct Candidate {
     message_id: String,
     pgp_signed: Option<Vec<u8>>,
@@ -153,21 +184,32 @@ async fn candidates(
     connection: &mut SqliteConnection,
     cursor: &str,
     limit: i64,
+    budget: usize,
 ) -> Result<Work, sqlx::Error> {
     let after: i64 = cursor.parse().unwrap_or(0);
-    let scanned: Vec<(i64, String, bool)> = sqlx::query_as(&format!(
+    let scanned: Vec<(i64, String, bool, i64)> = sqlx::query_as(&format!(
         "SELECT m.rowid, m.id,
                 EXISTS(SELECT 1 FROM attachments a
-                       WHERE a.message_id = m.id AND {HIDDEN_BESIDE_ROOT_SIGNATURE})
+                       WHERE a.message_id = m.id AND {HIDDEN_BESIDE_ROOT_SIGNATURE}),
+                COALESCE(length(m.pgp_signed), 0) + COALESCE(length(m.smime_signed), 0)
          FROM messages m WHERE m.rowid > ? ORDER BY m.rowid LIMIT ?"
     ))
     .bind(after)
     .bind(limit.clamp(1, SCAN_LIMIT))
     .fetch_all(&mut *connection)
     .await?;
-    let last = scanned.last().map(|row| row.0);
+    let mut last = None;
+    let mut read = 0usize;
     let mut bundles = Vec::new();
-    for (_, message_id, hidden) in scanned {
+    for (rowid, message_id, hidden, size) in scanned {
+        if hidden {
+            let size = usize::try_from(size).unwrap_or(usize::MAX);
+            if !bundles.is_empty() && read.saturating_add(size) > budget {
+                break;
+            }
+            read = read.saturating_add(size);
+        }
+        last = Some(rowid);
         if !hidden {
             continue;
         }
@@ -206,7 +248,7 @@ fn signed_entity_attachments_prepare<'c>(
 ) -> BoxFuture<'c, Result<Prepared, sqlx::Error>> {
     Box::pin(async move {
         let mut connection = pool.acquire().await?;
-        Ok(Box::new(candidates(&mut connection, cursor, limit).await?) as Prepared)
+        Ok(Box::new(candidates(&mut connection, cursor, limit, BLOCK_BYTES).await?) as Prepared)
     })
 }
 
@@ -219,7 +261,7 @@ fn signed_entity_attachments_block<'c>(
     Box::pin(async move {
         let work = match prepared.and_then(|work| work.downcast::<Work>().ok()) {
             Some(work) => *work,
-            None => candidates(&mut *connection, cursor, limit).await?,
+            None => candidates(&mut *connection, cursor, limit, BLOCK_BYTES).await?,
         };
         let Some(last) = work.last else {
             return Ok(None);
@@ -350,6 +392,100 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    async fn threaded(pool: &SqlitePool, message: &str, thread: &str, has_attachments: i64) {
+        sqlx::query(
+            "INSERT INTO threads (id, account_id, last_message_date, has_attachments, created_at, updated_at)
+             VALUES (?, 'a', '', ?, '', '')",
+        )
+        .bind(thread)
+        .bind(has_attachments)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE messages SET thread_id = ?, has_attachments = ? WHERE id = ?")
+            .bind(thread)
+            .bind(has_attachments)
+            .bind(message)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    async fn flags(pool: &SqlitePool, message: &str) -> (i64, i64) {
+        sqlx::query_as(
+            "SELECT m.has_attachments, t.has_attachments
+             FROM messages m JOIN threads t ON t.id = m.thread_id WHERE m.id = ?",
+        )
+        .bind(message)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    /// A rebuild sets the message's and its thread's attachment flag from the
+    /// rows it leaves: the older ones may have been only the signature part.
+    #[tokio::test]
+    async fn the_repair_sets_the_attachment_flag_from_the_rows_it_leaves() {
+        let with_file = crate::providers::imap::parse_raw_message_body(SIGNED_WITH_ATTACHMENT)
+            .pgp_signed
+            .unwrap();
+        let without = crate::providers::imap::parse_raw_message_body(include_bytes!(
+            "../../tests/corpus/pgp-mime/forged-signature-part-attachment.eml"
+        ))
+        .pgp_signed
+        .unwrap();
+        let pool = pool().await;
+        message(&pool, "with-file", Some(&with_file), None).await;
+        message(&pool, "without", Some(&without), None).await;
+        threaded(&pool, "with-file", "t-with-file", 0).await;
+        threaded(&pool, "without", "t-without", 1).await;
+        attachment(&pool, "outer", "with-file", 0).await;
+        attachment(&pool, "signature", "without", 0).await;
+
+        run_repair(&pool, &SIGNED_ENTITY_ATTACHMENTS, 10, None, |_| {})
+            .await
+            .unwrap();
+
+        assert_eq!(rows(&pool, "without").await, []);
+        assert_eq!(flags(&pool, "with-file").await, (1, 1));
+        assert_eq!(flags(&pool, "without").await, (0, 0));
+    }
+
+    /// A block reads bundles up to its byte budget, at least one, and its
+    /// cursor stops at the last message it read.
+    #[tokio::test]
+    async fn a_block_stops_at_its_byte_budget() {
+        let bundle = crate::providers::imap::parse_raw_message_body(SIGNED_WITH_ATTACHMENT)
+            .pgp_signed
+            .unwrap();
+        let pool = pool().await;
+        for id in ["first", "second", "third"] {
+            message(&pool, id, Some(&bundle), None).await;
+            attachment(&pool, &format!("{id}-row"), id, 0).await;
+        }
+        let rowids: Vec<i64> = sqlx::query_scalar("SELECT rowid FROM messages ORDER BY rowid")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        let mut connection = pool.acquire().await.unwrap();
+
+        let work = candidates(&mut connection, "", 10, 1).await.unwrap();
+        assert_eq!(work.candidates.len(), 1);
+        assert_eq!(work.candidates[0].message_id, "first");
+        assert_eq!(work.last, Some(rowids[0]));
+
+        let work = candidates(&mut connection, "", 10, bundle.len() * 2)
+            .await
+            .unwrap();
+        let read: Vec<&str> = work
+            .candidates
+            .iter()
+            .map(|candidate| candidate.message_id.as_str())
+            .collect();
+        assert_eq!(read, ["first", "second"]);
+        assert_eq!(work.last, Some(rowids[1]));
     }
 
     /// A message synced again after its block was read keeps what that sync
