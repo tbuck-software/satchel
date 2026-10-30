@@ -320,7 +320,7 @@ pub(crate) async fn upsert_gmail_snapshot_message(
                     .await
                     .map_err(|error| error.to_string())?;
                 return Ok(SnapshotResolution::Deferred(SnapshotDeferral::Failed(
-                    error,
+                    crate::sync::errors::SyncError::Transient(error),
                 )));
             }
         }

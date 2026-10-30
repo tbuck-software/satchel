@@ -343,6 +343,7 @@
       "smimeOwnCertificateMissing": "Your own S/MIME certificate is missing. Import a certificate for this account, otherwise the copy in Sent cannot be encrypted for you.",
       "smimeRecipientCertificateAmbiguous": "Several equally trusted S/MIME certificates exist for: {recipients}. Delete the outdated one, then send again.",
       "smimeRecipientCertificateMissing": "No S/MIME certificate was found for: {recipients}",
+      "snapshotMessagesHeld": "{count} messages in {folder} could not be updated from the server for {account} and stay where they are for now. Satchel tries again in a day.",
       "systemFolderImmutable": "\"{name}\" is a system folder and cannot be changed.",
       "templateNotFound": "The template was not found.",
       "templatePersistenceFailed": "Templates are currently unavailable. Please try again.",

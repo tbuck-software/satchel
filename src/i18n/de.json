@@ -343,6 +343,7 @@
       "smimeOwnCertificateMissing": "Das eigene S/MIME-Zertifikat fehlt. Importiere ein Zertifikat für dieses Konto, sonst lässt sich die Kopie im Gesendet-Ordner nicht für dich verschlüsseln.",
       "smimeRecipientCertificateAmbiguous": "Für folgende Adresse liegen mehrere gleichrangige S/MIME-Zertifikate vor: {recipients}. Lösche das veraltete und sende erneut.",
       "smimeRecipientCertificateMissing": "Für folgende Adresse wurde kein S/MIME-Zertifikat gefunden: {recipients}",
+      "snapshotMessagesHeld": "{count} Nachrichten in {folder} konnten für {account} nicht vom Server aktualisiert werden und bleiben vorerst, wo sie sind. Satchel versucht es in einem Tag erneut.",
       "systemFolderImmutable": "\"{name}\" ist ein Systemordner und kann nicht geändert werden.",
       "templateNotFound": "Die Vorlage wurde nicht gefunden.",
       "templatePersistenceFailed": "Vorlagen sind momentan nicht verfügbar. Bitte versuche es erneut.",

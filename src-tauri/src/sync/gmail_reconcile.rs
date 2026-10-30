@@ -9,6 +9,7 @@
 use std::collections::HashSet;
 
 use crate::providers::traits::MessageEnvelope;
+use crate::sync::errors::SyncError;
 use sqlx::SqlitePool;
 
 pub use crate::providers::gmail::gmail_label_is_state_view;
@@ -179,17 +180,11 @@ pub(crate) enum SnapshotDeferral {
     PendingMutation,
     /// A target label has used up its quarantine attempts.
     Quarantined,
-    /// Lookup, validation or target persistence failed.
-    Failed(String),
-}
-
-impl SnapshotDeferral {
-    /// Only a failure can succeed on the very next attempt. The queue and the
-    /// quarantine release an ID on their own schedule, so waiting for them
-    /// must not keep the folder listing pending on every poll.
-    pub(crate) fn retries_next_run(&self) -> bool {
-        matches!(self, Self::Failed(_))
-    }
+    /// Lookup, validation or target persistence failed in this run. The error
+    /// keeps its class: a permanent one is not retried on the next poll.
+    Failed(SyncError),
+    /// Earlier failures used up its attempts. It waits for its retry time.
+    Held,
 }
 
 /// The outcome for one owed snapshot ID.
