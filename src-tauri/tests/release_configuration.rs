@@ -63,3 +63,34 @@ fn sensitive_runtime_overrides_use_the_debug_policy() {
         read("../crates/satchel-core/src/utils/oauth.rs").contains("environment::debug_env(key)")
     );
 }
+
+/// The token endpoint receives the refresh token and, where one is configured,
+/// the client secret. Its fixture override must not survive into a release.
+#[test]
+fn token_endpoint_overrides_use_the_debug_policy() {
+    let source = read("../crates/satchel-core/src/utils/oauth.rs");
+    let start = source
+        .find("fn token_endpoint(")
+        .expect("oauth.rs resolves token endpoints in `token_endpoint`");
+    let body = &source[start..];
+    let body = &body[..body.find("\n}\n").expect("end of `token_endpoint`")];
+    for key in ["SATCHEL_GMAIL_TOKEN_URL", "SATCHEL_OUTLOOK_TOKEN_URL"] {
+        assert!(
+            body.contains(&format!("\"{key}\"")),
+            "`token_endpoint` no longer resolves {key}"
+        );
+        assert_eq!(
+            source.matches(&format!("\"{key}\"")).count(),
+            1,
+            "{key} is read outside `token_endpoint`"
+        );
+    }
+    assert!(
+        body.contains("environment::debug_env(key)"),
+        "`token_endpoint` bypasses the debug policy"
+    );
+    assert!(
+        !source.contains("env::var("),
+        "oauth.rs reads the environment in release"
+    );
+}

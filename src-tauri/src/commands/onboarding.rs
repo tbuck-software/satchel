@@ -438,49 +438,22 @@ pub async fn autoconfigure_groupware(
         ));
     }
 
-    let mut updated = value;
-    let object = updated
-        .as_object_mut()
-        .ok_or_else(|| CommandError::new("backend.errors.accountConfigurationInvalid"))?;
-    if let Some((server, _)) = caldav.as_ref() {
-        object.insert(
-            "caldav".to_string(),
-            serde_json::to_value(DavConfig {
-                server: server.clone(),
-                username: username.clone(),
-                password: password.clone(),
-            })
-            .map_err(|err| err.to_string())?,
-        );
-    }
-    if let Some((server, _)) = carddav.as_ref() {
-        object.insert(
-            "carddav".to_string(),
-            serde_json::to_value(DavConfig {
-                server: server.clone(),
-                username: username.clone(),
-                password: password.clone(),
-            })
-            .map_err(|err| err.to_string())?,
-        );
-    }
-    let serialized = serde_json::to_string(&updated).map_err(|err| err.to_string())?;
-    sqlx::query("UPDATE accounts SET config = ?, updated_at = ? WHERE id = ?")
-        .bind(crate::commands::accounts::encrypt_account_config(
+    let dav_config = |found: &Option<(String, usize)>| {
+        found.as_ref().map(|(server, _)| DavConfig {
+            server: server.clone(),
+            username: username.clone(),
+            password: password.clone(),
+        })
+    };
+    let config = crate::db::accounts::AccountRepository::new(pool.inner())
+        .update_dav_config(
             &account.id,
-            &serialized,
-        )?)
-        .bind(chrono::Utc::now().to_rfc3339())
-        .bind(&account.id)
-        .execute(pool.inner())
-        .await
-        .map_err(|err| err.to_string())?;
-    let summary = dav::sync_groupware_account(
-        pool.inner(),
-        &account.id,
-        &crate::commands::accounts::AccountConfig::from_plaintext(serialized),
-    )
-    .await?;
+            dav_config(&caldav),
+            dav_config(&carddav),
+            false,
+        )
+        .await?;
+    let summary = dav::sync_groupware_account(pool.inner(), &account.id, &config).await?;
 
     Ok(DavAutoconfigureDto {
         caldav_server: caldav.map(|value| value.0),

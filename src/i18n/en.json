@@ -264,6 +264,7 @@
       "oauthMailPermissionRequired": "Gmail access was not granted. Please connect again and allow mail access. Your existing account has not been changed.",
       "oauthPersistenceFailed": "The sign-in state could not be saved. Please try again.",
       "oauthProviderRequestFailed": "The provider could not complete the sign-in. Please try again.",
+      "oauthReloadRequired": "The account's sign-in changed while this was in progress. Please try again.",
       "oauthUrlRejected": "Satchel refused an unexpected sign-in address.",
       "outboxActionCannotBeDiscarded": "This outbox action cannot be discarded safely.",
       "passwordCheckFailed": "Signing in with the new password failed: {reason}",

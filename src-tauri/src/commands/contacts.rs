@@ -261,60 +261,24 @@ pub async fn sync_contact_avatars_inner(
             }
         };
 
-        if matches!(provider, OAuthProvider::Gmail)
-            && crate::utils::oauth::google_scope_granted(
-                &account.config,
-                crate::utils::oauth::GOOGLE_CONTACTS_SCOPE,
-            ) == Some(false)
-        {
-            continue;
-        }
-
-        let token = match access_token_from_account_config(provider, &account.config).await {
-            Ok(token) => token,
+        let result = fetch_current_contact_photos(
+            &client,
+            provider,
+            crate::utils::oauth::fresh_account_config_for_provider(pool, &account.id, provider),
+            "https://people.googleapis.com/v1",
+        )
+        .await;
+        let (token, contacts) = match result {
+            Ok(result) => result,
             Err(error) => {
-                tracing::warn!(
-                    error = %error,
-                    account_id = %account.id,
-                    "contact avatar credential access failed"
-                );
+                tracing::warn!(error = %error, account_id = %account.id,
+                    "contact avatar credential access failed");
                 summary
                     .errors
                     .push(PROVIDER_AVATAR_SYNC_ERROR_KEY.to_string());
                 continue;
             }
         };
-
-        let contacts = match provider {
-            OAuthProvider::Gmail => {
-                fetch_google_contact_photos(
-                    &client,
-                    &token,
-                    crate::utils::oauth::google_scope_granted(
-                        &account.config,
-                        crate::utils::oauth::GOOGLE_OTHER_CONTACTS_SCOPE,
-                    ) == Some(true),
-                )
-                .await
-            }
-            OAuthProvider::Outlook => fetch_graph_contact_photos(&client, &token).await,
-        };
-
-        let contacts = match contacts {
-            Ok(contacts) => contacts,
-            Err(error) => {
-                tracing::warn!(
-                    error = %error,
-                    account_id = %account.id,
-                    "provider contact avatar synchronization failed"
-                );
-                summary
-                    .errors
-                    .push(PROVIDER_AVATAR_SYNC_ERROR_KEY.to_string());
-                continue;
-            }
-        };
-
         for contact in contacts.into_iter().take(500) {
             let Some(data_url) = download_avatar_data_url(&contact.photo_url, Some(&token)).await
             else {
@@ -585,16 +549,57 @@ async fn upsert_contact_avatar(
         .await
 }
 
+// The config future may refresh or observe a reconnect. Both permission checks
+// and the token must come from its result, never the pre-await account snapshot.
+async fn fetch_current_contact_photos(
+    client: &reqwest::Client,
+    provider: OAuthProvider,
+    current: impl std::future::Future<
+        Output = crate::sync::errors::SyncResult<satchel_core::accounts::AccountConfig>,
+    >,
+    google_base: &str,
+) -> Result<(String, Vec<ProviderContactPhoto>), String> {
+    let config = current.await.map_err(|err| err.encoded())?;
+    if matches!(provider, OAuthProvider::Gmail)
+        && crate::utils::oauth::google_scope_granted(
+            &config,
+            crate::utils::oauth::GOOGLE_CONTACTS_SCOPE,
+        ) == Some(false)
+    {
+        return Ok((String::new(), Vec::new()));
+    }
+    let token = access_token_from_account_config(provider, &config)
+        .await
+        .map_err(|err| err.encoded())?;
+    let contacts = match provider {
+        OAuthProvider::Gmail => {
+            fetch_google_contact_photos(
+                client,
+                &token,
+                crate::utils::oauth::google_scope_granted(
+                    &config,
+                    crate::utils::oauth::GOOGLE_OTHER_CONTACTS_SCOPE,
+                ) == Some(true),
+                google_base,
+            )
+            .await?
+        }
+        OAuthProvider::Outlook => fetch_graph_contact_photos(client, &token).await?,
+    };
+    Ok((token, contacts))
+}
+
 async fn fetch_google_contact_photos(
     client: &reqwest::Client,
     token: &str,
     include_other_contacts: bool,
+    base: &str,
 ) -> Result<Vec<ProviderContactPhoto>, String> {
     let mut contacts = Vec::new();
     fetch_google_people_page(
         client,
         token,
-        "https://people.googleapis.com/v1/people/me/connections",
+        &format!("{base}/people/me/connections"),
         "connections",
         &mut contacts,
     )
@@ -604,7 +609,7 @@ async fn fetch_google_contact_photos(
         fetch_google_people_page(
             client,
             token,
-            "https://people.googleapis.com/v1/otherContacts",
+            &format!("{base}/otherContacts"),
             "otherContacts",
             &mut contacts,
         )
@@ -1080,6 +1085,166 @@ impl From<ContactError> for CommandError {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn contact_requests_use_scopes_and_token_from_config_returned_after_reconnect() {
+        use crate::utils::oauth::{
+            OAuthIdentity, OAuthTokenPayload, GOOGLE_CONTACTS_SCOPE, GOOGLE_OTHER_CONTACTS_SCOPE,
+        };
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for (old_regular, old_other, new_regular, new_other) in [
+            (true, true, true, false),
+            (true, false, true, true),
+            (false, false, true, false),
+            (true, true, false, true),
+        ] {
+            crate::utils::crypto::seed_master_key_for_tests();
+            let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+            crate::db::init(&pool).await.unwrap();
+            let scopes = |regular: bool, other: bool| {
+                [
+                    (regular, GOOGLE_CONTACTS_SCOPE),
+                    (other, GOOGLE_OTHER_CONTACTS_SCOPE),
+                ]
+                .into_iter()
+                .filter_map(|(granted, scope)| granted.then_some(scope))
+                .collect::<Vec<_>>()
+                .join(" ")
+            };
+            let old = serde_json::json!({"oauth": {"provider":"gmail", "client_id":"old-client",
+                "access_token":"old-access", "refresh_token":"old-refresh",
+                "scope":scopes(old_regular, old_other), "expires_at":"2000-01-01T00:00:00Z"}});
+            sqlx::query("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+                VALUES ('contacts-race', 'Fixture', 'fixture@example.test', 'gmail', ?, 'encrypted-in-config', '2026-01-01', '2026-01-01')")
+                .bind(satchel_core::accounts::encrypt_account_config("contacts-race", &old.to_string()).unwrap())
+                .execute(&pool).await.unwrap();
+
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel();
+            let server = tokio::spawn(async move {
+                let mut paths = Vec::new();
+                loop {
+                    let (mut stream, _) = tokio::select! {
+                        _ = &mut stop_rx => break,
+                        connection = listener.accept() => connection.unwrap(),
+                    };
+                    let mut request = Vec::new();
+                    loop {
+                        let mut buf = [0; 2048];
+                        let read = stream.read(&mut buf).await.unwrap();
+                        assert!(read > 0);
+                        request.extend_from_slice(&buf[..read]);
+                        if request.windows(4).any(|part| part == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    let request = String::from_utf8(request).unwrap();
+                    assert!(request
+                        .to_ascii_lowercase()
+                        .contains("authorization: bearer new-access"));
+                    let path = request
+                        .lines()
+                        .next()
+                        .unwrap()
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap()
+                        .to_owned();
+                    let other = path.starts_with("/otherContacts?");
+                    // An erroneous stale-scope request would fail and discard
+                    // valid regular contacts in the previous implementation.
+                    let (status, body) = if other && !new_other {
+                        ("403 Forbidden", "{}".to_string())
+                    } else {
+                        let list = if other {
+                            "otherContacts"
+                        } else {
+                            "connections"
+                        };
+                        (
+                            "200 OK",
+                            serde_json::json!({(list): [{
+                                "emailAddresses":[{"value":"person@example.test"}],
+                                "photos":[{"url":"https://photos.example.test/person.png"}]
+                            }]})
+                            .to_string(),
+                        )
+                    };
+                    paths.push(path);
+                    let response = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                    stream.write_all(response.as_bytes()).await.unwrap();
+                }
+                paths
+            });
+            let (waiting_tx, waiting_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            let task = tokio::spawn({
+                let pool = pool.clone();
+                async move {
+                    fetch_current_contact_photos(
+                        &reqwest::Client::new(),
+                        OAuthProvider::Gmail,
+                        async {
+                            waiting_tx.send(()).unwrap();
+                            release_rx.await.unwrap();
+                            crate::utils::oauth::fresh_account_config_for_provider(
+                                &pool,
+                                "contacts-race",
+                                OAuthProvider::Gmail,
+                            )
+                            .await
+                        },
+                        &base,
+                    )
+                    .await
+                    .unwrap()
+                }
+            });
+            waiting_rx.await.unwrap();
+            let client = crate::utils::oauth::OAuthClientConfig {
+                provider: OAuthProvider::Gmail,
+                client_id: "new-client".into(),
+                client_secret: None,
+                redirect_uri: "http://127.0.0.1:1".into(),
+                auth_url: "https://oauth.example.test/authorize".into(),
+                token_url: "https://oauth.example.test/token".into(),
+                scopes: Vec::new(),
+            };
+            AccountRepository::new(&pool)
+                .connect_oauth(
+                    "contacts-race",
+                    &client,
+                    &OAuthTokenPayload {
+                        access_token: "new-access".into(),
+                        refresh_token: Some("new-refresh".into()),
+                        token_type: None,
+                        scope: Some(scopes(new_regular, new_other)),
+                        expires_at: Some("2099-01-01T00:00:00Z".into()),
+                    },
+                    &OAuthIdentity {
+                        email: "fixture@example.test".into(),
+                        display_name: None,
+                    },
+                    "2026-01-01",
+                )
+                .await
+                .unwrap();
+            release_tx.send(()).unwrap();
+            let (_, contacts) = task.await.unwrap();
+            stop_tx.send(()).unwrap();
+            let requests = server.await.unwrap();
+            let expected = usize::from(new_regular) * (1 + usize::from(new_other));
+            assert_eq!(contacts.len(), expected);
+            assert_eq!(requests.len(), expected);
+            assert_eq!(
+                requests
+                    .iter()
+                    .any(|path| path.starts_with("/otherContacts?")),
+                new_regular && new_other
+            );
+        }
+    }
+
     #[tokio::test]
     async fn third_party_avatar_import_requires_explicit_consent() {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
