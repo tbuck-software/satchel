@@ -44,31 +44,27 @@ pub(crate) async fn reconcile_gmail_message_mailboxes_tx(
     account_id: &str,
     message: &MessageEnvelope,
 ) -> Result<HashSet<String>, String> {
-    let mut effective_mailbox_ids = gmail_effective_mailbox_ids(&message.mailbox_ids);
-    if effective_mailbox_ids.is_empty() {
-        effective_mailbox_ids.push("ARCHIVE".to_string());
-    }
+    let effective_mailbox_ids = gmail_target_mailbox_ids(&message.mailbox_ids);
     let mailbox_ids =
         serde_json::to_string(&effective_mailbox_ids).map_err(|err| err.to_string())?;
     // Also guard standalone callers: observing a relabel is no evidence that
     // its target was successfully stored.
-    let has_target: bool = sqlx::query_scalar(
-        "SELECT EXISTS(
-           SELECT 1 FROM messages m JOIN folders f ON f.id = m.folder_id
-           WHERE m.account_id = ? AND m.remote_id = ?
-             AND EXISTS (SELECT 1 FROM json_each(?) label
-                         WHERE LOWER(TRIM(label.value)) = LOWER(TRIM(f.remote_id)))
-         )",
+    let target: Option<String> = sqlx::query_scalar(
+        "SELECT m.id FROM messages m JOIN folders f ON f.id = m.folder_id
+         WHERE m.account_id = ? AND m.remote_id = ?
+           AND EXISTS (SELECT 1 FROM json_each(?) label
+                       WHERE LOWER(TRIM(label.value)) = LOWER(TRIM(f.remote_id)))
+         ORDER BY m.id LIMIT 1",
     )
     .bind(account_id)
     .bind(&message.remote_id)
     .bind(&mailbox_ids)
-    .fetch_one(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
-    if !has_target {
+    let Some(target) = target else {
         return Ok(HashSet::new());
-    }
+    };
     let touched = sqlx::query_scalar::<_, String>(
         "SELECT DISTINCT thread_id FROM messages
          WHERE account_id = ? AND remote_id = ? AND thread_id IS NOT NULL",
@@ -81,50 +77,70 @@ pub(crate) async fn reconcile_gmail_message_mailboxes_tx(
     .into_iter()
     .collect::<HashSet<_>>();
 
-    sqlx::query(
-        "DELETE FROM attachments
-         WHERE message_id IN (
-           SELECT stale.id
-           FROM messages stale
-           JOIN folders stale_folder ON stale_folder.id = stale.folder_id
-           WHERE stale.account_id = ?
-             AND stale.remote_id = ?
-             AND NOT EXISTS (
-               SELECT 1
-               FROM json_each(?) current_label
-               WHERE LOWER(TRIM(current_label.value)) = LOWER(TRIM(stale_folder.remote_id))
-             )
-         )",
+    let stale_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT stale.id FROM messages stale
+         JOIN folders f ON f.id = stale.folder_id
+         WHERE stale.account_id = ? AND stale.remote_id = ?
+           AND NOT EXISTS (SELECT 1 FROM json_each(?) label
+                           WHERE LOWER(TRIM(label.value)) = LOWER(TRIM(f.remote_id)))
+         ORDER BY stale.id",
     )
     .bind(account_id)
     .bind(&message.remote_id)
     .bind(&mailbox_ids)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|err| err.to_string())?;
+    if stale_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let stale_ids = serde_json::to_string(&stale_ids).map_err(|err| err.to_string())?;
+
+    // Local organization belongs to the delivery, not to an obsolete label
+    // copy. Preserve destination membership metadata when both copies were
+    // already linked; source-only links retain their original attribution.
+    sqlx::query(
+        "INSERT OR IGNORE INTO topic_items (topic_id, item_type, item_id, added_at, added_by)
+         SELECT topic_id, 'message', ?, added_at, added_by FROM topic_items
+         WHERE item_type = 'message' AND item_id IN (SELECT value FROM json_each(?))
+         ORDER BY added_at, item_id",
+    )
+    .bind(&target)
+    .bind(&stale_ids)
     .execute(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
-
-    let removed_stale_copies = sqlx::query(
-        "DELETE FROM messages
-         WHERE id IN (
-           SELECT stale.id
-           FROM messages stale
-           JOIN folders stale_folder ON stale_folder.id = stale.folder_id
-           WHERE stale.account_id = ?
-             AND stale.remote_id = ?
-             AND NOT EXISTS (
-               SELECT 1
-               FROM json_each(?) current_label
-               WHERE LOWER(TRIM(current_label.value)) = LOWER(TRIM(stale_folder.remote_id))
-             )
-         )",
+    sqlx::query(
+        "DELETE FROM topic_items WHERE item_type = 'message'
+         AND item_id IN (SELECT value FROM json_each(?))",
     )
-    .bind(account_id)
-    .bind(&message.remote_id)
-    .bind(&mailbox_ids)
+    .bind(&stale_ids)
     .execute(&mut **tx)
     .await
-    .map_err(|err| err.to_string())?
-    .rows_affected();
+    .map_err(|err| err.to_string())?;
+    for table in ["calendar_invites", "follow_up_reminders"] {
+        sqlx::query(&format!(
+            "UPDATE {table} SET message_id = ?
+             WHERE message_id IN (SELECT value FROM json_each(?))"
+        ))
+        .bind(&target)
+        .bind(&stale_ids)
+        .execute(&mut **tx)
+        .await
+        .map_err(|err| err.to_string())?;
+    }
+    sqlx::query("DELETE FROM attachments WHERE message_id IN (SELECT value FROM json_each(?))")
+        .bind(&stale_ids)
+        .execute(&mut **tx)
+        .await
+        .map_err(|err| err.to_string())?;
+    let removed_stale_copies =
+        sqlx::query("DELETE FROM messages WHERE id IN (SELECT value FROM json_each(?))")
+            .bind(&stale_ids)
+            .execute(&mut **tx)
+            .await
+            .map_err(|err| err.to_string())?
+            .rows_affected();
 
     if removed_stale_copies > 0 {
         Ok(touched)
@@ -167,6 +183,15 @@ pub fn gmail_effective_mailbox_ids(mailbox_ids: &[String]) -> Vec<String> {
         .filter(|label| !gmail_label_is_category_view(label) && !gmail_label_is_state_view(label))
         .cloned()
         .collect()
+}
+
+/// Complete local targets, including the synthetic archive for unlabeled mail.
+pub fn gmail_target_mailbox_ids(mailbox_ids: &[String]) -> Vec<String> {
+    let mut labels = gmail_effective_mailbox_ids(mailbox_ids);
+    if labels.is_empty() {
+        labels.push("ARCHIVE".into());
+    }
+    labels
 }
 
 /// Whether a message has no real folder left and needs the synthetic ARCHIVE.
@@ -496,38 +521,22 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("pool");
-        sqlx::query(
-            "CREATE TABLE folders (
-               id TEXT PRIMARY KEY,
-               account_id TEXT,
-               remote_id TEXT,
-               folder_type TEXT,
-               updated_at TEXT
-             )",
-        )
-        .execute(&pool)
-        .await
-        .expect("folders");
-        sqlx::query(
-            "CREATE TABLE messages (
-               id TEXT PRIMARY KEY,
-               account_id TEXT,
-               folder_id TEXT,
-               thread_id TEXT,
-               remote_id TEXT
-             )",
-        )
-        .execute(&pool)
-        .await
-        .expect("messages");
-        sqlx::query("CREATE TABLE attachments (id TEXT PRIMARY KEY, message_id TEXT)")
-            .execute(&pool)
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
             .await
-            .expect("attachments");
+            .expect("migrations");
+        sqlx::query(
+            "INSERT INTO accounts
+             (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('account', 'Me', 'me@example.com', 'gmail', '{}', '', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .expect("account");
         for (id, remote_id) in [("inbox", "INBOX"), ("sent", "SENT")] {
             sqlx::query(
-                "INSERT INTO folders (id, account_id, remote_id, folder_type, updated_at)
-                 VALUES (?, 'account', ?, 'custom', '')",
+                "INSERT INTO folders (id, account_id, remote_id, folder_type, name, full_path, created_at, updated_at)
+                 VALUES (?, 'account', ?, 'custom', '', '', '', '')",
             )
             .bind(id)
             .bind(remote_id)
@@ -537,8 +546,8 @@ mod tests {
         }
         for (id, folder_id) in [("copy-inbox", "inbox"), ("copy-sent", "sent")] {
             sqlx::query(
-                "INSERT INTO messages (id, account_id, folder_id, remote_id)
-                 VALUES (?, 'account', ?, 'remote-message')",
+                "INSERT INTO messages (id, account_id, folder_id, remote_id, from_address, to_addresses, subject, date, created_at, updated_at)
+                 VALUES (?, 'account', ?, 'remote-message', 'sender@example.com', '[]', '', '', '', '')",
             )
             .bind(id)
             .bind(folder_id)
@@ -546,7 +555,7 @@ mod tests {
             .await
             .expect("message");
         }
-        sqlx::query("INSERT INTO attachments (id, message_id) VALUES ('attachment', 'copy-inbox')")
+        sqlx::query("INSERT INTO attachments (id, message_id, filename, content_type, size, created_at) VALUES ('attachment', 'copy-inbox', 'fixture.txt', 'text/plain', 0, '')")
             .execute(&pool)
             .await
             .expect("attachment");

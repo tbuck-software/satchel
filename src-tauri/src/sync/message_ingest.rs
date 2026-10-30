@@ -300,11 +300,7 @@ async fn persist_provider_message(
         // Reuse an obsolete label copy rather than replacing its local ID.
         // Message topic links, cached attachments and other references survive
         // the move along with the thread, within this message's savepoint.
-        let mut labels =
-            crate::sync::gmail_reconcile::gmail_effective_mailbox_ids(&message.mailbox_ids);
-        if labels.is_empty() {
-            labels.push("ARCHIVE".into());
-        }
+        let labels = crate::sync::gmail_reconcile::gmail_target_mailbox_ids(&message.mailbox_ids);
         let labels = serde_json::to_string(&labels).map_err(|err| err.to_string())?;
         provider_message_row = sqlx::query_as::<_, (String, Option<String>)>(
             "SELECT m.id, m.thread_id FROM messages m JOIN folders f ON f.id = m.folder_id
@@ -320,12 +316,36 @@ async fn persist_provider_message(
         .await
         .map_err(|err| err.to_string())?;
     }
-    let provider_message_id = provider_message_row
-        .as_ref()
-        .map(|row| row.0.clone())
-        .unwrap_or_else(|| {
-            provider_message_db_id(provider_kind, account_id, folder_remote_id, message)
-        });
+    let provider_message_id = if let Some((id, _)) = &provider_message_row {
+        id.clone()
+    } else {
+        let mut id = provider_message_db_id(provider_kind, account_id, folder_remote_id, message);
+        // A prior relabel may have adopted this deterministic ID into another
+        // still-current folder. Allocate a distinct copy under the write lock;
+        // subsequent ingests find it by the exact account/folder/remote tuple.
+        if provider_kind.eq_ignore_ascii_case("gmail") {
+            while sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?)",
+            )
+            .bind(&id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|err| err.to_string())?
+            {
+                id = provider_local_id(
+                    "m",
+                    provider_kind,
+                    &[
+                        account_id,
+                        folder_remote_id,
+                        &message.remote_id,
+                        &uuid::Uuid::new_v4().to_string(),
+                    ],
+                );
+            }
+        }
+        id
+    };
     let message_id = if let Some(remote_draft_id) = remote_draft_id.as_deref() {
         sqlx::query_scalar::<_, String>(
             "SELECT id FROM messages

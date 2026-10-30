@@ -198,6 +198,154 @@ async fn gmail_last_copy_moves_keep_thread_organization_and_true_deletion_still_
 }
 
 #[tokio::test]
+async fn gmail_existing_target_keeps_message_links_and_their_metadata() {
+    for fail_after_transfer in [false, true] {
+        let pool = pool().await;
+        ingest(&pool, message(&["INBOX", "Label_one"])).await;
+        let thread = annotate(&pool).await;
+        let source: String =
+            sqlx::query_scalar("SELECT id FROM messages WHERE folder_id = 'inbox'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let target: String =
+            sqlx::query_scalar("SELECT id FROM messages WHERE folder_id != 'inbox'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        sqlx::raw_sql(
+            "INSERT INTO topics (id,name,created_at,updated_at) VALUES ('shared','Shared','','');",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (topic, id, added_at, added_by) in [
+            ("topic", &source, "source-date", "user"),
+            ("shared", &source, "source-date", "rule"),
+            ("shared", &target, "target-date", "user"),
+        ] {
+            sqlx::query("INSERT INTO topic_items (topic_id,item_type,item_id,added_at,added_by) VALUES (?,'message',?,?,?)")
+                .bind(topic).bind(id).bind(added_at).bind(added_by).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO calendar_invites (id,message_id,account_id,uid,raw_ics,created_at,updated_at) VALUES ('invite',?,'account','invite-uid','fixture','','')")
+            .bind(&source).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO follow_up_reminders (id,account_id,thread_id,message_id,due_at,created_at,updated_at) VALUES ('reminder','account',?,?,'2030-01-01','','')")
+            .bind(&thread).bind(&source).execute(&pool).await.unwrap();
+        if fail_after_transfer {
+            sqlx::raw_sql(
+                "CREATE TRIGGER fail_link_transfer BEFORE UPDATE ON threads
+                WHEN NOT EXISTS (SELECT 1 FROM messages WHERE folder_id = 'inbox')
+                BEGIN SELECT RAISE(ABORT, 'fixture projection failure'); END;",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            let failed = ingest(&pool, message(&["Label_one"])).await;
+            assert_eq!(failed.failed, 1);
+            assert!(!failed.cursor_may_advance());
+            assert_organization(&pool, &thread, &["INBOX", "Label_one"]).await;
+            let links: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM topic_items WHERE item_type='message' AND item_id=?",
+            )
+            .bind(&source)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(links, 2);
+            for table in ["calendar_invites", "follow_up_reminders"] {
+                let id: String = sqlx::query_scalar(&format!("SELECT message_id FROM {table}"))
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+                assert_eq!(id, source);
+            }
+            sqlx::raw_sql("DROP TRIGGER fail_link_transfer")
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        for _ in 0..2 {
+            assert_eq!(ingest(&pool, message(&["Label_one"])).await.failed, 0);
+            assert_organization(&pool, &thread, &["Label_one"]).await;
+            let links: Vec<(String, String, String, String)> = sqlx::query_as(
+                "SELECT ti.topic_id,m.id,ti.added_at,ti.added_by FROM topic_items ti
+                 JOIN messages m ON m.id=ti.item_id WHERE ti.item_type='message' ORDER BY ti.topic_id",
+            ).fetch_all(&pool).await.unwrap();
+            assert_eq!(
+                links,
+                vec![
+                    (
+                        "shared".into(),
+                        target.clone(),
+                        "target-date".into(),
+                        "user".into()
+                    ),
+                    (
+                        "topic".into(),
+                        target.clone(),
+                        "source-date".into(),
+                        "user".into()
+                    ),
+                ]
+            );
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM topic_items WHERE item_type='message'"
+                )
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+                2
+            );
+            for table in ["calendar_invites", "follow_up_reminders"] {
+                let id: String = sqlx::query_scalar(&format!("SELECT message_id FROM {table}"))
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+                assert_eq!(id, target);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn gmail_reused_id_does_not_replace_another_current_label_copy() {
+    for (source, destination) in [("Label_two", "Label_one"), ("Label_one", "Label_two")] {
+        let pool = pool().await;
+        ingest(&pool, message(&[source])).await;
+        let thread = annotate(&pool).await;
+        let original: String = sqlx::query_scalar("SELECT id FROM messages")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        ingest(&pool, message(&[destination])).await;
+        let mut labels = vec![source, destination];
+        labels.sort();
+        for _ in 0..2 {
+            let result = ingest(&pool, message(&labels)).await;
+            assert_eq!(result.failed, 0);
+            assert!(result.cursor_may_advance());
+            assert_organization(&pool, &thread, &labels).await;
+            let destination_id: String = sqlx::query_scalar(
+                "SELECT m.id FROM messages m JOIN folders f ON f.id=m.folder_id WHERE f.remote_id=?",
+            ).bind(destination).fetch_one(&pool).await.unwrap();
+            assert_eq!(destination_id, original);
+        }
+        // Removing and re-adding a label must also preserve the other copy.
+        ingest(&pool, message(&[source])).await;
+        let surviving: String = sqlx::query_scalar("SELECT id FROM messages")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        ingest(&pool, message(&labels)).await;
+        assert_organization(&pool, &thread, &labels).await;
+        assert_eq!(sqlx::query_scalar::<_, String>(
+            "SELECT m.id FROM messages m JOIN folders f ON f.id=m.folder_id WHERE f.remote_id=?",
+        ).bind(source).fetch_one(&pool).await.unwrap(), surviving);
+    }
+}
+
+#[tokio::test]
 async fn gmail_failed_target_savepoint_retains_old_copy_and_retries_after_restart() {
     let pool = pool().await;
     ingest(&pool, message(&["INBOX"])).await;

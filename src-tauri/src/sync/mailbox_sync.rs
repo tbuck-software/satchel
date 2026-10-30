@@ -23,7 +23,7 @@ use crate::sync::folder_reconcile::{
     reconcile_remote_message_removals, reset_local_provider_folder_with_generation,
     should_snapshot_folder,
 };
-use crate::sync::gmail_reconcile::{ensure_gmail_label_folder, gmail_effective_mailbox_ids};
+use crate::sync::gmail_reconcile::{ensure_gmail_label_folder, gmail_target_mailbox_ids};
 
 #[cfg(mobile)]
 use crate::sync::leases::acquire_mobile_mailbox_work_permit;
@@ -334,10 +334,7 @@ async fn ingest_messages_into_folder(
         if quarantine.is_exhausted(&message.remote_id) {
             outcome.skipped += 1;
             if account.provider.eq_ignore_ascii_case("gmail") {
-                let mut labels = gmail_effective_mailbox_ids(&message.mailbox_ids);
-                if labels.is_empty() {
-                    labels.push("ARCHIVE".into());
-                }
+                let labels = gmail_target_mailbox_ids(&message.mailbox_ids);
                 let labels = serde_json::to_string(&labels).map_err(|error| error.to_string())?;
                 let has_old_copy: bool = sqlx::query_scalar(
                     "SELECT EXISTS(
@@ -431,10 +428,7 @@ async fn ingest_folder_batch(
             .await
             .map_err(|error| error.to_string())?;
             externally_changed_threads.extend(threads);
-            let mut labels = gmail_effective_mailbox_ids(&message.mailbox_ids);
-            if labels.is_empty() {
-                labels.push("ARCHIVE".into());
-            }
+            let labels = gmail_target_mailbox_ids(&message.mailbox_ids);
             for label in labels {
                 targets.entry(label).or_default().push(message.clone());
             }
