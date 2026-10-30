@@ -15,8 +15,9 @@ use satchel_core::providers::traits::SyncCheckpoint;
 use sqlx::SqlitePool;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-/// Matches the freshness floor in `utils::oauth`.
-const FRESHNESS_FLOOR_SECONDS: i64 = 90;
+/// Credentials renew a token this close to its expiry.
+const FRESHNESS_FLOOR_SECONDS: i64 =
+    satchel_core::utils::oauth::ACCESS_TOKEN_RENEWAL_MARGIN.as_secs() as i64;
 
 #[derive(Default)]
 struct Seen {

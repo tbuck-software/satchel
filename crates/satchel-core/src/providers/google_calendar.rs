@@ -74,6 +74,30 @@ struct GoogleAttendee {
     email: Option<String>,
 }
 
+/// The calendar grant of the stored Gmail row, without refreshing it. `None`
+/// when the row is gone or says nothing; the refresh then decides.
+async fn stored_calendar_grant(
+    pool: &SqlitePool,
+    account_id: &str,
+) -> Result<Option<bool>, String> {
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT config FROM accounts WHERE id = ? AND provider = ?")
+            .bind(account_id)
+            .bind(OAuthProvider::Gmail.as_str())
+            .fetch_optional(pool)
+            .await
+            .map_err(|err| crate::sync::errors::SyncError::Transient(err.to_string()).encoded())?;
+    let Some(stored) = stored else {
+        return Ok(None);
+    };
+    let config = crate::accounts::decrypt_account_config(account_id, &stored)
+        .map_err(|err| crate::sync::errors::SyncError::Permanent(err).encoded())?;
+    Ok(crate::utils::oauth::google_scope_granted(
+        &config,
+        crate::utils::oauth::GOOGLE_CALENDAR_SCOPE,
+    ))
+}
+
 struct MappedEvent {
     id: String,
     calendar_id: String,
@@ -90,6 +114,12 @@ struct MappedEvent {
 /// Sync every visible Google calendar of one Gmail account. Returns the
 /// number of events now mirrored locally.
 pub async fn sync_account(pool: &SqlitePool, account_id: &str) -> Result<usize, String> {
+    // An account that never granted calendar access is skipped before its
+    // credentials are refreshed: offline or revoked, that failure is mail
+    // sync's to report, not the calendar's.
+    if stored_calendar_grant(pool, account_id).await? == Some(false) {
+        return Ok(0);
+    }
     let config = crate::utils::oauth::fresh_account_config_for_provider(
         pool,
         account_id,
@@ -98,7 +128,7 @@ pub async fn sync_account(pool: &SqlitePool, account_id: &str) -> Result<usize, 
     .await
     .map_err(|err| err.encoded())?;
     // The grant comes from the config the refresh returned: a reconnect after
-    // the caller listed this account may have added or withdrawn calendar access.
+    // the stored row was read may have added or withdrawn calendar access.
     if crate::utils::oauth::google_scope_granted(
         &config,
         crate::utils::oauth::GOOGLE_CALENDAR_SCOPE,
@@ -417,6 +447,35 @@ mod tests {
             .unwrap();
         // Without the calendar grant no Calendar request is made at all.
         assert_eq!(sync_account(&pool, "account").await, Ok(0));
+    }
+
+    /// An account that never granted calendar access has no calendar to fail
+    /// on: offline or revoked, its refresh failure belongs to mail sync.
+    #[tokio::test]
+    async fn a_mail_only_account_is_skipped_before_its_credentials_are_refreshed() {
+        crate::utils::crypto::seed_master_key_for_tests();
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::init(&pool).await.unwrap();
+        // Expired, and no refresh token: any refresh attempt fails permanently.
+        let mail_only = serde_json::json!({"oauth": {
+            "provider": "gmail", "client_id": "fixture-client",
+            "access_token": "mail-access",
+            "scope": crate::utils::oauth::GOOGLE_MAIL_SCOPE,
+            "expires_at": "2000-01-01T00:00:00Z"
+        }})
+        .to_string();
+        sqlx::query("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+            VALUES ('account', 'Fixture', 'fixture@example.test', 'gmail', ?, 'encrypted-in-config', '2026-01-01', '2026-01-01')")
+            .bind(crate::accounts::encrypt_account_config("account", &mail_only).unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(sync_account(&pool, "account").await, Ok(0));
+        let error: Option<String> = sqlx::query_scalar("SELECT last_oauth_error FROM accounts")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(error, None, "the calendar never tried to refresh");
     }
 
     fn timed(date_time: &str) -> GoogleEventTime {

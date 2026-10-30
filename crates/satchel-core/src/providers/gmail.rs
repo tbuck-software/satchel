@@ -1394,7 +1394,9 @@ impl MailProvider for GmailProvider {
         folder: &str,
         since: SyncCheckpoint,
     ) -> crate::sync::errors::SyncResult<SyncBatch> {
-        let token = self.access_token().await?;
+        // Taken again for every page: a long catch-up outlasts the renewal
+        // margin a single token is served with.
+        let mut token = self.access_token().await?;
         let client = crate::utils::http::client();
         if folder.eq_ignore_ascii_case("DRAFT") || folder.eq_ignore_ascii_case("DRAFTS") {
             return Ok(SyncBatch {
@@ -1422,6 +1424,7 @@ impl MailProvider for GmailProvider {
                 let mut page_token = None::<String>;
                 history_synced = true;
                 loop {
+                    token = self.access_token().await?;
                     let payload = match Self::list_history_page(
                         &client,
                         &token,
@@ -1493,6 +1496,7 @@ impl MailProvider for GmailProvider {
                     let mut page_token = None::<String>;
 
                     loop {
+                        token = self.access_token().await?;
                         let payload = Self::list_message_page(
                             &client,
                             &token,

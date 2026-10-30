@@ -1,6 +1,7 @@
 //! Owns refresh persistence. No database transaction spans a provider request.
-//! A fresh token or a temporary failure stores nothing, so a plain read checks
-//! that it still applies. A rotation or a rejection reloads the row in a short
+//! A fresh token, a temporary failure or a rejection already on record stores
+//! nothing, so a plain read checks that it still applies. A rotation or a new
+//! rejection reloads the row in a short
 //! write transaction after HTTP: settings-only changes merge with a successful
 //! rotation, changed authorizations win instead. Successful rotations merge
 //! once, regardless of intervening settings writes.
@@ -9,7 +10,9 @@ use std::future::Future;
 
 use sqlx::SqlitePool;
 
-use super::{ensure_fresh_account_config, OAuthProvider, OAUTH_RELOAD_REQUIRED};
+use super::{
+    ensure_fresh_account_config, OAuthProvider, OAUTH_REFRESH_REJECTED, OAUTH_RELOAD_REQUIRED,
+};
 use crate::accounts::{decrypt_account_config, encrypt_account_config, AccountConfig};
 use crate::sync::errors::{SyncError, SyncResult};
 
@@ -174,6 +177,14 @@ where
             continue;
         }
 
+        // A rejection already on record changes nothing either. Every later
+        // attempt with a revoked refresh token lands here.
+        if let Err(err) = &result {
+            if rejection_on_record(pool, account_id, &provider, &snapshot, err).await? {
+                return Err(err.clone());
+            }
+        }
+
         // Acquire the writer reservation only AFTER the request. Ordinary
         // settings writers cannot slip between this reload and the merge.
         let mut tx = pool
@@ -237,7 +248,7 @@ where
             }
             // A rejection already on record keeps its first occurrence and is
             // not announced again.
-            Err(err) if stored_error.as_deref() != Some(err.to_string().as_str()) => {
+            Err(err) if !same_rejection(stored_error.as_deref(), err) => {
                 let diagnostic = err.to_string();
                 sqlx::query(
                     "UPDATE accounts SET last_oauth_error = ?, last_oauth_error_at = ?
@@ -285,6 +296,50 @@ fn reload_required() -> SyncError {
 
 fn account_not_found() -> SyncError {
     SyncError::Permanent("backend.errors.accountNotFound".into())
+}
+
+/// Whether the unchanged row already records `err`. A plain read: when it
+/// does, the refresh has nothing to write and need not wait for the writer.
+async fn rejection_on_record(
+    pool: &SqlitePool,
+    account_id: &str,
+    provider: &str,
+    snapshot: &str,
+    err: &SyncError,
+) -> SyncResult<bool> {
+    let (current_provider, current_snapshot, stored_error): (String, String, Option<String>) =
+        sqlx::query_as("SELECT provider, config, last_oauth_error FROM accounts WHERE id = ?")
+            .bind(account_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|err| SyncError::Transient(err.to_string()))?
+            .ok_or_else(account_not_found)?;
+    Ok(current_provider == provider
+        && current_snapshot == snapshot
+        && same_rejection(stored_error.as_deref(), err))
+}
+
+fn same_rejection(stored: Option<&str>, err: &SyncError) -> bool {
+    stored.is_some_and(|stored| rejection_key(stored) == rejection_key(&err.to_string()))
+}
+
+/// What identifies a rejection across attempts: the HTTP status and the OAuth
+/// `error` code (`400 invalid_grant`). The rest of a token endpoint's body,
+/// such as Microsoft's trace and correlation ids, differs on every response.
+/// Local failures carry no response and compare as written.
+fn rejection_key(diagnostic: &str) -> String {
+    let Some(response) = diagnostic.strip_prefix(OAUTH_REFRESH_REJECTED) else {
+        return diagnostic.to_owned();
+    };
+    let (status, body) = response.split_once(": ").unwrap_or((response, ""));
+    let status = status.split_whitespace().next().unwrap_or_default();
+    let code = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|body| body.get("error")?.as_str().map(str::to_owned));
+    match code {
+        Some(code) => format!("{status} {code}"),
+        None => status.to_owned(),
+    }
 }
 
 fn oauth_block(config: &str) -> Option<serde_json::Value> {
@@ -1001,6 +1056,106 @@ mod tests {
         assert_eq!(
             changed.recorded_error.map(|recorded| recorded.error),
             Some("missing oauth refresh token".into())
+        );
+    }
+
+    /// A token endpoint rejection as `refresh_access_token` reports it.
+    /// Microsoft stamps every response with its own trace and correlation id.
+    fn rejection(status: &str, code: &str, trace: &str) -> SyncError {
+        SyncError::from_message(format!(
+            r#"oauth refresh failed with status {status}: {{"error":"{code}","error_description":"AADSTS70000: revoked. Trace ID: {trace} Correlation ID: corr-{trace}","trace_id":"{trace}","correlation_id":"corr-{trace}"}}"#
+        ))
+    }
+
+    #[tokio::test]
+    async fn a_repeated_provider_rejection_is_not_announced_again_despite_new_trace_ids() {
+        let pool = fixture().await;
+        let attempt = |error: SyncError| {
+            let pool = pool.clone();
+            async move {
+                refresh_with(&pool, "account", None, move |_, _| {
+                    let error = error.clone();
+                    async move { Err(error) }
+                })
+                .await
+            }
+        };
+        let first = attempt(rejection("400 Bad Request", "invalid_grant", "trace-1")).await;
+        assert!(first.config.unwrap_err().is_permanent());
+        let recorded = first.recorded_error.expect("first rejection is reported");
+        let detail = rejection("400 Bad Request", "invalid_grant", "trace-1").to_string();
+        assert_eq!(
+            recorded.error, detail,
+            "the banner keeps the provider's own text"
+        );
+        for trace in ["trace-2", "trace-3"] {
+            let repeated = attempt(rejection("400 Bad Request", "invalid_grant", trace)).await;
+            assert_eq!(repeated.recorded_error, None);
+        }
+        assert_eq!(
+            stored_error(&pool).await,
+            (Some(detail), Some(recorded.at)),
+            "the first occurrence stays on record"
+        );
+        // A different answer from the endpoint is news.
+        let changed = attempt(rejection("400 Bad Request", "invalid_client", "trace-4")).await;
+        assert!(changed.recorded_error.is_some());
+    }
+
+    #[test]
+    fn rejections_compare_by_status_and_oauth_error_code() {
+        let key = |error: SyncError| rejection_key(&error.to_string());
+        assert_eq!(
+            key(rejection("400 Bad Request", "invalid_grant", "a")),
+            key(rejection("400 Bad Request", "invalid_grant", "b"))
+        );
+        assert_ne!(
+            key(rejection("400 Bad Request", "invalid_grant", "a")),
+            key(rejection("400 Bad Request", "invalid_client", "a"))
+        );
+        assert_ne!(
+            key(rejection("400 Bad Request", "invalid_grant", "a")),
+            key(rejection("401 Unauthorized", "invalid_grant", "a"))
+        );
+        // Local failures carry no provider body and compare as written.
+        assert_eq!(
+            rejection_key("missing oauth refresh token"),
+            "missing oauth refresh token"
+        );
+        assert_ne!(rejection_key("invalid_grant"), rejection_key("other"));
+    }
+
+    #[tokio::test]
+    async fn a_rejection_already_on_record_does_not_wait_for_the_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = wal_fixture(dir.path(), &config("old", false)).await;
+        let on_record = rejection("400 Bad Request", "invalid_grant", "trace-1").to_string();
+        sqlx::query("UPDATE accounts SET last_oauth_error = ?, last_oauth_error_at = 'first'")
+            .bind(&on_record)
+            .execute(&pool)
+            .await
+            .unwrap();
+        // Every later folder of a revoked run lands here; an ingest holding the
+        // writer must not hold them up, since there is nothing to store.
+        let mut ingest = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        sqlx::query("UPDATE accounts SET updated_at = 'ingest' WHERE id = 'account'")
+            .execute(&mut *ingest)
+            .await
+            .unwrap();
+        let repeated = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            refresh_with(&pool, "account", None, |_, _| async {
+                Err(rejection("400 Bad Request", "invalid_grant", "trace-2"))
+            }),
+        )
+        .await
+        .expect("a rejection already on record must not wait for the writer");
+        assert!(repeated.config.unwrap_err().is_permanent());
+        assert_eq!(repeated.recorded_error, None);
+        ingest.commit().await.unwrap();
+        assert_eq!(
+            stored_error(&pool).await,
+            (Some(on_record), Some("first".into()))
         );
     }
 

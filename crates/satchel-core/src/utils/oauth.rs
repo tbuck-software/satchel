@@ -22,6 +22,10 @@ pub const GOOGLE_CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calenda
 /// account resolves it; nothing about the server or the sign-in is wrong.
 pub const OAUTH_RELOAD_REQUIRED: &str = "backend.errors.oauthReloadRequired";
 
+/// Starts the diagnostic for a token endpoint that answered with an error
+/// status; the status and the endpoint's body follow.
+const OAUTH_REFRESH_REJECTED: &str = "oauth refresh failed with status ";
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OAuthPurpose {
@@ -763,10 +767,7 @@ async fn refresh_access_token(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(format!(
-            "oauth refresh failed with status {}: {}",
-            status, body
-        ));
+        return Err(format!("{OAUTH_REFRESH_REJECTED}{status}: {body}"));
     }
 
     let token: OAuthTokenResponse = response
@@ -795,6 +796,12 @@ fn parse_rfc3339(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
         .map(|value| value.with_timezone(&chrono::Utc))
 }
 
+/// How long a served access token must still be valid. Gmail and Graph
+/// requests keep their token through every rate-limit retry, which can wait
+/// several minutes; a token served with less left expires under the request.
+/// Renewing this early costs nothing extra: one refresh per token lifetime.
+pub const ACCESS_TOKEN_RENEWAL_MARGIN: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
 pub fn oauth_config_has_fresh_access_token(config_json: &str) -> bool {
     load_stored_oauth(config_json)
         .map(|stored| oauth_token_is_fresh(&stored))
@@ -812,13 +819,40 @@ fn oauth_token_is_fresh(stored: &StoredOAuthConfig) -> bool {
             .expires_at
             .as_deref()
             .and_then(parse_rfc3339)
-            .map(|expires_at| expires_at > chrono::Utc::now() + chrono::Duration::seconds(90))
+            .map(|expires_at| {
+                chrono::Duration::from_std(ACCESS_TOKEN_RENEWAL_MARGIN)
+                    .is_ok_and(|margin| expires_at > chrono::Utc::now() + margin)
+            })
             .unwrap_or(true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_renewal_margin_outlasts_the_longest_wait_of_one_request() {
+        use crate::providers::gmail::{MAX_RATE_LIMIT_WAIT, RATE_LIMIT_ATTEMPTS};
+        // Gmail and Graph requests reuse their token across every rate-limit
+        // retry. A token served with less left would expire before the last one.
+        assert!(ACCESS_TOKEN_RENEWAL_MARGIN >= MAX_RATE_LIMIT_WAIT * RATE_LIMIT_ATTEMPTS as u32);
+        // Bounded, so an hour-long token is still refreshed about once an hour.
+        assert!(ACCESS_TOKEN_RENEWAL_MARGIN <= std::time::Duration::from_secs(10 * 60));
+        let expiring_in = |seconds: i64| {
+            serde_json::json!({"oauth": {
+                "access_token": "access",
+                "expires_at": (chrono::Utc::now() + chrono::Duration::seconds(seconds)).to_rfc3339()
+            }})
+            .to_string()
+        };
+        let margin = ACCESS_TOKEN_RENEWAL_MARGIN.as_secs() as i64;
+        assert!(!oauth_config_has_fresh_access_token(&expiring_in(
+            margin - 30
+        )));
+        assert!(oauth_config_has_fresh_access_token(&expiring_in(
+            margin + 30
+        )));
+    }
 
     #[test]
     fn gmail_sign_in_requests_one_mail_permission_without_identity_scopes() {

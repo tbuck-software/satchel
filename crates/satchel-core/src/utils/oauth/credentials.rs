@@ -16,21 +16,37 @@ use super::{
     oauth_config_has_fresh_access_token, OAuthProvider,
 };
 use crate::accounts::AccountConfig;
-use crate::sync::errors::SyncResult;
+use crate::sync::errors::{SyncError, SyncResult};
 
 #[derive(Clone)]
 pub struct OAuthCredentials(Arc<Inner>);
 
 struct Inner {
-    current: Mutex<AccountConfig>,
+    current: Mutex<Current>,
     account: Option<(SqlitePool, String)>,
+}
+
+struct Current {
+    config: AccountConfig,
+    /// The first permanent renewal failure. Asking again with the same
+    /// rejected refresh token only repeats it, so the run keeps this answer.
+    rejected: Option<SyncError>,
+}
+
+impl Current {
+    fn new(config: &AccountConfig) -> Mutex<Self> {
+        Mutex::new(Self {
+            config: config.clone(),
+            rejected: None,
+        })
+    }
 }
 
 impl OAuthCredentials {
     /// Serve `config` until its token expires, then ask for a reload.
     pub fn detached(config: &AccountConfig) -> Self {
         Self(Arc::new(Inner {
-            current: Mutex::new(config.clone()),
+            current: Current::new(config),
             account: None,
         }))
     }
@@ -38,23 +54,35 @@ impl OAuthCredentials {
     /// Start from `config` and renew from the stored account once it expires.
     pub fn stored(pool: &SqlitePool, account_id: &str, config: &AccountConfig) -> Self {
         Self(Arc::new(Inner {
-            current: Mutex::new(config.clone()),
+            current: Current::new(config),
             account: Some((pool.clone(), account_id.to_owned())),
         }))
     }
 
     /// The access token to send. Bound credentials first renew one that is
-    /// about to expire.
+    /// about to expire; once a renewal is rejected, the rest of the run gets
+    /// that rejection.
     pub async fn access_token(&self, provider: OAuthProvider) -> SyncResult<String> {
         // Held across the renewal, so concurrent requests of one run share a
         // refresh instead of each spending the same refresh token.
         let mut current = self.0.current.lock().await;
         if let Some((pool, account_id)) = &self.0.account {
-            if !oauth_config_has_fresh_access_token(&current) {
-                *current = fresh_account_config_for_provider(pool, account_id, provider).await?;
+            if !oauth_config_has_fresh_access_token(&current.config) {
+                if let Some(rejected) = &current.rejected {
+                    return Err(rejected.clone());
+                }
+                match fresh_account_config_for_provider(pool, account_id, provider).await {
+                    Ok(config) => current.config = config,
+                    Err(err) => {
+                        if err.is_permanent() {
+                            current.rejected = Some(err.clone());
+                        }
+                        return Err(err);
+                    }
+                }
             }
         }
-        access_token_from_account_config(provider, &current).await
+        access_token_from_account_config(provider, &current.config).await
     }
 }
 
@@ -72,7 +100,6 @@ impl std::fmt::Debug for OAuthCredentials {
 mod tests {
     use super::*;
     use crate::accounts::encrypt_account_config;
-    use crate::sync::errors::SyncError;
     use crate::utils::oauth::OAUTH_RELOAD_REQUIRED;
 
     fn config(access: &str, expires_at: &str) -> String {
@@ -124,6 +151,51 @@ mod tests {
                 .await
                 .unwrap_err(),
             SyncError::Transient(OAUTH_RELOAD_REQUIRED.into())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_permanent_refresh_failure_ends_renewal_for_the_rest_of_the_run() {
+        // Without a refresh token the renewal fails permanently, like a revoked one.
+        let revoked = serde_json::json!({"oauth": {
+            "provider": "gmail", "client_id": "fixture-client",
+            "access_token": "started-access", "expires_at": "2000-01-01T00:00:00Z"
+        }})
+        .to_string();
+        let pool = account(&revoked).await;
+        let stored =
+            OAuthCredentials::stored(&pool, "account", &AccountConfig::from_plaintext(revoked));
+        let first = stored.access_token(OAuthProvider::Gmail).await.unwrap_err();
+        assert!(first.is_permanent());
+        // Later folders of the run neither reload the account nor ask the
+        // token endpoint again; they get the first answer.
+        sqlx::query("DELETE FROM accounts")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            stored
+                .clone()
+                .access_token(OAuthProvider::Gmail)
+                .await
+                .unwrap_err(),
+            first
+        );
+    }
+
+    #[tokio::test]
+    async fn a_token_that_cannot_outlast_one_call_is_renewed_before_it_is_served() {
+        // A single request can wait out rate limits for minutes on the token it
+        // was built with: four minutes left is not enough for one call.
+        let pool = account(&config("rotated", "2099-01-01T00:00:00Z")).await;
+        let soon = chrono::Utc::now() + chrono::Duration::minutes(4);
+        let started = AccountConfig::from_plaintext(config("started", &soon.to_rfc3339()));
+        assert_eq!(
+            OAuthCredentials::stored(&pool, "account", &started)
+                .access_token(OAuthProvider::Gmail)
+                .await
+                .unwrap(),
+            "rotated-access"
         );
     }
 
