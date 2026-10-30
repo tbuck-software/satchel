@@ -13,7 +13,7 @@ use crate::{
             RemoteMessageRemoval, SyncBatch, SyncCheckpoint,
         },
     },
-    utils::oauth::{access_token_from_account_config, OAuthProvider},
+    utils::oauth::{OAuthCredentials, OAuthProvider},
 };
 
 mod batch;
@@ -49,7 +49,7 @@ fn max_delta_pages_per_run() -> usize {
 
 #[derive(Debug, Clone)]
 pub struct OutlookProvider {
-    config_json: crate::accounts::AccountConfig,
+    credentials: OAuthCredentials,
     /// One pool per provider: a client per call was a TLS handshake per call.
     client: reqwest::Client,
 }
@@ -212,14 +212,18 @@ impl OutlookProvider {
     const CURSOR_FORMAT_VERSION: u8 = 1;
 
     pub fn from_account_config(config_json: &crate::accounts::AccountConfig) -> Self {
+        Self::from_credentials(OAuthCredentials::detached(config_json))
+    }
+
+    pub fn from_credentials(credentials: OAuthCredentials) -> Self {
         Self {
-            config_json: config_json.clone(),
+            credentials,
             client: crate::utils::http::client(),
         }
     }
 
     async fn access_token(&self) -> crate::sync::errors::SyncResult<String> {
-        access_token_from_account_config(OAuthProvider::Outlook, &self.config_json).await
+        self.credentials.access_token(OAuthProvider::Outlook).await
     }
 
     /// Fetches a single message by its Graph id and maps it to an envelope,

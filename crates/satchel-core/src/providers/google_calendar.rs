@@ -97,6 +97,15 @@ pub async fn sync_account(pool: &SqlitePool, account_id: &str) -> Result<usize, 
     )
     .await
     .map_err(|err| err.encoded())?;
+    // The grant comes from the config the refresh returned: a reconnect after
+    // the caller listed this account may have added or withdrawn calendar access.
+    if crate::utils::oauth::google_scope_granted(
+        &config,
+        crate::utils::oauth::GOOGLE_CALENDAR_SCOPE,
+    ) == Some(false)
+    {
+        return Ok(0);
+    }
     let token = access_token_from_account_config(OAuthProvider::Gmail, &config)
         .await
         .map_err(|err| err.encoded())?;
@@ -385,6 +394,30 @@ async fn replace_google_mirror(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The command lists accounts before this call refreshes credentials. A
+    /// reconnect in between decides the grant, not the listing's snapshot.
+    #[tokio::test]
+    async fn the_calendar_grant_comes_from_the_refreshed_config() {
+        crate::utils::crypto::seed_master_key_for_tests();
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::init(&pool).await.unwrap();
+        let mail_only = serde_json::json!({"oauth": {
+            "provider": "gmail", "client_id": "fixture-client",
+            "access_token": "mail-access", "refresh_token": "mail-refresh",
+            "scope": crate::utils::oauth::GOOGLE_MAIL_SCOPE,
+            "expires_at": "2099-01-01T00:00:00Z"
+        }})
+        .to_string();
+        sqlx::query("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+            VALUES ('account', 'Fixture', 'fixture@example.test', 'gmail', ?, 'encrypted-in-config', '2026-01-01', '2026-01-01')")
+            .bind(crate::accounts::encrypt_account_config("account", &mail_only).unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        // Without the calendar grant no Calendar request is made at all.
+        assert_eq!(sync_account(&pool, "account").await, Ok(0));
+    }
 
     fn timed(date_time: &str) -> GoogleEventTime {
         GoogleEventTime {

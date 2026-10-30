@@ -12,7 +12,7 @@ use crate::{
             decode_bytes_with_declared_charset, decode_html_entities, decode_mime_encoded_words,
             extract_email_address, parse_address_list_tokens, AddressListDecodeStrategy,
         },
-        oauth::{access_token_from_account_config, OAuthProvider},
+        oauth::{OAuthCredentials, OAuthProvider},
     },
 };
 use base64::Engine;
@@ -541,7 +541,7 @@ where
 
 #[derive(Debug, Clone)]
 pub struct GmailProvider {
-    config_json: crate::accounts::AccountConfig,
+    credentials: OAuthCredentials,
 }
 
 #[derive(Debug, Deserialize)]
@@ -721,13 +721,15 @@ impl GmailProvider {
     const CURSOR_FORMAT_VERSION: u8 = 3;
 
     pub fn from_account_config(config_json: &crate::accounts::AccountConfig) -> Self {
-        Self {
-            config_json: config_json.clone(),
-        }
+        Self::from_credentials(OAuthCredentials::detached(config_json))
+    }
+
+    pub fn from_credentials(credentials: OAuthCredentials) -> Self {
+        Self { credentials }
     }
 
     async fn access_token(&self) -> crate::sync::errors::SyncResult<String> {
-        access_token_from_account_config(OAuthProvider::Gmail, &self.config_json).await
+        self.credentials.access_token(OAuthProvider::Gmail).await
     }
 
     /// Fetches a single message by its Gmail id and maps it to an envelope.

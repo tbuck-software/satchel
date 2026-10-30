@@ -462,7 +462,7 @@ async fn export_message_source(
         let attachments = export_attachments(pool, row).await?;
         return build_draft_message(row, attachments);
     }
-    match crate::commands::messages::fetch_remote_message_source(pool, &row.id).await {
+    match crate::commands::messages::fetch_remote_message_source(pool, pool, &row.id).await {
         Ok(Some(raw)) if valid_export_source(&raw) => Ok(raw),
         result => {
             if let Err(error) = result {

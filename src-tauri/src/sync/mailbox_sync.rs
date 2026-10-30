@@ -14,7 +14,7 @@ use crate::providers::{
     folder_mapping::provider_folder_type,
     imap::imap_checkpoint,
     pop3::POP3_FOLDER,
-    provider_for_account,
+    provider_for_stored_account,
     traits::{MessageEnvelope, MessageRef, RemoteFolder, SyncCheckpoint},
 };
 use crate::sync::folder_reconcile::{
@@ -519,8 +519,12 @@ pub(crate) async fn sync_mailboxes(
             replay_ingest_effects(pool, &account.id).await?;
             let config = crate::utils::oauth::refresh_account_config(pool, &account.id, &account.provider, &account.config).await.map_err(|err| err.encoded())?;
 
+            // Built once for a run of up to ten minutes; it renews an expiring
+            // token from the stored account.
             let provider =
-                provider_for_account(
+                provider_for_stored_account(
+                    pool,
+                    &account.id,
                     &account.provider,
                     &config,
                     &account.email,

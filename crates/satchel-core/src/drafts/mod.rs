@@ -20,7 +20,7 @@ pub mod send_queue;
 use crate::db::messages::SentMessageRepository;
 use crate::db::signatures::SignatureRepository;
 use crate::providers::{
-    provider_for_account,
+    provider_for_stored_account,
     traits::{OutgoingAttachment, OutgoingMessage},
 };
 use crate::sync::queue::{QueuedAction, SyncQueue, ACTION_SYNC_DRAFT};
@@ -908,7 +908,14 @@ async fn hydrate_imported_draft_attachments(
             )
             .await
             .map_err(|err| err.encoded())?;
-            let provider = provider_for_account(&row.provider, &config, &row.account_email, None)?;
+            let provider = provider_for_stored_account(
+                write,
+                &row.account_id,
+                &row.provider,
+                &config,
+                &row.account_email,
+                None,
+            )?;
             let fetched = tokio::time::timeout(
                 std::time::Duration::from_secs(60),
                 provider.fetch_attachment(
@@ -1103,7 +1110,8 @@ async fn push_draft_to_remote(
     .await
     .map_err(|err| err.encoded())?;
 
-    let provider = provider_for_account(&provider_kind, &config, &email, None)?;
+    let provider =
+        provider_for_stored_account(pool, &account_id, &provider_kind, &config, &email, None)?;
     let resolved_remote_draft_id = if remote_draft_id.is_none() {
         if let Some(message_remote_id) = remote_message_id {
             provider

@@ -7,7 +7,7 @@ use sqlx::{FromRow, QueryBuilder, Sqlite, SqlitePool, Transaction};
 use crate::{
     providers::{
         folder_mapping::default_remote_folder,
-        provider_for_account,
+        provider_for_stored_account,
         traits::{FlagUpdate, MessageRef},
     },
     sync::queue::{QueuedAction, SyncQueue},
@@ -616,7 +616,8 @@ pub async fn execute_remote_mutation(
         crate::utils::oauth::refresh_account_config(pool, &account.0, &account.1, &account.3)
             .await?;
 
-    let provider = provider_for_account(&account.1, &config, &account.2, None)?;
+    let provider =
+        provider_for_stored_account(pool, &account.0, &account.1, &config, &account.2, None)?;
     let mutation: RemoteMutationPayload =
         serde_json::from_value(payload).map_err(|err| format!("decode remote mutation: {err}"))?;
     match mutation {

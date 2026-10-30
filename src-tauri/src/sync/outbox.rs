@@ -23,7 +23,7 @@ use crate::{
         pgp, smime,
     },
     email::build::{build_rfc822, with_bcc_delivery_header},
-    providers::{provider_for_account, traits::OutgoingMessage},
+    providers::{provider_for_stored_account, traits::OutgoingMessage},
     sync::queue::QueuedAction,
     AppState,
 };
@@ -118,7 +118,14 @@ pub async fn execute_send_action(
     )
     .await?;
 
-    let provider = provider_for_account(&account.provider, &config, &account.email, None)?;
+    let provider = provider_for_stored_account(
+        pool,
+        &account.id,
+        &account.provider,
+        &config,
+        &account.email,
+        None,
+    )?;
 
     let mut outgoing = build_outgoing_message(
         pool,

@@ -1,15 +1,33 @@
 //! Owns refresh persistence. No database transaction spans a provider request.
-//! After HTTP, a short write transaction reloads the current row. Settings-only
-//! changes merge with a successful rotation; changed authorizations win instead.
-//! Successful rotations merge once, regardless of intervening settings writes.
+//! A fresh token or a temporary failure stores nothing, so a plain read checks
+//! that it still applies. A rotation or a rejection reloads the row in a short
+//! write transaction after HTTP: settings-only changes merge with a successful
+//! rotation, changed authorizations win instead. Successful rotations merge
+//! once, regardless of intervening settings writes.
 
 use std::future::Future;
 
 use sqlx::SqlitePool;
 
-use super::{ensure_fresh_account_config, OAuthProvider};
+use super::{ensure_fresh_account_config, OAuthProvider, OAUTH_RELOAD_REQUIRED};
 use crate::accounts::{decrypt_account_config, encrypt_account_config, AccountConfig};
 use crate::sync::errors::{SyncError, SyncResult};
+
+/// A re-authorization failure that one refresh newly stored for its account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedOAuthError {
+    pub error: String,
+    pub at: String,
+}
+
+/// Credentials after a refresh, plus the rejection it stored when that changed
+/// what the account shows. Announcing only those keeps a repeated failure from
+/// raising the reconnect prompt again on every attempt.
+#[derive(Debug)]
+pub struct RefreshOutcome {
+    pub config: SyncResult<AccountConfig>,
+    pub recorded_error: Option<RecordedOAuthError>,
+}
 
 /// Load and persist current credentials before returning them for provider use.
 pub async fn fresh_account_config(
@@ -36,9 +54,7 @@ pub async fn fresh_account_config_for_provider(
             .fetch_optional(pool)
             .await
             .map_err(|err| SyncError::Transient(err.to_string()))?;
-    let snapshot = snapshot.ok_or_else(|| {
-        SyncError::Transient("account provider changed or account was removed".into())
-    })?;
+    let snapshot = snapshot.ok_or_else(reload_required)?;
     refresh_account_config(pool, account_id, provider.as_str(), &snapshot).await
 }
 
@@ -49,7 +65,19 @@ pub async fn refresh_account_config(
     provider: &str,
     snapshot: &str,
 ) -> SyncResult<AccountConfig> {
-    fresh_account_config_with(
+    refresh_account_config_reporting(pool, account_id, provider, snapshot)
+        .await
+        .config
+}
+
+/// [`refresh_account_config`] for callers that announce a newly stored rejection.
+pub async fn refresh_account_config_reporting(
+    pool: &SqlitePool,
+    account_id: &str,
+    provider: &str,
+    snapshot: &str,
+) -> RefreshOutcome {
+    refresh_with(
         pool,
         account_id,
         Some((provider.to_owned(), snapshot.to_owned())),
@@ -61,8 +89,43 @@ pub async fn refresh_account_config(
 async fn fresh_account_config_with<F, Fut>(
     pool: &SqlitePool,
     account_id: &str,
+    initial: Option<(String, String)>,
+    refresh: F,
+) -> SyncResult<AccountConfig>
+where
+    F: FnMut(OAuthProvider, AccountConfig) -> Fut,
+    Fut: Future<Output = SyncResult<Option<String>>>,
+{
+    refresh_with(pool, account_id, initial, refresh)
+        .await
+        .config
+}
+
+async fn refresh_with<F, Fut>(
+    pool: &SqlitePool,
+    account_id: &str,
+    initial: Option<(String, String)>,
+    refresh: F,
+) -> RefreshOutcome
+where
+    F: FnMut(OAuthProvider, AccountConfig) -> Fut,
+    Fut: Future<Output = SyncResult<Option<String>>>,
+{
+    let mut recorded_error = None;
+    let config =
+        refresh_until_current(pool, account_id, initial, refresh, &mut recorded_error).await;
+    RefreshOutcome {
+        config,
+        recorded_error,
+    }
+}
+
+async fn refresh_until_current<F, Fut>(
+    pool: &SqlitePool,
+    account_id: &str,
     mut initial: Option<(String, String)>,
     mut refresh: F,
+    recorded_error: &mut Option<RecordedOAuthError>,
 ) -> SyncResult<AccountConfig>
 where
     F: FnMut(OAuthProvider, AccountConfig) -> Fut,
@@ -70,22 +133,15 @@ where
 {
     let mut original_provider = None;
     for _ in 0..4 {
-        let (provider, snapshot): (String, String) = match initial.take() {
+        let (provider, snapshot) = match initial.take() {
             Some(snapshot) => snapshot,
-            None => sqlx::query_as("SELECT provider, config FROM accounts WHERE id = ?")
-                .bind(account_id)
-                .fetch_optional(pool)
-                .await
-                .map_err(|err| SyncError::Transient(err.to_string()))?
-                .ok_or_else(|| SyncError::Permanent("account was not found".into()))?,
+            None => current_row(pool, account_id).await?,
         };
         if original_provider
             .as_ref()
             .is_some_and(|original| original != &provider)
         {
-            return Err(SyncError::Transient(
-                "account provider changed during oauth refresh".into(),
-            ));
+            return Err(reload_required());
         }
         original_provider.get_or_insert_with(|| provider.clone());
         let config = decrypt_account_config(account_id, &snapshot).map_err(SyncError::Permanent)?;
@@ -94,35 +150,48 @@ where
         };
         let result = refresh(oauth_provider, config.clone()).await;
 
+        // A fresh token or a temporary failure stores nothing, so it must not
+        // queue for the writer behind an ingest. A plain read still tells
+        // whether a reconnect landed while the request was out.
+        let persists = match &result {
+            Ok(updated) => updated.is_some(),
+            Err(err) => matches!(err, SyncError::Permanent(_)),
+        };
+        if !persists {
+            let (current_provider, current_snapshot) = current_row(pool, account_id).await?;
+            if current_provider != provider {
+                return Err(reload_required());
+            }
+            let current = decrypt_account_config(account_id, &current_snapshot)
+                .map_err(SyncError::Permanent)?;
+            // Reading a fresh token is not a successful refresh. In particular,
+            // reloading after a reconnect must not clear that authorization's
+            // newer error state just because our old HTTP response was discarded.
+            if oauth_block(&config) == oauth_block(&current) {
+                return result.map(|_| current);
+            }
+            initial = Some((current_provider, current_snapshot));
+            continue;
+        }
+
         // Acquire the writer reservation only AFTER the request. Ordinary
         // settings writers cannot slip between this reload and the merge.
         let mut tx = pool
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(|err| SyncError::Transient(err.to_string()))?;
-        let (current_provider, current_snapshot): (String, String) =
-            sqlx::query_as("SELECT provider, config FROM accounts WHERE id = ?")
+        let (current_provider, current_snapshot, stored_error): (String, String, Option<String>) =
+            sqlx::query_as("SELECT provider, config, last_oauth_error FROM accounts WHERE id = ?")
                 .bind(account_id)
                 .fetch_optional(&mut *tx)
                 .await
                 .map_err(|err| SyncError::Transient(err.to_string()))?
-                .ok_or_else(|| SyncError::Permanent("account was not found".into()))?;
+                .ok_or_else(account_not_found)?;
         if current_provider != provider {
-            return Err(SyncError::Transient(
-                "account provider changed during oauth refresh".into(),
-            ));
+            return Err(reload_required());
         }
         let current =
             decrypt_account_config(account_id, &current_snapshot).map_err(SyncError::Permanent)?;
-        // Reading a fresh token is not a successful refresh. In particular,
-        // reloading after a reconnect must not clear that authorization's newer
-        // error state just because our old HTTP response was discarded.
-        if matches!(result, Ok(None)) && oauth_block(&config) == oauth_block(&current) {
-            tx.commit()
-                .await
-                .map_err(|err| SyncError::Transient(err.to_string()))?;
-            return Ok(current);
-        }
         let updated = match &result {
             Ok(Some(updated))
                 if oauth_block(&config).is_some()
@@ -146,6 +215,7 @@ where
             }
         };
         let now = chrono::Utc::now().to_rfc3339();
+        let mut recorded = None;
         match &result {
             Ok(_) => {
                 let stored = match &updated {
@@ -163,35 +233,58 @@ where
                 .bind(account_id)
                 .execute(&mut *tx)
                 .await
+                .map_err(|err| SyncError::Transient(err.to_string()))?;
             }
-            Err(err) => {
+            // A rejection already on record keeps its first occurrence and is
+            // not announced again.
+            Err(err) if stored_error.as_deref() != Some(err.to_string().as_str()) => {
                 let diagnostic = err.to_string();
                 sqlx::query(
-                    "UPDATE accounts SET last_oauth_error_at = CASE
-                    WHEN last_oauth_error = ? THEN last_oauth_error_at ELSE ? END,
-                    last_oauth_error = ? WHERE id = ?",
+                    "UPDATE accounts SET last_oauth_error = ?, last_oauth_error_at = ?
+                    WHERE id = ?",
                 )
                 .bind(&diagnostic)
                 .bind(&now)
-                .bind(&diagnostic)
                 .bind(account_id)
                 .execute(&mut *tx)
                 .await
+                .map_err(|err| SyncError::Transient(err.to_string()))?;
+                recorded = Some(RecordedOAuthError {
+                    error: diagnostic,
+                    at: now,
+                });
             }
+            Err(_) => {}
         }
-        .map_err(|err| SyncError::Transient(err.to_string()))?;
         tx.commit()
             .await
             .map_err(|err| SyncError::Transient(err.to_string()))?;
+        *recorded_error = recorded;
         return result.map(|_| {
             updated
                 .map(AccountConfig::from_plaintext)
                 .unwrap_or(current)
         });
     }
-    Err(SyncError::Transient(
-        "account configuration changed during oauth refresh".into(),
-    ))
+    Err(reload_required())
+}
+
+async fn current_row(pool: &SqlitePool, account_id: &str) -> SyncResult<(String, String)> {
+    sqlx::query_as("SELECT provider, config FROM accounts WHERE id = ?")
+        .bind(account_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|err| SyncError::Transient(err.to_string()))?
+        .ok_or_else(account_not_found)
+}
+
+/// The credentials changed under this refresh; reloading the account resolves it.
+fn reload_required() -> SyncError {
+    SyncError::Transient(OAUTH_RELOAD_REQUIRED.into())
+}
+
+fn account_not_found() -> SyncError {
+    SyncError::Permanent("backend.errors.accountNotFound".into())
 }
 
 fn oauth_block(config: &str) -> Option<serde_json::Value> {
@@ -206,6 +299,7 @@ mod tests {
     use super::*;
     use crate::utils::oauth::{
         load_stored_oauth, merge_authorized_token_into_config, OAuthTokenPayload,
+        OAUTH_RELOAD_REQUIRED,
     };
 
     async fn fixture() -> SqlitePool {
@@ -439,7 +533,7 @@ mod tests {
             .await;
             assert_eq!(
                 result.unwrap_err(),
-                SyncError::Permanent("account was not found".into())
+                SyncError::Permanent("backend.errors.accountNotFound".into())
             );
             assert_eq!(
                 sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM accounts")
@@ -556,10 +650,7 @@ mod tests {
         })
         .await
         .unwrap_err();
-        assert_eq!(
-            result,
-            SyncError::Transient("account configuration changed during oauth refresh".into())
-        );
+        assert_eq!(result, SyncError::Transient(OAUTH_RELOAD_REQUIRED.into()));
         assert!(!result.is_permanent());
         let error: Option<String> = sqlx::query_scalar("SELECT last_oauth_error FROM accounts")
             .fetch_one(&pool)
@@ -587,10 +678,7 @@ mod tests {
         })
         .await
         .unwrap_err();
-        assert_eq!(
-            result,
-            SyncError::Transient("account provider changed during oauth refresh".into())
-        );
+        assert_eq!(result, SyncError::Transient(OAUTH_RELOAD_REQUIRED.into()));
         assert_eq!(stored(&pool).await, new_expired_config());
     }
 
@@ -810,5 +898,129 @@ mod tests {
         assert_eq!(persisted["oauth"]["refresh_token"], "rotated-refresh");
         assert_eq!(persisted["setting"], 7);
         assert_eq!(persisted["caldav"]["server"], "https://cal.example.test/31");
+    }
+
+    async fn wal_fixture(dir: &std::path::Path, config: &str) -> SqlitePool {
+        crate::utils::crypto::seed_master_key_for_tests();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(4)
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(dir.join("reader.db"))
+                    .create_if_missing(true)
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+            )
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::query("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+            VALUES ('account', 'Fixture', 'fixture@example.test', 'gmail', ?, 'encrypted-in-config', '2026-01-01', '2026-01-01')")
+            .bind(encrypt_account_config("account", config).unwrap()).execute(&pool).await.unwrap();
+        pool
+    }
+
+    async fn stored_error(pool: &SqlitePool) -> (Option<String>, Option<String>) {
+        sqlx::query_as("SELECT last_oauth_error, last_oauth_error_at FROM accounts")
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn fresh_tokens_and_temporary_failures_do_not_wait_for_the_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = wal_fixture(dir.path(), &config("old", true)).await;
+        // An ingest transaction holds the writer reservation. Opening a message
+        // only reads credentials and must not queue behind it.
+        let mut ingest = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        sqlx::query("UPDATE accounts SET updated_at = 'ingest' WHERE id = 'account'")
+            .execute(&mut *ingest)
+            .await
+            .unwrap();
+        let wait = std::time::Duration::from_secs(2);
+        let fresh = tokio::time::timeout(wait, fresh_account_config(&pool, "account"))
+            .await
+            .expect("a fresh token must not wait for the writer")
+            .unwrap();
+        assert_eq!(fresh.as_str(), config("old", true));
+        let offline = tokio::time::timeout(
+            wait,
+            fresh_account_config_with(&pool, "account", None, |_, _| async {
+                Err(SyncError::Transient("offline".into()))
+            }),
+        )
+        .await
+        .expect("a temporary failure must not wait for the writer")
+        .unwrap_err();
+        assert_eq!(offline, SyncError::Transient("offline".into()));
+        ingest.commit().await.unwrap();
+        assert_eq!(stored_error(&pool).await, (None, None));
+    }
+
+    #[tokio::test]
+    async fn only_reauthorization_failures_are_stored_and_reported_once() {
+        let pool = fixture().await;
+        let attempt = |error: SyncError| {
+            let pool = pool.clone();
+            async move {
+                refresh_with(&pool, "account", None, move |_, _| {
+                    let error = error.clone();
+                    async move { Err(error) }
+                })
+                .await
+            }
+        };
+        // A network flap after resume is not a reason to ask for a reconnect.
+        for error in [
+            SyncError::Transient("oauth refresh request failed: offline".into()),
+            SyncError::rate_limited("oauth refresh failed with status 429", None),
+        ] {
+            let outcome = attempt(error.clone()).await;
+            assert_eq!(outcome.config.unwrap_err(), error);
+            assert_eq!(outcome.recorded_error, None);
+            assert_eq!(stored_error(&pool).await, (None, None));
+        }
+        let first = attempt(SyncError::Permanent("invalid_grant".into())).await;
+        let recorded = first.recorded_error.expect("first rejection is reported");
+        assert_eq!(recorded.error, "invalid_grant");
+        assert_eq!(
+            stored_error(&pool).await,
+            (Some("invalid_grant".into()), Some(recorded.at.clone()))
+        );
+        // The same rejection again changes nothing, so nothing is announced.
+        let repeated = attempt(SyncError::Permanent("invalid_grant".into())).await;
+        assert_eq!(repeated.recorded_error, None);
+        // A temporary failure keeps the stored rejection as it is.
+        let flap = attempt(SyncError::Transient("offline".into())).await;
+        assert_eq!(flap.recorded_error, None);
+        assert_eq!(
+            stored_error(&pool).await,
+            (Some("invalid_grant".into()), Some(recorded.at))
+        );
+        let changed = attempt(SyncError::Permanent("missing oauth refresh token".into())).await;
+        assert_eq!(
+            changed.recorded_error.map(|recorded| recorded.error),
+            Some("missing oauth refresh token".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn local_races_ask_for_a_reload_by_message_key() {
+        let pool = fixture().await;
+        sqlx::query("UPDATE accounts SET provider = 'outlook'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let error = fresh_account_config_for_provider(&pool, "account", OAuthProvider::Gmail)
+            .await
+            .unwrap_err();
+        assert_eq!(error, SyncError::Transient(OAUTH_RELOAD_REQUIRED.into()));
+        // Queue and command seams keep the key instead of a generic reason.
+        assert_eq!(error.encoded(), OAUTH_RELOAD_REQUIRED);
+        let missing = fresh_account_config(&pool, "missing").await.unwrap_err();
+        assert_eq!(
+            missing,
+            SyncError::Permanent("backend.errors.accountNotFound".into())
+        );
     }
 }

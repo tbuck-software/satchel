@@ -353,25 +353,17 @@ async fn run_account_loop(
     events: &Arc<EventBus>,
     account: &AccountRow,
 ) -> Result<(), String> {
-    let config = match crate::utils::oauth::refresh_account_config(
+    let outcome = crate::utils::oauth::refresh_account_config_reporting(
         pool,
         &account.id,
         &account.provider,
         &account.config,
     )
-    .await
-    {
-        Ok(config) => config,
-        Err(err) => {
-            // Refresh errors are persisted conditionally in Core. The event only
-            // asks the frontend to reload that durable state.
-            let _ = app.emit(
-                "account:auth-required",
-                serde_json::json!({"account_id": account.id}),
-            );
-            return Err(err.encoded());
-        }
-    };
+    .await;
+    if let Some(payload) = auth_required_event(&account.id, &outcome) {
+        let _ = app.emit("account:auth-required", payload);
+    }
+    let config = outcome.config.map_err(|err| err.encoded())?;
 
     match account.provider.as_str() {
         "imap" => {
@@ -489,10 +481,59 @@ async fn sync_polled_inbox(
     }
 }
 
+/// The frontend reloads the account banner on this event. It fires only when
+/// the refresh stored a new rejection, never for a network flap or a repeat.
+fn auth_required_event(
+    account_id: &str,
+    outcome: &crate::utils::oauth::RefreshOutcome,
+) -> Option<serde_json::Value> {
+    let recorded = outcome.recorded_error.as_ref()?;
+    Some(serde_json::json!({
+        "account_id": account_id,
+        "error": recorded.error,
+        "at": recorded.at,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn auth_required_fires_once_per_stored_rejection_with_its_details() {
+        use crate::sync::errors::SyncError;
+        use crate::utils::oauth::{RecordedOAuthError, RefreshOutcome};
+        // A network flap after resume, and a rejection already on record,
+        // change nothing the banner shows.
+        for config in [
+            Err(SyncError::Transient(
+                "oauth refresh request failed: offline".into(),
+            )),
+            Err(SyncError::Permanent("invalid_grant".into())),
+        ] {
+            let outcome = RefreshOutcome {
+                config,
+                recorded_error: None,
+            };
+            assert_eq!(auth_required_event("account", &outcome), None);
+        }
+        let recorded = RefreshOutcome {
+            config: Err(SyncError::Permanent("invalid_grant".into())),
+            recorded_error: Some(RecordedOAuthError {
+                error: "invalid_grant".into(),
+                at: "2026-10-30T12:00:00+00:00".into(),
+            }),
+        };
+        assert_eq!(
+            auth_required_event("account", &recorded),
+            Some(serde_json::json!({
+                "account_id": "account",
+                "error": "invalid_grant",
+                "at": "2026-10-30T12:00:00+00:00",
+            }))
+        );
+    }
 
     /// Drives the coalescer with an injected run, and reports how often it ran.
     struct Coalescer {

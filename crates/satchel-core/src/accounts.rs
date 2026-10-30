@@ -224,14 +224,14 @@ mod credential_tests {
         )
         .await
         .unwrap_err();
+        let reload = crate::utils::oauth::OAUTH_RELOAD_REQUIRED;
         assert_eq!(
             error,
-            crate::sync::errors::SyncError::Transient(
-                "oauth access token expired; reload account configuration".into()
-            )
+            crate::sync::errors::SyncError::Transient(reload.into())
         );
         assert!(!error.is_permanent());
-        assert!(error.encoded().contains("backend.errors.queueTemporary"));
+        // Not "server temporarily unavailable": the server was never asked.
+        assert_eq!(error.encoded(), reload);
         // Providers expose the same typed variant to queue workers, rather
         // than reconstructing it from a diagnostic string.
         for kind in ["gmail", "outlook"] {
@@ -247,7 +247,7 @@ mod credential_tests {
                 failure,
                 crate::sync::errors::SyncError::Transient(_)
             ));
-            assert!(failure.encoded().contains("backend.errors.queueTemporary"));
+            assert_eq!(failure.encoded(), reload);
         }
     }
 

@@ -1,6 +1,9 @@
+mod credentials;
 mod refresh;
+pub use credentials::OAuthCredentials;
 pub use refresh::{
     fresh_account_config, fresh_account_config_for_provider, refresh_account_config,
+    refresh_account_config_reporting, RecordedOAuthError, RefreshOutcome,
 };
 
 use base64::Engine;
@@ -14,6 +17,10 @@ pub const GOOGLE_CONTACTS_SCOPE: &str = "https://www.googleapis.com/auth/contact
 pub const GOOGLE_OTHER_CONTACTS_SCOPE: &str =
     "https://www.googleapis.com/auth/contacts.other.readonly";
 pub const GOOGLE_CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar.readonly";
+
+/// Message key for credentials that changed under the caller. Reloading the
+/// account resolves it; nothing about the server or the sign-in is wrong.
+pub const OAUTH_RELOAD_REQUIRED: &str = "backend.errors.oauthReloadRequired";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -289,7 +296,7 @@ impl OAuthProvider {
                 client_secret,
                 redirect_uri,
                 auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
-                token_url: "https://oauth2.googleapis.com/token".into(),
+                token_url: token_endpoint(self, "https://oauth2.googleapis.com/token"),
                 scopes: vec![GOOGLE_MAIL_SCOPE],
             },
             Self::Outlook => OAuthClientConfig {
@@ -298,7 +305,10 @@ impl OAuthProvider {
                 client_secret,
                 redirect_uri,
                 auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".into(),
-                token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token".into(),
+                token_url: token_endpoint(
+                    self,
+                    "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+                ),
                 scopes: vec![
                     "openid",
                     "email",
@@ -311,6 +321,19 @@ impl OAuthProvider {
             },
         }
     }
+}
+
+/// Token endpoint of `provider`. Debug builds read an override for local
+/// provider fixtures; release builds always use the provider's own endpoint.
+fn token_endpoint(provider: OAuthProvider, default: &str) -> String {
+    let key = match provider {
+        OAuthProvider::Gmail => "SATCHEL_GMAIL_TOKEN_URL",
+        OAuthProvider::Outlook => "SATCHEL_OUTLOOK_TOKEN_URL",
+    };
+    crate::utils::environment::debug_env(key)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| default.to_string())
 }
 
 fn required_env(key: &str) -> Result<String, String> {
@@ -600,7 +623,7 @@ pub async fn access_token_from_account_config(
         .is_some_and(|stored| !stored.eq_ignore_ascii_case(provider.as_str()))
     {
         return Err(crate::sync::errors::SyncError::Transient(
-            "oauth provider changed; reload account configuration".into(),
+            OAUTH_RELOAD_REQUIRED.into(),
         ));
     }
     let access_token = stored
@@ -619,9 +642,9 @@ pub async fn access_token_from_account_config(
     }
 
     // A detached snapshot cannot save a rotated refresh token or detect a
-    // reconnect. Persistent consumers must load through fresh_account_config.
+    // reconnect. Work that outlives its token holds `OAuthCredentials::stored`.
     Err(crate::sync::errors::SyncError::Transient(
-        "oauth access token expired; reload account configuration".into(),
+        OAUTH_RELOAD_REQUIRED.into(),
     ))
 }
 
@@ -636,9 +659,7 @@ async fn ensure_fresh_account_config(
         .as_deref()
         .is_some_and(|stored| !stored.eq_ignore_ascii_case(provider.as_str()))
     {
-        return Err(SyncError::Transient(
-            "oauth provider changed; reload account configuration".into(),
-        ));
+        return Err(SyncError::Transient(OAUTH_RELOAD_REQUIRED.into()));
     }
     if oauth_token_is_fresh(&stored) {
         return Ok(None);

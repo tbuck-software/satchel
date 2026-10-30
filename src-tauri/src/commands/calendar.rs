@@ -428,33 +428,8 @@ where
     let mut summary = GoogleCalendarSyncSummary::default();
     for account in accounts {
         summary.accounts_checked += 1;
-        let config = match AccountRepository::new(pool)
-            .load_provider_config(&account.id)
-            .await
-        {
-            Ok(Some(config)) => config.config,
-            Ok(None) => {
-                tracing::warn!(account_id = %account.id, "google calendar account disappeared before sync");
-                summary
-                    .errors
-                    .push(google_calendar_sync_error(&account.email));
-                continue;
-            }
-            Err(error) => {
-                tracing::warn!(account_id = %account.id, %error, "google calendar credentials could not be loaded");
-                summary
-                    .errors
-                    .push(google_calendar_sync_error(&account.email));
-                continue;
-            }
-        };
-        if crate::utils::oauth::google_scope_granted(
-            &config,
-            crate::utils::oauth::GOOGLE_CALENDAR_SCOPE,
-        ) == Some(false)
-        {
-            continue;
-        }
+        // `sync_account` refreshes the credentials and decides the calendar
+        // grant from them. A snapshot read here would be stale by then.
         match sync_account(pool, &account.id).await {
             Ok(count) => summary.events_synced += count,
             Err(error) => {
@@ -658,24 +633,21 @@ mod tests {
         let attempts_for_sync = Arc::clone(&attempts);
         let summary = sync_google_calendar_with(&pool, None, move |pool, account_id| {
             let attempts = Arc::clone(&attempts_for_sync);
-            let account_id = account_id.to_string();
             Box::pin(async move {
                 attempts.fetch_add(1, Ordering::SeqCst);
-                assert_eq!(account_id, "working");
-                let config = AccountRepository::new(pool)
-                    .load_provider_config(&account_id)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .config;
-                assert!(config.contains("access_token"));
-                Ok(7)
+                if account_id == "working" {
+                    return Ok(7);
+                }
+                // The grant and the credentials are judged only after the
+                // refresh inside the per-account sync, never from a snapshot
+                // the command read before it.
+                satchel_core::providers::google_calendar::sync_account(pool, account_id).await
             })
         })
         .await
         .unwrap();
 
-        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
         assert_eq!(summary.accounts_checked, 3);
         assert_eq!(summary.events_synced, 7);
         assert_eq!(summary.errors.len(), 1);

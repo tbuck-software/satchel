@@ -38,7 +38,7 @@ pub async fn thread_eml_attachments(
         else {
             continue;
         };
-        match super::fetch_remote_message_source(write_pool.inner(), &message_id).await {
+        match super::fetch_remote_message_source(pool, write_pool.inner(), &message_id).await {
             Ok(Some(raw)) => attachments.push(eml_attachment(subject.as_deref(), &raw)),
             Ok(None) => {}
             Err(error) => {
