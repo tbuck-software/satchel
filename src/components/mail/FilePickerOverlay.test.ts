@@ -24,7 +24,7 @@ vi.mock('@/stores/topics', () => ({
     byId: () => undefined,
     closePicker: harness.closePicker,
     create: harness.create,
-    membershipsKnownFor: () => true, membershipsFailedFor: () => false, topicIdsFor: () => [],
+    hasMembershipsFor: () => true, membershipsKnownFor: () => true, membershipsFailedFor: () => false, membershipsLoadingFor: () => false, topicIdsFor: () => [],
   }),
 }));
 

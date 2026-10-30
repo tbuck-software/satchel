@@ -440,17 +440,22 @@ export function useThreadActions() {
     threadIds = Array.from(new Set(threadIds));
     if (threadIds.length === 0) return;
     const topicName = topics.byId(topicId)?.name ?? '';
-    let removed: NonNullable<Awaited<ReturnType<typeof topics.removeItemFromTopic>>>[];
-    try {
-      const wasMember = await Promise.all(
-        threadIds.map((threadId) => topics.removeItemFromTopic(topicId, 'thread', threadId)),
-      );
-      removed = wasMember.filter((receipt) => receipt !== null);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('thread.result.removeFromTopicFailed'));
+    const results = await Promise.allSettled(
+      threadIds.map((threadId) => topics.removeItemFromTopic(topicId, 'thread', threadId)),
+    );
+    const removed = results.flatMap((result) =>
+      result.status === 'fulfilled' && result.value !== null ? [result.value] : []);
+    const failures = results.filter((result) => result.status === 'rejected');
+    if (failures.length > 0 && removed.length === 0) {
+      const error = failures[0]!.reason;
+      toast.error(error instanceof Error ? error.message : t('thread.result.removeFromTopicFailed'));
       return;
     }
-    toast.success(t('thread.result.removedFromTopic', { topic: topicName }), {
+    const notify = failures.length > 0 ? toast.warning : toast.success;
+    const message = failures.length > 0
+      ? t('thread.result.removedFromTopicPartially', { topic: topicName, count: removed.length, failed: failures.length })
+      : t('thread.result.removedFromTopic', { topic: topicName });
+    notify(message, {
       timeout: UNDO_TIMEOUT_MS,
       ...(removed.length > 0 ? {
         action: {

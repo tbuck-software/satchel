@@ -3315,6 +3315,7 @@
       "readChanged": "Lesestatus geändert",
       "removeFromTopicFailed": "Entfernen fehlgeschlagen.",
       "removedFromTopic": "Aus Thema „{topic}“ entfernt",
+      "removedFromTopicPartially": "{count} aus Thema „{topic}“ entfernt; {failed} konnten nicht entfernt werden.",
       "restoreEmpty": "Keine Konversation konnte wiederhergestellt werden.",
       "restoreFailed": "Wiederherstellen fehlgeschlagen.",
       "snoozed": "E-Mail auf Wiedervorlage | {count} E-Mails auf Wiedervorlage",

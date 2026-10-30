@@ -494,3 +494,46 @@ it('reports membership failure, keeps it unknown, and clears only the owned erro
   expect(connection.backendErrorFor('topicMemberships')).toBeNull();
   expect(connection.backendErrorFor('templates')).toBeTruthy();
 });
+
+
+it('retains Undo receipts from every successful removal in a partial batch', async () => {
+  const store = useTopicsStore();
+  const toast = useToast();
+  toast.clear();
+  const last = deferred<{ item_id: string; revision: string }>();
+  backend.backendRemoveTopicItem!.mockImplementation(async ({ itemId }: { itemId: string }) => {
+    if (itemId === 'b') throw new Error('remove refused');
+    if (itemId === 'c') return last.promise;
+    return { item_id: itemId, revision: 'revision-a' };
+  });
+  store.memberships = { 'thread:a': ['topic'], 'thread:b': ['topic'], 'thread:c': ['topic'] };
+  const pending = useThreadActions().removeFromTopic(['a', 'b', 'c', 'a'], 'topic');
+  await vi.waitFor(() => expect(backend.backendRemoveTopicItem).toHaveBeenCalledTimes(3));
+  expect(toast.state.toasts).toHaveLength(0);
+  last.resolve({ item_id: 'c', revision: 'revision-c' });
+  await pending;
+  expect(store.topicIdsFor('thread', 'a')).toEqual([]);
+  expect(store.topicIdsFor('thread', 'b')).toEqual(['topic']);
+  expect(store.topicIdsFor('thread', 'c')).toEqual([]);
+  expect(toast.state.toasts).toHaveLength(1);
+  expect(toast.state.toasts[0]?.tone).toBe('warning');
+  expect(toast.state.toasts[0]?.message).toContain('2');
+  expect(toast.state.toasts[0]?.message).toContain('1');
+  backend.backendUndoTopicMemberships!.mockResolvedValueOnce(['a', 'c']);
+  await toast.state.toasts[0]?.action?.handler();
+  expect(backend.backendUndoTopicMemberships).toHaveBeenCalledExactlyOnceWith(
+    'topic', 'thread', [{ item_id: 'a', revision: 'revision-a' }, { item_id: 'c', revision: 'revision-c' }], true,
+  );
+  toast.clear();
+});
+
+it('offers no Undo when a failed removal batch did not change any memberships', async () => {
+  const toast = useToast();
+  toast.clear();
+  backend.backendRemoveTopicItem!.mockRejectedValue(new Error('remove refused'));
+  await useThreadActions().removeFromTopic(['a', 'b'], 'topic');
+  expect(toast.state.toasts).toHaveLength(1);
+  expect(toast.state.toasts[0]?.tone).toBe('error');
+  expect(toast.state.toasts[0]?.action).toBeUndefined();
+  toast.clear();
+});

@@ -2,7 +2,7 @@ import { orderedLoad } from './internal/orderedLoad';
 import { useConnectionStore } from '@/stores/connection';
 import { useAccountsStore } from '@/stores/accounts';
 import { defineStore } from 'pinia';
-import { computed, ref, watch } from 'vue';
+import { computed, ref, shallowReactive, watch } from 'vue';
 import {
   backendAddTopicFile,
   backendAddTopicItems,
@@ -196,7 +196,7 @@ export const useTopicsStore = defineStore('topics', () => {
 
   let membershipRevision = 0;
   // Per item guards allow disjoint chip/picker reads to finish independently.
-  const membershipLoads = new Map<string, ReturnType<typeof orderedLoad>>();
+  const membershipLoads = shallowReactive(new Map<string, ReturnType<typeof orderedLoad>>());
   function membershipLoader(itemType: TopicItemType, itemId: string) {
     const key = membershipKey(itemType, itemId);
     if (!membershipLoads.has(key)) {
@@ -238,6 +238,10 @@ export const useTopicsStore = defineStore('topics', () => {
         if (Object.keys(membershipFailures.value).length === 0) connection.clearBackendError('topicMemberships');
       },
     )));
+  }
+
+  function membershipsLoadingFor(itemType: TopicItemType, itemIds: string[]): boolean {
+    return itemIds.some((id) => membershipLoads.get(membershipKey(itemType, id))?.loading.value === true);
   }
 
   function membershipsFailedFor(itemType: TopicItemType, itemIds: string[]): boolean {
@@ -438,6 +442,7 @@ export const useTopicsStore = defineStore('topics', () => {
     hasMembershipsFor,
     membershipsKnownFor,
     membershipsFailedFor,
+    membershipsLoadingFor,
     undoMemberships,
     addItemsToTopic,
     removeItemFromTopic,
