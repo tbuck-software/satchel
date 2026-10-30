@@ -83,6 +83,8 @@
       "undoWindow": "Sende in {seconds}s — Rückgängig möglich"
     },
     "notifications": {
+      "actionFailed": "Die Aktion aus der Benachrichtigung ließ sich nicht abschließen. Versuche es in Satchel noch einmal.",
+      "mailGone": "Die E-Mail aus dieser Benachrichtigung liegt nicht mehr in Satchel.",
       "read": "Gelesen",
       "replyPlaceholder": "Antwort schreiben …"
     },

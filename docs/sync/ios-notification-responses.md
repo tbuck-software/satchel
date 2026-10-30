@@ -40,8 +40,18 @@ lease numbers only increase; delayed readiness or disposal from an older
 bootstrap cannot revive it or stop a newer listener. Lease IPC is serialized
 within the frontend realm, including reservations that resolve after disposal.
 Android and desktop return no lease and keep their existing notification paths.
+A failed reservation, activation or retirement reports through the connection
+`notifications` error source. The banner's Retry retires the current lease and
+connects a new one, registering the route callback only if it is still missing;
+a successful activation clears the error. Resume, Android navigation and the
+focus/visibility handlers are registered separately and survive a lease failure.
 
-The gate retains response payloads and OS completion closures until ACK.
+The gate retains response payloads and OS completion closures until ACK. The
+frontend ACKs through the `mobile_notification_response_handled` command
+(`backendMobileNotificationResponseHandled`), which reaches native through the
+same `dlsym` path. A failed ACK rejects in the frontend and reports through the
+`notifications` source; completed work stays deduplicated, so the next delivery,
+for example on the lease Retry connects, ACKs it again.
 It emits unacknowledged responses in native arrival order once per active lease.
 A new active lease replays even responses already emitted to an old listener.
 An emission racing disposal may reach no callback; it remains recoverable.
@@ -53,19 +63,36 @@ A failed action is forgotten instead, so the next delivery runs it again.
 ACKs are response-scoped, so an old handler can finish after takeover. Native
 completion runs outside the lock and only once, including repeated ACKs.
 
-Reply opens a visible composer and awaits its replacement guard. Refusal or a
-superseding composer request cancels that reply without dismissing notifications.
-An accepted reply carries the notification text into the composer before ACK.
-An accepted replacement whose open draft cannot be saved is a failure, not a
-refusal (`ComposerOpenOutcome` `unsaved`). It sends no ACK, and neither does a
-thrown action; native retains the response and reply text for retry on the next
-listener lifetime. A dismissal error after a successful open leaves the text in
-the composer and does not repeat the reply.
+Reply opens a visible composer and awaits its replacement guard. The composer
+store decides open requests one at a time, in arrival order: a second reply
+waits for the answer to the first instead of taking its question away, then
+meets the composer that answer left open. A refusal (`kept`) cancels that reply
+without dismissing notifications. An accepted reply carries the notification
+text into the composer before ACK. The request is marked `unsavedBody`: the form
+measures edits from what it opened with, so it calls the reply untouched, but
+until its first save the text exists nowhere else. The host therefore asks and
+saves it before any replacement, as it does for an edited draft.
+Two outcomes are failures, not refusals: an accepted replacement whose open
+draft cannot be saved (`unsaved`), and a question another dialog took away
+before anyone answered it (`interrupted`). Neither sends an ACK, and neither
+does a thrown action; native retains the response and reply text for retry on
+the next listener lifetime. A dismissal error after a successful open leaves the
+text in the composer and does not repeat the reply.
 
 Read and archive ACK only on the outcome `useThreadActions()` reports: `setRead`
 resolving `true`, and `archive` resolving `true` once the thread is Done, also
-when it already was. A rejected write, a rollback or a missing thread resolves
-`false`; the response then stays unacknowledged for the next delivery.
+when it already was. A rejected write or a rollback resolves `false`; the
+response then stays unacknowledged for the next delivery.
+
+`ensureThreadLoaded` tells a missing thread from a failed load. When the backend
+answers `backend.errors.threadNotFound`, nothing a retry does can change that:
+the response is ACKed, the notification dismissed, and a toast says the mail is
+gone. Any other load failure counts as transient. A read or archive gets
+`NOTIFICATION_ACTION_ATTEMPTS` (3) deliveries per response; the third failure
+is ACKed with a toast saying the action could not be completed, instead of
+replaying on every lease for the process lifetime. The count lives with the
+composer store, like deduplication. A reply is never given up: its text exists
+nowhere else, and only process termination ends its retention.
 
 These are in-process guarantees. Orderly bootstrap disposal/recreation with the
 same stores preserves in-flight work and deduplication. A fresh WebView can

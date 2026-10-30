@@ -4,9 +4,10 @@ import { defineComponent } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia } from 'pinia';
 import { createMemoryHistory, createRouter } from 'vue-router';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import {
   backendMobileNotificationsFrontendReady,
+  backendMobileNotificationResponseHandled,
   backendDismissMobileNotifications,
   backendListAccounts,
   backendTakePendingNotificationThread,
@@ -23,6 +24,7 @@ import {
   backendAcknowledgeDraftFlush,
   backendSyncGroupware,
   backendTransitionThreads,
+  backendGetThread,
 } from '@/services/backend';
 import { useAppBootstrap, useComposeWindowBootstrap } from '@/bootstrap';
 import ComposerHost from '@/components/mail/ComposerHost.vue';
@@ -32,6 +34,8 @@ import { useThreadsStore } from '@/stores/threads';
 import * as threadActionModule from '@/composables/useThreadActions';
 import { useComposerStore, type ComposerReplaceOutcome } from '@/stores/composer';
 import { useConnectionStore } from '@/stores/connection';
+import { useConfirm } from '@/composables/useConfirm';
+import { answerConfirms } from '@/test/dialogs';
 import { emit, listen } from '@tauri-apps/api/event';
 import { onAction, registerActionTypes } from '@tauri-apps/plugin-notification';
 
@@ -58,8 +62,6 @@ vi.mock('@/views/ComposeView.vue', () => ({
     },
   },
 }));
-
-vi.mock('@/composables/useConfirm', () => ({ useConfirm: () => ({ ask: async () => true }) }));
 
 vi.mock('@/composables/useComposerDraftPersistence', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/composables/useComposerDraftPersistence')>()),
@@ -100,6 +102,7 @@ vi.mock('@/services/backend', async (importOriginal) => {
       failures: [],
     }),
     backendListThreads: resolving({ threads: [], next_cursor: null, has_more: false }),
+    backendGetThread: vi.fn(async () => { throw new Error(JSON.stringify({ key: 'backend.errors.threadNotFound' })); }),
     backendListCachedThreads: resolving(null),
     backendListSmartInboxSummary: resolving(null),
     backendListContacts: resolving([]),
@@ -137,6 +140,7 @@ vi.mock('@/services/backend', async (importOriginal) => {
     backendSetBackgroundSync: resolving(undefined),
     backendConsumePendingMobileNotification: resolving({ threadId: null, actionId: null }),
     backendMobileNotificationsFrontendReady: vi.fn(async (id: number | null) => id ?? 1),
+    backendMobileNotificationResponseHandled: resolving(undefined),
     backendPendingCrashReports: resolving([]),
     backendTakePendingOpenWith: resolving([]),
     backendTakePendingNotificationThread: resolving(null),
@@ -210,6 +214,10 @@ describe('bootstrap entries', () => {
 
   afterEach(() => {
     for (const wrapper of mounted.splice(0)) wrapper.unmount();
+    useConfirm().answer(false);
+    composeForm.shouldConfirmClose.mockReset().mockReturnValue(false);
+    composeForm.persistDraft.mockReset().mockResolvedValue(null);
+    composeForm.currentDraftId.mockReset().mockReturnValue(null);
     useToast().clear();
     vi.restoreAllMocks();
   });
@@ -330,10 +338,12 @@ describe('bootstrap entries', () => {
       expect(read).toHaveBeenCalledTimes(actionId === 'satchel.read' ? 1 : 0);
       expect(archive).toHaveBeenCalledTimes(actionId === 'satchel.archive' ? 1 : 0);
       if (actionId === 'satchel.reply') {
-        expect(open).toHaveBeenCalledExactlyOnceWith({ mode: 'reply', threadId: 'ios-thread', body: 'reply text' });
+        expect(open).toHaveBeenCalledExactlyOnceWith({ mode: 'reply', threadId: 'ios-thread', body: 'reply text', unsavedBody: true });
       } else expect(open).not.toHaveBeenCalled();
       expect(ensure).toHaveBeenCalledTimes(actionId === 'tap' ? 0 : 1);
-      expect(emit).toHaveBeenCalledExactlyOnceWith('mobile:notification-response-handled', { responseId: 'ios-response' });
+      expect(backendMobileNotificationResponseHandled).toHaveBeenCalledExactlyOnceWith('ios-response');
+      // The ACK is a typed command now; a raw event escaped the manifest and its errors.
+      expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
       wrapper.unmount();
     },
   );
@@ -352,10 +362,10 @@ describe('bootstrap entries', () => {
       listenerId: 1, type: 'notification-tap', threadId: 'ios-thread', actionId: 'satchel.read', responseId: 'background-response',
     } } as never);
     await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
-    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
+    expect(backendMobileNotificationResponseHandled).not.toHaveBeenCalled();
     finish(true);
     await pending;
-    expect(emit).toHaveBeenCalledExactlyOnceWith('mobile:notification-response-handled', { responseId: 'background-response' });
+    expect(backendMobileNotificationResponseHandled).toHaveBeenCalledExactlyOnceWith('background-response');
     wrapper.unmount();
   });
 
@@ -550,6 +560,7 @@ describe('bootstrap entries', () => {
     { outcome: 'replaced', acknowledged: true },
     { outcome: 'kept', acknowledged: true },
     { outcome: 'unsaved', acknowledged: false },
+    { outcome: 'interrupted', acknowledged: false },
   ] as const)('waits for the reply replacement decision before ACK, outcome=$outcome', async ({ outcome, acknowledged }) => {
     const pinia = createPinia();
     const composer = useComposerStore(pinia);
@@ -569,14 +580,12 @@ describe('bootstrap entries', () => {
     await vi.waitFor(() => expect(guard).toHaveBeenCalledOnce());
     try {
       expect(composer.request?.body).toBe('existing draft');
-      expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', { responseId: 'reply-response' });
+      expect(backendMobileNotificationResponseHandled).not.toHaveBeenCalledWith('reply-response');
       expect(backendDismissMobileNotifications).not.toHaveBeenCalled();
       release(outcome);
       await handled;
       // A refusal is the user's answer; a failed save keeps the reply for a retry.
-      expect(vi.mocked(emit).mock.calls).toEqual(acknowledged
-        ? [['mobile:notification-response-handled', { responseId: 'reply-response' }]]
-        : []);
+      expect(vi.mocked(backendMobileNotificationResponseHandled).mock.calls).toEqual(acknowledged ? [['reply-response']] : []);
       expect(composer.request?.body).toBe(outcome === 'replaced' ? 'new reply' : 'existing draft');
       expect(backendDismissMobileNotifications).toHaveBeenCalledTimes(outcome === 'replaced' ? 1 : 0);
     } finally {
@@ -615,7 +624,7 @@ describe('bootstrap entries', () => {
     await flushPromises();
     expect(open).toHaveBeenCalledOnce();
     expect(guard).toHaveBeenCalledOnce();
-    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
+    expect(backendMobileNotificationResponseHandled).not.toHaveBeenCalled();
     expect(backendDismissMobileNotifications).not.toHaveBeenCalled();
     release(accepted ? 'replaced' : 'kept');
     await Promise.all([oldWork, replay]);
@@ -623,7 +632,7 @@ describe('bootstrap entries', () => {
     expect(backendDismissMobileNotifications).toHaveBeenCalledTimes(accepted ? 1 : 0);
     await newCallback({ payload: { ...payload, listenerId: 2 } } as never);
     expect(open).toHaveBeenCalledOnce();
-    expect(emit).toHaveBeenCalledWith('mobile:notification-response-handled', { responseId: 'guard-response' });
+    expect(backendMobileNotificationResponseHandled).toHaveBeenCalledWith('guard-response');
     expect(backendMobileNotificationsFrontendReady).toHaveBeenCalledWith(1, false);
     second.unmount();
     await flushPromises();
@@ -654,11 +663,11 @@ describe('bootstrap entries', () => {
     const replay = newCallback({ payload: { ...payload, listenerId: 2 } } as never);
     await flushPromises();
     expect(mutation).toHaveBeenCalledOnce();
-    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
+    expect(backendMobileNotificationResponseHandled).not.toHaveBeenCalled();
     finish();
     await Promise.all([pending, replay]);
     expect(mutation).toHaveBeenCalledOnce();
-    expect(emit).toHaveBeenCalledWith('mobile:notification-response-handled', { responseId: 'pending-response' });
+    expect(backendMobileNotificationResponseHandled).toHaveBeenCalledWith('pending-response');
     second.unmount();
   });
 
@@ -678,7 +687,7 @@ describe('bootstrap entries', () => {
     const callback = vi.mocked(listen).mock.calls.find(([name]) => name === 'mobile:notification-route')![1];
     const payload = { listenerId: 1, type: 'notification-tap', threadId: 'lost-thread', actionId,
       inputValue: 'reply survives ACK loss', responseId: 'lost-ack' };
-    vi.mocked(emit).mockRejectedValueOnce(new Error('ACK delivery lost'));
+    vi.mocked(backendMobileNotificationResponseHandled).mockRejectedValueOnce(new Error('ACK delivery lost'));
     await callback({ payload } as never);
     first.unmount();
     // A response received during disposal is not processed by the old callback.
@@ -689,14 +698,14 @@ describe('bootstrap entries', () => {
     const newCallback = vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route').at(-1)![1];
     // Old-lease events arriving at a new callback are ignored as well.
     await newCallback({ payload } as never);
-    expect(emit).toHaveBeenCalledTimes(1);
+    expect(backendMobileNotificationResponseHandled).toHaveBeenCalledTimes(1);
     await newCallback({ payload: { ...payload, listenerId: 2 } } as never);
     await newCallback({ payload: { ...later, listenerId: 2 } } as never);
     expect(read).toHaveBeenCalledTimes(actionId === 'satchel.read' ? 1 : 0);
     expect(archive).toHaveBeenCalledTimes(actionId === 'satchel.archive' ? 1 : 0);
     expect(open).toHaveBeenCalledTimes(actionId === 'satchel.reply' ? 1 : 0);
     if (actionId === 'satchel.reply') expect(composer.request?.body).toBe('reply survives ACK loss');
-    expect(emit).toHaveBeenCalledTimes(3);
+    expect(backendMobileNotificationResponseHandled).toHaveBeenCalledTimes(3);
     expect(router.currentRoute.value.params.id).toBe('lost-thread');
     second.unmount();
   });
@@ -716,7 +725,7 @@ describe('bootstrap entries', () => {
     const payload = { listenerId: 1, type: 'notification-tap', threadId: 'retry-thread', actionId: 'satchel.reply',
       inputValue: 'do not lose this text', responseId: 'failed-reply' };
     await callback({ payload } as never);
-    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
+    expect(backendMobileNotificationResponseHandled).not.toHaveBeenCalled();
     expect(composer.request?.body).toBe('original');
     expect(backendDismissMobileNotifications).not.toHaveBeenCalled();
     first.unmount();
@@ -727,11 +736,13 @@ describe('bootstrap entries', () => {
     await newCallback({ payload: { ...payload, listenerId: 2 } } as never);
     expect(guard).toHaveBeenCalledTimes(2);
     expect(composer.request).toMatchObject({ mode: 'reply', body: 'do not lose this text' });
-    expect(emit).toHaveBeenCalledWith('mobile:notification-response-handled', { responseId: 'failed-reply' });
+    expect(backendMobileNotificationResponseHandled).toHaveBeenCalledWith('failed-reply');
     second.unmount();
   });
 
   it('keeps a reply unacknowledged while the open draft cannot be saved, and delivers it on replay', async () => {
+    const confirms = answerConfirms(true);
+    onTestFinished(() => confirms.stop());
     const pinia = createPinia();
     const composer = useComposerStore(pinia);
     vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
@@ -749,7 +760,7 @@ describe('bootstrap entries', () => {
     await callback({ payload } as never);
     expect(composeForm.persistDraft).toHaveBeenCalledOnce();
     expect(composer.request?.body).toBe('unsaved original');
-    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', { responseId: 'unsaved-reply' });
+    expect(backendMobileNotificationResponseHandled).not.toHaveBeenCalledWith('unsaved-reply');
     expect(backendDismissMobileNotifications).not.toHaveBeenCalled();
     first.unmount();
     const second = boot(useAppBootstrap, pinia);
@@ -758,8 +769,96 @@ describe('bootstrap entries', () => {
     await replay({ payload: { ...payload, listenerId: 2 } } as never);
     expect(composeForm.persistDraft).toHaveBeenCalledTimes(2);
     expect(composer.request).toMatchObject({ mode: 'reply', body: 'reply typed into the notification' });
-    expect(emit).toHaveBeenCalledExactlyOnceWith('mobile:notification-response-handled', { responseId: 'unsaved-reply' });
+    expect(backendMobileNotificationResponseHandled).toHaveBeenCalledExactlyOnceWith('unsaved-reply');
     second.unmount();
+  });
+
+  describe('notification replies against the real composer host and dialog', () => {
+    async function openDirtyComposer() {
+      const pinia = createPinia();
+      const composer = useComposerStore(pinia);
+      vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
+      let generation = 0;
+      vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? ++generation);
+      const wrapper = boot(useAppBootstrap, pinia);
+      mounted.push(mount(ComposerHost, { global: { plugins: [pinia, router] } }));
+      // Only the draft typed into the composer counts as edited; the form
+      // measures a freshly opened reply against what it opened with.
+      composeForm.shouldConfirmClose.mockImplementation(() => composer.request?.body === 'unsent draft');
+      composeForm.persistDraft.mockResolvedValue('saved-draft');
+      await composer.open({ mode: 'new', body: 'unsent draft' });
+      await flushPromises();
+      const callbacks = () => vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route');
+      const reply = (responseId: string, text: string, listenerId = 1) => callbacks().at(-1)![1]({ payload: {
+        listenerId, type: 'notification-tap', threadId: `${responseId}-thread`, actionId: 'satchel.reply',
+        inputValue: text, responseId,
+      } } as never);
+      return { pinia, composer, wrapper, reply };
+    }
+
+    it('asks about one reply at a time and ACKs each only after its own answer', async () => {
+      const { composer, reply } = await openDirtyComposer();
+      const dialog = useConfirm();
+      const first = reply('reply-a', 'first reply');
+      await vi.waitFor(() => expect(dialog.state.pending).not.toBeNull());
+      const second = reply('reply-b', 'second reply');
+      await flushPromises();
+      // The second reply waits for the first answer instead of taking its question away.
+      expect(backendMobileNotificationResponseHandled).not.toHaveBeenCalled();
+      expect(composer.request?.body).toBe('unsent draft');
+
+      dialog.answer(true);
+      await first;
+      expect(composer.request).toMatchObject({ mode: 'reply', body: 'first reply' });
+      expect(backendMobileNotificationResponseHandled).toHaveBeenCalledExactlyOnceWith('reply-a');
+
+      // The form calls the opened reply untouched, but it exists nowhere else: ask.
+      await vi.waitFor(() => expect(dialog.state.pending).not.toBeNull());
+      expect(composeForm.shouldConfirmClose()).toBe(false);
+      expect(composer.request?.body).toBe('first reply');
+      dialog.answer(true);
+      await second;
+      // The unsent draft, then the first reply, were saved before each replacement.
+      expect(composeForm.persistDraft).toHaveBeenCalledTimes(2);
+      expect(composeForm.closeWithoutSaving).not.toHaveBeenCalled();
+      expect(composer.request).toMatchObject({ mode: 'reply', body: 'second reply' });
+      expect(vi.mocked(backendMobileNotificationResponseHandled).mock.calls).toEqual([['reply-a'], ['reply-b']]);
+    });
+
+    it('ACKs a reply the user declined, after the answer', async () => {
+      const { composer, reply } = await openDirtyComposer();
+      const dialog = useConfirm();
+      const pending = reply('declined-reply', 'not now');
+      await vi.waitFor(() => expect(dialog.state.pending).not.toBeNull());
+      dialog.answer(false);
+      await pending;
+      expect(composer.request?.body).toBe('unsent draft');
+      expect(backendMobileNotificationResponseHandled).toHaveBeenCalledExactlyOnceWith('declined-reply');
+    });
+
+    it('keeps a reply whose question another dialog took away for replay on the next lease', async () => {
+      const { pinia, composer, wrapper, reply } = await openDirtyComposer();
+      const dialog = useConfirm();
+      const pending = reply('preempted-reply', 'keep this reply');
+      await vi.waitFor(() => expect(dialog.state.pending).not.toBeNull());
+      const other = dialog.ask({ title: 'Another question', confirmLabel: 'OK' });
+      await pending;
+      // Nobody answered the reply's question; that is not a refusal.
+      expect(backendMobileNotificationResponseHandled).not.toHaveBeenCalled();
+      expect(composer.request?.body).toBe('unsent draft');
+      dialog.answer(false);
+      await other;
+
+      wrapper.unmount();
+      boot(useAppBootstrap, pinia);
+      await flushPromises();
+      const replay = reply('preempted-reply', 'keep this reply', 2);
+      await vi.waitFor(() => expect(dialog.state.pending).not.toBeNull());
+      dialog.answer(true);
+      await replay;
+      expect(composer.request).toMatchObject({ mode: 'reply', body: 'keep this reply' });
+      expect(backendMobileNotificationResponseHandled).toHaveBeenCalledExactlyOnceWith('preempted-reply');
+    });
   });
 
   it.each(['satchel.read', 'satchel.archive'])('keeps a failed %s unacknowledged and retries it on replay', async (actionId) => {
@@ -783,15 +882,75 @@ describe('bootstrap entries', () => {
     const payload = { listenerId: 1, type: 'notification-tap', threadId: 'failing-thread', actionId, responseId: 'failed-action' };
     await callback({ payload } as never);
     expect(write).toHaveBeenCalledOnce();
-    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', { responseId: 'failed-action' });
+    expect(backendMobileNotificationResponseHandled).not.toHaveBeenCalledWith('failed-action');
     first.unmount();
     const second = boot(useAppBootstrap, pinia);
     await flushPromises();
     const replay = vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route').at(-1)![1];
     await replay({ payload: { ...payload, listenerId: 2 } } as never);
     expect(write).toHaveBeenCalledTimes(2);
-    expect(emit).toHaveBeenCalledExactlyOnceWith('mobile:notification-response-handled', { responseId: 'failed-action' });
+    expect(backendMobileNotificationResponseHandled).toHaveBeenCalledExactlyOnceWith('failed-action');
     second.unmount();
+  });
+
+  it.each(['satchel.read', 'satchel.archive'])('ACKs %s for a mail the backend no longer has and says so', async (actionId) => {
+    const pinia = createPinia();
+    const threads = useThreadsStore(pinia);
+    const read = vi.spyOn(threads, 'setThreadsRead');
+    const wrapper = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    const callback = vi.mocked(listen).mock.calls.find(([name]) => name === 'mobile:notification-route')![1];
+    await callback({ payload: {
+      listenerId: 1, type: 'notification-tap', threadId: 'ghost', actionId, responseId: 'ghost-response',
+    } } as never);
+    expect(backendGetThread).toHaveBeenCalledWith('ghost');
+    expect(read).not.toHaveBeenCalled();
+    expect(backendTransitionThreads).not.toHaveBeenCalled();
+    expect(backendDismissMobileNotifications).toHaveBeenCalledWith(['ghost']);
+    expect(useToast().state.toasts.map(toast => toast.message))
+      .toContain('Satchel no longer has the email from this notification.');
+    expect(backendMobileNotificationResponseHandled).toHaveBeenCalledExactlyOnceWith('ghost-response');
+    wrapper.unmount();
+  });
+
+  it('retries an archive whose thread could not be loaded, then gives up and says so', async () => {
+    const pinia = createPinia();
+    vi.mocked(backendGetThread).mockRejectedValue(new Error(JSON.stringify({ key: 'backend.errors.threadPersistenceFailed' })));
+    let generation = 0;
+    vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? ++generation);
+    const payload = { type: 'notification-tap', threadId: 'locked', actionId: 'satchel.archive', responseId: 'locked-response' };
+    const failure = 'The action from the notification could not be completed. Try it again in Satchel.';
+    for (let lease = 1; lease <= 3; lease += 1) {
+      const wrapper = boot(useAppBootstrap, pinia);
+      await flushPromises();
+      const callback = vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route').at(-1)![1];
+      await callback({ payload: { ...payload, listenerId: lease } } as never);
+      expect(backendGetThread).toHaveBeenCalledTimes(lease);
+      // Transient: kept for the next lease, until the third delivery gives up.
+      expect(backendMobileNotificationResponseHandled).toHaveBeenCalledTimes(lease === 3 ? 1 : 0);
+      expect(useToast().state.toasts.some(toast => toast.message === failure)).toBe(lease === 3);
+      wrapper.unmount();
+    }
+    expect(backendDismissMobileNotifications).not.toHaveBeenCalled();
+  });
+
+  it('never gives up a reply, whose text exists nowhere else', async () => {
+    const pinia = createPinia();
+    const composer = useComposerStore(pinia);
+    await composer.open({ mode: 'new', body: 'open draft' });
+    composer.setReplaceGuard(async () => 'unsaved');
+    vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue('loaded');
+    let generation = 0;
+    vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? ++generation);
+    for (let lease = 1; lease <= 4; lease += 1) {
+      const wrapper = boot(useAppBootstrap, pinia);
+      await flushPromises();
+      const callback = vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route').at(-1)![1];
+      await callback({ payload: { listenerId: lease, type: 'notification-tap', threadId: 'reply-thread',
+        actionId: 'satchel.reply', inputValue: 'my reply', responseId: 'held-reply' } } as never);
+      wrapper.unmount();
+    }
+    expect(backendMobileNotificationResponseHandled).not.toHaveBeenCalled();
   });
 
   it('ignores malformed routes without ACK or navigation', async () => {
@@ -805,7 +964,7 @@ describe('bootstrap entries', () => {
       await callback({ payload } as never);
     }
     expect(router.currentRoute.value.name).toBe('inbox');
-    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
+    expect(backendMobileNotificationResponseHandled).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
@@ -840,6 +999,57 @@ describe('bootstrap entries', () => {
       second.unmount();
     },
   );
+
+  it.each(['reservation', 'activation'])('retries the notification lease from the connection banner after a %s failure', async (phase) => {
+    const pinia = createPinia();
+    const connection = useConnectionStore(pinia);
+    const read = vi.fn(async () => true);
+    const realActions = threadActionModule.useThreadActions;
+    vi.spyOn(threadActionModule, 'useThreadActions').mockImplementation(() => ({ ...realActions(), setRead: read }));
+    vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
+    let nextId = 0;
+    let failed = false;
+    vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id, ready) => {
+      const operation = id === null ? 'reservation' : ready ? 'activation' : 'retirement';
+      if (operation === phase && !failed) {
+        failed = true;
+        throw new Error('native bridge busy');
+      }
+      return id ?? ++nextId;
+    });
+    const wrapper = boot(useAppBootstrap, pinia);
+    await vi.waitFor(() => expect(connection.backendErrorFor('notifications')).toBe('native bridge busy'));
+
+    connection.requestRetry();
+    await vi.waitFor(() => expect(connection.backendErrorFor('notifications')).toBeNull());
+    const leaseId = phase === 'reservation' ? 1 : 2;
+    expect(backendMobileNotificationsFrontendReady).toHaveBeenLastCalledWith(leaseId, true);
+    const routes = vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route');
+    expect(routes).toHaveLength(1);
+    const deliver = (listenerId: number) => routes[0]![1]({ payload: {
+      listenerId, type: 'notification-tap', threadId: 'retry-thread', actionId: 'satchel.read', responseId: `lease-${listenerId}`,
+    } } as never);
+    if (phase === 'activation') await deliver(1);
+    await deliver(leaseId);
+    expect(read).toHaveBeenCalledOnce();
+    expect(backendMobileNotificationResponseHandled).toHaveBeenCalledExactlyOnceWith(`lease-${leaseId}`);
+    wrapper.unmount();
+  });
+
+  it('keeps resume, navigation and focus listeners when the notification lease fails', async () => {
+    const pinia = createPinia();
+    const connection = useConnectionStore(pinia);
+    vi.mocked(backendMobileNotificationsFrontendReady).mockRejectedValue(new Error('native bridge missing'));
+    const addListener = vi.spyOn(window, 'addEventListener');
+    const wrapper = boot(useAppBootstrap, pinia);
+    await vi.waitFor(() => expect(connection.backendErrorFor('notifications')).toBe('native bridge missing'));
+    await flushPromises();
+    const registered = vi.mocked(listen).mock.calls.map(([name]) => name);
+    expect(registered).toContain('mobile:resumed');
+    expect(registered).toContain('mobile:notification-navigation');
+    expect(addListener.mock.calls.some(([name]) => name === 'focus')).toBe(true);
+    wrapper.unmount();
+  });
 
   it('retires a reservation that resolves after disposal without disturbing a new listener', async () => {
     let reserve!: (id: number) => void;

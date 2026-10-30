@@ -83,6 +83,8 @@
       "undoWindow": "Sending in {seconds}s — you can still undo"
     },
     "notifications": {
+      "actionFailed": "The action from the notification could not be completed. Try it again in Satchel.",
+      "mailGone": "Satchel no longer has the email from this notification.",
       "read": "Read",
       "replyPlaceholder": "Write a reply…"
     },

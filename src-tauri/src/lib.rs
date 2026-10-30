@@ -899,6 +899,7 @@ pub fn run() {
             commands::mobile_notifications::consume_pending_mobile_notification,
             commands::mobile_notifications::dismiss_mobile_notifications,
             commands::mobile_notifications::mobile_notifications_frontend_ready,
+            commands::mobile_notifications::mobile_notification_response_handled,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build satchel tauri app")

@@ -234,6 +234,32 @@ pub fn mobile_notifications_frontend_ready(
     }
 }
 
+/// Release a retained iOS response once the frontend has acted on it: native
+/// drops its payload and runs the OS completion handler, once, however often
+/// this repeats. The frontend calls it only for an outcome it can stand behind;
+/// anything else stays retained for the next listener lease.
+/// Non-iOS platforms retain no responses.
+#[tauri::command]
+pub fn mobile_notification_response_handled(response_id: String) -> CommandResult<()> {
+    if response_id.trim().is_empty() || response_id.len() > 128 {
+        return Err("A notification response ID must have 1 to 128 bytes".into());
+    }
+    #[cfg(target_os = "ios")]
+    {
+        let response_id = std::ffi::CString::new(response_id)
+            .map_err(|_| "A notification response ID must not contain NUL")?;
+        let handled: unsafe extern "C" fn(*const std::ffi::c_char) =
+            unsafe { ios_native_symbol(c"satchel_mobile_response_handled")? };
+        unsafe { handled(response_id.as_ptr()) };
+        Ok(())
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = response_id;
+        Ok(())
+    }
+}
+
 #[cfg(target_os = "ios")]
 unsafe fn ios_native_symbol<T: Copy>(name: &std::ffi::CStr) -> Result<T, String> {
     let symbol = libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr());
@@ -257,7 +283,7 @@ mod ios_events {
         sync::{Mutex, OnceLock},
     };
 
-    use tauri::{Emitter, Listener};
+    use tauri::Emitter;
 
     static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
     static PENDING: Mutex<VecDeque<serde_json::Value>> = Mutex::new(VecDeque::new());
@@ -266,31 +292,6 @@ mod ios_events {
         if APP.set(app.clone()).is_err() {
             return;
         }
-        // Reuse the existing event channel, without adding a command or ACL.
-        // The OS background response stays alive until its JS action finishes.
-        app.listen("mobile:notification-response-handled", |event| {
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) else {
-                return;
-            };
-            let Some(response_id) = value.get("responseId").and_then(|id| id.as_str()) else {
-                return;
-            };
-            if response_id.len() > 128 {
-                return;
-            }
-            let Ok(response_id) = std::ffi::CString::new(response_id) else {
-                return;
-            };
-            let handled = unsafe {
-                super::ios_native_symbol::<unsafe extern "C" fn(*const c_char)>(
-                    c"satchel_mobile_response_handled",
-                )
-            };
-            match handled {
-                Ok(handled) => unsafe { handled(response_id.as_ptr()) },
-                Err(error) => tracing::warn!(%error, "iOS notification acknowledgement failed"),
-            }
-        });
         if let Ok(mut pending) = PENDING.lock() {
             while let Some(event) = pending.pop_front() {
                 let _ = app.emit("mobile:notification-route", event);
@@ -328,4 +329,17 @@ pub fn initialize_mobile_notification_bridge(app: &tauri::AppHandle) {
     ios_events::initialize(app);
     #[cfg(not(target_os = "ios"))]
     let _ = app;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mobile_notification_response_handled;
+
+    #[test]
+    fn acknowledges_only_response_ids_the_frontend_can_send() {
+        for invalid in [String::new(), " ".to_string(), "x".repeat(129)] {
+            assert!(mobile_notification_response_handled(invalid).is_err());
+        }
+        assert!(mobile_notification_response_handled("x".repeat(128)).is_ok());
+    }
 }

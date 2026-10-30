@@ -32,6 +32,8 @@
         "undoWindow": "Sending in {seconds}s — you can still undo"
       },
       "notifications": {
+        "actionFailed": "The action from the notification could not be completed. Try it again in Satchel.",
+        "mailGone": "Satchel no longer has the email from this notification.",
         "read": "Read",
         "replyPlaceholder": "Write a reply…"
       },
@@ -465,6 +467,8 @@
         "undoWindow": "Sende in {seconds}s — Rückgängig möglich"
       },
       "notifications": {
+        "actionFailed": "Die Aktion aus der Benachrichtigung ließ sich nicht abschließen. Versuche es in Satchel noch einmal.",
+        "mailGone": "Die E-Mail aus dieser Benachrichtigung liegt nicht mehr in Satchel.",
         "read": "Gelesen",
         "replyPlaceholder": "Antwort schreiben …"
       },

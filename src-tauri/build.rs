@@ -249,6 +249,7 @@ const COMMANDS: &[&str] = &[
     "consume_pending_mobile_notification",
     "dismiss_mobile_notifications",
     "mobile_notifications_frontend_ready",
+    "mobile_notification_response_handled",
 ];
 
 /// Permission set covering all of [`COMMANDS`].

@@ -229,6 +229,9 @@ printf "%s\\n" "$@" > "$SATCHEL_XCODEGEN_ARGS"
     );
     expect(swiftTemplate).toContain('@_silgen_name("satchel_mobile_event")');
     expect(bridge).toContain("pub fn mobile_notifications_frontend_ready");
+    // The ACK is a command with an ACL entry, not an untyped event.
+    expect(bridge).toContain("pub fn mobile_notification_response_handled");
+    expect(bridge).not.toContain("mobile:notification-response-handled");
     expect(bridge).toContain("mobile:notification-route");
     expect(bridge).toContain("libc::dlsym(libc::RTLD_DEFAULT");
     expect(bridge).not.toContain('unsafe extern "C" {');

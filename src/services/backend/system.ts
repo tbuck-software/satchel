@@ -290,6 +290,15 @@ export async function backendMobileNotificationsFrontendReady(listenerId: number
   return invoke<number | null>('mobile_notifications_frontend_ready', { listenerId, ready });
 }
 
+/**
+ * Release a retained iOS notification response: native drops its payload and
+ * completes the OS response. Only for an outcome the frontend stands behind;
+ * anything else stays retained for the next listener lease.
+ */
+export async function backendMobileNotificationResponseHandled(responseId: string): Promise<void> {
+  return invoke<void>('mobile_notification_response_handled', { responseId });
+}
+
 /** Consume the desktop notification that launched the app after listeners stand. */
 export function backendTakePendingNotificationThread(): Promise<string | null> {
   return invoke<string | null>('take_pending_notification_thread');

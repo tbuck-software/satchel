@@ -1329,6 +1329,17 @@ export default {
                 }
             }
         },
+        "mobile_notification_response_handled": {
+            "kind": "object",
+            "fields": {
+                "responseId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "mobile_notifications_frontend_ready": {
             "kind": "object",
             "fields": {

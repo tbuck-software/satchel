@@ -12,6 +12,7 @@ import {
   backendImportIcs,
   backendImportIcsPath,
   backendMobileNotificationsFrontendReady,
+  backendMobileNotificationResponseHandled,
   backendPendingCrashReports,
   backendUndoOutboxSend,
   backendRunImapSync,
@@ -77,8 +78,8 @@ import { loadPublicSuffixTable } from '@/utils/externalLinks';
 
 /**
  * How a notification action ended. `done` and `cancelled` (the user kept the
- * open draft, or a newer composer request won) are final and ACKed. `failed`
- * is not: native keeps the response, reply text included, for a later retry.
+ * open draft) are final and ACKed. `failed` is not: native keeps the response,
+ * reply text included, for a later retry.
  */
 type NotificationActionOutcome = 'done' | 'cancelled' | 'failed';
 
@@ -88,6 +89,14 @@ type NotificationActionOutcome = 'done' | 'cancelled' | 'failed';
 // ones are forgotten so a replay runs the action again. This is in-memory
 // deduplication, not recovery of JS side effects after a WebView crash.
 const notificationResponses = new WeakMap<object, Map<string, Promise<NotificationActionOutcome>>>();
+// Failed deliveries per response, with the same lifetime as the map above.
+const notificationFailures = new WeakMap<object, Map<string, number>>();
+/**
+ * Deliveries after which a read or archive that keeps failing is given up:
+ * ACKed with a toast instead of replaying on every lease for the process
+ * lifetime. A reply is never given up; its text exists nowhere else.
+ */
+const NOTIFICATION_ACTION_ATTEMPTS = 3;
 // Keep lease reservations in request order even when IPC replies resolve late.
 let notificationLifecycle: Promise<unknown> = Promise.resolve();
 function updateNotificationListener(id: number | null, ready: boolean): Promise<number | null> {
@@ -294,6 +303,12 @@ export function useAppBootstrap(): void {
     notificationResponses.set(composer, responses);
   }
   const sharedResponses = responses;
+  let failures = notificationFailures.get(composer);
+  if (!failures) {
+    failures = new Map();
+    notificationFailures.set(composer, failures);
+  }
+  const responseFailures = failures;
   let notificationListenerId: number | null = null;
   const retireNotificationListener = () => {
     if (notificationListenerId === null) return;
@@ -459,6 +474,9 @@ export function useAppBootstrap(): void {
         connectionStore.backendErrorFor('drafts') ? draftsStore.load() : undefined,
         connectionStore.backendErrorFor('templates') ? templatesStore.load() : undefined,
         connectionStore.backendErrorFor('smartFolders') ? smartFoldersStore.load() : undefined,
+        connectionStore.backendErrorFor('notifications') && backendSupportsNativeCommands()
+          ? connectNotificationRoutes()
+          : undefined,
         connectionStore.refresh(),
       ]);
     } finally {
@@ -504,6 +522,49 @@ export function useAppBootstrap(): void {
   const refreshMobileMailState = mobileResume.refreshMailState;
 
   /**
+   * The backend says the mail is gone. Nothing a retry could change, so the
+   * response is final; the notification goes too, and the user learns why
+   * nothing happened.
+   */
+  async function settleMissingThread(threadId: string): Promise<NotificationActionOutcome> {
+    useToast().info(t('app.notifications.mailGone'));
+    await backendDismissMobileNotifications([threadId]).catch(() => {});
+    return 'done';
+  }
+
+  /**
+   * Run one delivery and apply the retry policy: a failure stays unacknowledged
+   * for the next lease, up to NOTIFICATION_ACTION_ATTEMPTS deliveries of a read
+   * or archive. A thrown action counts as a failure.
+   */
+  async function settleNotificationAction(
+    notification: NativeNotificationRoute,
+    threadId: string,
+    responseId: string,
+  ): Promise<NotificationActionOutcome> {
+    let outcome: NotificationActionOutcome;
+    try {
+      outcome = await handleNotificationAction(notification, threadId);
+    } catch (error) {
+      console.warn('mobile notification action failed', error);
+      outcome = 'failed';
+    }
+    if (outcome !== 'failed') {
+      responseFailures.delete(responseId);
+      return outcome;
+    }
+    if (notificationAction(notification) === MAIL_ACTIONS.reply) return 'failed';
+    const attempts = (responseFailures.get(responseId) ?? 0) + 1;
+    if (attempts < NOTIFICATION_ACTION_ATTEMPTS) {
+      responseFailures.set(responseId, attempts);
+      return 'failed';
+    }
+    responseFailures.delete(responseId);
+    useToast().error(t('app.notifications.actionFailed'));
+    return 'cancelled';
+  }
+
+  /**
    * Act on a notification without making the user open the app first.
    *
    * Filing and marking read finish in place; only replying needs the composer,
@@ -517,13 +578,13 @@ export function useAppBootstrap(): void {
     const action = notificationAction(notification);
 
     if (action === MAIL_ACTIONS.archive) {
-      await threadsStore.ensureThreadLoaded(threadId);
+      if ((await threadsStore.ensureThreadLoaded(threadId)) === 'missing') return settleMissingThread(threadId);
       if (!(await threadActions.archive([threadId]))) return 'failed';
       await backendDismissMobileNotifications([threadId]).catch(() => {});
       return 'done';
     }
     if (action === MAIL_ACTIONS.read) {
-      await threadsStore.ensureThreadLoaded(threadId);
+      if ((await threadsStore.ensureThreadLoaded(threadId)) === 'missing') return settleMissingThread(threadId);
       return (await threadActions.setRead([threadId], true)) ? 'done' : 'failed';
     }
 
@@ -541,10 +602,11 @@ export function useAppBootstrap(): void {
         mode: 'reply',
         threadId,
         body: notificationReplyText(notification),
+        unsavedBody: true,
       });
-      // The user agreed to the replacement, but the open draft could not be
-      // saved: the reply text exists nowhere else yet.
-      if (opened === 'unsaved') return 'failed';
+      // Nobody answered the replacement question, or the user agreed but the
+      // open draft could not be saved: the reply text exists nowhere else yet.
+      if (opened === 'unsaved' || opened === 'interrupted') return 'failed';
       if (opened !== 'opened') return 'cancelled';
       await backendDismissMobileNotifications([threadId]).catch(() => {});
     }
@@ -582,6 +644,102 @@ export function useAppBootstrap(): void {
   function adoptDisposer(dispose: Disposer) {
     if (bootstrapDisposed) void dispose();
     else eventDisposers.push(dispose);
+  }
+
+  /**
+   * Resume and Android navigation do not depend on the iOS notification lease,
+   * so a failure there must not take them down; neither do they each other.
+   */
+  function registerMobileLifecycleListeners() {
+    mobileVisibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshMobileMailState();
+      }
+    };
+    window.addEventListener('focus', mobileVisibilityHandler);
+    document.addEventListener('visibilitychange', mobileVisibilityHandler);
+    const registrations: { name: string; register: () => Promise<Disposer> }[] = [
+      { name: 'mobile:resumed', register: () => listen('mobile:resumed', () => void refreshMobileMailState()) },
+      {
+        name: 'mobile:notification-navigation',
+        register: () => listen('mobile:notification-navigation', () => void consumePendingMobileNavigation()),
+      },
+    ];
+    for (const entry of registrations) {
+      entry.register().then(adoptDisposer, (error) => {
+        console.warn(`event listener ${entry.name} failed to register`, error);
+      });
+    }
+  }
+
+  async function onNotificationRoute({ payload }: Event<NativeNotificationRoute>) {
+    const listenerId = notificationListenerId;
+    if (bootstrapDisposed || listenerId === null || !payload || payload.listenerId !== listenerId) return;
+    const responseId = payload.responseId;
+    if (typeof responseId !== 'string' || !responseId.trim() || responseId.length > 128) return;
+    const threadId = notificationRouteThreadId(payload);
+    if (!threadId || typeof payload.actionId !== 'string'
+      || !['tap', ...Object.values(MAIL_ACTIONS)].includes(payload.actionId)) return;
+    let work = sharedResponses.get(responseId);
+    if (!work) {
+      // Defer invocation until the promise is registered, for reentrancy.
+      const started = Promise.resolve().then(() => settleNotificationAction(payload, threadId, responseId));
+      sharedResponses.set(responseId, started);
+      // Registered before any joiner awaits it, so a failure is gone
+      // from the map by the time a caller sees it.
+      void started.then(outcome => {
+        if (outcome === 'failed' && sharedResponses.get(responseId) === started) sharedResponses.delete(responseId);
+      });
+      work = started;
+    }
+    // Retain native response/reply text for replay after recreation.
+    if ((await work) === 'failed') return;
+    try {
+      await backendMobileNotificationResponseHandled(responseId);
+    } catch (error) {
+      // Completed work stays deduplicated, so the next delivery re-ACKs.
+      connectionStore.reportBackendError('notifications', error);
+      console.warn('mobile notification acknowledgement failed', error);
+    }
+  }
+
+  let notificationRouteListening = false;
+  let notificationConnection: Promise<void> | null = null;
+  /**
+   * Reserve an iOS listener lease, register the route callback once, then
+   * activate the lease so native replays what it retains. The banner's Retry
+   * runs this again after any step failed; a new lease replaces the old one,
+   * which also replays responses whose ACK was lost.
+   */
+  function connectNotificationRoutes(): Promise<void> {
+    notificationConnection ??= (async () => {
+      try {
+        retireNotificationListener();
+        if (bootstrapDisposed) return;
+        // Reserve before registration, activate only after its callback exists.
+        // A disposed bootstrap retires even a reservation that resolves late.
+        const listenerId = await updateNotificationListener(null, false);
+        notificationListenerId = listenerId;
+        if (bootstrapDisposed) {
+          retireNotificationListener();
+          return;
+        }
+        if (!notificationRouteListening) {
+          adoptDisposer(await listen<NativeNotificationRoute>('mobile:notification-route', onNotificationRoute));
+          notificationRouteListening = true;
+        }
+        if (bootstrapDisposed || notificationListenerId !== listenerId) return;
+        if (listenerId !== null) await updateNotificationListener(listenerId, true);
+        connectionStore.clearBackendError('notifications');
+      } catch (error) {
+        retireNotificationListener();
+        connectionStore.reportBackendError('notifications', error);
+        console.warn('mobile notification bridge failed', error);
+      }
+    })().finally(() => {
+      notificationConnection = null;
+    });
+    return notificationConnection;
   }
 
   async function registerStartupEvents() {
@@ -704,71 +862,8 @@ export function useAppBootstrap(): void {
     void notificationRestore;
 
     if (backendSupportsNativeCommands()) {
-      void (async () => {
-        try {
-          const { listen } = await import('@tauri-apps/api/event');
-          if (bootstrapDisposed) return;
-          // Reserve before registration, activate only after its callback exists.
-          // A disposed bootstrap retires even a reservation that resolves late.
-          notificationListenerId = await updateNotificationListener(null, false);
-          if (bootstrapDisposed) {
-            retireNotificationListener();
-            return;
-          }
-          const listenerId = notificationListenerId;
-          adoptDisposer(await listen<NativeNotificationRoute>('mobile:notification-route', async ({ payload }) => {
-            if (bootstrapDisposed || listenerId === null || !payload || payload.listenerId !== listenerId) return;
-            const responseId = payload.responseId;
-            if (typeof responseId !== 'string' || !responseId.trim() || responseId.length > 128) return;
-            const threadId = notificationRouteThreadId(payload);
-            if (!threadId || typeof payload.actionId !== 'string'
-              || !['tap', ...Object.values(MAIL_ACTIONS)].includes(payload.actionId)) return;
-            try {
-              let work = sharedResponses.get(responseId);
-              if (!work) {
-                // Defer invocation until the promise is registered, for reentrancy.
-                const started = Promise.resolve().then(() => handleNotificationAction(payload, threadId));
-                const forget = () => {
-                  if (sharedResponses.get(responseId) === started) sharedResponses.delete(responseId);
-                };
-                sharedResponses.set(responseId, started);
-                // Registered before any joiner awaits it, so a failure is gone
-                // from the map by the time a caller sees it.
-                void started.then(outcome => { if (outcome === 'failed') forget(); }, forget);
-                work = started;
-              }
-              // Retain native response/reply text for replay after recreation.
-              if ((await work) === 'failed') return;
-              const { emit } = await import('@tauri-apps/api/event');
-              await emit('mobile:notification-response-handled', { responseId });
-            } catch (error) {
-              console.warn('mobile notification action failed', error);
-            }
-          }));
-          adoptDisposer(await listen('mobile:resumed', () => {
-            void refreshMobileMailState();
-          }));
-          adoptDisposer(await listen('mobile:notification-navigation', () => {
-            void consumePendingMobileNavigation();
-          }));
-          if (bootstrapDisposed) return;
-          mobileVisibilityHandler = () => {
-            if (document.visibilityState === 'visible') {
-              void refreshMobileMailState();
-            }
-          };
-          window.addEventListener('focus', mobileVisibilityHandler);
-          document.addEventListener('visibilitychange', mobileVisibilityHandler);
-          if (listenerId !== null) {
-            await updateNotificationListener(listenerId, true);
-            connectionStore.clearBackendError('notifications');
-          }
-        } catch (error) {
-          retireNotificationListener();
-          connectionStore.reportBackendError('notifications', error);
-          console.warn('mobile notification bridge failed', error);
-        }
-      })();
+      registerMobileLifecycleListeners();
+      void connectNotificationRoutes();
     }
 
     // Follow a notification before the full Inbox query. A large local mailbox

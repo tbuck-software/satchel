@@ -15,6 +15,12 @@ export interface ComposerRequest {
   subject?: string;
   body?: string;
   bodyHtml?: string | null;
+  /**
+   * `body` is text the user wrote outside the composer, such as a notification
+   * reply, and exists nowhere else until it is saved. The host asks and saves
+   * it before a replacement, even while the form reports it untouched.
+   */
+  unsavedBody?: boolean;
 }
 
 /** The message key of the heading a composer opened in `mode` carries. */
@@ -28,19 +34,20 @@ export function composerModeTitleKey(mode: ComposerMode) {
 /**
  * The host's answer before an open composer is replaced: `replaced` once it is
  * closed (saved, or pristine), `kept` when it stays by choice, `unsaved` when
- * it had to stay because its draft could not be saved. Only `replaced` lets the
- * new request in.
+ * it had to stay because its draft could not be saved, `interrupted` when
+ * another question took the dialog before anyone answered. Only `replaced`
+ * lets the new request in.
  */
-export type ComposerReplaceOutcome = 'replaced' | 'kept' | 'unsaved';
+export type ComposerReplaceOutcome = 'replaced' | 'kept' | 'unsaved' | 'interrupted';
 
 export type ComposerReplaceGuard = (next: ComposerRequest) => Promise<ComposerReplaceOutcome>;
 
 /**
- * What became of an open request. `focused` found its draft in another window
- * and `superseded` lost to a newer request. `unsaved` is the one failure: the
- * request was accepted, but the open draft could not be saved to make room.
+ * What became of an open request. `focused` found its draft in another window.
+ * `kept` is the user's refusal. Neither `unsaved` (accepted, but the open draft
+ * could not be saved to make room) nor `interrupted` (nobody answered) is.
  */
-export type ComposerOpenOutcome = 'opened' | 'focused' | 'kept' | 'superseded' | 'unsaved';
+export type ComposerOpenOutcome = 'opened' | 'focused' | 'kept' | 'unsaved' | 'interrupted';
 
 export const useComposerStore = defineStore('composer', () => {
   const request = ref<ComposerRequest | null>(null);
@@ -56,7 +63,8 @@ export const useComposerStore = defineStore('composer', () => {
   const isOpen = computed(() => request.value !== null);
 
   let replaceGuard: ComposerReplaceGuard | null = null;
-  let openTicket = 0;
+  /** Settles once every request so far is decided; `null` while idle. */
+  let openTail: Promise<void> | null = null;
 
   function setReplaceGuard(guard: ComposerReplaceGuard): () => void {
     replaceGuard = guard;
@@ -78,10 +86,10 @@ export const useComposerStore = defineStore('composer', () => {
   /**
    * `open`, for a caller that has to tell a refusal from a failure: content
    * that exists nowhere else, such as a notification reply, may only be let go
-   * when the user kept the open draft, not when saving it failed.
+   * when the user kept the open draft. Not when saving it failed, and not when
+   * nobody answered.
    */
-  async function openWithOutcome(next: ComposerRequest = { mode: 'new' }): Promise<ComposerOpenOutcome> {
-    const ticket = ++openTicket;
+  function openWithOutcome(next: ComposerRequest = { mode: 'new' }): Promise<ComposerOpenOutcome> {
     const normalized: ComposerRequest = {
       mode: next.mode,
       threadId: next.threadId ?? null,
@@ -92,7 +100,21 @@ export const useComposerStore = defineStore('composer', () => {
       subject: next.subject ?? '',
       body: next.body ?? '',
       bodyHtml: next.bodyHtml ?? null,
+      ...(next.unsavedBody ? { unsavedBody: true } : {}),
     };
+    // One request at a time, in arrival order. A second one waits for the
+    // answer to the first instead of taking its question away, then meets the
+    // composer that answer left open. An idle store starts at once.
+    const turn = openTail ? openTail.then(() => openNow(normalized)) : openNow(normalized);
+    const tail = turn.then(() => {}, () => {});
+    openTail = tail;
+    void tail.then(() => {
+      if (openTail === tail) openTail = null;
+    });
+    return turn;
+  }
+
+  async function openNow(normalized: ComposerRequest): Promise<ComposerOpenOutcome> {
     // One window per draft: a draft open in a popout is brought forward there.
     if (normalized.draftId && backendCommandsAvailable()) {
       try {
@@ -105,8 +127,6 @@ export const useComposerStore = defineStore('composer', () => {
       const replaced = await replaceGuard(normalized);
       if (replaced !== 'replaced') return replaced;
     }
-    // A newer request arrived while this one waited.
-    if (ticket !== openTicket) return 'superseded';
     request.value = normalized;
     titleOverride.value = '';
     instance.value += 1;
