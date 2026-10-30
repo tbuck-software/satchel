@@ -404,6 +404,20 @@ async function leaveComposer() {
   else await router.push({ name: 'inbox' });
 }
 
+/**
+ * The Outbox action after a scheduled draft failed to load, when nothing
+ * loaded could be saved. The embedded composer is a modal over the mailbox
+ * and closes first. Its local backup stays, so text typed since is offered
+ * again.
+ */
+async function leaveForOutbox() {
+  if (props.embedded) {
+    await closeGuardWithoutSaving();
+    emit('close');
+  }
+  await router.push({ name: 'outbox' });
+}
+
 const sendBlocker = computed(() => composerSendBlocker({
   initialized: initialized.value,
   sending: sending.value,
@@ -688,7 +702,7 @@ onMounted(async () => {
       status.value = { tone: 'error', text };
       // A popout has no mailbox to route into; the message names the place.
       toast.error(text, queuedDraftNeedsOutbox(err) && !isPopout() ? {
-        action: { label: t('nav.folders.outbox'), handler: () => router.push({ name: 'outbox' }) },
+        action: { label: t('nav.folders.outbox'), handler: leaveForOutbox },
       } : undefined);
       draftLoadFailed.value = fromDraft;
     }

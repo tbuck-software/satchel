@@ -448,6 +448,8 @@ describe('composer setup', () => {
       } else {
         expect(options?.action?.label).toBe('Outbox');
         await options!.action!.handler();
+        // The embedded composer is a modal dialog; left open, it covers the Outbox.
+        expect(wrapper.emitted('close')).toHaveLength(1);
         expect(harness.push).toHaveBeenCalledWith({ name: 'outbox' });
       }
     } finally {
