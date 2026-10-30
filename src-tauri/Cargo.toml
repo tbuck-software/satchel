@@ -19,7 +19,7 @@ ipc-types = ["dep:ts-rs", "satchel-core/ipc-types"]
 [dependencies]
 async-trait = "0.1"
 satchel-core = { path = "../crates/satchel-core" }
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 futures = "0.3"

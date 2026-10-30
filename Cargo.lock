@@ -6133,7 +6133,7 @@ name = "satchel"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "block2",
  "chrono",
  "dns-lookup",
@@ -6201,7 +6201,7 @@ dependencies = [
  "argon2",
  "async-imap",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "chrono",
  "chrono-tz",
