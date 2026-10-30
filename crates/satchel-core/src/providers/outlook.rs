@@ -1756,7 +1756,7 @@ fn map_graph_message(message: GraphMessage) -> MessageEnvelope {
         };
     }
 
-    let attachments = message
+    let mut attachments = message
         .attachments
         .unwrap_or_default()
         .into_iter()
@@ -1794,6 +1794,11 @@ fn map_graph_message(message: GraphMessage) -> MessageEnvelope {
         });
     trust.auth_verified = auth_spf.is_some() || auth_dkim.is_some() || auth_dmarc.is_some();
     let pgp_signed = raw_body.and_then(|parsed| parsed.pgp_signed);
+    super::imap::drop_signature_parts(
+        &mut attachments,
+        &trust,
+        &header_value("Content-Type").unwrap_or_default(),
+    );
 
     MessageEnvelope {
         remote_id: remote_id.clone(),
@@ -2143,6 +2148,36 @@ mod tests {
 
         assert!(mapped.smime_signed.is_some());
         assert!(mapped.pgp_signed.is_none());
+    }
+
+    /// Graph lists the signature part as an attachment. Its headers are not
+    /// signed, so they must not add one to a message shown with a signature.
+    #[test]
+    fn a_signed_root_drops_the_signature_part_graph_lists() {
+        let mut graph: GraphMessage = serde_json::from_value(serde_json::json!({
+            "id": "signed-message",
+            "from": { "emailAddress": { "address": "gpg-fixture@example.test" } },
+            "internetMessageHeaders": [{
+                "name": "Content-Type",
+                "value": "multipart/signed; micalg=pgp-sha256; protocol=\"application/pgp-signature\"; boundary=\"Apple-Mail=_4B1E2C3D-5F60-4A7B-8C9D-0E1F2A3B4C5D\""
+            }],
+            "attachments": [{
+                "id": "sig-part",
+                "name": "Invoice.pdf",
+                "contentType": "application/pgp-signature",
+                "size": 99
+            }]
+        }))
+        .unwrap();
+        graph.raw_mime = Some(
+            include_bytes!("../../tests/corpus/pgp-mime/forged-signature-part-attachment.eml")
+                .to_vec(),
+        );
+
+        let mapped = map_graph_message(graph);
+
+        assert!(mapped.trust.root_crypto);
+        assert!(mapped.attachments.is_empty(), "{:?}", mapped.attachments);
     }
 
     #[test]

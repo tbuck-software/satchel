@@ -102,18 +102,30 @@ pub struct SmimeVerifyMessageResult {
     pub signer_email: Option<String>,
     pub signer_cn: Option<String>,
     pub error_detail: Option<String>,
+    /// What an opaque signature encapsulates, as the engine verified it.
+    #[serde(skip)]
+    pub content: Option<Vec<u8>>,
 }
 
 impl SmimeVerifyMessageResult {
     /// No verdict: the structure does not tie the signature to what is shown.
     pub fn malformed() -> Self {
+        Self::without_verdict("backend.errors.signedMessageMalformed")
+    }
+
+    /// No verdict: the signed content cannot be shown, so nothing else may be
+    /// shown in its place under the signature.
+    pub fn content_unavailable() -> Self {
+        Self::without_verdict("backend.errors.signedContentUnavailable")
+    }
+
+    fn without_verdict(key: &str) -> Self {
         Self {
             state: "error".to_string(),
             signer_email: None,
             signer_cn: None,
-            error_detail: Some(
-                CommandError::new("backend.errors.signedMessageMalformed").encoded(),
-            ),
+            error_detail: Some(CommandError::new(key).encoded()),
+            content: None,
         }
     }
 }
@@ -538,6 +550,7 @@ pub async fn verify_smime_message(
                 signer_email: result.signer.as_ref().and_then(|m| m.subject_email.clone()),
                 signer_cn: result.signer.as_ref().and_then(|m| m.subject_cn.clone()),
                 error_detail: result.error,
+                content: result.content,
             }
         }
         Err(err) => SmimeVerifyMessageResult {
@@ -545,6 +558,7 @@ pub async fn verify_smime_message(
             signer_email: None,
             signer_cn: None,
             error_detail: Some(err),
+            content: None,
         },
     }
 }
@@ -842,6 +856,7 @@ mod tests {
             signer_cert_pem: None,
             signer: None,
             error: None,
+            content: None,
         }
     }
 

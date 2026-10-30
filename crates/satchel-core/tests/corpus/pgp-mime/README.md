@@ -14,6 +14,9 @@ key. A signature only counts if what is displayed is the entity it verifies.
 | `preamble-and-epilogue.eml` | Both optional areas filled, SHA-512, no empty line before the close delimiter |
 | `nested-prefix-boundary.eml` | The inner boundary extends the outer one (`=_b_1`, `=_b_12`) |
 | `forged-*.eml` | Structures in which the displayed part and the signed part could differ |
+| `forged-unrecognised-protocol.eml`, `forged-missing-protocol.eml` | A root without a known protocol around a genuinely signed part |
+| `forged-signature-part-attachment.eml` | A genuine signature whose part names itself an attachment |
+| `forged-duplicate-signature-type.eml` | A signature part that names its type twice |
 
 The forged messages reuse a genuine entity and signature from the fixtures
 above. They must never show a valid signature over what they display.

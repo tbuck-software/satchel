@@ -240,6 +240,12 @@ pub struct MessageTrust {
     pub root_encryption: bool,
     #[serde(default)]
     pub root_inline_signature: bool,
+    /// The root is `multipart/signed`, and the strict splitter wrote the
+    /// stored body as the display of its signed entity, together with the
+    /// bundle. Rows without it predate that splitter; their stored body is
+    /// never shown under the signature.
+    #[serde(default)]
+    pub signed_binding: bool,
     /// Header verdicts came through the receiving provider's trust boundary.
     #[serde(default)]
     pub auth_verified: bool,

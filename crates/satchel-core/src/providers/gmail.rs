@@ -2184,7 +2184,7 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         };
         body.calendar = parsed.calendar.clone().or(body.calendar);
     }
-    let attachments = extract_attachments(&payload);
+    let mut attachments = extract_attachments(&payload);
     let snippet = decode_html_entities(&decode_mime_encoded_words(
         message
             .snippet
@@ -2228,6 +2228,11 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         });
     trust.auth_verified = auth_spf.is_some() || auth_dkim.is_some() || auth_dmarc.is_some();
     let pgp_signed = raw_body.and_then(|parsed| parsed.pgp_signed);
+    super::imap::drop_signature_parts(
+        &mut attachments,
+        &trust,
+        &header_value(&headers, "Content-Type").unwrap_or_default(),
+    );
 
     MessageEnvelope {
         remote_id: message.id,
@@ -2577,10 +2582,10 @@ mod tests {
     use super::{
         build_gmail_raw_message, cost, decode_gmail_part, gmail_message_needs_raw_crypto,
         gmail_move_label_changes, is_rate_limited, map_gmail_message, rate_limit_delay,
-        BackfillStep, GmailCursorState, GmailHeader, GmailHistoryResponse, GmailMessageResponse,
-        GmailPayload, GmailProvider, Priority, QuotaPacer, BACKGROUND_COOLDOWN,
-        BACKGROUND_UNITS_PER_SECOND, BLOCK_LAPSE_MARGIN, MAX_BLOCK_WAIT, MAX_RATE_LIMIT_WAIT,
-        QUOTA_BURST_UNITS, QUOTA_UNITS_PER_SECOND, REPEAT_BLOCK_WINDOW,
+        BackfillStep, GmailBody, GmailCursorState, GmailHeader, GmailHistoryResponse,
+        GmailMessageResponse, GmailPayload, GmailProvider, Priority, QuotaPacer,
+        BACKGROUND_COOLDOWN, BACKGROUND_UNITS_PER_SECOND, BLOCK_LAPSE_MARGIN, MAX_BLOCK_WAIT,
+        MAX_RATE_LIMIT_WAIT, QUOTA_BURST_UNITS, QUOTA_UNITS_PER_SECOND, REPEAT_BLOCK_WINDOW,
     };
     use crate::providers::traits::{MessageRef, OutgoingMessage, SyncCheckpoint};
     use base64::Engine;
@@ -2711,6 +2716,58 @@ mod tests {
 
         assert!(mapped.smime_signed.is_some());
         assert!(mapped.pgp_signed.is_none());
+    }
+
+    /// Gmail lists every part with an attachment id, the signature part too.
+    /// Its headers are not signed, so they must not add an attachment to a
+    /// message shown with a signature.
+    #[test]
+    fn a_signed_root_drops_the_signature_part_gmail_lists() {
+        let raw =
+            include_bytes!("../../tests/corpus/pgp-mime/forged-signature-part-attachment.eml");
+        let mut payload = payload_with_headers(
+            "multipart/signed",
+            &[(
+                "Content-Type",
+                "multipart/signed; micalg=pgp-sha256; protocol=\"application/pgp-signature\"; boundary=\"Apple-Mail=_4B1E2C3D-5F60-4A7B-8C9D-0E1F2A3B4C5D\"",
+            )],
+        );
+        let part =
+            |mime_type: &str, filename: Option<&str>, attachment_id: Option<&str>| GmailPayload {
+                filename: filename.map(str::to_string),
+                mime_type: Some(mime_type.to_string()),
+                headers: None,
+                body: Some(GmailBody {
+                    data: None,
+                    attachment_id: attachment_id.map(str::to_string),
+                    size: Some(99),
+                }),
+                parts: None,
+            };
+        payload.parts = Some(vec![
+            part("text/plain", None, None),
+            part(
+                "application/pgp-signature",
+                Some("Invoice.pdf"),
+                Some("sig-part"),
+            ),
+        ]);
+        let message = GmailMessageResponse {
+            id: "signed-message".to_string(),
+            thread_id: None,
+            history_id: None,
+            label_ids: None,
+            snippet: None,
+            internal_date: None,
+            payload: Some(payload),
+            raw: Some(base64url(raw)),
+        };
+
+        let mapped = map_gmail_message(message);
+
+        assert!(mapped.trust.root_crypto);
+        assert!(mapped.pgp_signed.is_some());
+        assert!(mapped.attachments.is_empty(), "{:?}", mapped.attachments);
     }
 
     #[test]

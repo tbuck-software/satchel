@@ -3,12 +3,16 @@
 //! the legitimate fixture must verify over exactly its displayed entity, the
 //! forged ones never over what they display.
 
-use satchel_core::email::sanitizer::sanitize_email_html;
-use satchel_core::email::signed_mime::{stored_body_matches, SignedMimeError};
+use satchel_core::email::signed_mime::{
+    display_entity, stored_signed_body, EntityDisplay, StoredSignedBody,
+};
 use satchel_core::providers::imap::{parse_header_value, parse_raw_message_body, ParsedBody};
+use satchel_core::providers::traits::MessageTrust;
 use satchel_core::utils::smime_engine;
 
 const SIGNED: &[u8] = include_bytes!("corpus/smime-signed/detached-signed.eml");
+const SIGNED_HTML: &[u8] = include_bytes!("corpus/smime-signed/detached-signed-html.eml");
+const OPAQUE: &[u8] = include_bytes!("corpus/smime-signed/opaque-signed.eml");
 const FORGED: &[(&str, &[u8])] = &[
     (
         "forged-quoted-boundary",
@@ -25,6 +29,14 @@ const FORGED: &[(&str, &[u8])] = &[
     (
         "forged-bare-cr",
         include_bytes!("corpus/smime-signed/forged-bare-cr.eml"),
+    ),
+    (
+        "forged-missing-protocol",
+        include_bytes!("corpus/smime-signed/forged-missing-protocol.eml"),
+    ),
+    (
+        "forged-html-link-swapped",
+        include_bytes!("corpus/smime-signed/forged-html-link-swapped.eml"),
     ),
 ];
 
@@ -59,6 +71,18 @@ fn detached_smime_signature_verifies_over_the_displayed_entity() {
 }
 
 #[test]
+fn detached_smime_html_verifies_over_the_displayed_entity() {
+    let parsed = parse_raw_message_body(SIGNED_HTML);
+    assert!(parsed.trust.root_crypto && parsed.trust.signed_binding);
+    assert!(parsed
+        .html
+        .as_deref()
+        .is_some_and(|html| html.contains("https://bank.example/invoice/42")));
+    let bundle = parsed.smime_signed.as_deref().unwrap();
+    assert!(signature_holds(bundle));
+}
+
+#[test]
 fn forged_smime_mail_never_verifies_over_what_it_displays() {
     for (name, raw) in FORGED {
         let parsed = parse_raw_message_body(raw);
@@ -78,33 +102,84 @@ fn forged_smime_mail_never_verifies_over_what_it_displays() {
         let content_type = parse_header_value(header, "Content-Type").unwrap();
         let stored = format!("Content-Type: {content_type}\r\n\r\n{body}");
         assert!(!signature_holds(stored.as_bytes()), "{name}: stored bundle");
+        // Neither does a signature found further down: it is no root's.
+        if parsed.smime_signed.is_none() {
+            assert!(!parsed.trust.root_crypto, "{name}");
+        }
     }
 }
 
 #[test]
-fn a_stored_row_keeps_its_signature_only_over_the_entity_it_shows() {
-    let parsed = parse_raw_message_body(SIGNED);
+fn a_stored_row_shows_exactly_the_entity_its_bundle_signs() {
+    for raw in [SIGNED, SIGNED_HTML] {
+        let parsed = parse_raw_message_body(raw);
+        let bundle = parsed.smime_signed.as_deref().unwrap();
+        let entity = StoredSignedBody::Entity(EntityDisplay {
+            text: parsed.text.clone(),
+            html: parsed.html.clone(),
+        });
+        assert_eq!(
+            stored_signed_body(bundle, &parsed.trust, true),
+            Ok(StoredSignedBody::Stored)
+        );
+        assert_eq!(
+            stored_signed_body(bundle, &parsed.trust, false),
+            Ok(entity.clone())
+        );
+        let legacy = MessageTrust {
+            signed_binding: false,
+            ..parsed.trust.clone()
+        };
+        assert_eq!(stored_signed_body(bundle, &legacy, true), Ok(entity));
+    }
+
+    // A row an older parser stored for the forged root: shown from its
+    // bundle, the genuine HTML with the genuine link.
+    let (_, forged) = FORGED
+        .iter()
+        .find(|(name, _)| *name == "forged-html-link-swapped")
+        .unwrap();
+    let forged = std::str::from_utf8(forged).unwrap();
+    let nested = forged
+        .find("--OUT\r\nContent-Type: multipart/signed")
+        .unwrap()
+        + 7;
+    let bundle = &forged.as_bytes()[nested..forged.rfind("\r\n--OUT--").unwrap()];
+    let trust: MessageTrust = serde_json::from_str(r#"{"root_crypto":true}"#).unwrap();
+    let Ok(StoredSignedBody::Entity(shown)) = stored_signed_body(bundle, &trust, true) else {
+        panic!("legacy row not shown from its bundle");
+    };
+    let html = shown.html.unwrap_or_default();
+    assert!(html.contains("https://bank.example/invoice/42"), "{html}");
+    assert!(!html.contains("evil.example"));
+}
+
+#[test]
+fn opaque_smime_shows_the_content_the_signature_holds() {
+    let parsed = parse_raw_message_body(OPAQUE);
+    assert!(parsed.trust.root_crypto);
     let bundle = parsed.smime_signed.as_deref().unwrap();
-    // As ingest stores the row, and as body reloads rewrite it.
     assert_eq!(
-        stored_body_matches(bundle, parsed.text.as_deref(), None),
-        Ok(())
+        stored_signed_body(bundle, &parsed.trust, false),
+        Ok(StoredSignedBody::Encapsulated)
     );
-    // A row an older parser filled from another part.
+    let result = smime_engine::verify(bundle).unwrap();
+    assert!(result.valid, "{:?}", result.error);
+    let content = result.content.expect("verified content");
     assert_eq!(
-        stored_body_matches(
-            bundle,
-            Some("Forged text: the contract terms have changed."),
-            None
-        ),
-        Err(SignedMimeError::StoredBodyMismatch)
+        display_entity(&content).text.as_deref(),
+        Some("The opaque contract text is signed as a whole.")
     );
-    assert_eq!(
-        stored_body_matches(
-            bundle,
-            parsed.text.as_deref(),
-            Some(&sanitize_email_html("<p>Forged text</p>"))
-        ),
-        Err(SignedMimeError::StoredBodyMismatch)
-    );
+
+    // A changed byte inside the content is no longer what was signed.
+    let tampered = bundle
+        .windows(6)
+        .position(|window| window == b"opaque")
+        .map(|at| {
+            let mut copy = bundle.to_vec();
+            copy[at] = b'O';
+            copy
+        })
+        .unwrap();
+    assert!(!smime_engine::verify(&tampered).unwrap().valid);
 }

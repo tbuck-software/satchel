@@ -1104,6 +1104,73 @@ describe('a message whose full body is not stored', () => {
     loadBodyMock.mockReset();
   });
 
+  /**
+   * The backend shows a signed message's body from what its signature covers.
+   * When that is nothing, nothing else may appear under the signature card.
+   */
+  it('never fills an empty signed body with the snippet or the subject', async () => {
+    previewMock.mockResolvedValue([
+      backendMessage({ id: 'm-opaque', subject: 'Wire the funds today' }),
+    ] as never);
+    bodiesMock.mockResolvedValue([
+      {
+        ...inlineBody(''),
+        id: 'm-opaque',
+        snippet: 'Wire the funds today',
+        body_text: '',
+        body_html: null,
+        body_loaded: true,
+        smime_state: 'error',
+        smime_error_detail: '{"key":"backend.errors.signedContentUnavailable","params":{}}',
+      },
+    ] as never);
+
+    const store = useMessagesStore();
+    await store.loadByThread('th-live');
+
+    const message = store.messagesByThread['th-live']?.[0];
+    expect(message?.smime?.state).toBe('error');
+    expect(message?.bodyText).toBe('');
+    // The backend has settled the body; a server copy would not be covered.
+    expect(loadBodyMock).not.toHaveBeenCalled();
+  });
+
+  /** A verdict belongs to the body it was computed for, not a fetched one. */
+  it('reads a fetched signed body back with its own verdict', async () => {
+    previewMock.mockResolvedValue([backendMessage({ id: 'm-evicted' })] as never);
+    const rows = [
+      { body_text: '', pgp_state: 'signature_partial' },
+      { body_text: 'Body as stored now', pgp_state: 'signature_invalid' },
+    ];
+    let reads = 0;
+    bodiesMock.mockImplementation(async () => [
+      {
+        ...inlineBody(''),
+        ...rows[Math.min(reads++, rows.length - 1)],
+        id: 'm-evicted',
+        snippet: '',
+        body_html: null,
+        body_loaded: false,
+      },
+    ] as never);
+    loadBodyMock.mockResolvedValue({
+      body_text: 'Body from the server',
+      body_html: null,
+      fetched: true,
+    });
+
+    const store = useMessagesStore();
+    await store.loadByThread('th-live');
+
+    await vi.waitFor(() =>
+      expect(store.messagesByThread['th-live']?.[0]?.pgp?.state).toBe('signature_invalid'),
+    );
+    const message = store.messagesByThread['th-live']?.[0];
+    expect(message?.bodyText).toBe('Body as stored now');
+    expect(message?.bodyLoaded).toBe(true);
+    expect(bodiesMock).toHaveBeenLastCalledWith(['m-evicted']);
+  });
+
   it('fetches it from the server and shows it', async () => {
     previewMock.mockResolvedValue([backendMessage({ id: 'm-old' })] as never);
     bodiesMock.mockResolvedValue([

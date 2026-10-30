@@ -137,17 +137,13 @@ pub(crate) async fn load_message_body_with_pools(
             .await
             .map_err(|error| error.to_string())?;
 
-    sqlx::query(
-        "UPDATE messages
-         SET body_text = ?, body_html = ?, original_body_html = ?, updated_at = ?
-         WHERE id = ?",
+    store_fetched_body(
+        write,
+        message_id,
+        &body_text,
+        body_html.as_deref(),
+        original_body_html.as_deref(),
     )
-    .bind(&body_text)
-    .bind(&body_html)
-    .bind(&original_body_html)
-    .bind(chrono::Utc::now().to_rfc3339())
-    .bind(message_id)
-    .execute(write)
     .await
     .map_err(|err| err.to_string())?;
 
@@ -156,6 +152,36 @@ pub(crate) async fn load_message_body_with_pools(
         body_html,
         fetched: true,
     })
+}
+
+/// Write a body fetched on its own into the existing row.
+///
+/// The row's signature bundle is not refetched with it, so the body is no
+/// longer the one the strict splitter wrote with that bundle: the binding mark
+/// goes, and a signature verdict shows the bundle's own entity from now on.
+async fn store_fetched_body(
+    write: &SqlitePool,
+    message_id: &str,
+    body_text: &str,
+    body_html: Option<&str>,
+    original_body_html: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE messages
+         SET body_text = ?, body_html = ?, original_body_html = ?, updated_at = ?,
+             trust_metadata = CASE WHEN json_valid(trust_metadata)
+                 THEN json_set(trust_metadata, '$.signed_binding', json('false'))
+                 ELSE trust_metadata END
+         WHERE id = ?",
+    )
+    .bind(body_text)
+    .bind(body_html)
+    .bind(original_body_html)
+    .bind(chrono::Utc::now().to_rfc3339())
+    .bind(message_id)
+    .execute(write)
+    .await?;
+    Ok(())
 }
 
 /// Whether the row already carries something worth showing.
@@ -180,7 +206,47 @@ fn has_body(target: &BodyTarget) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{has_body, BodyTarget};
+    use super::{has_body, store_fetched_body, BodyTarget};
+
+    #[tokio::test]
+    async fn a_body_fetched_on_its_own_loses_the_signed_binding() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .unwrap();
+        for sql in [
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at) VALUES ('a', 'Account', 'me@example.test', 'imap', '{}', '', '', '')",
+            "INSERT INTO folders (id, account_id, name, full_path, folder_type, created_at, updated_at) VALUES ('f', 'a', 'Inbox', 'Inbox', 'inbox', '', '')",
+            r#"INSERT INTO messages (id, account_id, folder_id, from_address, to_addresses, date, trust_metadata, created_at, updated_at) VALUES ('signed', 'a', 'f', 'a@example.test', '[]', '', '{"root_crypto":true,"signed_binding":true}', '', ''), ('plain', 'a', 'f', 'a@example.test', '[]', '', NULL, '', '')"#,
+        ] {
+            sqlx::query(sql).execute(&pool).await.unwrap();
+        }
+
+        for id in ["signed", "plain"] {
+            store_fetched_body(&pool, id, "Fetched", None, None)
+                .await
+                .unwrap();
+        }
+        let signed: String =
+            sqlx::query_scalar("SELECT trust_metadata FROM messages WHERE id = 'signed'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let trust: crate::providers::traits::MessageTrust = serde_json::from_str(&signed).unwrap();
+        assert!(trust.root_crypto);
+        assert!(!trust.signed_binding);
+        let plain: (String, Option<String>) =
+            sqlx::query_as("SELECT body_text, trust_metadata FROM messages WHERE id = 'plain'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(plain, ("Fetched".to_string(), None));
+    }
 
     fn target(provider: &str, body_html: Option<String>) -> BodyTarget {
         BodyTarget {

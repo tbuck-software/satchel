@@ -337,6 +337,7 @@
       "signaturePersistenceFailed": "Signatures are currently unavailable. Please try again.",
       "signatureSuggestionStatusInvalid": "Choose a valid signature suggestion status.",
       "signatureVariantInvalid": "Choose a valid signature variant.",
+      "signedContentUnavailable": "The signed content of this message cannot be shown, so its signature is not shown either.",
       "signedMessageMalformed": "The signature cannot be checked because the message structure does not tie it to the displayed content.",
       "smartFolderPersistenceFailed": "The smart folder could not be saved. Please try again.",
       "smimeCertificateExists": "This S/MIME certificate has already been imported.",

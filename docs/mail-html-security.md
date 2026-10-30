@@ -40,3 +40,40 @@ fingerprints replace stale per-message entries when bodies, signatures, sender
 identity or verification keys change. S/MIME includes local certificate and
 trust-origin data; the expiry bounds changes to the operating-system trust
 store and certificate validity between calls.
+
+## Signed mail
+
+A signature state only appears over the bytes it was verified on. For
+`multipart/signed`, `email::signed_mime` is the one splitter for display and
+verification. A container it does not take, because the protocol is missing
+or unknown or the structure is ambiguous, is shown unsigned. That container
+never takes over a signature from a nested part either. A signature below the
+root only ever gives a partial state.
+
+Stored rows show their verdict by construction, not by comparison:
+
+- Ingest marks a root that the strict splitter wrote together with its bundle
+  (`MessageTrust::signed_binding`). Only such a row shows its stored body under
+  the signature.
+- Every other root-signed row shows the entity decoded from its stored bundle,
+  the same bytes verification reads. This covers rows from before the marker,
+  evicted bodies, and bodies rewritten later (body fetch, legacy repair, both
+  of which drop the marker). If the bundle does not split, no verdict is shown.
+- Opaque S/MIME (`application/pkcs7-mime`, signed-data) shows the content the
+  engine read while verifying. Without that content there is no body and no
+  verdict, never the stored body, the snippet or the subject. A body fetched
+  later is read back through the same path before a verdict sits next to it.
+
+Attachments next to a root signature:
+
+- IMAP, POP3 and imported mail list them from the signed entity as the
+  splitter cut it; part numbers resolve the same way when the bytes are
+  fetched.
+- The signature part's headers are not signed. A part of a signature type, or
+  of the type the root declares as its `protocol`, is never offered. That
+  applies to provider lists, the IMAP fallback parser, and rows an older sync
+  stored.
+- Residual gap: Gmail and Outlook list the remaining attachments from their
+  own MIME parse and serve the bytes by their own part id. Those bytes are not
+  checked against the signed entity. A provider that splits a message
+  differently from Satchel could offer a part the signature does not cover.

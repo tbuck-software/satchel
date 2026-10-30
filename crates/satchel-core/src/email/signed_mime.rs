@@ -3,13 +3,14 @@
 //! A signature only vouches for the bytes the reader is shown. Display and
 //! verification therefore take the signed entity from this one splitter, and
 //! it refuses any structure that another MIME reader could split differently:
-//! a signature part known only by a secondary header, a parameter list that
-//! parses two ways, a delimiter-like line outside the signed entity. A refused
-//! structure carries no signature state at all.
+//! a signature part known only by a secondary header or named twice, a
+//! parameter list that parses two ways, a delimiter-like line outside the
+//! signed entity. A refused structure carries no signature state at all.
 
 use std::borrow::Cow;
 
 use crate::providers::imap::{extract_header_param, parse_header_value, parse_raw_header_value};
+use crate::providers::traits::MessageTrust;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignedProtocol {
@@ -69,7 +70,7 @@ pub enum SignedMimeError {
     PartCount(usize),
     #[error("a line outside the signed entity starts like a delimiter")]
     AmbiguousDelimiter,
-    #[error("the signature part is not of the declared protocol")]
+    #[error("the signature part is not unambiguously of the declared protocol")]
     SignatureType,
     #[error("the signed message exceeds the size limit")]
     TooLarge,
@@ -77,8 +78,6 @@ pub enum SignedMimeError {
     MissingArmor,
     #[error("the S/MIME signed entity has a carriage return outside a line break")]
     BareCarriageReturn,
-    #[error("the stored body is not what the signed entity displays")]
-    StoredBodyMismatch,
 }
 
 /// Split a `multipart/signed` body under the given content type.
@@ -135,9 +134,13 @@ pub fn split<'a>(content_type: &str, body: &'a [u8]) -> Result<SignedParts<'a>, 
 
     let signature = &body[second.next_line..signature_end];
     let (signature_header, _) = entity_header_and_body(signature);
-    let signature_type =
-        parse_header_value(&String::from_utf8_lossy(signature_header), "Content-Type")
-            .unwrap_or_default();
+    let signature_header = String::from_utf8_lossy(signature_header);
+    // A reader that takes another of several types sees another part, one
+    // that may name itself an attachment.
+    if header_count(&signature_header, "Content-Type") > 1 {
+        return Err(SignedMimeError::SignatureType);
+    }
+    let signature_type = parse_header_value(&signature_header, "Content-Type").unwrap_or_default();
     let signature_media = signature_type
         .split(';')
         .next()
@@ -167,49 +170,92 @@ pub fn split_bundle(bundle: &[u8]) -> Result<SignedParts<'_>, SignedMimeError> {
     split(&content_type, body)
 }
 
-/// Whether a stored row still shows exactly the entity its stored bundle signs.
+/// The text and HTML a signed entity displays.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EntityDisplay {
+    pub text: Option<String>,
+    pub html: Option<String>,
+}
+
+/// What a signed entity displays, decoded the way ingest decodes the body of a
+/// `multipart/signed` message.
+pub fn display_entity(entity: &[u8]) -> EntityDisplay {
+    let shown = crate::providers::imap::display_signed_entity(entity, 1);
+    EntityDisplay {
+        text: shown.text,
+        html: shown.html,
+    }
+}
+
+/// Where the body shown under a stored row's signature comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoredSignedBody {
+    /// The row's own body, which the strict splitter wrote with the bundle.
+    Stored,
+    /// The bundle's signed entity: the bytes verification reads.
+    Entity(EntityDisplay),
+    /// Opaque S/MIME: the content travels inside the signature, and only
+    /// the engine's verification extracts it.
+    Encapsulated,
+}
+
+/// How a stored row shows what its bundle signs.
 ///
-/// Rows synced before this splitter existed keep the body an older parser
-/// chose. Their signature only stands if that body is what the strictly split
-/// entity displays now: the same words in the text, and the same visible words
-/// in the HTML once both are sanitized the way ingest stores HTML.
-pub fn stored_body_matches(
+/// Only a row the strict splitter wrote together with its bundle keeps its
+/// stored body. Any other root-signed row, stored before the splitter existed
+/// or with its body evicted since, shows the entity decoded from the bundle,
+/// so what is displayed is what is verified. A signature below the root only
+/// ever reaches a partial state; such a row keeps the body of the whole
+/// message.
+pub fn stored_signed_body(
     bundle: &[u8],
-    body_text: Option<&str>,
-    body_html: Option<&str>,
-) -> Result<(), SignedMimeError> {
-    let parts = split_bundle(bundle)?;
-    let shown = crate::providers::imap::display_signed_entity(parts.entity, 1);
-    let shown_html = shown
-        .html
-        .as_deref()
-        .map(crate::email::sanitizer::sanitize_email_html);
-    let same_text =
-        words(body_text.unwrap_or_default()).eq(words(shown.text.as_deref().unwrap_or_default()));
-    let same_html = visible_words(body_html.unwrap_or_default())
-        == visible_words(shown_html.as_deref().unwrap_or_default());
-    if same_text && same_html {
-        Ok(())
-    } else {
-        Err(SignedMimeError::StoredBodyMismatch)
+    trust: &MessageTrust,
+    has_stored_body: bool,
+) -> Result<StoredSignedBody, SignedMimeError> {
+    if !trust.root_crypto {
+        return Ok(StoredSignedBody::Stored);
+    }
+    match split_bundle(bundle) {
+        Err(SignedMimeError::NotSigned) => Ok(StoredSignedBody::Encapsulated),
+        Err(error) => Err(error),
+        Ok(_) if trust.signed_binding && has_stored_body => Ok(StoredSignedBody::Stored),
+        Ok(parts) => Ok(StoredSignedBody::Entity(display_entity(parts.entity))),
     }
 }
 
-fn words(text: &str) -> std::str::SplitWhitespace<'_> {
-    text.split_whitespace()
+/// The media types a signature part carries.
+pub fn is_signature_media_type(content_type: &str) -> bool {
+    let media_type = content_type.split(';').next().unwrap_or_default().trim();
+    [
+        "application/pgp-signature",
+        "application/pkcs7-signature",
+        "application/x-pkcs7-signature",
+    ]
+    .iter()
+    .any(|signature| media_type.eq_ignore_ascii_case(signature))
 }
 
-/// The words of sanitized HTML with its tags taken out.
-fn visible_words(html: &str) -> Vec<&str> {
-    let mut words = Vec::new();
-    let mut rest = html;
-    while !rest.is_empty() {
-        let text_end = rest.find('<').unwrap_or(rest.len());
-        words.extend(rest[..text_end].split_whitespace());
-        rest = &rest[text_end..];
-        rest = rest.find('>').map_or("", |tag_end| &rest[tag_end + 1..]);
-    }
-    words
+/// Whether a part of a message under `root_content_type` is, by its type, a
+/// signature part: one of the signature types, or the root's declared
+/// `protocol`. Its headers are not signed.
+pub fn is_signature_part(content_type: &str, root_content_type: &str) -> bool {
+    let media_type = content_type.split(';').next().unwrap_or_default().trim();
+    is_signature_media_type(media_type)
+        || extract_header_param(root_content_type, "protocol")
+            .is_some_and(|protocol| protocol.trim().eq_ignore_ascii_case(media_type))
+}
+
+/// How many header fields of this name the block holds; continuation lines
+/// belong to the field above them.
+fn header_count(header: &str, name: &str) -> usize {
+    header
+        .lines()
+        .filter(|line| !line.starts_with([' ', '\t']))
+        .filter(|line| {
+            line.split_once(':')
+                .is_some_and(|(field, _)| field.trim().eq_ignore_ascii_case(name))
+        })
+        .count()
 }
 
 fn has_bare_carriage_return(entity: &[u8]) -> bool {
@@ -512,6 +558,18 @@ mod tests {
             split(&smime, self::body("\r\n").as_bytes()),
             Err(SignedMimeError::SignatureType)
         );
+        // A reader that takes the second type sees another part entirely.
+        for doubled in [
+            "Content-Type: application/pgp-signature\r\nContent-Type: application/pdf",
+            "Content-Type: application/pgp-signature\r\ncontent-type:application/pgp-signature",
+        ] {
+            let body = format!("--b\r\n{ENTITY}\r\n--b\r\n{doubled}\r\n\r\nsig\r\n--b--\r\n");
+            assert_eq!(
+                split(PGP, body.as_bytes()),
+                Err(SignedMimeError::SignatureType),
+                "{doubled:?}"
+            );
+        }
         let folded = "Content-Disposition: attachment;\r\n\tfilename=signature.asc\r\n\
                       Content-Type: application/pgp-signature;\r\n\tname=signature.asc\r\n\r\nsig";
         let body = format!("--b\r\n{ENTITY}\r\n--b\r\n{folded}\r\n--b--\r\n");

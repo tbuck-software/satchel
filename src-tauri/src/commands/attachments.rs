@@ -63,7 +63,19 @@ async fn attachments_for_messages(
         for id in chunk {
             ids.push_bind(id);
         }
-        query.push(") ORDER BY message_id, filename");
+        // Next to a root signature, a part of a signature type is the
+        // signature part: its headers are not signed and name nothing to open.
+        // Rows an older sync stored for it stay hidden.
+        query.push(
+            ") AND NOT (
+                 LOWER(content_type) IN ('application/pgp-signature',
+                     'application/pkcs7-signature', 'application/x-pkcs7-signature')
+                 AND EXISTS (SELECT 1 FROM messages m
+                     WHERE m.id = attachments.message_id
+                       AND json_valid(m.trust_metadata)
+                       AND json_extract(m.trust_metadata, '$.root_crypto'))
+             ) ORDER BY message_id, filename",
+        );
         rows.extend(
             query
                 .build_query_as::<AttachmentDto>()
@@ -784,14 +796,7 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("pool");
-        sqlx::query(
-            "CREATE TABLE attachments (id TEXT PRIMARY KEY, message_id TEXT NOT NULL,
-             filename TEXT, content_type TEXT NOT NULL, size INTEGER, content_id TEXT,
-             is_inline INTEGER NOT NULL DEFAULT 0, cached_path TEXT)",
-        )
-        .execute(&pool)
-        .await
-        .expect("schema");
+        attachment_schema(&pool).await;
         for (id, message, name) in [
             ("a1", "m1", "b.pdf"),
             ("a2", "m1", "a.png"),
@@ -829,6 +834,50 @@ mod tests {
             .await
             .expect("empty")
             .is_empty());
+    }
+
+    async fn attachment_schema(pool: &sqlx::SqlitePool) {
+        for sql in [
+            "CREATE TABLE attachments (id TEXT PRIMARY KEY, message_id TEXT NOT NULL,
+             filename TEXT, content_type TEXT NOT NULL, size INTEGER, content_id TEXT,
+             is_inline INTEGER NOT NULL DEFAULT 0, cached_path TEXT)",
+            "CREATE TABLE messages (id TEXT PRIMARY KEY, trust_metadata TEXT)",
+        ] {
+            sqlx::query(sql).execute(pool).await.expect("schema");
+        }
+    }
+
+    /// An older sync could store the signature part of a signed message as
+    /// an attachment, under whatever name its unsigned headers gave it.
+    #[tokio::test]
+    async fn a_signature_part_beside_a_root_signature_is_not_listed() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("pool");
+        attachment_schema(&pool).await;
+        for sql in [
+            r#"INSERT INTO messages (id, trust_metadata) VALUES ('signed', '{"root_crypto":true}'), ('mixed', '{"root_crypto":false}'), ('legacy', NULL)"#,
+            "INSERT INTO attachments (id, message_id, filename, content_type) VALUES
+             ('phantom', 'signed', 'Invoice.pdf', 'application/pgp-signature'),
+             ('smime', 'signed', 'smime.p7s', 'application/pkcs7-signature'),
+             ('real', 'signed', 'figures.csv', 'text/csv'),
+             ('nested', 'mixed', 'signature.asc', 'application/pgp-signature'),
+             ('unknown', 'legacy', 'signature.asc', 'application/pgp-signature')",
+        ] {
+            sqlx::query(sql).execute(&pool).await.expect("row");
+        }
+
+        let rows = super::attachments_for_messages(
+            &pool,
+            &["signed".into(), "mixed".into(), "legacy".into()],
+        )
+        .await
+        .expect("listing");
+
+        let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(ids, ["unknown", "nested", "real"]);
     }
 
     use super::{attachment_cache_path, attachment_open_risk, safe_filename, MAX_CACHE_NAME_BYTES};

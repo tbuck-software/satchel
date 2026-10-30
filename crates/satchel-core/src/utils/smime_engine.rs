@@ -46,6 +46,10 @@ pub struct SmimeVerifyResult {
     pub signer_cert_pem: Option<String>,
     pub signer: Option<SmimeCertMetadata>,
     pub error: Option<String>,
+    /// The content an opaque signature encapsulates, as the engine read it
+    /// while checking the signature over it. Detached signatures carry none:
+    /// their content is the entity the caller split.
+    pub content: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
@@ -127,7 +131,12 @@ pub fn decrypt(
 pub fn verify(signed_payload: &[u8]) -> Result<SmimeVerifyResult, String> {
     let bound = crate::email::signed_mime::bind_smime_bundle(signed_payload)
         .map_err(|error| error.to_string())?;
-    active_engine().verify(&bound)
+    let detached = matches!(bound, std::borrow::Cow::Owned(_));
+    let mut result = active_engine().verify(&bound)?;
+    if detached {
+        result.content = None;
+    }
+    Ok(result)
 }
 
 pub fn certificate_metadata(pem_certificate: &str) -> Result<SmimeCertMetadata, String> {
@@ -225,6 +234,7 @@ impl OpensslLibEngine {
             signer_cert_pem: None,
             signer: None,
             error: Some(error),
+            content: None,
         };
         let (pkcs7, detached_content) = match read_pkcs7(signed_payload) {
             Ok(parsed) => parsed,
@@ -234,7 +244,11 @@ impl OpensslLibEngine {
             Ok(stack) => stack,
             Err(err) => return failure(stack_error(err)),
         };
-        let outcome = pkcs7.verify(&empty, store, detached_content.as_deref(), None, flags);
+        // Opaque signed-data: the engine writes out the content it hashes.
+        let mut content = Vec::new();
+        let output = detached_content.is_none().then_some(&mut content);
+        let outcome = pkcs7.verify(&empty, store, detached_content.as_deref(), output, flags);
+        let content = (!content.is_empty()).then_some(content);
         // Report the signer either way: an invalid signature still tells the
         // user whose certificate was attached.
         let signer_cert_pem = pkcs7
@@ -264,6 +278,7 @@ impl OpensslLibEngine {
                 signer_cert_pem,
                 signer,
                 error: None,
+                content,
             },
             Err(err) => SmimeVerifyResult {
                 valid: false,
@@ -271,6 +286,7 @@ impl OpensslLibEngine {
                 signer_cert_pem,
                 signer,
                 error: Some(stack_error(err)),
+                content,
             },
         }
     }
@@ -899,6 +915,11 @@ impl SmimeEngine for OpensslCliEngine {
             chain_verified: false,
             signer_cert_pem,
             signer,
+            content: outcome
+                .as_ref()
+                .ok()
+                .filter(|content| !content.is_empty())
+                .cloned(),
             error: outcome.err(),
         };
         apply_platform_trust(signed_payload, &mut result);

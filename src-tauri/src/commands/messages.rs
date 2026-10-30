@@ -32,10 +32,14 @@ use crate::{
         SMIME_DECRYPTED_BLOCK_END, SMIME_DECRYPTED_BLOCK_START,
     },
     email::sanitizer::sanitize_email_html,
+    email::signed_mime::{self, EntityDisplay, SignedMimeError, StoredSignedBody},
     events::bus::AppEvent,
     plugins::runtime::{MessageTransformInput, PluginRuntime},
-    providers::imap::{is_legacy_truncated_body, parse_header_value, parse_raw_message_body},
-    providers::traits::MessageRef,
+    providers::imap::{
+        build_snippet, is_legacy_truncated_body, parse_header_value, parse_raw_message_body,
+        ParsedBody,
+    },
+    providers::traits::{MessageRef, MessageTrust},
     sync::outbox::{build_send_action, execute_send_action},
     utils::mime::{
         decode_html_entities, decode_mime_encoded_words, extract_email_address,
@@ -403,22 +407,6 @@ async fn message_bodies(
 
     let mut bodies = Vec::with_capacity(rows.len());
     for row in rows {
-        // Keep this state from the stored columns. `map_message_row` replaces
-        // a missing body with the snippet so list views always have readable
-        // text. Old IMAP bodies at the former 64-KiB cutoff likewise remain
-        // readable as a cached prefix while the full body is fetched.
-        let has_stored_body = row
-            .body_text
-            .as_deref()
-            .is_some_and(|text| !text.trim().is_empty())
-            || row
-                .body_html
-                .as_deref()
-                .is_some_and(|html| !html.trim().is_empty());
-        let body_loaded = has_stored_body
-            && !(row.id.starts_with("m-imap-")
-                && (is_legacy_truncated_body(row.body_text.as_deref())
-                    || is_legacy_truncated_body(row.body_html.as_deref())));
         let dto = map_message_row(
             row,
             app,
@@ -436,7 +424,7 @@ async fn message_bodies(
             snippet: dto.snippet,
             body_text: dto.body_text,
             body_html: dto.body_html,
-            body_loaded,
+            body_loaded: dto.body_loaded,
             pgp_state: dto.pgp_state,
             pgp_error_detail: dto.pgp_error_detail,
             pgp_signer_name: dto.pgp_signer_name,
@@ -614,10 +602,19 @@ async fn map_message_row(
         .filter(|_| trust.root_encryption);
     let smime_signed = row.smime_signed.clone();
     let pgp_signed = row.pgp_signed.clone();
-    let stored_body = (trust.root_crypto && stored_body_is_complete(&row))
-        .then(|| (row.body_text.clone(), row.body_html.clone()));
+    let has_stored_body = row_has_body(&row);
+    // `map_stored_message_row` replaces a missing body with the snippet so
+    // list views always have readable text; whether the body is really there
+    // comes from the stored columns. Old IMAP bodies at the former 64-KiB
+    // cutoff likewise remain readable as a cached prefix while the full body
+    // is fetched.
+    let body_loaded = has_stored_body
+        && !(row.id.starts_with("m-imap-")
+            && (is_legacy_truncated_body(row.body_text.as_deref())
+                || is_legacy_truncated_body(row.body_html.as_deref())));
 
     let mut dto = map_stored_message_row(row);
+    dto.body_loaded = body_loaded;
     let original_body_text = dto.body_text.clone();
 
     if (trust.root_encryption || trust.root_inline_signature)
@@ -671,16 +668,16 @@ async fn map_message_row(
                 {
                     tracing::warn!(message_id = %dto.id, %error, "could not cache decrypted PGP attachments");
                 }
-                let readable_text = parsed
-                    .text
-                    .filter(|text| !text.trim().is_empty())
-                    .unwrap_or(decrypted.display_body);
+                let inner_signed = parsed.pgp_signed.clone();
+                let inner_root_signed = parsed.trust.root_crypto;
+                let (readable_text, readable_html) =
+                    decrypted_display(parsed, decrypted.display_body);
                 dto.snippet = first_non_empty_line(&readable_text).unwrap_or(dto.snippet.clone());
                 dto.body_text = readable_text;
-                dto.body_html = parsed.html.filter(|html| !html.trim().is_empty());
-                if let Some(inner_signed) = parsed.pgp_signed.as_deref() {
+                dto.body_html = readable_html;
+                if let Some(inner_signed) = inner_signed.as_deref() {
                     apply_incoming_pgp_signed_status(&mut dto, app, pool, inner_signed).await;
-                    apply_signature_scope(&mut dto.pgp_state, parsed.trust.root_crypto);
+                    apply_signature_scope(&mut dto.pgp_state, inner_root_signed);
                 } else {
                     dto.pgp_state = Some("decrypted".to_string());
                     dto.pgp_error_detail = None;
@@ -763,11 +760,13 @@ async fn map_message_row(
     }
 
     if let Some(signed_bundle) = pgp_signed.as_deref() {
-        if stored_body_unbound(&dto.id, signed_bundle, stored_body.as_ref()).await {
-            mark_pgp_signed_malformed(&mut dto);
-        } else {
-            apply_incoming_pgp_signed_status(&mut dto, app, pool, signed_bundle).await;
-            apply_signature_scope(&mut dto.pgp_state, trust.root_crypto);
+        match show_signed_body(&mut dto, signed_bundle, &trust, has_stored_body).await {
+            Ok(StoredSignedBody::Stored | StoredSignedBody::Entity(_)) => {
+                apply_incoming_pgp_signed_status(&mut dto, app, pool, signed_bundle).await;
+                apply_signature_scope(&mut dto.pgp_state, trust.root_crypto);
+            }
+            // OpenPGP has no opaque form: such a bundle signs nothing shown.
+            Ok(StoredSignedBody::Encapsulated) | Err(_) => mark_pgp_signed_malformed(&mut dto),
         }
     }
 
@@ -796,10 +795,19 @@ async fn map_message_row(
     }
 
     if let Some(signed_payload) = smime_signed.as_deref() {
-        let verified = if stored_body_unbound(&dto.id, signed_payload, stored_body.as_ref()).await {
-            SmimeVerifyMessageResult::malformed()
-        } else {
-            verify_smime_message(app, pool, &dto.id, signed_payload, &dto.from_address).await
+        let verified = match show_signed_body(&mut dto, signed_payload, &trust, has_stored_body)
+            .await
+        {
+            Ok(StoredSignedBody::Stored | StoredSignedBody::Entity(_)) => {
+                verify_smime_message(app, pool, &dto.id, signed_payload, &dto.from_address).await
+            }
+            Ok(StoredSignedBody::Encapsulated) => {
+                let verified =
+                    verify_smime_message(app, pool, &dto.id, signed_payload, &dto.from_address)
+                        .await;
+                show_encapsulated_body(&mut dto, verified).await
+            }
+            Err(_) => SmimeVerifyMessageResult::malformed(),
         };
         dto.smime_state = Some(verified.state);
         apply_signature_scope(&mut dto.smime_state, trust.root_crypto);
@@ -822,55 +830,137 @@ async fn map_message_row(
     dto
 }
 
-/// Whether the row holds its whole body. An evicted or legacy-truncated body is
-/// fetched again before it is read, through the strict splitter.
-fn stored_body_is_complete(row: &MessageReadRecord) -> bool {
+/// Whether the row stores a body at all. A stored empty string counts as absent.
+fn row_has_body(row: &MessageReadRecord) -> bool {
     let present = |value: Option<&str>| value.is_some_and(|value| !value.trim().is_empty());
-    (present(row.body_text.as_deref()) || present(row.body_html.as_deref()))
-        && !is_legacy_truncated_body(row.body_text.as_deref())
-        && !is_legacy_truncated_body(row.body_html.as_deref())
+    present(row.body_text.as_deref()) || present(row.body_html.as_deref())
 }
 
-/// Rows synced before signed bodies were split strictly keep the body an older
-/// parser displayed. A root signature only stands over that body while it is
-/// still what the stored bundle's signed entity displays.
-async fn stored_body_unbound(
-    message_id: &str,
+/// Put on the DTO the body a stored signature covers, before it is verified.
+///
+/// A row the strict splitter wrote with its bundle keeps its body. Every other
+/// root-signed row shows the entity decoded from the bundle, the bytes
+/// verification reads, so display and verdict cannot part. `Err` means the
+/// bundle does not split; no verdict may be shown then.
+async fn show_signed_body(
+    dto: &mut MessageDto,
     bundle: &[u8],
-    stored_body: Option<&(Option<String>, Option<String>)>,
-) -> bool {
-    let Some((text, html)) = stored_body.cloned() else {
-        return false;
-    };
+    trust: &MessageTrust,
+    has_stored_body: bool,
+) -> Result<StoredSignedBody, SignedMimeError> {
     static CACHE: std::sync::LazyLock<
-        std::sync::Mutex<super::message_processing::ProcessingCache<bool>>,
+        std::sync::Mutex<
+            super::message_processing::ProcessingCache<
+                Result<(StoredSignedBody, String), SignedMimeError>,
+            >,
+        >,
     > = std::sync::LazyLock::new(|| std::sync::Mutex::new(Default::default()));
-    let message_id = message_id.to_string();
+    let message_id = dto.id.clone();
+    let subject = dto.subject.clone();
     let bundle = bundle.to_vec();
-    tokio::task::spawn_blocking(move || {
+    let trust = trust.clone();
+    let shown = tokio::task::spawn_blocking(move || {
         let fingerprint = super::message_processing::fingerprint(&[
             &bundle,
-            text.as_deref().unwrap_or_default().as_bytes(),
-            html.as_deref().unwrap_or_default().as_bytes(),
+            &[
+                u8::from(trust.root_crypto),
+                u8::from(trust.signed_binding),
+                u8::from(has_stored_body),
+            ],
+            subject.as_bytes(),
         ]);
         super::message_processing::cached(&CACHE, message_id, fingerprint, || {
-            let unbound = match crate::email::signed_mime::stored_body_matches(
-                &bundle,
-                text.as_deref(),
-                html.as_deref(),
-            ) {
-                // Opaque S/MIME carries its content inside the signature itself.
-                Ok(()) | Err(crate::email::signed_mime::SignedMimeError::NotSigned) => false,
-                Err(error) => {
-                    tracing::debug!(%error, "stored signed body rejected");
-                    true
-                }
-            };
-            (unbound, 1)
+            let shown =
+                signed_mime::stored_signed_body(&bundle, &trust, has_stored_body).map(|shown| {
+                    let snippet = match &shown {
+                        StoredSignedBody::Entity(entity) => {
+                            build_snippet(&subject, entity.text.as_deref(), entity.html.as_deref())
+                        }
+                        _ => String::new(),
+                    };
+                    (shown, snippet)
+                });
+            (shown, bundle.len())
         })
     })
     .await
-    .unwrap_or(true)
+    .unwrap_or_else(|error| {
+        tracing::warn!(%error, "signed body task failed");
+        Err(SignedMimeError::NotSigned)
+    });
+    match shown {
+        Ok((StoredSignedBody::Entity(entity), snippet)) => {
+            show_entity(dto, entity.clone(), snippet);
+            Ok(StoredSignedBody::Entity(entity))
+        }
+        Ok((shown, _)) => Ok(shown),
+        Err(error) => {
+            tracing::debug!(message_id = %dto.id, %error, "stored signed bundle rejected");
+            Err(error)
+        }
+    }
+}
+
+/// The DTO shows exactly this signed entity: nothing of the stored body, the
+/// snippet or the subject stands in for a part it does not display.
+fn show_entity(dto: &mut MessageDto, entity: EntityDisplay, snippet: String) {
+    dto.body_text = entity.text.unwrap_or_default();
+    dto.body_html = entity.html;
+    if !snippet.is_empty() {
+        dto.snippet = snippet;
+    }
+    // A body fetched again would not be what this verdict covers.
+    dto.body_loaded = true;
+}
+
+/// Opaque S/MIME carries its content inside the signature. Show what the
+/// engine read there while verifying, or no body and no verdict.
+async fn show_encapsulated_body(
+    dto: &mut MessageDto,
+    mut verified: SmimeVerifyMessageResult,
+) -> SmimeVerifyMessageResult {
+    let content = verified.content.take();
+    let entity = tokio::task::spawn_blocking(move || {
+        content
+            .as_deref()
+            .map(signed_mime::display_entity)
+            .filter(|entity| entity.text.is_some() || entity.html.is_some())
+    })
+    .await
+    .ok()
+    .flatten();
+    match entity {
+        Some(entity) => {
+            let snippet = entity
+                .text
+                .as_deref()
+                .and_then(first_non_empty_line)
+                .unwrap_or_default();
+            show_entity(dto, entity, snippet);
+            verified
+        }
+        None => {
+            show_entity(dto, EntityDisplay::default(), String::new());
+            if verified.state == "error" {
+                verified
+            } else {
+                SmimeVerifyMessageResult::content_unavailable()
+            }
+        }
+    }
+}
+
+/// What a decrypted message shows. Under a signature found inside it, only
+/// what the parser displayed of the signed structure: the decrypted plaintext
+/// as a whole is not what was signed.
+fn decrypted_display(parsed: ParsedBody, display_body: String) -> (String, Option<String>) {
+    let text = parsed.text.filter(|text| !text.trim().is_empty());
+    let html = parsed.html.filter(|html| !html.trim().is_empty());
+    if parsed.pgp_signed.is_some() || parsed.smime_signed.is_some() {
+        (text.unwrap_or_default(), html)
+    } else {
+        (text.unwrap_or(display_body), html)
+    }
 }
 
 fn mark_pgp_signed_malformed(dto: &mut MessageDto) {
@@ -1901,7 +1991,7 @@ mod tests {
 
     use satchel_core::db::messages::{MessageReadError, SentMessageError};
 
-    use super::{is_owned_sender, normalize_recipients, raw_header_block};
+    use super::{is_owned_sender, normalize_recipients, parse_raw_message_body, raw_header_block};
 
     #[cfg(desktop)]
     #[test]
@@ -2338,6 +2428,144 @@ mod tests {
             trust_metadata: None,
             source_payload: None,
         }
+    }
+
+    const FORGED_PGP_ROOT: &[u8] = include_bytes!(
+        "../../../crates/satchel-core/tests/corpus/pgp-mime/forged-missing-protocol.eml"
+    );
+    const FORGED_SMIME_HTML_ROOT: &[u8] = include_bytes!(
+        "../../../crates/satchel-core/tests/corpus/smime-signed/forged-html-link-swapped.eml"
+    );
+    const MUTT_SIGNED: &[u8] =
+        include_bytes!("../../../crates/satchel-core/tests/corpus/pgp-mime/mutt-crlf.eml");
+
+    /// The bundle an older parser kept for a forged root: the nested,
+    /// genuinely signed part.
+    fn legacy_bundle(forged: &[u8]) -> Vec<u8> {
+        let text = std::str::from_utf8(forged).unwrap();
+        let start = text
+            .find("--OUT\r\nContent-Type: multipart/signed")
+            .unwrap()
+            + 7;
+        text.as_bytes()[start..text.rfind("\r\n--OUT--").unwrap()].to_vec()
+    }
+
+    fn trust(json: &str) -> crate::providers::traits::MessageTrust {
+        serde_json::from_str(json).unwrap()
+    }
+
+    /// Rows synced before the strict splitter keep the body an older parser
+    /// chose. Whatever it is, the signature is shown over its own entity.
+    #[tokio::test]
+    async fn a_legacy_signed_row_shows_its_signed_entity_not_its_stored_body() {
+        let legacy = trust(r#"{"root_crypto":true}"#);
+        let padded = format!("Forged text {}", "x".repeat(65534 - 12));
+        assert!(super::is_legacy_truncated_body(Some(&padded)));
+        for stored in [
+            "Forged text: wire the money to the new account.".to_string(),
+            padded,
+        ] {
+            let bundle = legacy_bundle(FORGED_PGP_ROOT);
+            let mut dto = super::map_stored_message_row(stored_body_record(Some(stored), None));
+            dto.body_loaded = false;
+            let shown = super::show_signed_body(&mut dto, &bundle, &legacy, true).await;
+            assert!(matches!(shown, Ok(super::StoredSignedBody::Entity(_))));
+            assert!(
+                dto.body_text.starts_with("The fix is on the branch."),
+                "{}",
+                dto.body_text
+            );
+            assert!(!dto.body_text.contains("Forged"));
+            assert!(!dto.snippet.contains("Forged"));
+            assert!(dto.body_loaded);
+        }
+
+        // A swapped link in stored HTML does not survive either.
+        let bundle = legacy_bundle(FORGED_SMIME_HTML_ROOT);
+        let mut dto = super::map_stored_message_row(stored_body_record(
+            None,
+            Some(r#"<p>Please review the invoice at <a href="https://evil.example/login">the bank portal</a> before Friday.</p>"#.into()),
+        ));
+        super::show_signed_body(&mut dto, &bundle, &legacy, true)
+            .await
+            .unwrap();
+        let html = dto.body_html.unwrap_or_default();
+        assert!(html.contains("https://bank.example/invoice/42"), "{html}");
+        assert!(!html.contains("evil.example"));
+    }
+
+    #[tokio::test]
+    async fn a_signed_row_written_with_its_bundle_keeps_its_body_until_evicted() {
+        let parsed = parse_raw_message_body(MUTT_SIGNED);
+        assert!(parsed.trust.signed_binding);
+        let bundle = parsed.pgp_signed.clone().unwrap();
+        let stored = parsed.text.clone();
+
+        let mut dto = super::map_stored_message_row(stored_body_record(stored.clone(), None));
+        let shown = super::show_signed_body(&mut dto, &bundle, &parsed.trust, true).await;
+        assert_eq!(shown, Ok(super::StoredSignedBody::Stored));
+        assert_eq!(Some(dto.body_text), stored);
+
+        // Evicted: the snippet must not stand in for the body.
+        let mut dto = super::map_stored_message_row(stored_body_record(None, None));
+        assert_eq!(dto.body_text, "Preview");
+        dto.body_loaded = false;
+        super::show_signed_body(&mut dto, &bundle, &parsed.trust, false)
+            .await
+            .unwrap();
+        assert_eq!(Some(dto.body_text), stored);
+        assert!(dto.body_loaded);
+    }
+
+    #[tokio::test]
+    async fn opaque_smime_shows_the_verified_content_or_no_body_and_no_verdict() {
+        let content = b"Content-Type: text/plain\r\n\r\nThe opaque contract text.\r\n".to_vec();
+        let verified = |content: Option<Vec<u8>>| super::SmimeVerifyMessageResult {
+            state: "signature_valid".into(),
+            signer_email: Some("signer@example.test".into()),
+            signer_cn: None,
+            error_detail: None,
+            content,
+        };
+
+        let mut dto = super::map_stored_message_row(stored_body_record(None, None));
+        let result = super::show_encapsulated_body(&mut dto, verified(Some(content))).await;
+        assert_eq!(result.state, "signature_valid");
+        assert_eq!(dto.body_text, "The opaque contract text.");
+
+        // The subject or snippet never stands in for content that is missing.
+        let mut dto = super::map_stored_message_row(stored_body_record(None, None));
+        let result = super::show_encapsulated_body(&mut dto, verified(None)).await;
+        assert_eq!(result.state, "error");
+        assert!(result
+            .error_detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("backend.errors.signedContentUnavailable")));
+        assert!(dto.body_text.is_empty());
+        assert!(dto.body_html.is_none());
+    }
+
+    /// The decrypted plaintext as a whole is not what a signature inside it
+    /// covers, so it never stands in for the signed part.
+    #[test]
+    fn a_decrypted_signed_message_shows_only_its_signed_display() {
+        let inner = parse_raw_message_body(MUTT_SIGNED);
+        let (text, _) = super::decrypted_display(inner, "Whole plaintext".into());
+        assert!(text.starts_with("The fix is on the branch."));
+
+        let mut empty = parse_raw_message_body(MUTT_SIGNED);
+        empty.text = None;
+        let (text, html) = super::decrypted_display(empty, "Forged plaintext".into());
+        assert_eq!((text.as_str(), html), ("", None));
+
+        let plain = parse_raw_message_body(b"Content-Type: image/png\r\n\r\nAAAA");
+        let (text, _) = super::decrypted_display(plain, "Readable plaintext".into());
+        assert_eq!(text, "Readable plaintext");
+
+        // A signed part inside the decrypted message signs only that part.
+        let forged = parse_raw_message_body(FORGED_PGP_ROOT);
+        assert!(forged.pgp_signed.is_none());
+        assert!(!forged.trust.root_crypto);
     }
 
     #[test]

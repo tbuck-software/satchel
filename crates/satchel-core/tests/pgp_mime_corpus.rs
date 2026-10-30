@@ -6,9 +6,11 @@
 //! entity; the forged fixtures must never verify over what they display.
 
 use satchel_core::email::pgp_mime::parse_signed_message;
-use satchel_core::email::sanitizer::sanitize_email_html;
-use satchel_core::email::signed_mime::{stored_body_matches, SignedMimeError};
+use satchel_core::email::signed_mime::{
+    is_signature_media_type, stored_signed_body, EntityDisplay, StoredSignedBody,
+};
 use satchel_core::providers::imap::{parse_raw_message_body, ParsedBody};
+use satchel_core::providers::traits::MessageTrust;
 use satchel_core::utils::pgp_engine::{self, DetachedVerification};
 
 const GPG_FIXTURE_PUBLIC: &str = include_str!("corpus/pgp/gpg-public.asc");
@@ -79,7 +81,25 @@ const FORGED: &[Forged] = &[
         raw: include_bytes!("corpus/pgp-mime/forged-quoted-boundary.eml"),
         outcome: Outcome::NotSigned,
     },
+    Forged {
+        name: "forged-unrecognised-protocol",
+        raw: include_bytes!("corpus/pgp-mime/forged-unrecognised-protocol.eml"),
+        outcome: Outcome::NotSigned,
+    },
+    Forged {
+        name: "forged-missing-protocol",
+        raw: include_bytes!("corpus/pgp-mime/forged-missing-protocol.eml"),
+        outcome: Outcome::NotSigned,
+    },
+    Forged {
+        name: "forged-duplicate-signature-type",
+        raw: include_bytes!("corpus/pgp-mime/forged-duplicate-signature-type.eml"),
+        outcome: Outcome::NotSigned,
+    },
 ];
+
+const SIGNATURE_PART_ATTACHMENT: &[u8] =
+    include_bytes!("corpus/pgp-mime/forged-signature-part-attachment.eml");
 
 /// What the reader sees, reduced to what a signature has to cover.
 fn shown(parsed: &ParsedBody) -> (Option<&str>, Option<&str>) {
@@ -179,49 +199,105 @@ fn forged_signed_mail_never_verifies_over_what_it_displays() {
 }
 
 #[test]
-fn a_stored_row_keeps_its_signature_only_over_the_entity_it_shows() {
+fn the_signature_part_is_never_an_attachment_even_with_a_filename() {
+    let parsed = parse_raw_message_body(SIGNATURE_PART_ATTACHMENT);
+    assert!(parsed.trust.root_crypto);
+    let (_, verdict) = verify(parsed.pgp_signed.as_deref().unwrap()).unwrap();
+    assert!(matches!(verdict, DetachedVerification::Valid { .. }));
+    // Its headers are not signed, so nothing they name is offered.
+    for attachment in &parsed.attachments {
+        assert!(
+            !is_signature_media_type(&attachment.content_type)
+                && attachment.filename.as_deref() != Some("Invoice.pdf"),
+            "{attachment:?}"
+        );
+    }
+}
+
+#[test]
+fn a_signed_part_inside_another_container_never_signs_the_root() {
+    let genuine = LEGITIMATE
+        .iter()
+        .find(|fixture| fixture.name == "mutt-crlf")
+        .unwrap();
+    let text = std::str::from_utf8(genuine.raw).unwrap();
+    let signed = &text[text.find("Content-Type: multipart/signed").unwrap()..];
+    let mixed = format!(
+        "Content-Type: multipart/mixed; boundary=\"OUT\"\r\n\r\n--OUT\r\n\
+         Content-Type: text/plain\r\n\r\nForged text.\r\n--OUT\r\n{signed}\r\n--OUT--\r\n"
+    );
+    let parsed = parse_raw_message_body(mixed.as_bytes());
+    // The nested signature stays, for a partial state; the root is not signed.
+    assert!(parsed.pgp_signed.is_some());
+    assert!(!parsed.trust.root_crypto);
+    assert!(!parsed.trust.signed_binding);
+}
+
+/// The display a legacy row's stored bundle signs, next to the body an older
+/// parser stored for the root: the forged first part.
+fn legacy_row_of(forged: &[u8]) -> (Vec<u8>, MessageTrust) {
+    let text = std::str::from_utf8(forged).unwrap();
+    let nested = text
+        .find("--OUT\r\nContent-Type: multipart/signed")
+        .unwrap()
+        + 7;
+    let end = text.rfind("\r\n--OUT--").unwrap();
+    // Older rows carry no binding marker.
+    let trust = serde_json::from_str(r#"{"root_crypto":true}"#).unwrap();
+    (text.as_bytes()[nested..end].to_vec(), trust)
+}
+
+#[test]
+fn a_stored_row_shows_exactly_the_entity_its_bundle_signs() {
     for fixture in LEGITIMATE {
         let parsed = parse_raw_message_body(fixture.raw);
+        assert!(parsed.trust.signed_binding, "{}", fixture.name);
         let bundle = parsed.pgp_signed.as_deref().unwrap();
-        // As ingest stores the row: the parsed text and the sanitized HTML.
-        let html = parsed.html.as_deref().map(sanitize_email_html);
+        let entity = StoredSignedBody::Entity(EntityDisplay {
+            text: parsed.text.clone(),
+            html: parsed.html.clone(),
+        });
+        // Written with its bundle by the strict splitter: the body stands.
         assert_eq!(
-            stored_body_matches(bundle, parsed.text.as_deref(), html.as_deref()),
-            Ok(()),
+            stored_signed_body(bundle, &parsed.trust, true),
+            Ok(StoredSignedBody::Stored),
             "{}",
             fixture.name
         );
-        // Line endings and wrapping are not content.
-        let reflowed = parsed
-            .text
-            .as_deref()
-            .map(|text| text.replace('\n', "\r\n  "));
+        // Evicted: shown from the bundle, as ingest displayed it.
         assert_eq!(
-            stored_body_matches(bundle, reflowed.as_deref(), html.as_deref()),
-            Ok(()),
+            stored_signed_body(bundle, &parsed.trust, false),
+            Ok(entity.clone()),
             "{}",
             fixture.name
         );
-        // A row an older parser filled from another part keeps no verdict.
+        // Stored before the marker existed: never the stored body.
+        let legacy = MessageTrust {
+            signed_binding: false,
+            ..parsed.trust.clone()
+        };
         assert_eq!(
-            stored_body_matches(bundle, Some("Forged text"), html.as_deref()),
-            Err(SignedMimeError::StoredBodyMismatch),
+            stored_signed_body(bundle, &legacy, true),
+            Ok(entity),
             "{}",
             fixture.name
         );
     }
 
-    let nested = LEGITIMATE
-        .iter()
-        .find(|fixture| fixture.name == "nested-prefix-boundary")
-        .unwrap();
-    let parsed = parse_raw_message_body(nested.raw);
-    assert_eq!(
-        stored_body_matches(
-            parsed.pgp_signed.as_deref().unwrap(),
-            parsed.text.as_deref(),
-            Some(&sanitize_email_html("<p>Forged text</p>"))
-        ),
-        Err(SignedMimeError::StoredBodyMismatch)
-    );
+    for forged in ["forged-missing-protocol", "forged-unrecognised-protocol"] {
+        let raw = FORGED
+            .iter()
+            .find(|fixture| fixture.name == forged)
+            .unwrap();
+        let (bundle, trust) = legacy_row_of(raw.raw);
+        let Ok(StoredSignedBody::Entity(shown)) = stored_signed_body(&bundle, &trust, true) else {
+            panic!("{forged}: legacy row not shown from its bundle");
+        };
+        let text = shown.text.unwrap_or_default();
+        assert!(
+            text.starts_with("The fix is on the branch."),
+            "{forged}: {text:?}"
+        );
+        assert!(!text.contains("Forged"), "{forged}");
+    }
 }
