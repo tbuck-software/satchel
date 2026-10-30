@@ -9,7 +9,9 @@ tests in `src-tauri/src/commands/messages.rs` read the same files as PGP/MIME
 plaintext.
 
 No key material is checked in. The S/MIME tests issue their certificates at
-run time.
+run time. `signed-entity-in-preamble.eml` carries a signature by the
+`../pgp` fixture key; `src/email/decrypted.rs` and
+`src-tauri/src/commands/pgp.rs` verify it with that key's public half.
 
 ## Must decode, with every part accounted for
 
@@ -33,6 +35,7 @@ run time.
 | `related-nameless-image.eml` | HTML and an image without name or Content-ID, listed as an unnamed file |
 | `unlabelled-binary.eml` | Binary payload with no name and no disposition, listed as an unnamed file |
 | `nested-unlabelled-binary.eml` | The same below a cover note |
+| `signed-entity-in-preamble.eml` | `multipart/signed` whose preamble holds the signed entity of `../pgp/signed-covered-block.eml`; its signature part carries that file's signature. The entity after the first delimiter line is a different one. It is shown, and the signature is checked against it, so it does not verify |
 
 ## Must fail with a typed error
 
@@ -42,6 +45,7 @@ run time.
 | `nested-malformed-signed.eml` | `MalformedSigned`, below a cover note |
 | `nested-inline-envelope.eml` | `RemainingEncryption`: an envelope shown inline, below a cover note |
 | `missing-multipart-boundary.eml` | `MalformedMime`: `multipart/mixed` without a boundary |
+| `signed-part-labelled-by-description.eml` | `MalformedSigned`: the second part names the signature protocol only in `Content-Description`, not in its `Content-Type` |
 
 Opaque signed-data shown inline below a cover note fails with `UndecodedPart`;
 the test builds that payload at run time, because it needs a real signature.

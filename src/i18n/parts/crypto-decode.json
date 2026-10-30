@@ -16,7 +16,8 @@
         "pgpRemainingEncryption": "The decrypted OpenPGP content contains another encrypted layer that could not be opened.",
         "pgpMalformedSigned": "The signature structure in the decrypted OpenPGP content is incomplete or malformed.",
         "pgpMalformedMime": "The decrypted OpenPGP content has an incomplete or malformed MIME structure.",
-        "pgpUndecodedPart": "The decrypted OpenPGP content contains a part that Satchel cannot show."
+        "pgpUndecodedPart": "The decrypted OpenPGP content contains a part that Satchel cannot show.",
+        "decryptedAttachmentUnavailable": "This attachment comes from an encrypted message, and its decrypted copy is no longer stored. Open the message to decrypt it again."
       }
     }
   },
@@ -37,7 +38,8 @@
         "pgpRemainingEncryption": "Der entschlüsselte OpenPGP-Inhalt enthält eine weitere verschlüsselte Ebene, die nicht geöffnet werden konnte.",
         "pgpMalformedSigned": "Die Signaturstruktur im entschlüsselten OpenPGP-Inhalt ist unvollständig oder fehlerhaft.",
         "pgpMalformedMime": "Der entschlüsselte OpenPGP-Inhalt hat eine unvollständige oder fehlerhafte MIME-Struktur.",
-        "pgpUndecodedPart": "Der entschlüsselte OpenPGP-Inhalt enthält einen Teil, den Satchel nicht anzeigen kann."
+        "pgpUndecodedPart": "Der entschlüsselte OpenPGP-Inhalt enthält einen Teil, den Satchel nicht anzeigen kann.",
+        "decryptedAttachmentUnavailable": "Dieser Anhang stammt aus einer verschlüsselten Nachricht, und seine entschlüsselte Kopie ist nicht mehr gespeichert. Öffne die Nachricht, um ihn erneut zu entschlüsseln."
       }
     }
   }

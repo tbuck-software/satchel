@@ -1879,6 +1879,11 @@ mod tests {
                 smime_corpus!("missing-multipart-boundary.eml"),
                 DecodeError::MalformedMime,
             ),
+            (
+                "signed-part-labelled-by-description",
+                smime_corpus!("signed-part-labelled-by-description.eml"),
+                DecodeError::MalformedSigned,
+            ),
         ] {
             for signed in [false, true] {
                 let actual = smime_roundtrip(&leaf, payload, signed).err();
@@ -2057,6 +2062,68 @@ mod tests {
         assert_eq!(
             mixed(opaque.as_bytes()).err(),
             Some(crate::email::decrypted::DecodeError::UndecodedPart)
+        );
+    }
+
+    /// OpenSSL splits the signed bundle again with its own MIME parser. What
+    /// it verifies must be the entity the reader is shown.
+    #[test]
+    fn a_detached_signature_counts_only_for_the_entity_that_is_shown() {
+        use base64::Engine;
+        let ca = issue_ca();
+        let leaf = issue_leaf(&ca, "Synthetic Signer", "sender@example.test");
+        let content = b"Content-Type: text/plain\r\n\r\nSigned text";
+        let key = load_private_key(&leaf.key_pem, None).unwrap();
+        let flags = Pkcs7Flags::DETACHED | Pkcs7Flags::BINARY;
+        let signature = Pkcs7::sign(&leaf.cert, &key, &Stack::new().unwrap(), content, flags)
+            .unwrap()
+            .to_der()
+            .unwrap();
+        let signature = format!(
+            "Content-Type: application/pkcs7-signature; name=\"smime.p7s\"\r\nContent-Transfer-Encoding: base64\r\n\r\n{}",
+            base64::engine::general_purpose::STANDARD
+                .encode(signature)
+                .as_bytes()
+                .chunks(64)
+                .map(|line| std::str::from_utf8(line).unwrap())
+                .collect::<Vec<_>>()
+                .join("\r\n")
+        );
+        let verified = |payload: &[u8]| {
+            let parsed = crate::email::decrypted::parse_decrypted_body(payload).unwrap();
+            assert_eq!(parsed.signatures.len(), 1);
+            (
+                parsed.body.text_parts,
+                OpensslLibEngine
+                    .verify_against(
+                        &parsed.signatures[0].0,
+                        &store_trusting(&ca.0),
+                        Pkcs7Flags::empty(),
+                    )
+                    .valid,
+            )
+        };
+
+        let genuine = format!(
+            "Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; boundary=s\r\n\r\n--s\r\n{}\r\n--s\r\n{signature}\r\n--s--\r\n",
+            std::str::from_utf8(content).unwrap()
+        );
+        assert_eq!(
+            verified(genuine.as_bytes()),
+            (vec!["Signed text".into()], true)
+        );
+
+        // The decoder and OpenSSL read this header's boundary differently, so
+        // each finds other parts. Only the parts the decoder shows count.
+        let payload = format!(
+            "Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; boundary=\"a;b\"\r\n\r\n\
+             --a\r\nContent-Type: text/plain\r\n\r\nShown text\r\n--a\r\n{signature}\r\n--a--\r\n\
+             --a;b\r\n{}\r\n--a;b\r\n{signature}\r\n--a;b--\r\n",
+            std::str::from_utf8(content).unwrap()
+        );
+        assert_eq!(
+            verified(payload.as_bytes()),
+            (vec!["Shown text".into()], false)
         );
     }
 

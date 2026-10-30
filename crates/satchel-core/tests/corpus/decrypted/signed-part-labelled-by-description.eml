@@ -1,0 +1,15 @@
+Content-Type: multipart/signed; protocol="application/pgp-signature"; boundary=s
+
+--s
+Content-Type: text/plain
+
+Readable
+--s
+Content-Type: text/plain
+Content-Description: application/pgp-signature
+
+-----BEGIN PGP SIGNATURE-----
+
+AQID
+-----END PGP SIGNATURE-----
+--s--

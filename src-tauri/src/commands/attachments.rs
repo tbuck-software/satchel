@@ -201,6 +201,18 @@ pub async fn prepare_attachment_inner(
     pool: &SqlitePool,
     input: DownloadAttachmentInput,
 ) -> Result<PreparedAttachmentResult, String> {
+    let cache_dir = app
+        .path()
+        .resolve("satchel/attachments", tauri::path::BaseDirectory::AppData)
+        .map_err(|err| err.to_string())?;
+    prepare_attachment_in(&cache_dir, pool, input).await
+}
+
+async fn prepare_attachment_in(
+    cache_dir: &std::path::Path,
+    pool: &SqlitePool,
+    input: DownloadAttachmentInput,
+) -> Result<PreparedAttachmentResult, String> {
     let row: Option<(
         String,
         Option<String>,
@@ -248,17 +260,13 @@ pub async fn prepare_attachment_inner(
         return Err("attachment not found".into());
     };
     let filename = strip_filename_controls(&filename.unwrap_or_else(|| "attachment".into()));
-    let cache_dir = app
-        .path()
-        .resolve("satchel/attachments", tauri::path::BaseDirectory::AppData)
-        .map_err(|err| err.to_string())?;
-    tokio::fs::create_dir_all(&cache_dir)
+    tokio::fs::create_dir_all(cache_dir)
         .await
         .map_err(|err| format!("create attachment cache: {err}"))?;
 
     if let Some(path) = cached_path.as_deref() {
         if cache_path_is_owned_by(path, &id, &message_id) {
-            if let Some(size) = validated_cached_file_size(&cache_dir, path).await {
+            if let Some(size) = validated_cached_file_size(cache_dir, path).await {
                 return Ok(PreparedAttachmentResult {
                     filename,
                     mime_type: mime,
@@ -276,6 +284,10 @@ pub async fn prepare_attachment_inner(
             bytes: crate::sync::attachment_fetch::decode_attachment_base64(payload)
                 .map_err(|error| format!("attachment payload decode failed: {error}"))?,
         }
+    } else if satchel_core::email::decrypted::is_attachment_id(&id) {
+        // The server holds this part only inside the encrypted message, and a
+        // part ID from the decrypted content names another part there.
+        return Err("backend.errors.decryptedAttachmentUnavailable".into());
     } else {
         let remote_uid = remote_uid.ok_or_else(|| {
             format!(
@@ -314,7 +326,7 @@ pub async fn prepare_attachment_inner(
         fetched.content_type
     };
     let final_filename = fetched.filename.unwrap_or(filename.clone());
-    let path = attachment_cache_path(&cache_dir, &id, &final_filename);
+    let path = attachment_cache_path(cache_dir, &id, &final_filename);
     if tokio::fs::symlink_metadata(&path)
         .await
         .is_ok_and(|metadata| metadata.file_type().is_symlink())
@@ -912,6 +924,106 @@ mod tests {
                 .await
                 .expect("archive path");
         assert_eq!(other, None);
+    }
+
+    /// A part of decrypted content whose cache file is gone, released by the
+    /// rolling body window or deleted by maintenance. Its part ID names a part
+    /// of the decrypted plaintext; on the server the same ID is a part of the
+    /// encrypted message, so it is never fetched under this row.
+    #[tokio::test]
+    async fn a_decrypted_part_without_its_cache_file_is_not_fetched_from_the_server() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("pool");
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .expect("migrations");
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO accounts
+             (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('acc', 'Me', 'me@example.com', 'imap', '{}', '', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("account");
+        sqlx::query(
+            "INSERT INTO folders
+             (id, account_id, name, full_path, remote_id, folder_type, created_at, updated_at)
+             VALUES ('fld', 'acc', 'INBOX', 'INBOX', 'INBOX', 'inbox', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("folder");
+        sqlx::query(
+            "INSERT INTO messages
+             (id, account_id, folder_id, from_address, to_addresses, date, is_draft, remote_id,
+              created_at, updated_at)
+             VALUES ('msg', 'acc', 'fld', 'a@b.c', '[]', ?, 0, '12', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("message");
+
+        let cache = tempfile::tempdir().expect("cache dir");
+        let id = satchel_core::email::decrypted::attachment_id("msg", "mime-1");
+        let cached = attachment_cache_path(cache.path(), &id, "agenda.pdf");
+        std::fs::write(&cached, b"%PDF").expect("cache file");
+        // Rows written before decrypted parts lost their remote part ID.
+        sqlx::query(
+            "INSERT INTO attachments
+             (id, message_id, filename, content_type, size, is_inline, cached_path,
+              remote_part_id, created_at)
+             VALUES (?, 'msg', 'agenda.pdf', 'application/pdf', 4, 0, ?, 'mime-1', ?)",
+        )
+        .bind(&id)
+        .bind(cached.to_string_lossy().to_string())
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("attachment");
+        let prepare = || {
+            super::prepare_attachment_in(
+                cache.path(),
+                &pool,
+                super::DownloadAttachmentInput {
+                    attachment_id: id.clone(),
+                },
+            )
+        };
+        assert!(prepare().await.is_ok(), "the cached copy is served");
+
+        std::fs::remove_file(&cached).expect("cache file removed");
+        let missing_file = prepare().await;
+        sqlx::query("UPDATE attachments SET cached_path = NULL WHERE id = ?")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .expect("released");
+        let released = prepare().await;
+        for outcome in [missing_file, released] {
+            assert_eq!(
+                outcome.err().as_deref(),
+                Some("backend.errors.decryptedAttachmentUnavailable")
+            );
+        }
+        let row: (Option<String>, String) =
+            sqlx::query_as("SELECT filename, content_type FROM attachments WHERE id = ?")
+                .bind(&id)
+                .fetch_one(&pool)
+                .await
+                .expect("row");
+        assert_eq!(row, (Some("agenda.pdf".into()), "application/pdf".into()));
     }
 
     #[test]

@@ -1897,6 +1897,46 @@ mod tests {
         assert_eq!(verdict.state, "signature_valid");
     }
 
+    /// PGP/MIME plaintext whose signed bundle a lenient split reads as a
+    /// different entity than the one shown. The verdict is for the shown one.
+    #[test]
+    fn a_decrypted_signature_is_checked_against_the_shown_entity() {
+        use crate::commands::messages::{inline_pgp_body, pgp_detached_verdict};
+        let root = crate::providers::traits::MessageTrust {
+            root_encryption: true,
+            root_crypto: true,
+            ..Default::default()
+        };
+        let body = inline_pgp_body(
+            &root,
+            super::DecryptedIncomingPgp {
+                prefix: String::new(),
+                suffix: String::new(),
+                plaintext: include_str!(
+                    "../../../crates/satchel-core/tests/corpus/decrypted/signed-entity-in-preamble.eml"
+                )
+                .into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            body.decrypted_text,
+            "Shown text, not covered by the signature."
+        );
+        let [(bundle, true)] = &body.signatures[..] else {
+            panic!("signatures {:?}", body.signatures.len());
+        };
+        // What `verify_pgp_signed_bundle` does with it.
+        let signed = crate::email::pgp_mime::parse_signed_message(bundle).unwrap();
+        let verdict = pgp_detached_verdict(super::detached_signature_of(
+            &[GPG_FIXTURE_PUBLIC.to_string()],
+            &signed.signed_entity,
+            &signed.armored_signature,
+            "gpg-fixture@example.test",
+        ));
+        assert_eq!(verdict.state, "signature_invalid");
+    }
+
     #[test]
     fn several_inline_blocks_are_refused_instead_of_decrypting_the_first() {
         let (_, decrypted) = decrypt_stored_corpus(include_bytes!(

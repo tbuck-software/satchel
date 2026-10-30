@@ -24,6 +24,28 @@ pub struct DisplayedBody {
 /// Between two shown parts in the text view.
 pub const PART_SEPARATOR: &str = "\n\n";
 
+/// What the ID of every attachment row for a part of decrypted content, PGP
+/// or S/MIME, starts with. The `att-pgp-` form predates S/MIME decoding and
+/// stays: rows, cache file names and open attachment views are keyed by it.
+const ATTACHMENT_ID_PREFIX: &str = "att-pgp-";
+
+/// The stored ID of a part found inside decrypted content.
+pub fn attachment_id(message_id: &str, remote_part_id: &str) -> String {
+    format!("{ATTACHMENT_ID_PREFIX}{message_id}-{remote_part_id}")
+}
+
+/// Whether an attachment row holds a part of decrypted content. Such a part
+/// exists nowhere else: the server copy of the message holds it encrypted, so
+/// it can be read again only by decrypting the message again.
+pub fn is_attachment_id(id: &str) -> bool {
+    id.starts_with(ATTACHMENT_ID_PREFIX)
+}
+
+/// A `LIKE` pattern for [`is_attachment_id`].
+pub fn attachment_id_pattern() -> String {
+    format!("{ATTACHMENT_ID_PREFIX}%")
+}
+
 pub struct DecryptedBody {
     pub body: DisplayedBody,
     /// Exact S/MIME signed payloads, each with whether it covers the complete
@@ -149,4 +171,62 @@ fn escape_html_text(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_decrypted_body;
+    use crate::email::pgp_mime::parse_signed_message;
+    use crate::utils::pgp_engine::{verify_detached, DetachedVerification};
+
+    const GPG_PUBLIC: &str = include_str!("../../tests/corpus/pgp/gpg-public.asc");
+
+    fn verifies(bundle: &[u8]) -> bool {
+        let signed = parse_signed_message(bundle).unwrap();
+        matches!(
+            verify_detached(GPG_PUBLIC, &signed.signed_entity, &signed.armored_signature),
+            Ok(DetachedVerification::Valid { .. })
+        )
+    }
+
+    #[test]
+    fn attachment_ids_keep_their_persisted_form() {
+        let id = super::attachment_id("msg-1", "mime-2");
+        assert_eq!(id, "att-pgp-msg-1-mime-2");
+        assert!(super::is_attachment_id(&id));
+        assert!(!super::is_attachment_id("att-imap-msg-1-mime-2"));
+    }
+
+    /// The verifier splits the signed bundle again with its own parser. What
+    /// it checks must be the entity the reader is shown, byte for byte.
+    #[test]
+    fn a_signature_counts_only_for_the_entity_that_is_shown() {
+        // The fixture's own signed entity, as decrypted plaintext, still verifies.
+        let mail = include_bytes!("../../tests/corpus/pgp/signed-covered-block.eml");
+        let start = memchr::memmem::find(mail, b"Content-Type: multipart/signed").unwrap();
+        let decoded = parse_decrypted_body(&mail[start..]).unwrap();
+        let [(bundle, true)] = &decoded.pgp_signatures[..] else {
+            panic!("signatures {:?}", decoded.pgp_signatures.len());
+        };
+        assert!(verifies(bundle));
+
+        let decoded = parse_decrypted_body(include_bytes!(
+            "../../tests/corpus/decrypted/signed-entity-in-preamble.eml"
+        ))
+        .unwrap();
+        assert_eq!(
+            decoded.body.text_parts,
+            ["Shown text, not covered by the signature."]
+        );
+        let [(bundle, true)] = &decoded.pgp_signatures[..] else {
+            panic!("signatures {:?}", decoded.pgp_signatures.len());
+        };
+        let checked = parse_signed_message(bundle).unwrap().signed_entity;
+        assert!(
+            String::from_utf8_lossy(&checked).contains("Shown text"),
+            "verified {:?}",
+            String::from_utf8_lossy(&checked)
+        );
+        assert!(!verifies(bundle), "a signature over another entity");
+    }
 }

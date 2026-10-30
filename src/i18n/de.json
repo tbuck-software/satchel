@@ -191,6 +191,7 @@
       "contactAvatarProviderSyncFailed": "Kontaktbilder des Anbieters konnten nicht synchronisiert werden.",
       "contactEmailInvalid": "Gib eine gültige Kontakt-E-Mail-Adresse ein.",
       "contactPersistenceFailed": "Kontakte sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "decryptedAttachmentUnavailable": "Dieser Anhang stammt aus einer verschlüsselten Nachricht, und seine entschlüsselte Kopie ist nicht mehr gespeichert. Öffne die Nachricht, um ihn erneut zu entschlüsseln.",
       "desktopUnavailable": "Das Desktop-Backend ist nicht verfügbar. Starte Satchel mit `pnpm tauri:dev`.",
       "directorySelectionUnavailable": "Die Ordnerauswahl ist auf dieser Plattform nicht verfügbar.",
       "draftChangedElsewhere": "Dieser Entwurf wurde in einem anderen Fenster geändert. Dein Text hier ist nicht gespeichert.",

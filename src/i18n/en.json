@@ -191,6 +191,7 @@
       "contactAvatarProviderSyncFailed": "Provider contact photos could not be synchronized.",
       "contactEmailInvalid": "Enter a valid contact email address.",
       "contactPersistenceFailed": "Contacts are currently unavailable. Please try again.",
+      "decryptedAttachmentUnavailable": "This attachment comes from an encrypted message, and its decrypted copy is no longer stored. Open the message to decrypt it again.",
       "desktopUnavailable": "The desktop backend is unavailable. Start Satchel with `pnpm tauri:dev`.",
       "directorySelectionUnavailable": "Folder selection is not available on this platform.",
       "draftChangedElsewhere": "This draft was changed in another window. Your text here is not saved.",

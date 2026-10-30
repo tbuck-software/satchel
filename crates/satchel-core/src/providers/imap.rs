@@ -3636,17 +3636,16 @@ fn decode_mime_part(
     let attached = disposition_type(head.disposition.as_deref()) == "attachment";
 
     if lowered.starts_with("multipart/") {
-        let sections = extract_header_param(&head.content_type, "boundary")
-            .map(|boundary| split_multipart_sections(body, &boundary))
-            .unwrap_or_default();
+        let boundary = extract_header_param(&head.content_type, "boundary");
         if lowered.starts_with("multipart/encrypted") {
             return Err(IncompleteMime::RemainingEncryption);
         }
         if lowered.starts_with("multipart/signed") && place != PartPlace::Attached {
-            if !is_verifiable_signed(&lowered) || sections.len() != 2 {
-                return Err(IncompleteMime::MalformedSigned);
-            }
-            let (header, content) = split_header_and_body(sections[0]);
+            let signed = boundary
+                .as_deref()
+                .and_then(|boundary| SignedParts::split(&head.content_type, body, boundary))
+                .ok_or(IncompleteMime::MalformedSigned)?;
+            let (header, content) = split_exact_part(signed.entity);
             // A signature over the root covers what its content shows.
             let content_place = if place == PartPlace::Root {
                 PartPlace::Root
@@ -3660,13 +3659,7 @@ fn decode_mime_part(
                 content_place,
                 counter,
             )?;
-            let mut bundle = format!("Content-Type: {}\r\n\r\n", head.content_type).into_bytes();
-            bundle.extend_from_slice(body);
-            let signature = if lowered.contains("application/pgp-signature") {
-                DetachedSignature::Pgp(bundle)
-            } else {
-                DetachedSignature::Smime(bundle)
-            };
+            let signature = signed.for_verifier()?;
             if place == PartPlace::Root {
                 part.root_signatures.insert(0, signature);
             } else {
@@ -3674,6 +3667,9 @@ fn decode_mime_part(
             }
             return Ok(part);
         }
+        let sections = boundary
+            .map(|boundary| split_multipart_sections(body, &boundary))
+            .unwrap_or_default();
         if sections.is_empty() {
             return Err(IncompleteMime::MalformedMultipart);
         }
@@ -3774,6 +3770,169 @@ fn decode_mime_part(
     }
 
     Ok(attachment_part(head, body, counter))
+}
+
+/// The two parts of a `multipart/signed` entity, byte for byte.
+struct SignedParts<'a> {
+    protocol: SignatureProtocol,
+    /// What the signature covers, and what the decoder shows.
+    entity: &'a [u8],
+    /// The signature part, headers included.
+    signature: &'a [u8],
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SignatureProtocol {
+    Pgp,
+    Smime,
+}
+
+impl SignatureProtocol {
+    /// The protocol a media type names, from `protocol=` or a part's own
+    /// `Content-Type`; `None` for any protocol Satchel does not verify.
+    fn of(media_type: &str) -> Option<Self> {
+        let media_type = media_type.split(';').next()?.trim();
+        if media_type.eq_ignore_ascii_case("application/pgp-signature") {
+            Some(Self::Pgp)
+        } else if media_type.eq_ignore_ascii_case("application/pkcs7-signature")
+            || media_type.eq_ignore_ascii_case("application/x-pkcs7-signature")
+        {
+            Some(Self::Smime)
+        } else {
+            None
+        }
+    }
+
+    fn media_type(self) -> &'static str {
+        match self {
+            Self::Pgp => "application/pgp-signature",
+            Self::Smime => "application/pkcs7-signature",
+        }
+    }
+}
+
+impl<'a> SignedParts<'a> {
+    /// `None` unless the body holds exactly one content part and one signature
+    /// part, and the signature part's own `Content-Type` is the declared
+    /// protocol.
+    fn split(content_type: &str, body: &'a [u8], boundary: &str) -> Option<Self> {
+        let protocol = SignatureProtocol::of(&extract_header_param(content_type, "protocol")?)?;
+        let [entity, signature] = exact_multipart_parts(body, boundary)[..] else {
+            return None;
+        };
+        if entity.trim_ascii().is_empty() {
+            return None;
+        }
+        let (signature_header, _) = split_exact_part(signature);
+        let signature_type = MimePartHead::read(signature_header).content_type;
+        (SignatureProtocol::of(&signature_type) == Some(protocol)).then_some(Self {
+            protocol,
+            entity,
+            signature,
+        })
+    }
+
+    /// The bundle the verifier splits again, built so that it can only find
+    /// the entity the decoder shows.
+    ///
+    /// Verifiers read `multipart/signed` with parsers of their own. Handed the
+    /// original body, one that took a delimiter or boundary differently from
+    /// the decoder would check a signature over parts the reader never sees.
+    /// Here the boundary is derived from both parts and occurs in neither, so
+    /// every reading agrees.
+    fn for_verifier(&self) -> Result<DetachedSignature, IncompleteMime> {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::new()
+            .chain_update(self.entity)
+            .chain_update([0u8])
+            .chain_update(self.signature)
+            .finalize();
+        let boundary = format!(
+            "=_satchel_signed_{}",
+            digest[..16]
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
+        if [self.entity, self.signature]
+            .iter()
+            .any(|part| find_bytes(part, boundary.as_bytes()).is_some())
+        {
+            return Err(IncompleteMime::MalformedSigned);
+        }
+        let mut bundle = format!(
+            "Content-Type: multipart/signed; boundary=\"{boundary}\"; protocol=\"{}\"\r\n\r\n--{boundary}\r\n",
+            self.protocol.media_type()
+        )
+        .into_bytes();
+        bundle.extend_from_slice(self.entity);
+        bundle.extend_from_slice(format!("\r\n--{boundary}\r\n").as_bytes());
+        bundle.extend_from_slice(self.signature);
+        bundle.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        Ok(match self.protocol {
+            SignatureProtocol::Pgp => {
+                // The OpenPGP verifier's own split must yield the same bytes.
+                if crate::email::pgp_mime::parse_signed_message(&bundle)
+                    .is_ok_and(|parsed| parsed.signed_entity != self.entity)
+                {
+                    return Err(IncompleteMime::MalformedSigned);
+                }
+                DetachedSignature::Pgp(bundle)
+            }
+            SignatureProtocol::Smime => DetachedSignature::Smime(bundle),
+        })
+    }
+}
+
+/// The parts of a multipart body as a signature covers them: from the line
+/// after one delimiter to the line break before the next (RFC 2046). Unlike
+/// [`split_multipart_sections`], nothing is trimmed and empty parts count.
+fn exact_multipart_parts<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
+    let marker = format!("--{boundary}").into_bytes();
+    let mut parts = Vec::new();
+    let mut part_start: Option<usize> = None;
+    for index in memchr::memmem::find_iter(body, &marker) {
+        if index != 0 && body[index - 1] != b'\n' {
+            continue;
+        }
+        let after = index + marker.len();
+        let closing = body[after..].starts_with(b"--");
+        let Some(next_line) = delimiter_line_end(body, if closing { after + 2 } else { after })
+        else {
+            continue;
+        };
+        if let Some(start) = part_start.take() {
+            // The line break before a delimiter belongs to the delimiter.
+            let mut end = index;
+            if end > start && body[end - 1] == b'\n' {
+                end -= 1;
+            }
+            if end > start && body[end - 1] == b'\r' {
+                end -= 1;
+            }
+            parts.push(&body[start..end]);
+        }
+        if closing {
+            return parts;
+        }
+        part_start = Some(next_line);
+    }
+    if let Some(start) = part_start {
+        parts.push(&body[start..]);
+    }
+    parts
+}
+
+/// Header and body of an untrimmed part. One that opens with a blank line has
+/// no header, rather than a header made of its first paragraph.
+fn split_exact_part(part: &[u8]) -> (&[u8], &[u8]) {
+    match part
+        .strip_prefix(b"\r\n")
+        .or_else(|| part.strip_prefix(b"\n"))
+    {
+        Some(body) => (b"", body),
+        None => split_header_and_body(part),
+    }
 }
 
 /// One rendering per view. Files are never renderings: an invitation offered

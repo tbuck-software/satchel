@@ -756,18 +756,12 @@ async fn map_message_row(
                         }
                         inner_pgp = Some(verdict);
                     }
-                    Err(key) => {
-                        dto.pgp_state = Some("error".to_string());
-                        dto.pgp_error_detail = Some(CommandError::new(key).encoded());
-                    }
+                    Err(key) => inner_pgp = Some(PgpVerdict::failed(key)),
                 }
             }
             Ok(_) => {}
             Err(error) => match pgp_decrypt_failure(&trust, &original_body_text, &error) {
-                PgpDecryptFailure::Message(key) => {
-                    dto.pgp_state = Some("error".to_string());
-                    dto.pgp_error_detail = Some(CommandError::new(key).encoded());
-                }
+                PgpDecryptFailure::Message(key) => inner_pgp = Some(PgpVerdict::failed(key)),
                 PgpDecryptFailure::Block(segments) => {
                     dto.body_text = segments.iter().map(BodySegment::content).collect();
                     dto.body_segments = Some(segments);
@@ -950,6 +944,11 @@ async fn map_message_row(
     }
     if publication_complete {
         if let Some(segments) = dto.body_segments.as_ref() {
+            let referenced = dto
+                .body_html
+                .as_deref()
+                .map(referenced_cids)
+                .unwrap_or_default();
             // Include the outer encrypted file and any existing attachments too.
             // The renderer receives this same listing, not only the inner parts.
             match super::attachments::attachments_for_messages(pool, std::slice::from_ref(&dto.id))
@@ -960,13 +959,12 @@ async fn map_message_row(
                         .into_iter()
                         .map(|row| {
                             let data_url = provenance_data_url(
-                                &row.content_type,
-                                row.is_inline != 0,
+                                &row,
                                 decrypted_attachments
                                     .iter()
                                     .find(|part| part.id == row.id)
                                     .and_then(|part| part.data_url.as_ref()),
-                                dto.body_html.as_deref(),
+                                &referenced,
                             );
                             DecryptedAttachmentBinding {
                                 id: row.id,
@@ -1169,24 +1167,85 @@ pub(super) fn root_signature_covers_body(
 /// The inline image bytes a binding carries, so the renderer can check the
 /// bytes it hydrated against the decrypted ones.
 ///
-/// The renderer hydrates only images, and only inline ones or, when the HTML
-/// holds a `cid:` reference, those it may name. Any other part's bytes would
-/// be a second copy in the payload that nothing reads.
+/// The renderer hydrates only images: inline ones, and those an image in the
+/// HTML names by Content-ID or file name (`isNeededInlineImage` in
+/// `src/stores/messages.ts`). Any other part's bytes would be a second copy in
+/// the payload that nothing reads.
 pub(super) fn provenance_data_url(
-    content_type: &str,
-    is_inline: bool,
+    row: &super::attachments::AttachmentDto,
     data_url: Option<&String>,
-    html: Option<&str>,
+    referenced: &std::collections::HashSet<String>,
 ) -> Option<String> {
-    let image = content_type.to_ascii_lowercase().starts_with("image/");
-    let referenced = html.is_some_and(|html| {
-        html.as_bytes()
-            .windows(4)
-            .any(|window| window.eq_ignore_ascii_case(b"cid:"))
-    });
+    let image = row.content_type.to_ascii_lowercase().starts_with("image/");
+    let named = || {
+        let content_id = row.content_id.as_deref().map(clean_cid);
+        content_id
+            .iter()
+            .flat_map(|cid| [clean_cid(cid), clean_cid(&format!("<{cid}>"))])
+            .chain(row.filename.as_deref().map(clean_cid))
+            .any(|candidate| referenced.contains(&candidate.to_lowercase()))
+    };
     data_url
-        .filter(|_| image && (is_inline || referenced))
+        .filter(|_| image && (row.is_inline != 0 || named()))
         .cloned()
+}
+
+/// What `<img src="cid:…">` references the HTML holds, spelled as
+/// `referencedInlineCids` in `src/utils/emailInlineImages.ts` spells them.
+pub(super) fn referenced_cids(html: &str) -> std::collections::HashSet<String> {
+    let has_cid = html
+        .as_bytes()
+        .windows(4)
+        .any(|window| window.eq_ignore_ascii_case(b"cid:"));
+    if !has_cid {
+        return Default::default();
+    }
+    let document = scraper::Html::parse_document(html);
+    let images = scraper::Selector::parse("img[src]").expect("static selector");
+    document
+        .select(&images)
+        .filter_map(|image| image.value().attr("src"))
+        .filter(|source| {
+            source
+                .get(..4)
+                .is_some_and(|scheme| scheme.eq_ignore_ascii_case("cid:"))
+        })
+        .map(|source| clean_cid(source).to_lowercase())
+        .collect()
+}
+
+/// `cleanCid` in `src/utils/emailInlineImages.ts`: without the `cid:` scheme
+/// and angle brackets, percent-decoded where that is valid.
+fn clean_cid(value: &str) -> String {
+    let value = value.trim();
+    let value = match value.get(..4) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("cid:") => &value[4..],
+        _ => value,
+    };
+    let value = value.strip_prefix('<').unwrap_or(value);
+    let value = value.strip_suffix('>').unwrap_or(value).trim();
+    percent_decoded(value).unwrap_or_else(|| value.to_string())
+}
+
+/// `decodeURIComponent`: `None` where it would throw.
+fn percent_decoded(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = bytes.get(index + 1..index + 3)?;
+            if !hex.iter().all(u8::is_ascii_hexdigit) {
+                return None;
+            }
+            decoded.push(u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
 }
 
 /// Inline plaintext is usually bare text. Read as MIME, its first blank line
@@ -1273,6 +1332,17 @@ impl PgpVerdict {
         Self {
             state: "decrypted".into(),
             error_detail: None,
+            signer_name: None,
+            signer_fingerprint: None,
+        }
+    }
+
+    /// Content that could not be decrypted or decoded. It is the content's own
+    /// verdict and the worst one, so a valid outer signature never replaces it.
+    pub(super) fn failed(key: &'static str) -> Self {
+        Self {
+            state: "error".into(),
+            error_detail: Some(CommandError::new(key).encoded()),
             signer_name: None,
             signer_fingerprint: None,
         }
@@ -1372,13 +1442,6 @@ async fn verify_pgp_signed_bundle(
     .await
 }
 
-/// The stored ID of a part found inside decrypted content, PGP or S/MIME.
-/// The `att-pgp-` prefix predates S/MIME decoding and stays: rows, cache file
-/// names and open attachment views are keyed by it.
-fn decrypted_attachment_id(message_id: &str, remote_part_id: &str) -> String {
-    format!("att-pgp-{message_id}-{remote_part_id}")
-}
-
 async fn persist_decrypted_attachments(
     app: &tauri::AppHandle,
     pool: &SqlitePool,
@@ -1406,7 +1469,8 @@ async fn persist_decrypted_attachments(
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(encoded)
             .map_err(|error| format!("decode decrypted attachment: {error}"))?;
-        let attachment_id = decrypted_attachment_id(message_id, &attachment.remote_part_id);
+        let attachment_id =
+            satchel_core::email::decrypted::attachment_id(message_id, &attachment.remote_part_id);
         let filename = attachment
             .filename
             .clone()
@@ -1421,18 +1485,24 @@ async fn persist_decrypted_attachments(
             .map_err(|error| format!("write decrypted attachment cache: {error}"))?;
         let path = path.to_string_lossy().to_string();
 
+        // No remote part: the decoder numbers parts of the plaintext, and the
+        // same number names a part of the encrypted message on the server.
+        // Sync would match the row to that part, and a download would fetch
+        // its ciphertext under this file's name.
         sqlx::query(
             "INSERT INTO attachments
              (id, message_id, filename, content_type, size, content_id, storage_path, is_inline,
               cached_path, remote_uid, remote_part_id, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?)
+             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, NULL, ?)
              ON CONFLICT(id) DO UPDATE SET
                filename = excluded.filename,
                content_type = excluded.content_type,
                size = excluded.size,
                content_id = excluded.content_id,
                is_inline = excluded.is_inline,
-               cached_path = excluded.cached_path",
+               cached_path = excluded.cached_path,
+               remote_uid = NULL,
+               remote_part_id = NULL",
         )
         .bind(&attachment_id)
         .bind(message_id)
@@ -1442,7 +1512,6 @@ async fn persist_decrypted_attachments(
         .bind(attachment.content_id.as_deref())
         .bind(if attachment.is_inline { 1 } else { 0 })
         .bind(&path)
-        .bind(&attachment.remote_part_id)
         .bind(&now)
         .execute(pool)
         .await
@@ -2810,6 +2879,11 @@ mod tests {
                 decrypted_corpus!("malformed-signed-three-parts.eml"),
                 DecodeError::MalformedSigned,
             ),
+            (
+                "signed-part-labelled-by-description",
+                decrypted_corpus!("signed-part-labelled-by-description.eml"),
+                DecodeError::MalformedSigned,
+            ),
         ] {
             match super::inline_pgp_body(&root, pgp_mime_plaintext(plaintext)) {
                 Err(error) if error == expected => {}
@@ -2859,30 +2933,90 @@ mod tests {
     }
 
     /// The renderer only hydrates image bytes for inline images and for parts
-    /// a `cid:` reference may name. A PDF's bytes in the IPC payload are a
-    /// second copy of nothing it checks.
+    /// an image reference names. Bytes for any other part are a second copy
+    /// of nothing it checks.
     #[test]
     fn provenance_carries_image_bytes_only_where_the_renderer_resolves_them() {
         let bytes = "data:x;base64,AAAA".to_string();
-        let url = |content_type: &str, inline: bool, html: Option<&str>| {
-            super::provenance_data_url(content_type, inline, Some(&bytes), html)
+        let row = |content_type: &str, inline: bool, content_id: Option<&str>, filename: &str| {
+            super::super::attachments::AttachmentDto {
+                id: "att".into(),
+                message_id: "msg".into(),
+                filename: Some(filename.into()),
+                content_type: content_type.into(),
+                size: Some(3),
+                content_id: content_id.map(str::to_string),
+                is_inline: i64::from(inline),
+                cached_path: None,
+            }
         };
+        let url = |row: &super::super::attachments::AttachmentDto, html: Option<&str>| {
+            let referenced = html.map(super::referenced_cids).unwrap_or_default();
+            super::provenance_data_url(row, Some(&bytes), &referenced)
+        };
+        let logo = row("image/png", false, Some("<logo@example>"), "logo.png");
         assert_eq!(
-            url("application/pdf", false, Some("<img src=\"cid:a\">")),
+            url(
+                &row("application/pdf", false, Some("a"), "a.pdf"),
+                Some("<img src=\"cid:a\">")
+            ),
             None
         );
-        assert_eq!(url("application/pdf", true, None), None);
-        assert_eq!(url("image/png", false, None), None);
-        assert_eq!(url("image/png", false, Some("<p>no reference</p>")), None);
-        assert_eq!(url("image/png", true, None), Some(bytes.clone()));
         assert_eq!(
-            url("image/png", false, Some("<img src=\"CID:logo\">")),
+            url(&row("application/pdf", true, None, "a.pdf"), None),
+            None
+        );
+        assert_eq!(url(&logo, None), None);
+        assert_eq!(url(&logo, Some("<p>no reference</p>")), None);
+        // Another image's reference does not make this one needed.
+        assert_eq!(url(&logo, Some("<img src=\"cid:chart@example\">")), None);
+        assert_eq!(
+            url(&logo, Some("<a href=\"cid:logo@example\">logo</a>")),
+            None
+        );
+        assert_eq!(
+            url(&row("image/png", true, None, "inline.png"), None),
             Some(bytes.clone())
         );
-        assert_eq!(
-            super::provenance_data_url("image/png", true, None, None),
-            None
-        );
+        for reference in ["CID:Logo@Example", "cid:logo%40example", "cid:logo.png"] {
+            assert_eq!(
+                url(&logo, Some(&format!("<p><img src=\"{reference}\"></p>"))),
+                Some(bytes.clone()),
+                "{reference}"
+            );
+        }
+        let referenced = super::referenced_cids("<img src=\"cid:logo@example\">");
+        assert_eq!(super::provenance_data_url(&logo, None, &referenced), None);
+    }
+
+    /// Decrypted content that cannot be shown says so. A valid outer
+    /// signature over the ciphertext does not turn that into "verified".
+    #[test]
+    fn a_decode_error_outranks_any_outer_signature() {
+        let failed = super::PgpVerdict::failed("backend.errors.pgpMalformedSigned");
+        assert_eq!(failed.state, "error");
+        assert!(failed
+            .error_detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("backend.errors.pgpMalformedSigned")));
+        for outer in [
+            "signature_valid",
+            "signature_partial",
+            "signature_unknown_key",
+            "signature_invalid",
+            "error",
+        ] {
+            let outer = super::PgpVerdict {
+                state: outer.into(),
+                error_detail: None,
+                signer_name: Some("outer".into()),
+                signer_fingerprint: Some("outer".into()),
+            };
+            assert_eq!(
+                super::combine_pgp_verdicts(Some(failed.clone()), outer),
+                failed
+            );
+        }
     }
 
     /// An outer signature does not overwrite what the decrypted content says
@@ -2921,14 +3055,6 @@ mod tests {
         for state in ["signature_invalid", "signature_unchained", "error"] {
             assert!(!super::keeps_verifying_smime(Some(state)), "{state}");
         }
-    }
-
-    #[test]
-    fn decrypted_attachment_ids_keep_their_persisted_form() {
-        assert_eq!(
-            super::decrypted_attachment_id("msg-1", "mime-2"),
-            "att-pgp-msg-1-mime-2"
-        );
     }
 
     #[test]

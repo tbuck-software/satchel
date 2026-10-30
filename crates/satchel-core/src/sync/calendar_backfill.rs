@@ -61,12 +61,16 @@ pub async fn backfill_calendar_invites_from_attachments(
              OR LOWER(COALESCE(a.filename, '')) LIKE '%.ics'
            )
            AND a.calendar_scan_at IS NULL
+           -- Decrypted content stays off disk beyond its attachment cache;
+           -- an invite row would keep it after the message is gone.
+           AND a.id NOT LIKE ?
            AND NOT EXISTS (
              SELECT 1 FROM calendar_invites ci WHERE ci.message_id = m.id
            )
          ORDER BY m.date DESC
          LIMIT ?",
     )
+    .bind(crate::email::decrypted::attachment_id_pattern())
     .bind(limit)
     .fetch_all(pool)
     .await
@@ -177,8 +181,8 @@ mod tests {
     /// stops qualifying, so the app opened each session by downloading the
     /// same attachments again, which is how it walked into a rate limit four
     /// seconds after starting.
-    #[tokio::test]
-    async fn the_invite_scan_looks_at_an_attachment_once() {
+    /// A migrated database with one account and its inbox.
+    async fn pool_with_inbox() -> sqlx::SqlitePool {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
@@ -209,18 +213,32 @@ mod tests {
         .execute(&pool)
         .await
         .expect("folder");
+        pool
+    }
+
+    async fn insert_message(pool: &sqlx::SqlitePool, id: &str) {
+        let now = chrono::Utc::now().to_rfc3339();
         sqlx::query(
             "INSERT INTO messages
              (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, date,
               created_at, updated_at)
-             VALUES ('msg', 'acc', 'inbox', 'th', 'you@example.com', '[]', 'Termin', ?, ?, ?)",
+             VALUES (?, 'acc', 'inbox', ?, 'you@example.com', '[]', 'Termin', ?, ?, ?)",
         )
+        .bind(id)
+        .bind(format!("th-{id}"))
         .bind(&now)
         .bind(&now)
         .bind(&now)
-        .execute(&pool)
+        .execute(pool)
         .await
         .expect("message");
+    }
+
+    #[tokio::test]
+    async fn the_invite_scan_looks_at_an_attachment_once() {
+        let pool = pool_with_inbox().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        insert_message(&pool, "msg").await;
         // No cached copy and no remote id: nothing to read, nothing to import.
         sqlx::query(
             "INSERT INTO attachments
@@ -255,5 +273,56 @@ mod tests {
                 .await
                 .expect("count");
         assert_eq!(remaining, 0);
+    }
+
+    /// Decrypted content is not kept at rest, and `calendar_invites` rows
+    /// outlive their message. An invitation found in decrypted content stays
+    /// a file of that message.
+    #[tokio::test]
+    async fn the_invite_scan_skips_parts_of_decrypted_content() {
+        let pool = pool_with_inbox().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        let cache = tempfile::tempdir().expect("cache dir");
+        let ics = |uid: &str| {
+            format!(
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Satchel//Test//EN\r\nMETHOD:REQUEST\r\n\
+                 BEGIN:VEVENT\r\nUID:{uid}\r\nDTSTAMP:20261030T100000Z\r\n\
+                 DTSTART:20261105T100000Z\r\nDTEND:20261105T110000Z\r\nSUMMARY:{uid}\r\n\
+                 ORGANIZER;CN=Alice:mailto:alice@example.test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            )
+        };
+        for (message, attachment) in [
+            ("plain", "att-plain".to_string()),
+            (
+                "encrypted",
+                crate::email::decrypted::attachment_id("encrypted", "mime-1"),
+            ),
+        ] {
+            insert_message(&pool, message).await;
+            let path = cache.path().join(format!("{message}.ics"));
+            std::fs::write(&path, ics(&format!("{message}@example.test"))).expect("cache file");
+            sqlx::query(
+                "INSERT INTO attachments
+                 (id, message_id, filename, content_type, is_inline, cached_path, created_at)
+                 VALUES (?, ?, 'invite.ics', 'text/calendar', 0, ?, ?)",
+            )
+            .bind(&attachment)
+            .bind(message)
+            .bind(path.to_string_lossy().to_string())
+            .bind(&now)
+            .execute(&pool)
+            .await
+            .expect("attachment");
+        }
+
+        let imported = backfill_calendar_invites_from_attachments(&pool, 0)
+            .await
+            .expect("scan");
+        let invites: Vec<Option<String>> =
+            sqlx::query_scalar("SELECT message_id FROM calendar_invites ORDER BY message_id")
+                .fetch_all(&pool)
+                .await
+                .expect("invites");
+        assert_eq!((imported, invites), (1, vec![Some("plain".to_string())]));
     }
 }
