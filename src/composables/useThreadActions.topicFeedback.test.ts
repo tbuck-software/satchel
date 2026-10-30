@@ -8,6 +8,7 @@ import UndoFab from '@/components/ui/UndoFab.vue';
 import { useTopicsStore } from '@/stores/topics';
 import { useThreadActions } from './useThreadActions';
 import { useToast } from './useToast';
+import { useKeyboard } from './useKeyboard';
 
 const backend = vi.hoisted(() => ({ remove: vi.fn(), undo: vi.fn(), list: vi.fn() }));
 vi.mock('@/services/backend', async (original) => ({
@@ -24,14 +25,51 @@ vi.mock('@/stores/connection', () => ({ useConnectionStore: () => ({
 vi.mock('@/stores/threads', () => ({ useThreadsStore: () => ({}) }));
 vi.mock('@/stores/mailboxes', () => ({ useMailboxesStore: () => ({}) }));
 vi.mock('@/composables/useWorkflow', () => ({ useWorkflow: () => ({}) }));
-vi.mock('@/composables/useListKeyboardNavigation', () => ({ focusListThread: vi.fn() }));
-vi.mock('@/composables/useShortcutHints', () => ({ useShortcutHints: () => ({ hint: () => null }) }));
+vi.mock('@/composables/useListKeyboardNavigation', () => ({
+  focusListThread: vi.fn(), listKeyboardTargets: () => null,
+  listKeyboardSharesSelection: () => false,
+}));
 vi.mock('@/router/mailViews', () => ({ openView: vi.fn() }));
-vi.mock('vue-router', () => ({ useRoute: () => ({}), useRouter: () => ({}) }));
+vi.mock('vue-router', () => ({
+  useRoute: () => ({}), useRouter: () => ({ currentRoute: { value: { name: 'inbox' } } }),
+}));
 
 const Presenters = defineComponent({
   components: { ToastStack, UndoFab },
+  setup() { useKeyboard(); },
   template: '<div><ToastStack /><UndoFab variant="floating" /></div>',
+});
+
+it.each([
+  ['z', {}, false], ['Cmd+Z', { metaKey: true }, false], ['Ctrl+Z', { ctrlKey: true }, false],
+  ['z', {}, true], ['Cmd+Z', { metaKey: true }, true], ['Ctrl+Z', { ctrlKey: true }, true],
+] as const)('keeps %s (%j) on the latest partial removal with older archive=%s', async (_label, modifiers, hasOlder) => {
+  const olderUndo = vi.fn();
+  if (hasOlder) useToast().success('Archived', {
+    action: { label: 'Undo', present: 'fab', handler: olderUndo },
+  });
+  backend.remove.mockImplementation(async ({ itemId }: { itemId: string }) => {
+    if (itemId === 'b') throw new Error('remove refused');
+    return { item_id: itemId, revision: 'removed-a' };
+  });
+  const wrapper = mount(Presenters);
+  try {
+    await useThreadActions().removeFromTopic(['a', 'b'], 'topic');
+    await nextTick();
+    if (hasOlder) expect(wrapper.get('.undo-fab__main').attributes('aria-keyshortcuts')).toBeUndefined();
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true, ...modifiers }));
+    await vi.waitFor(() => expect(backend.undo).toHaveBeenCalledExactlyOnceWith(
+      'topic', 'thread', [{ item_id: 'a', revision: 'removed-a' }], true,
+    ));
+    expect(olderUndo).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(useToast().state.toasts.map(item => item.message)).toEqual(hasOlder ? ['Archived'] : []));
+    if (hasOlder) {
+      await nextTick();
+      expect(wrapper.get('.undo-fab__main').attributes('aria-keyshortcuts')).toBe('Z');
+    }
+  } finally {
+    wrapper.unmount();
+  }
 });
 beforeEach(() => {
   setActivePinia(createPinia());

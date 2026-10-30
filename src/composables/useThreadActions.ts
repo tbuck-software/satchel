@@ -460,6 +460,7 @@ export function useThreadActions() {
       ...(removed.length > 0 ? {
         action: {
           label: t('thread.actions.undo'),
+          undo: true,
           // Partial failures need visible text on touch screens as well.
           present: failures.length === 0 ? 'fab' : undefined,
           handler: () => attempt(

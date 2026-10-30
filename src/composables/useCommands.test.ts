@@ -6,6 +6,7 @@ import { useThreadsStore } from '@/stores/threads';
 import { registerThreadReaderCommands } from './useThreadReaderCommands';
 import { useCommands } from './useCommands';
 import { COMMAND_ICONS } from '@/components/navigation/commandIcons';
+import { useToast } from './useToast';
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -25,6 +26,24 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  useToast().clear();
+});
+
+it('offers the latest inline Undo without treating a newer navigation action as Undo', async () => {
+  const toast = useToast();
+  const older = vi.fn();
+  const latest = vi.fn();
+  const navigate = vi.fn();
+  toast.success('Archived', { action: { label: 'Undo', present: 'fab', handler: older } });
+  toast.warning('Partial removal', { action: { label: 'Undo', undo: true, handler: latest } });
+  toast.info('Show report', { action: { label: 'Show', handler: navigate } });
+  expect(command('undo:latest')?.title).toContain('Partial removal');
+  command('undo:latest')?.run();
+  await vi.waitFor(() => expect(toast.state.toasts.map(item => item.message)).toEqual(['Archived', 'Show report']));
+  expect(latest).toHaveBeenCalledOnce();
+  expect(older).not.toHaveBeenCalled();
+  expect(navigate).not.toHaveBeenCalled();
+  expect(command('undo:latest')?.title).toContain('Archived');
 });
 
 describe('palette shortcut hints', () => {
