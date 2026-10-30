@@ -77,7 +77,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -146,7 +146,7 @@ jobs:
         with:
           name: release-plan
           path: output
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -348,7 +348,7 @@ jobs:
           pattern: desktop-*
           merge-multiple: true
           path: output/release-assets
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - run: pnpm install --frozen-lockfile
       - run: node scripts/build-release-installer.mjs
       - name: Publish only the complete verified release
