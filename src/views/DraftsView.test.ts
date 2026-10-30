@@ -440,11 +440,13 @@ describe('DraftsView', () => {
   });
   it.each(['imapUidValidityMissing', 'imapUidValidityChanged'])(
     'shows per-item folder recovery for %s while valid drafts stay editable', async (key) => {
+      // Fixed times: drafts sort newest first, and two clock reads can differ.
       const invalid = makeDraft('unavailable', { thread_id: 'old-thread', subject: '', body: '', to: [],
+        updated_at: '2026-07-11T10:01:00Z',
         content_error: JSON.stringify({ key: `backend.errors.${key}`, params: { folder: 'Work/Drafts' } }),
       });
       harness.threads!.threads.push(makeThread('old-thread'));
-      harness.items!.push(invalid, makeDraft('valid'));
+      harness.items!.push(invalid, makeDraft('valid', { updated_at: '2026-07-11T10:00:00Z' }));
       const wrapper = render();
       await flushPromises();
       const row = wrapper.findAll('.row')[0]!;
