@@ -231,6 +231,7 @@
         "draftSendPending": "This draft has an active send. Open it from Drafts to cancel sending before editing.",
         "draftChangedElsewhere": "This draft was changed in another window. Your text here is not saved.",
         "draftGoneElsewhere": "This draft was sent or discarded in another window. Your text here is not saved.",
+        "queuedDraftNotRestorable": "This message can no longer be reopened as a draft because its draft changed after it was queued. It is still in the Outbox, where you can view it or discard it before it is sent.",
         "accountHasNoPassword": "This account signs in through its provider and has no password to change.",
         "passwordCheckFailed": "Signing in with the new password failed: {reason}",
         "updateCheckFailed": "Updates could not be checked. Try again later.",
@@ -246,7 +247,8 @@
         "updateRestartPreparationFailed": "The verified update is installed, but macOS could not prepare it for restart. Try again.",
         "accountColorInvalid": "Choose a colour as #rrggbb.",
         "accountAvatarInvalid": "The picture must be a small PNG, JPEG or WebP image.",
-        "exportOriginalUnavailable": "Cannot export \"{subject}\" because its complete original message is unavailable. Connect the account and try again. A partial message will not be exported."
+        "exportOriginalUnavailable": "Cannot export \"{subject}\" because its complete original message is unavailable. Connect the account and try again. A partial message will not be exported.",
+        "exportMailboxChanged": "Messages were removed or replaced while the export was running, so nothing was saved. Run the export again."
       }
     }
   },
@@ -482,6 +484,7 @@
         "draftSendPending": "Dieser Entwurf hat einen aktiven Versand. Öffne ihn unter Entwürfe, um den Versand vor dem Bearbeiten abzubrechen.",
         "draftChangedElsewhere": "Dieser Entwurf wurde in einem anderen Fenster geändert. Dein Text hier ist nicht gespeichert.",
         "draftGoneElsewhere": "Dieser Entwurf wurde in einem anderen Fenster gesendet oder verworfen. Dein Text hier ist nicht gespeichert.",
+        "queuedDraftNotRestorable": "Diese Nachricht lässt sich nicht mehr als Entwurf öffnen, weil sich ihr Entwurf nach dem Einreihen geändert hat. Im Postausgang kannst du sie noch ansehen oder vor dem Senden verwerfen.",
         "accountHasNoPassword": "Dieses Konto meldet sich über seinen Anbieter an und hat kein Passwort, das sich ändern ließe.",
         "passwordCheckFailed": "Die Anmeldung mit dem neuen Passwort ist fehlgeschlagen: {reason}",
         "updateCheckFailed": "Updates konnten nicht geprüft werden. Versuche es später erneut.",
@@ -497,7 +500,8 @@
         "updateRestartPreparationFailed": "Das geprüfte Update ist installiert, aber macOS konnte den Neustart nicht vorbereiten. Versuche es erneut.",
         "accountColorInvalid": "Wähle eine Farbe im Format #rrggbb.",
         "accountAvatarInvalid": "Das Bild muss ein kleines PNG-, JPEG- oder WebP-Bild sein.",
-        "exportOriginalUnavailable": "\"{subject}\" kann nicht exportiert werden, weil die vollständige Originalnachricht nicht verfügbar ist. Verbinde das Konto und versuche es erneut. Es wird keine unvollständige Nachricht exportiert."
+        "exportOriginalUnavailable": "\"{subject}\" kann nicht exportiert werden, weil die vollständige Originalnachricht nicht verfügbar ist. Verbinde das Konto und versuche es erneut. Es wird keine unvollständige Nachricht exportiert.",
+        "exportMailboxChanged": "Während des Exports wurden Nachrichten entfernt oder ersetzt, deshalb wurde nichts gespeichert. Starte den Export erneut."
       }
     }
   }

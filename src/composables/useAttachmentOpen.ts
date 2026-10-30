@@ -1,3 +1,4 @@
+import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { computed, ref, type Ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Attachment } from '@/types/mail';
@@ -34,7 +35,7 @@ export function useAttachmentOpen(attachment: Ref<Attachment> | (() => Attachmen
     try {
       await actions.downloadAndSaveAttachment(target.value.id, target.value.filename);
     } catch (error) {
-      toast.error(t('mail.attachment.saveFailed', { error: String(error) }));
+      toast.error(t('mail.attachment.saveFailed', { error: backendErrorLabel(error) }));
     } finally {
       saving.value = false;
     }
@@ -50,7 +51,7 @@ export function useAttachmentOpen(attachment: Ref<Attachment> | (() => Attachmen
     try {
       await actions.openAttachmentDefault(target.value.id);
     } catch (error) {
-      toast.error(t('mail.attachment.openFailed', { error: String(error) }));
+      toast.error(t('mail.attachment.openFailed', { error: backendErrorLabel(error) }));
     } finally {
       opening.value = false;
     }
@@ -75,7 +76,7 @@ export function useAttachmentOpen(attachment: Ref<Attachment> | (() => Attachmen
       const handled = await actions.toggleQuickLook(target.value.id);
       if (!handled) previewing.value = true;
     } catch (error) {
-      toast.error(t('mail.attachment.quickLookFailed', { error: String(error) }));
+      toast.error(t('mail.attachment.quickLookFailed', { error: backendErrorLabel(error) }));
     } finally {
       opening.value = false;
     }

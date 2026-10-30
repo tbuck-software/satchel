@@ -16,9 +16,12 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 /* Startup includes the chosen catalogue, even though it is a dynamic import.
  * The inactive locale is excluded; measure the larger of the two active paths.
  * Measured 2026-10-13 after the review integration: main initial 227.6 KiB,
- * viewer 120.1 KiB, tray 70.2 KiB gzip (was 238.1 / 118.1 / 73.0 before). */
+ * viewer 120.1 KiB, tray 70.2 KiB gzip (was 238.1 / 118.1 / 73.0 before).
+ * Main entry 101 KiB since 2026-10-30: main measured 99.4 KiB, and the IMAP
+ * generation checks in the messages and drafts stores, which load at
+ * startup, add 1.1 KiB (100.5 KiB, initial 233.8 KiB). */
 const budgets = {
-  'index.html': { entryGzip: 100 * 1024, initialGzip: 235 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
+  'index.html': { entryGzip: 101 * 1024, initialGzip: 235 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 124 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };

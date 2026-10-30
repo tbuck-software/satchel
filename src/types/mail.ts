@@ -69,6 +69,9 @@ export interface MessageSmimeStatus {
 
 export interface Message {
   id: string;
+  /** Saved IMAP generation; a change invalidates body and inline-image caches. */
+  remoteUidValidity?: number | null;
+  contentError?: string | null;
   threadId: string;
   from: Participant;
   to: Participant[];

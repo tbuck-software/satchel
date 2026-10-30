@@ -1,3 +1,4 @@
+import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import {
   cidCandidates,
   cleanCid,
@@ -123,6 +124,23 @@ function mapSmimeStatus(row: {
   };
 }
 
+function withoutInvalidContent(message: Message): Message {
+  if (!message.contentError) return message;
+  return {
+    ...message,
+    bodyText: '',
+    bodyHtml: undefined,
+    sourcePayload: undefined,
+    bodyLoaded: true,
+    bodyLoadError: backendErrorLabel(message.contentError),
+    attachments: [],
+    pgp: undefined,
+    smime: undefined,
+    inlineImagesPending: 0,
+    inlineImagesError: undefined,
+  };
+}
+
 function mapBackendMessage(row: BackendMessage, threadId: string): Message {
   const pgpStatus = mapPgpStatus(row);
   const smimeStatus = mapSmimeStatus(row);
@@ -134,8 +152,10 @@ function mapBackendMessage(row: BackendMessage, threadId: string): Message {
   const fallbackText = bodyTextCandidate || snippetCandidate || row.subject;
   const htmlCandidate = (row.body_html || '').trim();
 
-  return {
+  return withoutInvalidContent({
     id: row.id,
+    remoteUidValidity: row.remote_uidvalidity ?? null,
+    contentError: row.content_error ?? null,
     threadId: row.thread_id || threadId,
     from: {
       name: row.from_name || t('common.unknown'),
@@ -154,7 +174,7 @@ function mapBackendMessage(row: BackendMessage, threadId: string): Message {
     bodyText: fallbackText,
     bodyHtml: htmlCandidate || undefined,
     bodyLoaded: row.body_loaded,
-    bodyLoadError: undefined,
+    bodyLoadError: row.content_error ? backendErrorLabel(row.content_error) : undefined,
     timestamp: row.date || new Date().toISOString(),
     isRead: row.is_read,
     isDraft: row.is_draft,
@@ -167,7 +187,7 @@ function mapBackendMessage(row: BackendMessage, threadId: string): Message {
     authDkim: row.auth_dkim ?? null,
     authDmarc: row.auth_dmarc ?? null,
     sourcePayload: parseSourcePayload(row.source_payload),
-  };
+  });
 }
 
 /**
@@ -186,13 +206,15 @@ function applyMessageBody(message: Message, body: BackendMessageBody): Message {
   const fallbackText = bodyTextCandidate || snippetCandidate || message.subject;
   const htmlCandidate = (body.body_html || '').trim();
 
-  return {
+  return withoutInvalidContent({
     ...message,
+    remoteUidValidity: body.remote_uidvalidity ?? null,
+    contentError: body.content_error ?? null,
     sourcePayload: parseSourcePayload(body.source_payload) ?? message.sourcePayload,
     bodyText: fallbackText,
     bodyHtml: htmlCandidate || undefined,
     bodyLoaded: body.body_loaded,
-    bodyLoadError: undefined,
+    bodyLoadError: body.content_error ? backendErrorLabel(body.content_error) : undefined,
     pgp: pgpStatus,
     smime: smimeStatus,
     // Previews leave these empty; the body is where the backend sends them.
@@ -201,7 +223,12 @@ function applyMessageBody(message: Message, body: BackendMessageBody): Message {
     authSpf: body.auth_spf ?? null,
     authDkim: body.auth_dkim ?? null,
     authDmarc: body.auth_dmarc ?? null,
-  };
+  });
+}
+
+function changedGeneration(generation: number | null | undefined, existing?: Message, contentError?: string | null): boolean {
+  return Boolean(existing) && ((generation ?? null) !== (existing?.remoteUidValidity ?? null)
+    || (contentError ?? null) !== (existing?.contentError ?? null));
 }
 
 /**
@@ -209,7 +236,7 @@ function applyMessageBody(message: Message, body: BackendMessageBody): Message {
  * screen. Preview rows deliberately omit heavy body and attachment data.
  */
 function mergeMessagePreview(preview: Message, existing?: Message): Message {
-  if (!existing) return preview;
+  if (!existing || preview.contentError || changedGeneration(preview.remoteUidValidity, existing, preview.contentError)) return preview;
 
   const stableAttachments = existing.attachments.length > 0
     ? existing.attachments
@@ -285,11 +312,13 @@ function isNeededInlineImage(
 type InlineHydration = {
   attachment: Message['attachments'][number];
   error?: string;
+  generationMismatch?: boolean;
 };
 
 async function hydrateInlineAttachment(
   attachment: Message['attachments'][number],
   referencedCids: Set<string>,
+  generation: number | null,
 ): Promise<InlineHydration> {
   if (!isNeededInlineImage(attachment, referencedCids)) {
     return { attachment };
@@ -300,6 +329,9 @@ async function hydrateInlineAttachment(
 
   try {
     const downloaded = await backendDownloadAttachment(attachment.id);
+    if ((downloaded.remote_uidvalidity ?? null) !== generation) {
+      return { attachment, generationMismatch: true };
+    }
     const resolvedContentType = downloaded.mime_type === 'application/octet-stream'
       && isImageMimeType(attachment.contentType)
       ? attachment.contentType : downloaded.mime_type || attachment.contentType;
@@ -321,7 +353,7 @@ async function hydrateInlineAttachment(
   } catch (error) {
     return {
       attachment,
-      error: error instanceof Error ? error.message : String(error),
+      error: backendErrorLabel(error),
     };
   }
 }
@@ -378,10 +410,44 @@ export const useMessagesStore = defineStore('messages', () => {
   const threadLoadPromises = new Map<string, Promise<void>>();
   const threadRefreshRunners = new Map<string, CoalescingRunner<void>>();
   const hydratedAttachmentMessageIds = new Set<string>();
-  const hydratingAttachmentMessageIds = new Map<string, symbol>();
-  const bodyLoadOwners = new Map<string, symbol>();
+  const hydratingAttachmentMessageIds = new Map<string, { version: symbol }>();
+  const bodyRequestTokens = new Map<string, { version: symbol }>();
+  const detailsNeedingRevalidation = new Set<string>();
+  const revalidationAttempts = new Map<string, string>();
+  const demandedDetails = new Set<string>();
   const retained = new Map<string, RetainedThread>();
   let sweepTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function revalidateMessageReference(threadId: string, messageId: string) {
+    const message = messagesByThread.value[threadId]?.find(message => message.id === messageId);
+    if (!message) return;
+    const key = JSON.stringify([message.remoteUidValidity ?? null, message.contentError ?? null]);
+    if (revalidationAttempts.get(messageId) === key) {
+      patchMessage(threadId, messageId, current => ({ ...current, bodyLoaded: true,
+        bodyLoadError: t('errors.messageReferenceChanged') }));
+      return;
+    }
+    revalidationAttempts.set(messageId, key);
+    detailsNeedingRevalidation.add(messageId);
+    void refreshThread(threadId);
+  }
+
+  function forgetDetailsOnGenerationChange(generation: number | null | undefined, existing?: Message, contentError?: string | null) {
+    if (!existing || !changedGeneration(generation, existing, contentError)) return;
+    hydratedAttachmentMessageIds.delete(existing.id);
+    hydratingAttachmentMessageIds.delete(existing.id);
+    bodyRequestTokens.delete(existing.id);
+    loadingBodyMessageIds.value = loadingBodyMessageIds.value.filter(id => id !== existing.id);
+  }
+
+  function mergePreview(preview: Message, existing?: Message): Message {
+    if (!existing) {
+      hydratedAttachmentMessageIds.delete(preview.id);
+      hydratingAttachmentMessageIds.delete(preview.id);
+    }
+    forgetDetailsOnGenerationChange(preview.remoteUidValidity, existing, preview.contentError);
+    return mergeMessagePreview(preview, existing);
+  }
 
   const totalMessages = computed(() =>
     Object.values(messagesByThread.value).reduce((sum, messages) => sum + messages.length, 0),
@@ -411,7 +477,10 @@ export const useMessagesStore = defineStore('messages', () => {
     for (const id of evictedIds) {
       hydratedAttachmentMessageIds.delete(id);
       hydratingAttachmentMessageIds.delete(id);
-      bodyLoadOwners.delete(id);
+      bodyRequestTokens.delete(id);
+      detailsNeedingRevalidation.delete(id);
+      revalidationAttempts.delete(id);
+      demandedDetails.delete(id);
     }
     loadingBodyMessageIds.value = loadingBodyMessageIds.value.filter((id) => !evictedIds.has(id));
     delete messagesByThread.value[threadId];
@@ -551,6 +620,23 @@ export const useMessagesStore = defineStore('messages', () => {
     return messages.slice(-count).map((message) => message.id);
   }
 
+  function requestedDetailIds(threadId: string): string[] {
+    const demanded = (messagesByThread.value[threadId] ?? [])
+      .filter(message => demandedDetails.has(message.id) || detailsNeedingRevalidation.has(message.id))
+      .map(message => message.id);
+    return [...new Set([...prioritizedMessageIds(threadId), ...demanded])];
+  }
+
+  function forgetRemovedDetails(previousIds: Iterable<string>, rows: BackendMessage[]) {
+    const currentIds = new Set(rows.map(row => row.id));
+    for (const id of previousIds) {
+      if (currentIds.has(id)) continue;
+      demandedDetails.delete(id);
+      revalidationAttempts.delete(id);
+      detailsNeedingRevalidation.delete(id);
+    }
+  }
+
   async function loadThreadOnce(threadId: string, options: { remote: boolean }) {
     touchThreadCache(threadId);
     const version = nextVersion(threadId);
@@ -560,10 +646,7 @@ export const useMessagesStore = defineStore('messages', () => {
       const endPreview = perfStart(`messages.open:${threadId}`);
       const opened = await backendLoadThreadMessages(threadId, OPEN_BODY_COUNT);
       endPreview?.();
-      if (threadLoadVersions.get(threadId) !== version) {
-        endTotal?.();
-        return;
-      }
+      if (threadLoadVersions.get(threadId) !== version) return;
 
       const rows = opened.messages;
       const entry = entryFor(threadId);
@@ -575,16 +658,16 @@ export const useMessagesStore = defineStore('messages', () => {
         // reader keeps showing the previous failure over a legitimately empty
         // result and never offers a way out of it.
         connectionStore.clearBackendError('messages');
-        endTotal?.();
         return;
       }
 
       const previousById = new Map(
         (messagesByThread.value[threadId] ?? []).map((message) => [message.id, message]),
       );
+      forgetRemovedDetails(previousById.keys(), rows);
       messagesByThread.value[threadId] = rows.map((row) => {
         const preview = mapBackendMessage(row, threadId);
-        return mergeMessagePreview(preview, previousById.get(preview.id));
+        return mergePreview(preview, previousById.get(preview.id));
       });
       connectionStore.clearBackendError('messages');
       perfLog(`messages.open:${threadId}`, `rows=${rows.length} bodies=${opened.bodies.length}`);
@@ -594,25 +677,29 @@ export const useMessagesStore = defineStore('messages', () => {
       // a body. Otherwise a duplicate reload can invalidate this request after
       // the preview, then fail and leave the UI on "Loading full message...".
       await applyBodyRows(threadId, prioritizedIds, opened.bodies, version, options);
-      if (threadLoadVersions.get(threadId) !== version) {
-        endTotal?.();
-        return;
-      }
+      if (threadLoadVersions.get(threadId) !== version) return;
       enforceCacheBudget(threadId);
       if (options.remote) {
+        const detailIds = requestedDetailIds(threadId);
+        const missingBodies = detailIds.filter(id => {
+          const message = messagesByThread.value[threadId]?.find(message => message.id === id);
+          return message?.bodyLoaded === false && !message.contentError;
+        });
+        if (missingBodies.length > 0) await hydrateMessageBodies(threadId, missingBodies, version);
+        if (threadLoadVersions.get(threadId) !== version) return;
         entry.complete = true;
-        // Inline attachments can trigger remote/cache work. Start them only
-        // after the visible body is available, and only for that visible mail.
-        void hydrateMessageAttachments(threadId, prioritizedIds, version);
+        // A full reload replaces pending body and image work for expanded mail too.
+        void hydrateMessageAttachments(threadId, detailIds, version);
       }
       recordFrontendDiagnostic('messages.loaded', `thread=${threadId}`, cacheStats());
-      endTotal?.();
     } catch (error) {
-      endTotal?.();
       if (threadLoadVersions.get(threadId) !== version) return;
       if (backendCommandsAvailable()) {
         connectionStore.reportBackendError('messages', error);
       }
+    } finally {
+      // Every exit ends the timer, including a load superseded while bodies hydrate.
+      endTotal?.();
     }
   }
 
@@ -674,7 +761,7 @@ export const useMessagesStore = defineStore('messages', () => {
 
   /**
    * Reload the previews of a cached thread after a mail refresh. Bodies and
-   * images stay; only messages that are new and visible fetch theirs.
+   * images stay within their saved generation; changed visible mail reloads.
    */
   function refreshThread(threadId: string): Promise<void> {
     let runner = threadRefreshRunners.get(threadId);
@@ -713,16 +800,30 @@ export const useMessagesStore = defineStore('messages', () => {
       const previousById = new Map(
         (messagesByThread.value[threadId] ?? []).map((message) => [message.id, message]),
       );
+      forgetRemovedDetails(previousById.keys(), rows);
       messagesByThread.value[threadId] = rows.map((row) => {
         const preview = mapBackendMessage(row, threadId);
-        return mergeMessagePreview(preview, previousById.get(preview.id));
+        return mergePreview(preview, previousById.get(preview.id));
       });
       connectionStore.clearBackendError('messages');
-      const arrived = prioritizedMessageIds(threadId).filter((id) => !previousById.has(id));
+      const detailIds = requestedDetailIds(threadId);
+      const arrived = detailIds.filter((id) => {
+        const message = messagesByThread.value[threadId]?.find(message => message.id === id);
+        return !previousById.has(id) || changedGeneration(message?.remoteUidValidity, previousById.get(id), message?.contentError)
+          || detailsNeedingRevalidation.has(id)
+          || (demandedDetails.has(id) && message?.bodyLoaded === false && !message.contentError);
+      });
       if (arrived.length > 0) {
+        for (const id of arrived) {
+          if (detailsNeedingRevalidation.delete(id)) {
+            hydratedAttachmentMessageIds.delete(id);
+            hydratingAttachmentMessageIds.delete(id);
+          }
+        }
         await hydrateMessageBodies(threadId, arrived, version);
-        void hydrateMessageAttachments(threadId, arrived, version);
       }
+      // Refresh also replaces unfinished image requests for already loaded bodies.
+      void hydrateMessageAttachments(threadId, detailIds, version);
     }, false);
   }
 
@@ -828,11 +929,16 @@ export const useMessagesStore = defineStore('messages', () => {
     const bodiesById = new Map(rows.map((row) => [row.id, row]));
     const requested = new Set(requestedIds);
     const current = messagesByThread.value[threadId] ?? [];
+    const currentById = new Map(current.map(message => [message.id, message]));
+    const staleBodyIds = new Set(rows
+      .filter(row => changedGeneration(row.remote_uidvalidity, currentById.get(row.id), row.content_error))
+      .map(row => row.id));
     messagesByThread.value = {
       ...messagesByThread.value,
       [threadId]: current.map((message) => {
         const body = bodiesById.get(message.id);
         if (body) {
+          if (staleBodyIds.has(message.id)) return message;
           return applyMessageBody(message, body);
         }
         if (requested.has(message.id)) {
@@ -845,12 +951,15 @@ export const useMessagesStore = defineStore('messages', () => {
         return message;
       }),
     };
+    if (staleBodyIds.size > 0) {
+      for (const id of staleBodyIds) revalidateMessageReference(threadId, id);
+    }
 
     // A message whose complete body is not stored either comes back empty or
     // explicitly marked as incomplete (for example, an old 64-KiB IMAP
     // prefix). Fetch it now instead of showing the blank page or cached prefix.
     const emptyIds = rows
-      .filter((row) => requested.has(row.id) && (
+      .filter((row) => !row.content_error && !staleBodyIds.has(row.id) && requested.has(row.id) && (
         !row.body_loaded
         || (!(row.body_html ?? '').trim() && !row.body_text.trim())
       ))
@@ -879,8 +988,11 @@ export const useMessagesStore = defineStore('messages', () => {
     const rowsById = new Map(rows.map((row) => [row.id, row]));
     for (const id of messageIds) {
       if (threadLoadVersions.get(threadId) !== version) return;
-      if (bodyLoadOwners.get(id) === version) continue;
-      bodyLoadOwners.set(id, version);
+      if (bodyRequestTokens.get(id)?.version === version) continue;
+      const token = { version };
+      bodyRequestTokens.set(id, token);
+      const generation = messagesByThread.value[threadId]?.find(message => message.id === id)?.remoteUidValidity ?? null;
+      let ownsRequest = true;
       if (!isBodyLoading(id)) loadingBodyMessageIds.value = [...loadingBodyMessageIds.value, id];
       let loaded: Awaited<ReturnType<typeof backendLoadMessageBody>>;
       try {
@@ -891,7 +1003,8 @@ export const useMessagesStore = defineStore('messages', () => {
         );
       } catch (error) {
         if (threadLoadVersions.get(threadId) !== version) return;
-        const detail = error instanceof Error ? error.message : String(error);
+        if (bodyRequestTokens.get(id) !== token) continue;
+        const detail = backendErrorLabel(error);
         patchMessage(threadId, id, (message) => ({
           ...message,
           bodyLoaded: true,
@@ -899,14 +1012,18 @@ export const useMessagesStore = defineStore('messages', () => {
         }));
         continue;
       } finally {
-        if (bodyLoadOwners.get(id) === version) {
-          bodyLoadOwners.delete(id);
-          loadingBodyMessageIds.value = loadingBodyMessageIds.value.filter(
-            (messageId) => messageId !== id,
-          );
+        ownsRequest = bodyRequestTokens.get(id) === token;
+        if (ownsRequest) {
+          bodyRequestTokens.delete(id);
+          loadingBodyMessageIds.value = loadingBodyMessageIds.value.filter(messageId => messageId !== id);
         }
       }
       if (threadLoadVersions.get(threadId) !== version) return;
+      if (!ownsRequest || (messagesByThread.value[threadId]?.find(message => message.id === id)?.remoteUidValidity ?? null) !== generation) continue;
+      if ((loaded.remote_uidvalidity ?? null) !== generation) {
+        revalidateMessageReference(threadId, id);
+        continue;
+      }
       const row = rowsById.get(id);
       patchMessage(threadId, id, (message) =>
         applyMessageBody(message, {
@@ -915,6 +1032,7 @@ export const useMessagesStore = defineStore('messages', () => {
           body_text: loaded.body_text,
           body_html: loaded.body_html,
           body_loaded: true,
+          remote_uidvalidity: loaded.remote_uidvalidity,
         }),
       );
     }
@@ -958,11 +1076,15 @@ export const useMessagesStore = defineStore('messages', () => {
     }
 
     const pending = messageIds.filter((messageId) =>
-      !hydratedAttachmentMessageIds.has(messageId) && hydratingAttachmentMessageIds.get(messageId) !== version);
+      !messagesByThread.value[threadId]?.find(message => message.id === messageId)?.contentError
+      && !hydratedAttachmentMessageIds.has(messageId) && hydratingAttachmentMessageIds.get(messageId)?.version !== version);
     if (threadLoadVersions.get(threadId) !== version || pending.length === 0) {
       return;
     }
-    for (const messageId of pending) hydratingAttachmentMessageIds.set(messageId, version);
+    const claims = new Map(pending.map(messageId => [messageId, { version }]));
+    const generations = new Map(pending.map(messageId => [messageId,
+      messagesByThread.value[threadId]?.find(message => message.id === messageId)?.remoteUidValidity ?? null]));
+    for (const messageId of pending) hydratingAttachmentMessageIds.set(messageId, claims.get(messageId)!);
 
     // One round trip for the whole thread; a per-message listing made a topic
     // feed of twenty threads cost 160 invokes before a single image loaded.
@@ -985,6 +1107,9 @@ export const useMessagesStore = defineStore('messages', () => {
         if (threadLoadVersions.get(threadId) !== version) {
           return;
         }
+        const isCurrent = () => hydratingAttachmentMessageIds.get(messageId) === claims.get(messageId)
+          && (messagesByThread.value[threadId]?.find(message => message.id === messageId)?.remoteUidValidity ?? null) === generations.get(messageId);
+        if (!isCurrent()) continue;
 
         const body = (messagesByThread.value[threadId] ?? [])
           .find((message) => message.id === messageId)?.bodyHtml ?? '';
@@ -996,18 +1121,20 @@ export const useMessagesStore = defineStore('messages', () => {
         if (rowsByMessage) {
           const rows = rowsByMessage.get(messageId) ?? [];
           const hydrated = await Promise.all(
-            rows.map(mapAttachment).map((row) => hydrateInlineAttachment(row, referencedCids)),
+            rows.map(mapAttachment).map((row) => hydrateInlineAttachment(row, referencedCids, generations.get(messageId) ?? null)),
           );
+          if (hydrated.some(entry => entry.generationMismatch)) {
+            if (isCurrent()) revalidateMessageReference(threadId, messageId);
+            continue;
+          }
           attachments = hydrated.map((entry) => entry.attachment);
           hydrationError = hydrated.find((entry) => entry.error)?.error;
         }
-        if (hydratingAttachmentMessageIds.get(messageId) === version) {
-          hydratingAttachmentMessageIds.delete(messageId);
-        }
-
         if (threadLoadVersions.get(threadId) !== version) {
           return;
         }
+        if (!isCurrent()) continue;
+        hydratingAttachmentMessageIds.delete(messageId);
         // Only a clean pass counts as done. A failed one stays retryable, both
         // through `retryInlineImages` and on the next thread load.
         if (!hydrationError) {
@@ -1028,9 +1155,7 @@ export const useMessagesStore = defineStore('messages', () => {
       // A superseded load stops early; what it did not get to has to stay
       // claimable by the next one.
       for (const messageId of pending) {
-        if (hydratingAttachmentMessageIds.get(messageId) === version) {
-          hydratingAttachmentMessageIds.delete(messageId);
-        }
+        if (hydratingAttachmentMessageIds.get(messageId) === claims.get(messageId)) hydratingAttachmentMessageIds.delete(messageId);
       }
     }
     enforceCacheBudget(threadId);
@@ -1057,6 +1182,9 @@ export const useMessagesStore = defineStore('messages', () => {
       return;
     }
     touchThreadCache(threadId);
+    for (const id of messageIds) {
+      if (messagesByThread.value[threadId]?.some(message => message.id === id)) demandedDetails.add(id);
+    }
 
     const missingBodyIds = (messagesByThread.value[threadId] ?? [])
       .filter((message) => messageIds.includes(message.id) && message.bodyLoaded === false)

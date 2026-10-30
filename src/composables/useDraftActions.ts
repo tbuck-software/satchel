@@ -36,19 +36,13 @@ export function useDraftActions() {
     busy.value = next;
   }
 
-  /**
-   * Undo needs the draft's content, and after the delete there is nothing left
-   * to read it from — so it is read first. The backend comes first: the list
-   * in the store is loaded once, and saves from a popout or another device
-   * never reach it, so an undo from there restored an older version. The
-   * cached row is only the fallback when the read fails.
-   */
+  /** Only a successful fresh read can establish a safe Undo snapshot. */
   async function snapshot(draftId: string): Promise<BackendDraft | null> {
-    const known = drafts.items.find((item) => item.id === draftId) ?? null;
     try {
-      return (await drafts.fetchOne(draftId)) ?? known;
+      const draft = await drafts.fetchOne(draftId);
+      return draft?.content_error ? null : draft;
     } catch {
-      return known;
+      return null;
     }
   }
 

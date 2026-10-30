@@ -415,6 +415,64 @@ it('keeps edits to the quoted history when switching between plain text and HTML
  * tracking, no autosave, no close guard, and ten minutes of typing gone.
  */
 describe('composer setup', () => {
+  it.each(['imapUidValidityChanged', 'imapUidValidityMissing'].flatMap(key =>
+    ['Drafts', 'offline'].map(folder => [key, folder]),
+  ))('shows folder recovery when an imported draft fails with %s in %s', async (key, folder) => {
+    harness.fetchDraft.mockRejectedValue({ key: `backend.errors.${key}`, params: { folder } });
+    const wrapper = render([], true, { initialDraftId: 'draft-1', initialBody: '' });
+    try {
+      await flushPromises();
+      const error = harness.toastError.mock.calls[0]![0] as string;
+      expect(error).toContain(folder);
+      expect(error).toMatch(/sync.*folder/i);
+      expect(error).not.toContain('[object Object]');
+      expect(sendButton(wrapper).attributes('disabled')).toBeDefined();
+      expect(harness.draftSetup.mock.calls[0]![0].buildInput()).toBeNull();
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it.each([false, true])('points a scheduled draft that changed after queueing to the Outbox (popout %s)', async (popout) => {
+    harness.isPopout.mockReturnValue(popout);
+    harness.fetchDraft.mockRejectedValue({ key: 'backend.errors.queuedDraftNotRestorable' });
+    const wrapper = render([], !popout, { initialDraftId: 'draft-1', initialBody: '' });
+    try {
+      await flushPromises();
+      const [message, options] = harness.toastError.mock.calls[0]! as [string, { action?: { label: string; handler: () => unknown } }?];
+      expect(message).toContain('Outbox');
+      expect(sendButton(wrapper).attributes('disabled')).toBeDefined();
+      if (popout) {
+        // A popout has no mailbox to route into; the text names the place.
+        expect(options?.action).toBeUndefined();
+      } else {
+        expect(options?.action?.label).toBe('Outbox');
+        await options!.action!.handler();
+        // The embedded composer is a modal dialog; left open, it covers the Outbox.
+        expect(wrapper.emitted('close')).toHaveLength(1);
+        expect(harness.push).toHaveBeenCalledWith({ name: 'outbox' });
+      }
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it('refuses an unavailable list payload returned as a draft load', async () => {
+    harness.fetchDraft.mockResolvedValue({ id: 'draft-1', account_id: 'account-1',
+      to: [], cc: [], bcc: [], subject: '', body: '', updated_at: '',
+      content_error: JSON.stringify({ key: 'backend.errors.imapUidValidityMissing', params: { folder: 'Work/Drafts' } }),
+    });
+    const wrapper = render([], true, { initialDraftId: 'draft-1', initialBody: '' });
+    try {
+      await flushPromises();
+      expect(harness.toastError.mock.calls[0]![0]).toContain('Work/Drafts');
+      expect(sendButton(wrapper).attributes('disabled')).toBeDefined();
+      expect(harness.draftSetup.mock.calls[0]![0].buildInput()).toBeNull();
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it('offers setup retry when the template store records a handled load failure', async () => {
     harness.templatesLoad.mockImplementationOnce(async () => { harness.templatesLoadFailed = true; });
     const wrapper = render();

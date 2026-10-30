@@ -48,7 +48,7 @@ onMounted(() => {
 // threads are already in the inbox store; fetch only contexts outside its
 // loaded page (archived and older conversations are common here).
 watch(
-  () => drafts.sorted.map((draft) => draft.thread_id).filter((id): id is string => Boolean(id)),
+  () => drafts.sorted.filter((draft) => !draft.content_error).map((draft) => draft.thread_id).filter((id): id is string => Boolean(id)),
   (threadIds) => {
     for (const threadId of new Set(threadIds)) void threads.ensureThreadLoaded(threadId);
   },
@@ -111,7 +111,7 @@ const subtitle = computed(() => {
 });
 
 function threadFor(draft: BackendDraft) {
-  return draft.thread_id
+  return !draft.content_error && draft.thread_id
     ? threads.threads.find((thread) => thread.id === draft.thread_id)
     : undefined;
 }
@@ -145,11 +145,13 @@ function hasAttachments(draft: BackendDraft): boolean {
 }
 
 function snippet(draft: BackendDraft): string {
+  if (draft.content_error) return backendErrorLabel(draft.content_error);
   return previewText(draft).replace(/\s+/g, ' ').trim().slice(0, 160);
 }
 
 /** Plain-text preview; falls back to stripped HTML for rich-text drafts. */
 function previewText(draft: BackendDraft): string {
+  if (draft.content_error) return '';
   const body = (draft.body ?? '').trim();
   if (body) return body;
   const html = draft.body_html ?? '';
@@ -222,7 +224,7 @@ async function discardDraft(id: string) {
                 <CardButton
                   class="row__open"
                   @click="selectedId = draft.id"
-                  @dblclick="composer.openDraft(draft.id)"
+                  @dblclick="!draft.content_error && composer.openDraft(draft.id)"
                 >
                   <span
                     class="row__draft-avatar"
@@ -257,7 +259,7 @@ async function discardDraft(id: string) {
                     </span>
 
                     <span class="row__subject-line">
-                      <span class="row__subject">{{ draft.subject || $t('compose.noSubject') }}</span>
+                      <span class="row__subject">{{ draft.content_error ? $t('drafts.unavailable') : draft.subject || $t('compose.noSubject') }}</span>
                       <CountBadge v-if="messageCount(draft) > 1" :value="messageCount(draft)" />
                     </span>
 
@@ -287,7 +289,7 @@ async function discardDraft(id: string) {
                   <IconButton
                     size="sm"
                     :title="$t('drafts.editDraft')"
-                    :disabled="draftActions.isBusy(draft.id)"
+                    :disabled="Boolean(draft.content_error) || draftActions.isBusy(draft.id)"
                     @click="composer.openDraft(draft.id)"
                   >
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -326,7 +328,7 @@ async function discardDraft(id: string) {
 
     <template #detail>
       <ThreadView
-        v-if="selectedDraft?.thread_id && selectedThread"
+        v-if="selectedDraft?.thread_id && !selectedDraft.content_error && selectedThread"
         :thread-id="selectedDraft.thread_id"
         collapse-to-latest
         :show-back="ui.isSinglePane"
@@ -340,7 +342,7 @@ async function discardDraft(id: string) {
             </svg>
           </IconButton>
           <div class="preview__copy">
-            <h2 class="preview__subject">{{ selectedDraft.subject || $t('compose.noSubject') }}</h2>
+            <h2 class="preview__subject">{{ selectedDraft.content_error ? $t('drafts.unavailable') : selectedDraft.subject || $t('compose.noSubject') }}</h2>
             <p v-if="selectedDraft.to.length > 0" class="preview__line">{{ $t('common.to') }} {{ selectedDraft.to.join(', ') }}</p>
             <p v-if="selectedDraft.cc.length > 0" class="preview__line">{{ $t('common.cc') }} {{ selectedDraft.cc.join(', ') }}</p>
             <p v-if="selectedDraft.bcc.length > 0" class="preview__line">{{ $t('common.bcc') }} {{ selectedDraft.bcc.join(', ') }}</p>
@@ -353,7 +355,7 @@ async function discardDraft(id: string) {
             <AppButton
               variant="primary"
               size="sm"
-              :disabled="draftActions.isBusy(selectedDraft.id)"
+              :disabled="Boolean(selectedDraft.content_error) || draftActions.isBusy(selectedDraft.id)"
               @click="composer.openDraft(selectedDraft.id)"
             >
               {{ $t('common.edit') }}
@@ -370,7 +372,14 @@ async function discardDraft(id: string) {
         </header>
 
         <div class="preview__body">
-          <p v-if="previewText(selectedDraft)" class="preview__text">{{ previewText(selectedDraft) }}</p>
+          <ErrorState
+            v-if="selectedDraft.content_error"
+            :title="$t('drafts.unavailable')"
+            :detail="backendErrorLabel(selectedDraft.content_error)"
+            :busy="drafts.loading"
+            @retry="drafts.load()"
+          />
+          <p v-else-if="previewText(selectedDraft)" class="preview__text">{{ previewText(selectedDraft) }}</p>
           <p v-else class="preview__empty">{{ $t('drafts.noContent') }}</p>
 
           <ul v-if="selectedDraft.attachments?.length" class="preview__attachments">

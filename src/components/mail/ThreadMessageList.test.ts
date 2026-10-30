@@ -28,7 +28,7 @@ const DraftCardStub = defineComponent({
     busy: Boolean,
     keyboardFocused: Boolean,
   },
-  emits: ['edit', 'discard', 'focus'],
+  emits: ['edit', 'discard', 'focus', 'retry'],
   template: '<article :data-draft-id="message.id" />',
 });
 
@@ -99,6 +99,7 @@ describe('ThreadMessageList', () => {
     messageBubble.vm.$emit('focus-message');
     messageBubble.vm.$emit('toggle-collapsed');
     draftCard.vm.$emit('edit');
+    draftCard.vm.$emit('retry');
     draftCard.vm.$emit('discard');
     draftCard.vm.$emit('focus');
 
@@ -107,6 +108,7 @@ describe('ThreadMessageList', () => {
     expect(wrapper.emitted('focusMessage')).toEqual([['message-1'], ['draft-1']]);
     expect(wrapper.emitted('toggleCollapsed')).toEqual([['message-1']]);
     expect(wrapper.emitted('editDraft')).toEqual([['draft-1']]);
+    expect(wrapper.emitted('retryDraft')).toEqual([['draft-1']]);
     expect(wrapper.emitted('discardDraft')).toEqual([['draft-1']]);
   });
 

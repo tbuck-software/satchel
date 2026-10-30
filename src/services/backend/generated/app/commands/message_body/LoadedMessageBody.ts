@@ -1,5 +1,6 @@
 // Generated from Rust. Run pnpm ipc:generate.
 export type LoadedMessageBody = {
+    remote_uidvalidity?: number | null;
     body_text: string;
     body_html: string | null;
     /**

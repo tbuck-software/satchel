@@ -31,7 +31,7 @@ pub async fn list_drafts(
 ) -> CommandResult<Vec<DraftDto>> {
     satchel_core::drafts::list(pool.inner().as_ref())
         .await
-        .map_err(CommandError::unexpected)
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]

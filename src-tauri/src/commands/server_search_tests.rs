@@ -167,7 +167,12 @@ async fn server_hit_fetch_short_circuits_when_already_local() {
     let pool = pool().await;
     seed_account(&pool).await;
     seed_message(&pool, SeedMessage::default()).await;
-    sqlx::query("UPDATE messages SET remote_id = 'remote-1' WHERE id = 'm-1'")
+    sqlx::query("UPDATE messages SET remote_id = '42', remote_uidvalidity = 7 WHERE id = 'm-1'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("UPDATE folders SET uidvalidity = 7 WHERE id = 'fld-inbox'")
         .execute(&pool)
         .await
         .unwrap();
@@ -178,13 +183,54 @@ async fn server_hit_fetch_short_circuits_when_already_local() {
         &pool,
         &FetchServerHitInput {
             account_id: "acc-1".into(),
-            remote_id: "remote-1".into(),
+            remote_id: "42".into(),
         },
     )
     .await
     .unwrap();
     assert_eq!(fetched.message_id, "m-1");
     assert_eq!(fetched.thread_id, "th-m-1");
+}
+
+#[tokio::test]
+async fn server_hit_rejects_unverified_or_stale_cached_imap_content() {
+    use crate::commands::server_search::{fetch_server_search_hit_impl, FetchServerHitInput};
+
+    let pool = pool().await;
+    seed_account(&pool).await;
+    seed_message(&pool, SeedMessage::default()).await;
+    sqlx::query("UPDATE folders SET uidvalidity = 8 WHERE id = 'fld-inbox'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for generation in [None, Some(7)] {
+        sqlx::query(
+            "UPDATE messages SET remote_id = '42', remote_uidvalidity = ? WHERE id = 'm-1'",
+        )
+        .bind(generation)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let error = fetch_server_search_hit_impl(
+            &pool,
+            &FetchServerHitInput {
+                account_id: "acc-1".into(),
+                remote_id: "42".into(),
+            },
+        )
+        .await
+        .unwrap_err();
+        let error: serde_json::Value = serde_json::from_str(&error).unwrap();
+        assert_eq!(error["params"]["folder"], "INBOX");
+        assert_eq!(
+            error["key"],
+            if generation.is_none() {
+                "backend.errors.imapUidValidityMissing"
+            } else {
+                "backend.errors.imapUidValidityChanged"
+            }
+        );
+    }
 }
 
 #[tokio::test]

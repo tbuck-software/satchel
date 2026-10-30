@@ -205,6 +205,7 @@
       "exportAttachmentListUnavailable": "A message has attachments whose details are missing locally. Sync the message and try the export again.",
       "exportAttachmentMetadataInvalid": "A saved draft's attachment data is damaged. Reopen the draft and attach the files again.",
       "exportAttachmentUnavailable": "Cannot export \"{filename}\" because its local copy is missing or cannot be verified. Download the attachment and try again.",
+      "exportMailboxChanged": "Messages were removed or replaced while the export was running, so nothing was saved. Run the export again.",
       "exportOriginalUnavailable": "Cannot export \"{subject}\" because its complete original message is unavailable. Connect the account and try again. A partial message will not be exported.",
       "folderAccountMismatch": "Choose a folder belonging to the same account.",
       "folderContainsChildren": "The folder \"{name}\" still contains subfolders ({count}).",
@@ -306,6 +307,7 @@
       "queueRecipientRejected": "The server rejected a recipient. Check the email address before sending again.",
       "queueRejected": "The server rejected this action. Review its details before trying again.",
       "queueTemporary": "The server is temporarily unavailable. Satchel will try again automatically.",
+      "queuedDraftNotRestorable": "This message can no longer be reopened as a draft because its draft changed after it was queued. It is still in the Outbox, where you can view it or discard it before it is sent.",
       "recipientAddressInvalid": "This is not a valid recipient address: {value}",
       "replyContextLoadFailed": "The reply context could not be loaded. The message has not been sent yet.",
       "replyThreadNotFound": "The conversation for this reply is no longer available.",
@@ -990,6 +992,7 @@
       "waiting": "Waiting for you"
     },
     "title": "Drafts",
+    "unavailable": "Draft unavailable",
     "undo": "Undo",
     "withAttachment": "Has attachment"
   },
@@ -1005,6 +1008,7 @@
     "inlineImageUnavailable": "Image unavailable",
     "messageLoadFailed": "The message could not be loaded.",
     "messageLoadTimeout": "Loading the message took too long.",
+    "messageReferenceChanged": "The message's mailbox identity changed. Sync its folder and try again.",
     "oauth": {
       "invalidGrant": "Google no longer accepts the stored sign-in (expired or revoked). Please sign in again.",
       "missingConfig": "OAuth configuration is missing. Please reinstall Satchel or check the local .env file."

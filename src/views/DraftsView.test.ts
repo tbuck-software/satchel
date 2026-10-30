@@ -438,4 +438,31 @@ describe('DraftsView', () => {
     await flushPromises();
     expect(harness.draftActions!.discard).toHaveBeenCalledWith('available');
   });
+  it.each(['imapUidValidityMissing', 'imapUidValidityChanged'])(
+    'shows per-item folder recovery for %s while valid drafts stay editable', async (key) => {
+      // Fixed times: drafts sort newest first, and two clock reads can differ.
+      const invalid = makeDraft('unavailable', { thread_id: 'old-thread', subject: '', body: '', to: [],
+        updated_at: '2026-07-11T10:01:00Z',
+        content_error: JSON.stringify({ key: `backend.errors.${key}`, params: { folder: 'Work/Drafts' } }),
+      });
+      harness.threads!.threads.push(makeThread('old-thread'));
+      harness.items!.push(invalid, makeDraft('valid', { updated_at: '2026-07-11T10:00:00Z' }));
+      const wrapper = render();
+      await flushPromises();
+      const row = wrapper.findAll('.row')[0]!;
+      expect(row.text()).toContain('Work/Drafts');
+      expect(row.text()).toContain('Sync the folder');
+      await row.get('.row__open').trigger('dblclick');
+      expect(harness.composer!.openDraft).not.toHaveBeenCalled();
+      expect((row.findAll('[data-test="icon-button"]')[0]!.element as HTMLButtonElement).disabled).toBe(true);
+      expect(wrapper.get('[role="alert"]').text()).toContain('Work/Drafts');
+      const initialLoads = harness.drafts!.load.mock.calls.length;
+      await wrapper.get('.error-state [data-test="app-button"]').trigger('click');
+      expect(harness.drafts!.load.mock.calls.length).toBe(initialLoads + 1);
+      expect(wrapper.find('[data-test="thread-view"]').exists()).toBe(false);
+      await wrapper.findAll('.row')[1]!.get('.row__open').trigger('dblclick');
+      expect(harness.composer!.openDraft).toHaveBeenCalledWith('valid');
+    },
+  );
+
 });
