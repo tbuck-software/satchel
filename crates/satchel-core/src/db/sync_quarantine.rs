@@ -119,6 +119,30 @@ impl<'a> SyncQuarantineRepository<'a> {
         Ok(())
     }
 
+    /// Give one more attempt to every exhausted entry of an account whose last
+    /// failure is older than `failed_before`. Returns how many were rearmed.
+    ///
+    /// The row keeps its history: a retry that fails again exhausts it at once.
+    pub async fn rearm_exhausted(
+        &self,
+        account_id: &str,
+        failed_before: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, SyncQuarantineError> {
+        let rearmed = sqlx::query(
+            "UPDATE sync_quarantine SET attempts = ?
+             WHERE account_id = ? AND attempts >= ?
+               AND julianday(last_failed_at) < julianday(?)",
+        )
+        .bind(MAX_INGEST_ATTEMPTS - 1)
+        .bind(account_id)
+        .bind(MAX_INGEST_ATTEMPTS)
+        .bind(failed_before.to_rfc3339())
+        .execute(self.pool)
+        .await?
+        .rows_affected();
+        Ok(rearmed)
+    }
+
     /// Forget a message that has been stored after all.
     pub async fn clear(
         &self,
@@ -193,6 +217,74 @@ mod tests {
             .await
             .expect("load")
             .contains("42"));
+    }
+
+    #[tokio::test]
+    async fn only_long_exhausted_entries_of_the_account_are_rearmed_once() {
+        let pool = quarantine_pool().await;
+        sqlx::query(
+            "INSERT INTO accounts
+             (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('other', 'Other', 'other@example.com', 'imap', '{}', '', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .expect("other account");
+        let repository = SyncQuarantineRepository::new(&pool);
+        for (account, remote_id, attempts) in [
+            ("account", "old", MAX_INGEST_ATTEMPTS),
+            ("account", "retrying", MAX_INGEST_ATTEMPTS - 1),
+            ("account", "recent", MAX_INGEST_ATTEMPTS),
+            ("other", "old", MAX_INGEST_ATTEMPTS),
+        ] {
+            for _ in 0..attempts {
+                repository
+                    .record_failure(account, "inbox", remote_id, "broken")
+                    .await
+                    .expect("record");
+            }
+        }
+        let day_ago = (chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339();
+        sqlx::query("UPDATE sync_quarantine SET last_failed_at = ? WHERE remote_id != 'recent'")
+            .bind(day_ago)
+            .execute(&pool)
+            .await
+            .expect("age entries");
+        let cutoff = chrono::Utc::now() - chrono::Duration::hours(24);
+
+        assert_eq!(
+            repository
+                .rearm_exhausted("account", cutoff)
+                .await
+                .expect("rearm"),
+            1
+        );
+        let account = repository
+            .load_folder("account", "inbox")
+            .await
+            .expect("load");
+        assert!(!account.is_exhausted("old"));
+        assert!(account.is_exhausted("recent"));
+        assert!(repository
+            .load_folder("other", "inbox")
+            .await
+            .expect("load other")
+            .is_exhausted("old"));
+        // A failed retry exhausts it again and restarts its wait.
+        assert_eq!(
+            repository
+                .record_failure("account", "inbox", "old", "broken")
+                .await
+                .expect("record"),
+            MAX_INGEST_ATTEMPTS
+        );
+        assert_eq!(
+            repository
+                .rearm_exhausted("account", cutoff)
+                .await
+                .expect("rearm again"),
+            0
+        );
     }
 
     #[tokio::test]

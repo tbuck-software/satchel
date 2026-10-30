@@ -104,6 +104,15 @@ fn encoded_quarantined_messages(account: &str, folder: &str, count: usize) -> St
         .encoded()
 }
 
+/// Reported once, in the run whose failure used up the last attempt.
+fn encoded_skipped_messages(account: &str, folder: &str, count: usize) -> String {
+    crate::commands::error::CommandError::new("backend.errors.messagesSkipped")
+        .with_param("account", account)
+        .with_param("folder", folder)
+        .with_param("count", count as i64)
+        .encoded()
+}
+
 /// Reported once per hold, in the run that stopped the retries.
 fn encoded_held_snapshot_messages(account: &str, folder: &str, count: usize) -> String {
     crate::commands::error::CommandError::new("backend.errors.snapshotMessagesHeld")
@@ -127,9 +136,10 @@ fn encoded_folder_ingest_failure(account: &str, folders: &[String], count: usize
 /// does not cost a request on every poll. A permanent error holds at once.
 const SNAPSHOT_RESOLUTION_ATTEMPTS: u32 = 3;
 
-/// How long a held owed snapshot ID waits for one more lookup. A stale copy
-/// heals within a day of its cause going away, and a cause that stays costs
-/// one request a day.
+/// How long held work waits for one more attempt: an owed snapshot ID whose
+/// lookups kept failing, or a Gmail message whose target used up its
+/// quarantine. A stale copy heals within a day of its cause going away, and a
+/// cause that stays costs one request a day.
 const HELD_RETRY_AFTER_HOURS: i64 = 24;
 
 /// How one folder's batch fared.
@@ -137,6 +147,9 @@ const HELD_RETRY_AFTER_HOURS: i64 = 24;
 struct FolderIngestOutcome {
     ingested: usize,
     failed: usize,
+    /// Failures that used up their last attempt in this batch. Also counted
+    /// in `failed`; later batches skip them.
+    exhausted: usize,
     skipped: usize,
     /// Remote ids this batch committed, with no failure of theirs on record.
     ///
@@ -751,7 +764,8 @@ async fn ingest_messages_into_folder(
     for message in messages {
         // An exhausted Gmail relabel follows the same skip policy. Its old copy
         // survives without holding the cursor: snapshots delete only after a
-        // 404 and replace only after every target committed.
+        // 404 and replace only after every target committed. A day later the
+        // quarantine is rearmed, so the copy can still heal.
         if quarantine.is_exhausted(&message.remote_id) {
             outcome.skipped += 1;
         } else {
@@ -794,8 +808,14 @@ async fn ingest_messages_into_folder(
                     .record_failure(&account.id, folder_id, &message.remote_id, &error)
                     .await
                     .map_err(|error| error.to_string())?;
-                tracing::warn!(account_id = %account.id, folder_id, remote_id = %message.remote_id,
-                    attempts, "message ingest failed and was quarantined: {error}");
+                if attempts >= satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS {
+                    outcome.exhausted += 1;
+                    tracing::warn!(account_id = %account.id, folder_id, remote_id = %message.remote_id,
+                        attempts, "message ingest used up its attempts and is skipped from now on: {error}");
+                } else {
+                    tracing::warn!(account_id = %account.id, folder_id, remote_id = %message.remote_id,
+                        attempts, "message ingest failed and was quarantined: {error}");
+                }
             }
         }
     }
@@ -1054,6 +1074,24 @@ pub(crate) async fn sync_mailboxes(
                 .as_deref()
                 .and_then(|raw| serde_json::from_str(raw).ok())
                 .unwrap_or_default();
+
+            // An exhausted Gmail relabel leaves its stale copy in the old
+            // label. Give it another attempt after a while, so the copy can
+            // heal once the cause is gone: every Gmail snapshot picks up
+            // quarantine retries, and DRAFT is snapshotted on every full sync.
+            if account.provider.eq_ignore_ascii_case("gmail") {
+                let rearmed = SyncQuarantineRepository::new(pool)
+                    .rearm_exhausted(
+                        &account.id,
+                        chrono::Utc::now() - chrono::Duration::hours(HELD_RETRY_AFTER_HOURS),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                if rearmed > 0 {
+                    tracing::info!(account_id = %account.id, rearmed,
+                        "exhausted Gmail messages get another attempt");
+                }
+            }
 
             // The frequent Inbox path already has the provider's stable remote
             // folder id in SQLite after the first complete sync. Re-listing all
@@ -1379,11 +1417,18 @@ pub(crate) async fn sync_mailboxes(
                     .filter(|_| ingest.cursor_may_advance()) {
                     stamp_inbox_fetch(pool, &account.id, started_at).await?;
                 }
-                if ingest.failed > 0 {
+                if ingest.failed > ingest.exhausted {
                     summary.failures.push(encoded_quarantined_messages(
                         &account.email,
                         &folder.name,
-                        ingest.failed,
+                        ingest.failed - ingest.exhausted,
+                    ));
+                }
+                if ingest.exhausted > 0 {
+                    summary.failures.push(encoded_skipped_messages(
+                        &account.email,
+                        &folder.name,
+                        ingest.exhausted,
                     ));
                 }
                 if ingest.skipped > 0 {

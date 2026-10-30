@@ -315,10 +315,17 @@ pub(crate) async fn upsert_gmail_snapshot_message(
             Ok(value) => stored.push(value),
             Err(error) => {
                 tx.rollback().await.map_err(|error| error.to_string())?;
-                repository
+                let attempts = repository
                     .record_failure(account_id, folder_id, &message.remote_id, &error)
                     .await
                     .map_err(|error| error.to_string())?;
+                // The quarantine counts target failures; its last one holds
+                // the ID like any other exhausted target.
+                if attempts >= satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS {
+                    tracing::warn!(account_id, folder_id, remote_id = %message.remote_id,
+                        attempts, "snapshot target used up its attempts and is skipped: {error}");
+                    return Ok(SnapshotResolution::Deferred(SnapshotDeferral::Quarantined));
+                }
                 return Ok(SnapshotResolution::Deferred(SnapshotDeferral::Failed(
                     crate::sync::errors::SyncError::Transient(error),
                 )));

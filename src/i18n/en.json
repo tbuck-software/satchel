@@ -243,6 +243,7 @@
       "messageReadFailed": "The message could not be loaded. Please try again.",
       "messageSearchFailed": "Message search failed. Please try again.",
       "messagesQuarantined": "{count} messages in {folder} could not be stored for {account}. Sync continues with the remaining messages.",
+      "messagesSkipped": "{count} messages in {folder} still could not be stored for {account} after several attempts. Sync skips them and continues.",
       "noActiveAccount": "Set up an active account first.",
       "notAMessageFile": "Only .eml and .msg files can be opened this way.",
       "oauthAccountConflict": "This address already belongs to an IMAP account and cannot be replaced with OAuth.",

@@ -2444,3 +2444,92 @@ async fn gmail_failing_owed_lookups_are_capped_and_reported_once() {
     }
     std::env::remove_var("SATCHEL_GMAIL_API_BASE");
 }
+
+/// A relabel whose target cannot be stored is skipped once its attempts are
+/// used up. That is reported once, and a day later it gets another attempt,
+/// so the stale copy in its old label can still heal.
+#[tokio::test]
+async fn gmail_exhausted_relabel_is_reported_once_and_retried_after_a_day() {
+    let _guard = PROVIDER_HTTP_FIXTURES.lock().await;
+    let (base, requests, task) = server(|line, _| {
+        if line.contains("startHistoryId=200") && line.contains("labelId=INBOX") {
+            let history = json!({"historyId":"210","history":[{"id":"210",
+                "labelsRemoved":[{"message":{"id":"A"},"labelIds":["INBOX"]}]}]});
+            return ("200 OK", history.to_string());
+        }
+        if line.contains("startHistoryId=210") {
+            return (
+                "200 OK",
+                json!({"historyId":"210","history":[]}).to_string(),
+            );
+        }
+        quiet_gmail(line).unwrap_or_else(|| {
+            (
+                "200 OK",
+                labelled_response(requested_id(line), &["Label_one"]),
+            )
+        })
+    })
+    .await;
+    std::env::set_var("SATCHEL_GMAIL_API_BASE", &base);
+    let pool = pool().await;
+    gmail_account(&pool).await;
+    let mut state = persisted_state(&pool).await;
+    state.cursors.insert(
+        "INBOX".into(),
+        json!({"history_id":"200","format_version":3,"latest_ts":1790000000}).to_string(),
+    );
+    persist_sync_cursors(&pool, "account", &state, &SyncQueue::new(), None)
+        .await
+        .unwrap();
+    assert_eq!(ingest(&pool, delivery("A")).await.ingested, 1);
+    ensure_gmail_label_folder(&pool, "account", "Label_one")
+        .await
+        .unwrap();
+    sqlx::raw_sql(
+        "CREATE TRIGGER fail_label_one BEFORE INSERT ON messages
+         WHEN NEW.folder_id IN (SELECT id FROM folders WHERE remote_id='Label_one')
+         BEGIN SELECT RAISE(ABORT, 'fixture target failure'); END;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let max = satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS as usize;
+    let mut skipped_reports = Vec::new();
+    for run in 1..=max + 2 {
+        let summary = poll(&pool, FolderSelection::Inbox).await;
+        for key in failure_keys(&summary) {
+            if key == "backend.errors.messagesSkipped" {
+                skipped_reports.push(run);
+            }
+        }
+    }
+    assert_eq!(skipped_reports, [max], "reported once, when it ran out");
+    assert_eq!(locations(&pool).await, [("A".into(), "INBOX".into())]);
+
+    // A day later the target works again.
+    sqlx::raw_sql("DROP TRIGGER fail_label_one")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let yesterday = (chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339();
+    sqlx::query("UPDATE sync_quarantine SET last_failed_at = ?")
+        .bind(yesterday)
+        .execute(&pool)
+        .await
+        .unwrap();
+    requests.lock().unwrap().clear();
+    let healed = poll(&pool, FolderSelection::All).await;
+    assert!(healed.failures.is_empty(), "{:?}", healed.failures);
+    assert_eq!(locations(&pool).await, [("A".into(), "Label_one".into())]);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sync_quarantine")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0
+    );
+    std::env::remove_var("SATCHEL_GMAIL_API_BASE");
+    task.abort();
+}
