@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CollectionLoadState from '@/components/ui/CollectionLoadState.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { useDismissable } from '@/composables/useDismissable';
@@ -80,7 +81,14 @@ useDismissable(() => true, () => emit('close'));
           <input v-model="variables.my_name" />
         </label>
       </div>
-      <ul class="list">
+      <CollectionLoadState
+        :loading="templatesStore.loading"
+        :failed="templatesStore.loadFailed"
+        :has-content="templatesStore.items.length > 0"
+        :error-label="$t('settings.templates.loadFailed')"
+        @retry="templatesStore.load()"
+      />
+      <ul class="list" :aria-busy="templatesStore.loading">
         <li v-for="tpl in filtered" :key="tpl.id">
           <CardButton @click="pick(tpl.id)">
             <span class="name">{{ tpl.name }}</span>
@@ -88,7 +96,7 @@ useDismissable(() => true, () => emit('close'));
             <span class="preview">{{ tpl.body_text.slice(0, 80) }}</span>
           </CardButton>
         </li>
-        <li v-if="filtered.length === 0" class="empty">
+        <li v-if="filtered.length === 0 && !templatesStore.loading && !templatesStore.loadFailed" class="empty">
           {{ $t('compose.templates.empty') }}
         </li>
       </ul>

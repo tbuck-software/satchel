@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CollectionLoadState from '@/components/ui/CollectionLoadState.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, onMounted, ref } from 'vue';
@@ -134,7 +135,14 @@ function parseAttachmentsJson(value?: string | null): BackendOutgoingAttachment[
       }}
     </p>
 
-    <ul v-if="templatesStore.items.length > 0" class="list">
+    <CollectionLoadState
+      :loading="templatesStore.loading"
+      :failed="templatesStore.loadFailed"
+      :has-content="templatesStore.items.length > 0"
+      :error-label="$t('settings.templates.loadFailed')"
+      @retry="templatesStore.load()"
+    />
+    <ul v-if="templatesStore.items.length > 0" class="list" :aria-busy="templatesStore.loading">
       <li v-for="tpl in templatesStore.items" :key="tpl.id">
         <CardButton class="row" @click="edit(tpl.id)">
           <span class="name">{{ tpl.name }}</span>
@@ -145,7 +153,7 @@ function parseAttachmentsJson(value?: string | null): BackendOutgoingAttachment[
         <AppButton class="delete" @click="remove(tpl.id)" variant="danger" size="sm">{{ $t('common.delete') }}</AppButton>
       </li>
     </ul>
-    <p v-else class="empty">{{ $t('settings.templates.empty') }}</p>
+    <p v-else-if="!templatesStore.loading && !templatesStore.loadFailed" class="empty">{{ $t('settings.templates.empty') }}</p>
 
     <div class="editor">
       <h4>{{ editingId ? $t('settings.templates.editTitle') : $t('settings.templates.createTitle') }}</h4>

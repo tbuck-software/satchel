@@ -1468,7 +1468,7 @@ pub use satchel_core::db::RESTORE_PENDING_SUFFIX;
 #[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/backup/"))]
 pub struct BackupEntry {
     pub path: String,
-    /// Directory name, `satchel-YYYYMMDD-HHMMSS`.
+    /// Timestamped directory name, with a unique suffix for new backups.
     pub name: String,
     pub created_at: String,
     pub bytes: u64,
@@ -1624,13 +1624,24 @@ pub async fn create_backup(
         return Err(format!("{target_dir} is not a directory").into());
     }
     let root = state.write_grants.take(&root)?;
-    let created_at = chrono::Local::now();
-    let name = format!("satchel-{}", created_at.format("%Y%m%d-%H%M%S"));
-    let dest = root.join(&name);
-    std::fs::create_dir_all(&dest).map_err(|err| err.to_string())?;
+    let profile = profile_dir(&app)?;
+    create_backup_in(pool.inner(), &root, chrono::Utc::now(), |dest| {
+        copy_master_keys(&profile, dest, passphrase.as_deref())
+    })
+    .await
+    .map_err(Into::into)
+}
 
-    let target = dest.join("satchel.db");
-    let _ = std::fs::remove_file(&target);
+/// Shared creation path; the injected exporter lets tests exercise failures
+/// without accessing a real profile or the operating-system keychain.
+async fn create_backup_in(
+    pool: &SqlitePool,
+    root: &Path,
+    created_at: chrono::DateTime<chrono::Utc>,
+    export_keys: impl FnOnce(&Path) -> Result<usize, String>,
+) -> Result<BackupEntry, String> {
+    let staging = satchel_core::backup::publication::StagedBackup::new(root, created_at)?;
+    let target = staging.path().join("satchel.db");
     // VACUUM INTO takes an expression rather than a bound parameter; quote the
     // path the way SQLite expects.
     //
@@ -1643,29 +1654,32 @@ pub async fn create_backup(
         "VACUUM INTO '{}'",
         target.to_string_lossy().replace('\'', "''")
     ))
-    .execute(pool.inner())
+    .execute(pool)
     .await
-    .map_err(|err| format!("Sicherung fehlgeschlagen: {err}"))?;
+    .map_err(|err| err.to_string())?;
 
     // The encryption key lives outside the database. A backup without it cannot
     // restore an account whose credentials are encrypted.
-    let master_key_files = copy_master_keys(&profile_dir(&app)?, &dest, passphrase.as_deref())?;
     let facts = inspect_database(&target).await?;
+    let master_key_files = export_keys(staging.path())?;
+    let master_key_wrapped = crate::utils::crypto::backup_master_key_is_wrapped(staging.path());
     let bytes = std::fs::metadata(&target)
         .map(|meta| meta.len())
         .unwrap_or(0);
     let created_at = created_at.to_utc().to_rfc3339();
-    satchel_core::backup::write_backup_manifest(
-        &dest,
-        &satchel_core::backup::BackupManifest {
-            schema_version: facts.schema_version,
-            app_version: env!("CARGO_PKG_VERSION").to_string(),
-            created_at: created_at.clone(),
-            account_count: facts.accounts,
-            message_count: facts.messages,
-            search_index_ok: Some(facts.search_index_ok),
-        },
-    )?;
+    let dest = staging.publish(&satchel_core::backup::BackupManifest {
+        schema_version: facts.schema_version,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        created_at: created_at.clone(),
+        account_count: facts.accounts,
+        message_count: facts.messages,
+        search_index_ok: Some(facts.search_index_ok),
+    })?;
+    let name = dest
+        .file_name()
+        .ok_or(satchel_core::backup::publication::PUBLICATION_FAILED)?
+        .to_string_lossy()
+        .to_string();
 
     Ok(BackupEntry {
         path: dest.to_string_lossy().to_string(),
@@ -1675,7 +1689,7 @@ pub async fn create_backup(
         account_count: facts.accounts,
         message_count: facts.messages,
         master_key_files,
-        master_key_wrapped: passphrase.is_some(),
+        master_key_wrapped,
         schema_version: facts.schema_version,
         search_index_ok: Some(facts.search_index_ok),
     })
@@ -1698,10 +1712,7 @@ pub async fn list_backups(dir: String) -> CommandResult<Vec<BackupEntry>> {
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
     while let Some(entry) = read_dir.next_entry().await.map_err(|err| err.to_string())? {
         let path = entry.path();
-        if tokio::fs::metadata(path.join("satchel.db"))
-            .await
-            .is_ok_and(|meta| meta.is_file())
-        {
+        if satchel_core::backup::publication::is_backup_directory(&path) {
             candidates.push(path);
         }
     }
@@ -1742,6 +1753,13 @@ pub async fn list_backups(dir: String) -> CommandResult<Vec<BackupEntry>> {
             search_index_ok: manifest.search_index_ok,
         });
     }
+    // Fractional timestamps preserve creation order even when attempts finish
+    // out of order. Name is a deterministic fallback for legacy manifests.
+    entries.sort_by(|a, b| {
+        let time =
+            |entry: &BackupEntry| chrono::DateTime::parse_from_rfc3339(&entry.created_at).ok();
+        time(b).cmp(&time(a)).then_with(|| b.name.cmp(&a.name))
+    });
     Ok(entries)
 }
 
@@ -1805,23 +1823,32 @@ pub async fn restore_backup(
     })
 }
 
-/// Delete every backup below `dir` except the newest `keep`.
+/// Keep the newest `keep` completed publications. Legacy or unverified backups
+/// remain visible/restorable, but neither consume retention slots nor get deleted.
 #[tauri::command]
 pub async fn prune_backups(dir: String, keep: usize) -> CommandResult<Vec<String>> {
     let keep = keep.max(1);
     let stale: Vec<String> = list_backups(dir)
         .await?
         .into_iter()
+        .filter(|entry| {
+            satchel_core::backup::publication::retention_eligible(Path::new(&entry.path))
+        })
         .skip(keep)
         .map(|entry| entry.path)
         .collect();
-    for path in &stale {
-        crate::utils::crypto::remove_local_backup_master_key(Path::new(path))?;
-        tokio::fs::remove_dir_all(path)
+    let mut removed = Vec::new();
+    for path in stale {
+        // Recheck before deletion; a changed directory is conservatively kept.
+        if !satchel_core::backup::publication::retention_eligible(Path::new(&path)) {
+            continue;
+        }
+        tokio::fs::remove_dir_all(&path)
             .await
             .map_err(|err| format!("{path}: {err}"))?;
+        removed.push(path);
     }
-    Ok(stale)
+    Ok(removed)
 }
 
 /// Drop a staged restore before it is applied.
@@ -2422,6 +2449,334 @@ mod tests {
         assert_eq!(entries[0].message_count, 0);
         assert_eq!(entries[0].search_index_ok, None);
         assert_eq!(entries[0].bytes, 4096);
+    }
+
+    async fn backup_source_pool() -> (tempfile::TempDir, SqlitePool) {
+        // VACUUM INTO inherits SQLITE_OPEN_MEMORY from SQLx's in-memory
+        // connections. Use a real throwaway file, as production does.
+        let profile = tempfile::tempdir().unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(profile.path().join("satchel.db"))
+                    .create_if_missing(true)
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+            )
+            .await
+            .unwrap();
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .unwrap();
+        (profile, pool)
+    }
+
+    fn backup_time(seconds: i64) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp(1_790_000_000 + seconds, 123_456_789).unwrap()
+    }
+
+    fn synthetic_key_export(destination: &Path) -> Result<usize, String> {
+        use base64::Engine;
+        std::fs::write(
+            destination.join(MASTER_KEY_FILES[0]),
+            base64::engine::general_purpose::STANDARD.encode([7; 32]),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(1)
+    }
+
+    #[tokio::test]
+    async fn interrupted_attempts_never_displace_the_only_completed_backup() {
+        let (_profile, pool) = backup_source_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().to_string_lossy().to_string();
+        let valid = create_backup_in(&pool, root.path(), backup_time(0), synthetic_key_export)
+            .await
+            .unwrap();
+        for index in 1..=6 {
+            let result = create_backup_in(&pool, root.path(), backup_time(index), |stage| {
+                assert!(
+                    stage.join("satchel.db").is_file(),
+                    "snapshot already written"
+                );
+                if index % 2 == 0 {
+                    synthetic_key_export(stage)?;
+                }
+                Err("injected key export failure".into())
+            })
+            .await;
+            assert!(result.is_err());
+            let abandoned = root
+                .path()
+                .join(format!(".satchel-backup-abandoned-{index}"));
+            std::fs::create_dir(&abandoned).unwrap();
+            std::fs::write(abandoned.join("satchel.db"), b"partial").unwrap();
+            // Old versions wrote attempts directly to their final names. They
+            // stay visible for manual inspection, but cannot displace valid data.
+            let old_attempt = root.path().join(format!("satchel-20261031-12000{index}"));
+            std::fs::create_dir(&old_attempt).unwrap();
+            std::fs::write(old_attempt.join("satchel.db"), b"partial").unwrap();
+        }
+        // Fail the real atomic manifest writer after successful key export.
+        assert!(
+            create_backup_in(&pool, root.path(), backup_time(8), |stage| {
+                let count = synthetic_key_export(stage)?;
+                std::fs::create_dir(stage.join(satchel_core::backup::BACKUP_MANIFEST)).unwrap();
+                Ok(count)
+            })
+            .await
+            .is_err()
+        );
+        assert_eq!(list_backups(dir.clone()).await.unwrap().len(), 7);
+        assert!(prune_backups(dir.clone(), 5).await.unwrap().is_empty());
+        assert!(Path::new(&valid.path).is_dir());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 13);
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_creation_cleans_its_owned_staging_directory() {
+        let (_profile, pool) = backup_source_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        // Occupy the sole connection so creation suspends in the real VACUUM
+        // path after allocating its staging directory.
+        let connection = pool.acquire().await.unwrap();
+        let mut creation = Box::pin(create_backup_in(
+            &pool,
+            root.path(),
+            backup_time(0),
+            synthetic_key_export,
+        ));
+        assert!(futures::poll!(&mut creation).is_pending());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+        drop(creation);
+        drop(connection);
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        assert!(list_backups(root.path().to_string_lossy().to_string())
+            .await
+            .unwrap()
+            .is_empty());
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn completed_backups_prune_in_creation_order_and_legacy_stays_restorable() {
+        let (_profile, pool) = backup_source_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().to_string_lossy().to_string();
+        let legacy = root.path().join("satchel-20260910-120000");
+        std::fs::create_dir(&legacy).unwrap();
+        sqlx::query("VACUUM INTO ?")
+            .bind(legacy.join("satchel.db").to_str().unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        synthetic_key_export(&legacy).unwrap();
+        let malformed = backup_dir(root.path(), "satchel-20260910-120001", 4096, 0);
+        std::fs::write(malformed.join(satchel_core::backup::BACKUP_MANIFEST), b"{").unwrap();
+        let old_manifest = backup_dir(root.path(), "satchel-20260910-120002", 4096, 0);
+        let mut completed = Vec::new();
+        // Finish out of order; retention follows snapshot creation time.
+        for index in [3, 1, 5, 0, 6, 2, 4] {
+            completed.push(
+                create_backup_in(&pool, root.path(), backup_time(index), synthetic_key_export)
+                    .await
+                    .unwrap(),
+            );
+        }
+        let removed = prune_backups(dir.clone(), 5).await.unwrap();
+        assert_eq!(removed.len(), 2);
+        for entry in &completed {
+            let should_survive = entry.created_at != backup_time(0).to_rfc3339()
+                && entry.created_at != backup_time(1).to_rfc3339();
+            assert_eq!(Path::new(&entry.path).exists(), should_survive);
+        }
+        for path in [&legacy, &malformed, &old_manifest] {
+            assert!(
+                path.exists(),
+                "legacy and unverified directories are never pruned"
+            );
+        }
+        assert_eq!(list_backups(dir).await.unwrap().len(), 8);
+        inspect_database(&legacy.join("satchel.db")).await.unwrap();
+        let keys = crate::utils::crypto::backup_master_keys(&legacy, None).unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        satchel_core::backup::stage_restore(
+            profile.path(),
+            &legacy.join("satchel.db"),
+            &keys,
+            Some(&[9; 32]),
+        )
+        .await
+        .unwrap();
+        assert!(satchel_core::backup::restore_pending(profile.path()));
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn concurrent_same_timestamp_backups_are_distinct_and_recover_their_keys() {
+        let (_profile, pool) = backup_source_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        let time = backup_time(0);
+        let existing = backup_dir(
+            root.path(),
+            &format!("satchel-{}", time.format("%Y%m%d-%H%M%S")),
+            4096,
+            0,
+        );
+        let before = std::fs::read(existing.join("satchel.db")).unwrap();
+        let (a, b) = tokio::join!(
+            create_backup_in(&pool, root.path(), time, synthetic_key_export),
+            create_backup_in(&pool, root.path(), time, synthetic_key_export),
+        );
+        let (a, b) = (a.unwrap(), b.unwrap());
+        assert_ne!(a.path, b.path);
+        for entry in [&a, &b] {
+            assert!(satchel_core::backup::publication::retention_eligible(
+                Path::new(&entry.path)
+            ));
+            assert_eq!(
+                crate::utils::crypto::backup_master_keys(Path::new(&entry.path), None).unwrap(),
+                vec![[7; 32]]
+            );
+        }
+        assert_eq!(std::fs::read(existing.join("satchel.db")).unwrap(), before);
+        assert_eq!(
+            list_backups(root.path().to_string_lossy().to_string())
+                .await
+                .unwrap()
+                .len(),
+            3
+        );
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn published_snapshot_includes_committed_wal_data() {
+        let (profile, pool) = backup_source_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        sqlx::query("CREATE TABLE snapshot_probe (value TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO snapshot_probe VALUES ('committed in WAL')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            std::fs::metadata(profile.path().join("satchel.db-wal"))
+                .unwrap()
+                .len()
+                > 0
+        );
+        let entry = create_backup_in(&pool, root.path(), backup_time(0), synthetic_key_export)
+            .await
+            .unwrap();
+        let backup = open_readonly(&Path::new(&entry.path).join("satchel.db"))
+            .await
+            .unwrap();
+        let value: String = sqlx::query_scalar("SELECT value FROM snapshot_probe")
+            .fetch_one(&backup)
+            .await
+            .unwrap();
+        assert_eq!(value, "committed in WAL");
+        backup.close().await;
+        assert!(satchel_core::backup::publication::retention_eligible(
+            Path::new(&entry.path)
+        ));
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn published_wrapped_key_still_stages_a_restore() {
+        // satchel-core's test-support feature fixes the active key at [7; 32]
+        // and bypasses keychain access. Both profiles here are synthetic.
+        let (_profile, pool) = backup_source_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        let source_profile = tempfile::tempdir().unwrap();
+        let passphrase = "synthetic backup passphrase";
+        let entry = create_backup_in(&pool, root.path(), backup_time(0), |dest| {
+            copy_master_keys(source_profile.path(), dest, Some(passphrase))
+        })
+        .await
+        .unwrap();
+        assert!(entry.master_key_wrapped);
+        let path = Path::new(&entry.path);
+        assert!(crate::utils::crypto::backup_master_keys(path, None).is_err());
+        assert!(crate::utils::crypto::backup_master_keys(path, Some("wrong passphrase")).is_err());
+        let keys = crate::utils::crypto::backup_master_keys(path, Some(passphrase)).unwrap();
+        assert_eq!(keys, vec![[7; 32]]);
+        let destination_profile = tempfile::tempdir().unwrap();
+        satchel_core::backup::stage_restore(
+            destination_profile.path(),
+            &path.join("satchel.db"),
+            &keys,
+            Some(&[9; 32]),
+        )
+        .await
+        .unwrap();
+        assert!(satchel_core::backup::restore_pending(
+            destination_profile.path()
+        ));
+        pool.close().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn retention_ignores_foreign_paths_symlinks_and_changed_publications() {
+        use std::os::unix::fs::symlink;
+        let (_profile, pool) = backup_source_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let valid = create_backup_in(&pool, outside.path(), backup_time(0), synthetic_key_export)
+            .await
+            .unwrap();
+        let external = Path::new(&valid.path);
+        symlink(external, root.path().join(&valid.name)).unwrap();
+        let foreign = backup_dir(root.path(), "foreign", 4096, 0);
+        let changed = create_backup_in(&pool, root.path(), backup_time(1), synthetic_key_export)
+            .await
+            .unwrap();
+        symlink(
+            outside.path(),
+            Path::new(&changed.path).join("foreign-link"),
+        )
+        .unwrap();
+        let replaced_db =
+            create_backup_in(&pool, root.path(), backup_time(2), synthetic_key_export)
+                .await
+                .unwrap();
+        std::fs::remove_file(Path::new(&replaced_db.path).join("satchel.db")).unwrap();
+        symlink(
+            external.join("satchel.db"),
+            Path::new(&replaced_db.path).join("satchel.db"),
+        )
+        .unwrap();
+        for index in 3..10 {
+            create_backup_in(&pool, root.path(), backup_time(index), synthetic_key_export)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            prune_backups(root.path().to_string_lossy().to_string(), 5)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(external.is_dir());
+        assert!(foreign.is_dir());
+        assert!(Path::new(&changed.path).is_dir());
+        assert!(Path::new(&replaced_db.path).is_dir());
+        assert_eq!(
+            list_backups(root.path().to_string_lossy().to_string())
+                .await
+                .unwrap()
+                .len(),
+            7
+        );
+        pool.close().await;
     }
 
     /// The check the listing gave up has to still guard the restore.

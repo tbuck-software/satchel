@@ -21,6 +21,10 @@ pub struct MboxEntries<R> {
     /// A leading RFC header identifies a bare EML, whose body may contain
     /// unescaped From lines without becoming another mbox entry.
     bare: bool,
+    /// Still checking the first line for an RFC header name followed by a colon.
+    header_pending: bool,
+    /// The first five bytes of this line have already been classified.
+    in_line: bool,
     done: bool,
     /// Entries dropped for exceeding [`MAX_MESSAGE_BYTES`].
     pub dropped: usize,
@@ -43,6 +47,8 @@ impl<R: tokio::io::AsyncBufRead + Unpin> MboxEntries<R> {
             oversize: false,
             separated: false,
             bare: false,
+            header_pending: true,
+            in_line: false,
             done: false,
             dropped: 0,
             bytes_read: 0,
@@ -98,55 +104,83 @@ impl<R: tokio::io::AsyncBufRead + Unpin> MboxEntries<R> {
     async fn next_raw_entry(&mut self) -> Result<Option<Vec<u8>>, String> {
         use tokio::io::AsyncBufReadExt;
 
+        // Only the line prefix needs lookahead. The remainder goes straight
+        // from the reader into the bounded message buffer, or is discarded.
+        // Parser storage is O(ceiling) plus these five bytes, even for a line
+        // of arbitrary length. The caller owns the reader's buffer capacity.
+        let mut prefix = [0; 5];
+        let mut prefix_len = 0;
         loop {
             if self.done {
                 return Ok(None);
             }
-            let mut line = Vec::new();
-            let read = self
+            let available = self
                 .reader
-                .read_until(b'\n', &mut line)
+                .fill_buf()
                 .await
                 .map_err(|err| err.to_string())?;
-            self.bytes_read += read as u64;
-            if read == 0 {
+            if available.is_empty() {
+                // A final line shorter than "From " has no newline to flush it.
+                push_bounded(
+                    &mut self.current,
+                    &mut self.oversize,
+                    self.ceiling,
+                    &prefix[..prefix_len],
+                );
                 self.done = true;
-                if let Some(entry) = self.take_entry(true) {
-                    return Ok(Some(entry));
-                }
-                return Ok(None);
+                return Ok(self.take_entry(true));
             }
-            if self.bytes_read == read as u64 {
-                self.bare = line
+            let mut read = memchr::memchr(b'\n', available).map_or(available.len(), |at| at + 1);
+            if !self.in_line {
+                read = read.min(prefix.len() - prefix_len);
+            }
+            let chunk = &available[..read];
+            let ends_line = chunk.ends_with(b"\n");
+            if self.header_pending {
+                // This also works for a header name longer than the ceiling:
+                // classification needs no copy and continues after discarding.
+                if let Some(at) = chunk
                     .iter()
-                    .position(|byte| *byte == b':')
-                    .is_some_and(|end| {
-                        end > 0 && line[..end].iter().all(|byte| byte.is_ascii_graphic())
-                    });
-            }
-            if !self.bare && line.starts_with(b"From ") {
-                let previous = self.take_entry(false);
-                self.separated = true;
-                self.push(&line);
-                if let Some(entry) = previous {
-                    return Ok(Some(entry));
+                    .position(|byte| *byte == b':' || !byte.is_ascii_graphic())
+                {
+                    self.bare = chunk[at] == b':' && (self.bytes_read > 0 || at > 0);
+                    self.header_pending = false;
                 }
+            }
+            if self.in_line {
+                push_bounded(&mut self.current, &mut self.oversize, self.ceiling, chunk);
+            } else {
+                prefix[prefix_len..prefix_len + read].copy_from_slice(chunk);
+                prefix_len += read;
+            }
+            self.reader.consume(read);
+            self.bytes_read += read as u64;
+            if self.in_line {
+                self.in_line = !ends_line;
                 continue;
             }
-            self.push(&line);
+            if prefix_len < prefix.len() && !ends_line {
+                continue;
+            }
+            let previous = if !self.bare && prefix[..prefix_len] == *b"From " {
+                let previous = self.take_entry(false);
+                self.separated = true;
+                previous
+            } else {
+                None
+            };
+            push_bounded(
+                &mut self.current,
+                &mut self.oversize,
+                self.ceiling,
+                &prefix[..prefix_len],
+            );
+            prefix_len = 0;
+            self.in_line = !ends_line;
+            if let Some(entry) = previous {
+                return Ok(Some(entry));
+            }
         }
-    }
-
-    fn push(&mut self, line: &[u8]) {
-        if self.oversize {
-            return;
-        }
-        if self.current.len() + line.len() > self.ceiling {
-            self.oversize = true;
-            self.current = Vec::new();
-            return;
-        }
-        self.current.extend_from_slice(line);
     }
 
     /// Close off the entry being assembled. `at_end` allows the whole-file
@@ -177,6 +211,20 @@ impl<R: tokio::io::AsyncBufRead + Unpin> MboxEntries<R> {
         }
         Some(raw)
     }
+}
+
+/// Append only while the entry fits. Vec growth is amortized, so capacity can
+/// exceed the ceiling by a constant factor, but never depends on line length.
+fn push_bounded(current: &mut Vec<u8>, oversize: &mut bool, ceiling: usize, chunk: &[u8]) {
+    if *oversize {
+        return;
+    }
+    if chunk.len() > ceiling - current.len() {
+        *oversize = true;
+        *current = Vec::new();
+        return;
+    }
+    current.extend_from_slice(chunk);
 }
 
 pub fn strip_mbox_from_line(raw: &str) -> &str {

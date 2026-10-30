@@ -13,6 +13,7 @@ const harness = vi.hoisted(() => ({
   loadByThread: vi.fn(),
   loadAttachments: vi.fn(),
   timeline: [] as unknown[],
+  remove: vi.fn(), undo: vi.fn(), success: vi.fn(), error: vi.fn(),
 }));
 
 vi.mock('@/stores/messages', () => ({
@@ -30,11 +31,12 @@ vi.mock('@/stores/topics', () => ({
     fetchTimeline: vi.fn(async () => harness.timeline),
     filesFor: () => [],
     loadFiles: vi.fn(async () => {}),
+    removeItemFromTopic: harness.remove, undoMemberships: harness.undo,
   }),
 }));
 vi.mock('@/stores/composer', () => ({ useComposerStore: () => ({ openReply: vi.fn() }) }));
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }),
+  useToast: () => ({ success: harness.success, error: harness.error, info: vi.fn() }),
 }));
 vi.mock('@/utils/saveAttachment', () => ({ saveAttachmentWithDialog: vi.fn() }));
 
@@ -83,6 +85,7 @@ beforeEach(() => {
   vi.stubGlobal('scrollTo', vi.fn());
   Element.prototype.scrollTo = vi.fn();
   harness.loadByThread.mockReset();
+  harness.remove.mockReset(); harness.undo.mockReset(); harness.success.mockReset(); harness.error.mockReset();
   harness.loadAttachments.mockReset();
   harness.timeline = Array.from({ length: 20 }, (_, index) => linkedThread(index));
 });
@@ -96,7 +99,7 @@ async function mountFeed() {
     props: { topicId: 'topic-1' },
     global: {
       plugins: [createPinia()],
-      stubs: { TopicFeedItem: { template: '<article class="stub-card" />' } },
+      stubs: { TopicFeedItem: { name: 'TopicFeedItem', emits: ['remove'], template: '<article class="stub-card" />' } },
     },
   });
   await flushPromises();
@@ -142,5 +145,37 @@ describe('topic feed hydration', () => {
     await flushPromises();
 
     expect(harness.loadByThread).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe('topic membership Undo', () => {
+  it('does not offer Undo for a stale displayed membership that was already absent', async () => {
+    harness.remove.mockResolvedValue(null);
+    const wrapper = await mountFeed();
+    wrapper.findComponent({ name: 'TopicFeedItem' }).vm.$emit('remove');
+    await flushPromises();
+    expect(harness.remove).toHaveBeenCalledWith('topic-1', 'thread', 'thread-0');
+    expect(harness.success).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('keeps the original topic and item when navigation precedes a delayed removal receipt and Undo', async () => {
+    let release!: (value: { item_id: string; revision: string }) => void;
+    harness.remove.mockReturnValue(new Promise((resolve) => { release = resolve; }));
+    harness.undo.mockResolvedValue(undefined);
+    const wrapper = await mountFeed();
+    wrapper.findComponent({ name: 'TopicFeedItem' }).vm.$emit('remove');
+    await wrapper.setProps({ topicId: 'topic-2' });
+    await flushPromises();
+    const destinationCards = wrapper.findAll('.stub-card').length;
+    release({ item_id: 'thread-0', revision: 'removed' });
+    await flushPromises();
+    expect(wrapper.findAll('.stub-card')).toHaveLength(destinationCards);
+    const action = harness.success.mock.calls[0]![1].action;
+    await action.handler();
+    expect(harness.undo).toHaveBeenCalledExactlyOnceWith('topic-1', 'thread', [{ item_id: 'thread-0', revision: 'removed' }], true);
+    expect(wrapper.findAll('.stub-card')).toHaveLength(destinationCards);
+    wrapper.unmount();
   });
 });

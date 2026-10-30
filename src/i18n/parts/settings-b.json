@@ -169,7 +169,8 @@
         "syntaxIn": "in:",
         "syntaxTag": "tag:",
         "title": "Smart folders (saved searches)",
-        "validation": "Name and search query are required."
+        "validation": "Name and search query are required.",
+        "loadFailed": "Could not load smart folders. Try again."
       },
       "swipes": {
         "ariaLong": "{direction}: far swipe",
@@ -421,7 +422,8 @@
         "syntaxIn": "in:",
         "syntaxTag": "tag:",
         "title": "Smart Folders (gespeicherte Suchen)",
-        "validation": "Name und Suchanfrage sind Pflicht."
+        "validation": "Name und Suchanfrage sind Pflicht.",
+        "loadFailed": "Intelligente Ordner konnten nicht geladen werden. Bitte erneut versuchen."
       },
       "swipes": {
         "ariaLong": "{direction}: weite Wischgeste",

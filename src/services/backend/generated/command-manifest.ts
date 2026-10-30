@@ -2234,6 +2234,18 @@ export default {
                 }
             }
         },
+        "undo_topic_memberships": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::topics::UndoTopicMembershipsInput"
+                    }
+                }
+            }
+        },
         "undo_trash": {
             "kind": "object",
             "fields": {
@@ -4566,6 +4578,23 @@ export default {
                 }
             }
         },
+        "app::commands::topics::TopicMembershipReceiptDto": {
+            "kind": "object",
+            "fields": {
+                "item_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "revision": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "app::commands::topics::TopicMembershipsInput": {
             "kind": "object",
             "fields": {
@@ -4602,6 +4631,39 @@ export default {
                         "item": {
                             "kind": "value"
                         }
+                    }
+                },
+                "topic_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::topics::UndoTopicMembershipsInput": {
+            "kind": "object",
+            "fields": {
+                "item_type": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "receipts": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "ref",
+                            "name": "app::commands::topics::TopicMembershipReceiptDto"
+                        }
+                    }
+                },
+                "restore": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
                     }
                 },
                 "topic_id": {
