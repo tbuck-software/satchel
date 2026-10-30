@@ -459,6 +459,18 @@ pub async fn verify_smime_message(
     signed_payload: &[u8],
     from_address: &str,
 ) -> SmimeVerifyMessageResult {
+    // The engine re-checks this; asking first keeps the reason as a key.
+    if let Err(error) = crate::email::signed_mime::bind_smime_bundle(signed_payload) {
+        tracing::debug!(%message_id, %error, "S/MIME signed structure rejected");
+        return SmimeVerifyMessageResult {
+            state: "error".to_string(),
+            signer_email: None,
+            signer_cn: None,
+            error_detail: Some(
+                CommandError::new("backend.errors.signedMessageMalformed").encoded(),
+            ),
+        };
+    }
     let verified = {
         let payload = signed_payload.to_vec();
         let message_id = message_id.to_string();

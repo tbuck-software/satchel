@@ -13,6 +13,7 @@ use tokio::net::TcpStream;
 use tokio::time::{timeout, Duration};
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
+use crate::email::signed_mime::{self, SignedProtocol};
 use crate::providers::{
     cursor,
     imap_sessions::{read_with_pool, SessionOutcome, SessionPool, IDLE_SESSION_TTL},
@@ -2460,6 +2461,11 @@ fn is_trycreate_response(error: &str) -> bool {
 }
 
 pub fn parse_header_value(header: &str, key: &str) -> Option<String> {
+    parse_raw_header_value(header, key).map(|value| decode_mime_encoded_words(&value))
+}
+
+/// The unfolded value of a header, encoded words left as they are.
+pub(crate) fn parse_raw_header_value(header: &str, key: &str) -> Option<String> {
     let mut collecting = false;
     let mut value = String::new();
 
@@ -2491,11 +2497,7 @@ pub fn parse_header_value(header: &str, key: &str) -> Option<String> {
         }
     }
 
-    if collecting {
-        Some(decode_mime_encoded_words(&value))
-    } else {
-        None
-    }
+    collecting.then_some(value)
 }
 
 pub fn parse_from_address(header: &str) -> Option<String> {
@@ -3007,34 +3009,9 @@ fn parse_body_part(
 
     if lowered_content_type.starts_with("multipart/") {
         if lowered_content_type.starts_with("multipart/signed")
-            && (lowered_content_type.contains("application/pgp-signature")
-                || lowered_content_type.contains("application/pkcs7-signature")
-                || lowered_content_type.contains("application/x-pkcs7-signature"))
+            && SignedProtocol::declared(content_type).is_some()
         {
-            let sections = extract_header_param(content_type, "boundary")
-                .map(|boundary| split_multipart_sections(raw_body, &boundary))
-                .unwrap_or_default();
-            if sections.len() != 2 {
-                return ParsedBody::default();
-            }
-            let (part_header, part_body) = split_header_and_body(sections[0]);
-            let part_header = String::from_utf8_lossy(part_header);
-            let part_type = parse_header_value(&part_header, "Content-Type")
-                .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
-            let part_encoding = parse_header_value(&part_header, "Content-Transfer-Encoding")
-                .unwrap_or_else(|| "8bit".to_string());
-            let mut parsed = parse_body_part(&part_type, &part_encoding, part_body, depth + 1);
-            let mut bundle = format!("Content-Type: {content_type}\r\n\r\n").into_bytes();
-            bundle.extend_from_slice(raw_body);
-            parsed.smime_encrypted = None;
-            parsed.smime_signed = None;
-            parsed.pgp_signed = None;
-            if lowered_content_type.contains("application/pgp-signature") {
-                parsed.pgp_signed = Some(bundle);
-            } else {
-                parsed.smime_signed = Some(bundle);
-            }
-            return parsed;
+            return parse_signed_body(content_type, raw_body, depth);
         }
         if lowered_content_type.starts_with("multipart/encrypted")
             && lowered_content_type.contains("application/pgp-encrypted")
@@ -3186,6 +3163,40 @@ fn parse_body_part(
             attachments: Vec::new(),
         }
     }
+}
+
+/// Display exactly the entity a `multipart/signed` signature covers, and keep
+/// the bundle that verification later reads it back from.
+///
+/// Both sides take the entity from `signed_mime`. What it refuses is shown as
+/// nothing here, so no signature state can attach to it.
+fn parse_signed_body(content_type: &str, raw_body: &[u8], depth: usize) -> ParsedBody {
+    let Ok(parts) = signed_mime::split(content_type, raw_body) else {
+        return ParsedBody::default();
+    };
+    let mut bundle = format!("Content-Type: {content_type}\r\n\r\n").into_bytes();
+    bundle.extend_from_slice(raw_body);
+    // Verification splits the stored bundle, not this body. Show nothing it
+    // would not find there byte for byte.
+    if signed_mime::split_bundle(&bundle).map(|stored| stored.entity) != Ok(parts.entity) {
+        return ParsedBody::default();
+    }
+
+    let (part_header, part_body) = signed_mime::entity_header_and_body(parts.entity);
+    let part_header = String::from_utf8_lossy(part_header);
+    let part_type = parse_header_value(&part_header, "Content-Type")
+        .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
+    let part_encoding = parse_header_value(&part_header, "Content-Transfer-Encoding")
+        .unwrap_or_else(|| "8bit".to_string());
+    let mut parsed = parse_body_part(&part_type, &part_encoding, part_body, depth + 1);
+    parsed.smime_encrypted = None;
+    parsed.smime_signed = None;
+    parsed.pgp_signed = None;
+    match parts.protocol {
+        SignedProtocol::OpenPgp => parsed.pgp_signed = Some(bundle),
+        SignedProtocol::Smime => parsed.smime_signed = Some(bundle),
+    }
+    parsed
 }
 
 pub(super) fn root_crypto_trust(
@@ -3553,7 +3564,7 @@ fn split_header_and_body(section: &[u8]) -> (&[u8], &[u8]) {
     (b"", section)
 }
 
-fn extract_header_param(input: &str, key: &str) -> Option<String> {
+pub(crate) fn extract_header_param(input: &str, key: &str) -> Option<String> {
     let needle = key.to_ascii_lowercase();
     for raw_part in input.split(';').skip(1) {
         // An empty or valueless segment is not the end of the header. Bounce
@@ -4767,6 +4778,26 @@ AQID\r\n\
         assert!(parsed.pgp_signed.is_none());
         assert_eq!(parsed.text.as_deref(), Some("Signed body"));
         assert!(parsed.attachments.is_empty());
+    }
+
+    #[test]
+    fn a_signed_structure_the_stored_bundle_cannot_reproduce_shows_nothing() {
+        let body = b"--s\r\nContent-Type: text/plain\r\n\r\nSigned body\r\n\
+--s\r\nContent-Type: application/pgp-signature\r\n\r\nSignature\r\n--s--\r\n";
+        let plain = "multipart/signed; protocol=\"application/pgp-signature\"; boundary=s";
+        assert!(
+            parse_message_body(&format!("Content-Type: {plain}\r\n"), Some(body))
+                .pgp_signed
+                .is_some()
+        );
+
+        // Decoded once for display, the type gains line breaks; written into
+        // the bundle and read back, it would name a different structure.
+        let header = format!("Content-Type: {plain}; x=\"=?us-ascii?q?=0D=0A=0D=0A?=\"\r\n");
+        let parsed = parse_message_body(&header, Some(body));
+        assert!(parsed.pgp_signed.is_none());
+        assert!(parsed.text.is_none());
+        assert!(!parsed.trust.root_crypto);
     }
 
     #[test]

@@ -831,20 +831,29 @@ async fn apply_incoming_pgp_signed_status(
     signed_bundle: &[u8],
 ) {
     let from_address = dto.from_address.clone();
-    let verification = match crate::email::pgp_mime::parse_signed_message(signed_bundle) {
-        Ok(parsed) => {
-            verify_incoming_detached_signature(
-                app,
-                pool,
-                &dto.id,
-                &parsed.signed_entity,
-                &parsed.armored_signature,
-                &from_address,
-            )
-            .await
+    let parsed = match crate::email::pgp_mime::parse_signed_message(signed_bundle) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            // No key is consulted for a structure that does not tie the
+            // signature to the displayed entity.
+            tracing::debug!(message_id = %dto.id, %error, "OpenPGP signed structure rejected");
+            dto.pgp_state = Some("error".to_string());
+            dto.pgp_error_detail =
+                Some(CommandError::new("backend.errors.signedMessageMalformed").encoded());
+            dto.pgp_signer_name = None;
+            dto.pgp_signer_fingerprint = None;
+            return;
         }
-        Err(error) => Err(error),
     };
+    let verification = verify_incoming_detached_signature(
+        app,
+        pool,
+        &dto.id,
+        &parsed.signed_entity,
+        &parsed.armored_signature,
+        &from_address,
+    )
+    .await;
 
     match verification {
         Ok(IncomingPgpDetachedSignature::Valid {

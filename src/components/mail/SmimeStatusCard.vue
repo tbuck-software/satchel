@@ -3,6 +3,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { SmimeMessageState } from '@/types/mail';
+import { translateBackendError } from '@/utils/backendErrors';
 import AppIcon from '@/components/ui/AppIcon.vue';
 
 const { t } = useI18n();
@@ -21,6 +22,11 @@ const emit = defineEmits<{
   importCert: [];
   dismiss: [];
 }>();
+
+// The engine reports its own wording; the app's checks report a message key.
+const errorDetail = computed(() =>
+  props.errorDetail ? (translateBackendError(props.errorDetail) ?? props.errorDetail) : undefined,
+);
 
 // State is a closed TypeScript union; the switch covers every member.
 // oxlint-disable-next-line vue/return-in-computed-property
@@ -82,13 +88,13 @@ const config = computed(() => {
     case 'signature_invalid':
       return {
         title: t('mail.smime.signatureInvalid'),
-        description: props.errorDetail || t('mail.smime.signatureInvalidDescription'),
+        description: errorDetail.value || t('mail.smime.signatureInvalidDescription'),
         tone: 'danger',
       };
     case 'error':
       return {
         title: t('mail.smime.errorTitle'),
-        description: props.errorDetail || t('mail.smime.messageFailed'),
+        description: errorDetail.value || t('mail.smime.messageFailed'),
         tone: 'danger',
         primary: t('mail.smime.close'),
         action: () => emit('dismiss'),

@@ -121,8 +121,13 @@ pub fn decrypt(
     active_engine().decrypt(pem_private_key, pem_certificate, passphrase, ciphertext)
 }
 
+/// Verify a signed payload. A `multipart/signed` bundle reaches the engine
+/// rebuilt around the entity the display path shows, so the engine's own MIME
+/// parser cannot verify a different part than the one the reader sees.
 pub fn verify(signed_payload: &[u8]) -> Result<SmimeVerifyResult, String> {
-    active_engine().verify(signed_payload)
+    let bound = crate::email::signed_mime::bind_smime_bundle(signed_payload)
+        .map_err(|error| error.to_string())?;
+    active_engine().verify(&bound)
 }
 
 pub fn certificate_metadata(pem_certificate: &str) -> Result<SmimeCertMetadata, String> {
@@ -1539,6 +1544,80 @@ mod tests {
         let certs = OpensslLibEngine.extract_certificates(&signed).unwrap();
         assert_eq!(certs.len(), 1);
         assert_eq!(certs[0].trim(), leaf.cert_pem.trim());
+    }
+
+    /// A detached `multipart/signed` message as it travels (OpenSSL writes the
+    /// structure with LF around a CRLF entity), and its signed entity and
+    /// signature part cut out again.
+    fn detached_signed(leaf: &Identity, entity: &[u8]) -> (Vec<u8>, String, String) {
+        let key = load_private_key(&leaf.key_pem, None).unwrap();
+        let flags = Pkcs7Flags::DETACHED;
+        let signed = Pkcs7::sign(&leaf.cert, &key, &Stack::new().unwrap(), entity, flags)
+            .unwrap()
+            .to_smime(entity, flags)
+            .unwrap();
+        let text = String::from_utf8(signed)
+            .unwrap()
+            .replace("\r\n", "\n")
+            .replace('\n', "\r\n");
+        let boundary = text
+            .split("boundary=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .unwrap();
+        let delimiter = format!("\r\n--{boundary}");
+        let mut pieces = text.split(delimiter.as_str()).skip(1);
+        let entity = pieces.next().unwrap().trim_start_matches(['\r', '\n']);
+        let signature = pieces.next().unwrap().trim_matches(['\r', '\n']);
+        (
+            text.as_bytes().to_vec(),
+            entity.to_string(),
+            signature.to_string(),
+        )
+    }
+
+    #[test]
+    fn smime_signature_holds_only_for_the_displayed_entity() {
+        let ca = issue_ca();
+        let leaf = issue_leaf(&ca, "Bob", "bob@bank.example");
+        let (signed, entity, signature) = detached_signed(
+            &leaf,
+            b"Content-Type: text/plain; charset=us-ascii\r\n\r\nOriginal signed text",
+        );
+
+        let genuine = crate::providers::imap::parse_raw_message_body(&signed);
+        assert_eq!(genuine.text.as_deref(), Some("Original signed text"));
+        let bundle = genuine.smime_signed.as_deref().expect("signed bundle kept");
+        let result = verify(bundle).unwrap();
+        assert!(result.valid, "{:?}", result.error);
+
+        let header = "Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; micalg=sha-256;";
+        let forged_part = "Content-Type: text/plain; charset=us-ascii\r\n\r\nForged text";
+        // Each shape displays text the signature does not cover.
+        let shapes = [
+            format!(
+                "{header} boundary=\"Q7;x=1\"\r\n\r\n\
+                 --Q7;x=1\r\n{entity}\r\n--Q7;x=1\r\n{signature}\r\n--Q7;x=1--\r\n\
+                 --Q7\r\n{forged_part}\r\n--Q7\r\n{signature}\r\n--Q7--\r\n"
+            ),
+            format!(
+                "{header} boundary=\"G\"\r\n\r\npreamble x--G\r\n{entity}\r\n\
+                 --G\r\nContent-Description: application/pkcs7-signature\r\n{forged_part}\r\n\
+                 --G\r\n{signature}\r\n--G--\r\n"
+            ),
+        ];
+        for shape in shapes {
+            let parsed = crate::providers::imap::parse_raw_message_body(shape.as_bytes());
+            if let Some(bundle) = parsed.smime_signed.as_deref() {
+                assert_eq!(parsed.text.as_deref(), Some("Forged text"));
+                assert!(
+                    !verify(bundle).is_ok_and(|result| result.valid),
+                    "a valid S/MIME signature is shown over text it does not cover"
+                );
+            }
+            // A bundle stored before the display path learned to reject it.
+            assert!(!verify(shape.as_bytes()).is_ok_and(|result| result.valid));
+        }
     }
 
     #[test]

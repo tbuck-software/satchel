@@ -1,0 +1,33 @@
+From: Satchel GPG Fixture <gpg-fixture@example.test>
+To: reader@example.test
+Subject: Nested boundary
+MIME-Version: 1.0
+Content-Type: multipart/signed; protocol="application/pgp-signature"; micalg=pgp-sha256; boundary="=_b_1"
+
+--=_b_1
+Content-Type: multipart/alternative; boundary="=_b_12"
+
+--=_b_12
+Content-Type: text/plain; charset=us-ascii
+
+Plain rendering of the signed note.
+
+--=_b_12
+Content-Type: text/html; charset=us-ascii
+
+<p>HTML rendering of the signed note.</p>
+
+--=_b_12--
+
+--=_b_1
+Content-Type: application/pgp-signature
+
+-----BEGIN PGP SIGNATURE-----
+
+iHUEABYIAB0WIQTCkWCwutyFV+X+8wxaTn2RJ4W/XAUCauTArAAKCRBaTn2RJ4W/
+XAp0AP92qwKqKTa8p5gWRBtewLmiuVVliVgnIQ1ZU9jD40tg3QEAgQK4Zb4+aFYA
+XpJEM+Jjr4EEhhitrrSzHGfzI5ZknQM=
+=Cun5
+-----END PGP SIGNATURE-----
+
+--=_b_1--

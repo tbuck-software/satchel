@@ -1,0 +1,49 @@
+From: Satchel GPG Fixture <gpg-fixture@example.test>
+To: reader@example.test
+Subject: Quarterly figures
+Date: Tue, 01 Sep 2026 10:00:00 +0200
+Message-ID: <tb-signed-1@example.test>
+MIME-Version: 1.0
+User-Agent: Mozilla Thunderbird
+Content-Type: multipart/signed; micalg=pgp-sha256;
+ protocol="application/pgp-signature";
+ boundary="------------sig0Tb5Kq3x7W2dL8mN4pRjYvHc"
+
+This is an OpenPGP/MIME signed message (RFC 4880 and 3156)
+--------------sig0Tb5Kq3x7W2dL8mN4pRjYvHc
+Content-Type: multipart/mixed; boundary="------------mixA9fQ2wE6rT1yU5iO8pZ3xC";
+ protected-headers="v1"
+Subject: Quarterly figures
+From: Satchel GPG Fixture <gpg-fixture@example.test>
+To: reader@example.test
+Message-ID: <tb-signed-1@example.test>
+
+--------------mixA9fQ2wE6rT1yU5iO8pZ3xC
+Content-Type: text/plain; charset=UTF-8; format=flowed
+Content-Transfer-Encoding: quoted-printable
+
+The quarterly figures are attached. Gr=C3=BC=C3=9Fe.
+
+--------------mixA9fQ2wE6rT1yU5iO8pZ3xC
+Content-Type: text/csv; charset=UTF-8; name="figures.csv"
+Content-Disposition: attachment; filename="figures.csv"
+Content-Transfer-Encoding: base64
+
+cXVhcnRlcixyZXZlbnVlCnExLDEwMApxMiwxMjAK
+
+--------------mixA9fQ2wE6rT1yU5iO8pZ3xC--
+
+--------------sig0Tb5Kq3x7W2dL8mN4pRjYvHc
+Content-Type: application/pgp-signature; name="OpenPGP_signature.asc"
+Content-Description: OpenPGP digital signature
+Content-Disposition: attachment; filename="OpenPGP_signature.asc"
+
+-----BEGIN PGP SIGNATURE-----
+
+iHUEABYIAB0WIQTCkWCwutyFV+X+8wxaTn2RJ4W/XAUCauTAqQAKCRBaTn2RJ4W/
+XK14AP9GV/OZaoA+117RVrQoYSZFYFBJfrM5FLTRKwp5PITzaAD+MfKUsZBIQVrw
+xEGb3g2WlH5CllnfF+4N/0MhCFTAoA4=
+=jYrN
+-----END PGP SIGNATURE-----
+
+--------------sig0Tb5Kq3x7W2dL8mN4pRjYvHc--
