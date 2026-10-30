@@ -24,5 +24,6 @@ interface RenderFidelityPayload {
 }
 
 interface Window {
+  __mountSatchelResendEditor?: (sourceHtml: string) => void;
   __setSatchelRenderFidelityPayload?: (payload: RenderFidelityPayload) => Promise<void>;
 }

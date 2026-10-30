@@ -89,8 +89,13 @@ pub(crate) async fn load_message_body_with_pools(
         .clone()
         .filter(|id| !id.is_empty())
         .ok_or_else(|| CommandError::new("backend.errors.messageNotAvailableRemotely"))?;
-    let config =
-        crate::commands::accounts::decrypt_account_config(&target.account_id, &target.config)?;
+    let config = crate::utils::oauth::refresh_account_config(
+        write,
+        &target.account_id,
+        &target.provider,
+        &target.config,
+    )
+    .await?;
 
     let (body_text, body_html) = match target.provider.as_str() {
         "imap" | "pop3" => {

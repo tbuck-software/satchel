@@ -301,7 +301,10 @@ async fn prepare_attachment_in(
                 input.attachment_id
             )
         })?;
-        let config = crate::commands::accounts::decrypt_account_config(&account_id, &config)?;
+        let config =
+            crate::utils::oauth::refresh_account_config(pool, &account_id, &provider_kind, &config)
+                .await
+                .map_err(|err| err.encoded())?;
         let provider = provider_for_account(&provider_kind, &config, &account_email, None)?;
         provider
             .fetch_attachment(

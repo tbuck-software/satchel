@@ -264,6 +264,7 @@
       "oauthMailPermissionRequired": "Der Gmail-Zugriff wurde nicht freigegeben. Bitte verbinde das Konto erneut und erlaube den Mail-Zugriff. Dein bestehendes Konto wurde nicht verändert.",
       "oauthPersistenceFailed": "Der Anmeldestatus konnte nicht gespeichert werden. Bitte versuche es erneut.",
       "oauthProviderRequestFailed": "Der Anbieter konnte die Anmeldung nicht abschließen. Bitte versuche es erneut.",
+      "oauthReloadRequired": "Die Anmeldung des Kontos hat sich währenddessen geändert. Bitte versuche es erneut.",
       "oauthUrlRejected": "Satchel hat eine unerwartete Anmeldeadresse abgelehnt.",
       "outboxActionCannotBeDiscarded": "Dieser Eintrag im Postausgang kann nicht sicher verworfen werden.",
       "passwordCheckFailed": "Die Anmeldung mit dem neuen Passwort ist fehlgeschlagen: {reason}",
@@ -1025,8 +1026,11 @@
       "mailboxes": "Deine Postfächer konnten nicht geladen werden",
       "messages": "Die Nachrichten konnten nicht geladen werden",
       "outbox": "Der Postausgang konnte nicht geladen werden",
+      "smartFolders": "Deine intelligenten Ordner konnten nicht geladen werden",
       "sync": "Der Mail-Abgleich ist fehlgeschlagen",
+      "templates": "Deine Vorlagen konnten nicht geladen werden",
       "threads": "Die Konversationen konnten nicht geladen werden",
+      "topicMemberships": "Themenzuordnungen konnten nicht geladen werden",
       "topics": "Themen konnten nicht geladen werden",
       "unknown": "In Satchel hat etwas aufgehört zu funktionieren"
     },
@@ -2587,6 +2591,7 @@
       "createTitle": "Regel anlegen",
       "deleteConfirm": "Regel „{name}“ löschen?",
       "description": "Eingehende Mails anhand von Absender, Empfänger, Betreff oder Inhalt einordnen.",
+      "duplicateCondition": "Jedes Bedingungsfeld darf nur einmal verwendet werden.",
       "editTitle": "Regel bearbeiten",
       "empty": "Noch keine Regeln angelegt.",
       "loadFailed": "Regeln konnten nicht geladen werden: {error}",
@@ -2822,6 +2827,7 @@
       "hintMiddle": "als virtueller Ordner. Unterstützt:",
       "hintTail": ", freie Begriffe.",
       "iconLabel": "Icon (Emoji, optional)",
+      "loadFailed": "Intelligente Ordner konnten nicht geladen werden. Bitte erneut versuchen.",
       "newTitle": "Neuer Smart Folder",
       "queryLabel": "Suchanfrage",
       "queryPlaceholder": "from:boss has:attachment",
@@ -2936,6 +2942,7 @@
       "createTitle": "Neue Vorlage",
       "editTitle": "Vorlage bearbeiten",
       "empty": "Keine Vorlagen.",
+      "loadFailed": "Vorlagen konnten nicht geladen werden. Bitte erneut versuchen.",
       "nameRequired": "Bitte Name angeben.",
       "saved": "Gespeichert.",
       "shortcutOptional": "Shortcut (optional)",
@@ -3327,6 +3334,7 @@
       "readChanged": "Lesestatus geändert",
       "removeFromTopicFailed": "Entfernen fehlgeschlagen.",
       "removedFromTopic": "Aus Thema „{topic}“ entfernt",
+      "removedFromTopicPartially": "{count} aus Thema „{topic}“ entfernt; {failed} konnten nicht entfernt werden.",
       "restoreEmpty": "Keine Konversation konnte wiederhergestellt werden.",
       "restoreFailed": "Wiederherstellen fehlgeschlagen.",
       "snoozed": "E-Mail auf Wiedervorlage | {count} E-Mails auf Wiedervorlage",
@@ -3485,6 +3493,9 @@
       "showGist": "Kurzfassung anzeigen",
       "showOriginal": "Original anzeigen",
       "thread": "Konversation"
+    },
+    "memberships": {
+      "loadFailed": "Themenzuordnungen konnten nicht geladen werden"
     },
     "picker": {
       "actionAdd": "Zu {name} hinzufügen",

@@ -1,3 +1,4 @@
+import { orderedLoad } from './internal/orderedLoad';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import {
@@ -20,26 +21,21 @@ export const useInvitesStore = defineStore('invites', () => {
   const items = ref<BackendCalendarInvite[]>([]);
   const events = ref<BackendCalendarEvent[]>([]);
   const sources = ref<BackendCalendarSource[]>([]);
-  const loading = ref(false);
+  const loader = orderedLoad();
+  const { loading } = loader;
 
   async function load() {
     // "Can I send commands?", not "am I in a Tauri webview?" — the second is
     // false under the mock transport, which left the calendar empty there and
     // every surface reading from it untestable (AGENTS.md, Frontend).
     if (!backendCommandsAvailable()) return;
-    loading.value = true;
-    try {
-      const [inviteRows, eventRows, sourceRows] = await Promise.all([
-        backendListInvites(),
-        backendListCalendarEvents(),
-        backendListCalendarSources(),
-      ]);
+    await loader.load(() => Promise.all([
+      backendListInvites(), backendListCalendarEvents(), backendListCalendarSources(),
+    ]), ([inviteRows, eventRows, sourceRows]) => {
       items.value = inviteRows;
       events.value = eventRows;
       sources.value = sourceRows;
-    } finally {
-      loading.value = false;
-    }
+    }, (error) => { throw error; });
   }
 
   /**
@@ -69,21 +65,25 @@ export const useInvitesStore = defineStore('invites', () => {
   }
 
   async function createEvent(input: Parameters<typeof backendCreateCalendarEvent>[0]) {
-    const event = await backendCreateCalendarEvent(input);
-    const idx = events.value.findIndex((item) => item.id === event.id);
-    if (idx >= 0) events.value.splice(idx, 1, event);
-    else events.value.push(event);
-    return event;
+    return loader.mutate(async () => {
+      const event = await backendCreateCalendarEvent(input);
+      const idx = events.value.findIndex((item) => item.id === event.id);
+      if (idx >= 0) events.value.splice(idx, 1, event);
+      else events.value.push(event);
+      return event;
+    });
   }
 
   async function deleteEvent(id: string) {
-    await backendDeleteCalendarEvent(id);
-    events.value = events.value.filter((item) => item.id !== id);
+    return loader.mutate(async () => {
+      await backendDeleteCalendarEvent(id);
+      events.value = events.value.filter((item) => item.id !== id);
+    });
   }
 
   /** Import a local calendar file and refresh the invite/event mirror. */
   async function importIcs(input: Parameters<typeof backendImportIcs>[0]) {
-    const invite = await backendImportIcs(input);
+    const invite = await loader.mutate(() => backendImportIcs(input));
     await load();
     return invite;
   }
@@ -97,12 +97,14 @@ export const useInvitesStore = defineStore('invites', () => {
     response: 'accepted' | 'declined' | 'tentative',
     comment?: string,
   ) {
-    await backendRespondToInvite({ inviteId, response, comment });
-    const idx = items.value.findIndex((inv) => inv.id === inviteId);
-    const existing = idx >= 0 ? items.value[idx] : undefined;
-    if (idx >= 0 && existing) {
-      items.value[idx] = { ...existing, rsvp_status: response };
-    }
+    return loader.mutate(async () => {
+      await backendRespondToInvite({ inviteId, response, comment });
+      const idx = items.value.findIndex((inv) => inv.id === inviteId);
+      const existing = idx >= 0 ? items.value[idx] : undefined;
+      if (idx >= 0 && existing) {
+        items.value[idx] = { ...existing, rsvp_status: response };
+      }
+    });
   }
 
   return {

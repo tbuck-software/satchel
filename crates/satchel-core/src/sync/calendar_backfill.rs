@@ -110,8 +110,14 @@ pub async fn backfill_calendar_invites_from_attachments(
             None if remote_fetches >= MAX_CALENDAR_SCAN_FETCHES => break,
             None => {
                 remote_fetches += 1;
-                let account_config =
-                    crate::accounts::decrypt_account_config(&row.account_id, &row.config)?;
+                let account_config = crate::utils::oauth::refresh_account_config(
+                    pool,
+                    &row.account_id,
+                    &row.provider,
+                    &row.config,
+                )
+                .await
+                .map_err(|err| err.encoded())?;
                 match crate::providers::gmail::as_background(attachment_bytes(
                     &row.provider,
                     &account_config,

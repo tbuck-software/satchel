@@ -264,6 +264,7 @@
       "oauthMailPermissionRequired": "Gmail access was not granted. Please connect again and allow mail access. Your existing account has not been changed.",
       "oauthPersistenceFailed": "The sign-in state could not be saved. Please try again.",
       "oauthProviderRequestFailed": "The provider could not complete the sign-in. Please try again.",
+      "oauthReloadRequired": "The account's sign-in changed while this was in progress. Please try again.",
       "oauthUrlRejected": "Satchel refused an unexpected sign-in address.",
       "outboxActionCannotBeDiscarded": "This outbox action cannot be discarded safely.",
       "passwordCheckFailed": "Signing in with the new password failed: {reason}",
@@ -1025,8 +1026,11 @@
       "mailboxes": "Your mailboxes could not be loaded",
       "messages": "The messages could not be loaded",
       "outbox": "The outbox could not be loaded",
+      "smartFolders": "Your smart folders could not be loaded",
       "sync": "Mail sync failed",
+      "templates": "Your templates could not be loaded",
       "threads": "The conversations could not be loaded",
+      "topicMemberships": "Topic memberships could not be loaded",
       "topics": "Topics could not be loaded",
       "unknown": "Something in Satchel stopped working"
     },
@@ -2587,6 +2591,7 @@
       "createTitle": "Create rule",
       "deleteConfirm": "Delete rule “{name}”?",
       "description": "Sort incoming mail by sender, recipient, subject or content.",
+      "duplicateCondition": "Use each condition field only once.",
       "editTitle": "Edit rule",
       "empty": "No rules yet.",
       "loadFailed": "Could not load rules: {error}",
@@ -2822,6 +2827,7 @@
       "hintMiddle": "as a virtual folder. Supported:",
       "hintTail": ", free terms.",
       "iconLabel": "Icon (emoji, optional)",
+      "loadFailed": "Could not load smart folders. Try again.",
       "newTitle": "New smart folder",
       "queryLabel": "Search query",
       "queryPlaceholder": "from:boss has:attachment",
@@ -2936,6 +2942,7 @@
       "createTitle": "New template",
       "editTitle": "Edit template",
       "empty": "No templates.",
+      "loadFailed": "Could not load templates. Try again.",
       "nameRequired": "Please enter a name.",
       "saved": "Saved.",
       "shortcutOptional": "Shortcut (optional)",
@@ -3327,6 +3334,7 @@
       "readChanged": "Read status changed",
       "removeFromTopicFailed": "Removing failed.",
       "removedFromTopic": "Removed from topic “{topic}”",
+      "removedFromTopicPartially": "{count} removed from topic “{topic}”; {failed} could not be removed.",
       "restoreEmpty": "No conversations could be restored.",
       "restoreFailed": "Restoring failed.",
       "snoozed": "Email snoozed | {count} emails snoozed",
@@ -3485,6 +3493,9 @@
       "showGist": "Show summary",
       "showOriginal": "Show original",
       "thread": "Conversation"
+    },
+    "memberships": {
+      "loadFailed": "Topic memberships could not be loaded"
     },
     "picker": {
       "actionAdd": "Add to {name}",

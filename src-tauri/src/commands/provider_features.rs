@@ -184,7 +184,14 @@ async fn load_account(pool: &SqlitePool, account_id: &str) -> Result<AccountFeat
     .await
     .map_err(|err| err.to_string())?;
     Ok(AccountFeatureRow {
-        config: crate::commands::accounts::decrypt_account_config(&row.id, &row.config)?,
+        config: crate::utils::oauth::refresh_account_config(
+            pool,
+            &row.id,
+            &row.provider,
+            &row.config,
+        )
+        .await
+        .map_err(|err| err.encoded())?,
         id: row.id,
         provider: row.provider,
     })
@@ -194,7 +201,9 @@ async fn refresh_gmail_labels(
     pool: &SqlitePool,
     account: &AccountFeatureRow,
 ) -> Result<(), String> {
-    let token = access_token_from_account_config(OAuthProvider::Gmail, &account.config).await?;
+    let token = access_token_from_account_config(OAuthProvider::Gmail, &account.config)
+        .await
+        .map_err(|err| err.encoded())?;
     let response = satchel_core::utils::http::client()
         .get("https://gmail.googleapis.com/gmail/v1/users/me/labels")
         .bearer_auth(token)
@@ -237,7 +246,9 @@ async fn refresh_outlook_categories(
     pool: &SqlitePool,
     account: &AccountFeatureRow,
 ) -> Result<(), String> {
-    let token = access_token_from_account_config(OAuthProvider::Outlook, &account.config).await?;
+    let token = access_token_from_account_config(OAuthProvider::Outlook, &account.config)
+        .await
+        .map_err(|err| err.encoded())?;
     let response = satchel_core::utils::http::client()
         .get("https://graph.microsoft.com/v1.0/me/outlook/masterCategories")
         .bearer_auth(token)
@@ -305,7 +316,9 @@ async fn create_gmail_label(
     name: &str,
     color: Option<&str>,
 ) -> Result<(), String> {
-    let token = access_token_from_account_config(OAuthProvider::Gmail, &account.config).await?;
+    let token = access_token_from_account_config(OAuthProvider::Gmail, &account.config)
+        .await
+        .map_err(|err| err.encoded())?;
     let mut body = serde_json::json!({
         "name": name,
         "labelListVisibility": "labelShow",
@@ -353,7 +366,9 @@ async fn create_outlook_category(
     name: &str,
     color: Option<&str>,
 ) -> Result<(), String> {
-    let token = access_token_from_account_config(OAuthProvider::Outlook, &account.config).await?;
+    let token = access_token_from_account_config(OAuthProvider::Outlook, &account.config)
+        .await
+        .map_err(|err| err.encoded())?;
     let body = serde_json::json!({
         "displayName": name,
         "color": color.unwrap_or("preset0")

@@ -227,6 +227,54 @@ impl<'a> AccountRepository<'a> {
         Self { pool }
     }
 
+    /// Merge DAV settings into the latest config under a writer reservation.
+    /// Probing/discovery happens before this call; credentials and unrelated
+    /// settings are never copied from the caller's earlier snapshot.
+    pub async fn update_dav_config(
+        &self,
+        account_id: &str,
+        caldav: Option<crate::providers::dav::DavConfig>,
+        carddav: Option<crate::providers::dav::DavConfig>,
+        remove_missing: bool,
+    ) -> Result<AccountConfig, AccountError> {
+        wait_for_credentials().await?;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let stored: String =
+            sqlx::query_scalar("SELECT config FROM accounts WHERE id = ? AND is_active = 1")
+                .bind(account_id)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or(AccountError::NotFound)?;
+        let current = decrypt_account_config(account_id, &stored)
+            .map_err(|detail| AccountError::CredentialAccess { detail })?;
+        let mut value: serde_json::Value =
+            serde_json::from_str(&current).map_err(|_| AccountError::ConfigurationInvalid)?;
+        let object = value
+            .as_object_mut()
+            .ok_or(AccountError::ConfigurationInvalid)?;
+        for (field, config) in [("caldav", caldav), ("carddav", carddav)] {
+            if let Some(config) = config {
+                object.insert(
+                    field.into(),
+                    serde_json::to_value(config).map_err(|_| AccountError::ConfigurationInvalid)?,
+                );
+            } else if remove_missing {
+                object.remove(field);
+            }
+        }
+        let serialized = value.to_string();
+        let encrypted = encrypt_account_config(account_id, &serialized)
+            .map_err(|detail| AccountError::CredentialAccess { detail })?;
+        sqlx::query("UPDATE accounts SET config = ?, updated_at = ? WHERE id = ?")
+            .bind(encrypted)
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(account_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(AccountConfig::from_plaintext(serialized))
+    }
+
     pub async fn exists(&self, account_id: &str) -> Result<bool, AccountError> {
         let count: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM accounts WHERE id = ?")
             .bind(account_id)
@@ -562,22 +610,33 @@ impl<'a> AccountRepository<'a> {
         })
     }
 
+    /// Write the checked password into the latest config under a writer
+    /// reservation. Only the password fields change: a groupware save that
+    /// landed while the login was checked online must survive.
     pub async fn store_password_change(&self, change: &PasswordChange) -> Result<(), AccountError> {
-        let stored_config = encrypt_account_config(&change.account_id, &change.config)
-            .map_err(|detail| AccountError::CredentialAccess { detail })?;
-        let result = sqlx::query(
-            "UPDATE accounts SET config = ?, updated_at = ?
-             WHERE id = ? AND provider = ? AND is_active = 1",
+        let password = incoming_password(&change.provider, &change.config)?;
+        wait_for_credentials().await?;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let stored: String = sqlx::query_scalar(
+            "SELECT config FROM accounts WHERE id = ? AND provider = ? AND is_active = 1",
         )
-        .bind(stored_config)
-        .bind(chrono::Utc::now().to_rfc3339())
         .bind(&change.account_id)
         .bind(&change.provider)
-        .execute(self.pool)
-        .await?;
-        if result.rows_affected() == 0 {
-            return Err(AccountError::NotFound);
-        }
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AccountError::NotFound)?;
+        let current = decrypt_account_config(&change.account_id, &stored)
+            .map_err(|detail| AccountError::CredentialAccess { detail })?;
+        let replaced = config_with_password(&change.provider, &current, &password)?;
+        let encrypted = encrypt_account_config(&change.account_id, &replaced)
+            .map_err(|detail| AccountError::CredentialAccess { detail })?;
+        sqlx::query("UPDATE accounts SET config = ?, updated_at = ? WHERE id = ?")
+            .bind(encrypted)
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(&change.account_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -1048,6 +1107,29 @@ fn resolved_oauth_display_name(
         })
 }
 
+/// Where the incoming server's settings live. POP3 always nests; IMAP is
+/// nested or flat, the shapes `ImapProvider` reads.
+fn incoming_pointer(provider: &str, config: &serde_json::Value) -> &'static str {
+    if provider == POP3_PROVIDER {
+        "/pop3"
+    } else if config.get("imap").is_some_and(serde_json::Value::is_object) {
+        "/imap"
+    } else {
+        ""
+    }
+}
+
+/// The new password a prepared change carries for its incoming server.
+fn incoming_password(provider: &str, config: &str) -> Result<String, AccountError> {
+    let value: serde_json::Value =
+        serde_json::from_str(config).map_err(|_| AccountError::ConfigurationInvalid)?;
+    value
+        .pointer(&format!("{}/password", incoming_pointer(provider, &value)))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or(AccountError::ConfigurationInvalid)
+}
+
 /// Put `password` where the incoming server reads it. SMTP follows where it
 /// reused the old password; one of its own stays, and none means it already
 /// falls back to the incoming password.
@@ -1064,14 +1146,7 @@ fn config_with_password(
     if !value.is_object() {
         return Err(AccountError::ConfigurationInvalid);
     }
-    // POP3 always nests; IMAP is nested or flat, the shapes `ImapProvider` reads.
-    let incoming = if provider == POP3_PROVIDER {
-        "/pop3"
-    } else if value.get("imap").is_some_and(serde_json::Value::is_object) {
-        "/imap"
-    } else {
-        ""
-    };
+    let incoming = incoming_pointer(provider, &value);
     let old = value
         .pointer(&format!("{incoming}/password"))
         .and_then(serde_json::Value::as_str)
@@ -1554,6 +1629,57 @@ mod tests {
             repository.prepare_password_change(&oauth.id, "x").await,
             Err(AccountError::NoPassword)
         ));
+    }
+
+    #[tokio::test]
+    async fn password_change_keeps_groupware_settings_saved_during_the_login_check() {
+        crate::utils::crypto::seed_master_key_for_tests();
+        let pool = pool().await;
+        let repository = AccountRepository::new(&pool);
+        let created = repository
+            .create_email(CreateEmailAccount {
+                display_name: "Work".into(),
+                email: "person@example.test".into(),
+                provider: "imap".into(),
+                config: Some(serde_json::json!({
+                    "imap": { "host": "imap.example.test", "password": "rejected" },
+                    "smtp": { "host": "smtp.example.test", "password": "rejected" }
+                })),
+            })
+            .await
+            .expect("create account");
+        let change = repository
+            .prepare_password_change(&created.id, "accepted")
+            .await
+            .expect("prepare change");
+        // configure_groupware saves while the new password is checked online.
+        repository
+            .update_dav_config(
+                &created.id,
+                Some(crate::providers::dav::DavConfig {
+                    server: "https://dav.example.test".into(),
+                    username: "person".into(),
+                    password: "dav-only".into(),
+                }),
+                None,
+                true,
+            )
+            .await
+            .expect("save groupware");
+        repository
+            .store_password_change(&change)
+            .await
+            .expect("store change");
+
+        let connection = repository
+            .load_active_imap_connection(&created.id)
+            .await
+            .expect("connection");
+        let stored: serde_json::Value = serde_json::from_str(&connection.config).expect("json");
+        assert_eq!(stored["imap"]["password"], "accepted");
+        assert_eq!(stored["smtp"]["password"], "accepted");
+        assert_eq!(stored["caldav"]["server"], "https://dav.example.test");
+        assert_eq!(stored["caldav"]["password"], "dav-only");
     }
 
     #[tokio::test]
