@@ -119,17 +119,21 @@ remove the warnings by updating their parents when compatible releases exist.
 
 ## Wasmtime and vendored dependencies
 
-Wasmtime and wasmtime-wasi 36.0.19 fix RUSTSEC-2026-0379 and
-RUSTSEC-2026-0380 in Cranelift, in addition to RUSTSEC-2026-0363 and
-RUSTSEC-2026-0352 fixed in 36.0.18. Plugin runtime tests run with built components required.
+Wasmtime and wasmtime-wasi 36.0.20 fix RUSTSEC-2026-0424, unchecked memory
+use when transferring borrowed resources between components. 36.0.19 fixed
+RUSTSEC-2026-0379 and RUSTSEC-2026-0380 in Cranelift, and 36.0.18 fixed
+RUSTSEC-2026-0363 and RUSTSEC-2026-0352. Plugin runtime tests run with built
+components required.
 
 The plugin compilation cache remains enabled. Satchel vendors
-`wasmtime-internal-cache` 36.0.19 with only its zstd dependency requirement
+`wasmtime-internal-cache` 36.0.20 with only its zstd dependency requirement
 changed to 0.14.3. The root lockfile now uses zstd 0.14.3, zstd-safe 8.2.0 and
 zstd-sys 2.1.2, fixing RUSTSEC-2026-0391, RUSTSEC-2026-0398,
 RUSTSEC-2026-0403 and RUSTSEC-2026-0410 and removing the zstd-safe unsoundness
-warnings. The fuzz workspace does not depend on Wasmtime or zstd, so its
-lockfile needs no zstd update. See
+warnings. The vendored crate's version must match the Wasmtime release, or
+Cargo drops the patch and falls back to zstd 0.13: re-vendor it with every
+Wasmtime bump. The fuzz workspace does not depend on Wasmtime or zstd, so its
+lockfile needs no update. See
 `vendor/wasmtime-internal-cache/SATCHEL_PATCH.md` for the exact diff and removal
 condition.
 

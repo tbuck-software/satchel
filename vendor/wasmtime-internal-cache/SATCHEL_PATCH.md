@@ -1,11 +1,15 @@
 # Satchel Wasmtime cache patch
 
-Satchel vendors the crates.io release of `wasmtime-internal-cache` 36.0.19 to
+Satchel vendors the crates.io release of `wasmtime-internal-cache` 36.0.20 to
 retain its plugin compilation disk cache while using patched zstd crates.
 Wasmtime releases through 50.0.0 still require zstd 0.13 in their cache crate.
 The upstream archive's SHA-256 is
-`4108e1964b3a02b4b5604ea1a2918a0cbcab512e5de0ccf4c062fc6c06b2eb8e`,
-matching the registry entry removed from Satchel's lockfile by this patch.
+`65f09c789d1bb2e7ab1618ac8336d783c1ff0babc38430c7f1940d01c546722b`,
+matching the `cksum` of 36.0.20 in the crates.io registry index.
+
+36.0.20 was re-vendored for RUSTSEC-2026-0424. Its upstream source is
+identical to 36.0.19 apart from the package version in `Cargo.toml` and
+`Cargo.lock` and the Git revision in `.cargo_vcs_info.json`.
 
 ## Diff from the registry release
 
@@ -36,11 +40,11 @@ test exercises a disk-cache miss, a hit from a new engine and a changed componen
 To compare against the upstream archive:
 
 ```sh
-curl -fsSL -o /tmp/wasmtime-internal-cache-36.0.19.crate \
-  https://static.crates.io/crates/wasmtime-internal-cache/wasmtime-internal-cache-36.0.19.crate
+curl -fsSL -o /tmp/wasmtime-internal-cache-36.0.20.crate \
+  https://static.crates.io/crates/wasmtime-internal-cache/wasmtime-internal-cache-36.0.20.crate
 mkdir -p /tmp/satchel-wasmtime-cache-upstream
-tar xzf /tmp/wasmtime-internal-cache-36.0.19.crate -C /tmp/satchel-wasmtime-cache-upstream
-diff -ru /tmp/satchel-wasmtime-cache-upstream/wasmtime-internal-cache-36.0.19 \
+tar xzf /tmp/wasmtime-internal-cache-36.0.20.crate -C /tmp/satchel-wasmtime-cache-upstream
+diff -ru /tmp/satchel-wasmtime-cache-upstream/wasmtime-internal-cache-36.0.20 \
   vendor/wasmtime-internal-cache
 ```
 
