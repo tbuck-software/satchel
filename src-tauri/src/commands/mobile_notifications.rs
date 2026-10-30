@@ -40,7 +40,21 @@ struct AndroidMailNotification<'a> {
 }
 
 #[cfg(target_os = "ios")]
-tauri::ios_plugin_binding!(init_plugin_satchel_mail_notifications);
+type IosPluginInitializer = unsafe extern "C" fn() -> *const std::ffi::c_void;
+
+#[cfg(target_os = "ios")]
+static IOS_PLUGIN_INITIALIZER: std::sync::OnceLock<IosPluginInitializer> =
+    std::sync::OnceLock::new();
+
+#[cfg(target_os = "ios")]
+unsafe fn initialize_ios_mail_plugin() -> *const std::ffi::c_void {
+    // Tauri requires a Rust-ABI wrapper around the C initializer. Its raw
+    // pointer return has no swift-rs retain adjustment. PluginManager retains
+    // the returned NSObject, just as for the pinned notification plugin.
+    IOS_PLUGIN_INITIALIZER
+        .get()
+        .expect("iOS mail initializer must be resolved before registration")()
+}
 
 pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let builder = tauri::plugin::Builder::new("satchel-mail-notifications");
@@ -65,7 +79,14 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let builder = builder.setup(|_app, api| {
         // lib.rs registers this plugin after tauri-plugin-notification. Native
         // registration is synchronous, so its delegate is installed before ours.
-        api.register_ios_plugin(init_plugin_satchel_mail_notifications)?;
+        // This Swift initializer belongs to the final Xcode executable, not
+        // Rust's cdylib. Resolve it at setup rather than linking against it.
+        let initialize = unsafe {
+            ios_native_symbol::<IosPluginInitializer>(c"init_plugin_satchel_mail_notifications")
+        }
+        .map_err(std::io::Error::other)?;
+        let _ = IOS_PLUGIN_INITIALIZER.set(initialize);
+        api.register_ios_plugin(initialize_ios_mail_plugin)?;
         Ok(())
     });
     builder.build()
@@ -188,19 +209,28 @@ pub async fn dismiss_mail_notifications(
     Ok(())
 }
 
-/// Release routes queued by iOS before a listener existed.
-///
-/// A notification can be tapped while the process is cold; the Swift side holds
-/// the route until the frontend says it is listening.
+/// Reserve a listener lease with no ID, activate it after registration, and
+/// retire it on disposal. Stale lifecycle messages cannot affect newer leases.
+/// Non-iOS platforms have no native route gate and return no lease.
 #[tauri::command]
-pub fn mobile_notifications_frontend_ready() -> CommandResult<()> {
+pub fn mobile_notifications_frontend_ready(
+    listener_id: Option<u32>,
+    ready: bool,
+) -> CommandResult<Option<u32>> {
+    if listener_id == Some(0) {
+        return Err("A notification listener ID must be nonzero".into());
+    }
     #[cfg(target_os = "ios")]
     {
-        let ready: unsafe extern "C" fn() =
+        let update: unsafe extern "C" fn(u32, bool) -> u32 =
             unsafe { ios_native_symbol(c"satchel_mobile_frontend_ready")? };
-        unsafe { ready() };
+        Ok(Some(unsafe { update(listener_id.unwrap_or(0), ready) }))
     }
-    Ok(())
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = (listener_id, ready);
+        Ok(None)
+    }
 }
 
 #[cfg(target_os = "ios")]

@@ -81,3 +81,24 @@ jobs:
 
       - name: Build for the Apple Silicon iOS simulator through Tauri
         run: pnpm tauri ios build --debug --target aarch64-sim --ci
+
+      - name: Verify notification hooks are exported by the final executable
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          import pathlib
+          import plistlib
+          import re
+          import subprocess
+
+          products = pathlib.Path(os.environ["HOME"]) / "Library/Developer/Xcode/DerivedData"
+          apps = list(products.glob("satchel-*/Build/Products/*-iphonesimulator/*.app"))
+          assert apps, "No built simulator application found"
+          for app in apps:
+              with (app / "Info.plist").open("rb") as source:
+                  executable = app / plistlib.load(source)["CFBundleExecutable"]
+              exports = subprocess.check_output(["xcrun", "dyld_info", "-exports", str(executable)], text=True)
+              for name in ["init_plugin_satchel_mail_notifications", "satchel_mobile_frontend_ready", "satchel_mobile_response_handled"]:
+                  assert re.search(r"\b_" + name + r"\b", exports), f"{executable} does not export {name}"
+              print(f"Verified native notification hook exports in {executable}")
+          PYTHON

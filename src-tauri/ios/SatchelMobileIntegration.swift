@@ -89,13 +89,15 @@ private final class SatchelMailNotificationsPlugin: Plugin {
 }
 
 @_cdecl("init_plugin_satchel_mail_notifications")
-func initSatchelMailNotificationsPlugin() -> Plugin {
+public func initSatchelMailNotificationsPlugin() -> Plugin {
     SatchelMailNotificationsPlugin()
 }
 
 @_cdecl("satchel_mobile_frontend_ready")
-public func satchel_mobile_frontend_ready() {
-    routeGate.markFrontendReady()
+public func satchel_mobile_frontend_ready(_ listenerId: UInt32, _ ready: Bool) -> UInt32 {
+    if listenerId == 0 { return routeGate.beginListener() }
+    routeGate.setListener(listenerId, ready: ready)
+    return listenerId
 }
 
 @_cdecl("satchel_mobile_response_handled")

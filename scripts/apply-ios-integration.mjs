@@ -110,6 +110,40 @@ main = main.replace('\nextern "C" void satchel_mobile_install(void);\n', "");
 main = main.replace("\tsatchel_mobile_install();\n", "");
 if (main.includes("satchel_mobile_install"))
   fail("unexpected legacy delegate installation");
+// Mach-O's `used` attribute retains this table and its referenced public Swift
+// C entry points even with dead stripping/LTO. It never calls the initializer:
+// plugin setup still installs the delegate after the notification plugin.
+const hooksStart = "// Satchel notification native hooks: begin";
+const hooksEnd = "// Satchel notification native hooks: end";
+if (main.includes(hooksStart) !== main.includes(hooksEnd)
+    || main.split(hooksStart).length > 2 || main.split(hooksEnd).length > 2
+    || (main.includes(hooksStart) && main.indexOf(hooksEnd) < main.indexOf(hooksStart)))
+  fail("unexpected native hook retention block");
+if (main.includes(hooksStart)) {
+  const start = main.indexOf(hooksStart);
+  const end = main.indexOf(hooksEnd) + hooksEnd.length;
+  main = main.slice(0, start) + main.slice(end).replace(/^\n/, "");
+}
+const include = '#include "bindings/bindings.h"\n';
+if (main.split(include).length !== 2)
+  fail("unexpected generated main.mm bindings include");
+const hooks = `${hooksStart}
+#include <stdint.h>
+extern "C" void *init_plugin_satchel_mail_notifications(void);
+extern "C" uint32_t satchel_mobile_frontend_ready(uint32_t, bool);
+extern "C" void satchel_mobile_response_handled(const char *);
+__attribute__((used)) static const struct {
+  void *(*initialize)(void);
+  uint32_t (*lifecycle)(uint32_t, bool);
+  void (*handled)(const char *);
+} satchel_notification_native_hooks = {
+  init_plugin_satchel_mail_notifications,
+  satchel_mobile_frontend_ready,
+  satchel_mobile_response_handled,
+};
+${hooksEnd}
+`;
+main = main.replace(include, include + hooks);
 writeFileSync(mainPath, main);
 
 for (const filename of swiftSources) {

@@ -40,14 +40,22 @@ enum SatchelNotificationResponse {
     }
 }
 
-/// Delivers every response once, in order, after the frontend has a listener.
-/// Keep the OS response alive until the frontend finishes the action. Emission
-/// and completion happen outside the lock so callbacks can enqueue a response.
+/// In-process response retention. A listener lease is reserved before JS registers
+/// and activated afterwards. Replacing or disposing it stops delivery; every
+/// unacknowledged response is replayed in native order to the next active lease.
+/// Neither this queue nor the OS completion closures survive process termination.
 final class SatchelRouteGate {
+    private struct Response {
+        let id: String
+        let route: [String: Any]
+        let completion: () -> Void
+        var deliveredTo: UInt32 = 0
+    }
+
     private let lock = NSLock()
-    private var frontendReady = false
-    private var pendingRoutes: [[String: Any]] = []
-    private var completions: [String: () -> Void] = [:]
+    private var generation: UInt32 = 0
+    private var active = false
+    private var responses: [Response] = []
     private var draining = false
     private let emit: ([String: Any]) -> Void
 
@@ -55,38 +63,57 @@ final class SatchelRouteGate {
         self.emit = emit
     }
 
-    func queue(_ route: [String: Any], completion: @escaping () -> Void = {}) {
+    func beginListener() -> UInt32 {
         lock.lock()
-        let responseId = UUID().uuidString
-        var event = route
-        event["responseId"] = responseId
-        completions[responseId] = completion
-        pendingRoutes.append(event)
+        defer { lock.unlock() }
+        generation += 1
+        active = false
+        return generation
+    }
+
+    func setListener(_ id: UInt32, ready: Bool) {
+        lock.lock()
+        guard id == generation else {
+            lock.unlock()
+            return
+        }
+        // Retire disposed leases so a late ready cannot resurrect them.
+        if !ready {
+            generation += 1
+        }
+        active = ready
         drain()
     }
 
-    func markFrontendReady() {
+    func queue(_ route: [String: Any], completion: @escaping () -> Void = {}) {
         lock.lock()
-        frontendReady = true
+        responses.append(Response(id: UUID().uuidString, route: route, completion: completion))
         drain()
     }
 
     func acknowledge(_ responseId: String) {
         lock.lock()
-        let completion = completions.removeValue(forKey: responseId)
+        let index = responses.firstIndex { $0.id == responseId }
+        let completion = index.map { responses.remove(at: $0).completion }
         lock.unlock()
+        // An older listener may finish after a new lease took ownership.
+        // ACK is response-scoped and can complete each OS callback only once.
         completion?()
     }
 
-    /// Called with the lock held; always releases it before returning.
+    /// Called with the lock held; always releases it before returning. Recheck
+    /// the lease after each emission, including reentrant disposal/registration.
     private func drain() {
-        guard frontendReady, !draining else {
+        guard active, !draining else {
             lock.unlock()
             return
         }
         draining = true
-        while !pendingRoutes.isEmpty {
-            let route = pendingRoutes.removeFirst()
+        while active, let index = responses.firstIndex(where: { $0.deliveredTo != generation }) {
+            responses[index].deliveredTo = generation
+            var route = responses[index].route
+            route["responseId"] = responses[index].id
+            route["listenerId"] = generation
             lock.unlock()
             emit(route)
             lock.lock()

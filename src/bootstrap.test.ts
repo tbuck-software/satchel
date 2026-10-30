@@ -7,6 +7,7 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   backendMobileNotificationsFrontendReady,
+  backendDismissMobileNotifications,
   backendListAccounts,
   backendTakePendingNotificationThread,
   backendListContacts,
@@ -60,6 +61,7 @@ vi.mock('@/services/backend', async (importOriginal) => {
   return {
     ...actual,
     backendCommandsAvailable: () => true,
+    backendDismissMobileNotifications: resolving(undefined),
     backendSupportsNativeCommands: () => true,
     backendSetUiStrings: resolving(undefined),
     backendAcknowledgeDraftFlush: resolving(undefined),
@@ -110,7 +112,7 @@ vi.mock('@/services/backend', async (importOriginal) => {
     backendGetNotificationPreferences: resolving({ enabled: false }),
     backendSetBackgroundSync: resolving(undefined),
     backendConsumePendingMobileNotification: resolving({ threadId: null, actionId: null }),
-    backendMobileNotificationsFrontendReady: resolving(undefined),
+    backendMobileNotificationsFrontendReady: vi.fn(async (id: number | null) => id ?? 1),
     backendPendingCrashReports: resolving([]),
     backendTakePendingOpenWith: resolving([]),
     backendTakePendingNotificationThread: resolving(null),
@@ -148,6 +150,8 @@ function boot(entry: () => void, pinia = createPinia()) {
 describe('bootstrap entries', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? 1);
+    vi.mocked(listen).mockImplementation(async () => () => {});
     useToast().clear();
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -226,11 +230,12 @@ describe('bootstrap entries', () => {
         const registration = vi.mocked(listen).mock.calls.find(([event]) => event === 'mobile:notification-route');
         expect(registration).toBeDefined();
         await registration![1]({ payload: {
-          type: 'notification-tap', threadId: 'ios-thread', actionId, inputValue: '  reply text  ', responseId: 'ios-response',
+          listenerId: 1, type: 'notification-tap', threadId: 'ios-thread', actionId, inputValue: '  reply text  ', responseId: 'ios-response',
         } } as never);
       };
-      vi.mocked(backendMobileNotificationsFrontendReady).mockImplementationOnce(async () => {
-        if (lifecycle === 'cold') await deliver();
+      vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id, ready) => {
+        if (ready && lifecycle === 'cold') await deliver();
+        return id ?? 1;
       });
       const wrapper = boot(useAppBootstrap, pinia);
       await flushPromises();
@@ -273,7 +278,7 @@ describe('bootstrap entries', () => {
     await flushPromises();
     const registration = vi.mocked(listen).mock.calls.find(([event]) => event === 'mobile:notification-route')!;
     const pending = registration[1]({ payload: {
-      type: 'notification-tap', threadId: 'ios-thread', actionId: 'satchel.read', responseId: 'background-response',
+      listenerId: 1, type: 'notification-tap', threadId: 'ios-thread', actionId: 'satchel.read', responseId: 'background-response',
     } } as never);
     await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
     expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
@@ -463,7 +468,240 @@ describe('bootstrap entries', () => {
     await flushPromises();
 
     await vi.waitFor(() => expect(order).toEqual(['registerActionTypes', 'onAction']));
+    const actions = vi.mocked(registerActionTypes).mock.calls[0]![0][0]!.actions;
+    expect(actions.find(action => action.id === 'satchel.reply')).toMatchObject({ foreground: true });
+    expect(actions.find(action => action.id === 'satchel.read')?.foreground).not.toBe(true);
+    expect(actions.find(action => action.id === 'satchel.archive')?.foreground).not.toBe(true);
     wrapper.unmount();
+  });
+
+  it.each([true, false])('waits for reply replacement approval before ACK, accepted=%s', async (accepted) => {
+    const pinia = createPinia();
+    const composer = useComposerStore(pinia);
+    await composer.open({ mode: 'new', body: 'existing draft' });
+    let release!: (value: boolean) => void;
+    const guard = vi.fn(() => new Promise<boolean>(resolve => { release = resolve; }));
+    const disposeGuard = composer.setReplaceGuard(guard);
+    vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
+    const wrapper = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    await flushPromises();
+    const registration = vi.mocked(listen).mock.calls.find(([name]) => name === 'mobile:notification-route')!;
+    const handled = registration[1]({ payload: {
+      listenerId: 1, type: 'notification-tap', threadId: 'reply-thread', actionId: 'satchel.reply',
+      inputValue: 'new reply', responseId: 'reply-response',
+    } } as never);
+    await vi.waitFor(() => expect(guard).toHaveBeenCalledOnce());
+    try {
+      expect(composer.request?.body).toBe('existing draft');
+      expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', { responseId: 'reply-response' });
+      expect(backendDismissMobileNotifications).not.toHaveBeenCalled();
+      release(accepted);
+      await handled;
+      expect(emit).toHaveBeenCalledExactlyOnceWith('mobile:notification-response-handled', { responseId: 'reply-response' });
+      expect(composer.request?.body).toBe(accepted ? 'new reply' : 'existing draft');
+      expect(backendDismissMobileNotifications).toHaveBeenCalledTimes(accepted ? 1 : 0);
+    } finally {
+      release(accepted);
+      await handled;
+      disposeGuard();
+      wrapper.unmount();
+    }
+  });
+
+  it.each([true, false])('joins a reply guard across recreation and honors cancellation, accepted=%s', async (accepted) => {
+    const pinia = createPinia();
+    const composer = useComposerStore(pinia);
+    await composer.open({ mode: 'new', body: 'keep this draft' });
+    let release!: (value: boolean) => void;
+    const guard = vi.fn(() => new Promise<boolean>(resolve => { release = resolve; }));
+    composer.setReplaceGuard(guard);
+    const open = vi.spyOn(composer, 'open');
+    vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
+    let generation = 0;
+    vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? ++generation);
+    const first = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    const oldCallback = vi.mocked(listen).mock.calls.find(([name]) => name === 'mobile:notification-route')![1];
+    const payload = { listenerId: 1, type: 'notification-tap', threadId: 'guard-thread',
+      actionId: 'satchel.reply', inputValue: 'retained reply', responseId: 'guard-response' };
+    const oldWork = oldCallback({ payload } as never);
+    await vi.waitFor(() => expect(guard).toHaveBeenCalledOnce());
+    first.unmount();
+    const second = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    const newCallback = vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route').at(-1)![1];
+    // Stale callbacks cannot start work after disposal. A new delivery joins it.
+    await oldCallback({ payload } as never);
+    const replay = newCallback({ payload: { ...payload, listenerId: 2 } } as never);
+    await flushPromises();
+    expect(open).toHaveBeenCalledOnce();
+    expect(guard).toHaveBeenCalledOnce();
+    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
+    expect(backendDismissMobileNotifications).not.toHaveBeenCalled();
+    release(accepted);
+    await Promise.all([oldWork, replay]);
+    expect(composer.request?.body).toBe(accepted ? 'retained reply' : 'keep this draft');
+    expect(backendDismissMobileNotifications).toHaveBeenCalledTimes(accepted ? 1 : 0);
+    await newCallback({ payload: { ...payload, listenerId: 2 } } as never);
+    expect(open).toHaveBeenCalledOnce();
+    expect(emit).toHaveBeenCalledWith('mobile:notification-response-handled', { responseId: 'guard-response' });
+    expect(backendMobileNotificationsFrontendReady).toHaveBeenCalledWith(1, false);
+    second.unmount();
+    await flushPromises();
+    expect(backendMobileNotificationsFrontendReady).toHaveBeenCalledWith(2, false);
+  });
+
+  it.each(['satchel.read', 'satchel.archive'])('joins an in-flight %s mutation across recreation', async (actionId) => {
+    const pinia = createPinia();
+    vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
+    let finish!: () => void;
+    const mutation = vi.fn(() => new Promise<boolean>(resolve => { finish = () => resolve(true); }));
+    const realActions = threadActionModule.useThreadActions;
+    vi.spyOn(threadActionModule, 'useThreadActions').mockImplementation(() => ({
+      ...realActions(), setRead: mutation, archive: async () => { await mutation(); },
+    }));
+    let generation = 0;
+    vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? ++generation);
+    const first = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    const oldCallback = vi.mocked(listen).mock.calls.find(([name]) => name === 'mobile:notification-route')![1];
+    const payload = { listenerId: 1, type: 'notification-tap', threadId: 'pending-thread', actionId, responseId: 'pending-response' };
+    const pending = oldCallback({ payload } as never);
+    await vi.waitFor(() => expect(mutation).toHaveBeenCalledOnce());
+    first.unmount();
+    const second = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    const newCallback = vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route').at(-1)![1];
+    const replay = newCallback({ payload: { ...payload, listenerId: 2 } } as never);
+    await flushPromises();
+    expect(mutation).toHaveBeenCalledOnce();
+    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
+    finish();
+    await Promise.all([pending, replay]);
+    expect(mutation).toHaveBeenCalledOnce();
+    expect(emit).toHaveBeenCalledWith('mobile:notification-response-handled', { responseId: 'pending-response' });
+    second.unmount();
+  });
+
+  it.each(['satchel.read', 'satchel.archive', 'satchel.reply'])('re-ACKs completed work after event loss without repeating %s', async (actionId) => {
+    const pinia = createPinia();
+    const composer = useComposerStore(pinia);
+    const open = vi.spyOn(composer, 'open');
+    const realActions = threadActionModule.useThreadActions;
+    const read = vi.fn(async () => true);
+    const archive = vi.fn(async () => {});
+    vi.spyOn(threadActionModule, 'useThreadActions').mockImplementation(() => ({ ...realActions(), setRead: read, archive }));
+    vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
+    let generation = 0;
+    vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? ++generation);
+    const first = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    const callback = vi.mocked(listen).mock.calls.find(([name]) => name === 'mobile:notification-route')![1];
+    const payload = { listenerId: 1, type: 'notification-tap', threadId: 'lost-thread', actionId,
+      inputValue: 'reply survives ACK loss', responseId: 'lost-ack' };
+    vi.mocked(emit).mockRejectedValueOnce(new Error('ACK delivery lost'));
+    await callback({ payload } as never);
+    first.unmount();
+    // A response received during disposal is not processed by the old callback.
+    const later = { ...payload, responseId: 'while-disposed', actionId: 'tap' };
+    await callback({ payload: later } as never);
+    const second = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    const newCallback = vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route').at(-1)![1];
+    // Old-lease events arriving at a new callback are ignored as well.
+    await newCallback({ payload } as never);
+    expect(emit).toHaveBeenCalledTimes(1);
+    await newCallback({ payload: { ...payload, listenerId: 2 } } as never);
+    await newCallback({ payload: { ...later, listenerId: 2 } } as never);
+    expect(read).toHaveBeenCalledTimes(actionId === 'satchel.read' ? 1 : 0);
+    expect(archive).toHaveBeenCalledTimes(actionId === 'satchel.archive' ? 1 : 0);
+    expect(open).toHaveBeenCalledTimes(actionId === 'satchel.reply' ? 1 : 0);
+    if (actionId === 'satchel.reply') expect(composer.request?.body).toBe('reply survives ACK loss');
+    expect(emit).toHaveBeenCalledTimes(3);
+    expect(router.currentRoute.value.params.id).toBe('lost-thread');
+    second.unmount();
+  });
+
+  it('retains failed reply work for replay and keeps opened text through later dismissal errors', async () => {
+    const pinia = createPinia();
+    const composer = useComposerStore(pinia);
+    await composer.open({ mode: 'new', body: 'original' });
+    const guard = vi.fn().mockRejectedValueOnce(new Error('draft save failed')).mockResolvedValue(true);
+    composer.setReplaceGuard(guard);
+    vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
+    let generation = 0;
+    vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? ++generation);
+    const first = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    const callback = vi.mocked(listen).mock.calls.find(([name]) => name === 'mobile:notification-route')![1];
+    const payload = { listenerId: 1, type: 'notification-tap', threadId: 'retry-thread', actionId: 'satchel.reply',
+      inputValue: 'do not lose this text', responseId: 'failed-reply' };
+    await callback({ payload } as never);
+    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
+    expect(composer.request?.body).toBe('original');
+    expect(backendDismissMobileNotifications).not.toHaveBeenCalled();
+    first.unmount();
+    const second = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    const newCallback = vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route').at(-1)![1];
+    vi.mocked(backendDismissMobileNotifications).mockRejectedValueOnce(new Error('dismiss failed'));
+    await newCallback({ payload: { ...payload, listenerId: 2 } } as never);
+    expect(guard).toHaveBeenCalledTimes(2);
+    expect(composer.request).toMatchObject({ mode: 'reply', body: 'do not lose this text' });
+    expect(emit).toHaveBeenCalledWith('mobile:notification-response-handled', { responseId: 'failed-reply' });
+    second.unmount();
+  });
+
+  it('ignores malformed routes without ACK or navigation', async () => {
+    const wrapper = boot(useAppBootstrap);
+    await flushPromises();
+    const callback = vi.mocked(listen).mock.calls.find(([name]) => name === 'mobile:notification-route')![1];
+    const valid = { listenerId: 1, type: 'notification-tap', threadId: 'thread', actionId: 'tap', responseId: 'response' };
+    for (const payload of [null, {}, { ...valid, responseId: null }, { ...valid, responseId: '' }, { ...valid, responseId: ' ' },
+      { ...valid, responseId: 'x'.repeat(129) }, { ...valid, threadId: 42 }, { ...valid, threadId: ' ' },
+      { ...valid, type: 'other' }, { ...valid, actionId: 'unknown' }, { ...valid, actionId: 42 }, { ...valid, listenerId: 999 }]) {
+      await callback({ payload } as never);
+    }
+    expect(router.currentRoute.value.name).toBe('inbox');
+    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
+    wrapper.unmount();
+  });
+
+  it('retires a reservation that resolves after disposal without disturbing a new listener', async () => {
+    let reserve!: (id: number) => void;
+    vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? 2);
+    vi.mocked(backendMobileNotificationsFrontendReady).mockImplementationOnce(() => new Promise(resolve => { reserve = resolve; }));
+    const first = boot(useAppBootstrap);
+    await vi.waitFor(() => expect(reserve).toBeDefined());
+    first.unmount();
+    const second = boot(useAppBootstrap);
+    await flushPromises();
+    reserve(1);
+    await flushPromises();
+    await flushPromises();
+    expect(backendMobileNotificationsFrontendReady).toHaveBeenCalledWith(1, false);
+    expect(backendMobileNotificationsFrontendReady).not.toHaveBeenCalledWith(1, true);
+    expect(backendMobileNotificationsFrontendReady).toHaveBeenCalledWith(2, true);
+    expect(vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route')).toHaveLength(1);
+    second.unmount();
+  });
+
+  it('removes a late route registration and never activates its retired lease', async () => {
+    let registered!: (dispose: () => void) => void;
+    const dispose = vi.fn();
+    vi.mocked(listen).mockImplementation(async (name) => {
+      if (name === 'mobile:notification-route') return new Promise(resolve => { registered = resolve; });
+      return () => {};
+    });
+    const wrapper = boot(useAppBootstrap);
+    await vi.waitFor(() => expect(registered).toBeDefined());
+    wrapper.unmount();
+    registered(dispose);
+    await flushPromises();
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(backendMobileNotificationsFrontendReady).toHaveBeenCalledWith(1, false);
+    expect(backendMobileNotificationsFrontendReady).not.toHaveBeenCalledWith(1, true);
   });
 
   it('restores Undo Send into a draft and reopens the composer', async () => {

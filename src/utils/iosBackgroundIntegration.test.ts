@@ -136,13 +136,15 @@ printf "%s\\n" "$@" > "$SATCHEL_XCODEGEN_ARGS"
     const root = generatedAppleFixture();
     const mainPath = join(root, "src-tauri/gen/apple/Sources/satchel/main.mm");
     const original = readFileSync(mainPath, "utf8");
+    apply(root);
+    const expected = readFileSync(mainPath, "utf8");
     writeFileSync(mainPath, original
       .replace('#include "bindings/bindings.h"\n', '#include "bindings/bindings.h"\n\nextern "C" void satchel_mobile_install(void);\n')
       .replace('int main(int argc, char * argv[]) {\n', 'int main(int argc, char * argv[]) {\n\tsatchel_mobile_install();\n'));
     apply(root);
-    expect(readFileSync(mainPath, "utf8")).toBe(original);
+    expect(readFileSync(mainPath, "utf8")).toBe(expected);
     apply(root);
-    expect(readFileSync(mainPath, "utf8")).toBe(original);
+    expect(readFileSync(mainPath, "utf8")).toBe(expected);
   });
 
   it("registers the native owner synchronously after the notification plugin", () => {
@@ -152,7 +154,10 @@ printf "%s\\n" "$@" > "$SATCHEL_XCODEGEN_ARGS"
     const mailPlugin = app.indexOf(".plugin(commands::mobile_notifications::init())");
     expect(notificationPlugin).toBeGreaterThan(-1);
     expect(mailPlugin).toBeGreaterThan(notificationPlugin);
-    expect(bridge).toContain("api.register_ios_plugin(init_plugin_satchel_mail_notifications)?");
+    expect(bridge).toContain("api.register_ios_plugin(initialize_ios_mail_plugin)?");
+    expect(bridge).toContain('ios_native_symbol::<IosPluginInitializer>(c"init_plugin_satchel_mail_notifications")');
+    expect(bridge).not.toContain("tauri::ios_plugin_binding!");
+    expect(bridge).toContain(".map_err(std::io::Error::other)?");
     expect(swiftTemplate).toContain("SatchelMobileIntegration.shared.install()");
   });
 
@@ -166,6 +171,13 @@ printf "%s\\n" "$@" > "$SATCHEL_XCODEGEN_ARGS"
         "example.invalid.app",
       ),
     );
+    expect(() => apply(root)).toThrow();
+  });
+
+  it("fails closed on an unrecognized native hook retention block", () => {
+    const root = generatedAppleFixture();
+    const mainPath = join(root, "src-tauri/gen/apple/Sources/satchel/main.mm");
+    writeFileSync(mainPath, readFileSync(mainPath, "utf8") + "\n// Satchel notification native hooks: begin\n");
     expect(() => apply(root)).toThrow();
   });
 
@@ -188,5 +200,7 @@ printf "%s\\n" "$@" > "$SATCHEL_XCODEGEN_ARGS"
       "node --test tests/ios-integration-generator.node.mjs",
     );
     expect(workflow).toContain("pnpm tauri ios build");
+    expect(workflow).toContain('"dyld_info", "-exports"');
+    expect(workflow).toContain("init_plugin_satchel_mail_notifications");
   });
 });

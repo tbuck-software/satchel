@@ -35,6 +35,7 @@ export interface NativeNotificationRoute extends NotificationActionPayload {
   type?: unknown;
   threadId?: unknown;
   responseId?: unknown;
+  listenerId?: unknown;
 }
 
 export function notificationThreadId(notification: NotificationActionPayload): string | null {

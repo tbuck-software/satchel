@@ -9,6 +9,7 @@ import {
   readFileSync,
   readdirSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -104,4 +105,21 @@ test("the generated-project patch is idempotent", () => {
   const before = digest(paths);
   apply();
   assert.equal(digest(paths), before);
+});
+
+// Compile the generated main, not a second copy of the hook declarations.
+// This checks the C ABI table at optimization levels where unused code is lost.
+test("generated native hook retention table compiles without installing early", () => {
+  apply();
+  const main = filesBelow(join(apple, "Sources"), "main.mm")[0];
+  const include = mkdtempSync(join(tmpdir(), "satchel-native-hooks-"));
+  mkdirSync(join(include, "bindings"));
+  writeFileSync(join(include, "bindings/bindings.h"), "namespace ffi { inline void start_app() {} }\n");
+  const object = join(include, "main.o");
+  execFileSync(process.env.CXX ?? "c++", ["-x", "c++", "-std=c++17", "-O2", "-c", main, "-I", include, "-o", object]);
+  const symbols = execFileSync("nm", [object], { encoding: "utf8" });
+  for (const name of ["init_plugin_satchel_mail_notifications", "satchel_mobile_frontend_ready", "satchel_mobile_response_handled"]) {
+    assert.match(symbols, new RegExp(`\\bU _?${name}\\b`));
+  }
+  assert.match(symbols, /satchel_notification_native_hooks/);
 });

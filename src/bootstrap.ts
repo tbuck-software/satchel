@@ -74,6 +74,19 @@ import { crashReportForClipboard } from '@/utils/crashReport';
 import { loadOmniSearch } from '@/components/navigation/loadOmniSearch';
 import { loadPublicSuffixTable } from '@/utils/externalLinks';
 
+// Shared stores can outlive a bootstrap component. Keep response work with the
+// composer store so a replay joins a pending guard/action or ACKs finished work.
+// Completed IDs last for that store's lifetime, including a lost ACK. This is
+// in-memory deduplication, not recovery of JS side effects after a WebView crash.
+const notificationResponses = new WeakMap<object, Map<string, Promise<void>>>();
+// Keep lease reservations in request order even when IPC replies resolve late.
+let notificationLifecycle: Promise<unknown> = Promise.resolve();
+function updateNotificationListener(id: number | null, ready: boolean): Promise<number | null> {
+  const next = notificationLifecycle.then(() => backendMobileNotificationsFrontendReady(id, ready));
+  notificationLifecycle = next.catch(() => {});
+  return next;
+}
+
 /** What an event registration hands back so it can be taken down again. */
 type Disposer = () => void | Promise<void>;
 
@@ -266,6 +279,21 @@ export function useAppBootstrap(): void {
   const settingsStore = useSettingsStore();
   const ui = useUiStore();
   const composer = useComposerStore();
+  let responses = notificationResponses.get(composer);
+  if (!responses) {
+    responses = new Map();
+    notificationResponses.set(composer, responses);
+  }
+  const sharedResponses = responses;
+  let notificationListenerId: number | null = null;
+  const retireNotificationListener = () => {
+    if (notificationListenerId === null) return;
+    const id = notificationListenerId;
+    notificationListenerId = null;
+    void updateNotificationListener(id, false).catch(error => {
+      console.warn('mobile notification listener disposal failed', error);
+    });
+  };
   const appUpdates = useAppUpdateStore();
   onMounted(() => appUpdates.start());
   onBeforeUnmount(() => appUpdates.stop());
@@ -499,7 +527,8 @@ export function useAppBootstrap(): void {
       // Opened rather than sent: a reply the user cannot re-read before it
       // leaves is not a favour, and the notification field has no formatting,
       // no recipient list and no signature.
-      composer.open({ mode: 'reply', threadId, body: notificationReplyText(notification) });
+      const opened = await composer.open({ mode: 'reply', threadId, body: notificationReplyText(notification) });
+      if (!opened) return;
       await backendDismissMobileNotifications([threadId]).catch(() => {});
     }
   }
@@ -660,20 +689,39 @@ export function useAppBootstrap(): void {
       void (async () => {
         try {
           const { listen } = await import('@tauri-apps/api/event');
-          // iOS owns mail responses and buffers them until this listener exists.
-          // Acknowledge after the action finishes so background execution lasts
-          // through the database mutation or opening the reply composer.
+          if (bootstrapDisposed) return;
+          // Reserve before registration, activate only after its callback exists.
+          // A disposed bootstrap retires even a reservation that resolves late.
+          notificationListenerId = await updateNotificationListener(null, false);
+          if (bootstrapDisposed) {
+            retireNotificationListener();
+            return;
+          }
+          const listenerId = notificationListenerId;
           adoptDisposer(await listen<NativeNotificationRoute>('mobile:notification-route', async ({ payload }) => {
+            if (bootstrapDisposed || listenerId === null || !payload || payload.listenerId !== listenerId) return;
+            const responseId = payload.responseId;
+            if (typeof responseId !== 'string' || !responseId.trim() || responseId.length > 128) return;
             const threadId = notificationRouteThreadId(payload);
+            if (!threadId || typeof payload.actionId !== 'string'
+              || !['tap', ...Object.values(MAIL_ACTIONS)].includes(payload.actionId)) return;
             try {
-              if (threadId) await handleNotificationAction(payload, threadId);
-            } catch (error) {
-              console.warn('mobile notification action failed', error);
-            } finally {
-              if (typeof payload.responseId === 'string') {
-                const { emit } = await import('@tauri-apps/api/event');
-                await emit('mobile:notification-response-handled', { responseId: payload.responseId });
+              let work = sharedResponses.get(responseId);
+              if (!work) {
+                // Defer invocation until the promise is registered, for reentrancy.
+                work = Promise.resolve().then(() => handleNotificationAction(payload, threadId));
+                sharedResponses.set(responseId, work);
+                void work.catch(() => {
+                  if (sharedResponses.get(responseId) === work) sharedResponses.delete(responseId);
+                });
               }
+              await work;
+              const { emit } = await import('@tauri-apps/api/event');
+              await emit('mobile:notification-response-handled', { responseId });
+            } catch (error) {
+              // Retain native response/reply text for replay after recreation.
+              // A refused replacement is an explicit cancellation and resolves.
+              console.warn('mobile notification action failed', error);
             }
           }));
           adoptDisposer(await listen('mobile:resumed', () => {
@@ -690,8 +738,9 @@ export function useAppBootstrap(): void {
           };
           window.addEventListener('focus', mobileVisibilityHandler);
           document.addEventListener('visibilitychange', mobileVisibilityHandler);
-          await backendMobileNotificationsFrontendReady();
+          if (listenerId !== null) await updateNotificationListener(listenerId, true);
         } catch (error) {
+          retireNotificationListener();
           console.warn('mobile notification bridge failed', error);
         }
       })();
@@ -956,6 +1005,7 @@ export function useAppBootstrap(): void {
                     {
                       id: MAIL_ACTIONS.reply,
                       title: t('common.reply'),
+                      foreground: true,
                       input: true,
                       inputButtonTitle: t('ui.send'),
                       inputPlaceholder: t('app.notifications.replyPlaceholder'),
@@ -1107,6 +1157,7 @@ export function useAppBootstrap(): void {
 
   onBeforeUnmount(() => {
     bootstrapDisposed = true;
+    retireNotificationListener();
     startupEvents.dispose();
     cancelInteractionPrefetch?.();
     cancelInteractionPrefetch = null;
