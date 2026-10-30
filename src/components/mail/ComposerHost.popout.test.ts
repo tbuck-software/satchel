@@ -16,7 +16,9 @@ const composeView = vi.hoisted(() => ({
   currentDraftId: vi.fn(() => null as string | null),
 }));
 
-const confirm = vi.hoisted(() => ({ ask: vi.fn(async () => true) }));
+const confirm = vi.hoisted(() => ({
+  decide: vi.fn(async (): Promise<'confirmed' | 'declined' | 'preempted'> => 'confirmed'),
+}));
 
 const toast = vi.hoisted(() => ({
   error: vi.fn(),
@@ -67,7 +69,7 @@ beforeEach(() => {
   composeView.persistDraft.mockResolvedValue('draft-1');
   composeView.shouldConfirmClose.mockReturnValue(false);
   composeView.currentDraftId.mockReturnValue(null);
-  confirm.ask.mockResolvedValue(true);
+  confirm.decide.mockResolvedValue('confirmed');
 });
 
 describe('composer popout', () => {
@@ -130,19 +132,19 @@ describe('a second composer request while one is open', () => {
     await useComposerStore().openReply('thread-1');
     await flushPromises();
 
-    expect(confirm.ask).not.toHaveBeenCalled();
+    expect(confirm.decide).not.toHaveBeenCalled();
     expect(composeView.closeWithoutSaving).toHaveBeenCalled();
     expect(useComposerStore().request?.mode).toBe('reply');
   });
 
   it('asks first and keeps the composer when the user declines', async () => {
     composeView.shouldConfirmClose.mockReturnValue(true);
-    confirm.ask.mockResolvedValue(false);
+    confirm.decide.mockResolvedValue('declined');
     await mountOpenComposer();
 
-    await expect(useComposerStore().openReply('thread-1')).resolves.toBe(false);
+    await expect(useComposerStore().openWithOutcome({ mode: 'reply', threadId: 'thread-1' })).resolves.toBe('kept');
 
-    expect(confirm.ask).toHaveBeenCalledTimes(1);
+    expect(confirm.decide).toHaveBeenCalledTimes(1);
     expect(composeView.persistDraft).not.toHaveBeenCalled();
     expect(useComposerStore().request?.mode).toBe('new');
   });
@@ -152,7 +154,8 @@ describe('a second composer request while one is open', () => {
     composeView.persistDraft.mockResolvedValue(null);
     const wrapper = await mountOpenComposer();
 
-    await expect(useComposerStore().openEmail(['mara@example.com'])).resolves.toBe(false);
+    // Not a refusal: the user agreed, and the new request's content is not on disk.
+    await expect(useComposerStore().openWithOutcome({ mode: 'new', to: ['mara@example.com'] })).resolves.toBe('unsaved');
     await flushPromises();
 
     expect(useComposerStore().request?.to).toEqual([]);
@@ -161,6 +164,61 @@ describe('a second composer request while one is open', () => {
     composeView.persistDraft.mockResolvedValue('draft-1');
     await expect(useComposerStore().openEmail(['mara@example.com'])).resolves.toBe(true);
     expect(useComposerStore().request?.to).toEqual(['mara@example.com']);
+  });
+
+  it('reports a question another dialog took away as interrupted, not as kept', async () => {
+    composeView.shouldConfirmClose.mockReturnValue(true);
+    confirm.decide.mockResolvedValue('preempted');
+    await mountOpenComposer();
+
+    await expect(useComposerStore().openWithOutcome({ mode: 'reply', threadId: 'thread-1' })).resolves.toBe('interrupted');
+
+    expect(composeView.persistDraft).not.toHaveBeenCalled();
+    expect(useComposerStore().request?.mode).toBe('new');
+  });
+
+  it('asks before replacing a notification reply the form calls untouched, and saves it', async () => {
+    const wrapper = mount(ComposerHost, { attachTo: document.body });
+    await useComposerStore().open({ mode: 'reply', threadId: 'thread-1', body: 'typed in a notification', unsavedBody: true });
+    await flushPromises();
+
+    await expect(useComposerStore().openWithOutcome({ mode: 'forward', threadId: 'thread-2' })).resolves.toBe('opened');
+
+    expect(confirm.decide).toHaveBeenCalledTimes(1);
+    expect(composeView.persistDraft).toHaveBeenCalledTimes(1);
+    expect(composeView.closeWithoutSaving).not.toHaveBeenCalled();
+    expect(useComposerStore().request?.mode).toBe('forward');
+    wrapper.unmount();
+  });
+
+  it('retries saving a notification reply instead of dropping it', async () => {
+    composeView.persistDraft.mockResolvedValue(null);
+    const wrapper = mount(ComposerHost, { attachTo: document.body });
+    await useComposerStore().open({ mode: 'reply', threadId: 'thread-1', body: 'typed in a notification', unsavedBody: true });
+    await flushPromises();
+
+    await expect(useComposerStore().openWithOutcome({ mode: 'forward', threadId: 'thread-2' })).resolves.toBe('unsaved');
+    composeView.persistDraft.mockResolvedValue('draft-4');
+    await toast.error.mock.calls[0]?.[1]?.action?.handler();
+    await flushPromises();
+
+    expect(composeView.persistDraft).toHaveBeenCalledTimes(2);
+    expect(composeView.closeWithoutSaving).not.toHaveBeenCalled();
+    expect(useComposerStore().isOpen).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('replaces a notification reply without asking once its draft is on disk', async () => {
+    composeView.currentDraftId.mockReturnValue('draft-3');
+    const wrapper = mount(ComposerHost, { attachTo: document.body });
+    await useComposerStore().open({ mode: 'reply', threadId: 'thread-1', body: 'typed in a notification', unsavedBody: true });
+    await flushPromises();
+
+    await expect(useComposerStore().openWithOutcome({ mode: 'forward', threadId: 'thread-2' })).resolves.toBe('opened');
+
+    expect(confirm.decide).not.toHaveBeenCalled();
+    expect(composeView.closeWithoutSaving).toHaveBeenCalled();
+    wrapper.unmount();
   });
 
   it('keeps the composer when the same draft is opened again', async () => {

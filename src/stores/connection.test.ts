@@ -63,6 +63,19 @@ describe('connection backend errors', () => {
     expect(store.backendErrorSource).toBeNull();
   });
 
+  it('lets a later sync failure take the banner from a notification report', () => {
+    const store = useConnectionStore();
+    store.reportBackendError('notifications', 'backend.errors.notificationReplyWaiting');
+    expect(store.backendErrorSource).toBe('notifications');
+
+    store.reportSyncFailures(['account rejected the password']);
+    expect(store.backendErrorSource).toBe('sync');
+    expect(store.backendError).toBe('account rejected the password');
+
+    store.reportSyncFailures([]);
+    expect(store.backendErrorSource).toBe('notifications');
+  });
+
   it('answers per subsystem, so an empty view can tell a failed load from no mail', () => {
     const store = useConnectionStore();
     store.reportBackendError('threads', new Error('db is locked'));

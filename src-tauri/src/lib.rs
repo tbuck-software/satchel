@@ -117,8 +117,9 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_fs::init());
 
-    // Mail notifications are registered on every platform; the native half only
-    // exists on Android, and the commands answer honestly elsewhere.
+    // Keep this after tauri-plugin-notification: iOS installs its forwarding
+    // delegate after the plugin's delegate. Android uses its own mail plugin;
+    // the commands remain registered on every platform.
     let builder = builder.plugin(commands::mobile_notifications::init());
 
     // Same arrangement for the foreground service that keeps IMAP IDLE alive on
@@ -898,6 +899,7 @@ pub fn run() {
             commands::mobile_notifications::consume_pending_mobile_notification,
             commands::mobile_notifications::dismiss_mobile_notifications,
             commands::mobile_notifications::mobile_notifications_frontend_ready,
+            commands::mobile_notifications::mobile_notification_response_handled,
         ])
         .build(tauri::generate_context!())
         .expect("failed to build satchel tauri app")

@@ -387,6 +387,18 @@ describe('threads.refreshHead', () => {
       .toBe('done');
   });
 
+  it('tells a thread the backend no longer has from one it could not load', async () => {
+    const threads = useThreadsStore();
+    getThread.mockRejectedValueOnce(new Error(JSON.stringify({ key: 'backend.errors.threadNotFound' })));
+    await expect(threads.ensureThreadLoaded('gone')).resolves.toBe('missing');
+    getThread.mockRejectedValueOnce(new Error(JSON.stringify({ key: 'backend.errors.threadPersistenceFailed' })));
+    await expect(threads.ensureThreadLoaded('locked')).resolves.toBe('unavailable');
+    getThread.mockResolvedValueOnce(row('found', '2026-08-08T06:00:00Z') as never);
+    await expect(threads.ensureThreadLoaded('found')).resolves.toBe('loaded');
+    await expect(threads.ensureThreadLoaded('found')).resolves.toBe('loaded');
+    expect(getThread).toHaveBeenCalledTimes(3);
+  });
+
   it('drops a cached thread when sync confirms that it no longer exists', async () => {
     const threads = useThreadsStore();
     listThreads.mockResolvedValueOnce(
