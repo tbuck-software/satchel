@@ -167,7 +167,12 @@ async fn server_hit_fetch_short_circuits_when_already_local() {
     let pool = pool().await;
     seed_account(&pool).await;
     seed_message(&pool, SeedMessage::default()).await;
-    sqlx::query("UPDATE messages SET remote_id = 'remote-1' WHERE id = 'm-1'")
+    sqlx::query("UPDATE messages SET remote_id = '42', remote_uidvalidity = 7 WHERE id = 'm-1'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("UPDATE folders SET uidvalidity = 7 WHERE id = 'fld-inbox'")
         .execute(&pool)
         .await
         .unwrap();
@@ -178,13 +183,54 @@ async fn server_hit_fetch_short_circuits_when_already_local() {
         &pool,
         &FetchServerHitInput {
             account_id: "acc-1".into(),
-            remote_id: "remote-1".into(),
+            remote_id: "42".into(),
         },
     )
     .await
     .unwrap();
     assert_eq!(fetched.message_id, "m-1");
     assert_eq!(fetched.thread_id, "th-m-1");
+}
+
+#[tokio::test]
+async fn server_hit_rejects_unverified_or_stale_cached_imap_content() {
+    use crate::commands::server_search::{fetch_server_search_hit_impl, FetchServerHitInput};
+
+    let pool = pool().await;
+    seed_account(&pool).await;
+    seed_message(&pool, SeedMessage::default()).await;
+    sqlx::query("UPDATE folders SET uidvalidity = 8 WHERE id = 'fld-inbox'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for generation in [None, Some(7)] {
+        sqlx::query(
+            "UPDATE messages SET remote_id = '42', remote_uidvalidity = ? WHERE id = 'm-1'",
+        )
+        .bind(generation)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let error = fetch_server_search_hit_impl(
+            &pool,
+            &FetchServerHitInput {
+                account_id: "acc-1".into(),
+                remote_id: "42".into(),
+            },
+        )
+        .await
+        .unwrap_err();
+        let error: serde_json::Value = serde_json::from_str(&error).unwrap();
+        assert_eq!(error["params"]["folder"], "INBOX");
+        assert_eq!(
+            error["key"],
+            if generation.is_none() {
+                "backend.errors.imapUidValidityMissing"
+            } else {
+                "backend.errors.imapUidValidityChanged"
+            }
+        );
+    }
 }
 
 #[tokio::test]
@@ -372,6 +418,9 @@ async fn fetching_evicted_body_preserves_identity_and_local_state() {
     use base64::Engine;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    let _http_fixture = crate::sync::mailbox_sync::PROVIDER_HTTP_FIXTURES
+        .lock()
+        .await;
     let pool = pool().await;
     seed_account(&pool).await;
     seed_message(&pool, SeedMessage::default()).await;
@@ -407,8 +456,12 @@ async fn fetching_evicted_body_preserves_identity_and_local_state() {
     let address = listener.local_addr().unwrap();
     let html = "<p onclick=bad()>needle</p><script>bad()</script>";
     let response = serde_json::json!({
-        "id": "remote-1", "threadId": "different-provider-thread", "labelIds": ["INBOX"],
-        "payload": { "mimeType": "multipart/alternative", "headers": [], "parts": [
+        "id": "remote-1", "threadId": "different-provider-thread", "historyId": "300", "labelIds": ["INBOX"],
+        "internalDate": "1767225600000",
+        "payload": { "mimeType": "multipart/alternative", "headers": [
+            { "name": "From", "value": "remote@example.test" },
+            { "name": "Subject", "value": "Remote subject must not replace local metadata" }
+        ], "parts": [
             { "mimeType": "text/plain", "body": { "data": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("needle") } },
             { "mimeType": "text/html", "body": { "data": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(html) } },
         ] },
@@ -420,7 +473,7 @@ async fn fetching_evicted_body_preserves_identity_and_local_state() {
         assert!(String::from_utf8_lossy(&request[..len]).contains("/messages/remote-1?format=full"));
         socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).as_bytes()).await.unwrap();
     });
-    // No other app-crate test overrides the Gmail endpoint. Restore even on panic.
+    // Share the endpoint lock with sync fixtures and restore even on panic.
     struct EndpointGuard(Option<String>);
     impl Drop for EndpointGuard {
         fn drop(&mut self) {

@@ -17,6 +17,7 @@ pub mod oauth;
 pub mod plugin_permissions;
 pub mod profile_lock;
 pub mod queries;
+pub mod remote_content;
 pub mod sender_preferences;
 pub mod signatures;
 pub mod smart_folders;

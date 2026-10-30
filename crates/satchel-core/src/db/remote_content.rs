@@ -1,0 +1,678 @@
+//! Saved identity for on-demand content reads and their eventual writeback.
+use sqlx::{FromRow, SqlitePool};
+
+use crate::providers::traits::MessageRef;
+
+pub fn saved_uidvalidity(value: Option<i64>) -> Option<u32> {
+    value
+        .and_then(|value| u32::try_from(value).ok())
+        .filter(|value| *value != 0)
+}
+
+#[derive(Debug, Clone, FromRow, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ContentReference {
+    pub message_id: String,
+    pub account_id: String,
+    pub folder_id: Option<String>,
+    pub remote_id: Option<String>,
+    pub remote_uidvalidity: Option<i64>,
+    pub created_at: String,
+    pub provider: String,
+    pub source_folder: Option<String>,
+    pub folder_uidvalidity: Option<i64>,
+}
+
+impl ContentReference {
+    pub async fn load(pool: &SqlitePool, message_id: &str) -> Result<Self, String> {
+        let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
+        Self::load_on(&mut connection, message_id).await
+    }
+
+    /// Read a saved identity using an already owned transaction or connection.
+    pub async fn load_on(
+        connection: &mut sqlx::SqliteConnection,
+        message_id: &str,
+    ) -> Result<Self, String> {
+        Self::find_on(connection, message_id)
+            .await?
+            .ok_or_else(|| "backend.errors.messageNotAvailableLocally".to_string())
+    }
+
+    /// Like `load_on`, for callers that treat a missing row as an outcome.
+    pub async fn find_on(
+        connection: &mut sqlx::SqliteConnection,
+        message_id: &str,
+    ) -> Result<Option<Self>, String> {
+        sqlx::query_as(
+            "SELECT m.id AS message_id, m.account_id, m.folder_id, m.remote_id,
+                    m.remote_uidvalidity, m.created_at, a.provider,
+                    COALESCE(f.remote_id, f.full_path) AS source_folder,
+                    f.uidvalidity AS folder_uidvalidity
+             FROM messages m JOIN accounts a ON a.id = m.account_id
+             LEFT JOIN folders f ON f.id = m.folder_id WHERE m.id = ?",
+        )
+        .bind(message_id)
+        .fetch_optional(connection)
+        .await
+        .map_err(|error| error.to_string())
+    }
+
+    /// Read identities in bounded batches, including folder generation in the same snapshot.
+    pub async fn load_many(
+        pool: &SqlitePool,
+        ids: &[String],
+    ) -> Result<std::collections::HashMap<String, Self>, String> {
+        let mut result = std::collections::HashMap::new();
+        for chunk in ids.chunks(500) {
+            let mut query = sqlx::QueryBuilder::new("SELECT m.id AS message_id, m.account_id, m.folder_id, m.remote_id,
+                m.remote_uidvalidity, m.created_at, a.provider,
+                COALESCE(f.remote_id, f.full_path) AS source_folder, f.uidvalidity AS folder_uidvalidity
+                FROM messages m JOIN accounts a ON a.id = m.account_id
+                LEFT JOIN folders f ON f.id = m.folder_id WHERE m.id IN (");
+            let mut values = query.separated(",");
+            for id in chunk {
+                values.push_bind(id);
+            }
+            query.push(")");
+            for reference in query
+                .build_query_as::<Self>()
+                .fetch_all(pool)
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                result.insert(reference.message_id.clone(), reference);
+            }
+        }
+        Ok(result)
+    }
+
+    pub fn is_remote_imap(&self) -> bool {
+        is_remote_imap(&self.provider, self.remote_id.as_deref())
+    }
+
+    pub fn uidvalidity(&self) -> Option<u32> {
+        saved_uidvalidity(self.remote_uidvalidity)
+    }
+
+    pub fn message_ref(&self) -> Result<MessageRef, String> {
+        if self.provider == "imap" && !self.is_remote_imap() {
+            return Err("backend.errors.messageNotAvailableRemotely".to_string());
+        }
+        if self.is_remote_imap() {
+            if self.uidvalidity().is_none() {
+                return Err(self.error("backend.errors.imapUidValidityMissing"));
+            }
+            if self.remote_uidvalidity != self.folder_uidvalidity {
+                return Err(self.changed_error());
+            }
+        }
+        Ok(MessageRef {
+            remote_id: self
+                .remote_id
+                .clone()
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| "backend.errors.messageNotAvailableRemotely".to_string())?,
+            source_folder: self.source_folder.clone(),
+            source_uidvalidity: self.uidvalidity(),
+        })
+    }
+
+    /// Folder generations belong to remote IMAP identities, not to local
+    /// content merely stored under an IMAP account.
+    pub fn same_identity(&self, current: &Self) -> bool {
+        self.message_id == current.message_id
+            && self.account_id == current.account_id
+            && self.folder_id == current.folder_id
+            && self.remote_id == current.remote_id
+            && self.remote_uidvalidity == current.remote_uidvalidity
+            && self.created_at == current.created_at
+            && self.provider == current.provider
+            && (!self.is_remote_imap()
+                || (self.source_folder == current.source_folder
+                    && self.folder_uidvalidity == current.folder_uidvalidity))
+    }
+
+    /// Identity of content that is not bound to one server UID: a draft's
+    /// own editable state, or bytes an export has already written.
+    ///
+    /// Sync replaces a draft's server copy without a mailbox reset. The first
+    /// ingest stamps a UID and generation on a draft that had none, and each
+    /// autosave re-upload assigns a new UID in the same generation; a confirmed
+    /// move or a folder rename keeps the generation the row was read in. A
+    /// generation, once saved, must still match. The current row's own
+    /// `validate_cached_read` separately rejects a row its folder has outgrown.
+    pub fn same_draft_identity(&self, current: &Self) -> bool {
+        self.message_id == current.message_id
+            && self.account_id == current.account_id
+            && self.created_at == current.created_at
+            && self.provider == current.provider
+            && (self.remote_uidvalidity.is_none()
+                || self.remote_uidvalidity == current.remote_uidvalidity)
+    }
+
+    pub async fn begin_write<'a>(
+        &self,
+        pool: &'a SqlitePool,
+    ) -> Result<sqlx::Transaction<'a, sqlx::Sqlite>, String> {
+        let mut tx = pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(|error| error.to_string())?;
+        self.ensure_current(&mut tx).await?;
+        Ok(tx)
+    }
+
+    /// Call inside the write transaction, before publishing fetched content.
+    /// `begin_write` holds the writer lock from this check through publication.
+    pub async fn ensure_current(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    ) -> Result<(), String> {
+        self.validate_cached_read()?;
+        let current: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM messages m JOIN accounts a ON a.id = m.account_id
+             LEFT JOIN folders f ON f.id = m.folder_id
+             WHERE m.id = ? AND m.account_id = ? AND m.folder_id IS ?
+               AND m.remote_id IS ? AND m.remote_uidvalidity IS ? AND m.created_at = ?
+               AND a.provider = ? AND (? = 0 OR (f.uidvalidity IS ?
+                    AND COALESCE(f.remote_id, f.full_path) IS ?)))",
+        )
+        .bind(&self.message_id)
+        .bind(&self.account_id)
+        .bind(&self.folder_id)
+        .bind(&self.remote_id)
+        .bind(self.remote_uidvalidity)
+        .bind(&self.created_at)
+        .bind(&self.provider)
+        .bind(self.is_remote_imap())
+        .bind(self.folder_uidvalidity)
+        .bind(&self.source_folder)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|error| error.to_string())?;
+        if current {
+            Ok(())
+        } else {
+            Err(self.changed_error())
+        }
+    }
+
+    /// Validate a collection in one transaction, with bounded SQL batches and
+    /// no content blobs. The caller owns the snapshot through return/publication.
+    pub async fn ensure_many_current(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        references: &[Self],
+    ) -> Result<(), String> {
+        for chunk in references.chunks(500) {
+            for reference in chunk {
+                reference.validate_cached_read()?;
+            }
+            let ids = serde_json::to_string(
+                &chunk
+                    .iter()
+                    .map(|reference| &reference.message_id)
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(|error| error.to_string())?;
+            let current: Vec<Self> = sqlx::query_as(
+                "SELECT m.id AS message_id, m.account_id, m.folder_id, m.remote_id,
+                        m.remote_uidvalidity, m.created_at, a.provider,
+                        COALESCE(f.remote_id, f.full_path) AS source_folder,
+                        f.uidvalidity AS folder_uidvalidity
+                 FROM messages m JOIN accounts a ON a.id = m.account_id
+                 LEFT JOIN folders f ON f.id = m.folder_id
+                 WHERE m.id IN (SELECT value FROM json_each(?))",
+            )
+            .bind(ids)
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(|error| error.to_string())?;
+            let current: std::collections::HashMap<_, _> = current
+                .into_iter()
+                .map(|reference| (reference.message_id.clone(), reference))
+                .collect();
+            for reference in chunk {
+                if !current
+                    .get(&reference.message_id)
+                    .is_some_and(|current| reference.same_identity(current))
+                {
+                    return Err(reference.changed_error());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn changed_error(&self) -> String {
+        if self.is_remote_imap() {
+            self.error("backend.errors.imapUidValidityChanged")
+        } else {
+            "backend.errors.messageNotAvailableLocally".to_string()
+        }
+    }
+
+    /// Local drafts have no remote identity. Remote IMAP content requires the
+    /// saved generation even when its bytes already live in a cache.
+    pub fn validate_cached_read(&self) -> Result<(), String> {
+        if self.is_remote_imap() {
+            self.message_ref()?;
+        }
+        Ok(())
+    }
+
+    fn error(&self, key: &str) -> String {
+        serde_json::json!({"key": key, "params": {"folder": self.source_folder.as_deref().unwrap_or("INBOX")}}).to_string()
+    }
+
+    pub fn owns_attachment_cache(&self, path: &str, attachment_id: &str) -> bool {
+        cache_path_is_owned_by(
+            path,
+            &self.attachment_cache_id(attachment_id),
+            &self.message_id,
+        )
+    }
+
+    /// New cache files cannot collide with an earlier generation, including a
+    /// legacy cache whose generation was never recorded.
+    pub fn attachment_cache_id(&self, attachment_id: &str) -> String {
+        attachment_cache_id(
+            &self.provider,
+            self.remote_id.as_deref(),
+            self.remote_uidvalidity,
+            attachment_id,
+        )
+    }
+}
+
+/// Only explicit identities produced by local ingestion are local. A malformed
+/// server UID must still fail closed rather than gaining access to old bytes.
+pub fn is_remote_imap(provider: &str, remote_id: Option<&str>) -> bool {
+    provider == "imap" && remote_id.is_some_and(|id| !id.is_empty() && !is_import_id(id))
+}
+
+fn is_import_id(id: &str) -> bool {
+    id.strip_prefix("import-")
+        .is_some_and(|suffix| uuid::Uuid::parse_str(suffix).is_ok())
+}
+
+pub fn attachment_cache_id(
+    provider: &str,
+    remote_id: Option<&str>,
+    generation: Option<i64>,
+    id: &str,
+) -> String {
+    if is_remote_imap(provider, remote_id) {
+        format!("{id}:imap:{}", generation.unwrap_or(0))
+    } else {
+        id.to_string()
+    }
+}
+
+pub fn short_attachment_cache_key(value: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(value.as_bytes())
+        .iter()
+        .take(12)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+pub fn cache_path_is_owned_by(path: &str, cache_id: &str, message_id: &str) -> bool {
+    let Some(name) = std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+    else {
+        return false;
+    };
+    [cache_id.to_string(), format!("{message_id}-{cache_id}")]
+        .iter()
+        .any(|key| name.starts_with(&format!("{}-", short_attachment_cache_key(key))))
+}
+
+/// Cache file name for an attachment: a digest of the attachment id plus a
+/// trimmed version of the original name.
+///
+/// The id must never reach the file name. Gmail part ids run past 500
+/// characters, so `{id}-{filename}` blows the 255-byte name limit of every
+/// common file system — and the sync path used to build exactly that. The write
+/// failed with `ENAMETOOLONG`, the error was discarded, and every freshly
+/// downloaded inline image was thrown away: 9 700 parts fetched from Gmail for
+/// nothing, then fetched again on every open until the account hit a 429.
+/// Regression guard: `cache_path_stays_within_file_name_limits`.
+pub fn attachment_cache_path(
+    cache_dir: &std::path::Path,
+    attachment_id: &str,
+    filename: &str,
+) -> std::path::PathBuf {
+    cache_dir.join(format!(
+        "{}-{}",
+        short_attachment_cache_key(attachment_id),
+        safe_filename(filename)
+    ))
+}
+
+/// Longest original name kept in a cache file name. The digest prefix already
+/// carries uniqueness, so this only has to stay recognisable in a file listing.
+pub const MAX_CACHE_NAME_BYTES: usize = 120;
+
+pub fn safe_filename(value: &str) -> String {
+    // Every branch yields ASCII, so byte and char lengths agree below.
+    let sanitized = crate::utils::filename::strip_filename_controls(value)
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if sanitized.trim_matches('_').is_empty() {
+        return "attachment".to_string();
+    }
+    if sanitized.len() <= MAX_CACHE_NAME_BYTES {
+        return sanitized;
+    }
+    // Keep the extension: it is what makes the cache dir readable, and Finder
+    // and `open` both key off it.
+    match sanitized.rsplit_once('.') {
+        Some((stem, ext)) if !ext.is_empty() && ext.len() < 16 => {
+            let budget = MAX_CACHE_NAME_BYTES - ext.len() - 1;
+            format!("{}.{ext}", &stem[..budget.min(stem.len())])
+        }
+        _ => sanitized[..MAX_CACHE_NAME_BYTES].to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn fixture() -> SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        seed_fixture(&pool).await;
+        pool
+    }
+
+    async fn seed_fixture(pool: &SqlitePool) {
+        crate::db::init(pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, email, display_name, provider, config, credentials_ref, created_at, updated_at)
+                VALUES ('acc', 'me@example.test', 'Me', 'imap', '{}', '', '', '');
+            INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, uidvalidity, created_at, updated_at)
+                VALUES ('inbox', 'acc', 'INBOX', 'INBOX', 'INBOX', 'inbox', 7, '', '');
+            INSERT INTO threads (id, account_id, subject, last_message_date, created_at, updated_at)
+                VALUES ('thread', 'acc', 'Subject', '', '', '');
+            INSERT INTO messages (id, account_id, folder_id, thread_id, remote_id, remote_uidvalidity,
+                from_address, to_addresses, date, body_text, created_at, updated_at)
+                VALUES ('message', 'acc', 'inbox', 'thread', '42', 7, '', '[]', '', '', 'original', '');")
+            .execute(pool).await.unwrap();
+    }
+
+    #[test]
+    fn local_classification_and_cache_ownership_are_shared() {
+        let import = "import-550e8400-e29b-41d4-a716-446655440000";
+        for remote in [None, Some(""), Some(import)] {
+            assert!(!is_remote_imap("imap", remote));
+            let id = attachment_cache_id("imap", remote, None, "part");
+            assert_eq!(id, "part");
+            for key in [&id, &format!("message-{id}")] {
+                let path = attachment_cache_path(std::path::Path::new("/cache"), key, "file.txt");
+                assert!(cache_path_is_owned_by(
+                    path.to_str().unwrap(),
+                    &id,
+                    "message"
+                ));
+                assert!(!cache_path_is_owned_by(
+                    path.to_str().unwrap(),
+                    "peer",
+                    "message"
+                ));
+            }
+        }
+        for remote in ["42", "invalid", "import-not-a-uuid"] {
+            assert!(is_remote_imap("imap", Some(remote)));
+            let key = attachment_cache_id("imap", Some(remote), Some(7), "part");
+            let path = attachment_cache_path(std::path::Path::new("/cache"), &key, "file.txt");
+            assert!(!cache_path_is_owned_by(
+                path.to_str().unwrap(),
+                "part:imap:8",
+                "message"
+            ));
+            assert!(!cache_path_is_owned_by(
+                path.to_str().unwrap(),
+                "part",
+                "message"
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn local_content_publication_ignores_remote_folder_generation_changes() {
+        for remote_id in [None, Some("import-550e8400-e29b-41d4-a716-446655440000")] {
+            let pool = fixture().await;
+            sqlx::query("UPDATE messages SET remote_id = ?, remote_uidvalidity = NULL")
+                .bind(remote_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let reference = ContentReference::load(&pool, "message").await.unwrap();
+            reference.validate_cached_read().unwrap();
+            assert!(reference
+                .message_ref()
+                .unwrap_err()
+                .contains("messageNotAvailableRemotely"));
+            sqlx::query("UPDATE folders SET uidvalidity = 8")
+                .execute(&pool)
+                .await
+                .unwrap();
+            let current = ContentReference::load(&pool, "message").await.unwrap();
+            assert!(reference.same_identity(&current));
+            let tx = reference.begin_write(&pool).await.unwrap();
+            tx.rollback().await.unwrap();
+        }
+        let pool = fixture().await;
+        let remote = ContentReference::load(&pool, "message").await.unwrap();
+        sqlx::query("UPDATE folders SET uidvalidity = 8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(!remote.same_identity(&ContentReference::load(&pool, "message").await.unwrap()));
+        assert!(remote.begin_write(&pool).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn content_reference_requires_the_envelopes_saved_generation() {
+        let pool = fixture().await;
+        let reference = ContentReference::load(&pool, "message").await.unwrap();
+        assert_eq!(reference.message_ref().unwrap().source_uidvalidity, Some(7));
+        for generation in [None, Some(0), Some(-1), Some(i64::from(u32::MAX) + 1)] {
+            sqlx::query("UPDATE messages SET remote_uidvalidity = ?")
+                .bind(generation)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let unknown = ContentReference::load(&pool, "message").await.unwrap();
+            assert!(unknown
+                .message_ref()
+                .unwrap_err()
+                .contains("imapUidValidityMissing"));
+            assert!(unknown
+                .validate_cached_read()
+                .unwrap_err()
+                .contains("imapUidValidityMissing"));
+        }
+        sqlx::query("UPDATE messages SET remote_uidvalidity = 6")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let stale = ContentReference::load(&pool, "message").await.unwrap();
+        assert!(stale
+            .message_ref()
+            .unwrap_err()
+            .contains("imapUidValidityChanged"));
+        assert!(stale
+            .validate_cached_read()
+            .unwrap_err()
+            .contains("imapUidValidityChanged"));
+    }
+
+    #[tokio::test]
+    async fn late_content_writeback_cannot_poison_a_reingested_message() {
+        let pool = fixture().await;
+        let reference = ContentReference::load(&pool, "message").await.unwrap();
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        reference.ensure_current(&mut tx).await.unwrap();
+        tx.rollback().await.unwrap();
+        // A reset may re-use even the local id, for example for an imported draft.
+        sqlx::raw_sql(
+            "UPDATE folders SET uidvalidity = 8;
+            UPDATE messages SET remote_uidvalidity = 8, body_text = 'new generation';",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        assert!(reference
+            .ensure_current(&mut tx)
+            .await
+            .unwrap_err()
+            .contains("imapUidValidityChanged"));
+        tx.rollback().await.unwrap();
+        let body: String = sqlx::query_scalar("SELECT body_text FROM messages")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(body, "new generation");
+        let current = ContentReference::load(&pool, "message").await.unwrap();
+        assert_ne!(
+            reference.attachment_cache_id("part"),
+            current.attachment_cache_id("part")
+        );
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        current.ensure_current(&mut tx).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn content_publication_and_folder_reset_serialize_on_the_writer() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("generation.db");
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true)
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+                    .busy_timeout(std::time::Duration::from_secs(5)),
+            )
+            .await
+            .unwrap();
+        seed_fixture(&pool).await;
+        let reference = ContentReference::load(&pool, "message").await.unwrap();
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+        let ready = barrier.clone();
+        let writer = pool.clone();
+        let publish = tokio::spawn(async move {
+            ready.wait().await;
+            match reference.begin_write(&writer).await {
+                Ok(mut tx) => {
+                    sqlx::query(
+                        "UPDATE messages SET body_text = 'old fetched body' WHERE id = 'message'",
+                    )
+                    .execute(&mut *tx)
+                    .await
+                    .unwrap();
+                    tx.commit().await.unwrap();
+                }
+                Err(error) => assert!(error.contains("imapUidValidityChanged")),
+            }
+        });
+        barrier.wait().await;
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        sqlx::raw_sql(
+            "UPDATE folders SET uidvalidity = 8;
+            UPDATE messages SET remote_uidvalidity = 8, body_text = 'replacement';",
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        publish.await.unwrap();
+        let body: String = sqlx::query_scalar("SELECT body_text FROM messages")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(body, "replacement");
+    }
+
+    #[tokio::test]
+    async fn draft_identity_survives_server_copy_replacement_but_not_a_new_generation() {
+        let pool = fixture().await;
+        let saved = ContentReference::load(&pool, "message").await.unwrap();
+        let local = ContentReference {
+            remote_id: None,
+            remote_uidvalidity: None,
+            ..saved.clone()
+        };
+        let current = |change: &str| {
+            let mut current = saved.clone();
+            match change {
+                "reupload" => current.remote_id = Some("43".into()),
+                "renamed" => {
+                    current.folder_id = Some("renamed".into());
+                    current.source_folder = Some("Renamed".into());
+                }
+                "reset" => {
+                    current.remote_uidvalidity = Some(8);
+                    current.folder_uidvalidity = Some(8);
+                }
+                "unstamped" => current.remote_uidvalidity = None,
+                "account" => current.account_id = "other".into(),
+                "recreated" => current.created_at = "replacement".into(),
+                "other-row" => current.message_id = "other".into(),
+                _ => {}
+            }
+            current
+        };
+        for change in ["same", "reupload", "renamed"] {
+            assert!(saved.same_draft_identity(&current(change)), "{change}");
+            assert!(!saved.same_identity(&current(change)) || change == "same");
+        }
+        for change in ["reset", "unstamped", "account", "recreated", "other-row"] {
+            assert!(!saved.same_draft_identity(&current(change)), "{change}");
+        }
+        // The first ingest of a local draft stamps the generation it had none of.
+        for change in ["same", "reupload", "reset", "unstamped"] {
+            assert!(local.same_draft_identity(&current(change)), "{change}");
+        }
+        for change in ["account", "recreated", "other-row"] {
+            assert!(!local.same_draft_identity(&current(change)), "{change}");
+        }
+    }
+
+    #[tokio::test]
+    async fn moving_the_message_or_resetting_only_the_folder_invalidates_writeback() {
+        let pool = fixture().await;
+        let reference = ContentReference::load(&pool, "message").await.unwrap();
+        sqlx::query("UPDATE folders SET uidvalidity = 8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        assert!(reference.ensure_current(&mut tx).await.is_err());
+        tx.rollback().await.unwrap();
+        sqlx::raw_sql(
+            "UPDATE folders SET uidvalidity = 7;
+            UPDATE messages SET remote_id = '43';",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        assert!(reference.ensure_current(&mut tx).await.is_err());
+    }
+}

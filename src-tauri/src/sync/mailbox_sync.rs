@@ -1,9 +1,9 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     sync::Arc,
 };
 
-use satchel_core::db::sync_quarantine::{FolderQuarantine, SyncQuarantineRepository};
+use satchel_core::db::sync_quarantine::SyncQuarantineRepository;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 use tauri::{AppHandle, Manager};
@@ -17,16 +17,17 @@ use crate::providers::{
     provider_for_stored_account,
     traits::{MessageEnvelope, MessageRef, RemoteFolder, SyncCheckpoint},
 };
+use crate::sync::errors::SyncError;
 use crate::sync::folder_reconcile::{
-    folder_snapshot_due, reconcile_external_workflow_states, reconcile_imap_folder_rename,
-    reconcile_imap_folder_snapshot, reconcile_missing_remote_folders,
+    folder_snapshot_due, pending_remote_message_refs, reconcile_external_workflow_states,
+    reconcile_imap_folder_rename, reconcile_imap_folder_snapshot, reconcile_missing_remote_folders,
     reconcile_remote_message_removals, reset_local_provider_folder_with_generation,
-    should_snapshot_folder,
+    should_snapshot_folder, PendingMutations,
 };
 use crate::sync::gmail_reconcile::{
-    ensure_gmail_archive_folder, gmail_label_is_category_view, gmail_message_belongs_to_folder,
-    gmail_message_needs_synthetic_archive, reconcile_gmail_message_mailboxes,
+    ensure_gmail_label_folder, gmail_target_mailbox_ids, SnapshotDeferral, SnapshotResolution,
 };
+
 #[cfg(mobile)]
 use crate::sync::leases::acquire_mobile_mailbox_work_permit;
 use crate::sync::leases::sync_run_lock;
@@ -102,6 +103,25 @@ fn encoded_quarantined_messages(account: &str, folder: &str, count: usize) -> St
         .encoded()
 }
 
+/// Reported once, in the run whose failure used up the last attempt.
+fn encoded_skipped_messages(account: &str, folder: &str, count: usize) -> String {
+    crate::commands::error::CommandError::new("backend.errors.messagesSkipped")
+        .with_param("account", account)
+        .with_param("folder", folder)
+        .with_param("count", count as i64)
+        .encoded()
+}
+
+/// Reported once per hold, by the first full sync after it. Inbox polls drop
+/// their summary.
+fn encoded_held_snapshot_messages(account: &str, folder: &str, count: usize) -> String {
+    crate::commands::error::CommandError::new("backend.errors.snapshotMessagesHeld")
+        .with_param("account", account)
+        .with_param("folder", folder)
+        .with_param("count", count as i64)
+        .encoded()
+}
+
 fn encoded_folder_ingest_failure(account: &str, folders: &[String], count: usize) -> String {
     crate::commands::error::CommandError::new("backend.errors.folderIngestBlocked")
         .with_param("account", account)
@@ -110,11 +130,27 @@ fn encoded_folder_ingest_failure(account: &str, folders: &[String], count: usize
         .encoded()
 }
 
+/// How long an owed snapshot ID waits after each transient failed lookup.
+/// The failure after the last window holds it; a permanent error holds at
+/// once. Inbox polls run every 15 seconds, so counting each of them would
+/// turn a one-minute outage into a day's hold; this way an outage of up to an
+/// hour costs at most four requests and holds nothing.
+const RESOLUTION_BACKOFF_MINUTES: [i64; 3] = [1, 10, 60];
+
+/// How long held work waits for one more attempt: an owed snapshot ID whose
+/// lookups kept failing, or a Gmail message whose target used up its
+/// quarantine. A stale copy heals within a day of its cause going away, and a
+/// cause that stays costs one request a day.
+const HELD_RETRY_AFTER_HOURS: i64 = 24;
+
 /// How one folder's batch fared.
 #[derive(Debug, Default)]
 struct FolderIngestOutcome {
     ingested: usize,
     failed: usize,
+    /// Failures that used up their last attempt in this batch. Also counted
+    /// in `failed`; later batches skip them.
+    exhausted: usize,
     skipped: usize,
     /// Remote ids this batch committed, with no failure of theirs on record.
     ///
@@ -166,12 +202,560 @@ struct MailAccountRow {
     ingest_cutoff: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 struct ImapSyncState {
     #[serde(default)]
     cursors: HashMap<String, String>,
     #[serde(default)]
     folder_snapshot_at: HashMap<String, String>,
+    /// Must survive a replacement cursor, failed snapshot, and process restart.
+    /// Older state decodes as empty; older readers ignore the additional field.
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    pending_snapshots: HashSet<String>,
+    /// IDs stay owed even if another ingest moves their source before retry.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    snapshot_resolutions: HashMap<String, HashSet<String>>,
+    /// A lookup can still name its source after a presence-listing race.
+    /// Do not rediscover completed copies while this snapshot remains pending.
+    /// Explicit owed IDs and quarantine retries bypass this exclusion.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    resolved_snapshot_copies: HashMap<String, HashSet<String>>,
+    /// Failed resolutions of owed IDs, per folder. They survive restarts, so
+    /// a lookup that keeps failing cannot be retried on every poll forever.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    snapshot_failures: HashMap<String, HashMap<String, SnapshotFailure>>,
+    /// Held owed IDs no summary has reported yet, per folder. Inbox polls
+    /// drop their summary, so the next full sync reports them, once.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    unreported_holds: HashMap<String, BTreeSet<String>>,
+}
+
+/// The failed resolutions of one owed ID.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+struct SnapshotFailure {
+    attempts: u32,
+    failed_at: chrono::DateTime<chrono::Utc>,
+    /// Retries stopped until [`HELD_RETRY_AFTER_HOURS`] after `failed_at`.
+    #[serde(default)]
+    held: bool,
+}
+
+impl ImapSyncState {
+    fn request_snapshot(&mut self, folder: &str, snapshot_due: bool, required: bool) -> bool {
+        if snapshot_due && required {
+            self.pending_snapshots.insert(folder.to_string());
+        }
+        self.pending_snapshots.contains(folder)
+    }
+
+    /// Forget every per-folder entry of folders the provider no longer returns.
+    fn retain_folders(&mut self, retained: &HashSet<String>) {
+        self.cursors.retain(|folder, _| retained.contains(folder));
+        self.folder_snapshot_at
+            .retain(|folder, _| retained.contains(folder));
+        self.pending_snapshots
+            .retain(|folder| retained.contains(folder));
+        self.snapshot_resolutions
+            .retain(|folder, _| retained.contains(folder));
+        self.resolved_snapshot_copies
+            .retain(|folder, _| retained.contains(folder));
+        self.snapshot_failures
+            .retain(|folder, _| retained.contains(folder));
+        self.unreported_holds
+            .retain(|folder, _| retained.contains(folder));
+    }
+
+    /// Whether ordinary polls owe this folder lookups: IDs a completed
+    /// snapshot left owed. A pending snapshot looks them up itself.
+    fn owes_resolutions(&self, folder: &str) -> bool {
+        !self.pending_snapshots.contains(folder)
+            && self
+                .snapshot_resolutions
+                .get(folder)
+                .is_some_and(|ids| !ids.is_empty())
+    }
+
+    /// Whether earlier failures still hold this owed ID back at `now`: it is
+    /// held, or its last transient failure's backoff window is still open.
+    fn resolution_held(&self, folder: &str, id: &str, now: chrono::DateTime<chrono::Utc>) -> bool {
+        self.snapshot_failures
+            .get(folder)
+            .and_then(|failures| failures.get(id))
+            .is_some_and(|failure| {
+                let wait = if failure.held {
+                    chrono::Duration::hours(HELD_RETRY_AFTER_HOURS)
+                } else {
+                    RESOLUTION_BACKOFF_MINUTES
+                        .get((failure.attempts as usize).saturating_sub(1))
+                        .map_or_else(chrono::Duration::zero, |minutes| {
+                            chrono::Duration::minutes(*minutes)
+                        })
+                };
+                now.signed_duration_since(failure.failed_at) < wait
+            })
+    }
+
+    /// Count one failed resolution. Returns whether the ID is held from now
+    /// on: the error is permanent, or it failed after its last backoff window.
+    fn record_resolution_failure(
+        &mut self,
+        folder: &str,
+        id: &str,
+        error: &SyncError,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> bool {
+        let failure = self
+            .snapshot_failures
+            .entry(folder.to_string())
+            .or_default()
+            .entry(id.to_string())
+            .or_insert(SnapshotFailure {
+                attempts: 0,
+                failed_at: now,
+                held: false,
+            });
+        failure.attempts += 1;
+        failure.failed_at = now;
+        failure.held =
+            error.is_permanent() || failure.attempts as usize > RESOLUTION_BACKOFF_MINUTES.len();
+        failure.held
+    }
+
+    /// Forget a resolved ID, together with its failures.
+    fn retire_resolution(&mut self, folder: &str, id: &str) {
+        if let Some(owed) = self.snapshot_resolutions.get_mut(folder) {
+            owed.remove(id);
+            if owed.is_empty() {
+                self.snapshot_resolutions.remove(folder);
+            }
+        }
+        if let Some(failures) = self.snapshot_failures.get_mut(folder) {
+            failures.remove(id);
+            if failures.is_empty() {
+                self.snapshot_failures.remove(folder);
+            }
+        }
+        // A hold that healed before any full sync is not worth a report.
+        if let Some(holds) = self.unreported_holds.get_mut(folder) {
+            holds.remove(id);
+            if holds.is_empty() {
+                self.unreported_holds.remove(folder);
+            }
+        }
+    }
+}
+
+/// What one folder snapshot settled. Deferred IDs stay owed durably.
+#[derive(Debug, Default)]
+struct SnapshotProgress {
+    changed: HashSet<String>,
+    deferred: BTreeMap<String, SnapshotDeferral>,
+}
+
+/// A provider returns Some only after every snapshot page has succeeded.
+/// Keep the obligation on None, network failure, or a stale IMAP generation.
+async fn reconcile_folder_snapshot(
+    pool: &SqlitePool,
+    provider: &dyn crate::providers::traits::MailProvider,
+    context: &FolderIngestContext<'_>,
+    state: &mut ImapSyncState,
+    queue: &SyncQueue,
+) -> Result<SnapshotProgress, String> {
+    let account_id = &context.account.id;
+    let remote_folder_id = context.folder_remote_id;
+    // Durable before any network or ingest work. Listing IDs is not completion.
+    state.pending_snapshots.insert(remote_folder_id.to_string());
+    persist_sync_cursors(pool, account_id, state, queue, None).await?;
+    let Some(snapshot) = provider
+        .sync_message_state_snapshot(remote_folder_id)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(SnapshotProgress::default());
+    };
+    let (progress, skipped_stale_generation) =
+        if context.account.provider.eq_ignore_ascii_case("gmail") {
+            (
+                reconcile_gmail_snapshot(pool, provider, context, &snapshot.states, state, queue)
+                    .await?,
+                false,
+            )
+        } else {
+            let changes = reconcile_imap_folder_snapshot(
+                pool,
+                account_id,
+                context.folder_id,
+                remote_folder_id,
+                &snapshot.states,
+                snapshot.remote_uidvalidity,
+            )
+            .await?;
+            (
+                SnapshotProgress {
+                    changed: changes.relocated_threads,
+                    ..SnapshotProgress::default()
+                },
+                changes.skipped_stale_generation,
+            )
+        };
+    if skipped_stale_generation {
+        tracing::warn!(
+            account_id,
+            folder = remote_folder_id,
+            snapshot_uidvalidity = ?snapshot.remote_uidvalidity,
+            "folder snapshot named another generation, kept every message"
+        );
+    } else {
+        // Every ID the listing found absent is owed durably by now, so the
+        // listing has nothing left to add. Ordinary polls look up what is
+        // still owed without listing the folder again.
+        let mut completed = state.clone();
+        completed.folder_snapshot_at.insert(
+            remote_folder_id.to_string(),
+            chrono::Utc::now().to_rfc3339(),
+        );
+        completed.pending_snapshots.remove(remote_folder_id);
+        completed.resolved_snapshot_copies.remove(remote_folder_id);
+        if let Some(owed) = completed.snapshot_resolutions.get(remote_folder_id) {
+            tracing::info!(
+                account_id,
+                folder = remote_folder_id,
+                owed = owed.len(),
+                "folder snapshot completed with IDs still owed"
+            );
+        }
+        persist_sync_cursors(pool, account_id, &completed, queue, None).await?;
+        *state = completed;
+    }
+    Ok(progress)
+}
+
+/// Look up only the IDs a completed snapshot left owed. Lookups are
+/// account-wide, so listing the folder again would add nothing; an ID whose
+/// holder has not let go yet costs no request at all.
+async fn resolve_owed_snapshot_ids(
+    pool: &SqlitePool,
+    provider: &dyn crate::providers::traits::MailProvider,
+    context: &FolderIngestContext<'_>,
+    state: &mut ImapSyncState,
+    queue: &SyncQueue,
+) -> Result<SnapshotProgress, String> {
+    let owed = state
+        .snapshot_resolutions
+        .get(context.folder_remote_id)
+        .map(|ids| ids.iter().cloned().collect::<BTreeSet<_>>())
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut progress = SnapshotProgress::default();
+    for ids in owed.chunks(100) {
+        resolve_owed_ids(pool, provider, context, state, queue, ids, &mut progress).await?;
+    }
+    Ok(progress)
+}
+
+/// A missing Gmail label copy is not proof of global deletion. Resolve absent
+/// copies and unfinished known deliveries outside write transactions, with
+/// bounded batches. Never pass Gmail presence lists to the IMAP reconciler.
+async fn reconcile_gmail_snapshot(
+    pool: &SqlitePool,
+    provider: &dyn crate::providers::traits::MailProvider,
+    context: &FolderIngestContext<'_>,
+    states: &[crate::providers::traits::RemoteMessageState],
+    state: &mut ImapSyncState,
+    queue: &SyncQueue,
+) -> Result<SnapshotProgress, String> {
+    let present = serde_json::to_string(&states.iter().map(|s| &s.remote_id).collect::<Vec<_>>())
+        .map_err(|error| error.to_string())?;
+    let mut after = String::new();
+    let mut progress = SnapshotProgress::default();
+    loop {
+        let resolved = state
+            .resolved_snapshot_copies
+            .get(context.folder_remote_id)
+            .cloned()
+            .unwrap_or_default();
+        let resolved_json = serde_json::to_string(&resolved).map_err(|error| error.to_string())?;
+        let owed = state
+            .snapshot_resolutions
+            .entry(context.folder_remote_id.to_string())
+            .or_default();
+        let owed_json = serde_json::to_string(&*owed).map_err(|error| error.to_string())?;
+        let absent: Vec<String> = sqlx::query_scalar(
+            "SELECT remote_id FROM (
+                SELECT remote_id FROM messages
+                WHERE account_id = ? AND folder_id = ?
+                  AND remote_id NOT IN (SELECT value FROM json_each(?))
+                  AND remote_id NOT IN (SELECT value FROM json_each(?))
+                UNION SELECT value FROM json_each(?)
+                UNION SELECT q.remote_id FROM sync_quarantine q
+                WHERE q.account_id = ? AND q.attempts < ? AND EXISTS (
+                    SELECT 1 FROM messages m WHERE m.account_id = q.account_id
+                    AND m.remote_id = q.remote_id AND m.folder_id = ?
+                )
+             ) WHERE remote_id > ? ORDER BY remote_id LIMIT 100",
+        )
+        .bind(&context.account.id)
+        .bind(context.folder_id)
+        .bind(&present)
+        .bind(&resolved_json)
+        .bind(&owed_json)
+        .bind(&context.account.id)
+        // An exhausted target refuses every lookup's result. Its source folder
+        // still finds it absent, so only retry work joins every snapshot.
+        .bind(satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS)
+        .bind(context.folder_id)
+        .bind(&after)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| error.to_string())?;
+        let Some(last) = absent.last() else {
+            break;
+        };
+        after = last.clone();
+        // Persist before lookup/ingest. Do not lose the identity when a later
+        // folder/backfill stores a partial replacement before this is retried.
+        owed.extend(absent.iter().cloned());
+        persist_sync_cursors(pool, &context.account.id, state, queue, None).await?;
+        resolve_owed_ids(
+            pool,
+            provider,
+            context,
+            state,
+            queue,
+            &absent,
+            &mut progress,
+        )
+        .await?;
+    }
+    retry_quarantined_elsewhere(pool, provider, context, state, queue, &mut progress).await?;
+    if state
+        .snapshot_resolutions
+        .get(context.folder_remote_id)
+        .is_some_and(HashSet::is_empty)
+    {
+        state.snapshot_resolutions.remove(context.folder_remote_id);
+    }
+    Ok(progress)
+}
+
+/// Retry work joins every Gmail snapshot, so a rearmed relabel heals within a
+/// day even though its own folder is rarely snapshotted. Its stale copy sits
+/// in another folder, though, and the ID is owed there: its failures, its
+/// hold and the report name that folder, not the one being snapshotted.
+async fn retry_quarantined_elsewhere(
+    pool: &SqlitePool,
+    provider: &dyn crate::providers::traits::MailProvider,
+    context: &FolderIngestContext<'_>,
+    state: &mut ImapSyncState,
+    queue: &SyncQueue,
+    progress: &mut SnapshotProgress,
+) -> Result<(), String> {
+    let copies: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT DISTINCT f.id, COALESCE(NULLIF(f.remote_id, ''), f.full_path), q.remote_id
+         FROM sync_quarantine q
+         JOIN messages m ON m.account_id = q.account_id AND m.remote_id = q.remote_id
+         JOIN folders f ON f.id = m.folder_id
+         WHERE q.account_id = ? AND q.attempts < ? AND NOT EXISTS (
+             SELECT 1 FROM messages t WHERE t.account_id = q.account_id
+             AND t.remote_id = q.remote_id AND t.folder_id = ?
+         )
+         ORDER BY 2, 3",
+    )
+    .bind(&context.account.id)
+    .bind(satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS)
+    .bind(context.folder_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?;
+    // Lookups are account-wide: one folder per ID is enough.
+    let mut seen = HashSet::new();
+    let mut by_folder: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+    for (folder_id, remote_folder_id, id) in copies {
+        if seen.insert(id.clone()) {
+            by_folder
+                .entry((folder_id, remote_folder_id))
+                .or_default()
+                .push(id);
+        }
+    }
+    for ((folder_id, remote_folder_id), ids) in by_folder {
+        let stale = FolderIngestContext {
+            folder_id: &folder_id,
+            folder_remote_id: &remote_folder_id,
+            ..*context
+        };
+        for ids in ids.chunks(100) {
+            // Owed durably before the lookup, like any snapshot ID.
+            state
+                .snapshot_resolutions
+                .entry(remote_folder_id.clone())
+                .or_default()
+                .extend(ids.iter().cloned());
+            persist_sync_cursors(pool, &context.account.id, state, queue, None).await?;
+            resolve_owed_ids(pool, provider, &stale, state, queue, ids, progress).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Look up `ids`, each already owed durably by this folder, and apply what
+/// Gmail says. The queue, the quarantine and earlier failures hold an ID
+/// without a request; the in-transaction checks still guard every write.
+async fn resolve_owed_ids(
+    pool: &SqlitePool,
+    provider: &dyn crate::providers::traits::MailProvider,
+    context: &FolderIngestContext<'_>,
+    state: &mut ImapSyncState,
+    queue: &SyncQueue,
+    ids: &[String],
+    progress: &mut SnapshotProgress,
+) -> Result<(), String> {
+    let account_id = &context.account.id;
+    let folder = context.folder_remote_id;
+    let pinned: HashSet<String> =
+        pending_remote_message_refs(pool, account_id, PendingMutations::All)
+            .await?
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect();
+    let exhausted: HashSet<String> = sqlx::query_scalar(
+        "SELECT DISTINCT remote_id FROM sync_quarantine
+         WHERE account_id = ? AND attempts >= ?
+           AND remote_id IN (SELECT value FROM json_each(?))",
+    )
+    .bind(account_id)
+    .bind(satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS)
+    .bind(serde_json::to_string(ids).map_err(|error| error.to_string())?)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?
+    .into_iter()
+    .collect();
+    let now = chrono::Utc::now();
+    let mut due = Vec::new();
+    for id in ids {
+        let holder = if pinned.contains(id) {
+            Some(SnapshotDeferral::PendingMutation)
+        } else if exhausted.contains(id) {
+            Some(SnapshotDeferral::Quarantined)
+        } else if state.resolution_held(folder, id, now) {
+            Some(SnapshotDeferral::Held)
+        } else {
+            None
+        };
+        match holder {
+            Some(reason) => {
+                progress.deferred.insert(id.clone(), reason);
+            }
+            None => due.push(id.clone()),
+        }
+    }
+    for ids in due.chunks(3) {
+        // Await the whole network batch before any database write begins.
+        let lookups =
+            futures::future::join_all(ids.iter().map(|id| provider.resolve_snapshot_message(id)))
+                .await;
+        for (id, lookup) in ids.iter().zip(lookups) {
+            let mut source_copy_remains = false;
+            let resolution = match lookup {
+                // The quota is account-wide: every further lookup would be
+                // refused too. Completed IDs are already retired.
+                Err(error) if error.is_rate_limited() => return Err(error.to_string()),
+                Err(error) => SnapshotResolution::Deferred(SnapshotDeferral::Failed(error)),
+                Ok(Some(message)) => {
+                    source_copy_remains = gmail_target_mailbox_ids(&message.mailbox_ids)
+                        .iter()
+                        .any(|label| label.as_str() == folder);
+                    crate::sync::message_ingest::upsert_gmail_snapshot_message(
+                        context.app,
+                        pool,
+                        account_id,
+                        &context.account.email,
+                        &context.account.display_name,
+                        context.config,
+                        &message,
+                        context.events,
+                        context.account.ingest_cutoff.as_deref(),
+                    )
+                    .await?
+                }
+                Ok(None) => {
+                    crate::sync::gmail_reconcile::reconcile_gmail_snapshot_deletion(
+                        pool, account_id, id,
+                    )
+                    .await?
+                }
+            };
+            let threads = match resolution {
+                SnapshotResolution::Resolved(threads) => threads,
+                SnapshotResolution::Deferred(reason) => {
+                    // Still owed and durable since before the lookup. The
+                    // rest of the folder must not wait for this ID.
+                    let mut deferred = state.clone();
+                    let held = match &reason {
+                        SnapshotDeferral::Failed(error) => deferred.record_resolution_failure(
+                            folder,
+                            id,
+                            error,
+                            chrono::Utc::now(),
+                        ),
+                        // The pre-check passed it, so its target ran out now.
+                        SnapshotDeferral::Quarantined => true,
+                        SnapshotDeferral::PendingMutation | SnapshotDeferral::Held => false,
+                    };
+                    if held {
+                        deferred
+                            .unreported_holds
+                            .entry(folder.to_string())
+                            .or_default()
+                            .insert(id.clone());
+                        tracing::warn!(
+                            account_id = %account_id,
+                            folder,
+                            remote_id = %id,
+                            ?reason,
+                            "owed snapshot ID keeps its old place until its retry time"
+                        );
+                    } else {
+                        tracing::info!(
+                            account_id = %account_id,
+                            folder,
+                            remote_id = %id,
+                            ?reason,
+                            "snapshot ID deferred"
+                        );
+                    }
+                    if held || matches!(reason, SnapshotDeferral::Failed(_)) {
+                        persist_sync_cursors(pool, account_id, &deferred, queue, None).await?;
+                    }
+                    *state = deferred;
+                    progress.deferred.insert(id.clone(), reason);
+                    continue;
+                }
+            };
+            progress.changed.extend(threads);
+            // The target transaction committed before retiring this ID.
+            // A crash in between only replays one safe resolution. Persist
+            // each success so a later failure/deadline cannot starve work
+            // beyond the first page, including already deleted messages.
+            let mut progressed = state.clone();
+            // Only a pending snapshot excludes resolved copies, and only its
+            // completion forgets them. Recorded by a listing-free pass, the
+            // copy would hide the ID from the next snapshot after it left.
+            if source_copy_remains && state.pending_snapshots.contains(folder) {
+                progressed
+                    .resolved_snapshot_copies
+                    .entry(folder.to_string())
+                    .or_default()
+                    .insert(id.clone());
+            }
+            progressed.retire_resolution(folder, id);
+            persist_sync_cursors(pool, account_id, &progressed, queue, None).await?;
+            *state = progressed;
+        }
+    }
+    Ok(())
 }
 
 /// Persist the folder cursors reached so far, plus any remote mutation this
@@ -264,10 +848,27 @@ async fn ingest_messages_into_folder(
     folder_remote_id: &str,
     folder_type: &str,
     messages: &[MessageEnvelope],
-    quarantine: &FolderQuarantine,
     outcome: &mut FolderIngestOutcome,
 ) -> Result<(), String> {
     let account = context.account;
+    let repository = SyncQuarantineRepository::new(pool);
+    let quarantine = repository
+        .load_folder(&account.id, folder_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut candidates = Vec::new();
+    for message in messages {
+        // An exhausted Gmail relabel follows the same skip policy. Its old copy
+        // survives without holding the cursor: snapshots delete only after a
+        // 404 and replace only after every target committed. A day later the
+        // quarantine is rearmed, so the copy can still heal.
+        if quarantine.is_exhausted(&message.remote_id) {
+            outcome.skipped += 1;
+        } else {
+            candidates.push(message.clone());
+        }
+    }
+    let messages = candidates;
     let results = upsert_provider_messages(
         context.app,
         pool,
@@ -279,12 +880,11 @@ async fn ingest_messages_into_folder(
         folder_id,
         folder_remote_id,
         folder_type,
-        messages,
+        &messages,
         context.events,
         account.ingest_cutoff.as_deref(),
     )
     .await?;
-    let repository = SyncQuarantineRepository::new(pool);
     for (message, result) in messages.iter().zip(results) {
         match result {
             Ok(()) => {
@@ -304,8 +904,14 @@ async fn ingest_messages_into_folder(
                     .record_failure(&account.id, folder_id, &message.remote_id, &error)
                     .await
                     .map_err(|error| error.to_string())?;
-                tracing::warn!(account_id = %account.id, folder_id, remote_id = %message.remote_id,
-                    attempts, "message ingest failed and was quarantined: {error}");
+                if attempts >= satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS {
+                    outcome.exhausted += 1;
+                    tracing::warn!(account_id = %account.id, folder_id, remote_id = %message.remote_id,
+                        attempts, "message ingest used up its attempts and is skipped from now on: {error}");
+                } else {
+                    tracing::warn!(account_id = %account.id, folder_id, remote_id = %message.remote_id,
+                        attempts, "message ingest failed and was quarantined: {error}");
+                }
             }
         }
     }
@@ -319,61 +925,54 @@ async fn ingest_folder_batch(
     externally_changed_threads: &mut HashSet<String>,
 ) -> Result<FolderIngestOutcome, String> {
     let account = context.account;
-    let quarantine = SyncQuarantineRepository::new(pool)
-        .load_folder(&account.id, context.folder_id)
-        .await
-        .map_err(|error| error.to_string())?;
     let mut outcome = FolderIngestOutcome::default();
-    let mut primary = Vec::new();
-    let mut archive = Vec::new();
-    for message in messages {
-        if quarantine.is_exhausted(&message.remote_id) {
-            outcome.skipped += 1;
-            continue;
-        }
-        if account.provider.eq_ignore_ascii_case("gmail") {
-            externally_changed_threads
-                .extend(reconcile_gmail_message_mailboxes(pool, &account.id, &message).await?);
-            if gmail_message_needs_synthetic_archive(&message) {
-                archive.push(message.clone());
-            }
-            let category_view = message
-                .mailbox_ids
-                .iter()
-                .any(|label| gmail_label_is_category_view(label));
-            if (gmail_label_is_category_view(context.folder_remote_id) && category_view)
-                || !gmail_message_belongs_to_folder(&message, context.folder_remote_id)
-            {
-                continue;
+    if account.provider.eq_ignore_ascii_case("gmail") {
+        let mut targets = std::collections::BTreeMap::<String, Vec<MessageEnvelope>>::new();
+        for message in messages {
+            // Account-wide history must land in actual labels, even when a
+            // different folder's cursor observed it. Ingest owns stale-copy
+            // cleanup in the target savepoint, never before it.
+            let threads = sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT thread_id FROM messages WHERE account_id = ?
+                 AND remote_id = ? AND thread_id IS NOT NULL",
+            )
+            .bind(&account.id)
+            .bind(&message.remote_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|error| error.to_string())?;
+            externally_changed_threads.extend(threads);
+            let labels = gmail_target_mailbox_ids(&message.mailbox_ids);
+            for label in labels {
+                targets.entry(label).or_default().push(message.clone());
             }
         }
-        primary.push(message);
-    }
-    if !archive.is_empty() {
-        let folder_id = ensure_gmail_archive_folder(pool, &account.id).await?;
+        for (label, messages) in targets {
+            let (folder_id, folder_type) =
+                ensure_gmail_label_folder(pool, &account.id, &label).await?;
+            ingest_messages_into_folder(
+                pool,
+                context,
+                &folder_id,
+                &label,
+                &folder_type,
+                &messages,
+                &mut outcome,
+            )
+            .await?;
+        }
+    } else {
         ingest_messages_into_folder(
             pool,
             context,
-            &folder_id,
-            "ARCHIVE",
-            "archive",
-            &archive,
-            &quarantine,
+            context.folder_id,
+            context.folder_remote_id,
+            context.folder_type,
+            &messages,
             &mut outcome,
         )
         .await?;
     }
-    ingest_messages_into_folder(
-        pool,
-        context,
-        context.folder_id,
-        context.folder_remote_id,
-        context.folder_type,
-        &primary,
-        &quarantine,
-        &mut outcome,
-    )
-    .await?;
     Ok(outcome)
 }
 
@@ -553,6 +1152,24 @@ pub(crate) async fn sync_mailboxes(
                 .and_then(|raw| serde_json::from_str(raw).ok())
                 .unwrap_or_default();
 
+            // An exhausted Gmail relabel leaves its stale copy in the old
+            // label. Give it another attempt after a while, so the copy can
+            // heal once the cause is gone: every Gmail snapshot picks up
+            // quarantine retries, and DRAFT is snapshotted on every full sync.
+            if account.provider.eq_ignore_ascii_case("gmail") {
+                let rearmed = SyncQuarantineRepository::new(pool)
+                    .rearm_exhausted(
+                        &account.id,
+                        chrono::Utc::now() - chrono::Duration::hours(HELD_RETRY_AFTER_HOURS),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                if rearmed > 0 {
+                    tracing::info!(account_id = %account.id, rearmed,
+                        "exhausted Gmail messages get another attempt");
+                }
+            }
+
             // The frequent Inbox path already has the provider's stable remote
             // folder id in SQLite after the first complete sync. Re-listing all
             // folders every 15 seconds is surprisingly expensive on Outlook
@@ -645,6 +1262,10 @@ pub(crate) async fn sync_mailboxes(
             // its ingestion and notification.
             let available_folder_ids: HashSet<String> =
                 folders.iter().map(|folder| folder.id.clone()).collect();
+            let folder_names: HashMap<String, String> = folders
+                .iter()
+                .map(|folder| (folder.id.clone(), folder.name.clone()))
+                .collect();
             prepare_folders_for_sync(&account.provider, &mut folders, folder_selection);
             if folder_selection == FolderSelection::Inbox && folders.is_empty() {
                 return Err(format!("{}: inbox folder not found", account.email));
@@ -655,7 +1276,10 @@ pub(crate) async fn sync_mailboxes(
             let mut has_backfill_pending = false;
             let mut backfill_remaining_messages = 0usize;
             let mut backfill_total_messages = 0usize;
-            let mut snapshot_folders = Vec::<(String, String)>::new();
+            // (local id, remote id, name) of folders to snapshot, and of
+            // folders whose completed snapshot left IDs owed.
+            let mut snapshot_folders = Vec::<(String, String, String)>::new();
+            let mut owed_folders = Vec::<(String, String, String)>::new();
             let mut snapshot_sync_complete = true;
             let mut externally_changed_threads = HashSet::new();
             let mut folder_fetch_failures = Vec::<String>::new();
@@ -807,8 +1431,12 @@ pub(crate) async fn sync_mailboxes(
                 };
                 externally_changed_threads.extend(reset_thread_ids.iter().cloned());
 
-                if snapshot_due && batch.snapshot_required {
-                    snapshot_folders.push((folder_id.clone(), folder.id.clone()));
+                if state.request_snapshot(&folder.id, snapshot_due, batch.snapshot_required) {
+                    snapshot_folders.push((folder_id.clone(), folder.id.clone(), folder.name.clone()));
+                } else if account.provider.eq_ignore_ascii_case("gmail")
+                    && state.owes_resolutions(&folder.id)
+                {
+                    owed_folders.push((folder_id.clone(), folder.id.clone(), folder.name.clone()));
                 }
 
                 let next_cursor = batch.next.cursor.take();
@@ -833,6 +1461,12 @@ pub(crate) async fn sync_mailboxes(
                 )
                 .await?;
                 messages_synced += ingest.ingested;
+                // Let a failing replacement retry before snapshots run. This
+                // lasts at most MAX_INGEST_ATTEMPTS runs: an exhausted message
+                // counts as skipped, not failed.
+                if account.provider.eq_ignore_ascii_case("gmail") && ingest.failed > 0 {
+                    snapshot_sync_complete = false;
+                }
 
                 // The cursor is written per folder, right after its own batch.
                 // A failed savepoint retains the cursor until it succeeds or
@@ -864,11 +1498,18 @@ pub(crate) async fn sync_mailboxes(
                     .filter(|_| ingest.cursor_may_advance()) {
                     stamp_inbox_fetch(pool, &account.id, started_at).await?;
                 }
-                if ingest.failed > 0 {
+                if ingest.failed > ingest.exhausted {
                     summary.failures.push(encoded_quarantined_messages(
                         &account.email,
                         &folder.name,
-                        ingest.failed,
+                        ingest.failed - ingest.exhausted,
+                    ));
+                }
+                if ingest.exhausted > 0 {
+                    summary.failures.push(encoded_skipped_messages(
+                        &account.email,
+                        &folder.name,
+                        ingest.exhausted,
                     ));
                 }
                 if ingest.skipped > 0 {
@@ -906,40 +1547,26 @@ pub(crate) async fn sync_mailboxes(
             }
 
             if snapshot_sync_complete {
-                for (folder_id, remote_folder_id) in snapshot_folders {
-                    match provider.sync_message_state_snapshot(&remote_folder_id).await {
-                        Ok(Some(snapshot)) => {
-                            let changes = reconcile_imap_folder_snapshot(
-                                pool,
-                                &account.id,
-                                &folder_id,
-                                &remote_folder_id,
-                                &snapshot.states,
-                                snapshot.remote_uidvalidity,
-                            )
-                            .await?;
-                            externally_changed_threads.extend(changes.relocated_threads);
-                            if changes.skipped_stale_generation {
-                                // Retry on the next run instead of counting a
-                                // reconciliation that never happened.
-                                tracing::warn!(
-                                    account_id = %account.id,
-                                    folder = %remote_folder_id,
-                                    snapshot_uidvalidity = ?snapshot.remote_uidvalidity,
-                                    "folder snapshot named another generation, kept every message"
-                                );
-                            } else {
-                                state.folder_snapshot_at.insert(
-                                    remote_folder_id.clone(),
-                                    chrono::Utc::now().to_rfc3339(),
-                                );
-                            }
-                        }
-                        Ok(None) => {}
+                // Snapshots list their folder. Owed IDs need lookups only.
+                let passes = snapshot_folders.into_iter().map(|folder| (folder, true))
+                    .chain(owed_folders.into_iter().map(|folder| (folder, false)));
+                for ((folder_id, remote_folder_id, folder_name), listed) in passes {
+                    let context = FolderIngestContext {
+                        app, events, account: &account, config: &config,
+                        folder_id: &folder_id, folder_remote_id: &remote_folder_id,
+                        folder_type: "", // Gmail derives each target's type; other providers do not ingest here.
+                    };
+                    let result = if listed {
+                        reconcile_folder_snapshot(pool, provider.as_ref(), &context, &mut state, queue.as_ref()).await
+                    } else {
+                        resolve_owed_snapshot_ids(pool, provider.as_ref(), &context, &mut state, queue.as_ref()).await
+                    };
+                    match result {
+                        // Deferred IDs stay owed; the folder itself synced.
+                        // Their holds wait in the state for a full sync.
+                        Ok(progress) => externally_changed_threads.extend(progress.changed),
                         Err(err) => summary.failures.push(encoded_folder_sync_failure(
-                            &account.email,
-                            &remote_folder_id,
-                            err,
+                            &account.email, &folder_name, err,
                         )),
                     }
                 }
@@ -992,8 +1619,16 @@ pub(crate) async fn sync_mailboxes(
                     "SELECT COALESCE(remote_id, full_path) FROM folders WHERE account_id = ? AND folder_type != 'local'"
                 ).bind(&account.id).fetch_all(pool).await.map_err(|error| error.to_string())?
                     .into_iter().collect();
-                state.cursors.retain(|folder_id, _| retained.contains(folder_id));
-                state.folder_snapshot_at.retain(|folder_id, _| retained.contains(folder_id));
+                state.retain_folders(&retained);
+                // Inbox polls drop their summary, so holds wait for a full
+                // sync, which reports each once. Durable with the write below.
+                let holds = std::mem::take(&mut state.unreported_holds);
+                for (folder, held) in holds.into_iter().collect::<BTreeMap<_, _>>() {
+                    let name = folder_names.get(&folder).unwrap_or(&folder);
+                    summary.failures.push(encoded_held_snapshot_messages(
+                        &account.email, name, held.len(),
+                    ));
+                }
             }
 
             // The retained cursor set and the snapshot timestamps are the last
@@ -1907,3 +2542,12 @@ mod tests {
         );
     }
 }
+
+// Provider fixtures in sync and body refetch share process-wide URL overrides.
+#[cfg(test)]
+pub(crate) static PROVIDER_HTTP_FIXTURES: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
+
+#[cfg(test)]
+#[path = "mailbox_sync/consistency_tests.rs"]
+mod consistency_tests;

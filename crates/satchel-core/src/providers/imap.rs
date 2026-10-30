@@ -55,6 +55,40 @@ async fn close_session(mut session: ImapSession) {
     let _ = timeout(ImapProvider::op_timeout(), session.logout()).await;
 }
 
+fn read_generation_error(key: &str, folder: &str) -> String {
+    serde_json::json!({"key": key, "params": {"folder": folder}}).to_string()
+}
+
+async fn select_read_folder<T>(
+    session: &mut async_imap::Session<T>,
+    folder: &str,
+    expected_uidvalidity: Option<u32>,
+) -> Result<(), String>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    let Some(expected) = expected_uidvalidity.filter(|value| *value != 0) else {
+        return Err(read_generation_error(
+            "backend.errors.imapUidValidityMissing",
+            folder,
+        ));
+    };
+    match timeout(ImapProvider::op_timeout(), session.select(folder)).await {
+        Err(_) => Err(format!("imap SELECT {folder} timed out")),
+        Ok(Err(err)) => Err(format!("imap SELECT {folder} failed: {err}")),
+        Ok(Ok(mailbox)) => {
+            if mailbox.uid_validity == Some(expected) {
+                Ok(())
+            } else {
+                Err(read_generation_error(
+                    "backend.errors.imapUidValidityChanged",
+                    folder,
+                ))
+            }
+        }
+    }
+}
+
 /// SELECT `folder` and fetch `query` for one UID on a borrowed session.
 ///
 /// `Ok(None)` means the server answered and has no such message: the session
@@ -70,19 +104,21 @@ async fn fetch_one_on_session<T>(
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
 {
-    let selected = match timeout(ImapProvider::op_timeout(), session.select(folder)).await {
-        Err(_) => Err(format!("imap SELECT {folder} timed out")),
-        Ok(Err(err)) => Err(format!("imap SELECT {folder} failed: {err}")),
-        Ok(Ok(mailbox)) => match expected_uidvalidity {
-            Some(expected) if mailbox.uid_validity != Some(expected) => {
-                Err("backend.errors.imapUidValidityChanged".to_string())
-            }
-            _ => Ok(()),
-        },
-    };
-    if let Err(error) = selected {
+    if let Err(error) = select_read_folder(&mut session, folder, expected_uidvalidity).await {
         return (None, Err(error));
     }
+    fetch_selected_on_session(session, uid, query, operation).await
+}
+
+async fn fetch_selected_on_session<T>(
+    mut session: async_imap::Session<T>,
+    uid: &str,
+    query: &str,
+    operation: &str,
+) -> SessionOutcome<async_imap::Session<T>, Option<async_imap::types::Fetch>>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
     match collect_imap_response(
         ImapProvider::op_timeout(),
         session.uid_fetch(uid, query),
@@ -95,11 +131,57 @@ where
     }
 }
 
+async fn attachment_parts_on_session<T>(
+    mut session: async_imap::Session<T>,
+    key: &AttachmentCacheKey,
+) -> SessionOutcome<async_imap::Session<T>, Arc<Vec<ParsedAttachment>>>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    // Validate even a cache hit: the server may have reset since the last read.
+    if let Err(error) = select_read_folder(&mut session, &key.folder, key.uidvalidity).await {
+        return (None, Err(error));
+    }
+    if let Some(parts) = cached_attachment_parts(key, Instant::now()) {
+        return (Some(session), Ok(parts));
+    }
+    let parts = ImapProvider::attachment_parts(key, || async {
+        let mut entries = collect_imap_response(
+            ImapProvider::op_timeout(),
+            session.uid_fetch(&key.remote_id, "(BODY.PEEK[HEADER] BODY.PEEK[TEXT])"),
+            "UID FETCH attachment",
+        )
+        .await?;
+        let entry = entries
+            .pop()
+            .ok_or_else(|| "imap attachment message not found".to_string())?;
+        let header = entry
+            .header()
+            .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+            .unwrap_or_default();
+        let content_type = parse_header_value(&header, "Content-Type")
+            .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
+        let transfer_encoding = parse_header_value(&header, "Content-Transfer-Encoding")
+            .unwrap_or_else(|| "8bit".to_string());
+        Ok(parse_attachments_from_body(
+            &content_type,
+            &transfer_encoding,
+            entry.text().unwrap_or_default(),
+        ))
+    })
+    .await;
+    match parts {
+        Ok(parts) => (Some(session), Ok(parts)),
+        Err(error) => (None, Err(error.to_string())),
+    }
+}
+
 /// One message body, header plus text, on a borrowed session.
 pub(crate) async fn fetch_body_on_session<T>(
     session: async_imap::Session<T>,
     folder: String,
     uid: String,
+    expected_uidvalidity: Option<u32>,
 ) -> SessionOutcome<async_imap::Session<T>, ParsedBody>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
@@ -110,7 +192,7 @@ where
         &uid,
         "(BODY.PEEK[HEADER] BODY.PEEK[TEXT])",
         "UID FETCH body",
-        None,
+        expected_uidvalidity,
     )
     .await;
     let parsed = fetched.and_then(|entry| {
@@ -518,11 +600,28 @@ impl ImapProvider {
     /// that already exists rather than ingesting a second copy.
     pub async fn fetch_message_body(&self, message: &MessageRef) -> Result<ParsedBody, String> {
         let folder = message.source_folder.as_deref().unwrap_or("INBOX");
+        if message
+            .source_uidvalidity
+            .filter(|value| *value != 0)
+            .is_none()
+        {
+            return Err(read_generation_error(
+                "backend.errors.imapUidValidityMissing",
+                folder,
+            ));
+        }
         read_with_pool(
             &READ_SESSIONS,
             &self.session_key(),
             || self.login_session(),
-            |session| fetch_body_on_session(session, folder.to_string(), message.remote_id.clone()),
+            |session| {
+                fetch_body_on_session(
+                    session,
+                    folder.to_string(),
+                    message.remote_id.clone(),
+                    message.source_uidvalidity,
+                )
+            },
             close_session,
         )
         .await
@@ -547,7 +646,10 @@ impl ImapProvider {
             .filter(|value| *value != 0)
             .is_none()
         {
-            return Err("backend.errors.imapUidValidityMissing".into());
+            return Err(read_generation_error(
+                "backend.errors.imapUidValidityMissing",
+                message.source_folder.as_deref().unwrap_or("INBOX"),
+            ));
         }
         let folder = message.source_folder.as_deref().unwrap_or("INBOX");
         read_with_pool(
@@ -617,55 +719,18 @@ impl ImapProvider {
         Ok(parts)
     }
 
-    /// Fetch a message body and parse out its attachment parts.
-    async fn load_attachment_parts(
-        &self,
-        folder: &str,
-        remote_id: &str,
-    ) -> crate::sync::errors::SyncResult<Vec<ParsedAttachment>> {
-        let attachments = read_with_pool(
-            &READ_SESSIONS,
-            &self.session_key(),
-            || self.login_session(),
-            |session| async move {
-                let (session, fetched) = fetch_one_on_session(
-                    session,
-                    folder,
-                    remote_id,
-                    "(BODY.PEEK[HEADER] BODY.PEEK[TEXT])",
-                    "UID FETCH attachment",
-                    None,
-                )
-                .await;
-                let parts = fetched.and_then(|entry| {
-                    let entry =
-                        entry.ok_or_else(|| "imap attachment message not found".to_string())?;
-                    let header = entry
-                        .header()
-                        .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
-                        .unwrap_or_default();
-                    let content_type = parse_header_value(&header, "Content-Type")
-                        .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
-                    let transfer_encoding =
-                        parse_header_value(&header, "Content-Transfer-Encoding")
-                            .unwrap_or_else(|| "8bit".to_string());
-                    Ok(parse_attachments_from_body(
-                        &content_type,
-                        &transfer_encoding,
-                        entry.text().unwrap_or_default(),
-                    ))
-                });
-                (session, parts)
-            },
-            close_session,
-        )
-        .await?;
-        Ok(attachments)
-    }
+    // v5 replays envelopes to establish each message's saved UIDVALIDITY.
+    // Legacy rows cannot adopt a folder's current generation without a fetch.
+    const CURSOR_FORMAT_VERSION: u8 = 5;
 
-    // v4 deliberately replays every envelope once so installations that
-    // predate reply-aware IMAP sync recover Message-ID/In-Reply-To/References.
-    const CURSOR_FORMAT_VERSION: u8 = 4;
+    fn prepare_envelope_repair(state: &mut ImapCursorState, has_cursor: bool, exists: u32) {
+        if has_cursor && state.format_version < Self::CURSOR_FORMAT_VERSION {
+            // Include already-synced messages even if an older backfill was
+            // still in progress. None of them has a saved generation yet.
+            state.backfill_next_seq = exists;
+            state.backfill_total_seq = exists;
+        }
+    }
 
     fn op_timeout() -> Duration {
         let secs = std::env::var("SATCHEL_IMAP_TIMEOUT_SECS")
@@ -1508,15 +1573,7 @@ impl MailProvider for ImapProvider {
         let anchored = decision != GenerationDecision::WindowOnly;
         let since_uid = if anchored { cursor_state.high_uid } else { 0 };
         let since_seq = if anchored { cursor_state.high_seq } else { 0 };
-        let needs_envelope_repair =
-            has_cursor && cursor_state.format_version < Self::CURSOR_FORMAT_VERSION;
-
-        if needs_envelope_repair && cursor_state.backfill_next_seq == 0 {
-            // One-time repair pass: rewrite legacy rows with complete envelope
-            // headers so reply threading can recover existing conversations.
-            cursor_state.backfill_next_seq = exists;
-            cursor_state.backfill_total_seq = exists;
-        }
+        Self::prepare_envelope_repair(&mut cursor_state, has_cursor, exists);
 
         let incremental_window = if has_cursor {
             fetch_window
@@ -2286,9 +2343,22 @@ impl MailProvider for ImapProvider {
     ) -> crate::sync::errors::SyncResult<FetchedAttachment> {
         let folder = message.source_folder.as_deref().unwrap_or("INBOX");
         let key = self.attachment_cache_key(folder, message);
-        let parts = Self::attachment_parts(&key, || {
-            self.load_attachment_parts(folder, &message.remote_id)
-        })
+        if message
+            .source_uidvalidity
+            .filter(|value| *value != 0)
+            .is_none()
+        {
+            return Err(
+                read_generation_error("backend.errors.imapUidValidityMissing", folder).into(),
+            );
+        }
+        let parts = read_with_pool(
+            &READ_SESSIONS,
+            &self.session_key(),
+            || self.login_session(),
+            |session| attachment_parts_on_session(session, &key),
+            close_session,
+        )
         .await?;
 
         Ok(parts
@@ -4251,6 +4321,140 @@ mod tests {
     use std::sync::{Arc, OnceLock};
     use std::time::{Duration, Instant};
 
+    async fn generation_test_session(
+        generation: u32,
+        payload: &str,
+    ) -> (
+        async_imap::Session<tokio::io::DuplexStream>,
+        Arc<std::sync::atomic::AtomicU32>,
+        Arc<AtomicUsize>,
+    ) {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        let (client, server) = tokio::io::duplex(8192);
+        let generation = Arc::new(std::sync::atomic::AtomicU32::new(generation));
+        let current = generation.clone();
+        let fetches = Arc::new(AtomicUsize::new(0));
+        let count = fetches.clone();
+        let payload = payload.to_string();
+        tokio::spawn(async move {
+            let (reader, mut writer) = tokio::io::split(server);
+            let mut reader = tokio::io::BufReader::new(reader);
+            writer.write_all(b"* OK test server\r\n").await.unwrap();
+            let mut line = String::new();
+            while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
+                let mut words = line.split_whitespace();
+                let tag = words.next().unwrap();
+                let command = words.next().unwrap();
+                let reply = match command {
+                    "LOGIN" => format!("{tag} OK login\r\n"),
+                    "SELECT" => {
+                        let generation = current.load(Ordering::SeqCst);
+                        let validity = if generation == 0 {
+                            String::new()
+                        } else {
+                            format!("* OK [UIDVALIDITY {generation}] generation\r\n")
+                        };
+                        format!("* 1 EXISTS\r\n{validity}{tag} OK selected\r\n")
+                    }
+                    "UID" => {
+                        count.fetch_add(1, Ordering::SeqCst);
+                        let header = "Content-Type: multipart/mixed; boundary=x\r\n\r\n";
+                        let body = format!("--x\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=file.bin\r\n\r\n{payload}\r\n--x--\r\n");
+                        format!("* 1 FETCH (UID 42 BODY[HEADER] {{{}}}\r\n{header} BODY[TEXT] {{{}}}\r\n{body})\r\n{tag} OK fetched\r\n", header.len(), body.len())
+                    }
+                    _ => format!("{tag} BAD unexpected command\r\n"),
+                };
+                if writer.write_all(reply.as_bytes()).await.is_err() {
+                    break;
+                }
+                line.clear();
+            }
+        });
+        let mut client = async_imap::Client::new(client);
+        client.read_response().await.unwrap();
+        (
+            client.login("user", "pass").await.unwrap(),
+            generation,
+            fetches,
+        )
+    }
+
+    #[tokio::test]
+    async fn content_reads_reject_unknown_or_mismatched_generations_before_uid_fetch() {
+        for (expected, actual) in [(None, 7), (Some(0), 7), (Some(7), 0), (Some(7), 8)] {
+            let (session, _, fetches) = generation_test_session(actual, "unrelated message").await;
+            let (session, body) =
+                super::fetch_body_on_session(session, "INBOX".into(), "42".into(), expected).await;
+            assert!(session.is_none());
+            let error: serde_json::Value = serde_json::from_str(&body.unwrap_err()).unwrap();
+            assert_eq!(error["params"]["folder"], "INBOX");
+            assert_eq!(fetches.load(Ordering::SeqCst), 0);
+
+            let (session, _, fetches) =
+                generation_test_session(actual, "unrelated attachment").await;
+            let mut key = cache_key("42");
+            key.uidvalidity = expected;
+            let (session, parts) = super::attachment_parts_on_session(session, &key).await;
+            assert!(session.is_none());
+            assert!(parts.is_err());
+            assert_eq!(fetches.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn attachment_cache_hits_validate_select_and_never_cross_generations() {
+        let _guard = cache_lock().lock().await;
+        let mut key = cache_key("42");
+        key.account = "generation-cache".into();
+        key.uidvalidity = Some(7);
+        let (session, generation, fetches) = generation_test_session(7, "old payload").await;
+        let (session, first) = super::attachment_parts_on_session(session, &key).await;
+        let first = first.unwrap();
+        assert_eq!(first[0].bytes, b"old payload");
+        let (session, second) = super::attachment_parts_on_session(session.unwrap(), &key).await;
+        assert_eq!(second.unwrap()[0].bytes, b"old payload");
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+        generation.store(8, Ordering::SeqCst);
+        let (session, stale) = super::attachment_parts_on_session(session.unwrap(), &key).await;
+        assert!(session.is_none());
+        assert!(stale.unwrap_err().contains("imapUidValidityChanged"));
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+        key.uidvalidity = Some(8);
+        let (session, _, fetches) = generation_test_session(8, "new payload").await;
+        let (_, fresh) = super::attachment_parts_on_session(session, &key).await;
+        assert_eq!(fresh.unwrap()[0].bytes, b"new payload");
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn public_content_fetches_reject_missing_generation_without_connecting() {
+        use crate::providers::traits::MailProvider;
+        let provider = ImapProvider::default();
+        for generation in [None, Some(0)] {
+            let message = crate::providers::traits::MessageRef {
+                remote_id: "42".into(),
+                source_folder: Some("INBOX".into()),
+                source_uidvalidity: generation,
+            };
+            assert!(provider
+                .fetch_message_body(&message)
+                .await
+                .unwrap_err()
+                .contains("imapUidValidityMissing"));
+            assert!(provider
+                .fetch_raw_message(&message)
+                .await
+                .unwrap_err()
+                .contains("imapUidValidityMissing"));
+            assert!(provider
+                .fetch_attachment(&message, "mime-1")
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("imapUidValidityMissing"));
+        }
+    }
+
     #[test]
     fn login_errors_tell_a_refusal_from_a_dropped_connection() {
         let refused = login_error_text(&async_imap::error::Error::No(
@@ -5342,6 +5546,25 @@ Content-Type: text/html\r\n\r\n\
                 "cursor {cursor}, database {database:?}, server {server}"
             );
         }
+    }
+
+    #[test]
+    fn generation_repair_revisits_messages_above_an_unfinished_legacy_backfill() {
+        let mut state = super::ImapCursorState {
+            format_version: 4,
+            backfill_next_seq: 10,
+            backfill_total_seq: 100,
+            ..Default::default()
+        };
+        ImapProvider::prepare_envelope_repair(&mut state, true, 100);
+        assert_eq!(state.backfill_next_seq, 100);
+        state.format_version = ImapProvider::CURSOR_FORMAT_VERSION;
+        state.backfill_next_seq = 10;
+        ImapProvider::prepare_envelope_repair(&mut state, true, 100);
+        assert_eq!(
+            state.backfill_next_seq, 10,
+            "a verified cursor keeps its progress"
+        );
     }
 
     #[test]

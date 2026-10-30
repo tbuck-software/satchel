@@ -155,6 +155,24 @@ mod tests {
     }
 
     #[test]
+    fn folder_recovery_strings_preserve_keys_and_params_at_the_command_boundary() {
+        for key in [
+            "backend.errors.imapUidValidityMissing",
+            "backend.errors.imapUidValidityChanged",
+        ] {
+            let encoded =
+                serde_json::json!({"key": key, "params": {"folder": "Work/Drafts"}}).to_string();
+            let error = CommandError::from(encoded);
+            assert_eq!(error.key, key);
+            assert_eq!(error.params["folder"], "Work/Drafts");
+        }
+        assert_eq!(
+            CommandError::from("database is closed").key,
+            "backend.errors.unexpected"
+        );
+    }
+
+    #[test]
     fn omits_empty_params() {
         assert_eq!(
             serde_json::to_value(CommandError::new("backend.errors.inlineBackfillRunning"))

@@ -270,6 +270,20 @@ impl<'a> CalendarRepository<'a> {
         message_id: Option<&str>,
         invite: &ParsedInvite,
     ) -> Result<CalendarInviteRecord, CalendarError> {
+        let mut connection = self.pool.acquire().await?;
+        Self::upsert_invite_on_connection(&mut connection, account_id, message_id, invite).await?;
+        drop(connection);
+        self.find_invite(account_id, &invite.uid, invite.recurrence_id.as_deref())
+            .await
+    }
+
+    /// Publish a parsed mail attachment inside the caller's identity guard.
+    pub async fn upsert_invite_on_connection(
+        connection: &mut sqlx::SqliteConnection,
+        account_id: &str,
+        message_id: Option<&str>,
+        invite: &ParsedInvite,
+    ) -> Result<(), CalendarError> {
         let now = chrono::Utc::now().to_rfc3339();
         let recurrence_id = invite.recurrence_id.as_deref().unwrap_or("");
         let id = invite_id(account_id, &invite.uid, recurrence_id);
@@ -323,10 +337,9 @@ impl<'a> CalendarRepository<'a> {
         })
         .bind(&now)
         .bind(&now)
-        .execute(self.pool)
+        .execute(connection)
         .await?;
-        self.find_invite(account_id, &invite.uid, invite.recurrence_id.as_deref())
-            .await
+        Ok(())
     }
 
     /// Keep the resource body, form projection and DAV precondition together.

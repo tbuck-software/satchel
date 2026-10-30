@@ -6,6 +6,7 @@ use thiserror::Error;
 #[derive(Debug, FromRow)]
 struct StoredMessageRow {
     id: String,
+    remote_uidvalidity: Option<i64>,
     thread_id: Option<String>,
     subject: Option<String>,
     snippet: Option<String>,
@@ -34,6 +35,7 @@ struct StoredMessageRow {
 #[derive(Debug, FromRow)]
 struct StoredMessagePreviewRow {
     id: String,
+    remote_uidvalidity: Option<i64>,
     thread_id: Option<String>,
     subject: Option<String>,
     snippet: Option<String>,
@@ -54,6 +56,7 @@ struct StoredMessagePreviewRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageReadRecord {
     pub id: String,
+    pub remote_uidvalidity: Option<i64>,
     pub thread_id: Option<String>,
     pub subject: Option<String>,
     pub snippet: Option<String>,
@@ -86,6 +89,7 @@ pub struct MessageReadRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessagePreviewRecord {
     pub id: String,
+    pub remote_uidvalidity: Option<i64>,
     pub thread_id: Option<String>,
     pub subject: Option<String>,
     pub snippet: Option<String>,
@@ -103,6 +107,7 @@ impl From<StoredMessageRow> for MessageReadRecord {
     fn from(row: StoredMessageRow) -> Self {
         Self {
             id: row.id,
+            remote_uidvalidity: row.remote_uidvalidity,
             thread_id: row.thread_id,
             subject: row.subject,
             snippet: row.snippet,
@@ -134,6 +139,7 @@ impl From<StoredMessagePreviewRow> for MessagePreviewRecord {
     fn from(row: StoredMessagePreviewRow) -> Self {
         Self {
             id: row.id,
+            remote_uidvalidity: row.remote_uidvalidity,
             thread_id: row.thread_id,
             subject: row.subject,
             snippet: row.snippet,
@@ -151,19 +157,20 @@ impl From<StoredMessagePreviewRow> for MessagePreviewRecord {
 
 /// Column list for the full read projection. Keep it in sync with the private
 /// stored row and use it for both thread and body reads.
-const MESSAGE_READ_COLUMNS: &str = "id, thread_id, subject, snippet, from_address, from_name, \
+const MESSAGE_READ_COLUMNS: &str =
+    "id, remote_uidvalidity, thread_id, subject, snippet, from_address, from_name, \
      to_addresses, cc_addresses, reply_to, date, body_text, body_html, is_read, is_draft, \
      list_unsubscribe, list_unsubscribe_post, auth_spf, auth_dkim, auth_dmarc, \
      smime_encrypted, smime_signed, pgp_signed, trust_metadata, source_payload";
 
-const MESSAGE_READ_PROJECTION: &str = "messages.id, messages.thread_id, messages.subject, messages.snippet, messages.from_address, messages.from_name, messages.to_addresses, messages.cc_addresses, messages.reply_to, messages.date, messages.body_text, messages.body_html, messages.is_read, CASE WHEN messages.is_draft = 1 AND LOWER(TRIM(folders.folder_type)) <> 'trash' THEN 1 ELSE 0 END AS is_draft, messages.list_unsubscribe, messages.list_unsubscribe_post, messages.auth_spf, messages.auth_dkim, messages.auth_dmarc, messages.smime_encrypted, messages.smime_signed, messages.pgp_signed, messages.trust_metadata, messages.source_payload";
+const MESSAGE_READ_PROJECTION: &str = "messages.id, messages.remote_uidvalidity, messages.thread_id, messages.subject, messages.snippet, messages.from_address, messages.from_name, messages.to_addresses, messages.cc_addresses, messages.reply_to, messages.date, messages.body_text, messages.body_html, messages.is_read, CASE WHEN messages.is_draft = 1 AND LOWER(TRIM(folders.folder_type)) <> 'trash' THEN 1 ELSE 0 END AS is_draft, messages.list_unsubscribe, messages.list_unsubscribe_post, messages.auth_spf, messages.auth_dkim, messages.auth_dmarc, messages.smime_encrypted, messages.smime_signed, messages.pgp_signed, messages.trust_metadata, messages.source_payload";
 
 /// The preview projection intentionally leaves out bodies and every unbounded
 /// payload, `source_payload` included: the only consumer renders it next to a
 /// loaded body, and it arrives with that body.
-const MESSAGE_PREVIEW_COLUMNS: &str = "id, thread_id, subject, snippet, from_address, from_name, to_addresses, cc_addresses, reply_to, date, is_read, is_draft";
+const MESSAGE_PREVIEW_COLUMNS: &str = "id, remote_uidvalidity, thread_id, subject, snippet, from_address, from_name, to_addresses, cc_addresses, reply_to, date, is_read, is_draft";
 
-const MESSAGE_PREVIEW_PROJECTION: &str = "messages.id, messages.thread_id, messages.subject, messages.snippet, messages.from_address, messages.from_name, messages.to_addresses, messages.cc_addresses, messages.reply_to, messages.date, messages.is_read, CASE WHEN messages.is_draft = 1 AND LOWER(TRIM(folders.folder_type)) <> 'trash' THEN 1 ELSE 0 END AS is_draft";
+const MESSAGE_PREVIEW_PROJECTION: &str = "messages.id, messages.remote_uidvalidity, messages.thread_id, messages.subject, messages.snippet, messages.from_address, messages.from_name, messages.to_addresses, messages.cc_addresses, messages.reply_to, messages.date, messages.is_read, CASE WHEN messages.is_draft = 1 AND LOWER(TRIM(folders.folder_type)) <> 'trash' THEN 1 ELSE 0 END AS is_draft";
 
 /// Computes the identity used to collapse provider copies of one message.
 /// Synthetic IMAP Message-IDs are local implementation details, so they fall
@@ -326,6 +333,45 @@ pub struct MessageSourceRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn display_projections_keep_the_saved_message_generation() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+                VALUES ('a', 'Account', 'me@example.test', 'imap', '{}', '', '', '');
+            INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, uidvalidity, created_at, updated_at)
+                VALUES ('f', 'a', 'Inbox', 'INBOX', 'INBOX', 'inbox', 8, '', '');
+            INSERT INTO threads (id, account_id, subject, last_message_date, created_at, updated_at)
+                VALUES ('t', 'a', 'Mail', '', '', '');
+            INSERT INTO messages (id, thread_id, account_id, folder_id, remote_id, remote_uidvalidity, from_address, to_addresses, date, created_at, updated_at)
+                VALUES ('m', 't', 'a', 'f', '42', 7, 'bob@example.test', '[]', '', '', '');")
+            .execute(&pool).await.unwrap();
+        let repository = MessageReadRepository::new(&pool);
+        for saved in [Some(7_i64), None, Some(8_i64)] {
+            sqlx::query("UPDATE messages SET remote_uidvalidity = ? WHERE id = 'm'")
+                .bind(saved)
+                .execute(&pool)
+                .await
+                .unwrap();
+            assert_eq!(
+                repository.list_messages("t").await.unwrap()[0].remote_uidvalidity,
+                saved
+            );
+            assert_eq!(
+                repository.list_messages_preview("t").await.unwrap()[0].remote_uidvalidity,
+                saved
+            );
+            assert_eq!(
+                repository.list_message_bodies(&["m".into()]).await.unwrap()[0].remote_uidvalidity,
+                saved
+            );
+        }
+    }
 
     /// PERF-15: an unbounded column the doc comment already excluded.
     #[test]

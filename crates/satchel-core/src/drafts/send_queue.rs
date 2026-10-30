@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendActionPayload {
     pub account_id: String,
+    /// Identity saved with the queued snapshot, before a reset can replace its row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft_reference: Option<crate::db::remote_content::ContentReference>,
     pub input: OutgoingMessageInput,
     /// RFC3339 timestamp at which to actually send. None means "immediately".
     #[serde(default)]
@@ -25,6 +28,7 @@ pub fn build_send_action(
     let message_id_header = format!("<{}@satchel.local>", uuid::Uuid::new_v4());
     let payload = SendActionPayload {
         account_id: account_id.clone(),
+        draft_reference: None,
         input,
         scheduled_for: scheduled_for.map(|t| t.to_rfc3339()),
         message_id_header: Some(message_id_header),

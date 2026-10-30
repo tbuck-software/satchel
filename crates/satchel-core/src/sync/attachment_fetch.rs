@@ -16,6 +16,7 @@ pub async fn attachment_bytes(
     account_email: &str,
     message_remote_id: &str,
     folder_remote_id: &str,
+    source_uidvalidity: Option<u32>,
     attachment: &RemoteAttachment,
 ) -> crate::sync::errors::SyncResult<Vec<u8>> {
     if let Some(raw) = attachment.content_base64.as_deref() {
@@ -30,7 +31,7 @@ pub async fn attachment_bytes(
             &MessageRef {
                 remote_id: message_remote_id.to_string(),
                 source_folder: Some(folder_remote_id.to_string()),
-                source_uidvalidity: None,
+                source_uidvalidity,
             },
             &attachment.remote_part_id,
         )

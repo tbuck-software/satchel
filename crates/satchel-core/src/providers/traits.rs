@@ -401,6 +401,15 @@ pub trait MailProvider: Send + Sync {
     ) -> SyncResult<Option<RemoteMessageStateSnapshot>> {
         Ok(None)
     }
+    /// Resolve an account-wide ID absent from a folder snapshot. `None` is
+    /// proof of global deletion, never a transient failure or label removal.
+    /// Providers without globally stable IDs must not implement this seam.
+    async fn resolve_snapshot_message(
+        &self,
+        _remote_id: &str,
+    ) -> SyncResult<Option<MessageEnvelope>> {
+        Err("provider does not support global snapshot resolution".into())
+    }
     /// Exactly these messages of `folder`, with the folder's generation in
     /// `remote_uidvalidity`. `None`: the provider cannot address single
     /// messages, and the caller falls back to a folder sync.

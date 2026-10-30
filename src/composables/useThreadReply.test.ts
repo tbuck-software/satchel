@@ -74,6 +74,27 @@ describe('useThreadReply', () => {
     expect(harness.openDraft).not.toHaveBeenCalled();
   });
 
+  it.each(['thread', 'list', 'thread-with-stale-list', 'list-with-stale-thread'])(
+    'starts a usable reply when the unavailable draft comes from %s', (source) => {
+      const error = JSON.stringify({ key: 'backend.errors.imapUidValidityChanged', params: { folder: 'Drafts' } });
+      if (source !== 'list') harness.messages.push({ ...message('blocked', true),
+        contentError: source.startsWith('thread') ? error : null });
+      if (source !== 'thread') harness.drafts.push({ id: 'blocked', thread_id: 'thread-1',
+        content_error: source.startsWith('list') ? error : null });
+      useThreadReply().reply('thread-1');
+      expect(harness.openDraft).not.toHaveBeenCalled();
+      expect(harness.openReply).toHaveBeenCalledWith('thread-1', false);
+    },
+  );
+
+  it('still resumes an available draft when a newer one is unavailable', () => {
+    harness.messages.push(message('available', true), { ...message('blocked', true),
+      contentError: 'backend.errors.imapUidValidityMissing' });
+    useThreadReply().reply('thread-1');
+    expect(harness.openDraft).toHaveBeenCalledWith('available');
+    expect(harness.openReply).not.toHaveBeenCalled();
+  });
+
   it('starts its own composer for reply all', () => {
     harness.messages = [message('first'), message('draft-1', true)];
     useThreadReply().reply('thread-1', true);

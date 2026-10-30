@@ -51,7 +51,8 @@ import { useComposerSignature } from '@/composables/useComposerSignature';
 import { useComposerTransport } from '@/composables/useComposerTransport';
 import { useToast } from '@/composables/useToast';
 import { useToastClearance } from '@/composables/useToastClearance';
-import { outboxErrorLabel } from '@/utils/outboxLabels';
+import { outboxErrorLabel, queuedDraftNeedsOutbox } from '@/utils/outboxLabels';
+import { translateBackendError } from '@/utils/backendErrors';
 import {
   formatTimestamp,
   mergeRecipients,
@@ -236,6 +237,8 @@ const threadEmlDrop = useThreadEmlDrop(
   () => sending.value,
 );
 const initialized = ref(false);
+/** Failed draft loads must not persist or send an empty replacement. */
+const draftLoadFailed = ref(false);
 // A loaded reply or draft shows its history control at once, not after a pause.
 watch(initialized, (ready) => {
   if (ready) quotedHistory.settle();
@@ -350,7 +353,7 @@ const {
   initialized,
   sending,
   status,
-  buildInput: () => activeAccount.value ? composerDraftInput(currentDraftState()) : null,
+  buildInput: () => activeAccount.value && !draftLoadFailed.value ? composerDraftInput(currentDraftState()) : null,
   drafts: draftsStore,
   t,
   onCaughtUp: () => localBackup.clear(),
@@ -401,8 +404,20 @@ async function leaveComposer() {
   else await router.push({ name: 'inbox' });
 }
 
-/** A draft that could not be loaded must not be sent as an empty message. */
-const draftLoadFailed = ref(false);
+/**
+ * The Outbox action after a scheduled draft failed to load, when nothing
+ * loaded could be saved. The embedded composer is a modal over the mailbox
+ * and closes first. Its local backup stays, so text typed since is offered
+ * again.
+ */
+async function leaveForOutbox() {
+  if (props.embedded) {
+    await closeGuardWithoutSaving();
+    emit('close');
+  }
+  await router.push({ name: 'outbox' });
+}
+
 const sendBlocker = computed(() => composerSendBlocker({
   initialized: initialized.value,
   sending: sending.value,
@@ -467,7 +482,7 @@ async function loadDraft() {
   const id = props.initialDraftId || (route.query.draftId as string | undefined);
   if (!id) return;
   const draft = await draftsStore.fetchOne(id);
-  if (!draft) return;
+  if (!draft) throw new Error(t('backend.errors.messageNotAvailableLocally'));
   if (draft.send_cancelled) toast.info(t('compose.schedule.editCancelled'));
   await applyDraft(draft);
   // A reply carries the message it answers.
@@ -475,6 +490,7 @@ async function loadDraft() {
 }
 
 async function applyDraft(draft: BackendDraft) {
+  if (draft.content_error) throw new Error(translateBackendError(draft.content_error) ?? t('drafts.unavailable'));
   draftId.value = draft.id;
   draftRevision.value = draft.revision ?? null;
   contextThreadId.value = draft.thread_id ?? null;
@@ -681,9 +697,13 @@ onMounted(async () => {
       if (fromDraft) await loadDraft();
       else await initializeThreadContext();
     } catch (err) {
-      const text = outboxErrorLabel(err instanceof Error ? err.message : String(err));
+      const text = translateBackendError(err)
+        ?? outboxErrorLabel(err instanceof Error ? err.message : String(err));
       status.value = { tone: 'error', text };
-      toast.error(text);
+      // A popout has no mailbox to route into; the message names the place.
+      toast.error(text, queuedDraftNeedsOutbox(err) && !isPopout() ? {
+        action: { label: t('nav.folders.outbox'), handler: leaveForOutbox },
+      } : undefined);
       draftLoadFailed.value = fromDraft;
     }
     if (!fromDraft) syncSignatureSelection();

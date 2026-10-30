@@ -31,6 +31,7 @@ import { NOTIFICATION_RETRY_DELAY_MS } from '@/mobile/iosNotificationResponses';
 import ComposerHost from '@/components/mail/ComposerHost.vue';
 import type { Thread } from '@/types/mail';
 import { useToast } from '@/composables/useToast';
+import { BackendError } from '@/utils/backendErrors';
 import { useThreadsStore } from '@/stores/threads';
 import * as threadActionModule from '@/composables/useThreadActions';
 import { useComposerStore, type ComposerReplaceOutcome } from '@/stores/composer';
@@ -183,6 +184,7 @@ const router = createRouter({
     { path: '/inbox', name: 'inbox', component: { template: '<div />' } },
     { path: '/thread/:id', name: 'thread', component: { template: '<div />' } },
     { path: '/compose', name: 'compose', component: { template: '<div />' } },
+    { path: '/outbox', name: 'outbox', component: { template: '<div />' } },
   ],
 });
 
@@ -1444,6 +1446,29 @@ describe('bootstrap entries', () => {
     await undo!.action!.handler();
     expect(backendUndoOutboxSend).toHaveBeenCalledWith('queued-send');
     expect(useComposerStore().request?.draftId).toBe('restored-draft');
+    wrapper.unmount();
+  });
+
+  it('points an Undo whose draft changed after queueing to the Outbox', async () => {
+    vi.mocked(backendUndoOutboxSend).mockRejectedValueOnce(
+      new BackendError('backend.errors.queuedDraftNotRestorable'),
+    );
+    const wrapper = boot(useAppBootstrap);
+    await flushPromises();
+    await flushPromises();
+    const registration = vi.mocked(listen).mock.calls.find(([name]) => name === 'outbox:undo-window');
+    const handler = registration![1] as (event: unknown) => void;
+    handler({ payload: { queued_id: 'queued-send', undo_seconds: 5 } });
+    await vi.waitFor(() => expect(
+      useToast().state.toasts.some((toast) => toast.action?.present === 'fab'),
+    ).toBe(true));
+    const undo = useToast().state.toasts.find((toast) => toast.action?.present === 'fab');
+    expect(await undo!.action!.handler()).toBe(false);
+    const failure = useToast().state.toasts.find((toast) => toast.tone === 'error');
+    expect(failure?.message).toContain('Outbox');
+    expect(failure?.action?.label).toBe('Outbox');
+    await failure!.action!.handler();
+    expect(router.currentRoute.value.name).toBe('outbox');
     wrapper.unmount();
   });
 

@@ -55,6 +55,31 @@ describe('ThreadDraftCard', () => {
     expect(wrapper.get('.draft-card__body').attributes('aria-label')).toBe('Continue your draft to Sarah Kim');
   });
 
+  it('offers recovery instead of opening or previewing an unavailable draft', async () => {
+    const wrapper = render({ message: draft({
+      bodyText: 'stale draft text',
+      contentError: JSON.stringify({ key: 'backend.errors.imapUidValidityChanged', params: { folder: 'Work/Drafts' } }),
+    }) });
+    try {
+      expect(wrapper.get('[role="alert"]').text()).toContain('Work/Drafts');
+      expect(wrapper.text()).toContain('Sync the folder');
+      expect(wrapper.text()).not.toContain('stale draft text');
+      expect(wrapper.find('.draft-card__body').exists()).toBe(false);
+      const edit = wrapper.findAll('button').find(button => button.text() === 'Continue editing')!;
+      expect(edit.attributes('disabled')).toBeDefined();
+      await edit.trigger('click');
+      await wrapper.get('.draft-card__actions').trigger('click');
+      expect(wrapper.emitted('edit')).toBeUndefined();
+      await wrapper.get('.error-state button').trigger('click');
+      expect(wrapper.emitted('retry')).toHaveLength(1);
+      await wrapper.setProps({ message: draft() });
+      await wrapper.get('.draft-card__body').trigger('click');
+      expect(wrapper.emitted('edit')).toHaveLength(1);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it('discards once, and not while a discard is running', async () => {
     const wrapper = render();
     const discard = () => wrapper.findAll('button').find((button) => button.text() === 'Discard')!;

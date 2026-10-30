@@ -11,6 +11,7 @@
       },
       "inlineImageUnavailable": "Image unavailable",
       "messageLoadFailed": "The message could not be loaded.",
+      "messageReferenceChanged": "The message's mailbox identity changed. Sync its folder and try again.",
       "messageLoadTimeout": "Loading the message took too long.",
       "oauth": {
         "invalidGrant": "Google no longer accepts the stored sign-in (expired or revoked). Please sign in again.",
@@ -331,6 +332,7 @@
       },
       "inlineImageUnavailable": "Bild nicht verfügbar",
       "messageLoadFailed": "Die Nachricht konnte nicht geladen werden.",
+      "messageReferenceChanged": "Die Postfachkennung der Nachricht hat sich geändert. Synchronisiere ihren Ordner und versuche es erneut.",
       "messageLoadTimeout": "Das Nachladen der Nachricht hat zu lange gedauert.",
       "oauth": {
         "invalidGrant": "Google akzeptiert den gespeicherten Login nicht mehr (abgelaufen oder widerrufen). Bitte erneut anmelden.",

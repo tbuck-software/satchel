@@ -1,5 +1,6 @@
 // Generated from Rust. Run pnpm ipc:generate.
 export type DownloadAttachmentResult = {
+    remote_uidvalidity?: number | null;
     filename: string;
     mime_type: string;
     /**

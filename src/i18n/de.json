@@ -205,6 +205,7 @@
       "exportAttachmentListUnavailable": "Für eine Nachricht fehlen lokale Angaben zu ihren Anhängen. Gleiche die Nachricht ab und versuche den Export erneut.",
       "exportAttachmentMetadataInvalid": "Die Anhangsdaten eines gespeicherten Entwurfs sind beschädigt. Öffne den Entwurf erneut und hänge die Dateien noch einmal an.",
       "exportAttachmentUnavailable": "\"{filename}\" kann nicht exportiert werden, weil die lokale Kopie fehlt oder nicht verifiziert werden kann. Lade den Anhang herunter und versuche es erneut.",
+      "exportMailboxChanged": "Während des Exports wurden Nachrichten entfernt oder ersetzt, deshalb wurde nichts gespeichert. Starte den Export erneut.",
       "exportOriginalUnavailable": "\"{subject}\" kann nicht exportiert werden, weil die vollständige Originalnachricht nicht verfügbar ist. Verbinde das Konto und versuche es erneut. Es wird keine unvollständige Nachricht exportiert.",
       "folderAccountMismatch": "Wähle einen Ordner desselben Kontos.",
       "folderContainsChildren": "Der Ordner \"{name}\" enthält noch Unterordner ({count}).",
@@ -246,6 +247,7 @@
       "messageReadFailed": "Die Nachricht konnte nicht geladen werden. Bitte versuche es erneut.",
       "messageSearchFailed": "Die Nachrichtensuche ist fehlgeschlagen. Bitte versuche es erneut.",
       "messagesQuarantined": "{count} Nachrichten in {folder} konnten für {account} nicht gespeichert werden. Die Synchronisierung läuft mit den übrigen weiter.",
+      "messagesSkipped": "{count} Nachrichten in {folder} konnten für {account} auch nach mehreren Versuchen nicht gespeichert werden. Die Synchronisierung überspringt sie und läuft weiter.",
       "noActiveAccount": "Richte zuerst ein aktives Konto ein.",
       "notAMessageFile": "So lassen sich nur .eml- und .msg-Dateien öffnen.",
       "notificationReplyWaiting": "Eine Antwort aus einer Benachrichtigung ließ sich nicht öffnen. Satchel behält sie, bis du es erneut versuchst.",
@@ -305,6 +307,7 @@
       "queueRecipientRejected": "Der Server hat einen Empfänger abgelehnt. Prüfe die E-Mail-Adresse vor dem erneuten Senden.",
       "queueRejected": "Der Server hat diese Aktion abgelehnt. Prüfe die Details vor einem erneuten Versuch.",
       "queueTemporary": "Der Server ist vorübergehend nicht erreichbar. Satchel versucht es automatisch erneut.",
+      "queuedDraftNotRestorable": "Diese Nachricht lässt sich nicht mehr als Entwurf öffnen, weil sich ihr Entwurf nach dem Einreihen geändert hat. Im Postausgang kannst du sie noch ansehen oder vor dem Senden verwerfen.",
       "recipientAddressInvalid": "Das ist keine gültige Empfängeradresse: {value}",
       "replyContextLoadFailed": "Der Antwortkontext konnte nicht geladen werden. Die Nachricht wurde noch nicht gesendet.",
       "replyThreadNotFound": "Die Unterhaltung für diese Antwort ist nicht mehr verfügbar.",
@@ -350,6 +353,7 @@
       "smimeOwnCertificateMissing": "Das eigene S/MIME-Zertifikat fehlt. Importiere ein Zertifikat für dieses Konto, sonst lässt sich die Kopie im Gesendet-Ordner nicht für dich verschlüsseln.",
       "smimeRecipientCertificateAmbiguous": "Für folgende Adresse liegen mehrere gleichrangige S/MIME-Zertifikate vor: {recipients}. Lösche das veraltete und sende erneut.",
       "smimeRecipientCertificateMissing": "Für folgende Adresse wurde kein S/MIME-Zertifikat gefunden: {recipients}",
+      "snapshotMessagesHeld": "{count} Nachrichten in {folder} konnten für {account} nicht vom Server aktualisiert werden und bleiben vorerst, wo sie sind. Satchel versucht es in einem Tag erneut.",
       "systemFolderImmutable": "\"{name}\" ist ein Systemordner und kann nicht geändert werden.",
       "templateNotFound": "Die Vorlage wurde nicht gefunden.",
       "templatePersistenceFailed": "Vorlagen sind momentan nicht verfügbar. Bitte versuche es erneut.",
@@ -990,6 +994,7 @@
       "waiting": "Warten auf dich"
     },
     "title": "Entwürfe",
+    "unavailable": "Entwurf nicht verfügbar",
     "undo": "Rückgängig",
     "withAttachment": "Mit Anhang"
   },
@@ -1005,6 +1010,7 @@
     "inlineImageUnavailable": "Bild nicht verfügbar",
     "messageLoadFailed": "Die Nachricht konnte nicht geladen werden.",
     "messageLoadTimeout": "Das Nachladen der Nachricht hat zu lange gedauert.",
+    "messageReferenceChanged": "Die Postfachkennung der Nachricht hat sich geändert. Synchronisiere ihren Ordner und versuche es erneut.",
     "oauth": {
       "invalidGrant": "Google akzeptiert den gespeicherten Login nicht mehr (abgelaufen oder widerrufen). Bitte erneut anmelden.",
       "missingConfig": "OAuth-Konfiguration fehlt. Bitte Satchel neu installieren oder die lokale .env prüfen."

@@ -1,5 +1,6 @@
 use sqlx::{FromRow, SqlitePool};
 
+use crate::db::remote_content::ContentReference;
 use crate::providers::traits::RemoteAttachment;
 use crate::sync::attachment_fetch::attachment_bytes;
 
@@ -14,6 +15,7 @@ struct CalendarAttachmentRow {
     message_remote_id: String,
     folder_remote_id: Option<String>,
     folder_path: String,
+    remote_uidvalidity: Option<i64>,
     filename: Option<String>,
     content_type: String,
     size: Option<i64>,
@@ -40,9 +42,10 @@ pub async fn backfill_calendar_invites_from_attachments(
             acc.provider AS provider,
             acc.config AS config,
             m.id AS message_id,
-            COALESCE(a.remote_uid, m.remote_id, '') AS message_remote_id,
+            COALESCE(m.remote_id, '') AS message_remote_id,
             f.remote_id AS folder_remote_id,
             f.full_path AS folder_path,
+            m.remote_uidvalidity,
             a.filename AS filename,
             a.content_type AS content_type,
             a.size AS size,
@@ -75,6 +78,19 @@ pub async fn backfill_calendar_invites_from_attachments(
     let mut imported = 0_u64;
     let mut remote_fetches = 0_u32;
     for row in rows {
+        let Ok(reference) = ContentReference::load(pool, &row.message_id).await else {
+            continue;
+        };
+        if reference.account_id != row.account_id
+            || reference.provider != row.provider
+            || reference.remote_id.as_deref().unwrap_or_default() != row.message_remote_id
+            || reference.remote_uidvalidity != row.remote_uidvalidity
+            || (row.provider == "imap"
+                && reference.source_folder.as_deref()
+                    != Some(row.folder_remote_id.as_deref().unwrap_or(&row.folder_path)))
+        {
+            continue;
+        }
         let attachment = RemoteAttachment {
             remote_part_id: row.remote_part_id.clone(),
             filename: row.filename.clone(),
@@ -86,7 +102,11 @@ pub async fn backfill_calendar_invites_from_attachments(
         };
 
         let cached_bytes = if let Some(path) = row.cached_path.as_deref() {
-            tokio::fs::read(path).await.ok()
+            if reference.owns_attachment_cache(path, &row.attachment_id) {
+                tokio::fs::read(path).await.ok()
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -120,6 +140,8 @@ pub async fn backfill_calendar_invites_from_attachments(
                     &row.account_email,
                     &row.message_remote_id,
                     row.folder_remote_id.as_deref().unwrap_or(&row.folder_path),
+                    row.remote_uidvalidity
+                        .and_then(|value| u32::try_from(value).ok()),
                     &attachment,
                 ))
                 .await
@@ -136,23 +158,22 @@ pub async fn backfill_calendar_invites_from_attachments(
             }
         };
 
+        let invite = bytes.as_deref().and_then(|bytes| {
+            crate::email::calendar::parse_invite(&String::from_utf8_lossy(bytes))
+        });
         // Marked whatever the outcome: an attachment that yields no invite is
         // not going to start yielding one, and re-fetching it on every launch
         // is what kept the provider busy for nothing.
-        mark_calendar_scanned(pool, &row.attachment_id).await;
+        match mark_calendar_scanned(pool, &row.attachment_id, &reference, invite.as_ref()).await {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(error) => {
+                tracing::debug!(%error, "skipping invite scan after message reference changed");
+                continue;
+            }
+        }
 
-        let Some(bytes) = bytes else {
-            continue;
-        };
-        let raw = String::from_utf8_lossy(&bytes).into_owned();
-        let Some(invite) = crate::email::calendar::parse_invite(&raw) else {
-            continue;
-        };
-        crate::db::calendar::CalendarRepository::new(pool)
-            .upsert_invite(&row.account_id, Some(&row.message_id), &invite)
-            .await
-            .map_err(|error| error.to_string())?;
-        imported += 1;
+        imported += u64::from(invite.is_some());
     }
 
     Ok(imported)
@@ -164,18 +185,108 @@ const DEFAULT_CALENDAR_SCAN_BATCH: i64 = 200;
 /// How many of those may be downloaded from the provider.
 const MAX_CALENDAR_SCAN_FETCHES: u32 = 20;
 
-async fn mark_calendar_scanned(pool: &SqlitePool, attachment_id: &str) {
-    let _ = sqlx::query("UPDATE attachments SET calendar_scan_at = ? WHERE id = ?")
-        .bind(chrono::Utc::now().to_rfc3339())
-        .bind(attachment_id)
-        .execute(pool)
-        .await;
+async fn mark_calendar_scanned(
+    pool: &SqlitePool,
+    attachment_id: &str,
+    reference: &ContentReference,
+    invite: Option<&crate::email::calendar::ParsedInvite>,
+) -> Result<bool, String> {
+    let mut tx = reference.begin_write(pool).await?;
+    let result =
+        sqlx::query("UPDATE attachments SET calendar_scan_at = ? WHERE id = ? AND message_id = ?")
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(attachment_id)
+            .bind(&reference.message_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+    if result.rows_affected() != 1 {
+        return Ok(false);
+    }
+    if let Some(invite) = invite {
+        crate::db::calendar::CalendarRepository::upsert_invite_on_connection(
+            &mut tx,
+            &reference.account_id,
+            Some(&reference.message_id),
+            invite,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+    tx.commit().await.map_err(|error| error.to_string())?;
+    Ok(true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::backfill_calendar_invites_from_attachments;
     use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn an_old_scan_cannot_mark_a_reingested_generation() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+                VALUES ('a', 'Account', 'me@example.test', 'imap', '{}', '', '', '');
+            INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, uidvalidity, created_at, updated_at)
+                VALUES ('f', 'a', 'Inbox', 'INBOX', 'INBOX', 'inbox', 7, '', '');
+            INSERT INTO messages (id, account_id, folder_id, remote_id, remote_uidvalidity, from_address, to_addresses, date, created_at, updated_at)
+                VALUES ('m', 'a', 'f', '42', 7, 'bob@example.test', '[]', '', '', '');
+            INSERT INTO attachments (id, message_id, content_type, created_at) VALUES ('att', 'm', 'text/calendar', '');")
+            .execute(&pool).await.unwrap();
+        let reference = crate::db::remote_content::ContentReference::load(&pool, "m")
+            .await
+            .unwrap();
+        let invite = crate::email::calendar::parse_invite("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:generation-test\r\nDTSTART:20261029T120000Z\r\nDTEND:20261029T130000Z\r\nSUMMARY:Original invite\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n").unwrap();
+        assert!(super::mark_calendar_scanned(&pool, "att", &reference, None)
+            .await
+            .unwrap());
+        sqlx::raw_sql(
+            "UPDATE folders SET uidvalidity = 8; UPDATE messages SET remote_uidvalidity = 8;
+            UPDATE attachments SET calendar_scan_at = NULL;",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            super::mark_calendar_scanned(&pool, "att", &reference, Some(&invite))
+                .await
+                .unwrap_err()
+                .contains("imapUidValidityChanged")
+        );
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM calendar_invites")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            count, 0,
+            "an old attachment cannot publish against a replacement message"
+        );
+        let marker: Option<String> =
+            sqlx::query_scalar("SELECT calendar_scan_at FROM attachments WHERE id = 'att'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(marker, None);
+        let current = crate::db::remote_content::ContentReference::load(&pool, "m")
+            .await
+            .unwrap();
+        assert!(
+            super::mark_calendar_scanned(&pool, "att", &current, Some(&invite))
+                .await
+                .unwrap()
+        );
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM calendar_invites WHERE message_id = 'm'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(count, 1);
+    }
 
     /// The invite scan has to converge. It used to select every .ics
     /// attachment that had not produced an invite and re-fetch it from the
