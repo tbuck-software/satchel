@@ -140,7 +140,7 @@ describe('a second composer request while one is open', () => {
     confirm.ask.mockResolvedValue(false);
     await mountOpenComposer();
 
-    await expect(useComposerStore().openReply('thread-1')).resolves.toBe(false);
+    await expect(useComposerStore().openWithOutcome({ mode: 'reply', threadId: 'thread-1' })).resolves.toBe('kept');
 
     expect(confirm.ask).toHaveBeenCalledTimes(1);
     expect(composeView.persistDraft).not.toHaveBeenCalled();
@@ -152,7 +152,8 @@ describe('a second composer request while one is open', () => {
     composeView.persistDraft.mockResolvedValue(null);
     const wrapper = await mountOpenComposer();
 
-    await expect(useComposerStore().openEmail(['mara@example.com'])).resolves.toBe(false);
+    // Not a refusal: the user agreed, and the new request's content is not on disk.
+    await expect(useComposerStore().openWithOutcome({ mode: 'new', to: ['mara@example.com'] })).resolves.toBe('unsaved');
     await flushPromises();
 
     expect(useComposerStore().request?.to).toEqual([]);

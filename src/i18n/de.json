@@ -1007,6 +1007,7 @@
       "drafts": "Deine Entwürfe konnten nicht geladen werden",
       "mailboxes": "Deine Postfächer konnten nicht geladen werden",
       "messages": "Die Nachrichten konnten nicht geladen werden",
+      "notifications": "Die Verarbeitung von Benachrichtigungen ist fehlgeschlagen",
       "outbox": "Der Postausgang konnte nicht geladen werden",
       "sync": "Der Mail-Abgleich ist fehlgeschlagen",
       "threads": "Die Konversationen konnten nicht geladen werden",

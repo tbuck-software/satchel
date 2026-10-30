@@ -26,10 +26,21 @@ export function composerModeTitleKey(mode: ComposerMode) {
 }
 
 /**
- * Asked before an open composer is replaced. `true` once it is closed (saved,
- * or pristine); `false` keeps it, and the new request is dropped.
+ * The host's answer before an open composer is replaced: `replaced` once it is
+ * closed (saved, or pristine), `kept` when it stays by choice, `unsaved` when
+ * it had to stay because its draft could not be saved. Only `replaced` lets the
+ * new request in.
  */
-export type ComposerReplaceGuard = (next: ComposerRequest) => Promise<boolean>;
+export type ComposerReplaceOutcome = 'replaced' | 'kept' | 'unsaved';
+
+export type ComposerReplaceGuard = (next: ComposerRequest) => Promise<ComposerReplaceOutcome>;
+
+/**
+ * What became of an open request. `focused` found its draft in another window
+ * and `superseded` lost to a newer request. `unsaved` is the one failure: the
+ * request was accepted, but the open draft could not be saved to make room.
+ */
+export type ComposerOpenOutcome = 'opened' | 'focused' | 'kept' | 'superseded' | 'unsaved';
 
 export const useComposerStore = defineStore('composer', () => {
   const request = ref<ComposerRequest | null>(null);
@@ -61,6 +72,15 @@ export const useComposerStore = defineStore('composer', () => {
    * Resolves `false` when nothing opened.
    */
   async function open(next: ComposerRequest = { mode: 'new' }): Promise<boolean> {
+    return (await openWithOutcome(next)) === 'opened';
+  }
+
+  /**
+   * `open`, for a caller that has to tell a refusal from a failure: content
+   * that exists nowhere else, such as a notification reply, may only be let go
+   * when the user kept the open draft, not when saving it failed.
+   */
+  async function openWithOutcome(next: ComposerRequest = { mode: 'new' }): Promise<ComposerOpenOutcome> {
     const ticket = ++openTicket;
     const normalized: ComposerRequest = {
       mode: next.mode,
@@ -76,18 +96,21 @@ export const useComposerStore = defineStore('composer', () => {
     // One window per draft: a draft open in a popout is brought forward there.
     if (normalized.draftId && backendCommandsAvailable()) {
       try {
-        if (await backendFocusDraftEditor(normalized.draftId)) return false;
+        if (await backendFocusDraftEditor(normalized.draftId)) return 'focused';
       } catch (error) {
         console.warn('draft editor lookup failed', error);
       }
     }
-    if (request.value && replaceGuard && !(await replaceGuard(normalized))) return false;
+    if (request.value && replaceGuard) {
+      const replaced = await replaceGuard(normalized);
+      if (replaced !== 'replaced') return replaced;
+    }
     // A newer request arrived while this one waited.
-    if (ticket !== openTicket) return false;
+    if (ticket !== openTicket) return 'superseded';
     request.value = normalized;
     titleOverride.value = '';
     instance.value += 1;
-    return true;
+    return 'opened';
   }
 
   /**
@@ -143,6 +166,7 @@ export const useComposerStore = defineStore('composer', () => {
     title,
     isOpen,
     open,
+    openWithOutcome,
     openNew,
     openEmail,
     openDraft,

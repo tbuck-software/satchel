@@ -21,12 +21,16 @@ import {
   backendUndoOutboxSend,
   backendAcknowledgeDraftFlush,
   backendSyncGroupware,
+  backendTransitionThreads,
 } from '@/services/backend';
 import { useAppBootstrap, useComposeWindowBootstrap } from '@/bootstrap';
+import ComposerHost from '@/components/mail/ComposerHost.vue';
+import type { Thread } from '@/types/mail';
 import { useToast } from '@/composables/useToast';
 import { useThreadsStore } from '@/stores/threads';
 import * as threadActionModule from '@/composables/useThreadActions';
-import { useComposerStore } from '@/stores/composer';
+import { useComposerStore, type ComposerReplaceOutcome } from '@/stores/composer';
+import { useConnectionStore } from '@/stores/connection';
 import { emit, listen } from '@tauri-apps/api/event';
 import { onAction, registerActionTypes } from '@tauri-apps/plugin-notification';
 
@@ -36,6 +40,25 @@ vi.mock('@tauri-apps/api/event', () => ({
 }));
 
 const draftFlush = vi.hoisted(() => ({ result: true }));
+
+/** The form the real ComposerHost talks to when a notification replaces its draft. */
+const composeForm = vi.hoisted(() => ({
+  persistDraft: vi.fn(async (): Promise<string | null> => null),
+  shouldConfirmClose: vi.fn(() => false),
+  closeWithoutSaving: vi.fn(async () => {}),
+  currentDraftId: vi.fn((): string | null => null),
+}));
+
+vi.mock('@/views/ComposeView.vue', () => ({
+  default: {
+    setup(_props: unknown, { expose }: { expose: (handle: unknown) => void }) {
+      expose(composeForm);
+      return () => undefined;
+    },
+  },
+}));
+
+vi.mock('@/composables/useConfirm', () => ({ useConfirm: () => ({ ask: async () => true }) }));
 
 vi.mock('@/composables/useComposerDraftPersistence', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/composables/useComposerDraftPersistence')>()),
@@ -118,8 +141,33 @@ vi.mock('@/services/backend', async (importOriginal) => {
     backendTakePendingNotificationThread: resolving(null),
     backendImportIcsPath: resolving(null),
     backendSyncGroupware: resolving({}),
+    backendTransitionThreads: vi.fn(async (input: { threads: { thread_id: string }[] }) => ({
+      applied: input.threads.map(entry => entry.thread_id),
+      failed: [],
+    })),
   };
 });
+
+function inboxThread(id: string): Thread {
+  return {
+    id,
+    accountId: 'account',
+    subject: 'Subject',
+    participants: [{ name: 'Sender', email: 'sender@example.com' }],
+    snippet: 'Preview',
+    lastMessageAt: '2026-10-30T08:00:00.000Z',
+    lastMessageAtMs: Date.parse('2026-10-30T08:00:00.000Z'),
+    messageCount: 1,
+    unreadCount: 1,
+    hasAttachments: false,
+    workflowState: 'inbox',
+    priority: 0,
+    isStarred: false,
+    hasInvite: false,
+    mailboxNames: ['INBOX'],
+    tags: [],
+  };
+}
 
 const router = createRouter({
   history: createMemoryHistory(),
@@ -220,11 +268,11 @@ describe('bootstrap entries', () => {
       const ensure = vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
       const realActions = threadActionModule.useThreadActions;
       const read = vi.fn(async () => true);
-      const archive = vi.fn(async () => {});
+      const archive = vi.fn(async () => true);
       vi.spyOn(threadActionModule, 'useThreadActions').mockImplementation(() => ({
         ...realActions(), setRead: read, archive,
       }));
-      const open = vi.spyOn(useComposerStore(pinia), 'open');
+      const open = vi.spyOn(useComposerStore(pinia), 'openWithOutcome');
       const push = vi.spyOn(router, 'push');
       const deliver = async () => {
         const registration = vi.mocked(listen).mock.calls.find(([event]) => event === 'mobile:notification-route');
@@ -475,12 +523,16 @@ describe('bootstrap entries', () => {
     wrapper.unmount();
   });
 
-  it.each([true, false])('waits for reply replacement approval before ACK, accepted=%s', async (accepted) => {
+  it.each([
+    { outcome: 'replaced', acknowledged: true },
+    { outcome: 'kept', acknowledged: true },
+    { outcome: 'unsaved', acknowledged: false },
+  ] as const)('waits for the reply replacement decision before ACK, outcome=$outcome', async ({ outcome, acknowledged }) => {
     const pinia = createPinia();
     const composer = useComposerStore(pinia);
     await composer.open({ mode: 'new', body: 'existing draft' });
-    let release!: (value: boolean) => void;
-    const guard = vi.fn(() => new Promise<boolean>(resolve => { release = resolve; }));
+    let release!: (value: ComposerReplaceOutcome) => void;
+    const guard = vi.fn(() => new Promise<ComposerReplaceOutcome>(resolve => { release = resolve; }));
     const disposeGuard = composer.setReplaceGuard(guard);
     vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
     const wrapper = boot(useAppBootstrap, pinia);
@@ -496,13 +548,16 @@ describe('bootstrap entries', () => {
       expect(composer.request?.body).toBe('existing draft');
       expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', { responseId: 'reply-response' });
       expect(backendDismissMobileNotifications).not.toHaveBeenCalled();
-      release(accepted);
+      release(outcome);
       await handled;
-      expect(emit).toHaveBeenCalledExactlyOnceWith('mobile:notification-response-handled', { responseId: 'reply-response' });
-      expect(composer.request?.body).toBe(accepted ? 'new reply' : 'existing draft');
-      expect(backendDismissMobileNotifications).toHaveBeenCalledTimes(accepted ? 1 : 0);
+      // A refusal is the user's answer; a failed save keeps the reply for a retry.
+      expect(vi.mocked(emit).mock.calls).toEqual(acknowledged
+        ? [['mobile:notification-response-handled', { responseId: 'reply-response' }]]
+        : []);
+      expect(composer.request?.body).toBe(outcome === 'replaced' ? 'new reply' : 'existing draft');
+      expect(backendDismissMobileNotifications).toHaveBeenCalledTimes(outcome === 'replaced' ? 1 : 0);
     } finally {
-      release(accepted);
+      release(outcome);
       await handled;
       disposeGuard();
       wrapper.unmount();
@@ -513,10 +568,10 @@ describe('bootstrap entries', () => {
     const pinia = createPinia();
     const composer = useComposerStore(pinia);
     await composer.open({ mode: 'new', body: 'keep this draft' });
-    let release!: (value: boolean) => void;
-    const guard = vi.fn(() => new Promise<boolean>(resolve => { release = resolve; }));
+    let release!: (value: ComposerReplaceOutcome) => void;
+    const guard = vi.fn(() => new Promise<ComposerReplaceOutcome>(resolve => { release = resolve; }));
     composer.setReplaceGuard(guard);
-    const open = vi.spyOn(composer, 'open');
+    const open = vi.spyOn(composer, 'openWithOutcome');
     vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
     let generation = 0;
     vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? ++generation);
@@ -539,7 +594,7 @@ describe('bootstrap entries', () => {
     expect(guard).toHaveBeenCalledOnce();
     expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
     expect(backendDismissMobileNotifications).not.toHaveBeenCalled();
-    release(accepted);
+    release(accepted ? 'replaced' : 'kept');
     await Promise.all([oldWork, replay]);
     expect(composer.request?.body).toBe(accepted ? 'retained reply' : 'keep this draft');
     expect(backendDismissMobileNotifications).toHaveBeenCalledTimes(accepted ? 1 : 0);
@@ -559,7 +614,7 @@ describe('bootstrap entries', () => {
     const mutation = vi.fn(() => new Promise<boolean>(resolve => { finish = () => resolve(true); }));
     const realActions = threadActionModule.useThreadActions;
     vi.spyOn(threadActionModule, 'useThreadActions').mockImplementation(() => ({
-      ...realActions(), setRead: mutation, archive: async () => { await mutation(); },
+      ...realActions(), setRead: mutation, archive: mutation,
     }));
     let generation = 0;
     vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? ++generation);
@@ -587,10 +642,10 @@ describe('bootstrap entries', () => {
   it.each(['satchel.read', 'satchel.archive', 'satchel.reply'])('re-ACKs completed work after event loss without repeating %s', async (actionId) => {
     const pinia = createPinia();
     const composer = useComposerStore(pinia);
-    const open = vi.spyOn(composer, 'open');
+    const open = vi.spyOn(composer, 'openWithOutcome');
     const realActions = threadActionModule.useThreadActions;
     const read = vi.fn(async () => true);
-    const archive = vi.fn(async () => {});
+    const archive = vi.fn(async () => true);
     vi.spyOn(threadActionModule, 'useThreadActions').mockImplementation(() => ({ ...realActions(), setRead: read, archive }));
     vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
     let generation = 0;
@@ -627,7 +682,7 @@ describe('bootstrap entries', () => {
     const pinia = createPinia();
     const composer = useComposerStore(pinia);
     await composer.open({ mode: 'new', body: 'original' });
-    const guard = vi.fn().mockRejectedValueOnce(new Error('draft save failed')).mockResolvedValue(true);
+    const guard = vi.fn().mockRejectedValueOnce(new Error('draft save failed')).mockResolvedValue('replaced');
     composer.setReplaceGuard(guard);
     vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
     let generation = 0;
@@ -653,6 +708,69 @@ describe('bootstrap entries', () => {
     second.unmount();
   });
 
+  it('keeps a reply unacknowledged while the open draft cannot be saved, and delivers it on replay', async () => {
+    const pinia = createPinia();
+    const composer = useComposerStore(pinia);
+    vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
+    composeForm.shouldConfirmClose.mockReturnValue(true);
+    composeForm.persistDraft.mockResolvedValueOnce(null).mockResolvedValue('saved-draft');
+    let generation = 0;
+    vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? ++generation);
+    const first = boot(useAppBootstrap, pinia);
+    mounted.push(mount(ComposerHost, { global: { plugins: [pinia, router] } }));
+    await composer.open({ mode: 'new', body: 'unsaved original' });
+    await flushPromises();
+    const callback = vi.mocked(listen).mock.calls.find(([name]) => name === 'mobile:notification-route')![1];
+    const payload = { listenerId: 1, type: 'notification-tap', threadId: 'unsaved-thread', actionId: 'satchel.reply',
+      inputValue: 'reply typed into the notification', responseId: 'unsaved-reply' };
+    await callback({ payload } as never);
+    expect(composeForm.persistDraft).toHaveBeenCalledOnce();
+    expect(composer.request?.body).toBe('unsaved original');
+    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', { responseId: 'unsaved-reply' });
+    expect(backendDismissMobileNotifications).not.toHaveBeenCalled();
+    first.unmount();
+    const second = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    const replay = vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route').at(-1)![1];
+    await replay({ payload: { ...payload, listenerId: 2 } } as never);
+    expect(composeForm.persistDraft).toHaveBeenCalledTimes(2);
+    expect(composer.request).toMatchObject({ mode: 'reply', body: 'reply typed into the notification' });
+    expect(emit).toHaveBeenCalledExactlyOnceWith('mobile:notification-response-handled', { responseId: 'unsaved-reply' });
+    second.unmount();
+  });
+
+  it.each(['satchel.read', 'satchel.archive'])('keeps a failed %s unacknowledged and retries it on replay', async (actionId) => {
+    const pinia = createPinia();
+    const threads = useThreadsStore(pinia);
+    // The startup load replaces the list, so the row arrives the way a cold one does.
+    vi.spyOn(threads, 'ensureThreadLoaded').mockImplementation(async (id) => {
+      if (!threads.find(id)) threads.threads = [...threads.threads, inboxThread(id)];
+      return undefined as never;
+    });
+    const read = vi.spyOn(threads, 'setThreadsRead')
+      .mockRejectedValueOnce(new Error('database is locked'))
+      .mockResolvedValue(undefined);
+    const write = actionId === 'satchel.read' ? read : vi.mocked(backendTransitionThreads);
+    if (write !== read) write.mockRejectedValueOnce(new Error('database is locked'));
+    let generation = 0;
+    vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? ++generation);
+    const first = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    const callback = vi.mocked(listen).mock.calls.find(([name]) => name === 'mobile:notification-route')![1];
+    const payload = { listenerId: 1, type: 'notification-tap', threadId: 'failing-thread', actionId, responseId: 'failed-action' };
+    await callback({ payload } as never);
+    expect(write).toHaveBeenCalledOnce();
+    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', { responseId: 'failed-action' });
+    first.unmount();
+    const second = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    const replay = vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route').at(-1)![1];
+    await replay({ payload: { ...payload, listenerId: 2 } } as never);
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(emit).toHaveBeenCalledExactlyOnceWith('mobile:notification-response-handled', { responseId: 'failed-action' });
+    second.unmount();
+  });
+
   it('ignores malformed routes without ACK or navigation', async () => {
     const wrapper = boot(useAppBootstrap);
     await flushPromises();
@@ -667,6 +785,38 @@ describe('bootstrap entries', () => {
     expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
     wrapper.unmount();
   });
+
+  it.each(['reservation', 'activation', 'retirement'])(
+    'reports %s failures until a new listener activates without clearing another owner', async (phase) => {
+      const pinia = createPinia();
+      const connection = useConnectionStore(pinia);
+      const failure = new Error(JSON.stringify({ key: 'backend.errors.unexpected' }));
+      let nextId = 0;
+      let failed = false;
+      vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id, ready) => {
+        const operation = id === null ? 'reservation' : ready ? 'activation' : 'retirement';
+        if (operation === phase && !failed) {
+          failed = true;
+          throw failure;
+        }
+        return id ?? ++nextId;
+      });
+      const first = boot(useAppBootstrap, pinia);
+      await flushPromises();
+      if (phase === 'retirement') first.unmount();
+      await vi.waitFor(() => expect(connection.backendErrorFor('notifications')).toBe(failure.message));
+      // A cleanup success must not hide a failed activation.
+      await flushPromises();
+      expect(connection.backendErrorFor('notifications')).toBe(failure.message);
+      connection.reportBackendError('another-owner', new Error('independent failure'));
+      first.unmount();
+      const second = boot(useAppBootstrap, pinia);
+      await flushPromises();
+      await vi.waitFor(() => expect(connection.backendErrorFor('notifications')).toBeNull());
+      expect(connection.backendErrorFor('another-owner')).toBe('independent failure');
+      second.unmount();
+    },
+  );
 
   it('retires a reservation that resolves after disposal without disturbing a new listener', async () => {
     let reserve!: (id: number) => void;

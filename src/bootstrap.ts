@@ -74,11 +74,19 @@ import { crashReportForClipboard } from '@/utils/crashReport';
 import { loadOmniSearch } from '@/components/navigation/loadOmniSearch';
 import { loadPublicSuffixTable } from '@/utils/externalLinks';
 
+/**
+ * How a notification action ended. `done` and `cancelled` (the user kept the
+ * open draft, or a newer composer request won) are final and ACKed. `failed`
+ * is not: native keeps the response, reply text included, for a later retry.
+ */
+type NotificationActionOutcome = 'done' | 'cancelled' | 'failed';
+
 // Shared stores can outlive a bootstrap component. Keep response work with the
 // composer store so a replay joins a pending guard/action or ACKs finished work.
-// Completed IDs last for that store's lifetime, including a lost ACK. This is
-// in-memory deduplication, not recovery of JS side effects after a WebView crash.
-const notificationResponses = new WeakMap<object, Map<string, Promise<void>>>();
+// Completed IDs last for that store's lifetime, including a lost ACK; failed
+// ones are forgotten so a replay runs the action again. This is in-memory
+// deduplication, not recovery of JS side effects after a WebView crash.
+const notificationResponses = new WeakMap<object, Map<string, Promise<NotificationActionOutcome>>>();
 // Keep lease reservations in request order even when IPC replies resolve late.
 let notificationLifecycle: Promise<unknown> = Promise.resolve();
 function updateNotificationListener(id: number | null, ready: boolean): Promise<number | null> {
@@ -291,6 +299,7 @@ export function useAppBootstrap(): void {
     const id = notificationListenerId;
     notificationListenerId = null;
     void updateNotificationListener(id, false).catch(error => {
+      connectionStore.reportBackendError('notifications', error);
       console.warn('mobile notification listener disposal failed', error);
     });
   };
@@ -502,19 +511,18 @@ export function useAppBootstrap(): void {
   async function handleNotificationAction(
     notification: Parameters<typeof notificationThreadId>[0],
     threadId: string,
-  ) {
+  ): Promise<NotificationActionOutcome> {
     const action = notificationAction(notification);
 
     if (action === MAIL_ACTIONS.archive) {
       await threadsStore.ensureThreadLoaded(threadId);
-      await threadActions.archive([threadId]);
+      if (!(await threadActions.archive([threadId]))) return 'failed';
       await backendDismissMobileNotifications([threadId]).catch(() => {});
-      return;
+      return 'done';
     }
     if (action === MAIL_ACTIONS.read) {
       await threadsStore.ensureThreadLoaded(threadId);
-      await threadActions.setRead([threadId], true);
-      return;
+      return (await threadActions.setRead([threadId], true)) ? 'done' : 'failed';
     }
 
     if (action === MAIL_ACTIONS.reply) {
@@ -527,10 +535,18 @@ export function useAppBootstrap(): void {
       // Opened rather than sent: a reply the user cannot re-read before it
       // leaves is not a favour, and the notification field has no formatting,
       // no recipient list and no signature.
-      const opened = await composer.open({ mode: 'reply', threadId, body: notificationReplyText(notification) });
-      if (!opened) return;
+      const opened = await composer.openWithOutcome({
+        mode: 'reply',
+        threadId,
+        body: notificationReplyText(notification),
+      });
+      // The user agreed to the replacement, but the open draft could not be
+      // saved: the reply text exists nowhere else yet.
+      if (opened === 'unsaved') return 'failed';
+      if (opened !== 'opened') return 'cancelled';
       await backendDismissMobileNotifications([threadId]).catch(() => {});
     }
+    return 'done';
   }
 
   /**
@@ -709,18 +725,21 @@ export function useAppBootstrap(): void {
               let work = sharedResponses.get(responseId);
               if (!work) {
                 // Defer invocation until the promise is registered, for reentrancy.
-                work = Promise.resolve().then(() => handleNotificationAction(payload, threadId));
-                sharedResponses.set(responseId, work);
-                void work.catch(() => {
-                  if (sharedResponses.get(responseId) === work) sharedResponses.delete(responseId);
-                });
+                const started = Promise.resolve().then(() => handleNotificationAction(payload, threadId));
+                const forget = () => {
+                  if (sharedResponses.get(responseId) === started) sharedResponses.delete(responseId);
+                };
+                sharedResponses.set(responseId, started);
+                // Registered before any joiner awaits it, so a failure is gone
+                // from the map by the time a caller sees it.
+                void started.then(outcome => { if (outcome === 'failed') forget(); }, forget);
+                work = started;
               }
-              await work;
+              // Retain native response/reply text for replay after recreation.
+              if ((await work) === 'failed') return;
               const { emit } = await import('@tauri-apps/api/event');
               await emit('mobile:notification-response-handled', { responseId });
             } catch (error) {
-              // Retain native response/reply text for replay after recreation.
-              // A refused replacement is an explicit cancellation and resolves.
               console.warn('mobile notification action failed', error);
             }
           }));
@@ -738,9 +757,13 @@ export function useAppBootstrap(): void {
           };
           window.addEventListener('focus', mobileVisibilityHandler);
           document.addEventListener('visibilitychange', mobileVisibilityHandler);
-          if (listenerId !== null) await updateNotificationListener(listenerId, true);
+          if (listenerId !== null) {
+            await updateNotificationListener(listenerId, true);
+            connectionStore.clearBackendError('notifications');
+          }
         } catch (error) {
           retireNotificationListener();
+          connectionStore.reportBackendError('notifications', error);
           console.warn('mobile notification bridge failed', error);
         }
       })();

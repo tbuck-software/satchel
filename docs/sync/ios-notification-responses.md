@@ -32,15 +32,23 @@ Callbacks reject other leases and disposed owners. Within the same composer
 store, replay joins in-flight work or re-ACKs completed work without repeating
 navigation, composer replacement, or shared thread actions. Completed IDs remain
 in memory for the store's lifetime to tolerate lost ACKs and queued duplicates.
+A failed action is forgotten instead, so the next delivery runs it again.
 ACKs are response-scoped, so an old handler can finish after takeover. Native
 completion runs outside the lock and only once, including repeated ACKs.
 
 Reply opens a visible composer and awaits its replacement guard. Refusal or a
 superseding composer request cancels that reply without dismissing notifications.
 An accepted reply carries the notification text into the composer before ACK.
-A thrown action or draft-save error sends no ACK; native retains the response
-and reply text for retry on the next listener lifetime. A dismissal error after
-a successful open leaves the text in the composer and does not repeat the reply.
+An accepted replacement whose open draft cannot be saved is a failure, not a
+refusal (`ComposerOpenOutcome` `unsaved`). It sends no ACK, and neither does a
+thrown action; native retains the response and reply text for retry on the next
+listener lifetime. A dismissal error after a successful open leaves the text in
+the composer and does not repeat the reply.
+
+Read and archive ACK only on the outcome `useThreadActions()` reports: `setRead`
+resolving `true`, and `archive` resolving `true` once the thread is Done, also
+when it already was. A rejected write, a rollback or a missing thread resolves
+`false`; the response then stays unacknowledged for the next delivery.
 
 These are in-process guarantees. Orderly bootstrap disposal/recreation with the
 same stores preserves in-flight work and deduplication. A fresh WebView can

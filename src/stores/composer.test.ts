@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { useComposerStore } from './composer';
+import { useComposerStore, type ComposerReplaceOutcome } from './composer';
 
 describe('composer store', () => {
   beforeEach(() => {
@@ -58,7 +58,7 @@ describe('replacing an open composer', () => {
     const composer = useComposerStore();
     await composer.openNew();
     const firstInstance = composer.instance;
-    const guard = vi.fn(async () => false);
+    const guard = vi.fn(async () => 'kept' as const);
     composer.setReplaceGuard(guard);
 
     await expect(composer.openReply('thread-1')).resolves.toBe(false);
@@ -73,7 +73,7 @@ describe('replacing an open composer', () => {
     await composer.openNew();
     composer.setReplaceGuard(async () => {
       composer.close();
-      return true;
+      return 'replaced';
     });
 
     await expect(composer.openEmail(['mara@example.com'])).resolves.toBe(true);
@@ -84,23 +84,33 @@ describe('replacing an open composer', () => {
   it('drops a request that a newer one overtook while the host was asking', async () => {
     const composer = useComposerStore();
     await composer.openNew();
-    let answer!: (value: boolean) => void;
-    composer.setReplaceGuard(() => new Promise<boolean>((resolve) => { answer = resolve; }));
+    let answer!: (value: ComposerReplaceOutcome) => void;
+    composer.setReplaceGuard(() => new Promise<ComposerReplaceOutcome>((resolve) => { answer = resolve; }));
 
-    const first = composer.openReply('thread-1');
+    const first = composer.openWithOutcome({ mode: 'reply', threadId: 'thread-1' });
     const pendingAnswer = answer;
     const second = composer.openForward('thread-2');
-    pendingAnswer(true);
-    answer(true);
+    pendingAnswer('replaced');
+    answer('replaced');
 
-    await expect(first).resolves.toBe(false);
+    await expect(first).resolves.toBe('superseded');
     await expect(second).resolves.toBe(true);
     expect(composer.request).toMatchObject({ mode: 'forward', threadId: 'thread-2' });
   });
 
+  it.each(['kept', 'unsaved'] as const)('tells a caller that the open composer answered %s', async (outcome) => {
+    const composer = useComposerStore();
+    await composer.open({ mode: 'new', body: 'open draft' });
+    composer.setReplaceGuard(async () => outcome);
+
+    await expect(composer.openWithOutcome({ mode: 'reply', threadId: 'thread-1', body: 'reply' }))
+      .resolves.toBe(outcome);
+    expect(composer.request?.body).toBe('open draft');
+  });
+
   it('opens without asking when nothing is open', async () => {
     const composer = useComposerStore();
-    const guard = vi.fn(async () => false);
+    const guard = vi.fn(async () => 'kept' as const);
     composer.setReplaceGuard(guard);
 
     await expect(composer.openNew()).resolves.toBe(true);

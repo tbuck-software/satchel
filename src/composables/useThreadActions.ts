@@ -190,13 +190,18 @@ export function useThreadActions() {
     void router?.push({ name: 'inbox' });
   }
 
+  /**
+   * Resolves `true` once every thread is in `nextState`, whether this call
+   * moved it or it already was there; `false` when any was refused, rolled
+   * back or not found.
+   */
   async function transitionThreads(
     threadIds: string[],
     nextState: WorkflowState,
     label: string,
     snoozeUntil?: string,
-  ): Promise<void> {
-    if (threadIds.length === 0) return;
+  ): Promise<boolean> {
+    if (threadIds.length === 0) return true;
 
     const normalizedThreadIds = Array.from(new Set(threadIds));
     const knownIds = snapshotStates(normalizedThreadIds).map((entry) => entry.threadId);
@@ -206,7 +211,7 @@ export function useThreadActions() {
         if (!threads.find(id)) await threads.ensureThreadLoaded(id);
       }
       const requested = snapshotStates(normalizedThreadIds);
-      if (requested.length === 0) return;
+      if (requested.length === 0) return false;
       const applied = await workflow.transitionMany(
         normalizedThreadIds, nextState, 'manual', snoozeUntil, { refresh: false },
       );
@@ -215,7 +220,10 @@ export function useThreadActions() {
       // failure already announced itself with its own toast.
       const appliedIds = new Set(applied);
       const snapshot = requested.filter((entry) => appliedIds.has(entry.threadId));
-      if (snapshot.length === 0) return;
+      const complete = requested.length === normalizedThreadIds.length && requested.every(
+        (entry) => appliedIds.has(entry.threadId) || entry.previousState === nextState,
+      );
+      if (snapshot.length === 0) return complete;
 
       // One receipt with one deadline for the whole batch, and one Undo payload.
       showWorkflowUndo(snapshot, nextState, label);
@@ -237,6 +245,7 @@ export function useThreadActions() {
       // Each successful transition already started its own visible Undo period.
       // A slow list refresh must not consume the user's chance to cancel it.
       await refreshLists();
+      return complete;
     });
   }
 
@@ -249,9 +258,12 @@ export function useThreadActions() {
     });
   }
 
-  /** Archive = the "done" workflow state; fully reversible. */
-  async function archive(threadIds: string[]): Promise<void> {
-    await transitionThreads(threadIds, 'done', t('thread.state.done'));
+  /**
+   * Archive = the "done" workflow state; fully reversible. Resolves `false`
+   * when a thread did not reach it; the failure has its own toast.
+   */
+  async function archive(threadIds: string[]): Promise<boolean> {
+    return transitionThreads(threadIds, 'done', t('thread.state.done'));
   }
 
   async function snooze(threadIds: string[]): Promise<void> {

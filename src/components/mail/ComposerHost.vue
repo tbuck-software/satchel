@@ -5,7 +5,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import ComposeView from '@/views/ComposeView.vue';
-import { composerModeTitleKey, useComposerStore, type ComposerRequest } from '@/stores/composer';
+import {
+  composerModeTitleKey,
+  useComposerStore,
+  type ComposerReplaceOutcome,
+  type ComposerRequest,
+} from '@/stores/composer';
 import { useUiStore } from '@/stores/ui';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
@@ -224,23 +229,24 @@ async function requestCloseComposer(): Promise<boolean> {
  * A second request (reply, mailto, tray, notification) while a composer is
  * open. Untouched composers make way; one with work in it asks first and is
  * then saved through the regular close path, which keeps it open if that fails.
+ * That failure is `unsaved`, not `kept`: the user agreed to the replacement.
  */
-async function confirmReplace(next: ComposerRequest): Promise<boolean> {
+async function confirmReplace(next: ComposerRequest): Promise<ComposerReplaceOutcome> {
   const form = formRef.value;
-  if (!form) return true;
+  if (!form) return 'replaced';
   // The same draft is already in front of the user.
-  if (next.draftId && next.draftId === form.currentDraftId()) return false;
+  if (next.draftId && next.draftId === form.currentDraftId()) return 'kept';
   if (!form.shouldConfirmClose()) {
     await form.closeWithoutSaving();
-    return true;
+    return 'replaced';
   }
   const replace = await confirm.ask({
     title: t('compose.replace.title'),
     body: t('compose.replace.body'),
     confirmLabel: t('compose.replace.confirm'),
   });
-  if (!replace) return false;
-  return requestCloseComposer();
+  if (!replace) return 'kept';
+  return (await requestCloseComposer()) ? 'replaced' : 'unsaved';
 }
 
 onBeforeUnmount(composer.setReplaceGuard(confirmReplace));
