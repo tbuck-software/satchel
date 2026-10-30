@@ -517,20 +517,88 @@ async fn server_async<F: std::future::Future<Output = (&'static str, String)> + 
     let origin = base.clone();
     let task = tokio::spawn(async move {
         loop {
-            let (mut socket, _) = listener.accept().await.unwrap();
+            let Ok((mut socket, _)) = listener.accept().await else {
+                continue;
+            };
             let mut buffer = [0; 8192];
-            let read = socket.read(&mut buffer).await.unwrap();
-            let request = String::from_utf8_lossy(&buffer[..read]);
-            let line = request.lines().next().unwrap();
-            recorded.lock().unwrap().push(line.to_string());
-            let (status, body) = route(line.to_string(), origin.clone()).await;
-            socket.write_all(format!(
+            // The code under test writes its request right after connecting.
+            // A silent foreign connection must not stall the fixture.
+            let read =
+                tokio::time::timeout(std::time::Duration::from_secs(5), socket.read(&mut buffer))
+                    .await;
+            let Ok(Ok(read)) = read else {
+                continue;
+            };
+            let Some(line) = api_request_line(&buffer[..read]) else {
+                // Not an HTTP request for an API path: a probe from another
+                // local process, never a request the code under test made.
+                let _ = socket
+                    .write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await;
+                continue;
+            };
+            recorded.lock().unwrap().push(line.clone());
+            let (status, body) = route(line, origin.clone()).await;
+            // The client may already have given up (deadline tests).
+            let _ = socket.write_all(format!(
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len(),
-            ).as_bytes()).await.unwrap();
+            ).as_bytes()).await;
         }
     });
     (base, requests, task)
+}
+
+/// Provider APIs never live at the root, so `GET /` is a probe as well.
+fn api_request_line(request: &[u8]) -> Option<String> {
+    let line = std::str::from_utf8(request).ok()?.lines().next()?;
+    let mut parts = line.split(' ');
+    let (method, target, version) = (parts.next()?, parts.next()?, parts.next()?);
+    let well_formed = parts.next().is_none()
+        && !method.is_empty()
+        && method.bytes().all(|byte| byte.is_ascii_uppercase())
+        && target.starts_with('/')
+        && target != "/"
+        && version.starts_with("HTTP/1.");
+    well_formed.then(|| line.to_string())
+}
+
+/// Local tooling on a developer machine may probe every new loopback listener
+/// with `GET /` or a TLS ClientHello. Neither may stop the fixture, nor appear
+/// among the requests the code under test made.
+#[tokio::test]
+async fn fixture_server_survives_foreign_probes_and_records_only_api_requests() {
+    let (base, requests, task) = server(|line, _| {
+        assert!(line.starts_with("GET /messages/A"), "routed {line}");
+        ("200 OK", json!({"id":"A"}).to_string())
+    })
+    .await;
+    let address = base.trim_start_matches("http://").to_string();
+    let tls_client_hello = [
+        0x16, 0x03, 0x01, 0x06, 0x3c, 0x01, 0x00, 0x06, 0x38, 0x03, 0x03,
+    ];
+    for probe in [
+        b"GET / HTTP/1.1\r\nhost: localhost\r\nuser-agent: node\r\n\r\n".as_slice(),
+        tls_client_hello.as_slice(),
+        b"".as_slice(),
+    ] {
+        let mut socket = tokio::net::TcpStream::connect(&address).await.unwrap();
+        socket.write_all(probe).await.unwrap();
+        socket.shutdown().await.unwrap();
+        let mut ignored = Vec::new();
+        let _ = socket.read_to_end(&mut ignored).await;
+    }
+    let response = reqwest::get(format!("{base}/messages/A?format=full"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        *requests.lock().unwrap(),
+        ["GET /messages/A?format=full HTTP/1.1"]
+    );
+    task.abort();
 }
 
 fn config() -> crate::commands::accounts::AccountConfig {
