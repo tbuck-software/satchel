@@ -86,7 +86,8 @@
       "actionFailed": "The action from the notification could not be completed. Try it again in Satchel.",
       "mailGone": "Satchel no longer has the email from this notification.",
       "read": "Read",
-      "replyPlaceholder": "Write a reply…"
+      "replyPlaceholder": "Write a reply…",
+      "replyWaiting": "Your reply from the notification is kept. Satchel offers it again once the open dialog or draft is closed."
     },
     "outbox": {
       "needsAttention": "{count} email needs attention in Outbox. | {count} emails need attention in Outbox.",
@@ -247,6 +248,7 @@
       "messagesQuarantined": "{count} messages in {folder} could not be stored for {account}. Sync continues with the remaining messages.",
       "noActiveAccount": "Set up an active account first.",
       "notAMessageFile": "Only .eml and .msg files can be opened this way.",
+      "notificationResponseWaiting": "An action from a notification is still waiting to be completed.",
       "oauthAccountConflict": "This address already belongs to an IMAP account and cannot be replaced with OAuth.",
       "oauthAccountMismatch": "Please choose the Google account you are connecting. Your existing account has not been changed.",
       "oauthAuthorizationCancelled": "The sign-in was cancelled.",

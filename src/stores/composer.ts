@@ -35,8 +35,8 @@ export function composerModeTitleKey(mode: ComposerMode) {
  * The host's answer before an open composer is replaced: `replaced` once it is
  * closed (saved, or pristine), `kept` when it stays by choice, `unsaved` when
  * it had to stay because its draft could not be saved, `interrupted` when
- * another question took the dialog before anyone answered. Only `replaced`
- * lets the new request in.
+ * nobody answered: another question took the dialog, or no host came up to
+ * ask. Only `replaced` lets the new request in.
  */
 export type ComposerReplaceOutcome = 'replaced' | 'kept' | 'unsaved' | 'interrupted';
 
@@ -48,6 +48,13 @@ export type ComposerReplaceGuard = (next: ComposerRequest) => Promise<ComposerRe
  * could not be saved to make room) nor `interrupted` (nobody answered) is.
  */
 export type ComposerOpenOutcome = 'opened' | 'focused' | 'kept' | 'unsaved' | 'interrupted';
+
+/**
+ * How long a request waits for the host's guard before a body that exists
+ * nowhere else. App.vue loads the host as a chunk once the first request is
+ * open; this only runs out when that chunk never arrives.
+ */
+export const REPLACE_GUARD_WAIT_MS = 10_000;
 
 export const useComposerStore = defineStore('composer', () => {
   const request = ref<ComposerRequest | null>(null);
@@ -63,14 +70,34 @@ export const useComposerStore = defineStore('composer', () => {
   const isOpen = computed(() => request.value !== null);
 
   let replaceGuard: ComposerReplaceGuard | null = null;
+  /** Requests waiting for a host to register its guard, or for the composer to close. */
+  const hostWaiters = new Set<() => void>();
   /** Settles once every request so far is decided; `null` while idle. */
   let openTail: Promise<void> | null = null;
 
   function setReplaceGuard(guard: ComposerReplaceGuard): () => void {
     replaceGuard = guard;
+    wakeHostWaiters();
     return () => {
       if (replaceGuard === guard) replaceGuard = null;
     };
+  }
+
+  function wakeHostWaiters() {
+    for (const wake of hostWaiters) wake();
+  }
+
+  /** Settles once a guard registers or the composer closes, at the latest after REPLACE_GUARD_WAIT_MS. */
+  function waitForHost(): Promise<void> {
+    return new Promise((resolve) => {
+      const wake = () => {
+        clearTimeout(timer);
+        hostWaiters.delete(wake);
+        resolve();
+      };
+      const timer = setTimeout(wake, REPLACE_GUARD_WAIT_MS);
+      hostWaiters.add(wake);
+    });
   }
 
   /**
@@ -122,6 +149,13 @@ export const useComposerStore = defineStore('composer', () => {
       } catch (error) {
         console.warn('draft editor lookup failed', error);
       }
+    }
+    // The host mounts, and registers its guard, only after the first request
+    // opened. Text that exists nowhere else waits for it instead of being
+    // replaced unasked; if no host comes, it stays and nobody answered.
+    if (request.value?.unsavedBody && !replaceGuard) {
+      await waitForHost();
+      if (request.value?.unsavedBody && !replaceGuard) return 'interrupted';
     }
     if (request.value && replaceGuard) {
       const replaced = await replaceGuard(normalized);
@@ -178,6 +212,7 @@ export const useComposerStore = defineStore('composer', () => {
 
   function close() {
     request.value = null;
+    wakeHostWaiters();
   }
 
   return {

@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { useComposerStore, type ComposerReplaceOutcome } from './composer';
+import { REPLACE_GUARD_WAIT_MS, useComposerStore, type ComposerReplaceOutcome } from './composer';
 
 describe('composer store', () => {
   beforeEach(() => {
@@ -152,6 +152,59 @@ describe('replacing an open composer', () => {
 
     await expect(composer.openNew()).resolves.toBe(true);
     expect(guard).not.toHaveBeenCalled();
+  });
+
+  // App.vue loads the host as an async chunk behind `composer.isOpen`, so its
+  // guard registers only after the first open. A second request in that gap
+  // used to replace text that existed nowhere else without a question.
+  it('waits for the host to register its guard before replacing a body that exists nowhere else', async () => {
+    const composer = useComposerStore();
+    await expect(composer.openWithOutcome({ mode: 'reply', threadId: 'a', body: 'reply text A', unsavedBody: true }))
+      .resolves.toBe('opened');
+
+    const second = composer.openWithOutcome({ mode: 'reply', threadId: 'b', body: 'reply text B', unsavedBody: true });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(composer.request?.body).toBe('reply text A');
+
+    const guard = vi.fn(async () => 'kept' as const);
+    composer.setReplaceGuard(guard);
+    await expect(second).resolves.toBe('kept');
+    expect(guard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ threadId: 'b' }));
+    expect(composer.request?.body).toBe('reply text A');
+  });
+
+  it('leaves such a body open, unanswered, when no host comes to ask', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
+    const composer = useComposerStore();
+    await composer.open({ mode: 'reply', threadId: 'a', body: 'reply text A', unsavedBody: true });
+
+    const second = composer.openWithOutcome({ mode: 'reply', threadId: 'b', body: 'reply text B' });
+    await vi.advanceTimersByTimeAsync(REPLACE_GUARD_WAIT_MS);
+    await expect(second).resolves.toBe('interrupted');
+    expect(composer.request?.body).toBe('reply text A');
+    // The queue moves on, and a guard that registers late is used.
+    composer.setReplaceGuard(async () => 'kept');
+    await expect(composer.openWithOutcome({ mode: 'new' })).resolves.toBe('kept');
+  });
+
+  it('opens at once when that composer closes while the request waits for a host', async () => {
+    const composer = useComposerStore();
+    await composer.open({ mode: 'reply', threadId: 'a', body: 'reply text A', unsavedBody: true });
+    const second = composer.openWithOutcome({ mode: 'reply', threadId: 'b', body: 'reply text B' });
+    await Promise.resolve();
+
+    composer.close();
+    await expect(second).resolves.toBe('opened');
+    expect(composer.request?.body).toBe('reply text B');
+  });
+
+  it('does not wait for a host to replace a composer that holds nothing of its own', async () => {
+    const composer = useComposerStore();
+    await composer.openReply('thread-1');
+
+    await expect(composer.openWithOutcome({ mode: 'forward', threadId: 'thread-2' })).resolves.toBe('opened');
+    expect(composer.request).toMatchObject({ mode: 'forward', threadId: 'thread-2' });
   });
 });
 

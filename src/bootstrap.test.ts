@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { defineComponent } from 'vue';
+import { defineAsyncComponent, defineComponent } from 'vue';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia } from 'pinia';
 import { createMemoryHistory, createRouter } from 'vue-router';
@@ -26,7 +26,7 @@ import {
   backendTransitionThreads,
   backendGetThread,
 } from '@/services/backend';
-import { useAppBootstrap, useComposeWindowBootstrap } from '@/bootstrap';
+import { NOTIFICATION_RETRY_DELAY_MS, useAppBootstrap, useComposeWindowBootstrap } from '@/bootstrap';
 import ComposerHost from '@/components/mail/ComposerHost.vue';
 import type { Thread } from '@/types/mail';
 import { useToast } from '@/composables/useToast';
@@ -36,6 +36,7 @@ import { useComposerStore, type ComposerReplaceOutcome } from '@/stores/composer
 import { useConnectionStore } from '@/stores/connection';
 import { useConfirm } from '@/composables/useConfirm';
 import { answerConfirms } from '@/test/dialogs';
+import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { emit, listen } from '@tauri-apps/api/event';
 import { onAction, registerActionTypes } from '@tauri-apps/plugin-notification';
 
@@ -183,6 +184,16 @@ const router = createRouter({
   ],
 });
 
+const REPLY_WAITING = 'Your reply from the notification is kept. Satchel offers it again once the open dialog or draft is closed.';
+const RESPONSE_WAITING = 'An action from a notification is still waiting to be completed.';
+const ACTION_FAILED = 'The action from the notification could not be completed. Try it again in Satchel.';
+const SAVE_FAILED_STAYS_OPEN = 'The draft could not be saved. The composer stays open.';
+
+/** A reply typed into the notification of `${id}-thread`, as native routes it. */
+function notificationReply(id: string, text: string) {
+  return { type: 'notification-tap', threadId: `${id}-thread`, actionId: 'satchel.reply', inputValue: text };
+}
+
 /** The list loads a popout has no business starting. */
 const listLoads = () => [
   vi.mocked(backendListThreads),
@@ -200,10 +211,67 @@ function boot(entry: () => void, pinia = createPinia()) {
   return wrapper;
 }
 
+/**
+ * The native route gate as the frontend sees it: a response stays until its
+ * ACK, and each newly activated lease is handed every response it has not had.
+ * Nothing is delivered again without a new lease.
+ */
+function nativeRouteGate() {
+  let generation = 0;
+  let active = false;
+  let activations = 0;
+  const retained: { responseId: string; route: Record<string, unknown>; deliveredTo: number }[] = [];
+  const deliveries: Promise<unknown>[] = [];
+  const callback = () => vi.mocked(listen).mock.calls.filter(([name]) => name === 'mobile:notification-route').at(-1)![1];
+  function drain() {
+    for (const response of retained) {
+      if (!active) return;
+      if (response.deliveredTo === generation) continue;
+      response.deliveredTo = generation;
+      deliveries.push(Promise.resolve(callback()({ payload: {
+        ...response.route, responseId: response.responseId, listenerId: generation,
+      } } as never)));
+    }
+  }
+  vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id, ready) => {
+    if (id === null) {
+      generation += 1;
+      active = false;
+      return generation;
+    }
+    if (id !== generation) return id;
+    if (ready) activations += 1;
+    else generation += 1;
+    active = ready;
+    drain();
+    return id;
+  });
+  vi.mocked(backendMobileNotificationResponseHandled).mockImplementation(async (responseId) => {
+    const index = retained.findIndex(response => response.responseId === responseId);
+    if (index >= 0) retained.splice(index, 1);
+  });
+  return {
+    respond(responseId: string, route: Record<string, unknown>) {
+      retained.push({ responseId, route, deliveredTo: 0 });
+      drain();
+    },
+    retained: () => retained.map(response => response.responseId),
+    activations: () => activations,
+    settled: async () => {
+      for (let seen = -1; seen !== deliveries.length;) {
+        seen = deliveries.length;
+        await Promise.all(deliveries);
+        await flushPromises();
+      }
+    },
+  };
+}
+
 describe('bootstrap entries', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id) => id ?? 1);
+    vi.mocked(backendMobileNotificationResponseHandled).mockImplementation(async () => {});
     vi.mocked(listen).mockImplementation(async () => () => {});
     useToast().clear();
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -846,10 +914,11 @@ describe('bootstrap entries', () => {
       // Nobody answered the reply's question; that is not a refusal.
       expect(backendMobileNotificationResponseHandled).not.toHaveBeenCalled();
       expect(composer.request?.body).toBe('unsent draft');
+      // Gone before that dialog closes, so only the next bootstrap's lease brings it back.
+      wrapper.unmount();
       dialog.answer(false);
       await other;
 
-      wrapper.unmount();
       boot(useAppBootstrap, pinia);
       await flushPromises();
       const replay = reply('preempted-reply', 'keep this reply', 2);
@@ -858,6 +927,228 @@ describe('bootstrap entries', () => {
       await replay;
       expect(composer.request).toMatchObject({ mode: 'reply', body: 'keep this reply' });
       expect(backendMobileNotificationResponseHandled).toHaveBeenCalledExactlyOnceWith('preempted-reply');
+    });
+
+    it('asks before a reply replaces one the lazily loaded host has not mounted yet', async () => {
+      const pinia = createPinia();
+      const composer = useComposerStore(pinia);
+      vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue('loaded');
+      composeForm.persistDraft.mockResolvedValue('saved-first-reply');
+      const dialog = useConfirm();
+      let loadChunk!: () => void;
+      const chunk = new Promise<void>(resolve => { loadChunk = resolve; });
+      // App.vue mounts the host the same way: an async chunk behind `composer.isOpen`.
+      const LazyHost = defineAsyncComponent(async () => {
+        await chunk;
+        return import('@/components/mail/ComposerHost.vue');
+      });
+      mounted.push(mount(defineComponent({
+        components: { LazyHost },
+        setup: () => ({ composer }),
+        template: '<LazyHost v-if="composer.isOpen" />',
+      }), { global: { plugins: [pinia, router] } }));
+      // Two replies wait in native; the cold start's first lease replays both at once.
+      const gate = nativeRouteGate();
+      gate.respond('reply-a', notificationReply('reply-a', 'first reply'));
+      gate.respond('reply-b', notificationReply('reply-b', 'second reply'));
+      boot(useAppBootstrap, pinia);
+
+      await vi.waitFor(() => expect(composer.request?.body).toBe('first reply'));
+      await flushPromises();
+      // The second reply waits for the host instead of replacing the first unasked.
+      expect(gate.retained()).toEqual(['reply-b']);
+      expect(composer.request?.body).toBe('first reply');
+      expect(dialog.state.pending).toBeNull();
+
+      loadChunk();
+      await vi.waitFor(() => expect(dialog.state.pending).not.toBeNull());
+      expect(composer.request?.body).toBe('first reply');
+      dialog.answer(true);
+      await gate.settled();
+      expect(composeForm.persistDraft).toHaveBeenCalledOnce();
+      expect(composer.request).toMatchObject({ mode: 'reply', body: 'second reply' });
+      expect(gate.retained()).toEqual([]);
+    });
+  });
+
+  describe('a notification response that was not ACKed comes back without a restart', () => {
+    async function bootWithOpenDraft() {
+      const pinia = createPinia();
+      const composer = useComposerStore(pinia);
+      const connection = useConnectionStore(pinia);
+      vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue('loaded');
+      const gate = nativeRouteGate();
+      boot(useAppBootstrap, pinia);
+      mounted.push(mount(ComposerHost, { global: { plugins: [pinia, router] } }));
+      composeForm.shouldConfirmClose.mockImplementation(() => composer.request?.body === 'unsent draft');
+      await composer.open({ mode: 'new', body: 'unsent draft' });
+      await flushPromises();
+      return { composer, connection, gate };
+    }
+
+    it('asks again about a reply whose question another dialog took away, once that dialog closes', async () => {
+      const { composer, connection, gate } = await bootWithOpenDraft();
+      composeForm.persistDraft.mockResolvedValue('saved-draft');
+      const dialog = useConfirm();
+      gate.respond('preempted-reply', notificationReply('preempted', 'keep this reply'));
+      await vi.waitFor(() => expect(dialog.state.pending).not.toBeNull());
+      const other = dialog.ask({ title: 'Another question', confirmLabel: 'OK' });
+      await gate.settled();
+      expect(gate.retained()).toEqual(['preempted-reply']);
+      expect(useToast().state.toasts.map(toast => toast.message)).toContain(REPLY_WAITING);
+      expect(backendErrorLabel(connection.backendErrorFor('notifications'))).toBe(RESPONSE_WAITING);
+      // Nothing comes back while the other question is still open.
+      expect(gate.activations()).toBe(1);
+
+      dialog.answer(false);
+      await other;
+      await vi.waitFor(() => expect(dialog.state.pending).not.toBeNull());
+      expect(gate.activations()).toBe(2);
+      expect(composer.request?.body).toBe('unsent draft');
+      dialog.answer(true);
+      await gate.settled();
+      expect(composer.request).toMatchObject({ mode: 'reply', body: 'keep this reply' });
+      expect(gate.retained()).toEqual([]);
+      expect(connection.backendErrorFor('notifications')).toBeNull();
+    });
+
+    it('offers a reply again once the draft that could not be saved is out of the way, not before', async () => {
+      const { composer, gate } = await bootWithOpenDraft();
+      composeForm.persistDraft.mockResolvedValueOnce(null).mockResolvedValue('saved-draft');
+      const dialog = useConfirm();
+      gate.respond('unsaved-reply', notificationReply('unsaved', 'reply typed into the notification'));
+      await vi.waitFor(() => expect(dialog.state.pending).not.toBeNull());
+      dialog.answer(true);
+      await gate.settled();
+      expect(composer.request?.body).toBe('unsent draft');
+      expect(gate.retained()).toEqual(['unsaved-reply']);
+
+      // Another dialog closing changes nothing for a draft that cannot be saved.
+      const other = dialog.ask({ title: 'Another question', confirmLabel: 'OK' });
+      dialog.answer(true);
+      await other;
+      await flushPromises();
+      expect(gate.activations()).toBe(1);
+
+      // The user saves the draft from the toast; the composer closes and the reply opens.
+      const saveFailed = useToast().state.toasts.find(toast => toast.message === SAVE_FAILED_STAYS_OPEN)!;
+      await saveFailed.action!.handler();
+      await vi.waitFor(() => expect(gate.retained()).toEqual([]));
+      expect(gate.activations()).toBe(2);
+      expect(composer.request).toMatchObject({ mode: 'reply', body: 'reply typed into the notification' });
+    });
+
+    it('lets a held reply wait out a composer the user opened in place of the draft', async () => {
+      const { composer, gate } = await bootWithOpenDraft();
+      composeForm.persistDraft.mockResolvedValueOnce(null).mockResolvedValue('saved-draft');
+      const dialog = useConfirm();
+      gate.respond('unsaved-reply', notificationReply('unsaved', 'reply typed into the notification'));
+      await vi.waitFor(() => expect(dialog.state.pending).not.toBeNull());
+      dialog.answer(true);
+      await gate.settled();
+      expect(gate.retained()).toEqual(['unsaved-reply']);
+
+      // The user forwards something instead; the draft saves on the way out.
+      const forward = composer.openWithOutcome({ mode: 'forward', threadId: 'other-thread' });
+      await vi.waitFor(() => expect(dialog.state.pending).not.toBeNull());
+      dialog.answer(true);
+      await expect(forward).resolves.toBe('opened');
+      await new Promise(resolve => setTimeout(resolve, 20));
+      await gate.settled();
+      expect(gate.activations()).toBe(1);
+      expect(composer.request).toMatchObject({ mode: 'forward', threadId: 'other-thread' });
+
+      composer.close();
+      await vi.waitFor(() => expect(gate.retained()).toEqual([]));
+      expect(composer.request).toMatchObject({ mode: 'reply', body: 'reply typed into the notification' });
+    });
+
+    it('delivers a reply whose action threw again from the banner Retry', async () => {
+      const pinia = createPinia();
+      const composer = useComposerStore(pinia);
+      const connection = useConnectionStore(pinia);
+      vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded')
+        .mockRejectedValueOnce(new Error('database is locked'))
+        .mockResolvedValue('loaded');
+      const gate = nativeRouteGate();
+      boot(useAppBootstrap, pinia);
+      await flushPromises();
+      gate.respond('thrown-reply', notificationReply('thrown', 'still here'));
+      await gate.settled();
+      expect(gate.retained()).toEqual(['thrown-reply']);
+      expect(backendErrorLabel(connection.backendErrorFor('notifications'))).toBe(RESPONSE_WAITING);
+      expect(gate.activations()).toBe(1);
+
+      connection.requestRetry();
+      await vi.waitFor(() => expect(gate.retained()).toEqual([]));
+      expect(gate.activations()).toBe(2);
+      expect(composer.request).toMatchObject({ mode: 'reply', body: 'still here' });
+      expect(connection.backendErrorFor('notifications')).toBeNull();
+    });
+
+    it.each(['satchel.read', 'satchel.archive'])('retries a failed %s after a pause, up to its cap', async (actionId) => {
+      const pinia = createPinia();
+      const connection = useConnectionStore(pinia);
+      vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue('loaded');
+      const mutation = vi.fn(async () => false);
+      const realActions = threadActionModule.useThreadActions;
+      vi.spyOn(threadActionModule, 'useThreadActions').mockImplementation(() => ({
+        ...realActions(), setRead: mutation, archive: mutation,
+      }));
+      const gate = nativeRouteGate();
+      boot(useAppBootstrap, pinia);
+      await flushPromises();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      onTestFinished(() => { vi.useRealTimers(); });
+
+      gate.respond('failing-action', { type: 'notification-tap', threadId: 'failing-thread', actionId });
+      await gate.settled();
+      expect(mutation).toHaveBeenCalledTimes(1);
+      expect(backendErrorLabel(connection.backendErrorFor('notifications'))).toBe(RESPONSE_WAITING);
+      // No tight cycle: nothing comes back before the pause is over.
+      await vi.advanceTimersByTimeAsync(NOTIFICATION_RETRY_DELAY_MS - 1);
+      await gate.settled();
+      expect(mutation).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await gate.settled();
+      expect(mutation).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(2 * NOTIFICATION_RETRY_DELAY_MS);
+      await gate.settled();
+      // The third delivery gives up and says so.
+      expect(mutation).toHaveBeenCalledTimes(3);
+      expect(gate.retained()).toEqual([]);
+      expect(useToast().state.toasts.map(toast => toast.message)).toContain(ACTION_FAILED);
+      expect(connection.backendErrorFor('notifications')).toBeNull();
+      await vi.advanceTimersByTimeAsync(10 * NOTIFICATION_RETRY_DELAY_MS);
+      await gate.settled();
+      expect(mutation).toHaveBeenCalledTimes(3);
+      expect(gate.activations()).toBe(3);
+    });
+
+    it('holds a timed retry back while a dialog is open, so it cannot take the question away', async () => {
+      const pinia = createPinia();
+      vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue('loaded');
+      const mutation = vi.fn(async () => false);
+      const realActions = threadActionModule.useThreadActions;
+      vi.spyOn(threadActionModule, 'useThreadActions').mockImplementation(() => ({ ...realActions(), setRead: mutation }));
+      const gate = nativeRouteGate();
+      boot(useAppBootstrap, pinia);
+      await flushPromises();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      onTestFinished(() => { vi.useRealTimers(); });
+      gate.respond('failing-read', { type: 'notification-tap', threadId: 'failing-thread', actionId: 'satchel.read' });
+      await gate.settled();
+      const dialog = useConfirm();
+      const question = dialog.decide({ title: 'Delete for good?', confirmLabel: 'Delete' });
+
+      await vi.advanceTimersByTimeAsync(NOTIFICATION_RETRY_DELAY_MS);
+      await gate.settled();
+      expect(gate.activations()).toBe(1);
+      dialog.answer(true);
+      await expect(question).resolves.toBe('confirmed');
+      await gate.settled();
+      expect(gate.activations()).toBe(2);
+      expect(mutation).toHaveBeenCalledTimes(2);
     });
   });
 

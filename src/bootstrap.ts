@@ -57,6 +57,7 @@ import { useFollowUpsStore } from '@/stores/followUps';
 import { useComposerStore } from '@/stores/composer';
 import { useAppUpdateStore } from '@/stores/appUpdate';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 import { useQueueFailureToasts } from '@/composables/useQueueFailureToasts';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { useKeyboard } from '@/composables/useKeyboard';
@@ -78,10 +79,17 @@ import { loadPublicSuffixTable } from '@/utils/externalLinks';
 
 /**
  * How a notification action ended. `done` and `cancelled` (the user kept the
- * open draft) are final and ACKed. `failed` is not: native keeps the response,
- * reply text included, for a later retry.
+ * open draft) are final and ACKed. The rest are not: native keeps the response,
+ * reply text included, and delivers it again to the next lease. `interrupted`
+ * (nobody answered the reply's question) and `unsaved` (the open draft could
+ * not be saved to make room) wait for the dialog or composer in their way;
+ * `failed` is everything else.
  */
-type NotificationActionOutcome = 'done' | 'cancelled' | 'failed';
+type NotificationActionOutcome = 'done' | 'cancelled' | 'failed' | 'interrupted' | 'unsaved';
+
+function isFinalOutcome(outcome: NotificationActionOutcome) {
+  return outcome === 'done' || outcome === 'cancelled';
+}
 
 // Shared stores can outlive a bootstrap component. Keep response work with the
 // composer store so a replay joins a pending guard/action or ACKs finished work.
@@ -97,6 +105,14 @@ const notificationFailures = new WeakMap<object, Map<string, number>>();
  * lifetime. A reply is never given up; its text exists nowhere else.
  */
 const NOTIFICATION_ACTION_ATTEMPTS = 3;
+/**
+ * Pause before a failed read or archive is delivered again, times the
+ * deliveries it has failed so far. A failure that repeats reaches the cap
+ * above in minutes instead of in a tight loop.
+ */
+export const NOTIFICATION_RETRY_DELAY_MS = 15_000;
+/** The banner's cause while a response waits; a key, translated on render. */
+const NOTIFICATION_RESPONSE_WAITING = 'backend.errors.notificationResponseWaiting';
 // Keep lease reservations in request order even when IPC replies resolve late.
 let notificationLifecycle: Promise<unknown> = Promise.resolve();
 function updateNotificationListener(id: number | null, ready: boolean): Promise<number | null> {
@@ -475,7 +491,7 @@ export function useAppBootstrap(): void {
         connectionStore.backendErrorFor('templates') ? templatesStore.load() : undefined,
         connectionStore.backendErrorFor('smartFolders') ? smartFoldersStore.load() : undefined,
         connectionStore.backendErrorFor('notifications') && backendSupportsNativeCommands()
-          ? connectNotificationRoutes()
+          ? redeliverNotificationResponses()
           : undefined,
         connectionStore.refresh(),
       ]);
@@ -551,6 +567,8 @@ export function useAppBootstrap(): void {
     }
     if (outcome !== 'failed') {
       responseFailures.delete(responseId);
+      // Native keeps it for the next lease; say why nothing opened.
+      if (outcome === 'interrupted') useToast().info(t('app.notifications.replyWaiting'));
       return outcome;
     }
     if (notificationAction(notification) === MAIL_ACTIONS.reply) return 'failed';
@@ -606,7 +624,7 @@ export function useAppBootstrap(): void {
       });
       // Nobody answered the replacement question, or the user agreed but the
       // open draft could not be saved: the reply text exists nowhere else yet.
-      if (opened === 'unsaved' || opened === 'interrupted') return 'failed';
+      if (opened === 'unsaved' || opened === 'interrupted') return opened;
       if (opened !== 'opened') return 'cancelled';
       await backendDismissMobileNotifications([threadId]).catch(() => {});
     }
@@ -688,14 +706,19 @@ export function useAppBootstrap(): void {
       // Registered before any joiner awaits it, so a failure is gone
       // from the map by the time a caller sees it.
       void started.then(outcome => {
-        if (outcome === 'failed' && sharedResponses.get(responseId) === started) sharedResponses.delete(responseId);
+        if (!isFinalOutcome(outcome) && sharedResponses.get(responseId) === started) sharedResponses.delete(responseId);
       });
       work = started;
     }
     // Retain native response/reply text for replay after recreation.
-    if ((await work) === 'failed') return;
+    const outcome = await work;
+    if (!isFinalOutcome(outcome)) {
+      if (!bootstrapDisposed) holdNotificationResponse(responseId, outcome, notificationAction(payload));
+      return;
+    }
     try {
       await backendMobileNotificationResponseHandled(responseId);
+      releaseNotificationResponse(responseId);
     } catch (error) {
       // Completed work stays deduplicated, so the next delivery re-ACKs.
       connectionStore.reportBackendError('notifications', error);
@@ -730,7 +753,9 @@ export function useAppBootstrap(): void {
         }
         if (bootstrapDisposed || notificationListenerId !== listenerId) return;
         if (listenerId !== null) await updateNotificationListener(listenerId, true);
-        connectionStore.clearBackendError('notifications');
+        // The lease works; a response it has yet to finish is still waiting.
+        if (heldResponses.size) connectionStore.reportBackendError('notifications', NOTIFICATION_RESPONSE_WAITING);
+        else connectionStore.clearBackendError('notifications');
       } catch (error) {
         retireNotificationListener();
         connectionStore.reportBackendError('notifications', error);
@@ -741,6 +766,89 @@ export function useAppBootstrap(): void {
     });
     return notificationConnection;
   }
+
+  const confirmDialog = useConfirm();
+  /** Responses this bootstrap was handed and could not ACK yet. */
+  const heldResponses = new Set<string>();
+  /** What has to happen before a new lease can help a held response. */
+  const redeliverWhen = { dialogCloses: false, composerCloses: false };
+  let redeliveryTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Native keeps a response that was not ACKed, but delivers it again only to
+   * a new lease. Re-issue one once whatever stopped the response is out of the
+   * way: the dialog that took a reply's question, the composer whose draft
+   * could not be saved, or, for a read or archive, a pause. Until then the
+   * banner says a response is waiting, and its Retry re-issues the lease too.
+   * A reply whose action threw waits for that Retry.
+   */
+  function holdNotificationResponse(responseId: string, outcome: NotificationActionOutcome, action: string | null) {
+    heldResponses.add(responseId);
+    connectionStore.reportBackendError('notifications', NOTIFICATION_RESPONSE_WAITING);
+    if (outcome === 'interrupted') redeliverWhen.dialogCloses = true;
+    if (outcome === 'interrupted' || outcome === 'unsaved') {
+      redeliverWhen.composerCloses = true;
+      // Closed while the answer travelled: nothing is in the way any more.
+      if (!composer.isOpen) redeliverOnceComposerStaysClosed();
+    } else if (action !== MAIL_ACTIONS.reply) {
+      scheduleNotificationRedelivery(NOTIFICATION_RETRY_DELAY_MS * (responseFailures.get(responseId) ?? 1));
+    }
+  }
+
+  function releaseNotificationResponse(responseId: string) {
+    if (!heldResponses.delete(responseId) || heldResponses.size) return;
+    if (connectionStore.backendErrorFor('notifications') === NOTIFICATION_RESPONSE_WAITING) {
+      connectionStore.clearBackendError('notifications');
+    }
+  }
+
+  /**
+   * A replacement closes the composer on its way to the next request, the one
+   * the user asked for. Only a composer that is still closed after the current
+   * task is out of the way.
+   */
+  function redeliverOnceComposerStaysClosed() {
+    setTimeout(() => {
+      if (!composer.isOpen && redeliverWhen.composerCloses) void redeliverNotificationResponses();
+    });
+  }
+
+  function scheduleNotificationRedelivery(delay: number) {
+    if (redeliveryTimer !== null || bootstrapDisposed) return;
+    redeliveryTimer = setTimeout(() => {
+      redeliveryTimer = null;
+      void redeliverNotificationResponses();
+    }, delay);
+  }
+
+  /** Re-issue the lease, so native delivers every held response again. */
+  async function redeliverNotificationResponses() {
+    if (bootstrapDisposed) return;
+    // A replayed reply asks its question, and a new question takes the open
+    // one away. Wait for that dialog to close instead.
+    if (confirmDialog.state.pending) {
+      redeliverWhen.dialogCloses = true;
+      return;
+    }
+    redeliverWhen.dialogCloses = false;
+    redeliverWhen.composerCloses = false;
+    if (redeliveryTimer !== null) {
+      clearTimeout(redeliveryTimer);
+      redeliveryTimer = null;
+    }
+    // A lease still connecting may have delivered before the response failed.
+    await notificationConnection;
+    if (!bootstrapDisposed) await connectNotificationRoutes();
+  }
+
+  // Transitions, not states: each one re-issues the lease at most once, so a
+  // response that keeps failing waits for the next thing the user does.
+  watch(() => confirmDialog.state.pending, (pending, previous) => {
+    if (!pending && previous && redeliverWhen.dialogCloses) void redeliverNotificationResponses();
+  });
+  watch(() => composer.isOpen, (open) => {
+    if (!open && redeliverWhen.composerCloses) redeliverOnceComposerStaysClosed();
+  });
 
   async function registerStartupEvents() {
     if (!backendSupportsNativeCommands()) return;
@@ -1278,6 +1386,7 @@ export function useAppBootstrap(): void {
   onBeforeUnmount(() => {
     bootstrapDisposed = true;
     retireNotificationListener();
+    if (redeliveryTimer !== null) clearTimeout(redeliveryTimer);
     startupEvents.dispose();
     cancelInteractionPrefetch?.();
     cancelInteractionPrefetch = null;

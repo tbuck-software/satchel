@@ -35,7 +35,8 @@
         "actionFailed": "The action from the notification could not be completed. Try it again in Satchel.",
         "mailGone": "Satchel no longer has the email from this notification.",
         "read": "Read",
-        "replyPlaceholder": "Write a reply…"
+        "replyPlaceholder": "Write a reply…",
+        "replyWaiting": "Your reply from the notification is kept. Satchel offers it again once the open dialog or draft is closed."
       },
       "outbox": {
         "needsAttention": "{count} email needs attention in Outbox. | {count} emails need attention in Outbox.",
@@ -470,7 +471,8 @@
         "actionFailed": "Die Aktion aus der Benachrichtigung ließ sich nicht abschließen. Versuche es in Satchel noch einmal.",
         "mailGone": "Die E-Mail aus dieser Benachrichtigung liegt nicht mehr in Satchel.",
         "read": "Gelesen",
-        "replyPlaceholder": "Antwort schreiben …"
+        "replyPlaceholder": "Antwort schreiben …",
+        "replyWaiting": "Deine Antwort aus der Benachrichtigung bleibt erhalten. Satchel bietet sie wieder an, sobald der offene Dialog oder Entwurf geschlossen ist."
       },
       "outbox": {
         "needsAttention": "{count} E-Mail im Postausgang benötigt Aufmerksamkeit. | {count} E-Mails im Postausgang benötigen Aufmerksamkeit.",
