@@ -22,11 +22,9 @@ function generatedAppleFixture(): string {
   );
   mkdirSync(join(root, "src-tauri/ios"), { recursive: true });
   cpSync(
-    new URL(
-      "../../src-tauri/ios/SatchelMobileIntegration.swift",
-      import.meta.url,
-    ),
-    join(root, "src-tauri/ios/SatchelMobileIntegration.swift"),
+    new URL("../../src-tauri/ios", import.meta.url),
+    join(root, "src-tauri/ios"),
+    { recursive: true },
   );
   // The script reads the deep link schemes from here, so the fixture is
   // incomplete without it — the real config, not a stand-in, or the test
@@ -56,10 +54,9 @@ function apply(root: string, extraEnv: Record<string, string> = {}): void {
   );
 }
 
-const swiftTemplate = readFileSync(
-  new URL("../../src-tauri/ios/SatchelMobileIntegration.swift", import.meta.url),
-  "utf8",
-);
+const swiftTemplate = ["SatchelMobileIntegration.swift", "SatchelNotificationRouting.swift"]
+  .map(name => readFileSync(new URL(`../../src-tauri/ios/${name}`, import.meta.url), "utf8"))
+  .join("\n");
 
 describe("generated iOS native integration", () => {
   it("regenerates an existing Xcode project after installing the Swift source", () => {
@@ -100,13 +97,6 @@ printf "%s\\n" "$@" > "$SATCHEL_XCODEGEN_ARGS"
     expect(workflow).toContain("brew install xcodegen");
   });
 
-  it("keeps a notification tap pending until the frontend listener is ready", () => {
-    expect(swiftTemplate).toContain("private var frontendReady = false");
-    expect(swiftTemplate).toContain("guard frontendReady, let route = pendingRoute");
-    expect(swiftTemplate).toContain('@_cdecl("satchel_mobile_frontend_ready")');
-    expect(swiftTemplate).toContain('"type": "notification-tap"');
-  });
-
   it("talks to no server: no push registration, background tasks or keychain", () => {
     expect(swiftTemplate).not.toMatch(/relay/i);
     expect(swiftTemplate).not.toContain("registerForRemoteNotifications");
@@ -124,21 +114,46 @@ printf "%s\\n" "$@" > "$SATCHEL_XCODEGEN_ARGS"
       root,
       "src-tauri/gen/apple/Sources/satchel/SatchelMobileIntegration.swift",
     );
-    const first = [projectPath, mainPath, swiftPath].map((path) =>
+    const routingPath = join(root, "src-tauri/gen/apple/Sources/satchel/SatchelNotificationRouting.swift");
+    const first = [projectPath, mainPath, swiftPath, routingPath].map((path) =>
       readFileSync(path, "utf8"),
     );
 
     // project.yml is left alone: no background modes, no APNs entitlement.
     expect(first[0]).not.toContain("UIBackgroundModes");
     expect(first[0]).not.toContain("BGTaskSchedulerPermittedIdentifiers");
-    expect(first[1]).toContain("satchel_mobile_install();");
+    expect(first[1]).not.toContain("satchel_mobile_install");
+    expect(readFileSync(join(root, "src-tauri/gen/apple/Sources/satchel/SatchelNotificationRouting.swift"), "utf8")).toContain("__EXTRA__");
     expect(first[2]).toContain("UNUserNotificationCenterDelegate");
-    expect(first[2]).toContain("threadId");
 
     apply(root);
     expect(
-      [projectPath, mainPath, swiftPath].map((path) => readFileSync(path, "utf8")),
+      [projectPath, mainPath, swiftPath, routingPath].map((path) => readFileSync(path, "utf8")),
     ).toEqual(first);
+  });
+
+  it("removes an earlier pre-plugin delegate installation and remains idempotent", () => {
+    const root = generatedAppleFixture();
+    const mainPath = join(root, "src-tauri/gen/apple/Sources/satchel/main.mm");
+    const original = readFileSync(mainPath, "utf8");
+    writeFileSync(mainPath, original
+      .replace('#include "bindings/bindings.h"\n', '#include "bindings/bindings.h"\n\nextern "C" void satchel_mobile_install(void);\n')
+      .replace('int main(int argc, char * argv[]) {\n', 'int main(int argc, char * argv[]) {\n\tsatchel_mobile_install();\n'));
+    apply(root);
+    expect(readFileSync(mainPath, "utf8")).toBe(original);
+    apply(root);
+    expect(readFileSync(mainPath, "utf8")).toBe(original);
+  });
+
+  it("registers the native owner synchronously after the notification plugin", () => {
+    const app = readFileSync(new URL("../../src-tauri/src/lib.rs", import.meta.url), "utf8");
+    const bridge = readFileSync(new URL("../../src-tauri/src/commands/mobile_notifications.rs", import.meta.url), "utf8");
+    const notificationPlugin = app.indexOf(".plugin(tauri_plugin_notification::init())");
+    const mailPlugin = app.indexOf(".plugin(commands::mobile_notifications::init())");
+    expect(notificationPlugin).toBeGreaterThan(-1);
+    expect(mailPlugin).toBeGreaterThan(notificationPlugin);
+    expect(bridge).toContain("api.register_ios_plugin(init_plugin_satchel_mail_notifications)?");
+    expect(swiftTemplate).toContain("SatchelMobileIntegration.shared.install()");
   });
 
   it("fails closed instead of patching an unexpected bundle identifier", () => {

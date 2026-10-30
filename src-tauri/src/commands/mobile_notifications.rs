@@ -39,6 +39,9 @@ struct AndroidMailNotification<'a> {
     sound: bool,
 }
 
+#[cfg(target_os = "ios")]
+tauri::ios_plugin_binding!(init_plugin_satchel_mail_notifications);
+
 pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let builder = tauri::plugin::Builder::new("satchel-mail-notifications");
     #[cfg(target_os = "android")]
@@ -56,6 +59,13 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             },
         )?;
         app.manage(AndroidMailNotifications(handle));
+        Ok(())
+    });
+    #[cfg(target_os = "ios")]
+    let builder = builder.setup(|_app, api| {
+        // lib.rs registers this plugin after tauri-plugin-notification. Native
+        // registration is synchronous, so its delegate is installed before ours.
+        api.register_ios_plugin(init_plugin_satchel_mail_notifications)?;
         Ok(())
     });
     builder.build()
@@ -216,13 +226,40 @@ mod ios_events {
         sync::{Mutex, OnceLock},
     };
 
-    use tauri::Emitter;
+    use tauri::{Emitter, Listener};
 
     static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
     static PENDING: Mutex<VecDeque<serde_json::Value>> = Mutex::new(VecDeque::new());
 
     pub fn initialize(app: &tauri::AppHandle) {
-        let _ = APP.set(app.clone());
+        if APP.set(app.clone()).is_err() {
+            return;
+        }
+        // Reuse the existing event channel, without adding a command or ACL.
+        // The OS background response stays alive until its JS action finishes.
+        app.listen("mobile:notification-response-handled", |event| {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) else {
+                return;
+            };
+            let Some(response_id) = value.get("responseId").and_then(|id| id.as_str()) else {
+                return;
+            };
+            if response_id.len() > 128 {
+                return;
+            }
+            let Ok(response_id) = std::ffi::CString::new(response_id) else {
+                return;
+            };
+            let handled = unsafe {
+                super::ios_native_symbol::<unsafe extern "C" fn(*const c_char)>(
+                    c"satchel_mobile_response_handled",
+                )
+            };
+            match handled {
+                Ok(handled) => unsafe { handled(response_id.as_ptr()) },
+                Err(error) => tracing::warn!(%error, "iOS notification acknowledgement failed"),
+            }
+        });
         if let Ok(mut pending) = PENDING.lock() {
             while let Some(event) = pending.pop_front() {
                 let _ = app.emit("mobile:notification-route", event);

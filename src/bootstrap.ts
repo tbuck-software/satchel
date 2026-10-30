@@ -660,10 +660,21 @@ export function useAppBootstrap(): void {
       void (async () => {
         try {
           const { listen } = await import('@tauri-apps/api/event');
-          // iOS: a tap the native side held back until this listener existed.
-          adoptDisposer(await listen<NativeNotificationRoute>('mobile:notification-route', ({ payload }) => {
+          // iOS owns mail responses and buffers them until this listener exists.
+          // Acknowledge after the action finishes so background execution lasts
+          // through the database mutation or opening the reply composer.
+          adoptDisposer(await listen<NativeNotificationRoute>('mobile:notification-route', async ({ payload }) => {
             const threadId = notificationRouteThreadId(payload);
-            if (threadId) void router.push({ name: 'thread', params: { id: threadId } });
+            try {
+              if (threadId) await handleNotificationAction(payload, threadId);
+            } catch (error) {
+              console.warn('mobile notification action failed', error);
+            } finally {
+              if (typeof payload.responseId === 'string') {
+                const { emit } = await import('@tauri-apps/api/event');
+                await emit('mobile:notification-response-handled', { responseId: payload.responseId });
+              }
+            }
           }));
           adoptDisposer(await listen('mobile:resumed', () => {
             void refreshMobileMailState();
@@ -927,10 +938,8 @@ export function useAppBootstrap(): void {
             }),
           },
           {
-            // The mobile half of the same story. `onAction` fires when the OS reports
-            // a tap on Android and iOS, where the plugin does deliver actions; on the
-            // desktop it never fires and the native delegate in `utils::mac_notify`
-            // emits `mail:focus-thread` instead. Both end at the same route.
+            // Android plugin actions carry extra. iOS mail responses exclusively use
+            // mobile:notification-route; desktop uses mail:focus-thread.
             name: 'notification:action',
             register: async () => {
               const { onAction, registerActionTypes } = await import('@tauri-apps/plugin-notification');

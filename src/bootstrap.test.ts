@@ -6,6 +6,7 @@ import { createPinia } from 'pinia';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  backendMobileNotificationsFrontendReady,
   backendListAccounts,
   backendTakePendingNotificationThread,
   backendListContacts,
@@ -22,6 +23,8 @@ import {
 } from '@/services/backend';
 import { useAppBootstrap, useComposeWindowBootstrap } from '@/bootstrap';
 import { useToast } from '@/composables/useToast';
+import { useThreadsStore } from '@/stores/threads';
+import * as threadActionModule from '@/composables/useThreadActions';
 import { useComposerStore } from '@/stores/composer';
 import { emit, listen } from '@tauri-apps/api/event';
 import { onAction, registerActionTypes } from '@tauri-apps/plugin-notification';
@@ -134,9 +137,9 @@ const listLoads = () => [
 ];
 
 const mounted: ReturnType<typeof mount>[] = [];
-function boot(entry: () => void) {
+function boot(entry: () => void, pinia = createPinia()) {
   const wrapper = mount(defineComponent({ setup: () => entry(), template: '<div />' }), {
-    global: { plugins: [createPinia(), router] },
+    global: { plugins: [pinia, router] },
   });
   mounted.push(wrapper);
   return wrapper;
@@ -202,6 +205,81 @@ describe('bootstrap entries', () => {
     await flushPromises();
     await flushPromises();
     await vi.waitFor(() => expect(router.currentRoute.value.params.id).toBe('cold-start'));
+    wrapper.unmount();
+  });
+
+  it.each(['tap', 'satchel.read', 'satchel.archive', 'satchel.reply'].flatMap(actionId =>
+    ['cold', 'warm'].map(lifecycle => ({ actionId, lifecycle })),
+  ))(
+    'delivers the $lifecycle iOS action $actionId once through the registered listener', async ({ actionId, lifecycle }) => {
+      const pinia = createPinia();
+      const ensure = vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
+      const realActions = threadActionModule.useThreadActions;
+      const read = vi.fn(async () => true);
+      const archive = vi.fn(async () => {});
+      vi.spyOn(threadActionModule, 'useThreadActions').mockImplementation(() => ({
+        ...realActions(), setRead: read, archive,
+      }));
+      const open = vi.spyOn(useComposerStore(pinia), 'open');
+      const push = vi.spyOn(router, 'push');
+      const deliver = async () => {
+        const registration = vi.mocked(listen).mock.calls.find(([event]) => event === 'mobile:notification-route');
+        expect(registration).toBeDefined();
+        await registration![1]({ payload: {
+          type: 'notification-tap', threadId: 'ios-thread', actionId, inputValue: '  reply text  ', responseId: 'ios-response',
+        } } as never);
+      };
+      vi.mocked(backendMobileNotificationsFrontendReady).mockImplementationOnce(async () => {
+        if (lifecycle === 'cold') await deliver();
+      });
+      const wrapper = boot(useAppBootstrap, pinia);
+      await flushPromises();
+      await flushPromises();
+      if (lifecycle === 'warm') {
+        await deliver();
+        await flushPromises();
+      }
+      // Pinned iOS plugin actionPerformed has no extra. Even if received, it
+      // must not duplicate the native mail route/action.
+      const pluginListener = vi.mocked(onAction).mock.calls.at(-1)![0];
+      pluginListener({ actionId, inputValue: '  reply text  ', notification: {
+        id: 1, title: 'Mail', body: 'Preview', actionTypeId: 'satchel.mail', sound: '',
+      } } as never);
+      await flushPromises();
+      if (actionId === 'satchel.read') expect(read).toHaveBeenCalledExactlyOnceWith(['ios-thread'], true);
+      else if (actionId === 'satchel.archive') expect(archive).toHaveBeenCalledExactlyOnceWith(['ios-thread']);
+      else expect(router.currentRoute.value.params.id).toBe('ios-thread');
+      const navigations = push.mock.calls.filter(([route]) => typeof route === 'object' && 'name' in route && route.name === 'thread');
+      expect(navigations).toHaveLength(actionId === 'tap' || actionId === 'satchel.reply' ? 1 : 0);
+      expect(read).toHaveBeenCalledTimes(actionId === 'satchel.read' ? 1 : 0);
+      expect(archive).toHaveBeenCalledTimes(actionId === 'satchel.archive' ? 1 : 0);
+      if (actionId === 'satchel.reply') {
+        expect(open).toHaveBeenCalledExactlyOnceWith({ mode: 'reply', threadId: 'ios-thread', body: 'reply text' });
+      } else expect(open).not.toHaveBeenCalled();
+      expect(ensure).toHaveBeenCalledTimes(actionId === 'tap' ? 0 : 1);
+      expect(emit).toHaveBeenCalledExactlyOnceWith('mobile:notification-response-handled', { responseId: 'ios-response' });
+      wrapper.unmount();
+    },
+  );
+
+  it('acknowledges an iOS background action only after its mutation settles', async () => {
+    const pinia = createPinia();
+    vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue(undefined as never);
+    let finish!: (result: boolean) => void;
+    const read = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve; }));
+    const realActions = threadActionModule.useThreadActions;
+    vi.spyOn(threadActionModule, 'useThreadActions').mockImplementation(() => ({ ...realActions(), setRead: read }));
+    const wrapper = boot(useAppBootstrap, pinia);
+    await flushPromises();
+    const registration = vi.mocked(listen).mock.calls.find(([event]) => event === 'mobile:notification-route')!;
+    const pending = registration[1]({ payload: {
+      type: 'notification-tap', threadId: 'ios-thread', actionId: 'satchel.read', responseId: 'background-response',
+    } } as never);
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+    expect(emit).not.toHaveBeenCalledWith('mobile:notification-response-handled', expect.anything());
+    finish(true);
+    await pending;
+    expect(emit).toHaveBeenCalledExactlyOnceWith('mobile:notification-response-handled', { responseId: 'background-response' });
     wrapper.unmount();
   });
 

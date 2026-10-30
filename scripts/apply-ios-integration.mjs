@@ -14,12 +14,10 @@ import process from "node:process";
 const root = resolve(process.cwd());
 const apple = join(root, "src-tauri", "gen", "apple");
 const projectPath = join(apple, "project.yml");
-const templatePath = join(
-  root,
-  "src-tauri",
-  "ios",
+const swiftSources = [
   "SatchelMobileIntegration.swift",
-);
+  "SatchelNotificationRouting.swift",
+];
 const expectedBundleId = "de.tbuck.satchel";
 
 /**
@@ -51,18 +49,6 @@ function filesBelow(directory, filename) {
   }
   return found;
 }
-/**
- * @param {string} text
- * @param {string} needle
- * @param {string} replacement
- * @param {string} label
- */
-function replaceOnce(text, needle, replacement, label) {
-  const count = text.split(needle).length - 1;
-  if (count !== 1) fail(`expected one ${label}, found ${count}`);
-  return text.replace(needle, replacement);
-}
-
 /** The custom URL schemes `plugins.deep-link` registers for mobile. */
 function deepLinkSchemes() {
   /** @type {{ plugins?: { "deep-link"?: { mobile?: Array<{ scheme?: string | string[] }> } } }} */
@@ -118,25 +104,19 @@ if (mainFiles.length !== 1)
   fail(`expected one generated main.mm, found ${mainFiles.length}`);
 const mainPath = mainFiles[0];
 let main = readRequired(mainPath);
-if (!main.includes("satchel_mobile_install();")) {
-  main = replaceOnce(
-    main,
-    '#include "bindings/bindings.h"\n',
-    '#include "bindings/bindings.h"\n\nextern "C" void satchel_mobile_install(void);\n',
-    "Tauri bindings include",
-  );
-  main = replaceOnce(
-    main,
-    "int main(int argc, char * argv[]) {\n",
-    "int main(int argc, char * argv[]) {\n\tsatchel_mobile_install();\n",
-    "generated main entry point",
-  );
-}
+// Remove the pre-plugin installation injected by earlier versions. Plugin
+// registration now owns installation, after NotificationManager.init.
+main = main.replace('\nextern "C" void satchel_mobile_install(void);\n', "");
+main = main.replace("\tsatchel_mobile_install();\n", "");
+if (main.includes("satchel_mobile_install"))
+  fail("unexpected legacy delegate installation");
 writeFileSync(mainPath, main);
 
-readRequired(templatePath);
-const swiftPath = join(dirname(mainPath), "SatchelMobileIntegration.swift");
-copyFileSync(templatePath, swiftPath);
+for (const filename of swiftSources) {
+  const template = join(root, "src-tauri", "ios", filename);
+  readRequired(template);
+  copyFileSync(template, join(dirname(mainPath), filename));
+}
 
 // The Swift file is new to the generated project; xcodegen has to see it.
 const xcodeProjects = readdirSync(apple).filter((entry) =>
@@ -156,11 +136,14 @@ if (xcodeProjects.length === 1) {
 }
 
 for (const required of [
-  "satchel_mobile_install();",
+  "init_plugin_satchel_mail_notifications",
   "UNUserNotificationCenterDelegate",
   "satchel_mobile_frontend_ready",
+  "satchel_mobile_response_handled",
 ]) {
-  const all = `${main}\n${readRequired(swiftPath)}`;
+  const all = swiftSources
+    .map((name) => readRequired(join(dirname(mainPath), name)))
+    .join("\n");
   if (!all.includes(required)) fail(`verification failed for ${required}`);
 }
 

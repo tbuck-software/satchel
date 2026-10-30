@@ -31,9 +31,10 @@ export function notificationReplyText(payload: NotificationActionPayload): strin
   return typeof payload.inputValue === 'string' ? payload.inputValue.trim() : '';
 }
 
-export interface NativeNotificationRoute {
+export interface NativeNotificationRoute extends NotificationActionPayload {
   type?: unknown;
   threadId?: unknown;
+  responseId?: unknown;
 }
 
 export function notificationThreadId(notification: NotificationActionPayload): string | null {

@@ -11,6 +11,8 @@ on:
       - 'src-tauri/**'
       - 'src/**'
       - 'scripts/**'
+      - 'tests/ios-notification-routing/**'
+      - 'tests/ios-integration-generator.node.mjs'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - '.github/workflows/ios.yml'
@@ -71,6 +73,11 @@ jobs:
         run: |
           pnpm exec vitest run src/utils/iosBackgroundIntegration.test.ts src/services/backend.runtime.test.ts
           node --test tests/ios-integration-generator.node.mjs
+
+      - name: Exercise notification payload and cold/warm delivery
+        run: |
+          swiftc src-tauri/ios/SatchelNotificationRouting.swift tests/ios-notification-routing/main.swift -o "$RUNNER_TEMP/satchel-notification-routing"
+          "$RUNNER_TEMP/satchel-notification-routing"
 
       - name: Build for the Apple Silicon iOS simulator through Tauri
         run: pnpm tauri ios build --debug --target aarch64-sim --ci
