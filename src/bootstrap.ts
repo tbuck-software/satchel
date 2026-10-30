@@ -58,6 +58,7 @@ import { useAppUpdateStore } from '@/stores/appUpdate';
 import { useToast } from '@/composables/useToast';
 import { useQueueFailureToasts } from '@/composables/useQueueFailureToasts';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
+import { queuedDraftNeedsOutbox } from '@/utils/outboxLabels';
 import { useKeyboard } from '@/composables/useKeyboard';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { createMobileResume } from '@/mobile/resume';
@@ -573,7 +574,12 @@ export function useAppBootstrap(): void {
                 } catch (err) {
                   toast.error(t('app.mail.cancelFailed', {
                     error: err instanceof Error ? err.message : String(err),
-                  }));
+                  }), queuedDraftNeedsOutbox(err) ? {
+                    action: {
+                      label: t('nav.folders.outbox'),
+                      handler: () => router.push({ name: 'outbox' }),
+                    },
+                  } : {});
                   return false;
                 }
               },

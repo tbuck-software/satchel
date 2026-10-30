@@ -3601,4 +3601,240 @@ mod tests {
         .expect("replacement attachment");
         assert_eq!(attachment_state, ("replacement-message".into(), None));
     }
+
+    /// A queued send saves its draft's identity. Ordinary sync then adopts the
+    /// draft row for the server copy, before or after the enqueue, and assigns
+    /// it a UID (first ingest) or a new one (autosave re-upload) in the same
+    /// mailbox generation. Undo, scheduled-draft Edit and Discard must survive
+    /// that for every provider; only a new UIDVALIDITY may refuse the snapshot.
+    mod queued_draft_identity {
+        use super::*;
+        use satchel_core::drafts::{self, send_queue::build_send_action, DraftError};
+
+        const SNAPSHOT_BODY: &str = "Queued text";
+
+        async fn draft_pool(provider: &str) -> sqlx::SqlitePool {
+            let pool = ingest_pool().await;
+            sqlx::query("UPDATE accounts SET provider = ?")
+                .bind(provider)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, created_at, updated_at)
+                 VALUES ('drafts', 'account', 'Drafts', 'Drafts', 'drafts', ?, ?, '', '')",
+            )
+            .bind(if provider == "gmail" { "DRAFT" } else { "Drafts" })
+            .bind((provider == "imap").then_some(7_i64))
+            .execute(&pool)
+            .await
+            .unwrap();
+            pool
+        }
+
+        fn server_copy(provider: &str, version: u32, generation: u32) -> MessageEnvelope {
+            let mut message = envelope(&match provider {
+                "imap" => (40 + version).to_string(),
+                "gmail" => format!("gmail-message-{version}"),
+                // Outlook updates a draft in place; its id is the draft id.
+                _ => "outlook-draft".to_string(),
+            });
+            message.remote_uidvalidity = (provider == "imap").then_some(generation);
+            message.remote_draft_id = (provider != "outlook").then(|| "stable-draft".to_string());
+            message.mailbox_ids = vec!["DRAFT".to_string()];
+            message.message_id_header = Some("<draft@example.com>".to_string());
+            message.subject = "Subject".to_string();
+            message.body_text = Some(format!("Server copy {version}"));
+            message.from_address = "account@example.com".to_string();
+            message.date_rfc3339 = format!("2026-01-01T00:00:0{version}Z");
+            message
+        }
+
+        async fn ingest(pool: &sqlx::SqlitePool, provider: &str, message: &MessageEnvelope) {
+            upsert_provider_message(
+                None,
+                pool,
+                provider,
+                "account",
+                "account@example.com",
+                "Account",
+                &crate::commands::accounts::AccountConfig::from_plaintext("{}"),
+                "drafts",
+                if provider == "gmail" {
+                    "DRAFT"
+                } else {
+                    "Drafts"
+                },
+                "drafts",
+                message,
+                None,
+            )
+            .await
+            .unwrap();
+        }
+
+        async fn identity(pool: &sqlx::SqlitePool) -> (String, Option<String>, Option<i64>) {
+            sqlx::query_as(
+                "SELECT id, remote_id, remote_uidvalidity FROM messages WHERE is_draft = 1",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap()
+        }
+
+        /// Saves draft `d1`, records its provider id as an upload would, then
+        /// queues a scheduled send of `SNAPSHOT_BODY` from it.
+        async fn queue_send(
+            pool: &sqlx::SqlitePool,
+            queue: &SyncQueue,
+            provider: &str,
+            ingest_before: bool,
+        ) -> String {
+            let input: drafts::DraftInput = serde_json::from_value(serde_json::json!({
+                "id": "d1", "account_id": "account", "to": ["you@example.test"],
+                "subject": "Subject", "body": "Autosaved text", "from_address": "account@example.com",
+            }))
+            .unwrap();
+            drafts::save(pool, queue, &input).await.unwrap();
+            sqlx::query("UPDATE messages SET remote_draft_id = ? WHERE id = 'd1'")
+                .bind(if provider == "outlook" {
+                    "outlook-draft"
+                } else {
+                    "stable-draft"
+                })
+                .execute(pool)
+                .await
+                .unwrap();
+            if ingest_before {
+                ingest(pool, provider, &server_copy(provider, 1, 7)).await;
+            }
+            let outgoing = serde_json::from_value(serde_json::json!({
+                "draft_id": "d1", "to": ["you@example.test"], "subject": "Subject",
+                "body": SNAPSHOT_BODY, "from_address": "account@example.com",
+            }))
+            .unwrap();
+            let action = build_send_action(
+                "account".into(),
+                outgoing,
+                Some(chrono::Utc::now() + chrono::Duration::days(1)),
+            )
+            .unwrap();
+            drafts::enqueue_send_with_draft(pool, queue, &action)
+                .await
+                .unwrap();
+            action.id
+        }
+
+        async fn queued_sends(pool: &sqlx::SqlitePool) -> i64 {
+            sqlx::query_scalar("SELECT COUNT(*) FROM sync_queue WHERE action_type = 'send_message'")
+                .fetch_one(pool)
+                .await
+                .unwrap()
+        }
+
+        #[tokio::test]
+        async fn sync_adopting_the_server_copy_keeps_undo_edit_and_discard() {
+            for provider in ["imap", "gmail", "outlook"] {
+                for ordering in ["first_ingest_after_enqueue", "reupload_after_enqueue"] {
+                    for operation in ["undo", "edit", "discard"] {
+                        let case = format!("{provider}/{ordering}/{operation}");
+                        let pool = draft_pool(provider).await;
+                        let queue = SyncQueue::new();
+                        let reupload = ordering == "reupload_after_enqueue";
+                        let queued = queue_send(&pool, &queue, provider, reupload).await;
+                        let before = identity(&pool).await;
+                        ingest(
+                            &pool,
+                            provider,
+                            &server_copy(provider, 1 + u32::from(reupload), 7),
+                        )
+                        .await;
+                        let after = identity(&pool).await;
+                        assert_eq!(after.0, "d1", "{case}: sync adopts the local draft row");
+                        assert!(after.1.is_some(), "{case}");
+                        if reupload && provider != "outlook" {
+                            assert_ne!(before.1, after.1, "{case}: the re-upload replaces the UID");
+                        } else if !reupload {
+                            assert_eq!(before.1, None, "{case}: the draft was local when queued");
+                        }
+                        match operation {
+                            "undo" | "edit" => {
+                                let draft = if operation == "undo" {
+                                    drafts::restore_queued_draft(&pool, &queue, &queued).await
+                                } else {
+                                    drafts::load(&pool, &pool, &queue, "d1")
+                                        .await
+                                        .map(|draft| draft.expect("draft"))
+                                }
+                                .unwrap_or_else(|error| panic!("{case}: {error:?}"));
+                                assert_eq!(draft.id, "d1", "{case}");
+                                assert_eq!(draft.body, SNAPSHOT_BODY, "{case}");
+                            }
+                            _ => {
+                                drafts::discard(&pool, &queue, "d1")
+                                    .await
+                                    .unwrap_or_else(|error| panic!("{case}: {error:?}"));
+                                let remaining: i64 = sqlx::query_scalar(
+                                    "SELECT COUNT(*) FROM messages WHERE id = 'd1'",
+                                )
+                                .fetch_one(&pool)
+                                .await
+                                .unwrap();
+                                assert_eq!(remaining, 0, "{case}");
+                            }
+                        }
+                        assert_eq!(queued_sends(&pool).await, 0, "{case}");
+                    }
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn a_new_mailbox_generation_still_refuses_the_queued_snapshot() {
+            for ingest_before in [false, true] {
+                for operation in ["undo", "edit"] {
+                    let pool = draft_pool("imap").await;
+                    let queue = SyncQueue::new();
+                    let queued = queue_send(&pool, &queue, "imap", ingest_before).await;
+                    // The server reset Drafts; sync adopts the same draft row
+                    // under the new UIDVALIDITY.
+                    sqlx::query("UPDATE folders SET uidvalidity = 8 WHERE id = 'drafts'")
+                        .execute(&pool)
+                        .await
+                        .unwrap();
+                    ingest(&pool, "imap", &server_copy("imap", 1, 8)).await;
+                    assert_eq!(
+                        identity(&pool).await,
+                        ("d1".to_string(), Some("41".to_string()), Some(8))
+                    );
+                    let result = if operation == "undo" {
+                        drafts::restore_queued_draft(&pool, &queue, &queued).await
+                    } else {
+                        drafts::load(&pool, &pool, &queue, "d1")
+                            .await
+                            .map(|draft| draft.expect("draft"))
+                    };
+                    if ingest_before {
+                        assert!(
+                            matches!(result, Err(DraftError::QueuedDraftNotRestorable)),
+                            "{operation}: {result:?}"
+                        );
+                        let body: Option<String> =
+                            sqlx::query_scalar("SELECT body_text FROM messages WHERE id = 'd1'")
+                                .fetch_one(&pool)
+                                .await
+                                .unwrap();
+                        assert_eq!(body.as_deref(), Some("Server copy 1"));
+                        assert_eq!(queued_sends(&pool).await, 1);
+                        // Discard needs no snapshot: it stops the send and removes the draft.
+                        drafts::discard(&pool, &queue, "d1").await.unwrap();
+                        assert_eq!(queued_sends(&pool).await, 0);
+                    } else {
+                        // Queued while still local, the snapshot never had a generation.
+                        assert_eq!(result.unwrap().body, SNAPSHOT_BODY, "{operation}");
+                    }
+                }
+            }
+        }
+    }
 }

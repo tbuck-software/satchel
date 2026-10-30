@@ -1,4 +1,5 @@
 import { t, tc } from '@/i18n/runtime';
+import { backendErrorKey } from '@/utils/backendErrors';
 import {
   transportErrorLabel,
   type TransportErrorClass,
@@ -101,6 +102,14 @@ export function outboxActionCanBeRetried(
 export function outboxActionCanBeReopenedAsDraft(actionType: string, status: string): boolean {
   return actionType === 'send_message'
     && (status === 'failed' || status === 'delivery_unknown');
+}
+
+/**
+ * A queued send whose draft changed after it was queued cannot become a draft
+ * again. It is still queued, and the Outbox is where it can be read or stopped.
+ */
+export function queuedDraftNeedsOutbox(error: unknown): boolean {
+  return backendErrorKey(error) === 'backend.errors.queuedDraftNotRestorable';
 }
 
 export function outboxVisibleCount(pendingSends: number, failedSends: number): number {

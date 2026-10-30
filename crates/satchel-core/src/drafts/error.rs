@@ -17,6 +17,8 @@ pub enum DraftError {
     SendPending,
     #[error("backend.errors.outboxActionCannotBeDiscarded")]
     OutboxActionCannotBeDiscarded,
+    #[error("backend.errors.queuedDraftNotRestorable")]
+    QueuedDraftNotRestorable,
     #[error("backend.errors.recipientAddressInvalid")]
     InvalidRecipient { value: String },
     #[error(transparent)]
@@ -42,6 +44,7 @@ impl DraftError {
             Self::ChangedElsewhere => "backend.errors.draftChangedElsewhere",
             Self::SendPending => "backend.errors.draftSendPending",
             Self::OutboxActionCannotBeDiscarded => "backend.errors.outboxActionCannotBeDiscarded",
+            Self::QueuedDraftNotRestorable => "backend.errors.queuedDraftNotRestorable",
             Self::InvalidRecipient { .. } => "backend.errors.recipientAddressInvalid",
             Self::Signature(error) => match error {
                 SignatureError::NameEmpty => "backend.errors.signatureNameRequired",

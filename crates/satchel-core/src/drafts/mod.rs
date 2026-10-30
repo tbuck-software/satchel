@@ -576,15 +576,23 @@ async fn restore_queued_draft_tx(
     if let Some(draft_id) = payload.input.draft_id.as_deref() {
         // The writer is already owned. Check before publishing any queue content
         // or allowing the upsert to overwrite a row that replaced the draft.
-        let current = ContentReference::load_on(tx, draft_id).await?;
-        current.ensure_current(tx).await?;
-        if let Some(saved) = payload.draft_reference.as_ref() {
-            saved.ensure_current(tx).await?;
-        } else if current.is_remote_imap() {
+        // Neither syncing nor retrying brings such a draft back; the send stays
+        // queued, and only the Outbox can still show or discard it.
+        let current = ContentReference::find_on(tx, draft_id)
+            .await?
+            .ok_or(DraftError::QueuedDraftNotRestorable)?;
+        // Read in this transaction, so `ensure_current` reduces to this check:
+        // a row whose folder has since changed generation is stale.
+        current
+            .validate_cached_read()
+            .map_err(|_| DraftError::QueuedDraftNotRestorable)?;
+        let restorable = match payload.draft_reference.as_ref() {
+            // Sync adopting the server copy keeps the draft; a reset does not.
+            Some(saved) => saved.same_draft_identity(&current),
             // A legacy queue snapshot cannot borrow a replacement envelope's
             // valid generation. Local and imported snapshots remain editable.
-            return Err(DraftError::ChangedElsewhere);
-        }
+            None => !current.is_remote_imap(),
+        };
         let owned: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ? AND account_id = ? AND is_draft = 1)",
         )
@@ -593,8 +601,8 @@ async fn restore_queued_draft_tx(
         .fetch_one(&mut **tx)
         .await
         .map_err(DraftError::unexpected)?;
-        if !owned {
-            return Err(DraftError::ChangedElsewhere);
+        if !restorable || !owned {
+            return Err(DraftError::QueuedDraftNotRestorable);
         }
     }
     sqlx::query("DELETE FROM sync_queue WHERE id = ?")
@@ -880,17 +888,22 @@ async fn finish_draft_list(
     }
     // Sanitization yields to blocking workers. Recheck every captured identity
     // after those awaits, retaining unavailable metadata for changed/deleted rows.
+    // The list shows each draft's own editable state, so sync replacing its
+    // server copy meanwhile leaves the snapshot valid; a new generation does not.
     let ids = references
         .iter()
         .map(|reference| reference.message_id.clone())
         .collect::<Vec<_>>();
     let current = ContentReference::load_many(pool, &ids).await?;
     for (draft, reference) in drafts.iter_mut().zip(references) {
-        if !current
-            .get(&reference.message_id)
-            .is_some_and(|value| reference.same_identity(value))
-        {
-            *draft = unavailable_draft(draft.clone(), reference.changed_error());
+        let error = match current.get(&reference.message_id) {
+            Some(value) if reference.same_draft_identity(value) => {
+                value.validate_cached_read().err()
+            }
+            _ => Some(reference.changed_error()),
+        };
+        if let Some(error) = error {
+            *draft = unavailable_draft(draft.clone(), error);
         }
     }
     Ok(drafts)
@@ -1117,10 +1130,30 @@ async fn delete_draft_with_queue(
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(DraftError::unexpected)?;
-    let queued: Vec<String> = sqlx::query_scalar("SELECT id FROM sync_queue WHERE action_type = 'send_message' AND json_valid(payload) AND json_extract(payload, '$.input.draft_id') = ?")
-        .bind(id).fetch_all(&mut *tx).await.map_err(DraftError::unexpected)?;
-    for queued_id in queued.into_iter().filter(|_| cancel_send) {
-        restore_queued_draft_tx(&mut tx, queue, &queued_id).await?;
+    if cancel_send {
+        // The draft goes, so its queued snapshot is not restored first: a
+        // snapshot whose draft changed since queueing must not block Discard.
+        // A send the worker owns, or that may have reached the provider, stays.
+        sqlx::query(
+            "DELETE FROM sync_queue WHERE action_type = 'send_message'
+             AND status IN ('pending', 'scheduled', 'failed')
+             AND json_valid(payload) AND json_extract(payload, '$.input.draft_id') = ?",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(DraftError::unexpected)?;
+        let protected: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM sync_queue WHERE action_type = 'send_message'
+             AND json_valid(payload) AND json_extract(payload, '$.input.draft_id') = ?)",
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(DraftError::unexpected)?;
+        if protected {
+            return Err(DraftError::OutboxActionCannotBeDiscarded);
+        }
     }
     let remote: Option<(String, Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT m.account_id, m.remote_draft_id, m.remote_id, f.remote_id
@@ -1548,7 +1581,7 @@ mod tests {
     async fn draft_list_revalidates_each_snapshot_after_identity_change_or_removal() {
         let pool = draft_test_pool().await;
         let queue = crate::sync::queue::SyncQueue::new();
-        for id in ["stable", "changed", "removed"] {
+        for id in ["stable", "reuploaded", "changed", "removed"] {
             let mut input = draft_input("A", "Saved body");
             input.id = Some(id.into());
             input.body_html = Some("<p>Saved HTML</p>".into());
@@ -1562,18 +1595,21 @@ mod tests {
         .await
         .unwrap();
         let snapshot = super::draft_list_snapshot(&pool).await.unwrap();
+        // An autosave re-upload replaces the UID within the generation; a row
+        // adopted under another generation is a different mailbox's content.
         sqlx::raw_sql(
-            "UPDATE messages SET remote_id = '43' WHERE id = 'changed';
+            "UPDATE messages SET remote_id = '43' WHERE id = 'reuploaded';
+            UPDATE messages SET remote_uidvalidity = 9 WHERE id = 'changed';
             DELETE FROM messages WHERE id = 'removed';",
         )
         .execute(&pool)
         .await
         .unwrap();
         let drafts = super::finish_draft_list(&pool, snapshot).await.unwrap();
-        assert_eq!(drafts.len(), 3);
+        assert_eq!(drafts.len(), 4);
         for draft in drafts {
-            if draft.id == "stable" {
-                assert!(draft.content_error.is_none());
+            if matches!(draft.id.as_str(), "stable" | "reuploaded") {
+                assert!(draft.content_error.is_none(), "{}", draft.id);
                 assert_eq!(draft.body, "Saved body");
             } else {
                 assert!(draft
@@ -2568,11 +2604,13 @@ mod queued_send_tests {
     async fn queued_restoration_rejects_unavailable_and_replaced_drafts_without_writes() {
         for open in [false, true] {
             for status in ["pending", "scheduled", "failed"] {
+                // A new UID or folder within the saved generation is sync
+                // replacing the server copy; see
+                // `queued_restoration_survives_sync_replacing_the_server_copy`.
                 for change in [
                     "missing",
                     "changed",
-                    "uid",
-                    "folder",
+                    "reset",
                     "account",
                     "recreated",
                     "removed",
@@ -2606,18 +2644,14 @@ mod queued_send_tests {
                                 .await
                                 .unwrap();
                         }
-                        "uid" => {
-                            sqlx::query("UPDATE messages SET remote_id = '43'")
-                                .execute(&pool)
-                                .await
-                                .unwrap();
-                        }
-                        "folder" => {
-                            sqlx::query("INSERT INTO folders (id, account_id, name, full_path, folder_type, uidvalidity, created_at, updated_at) VALUES ('other', 'a', 'Other', 'Other', 'drafts', 7, '', '')").execute(&pool).await.unwrap();
-                            sqlx::query("UPDATE messages SET folder_id = 'other'")
-                                .execute(&pool)
-                                .await
-                                .unwrap();
+                        "reset" => {
+                            sqlx::raw_sql(
+                                "UPDATE folders SET uidvalidity = 8;
+                                UPDATE messages SET remote_id = '42', remote_uidvalidity = 8;",
+                            )
+                            .execute(&pool)
+                            .await
+                            .unwrap();
                         }
                         "account" => {
                             sqlx::query("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at) VALUES ('b', 'B', 'b@example.test', 'imap', '{}', '', '', '')").execute(&pool).await.unwrap();
@@ -2667,17 +2701,10 @@ mod queued_send_tests {
                         DraftError::Failure(value) => value,
                         other => other.encoded(),
                     };
+                    // Syncing cannot bring the saved draft back; only the Outbox can act.
                     assert!(
-                        encoded.contains(if change == "missing" {
-                            "imapUidValidityMissing"
-                        } else if change == "removed" {
-                            "messageNotAvailableLocally"
-                        } else if change == "delivered" {
-                            "draftChangedElsewhere"
-                        } else {
-                            "imapUidValidityChanged"
-                        }),
-                        "{encoded}"
+                        encoded.contains("queuedDraftNotRestorable"),
+                        "{open}/{status}/{change}: {encoded}"
                     );
                     let after: Vec<(String, Option<String>, i64)> =
                         sqlx::query_as("SELECT id, body_text, draft_revision FROM messages")
@@ -2732,10 +2759,14 @@ mod queued_send_tests {
                 .await
                 .unwrap();
             let mut reset = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
-            sqlx::query("UPDATE messages SET remote_id = '43', body_text = 'replacement content'")
-                .execute(&mut *reset)
-                .await
-                .unwrap();
+            sqlx::raw_sql(
+                "UPDATE folders SET uidvalidity = 8;
+                UPDATE messages SET remote_id = '43', remote_uidvalidity = 8,
+                    body_text = 'replacement content';",
+            )
+            .execute(&mut *reset)
+            .await
+            .unwrap();
             let (started, waiting) = tokio::sync::oneshot::channel();
             let restore = tokio::spawn({
                 let pool = pool.clone();
@@ -2755,9 +2786,7 @@ mod queued_send_tests {
             waiting.await.unwrap();
             reset.commit().await.unwrap();
             let result = restore.await.unwrap();
-            assert!(
-                matches!(result, Err(DraftError::Failure(ref error)) if error.contains("imapUidValidityChanged"))
-            );
+            assert!(matches!(result, Err(DraftError::QueuedDraftNotRestorable)));
             let body: String =
                 sqlx::query_scalar("SELECT body_text FROM messages WHERE id = 'saved'")
                     .fetch_one(&pool)
@@ -2800,7 +2829,7 @@ mod queued_send_tests {
                     restore_queued_draft(&pool, &queue, &action.id).await
                 };
                 if remote == Some("42") {
-                    assert!(matches!(result, Err(DraftError::ChangedElsewhere)));
+                    assert!(matches!(result, Err(DraftError::QueuedDraftNotRestorable)));
                     assert_eq!(queue.list_mail_outbox(&pool).await.unwrap().len(), 1);
                     let body: String =
                         sqlx::query_scalar("SELECT body_text FROM messages WHERE id = 'saved'")
@@ -2856,6 +2885,127 @@ mod queued_send_tests {
                 assert_eq!(draft.attachments.len(), 1);
                 assert!(queue.list_mail_outbox(&pool).await.unwrap().is_empty());
             }
+        }
+    }
+
+    /// Sync adopts the draft row for the server copy: the first ingest stamps a
+    /// UID and generation, each autosave re-upload a new UID, and a folder
+    /// rename moves the row within its generation. None of these is a reset.
+    /// The app crate repeats this through the real ingest upsert.
+    #[tokio::test]
+    async fn queued_restoration_survives_sync_replacing_the_server_copy() {
+        for open in [false, true] {
+            for change in ["first-ingest", "reupload", "renamed"] {
+                let (pool, queue) = fixture().await;
+                let action = action(Some("saved"));
+                let input = draft_input_for_send("a", &action_input(&action), None).unwrap();
+                save(&pool, &queue, &input).await.unwrap();
+                sqlx::query("UPDATE folders SET uidvalidity = 7")
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                if change != "first-ingest" {
+                    sqlx::query("UPDATE messages SET remote_id = '41', remote_uidvalidity = 7")
+                        .execute(&pool)
+                        .await
+                        .unwrap();
+                }
+                enqueue_send_with_draft(&pool, &queue, &action)
+                    .await
+                    .unwrap();
+                match change {
+                    "first-ingest" | "reupload" => {
+                        sqlx::query(
+                            "UPDATE messages SET remote_id = ?, remote_uidvalidity = 7,
+                                body_text = 'Server copy'",
+                        )
+                        .bind(if change == "reupload" { "42" } else { "41" })
+                        .execute(&pool)
+                        .await
+                        .unwrap();
+                    }
+                    "renamed" => {
+                        sqlx::raw_sql(
+                            "INSERT INTO folders (id, account_id, name, full_path, folder_type, uidvalidity, created_at, updated_at)
+                                VALUES ('renamed', 'a', 'Renamed', 'Renamed', 'drafts', 7, '', '');
+                            UPDATE messages SET folder_id = 'renamed';
+                            DELETE FROM folders WHERE id <> 'renamed';",
+                        )
+                        .execute(&pool)
+                        .await
+                        .unwrap();
+                    }
+                    _ => unreachable!(),
+                }
+                let draft = if open {
+                    load(&pool, &pool, &queue, "saved").await.unwrap().unwrap()
+                } else {
+                    restore_queued_draft(&pool, &queue, &action.id)
+                        .await
+                        .unwrap()
+                };
+                assert_eq!(
+                    draft.body, "Latest edits before autosave",
+                    "{open}/{change}"
+                );
+                assert!(queue.list_mail_outbox(&pool).await.unwrap().is_empty());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn discarding_a_scheduled_draft_needs_no_restorable_snapshot() {
+        for change in ["legacy", "reset", "removed"] {
+            let (pool, queue) = fixture().await;
+            let action = action(Some("saved"));
+            let input = draft_input_for_send("a", &action_input(&action), None).unwrap();
+            save(&pool, &queue, &input).await.unwrap();
+            sqlx::raw_sql(
+                "UPDATE folders SET uidvalidity = 7;
+                UPDATE messages SET remote_id = '42', remote_uidvalidity = 7;",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            enqueue_send_with_draft(&pool, &queue, &action)
+                .await
+                .unwrap();
+            match change {
+                "legacy" => {
+                    sqlx::query("UPDATE sync_queue SET payload = json_remove(payload, '$.draft_reference') WHERE id = ?")
+                        .bind(&action.id).execute(&pool).await.unwrap();
+                }
+                "reset" => {
+                    sqlx::raw_sql(
+                        "UPDATE folders SET uidvalidity = 8;
+                        UPDATE messages SET remote_id = '43', remote_uidvalidity = 8;",
+                    )
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                }
+                "removed" => {
+                    sqlx::query("DELETE FROM messages")
+                        .execute(&pool)
+                        .await
+                        .unwrap();
+                }
+                _ => unreachable!(),
+            }
+            assert!(matches!(
+                restore_queued_draft(&pool, &queue, &action.id).await,
+                Err(DraftError::QueuedDraftNotRestorable)
+            ));
+            discard(&pool, &queue, "saved").await.unwrap();
+            assert!(
+                queue.list_mail_outbox(&pool).await.unwrap().is_empty(),
+                "{change}"
+            );
+            let drafts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(drafts, 0, "{change}");
         }
     }
 

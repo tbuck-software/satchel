@@ -51,7 +51,7 @@ import { useComposerSignature } from '@/composables/useComposerSignature';
 import { useComposerTransport } from '@/composables/useComposerTransport';
 import { useToast } from '@/composables/useToast';
 import { useToastClearance } from '@/composables/useToastClearance';
-import { outboxErrorLabel } from '@/utils/outboxLabels';
+import { outboxErrorLabel, queuedDraftNeedsOutbox } from '@/utils/outboxLabels';
 import { translateBackendError } from '@/utils/backendErrors';
 import {
   formatTimestamp,
@@ -686,7 +686,10 @@ onMounted(async () => {
       const text = translateBackendError(err)
         ?? outboxErrorLabel(err instanceof Error ? err.message : String(err));
       status.value = { tone: 'error', text };
-      toast.error(text);
+      // A popout has no mailbox to route into; the message names the place.
+      toast.error(text, queuedDraftNeedsOutbox(err) && !isPopout() ? {
+        action: { label: t('nav.folders.outbox'), handler: () => router.push({ name: 'outbox' }) },
+      } : undefined);
       draftLoadFailed.value = fromDraft;
     }
     if (!fromDraft) syncSignatureSelection();

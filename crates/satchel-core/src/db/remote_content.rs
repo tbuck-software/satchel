@@ -33,6 +33,16 @@ impl ContentReference {
         connection: &mut sqlx::SqliteConnection,
         message_id: &str,
     ) -> Result<Self, String> {
+        Self::find_on(connection, message_id)
+            .await?
+            .ok_or_else(|| "backend.errors.messageNotAvailableLocally".to_string())
+    }
+
+    /// Like `load_on`, for callers that treat a missing row as an outcome.
+    pub async fn find_on(
+        connection: &mut sqlx::SqliteConnection,
+        message_id: &str,
+    ) -> Result<Option<Self>, String> {
         sqlx::query_as(
             "SELECT m.id AS message_id, m.account_id, m.folder_id, m.remote_id,
                     m.remote_uidvalidity, m.created_at, a.provider,
@@ -44,8 +54,7 @@ impl ContentReference {
         .bind(message_id)
         .fetch_optional(connection)
         .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "backend.errors.messageNotAvailableLocally".to_string())
+        .map_err(|error| error.to_string())
     }
 
     /// Read identities in bounded batches, including folder generation in the same snapshot.
@@ -121,6 +130,24 @@ impl ContentReference {
             && (!self.is_remote_imap()
                 || (self.source_folder == current.source_folder
                     && self.folder_uidvalidity == current.folder_uidvalidity))
+    }
+
+    /// Identity of content that is not bound to one server UID: a draft's
+    /// own editable state, or bytes an export has already written.
+    ///
+    /// Sync replaces a draft's server copy without a mailbox reset. The first
+    /// ingest stamps a UID and generation on a draft that had none, and each
+    /// autosave re-upload assigns a new UID in the same generation; a confirmed
+    /// move or a folder rename keeps the generation the row was read in. A
+    /// generation, once saved, must still match. The current row's own
+    /// `validate_cached_read` separately rejects a row its folder has outgrown.
+    pub fn same_draft_identity(&self, current: &Self) -> bool {
+        self.message_id == current.message_id
+            && self.account_id == current.account_id
+            && self.created_at == current.created_at
+            && self.provider == current.provider
+            && (self.remote_uidvalidity.is_none()
+                || self.remote_uidvalidity == current.remote_uidvalidity)
     }
 
     pub async fn begin_write<'a>(
@@ -580,6 +607,51 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body, "replacement");
+    }
+
+    #[tokio::test]
+    async fn draft_identity_survives_server_copy_replacement_but_not_a_new_generation() {
+        let pool = fixture().await;
+        let saved = ContentReference::load(&pool, "message").await.unwrap();
+        let local = ContentReference {
+            remote_id: None,
+            remote_uidvalidity: None,
+            ..saved.clone()
+        };
+        let current = |change: &str| {
+            let mut current = saved.clone();
+            match change {
+                "reupload" => current.remote_id = Some("43".into()),
+                "renamed" => {
+                    current.folder_id = Some("renamed".into());
+                    current.source_folder = Some("Renamed".into());
+                }
+                "reset" => {
+                    current.remote_uidvalidity = Some(8);
+                    current.folder_uidvalidity = Some(8);
+                }
+                "unstamped" => current.remote_uidvalidity = None,
+                "account" => current.account_id = "other".into(),
+                "recreated" => current.created_at = "replacement".into(),
+                "other-row" => current.message_id = "other".into(),
+                _ => {}
+            }
+            current
+        };
+        for change in ["same", "reupload", "renamed"] {
+            assert!(saved.same_draft_identity(&current(change)), "{change}");
+            assert!(!saved.same_identity(&current(change)) || change == "same");
+        }
+        for change in ["reset", "unstamped", "account", "recreated", "other-row"] {
+            assert!(!saved.same_draft_identity(&current(change)), "{change}");
+        }
+        // The first ingest of a local draft stamps the generation it had none of.
+        for change in ["same", "reupload", "reset", "unstamped"] {
+            assert!(local.same_draft_identity(&current(change)), "{change}");
+        }
+        for change in ["account", "recreated", "other-row"] {
+            assert!(!local.same_draft_identity(&current(change)), "{change}");
+        }
     }
 
     #[tokio::test]

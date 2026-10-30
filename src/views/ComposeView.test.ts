@@ -433,6 +433,28 @@ describe('composer setup', () => {
     }
   });
 
+  it.each([false, true])('points a scheduled draft that changed after queueing to the Outbox (popout %s)', async (popout) => {
+    harness.isPopout.mockReturnValue(popout);
+    harness.fetchDraft.mockRejectedValue({ key: 'backend.errors.queuedDraftNotRestorable' });
+    const wrapper = render([], !popout, { initialDraftId: 'draft-1', initialBody: '' });
+    try {
+      await flushPromises();
+      const [message, options] = harness.toastError.mock.calls[0]! as [string, { action?: { label: string; handler: () => unknown } }?];
+      expect(message).toContain('Outbox');
+      expect(sendButton(wrapper).attributes('disabled')).toBeDefined();
+      if (popout) {
+        // A popout has no mailbox to route into; the text names the place.
+        expect(options?.action).toBeUndefined();
+      } else {
+        expect(options?.action?.label).toBe('Outbox');
+        await options!.action!.handler();
+        expect(harness.push).toHaveBeenCalledWith({ name: 'outbox' });
+      }
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it('refuses an unavailable list payload returned as a draft load', async () => {
     harness.fetchDraft.mockResolvedValue({ id: 'draft-1', account_id: 'account-1',
       to: [], cc: [], bcc: [], subject: '', body: '', updated_at: '',
