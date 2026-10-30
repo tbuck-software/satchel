@@ -186,6 +186,7 @@ const COMMANDS: &[&str] = &[
     "delete_topic",
     "add_topic_items",
     "remove_topic_item",
+    "undo_topic_memberships",
     "list_topic_memberships",
     "get_topic_timeline",
     "upsert_topic_note",

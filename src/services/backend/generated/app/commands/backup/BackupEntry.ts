@@ -2,7 +2,7 @@
 export type BackupEntry = {
     path: string;
     /**
-     * Directory name, `satchel-YYYYMMDD-HHMMSS`.
+     * Timestamped directory name, with a unique suffix for new backups.
      */
     name: string;
     created_at: string;

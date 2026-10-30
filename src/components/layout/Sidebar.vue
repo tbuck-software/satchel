@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CollectionLoadState from '@/components/ui/CollectionLoadState.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
@@ -224,8 +225,15 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
         <PluginSlotHost slot-name="sidebar_section" />
       </nav>
       <!-- Smart folders (saved searches) -->
-      <nav v-if="smartFolders.items.length > 0" class="grid gap-0.5 px-3 pb-2 pt-5">
+      <nav v-if="smartFolders.items.length > 0 || smartFolders.loadFailed" class="grid gap-0.5 px-3 pb-2 pt-5" :aria-busy="smartFolders.loading">
         <span class="text-2xs font-semibold text-tertiary px-3 mb-1">{{ $t('nav.smartFolders') }}</span>
+        <CollectionLoadState
+          :loading="smartFolders.loading"
+          :failed="smartFolders.loadFailed"
+          :has-content="smartFolders.items.length > 0"
+          :error-label="$t('settings.smartFolders.loadFailed')"
+          @retry="smartFolders.load()"
+        />
         <NavItem
           v-for="folder in smartFolders.items"
           :key="folder.id"

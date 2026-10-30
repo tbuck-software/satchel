@@ -440,6 +440,10 @@ test('keeps error toasts off the draft card, the reply bar and the send button',
 
   await page.setViewportSize({ width: 900, height: 700 });
   await page.getByText('Staging login 500 after deployment', { exact: true }).first().click();
+  // Membership chips can put the draft below the fold after resizing.
+  // Test toast overlap on a visible action rather than an offscreen point.
+  await resume.scrollIntoViewIfNeeded();
+  await expect(resume).toBeInViewport({ ratio: 1 });
   // The reader's foot sits in the stack's corner here; the card must win.
   await expect.poll(() => isUncovered(resume)).toBe(true);
   await resume.click();

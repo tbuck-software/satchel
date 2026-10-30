@@ -69,8 +69,13 @@ const active = ref(true);
 const conditions = ref<ConditionDraft[]>([{ field: 'from_contains', value: '' }]);
 const actions = ref<ActionDraft[]>([{ kind: 'set_category', value: 'updates' }]);
 
+const unusedCondition = computed(() => conditionFields.find((field) =>
+  !conditions.value.some((condition) => condition.field === field)));
+const uniqueConditions = computed(() =>
+  new Set(conditions.value.map((condition) => condition.field)).size === conditions.value.length);
 const canSave = computed(() =>
-  name.value.trim().length > 0
+  uniqueConditions.value
+  && name.value.trim().length > 0
   && conditions.value.some((condition) => condition.value.trim().length > 0)
   && actions.value.every((action) => action.kind === 'mark_read' || action.value.trim().length > 0),
 );
@@ -156,9 +161,7 @@ function changeActionKind(action: ActionDraft, event: Event) {
 }
 
 function addCondition() {
-  const unused = conditionFields
-    .find((field) => !conditions.value.some((condition) => condition.field === field));
-  conditions.value.push({ field: unused ?? 'subject_contains', value: '' });
+  if (unusedCondition.value) conditions.value.push({ field: unusedCondition.value, value: '' });
 }
 
 function addAction() {
@@ -166,6 +169,10 @@ function addAction() {
 }
 
 async function save() {
+  if (!uniqueConditions.value) {
+    error.value = t('settings.rules.duplicateCondition');
+    return;
+  }
   if (!canSave.value || saving.value) return;
   saving.value = true;
   error.value = '';
@@ -266,7 +273,7 @@ onMounted(load);
       <AppButton variant="primary" @click="startCreate">{{ $t('settings.rules.newRule') }}</AppButton>
     </header>
 
-    <p v-if="error" class="message error">{{ error }}</p>
+    <p v-if="error" role="alert" class="message error">{{ error }}</p>
     <p v-if="notice" class="message notice">{{ notice }}</p>
     <p v-if="loading" class="empty">{{ $t('settings.rules.loading') }}</p>
     <p v-else-if="rules.length === 0 && !editorOpen" class="empty">{{ $t('settings.rules.empty') }}</p>
@@ -312,7 +319,7 @@ onMounted(load);
         </label>
         <div v-for="(condition, index) in conditions" :key="index" class="flow-row">
           <select v-model="condition.field">
-            <option v-for="(label, field) in conditionLabels" :key="field" :value="field">{{ label }}</option>
+            <option v-for="(label, field) in conditionLabels" :key="field" :value="field" :disabled="conditions.some((other, otherIndex) => otherIndex !== index && other.field === field)">{{ label }}</option>
           </select>
           <input v-model="condition.value" :placeholder="$t('settings.rules.valuePlaceholder')" />
           <IconButton
@@ -325,7 +332,7 @@ onMounted(load);
             </svg>
           </IconButton>
         </div>
-        <AppButton size="sm" @click="addCondition">{{ $t('settings.rules.addCondition') }}</AppButton>
+        <AppButton size="sm" :disabled="!unusedCondition" @click="addCondition">{{ $t('settings.rules.addCondition') }}</AppButton>
       </fieldset>
 
       <fieldset>

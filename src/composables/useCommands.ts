@@ -11,7 +11,7 @@ import { useMessageLinks } from '@/composables/useMessageLinks';
 import { useShortcutHints, type ShortcutHint } from '@/composables/useShortcutHints';
 import { activeThreadReaderCommands } from '@/composables/useThreadReaderCommands';
 import { listKeyboardTargets } from '@/composables/useListKeyboardNavigation';
-import { useUndoFab } from '@/composables/useUndoFab';
+import { useUndo } from '@/composables/useUndo';
 import { useToast } from '@/composables/useToast';
 import { useMailSync } from '@/composables/useMailSync';
 import { useUiStore } from '@/stores/ui';
@@ -78,7 +78,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
   const { syncMail } = useMailSync();
   const ui = useUiStore();
   const { hint } = useShortcutHints();
-  const undoFab = useUndoFab();
+  const undo = useUndo();
 
   // A list with its own targets (search page, topic, sender review) is what
   // the palette acts on, like the keys; otherwise the store's selection.
@@ -423,16 +423,16 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       },
       ...readerCommands(),
     ] : []),
-    ...(undoFab.entries.value.length > 0 ? [{
+    ...(undo.entries.value.length > 0 ? [{
       id: 'undo:latest',
       icon: 'undo' as const,
-      title: t('commands.undo', { label: undoFab.entries.value.at(-1)?.label ?? '' }),
+      title: t('commands.undo', { label: undo.entries.value.at(-1)?.label ?? '' }),
       context: 'app' as const,
       shortcut: hint('undo'),
       keywords: t('commands.keywords.undo'),
       run: () => {
-        const entry = undoFab.entries.value.at(-1);
-        if (entry) void undoFab.run(entry);
+        const entry = undo.entries.value.at(-1);
+        if (entry) void undo.run(entry);
       },
     }] : []),
     {

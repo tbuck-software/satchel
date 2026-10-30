@@ -7,6 +7,7 @@
  * here, so they get topics only.
  */
 import AppIcon from '@/components/ui/AppIcon.vue';
+import TopicMembershipState from '@/components/topics/TopicMembershipState.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import KeyCap from '@/components/ui/KeyCap.vue';
 import { formatBinding } from '@/config/keybindings';
@@ -74,7 +75,7 @@ const rows = computed<PickerRow[]>(() => {
   if (!target) return [];
   const term = query.value.trim().toLowerCase();
   const list: PickerRow[] = [...folderRows.value];
-  list.push(...topics.activeTopics
+  if (topics.membershipsKnownFor(target.itemType, target.itemIds)) list.push(...topics.activeTopics
     .filter((topic) => !term || topic.name.toLowerCase().includes(term))
     .map((topic) => {
       const memberCount = target.itemIds.filter((itemId) =>
@@ -260,6 +261,8 @@ function onEnter() {
             />
           </div>
 
+          <TopicMembershipState v-if="topics.pickerTarget"
+            :item-type="topics.pickerTarget.itemType" :item-ids="topics.pickerTarget.itemIds" />
           <div v-if="rows.length > 0" id="topic-picker-list" class="list" role="listbox" :aria-label="$t('thread.actions.fileTo')">
             <template v-for="(row, index) in rows" :key="`${row.kind}:${row.id}`">
             <p v-if="groupLabel(index)" class="group-label" role="presentation">{{ groupLabel(index) }}</p>
@@ -298,7 +301,7 @@ function onEnter() {
             </CardButton>
             </template>
           </div>
-          <p v-else class="empty-hint">{{ $t('topics.picker.empty') }}</p>
+          <p v-else-if="topics.pickerTarget && topics.membershipsKnownFor(topics.pickerTarget.itemType, topics.pickerTarget.itemIds)" class="empty-hint">{{ $t('topics.picker.empty') }}</p>
 
           <footer class="hint-row" aria-hidden="true">
             <span><KeyCap>↑</KeyCap><KeyCap>↓</KeyCap> {{ $t('nav.omni.hints.navigate') }}</span>

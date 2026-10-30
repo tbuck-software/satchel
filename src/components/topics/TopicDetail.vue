@@ -463,17 +463,27 @@ async function deleteNote(noteId: string) {
 async function removeItem(item: TopicTimelineItem) {
   if (item.item_type === 'note') return;
   try {
-    await topics.removeItemFromTopic(topicId.value, item.item_type, item.item_id);
-    timeline.value = timeline.value.filter(
-      (entry) => !(entry.item_type === item.item_type && entry.item_id === item.item_id),
-    );
+    const originalTopicId = topicId.value;
+    const itemType = item.item_type;
+    const itemId = item.item_id;
+    const receipt = await topics.removeItemFromTopic(originalTopicId, itemType, itemId);
+    if (topicId.value === originalTopicId) {
+      timeline.value = timeline.value.filter(
+        (entry) => !(entry.item_type === itemType && entry.item_id === itemId),
+      );
+    }
+    if (!receipt) return;
     toast.success(t('topics.toast.itemRemoved'), {
       action: {
         label: t('topics.toast.undo'),
-        handler: () => {
-          void topics
-            .addItemsToTopic(topicId.value, item.item_type as 'thread' | 'message', [item.item_id])
-            .then(() => loadTimeline());
+        handler: async () => {
+          try {
+            await topics.undoMemberships(originalTopicId, itemType, [receipt], true);
+            if (topicId.value === originalTopicId) await loadTimeline();
+          } catch {
+            toast.error(t('topics.picker.assignFailed'));
+            return false;
+          }
         },
       },
     });

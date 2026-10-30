@@ -836,6 +836,7 @@ pub fn run() {
             commands::topics::delete_topic,
             commands::topics::add_topic_items,
             commands::topics::remove_topic_item,
+            commands::topics::undo_topic_memberships,
             commands::topics::list_topic_memberships,
             commands::topics::get_topic_timeline,
             commands::topics::upsert_topic_note,

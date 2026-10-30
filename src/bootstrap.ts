@@ -19,6 +19,7 @@ import {
   backendSetUiStrings,
   backendSyncGroupware,
   backendSupportsNativeCommands,
+  backendCommandsAvailable,
   backendTakePendingOpenWith,
   backendTakePendingNotificationThread,
   backendAcknowledgeDraftFlush,
@@ -448,15 +449,16 @@ export function useAppBootstrap(): void {
   });
 
   watch(() => connectionStore.retryToken, async () => {
-    if (!backendSupportsNativeCommands() || connectionStore.retrying) return;
+    if (!backendCommandsAvailable() || connectionStore.retrying) return;
     connectionStore.retrying = true;
     try {
-      // The outbox and the drafts report into the same banner, so the retry has
-      // to reach them — otherwise a failed list leaves a banner nothing can clear.
+      // Auxiliary lists report into the same banner; its retry must reach them.
       await Promise.all([
         loadCoreStores(),
         outboxStore.load(),
         connectionStore.backendErrorFor('drafts') ? draftsStore.load() : undefined,
+        connectionStore.backendErrorFor('templates') ? templatesStore.load() : undefined,
+        connectionStore.backendErrorFor('smartFolders') ? smartFoldersStore.load() : undefined,
         connectionStore.refresh(),
       ]);
     } finally {

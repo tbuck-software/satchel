@@ -181,6 +181,7 @@ describe.each(cases)('$label deletion', (testCase) => {
     await wrapper.get('.list .delete').trigger('click');
     await vi.waitFor(() => {
       expect(wrapper.findAll('.list .delete')).toHaveLength(0);
+      expect(toast.state.toasts).toHaveLength(1);
     });
 
     expect(testCase.deleteMock).toHaveBeenCalledWith(testCase.entryId);

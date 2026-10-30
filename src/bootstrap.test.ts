@@ -14,6 +14,7 @@ import {
   backendImportIcsPath,
   backendTakePendingOpenWith,
   backendListTemplates,
+  backendListSmartFolders,
   backendListThreads,
   backendListTopics,
   backendRunImapSync,
@@ -221,6 +222,28 @@ describe('bootstrap entries', () => {
     await vi.waitFor(() => expect(backendRunImapSync).toHaveBeenCalled());
     for (const load of listLoads()) expect(load).toHaveBeenCalled();
 
+    wrapper.unmount();
+  });
+
+  it('retries failed templates and smart folders from the connection banner', async () => {
+    vi.mocked(backendListTemplates).mockRejectedValueOnce(new Error('template list offline'));
+    vi.mocked(backendListSmartFolders).mockRejectedValueOnce(new Error('folder list offline'));
+    const wrapper = boot(useAppBootstrap);
+    await flushPromises();
+    await flushPromises();
+    const connection = useConnectionStore();
+    await vi.waitFor(() => {
+      expect(connection.backendErrorFor('templates')).toBe('template list offline');
+      expect(connection.backendErrorFor('smartFolders')).toBe('folder list offline');
+    });
+    connection.requestRetry();
+    await vi.waitFor(() => {
+      expect(backendListTemplates).toHaveBeenCalledTimes(2);
+      expect(backendListSmartFolders).toHaveBeenCalledTimes(2);
+      expect(connection.backendErrorFor('templates')).toBeNull();
+      expect(connection.backendErrorFor('smartFolders')).toBeNull();
+      expect(connection.retrying).toBe(false);
+    });
     wrapper.unmount();
   });
 
