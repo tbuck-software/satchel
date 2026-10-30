@@ -83,8 +83,11 @@
       "undoWindow": "Sende in {seconds}s — Rückgängig möglich"
     },
     "notifications": {
+      "actionFailed": "Die Aktion aus der Benachrichtigung ließ sich nicht abschließen. Versuche es in Satchel noch einmal.",
+      "mailGone": "Die E-Mail aus dieser Benachrichtigung liegt nicht mehr in Satchel.",
       "read": "Gelesen",
-      "replyPlaceholder": "Antwort schreiben …"
+      "replyPlaceholder": "Antwort schreiben …",
+      "replyWaiting": "Deine Antwort aus der Benachrichtigung bleibt erhalten. Satchel bietet sie wieder an, sobald der offene Dialog oder Entwurf geschlossen ist."
     },
     "outbox": {
       "needsAttention": "{count} E-Mail im Postausgang benötigt Aufmerksamkeit. | {count} E-Mails im Postausgang benötigen Aufmerksamkeit.",
@@ -246,6 +249,7 @@
       "messagesQuarantined": "{count} Nachrichten in {folder} konnten für {account} nicht gespeichert werden. Die Synchronisierung läuft mit den übrigen weiter.",
       "noActiveAccount": "Richte zuerst ein aktives Konto ein.",
       "notAMessageFile": "So lassen sich nur .eml- und .msg-Dateien öffnen.",
+      "notificationReplyWaiting": "Eine Antwort aus einer Benachrichtigung ließ sich nicht öffnen. Satchel behält sie, bis du es erneut versuchst.",
       "oauthAccountConflict": "Diese Adresse gehört bereits zu einem IMAP-Konto und kann nicht durch OAuth ersetzt werden.",
       "oauthAccountMismatch": "Bitte wähle das Google-Konto aus, das du verbinden möchtest. Dein bestehendes Konto wurde nicht verändert.",
       "oauthAuthorizationCancelled": "Die Anmeldung wurde abgebrochen.",
@@ -1013,6 +1017,7 @@
       "drafts": "Deine Entwürfe konnten nicht geladen werden",
       "mailboxes": "Deine Postfächer konnten nicht geladen werden",
       "messages": "Die Nachrichten konnten nicht geladen werden",
+      "notifications": "Die Verarbeitung von Benachrichtigungen ist fehlgeschlagen",
       "outbox": "Der Postausgang konnte nicht geladen werden",
       "smartFolders": "Deine intelligenten Ordner konnten nicht geladen werden",
       "sync": "Der Mail-Abgleich ist fehlgeschlagen",

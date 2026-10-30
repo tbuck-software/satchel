@@ -1329,9 +1329,36 @@ export default {
                 }
             }
         },
+        "mobile_notification_response_handled": {
+            "kind": "object",
+            "fields": {
+                "responseId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "mobile_notifications_frontend_ready": {
             "kind": "object",
-            "fields": {}
+            "fields": {
+                "listenerId": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "ready": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
         },
         "move_threads_to_folder": {
             "kind": "object",

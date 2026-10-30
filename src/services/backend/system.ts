@@ -285,9 +285,18 @@ export async function backendDismissMobileNotifications(threadIds: string[]): Pr
 }
 
 
-/** Tell the native side the listener for queued notification routes exists. */
-export async function backendMobileNotificationsFrontendReady(): Promise<void> {
-  return invoke<void>('mobile_notifications_frontend_ready');
+/** Reserve, activate or dispose the iOS route listener lease. */
+export async function backendMobileNotificationsFrontendReady(listenerId: number | null, ready: boolean): Promise<number | null> {
+  return invoke<number | null>('mobile_notifications_frontend_ready', { listenerId, ready });
+}
+
+/**
+ * Release a retained iOS notification response: native drops its payload and
+ * completes the OS response. Only for an outcome the frontend stands behind;
+ * anything else stays retained for the next listener lease.
+ */
+export async function backendMobileNotificationResponseHandled(responseId: string): Promise<void> {
+  return invoke<void>('mobile_notification_response_handled', { responseId });
 }
 
 /** Consume the desktop notification that launched the app after listeners stand. */
