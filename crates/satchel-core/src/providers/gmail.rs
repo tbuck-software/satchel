@@ -1151,7 +1151,11 @@ impl GmailProvider {
             return Err("gmail label lookup returned an incomplete message".into());
         }
         if minimal.label_ids.is_some() {
-            return Err("gmail message lookup omitted its labels".into());
+            // Both answers are complete, but they disagree: neither can be
+            // trusted to say where the message lives.
+            return Err(
+                "gmail full message response omitted labels that its label lookup returned".into(),
+            );
         }
         Ok(Vec::new())
     }
