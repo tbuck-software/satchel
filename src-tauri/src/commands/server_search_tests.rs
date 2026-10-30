@@ -328,6 +328,44 @@ async fn retained_header_with_evicted_body_stays_available_on_server() {
 }
 
 #[tokio::test]
+async fn retained_header_body_errors_preserve_translation_parameters() {
+    use crate::commands::error::CommandError;
+    use crate::commands::server_search::{fetch_server_search_hit_impl, FetchServerHitInput};
+
+    let pool = pool().await;
+    seed_account(&pool).await;
+    seed_message(&pool, SeedMessage::default()).await;
+    crate::utils::crypto::seed_master_key_for_tests();
+    let config = crate::commands::accounts::encrypt_account_config("acc-1", "{}").unwrap();
+    sqlx::query("UPDATE accounts SET provider = 'test-unsupported', config = ? WHERE id = 'acc-1'")
+        .bind(config)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE messages SET remote_id = 'remote-1', body_text = NULL, body_html = NULL WHERE id = 'm-1'")
+        .execute(&pool).await.unwrap();
+
+    let error = fetch_server_search_hit_impl(
+        &pool,
+        &FetchServerHitInput {
+            account_id: "acc-1".into(),
+            remote_id: "remote-1".into(),
+        },
+    )
+    .await
+    .map_err(CommandError::from)
+    .unwrap_err();
+
+    assert_eq!(
+        serde_json::to_value(error).unwrap(),
+        serde_json::json!({
+            "key": "backend.errors.messageBodyProviderUnsupported",
+            "params": { "provider": "test-unsupported" },
+        })
+    );
+}
+
+#[tokio::test]
 async fn fetching_evicted_body_preserves_identity_and_local_state() {
     use crate::commands::server_search::{fetch_server_search_hit_impl, FetchServerHitInput};
     use crate::db::messages::{MessageSearchRepository, SearchQuery};

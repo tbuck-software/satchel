@@ -137,7 +137,7 @@ pub(crate) async fn fetch_server_search_hit_impl(
             &existing.message_id,
         )
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| err.encoded())?;
         return Ok(existing);
     }
 

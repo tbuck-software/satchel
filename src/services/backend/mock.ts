@@ -523,13 +523,17 @@ function messageDto(message: Message): BackendMessage {
   };
 }
 
+function hasCachedBody(message: Message): boolean {
+  return Boolean(message.bodyText.trim() || message.bodyHtml?.trim());
+}
+
 function messageBodyDto(message: Message): BackendMessageBody {
   return {
     id: message.id,
     snippet: message.bodyText.slice(0, 180),
     body_text: message.bodyText,
     body_html: message.bodyHtml ?? null,
-    body_loaded: Boolean(message.bodyText.trim() || message.bodyHtml?.trim()),
+    body_loaded: hasCachedBody(message),
     list_unsubscribe: message.listUnsubscribe ?? null,
     list_unsubscribe_post: message.listUnsubscribePost ?? null,
     auth_spf: message.authSpf ?? null,
@@ -562,7 +566,7 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
 }
 
 function restoreServerBody(message: Message): boolean {
-  if (message.bodyText.trim() || message.bodyHtml?.trim()) return false;
+  if (hasCachedBody(message)) return false;
   const remote = serverMessages.find(entry => entry.message.id === message.id);
   if (!remote) throw new Error('message body not available remotely');
   message.bodyText = remote.message.bodyText;
