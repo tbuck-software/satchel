@@ -646,10 +646,7 @@ export const useMessagesStore = defineStore('messages', () => {
       const endPreview = perfStart(`messages.open:${threadId}`);
       const opened = await backendLoadThreadMessages(threadId, OPEN_BODY_COUNT);
       endPreview?.();
-      if (threadLoadVersions.get(threadId) !== version) {
-        endTotal?.();
-        return;
-      }
+      if (threadLoadVersions.get(threadId) !== version) return;
 
       const rows = opened.messages;
       const entry = entryFor(threadId);
@@ -661,7 +658,6 @@ export const useMessagesStore = defineStore('messages', () => {
         // reader keeps showing the previous failure over a legitimately empty
         // result and never offers a way out of it.
         connectionStore.clearBackendError('messages');
-        endTotal?.();
         return;
       }
 
@@ -681,10 +677,7 @@ export const useMessagesStore = defineStore('messages', () => {
       // a body. Otherwise a duplicate reload can invalidate this request after
       // the preview, then fail and leave the UI on "Loading full message...".
       await applyBodyRows(threadId, prioritizedIds, opened.bodies, version, options);
-      if (threadLoadVersions.get(threadId) !== version) {
-        endTotal?.();
-        return;
-      }
+      if (threadLoadVersions.get(threadId) !== version) return;
       enforceCacheBudget(threadId);
       if (options.remote) {
         const detailIds = requestedDetailIds(threadId);
@@ -699,13 +692,14 @@ export const useMessagesStore = defineStore('messages', () => {
         void hydrateMessageAttachments(threadId, detailIds, version);
       }
       recordFrontendDiagnostic('messages.loaded', `thread=${threadId}`, cacheStats());
-      endTotal?.();
     } catch (error) {
-      endTotal?.();
       if (threadLoadVersions.get(threadId) !== version) return;
       if (backendCommandsAvailable()) {
         connectionStore.reportBackendError('messages', error);
       }
+    } finally {
+      // Every exit ends the timer, including a load superseded while bodies hydrate.
+      endTotal?.();
     }
   }
 
