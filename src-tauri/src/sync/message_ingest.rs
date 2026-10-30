@@ -17,6 +17,7 @@ use crate::events::bus::EventBus;
 use crate::providers::traits::MessageEnvelope;
 use crate::sync::attachment_processing::process_special_attachment;
 use crate::sync::folder_reconcile::{is_snooze_folder, reconcile_external_workflow_states};
+use crate::sync::gmail_reconcile::{SnapshotDeferral, SnapshotResolution};
 use crate::sync::thread_resolution::{
     deduplicate_spark_draft_versions, derive_message_id_header, derive_remote_draft_id,
     effective_from_name, message_is_sent, reconcile_sent_draft_autosaves,
@@ -233,6 +234,9 @@ pub(crate) async fn upsert_provider_messages(
 /// Snapshot recovery must store every current label before losing the last
 /// obsolete copy. Reuse the normal persistence/organization guards, but give
 /// all targets of this delivery a single rollback boundary.
+///
+/// `Err` is reserved for failures that stop the whole snapshot run; anything
+/// specific to this delivery defers only its ID.
 pub(crate) async fn upsert_gmail_snapshot_message(
     app: Option<&AppHandle>,
     pool: &SqlitePool,
@@ -243,7 +247,7 @@ pub(crate) async fn upsert_gmail_snapshot_message(
     message: &MessageEnvelope,
     events: Option<&Arc<EventBus>>,
     cutoff: Option<&str>,
-) -> Result<(), String> {
+) -> Result<SnapshotResolution, String> {
     use satchel_core::db::sync_quarantine::SyncQuarantineRepository;
     let repository = SyncQuarantineRepository::new(pool);
     let mut targets = Vec::new();
@@ -257,24 +261,38 @@ pub(crate) async fn upsert_gmail_snapshot_message(
             .map_err(|error| error.to_string())?
             .is_exhausted(&message.remote_id)
         {
-            return Err(format!(
-                "snapshot target is quarantined: {}",
-                message.remote_id
-            ));
+            return Ok(SnapshotResolution::Deferred(SnapshotDeferral::Quarantined));
         }
         targets.push((folder_id, label, folder_type));
     }
+    // Read before the replacement: obsolete copies may sit in other threads.
+    let threads: HashSet<String> = sqlx::query_scalar(
+        "SELECT DISTINCT thread_id FROM messages WHERE account_id = ? AND remote_id = ?",
+    )
+    .bind(account_id)
+    .bind(&message.remote_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?
+    .into_iter()
+    .collect();
     let html = prepare_message_html(std::slice::from_ref(message)).await?;
     let mut tx = pool
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|error| error.to_string())?;
-    crate::sync::gmail_reconcile::guard_gmail_snapshot_message_tx(
+    if crate::sync::gmail_reconcile::gmail_snapshot_message_pinned_tx(
         &mut tx,
         account_id,
         &message.remote_id,
     )
-    .await?;
+    .await?
+    {
+        tx.rollback().await.map_err(|error| error.to_string())?;
+        return Ok(SnapshotResolution::Deferred(
+            SnapshotDeferral::PendingMutation,
+        ));
+    }
     let flag_locks = PendingFlagLocks::load(&mut tx, account_id).await?;
     let mut stored = Vec::new();
     for (folder_id, label, folder_type) in &targets {
@@ -301,7 +319,9 @@ pub(crate) async fn upsert_gmail_snapshot_message(
                     .record_failure(account_id, folder_id, &message.remote_id, &error)
                     .await
                     .map_err(|error| error.to_string())?;
-                return Err(error);
+                return Ok(SnapshotResolution::Deferred(SnapshotDeferral::Failed(
+                    error,
+                )));
             }
         }
     }
@@ -335,7 +355,7 @@ pub(crate) async fn upsert_gmail_snapshot_message(
             tracing::warn!(%error, remote_id = %message.remote_id, "post-ingest processing deferred");
         }
     }
-    Ok(())
+    Ok(SnapshotResolution::Resolved(threads))
 }
 
 /// Replay rules after a commit, including intent left by a previous process.

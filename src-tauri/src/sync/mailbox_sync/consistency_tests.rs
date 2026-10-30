@@ -1061,19 +1061,41 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
             &pool, &provider, "account", "inbox", "INBOX", &mut state, &queue,
         )
         .await;
-        let should_fail = matches!(
+        // Only a failed listing errors the folder. A deferred ID stays owed
+        // while the rest of the snapshot proceeds.
+        let listing_failed = scenario == "listing-before-target";
+        let deferred = matches!(
             scenario,
             "lookup"
                 | "auth"
                 | "malformed"
                 | "empty-payload"
                 | "target"
-                | "listing-before-target"
                 | "quarantine"
                 | "pending"
                 | "pending-deleted"
         );
-        assert_eq!(result.is_err(), should_fail, "{scenario}: {result:?}");
+        // The queue or the quarantine owns these. Waiting for them must not
+        // keep the folder listing pending.
+        let held = matches!(scenario, "quarantine" | "pending" | "pending-deleted");
+        let should_fail = listing_failed || deferred;
+        if listing_failed {
+            assert!(result.is_err(), "{scenario}: {result:?}");
+        } else {
+            let progress = result.unwrap_or_else(|error| panic!("{scenario}: {error}"));
+            assert_eq!(
+                progress.deferred.keys().collect::<Vec<_>>(),
+                if deferred { vec!["A"] } else { vec![] },
+                "{scenario}"
+            );
+            if deferred {
+                assert_eq!(
+                    progress.deferred["A"].retries_next_run(),
+                    !held,
+                    "{scenario}"
+                );
+            }
+        }
         if should_fail {
             let after: String = sqlx::query_scalar("SELECT json_object('subject',subject,'from',from_address,'date',date,'text',body_text,'html',body_html) FROM messages WHERE id=?")
                 .bind(&source).fetch_one(&pool).await.unwrap();
@@ -1101,8 +1123,17 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
             .await
             .unwrap();
         let mut restored: ImapSyncState = serde_json::from_str(&raw).unwrap();
-        assert_eq!(restored.pending_snapshots.contains("INBOX"), should_fail);
-        if matches!(scenario, "quarantine" | "pending" | "pending-deleted") {
+        assert_eq!(
+            restored.pending_snapshots.contains("INBOX"),
+            should_fail && !held,
+            "{scenario}"
+        );
+        assert_eq!(
+            restored.folder_snapshot_at.contains_key("INBOX"),
+            !should_fail || held,
+            "{scenario}"
+        );
+        if deferred {
             assert!(
                 restored.snapshot_resolutions["INBOX"].contains("A"),
                 "{scenario}"
@@ -1153,7 +1184,14 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
                 .await
                 .unwrap();
             assert!(!next.snapshot_required);
-            assert!(restored.request_snapshot("INBOX", true, next.snapshot_required));
+            if held {
+                // Held IDs wait, owed, for the folder's next snapshot instead
+                // of re-listing it on every poll.
+                assert!(!restored.request_snapshot("INBOX", true, next.snapshot_required));
+                assert!(restored.request_snapshot("INBOX", true, true));
+            } else {
+                assert!(restored.request_snapshot("INBOX", true, next.snapshot_required));
+            }
             reconcile_test_snapshot(
                 &pool,
                 &provider,
@@ -1245,7 +1283,7 @@ async fn reconcile_test_snapshot(
     remote_folder_id: &str,
     state: &mut ImapSyncState,
     queue: &SyncQueue,
-) -> Result<HashSet<String>, String> {
+) -> Result<SnapshotProgress, String> {
     let provider_kind = if remote_folder_id == "inbox" {
         "outlook"
     } else {
@@ -1580,7 +1618,15 @@ async fn gmail_incomplete_snapshot_responses_preserve_cached_content_and_work() 
             &pool, &provider, "account", "inbox", "INBOX", &mut state, &queue,
         )
         .await;
-        assert!(result.is_err(), "{scenario} was acknowledged: {result:?}");
+        let progress =
+            result.unwrap_or_else(|error| panic!("{scenario} errored the folder: {error}"));
+        assert!(
+            matches!(
+                progress.deferred.get("A"),
+                Some(SnapshotDeferral::Failed(_))
+            ),
+            "{scenario} was acknowledged: {progress:?}"
+        );
         assert_organization(&pool, &thread, &["INBOX"]).await;
         let after: (String, String, String, Option<String>, Option<String>) =
             sqlx::query_as("SELECT subject,from_address,date,body_text,body_html FROM messages")
@@ -1763,6 +1809,210 @@ async fn gmail_snapshot_commit_before_progress_failure_is_safe_to_replay() {
             .count(),
         2
     );
+    std::env::remove_var("SATCHEL_GMAIL_API_BASE");
+    task.abort();
+}
+
+fn labelled_response(id: &str, labels: &[&str]) -> String {
+    json!({"id":id,"threadId":id,"historyId":"300","labelIds":labels,
+        "internalDate":"1767225600000","payload":{"mimeType":"text/plain",
+        "headers":[{"name":"From","value":"sender@example.test"}],
+        "body":{"data":"Rml4dHVyZQ=="}}})
+    .to_string()
+}
+
+fn delivery(id: &str) -> MessageEnvelope {
+    let mut message = message(&["INBOX"]);
+    message.remote_id = id.into();
+    message.remote_thread_id = Some(id.into());
+    message.message_id_header = Some(format!("<{id}@example.test>"));
+    message
+}
+
+async fn locations(pool: &SqlitePool) -> Vec<(String, String)> {
+    sqlx::query_as(
+        "SELECT m.remote_id, f.remote_id FROM messages m JOIN folders f ON f.id=m.folder_id
+         ORDER BY 1, 2",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+async fn persisted_state(pool: &SqlitePool) -> ImapSyncState {
+    let raw: String = sqlx::query_scalar("SELECT sync_state FROM accounts")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    serde_json::from_str(&raw).unwrap()
+}
+
+fn fetched_ids(requests: &std::sync::Mutex<Vec<String>>) -> Vec<String> {
+    requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|line| line.split("/messages/").nth(1))
+        .map(|path| path.split('?').next().unwrap().to_string())
+        .collect()
+}
+
+fn ids(values: &[&str]) -> HashSet<String> {
+    values.iter().map(|value| value.to_string()).collect()
+}
+
+/// A failed mutation, an exhausted target quarantine and a failed lookup each
+/// hold back one ID. The rest of the folder must still converge, and IDs held
+/// by another owner must not re-list the folder on every poll.
+#[tokio::test]
+async fn gmail_blocked_snapshot_ids_stay_owed_without_starving_the_folder() {
+    let _guard = PROVIDER_HTTP_FIXTURES.lock().await;
+    let fail_lookup = Arc::new(AtomicBool::new(true));
+    let failing = fail_lookup.clone();
+    let (base, requests, task) = server(move |line, _| {
+        if line.contains("/messages?") {
+            return ("200 OK", json!({"messages":[]}).to_string());
+        }
+        let id = line
+            .split("/messages/")
+            .nth(1)
+            .unwrap()
+            .split('?')
+            .next()
+            .unwrap();
+        if id == "C" && failing.load(Ordering::SeqCst) {
+            return ("503 Service Unavailable", "{}".into());
+        }
+        ("200 OK", labelled_response(id, &["Label_one"]))
+    })
+    .await;
+    std::env::set_var("SATCHEL_GMAIL_API_BASE", &base);
+    let pool = pool().await;
+    for id in ["A", "B", "C", "D", "E"] {
+        assert_eq!(ingest(&pool, delivery(id)).await.ingested, 1);
+    }
+    let queue = SyncQueue::new();
+    queue
+        .enqueue(
+            &pool,
+            QueuedAction::new(
+                "account".into(),
+                ACTION_REMOTE_MUTATION,
+                json!({"kind":"move","refs":[{"remote_id":"B","source_folder":"INBOX"}],
+                    "target_remote_folder_id":"Label_one"}),
+            ),
+        )
+        .await
+        .unwrap();
+    sqlx::query("UPDATE sync_queue SET status='failed'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (label_one, _) = ensure_gmail_label_folder(&pool, "account", "Label_one")
+        .await
+        .unwrap();
+    let quarantine = SyncQuarantineRepository::new(&pool);
+    for _ in 0..satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS {
+        quarantine
+            .record_failure("account", &label_one, "E", "fixture")
+            .await
+            .unwrap();
+    }
+    let provider = crate::providers::gmail::GmailProvider::from_account_config(&config());
+    let mut state = ImapSyncState::default();
+    assert!(state.request_snapshot("INBOX", true, true));
+
+    // C's lookup fails; B and E are held by the queue and the quarantine.
+    let first = reconcile_test_snapshot(
+        &pool, &provider, "account", "inbox", "INBOX", &mut state, &queue,
+    )
+    .await
+    .unwrap();
+    assert_eq!(first.deferred.keys().collect::<Vec<_>>(), ["B", "C", "E"]);
+    assert_eq!(first.deferred["B"], SnapshotDeferral::PendingMutation);
+    assert!(matches!(first.deferred["C"], SnapshotDeferral::Failed(_)));
+    assert_eq!(first.deferred["E"], SnapshotDeferral::Quarantined);
+    assert_eq!(
+        locations(&pool).await,
+        [
+            ("A".into(), "Label_one".into()),
+            ("B".into(), "INBOX".into()),
+            ("C".into(), "INBOX".into()),
+            ("D".into(), "Label_one".into()),
+            ("E".into(), "INBOX".into()),
+        ]
+    );
+    let persisted = persisted_state(&pool).await;
+    assert_eq!(
+        persisted.snapshot_resolutions["INBOX"],
+        ids(&["B", "C", "E"])
+    );
+    assert!(
+        persisted.pending_snapshots.contains("INBOX"),
+        "a failed lookup is retried by the next run"
+    );
+    assert!(!persisted.folder_snapshot_at.contains_key("INBOX"));
+
+    // The lookup recovers after a restart. Only owed IDs are fetched again.
+    fail_lookup.store(false, Ordering::SeqCst);
+    requests.lock().unwrap().clear();
+    let mut state = persisted;
+    let second = reconcile_test_snapshot(
+        &pool, &provider, "account", "inbox", "INBOX", &mut state, &queue,
+    )
+    .await
+    .unwrap();
+    assert_eq!(second.deferred.keys().collect::<Vec<_>>(), ["B", "E"]);
+    assert_eq!(fetched_ids(&requests), ["B", "C", "E"]);
+    assert_eq!(
+        locations(&pool).await,
+        [
+            ("A".into(), "Label_one".into()),
+            ("B".into(), "INBOX".into()),
+            ("C".into(), "Label_one".into()),
+            ("D".into(), "Label_one".into()),
+            ("E".into(), "INBOX".into()),
+        ]
+    );
+    let mut persisted = persisted_state(&pool).await;
+    assert_eq!(persisted.snapshot_resolutions["INBOX"], ids(&["B", "E"]));
+    assert!(
+        !persisted.pending_snapshots.contains("INBOX"),
+        "held IDs must not re-list the folder on every poll"
+    );
+    assert!(persisted.folder_snapshot_at.contains_key("INBOX"));
+    assert!(!persisted.request_snapshot("INBOX", true, false));
+
+    // Once their owners release them, the next snapshot resolves both.
+    sqlx::query("DELETE FROM sync_queue")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM sync_quarantine")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(persisted.request_snapshot("INBOX", true, true));
+    requests.lock().unwrap().clear();
+    reconcile_test_snapshot(
+        &pool,
+        &provider,
+        "account",
+        "inbox",
+        "INBOX",
+        &mut persisted,
+        &queue,
+    )
+    .await
+    .unwrap();
+    assert_eq!(fetched_ids(&requests), ["B", "E"]);
+    assert!(locations(&pool)
+        .await
+        .iter()
+        .all(|(_, folder)| folder == "Label_one"));
+    let done = persisted_state(&pool).await;
+    assert!(!done.pending_snapshots.contains("INBOX"));
+    assert!(!done.snapshot_resolutions.contains_key("INBOX"));
     std::env::remove_var("SATCHEL_GMAIL_API_BASE");
     task.abort();
 }

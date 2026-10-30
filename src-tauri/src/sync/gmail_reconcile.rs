@@ -172,23 +172,49 @@ pub async fn reconcile_gmail_message_mailboxes(
     Ok(touched)
 }
 
+/// Why an owed snapshot ID stays owed after this run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SnapshotDeferral {
+    /// A queued or failed remote mutation still owns the local state.
+    PendingMutation,
+    /// A target label has used up its quarantine attempts.
+    Quarantined,
+    /// Lookup, validation or target persistence failed.
+    Failed(String),
+}
+
+impl SnapshotDeferral {
+    /// Only a failure can succeed on the very next attempt. The queue and the
+    /// quarantine release an ID on their own schedule, so waiting for them
+    /// must not keep the folder listing pending on every poll.
+    pub(crate) fn retries_next_run(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+}
+
+/// The outcome for one owed snapshot ID.
+#[derive(Debug)]
+pub(crate) enum SnapshotResolution {
+    /// Committed. These threads changed.
+    Resolved(HashSet<String>),
+    /// Nothing changed. The ID stays owed.
+    Deferred(SnapshotDeferral),
+}
+
 /// A snapshot must not undo optimistic state still owned by the queue.
 /// Check under the same write lock as the replacement/deletion.
-pub(crate) async fn guard_gmail_snapshot_message_tx(
+pub(crate) async fn gmail_snapshot_message_pinned_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     account_id: &str,
     remote_id: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let pending = crate::sync::folder_reconcile::pending_remote_message_refs(
         &mut **tx,
         account_id,
         crate::sync::folder_reconcile::PendingMutations::All,
     )
     .await?;
-    if pending.iter().any(|(_, id)| id == remote_id) {
-        return Err("snapshot message still has a pending remote mutation".into());
-    }
-    Ok(())
+    Ok(pending.iter().any(|(_, id)| id == remote_id))
 }
 
 /// Only an account-wide point lookup's explicit 404 authorizes this path.
@@ -198,12 +224,17 @@ pub(crate) async fn reconcile_gmail_snapshot_deletion(
     pool: &SqlitePool,
     account_id: &str,
     remote_id: &str,
-) -> Result<HashSet<String>, String> {
+) -> Result<SnapshotResolution, String> {
     let mut tx = pool
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|error| error.to_string())?;
-    guard_gmail_snapshot_message_tx(&mut tx, account_id, remote_id).await?;
+    if gmail_snapshot_message_pinned_tx(&mut tx, account_id, remote_id).await? {
+        tx.rollback().await.map_err(|error| error.to_string())?;
+        return Ok(SnapshotResolution::Deferred(
+            SnapshotDeferral::PendingMutation,
+        ));
+    }
     let rows: Vec<(String, String)> =
         sqlx::query_as("SELECT id, thread_id FROM messages WHERE account_id = ? AND remote_id = ?")
             .bind(account_id)
@@ -236,7 +267,7 @@ pub(crate) async fn reconcile_gmail_snapshot_deletion(
     .await
     .map_err(|error| error.to_string())?;
     tx.commit().await.map_err(|error| error.to_string())?;
-    Ok(touched)
+    Ok(SnapshotResolution::Resolved(touched))
 }
 
 /// The labels of a message that stand for a real local folder.

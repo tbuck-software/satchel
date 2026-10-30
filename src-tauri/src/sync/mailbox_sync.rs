@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -23,7 +23,9 @@ use crate::sync::folder_reconcile::{
     reconcile_remote_message_removals, reset_local_provider_folder_with_generation,
     should_snapshot_folder,
 };
-use crate::sync::gmail_reconcile::{ensure_gmail_label_folder, gmail_target_mailbox_ids};
+use crate::sync::gmail_reconcile::{
+    ensure_gmail_label_folder, gmail_target_mailbox_ids, SnapshotDeferral, SnapshotResolution,
+};
 
 #[cfg(mobile)]
 use crate::sync::leases::acquire_mobile_mailbox_work_permit;
@@ -194,15 +196,23 @@ impl ImapSyncState {
     }
 }
 
+/// What one folder snapshot settled. Deferred IDs stay owed durably.
+#[derive(Debug, Default)]
+struct SnapshotProgress {
+    changed: HashSet<String>,
+    deferred: BTreeMap<String, SnapshotDeferral>,
+}
+
 /// A provider returns Some only after every snapshot page has succeeded.
-/// Keep the obligation on None, network failure, or a stale IMAP generation.
+/// Keep the obligation on None, network failure, a stale IMAP generation, or
+/// an ID whose failure the next run may resolve.
 async fn reconcile_folder_snapshot(
     pool: &SqlitePool,
     provider: &dyn crate::providers::traits::MailProvider,
     context: &FolderIngestContext<'_>,
     state: &mut ImapSyncState,
     queue: &SyncQueue,
-) -> Result<HashSet<String>, String> {
+) -> Result<SnapshotProgress, String> {
     let account_id = &context.account.id;
     let remote_folder_id = context.folder_remote_id;
     // Durable before any network or ingest work. Listing IDs is not completion.
@@ -213,9 +223,9 @@ async fn reconcile_folder_snapshot(
         .await
         .map_err(|error| error.to_string())?
     else {
-        return Ok(HashSet::new());
+        return Ok(SnapshotProgress::default());
     };
-    let (relocated_threads, skipped_stale_generation) =
+    let (progress, skipped_stale_generation) =
         if context.account.provider.eq_ignore_ascii_case("gmail") {
             (
                 reconcile_gmail_snapshot(pool, provider, context, &snapshot.states, state, queue)
@@ -232,28 +242,62 @@ async fn reconcile_folder_snapshot(
                 snapshot.remote_uidvalidity,
             )
             .await?;
-            (changes.relocated_threads, changes.skipped_stale_generation)
+            (
+                SnapshotProgress {
+                    changed: changes.relocated_threads,
+                    deferred: BTreeMap::new(),
+                },
+                changes.skipped_stale_generation,
+            )
         };
-    if !skipped_stale_generation {
-        let mut completed = state.clone();
-        completed.folder_snapshot_at.insert(
-            remote_folder_id.to_string(),
-            chrono::Utc::now().to_rfc3339(),
-        );
-        completed.pending_snapshots.remove(remote_folder_id);
-        completed.snapshot_resolutions.remove(remote_folder_id);
-        completed.resolved_snapshot_copies.remove(remote_folder_id);
-        persist_sync_cursors(pool, account_id, &completed, queue, None).await?;
-        *state = completed;
-    } else {
+    if skipped_stale_generation {
         tracing::warn!(
             account_id,
             folder = remote_folder_id,
             snapshot_uidvalidity = ?snapshot.remote_uidvalidity,
             "folder snapshot named another generation, kept every message"
         );
+    } else if progress
+        .deferred
+        .values()
+        .any(SnapshotDeferral::retries_next_run)
+    {
+        // Every other ID is already retired; the next run re-lists the folder
+        // and looks up only what is still owed.
+        tracing::warn!(
+            account_id,
+            folder = remote_folder_id,
+            deferred = progress.deferred.len(),
+            "folder snapshot left failed lookups for the next run"
+        );
+    } else {
+        let mut completed = state.clone();
+        completed.folder_snapshot_at.insert(
+            remote_folder_id.to_string(),
+            chrono::Utc::now().to_rfc3339(),
+        );
+        completed.pending_snapshots.remove(remote_folder_id);
+        completed.resolved_snapshot_copies.remove(remote_folder_id);
+        // IDs held by the queue or the quarantine stay owed until the folder's
+        // next snapshot. Re-listing on every poll would not release them sooner.
+        if progress.deferred.is_empty() {
+            completed.snapshot_resolutions.remove(remote_folder_id);
+        } else {
+            tracing::info!(
+                account_id,
+                folder = remote_folder_id,
+                held = progress.deferred.len(),
+                "folder snapshot completed with held IDs owed"
+            );
+            completed.snapshot_resolutions.insert(
+                remote_folder_id.to_string(),
+                progress.deferred.keys().cloned().collect(),
+            );
+        }
+        persist_sync_cursors(pool, account_id, &completed, queue, None).await?;
+        *state = completed;
     }
-    Ok(relocated_threads)
+    Ok(progress)
 }
 
 /// A missing Gmail label copy is not proof of global deletion. Resolve absent
@@ -266,11 +310,11 @@ async fn reconcile_gmail_snapshot(
     states: &[crate::providers::traits::RemoteMessageState],
     state: &mut ImapSyncState,
     queue: &SyncQueue,
-) -> Result<HashSet<String>, String> {
+) -> Result<SnapshotProgress, String> {
     let present = serde_json::to_string(&states.iter().map(|s| &s.remote_id).collect::<Vec<_>>())
         .map_err(|error| error.to_string())?;
     let mut after = String::new();
-    let mut changed = HashSet::new();
+    let mut progress = SnapshotProgress::default();
     loop {
         let resolved = state
             .resolved_snapshot_copies
@@ -317,27 +361,23 @@ async fn reconcile_gmail_snapshot(
         persist_sync_cursors(pool, &context.account.id, state, queue, None).await?;
         for ids in absent.chunks(3) {
             // Await the whole network batch before any database write begins.
-            let messages = futures::future::try_join_all(
+            let lookups = futures::future::join_all(
                 ids.iter().map(|id| provider.resolve_snapshot_message(id)),
             )
-            .await
-            .map_err(|error| error.to_string())?;
-            for (id, message) in ids.iter().zip(messages) {
-                let source_copy_remains = message.as_ref().is_some_and(|message| {
-                    gmail_target_mailbox_ids(&message.mailbox_ids)
-                        .iter()
-                        .any(|label| label.as_str() == context.folder_remote_id)
-                });
-                match message {
-                    Some(message) => {
-                        let threads: Vec<String> = sqlx::query_scalar(
-                            "SELECT DISTINCT thread_id FROM messages WHERE account_id = ? AND remote_id = ?",
-                        )
-                        .bind(&context.account.id)
-                        .bind(id)
-                        .fetch_all(pool)
-                        .await
-                        .map_err(|error| error.to_string())?;
+            .await;
+            for (id, lookup) in ids.iter().zip(lookups) {
+                let mut source_copy_remains = false;
+                let resolution = match lookup {
+                    // The quota is account-wide: every further lookup would be
+                    // refused too. Completed IDs are already retired.
+                    Err(error) if error.is_rate_limited() => return Err(error.to_string()),
+                    Err(error) => {
+                        SnapshotResolution::Deferred(SnapshotDeferral::Failed(error.to_string()))
+                    }
+                    Ok(Some(message)) => {
+                        source_copy_remains = gmail_target_mailbox_ids(&message.mailbox_ids)
+                            .iter()
+                            .any(|label| label.as_str() == context.folder_remote_id);
                         crate::sync::message_ingest::upsert_gmail_snapshot_message(
                             context.app,
                             pool,
@@ -349,18 +389,34 @@ async fn reconcile_gmail_snapshot(
                             context.events,
                             context.account.ingest_cutoff.as_deref(),
                         )
-                        .await?;
-                        changed.extend(threads);
+                        .await?
                     }
-                    None => changed.extend(
+                    Ok(None) => {
                         crate::sync::gmail_reconcile::reconcile_gmail_snapshot_deletion(
                             pool,
                             &context.account.id,
                             id,
                         )
-                        .await?,
-                    ),
-                }
+                        .await?
+                    }
+                };
+                let threads = match resolution {
+                    SnapshotResolution::Resolved(threads) => threads,
+                    SnapshotResolution::Deferred(reason) => {
+                        // Still owed and durable since before the lookup. The
+                        // rest of the folder must not wait for this ID.
+                        tracing::info!(
+                            account_id = %context.account.id,
+                            folder = context.folder_remote_id,
+                            remote_id = %id,
+                            ?reason,
+                            "snapshot ID deferred"
+                        );
+                        progress.deferred.insert(id.clone(), reason);
+                        continue;
+                    }
+                };
+                progress.changed.extend(threads);
                 // The target transaction committed before retiring this ID.
                 // A crash in between only replays one safe resolution. Persist
                 // each success so a later failure/deadline cannot starve work
@@ -389,7 +445,7 @@ async fn reconcile_gmail_snapshot(
             }
         }
     }
-    Ok(changed)
+    Ok(progress)
 }
 
 /// Persist the folder cursors reached so far, plus any remote mutation this
@@ -1184,7 +1240,8 @@ pub(crate) async fn sync_mailboxes(
                             folder_type: "", // Gmail derives each target's type; other providers do not ingest here.
                         }, &mut state, queue.as_ref(),
                     ).await {
-                        Ok(changed) => externally_changed_threads.extend(changed),
+                        // Deferred IDs stay owed; the folder itself synced.
+                        Ok(progress) => externally_changed_threads.extend(progress.changed),
                         Err(err) => summary.failures.push(encoded_folder_sync_failure(
                             &account.email, &remote_folder_id, err,
                         )),
