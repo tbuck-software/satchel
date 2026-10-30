@@ -207,11 +207,12 @@ pub fn registered_repairs() -> &'static [DataRepair] {
         THREAD_FOLDERS,
         MESSAGE_ADDRESSES,
         FTS_PREFIX,
+        super::signed_attachments::SIGNED_ENTITY_ATTACHMENTS,
     ]
 }
 
 /// Run blocking CPU work off the async runtime.
-async fn off_runtime<T: Send + 'static>(
+pub(super) async fn off_runtime<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, sqlx::Error> {
     tokio::task::spawn_blocking(work)

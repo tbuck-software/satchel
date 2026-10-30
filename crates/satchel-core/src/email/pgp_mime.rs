@@ -289,7 +289,10 @@ mod tests {
     fn signed_message_round_trips_into_exact_verification_parts() {
         let signature = "-----BEGIN PGP SIGNATURE-----\nabc\n-----END PGP SIGNATURE-----";
         let signed = build_signed(MSG, signature);
-        let parsed = parse_signed_message(signed.as_bytes()).expect("parse signed message");
+        // Verification reads the bundle ingest stores, never the whole message.
+        let stored = crate::providers::imap::parse_raw_message_body(signed.as_bytes());
+        let parsed = parse_signed_message(stored.pgp_signed.as_deref().expect("stored bundle"))
+            .expect("parse signed message");
 
         assert_eq!(parsed.signed_entity, signable_entity(MSG).as_bytes());
         assert_eq!(parsed.armored_signature, normalize_crlf(signature));

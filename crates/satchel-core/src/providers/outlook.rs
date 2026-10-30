@@ -1794,10 +1794,10 @@ fn map_graph_message(message: GraphMessage) -> MessageEnvelope {
         });
     trust.auth_verified = auth_spf.is_some() || auth_dkim.is_some() || auth_dmarc.is_some();
     let pgp_signed = raw_body.and_then(|parsed| parsed.pgp_signed);
-    super::imap::drop_signature_parts(
+    super::imap::drop_signature_part(
         &mut attachments,
         &trust,
-        &header_value("Content-Type").unwrap_or_default(),
+        pgp_signed.as_deref().or(smime_signed.as_deref()),
     );
 
     MessageEnvelope {
@@ -2178,6 +2178,45 @@ mod tests {
 
         assert!(mapped.trust.root_crypto);
         assert!(mapped.attachments.is_empty(), "{:?}", mapped.attachments);
+    }
+
+    /// Graph lists parts without their position. The signature part is the
+    /// one with its own type and name; a signature-typed file inside the
+    /// signed entity, the detached signature of a download, stays.
+    #[test]
+    fn a_signed_root_keeps_signature_typed_files_inside_its_entity() {
+        let mut graph: GraphMessage = serde_json::from_value(serde_json::json!({
+            "id": "signed-message",
+            "from": { "emailAddress": { "address": "releases@example.test" } },
+            "internetMessageHeaders": [{
+                "name": "Content-Type",
+                "value": "multipart/signed; micalg=pgp-sha256; protocol=\"application/pgp-signature\"; boundary=\"S\""
+            }],
+            "attachments": [
+                { "id": "sig-part", "name": "Invoice.pdf", "contentType": "application/pgp-signature", "size": 99 },
+                { "id": "file-asc", "name": "release.tar.gz.asc", "contentType": "application/pgp-signature", "size": 99 }
+            ]
+        }))
+        .unwrap();
+        graph.raw_mime = Some(
+            b"From: releases@example.test\r\n\
+            Content-Type: multipart/signed; micalg=pgp-sha256; protocol=\"application/pgp-signature\"; boundary=\"S\"\r\n\r\n\
+--S\r\nContent-Type: multipart/mixed; boundary=\"M\"\r\n\r\n\
+--M\r\nContent-Type: text/plain\r\n\r\nRelease 2.1 is out; its signature file is attached.\r\n\
+--M\r\nContent-Type: application/pgp-signature; name=\"release.tar.gz.asc\"\r\nContent-Disposition: attachment; filename=\"release.tar.gz.asc\"\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\nBBBB\r\n-----END PGP SIGNATURE-----\r\n--M--\r\n\
+--S\r\nContent-Type: application/pgp-signature; name=\"Invoice.pdf\"\r\nContent-Disposition: attachment; filename=\"Invoice.pdf\"\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\nAAAA\r\n-----END PGP SIGNATURE-----\r\n--S--\r\n"
+                .to_vec(),
+        );
+
+        let mapped = map_graph_message(graph);
+
+        assert!(mapped.trust.signed_binding);
+        let ids: Vec<&str> = mapped
+            .attachments
+            .iter()
+            .map(|attachment| attachment.remote_part_id.as_str())
+            .collect();
+        assert_eq!(ids, ["file-asc"]);
     }
 
     #[test]

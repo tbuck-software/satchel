@@ -3338,20 +3338,55 @@ pub(super) fn root_crypto_trust(
     }
 }
 
-/// Attachments a provider lists by its own parse, for a message shown with
-/// root crypto. The signature part's headers are not signed, so nothing they
-/// name is offered; what the provider lists from inside the signed entity
-/// stays, fetched by the provider's own part id.
-pub(super) fn drop_signature_parts(
+/// The attachments of a stored bundle's signed entity, bytes included: the
+/// parts verification reads, found the way a parse of the message finds them.
+pub fn signed_entity_attachments(
+    bundle: &[u8],
+) -> Result<Vec<RemoteAttachment>, signed_mime::SignedMimeError> {
+    let parts = signed_mime::split_bundle(bundle)?;
+    let (header, body) = signed_mime::entity_header_and_body(parts.entity);
+    let mut counter = 0usize;
+    let mut found = Vec::new();
+    collect_section_attachments(header, body, 0, &mut counter, &mut found);
+    Ok(found
+        .into_iter()
+        .map(|attachment| remote_attachment_from(attachment, EmbedPolicy::All))
+        .collect())
+}
+
+/// Drop the signature part from attachments a provider listed by its own
+/// parse, under a root the strict splitter took as signed.
+///
+/// The signature part's headers are not signed and may name it anything. A
+/// provider that lists parts without their position knows it only by the type
+/// and file name those headers give, so exactly that part goes. A part inside
+/// the signed entity that merely shares the signature's type, the detached
+/// signature of a download, stays.
+pub(super) fn drop_signature_part(
     attachments: &mut Vec<RemoteAttachment>,
     trust: &super::traits::MessageTrust,
-    root_content_type: &str,
+    bundle: Option<&[u8]>,
 ) {
-    if trust.root_crypto {
-        attachments.retain(|attachment| {
-            !signed_mime::is_signature_part(&attachment.content_type, root_content_type)
-        });
+    if !trust.signed_binding {
+        return;
     }
+    let Some(parts) = bundle.and_then(|bundle| signed_mime::split_bundle(bundle).ok()) else {
+        return;
+    };
+    let (header, _) = signed_mime::entity_header_and_body(parts.signature);
+    let header = String::from_utf8_lossy(header);
+    let content_type = parse_header_value(&header, "Content-Type").unwrap_or_default();
+    let media_type = crate::email::mime_type::normalize_mime_type(&content_type);
+    let filename = parse_header_value(&header, "Content-Disposition")
+        .as_deref()
+        .and_then(extract_filename_param)
+        .or_else(|| extract_filename_param(&content_type))
+        .map(|value| decode_mime_encoded_words(&value));
+    attachments.retain(|attachment| {
+        !(crate::email::mime_type::normalize_mime_type(&attachment.content_type)
+            .eq_ignore_ascii_case(&media_type)
+            && attachment.filename == filename)
+    });
 }
 
 fn merge_parsed_body(target: &mut ParsedBody, candidate: ParsedBody) {

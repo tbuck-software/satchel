@@ -22,11 +22,22 @@ describe('signature status cards', () => {
     expect(wrapper.text()).not.toContain('backend.errors');
   });
 
-  it('keeps the engine wording of an S/MIME error that is no key', () => {
+  it('shows its own wording, not the engine\'s, for an S/MIME error that is no key', () => {
     wrapper = mount(SmimeStatusCard, {
       props: { state: 'signature_invalid', errorDetail: 'digest failure' },
     });
-    expect(wrapper.text()).toContain('digest failure');
+    expect(wrapper.text()).not.toContain('digest failure');
+    expect(wrapper.text()).toContain('The signature does not match the message or could not be checked.');
+  });
+
+  /** A partial signature may cover a part other than the text on screen. */
+  it('does not let a partial signature vouch for the text shown', () => {
+    for (const card of [PgpStatusCard, SmimeStatusCard]) {
+      wrapper = mount(card, { props: { state: 'signature_partial' } });
+      expect(wrapper.text()).toContain('The text shown may not be the signed part.');
+      wrapper.unmount();
+      wrapper = null;
+    }
   });
 
   it('says why no S/MIME signature is shown when the signed content cannot be', () => {

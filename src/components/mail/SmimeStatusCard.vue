@@ -23,10 +23,9 @@ const emit = defineEmits<{
   dismiss: [];
 }>();
 
-// The engine reports its own wording; the app's checks report a message key.
-const errorDetail = computed(() =>
-  props.errorDetail ? (translateBackendError(props.errorDetail) ?? props.errorDetail) : undefined,
-);
+// Only a message key is shown. The engine's own wording is neither translated
+// nor written for readers, so the card's text stands in for it.
+const errorDetail = computed(() => translateBackendError(props.errorDetail) || undefined);
 
 // State is a closed TypeScript union; the switch covers every member.
 // oxlint-disable-next-line vue/return-in-computed-property

@@ -160,15 +160,25 @@ pub fn split<'a>(content_type: &str, body: &'a [u8]) -> Result<SignedParts<'a>, 
 
 /// Split a stored bundle: a `Content-Type` header, an empty line, the body.
 ///
+/// Every writer of a detached bundle puts that header first. Anything else is
+/// not one: an opaque S/MIME bundle is DER, and the content it carries may
+/// well contain a line that reads like a `multipart/signed` header.
+///
 /// The header is read as written, without decoding encoded words again: the
 /// display path decoded it once before writing it, and a second pass could
 /// turn it into a different boundary.
 pub fn split_bundle(bundle: &[u8]) -> Result<SignedParts<'_>, SignedMimeError> {
+    if !bundle.starts_with(BUNDLE_PREFIX) {
+        return Err(SignedMimeError::NotSigned);
+    }
     let (header, body) = entity_header_and_body(bundle);
     let content_type = parse_raw_header_value(&String::from_utf8_lossy(header), "Content-Type")
         .ok_or(SignedMimeError::NotSigned)?;
     split(&content_type, body)
 }
+
+/// How every stored detached bundle begins.
+pub const BUNDLE_PREFIX: &[u8] = b"Content-Type:";
 
 /// The text and HTML a signed entity displays.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -233,16 +243,6 @@ pub fn is_signature_media_type(content_type: &str) -> bool {
     ]
     .iter()
     .any(|signature| media_type.eq_ignore_ascii_case(signature))
-}
-
-/// Whether a part of a message under `root_content_type` is, by its type, a
-/// signature part: one of the signature types, or the root's declared
-/// `protocol`. Its headers are not signed.
-pub fn is_signature_part(content_type: &str, root_content_type: &str) -> bool {
-    let media_type = content_type.split(';').next().unwrap_or_default().trim();
-    is_signature_media_type(media_type)
-        || extract_header_param(root_content_type, "protocol")
-            .is_some_and(|protocol| protocol.trim().eq_ignore_ascii_case(media_type))
 }
 
 /// How many header fields of this name the block holds; continuation lines
@@ -658,6 +658,30 @@ mod tests {
         assert_eq!(
             split_bundle(b"Content-Type: text/plain\r\n\r\nhello"),
             Err(SignedMimeError::NotSigned)
+        );
+    }
+
+    /// Every writer of a detached bundle puts its `Content-Type` line first.
+    /// An opaque S/MIME bundle is DER, and its content may read like one.
+    #[test]
+    fn only_a_bundle_that_opens_with_its_content_type_splits() {
+        let detached = format!("Content-Type: {PGP}\r\n\r\n{}", body("\r\n"));
+        assert!(split_bundle(detached.as_bytes()).is_ok());
+        let mut opaque = b"\x30\x82\x01\x00\x06\x09".to_vec();
+        opaque.extend_from_slice(detached.as_bytes());
+        assert_eq!(split_bundle(&opaque), Err(SignedMimeError::NotSigned));
+        let folded = format!("X-Note: first\r\n{detached}");
+        assert_eq!(
+            split_bundle(folded.as_bytes()),
+            Err(SignedMimeError::NotSigned)
+        );
+        let trust = MessageTrust {
+            root_crypto: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            stored_signed_body(&opaque, &trust, false),
+            Ok(StoredSignedBody::Encapsulated)
         );
     }
 

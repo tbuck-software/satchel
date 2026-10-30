@@ -183,3 +183,40 @@ fn opaque_smime_shows_the_content_the_signature_holds() {
         .unwrap();
     assert!(!smime_engine::verify(&tampered).unwrap().valid);
 }
+
+/// Opaque signed content that reads like a detached bundle is still opaque:
+/// what it shows comes from the engine, never from the DER bytes around it.
+#[test]
+fn opaque_content_that_reads_like_a_detached_bundle_stays_encapsulated() {
+    let keys = smime_engine::generate_keypair(&smime_engine::GenerateSmimeRequest {
+        name: "Alice",
+        email: "alice@example.test",
+        passphrase: None,
+    })
+    .unwrap();
+    let content = "Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; boundary=\"I\"\r\n\r\n\
+        --I\r\nContent-Type: text/plain\r\n\r\nInner text\r\n\
+        --I\r\nContent-Type: application/pkcs7-signature\r\n\r\nAAAA\r\n--I--\r\n";
+    let signed = smime_engine::sign(
+        &keys.pem_private_key,
+        &keys.pem_certificate,
+        None,
+        content.as_bytes(),
+    )
+    .unwrap();
+    let message = [
+        b"From: alice@example.test\r\n".as_slice(),
+        signed.as_slice(),
+    ]
+    .concat();
+    let parsed = parse_raw_message_body(&message);
+    let bundle = parsed.smime_signed.as_deref().expect("opaque bundle");
+    assert!(parsed.trust.root_crypto && !parsed.trust.signed_binding);
+    assert!(!bundle.starts_with(b"Content-Type:"));
+    for has_stored_body in [false, true] {
+        assert_eq!(
+            stored_signed_body(bundle, &parsed.trust, has_stored_body),
+            Ok(StoredSignedBody::Encapsulated)
+        );
+    }
+}
