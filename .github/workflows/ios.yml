@@ -11,6 +11,8 @@ on:
       - 'src-tauri/**'
       - 'src/**'
       - 'scripts/**'
+      - 'tests/ios-notification-routing/**'
+      - 'tests/ios-integration-generator.node.mjs'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - '.github/workflows/ios.yml'
@@ -69,8 +71,21 @@ jobs:
 
       - name: Verify generated Apple integration contracts
         run: |
-          pnpm exec vitest run src/utils/iosBackgroundIntegration.test.ts src/services/backend.runtime.test.ts
+          pnpm exec vitest run src/utils/iosBackgroundIntegration.test.ts src/services/backend.runtime.test.ts scripts/verify-ios-hook-exports.test.mjs
           node --test tests/ios-integration-generator.node.mjs
+
+      - name: Exercise notification payload and cold/warm delivery
+        run: |
+          swiftc src-tauri/ios/Sources/SatchelIOS/SatchelNotificationRouting.swift tests/ios-notification-routing/main.swift -o "$RUNNER_TEMP/satchel-notification-routing"
+          "$RUNNER_TEMP/satchel-notification-routing"
 
       - name: Build for the Apple Silicon iOS simulator through Tauri
         run: pnpm tauri ios build --debug --target aarch64-sim --ci
+
+      # Debug builds link the app's code into Satchel.debug.dylib and leave the
+      # executable a stub; the script reads the image from xcodebuild's settings.
+      - name: Verify notification hooks are exported by the app's code image
+        run: >-
+          node scripts/verify-ios-hook-exports.mjs
+          -workspace "$GITHUB_WORKSPACE/src-tauri/gen/apple/satchel.xcodeproj/project.xcworkspace/"
+          -scheme satchel_iOS -sdk iphonesimulator -configuration debug

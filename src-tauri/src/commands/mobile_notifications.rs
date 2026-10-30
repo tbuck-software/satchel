@@ -39,6 +39,23 @@ struct AndroidMailNotification<'a> {
     sound: bool,
 }
 
+#[cfg(target_os = "ios")]
+type IosPluginInitializer = unsafe extern "C" fn() -> *const std::ffi::c_void;
+
+#[cfg(target_os = "ios")]
+static IOS_PLUGIN_INITIALIZER: std::sync::OnceLock<IosPluginInitializer> =
+    std::sync::OnceLock::new();
+
+#[cfg(target_os = "ios")]
+unsafe fn initialize_ios_mail_plugin() -> *const std::ffi::c_void {
+    // Tauri requires a Rust-ABI wrapper around the C initializer. Its raw
+    // pointer return has no swift-rs retain adjustment. PluginManager retains
+    // the returned NSObject, just as for the pinned notification plugin.
+    IOS_PLUGIN_INITIALIZER
+        .get()
+        .expect("iOS mail initializer must be resolved before registration")()
+}
+
 pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let builder = tauri::plugin::Builder::new("satchel-mail-notifications");
     #[cfg(target_os = "android")]
@@ -56,6 +73,21 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             },
         )?;
         app.manage(AndroidMailNotifications(handle));
+        Ok(())
+    });
+    #[cfg(target_os = "ios")]
+    let builder = builder.setup(|_app, api| {
+        // lib.rs registers this plugin after tauri-plugin-notification. Native
+        // registration is synchronous, so its delegate is installed before ours.
+        // build.rs links this Swift initializer into libapp.a, and main.mm's
+        // hook table carries it into the final executable. Rust's cdylib link
+        // never loads it, so resolve it at setup rather than linking against it.
+        let initialize = unsafe {
+            ios_native_symbol::<IosPluginInitializer>(c"init_plugin_satchel_mail_notifications")
+        }
+        .map_err(std::io::Error::other)?;
+        let _ = IOS_PLUGIN_INITIALIZER.set(initialize);
+        api.register_ios_plugin(initialize_ios_mail_plugin)?;
         Ok(())
     });
     builder.build()
@@ -178,19 +210,54 @@ pub async fn dismiss_mail_notifications(
     Ok(())
 }
 
-/// Release routes queued by iOS before a listener existed.
-///
-/// A notification can be tapped while the process is cold; the Swift side holds
-/// the route until the frontend says it is listening.
+/// Reserve a listener lease with no ID, activate it after registration, and
+/// retire it on disposal. Stale lifecycle messages cannot affect newer leases.
+/// Non-iOS platforms have no native route gate and return no lease.
 #[tauri::command]
-pub fn mobile_notifications_frontend_ready() -> CommandResult<()> {
+pub fn mobile_notifications_frontend_ready(
+    listener_id: Option<u32>,
+    ready: bool,
+) -> CommandResult<Option<u32>> {
+    if listener_id == Some(0) {
+        return Err("A notification listener ID must be nonzero".into());
+    }
     #[cfg(target_os = "ios")]
     {
-        let ready: unsafe extern "C" fn() =
+        let update: unsafe extern "C" fn(u32, bool) -> u32 =
             unsafe { ios_native_symbol(c"satchel_mobile_frontend_ready")? };
-        unsafe { ready() };
+        Ok(Some(unsafe { update(listener_id.unwrap_or(0), ready) }))
     }
-    Ok(())
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = (listener_id, ready);
+        Ok(None)
+    }
+}
+
+/// Release a retained iOS response once the frontend has acted on it: native
+/// drops its payload and runs the OS completion handler, once, however often
+/// this repeats. The frontend calls it only for an outcome it can stand behind;
+/// anything else stays retained for the next listener lease.
+/// Non-iOS platforms retain no responses.
+#[tauri::command]
+pub fn mobile_notification_response_handled(response_id: String) -> CommandResult<()> {
+    if response_id.trim().is_empty() || response_id.len() > 128 {
+        return Err("A notification response ID must have 1 to 128 bytes".into());
+    }
+    #[cfg(target_os = "ios")]
+    {
+        let response_id = std::ffi::CString::new(response_id)
+            .map_err(|_| "A notification response ID must not contain NUL")?;
+        let handled: unsafe extern "C" fn(*const std::ffi::c_char) =
+            unsafe { ios_native_symbol(c"satchel_mobile_response_handled")? };
+        unsafe { handled(response_id.as_ptr()) };
+        Ok(())
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = response_id;
+        Ok(())
+    }
 }
 
 #[cfg(target_os = "ios")]
@@ -222,7 +289,9 @@ mod ios_events {
     static PENDING: Mutex<VecDeque<serde_json::Value>> = Mutex::new(VecDeque::new());
 
     pub fn initialize(app: &tauri::AppHandle) {
-        let _ = APP.set(app.clone());
+        if APP.set(app.clone()).is_err() {
+            return;
+        }
         if let Ok(mut pending) = PENDING.lock() {
             while let Some(event) = pending.pop_front() {
                 let _ = app.emit("mobile:notification-route", event);
@@ -260,4 +329,17 @@ pub fn initialize_mobile_notification_bridge(app: &tauri::AppHandle) {
     ios_events::initialize(app);
     #[cfg(not(target_os = "ios"))]
     let _ = app;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mobile_notification_response_handled;
+
+    #[test]
+    fn acknowledges_only_response_ids_the_frontend_can_send() {
+        for invalid in [String::new(), " ".to_string(), "x".repeat(129)] {
+            assert!(mobile_notification_response_handled(invalid).is_err());
+        }
+        assert!(mobile_notification_response_handled("x".repeat(128)).is_ok());
+    }
 }

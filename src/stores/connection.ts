@@ -30,7 +30,17 @@ export const useConnectionStore = defineStore('connection', () => {
   const syncFailures = ref<string[]>([]);
   const retryToken = ref(0);
   const retrying = ref(false);
-  const backendError = computed(() => Object.values(backendErrors.value)[0] ?? null);
+  /**
+   * The banner shows one report: the first, except that `notifications` goes
+   * last. A notification response waiting for its Retry must not cover a sync
+   * failure whose banner carries its own fix, such as a rejected password; one
+   * Retry serves every source anyway.
+   */
+  const leadingError = computed(() => {
+    const entries = Object.entries(backendErrors.value);
+    return entries.find(([source]) => source !== 'notifications') ?? entries[0] ?? null;
+  });
+  const backendError = computed(() => leadingError.value?.[1] ?? null);
   /**
    * Which subsystem reported it, so the UI can name the right one.
    *
@@ -38,7 +48,7 @@ export const useConnectionStore = defineStore('connection', () => {
    * reply did not. Calling that "backend unreachable" pointed at the wrong end
    * of the wire and cost real time to chase.
    */
-  const backendErrorSource = computed(() => Object.keys(backendErrors.value)[0] ?? null);
+  const backendErrorSource = computed(() => leadingError.value?.[0] ?? null);
 
   const backfillRunning = computed(() => backfillRemaining.value > 0);
   const backfillDone = computed(() => Math.max(backfillTotal.value - backfillRemaining.value, 0));
