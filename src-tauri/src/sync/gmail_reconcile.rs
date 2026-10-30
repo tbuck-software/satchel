@@ -172,6 +172,73 @@ pub async fn reconcile_gmail_message_mailboxes(
     Ok(touched)
 }
 
+/// A snapshot must not undo optimistic state still owned by the queue.
+/// Check under the same write lock as the replacement/deletion.
+pub(crate) async fn guard_gmail_snapshot_message_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    account_id: &str,
+    remote_id: &str,
+) -> Result<(), String> {
+    let pending = crate::sync::folder_reconcile::pending_remote_message_refs(
+        &mut **tx,
+        account_id,
+        crate::sync::folder_reconcile::PendingMutations::All,
+    )
+    .await?;
+    if pending.iter().any(|(_, id)| id == remote_id) {
+        return Err("snapshot message still has a pending remote mutation".into());
+    }
+    Ok(())
+}
+
+/// Only an account-wide point lookup's explicit 404 authorizes this path.
+/// Delete polymorphic message links before the rows, and project threads in
+/// the same transaction so a failed cleanup is safe to retry after restart.
+pub(crate) async fn reconcile_gmail_snapshot_deletion(
+    pool: &SqlitePool,
+    account_id: &str,
+    remote_id: &str,
+) -> Result<HashSet<String>, String> {
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|error| error.to_string())?;
+    guard_gmail_snapshot_message_tx(&mut tx, account_id, remote_id).await?;
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, thread_id FROM messages WHERE account_id = ? AND remote_id = ?")
+            .bind(account_id)
+            .bind(remote_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+    let touched: HashSet<String> = rows.iter().map(|(_, thread)| thread.clone()).collect();
+    for (id, _) in rows {
+        sqlx::query("DELETE FROM topic_items WHERE item_type = 'message' AND item_id = ?")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+        sqlx::query("DELETE FROM attachments WHERE message_id = ?")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+        sqlx::query("DELETE FROM messages WHERE id = ?")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    satchel_core::db::threads::refresh_thread_projections_tx(
+        &mut tx,
+        &touched.iter().cloned().collect::<Vec<_>>(),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|error| error.to_string())?;
+    Ok(touched)
+}
+
 /// The labels of a message that stand for a real local folder.
 ///
 /// Category and state views are Gmail's own filters, not places a message

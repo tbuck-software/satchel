@@ -230,6 +230,114 @@ pub(crate) async fn upsert_provider_messages(
     Ok(results)
 }
 
+/// Snapshot recovery must store every current label before losing the last
+/// obsolete copy. Reuse the normal persistence/organization guards, but give
+/// all targets of this delivery a single rollback boundary.
+pub(crate) async fn upsert_gmail_snapshot_message(
+    app: Option<&AppHandle>,
+    pool: &SqlitePool,
+    account_id: &str,
+    account_email: &str,
+    account_display_name: &str,
+    account_config: &crate::commands::accounts::AccountConfig,
+    message: &MessageEnvelope,
+    events: Option<&Arc<EventBus>>,
+    cutoff: Option<&str>,
+) -> Result<(), String> {
+    use satchel_core::db::sync_quarantine::SyncQuarantineRepository;
+    let repository = SyncQuarantineRepository::new(pool);
+    let mut targets = Vec::new();
+    for label in crate::sync::gmail_reconcile::gmail_target_mailbox_ids(&message.mailbox_ids) {
+        let (folder_id, folder_type) =
+            crate::sync::gmail_reconcile::ensure_gmail_label_folder(pool, account_id, &label)
+                .await?;
+        if repository
+            .load_folder(account_id, &folder_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .is_exhausted(&message.remote_id)
+        {
+            return Err(format!(
+                "snapshot target is quarantined: {}",
+                message.remote_id
+            ));
+        }
+        targets.push((folder_id, label, folder_type));
+    }
+    let html = prepare_message_html(std::slice::from_ref(message)).await?;
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|error| error.to_string())?;
+    crate::sync::gmail_reconcile::guard_gmail_snapshot_message_tx(
+        &mut tx,
+        account_id,
+        &message.remote_id,
+    )
+    .await?;
+    let flag_locks = PendingFlagLocks::load(&mut tx, account_id).await?;
+    let mut stored = Vec::new();
+    for (folder_id, label, folder_type) in &targets {
+        match persist_provider_message(
+            &mut tx,
+            "gmail",
+            account_id,
+            account_email,
+            account_display_name,
+            folder_id,
+            label,
+            folder_type,
+            message,
+            html[0].as_deref(),
+            &flag_locks,
+            cutoff,
+        )
+        .await
+        {
+            Ok(value) => stored.push(value),
+            Err(error) => {
+                tx.rollback().await.map_err(|error| error.to_string())?;
+                repository
+                    .record_failure(account_id, folder_id, &message.remote_id, &error)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                return Err(error);
+            }
+        }
+    }
+    // Every actual target is safe now. Clear obsolete-label failures too,
+    // otherwise they could keep rediscovering an already recovered delivery.
+    sqlx::query("DELETE FROM sync_quarantine WHERE account_id = ? AND remote_id = ?")
+        .bind(account_id)
+        .bind(&message.remote_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|error| error.to_string())?;
+    replay_ingest_effects(pool, account_id).await?;
+    for ((folder_id, label, folder_type), stored) in targets.iter().zip(stored) {
+        if let Err(error) = finish_provider_message(
+            app,
+            pool,
+            "gmail",
+            account_id,
+            account_email,
+            account_config,
+            folder_id,
+            label,
+            folder_type,
+            message,
+            stored,
+            events,
+        )
+        .await
+        {
+            tracing::warn!(%error, remote_id = %message.remote_id, "post-ingest processing deferred");
+        }
+    }
+    Ok(())
+}
+
 /// Replay rules after a commit, including intent left by a previous process.
 pub(crate) async fn replay_ingest_effects(
     pool: &SqlitePool,

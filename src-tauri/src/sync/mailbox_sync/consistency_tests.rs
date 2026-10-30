@@ -524,9 +524,12 @@ fn config() -> crate::commands::accounts::AccountConfig {
     )
 }
 
-// One HTTP test owns both process-wide URL overrides.
+static PROVIDER_HTTP_FIXTURES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+// HTTP fixtures serialize their process-wide URL overrides.
 #[tokio::test]
 async fn provider_history_progress_and_snapshot_obligations_survive_restart() {
+    let _guard = PROVIDER_HTTP_FIXTURES.lock().await;
     let fail_page = Arc::new(AtomicBool::new(true));
     let page_failure = fail_page.clone();
     let (base, requests, server_task) = server(move |line, _| {
@@ -611,6 +614,9 @@ async fn snapshot_restart(outlook: bool) {
             && (line.contains("q=after") || line.contains("/messages/delta"))
         {
             return ("400 Bad Request", "{}".into());
+        }
+        if line.contains("/messages/A") {
+            return ("404 Not Found", "{}".into());
         }
         if line.contains("/profile") {
             return ("200 OK", json!({"historyId":"200"}).to_string());
@@ -719,7 +725,7 @@ async fn snapshot_restart(outlook: bool) {
     persist_sync_cursors(&pool, "account", &state, &queue, None)
         .await
         .unwrap();
-    assert!(reconcile_folder_snapshot(
+    assert!(reconcile_test_snapshot(
         &pool,
         provider.as_ref(),
         "account",
@@ -762,7 +768,7 @@ async fn snapshot_restart(outlook: bool) {
     persist_sync_cursors(&pool, "account", &state, &queue, None)
         .await
         .unwrap();
-    reconcile_folder_snapshot(
+    reconcile_test_snapshot(
         &pool,
         provider.as_ref(),
         "account",
@@ -809,4 +815,365 @@ async fn snapshot_restart(outlook: bool) {
         .iter()
         .any(|line| line.contains("snapshot-page-2")));
     server_task.abort();
+}
+
+/// Completed backfills leave the reset run with only time-based catch-up.
+/// A predates that window; only resolving absent snapshot IDs can find its move.
+#[tokio::test]
+async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids() {
+    let _guard = PROVIDER_HTTP_FIXTURES.lock().await;
+    for scenario in [
+        "still-inbox",
+        "archive",
+        "move",
+        "existing",
+        "deleted",
+        "lookup",
+        "auth",
+        "malformed",
+        "target",
+        "listing-before-target",
+        "quarantine",
+        "pending",
+        "pending-deleted",
+    ] {
+        let fail = Arc::new(AtomicBool::new(true));
+        let failure = fail.clone();
+        let (base, requests, task) = server(move |line, _| {
+            if line.contains("startHistoryId=100") {
+                return ("404 Not Found", "{}".into());
+            }
+            if line.contains("/history") || line.contains("/profile") {
+                return ("200 OK", json!({"historyId":"200"}).to_string());
+            }
+            if line.contains("/messages/A") {
+                if scenario == "deleted" || scenario == "pending-deleted" { return ("404 Not Found", "{}".into()); }
+                if failure.load(Ordering::SeqCst) {
+                    match scenario {
+                        "lookup" => return ("503 Service Unavailable", "{}".into()),
+                        "auth" => return ("401 Unauthorized", "{}".into()),
+                        "malformed" => return ("200 OK", json!({"id":"wrong-id","payload":{"mimeType":"text/plain"}}).to_string()),
+                        _ => {}
+                    }
+                }
+                let labels = if scenario == "still-inbox" { vec!["INBOX"] } else if scenario == "archive" { vec![] } else if scenario == "existing" || scenario == "target" || scenario == "listing-before-target" {
+                    vec!["Label_one", "Label_two"]
+                } else { vec!["Label_one"] };
+                return ("200 OK", json!({"id":"A","threadId":"conversation","labelIds":labels,
+                    "internalDate":"1767225600000", "payload":{"mimeType":"text/plain",
+                    "headers":[{"name":"Message-ID","value":"<a@example.test>"}],"body":{"data":"Rml4dHVyZQ=="}}}).to_string());
+            }
+            if line.contains("/messages?") {
+                if scenario == "listing-before-target" && failure.load(Ordering::SeqCst) && !line.contains("q=after") {
+                    return ("503 Service Unavailable", "{}".into());
+                }
+                return ("200 OK", json!({"messages":[]}).to_string());
+            }
+            panic!("unexpected reset move request {line}");
+        }).await;
+        std::env::set_var("SATCHEL_GMAIL_API_BASE", &base);
+        let provider = crate::providers::gmail::GmailProvider::from_account_config(&config());
+        let pool = pool().await;
+        // Folder discovery already completed, even when its backfill was empty.
+        ensure_gmail_label_folder(&pool, "account", "Label_one")
+            .await
+            .unwrap();
+        ingest(
+            &pool,
+            message(if scenario == "existing" || scenario == "deleted" {
+                &["INBOX", "Label_one"]
+            } else {
+                &["INBOX"]
+            }),
+        )
+        .await;
+        let thread = annotate(&pool).await;
+        let source: String = sqlx::query_scalar("SELECT id FROM messages WHERE folder_id='inbox'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let target: Option<String> =
+            sqlx::query_scalar("SELECT id FROM messages WHERE folder_id!='inbox'")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        sqlx::query("INSERT INTO topic_items (topic_id,item_type,item_id,added_at,added_by) VALUES ('topic','message',?,'source-date','user')")
+            .bind(&source).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO attachments (id,message_id,filename,content_type,size,created_at) VALUES ('cached',?,'fixture.txt','text/plain',0,'')")
+            .bind(&source).execute(&pool).await.unwrap();
+        if scenario == "target" || scenario == "listing-before-target" {
+            // Fail the SECOND target after the first has already transferred A.
+            sqlx::raw_sql(
+                "CREATE TRIGGER fail_second_target BEFORE INSERT ON messages
+                WHEN NEW.folder_id IN (SELECT id FROM folders WHERE remote_id='Label_two')
+                BEGIN SELECT RAISE(ABORT, 'fixture second target failure'); END;",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        if scenario == "quarantine" {
+            let (folder, _) = ensure_gmail_label_folder(&pool, "account", "Label_one")
+                .await
+                .unwrap();
+            let repo = SyncQuarantineRepository::new(&pool);
+            for _ in 0..satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS {
+                repo.record_failure("account", &folder, "A", "fixture")
+                    .await
+                    .unwrap();
+            }
+        }
+        let mut state = ImapSyncState::default();
+        let old = json!({"history_id":"100","format_version":3,"latest_ts":1790000000});
+        for folder in ["INBOX", "Label_one"] {
+            state.cursors.insert(folder.into(), old.to_string());
+        }
+        let queue = SyncQueue::new();
+        if scenario.starts_with("pending") {
+            queue
+                .enqueue(
+                    &pool,
+                    QueuedAction::new(
+                        "account".into(),
+                        ACTION_REMOTE_MUTATION,
+                        json!({"kind":"move", "refs":[{"remote_id":"A","source_folder":"INBOX"}],
+                    "target_remote_folder_id":"Label_one"}),
+                    ),
+                )
+                .await
+                .unwrap();
+        }
+        for folder in ["INBOX", "Label_one"] {
+            let batch = provider
+                .sync_messages(
+                    folder,
+                    SyncCheckpoint {
+                        cursor: state.cursors.get(folder).cloned(),
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(
+                batch.messages.is_empty(),
+                "old A must be absent from time-based catch-up"
+            );
+            assert!(batch.snapshot_required);
+            assert!(state.request_snapshot(folder, true, batch.snapshot_required));
+            state
+                .cursors
+                .insert(folder.into(), batch.next.cursor.unwrap());
+        }
+        persist_sync_cursors(&pool, "account", &state, &queue, None)
+            .await
+            .unwrap();
+        let result = reconcile_test_snapshot(
+            &pool, &provider, "account", "inbox", "INBOX", &mut state, &queue,
+        )
+        .await;
+        let should_fail = matches!(
+            scenario,
+            "lookup"
+                | "auth"
+                | "malformed"
+                | "target"
+                | "listing-before-target"
+                | "quarantine"
+                | "pending"
+                | "pending-deleted"
+        );
+        assert_eq!(result.is_err(), should_fail, "{scenario}: {result:?}");
+        if should_fail {
+            assert_organization(&pool, &thread, &["INBOX"]).await;
+            assert_eq!(
+                sqlx::query_scalar::<_, String>(
+                    "SELECT item_id FROM topic_items WHERE item_type='message'"
+                )
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+                source
+            );
+            assert_eq!(
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM attachments")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap(),
+                1
+            );
+        }
+        let raw: String = sqlx::query_scalar("SELECT sync_state FROM accounts")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let mut restored: ImapSyncState = serde_json::from_str(&raw).unwrap();
+        assert_eq!(restored.pending_snapshots.contains("INBOX"), should_fail);
+        if should_fail {
+            fail.store(false, Ordering::SeqCst);
+            if scenario.starts_with("pending") {
+                sqlx::query("DELETE FROM sync_queue")
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
+            if scenario == "target" || scenario == "listing-before-target" {
+                // Ordinary backfill can land the first label while the second
+                // still fails. The durable ID must survive losing INBOX's row.
+                let partial = ingest(&pool, message(&["Label_one", "Label_two"])).await;
+                assert_eq!(partial.failed, 1);
+                assert_organization(&pool, &thread, &["Label_one"]).await;
+                if scenario == "target" {
+                    assert!(restored.snapshot_resolutions["INBOX"].contains("A"));
+                } else {
+                    assert!(!restored.snapshot_resolutions.contains_key("INBOX"));
+                }
+            }
+            if scenario == "target" || scenario == "listing-before-target" {
+                sqlx::raw_sql("DROP TRIGGER fail_second_target")
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
+            if scenario == "quarantine" {
+                sqlx::query("DELETE FROM sync_quarantine")
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
+            // A fresh provider and state use the persisted obligation even though
+            // the next successful history response no longer requests a snapshot.
+            let provider = crate::providers::gmail::GmailProvider::from_account_config(&config());
+            let next = provider
+                .sync_messages(
+                    "INBOX",
+                    SyncCheckpoint {
+                        cursor: restored.cursors.get("INBOX").cloned(),
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(!next.snapshot_required);
+            assert!(restored.request_snapshot("INBOX", true, next.snapshot_required));
+            reconcile_test_snapshot(
+                &pool,
+                &provider,
+                "account",
+                "inbox",
+                "INBOX",
+                &mut restored,
+                &queue,
+            )
+            .await
+            .unwrap();
+        }
+        if scenario == "deleted" || scenario == "pending-deleted" {
+            for table in [
+                "messages",
+                "threads",
+                "thread_tags",
+                "topic_items",
+                "workflow_events",
+                "attachments",
+            ] {
+                assert_eq!(
+                    sqlx::query_scalar::<_, i64>(&format!("SELECT COUNT(*) FROM {table}"))
+                        .fetch_one(&pool)
+                        .await
+                        .unwrap(),
+                    0,
+                    "{table}"
+                );
+            }
+        } else {
+            let labels: &[&str] = if scenario == "still-inbox" {
+                &["INBOX"]
+            } else if scenario == "archive" {
+                &["ARCHIVE"]
+            } else if scenario == "existing"
+                || scenario == "target"
+                || scenario == "listing-before-target"
+            {
+                &["Label_one", "Label_two"]
+            } else {
+                &["Label_one"]
+            };
+            assert_organization(&pool, &thread, labels).await;
+            let survivor: String = sqlx::query_scalar("SELECT m.id FROM messages m JOIN folders f ON f.id=m.folder_id WHERE f.remote_id=?")
+                .bind(labels[0])
+                .fetch_one(&pool).await.unwrap();
+            assert_eq!(survivor, target.unwrap_or(source));
+            assert_eq!(
+                sqlx::query_as::<_, (String, String, String)>(
+                    "SELECT item_id,added_at,added_by FROM topic_items WHERE item_type='message'"
+                )
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+                (survivor, "source-date".into(), "user".into())
+            );
+        }
+        let raw: String = sqlx::query_scalar("SELECT sync_state FROM accounts")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let done: ImapSyncState = serde_json::from_str(&raw).unwrap();
+        assert!(!done.pending_snapshots.contains("INBOX"));
+        assert!(!done.snapshot_resolutions.contains_key("INBOX"));
+        assert!(done.pending_snapshots.contains("Label_one"));
+        let recorded = requests.lock().unwrap();
+        assert!(recorded.iter().any(|r| r.contains("q=after")));
+        assert!(
+            recorded.iter().any(|r| r.contains("/messages/A")),
+            "absent A requires a global lookup"
+        );
+        assert!(
+            !recorded
+                .iter()
+                .any(|r| r.contains("/messages/") && !r.contains("/messages/A")),
+            "only absent IDs need downloading"
+        );
+        task.abort();
+    }
+    std::env::remove_var("SATCHEL_GMAIL_API_BASE");
+}
+
+async fn reconcile_test_snapshot(
+    pool: &SqlitePool,
+    provider: &dyn MailProvider,
+    account_id: &str,
+    folder_id: &str,
+    remote_folder_id: &str,
+    state: &mut ImapSyncState,
+    queue: &SyncQueue,
+) -> Result<HashSet<String>, String> {
+    let provider_kind = if remote_folder_id == "inbox" {
+        "outlook"
+    } else {
+        "gmail"
+    };
+    let account = MailAccountRow {
+        id: account_id.into(),
+        display_name: "Fixture".into(),
+        email: "me@example.test".into(),
+        provider: provider_kind.into(),
+        config: "{}".into(),
+        sync_state: None,
+        outlook_immutable_ids_migrated: 1,
+        ingest_cutoff: None,
+    };
+    reconcile_folder_snapshot(
+        pool,
+        provider,
+        &FolderIngestContext {
+            app: None,
+            events: None,
+            account: &account,
+            config: &config(),
+            folder_id,
+            folder_remote_id: remote_folder_id,
+            folder_type: "inbox",
+        },
+        state,
+        queue,
+    )
+    .await
 }

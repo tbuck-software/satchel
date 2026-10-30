@@ -835,7 +835,7 @@ impl GmailProvider {
             Some(token) => BackfillStep::Continue(token),
             // An expired history cursor leaves a hole no incremental pass can
             // see: the `after:` catch-up matches on receive time, and the
-            // snapshot only deletes. Re-list the label instead of skipping.
+            // snapshot cannot discover IDs never cached locally. Re-list the label.
             None if parsed.state.history_expired => BackfillStep::Bootstrap,
             // A legacy `ts:` cursor never backfilled, so it starts one now.
             None if !parsed.had_checkpoint || parsed.was_legacy => BackfillStep::Bootstrap,
@@ -1039,6 +1039,9 @@ impl GmailProvider {
                 .json::<GmailMessageResponse>()
                 .await
                 .map_err(|err| format!("gmail message parse failed: {err}"))?;
+            if message.payload.is_none() && message.raw.is_none() {
+                return Err("gmail message lookup returned an incomplete message".into());
+            }
             if gmail_message_needs_raw_crypto(&message)
                 || message
                     .payload
@@ -1547,8 +1550,8 @@ impl MailProvider for GmailProvider {
         //
         // A backfill page is a partial, historical view of the folder — it is
         // NEVER a folder snapshot, so it must not touch `snapshot_required`:
-        // that flag drives `reconcile_imap_folder_snapshot`, which deletes every
-        // local row missing from the snapshot.
+        // reconciliation needs complete folder presence, followed by global
+        // resolution of absent local IDs. A time window cannot prove absence.
         //
         // Failures here are swallowed on purpose. These calls are rate-limited
         // far more often than the incremental pass, and propagating the error
@@ -1622,14 +1625,39 @@ impl MailProvider for GmailProvider {
         })
     }
 
+    async fn resolve_snapshot_message(
+        &self,
+        remote_id: &str,
+    ) -> crate::sync::errors::SyncResult<Option<MessageEnvelope>> {
+        let token = self.access_token().await?;
+        let (mut messages, _, _) = Self::fetch_message_details(
+            &crate::utils::http::client(),
+            &token,
+            vec![GmailMessageListItem {
+                id: remote_id.to_string(),
+            }],
+        )
+        .await?;
+        // fetch_message_details omits only explicit HTTP 404 responses.
+        // Parsing, authentication, quota and transport errors remain errors.
+        let message = messages.pop();
+        if message
+            .as_ref()
+            .is_some_and(|message| message.remote_id != remote_id)
+        {
+            return Err("gmail snapshot lookup returned a mismatched message".into());
+        }
+        Ok(message)
+    }
+
     async fn sync_message_state_snapshot(
         &self,
         folder: &str,
     ) -> crate::sync::errors::SyncResult<Option<crate::providers::traits::RemoteMessageStateSnapshot>>
     {
         // Folder snapshots repair moves/deletes even after a history cursor
-        // has expired. IDs are enough for presence reconciliation; flags remain
-        // sourced from full message payloads so this cheap pass cannot clobber them.
+        // has expired. Absent IDs still need account-wide resolution before
+        // removal; flags remain sourced from full message payloads.
 
         let token = self.access_token().await?;
         let client = crate::utils::http::client();

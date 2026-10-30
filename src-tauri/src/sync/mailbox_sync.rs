@@ -165,7 +165,7 @@ struct MailAccountRow {
     ingest_cutoff: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 struct ImapSyncState {
     #[serde(default)]
     cursors: HashMap<String, String>,
@@ -175,6 +175,9 @@ struct ImapSyncState {
     /// Older state decodes as empty; older readers ignore the additional field.
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pending_snapshots: HashSet<String>,
+    /// IDs stay owed even if another ingest moves their source before retry.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    snapshot_resolutions: HashMap<String, HashSet<String>>,
 }
 
 impl ImapSyncState {
@@ -191,12 +194,15 @@ impl ImapSyncState {
 async fn reconcile_folder_snapshot(
     pool: &SqlitePool,
     provider: &dyn crate::providers::traits::MailProvider,
-    account_id: &str,
-    folder_id: &str,
-    remote_folder_id: &str,
+    context: &FolderIngestContext<'_>,
     state: &mut ImapSyncState,
     queue: &SyncQueue,
 ) -> Result<HashSet<String>, String> {
+    let account_id = &context.account.id;
+    let remote_folder_id = context.folder_remote_id;
+    // Durable before any network or ingest work. Listing IDs is not completion.
+    state.pending_snapshots.insert(remote_folder_id.to_string());
+    persist_sync_cursors(pool, account_id, state, queue, None).await?;
     let Some(snapshot) = provider
         .sync_message_state_snapshot(remote_folder_id)
         .await
@@ -204,22 +210,35 @@ async fn reconcile_folder_snapshot(
     else {
         return Ok(HashSet::new());
     };
-    let changes = reconcile_imap_folder_snapshot(
-        pool,
-        account_id,
-        folder_id,
-        remote_folder_id,
-        &snapshot.states,
-        snapshot.remote_uidvalidity,
-    )
-    .await?;
-    if !changes.skipped_stale_generation {
-        state.folder_snapshot_at.insert(
+    let (relocated_threads, skipped_stale_generation) =
+        if context.account.provider.eq_ignore_ascii_case("gmail") {
+            (
+                reconcile_gmail_snapshot(pool, provider, context, &snapshot.states, state, queue)
+                    .await?,
+                false,
+            )
+        } else {
+            let changes = reconcile_imap_folder_snapshot(
+                pool,
+                account_id,
+                context.folder_id,
+                remote_folder_id,
+                &snapshot.states,
+                snapshot.remote_uidvalidity,
+            )
+            .await?;
+            (changes.relocated_threads, changes.skipped_stale_generation)
+        };
+    if !skipped_stale_generation {
+        let mut completed = state.clone();
+        completed.folder_snapshot_at.insert(
             remote_folder_id.to_string(),
             chrono::Utc::now().to_rfc3339(),
         );
-        state.pending_snapshots.remove(remote_folder_id);
-        persist_sync_cursors(pool, account_id, state, queue, None).await?;
+        completed.pending_snapshots.remove(remote_folder_id);
+        completed.snapshot_resolutions.remove(remote_folder_id);
+        persist_sync_cursors(pool, account_id, &completed, queue, None).await?;
+        *state = completed;
     } else {
         tracing::warn!(
             account_id,
@@ -228,7 +247,105 @@ async fn reconcile_folder_snapshot(
             "folder snapshot named another generation, kept every message"
         );
     }
-    Ok(changes.relocated_threads)
+    Ok(relocated_threads)
+}
+
+/// A missing Gmail label copy is not proof of global deletion. Resolve absent
+/// copies and unfinished known deliveries outside write transactions, with
+/// bounded batches. Never pass Gmail presence lists to the IMAP reconciler.
+async fn reconcile_gmail_snapshot(
+    pool: &SqlitePool,
+    provider: &dyn crate::providers::traits::MailProvider,
+    context: &FolderIngestContext<'_>,
+    states: &[crate::providers::traits::RemoteMessageState],
+    state: &mut ImapSyncState,
+    queue: &SyncQueue,
+) -> Result<HashSet<String>, String> {
+    let present = serde_json::to_string(&states.iter().map(|s| &s.remote_id).collect::<Vec<_>>())
+        .map_err(|error| error.to_string())?;
+    let mut after = String::new();
+    let mut changed = HashSet::new();
+    loop {
+        let owed = state
+            .snapshot_resolutions
+            .entry(context.folder_remote_id.to_string())
+            .or_default();
+        let owed_json = serde_json::to_string(&*owed).map_err(|error| error.to_string())?;
+        let absent: Vec<String> = sqlx::query_scalar(
+            "SELECT remote_id FROM (
+                SELECT remote_id FROM messages
+                WHERE account_id = ? AND folder_id = ?
+                  AND remote_id NOT IN (SELECT value FROM json_each(?))
+                UNION SELECT value FROM json_each(?)
+                UNION SELECT q.remote_id FROM sync_quarantine q
+                WHERE q.account_id = ? AND EXISTS (
+                    SELECT 1 FROM messages m WHERE m.account_id = q.account_id
+                    AND m.remote_id = q.remote_id
+                )
+             ) WHERE remote_id > ? ORDER BY remote_id LIMIT 100",
+        )
+        .bind(&context.account.id)
+        .bind(context.folder_id)
+        .bind(&present)
+        .bind(&owed_json)
+        .bind(&context.account.id)
+        .bind(&after)
+        .fetch_all(pool)
+        .await
+        .map_err(|error| error.to_string())?;
+        let Some(last) = absent.last() else {
+            break;
+        };
+        after = last.clone();
+        // Persist before lookup/ingest. Do not lose the identity when a later
+        // folder/backfill stores a partial replacement before this is retried.
+        owed.extend(absent.iter().cloned());
+        persist_sync_cursors(pool, &context.account.id, state, queue, None).await?;
+        for ids in absent.chunks(3) {
+            // Await the whole network batch before any database write begins.
+            let messages = futures::future::try_join_all(
+                ids.iter().map(|id| provider.resolve_snapshot_message(id)),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            for (id, message) in ids.iter().zip(messages) {
+                match message {
+                    Some(message) => {
+                        let threads: Vec<String> = sqlx::query_scalar(
+                            "SELECT DISTINCT thread_id FROM messages WHERE account_id = ? AND remote_id = ?",
+                        )
+                        .bind(&context.account.id)
+                        .bind(id)
+                        .fetch_all(pool)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                        crate::sync::message_ingest::upsert_gmail_snapshot_message(
+                            context.app,
+                            pool,
+                            &context.account.id,
+                            &context.account.email,
+                            &context.account.display_name,
+                            context.config,
+                            &message,
+                            context.events,
+                            context.account.ingest_cutoff.as_deref(),
+                        )
+                        .await?;
+                        changed.extend(threads);
+                    }
+                    None => changed.extend(
+                        crate::sync::gmail_reconcile::reconcile_gmail_snapshot_deletion(
+                            pool,
+                            &context.account.id,
+                            id,
+                        )
+                        .await?,
+                    ),
+                }
+            }
+        }
+    }
+    Ok(changed)
 }
 
 /// Persist the folder cursors reached so far, plus any remote mutation this
@@ -1017,8 +1134,11 @@ pub(crate) async fn sync_mailboxes(
             if snapshot_sync_complete {
                 for (folder_id, remote_folder_id) in snapshot_folders {
                     match reconcile_folder_snapshot(
-                        pool, provider.as_ref(), &account.id, &folder_id,
-                        &remote_folder_id, &mut state, queue.as_ref(),
+                        pool, provider.as_ref(), &FolderIngestContext {
+                            app, events, account: &account, config: &config,
+                            folder_id: &folder_id, folder_remote_id: &remote_folder_id,
+                            folder_type: "", // Gmail derives each target's type; other providers do not ingest here.
+                        }, &mut state, queue.as_ref(),
                     ).await {
                         Ok(changed) => externally_changed_threads.extend(changed),
                         Err(err) => summary.failures.push(encoded_folder_sync_failure(
@@ -1078,6 +1198,7 @@ pub(crate) async fn sync_mailboxes(
                 state.cursors.retain(|folder_id, _| retained.contains(folder_id));
                 state.folder_snapshot_at.retain(|folder_id, _| retained.contains(folder_id));
                 state.pending_snapshots.retain(|folder_id| retained.contains(folder_id));
+                state.snapshot_resolutions.retain(|folder_id, _| retained.contains(folder_id));
             }
 
             // The retained cursor set and the snapshot timestamps are the last
