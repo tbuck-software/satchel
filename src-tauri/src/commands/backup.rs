@@ -245,6 +245,8 @@ const EXPORT_PAGE_ROWS: i64 = 500;
 /// Original source blobs are loaded individually, never as a whole page.
 #[derive(sqlx::FromRow)]
 struct MessageExportRow {
+    #[sqlx(flatten)]
+    reference: crate::db::remote_content::ContentReference,
     id: String,
     date: String,
     from_address: String,
@@ -333,6 +335,8 @@ async fn export_attachments(
 ) -> Result<Vec<crate::providers::traits::OutgoingAttachment>, String> {
     use crate::providers::traits::OutgoingAttachment;
 
+    let reference = &row.reference;
+    reference.validate_cached_read()?;
     if let Some(raw) = row
         .draft_attachments_json
         .as_deref()
@@ -356,8 +360,6 @@ async fn export_attachments(
         }
     }
 
-    let reference = crate::db::remote_content::ContentReference::load(pool, &row.id).await?;
-    reference.validate_cached_read()?;
     let rows: Vec<MboxAttachmentRow> = sqlx::query_as(
         "SELECT id, filename, content_type, content_id, is_inline,
                 COALESCE(cached_path, storage_path) AS path
@@ -464,6 +466,8 @@ async fn export_message_source(
 ) -> Result<Vec<u8>, String> {
     if row.is_draft != 0 {
         let attachments = export_attachments(pool, row).await?;
+        let mut tx = pool.begin().await.map_err(|error| error.to_string())?;
+        row.reference.ensure_current(&mut tx).await?;
         return build_draft_message(row, attachments);
     }
     match crate::commands::messages::fetch_remote_message_source(pool, &row.id).await {
@@ -517,10 +521,14 @@ async fn write_mailbox_export(
 
 async fn fetch_export_message(pool: &SqlitePool, id: &str) -> Result<MessageExportRow, String> {
     sqlx::query_as(
-        "SELECT id, date, from_address, COALESCE(from_name, '') AS from_name,
-        to_addresses, cc_addresses, bcc_addresses, reply_to, subject, body_text, body_html,
-        message_id_header, in_reply_to, references_header, draft_attachments_json,
-        has_attachments, is_draft FROM messages WHERE id = ?",
+        "SELECT m.id, m.date, m.from_address, COALESCE(m.from_name, '') AS from_name,
+        m.to_addresses, m.cc_addresses, m.bcc_addresses, m.reply_to, m.subject, m.body_text, m.body_html,
+        m.message_id_header, m.in_reply_to, m.references_header, m.draft_attachments_json,
+        m.has_attachments, m.is_draft, m.id AS message_id, m.account_id, m.folder_id,
+        m.remote_id, m.remote_uidvalidity, m.created_at, a.provider,
+        COALESCE(f.remote_id, f.full_path) AS source_folder, f.uidvalidity AS folder_uidvalidity
+        FROM messages m JOIN accounts a ON a.id = m.account_id
+        LEFT JOIN folders f ON f.id = m.folder_id WHERE m.id = ?",
     )
     .bind(id)
     .fetch_one(pool)
@@ -3169,6 +3177,70 @@ Content-Transfer-Encoding: 8bit\r\n\r\nGr\xfc\xdfe\r\n\
                 "at row {index}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn draft_generation_export_guards_precede_json_attachment_returns() {
+        let pool = migrated_pool().await;
+        seed_exportable_messages(&pool, 1).await;
+        sqlx::query("UPDATE folders SET uidvalidity = 8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let attachments = serde_json::json!([{
+            "filename": "saved.txt", "mime_type": "text/plain", "content_base64": "c2F2ZWQ="
+        }])
+        .to_string();
+        let target = tempfile::tempdir().unwrap();
+        let path = target.path().join("export.eml");
+        for payload in [None, Some(attachments.as_str())] {
+            for generation in [None, Some(7), Some(8)] {
+                sqlx::query("UPDATE messages SET remote_id = '42', remote_uidvalidity = ?, draft_attachments_json = ?")
+                    .bind(generation).bind(payload).execute(&pool).await.unwrap();
+                std::fs::write(&path, b"previous complete export").unwrap();
+                let result =
+                    write_message_export(&pool, path.to_str().unwrap(), "message-00000").await;
+                if generation == Some(8) {
+                    result.unwrap();
+                    let parsed =
+                        crate::providers::imap::parse_raw_rfc822(&std::fs::read(&path).unwrap())
+                            .unwrap();
+                    assert_eq!(parsed.body_text.as_deref(), Some("Body 0"));
+                    assert_eq!(parsed.attachments.len(), usize::from(payload.is_some()));
+                } else {
+                    let key = if generation.is_none() {
+                        "imapUidValidityMissing"
+                    } else {
+                        "imapUidValidityChanged"
+                    };
+                    assert!(result.unwrap_err().contains(key));
+                    assert_eq!(std::fs::read(&path).unwrap(), b"previous complete export");
+                }
+            }
+        }
+        // A saved export row must not acquire a newer row's verified identity.
+        let row = super::fetch_export_message(&pool, "message-00000")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE folders SET uidvalidity = 9")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE messages SET remote_uidvalidity = 9, body_text = 'New generation'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(super::export_message_source(&pool, &row)
+            .await
+            .unwrap_err()
+            .contains("imapUidValidityChanged"));
+        sqlx::query("UPDATE messages SET remote_id = NULL, remote_uidvalidity = NULL")
+            .execute(&pool)
+            .await
+            .unwrap();
+        write_message_export(&pool, path.to_str().unwrap(), "message-00000")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

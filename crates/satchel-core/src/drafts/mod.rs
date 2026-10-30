@@ -18,6 +18,7 @@ mod error;
 pub mod outgoing;
 pub mod send_queue;
 use crate::db::messages::SentMessageRepository;
+use crate::db::remote_content::ContentReference;
 use crate::db::signatures::SignatureRepository;
 use crate::providers::{
     provider_for_account,
@@ -144,6 +145,14 @@ struct DraftRow {
     updated_at: String,
     draft_send_options_json: Option<String>,
     draft_revision: i64,
+}
+
+#[derive(Debug, FromRow)]
+struct ReferencedDraftRow {
+    #[sqlx(flatten)]
+    draft: DraftRow,
+    #[sqlx(flatten)]
+    reference: ContentReference,
 }
 
 #[derive(Debug, FromRow)]
@@ -796,9 +805,12 @@ async fn record_remote_draft_id(
 }
 
 pub async fn list(pool: &SqlitePool) -> Result<Vec<DraftDto>, String> {
-    let rows = sqlx::query_as::<_, DraftRow>(
-        "SELECT m.id, m.account_id, m.thread_id, m.to_addresses, m.cc_addresses, m.bcc_addresses, m.subject, m.body_text, m.body_html, m.from_address, m.from_name, m.reply_to, m.scheduled_for, m.draft_attachments_json, m.signature_id, m.signature_variant, m.signature_override_text, m.signature_override_html, m.updated_at, m.draft_send_options_json, m.draft_revision
-         FROM messages m
+    let rows = sqlx::query_as::<_, ReferencedDraftRow>(
+        "SELECT m.id, m.account_id, m.thread_id, m.to_addresses, m.cc_addresses, m.bcc_addresses, m.subject, m.body_text, m.body_html, m.from_address, m.from_name, m.reply_to, m.scheduled_for, m.draft_attachments_json, m.signature_id, m.signature_variant, m.signature_override_text, m.signature_override_html, m.updated_at, m.draft_send_options_json, m.draft_revision,
+                m.id AS message_id, m.folder_id, m.remote_id, m.remote_uidvalidity,
+                m.created_at, a.provider, COALESCE(f.remote_id, f.full_path) AS source_folder,
+                f.uidvalidity AS folder_uidvalidity
+         FROM messages m JOIN accounts a ON a.id = m.account_id
          JOIN folders f ON f.id = m.folder_id
          WHERE m.is_draft = 1 AND LOWER(TRIM(f.folder_type)) <> 'trash'
          ORDER BY m.updated_at DESC",
@@ -807,8 +819,24 @@ pub async fn list(pool: &SqlitePool) -> Result<Vec<DraftDto>, String> {
     .await
     .map_err(|error| error.to_string())?;
     let mut drafts = Vec::with_capacity(rows.len());
+    let mut references = Vec::with_capacity(rows.len());
     for row in rows {
-        drafts.push(sanitize_draft_html(row.into()).await?);
+        row.reference.validate_cached_read()?;
+        references.push(row.reference);
+        drafts.push(sanitize_draft_html(row.draft.into()).await?);
+    }
+    let ids = references
+        .iter()
+        .map(|reference| reference.message_id.clone())
+        .collect::<Vec<_>>();
+    let current = ContentReference::load_many(pool, &ids).await?;
+    for reference in references {
+        if !current
+            .get(&reference.message_id)
+            .is_some_and(|value| reference.same_identity(value))
+        {
+            return Err(reference.changed_error());
+        }
     }
     Ok(drafts)
 }
@@ -829,9 +857,12 @@ async fn load_draft_inner(
     write: &SqlitePool,
     id: &str,
 ) -> Result<Option<DraftDto>, String> {
-    let row = sqlx::query_as::<_, DraftRow>(
-        "SELECT m.id, m.account_id, m.thread_id, m.to_addresses, m.cc_addresses, m.bcc_addresses, m.subject, m.body_text, m.body_html, m.from_address, m.from_name, m.reply_to, m.scheduled_for, m.draft_attachments_json, m.signature_id, m.signature_variant, m.signature_override_text, m.signature_override_html, m.updated_at, m.draft_send_options_json, m.draft_revision
-         FROM messages m
+    let row = sqlx::query_as::<_, ReferencedDraftRow>(
+        "SELECT m.id, m.account_id, m.thread_id, m.to_addresses, m.cc_addresses, m.bcc_addresses, m.subject, m.body_text, m.body_html, m.from_address, m.from_name, m.reply_to, m.scheduled_for, m.draft_attachments_json, m.signature_id, m.signature_variant, m.signature_override_text, m.signature_override_html, m.updated_at, m.draft_send_options_json, m.draft_revision,
+                m.id AS message_id, m.folder_id, m.remote_id, m.remote_uidvalidity,
+                m.created_at, a.provider, COALESCE(f.remote_id, f.full_path) AS source_folder,
+                f.uidvalidity AS folder_uidvalidity
+         FROM messages m JOIN accounts a ON a.id = m.account_id
          JOIN folders f ON f.id = m.folder_id
          WHERE m.id = ? AND m.is_draft = 1 AND LOWER(TRIM(f.folder_type)) <> 'trash'",
     )
@@ -840,24 +871,33 @@ async fn load_draft_inner(
     .await
     .map_err(|err| err.to_string())?;
     let Some(row) = row else { return Ok(None) };
+    let ReferencedDraftRow {
+        draft: row,
+        reference,
+    } = row;
+    reference.validate_cached_read()?;
     let had_local_attachment_payload = row
         .draft_attachments_json
         .as_deref()
         .is_some_and(|raw| !raw.trim().is_empty());
     let mut draft: DraftDto = row.into();
     if !had_local_attachment_payload {
-        hydrate_imported_draft_attachments(read, write, id, &mut draft).await?;
+        hydrate_imported_draft_attachments(read, write, &reference, &mut draft).await?;
     }
-    Ok(Some(sanitize_draft_html(draft).await?))
+    let draft = sanitize_draft_html(draft).await?;
+    let mut tx = read.begin().await.map_err(|error| error.to_string())?;
+    reference.ensure_current(&mut tx).await?;
+    Ok(Some(draft))
 }
 
 async fn hydrate_imported_draft_attachments(
     read: &SqlitePool,
     write: &SqlitePool,
-    draft_id: &str,
+    reference: &ContentReference,
     draft: &mut DraftDto,
 ) -> Result<(), String> {
-    let reference = crate::db::remote_content::ContentReference::load(read, draft_id).await?;
+    reference.validate_cached_read()?;
+    let draft_id = &reference.message_id;
     let rows = sqlx::query_as::<_, ImportedDraftAttachmentRow>(
         "SELECT a.id, a.filename, a.content_type, a.content_id, a.is_inline, a.cached_path,
                 a.remote_part_id, acc.provider, acc.id AS account_id, acc.email AS account_email,
@@ -876,8 +916,6 @@ async fn hydrate_imported_draft_attachments(
     if rows.is_empty() {
         return Ok(());
     }
-    reference.validate_cached_read()?;
-
     let mut attachments = Vec::with_capacity(rows.len());
     for row in rows {
         let cached = if let Some(path) = row.cached_path.as_deref() {
@@ -1252,6 +1290,69 @@ mod tests {
                     ('B', 'B', 'b@example.test', 'imap', '{}', '', '2026-01-01', '2026-01-01');",
         ).execute(&pool).await.expect("accounts");
         pool
+    }
+
+    #[tokio::test]
+    async fn draft_generation_guards_cover_cached_bodies_and_json_attachments() {
+        let pool = draft_test_pool().await;
+        let queue = crate::sync::queue::SyncQueue::new();
+        save(&pool, &queue, &draft_input("A", "Saved body"))
+            .await
+            .unwrap();
+        sqlx::query("UPDATE folders SET uidvalidity = 8 WHERE account_id = 'A'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let attachments = serde_json::json!([{
+            "filename": "saved.txt", "mime_type": "text/plain", "content_base64": "c2F2ZWQ="
+        }])
+        .to_string();
+        for payload in [None, Some(attachments.as_str())] {
+            for generation in [None, Some(7), Some(8)] {
+                sqlx::query("UPDATE messages SET remote_id = '42', remote_uidvalidity = ?, draft_attachments_json = ? WHERE id = 'draft'")
+                    .bind(generation).bind(payload).execute(&pool).await.unwrap();
+                let listed = super::list(&pool).await;
+                let loaded = super::load(&pool, &pool, &queue, "draft").await;
+                if generation == Some(8) {
+                    let listed = listed.unwrap();
+                    let loaded = loaded.unwrap().unwrap();
+                    assert_eq!(listed[0].body, "Saved body");
+                    assert_eq!(loaded.body, "Saved body");
+                    assert_eq!(loaded.attachments.len(), usize::from(payload.is_some()));
+                } else {
+                    let key = if generation.is_none() {
+                        "imapUidValidityMissing"
+                    } else {
+                        "imapUidValidityChanged"
+                    };
+                    assert!(listed.unwrap_err().contains(key));
+                    assert!(loaded.unwrap_err().to_string().contains(key));
+                }
+            }
+        }
+        for local_id in [None, Some("import-123e4567-e89b-12d3-a456-426614174000")] {
+            sqlx::query(
+                "UPDATE messages SET remote_id = ?, remote_uidvalidity = NULL WHERE id = 'draft'",
+            )
+            .bind(local_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query("UPDATE folders SET uidvalidity = 9")
+                .execute(&pool)
+                .await
+                .unwrap();
+            assert_eq!(super::list(&pool).await.unwrap()[0].body, "Saved body");
+            assert_eq!(
+                super::load(&pool, &pool, &queue, "draft")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .attachments
+                    .len(),
+                1
+            );
+        }
     }
 
     #[tokio::test]

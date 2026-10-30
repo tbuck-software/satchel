@@ -1434,3 +1434,71 @@ describe('bounded content revalidation', () => {
     expect(messages.getByThread('th-live')[0]?.bodyLoaded).toBe(true);
   });
 });
+
+
+describe('invalid previews and interrupted body refreshes', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    commandsAvailableMock.mockReturnValue(true);
+    previewMock.mockReset();
+    bodiesMock.mockReset();
+    attachmentsMock.mockReset().mockResolvedValue([]);
+    loadBodyMock.mockReset();
+  });
+
+  it.each([null, 7])('never exposes invalid preview content with saved generation %s', async (generation) => {
+    const content_error = JSON.stringify({ key: 'backend.errors.imapUidValidityChanged', params: { folder: 'INBOX' } });
+    previewMock.mockResolvedValue([
+      backendMessage({ id: 'old', remote_uidvalidity: generation, content_error, body_loaded: true,
+        body_text: '', snippet: 'STALE CACHED CONTENT', body_html: '<p>STALE HTML</p>', source_payload: '{"text":"stale payload"}' }),
+      backendMessage({ id: 'middle' }), backendMessage({ id: 'latest' }),
+    ] as never);
+    bodiesMock.mockImplementation(async ids => ids.map(id => ({ ...inlineBody('<p>safe</p>'), id })) as never);
+    const store = useMessagesStore();
+    await store.openThread('th-live');
+    const message = store.getByThread('th-live')[0]!;
+    expect(message.bodyText).toBe('');
+    expect(message.bodyHtml).toBeUndefined();
+    expect(message.sourcePayload).toBeUndefined();
+    expect(message.bodyLoadError).toMatch(/sync.*folder/i);
+    const { forwardThreadPrefill, replyThreadPrefill } = await import('@/utils/composerThreadPrefill');
+    for (const prefill of [forwardThreadPrefill([message], 'Subject'), replyThreadPrefill('reply', [message], 'Subject', new Set<string>())]) {
+      expect(prefill.body ?? '').not.toContain('STALE');
+      expect(prefill.bodyHtml ?? '').not.toContain('STALE');
+    }
+  });
+
+  it.each(['before', 'after', 'reject'])('replaces an obsolete body request whose completion arrives %s the new one', async (order) => {
+    previewMock.mockResolvedValue(['old', 'middle', 'latest'].map(id => backendMessage({ id, remote_uidvalidity: 7 })) as never);
+    bodiesMock.mockImplementation(async ids => ids.map(id => ({ ...inlineBody(''), id, remote_uidvalidity: 7,
+      body_loaded: id !== 'old', body_text: id === 'old' ? '' : 'Cached latest' })) as never);
+    type Loaded = Awaited<ReturnType<typeof backendLoadMessageBody>>;
+    let resolveOld!: (body: Loaded) => void;
+    let rejectOld!: (error: Error) => void;
+    let resolveCurrent!: (body: Loaded) => void;
+    loadBodyMock.mockImplementationOnce(() => new Promise((resolve, reject) => { resolveOld = resolve; rejectOld = reject; }));
+    loadBodyMock.mockImplementationOnce(() => new Promise(resolve => { resolveCurrent = resolve; }));
+    const store = useMessagesStore();
+    await store.openThread('th-live');
+    const expansion = store.loadAttachmentsForMessages('th-live', ['old']);
+    await vi.waitFor(() => expect(loadBodyMock).toHaveBeenCalledTimes(1));
+    const refresh = store.refreshThread('th-live');
+    await vi.waitFor(() => expect(loadBodyMock).toHaveBeenCalledTimes(2));
+    const oldBody = { body_text: 'Obsolete body', body_html: null, remote_uidvalidity: 7, fetched: true };
+    if (order !== 'after') {
+      if (order === 'reject') rejectOld(new Error('Obsolete failure'));
+      else resolveOld(oldBody);
+      await expansion;
+      expect(store.isBodyLoading('old')).toBe(true);
+      expect(store.getByThread('th-live')[0]?.bodyLoadError).toBeUndefined();
+    }
+    resolveCurrent({ ...oldBody, body_text: 'Current body' });
+    await refresh;
+    if (order === 'after') { resolveOld(oldBody); await expansion; }
+    expect(store.isBodyLoading('old')).toBe(false);
+    expect(store.getByThread('th-live')[0]?.bodyLoaded).toBe(true);
+    expect(store.getByThread('th-live')[0]?.bodyText).toBe('Current body');
+    expect(store.getByThread('th-live')[0]?.bodyLoadError).toBeUndefined();
+  });
+});

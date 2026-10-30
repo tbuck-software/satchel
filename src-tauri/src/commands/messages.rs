@@ -195,6 +195,9 @@ async fn validated_previews(
                 })
                 .unwrap_or_else(|| Some("backend.errors.messageNotAvailableLocally".to_string()));
             if dto.content_error.is_some() {
+                dto.snippet.clear();
+                dto.body_html = None;
+                dto.source_payload = None;
                 dto.body_text.clear();
                 dto.body_loaded = true;
             }
@@ -1976,6 +1979,10 @@ mod tests {
             VALUES ('m','a','f','t','42',7,'sender@example.test','[]','','cached body',CAST('From: sender@example.test' || char(13,10,13,10) || 'cached source' AS BLOB),'','');")
             .execute(&pool).await.unwrap();
         sqlx::query("INSERT INTO messages (id,account_id,folder_id,thread_id,remote_id,remote_uidvalidity,from_address,to_addresses,date,body_text,created_at,updated_at) VALUES ('neighbor','a','f','t','43',8,'sender@example.test','[]','','neighbor bytes','','')").execute(&pool).await.unwrap();
+        sqlx::query("UPDATE messages SET snippet = 'cached snippet' WHERE id = 'm'")
+            .execute(&pool)
+            .await
+            .unwrap();
         let dir = tempfile::tempdir().unwrap();
         let reference = ContentReference::load(&pool, "m").await.unwrap();
         let part = crate::providers::traits::RemoteAttachment {
@@ -2057,6 +2064,9 @@ mod tests {
             let preview = previews.iter().find(|row| row.id == "m").unwrap();
             assert!(preview.content_error.as_deref().unwrap().contains(key));
             assert!(preview.body_text.is_empty());
+            assert!(preview.snippet.is_empty());
+            assert!(preview.body_html.is_none());
+            assert!(preview.source_payload.is_none());
             let current = ContentReference::load(&pool, "m").await.unwrap();
             let repository = satchel_core::db::messages::MessageReadRepository::new(&pool);
             for mut row in repository

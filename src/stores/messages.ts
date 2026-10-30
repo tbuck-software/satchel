@@ -124,6 +124,23 @@ function mapSmimeStatus(row: {
   };
 }
 
+function withoutInvalidContent(message: Message): Message {
+  if (!message.contentError) return message;
+  return {
+    ...message,
+    bodyText: '',
+    bodyHtml: undefined,
+    sourcePayload: undefined,
+    bodyLoaded: true,
+    bodyLoadError: backendErrorLabel(message.contentError),
+    attachments: [],
+    pgp: undefined,
+    smime: undefined,
+    inlineImagesPending: 0,
+    inlineImagesError: undefined,
+  };
+}
+
 function mapBackendMessage(row: BackendMessage, threadId: string): Message {
   const pgpStatus = mapPgpStatus(row);
   const smimeStatus = mapSmimeStatus(row);
@@ -135,7 +152,7 @@ function mapBackendMessage(row: BackendMessage, threadId: string): Message {
   const fallbackText = bodyTextCandidate || snippetCandidate || row.subject;
   const htmlCandidate = (row.body_html || '').trim();
 
-  return {
+  return withoutInvalidContent({
     id: row.id,
     remoteUidValidity: row.remote_uidvalidity ?? null,
     contentError: row.content_error ?? null,
@@ -170,7 +187,7 @@ function mapBackendMessage(row: BackendMessage, threadId: string): Message {
     authDkim: row.auth_dkim ?? null,
     authDmarc: row.auth_dmarc ?? null,
     sourcePayload: parseSourcePayload(row.source_payload),
-  };
+  });
 }
 
 /**
@@ -189,7 +206,7 @@ function applyMessageBody(message: Message, body: BackendMessageBody): Message {
   const fallbackText = bodyTextCandidate || snippetCandidate || message.subject;
   const htmlCandidate = (body.body_html || '').trim();
 
-  return {
+  return withoutInvalidContent({
     ...message,
     remoteUidValidity: body.remote_uidvalidity ?? null,
     contentError: body.content_error ?? null,
@@ -206,7 +223,7 @@ function applyMessageBody(message: Message, body: BackendMessageBody): Message {
     authSpf: body.auth_spf ?? null,
     authDkim: body.auth_dkim ?? null,
     authDmarc: body.auth_dmarc ?? null,
-  };
+  });
 }
 
 function changedGeneration(generation: number | null | undefined, existing?: Message, contentError?: string | null): boolean {
@@ -219,7 +236,7 @@ function changedGeneration(generation: number | null | undefined, existing?: Mes
  * screen. Preview rows deliberately omit heavy body and attachment data.
  */
 function mergeMessagePreview(preview: Message, existing?: Message): Message {
-  if (!existing || changedGeneration(preview.remoteUidValidity, existing, preview.contentError)) return preview;
+  if (!existing || preview.contentError || changedGeneration(preview.remoteUidValidity, existing, preview.contentError)) return preview;
 
   const stableAttachments = existing.attachments.length > 0
     ? existing.attachments
@@ -394,7 +411,7 @@ export const useMessagesStore = defineStore('messages', () => {
   const threadRefreshRunners = new Map<string, CoalescingRunner<void>>();
   const hydratedAttachmentMessageIds = new Set<string>();
   const hydratingAttachmentMessageIds = new Map<string, { version: symbol }>();
-  const bodyRequestTokens = new Map<string, symbol>();
+  const bodyRequestTokens = new Map<string, { version: symbol }>();
   const detailsNeedingRevalidation = new Set<string>();
   const revalidationAttempts = new Map<string, string>();
   const demandedDetails = new Set<string>();
@@ -603,6 +620,16 @@ export const useMessagesStore = defineStore('messages', () => {
     return messages.slice(-count).map((message) => message.id);
   }
 
+  function forgetRemovedDetails(previousIds: Iterable<string>, rows: BackendMessage[]) {
+    const currentIds = new Set(rows.map(row => row.id));
+    for (const id of previousIds) {
+      if (currentIds.has(id)) continue;
+      demandedDetails.delete(id);
+      revalidationAttempts.delete(id);
+      detailsNeedingRevalidation.delete(id);
+    }
+  }
+
   async function loadThreadOnce(threadId: string, options: { remote: boolean }) {
     touchThreadCache(threadId);
     const version = nextVersion(threadId);
@@ -634,14 +661,7 @@ export const useMessagesStore = defineStore('messages', () => {
       const previousById = new Map(
         (messagesByThread.value[threadId] ?? []).map((message) => [message.id, message]),
       );
-      const currentIds = new Set(rows.map(row => row.id));
-      for (const id of previousById.keys()) {
-        if (!currentIds.has(id)) {
-          demandedDetails.delete(id);
-          revalidationAttempts.delete(id);
-          detailsNeedingRevalidation.delete(id);
-        }
-      }
+      forgetRemovedDetails(previousById.keys(), rows);
       messagesByThread.value[threadId] = rows.map((row) => {
         const preview = mapBackendMessage(row, threadId);
         return mergePreview(preview, previousById.get(preview.id));
@@ -773,14 +793,7 @@ export const useMessagesStore = defineStore('messages', () => {
       const previousById = new Map(
         (messagesByThread.value[threadId] ?? []).map((message) => [message.id, message]),
       );
-      const currentIds = new Set(rows.map(row => row.id));
-      for (const id of previousById.keys()) {
-        if (!currentIds.has(id)) {
-          demandedDetails.delete(id);
-          revalidationAttempts.delete(id);
-          detailsNeedingRevalidation.delete(id);
-        }
-      }
+      forgetRemovedDetails(previousById.keys(), rows);
       messagesByThread.value[threadId] = rows.map((row) => {
         const preview = mapBackendMessage(row, threadId);
         return mergePreview(preview, previousById.get(preview.id));
@@ -968,12 +981,13 @@ export const useMessagesStore = defineStore('messages', () => {
   ) {
     const rowsById = new Map(rows.map((row) => [row.id, row]));
     for (const id of messageIds) {
-      if (isBodyLoading(id)) continue;
-      const token = Symbol(id);
+      if (threadLoadVersions.get(threadId) !== version) return;
+      if (bodyRequestTokens.get(id)?.version === version) continue;
+      const token = { version };
       bodyRequestTokens.set(id, token);
       const generation = messagesByThread.value[threadId]?.find(message => message.id === id)?.remoteUidValidity ?? null;
       let ownsRequest = true;
-      loadingBodyMessageIds.value = [...loadingBodyMessageIds.value, id];
+      if (!isBodyLoading(id)) loadingBodyMessageIds.value = [...loadingBodyMessageIds.value, id];
       let loaded: Awaited<ReturnType<typeof backendLoadMessageBody>>;
       try {
         loaded = await withTimeout(
