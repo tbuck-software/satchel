@@ -2,9 +2,9 @@
 import type { BodySegment } from "./BodySegment";
 import type { DecryptedAttachmentBinding } from "./DecryptedAttachmentBinding";
 /**
- * Exact transient render inputs issued together after decoding and sanitizing.
- * PR54 integration must bind this snapshot and attachment publication to the
- * same saved ContentReference, with generation checks around every await.
+ * Exact transient render inputs issued together after decoding and
+ * sanitizing. The renderer grants captions only while the body matches this
+ * snapshot.
  */
 export type BodyProvenance = {
     segments: Array<BodySegment>;

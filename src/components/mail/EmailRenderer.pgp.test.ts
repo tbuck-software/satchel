@@ -21,6 +21,24 @@ describe('encrypted block actions', () => {
     },
   );
 
+  it('says a quoted block was not decrypted instead of offering decryption again', () => {
+    const block = '> -----BEGIN PGP MESSAGE-----\n> ciphertext\n> -----END PGP MESSAGE-----\n';
+    const segments = [
+      { kind: 'text' as const, content: 'Forwarding it back.\n' },
+      { kind: 'pgp_undecrypted' as const, content: block },
+    ];
+    const wrapper = mount(EmailRenderer, { props: {
+      text: `Forwarding it back.\n${block}`, canDecrypt: true, bodySegments: segments,
+      bodyProvenance: { html: null, attachments: [], segments },
+    } });
+    expect(wrapper.find('.pgp-segment-action').exists()).toBe(false);
+    expect(wrapper.get('.pgp-segment-header').text()).toBe('Encrypted OpenPGP block');
+    expect(wrapper.get('.pgp-segment-hint').text()).toContain('None of your unlocked keys can decrypt this block');
+    expect(wrapper.get('.pgp-segment-raw').text()).toContain('ciphertext');
+    expect(wrapper.get('.text-segment').text()).toBe('Forwarding it back.');
+    wrapper.unmount();
+  });
+
   it('does not offer an inert action in a viewer without decryption support', () => {
     const wrapper = mount(EmailRenderer, { props: { text } });
     expect(wrapper.find('.pgp-segment-action').exists()).toBe(false);
@@ -48,6 +66,37 @@ describe('decryption captions', () => {
     } });
     expect(wrapper.get('.pgp-segment-header').text()).toBe('Decrypted S/MIME block');
     expect(wrapper.find('iframe').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('keeps the caption over HTML decrypted from several parts', () => {
+    const segments = [
+      { kind: 'smime_decrypted' as const, content: 'Part one' },
+      { kind: 'text' as const, content: '\n\n' },
+      { kind: 'smime_decrypted' as const, content: 'Part two' },
+    ];
+    const html = '<p>Part <b>one</b></p><p>Part two</p>';
+    const wrapper = mount(EmailRenderer, { props: {
+      html, text: 'Part one\n\nPart two', bodySegments: segments,
+      bodyProvenance: { html, attachments: [], segments },
+    } });
+    expect(wrapper.get('.pgp-segment-header').text()).toBe('Decrypted S/MIME block');
+    expect(wrapper.find('iframe').exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('shows each decrypted part as its own captioned segment in text mode', () => {
+    const segments = [
+      { kind: 'smime_decrypted' as const, content: 'Unsigned cover' },
+      { kind: 'text' as const, content: '\n\n' },
+      { kind: 'smime_decrypted' as const, content: 'Signed paragraph' },
+    ];
+    const wrapper = mount(EmailRenderer, { props: {
+      text: 'Unsigned cover\n\nSigned paragraph', bodySegments: segments,
+      bodyProvenance: { html: null, attachments: [], segments },
+    } });
+    expect(wrapper.findAll('.pgp-segment-body').map((part) => part.text()))
+      .toEqual(['Unsigned cover', 'Signed paragraph']);
     wrapper.unmount();
   });
 

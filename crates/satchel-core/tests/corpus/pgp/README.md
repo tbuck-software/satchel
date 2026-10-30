@@ -31,7 +31,23 @@ does not affect them. The first holds one block between a cover note and a
 suffix; its plaintext is `Hello Bob,\n\nthe meeting moves to Thursday.\n`,
 without MIME headers. The second holds two blocks after a cover note, and
 Satchel refuses to decrypt it rather than show one block as the decrypted
-message. The app tests in `src-tauri/src/commands/{pgp,messages}.rs` read both.
+message. The app tests in `src-tauri/src/commands/{pgp,messages}.rs` read these
+and the fixtures below.
+
+GnuPG 2.4.8 with libgcrypt 1.12.2 produced three more fixtures on 2026-10-30,
+each encrypted to the fixture's public key:
+
+- `mime-mixed-parts.eml` is PGP/MIME whose plaintext is
+  `../decrypted/mixed-text-attachment-text.eml`: text, a PDF, text. Both text
+  parts must be shown and the PDF listed.
+- `signed-covered-block.eml` is `multipart/signed`, signed by the fixture key,
+  whose signed text holds a cover note and one armored block. The signature
+  covers the ciphertext, not the plaintext the reader shows after decrypting,
+  so it may only count as a partial signature.
+- `quoted-foreign-block.eml` is a reply that quotes
+  `rpgp-cv25519-import.enc.asc`, a block for another key, with `> ` prefixes.
+  The fixture key cannot decrypt it; only that block may say so, not the
+  message.
 
 To require the optional GnuPG tests on a host with the affected library, run
 them against a newer libgcrypt in a scoped environment; do not replace the

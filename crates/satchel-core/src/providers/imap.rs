@@ -2619,35 +2619,7 @@ pub fn parse_raw_message_body(raw: &[u8]) -> ParsedBody {
         .unwrap_or_else(|| "8bit".to_string());
     let mut parsed = parse_body_part(&content_type, &transfer_encoding, body, 0);
     parsed.trust = root_crypto_trust(&content_type, &parsed);
-    let disposition = parse_header_value(&header, "Content-Disposition");
-    let content_id = parse_header_value(&header, "Content-ID")
-        .map(|value| value.trim_matches(['<', '>']).to_string())
-        .filter(|value| !value.is_empty());
-    let mut attachments = Vec::new();
-    collect_attachment_parts(
-        &content_type,
-        &transfer_encoding,
-        body,
-        disposition.as_deref(),
-        content_id,
-        0,
-        &mut 0,
-        &mut attachments,
-    );
-    if disposition.as_deref().is_some_and(|value| {
-        value
-            .split(';')
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .eq_ignore_ascii_case("attachment")
-    }) && !attachments.is_empty()
-        && !parsed.trust.root_crypto
-    {
-        parsed.text = None;
-        parsed.html = None;
-    }
-    parsed.attachments = attachments
+    parsed.attachments = parse_attachments_from_body(&content_type, &transfer_encoding, body)
         .into_iter()
         .map(|attachment| remote_attachment_from(attachment, EmbedPolicy::All))
         .collect();
@@ -3408,9 +3380,41 @@ struct LeafAttachment {
     is_inline: bool,
 }
 
-/// How the attachment scan keeps a leaf part, `None` when it leaves the part
-/// to the body. `check_complete_mime` asks the same question, so the two
-/// cannot disagree about which parts reach the attachment list.
+/// The first token of a `Content-Disposition`, lowercased.
+fn disposition_type(disposition: Option<&str>) -> String {
+    disposition
+        .unwrap_or_default()
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+}
+
+/// The name and inline flag a leaf part carries when it is kept as a file.
+fn attachment_leaf(
+    content_type: &str,
+    disposition: Option<&str>,
+    has_content_id: bool,
+) -> LeafAttachment {
+    let filename = extract_filename_param(disposition.unwrap_or_default())
+        .or_else(|| extract_filename_param(content_type))
+        .map(|value| decode_mime_encoded_words(&value));
+    let disposition_type = disposition_type(disposition);
+    // Outlook gives regular image attachments a Content-ID too. An explicit
+    // attachment disposition takes precedence over that inline-image hint.
+    let is_inline = disposition_type == "inline"
+        || (disposition_type != "attachment"
+            && has_content_id
+            && content_type.to_ascii_lowercase().starts_with("image/"));
+    LeafAttachment {
+        filename,
+        is_inline,
+    }
+}
+
+/// How the attachment scan keeps a leaf part of synced mail, `None` when it
+/// leaves the part to the body or skips it.
 fn leaf_attachment(
     content_type: &str,
     disposition: Option<&str>,
@@ -3422,27 +3426,9 @@ fn leaf_attachment(
     {
         return None;
     }
-    let lowered_disposition = disposition.unwrap_or_default().to_ascii_lowercase();
-    let filename = extract_filename_param(disposition.unwrap_or_default())
-        .or_else(|| extract_filename_param(content_type))
-        .map(|value| decode_mime_encoded_words(&value));
-    let disposition_type = lowered_disposition
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim();
-    // Outlook gives regular image attachments a Content-ID too. An explicit
-    // attachment disposition takes precedence over that inline-image hint.
-    let is_inline = disposition_type == "inline"
-        || (disposition_type != "attachment"
-            && has_content_id
-            && lowered_content_type.starts_with("image/"));
-    (disposition_type == "attachment" || filename.is_some() || is_inline).then_some(
-        LeafAttachment {
-            filename,
-            is_inline,
-        },
-    )
+    let leaf = attachment_leaf(content_type, disposition, has_content_id);
+    (disposition_type(disposition) == "attachment" || leaf.filename.is_some() || leaf.is_inline)
+        .then_some(leaf)
 }
 
 fn is_pkcs7_mime(lowered_content_type: &str) -> bool {
@@ -3472,7 +3458,7 @@ fn is_verifiable_signed(lowered_content_type: &str) -> bool {
             || lowered_content_type.contains("application/x-pkcs7-signature"))
 }
 
-/// A part of a MIME tree that `parse_raw_message_body` would not show.
+/// Why a decrypted MIME tree cannot be shown completely.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncompleteMime {
     /// Nested deeper than the parsers descend.
@@ -3484,31 +3470,83 @@ pub enum IncompleteMime {
     MalformedSigned,
     /// An encrypted layer that would have to be shown in place.
     RemainingEncryption,
-    /// A part that reaches neither the body nor the attachment list.
+    /// Opaque signed-data below the root: its content would need unwrapping
+    /// in place, and the reader would see a signature over text it never shows.
     UndecodedPart,
 }
 
-/// Check that `parse_raw_message_body` accounts for every part of `raw`.
+/// A part a decrypted entity shows, in document order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShownLeaf {
+    Text(String),
+    /// As the part declares it. The decoder sanitizes it before display.
+    Html(String),
+}
+
+/// A `multipart/signed` bundle, ready for verification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DetachedSignature {
+    Smime(Vec<u8>),
+    Pgp(Vec<u8>),
+}
+
+/// A decrypted MIME entity in which every part is accounted for: shown,
+/// listed as an attachment, consumed as a signature or as one of several
+/// alternatives, or refused with an [`IncompleteMime`].
+#[derive(Debug, Default)]
+pub struct CompleteMime {
+    /// What the text view shows.
+    pub text: Vec<ShownLeaf>,
+    /// What the HTML view shows. It differs from `text` only where an
+    /// alternative offers a plain and an HTML rendering.
+    pub html: Vec<ShownLeaf>,
+    pub attachments: Vec<RemoteAttachment>,
+    /// Signatures over the whole entity, outermost first.
+    pub root_signatures: Vec<DetachedSignature>,
+    /// Opaque signed-data at the root. Its content is inside the signature,
+    /// so nothing else has been decoded yet; the caller unwraps it.
+    pub opaque_signed: Option<Vec<u8>>,
+    /// Signatures below the root, each over some of what is shown.
+    pub nested_signatures: Vec<DetachedSignature>,
+}
+
+/// Decode a decrypted entity, which has no second copy.
 ///
-/// The parser is lenient on purpose: synced mail with one broken part still
-/// shows the rest, and the server keeps the original. A decrypted payload has
-/// no second copy, so its decoder turns each silent loss into an error.
-///
-/// A part is accounted for when the body may show it as text, the attachment
-/// scan keeps it, it is a detached signature, or it is one alternative of
-/// several that are accounted for. Which of several text parts the body shows
-/// is the parser's selection, as for any mail. An opaque signed layer at the
-/// root is the caller's to unwrap; below the root nothing would show it.
-pub fn check_complete_mime(raw: &[u8]) -> Result<(), IncompleteMime> {
+/// `parse_raw_message_body` is lenient on purpose: synced mail with one broken
+/// part still shows the rest, and the server keeps the original. Here every
+/// part reaches the reader or the whole entity is refused. Several text parts
+/// are all shown, in order: Apple Mail writes an attachment placed mid-body as
+/// text, file, text. Calendar and contact data, and parts without a name, are
+/// listed as files.
+pub fn decode_complete_mime(raw: &[u8]) -> Result<CompleteMime, IncompleteMime> {
     let (header, body) = split_header_and_body(raw);
-    check_mime_part(&MimePartHead::read(header), body, 0, true)
+    let mut counter = 0;
+    let part = decode_mime_part(
+        &MimePartHead::read(header),
+        body,
+        0,
+        PartPlace::Root,
+        &mut counter,
+    )?;
+    Ok(CompleteMime {
+        text: part.text,
+        html: part.html,
+        attachments: part
+            .attachments
+            .into_iter()
+            .map(|attachment| remote_attachment_from(attachment, EmbedPolicy::All))
+            .collect(),
+        root_signatures: part.root_signatures,
+        opaque_signed: part.opaque_signed,
+        nested_signatures: part.nested_signatures,
+    })
 }
 
 struct MimePartHead {
     content_type: String,
     transfer_encoding: String,
     disposition: Option<String>,
-    has_content_id: bool,
+    content_id: Option<String>,
 }
 
 impl MimePartHead {
@@ -3521,112 +3559,323 @@ impl MimePartHead {
             transfer_encoding: parse_header_value(&header, "Content-Transfer-Encoding")
                 .unwrap_or_else(|| "8bit".to_string()),
             disposition: parse_header_value(&header, "Content-Disposition"),
-            has_content_id: parse_header_value(&header, "Content-ID")
-                .is_some_and(|value| !value.trim_matches(['<', '>']).is_empty()),
+            content_id: parse_header_value(&header, "Content-ID")
+                .map(|value| value.trim_matches(['<', '>']).to_string())
+                .filter(|value| !value.is_empty()),
         }
     }
 }
 
-/// `displayed` is false below a multipart the body skips as an attachment:
-/// its text reaches the reader only if the attachment scan keeps it.
-fn check_mime_part(
+/// Where a part sits, which decides what its leaves become.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PartPlace {
+    /// The entity itself, or the content of a signature over it.
+    Root,
+    /// Shown in the body, below the root.
+    Body,
+    /// Inside a multipart the sender marked as an attachment: its leaves are
+    /// files, as the attachment scan lists them for synced mail.
+    Attached,
+}
+
+#[derive(Default)]
+struct DecodedPart {
+    text: Vec<ShownLeaf>,
+    html: Vec<ShownLeaf>,
+    attachments: Vec<ParsedAttachment>,
+    root_signatures: Vec<DetachedSignature>,
+    opaque_signed: Option<Vec<u8>>,
+    nested_signatures: Vec<DetachedSignature>,
+}
+
+impl DecodedPart {
+    fn shown(leaf: ShownLeaf) -> Self {
+        Self {
+            text: vec![leaf.clone()],
+            html: vec![leaf],
+            ..Default::default()
+        }
+    }
+
+    fn shows_something(&self) -> bool {
+        !self.text.is_empty() || !self.html.is_empty()
+    }
+
+    fn has_html(&self) -> bool {
+        self.html
+            .iter()
+            .any(|leaf| matches!(leaf, ShownLeaf::Html(_)))
+    }
+
+    /// Everything but what it shows: files and signatures.
+    fn take_files(&mut self, from: &mut DecodedPart) {
+        self.attachments.append(&mut from.attachments);
+        self.root_signatures.append(&mut from.root_signatures);
+        self.nested_signatures.append(&mut from.nested_signatures);
+    }
+
+    fn append(&mut self, mut other: DecodedPart) {
+        self.text.append(&mut other.text);
+        self.html.append(&mut other.html);
+        self.take_files(&mut other);
+    }
+}
+
+fn decode_mime_part(
     head: &MimePartHead,
     body: &[u8],
     depth: usize,
-    displayed: bool,
-) -> Result<(), IncompleteMime> {
+    place: PartPlace,
+    counter: &mut usize,
+) -> Result<DecodedPart, IncompleteMime> {
     const MAX_DEPTH: usize = 10;
     if depth > MAX_DEPTH {
         return Err(IncompleteMime::NestingLimit);
     }
     let lowered = head.content_type.to_ascii_lowercase();
-    let disposition = head.disposition.as_deref().unwrap_or_default();
-    let attached = disposition
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .eq_ignore_ascii_case("attachment");
+    let attached = disposition_type(head.disposition.as_deref()) == "attachment";
 
     if lowered.starts_with("multipart/") {
         let sections = extract_header_param(&head.content_type, "boundary")
             .map(|boundary| split_multipart_sections(body, &boundary))
             .unwrap_or_default();
-        if lowered.starts_with("multipart/signed") {
+        if lowered.starts_with("multipart/encrypted") {
+            return Err(IncompleteMime::RemainingEncryption);
+        }
+        if lowered.starts_with("multipart/signed") && place != PartPlace::Attached {
             if !is_verifiable_signed(&lowered) || sections.len() != 2 {
                 return Err(IncompleteMime::MalformedSigned);
             }
             let (header, content) = split_header_and_body(sections[0]);
-            return check_mime_part(&MimePartHead::read(header), content, depth + 1, displayed);
-        }
-        if lowered.starts_with("multipart/encrypted") {
-            return Err(IncompleteMime::RemainingEncryption);
+            // A signature over the root covers what its content shows.
+            let content_place = if place == PartPlace::Root {
+                PartPlace::Root
+            } else {
+                PartPlace::Body
+            };
+            let mut part = decode_mime_part(
+                &MimePartHead::read(header),
+                content,
+                depth + 1,
+                content_place,
+                counter,
+            )?;
+            let mut bundle = format!("Content-Type: {}\r\n\r\n", head.content_type).into_bytes();
+            bundle.extend_from_slice(body);
+            let signature = if lowered.contains("application/pgp-signature") {
+                DetachedSignature::Pgp(bundle)
+            } else {
+                DetachedSignature::Smime(bundle)
+            };
+            if place == PartPlace::Root {
+                part.root_signatures.insert(0, signature);
+            } else {
+                part.nested_signatures.insert(0, signature);
+            }
+            return Ok(part);
         }
         if sections.is_empty() {
             return Err(IncompleteMime::MalformedMultipart);
         }
-        let displayed =
-            displayed && !(depth > 0 && disposition.to_ascii_lowercase().contains("attachment"));
-        let alternative = lowered.starts_with("multipart/alternative");
-        let mut accounted = false;
+        let child_place = if place == PartPlace::Attached || (depth > 0 && attached) {
+            PartPlace::Attached
+        } else {
+            PartPlace::Body
+        };
+        let mut children = Vec::with_capacity(sections.len());
         for section in sections {
             let (header, content) = split_header_and_body(section);
-            match check_mime_part(&MimePartHead::read(header), content, depth + 1, displayed) {
-                Ok(()) => accounted = true,
-                // The reader shows an alternative it can render instead.
-                Err(IncompleteMime::UndecodedPart) if alternative => {}
-                Err(error) => return Err(error),
-            }
+            children.push(decode_mime_part(
+                &MimePartHead::read(header),
+                content,
+                depth + 1,
+                child_place,
+                counter,
+            ));
         }
-        return if accounted {
-            Ok(())
-        } else {
-            Err(IncompleteMime::UndecodedPart)
-        };
+        if child_place != PartPlace::Attached && lowered.starts_with("multipart/alternative") {
+            return choose_alternative(children);
+        }
+        let mut part = DecodedPart::default();
+        for child in children {
+            part.append(child?);
+        }
+        return Ok(part);
     }
 
     if is_pkcs7_mime(&lowered) {
-        if depth > 0 && attached {
+        if (depth > 0 && attached) || place == PartPlace::Attached {
             // A file, such as a forwarded encrypted mail.
-            return Ok(());
+            return Ok(attachment_part(head, body, counter));
         }
         if pkcs7_is_enveloped(&head.content_type, &lowered) {
             return Err(IncompleteMime::RemainingEncryption);
         }
-        return if depth == 0 {
-            Ok(())
-        } else {
-            Err(IncompleteMime::UndecodedPart)
-        };
+        if place != PartPlace::Root {
+            return Err(IncompleteMime::UndecodedPart);
+        }
+        return Ok(DecodedPart {
+            opaque_signed: Some(decode_part_bytes(body, &head.transfer_encoding)),
+            ..Default::default()
+        });
     }
 
     if lowered.starts_with("message/rfc822") {
-        if attached_message_filename(&head.content_type, head.disposition.as_deref()).is_some() {
-            return Ok(());
+        if place == PartPlace::Attached
+            || attached_message_filename(&head.content_type, head.disposition.as_deref()).is_some()
+        {
+            return Ok(attachment_part(head, body, counter));
         }
         let decoded = decode_part_bytes(body, &head.transfer_encoding);
         let (header, embedded) = split_header_and_body(&decoded);
         // The attachment scan judges the embedded root by the outer part.
         let embedded_head = MimePartHead {
             disposition: head.disposition.clone(),
-            has_content_id: head.has_content_id,
+            content_id: head.content_id.clone(),
             ..MimePartHead::read(header)
         };
-        return check_mime_part(&embedded_head, embedded, depth + 1, displayed);
+        return decode_mime_part(
+            &embedded_head,
+            embedded,
+            depth + 1,
+            PartPlace::Body,
+            counter,
+        );
     }
 
-    if is_detached_signature(&lowered)
-        || (displayed && lowered.starts_with("text/"))
-        || leaf_attachment(
+    if place != PartPlace::Attached
+        && !attached
+        && lowered.starts_with("text/")
+        && default_file_name(&lowered).is_none()
+    {
+        let text = normalize_body_text(&decode_part_content(
+            body,
+            &head.transfer_encoding,
+            &head.content_type,
+        ));
+        let mut part = if text.is_empty() {
+            DecodedPart::default()
+        } else if lowered.starts_with("text/html") {
+            DecodedPart::shown(ShownLeaf::Html(text))
+        } else {
+            DecodedPart::shown(ShownLeaf::Text(text))
+        };
+        // A named text part is a file too, as the attachment scan lists it.
+        let leaf = attachment_leaf(
             &head.content_type,
             head.disposition.as_deref(),
-            head.has_content_id,
-        )
-        .is_some()
-    {
-        return Ok(());
+            head.content_id.is_some(),
+        );
+        if leaf.filename.is_some() {
+            part.attachments
+                .extend(attachment_part(head, body, counter).attachments);
+        }
+        return Ok(part);
     }
-    Err(IncompleteMime::UndecodedPart)
+
+    Ok(attachment_part(head, body, counter))
+}
+
+/// One rendering per view. Files are never renderings: an invitation offered
+/// as an alternative, or a file inside one that is not shown, stays listed.
+/// A signature counts only where its content is shown.
+///
+/// RFC 2046 orders alternatives by fidelity, so the last one with HTML is the
+/// HTML view. The text view prefers a rendering without HTML.
+fn choose_alternative(
+    children: Vec<Result<DecodedPart, IncompleteMime>>,
+) -> Result<DecodedPart, IncompleteMime> {
+    let mut decoded = Vec::with_capacity(children.len());
+    for child in children {
+        match child {
+            Ok(part) => decoded.push(part),
+            // The reader shows an alternative it can render instead.
+            Err(IncompleteMime::UndecodedPart) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    if decoded.is_empty() {
+        return Err(IncompleteMime::UndecodedPart);
+    }
+    let html_view = decoded.iter().rposition(DecodedPart::has_html);
+    let text_view = decoded
+        .iter()
+        .position(|part| part.shows_something() && !part.has_html())
+        .or(html_view)
+        .or_else(|| decoded.iter().position(DecodedPart::shows_something));
+    let html_view = html_view.or(text_view);
+    let mut chosen = DecodedPart::default();
+    for (index, mut part) in decoded.into_iter().enumerate() {
+        let for_text = Some(index) == text_view;
+        let for_html = Some(index) == html_view;
+        chosen.attachments.append(&mut part.attachments);
+        if part.shows_something() && !for_text && !for_html {
+            // Consumed as an alternative rendering of the same content.
+            continue;
+        }
+        if for_text {
+            chosen.text.append(&mut part.text);
+        }
+        if for_html {
+            chosen.html.append(&mut part.html);
+        }
+        chosen.take_files(&mut part);
+    }
+    Ok(chosen)
+}
+
+/// The name a file gets when its part has none and its type is data the
+/// reader does not show as text.
+fn default_file_name(lowered_content_type: &str) -> Option<&'static str> {
+    if lowered_content_type.starts_with("text/calendar") {
+        Some("invite.ics")
+    } else if ["text/vcard", "text/x-vcard", "text/directory"]
+        .iter()
+        .any(|kind| lowered_content_type.starts_with(kind))
+    {
+        Some("contact.vcf")
+    } else if lowered_content_type.starts_with("message/rfc822") {
+        Some("attached-message.eml")
+    } else {
+        None
+    }
+}
+
+/// A leaf kept as a file, named or not. TNEF expands as in the attachment scan.
+fn attachment_part(head: &MimePartHead, body: &[u8], counter: &mut usize) -> DecodedPart {
+    let lowered = head.content_type.to_ascii_lowercase();
+    let LeafAttachment {
+        filename,
+        is_inline,
+    } = attachment_leaf(
+        &head.content_type,
+        head.disposition.as_deref(),
+        head.content_id.is_some(),
+    );
+    let filename = filename.or_else(|| default_file_name(&lowered).map(str::to_string));
+    let bytes = decode_part_bytes(body, &head.transfer_encoding);
+    if is_tnef_part(&lowered, filename.as_deref()) {
+        let expanded = expand_tnef_attachments(&bytes, counter);
+        if !expanded.is_empty() {
+            return DecodedPart {
+                attachments: expanded,
+                ..Default::default()
+            };
+        }
+    }
+    let message = lowered.starts_with("message/rfc822");
+    *counter += 1;
+    DecodedPart {
+        attachments: vec![ParsedAttachment {
+            remote_part_id: format!("mime-{counter}"),
+            filename,
+            content_type: crate::email::mime_type::normalize_mime_type(&head.content_type),
+            content_id: head.content_id.clone(),
+            is_inline: is_inline && !message,
+            bytes,
+        }],
+        ..Default::default()
+    }
 }
 
 fn is_tnef_part(lowered_content_type: &str, filename: Option<&str>) -> bool {
@@ -4283,6 +4532,23 @@ mod tests {
         assert!(ImapProvider::message_refs_by_folder(&mixed)
             .expect_err("mixed generations")
             .is_permanent());
+    }
+
+    /// Gmail (`raw`), Outlook (`raw_mime`) and IMAP read ordinary mail with
+    /// these two parsers. A root text part labelled as an attachment stays the
+    /// body there, as it always has; only the decrypted-payload decoder, whose
+    /// input has no second copy, lists it as a file.
+    #[test]
+    fn ordinary_root_text_labelled_as_an_attachment_stays_the_body() {
+        let raw = include_bytes!("../../tests/corpus/mail/root-text-attachment.eml");
+        let from_raw = super::parse_raw_message_body(raw);
+        assert_eq!(from_raw.text.as_deref(), Some("Hello body"));
+        assert!(from_raw.attachments.is_empty());
+
+        let (header, body) = super::split_header_and_body(raw);
+        let from_parts = super::parse_message_body(&String::from_utf8_lossy(header), Some(body));
+        assert_eq!(from_parts.text.as_deref(), Some("Hello body"));
+        assert!(from_parts.attachments.is_empty());
     }
 
     /// The two body parsers deliberately differ, and the reason is not taste.

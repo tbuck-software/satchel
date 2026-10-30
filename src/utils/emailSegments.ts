@@ -1,7 +1,7 @@
 import type { Attachment, Message } from '@/types/mail';
 /** Decryption provenance comes only from a backend result, never mail text. */
 export interface RenderSegment {
-  kind: 'text' | 'pgp_decrypted' | 'pgp_encrypted' | 'smime_decrypted';
+  kind: 'text' | 'pgp_decrypted' | 'pgp_encrypted' | 'pgp_undecrypted' | 'smime_decrypted';
   content: string;
 }
 
@@ -94,7 +94,7 @@ export function splitRenderSegments(text: string, provenance?: RenderSegment[] |
  * This snapshot is transient IPC data, never parsed from sender-controlled MIME.
  * Attachments match by position: a `cid:` reference resolves to the first
  * attachment that carries it, so the order decides which image is shown.
- * PR54 must additionally validate the saved ContentReference/generation.
+ * Only images the renderer may hydrate carry bytes to compare.
  */
 export function matchingBodyProvenance(
   text: string, html: string | undefined, segments: RenderSegment[] | undefined,

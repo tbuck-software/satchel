@@ -1531,10 +1531,10 @@ mod tests {
         );
     }
 
-    /// A decrypted payload from `tests/corpus/smime`; see the README there.
+    /// A decrypted payload from `tests/corpus/decrypted`; see the README there.
     macro_rules! smime_corpus {
         ($name:literal) => {
-            include_bytes!(concat!("../../tests/corpus/smime/", $name)).as_slice()
+            include_bytes!(concat!("../../tests/corpus/decrypted/", $name)).as_slice()
         };
     }
 
@@ -1544,7 +1544,7 @@ mod tests {
         leaf: &Identity,
         payload: &[u8],
         signed: bool,
-    ) -> Result<crate::email::smime::DecryptedBody, crate::email::smime::DecodeError> {
+    ) -> Result<crate::email::decrypted::DecryptedBody, crate::email::decrypted::DecodeError> {
         let encrypted = crate::email::smime::protect_message(
             payload,
             signed.then_some((leaf.key_pem.as_str(), leaf.cert_pem.as_str(), None)),
@@ -1559,7 +1559,7 @@ mod tests {
             envelope.smime_encrypted.as_deref().unwrap(),
         )
         .unwrap();
-        crate::email::smime::parse_decrypted_body(&bytes)
+        crate::email::decrypted::parse_decrypted_body(&bytes)
     }
 
     #[test]
@@ -1594,7 +1594,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 smime_roundtrip(&leaf, &inner, true).err(),
-                Some(crate::email::smime::DecodeError::RemainingEncryption)
+                Some(crate::email::decrypted::DecodeError::RemainingEncryption)
             );
         }
 
@@ -1632,9 +1632,230 @@ mod tests {
         }
     }
 
+    /// Every part of a decrypted payload is shown, listed as an attachment,
+    /// consumed as a signature or alternative, or rejected. None of these
+    /// payloads is malformed, so each must decode with nothing left out.
+    #[test]
+    fn decrypted_corpus_accounts_for_every_part() {
+        let leaf = issue_leaf(&issue_ca(), "Synthetic Signer", "sender@example.test");
+        let mut failures = Vec::new();
+        let in_order = |haystack: Option<&str>, needles: &[&str]| {
+            let haystack = haystack.unwrap_or_default();
+            let positions = needles
+                .iter()
+                .map(|needle| haystack.find(needle))
+                .collect::<Option<Vec<_>>>();
+            positions.is_some_and(|positions| positions.windows(2).all(|pair| pair[0] < pair[1]))
+        };
+        let files = |body: &crate::email::decrypted::DecryptedBody| {
+            body.body
+                .attachments
+                .iter()
+                .map(|part| {
+                    (
+                        part.filename.clone(),
+                        part.content_type.clone(),
+                        part.is_inline,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let named = |name: &str, content_type: &str| {
+            vec![(Some(name.to_string()), content_type.to_string(), false)]
+        };
+        let unnamed = |content_type: &str| vec![(None, content_type.to_string(), false)];
+        for signed in [false, true] {
+            let mut check = |name: &str,
+                             payload: &[u8],
+                             expect: &dyn Fn(
+                &crate::email::decrypted::DecryptedBody,
+            ) -> Vec<String>| {
+                match smime_roundtrip(&leaf, payload, signed) {
+                    Ok(body) => failures.extend(
+                        expect(&body)
+                            .into_iter()
+                            .map(|problem| format!("{name} (signed: {signed}): {problem}")),
+                    ),
+                    Err(error) => {
+                        failures.push(format!("{name} (signed: {signed}): got {error:?}"))
+                    }
+                }
+            };
+            let both = ["Part one, above the file.", "Part two, below the file."];
+            check(
+                "mixed-text-attachment-text",
+                smime_corpus!("mixed-text-attachment-text.eml"),
+                &|body| {
+                    let mut problems = Vec::new();
+                    if body.body.text_parts != both {
+                        problems.push(format!("text parts {:?}", body.body.text_parts));
+                    }
+                    if files(body) != named("agenda.pdf", "application/pdf") {
+                        problems.push(format!("attachments {:?}", files(body)));
+                    }
+                    problems
+                },
+            );
+            check(
+                "mixed-html-attachment-html",
+                smime_corpus!("mixed-html-attachment-html.eml"),
+                &|body| {
+                    let mut problems = Vec::new();
+                    if !in_order(body.body.html.as_deref(), &both) {
+                        problems.push(format!("html {:?}", body.body.html));
+                    }
+                    if !in_order(body.body.text.as_deref(), &both) {
+                        problems.push(format!("text {:?}", body.body.text));
+                    }
+                    problems
+                },
+            );
+            for (name, payload) in [
+                ("root-calendar", smime_corpus!("root-calendar.eml")),
+                (
+                    "calendar-attachment",
+                    smime_corpus!("calendar-attachment.eml"),
+                ),
+                (
+                    "alternative-calendar",
+                    smime_corpus!("alternative-calendar.eml"),
+                ),
+            ] {
+                check(name, payload, &|body| {
+                    let mut problems = Vec::new();
+                    if files(body) != named("invite.ics", "text/calendar") {
+                        problems.push(format!("attachments {:?}", files(body)));
+                    } else {
+                        use base64::Engine as _;
+                        let bytes = base64::engine::general_purpose::STANDARD
+                            .decode(body.body.attachments[0].content_base64.as_deref().unwrap())
+                            .unwrap();
+                        if !String::from_utf8_lossy(&bytes).contains("SUMMARY:Board meeting") {
+                            problems.push("invite bytes lost".into());
+                        }
+                    }
+                    if name != "root-calendar"
+                        && !in_order(
+                            body.body.text.as_deref(),
+                            &["Please accept the invitation."],
+                        )
+                    {
+                        problems.push(format!("text {:?}", body.body.text));
+                    }
+                    problems
+                });
+            }
+            check("vcard-part", smime_corpus!("vcard-part.eml"), &|body| {
+                let mut problems = Vec::new();
+                if files(body) != named("contact.vcf", "text/x-vcard") {
+                    problems.push(format!("attachments {:?}", files(body)));
+                }
+                if body
+                    .body
+                    .text
+                    .as_deref()
+                    .is_some_and(|text| text.contains("BEGIN:VCARD"))
+                {
+                    problems.push("vCard shown as body text".into());
+                }
+                problems
+            });
+            check(
+                "nested-signed-behind-cover",
+                smime_corpus!("nested-signed-behind-cover.eml"),
+                &|body| {
+                    let mut problems = Vec::new();
+                    let parts = ["Unsigned cover note.", "Signed paragraph."];
+                    if body.body.text_parts != parts {
+                        problems.push(format!("text parts {:?}", body.body.text_parts));
+                    }
+                    let scopes = body
+                        .signatures
+                        .iter()
+                        .map(|(_, root)| *root)
+                        .collect::<Vec<_>>();
+                    if scopes[usize::from(signed)..] != [false] {
+                        problems.push(format!("signature scopes {scopes:?}"));
+                    }
+                    problems
+                },
+            );
+            check(
+                "alternative-file-in-hidden-rendering",
+                smime_corpus!("alternative-file-in-hidden-rendering.eml"),
+                &|body| {
+                    let mut problems = Vec::new();
+                    if body.body.text_parts != ["Short rendering."] {
+                        problems.push(format!("text parts {:?}", body.body.text_parts));
+                    }
+                    if files(body) != named("agenda.pdf", "application/pdf") {
+                        problems.push(format!("attachments {:?}", files(body)));
+                    }
+                    problems
+                },
+            );
+            check("nameless-pdf", smime_corpus!("nameless-pdf.eml"), &|body| {
+                if files(body) == unnamed("application/pdf") {
+                    Vec::new()
+                } else {
+                    vec![format!("attachments {:?}", files(body))]
+                }
+            });
+            check(
+                "related-nameless-image",
+                smime_corpus!("related-nameless-image.eml"),
+                &|body| {
+                    let mut problems = Vec::new();
+                    if files(body) != unnamed("image/png") {
+                        problems.push(format!("attachments {:?}", files(body)));
+                    }
+                    if !in_order(body.body.html.as_deref(), &["Chart below"]) {
+                        problems.push(format!("html {:?}", body.body.html));
+                    }
+                    problems
+                },
+            );
+            check(
+                "unlabelled-binary",
+                smime_corpus!("unlabelled-binary.eml"),
+                &|body| {
+                    if files(body) == unnamed("application/octet-stream")
+                        && body.body.text.is_none()
+                    {
+                        Vec::new()
+                    } else {
+                        vec![format!(
+                            "text {:?}, attachments {:?}",
+                            body.body.text,
+                            files(body)
+                        )]
+                    }
+                },
+            );
+            check(
+                "nested-unlabelled-binary",
+                smime_corpus!("nested-unlabelled-binary.eml"),
+                &|body| {
+                    if files(body) == unnamed("application/octet-stream")
+                        && body.body.text.as_deref() == Some("Cover")
+                    {
+                        Vec::new()
+                    } else {
+                        vec![format!(
+                            "text {:?}, attachments {:?}",
+                            body.body.text,
+                            files(body)
+                        )]
+                    }
+                },
+            );
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
     #[test]
     fn decrypted_corpus_rejects_incomplete_mime_at_any_depth() {
-        use crate::email::smime::DecodeError;
+        use crate::email::decrypted::DecodeError;
         let leaf = issue_leaf(&issue_ca(), "Synthetic Signer", "sender@example.test");
         let mut failures = Vec::new();
         for (name, payload, expected) in [
@@ -1658,16 +1879,6 @@ mod tests {
                 smime_corpus!("missing-multipart-boundary.eml"),
                 DecodeError::MalformedMime,
             ),
-            (
-                "unlabelled-binary",
-                smime_corpus!("unlabelled-binary.eml"),
-                DecodeError::UndecodedPart,
-            ),
-            (
-                "nested-unlabelled-binary",
-                smime_corpus!("nested-unlabelled-binary.eml"),
-                DecodeError::UndecodedPart,
-            ),
         ] {
             for signed in [false, true] {
                 let actual = smime_roundtrip(&leaf, payload, signed).err();
@@ -1686,7 +1897,7 @@ mod tests {
     #[test]
     fn encrypted_mime_roundtrips_text_html_attachments_and_inner_signatures() {
         use crate::{
-            email::{build::build_rfc822, smime::parse_decrypted_body},
+            email::{build::build_rfc822, decrypted::parse_decrypted_body},
             providers::traits::{OutgoingAttachment, OutgoingMessage},
         };
         let ca = issue_ca();
@@ -1791,7 +2002,7 @@ mod tests {
         let signed = signature.to_smime(content, flags).unwrap();
         let encrypted = encrypt(std::slice::from_ref(&leaf.cert_pem), &signed).unwrap();
         let bytes = decrypt(&leaf.key_pem, &leaf.cert_pem, None, &encrypted).unwrap();
-        let parsed = crate::email::smime::parse_decrypted_body(&bytes).unwrap();
+        let parsed = crate::email::decrypted::parse_decrypted_body(&bytes).unwrap();
         assert_eq!(parsed.body.text.as_deref(), Some("HTML only"));
         assert!(!parsed.body.html.unwrap().contains("<script"));
         assert_eq!(parsed.signatures.len(), 1);
@@ -1821,11 +2032,15 @@ mod tests {
             mixed.extend_from_slice(b"\r\n--m--\r\n");
             let encrypted = encrypt(std::slice::from_ref(&leaf.cert_pem), &mixed).unwrap();
             let bytes = decrypt(&leaf.key_pem, &leaf.cert_pem, None, &encrypted).unwrap();
-            crate::email::smime::parse_decrypted_body(&bytes)
+            crate::email::decrypted::parse_decrypted_body(&bytes)
         };
         let parsed = mixed(&detached).unwrap();
-        assert!(parsed.body.html.unwrap().contains("Unsigned cover"));
-        assert_eq!(parsed.body.text.as_deref(), Some("Signed text"));
+        // Both parts are shown, each as its own part: a signature is never
+        // recorded over text the reader does not see.
+        let html = parsed.body.html.unwrap();
+        let cover = html.find("Unsigned cover").unwrap();
+        assert!(html[cover..].contains("Signed text"));
+        assert_eq!(parsed.body.text_parts, ["Unsigned cover", "Signed text"]);
         assert_eq!(parsed.signatures.len(), 1);
         assert!(
             !parsed.signatures[0].1,
@@ -1841,7 +2056,7 @@ mod tests {
         );
         assert_eq!(
             mixed(opaque.as_bytes()).err(),
-            Some(crate::email::smime::DecodeError::UndecodedPart)
+            Some(crate::email::decrypted::DecodeError::UndecodedPart)
         );
     }
 
@@ -1852,7 +2067,7 @@ mod tests {
         let payload = b"Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; boundary=s\r\n\r\n--s\r\nContent-Type: text/plain\r\n\r\nReadable message\r\n--s\r\nContent-Type: application/pkcs7-signature\r\nContent-Transfer-Encoding: base64\r\n\r\nAQID\r\n--s--\r\n";
         let encrypted = encrypt(std::slice::from_ref(&leaf.cert_pem), payload).unwrap();
         let bytes = decrypt(&leaf.key_pem, &leaf.cert_pem, None, &encrypted).unwrap();
-        let parsed = crate::email::smime::parse_decrypted_body(&bytes).unwrap();
+        let parsed = crate::email::decrypted::parse_decrypted_body(&bytes).unwrap();
         assert_eq!(parsed.body.text.as_deref(), Some("Readable message"));
         assert_eq!(parsed.signatures.len(), 1);
         assert!(!verify(&parsed.signatures[0].0).unwrap().valid);
@@ -1877,7 +2092,7 @@ mod tests {
             .unwrap();
         let encrypted = encrypt(std::slice::from_ref(&leaf.cert_pem), &damaged).unwrap();
         let bytes = decrypt(&leaf.key_pem, &leaf.cert_pem, None, &encrypted).unwrap();
-        let parsed = crate::email::smime::parse_decrypted_body(&bytes).unwrap();
+        let parsed = crate::email::decrypted::parse_decrypted_body(&bytes).unwrap();
         assert_eq!(parsed.body.text.as_deref(), Some("Original secreX"));
         let payload = &parsed.signatures[0].0;
         assert!(!verify(payload).unwrap().valid);

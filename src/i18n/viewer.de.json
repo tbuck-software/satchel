@@ -120,7 +120,8 @@
       "decryptedPgp": "Entschlüsselter OpenPGP-Block",
       "decryptedSmime": "Entschlüsselter S/MIME-Block",
       "encryptedHint": "Importiere und entsperre den passenden privaten Schlüssel unter Einstellungen → OpenPGP und öffne die Nachricht erneut, um diesen Block zu lesen.",
-      "encryptedPgp": "Verschlüsselter OpenPGP-Block"
+      "encryptedPgp": "Verschlüsselter OpenPGP-Block",
+      "undecryptedHint": "Keiner deiner entsperrten Schlüssel kann diesen Block entschlüsseln. Er ist vermutlich an jemand anderen gerichtet."
     },
     "quotes": {
       "count": "{count} frühere Nachricht | {count} frühere Nachrichten",

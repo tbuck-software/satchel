@@ -11,4 +11,7 @@ export type BodySegment = {
 } | {
     "kind": "smime_decrypted";
     "content": string;
+} | {
+    "kind": "pgp_undecrypted";
+    "content": string;
 };

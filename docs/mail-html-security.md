@@ -42,23 +42,56 @@ trust-origin data; the expiry bounds changes to the operating-system trust
 store and certificate validity between calls.
 
 Decrypted MIME unwrapping, charset decoding and sanitization run together in
-Core on a blocking worker. A decrypted S/MIME payload has no second copy, so
-`check_complete_mime` requires every part, at any depth, to reach the reader
-as text, an attachment or a signature. A multipart without a boundary or
-parts, a malformed signed structure, an encrypted layer shown in place, and a
-part with nowhere to go each return a typed error. The stored encrypted
-source remains intact.
+Core on a blocking worker. A decrypted S/MIME payload, and an OpenPGP plaintext
+that declares MIME, has no second copy, so `decode_complete_mime` accounts for
+every part at any depth: it is shown, listed as an attachment, consumed as a
+signature or as one of several alternatives, or the entity is refused with a
+typed error. All text parts are shown in order, each as a segment of its own,
+because Apple Mail writes an attachment placed mid-body as text, file, text.
+Calendar and contact parts, and parts without a name, are listed as files. A
+multipart without a boundary or parts, a malformed signed structure, an
+encrypted layer shown in place, and opaque signed-data below the root are
+refused; the stored encrypted source remains intact. A signature below the
+root is recorded with partial scope over a part that is shown, never over one
+that is not. The shared parser for synced mail keeps its lenient behaviour.
+
 Transient decryption captions require an exact snapshot of the segments,
 final sanitized HTML and published attachment inputs. Attachments match by
 position, because a `cid:` reference shows the first attachment that carries
-it; the listing breaks filename ties by ID so the order stays the same. The
-store keeps that snapshot with its body and discards it on raw replacement;
-the renderer checks it before granting captions. Sender-controlled markers
-never grant provenance. The prepared-body cache compares exact inline-image
-inputs, including byte replacements of the same length.
+it; the listing breaks filename ties by ID so the order stays the same. Only
+images the renderer may hydrate (inline ones, or any image when the HTML holds
+a `cid:` reference) carry their bytes in the snapshot; other files are bound by
+ID, name, type, size, Content-ID, inline flag and cache path. The store keeps
+that snapshot with its body and discards it on raw replacement; the renderer
+checks it before granting captions. Sender-controlled markers never grant
+provenance. The prepared-body cache compares exact inline-image inputs,
+including byte replacements of the same length.
 
 Inline OpenPGP is decrypted wherever the stored text holds one armored block.
 A cover note and a suffix stay plain text segments. The block's own HTML and a
 whole-message signature scope apply only when the block is the entire root
 body. A body with several blocks is not decrypted: it shows an error instead
-of captioning one block as the decrypted message.
+of captioning one block as the decrypted message. A block among other text
+that the unlocked keys cannot decrypt, such as one quoted from a message to
+someone else, leaves the message state alone; its own segment says it was not
+decrypted. A root signature over a body in which a block was decrypted signs
+the ciphertext, not the plaintext shown, so it counts as a partial signature,
+and it does not overwrite the decrypted content's own signature state unless
+it is the worse claim.
+
+## Decrypted content at rest
+
+Decrypted bodies are transient. Text, HTML and segments are computed on each
+read and held only in memory: the short-lived processing caches above and the
+frontend message store. The database keeps the encrypted source.
+
+Decrypted attachments are not transient. To open, save and preview them like
+any other attachment, `persist_decrypted_attachments` writes each part found
+in decrypted content (S/MIME, PGP/MIME, and inline OpenPGP, including a block
+after a cover note or one quoted in a reply) as plaintext into the attachment
+cache under the app data directory (`satchel/attachments`). It records the
+file name, MIME type, size and Content-ID in the `attachments` table. The files
+remain while the message exists; the maintenance worker deletes cache files
+that no row references. Satchel does not encrypt them, which is the same
+protection the SQLite database has (see `PRIVACY.md`): protect the device and
+its backups accordingly.

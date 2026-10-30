@@ -1,0 +1,17 @@
+Content-Type: multipart/mixed; boundary=m
+
+--m
+Content-Type: text/plain; charset=utf-8
+
+Part one, above the file.
+--m
+Content-Type: application/pdf; name="agenda.pdf"
+Content-Disposition: attachment; filename="agenda.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQK
+--m
+Content-Type: text/plain; charset=utf-8
+
+Part two, below the file.
+--m--

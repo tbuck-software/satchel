@@ -173,9 +173,13 @@ const missingImageSource = computed(() => missingInlineImageSource(t('errors.inl
 const trustedSegments = computed(() => matchingBodyProvenance(
   props.text ?? '', props.html, props.bodySegments, props.bodyProvenance, props.attachments,
 ));
+// A body decrypted as one piece keeps its caption over the HTML view, even
+// when it shows several parts, each a segment of its own.
 const fullBodyDecryption = computed(() => {
   const meaningful = trustedSegments.value?.filter((segment) => segment.content.trim() || segment.kind.endsWith('_decrypted'));
-  return meaningful?.length === 1 ? meaningful[0]?.kind : undefined;
+  const kinds = new Set(meaningful?.map((segment) => segment.kind));
+  const [kind] = kinds;
+  return kinds.size === 1 && kind?.endsWith('_decrypted') ? kind : undefined;
 });
 
 const prepared = computed(() => prepareEmailBody(props.cacheKey, {
@@ -497,6 +501,11 @@ const hasPgpSegments = computed(() =>
         <section v-else-if="segment.kind === 'smime_decrypted'" class="pgp-segment">
           <header class="pgp-segment-header">{{ $t('mail.pgpBlock.decryptedSmime') }}</header>
           <pre class="pgp-segment-body">{{ segment.content }}</pre>
+        </section>
+        <section v-else-if="segment.kind === 'pgp_undecrypted'" class="pgp-segment encrypted">
+          <header class="pgp-segment-header">{{ $t('mail.pgpBlock.encryptedPgp') }}</header>
+          <p class="pgp-segment-hint">{{ $t('mail.pgpBlock.undecryptedHint') }}</p>
+          <pre class="pgp-segment-raw">{{ segment.content }}</pre>
         </section>
         <section v-else-if="segment.kind === 'pgp_encrypted'" class="pgp-segment encrypted">
           <header class="pgp-segment-header">{{ $t('mail.pgpBlock.encryptedPgp') }}</header>

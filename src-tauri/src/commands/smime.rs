@@ -763,7 +763,7 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(bytes, payload);
-        let body = satchel_core::email::smime::parse_decrypted_body(&bytes).unwrap();
+        let body = satchel_core::email::decrypted::parse_decrypted_body(&bytes).unwrap();
         assert_eq!(body.body.text.as_deref(), Some("Grüße"));
     }
 
