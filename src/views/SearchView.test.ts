@@ -79,6 +79,7 @@ vi.mock('@/composables/useSearch', () => ({
   },
 }));
 vi.mock('@/composables/useServerSearch', () => ({
+  serverHitKey: (entry: { accountId: string; hit: { remote_id: string } }) => JSON.stringify([entry.accountId, entry.hit.remote_id]),
   useServerSearch: (options: { accountFilter: Ref<string> }) => {
     harness.serverSearchOptions = options;
     return harness.serverState!;
@@ -453,4 +454,46 @@ describe('SearchView', () => {
     expect(harness.searchState!.query.value).toBe('invoice');
   });
 
+});
+
+
+describe('server search failures', () => {
+  it('shows partial results alongside the failure and a retry action', async () => {
+    const wrapper = mountView();
+    harness.searchState!.query.value = 'invoice';
+    harness.serverState!.canSearchServer.value = true;
+    harness.serverState!.serverQueried.value = true;
+    harness.serverState!.serverError.value = 'Some accounts could not be searched: Work.';
+    harness.serverState!.serverHits.value = [
+      { accountId: 'one', hit: { remote_id: 'same', subject: 'First account', from: 'sender@example.com', snippet: '', date: null } },
+      { accountId: 'two', hit: { remote_id: 'same', subject: 'Second account', from: 'sender@example.com', snippet: '', date: null } },
+    ];
+    harness.serverState!.fetchingHitId.value = JSON.stringify(['one', 'same']);
+    await nextTick();
+    expect(wrapper.find('[role="alert"]').text()).toContain('Some accounts');
+    expect(wrapper.findAll('.result-server-note').map(note => note.text())).toEqual([
+      'Loading…', 'Server result: click to load and open the message.',
+    ]);
+    expect(wrapper.text()).toContain('First account');
+    expect(wrapper.text()).toContain('Second account');
+    const retry = wrapper.findAll('button').find(button => button.text() === 'Retry failed accounts')!;
+    await retry.trigger('click');
+    expect(harness.serverState!.searchServer).toHaveBeenCalledOnce();
+    wrapper.unmount();
+  });
+
+  it('shows no empty server state when the search failed', async () => {
+    const wrapper = mountView();
+    harness.searchState!.query.value = 'invoice';
+    harness.serverState!.canSearchServer.value = true;
+    harness.serverState!.serverQueried.value = true;
+    harness.serverState!.serverError.value = 'Server search failed.';
+    await nextTick();
+    expect(wrapper.text()).toContain('Server search failed.');
+    expect(wrapper.text()).not.toContain('No further results on the server.');
+    harness.serverState!.serverError.value = '';
+    await nextTick();
+    expect(wrapper.text()).toContain('No further results on the server.');
+    wrapper.unmount();
+  });
 });

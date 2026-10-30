@@ -523,19 +523,55 @@ function messageDto(message: Message): BackendMessage {
   };
 }
 
+function hasCachedBody(message: Message): boolean {
+  return Boolean(message.bodyText.trim() || message.bodyHtml?.trim());
+}
+
 function messageBodyDto(message: Message): BackendMessageBody {
   return {
     id: message.id,
     snippet: message.bodyText.slice(0, 180),
     body_text: message.bodyText,
     body_html: message.bodyHtml ?? null,
-    body_loaded: true,
+    body_loaded: hasCachedBody(message),
     list_unsubscribe: message.listUnsubscribe ?? null,
     list_unsubscribe_post: message.listUnsubscribePost ?? null,
     auth_spf: message.authSpf ?? null,
     auth_dkim: message.authDkim ?? null,
     auth_dmarc: message.authDmarc ?? null,
   };
+}
+
+/** Provider fixtures retain their bodies independently of the local cache. */
+const serverMessages: Array<{ accountId: string; remoteId: string; message: Message; thread: Thread }> = [];
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockServerSearch')) {
+  const baseThread = threads[0]!;
+  const baseMessage = messages[baseThread.id]![0]!;
+  accounts[0]!.provider = 'gmail';
+  accounts.push({ ...accounts[0]!, id: 'acc-server-other', email: 'other@example.com', provider: 'outlook' });
+  for (const accountId of [accounts[0]!.id, 'acc-server-other']) {
+    for (const retained of [true, false]) {
+      const thread = { ...baseThread, id: `th-server-${accountId}-${retained}`, accountId };
+      const message = {
+        ...baseMessage, id: `m-server-${accountId}-${retained}`, threadId: thread.id,
+        subject: 'Provider fixture', bodyText: 'Server search needle', bodyHtml: undefined,
+      };
+      serverMessages.push({ accountId, remoteId: retained ? 'shared-remote' : 'server-only', message, thread });
+      if (retained) {
+        threads.push({ ...thread });
+        messages[thread.id] = [{ ...message, bodyText: '' }];
+      }
+    }
+  }
+}
+
+function restoreServerBody(message: Message): boolean {
+  if (hasCachedBody(message)) return false;
+  const remote = serverMessages.find(entry => entry.message.id === message.id);
+  if (!remote) throw new Error('message body not available remotely');
+  message.bodyText = remote.message.bodyText;
+  message.bodyHtml = remote.message.bodyHtml;
+  return true;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -895,10 +931,11 @@ const handlers: Record<string, Handler> = {
       .map(messageBodyDto);
   },
   load_message_body: (payload) => {
-    const id = payload.messageId as string;
+    const id = input(payload).message_id as string;
     const message = Object.values(messages).flat().find((entry) => entry.id === id);
     if (!message) throw new Error('message not found');
-    return messageBodyDto(message);
+    const fetched = restoreServerBody(message);
+    return { body_text: message.bodyText, body_html: message.bodyHtml ?? null, fetched };
   },
   /*
    * The seeded messages carry attachments, and returning none left the
@@ -973,6 +1010,38 @@ const handlers: Record<string, Handler> = {
       inline: false,
     }];
   }),
+  server_search: (payload) => {
+    const request = input(payload);
+    const accountId = String(request.account_id);
+    const account = accounts.find(account => account.id === accountId);
+    if (!account) throw new Error('account not found');
+    if (!['gmail', 'outlook'].includes(account.provider)) return [];
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mockServerSearchFailure') === accountId) {
+      throw new Error('network is unreachable');
+    }
+    const query = String(request.query ?? '').trim().toLowerCase();
+    const local = handlers.search_message_hits!({ input: { query, account_id: accountId, limit: 500 } }) as { hits: Array<{ id: string }> };
+    const known = new Set(local.hits.map(hit => hit.id));
+    return serverMessages.filter(entry => entry.accountId === accountId
+      && query && `${entry.message.subject} ${entry.message.bodyText}`.toLowerCase().includes(query)
+      && !known.has(entry.message.id)).map(({ remoteId, message }) => ({
+      remote_id: remoteId, subject: message.subject, snippet: message.bodyText,
+      from: message.from.email, date: message.timestamp,
+    }));
+  },
+  fetch_server_search_hit: (payload) => {
+    const request = input(payload);
+    const entry = serverMessages.find(entry => entry.accountId === request.account_id && entry.remoteId === request.remote_id);
+    if (!entry) throw new Error('message not found on server');
+    const local = messages[entry.thread.id]?.find(message => message.id === entry.message.id);
+    if (local) {
+      restoreServerBody(local);
+    } else {
+      threads.push({ ...entry.thread });
+      messages[entry.thread.id] = [{ ...entry.message }];
+    }
+    return { message_id: entry.message.id, thread_id: entry.thread.id };
+  },
   search_message_hits: (payload) => {
     const request = input(payload);
     const query = String(request.query ?? '').trim().toLowerCase();

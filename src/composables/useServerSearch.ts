@@ -17,8 +17,13 @@ export interface ServerHitEntry {
   hit: BackendServerSearchHit;
 }
 
+/** Stable identity for provider IDs, which are only unique within an account. */
+export function serverHitKey(entry: ServerHitEntry): string {
+  return JSON.stringify([entry.accountId, entry.hit.remote_id]);
+}
+
 /**
- * Search provider-backed mail that has not been ingested locally yet.
+ * Search provider-backed mail missing from the local query results.
  *
  * The interface deliberately exposes only view state and two user actions.
  * Provider filtering, account scoping, request invalidation, parallel account
@@ -39,7 +44,7 @@ export function useServerSearch(options: {
   const serverLoading = ref(false);
   const serverError = ref('');
   const serverQueried = ref(false);
-  /** remote_id of the hit currently being downloaded. */
+  /** Account-scoped key of the hit currently being downloaded. */
   const fetchingHitId = ref('');
 
   /** Accounts whose provider supports a server-side query (Gmail/Outlook). */
@@ -65,8 +70,10 @@ export function useServerSearch(options: {
   // for. Invalidate in-flight work as well, so a slow old response cannot
   // repopulate a fresh query or clear a newer fetch guard.
   let requestId = 0;
+  let failedAccountIds = new Set<string>();
   function reset() {
     requestId += 1;
+    failedAccountIds.clear();
     serverHits.value = [];
     serverError.value = '';
     serverQueried.value = false;
@@ -81,29 +88,39 @@ export function useServerSearch(options: {
     if (!raw || serverLoading.value || !canSearchServer.value) return;
 
     const id = ++requestId;
+    fetchingHitId.value = '';
     const accountScope = serverAccountScope.value;
     const isCurrentRequest = () =>
       id === requestId && accountScope === serverAccountScope.value;
+    const requestedAccounts = serverAccounts.value.filter(account =>
+      failedAccountIds.size === 0 || failedAccountIds.has(account.id),
+    );
     serverLoading.value = true;
     serverError.value = '';
     try {
-      const responses = await Promise.all(
-        serverAccounts.value.map(async (account) => {
-          const hits = await backendServerSearch({ accountId: account.id, query: raw });
-          return hits.map((hit) => ({ accountId: account.id, hit }));
-        }),
+      const responses = await Promise.allSettled(
+        requestedAccounts.map(account => backendServerSearch({ accountId: account.id, query: raw })),
       );
       if (!isCurrentRequest()) return;
-      serverHits.value = responses.flat();
-      serverQueried.value = true;
-    } catch (error) {
-      // Offline, an expired token and a rate limit each need a different
-      // answer from the reader; one sentence for all three needs none.
-      const cause = transportErrorCause(error);
-      if (isCurrentRequest()) {
-        serverError.value = cause
-          ? t('search.server.failedCause', { cause })
-          : t('search.server.failed');
+      const failures: Array<{ accountId: string; reason: unknown }> = [];
+      responses.forEach((response, index) => {
+        const account = requestedAccounts[index]!;
+        if (response.status === 'fulfilled') {
+          serverHits.value = serverHits.value.filter(entry => entry.accountId !== account.id)
+            .concat(response.value.map(hit => ({ accountId: account.id, hit })));
+          serverQueried.value = true;
+        } else {
+          failures.push({ accountId: account.id, reason: response.reason });
+        }
+      });
+      failedAccountIds = new Set(failures.map(failure => failure.accountId));
+      if (failures.length) {
+        const cause = transportErrorCause(failures[0]!.reason);
+        const accountNames = requestedAccounts.filter(account => failedAccountIds.has(account.id))
+          .map(account => account.email || account.id).join(', ');
+        serverError.value = serverQueried.value
+          ? (cause ? t('search.server.partialFailedCause', { accounts: accountNames, cause }) : t('search.server.partialFailed', { accounts: accountNames }))
+          : (cause ? t('search.server.failedCause', { cause }) : t('search.server.failed'));
       }
     } finally {
       if (isCurrentRequest()) serverLoading.value = false;
@@ -115,7 +132,7 @@ export function useServerSearch(options: {
     if (fetchingHitId.value) return;
 
     const id = requestId;
-    fetchingHitId.value = entry.hit.remote_id;
+    fetchingHitId.value = serverHitKey(entry);
     try {
       const fetched = await backendFetchServerSearchHit({
         accountId: entry.accountId,
@@ -125,7 +142,7 @@ export function useServerSearch(options: {
 
       pushRecent(options.query.value);
       serverHits.value = serverHits.value.filter(
-        (candidate) => candidate.hit.remote_id !== entry.hit.remote_id,
+        (candidate) => serverHitKey(candidate) !== serverHitKey(entry),
       );
       await threads.ensureThreadLoaded(fetched.thread_id);
       if (id !== requestId) return;

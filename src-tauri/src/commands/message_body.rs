@@ -57,7 +57,7 @@ pub async fn load_message_body(
     load_message_body_with_pools(pool.inner().as_ref(), write_pool.inner(), &input.message_id).await
 }
 
-async fn load_message_body_with_pools(
+pub(crate) async fn load_message_body_with_pools(
     read: &SqlitePool,
     write: &SqlitePool,
     message_id: &str,

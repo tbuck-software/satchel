@@ -248,13 +248,16 @@
         "fetchFailed": "The message could not be loaded from the server.",
         "fetching": "Loading…",
         "hitCount": "{count} server result | {count} server results",
-        "hint": "Finds mail that has not been synced locally yet.",
+        "hint": "Finds mail missing from the local search, including bodies stored only on the server.",
         "noMore": "No further results on the server.",
-        "note": "Only on the server – click to download the message.",
+        "note": "Server result: click to load and open the message.",
         "results": "Server results",
         "running": "Searching the server…",
         "failedCause": "Server search failed: {cause}",
-        "fetchFailedCause": "The message could not be loaded from the server: {cause}"
+        "fetchFailedCause": "The message could not be loaded from the server: {cause}",
+        "partialFailed": "Some accounts could not be searched: {accounts}. Retry to search these accounts.",
+        "partialFailedCause": "Some accounts could not be searched: {accounts}. {cause}",
+        "retry": "Retry failed accounts"
       },
       "title": "Search",
       "warning": {
@@ -561,13 +564,16 @@
         "fetchFailed": "Nachricht konnte nicht vom Server geladen werden.",
         "fetching": "Wird geladen …",
         "hitCount": "{count} Server-Treffer | {count} Server-Treffer",
-        "hint": "Findet Mails, die noch nicht lokal synchronisiert sind.",
+        "hint": "Findet Mails, die in der lokalen Suche fehlen, auch wenn ihr Inhalt nur auf dem Server liegt.",
         "noMore": "Keine weiteren Treffer auf dem Server.",
-        "note": "Nur auf dem Server – Klick lädt die Nachricht herunter.",
+        "note": "Server-Treffer: Klicken, um die Nachricht zu laden und zu öffnen.",
         "results": "Server-Treffer",
         "running": "Server-Suche läuft …",
         "failedCause": "Server-Suche fehlgeschlagen: {cause}",
-        "fetchFailedCause": "Nachricht konnte nicht vom Server geladen werden: {cause}"
+        "fetchFailedCause": "Nachricht konnte nicht vom Server geladen werden: {cause}",
+        "partialFailed": "Einige Konten konnten nicht durchsucht werden: {accounts}. Erneut versuchen, um diese Konten zu durchsuchen.",
+        "partialFailedCause": "Einige Konten konnten nicht durchsucht werden: {accounts}. {cause}",
+        "retry": "Erneut versuchen"
       },
       "title": "Suche",
       "warning": {
