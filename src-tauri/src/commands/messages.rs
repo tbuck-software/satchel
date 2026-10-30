@@ -2342,7 +2342,8 @@ pub(super) async fn fetch_remote_message_source(
         &target.provider,
         &target.config,
     )
-    .await?;
+    .await
+    .map_err(|err| err.encoded())?;
 
     let raw = match target.provider.as_str() {
         "imap" => {

@@ -89,13 +89,17 @@ struct MappedEvent {
 
 /// Sync every visible Google calendar of one Gmail account. Returns the
 /// number of events now mirrored locally.
-pub async fn sync_account(
-    pool: &SqlitePool,
-    account_id: &str,
-    _config_json: &crate::accounts::AccountConfig,
-) -> Result<usize, String> {
-    let config = crate::utils::oauth::fresh_account_config(pool, account_id).await?;
-    let token = access_token_from_account_config(OAuthProvider::Gmail, &config).await?;
+pub async fn sync_account(pool: &SqlitePool, account_id: &str) -> Result<usize, String> {
+    let config = crate::utils::oauth::fresh_account_config_for_provider(
+        pool,
+        account_id,
+        OAuthProvider::Gmail,
+    )
+    .await
+    .map_err(|err| err.encoded())?;
+    let token = access_token_from_account_config(OAuthProvider::Gmail, &config)
+        .await
+        .map_err(|err| err.encoded())?;
     let client = crate::utils::http::client();
 
     let now = chrono::Utc::now();

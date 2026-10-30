@@ -227,6 +227,54 @@ impl<'a> AccountRepository<'a> {
         Self { pool }
     }
 
+    /// Merge DAV settings into the latest config under a writer reservation.
+    /// Probing/discovery happens before this call; credentials and unrelated
+    /// settings are never copied from the caller's earlier snapshot.
+    pub async fn update_dav_config(
+        &self,
+        account_id: &str,
+        caldav: Option<crate::providers::dav::DavConfig>,
+        carddav: Option<crate::providers::dav::DavConfig>,
+        remove_missing: bool,
+    ) -> Result<AccountConfig, AccountError> {
+        wait_for_credentials().await?;
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let stored: String =
+            sqlx::query_scalar("SELECT config FROM accounts WHERE id = ? AND is_active = 1")
+                .bind(account_id)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or(AccountError::NotFound)?;
+        let current = decrypt_account_config(account_id, &stored)
+            .map_err(|detail| AccountError::CredentialAccess { detail })?;
+        let mut value: serde_json::Value =
+            serde_json::from_str(&current).map_err(|_| AccountError::ConfigurationInvalid)?;
+        let object = value
+            .as_object_mut()
+            .ok_or(AccountError::ConfigurationInvalid)?;
+        for (field, config) in [("caldav", caldav), ("carddav", carddav)] {
+            if let Some(config) = config {
+                object.insert(
+                    field.into(),
+                    serde_json::to_value(config).map_err(|_| AccountError::ConfigurationInvalid)?,
+                );
+            } else if remove_missing {
+                object.remove(field);
+            }
+        }
+        let serialized = value.to_string();
+        let encrypted = encrypt_account_config(account_id, &serialized)
+            .map_err(|detail| AccountError::CredentialAccess { detail })?;
+        sqlx::query("UPDATE accounts SET config = ?, updated_at = ? WHERE id = ?")
+            .bind(encrypted)
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(account_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(AccountConfig::from_plaintext(serialized))
+    }
+
     pub async fn exists(&self, account_id: &str) -> Result<bool, AccountError> {
         let count: i64 = sqlx::query_scalar("SELECT COUNT(1) FROM accounts WHERE id = ?")
             .bind(account_id)

@@ -289,7 +289,8 @@ pub async fn prepare_attachment_inner(
         })?;
         let config =
             crate::utils::oauth::refresh_account_config(pool, &account_id, &provider_kind, &config)
-                .await?;
+                .await
+                .map_err(|err| err.encoded())?;
         let provider = provider_for_account(&provider_kind, &config, &account_email, None)?;
         provider
             .fetch_attachment(

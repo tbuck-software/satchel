@@ -1,5 +1,7 @@
 mod refresh;
-pub use refresh::{fresh_account_config, refresh_account_config};
+pub use refresh::{
+    fresh_account_config, fresh_account_config_for_provider, refresh_account_config,
+};
 
 use base64::Engine;
 use reqwest::Url;
@@ -589,14 +591,17 @@ pub fn load_stored_oauth(config_json: &str) -> Result<StoredOAuthConfig, String>
 pub async fn access_token_from_account_config(
     provider: OAuthProvider,
     config_json: &crate::accounts::AccountConfig,
-) -> Result<String, String> {
-    let stored = load_stored_oauth(config_json)?;
+) -> crate::sync::errors::SyncResult<String> {
+    let stored =
+        load_stored_oauth(config_json).map_err(crate::sync::errors::SyncError::Permanent)?;
     if stored
         .provider
         .as_deref()
         .is_some_and(|stored| !stored.eq_ignore_ascii_case(provider.as_str()))
     {
-        return Err("[transient] oauth provider changed; reload account configuration".into());
+        return Err(crate::sync::errors::SyncError::Transient(
+            "oauth provider changed; reload account configuration".into(),
+        ));
     }
     let access_token = stored
         .access_token
@@ -615,33 +620,46 @@ pub async fn access_token_from_account_config(
 
     // A detached snapshot cannot save a rotated refresh token or detect a
     // reconnect. Persistent consumers must load through fresh_account_config.
-    Err("[transient] oauth access token expired; reload account configuration".into())
+    Err(crate::sync::errors::SyncError::Transient(
+        "oauth access token expired; reload account configuration".into(),
+    ))
 }
 
 async fn ensure_fresh_account_config(
     provider: OAuthProvider,
     config_json: &crate::accounts::AccountConfig,
-) -> Result<Option<String>, String> {
-    // Returns *plaintext* JSON when it refreshes; callers re-encrypt before
-    // storing (see the encrypt_account_config calls at each UPDATE).
-    let stored = load_stored_oauth(config_json)?;
+) -> crate::sync::errors::SyncResult<Option<String>> {
+    use crate::sync::errors::SyncError;
+    let stored = load_stored_oauth(config_json).map_err(SyncError::Permanent)?;
+    if stored
+        .provider
+        .as_deref()
+        .is_some_and(|stored| !stored.eq_ignore_ascii_case(provider.as_str()))
+    {
+        return Err(SyncError::Transient(
+            "oauth provider changed; reload account configuration".into(),
+        ));
+    }
     if oauth_token_is_fresh(&stored) {
         return Ok(None);
     }
-
     let refresh_token = stored
         .refresh_token
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| "missing oauth refresh token".to_string())?;
-    let config = provider.load_config_for_stored(&stored)?;
-    let refreshed = refresh_access_token(&config, refresh_token).await?;
-    Ok(Some(merge_token_into_config(
-        config_json,
-        provider,
-        &refreshed,
-    )?))
+        .ok_or_else(|| SyncError::Permanent("missing oauth refresh token".into()))?;
+    let config = provider
+        .load_config_for_stored(&stored)
+        .map_err(SyncError::Permanent)?;
+    // The HTTP adapter still returns third-party diagnostics. Classify once
+    // here; callers retain the resulting variant through their retry decision.
+    let refreshed = refresh_access_token(&config, refresh_token)
+        .await
+        .map_err(SyncError::from_message)?;
+    Ok(Some(
+        merge_token_into_config(config_json, provider, &refreshed).map_err(SyncError::Permanent)?,
+    ))
 }
 
 pub fn merge_token_into_config(

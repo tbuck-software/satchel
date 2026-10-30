@@ -906,7 +906,8 @@ async fn hydrate_imported_draft_attachments(
                 &row.provider,
                 &row.config,
             )
-            .await?;
+            .await
+            .map_err(|err| err.encoded())?;
             let provider = provider_for_account(&row.provider, &config, &row.account_email, None)?;
             let fetched = tokio::time::timeout(
                 std::time::Duration::from_secs(60),
@@ -1099,7 +1100,8 @@ async fn push_draft_to_remote(
         &provider_kind,
         &stored_config,
     )
-    .await?;
+    .await
+    .map_err(|err| err.encoded())?;
 
     let provider = provider_for_account(&provider_kind, &config, &email, None)?;
     let resolved_remote_draft_id = if remote_draft_id.is_none() {

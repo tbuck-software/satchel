@@ -369,7 +369,7 @@ async fn run_account_loop(
                 "account:auth-required",
                 serde_json::json!({"account_id": account.id}),
             );
-            return Err(err);
+            return Err(err.encoded());
         }
     };
 

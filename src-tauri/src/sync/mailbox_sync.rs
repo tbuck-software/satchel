@@ -517,7 +517,7 @@ pub(crate) async fn sync_mailboxes(
 
         let account_sync_result: Result<(usize, usize, bool, usize, usize), String> = async {
             replay_ingest_effects(pool, &account.id).await?;
-            let config = crate::utils::oauth::refresh_account_config(pool, &account.id, &account.provider, &account.config).await?;
+            let config = crate::utils::oauth::refresh_account_config(pool, &account.id, &account.provider, &account.config).await.map_err(|err| err.encoded())?;
 
             let provider =
                 provider_for_account(

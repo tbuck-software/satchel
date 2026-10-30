@@ -726,7 +726,7 @@ impl GmailProvider {
         }
     }
 
-    async fn access_token(&self) -> Result<String, String> {
+    async fn access_token(&self) -> crate::sync::errors::SyncResult<String> {
         access_token_from_account_config(OAuthProvider::Gmail, &self.config_json).await
     }
 

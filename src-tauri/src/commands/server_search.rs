@@ -55,7 +55,8 @@ pub async fn server_search(
         &row.0,
         &row.1,
     )
-    .await?;
+    .await
+    .map_err(|err| err.encoded())?;
     let hits = match row.0.as_str() {
         "gmail" => gmail_search(&config, &input.query).await?,
         "outlook" => outlook_search(&config, &input.query).await?,
@@ -157,7 +158,8 @@ pub(crate) async fn fetch_server_search_hit_impl(
     let (provider, email, display_name, config) = row;
     let config =
         crate::utils::oauth::refresh_account_config(pool, &input.account_id, &provider, &config)
-            .await?;
+            .await
+            .map_err(|err| err.encoded())?;
 
     let (envelope, folder_hint) = match provider.as_str() {
         "gmail" => (
@@ -289,7 +291,9 @@ async fn gmail_search(
     config_json: &crate::commands::accounts::AccountConfig,
     query: &str,
 ) -> Result<Vec<ServerSearchHit>, String> {
-    let token = access_token_from_account_config(OAuthProvider::Gmail, config_json).await?;
+    let token = access_token_from_account_config(OAuthProvider::Gmail, config_json)
+        .await
+        .map_err(|err| err.encoded())?;
     let client = satchel_core::utils::http::client();
     let list = client
         .get("https://gmail.googleapis.com/gmail/v1/users/me/messages")
@@ -373,7 +377,9 @@ async fn outlook_search(
     config_json: &crate::commands::accounts::AccountConfig,
     query: &str,
 ) -> Result<Vec<ServerSearchHit>, String> {
-    let token = access_token_from_account_config(OAuthProvider::Outlook, config_json).await?;
+    let token = access_token_from_account_config(OAuthProvider::Outlook, config_json)
+        .await
+        .map_err(|err| err.encoded())?;
     let client = satchel_core::utils::http::client();
     // Microsoft Graph requires `ConsistencyLevel: eventual` for $search.
     let escaped = query.replace('"', "\\\"");

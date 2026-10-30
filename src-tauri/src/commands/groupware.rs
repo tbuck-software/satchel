@@ -52,54 +52,13 @@ pub async fn configure_groupware(
         dav::probe_dav_config(config, false).await?;
     }
 
-    let current: String =
-        sqlx::query_scalar("SELECT config FROM accounts WHERE id = ? AND is_active = 1 LIMIT 1")
-            .bind(&input.account_id)
-            .fetch_one(pool.inner())
-            .await
-            .map_err(|err| err.to_string())?;
-    let current = crate::commands::accounts::decrypt_account_config(&input.account_id, &current)?;
-    let mut config_json = serde_json::from_str::<serde_json::Value>(&current)
-        .unwrap_or_else(|_| serde_json::json!({}));
-    let object = config_json
-        .as_object_mut()
-        .ok_or_else(|| "account config must be a JSON object".to_string())?;
-    if let Some(config) = caldav {
-        object.insert(
-            "caldav".to_string(),
-            serde_json::to_value(config).map_err(|err| err.to_string())?,
-        );
-    } else {
-        object.remove("caldav");
-    }
-    if let Some(config) = carddav {
-        object.insert(
-            "carddav".to_string(),
-            serde_json::to_value(config).map_err(|err| err.to_string())?,
-        );
-    } else {
-        object.remove("carddav");
-    }
+    let config = crate::db::accounts::AccountRepository::new(pool.inner())
+        .update_dav_config(&input.account_id, caldav, carddav, true)
+        .await?;
 
-    let serialized = serde_json::to_string(&config_json).map_err(|err| err.to_string())?;
-    sqlx::query("UPDATE accounts SET config = ?, updated_at = ? WHERE id = ?")
-        .bind(crate::commands::accounts::encrypt_account_config(
-            &input.account_id,
-            &serialized,
-        )?)
-        .bind(chrono::Utc::now().to_rfc3339())
-        .bind(&input.account_id)
-        .execute(pool.inner())
+    dav::sync_groupware_account(pool.inner(), &input.account_id, &config)
         .await
-        .map_err(|err| err.to_string())?;
-
-    dav::sync_groupware_account(
-        pool.inner(),
-        &input.account_id,
-        &crate::commands::accounts::AccountConfig::from_plaintext(serialized),
-    )
-    .await
-    .map_err(Into::into)
+        .map_err(Into::into)
 }
 
 #[tauri::command]

@@ -226,8 +226,29 @@ mod credential_tests {
         .unwrap_err();
         assert_eq!(
             error,
-            "[transient] oauth access token expired; reload account configuration"
+            crate::sync::errors::SyncError::Transient(
+                "oauth access token expired; reload account configuration".into()
+            )
         );
+        assert!(!error.is_permanent());
+        assert!(error.encoded().contains("backend.errors.queueTemporary"));
+        // Providers expose the same typed variant to queue workers, rather
+        // than reconstructing it from a diagnostic string.
+        for kind in ["gmail", "outlook"] {
+            let provider = crate::providers::provider_for_account(
+                kind,
+                &AccountConfig::from_plaintext(OAUTH_CONFIG),
+                "fixture@example.test",
+                None,
+            )
+            .unwrap();
+            let failure = provider.sync_folders().await.unwrap_err();
+            assert!(matches!(
+                failure,
+                crate::sync::errors::SyncError::Transient(_)
+            ));
+            assert!(failure.encoded().contains("backend.errors.queueTemporary"));
+        }
     }
 
     #[test]

@@ -131,7 +131,9 @@ async fn push_gmail_vacation(
     config_json: &crate::commands::accounts::AccountConfig,
     input: &VacationInput,
 ) -> Result<(), String> {
-    let token = access_token_from_account_config(OAuthProvider::Gmail, config_json).await?;
+    let token = access_token_from_account_config(OAuthProvider::Gmail, config_json)
+        .await
+        .map_err(|err| err.encoded())?;
     let starts_ms = input
         .starts_at
         .as_deref()
@@ -183,7 +185,9 @@ async fn push_outlook_vacation(
     config_json: &crate::commands::accounts::AccountConfig,
     input: &VacationInput,
 ) -> Result<(), String> {
-    let token = access_token_from_account_config(OAuthProvider::Outlook, config_json).await?;
+    let token = access_token_from_account_config(OAuthProvider::Outlook, config_json)
+        .await
+        .map_err(|err| err.encoded())?;
     let status = if input.enabled {
         if input.starts_at.is_some() && input.ends_at.is_some() {
             "scheduled"

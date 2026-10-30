@@ -112,7 +112,8 @@ pub async fn backfill_calendar_invites_from_attachments(
                     &row.provider,
                     &row.config,
                 )
-                .await?;
+                .await
+                .map_err(|err| err.encoded())?;
                 match crate::providers::gmail::as_background(attachment_bytes(
                     &row.provider,
                     &account_config,

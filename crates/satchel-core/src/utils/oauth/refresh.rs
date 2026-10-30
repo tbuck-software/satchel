@@ -1,14 +1,7 @@
-//! Refresh persistence belongs here, never at a caller's snapshot-based UPDATE.
-//!
-//! Config writes encrypt with a new random nonce, so exact ciphertext equality
-//! is a revision of the whole config, even if the plaintext is unchanged. This
-//! avoids timestamp collisions and ABA across reauthorization. The provider is
-//! compared too. No transaction spans the token request. The first refresh to
-//! commit wins; a competing authorization/refresh discards the old response.
-//! Settings-only changes retain a successful rotation: the unchanged OAuth
-//! block permits rebasing it onto current settings, still gated on the entire
-//! current ciphertext. This avoids reusing an already consumed refresh token.
-//! Other conflicts reload/refresh current credentials. Missing rows fail closed.
+//! Owns refresh persistence. No database transaction spans a provider request.
+//! After HTTP, a short write transaction reloads the current row. Settings-only
+//! changes merge with a successful rotation; changed authorizations win instead.
+//! Successful rotations merge once, regardless of intervening settings writes.
 
 use std::future::Future;
 
@@ -16,30 +9,46 @@ use sqlx::SqlitePool;
 
 use super::{ensure_fresh_account_config, OAuthProvider};
 use crate::accounts::{decrypt_account_config, encrypt_account_config, AccountConfig};
+use crate::sync::errors::{SyncError, SyncResult};
 
-/// Load the current configuration and persist refreshed credentials before use.
-/// OAuth accounts require a writer pool even when their token is already fresh.
-/// Conflicts reload current credentials. Only settings-only changes can retain
-/// a successful rotation, rebased onto those settings and saved conditionally.
-/// Deletion fails closed. Repeated config churn is retried later.
+/// Load and persist current credentials before returning them for provider use.
 pub async fn fresh_account_config(
     pool: &SqlitePool,
     account_id: &str,
-) -> Result<AccountConfig, String> {
+) -> SyncResult<AccountConfig> {
     fresh_account_config_with(pool, account_id, None, |provider, config| async move {
         ensure_fresh_account_config(provider, &config).await
     })
     .await
 }
 
-/// Like fresh_account_config, starting from an exact persisted row already read
-/// by the caller. The raw ciphertext is the compare-and-save revision.
+/// Load credentials for callers holding provider-specific metadata. Reject a
+/// changed provider before allowing its credentials to reach the old endpoint.
+pub async fn fresh_account_config_for_provider(
+    pool: &SqlitePool,
+    account_id: &str,
+    provider: OAuthProvider,
+) -> SyncResult<AccountConfig> {
+    let snapshot: Option<String> =
+        sqlx::query_scalar("SELECT config FROM accounts WHERE id = ? AND provider = ?")
+            .bind(account_id)
+            .bind(provider.as_str())
+            .fetch_optional(pool)
+            .await
+            .map_err(|err| SyncError::Transient(err.to_string()))?;
+    let snapshot = snapshot.ok_or_else(|| {
+        SyncError::Transient("account provider changed or account was removed".into())
+    })?;
+    refresh_account_config(pool, account_id, provider.as_str(), &snapshot).await
+}
+
+/// Start from a persisted row. A provider change requires metadata to be reloaded.
 pub async fn refresh_account_config(
     pool: &SqlitePool,
     account_id: &str,
     provider: &str,
     snapshot: &str,
-) -> Result<AccountConfig, String> {
+) -> SyncResult<AccountConfig> {
     fresh_account_config_with(
         pool,
         account_id,
@@ -54,13 +63,12 @@ async fn fresh_account_config_with<F, Fut>(
     account_id: &str,
     mut initial: Option<(String, String)>,
     mut refresh: F,
-) -> Result<AccountConfig, String>
+) -> SyncResult<AccountConfig>
 where
     F: FnMut(OAuthProvider, AccountConfig) -> Fut,
-    Fut: Future<Output = Result<Option<String>, String>>,
+    Fut: Future<Output = SyncResult<Option<String>>>,
 {
     let mut original_provider = None;
-    let mut pending_refresh: Option<(serde_json::Value, serde_json::Value)> = None;
     for _ in 0..4 {
         let (provider, snapshot): (String, String) = match initial.take() {
             Some(snapshot) => snapshot,
@@ -68,83 +76,122 @@ where
                 .bind(account_id)
                 .fetch_optional(pool)
                 .await
-                .map_err(|err| err.to_string())?
-                .ok_or_else(|| "account was not found".to_string())?,
+                .map_err(|err| SyncError::Transient(err.to_string()))?
+                .ok_or_else(|| SyncError::Permanent("account was not found".into()))?,
         };
         if original_provider
             .as_ref()
             .is_some_and(|original| original != &provider)
         {
-            // Callers also hold provider-specific metadata. Make them reload it
-            // instead of sending a new provider's token to the old endpoint.
-            return Err("[transient] account provider changed during oauth refresh".into());
+            return Err(SyncError::Transient(
+                "account provider changed during oauth refresh".into(),
+            ));
         }
         original_provider.get_or_insert_with(|| provider.clone());
-        let config = decrypt_account_config(account_id, &snapshot)?;
+        let config = decrypt_account_config(account_id, &snapshot).map_err(SyncError::Permanent)?;
         let Ok(oauth_provider) = OAuthProvider::parse(&provider) else {
             return Ok(config);
         };
-        // Keep a rotated token across settings-only writes without rebuilding
-        // their config from our old snapshot. Any OAuth change invalidates the
-        // pending response; the whole-row CAS below also closes the next race.
-        let rebased = pending_refresh.take().and_then(|(expected, refreshed)| {
-            let mut current: serde_json::Value = serde_json::from_str(&config).ok()?;
-            if current.get("oauth")? != &expected {
-                return None;
+        let result = refresh(oauth_provider, config.clone()).await;
+
+        // Acquire the writer reservation only AFTER the request. Ordinary
+        // settings writers cannot slip between this reload and the merge.
+        let mut tx = pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(|err| SyncError::Transient(err.to_string()))?;
+        let (current_provider, current_snapshot): (String, String) =
+            sqlx::query_as("SELECT provider, config FROM accounts WHERE id = ?")
+                .bind(account_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|err| SyncError::Transient(err.to_string()))?
+                .ok_or_else(|| SyncError::Permanent("account was not found".into()))?;
+        if current_provider != provider {
+            return Err(SyncError::Transient(
+                "account provider changed during oauth refresh".into(),
+            ));
+        }
+        let current =
+            decrypt_account_config(account_id, &current_snapshot).map_err(SyncError::Permanent)?;
+        // Reading a fresh token is not a successful refresh. In particular,
+        // reloading after a reconnect must not clear that authorization's newer
+        // error state just because our old HTTP response was discarded.
+        if matches!(result, Ok(None)) && oauth_block(&config) == oauth_block(&current) {
+            tx.commit()
+                .await
+                .map_err(|err| SyncError::Transient(err.to_string()))?;
+            return Ok(current);
+        }
+        let updated = match &result {
+            Ok(Some(updated))
+                if oauth_block(&config).is_some()
+                    && oauth_block(&config) == oauth_block(&current) =>
+            {
+                let mut merged: serde_json::Value = serde_json::from_str(&current)
+                    .map_err(|err| SyncError::Permanent(err.to_string()))?;
+                merged["oauth"] = oauth_block(updated).ok_or_else(|| {
+                    SyncError::Permanent("refreshed oauth configuration is invalid".into())
+                })?;
+                Some(merged.to_string())
             }
-            current["oauth"] = refreshed;
-            Some(current.to_string())
-        });
-        let result = match rebased {
-            Some(config) => Ok(Some(config)),
-            None => refresh(oauth_provider, config.clone()).await,
+            _ if snapshot == current_snapshot => None,
+            _ => {
+                // Never apply an old response or error to a new authorization.
+                tx.rollback()
+                    .await
+                    .map_err(|err| SyncError::Transient(err.to_string()))?;
+                initial = Some((current_provider, current_snapshot));
+                continue;
+            }
         };
         let now = chrono::Utc::now().to_rfc3339();
-        let changed = match &result {
-            Ok(updated) => {
-                let stored = match updated {
-                    Some(updated) => encrypt_account_config(account_id, updated)?,
-                    None => snapshot.clone(),
+        match &result {
+            Ok(_) => {
+                let stored = match &updated {
+                    Some(updated) => {
+                        encrypt_account_config(account_id, updated).map_err(SyncError::Permanent)?
+                    }
+                    None => current_snapshot,
                 };
                 sqlx::query(
                     "UPDATE accounts SET config = ?, updated_at = ?,
-                     last_oauth_error = NULL, last_oauth_error_at = NULL WHERE id = ? AND config = ? AND provider = ?",
+                    last_oauth_error = NULL, last_oauth_error_at = NULL WHERE id = ?",
                 )
                 .bind(stored)
                 .bind(&now)
                 .bind(account_id)
-                .bind(&snapshot)
-                .bind(&provider)
-                .execute(pool)
+                .execute(&mut *tx)
                 .await
             }
             Err(err) => {
+                let diagnostic = err.to_string();
                 sqlx::query(
                     "UPDATE accounts SET last_oauth_error_at = CASE
-                       WHEN last_oauth_error = ? THEN last_oauth_error_at ELSE ? END,
-                     last_oauth_error = ? WHERE id = ? AND config = ? AND provider = ?",
+                    WHEN last_oauth_error = ? THEN last_oauth_error_at ELSE ? END,
+                    last_oauth_error = ? WHERE id = ?",
                 )
-                .bind(err)
+                .bind(&diagnostic)
                 .bind(&now)
-                .bind(err)
+                .bind(&diagnostic)
                 .bind(account_id)
-                .bind(&snapshot)
-                .bind(&provider)
-                .execute(pool)
+                .execute(&mut *tx)
                 .await
             }
         }
-        .map_err(|err| err.to_string())?
-        .rows_affected();
-        if changed == 0 {
-            if let Ok(Some(updated)) = &result {
-                pending_refresh = oauth_block(&config).zip(oauth_block(updated));
-            }
-            continue;
-        }
-        return result.map(|updated| updated.map(AccountConfig::from_plaintext).unwrap_or(config));
+        .map_err(|err| SyncError::Transient(err.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|err| SyncError::Transient(err.to_string()))?;
+        return result.map(|_| {
+            updated
+                .map(AccountConfig::from_plaintext)
+                .unwrap_or(current)
+        });
     }
-    Err("[transient] account configuration changed during oauth refresh".to_string())
+    Err(SyncError::Transient(
+        "account configuration changed during oauth refresh".into(),
+    ))
 }
 
 fn oauth_block(config: &str) -> Option<serde_json::Value> {
@@ -164,18 +211,11 @@ mod tests {
     async fn fixture() -> SqlitePool {
         crate::utils::crypto::seed_master_key_for_tests();
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::raw_sql(
-            "CREATE TABLE accounts (id TEXT PRIMARY KEY, provider TEXT, config TEXT,
-             updated_at TEXT, last_oauth_error TEXT, last_oauth_error_at TEXT);",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query("INSERT INTO accounts (id, provider, config) VALUES ('account', 'gmail', ?)")
+        crate::db::init(&pool).await.unwrap();
+        sqlx::query("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+            VALUES ('account', 'Fixture', 'fixture@example.test', 'gmail', ?, 'encrypted-in-config', '2026-01-01', '2026-01-01')")
             .bind(encrypt_account_config("account", &config("old", false)).unwrap())
-            .execute(&pool)
-            .await
-            .unwrap();
+            .execute(&pool).await.unwrap();
         pool
     }
 
@@ -219,7 +259,7 @@ mod tests {
     }
 
     // The oneshot channels place reauthorization exactly inside the token await.
-    async fn paused_reconnect(fail: bool) {
+    async fn paused_reconnect(fail: bool, new_error: bool) {
         let pool = fixture().await;
         let (read_tx, read_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = tokio::sync::oneshot::channel();
@@ -238,7 +278,7 @@ mod tests {
                             read.send(()).unwrap();
                             release.await.unwrap();
                             if fail {
-                                Err("invalid_grant".into())
+                                Err(SyncError::Permanent("invalid_grant".into()))
                             } else {
                                 Ok(Some(refreshed(&config)))
                             }
@@ -267,8 +307,10 @@ mod tests {
             expires_at: Some("2099-01-01T00:00:00Z".into()),
         };
         let current = merge_authorized_token_into_config(&current, &client, &token).unwrap();
-        sqlx::query("UPDATE accounts SET config = ?, last_oauth_error = NULL WHERE id = 'account'")
+        sqlx::query("UPDATE accounts SET config = ?, last_oauth_error = ?, last_oauth_error_at = ? WHERE id = 'account'")
             .bind(encrypt_account_config("account", &current).unwrap())
+            .bind(new_error.then_some("new authorization error"))
+            .bind(new_error.then_some("new error time"))
             .execute(&pool)
             .await
             .unwrap();
@@ -288,16 +330,32 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(error, None);
+        assert_eq!(
+            error.as_deref(),
+            new_error.then_some("new authorization error")
+        );
+        if new_error {
+            let at: String = sqlx::query_scalar("SELECT last_oauth_error_at FROM accounts")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(at, "new error time");
+        }
     }
 
     #[tokio::test]
     async fn paused_refresh_success_preserves_reauthorization() {
-        paused_reconnect(false).await;
+        paused_reconnect(false, false).await;
     }
     #[tokio::test]
     async fn paused_refresh_failure_uses_reauthorization() {
-        paused_reconnect(true).await;
+        paused_reconnect(true, false).await;
+    }
+
+    #[tokio::test]
+    async fn late_refresh_results_preserve_new_authorization_error_state() {
+        paused_reconnect(false, true).await;
+        paused_reconnect(true, true).await;
     }
 
     #[tokio::test]
@@ -372,14 +430,17 @@ mod tests {
                         .await
                         .unwrap();
                     if fail {
-                        Err("invalid_grant".into())
+                        Err(SyncError::Permanent("invalid_grant".into()))
                     } else {
                         Ok(Some(refreshed(&config)))
                     }
                 }
             })
             .await;
-            assert_eq!(result.unwrap_err(), "account was not found");
+            assert_eq!(
+                result.unwrap_err(),
+                SyncError::Permanent("account was not found".into())
+            );
             assert_eq!(
                 sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM accounts")
                     .fetch_one(&pool)
@@ -397,11 +458,11 @@ mod tests {
         for attempt in 0..2 {
             assert_eq!(
                 fresh_account_config_with(&pool, "account", None, |_, _| async {
-                    Err("invalid_grant".into())
+                    Err(SyncError::Permanent("invalid_grant".into()))
                 })
                 .await
                 .unwrap_err(),
-                "invalid_grant"
+                SyncError::Permanent("invalid_grant".into())
             );
             if attempt == 0 {
                 sqlx::query("UPDATE accounts SET last_oauth_error_at = 'first'")
@@ -490,16 +551,16 @@ mod tests {
                     .execute(&pool)
                     .await
                     .unwrap();
-                Err("invalid_grant".into())
+                Err(SyncError::Permanent("invalid_grant".into()))
             }
         })
         .await
         .unwrap_err();
         assert_eq!(
             result,
-            "[transient] account configuration changed during oauth refresh"
+            SyncError::Transient("account configuration changed during oauth refresh".into())
         );
-        assert!(!crate::sync::errors::SyncError::from_message(result).is_permanent());
+        assert!(!result.is_permanent());
         let error: Option<String> = sqlx::query_scalar("SELECT last_oauth_error FROM accounts")
             .fetch_one(&pool)
             .await
@@ -528,7 +589,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             result,
-            "[transient] account provider changed during oauth refresh"
+            SyncError::Transient("account provider changed during oauth refresh".into())
         );
         assert_eq!(stored(&pool).await, new_expired_config());
     }
@@ -564,5 +625,190 @@ mod tests {
         assert_eq!(value["oauth"]["access_token"], "rotated-access");
         assert_eq!(value["oauth"]["scope"], "old-scope");
         assert_eq!(stored(&pool).await, result.as_str());
+    }
+    fn dav_config(server: &str) -> crate::providers::dav::DavConfig {
+        crate::providers::dav::DavConfig {
+            server: server.into(),
+            username: "fixture".into(),
+            password: "fixture-only".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn dav_settings_before_and_after_rotation_preserve_credentials_and_errors() {
+        let pool = fixture().await;
+        let writer = pool.clone();
+        let result = fresh_account_config_with(&pool, "account", None, move |_, config| {
+            let writer = writer.clone();
+            async move {
+                // This production writer runs while the provider request is
+                // outstanding. It must complete without a refresh-held lock.
+                crate::db::accounts::AccountRepository::new(&writer)
+                    .update_dav_config(
+                        "account",
+                        Some(dav_config("https://cal.example.test")),
+                        None,
+                        true,
+                    )
+                    .await
+                    .unwrap();
+                Ok(Some(refreshed(&config)))
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            load_stored_oauth(&result).unwrap().refresh_token.as_deref(),
+            Some("rotated-refresh")
+        );
+        sqlx::query(
+            "UPDATE accounts SET last_oauth_error = 'new error', last_oauth_error_at = 'new time'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // A settings intent captured before refresh must only touch its DAV fields.
+        let current = crate::db::accounts::AccountRepository::new(&pool)
+            .update_dav_config(
+                "account",
+                None,
+                Some(dav_config("https://card.example.test")),
+                false,
+            )
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&current).unwrap();
+        assert_eq!(value["caldav"]["server"], "https://cal.example.test");
+        assert_eq!(value["carddav"]["server"], "https://card.example.test");
+        assert_eq!(value["setting"], "old");
+        assert_eq!(value["oauth"]["refresh_token"], "rotated-refresh");
+        assert_eq!(stored(&pool).await, current.as_str());
+        let error: (String, String) =
+            sqlx::query_as("SELECT last_oauth_error, last_oauth_error_at FROM accounts")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(error, ("new error".into(), "new time".into()));
+    }
+
+    #[tokio::test]
+    async fn dav_settings_apply_to_reauthorization_without_restoring_old_oauth() {
+        let pool = fixture().await;
+        let repo = crate::db::accounts::AccountRepository::new(&pool);
+        let client = OAuthProvider::Gmail.build_config(
+            "new-client".into(),
+            None,
+            "http://127.0.0.1:1".into(),
+        );
+        repo.connect_oauth(
+            "account",
+            &client,
+            &OAuthTokenPayload {
+                access_token: "new-access".into(),
+                refresh_token: Some("new-refresh".into()),
+                token_type: None,
+                scope: Some("new-scope".into()),
+                expires_at: Some("2099-01-01T00:00:00Z".into()),
+            },
+            &crate::utils::oauth::OAuthIdentity {
+                email: "fixture@example.test".into(),
+                display_name: None,
+            },
+            "2026-01-01",
+        )
+        .await
+        .unwrap();
+        let config = repo
+            .update_dav_config(
+                "account",
+                Some(dav_config("https://cal.example.test")),
+                None,
+                true,
+            )
+            .await
+            .unwrap();
+        let oauth = load_stored_oauth(&config).unwrap();
+        assert_eq!(oauth.client_id.as_deref(), Some("new-client"));
+        assert_eq!(oauth.scope.as_deref(), Some("new-scope"));
+        assert_eq!(oauth.refresh_token.as_deref(), Some("new-refresh"));
+        assert_eq!(stored(&pool).await, config.as_str());
+    }
+
+    #[tokio::test]
+    async fn settings_churn_queued_around_refresh_commit_cannot_discard_rotation() {
+        crate::utils::crypto::seed_master_key_for_tests();
+        let dir = tempfile::tempdir().unwrap();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(4)
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(dir.path().join("race.db"))
+                    .create_if_missing(true)
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+            )
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::query("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+            VALUES ('account', 'Fixture', 'fixture@example.test', 'gmail', ?, 'encrypted-in-config', '2026-01-01', '2026-01-01')")
+            .bind(encrypt_account_config("account", &config("old", false)).unwrap()).execute(&pool).await.unwrap();
+        // Hold the writer reservation until HTTP has completed. Refresh must
+        // wait, then reload rather than exhausting settings-only CAS attempts.
+        let mut writer = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        let refresh = tokio::spawn({
+            let pool = pool.clone();
+            async move {
+                let mut done = Some(done_tx);
+                fresh_account_config_with(&pool, "account", None, move |_, config| {
+                    done.take()
+                        .expect("one-use refresh token must be exchanged only once")
+                        .send(())
+                        .unwrap();
+                    async move { Ok(Some(refreshed(&config))) }
+                })
+                .await
+                .unwrap()
+            }
+        });
+        done_rx.await.unwrap();
+        for revision in 0..8 {
+            let mut current: serde_json::Value =
+                serde_json::from_str(&config("old", false)).unwrap();
+            current["setting"] = revision.into();
+            sqlx::query("UPDATE accounts SET config = ? WHERE id = 'account'")
+                .bind(encrypt_account_config("account", &current.to_string()).unwrap())
+                .execute(&mut *writer)
+                .await
+                .unwrap();
+        }
+        let settings = tokio::spawn({
+            let pool = pool.clone();
+            async move {
+                for revision in 0..32 {
+                    crate::db::accounts::AccountRepository::new(&pool)
+                        .update_dav_config(
+                            "account",
+                            Some(dav_config(&format!("https://cal.example.test/{revision}"))),
+                            None,
+                            true,
+                        )
+                        .await
+                        .unwrap();
+                    tokio::task::yield_now().await;
+                }
+            }
+        });
+        writer.commit().await.unwrap();
+        let result = refresh.await.unwrap();
+        settings.await.unwrap();
+        assert_eq!(
+            load_stored_oauth(&result).unwrap().refresh_token.as_deref(),
+            Some("rotated-refresh")
+        );
+        let persisted: serde_json::Value = serde_json::from_str(&stored(&pool).await).unwrap();
+        assert_eq!(persisted["oauth"]["refresh_token"], "rotated-refresh");
+        assert_eq!(persisted["setting"], 7);
+        assert_eq!(persisted["caldav"]["server"], "https://cal.example.test/31");
     }
 }
