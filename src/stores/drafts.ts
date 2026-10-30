@@ -64,11 +64,14 @@ export const useDraftsStore = defineStore('drafts', () => {
 
   async function fetchOne(id: string): Promise<BackendDraft | null> {
     if (!backendCommandsAvailable()) return null;
-    const draft = await backendLoadDraft(id);
-    if (draft?.content_error) throw new Error(backendErrorLabel(draft.content_error), { cause: draft.content_error });
-    const idx = items.value.findIndex((item) => item.id === id);
-    if (draft && idx >= 0) items.value.splice(idx, 1, draft);
-    return draft;
+    // The fresh row replaces list metadata, so an older list snapshot must reread.
+    return loader.mutate(async () => {
+      const draft = await backendLoadDraft(id);
+      if (draft?.content_error) throw new Error(backendErrorLabel(draft.content_error), { cause: draft.content_error });
+      const idx = items.value.findIndex((item) => item.id === id);
+      if (draft && idx >= 0) items.value.splice(idx, 1, draft);
+      return draft;
+    });
   }
 
   async function remove(id: string) {

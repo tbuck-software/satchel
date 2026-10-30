@@ -202,6 +202,46 @@ describe('drafts store', () => {
     saveMock.mockResolvedValueOnce(storedDraft({ body: 'Edited after sync' }));
     expect((await drafts.save(draftInput({ id: 'draft-1', body: 'Edited after sync' })))?.body).toBe('Edited after sync');
   });
+
+  it('rereads a list snapshot taken before a verified fresh read instead of restoring its stale error', async () => {
+    const stale = storedDraft({ content_error: 'backend.errors.imapUidValidityMissing' });
+    let resolveOld!: (rows: BackendDraft[]) => void;
+    listMock
+      .mockResolvedValueOnce([stale])
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValue([storedDraft()]);
+    const drafts = useDraftsStore();
+    await drafts.load();
+    const late = drafts.load();
+    vi.mocked(backendLoadDraft).mockResolvedValueOnce(storedDraft());
+    await drafts.fetchOne('draft-1');
+    resolveOld([stale]);
+    await late;
+    expect(listMock).toHaveBeenCalledTimes(3);
+    expect(drafts.items[0]?.content_error).toBeUndefined();
+    saveMock.mockResolvedValueOnce(storedDraft({ body: 'Edited after sync' }));
+    expect((await drafts.save(draftInput({ id: 'draft-1', body: 'Edited after sync' })))?.body).toBe('Edited after sync');
+  });
+
+  it('keeps an unavailable-draft save rejection when an older list load completes', async () => {
+    const blocked = storedDraft({ id: 'blocked', body: '', content_error: JSON.stringify({
+      key: 'backend.errors.imapUidValidityMissing', params: { folder: 'Work/Drafts' },
+    }) });
+    let resolveOld!: (rows: BackendDraft[]) => void;
+    listMock
+      .mockResolvedValueOnce([blocked])
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValue([blocked]);
+    const drafts = useDraftsStore();
+    await drafts.load();
+    const late = drafts.load();
+    await expect(drafts.save(draftInput({ id: 'blocked' }))).rejects.toThrow('Work/Drafts');
+    resolveOld([blocked]);
+    await late;
+    expect(saveMock).not.toHaveBeenCalled();
+    expect(drafts.lastError).toContain('Work/Drafts');
+  });
+
   it('edits, deletes and undoes a valid draft while an unavailable row remains in the real store', async () => {
     const blocked = storedDraft({ id: 'blocked', body: '', content_error: 'backend.errors.imapUidValidityMissing' });
     const edited = storedDraft({ body: 'Edited beside an unavailable draft' });
