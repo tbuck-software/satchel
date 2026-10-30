@@ -97,6 +97,7 @@ vi.mock('@/services/backend', () => ({
 const topicAddMock = vi.hoisted(() => vi.fn());
 const topicRemoveMock = vi.hoisted(() => vi.fn());
 const topicMembershipsMock = vi.hoisted(() => vi.fn());
+const topicUndoMock = vi.hoisted(() => vi.fn());
 vi.mock('@/stores/topics', () => ({
   useTopicsStore: () => ({
     byId: () => undefined,
@@ -104,6 +105,7 @@ vi.mock('@/stores/topics', () => ({
     loadMembershipsFor: topicMembershipsMock,
     addItemsToTopic: topicAddMock,
     removeItemFromTopic: topicRemoveMock,
+    undoMemberships: topicUndoMock,
   }),
 }));
 
@@ -667,18 +669,19 @@ describe('silent failures (#119)', () => {
     toasts.length = 0;
     topicAddMock.mockReset();
     topicRemoveMock.mockReset();
+    topicUndoMock.mockReset();
     priorityMock.mockReset();
     threadState.threads = [seedThread({ priority: 1 })];
   });
 
   it('undoes only the topic links the add actually created', async () => {
-    topicAddMock.mockResolvedValue(['thread-2']);
-    topicRemoveMock.mockResolvedValue(true);
+    topicAddMock.mockResolvedValue([{ item_id: 'thread-2', revision: 'second' }]);
+    topicRemoveMock.mockResolvedValue({ item_id: 'thread-1', revision: 'removed' });
     await useThreadActions().addToTopic(['thread-1', 'thread-2'], 'topic-1');
 
     await toasts[0]?.action?.handler();
 
-    expect(topicRemoveMock).toHaveBeenCalledExactlyOnceWith('topic-1', 'thread', 'thread-2');
+    expect(topicUndoMock).toHaveBeenCalledExactlyOnceWith('topic-1', 'thread', [{ item_id: 'thread-2', revision: 'second' }], false);
   });
 
   it('offers no undo when every thread already belonged to the topic', async () => {
@@ -690,18 +693,18 @@ describe('silent failures (#119)', () => {
   });
 
   it('re-adds only threads the removal actually unlinked', async () => {
-    topicRemoveMock.mockImplementation(async (_topic: string, _type: string, id: string) => id === 'thread-1');
-    topicAddMock.mockResolvedValue(['thread-1']);
+    topicRemoveMock.mockImplementation(async (_topic: string, _type: string, id: string) => id === 'thread-1' ? { item_id: id, revision: 'removed' } : null);
+    topicAddMock.mockResolvedValue([{ item_id: 'thread-1', revision: 'added' }]);
     await useThreadActions().removeFromTopic(['thread-1', 'thread-2'], 'topic-1');
 
     await toasts[0]?.action?.handler();
 
-    expect(topicAddMock).toHaveBeenCalledExactlyOnceWith('topic-1', 'thread', ['thread-1']);
+    expect(topicUndoMock).toHaveBeenCalledExactlyOnceWith('topic-1', 'thread', [{ item_id: 'thread-1', revision: 'removed' }], true);
   });
 
   it('reports a failed topic undo and keeps the receipt', async () => {
-    topicAddMock.mockResolvedValue(['thread-1']);
-    topicRemoveMock.mockRejectedValue(new Error('topic store offline'));
+    topicAddMock.mockResolvedValue([{ item_id: 'thread-1', revision: 'added' }]);
+    topicUndoMock.mockRejectedValue(new Error('topic store offline'));
     const actions = useThreadActions();
     await actions.addToTopic(['thread-1'], 'topic-1');
 
@@ -711,8 +714,8 @@ describe('silent failures (#119)', () => {
   });
 
   it('reports a failed re-add when undoing a topic removal', async () => {
-    topicRemoveMock.mockResolvedValue(true);
-    topicAddMock.mockRejectedValue(new Error('re-add refused'));
+    topicRemoveMock.mockResolvedValue({ item_id: 'thread-1', revision: 'removed' });
+    topicUndoMock.mockRejectedValue(new Error('re-add refused'));
     const actions = useThreadActions();
     await actions.removeFromTopic(['thread-1'], 'topic-1');
 

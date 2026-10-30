@@ -306,7 +306,57 @@ for (const item of outbox.filter((entry) => entry.status === 'scheduled')) {
   if (draft) queuedDrafts.set(item.id, { ...draft });
 }
 const topics: BackendTopic[] = mockTopics.map((topic) => ({ ...topic }));
-const topicTimeline: Record<string, BackendTopicTimelineItem[]> = { ...mockTopicTimeline };
+const topicTimeline: Record<string, BackendTopicTimelineItem[]> = Object.fromEntries(Object.entries(mockTopicTimeline).map(([id, rows]) => [id, rows.map((row) => ({ ...row }))]));
+const topicLinks: { topic_id: string; item_type: string; item_id: string }[] = Object.entries(topicTimeline)
+  .flatMap(([topicId, rows]) => rows.filter((row) => row.item_type !== 'note').map((row) => ({
+    topic_id: topicId, item_type: row.item_type, item_id: row.item_id,
+  })));
+const topicVersions = new Map<string, string>();
+const removedTopicItems = new Map<string, BackendTopicTimelineItem>();
+function topicLinkKey(topicId: string, itemType: string, itemId: string): string {
+  return JSON.stringify([topicId, itemType, itemId]);
+}
+
+function changeTopicLink(topicId: string, itemType: string, itemId: string, present: boolean, addedBy = 'user', restore = false) {
+  const topic = topics.find((topic) => topic.id === topicId);
+  if (!topic) throw new Error('topic not found');
+  const index = topicLinks.findIndex((link) => link.topic_id === topicId && link.item_type === itemType && link.item_id === itemId);
+  if ((index >= 0) === present) return null;
+  const key = topicLinkKey(topicId, itemType, itemId);
+  const rows = topicTimeline[topicId] ?? [];
+  if (present) {
+    topicLinks.push({ topic_id: topicId, item_type: itemType, item_id: itemId });
+    // Events are memberships but are rendered separately, like Core's timeline.
+    if (itemType === 'thread' || itemType === 'message') {
+      const message = itemType === 'message' ? Object.values(messages).flat().find((m) => m.id === itemId) : undefined;
+      const thread = findThread(message?.threadId ?? itemId);
+      if (thread || message) {
+        const now = new Date().toISOString();
+        const original = restore ? removedTopicItems.get(key) : undefined;
+        rows.push(original ?? {
+          item_type: itemType, item_id: itemId, thread_id: message?.threadId ?? itemId,
+          title: message?.subject ?? thread!.subject, snippet: message?.bodyText ?? thread!.snippet,
+          content: null, from_address: message?.from.email ?? thread?.participants[0]?.email ?? null,
+          sort_date: message?.timestamp ?? thread!.lastMessageAt, added_at: now, added_by: addedBy,
+          message_count: itemType === 'message' ? 1 : thread!.messageCount,
+          unread_count: message ? Number(!message.isRead) : thread!.unreadCount,
+        });
+      }
+    }
+    topic.item_count++;
+  } else {
+    topicLinks.splice(index, 1);
+    const row = rows.find((row) => row.item_type === itemType && row.item_id === itemId);
+    if (row) removedTopicItems.set(key, row);
+    topic.item_count = Math.max(0, topic.item_count - 1);
+  }
+  topicTimeline[topicId] = (present ? rows : rows.filter((row) => row.item_type !== itemType || row.item_id !== itemId))
+    .sort((a, b) => b.sort_date.localeCompare(a.sort_date));
+  const revision = crypto.randomUUID();
+  topicVersions.set(key, revision);
+  return { item_id: itemId, revision };
+}
+
 function draftFromInput(scope: Record<string, unknown>): BackendDraft {
   return {
     ...scope,
@@ -1196,9 +1246,48 @@ const handlers: Record<string, Handler> = {
     const thread = findThread(item.thread_id);
     return thread ? accountVisible(thread.accountId) : true;
   }),
-  list_topic_memberships: () => [],
-  add_topic_items: () => undefined,
-  remove_topic_item: () => undefined,
+  list_topic_memberships: (payload) => {
+    const scope = input(payload);
+    return topicLinks.filter((link) => link.item_type === scope.item_type
+      && (scope.item_ids as string[]).includes(link.item_id)).map(({ topic_id, item_id }) => ({ topic_id, item_id }));
+  },
+  add_topic_items: (payload) => {
+    const scope = input(payload);
+    return (scope.item_ids as string[]).flatMap((id) => {
+      const receipt = changeTopicLink(scope.topic_id as string, scope.item_type as string, id, true, String(scope.added_by ?? 'user'));
+      return receipt ? [receipt] : [];
+    });
+  },
+  remove_topic_item: (payload) => {
+    const scope = input(payload);
+    return changeTopicLink(scope.topic_id as string, scope.item_type as string, scope.item_id as string, false);
+  },
+  undo_topic_memberships: (payload) => {
+    const scope = input(payload);
+    const topicId = scope.topic_id as string;
+    const itemType = scope.item_type as string;
+    if (!topics.some((topic) => topic.id === topicId)) return [];
+    return (scope.receipts as { item_id: string; revision: string }[]).flatMap((receipt) => {
+      if (topicVersions.get(topicLinkKey(topicId, itemType, receipt.item_id)) !== receipt.revision) return [];
+      const changed = changeTopicLink(topicId, itemType, receipt.item_id, scope.restore as boolean, 'user', scope.restore as boolean);
+      return changed ? [receipt.item_id] : [];
+    });
+  },
+  delete_topic: ({ id }) => {
+    const index = topics.findIndex((topic) => topic.id === id);
+    if (index >= 0) topics.splice(index, 1);
+    delete topicTimeline[id as string];
+    for (let i = topicLinks.length - 1; i >= 0; i--) {
+      const link = topicLinks[i]!;
+      if (link.topic_id !== id) continue;
+      topicLinks.splice(i, 1);
+    }
+    for (const key of topicVersions.keys()) {
+      if (JSON.parse(key)[0] !== id) continue;
+      topicVersions.delete(key);
+      removedTopicItems.delete(key);
+    }
+  },
   list_topic_files: () => [],
 
   /* --- composer ------------------------------------------------------- */

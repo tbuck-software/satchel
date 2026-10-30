@@ -9,7 +9,7 @@ import { threadActionTargets } from './threadActionTargets';
 import { useThreadActions } from './useThreadActions';
 import { useThreadReply } from './useThreadReply';
 import { useMessageLinks } from './useMessageLinks';
-import { useUndoFab } from './useUndoFab';
+import { useUndo } from './useUndo';
 import { activeThreadReaderCommands } from './useThreadReaderCommands';
 import { focusSettingsFilter } from './settingsFilterFocus';
 import { focusListSearch } from './listSearchFocus';
@@ -77,7 +77,7 @@ export function useKeyboard() {
   const threadReply = useThreadReply();
   const actions = useThreadActions();
   const messageLinks = useMessageLinks();
-  const undoFab = useUndoFab();
+  const undo = useUndo();
   let pendingSequence = '';
   let sequenceTimer: number | null = null;
   // Read once per keystroke; every binding below is judged against it.
@@ -202,9 +202,9 @@ export function useKeyboard() {
   }
 
   function undoLatest(): boolean {
-    const entry = undoFab.entries.value.at(-1);
+    const entry = undo.entries.value.at(-1);
     if (!entry) return false;
-    void undoFab.run(entry);
+    void undo.run(entry);
     return true;
   }
 

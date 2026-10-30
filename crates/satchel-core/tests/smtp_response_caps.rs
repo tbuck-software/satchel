@@ -7,7 +7,6 @@ use std::{io::Write, net::TcpListener, sync::mpsc, thread, time::Duration};
 
 fn hostile_peer(
     reply: Vec<u8>,
-    hold_open: bool,
 ) -> (
     std::net::SocketAddr,
     thread::JoinHandle<()>,
@@ -22,9 +21,11 @@ fn hostile_peer(
             .set_write_timeout(Some(Duration::from_secs(5)))
             .unwrap();
         let _ = socket.write_all(&reply);
-        if hold_open {
-            let _ = wait.recv_timeout(Duration::from_secs(15));
-        }
+        // Keep the socket open until the client has finished. Closing right
+        // after the write can race the client's non-blocking connect: socket2
+        // then sees POLLHUP and reports a connection error before any reply
+        // byte is read.
+        let _ = wait.recv_timeout(Duration::from_secs(15));
     });
     (address, server, release)
 }
@@ -41,16 +42,15 @@ fn oversized_response() -> Vec<u8> {
 
 #[test]
 fn synchronous_reader_rejects_oversized_replies() {
-    for (reply, hold_open, message) in [
-        (oversized_line(), false, "SMTP response line too long"),
-        (oversized_response(), false, "SMTP response too large"),
+    for (reply, message) in [
+        (oversized_line(), "SMTP response line too long"),
+        (oversized_response(), "SMTP response too large"),
         (
             format!("220 {}", "x".repeat(1000)).into_bytes(),
-            true,
             "SMTP response line too long",
         ),
     ] {
-        let (address, server, release) = hostile_peer(reply, hold_open);
+        let (address, server, release) = hostile_peer(reply);
         let result = SmtpConnection::connect(
             address,
             Some(Duration::from_secs(5)),
@@ -68,16 +68,15 @@ fn synchronous_reader_rejects_oversized_replies() {
 
 #[tokio::test]
 async fn asynchronous_reader_rejects_oversized_replies() {
-    for (reply, hold_open, message) in [
-        (oversized_line(), false, "SMTP response line too long"),
-        (oversized_response(), false, "SMTP response too large"),
+    for (reply, message) in [
+        (oversized_line(), "SMTP response line too long"),
+        (oversized_response(), "SMTP response too large"),
         (
             format!("220 {}", "x".repeat(1000)).into_bytes(),
-            true,
             "SMTP response line too long",
         ),
     ] {
-        let (address, server, release) = hostile_peer(reply, hold_open);
+        let (address, server, release) = hostile_peer(reply);
         let result = tokio::time::timeout(
             Duration::from_secs(10),
             AsyncSmtpConnection::connect_tokio1(
