@@ -13,6 +13,8 @@ export interface ToastAction {
    * and batch payload live here; the FAB only mirrors them.
    */
   present?: 'fab';
+  /** Include an inline action in global Undo shortcuts and the command palette. */
+  undo?: boolean;
   /** Combine equivalent Undo payloads into one persistence/refresh pass. */
   batch?: {
     key: string;

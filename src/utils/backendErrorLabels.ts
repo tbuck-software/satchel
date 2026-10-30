@@ -20,6 +20,7 @@ import { translateBackendError } from '@/utils/backendErrors';
 export const BACKEND_ERROR_SOURCES = [
   'threads',
   'topics',
+  'topicMemberships',
   'messages',
   'mailboxes',
   'accounts',
@@ -27,6 +28,8 @@ export const BACKEND_ERROR_SOURCES = [
   'sync',
   'outbox',
   'drafts',
+  'templates',
+  'smartFolders',
 ] as const;
 
 export type BackendErrorSource = (typeof BACKEND_ERROR_SOURCES)[number];
@@ -34,6 +37,7 @@ export type BackendErrorSource = (typeof BACKEND_ERROR_SOURCES)[number];
 const SOURCE_KEYS: Record<string, string> = {
   threads: 'errors.source.threads',
   topics: 'errors.source.topics',
+  topicMemberships: 'errors.source.topicMemberships',
   messages: 'errors.source.messages',
   mailboxes: 'errors.source.mailboxes',
   accounts: 'errors.source.accounts',
@@ -41,6 +45,8 @@ const SOURCE_KEYS: Record<string, string> = {
   sync: 'errors.source.sync',
   outbox: 'errors.source.outbox',
   drafts: 'errors.source.drafts',
+  templates: 'errors.source.templates',
+  smartFolders: 'errors.source.smartFolders',
 };
 
 const UNKNOWN_SOURCE_KEY = 'errors.source.unknown';

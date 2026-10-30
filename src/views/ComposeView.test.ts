@@ -18,6 +18,7 @@ const harness = vi.hoisted(() => ({
   finish: vi.fn(),
   push: vi.fn(),
   templatesLoad: vi.fn(),
+  templatesLoadFailed: false,
   startAutosave: vi.fn(),
   captureBaseline: vi.fn(),
   isPopout: vi.fn(() => false),
@@ -65,7 +66,7 @@ vi.mock('@/stores/settings', () => ({
   useSettingsStore: () => ({ composePlainText: harness.composePlainText }),
 }));
 vi.mock('@/stores/templates', () => ({
-  useTemplatesStore: () => ({ load: harness.templatesLoad, items: [] }),
+  useTemplatesStore: () => ({ load: harness.templatesLoad, get loadFailed() { return harness.templatesLoadFailed; }, items: [] }),
 }));
 vi.mock('@/stores/threads', () => ({
   useThreadsStore: () => ({ threads: [], load: vi.fn().mockResolvedValue(undefined) }),
@@ -213,6 +214,7 @@ async function send(wrapper: ReturnType<typeof render>) {
 beforeEach(() => {
   vi.clearAllMocks();
   harness.templatesLoad.mockResolvedValue(undefined);
+  harness.templatesLoadFailed = false;
   harness.fetchDraft.mockResolvedValue(null);
   harness.isPopout.mockReturnValue(false);
   harness.getByThread.mockReturnValue([]);
@@ -445,6 +447,19 @@ describe('composer setup', () => {
     } finally {
       wrapper.unmount();
     }
+  });
+
+  it('offers setup retry when the template store records a handled load failure', async () => {
+    harness.templatesLoad.mockImplementationOnce(async () => { harness.templatesLoadFailed = true; });
+    const wrapper = render();
+    await flushPromises();
+    expect(wrapper.get('.compose-notices').text()).toContain('templates');
+    harness.templatesLoadFailed = false;
+    await wrapper.get('.compose-notices button').trigger('click');
+    await flushPromises();
+    expect(harness.templatesLoad).toHaveBeenCalledTimes(2);
+    expect(wrapper.find('.compose-notices').exists()).toBe(false);
+    wrapper.unmount();
   });
 
   it('keeps autosave and the close guard when a side load fails, and offers a retry', async () => {

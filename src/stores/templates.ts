@@ -1,3 +1,5 @@
+import { useConnectionStore } from './connection';
+import { orderedLoad } from './internal/orderedLoad';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import {
@@ -12,32 +14,35 @@ import {
 
 export const useTemplatesStore = defineStore('templates', () => {
   const items = ref<BackendTemplate[]>([]);
-  const loading = ref(false);
+  const connection = useConnectionStore();
+  const loader = orderedLoad();
+  const { loading, loadFailed } = loader;
 
   async function load() {
     if (!backendCommandsAvailable()) return;
-    loading.value = true;
-    try {
-      items.value = await backendListTemplates();
-    } finally {
-      loading.value = false;
-    }
+    await loader.load(backendListTemplates, (rows) => { items.value = rows; },
+      (error) => connection.reportBackendError('templates', error),
+      () => connection.clearBackendError('templates'));
   }
 
   async function upsert(input: Parameters<typeof backendUpsertTemplate>[0]) {
-    const tpl = await backendUpsertTemplate(input);
-    const idx = items.value.findIndex((t) => t.id === tpl.id);
-    if (idx >= 0) items.value.splice(idx, 1, tpl);
-    else items.value.push(tpl);
-    return tpl;
+    return loader.mutate(async () => {
+      const tpl = await backendUpsertTemplate(input);
+      const idx = items.value.findIndex((t) => t.id === tpl.id);
+      if (idx >= 0) items.value.splice(idx, 1, tpl);
+      else items.value.push(tpl);
+      return tpl;
+    });
   }
 
   /** Resolves with the deleted template so the caller can offer Undo. */
   async function remove(id: string): Promise<BackendTemplate | null> {
-    const template = items.value.find((t) => t.id === id) ?? null;
-    await backendDeleteTemplate(id);
-    items.value = items.value.filter((t) => t.id !== id);
-    return template;
+    return loader.mutate(async () => {
+      const template = items.value.find((t) => t.id === id) ?? null;
+      await backendDeleteTemplate(id);
+      items.value = items.value.filter((t) => t.id !== id);
+      return template;
+    });
   }
 
   /** Undo for a delete: the same id, so it survives a reload as itself. */
@@ -79,5 +84,5 @@ export const useTemplatesStore = defineStore('templates', () => {
     return items.value.find((t) => t.shortcut?.toLowerCase() === lower) ?? null;
   }
 
-  return { items, loading, load, upsert, remove, restore, render, findByShortcut };
+  return { items, loading, loadFailed, load, upsert, remove, restore, render, findByShortcut };
 });

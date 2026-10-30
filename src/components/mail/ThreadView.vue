@@ -32,6 +32,7 @@ import ThreadPrintSheet from './ThreadPrintSheet.vue';
 import ThreadMobileActions from './ThreadMobileActions.vue';
 import ThreadReplyBar from './ThreadReplyBar.vue';
 import TopicChip from '@/components/topics/TopicChip.vue';
+import TopicMembershipState from '@/components/topics/TopicMembershipState.vue';
 import { useRouter } from 'vue-router';
 import SnoozePicker from '@/components/navigation/SnoozePicker.vue';
 import PluginSlotHost from '@/components/plugins/PluginSlotHost.vue';
@@ -1054,6 +1055,7 @@ function showEntireThread() {
               {{ $t('common.done') }}
             </span>
           </div>
+          <TopicMembershipState v-if="threadId" item-type="thread" :item-ids="[threadId]" />
           <div v-if="threadTopics.length > 0" class="mt-2 flex flex-wrap items-center gap-1.5">
             <TopicChip
               v-for="topic in threadTopics"

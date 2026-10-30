@@ -15,7 +15,7 @@ const props = defineProps<{
   variant: 'floating' | 'docked';
 }>();
 
-const { entries, run } = useUndoFab();
+const { entries, run, latestKey } = useUndoFab();
 const { t } = useI18n();
 const { hint } = useShortcutHints();
 
@@ -97,7 +97,7 @@ useToastClearance(rootRef);
 watch(() => Boolean(activeEntry.value), refreshToastClearance, { flush: 'post' });
 /** The undo key acts on the newest receipt, so only that one shows it. */
 const undoKey = computed(() =>
-  activeEntry.value && activeEntry.value.key === entries.value.at(-1)?.key ? hint('undo') : null,
+  activeEntry.value && activeEntry.value.key === latestKey.value ? hint('undo') : null,
 );
 </script>
 
