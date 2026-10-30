@@ -2619,7 +2619,35 @@ pub fn parse_raw_message_body(raw: &[u8]) -> ParsedBody {
         .unwrap_or_else(|| "8bit".to_string());
     let mut parsed = parse_body_part(&content_type, &transfer_encoding, body, 0);
     parsed.trust = root_crypto_trust(&content_type, &parsed);
-    parsed.attachments = parse_attachments_from_body(&content_type, &transfer_encoding, body)
+    let disposition = parse_header_value(&header, "Content-Disposition");
+    let content_id = parse_header_value(&header, "Content-ID")
+        .map(|value| value.trim_matches(['<', '>']).to_string())
+        .filter(|value| !value.is_empty());
+    let mut attachments = Vec::new();
+    collect_attachment_parts(
+        &content_type,
+        &transfer_encoding,
+        body,
+        disposition.as_deref(),
+        content_id,
+        0,
+        &mut 0,
+        &mut attachments,
+    );
+    if disposition.as_deref().is_some_and(|value| {
+        value
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .eq_ignore_ascii_case("attachment")
+    }) && !attachments.is_empty()
+        && !parsed.trust.root_crypto
+    {
+        parsed.text = None;
+        parsed.html = None;
+    }
+    parsed.attachments = attachments
         .into_iter()
         .map(|attachment| remote_attachment_from(attachment, EmbedPolicy::All))
         .collect();

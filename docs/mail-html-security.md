@@ -40,3 +40,13 @@ fingerprints replace stale per-message entries when bodies, signatures, sender
 identity or verification keys change. S/MIME includes local certificate and
 trust-origin data; the expiry bounds changes to the operating-system trust
 store and certificate validity between calls.
+
+Decrypted MIME unwrapping, charset decoding and sanitization run together in
+Core on a blocking worker. Incomplete encrypted layers and malformed signed
+structures return an error while the stored encrypted source remains intact.
+Transient decryption captions require an exact snapshot of the segments,
+final sanitized HTML and published attachment inputs. The store keeps that
+snapshot with its body and discards it on raw replacement; the renderer checks
+it before granting captions. Sender-controlled markers never grant provenance.
+The prepared-body cache compares exact inline-image inputs, including byte
+replacements of the same length.

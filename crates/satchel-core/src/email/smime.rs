@@ -25,11 +25,50 @@ pub struct DecryptedBody {
     pub signatures: Vec<(Vec<u8>, bool)>,
 }
 
+#[derive(Debug)]
+pub enum DecodeError {
+    NestingLimit,
+    RemainingEncryption,
+    MalformedSigned,
+    InvalidSignedContent(String),
+}
+
+impl std::fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NestingLimit => f.write_str("S/MIME nesting limit exceeded"),
+            Self::RemainingEncryption => f.write_str("S/MIME content is still encrypted"),
+            Self::MalformedSigned => f.write_str("Malformed S/MIME signed MIME structure"),
+            Self::InvalidSignedContent(error) => f.write_str(error),
+        }
+    }
+}
+
+impl std::error::Error for DecodeError {}
+
+fn parse_entity(bytes: &[u8]) -> Result<ParsedBody, DecodeError> {
+    let body = parse_raw_message_body(bytes);
+    if body.smime_encrypted.is_some() {
+        return Err(DecodeError::RemainingEncryption);
+    }
+    let header = String::from_utf8_lossy(bytes);
+    let content_type = crate::providers::imap::parse_header_value(&header, "Content-Type")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if content_type.starts_with("multipart/signed")
+        && body.smime_signed.is_none()
+        && body.pgp_signed.is_none()
+    {
+        return Err(DecodeError::MalformedSigned);
+    }
+    Ok(body)
+}
+
 /// Keep bytes intact until the MIME parser decodes each part's charset and CTE.
 /// Opaque signed-data must be unwrapped separately from signature verification:
 /// a damaged signature can still contain readable mail, but never gains trust.
-pub fn parse_decrypted_body(bytes: &[u8]) -> Result<DecryptedBody, String> {
-    let mut body = parse_raw_message_body(bytes);
+pub fn parse_decrypted_body(bytes: &[u8]) -> Result<DecryptedBody, DecodeError> {
+    let mut body = parse_entity(bytes)?;
     let mut signatures = Vec::new();
     for _ in 0..10 {
         let Some(payload) = body.smime_signed.take() else {
@@ -44,16 +83,16 @@ pub fn parse_decrypted_body(bytes: &[u8]) -> Result<DecryptedBody, String> {
         let content = crate::utils::smime_engine::signed_content(&payload);
         signatures.push((payload, true));
         match content {
-            Ok(content) => body = parse_raw_message_body(&content),
+            Ok(content) => body = parse_entity(&content)?,
             // multipart/signed can retain its readable entity even when the
             // signature structure is broken. Verification still receives it.
             Err(_) if body.text.is_some() || body.html.is_some() => {
                 return Ok(finish(body, signatures));
             }
-            Err(error) => return Err(error),
+            Err(error) => return Err(DecodeError::InvalidSignedContent(error)),
         }
     }
-    Err("S/MIME nesting limit exceeded".into())
+    Err(DecodeError::NestingLimit)
 }
 
 fn finish(mut body: ParsedBody, signatures: Vec<(Vec<u8>, bool)>) -> DecryptedBody {

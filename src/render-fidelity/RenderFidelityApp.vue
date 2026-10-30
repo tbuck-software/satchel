@@ -14,6 +14,7 @@ interface RenderFidelityPayload {
   bodyHtml?: string;
   bodyText?: string;
   bodySegments?: RenderSegment[];
+  bodyProvenance?: import('@/types/mail').Message['bodyProvenance'];
   normalizeQuotes?: boolean;
   trustedDmarcPass?: boolean;
   attachments: Attachment[];
@@ -55,6 +56,7 @@ window.__setSatchelRenderFidelityPayload = async (nextPayload: RenderFidelityPay
         :html="payload.bodyHtml"
         :text="payload.bodyText"
         :body-segments="payload.bodySegments"
+        :body-provenance="payload.bodyProvenance"
         :attachments="payload.attachments"
         :sender-email="payload.fromAddress"
         :trusted-dmarc-pass="payload.trustedDmarcPass"

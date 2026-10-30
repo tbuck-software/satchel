@@ -46,7 +46,7 @@ pub async fn list_attachments_for_messages(
         .map_err(CommandError::unexpected)
 }
 
-async fn attachments_for_messages(
+pub(super) async fn attachments_for_messages(
     pool: &SqlitePool,
     message_ids: &[String],
 ) -> Result<Vec<AttachmentDto>, sqlx::Error> {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { translateBackendError } from '@/utils/backendErrors';
 import AppButton from '@/components/ui/AppButton.vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -82,13 +83,13 @@ const config = computed(() => {
     case 'signature_invalid':
       return {
         title: t('mail.smime.signatureInvalid'),
-        description: props.errorDetail || t('mail.smime.signatureInvalidDescription'),
+        description: translateBackendError(props.errorDetail) || t('mail.smime.signatureInvalidDescription'),
         tone: 'danger',
       };
     case 'error':
       return {
         title: t('mail.smime.errorTitle'),
-        description: props.errorDetail || t('mail.smime.messageFailed'),
+        description: translateBackendError(props.errorDetail) || t('mail.smime.messageFailed'),
         tone: 'danger',
         primary: t('mail.smime.close'),
         action: () => emit('dismiss'),

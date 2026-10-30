@@ -1,3 +1,4 @@
+import type { BodyProvenance } from '../services/backend/generated/app/commands/messages/BodyProvenance';
 import type { BodySegment } from '../services/backend/generated/app/commands/messages/BodySegment';
 import type { Priority, WorkflowState } from './workflow';
 
@@ -78,6 +79,7 @@ export interface Message {
   subject: string;
   bodyText: string;
   bodySegments?: BodySegment[];
+  bodyProvenance?: BodyProvenance;
   bodyHtml?: string;
   bodyLoaded?: boolean;
   bodyLoadError?: string;

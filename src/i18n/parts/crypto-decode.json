@@ -1,0 +1,26 @@
+{
+  "en": {
+    "backend": {
+      "errors": {
+        "smimeDecryptFailed": "The S/MIME message could not be decrypted.",
+        "smimeDecodeFailed": "The decrypted S/MIME content could not be read.",
+        "smimeNestingLimit": "The S/MIME message has too many nested layers.",
+        "smimeRemainingEncryption": "The S/MIME message contains another encrypted layer that could not be opened.",
+        "smimeMalformedSigned": "The S/MIME signature structure is incomplete or malformed.",
+        "smimeVerificationFailed": "The S/MIME signature could not be verified."
+      }
+    }
+  },
+  "de": {
+    "backend": {
+      "errors": {
+        "smimeDecryptFailed": "Die S/MIME-Nachricht konnte nicht entschlüsselt werden.",
+        "smimeDecodeFailed": "Der entschlüsselte S/MIME-Inhalt konnte nicht gelesen werden.",
+        "smimeNestingLimit": "Die S/MIME-Nachricht enthält zu viele verschachtelte Ebenen.",
+        "smimeRemainingEncryption": "Die S/MIME-Nachricht enthält eine weitere verschlüsselte Ebene, die nicht geöffnet werden konnte.",
+        "smimeMalformedSigned": "Die S/MIME-Signaturstruktur ist unvollständig oder fehlerhaft.",
+        "smimeVerificationFailed": "Die S/MIME-Signatur konnte nicht überprüft werden."
+      }
+    }
+  }
+}

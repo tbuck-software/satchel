@@ -1,4 +1,5 @@
 // Generated from Rust. Run pnpm ipc:generate.
+import type { BodyProvenance } from "./BodyProvenance";
 import type { BodySegment } from "./BodySegment";
 export type MessageDto = {
     id: string;
@@ -13,6 +14,7 @@ export type MessageDto = {
     date: string;
     body_text: string;
     body_segments: Array<BodySegment> | null;
+    body_provenance: BodyProvenance | null;
     body_html: string | null;
     body_loaded: boolean;
     is_read: boolean;

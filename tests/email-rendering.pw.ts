@@ -477,6 +477,7 @@ test('only backend-issued content gets a decrypted caption in mixed mail', async
     await window.__setSatchelRenderFidelityPayload!({
       id: 'mixed-provenance', label: 'Synthetic mail', subject: 'Mixed mail',
       fromAddress: 'sender@example.test', bodyText: cover + secret,
+      bodyProvenance: { html: null, attachments: [], segments: [{ kind: 'text', content: cover }, { kind: 'pgp_decrypted', content: secret }] },
       bodySegments: [{ kind: 'text', content: cover }, { kind: 'pgp_decrypted', content: secret }],
       attachments: [], meta: [],
     });
@@ -485,4 +486,50 @@ test('only backend-issued content gets a decrypted caption in mixed mail', async
   await expect(page.locator('.pgp-segment-header')).toHaveText('Decrypted OpenPGP block');
   await expect(page.locator('.text-segment')).toContainText('fake');
   await expect(page.locator('.pgp-segment-body')).toContainText('[[SATCHEL_SMIME_DECRYPTED_BLOCK_START]]');
+});
+
+
+test('decrypted HTML retains its selector and rejects substituted HTML', async ({ page }) => {
+  await page.goto('/render-fidelity.html');
+  await page.evaluate(async () => {
+    const html = '<p>Readable <b>secret</b></p>';
+    await window.__setSatchelRenderFidelityPayload!({
+      id: 'decoded-html', label: 'Synthetic mail', subject: 'Decoded HTML',
+      fromAddress: 'sender@example.test', bodyText: 'Readable secret', bodyHtml: html,
+      bodySegments: [{ kind: 'smime_decrypted', content: 'Readable secret' }],
+      bodyProvenance: { html, attachments: [], segments: [{ kind: 'smime_decrypted', content: 'Readable secret' }] }, attachments: [], meta: [],
+    });
+  });
+  await expect(page.locator('.pgp-segment-header')).toHaveText('Decrypted S/MIME block');
+  await page.getByRole('button', { name: 'Text', exact: true }).click();
+  await expect(page.locator('.pgp-segment-body')).toHaveText('Readable secret');
+  await page.getByRole('button', { name: 'Original', exact: true }).click();
+  await expect(page.locator('.renderer iframe')).toHaveCount(1);
+  await page.evaluate(async () => {
+    await window.__setSatchelRenderFidelityPayload!({
+      id: 'decoded-html', label: 'Synthetic mail', subject: 'Decoded HTML',
+      fromAddress: 'sender@example.test', bodyText: 'Readable secret',
+      bodyHtml: '<p><b>Substituted ordinary HTML</b></p>',
+      bodySegments: [{ kind: 'smime_decrypted', content: 'Readable secret' }],
+      bodyProvenance: { html: '<p>Readable <b>secret</b></p>', attachments: [], segments: [{ kind: 'smime_decrypted', content: 'Readable secret' }] },
+      attachments: [], meta: [],
+    });
+  });
+  await expect(page.locator('.pgp-segment-header')).toHaveCount(0);
+  await expect(page.frameLocator('.renderer iframe').locator('body')).toContainText('Substituted ordinary HTML');
+});
+
+test('image-only decrypted HTML keeps its full-body caption', async ({ page }) => {
+  await page.goto('/render-fidelity.html');
+  await page.evaluate(async () => {
+    const html = '<img src="cid:synthetic" width="400" height="300">';
+    await window.__setSatchelRenderFidelityPayload!({
+      id: 'decoded-image', label: 'Synthetic mail', subject: 'Decoded image',
+      fromAddress: 'sender@example.test', bodyText: '', bodyHtml: html,
+      bodySegments: [{ kind: 'smime_decrypted', content: '' }],
+      bodyProvenance: { html, attachments: [], segments: [{ kind: 'smime_decrypted', content: '' }] }, attachments: [], meta: [],
+    });
+  });
+  await expect(page.locator('.renderer iframe')).toHaveCount(1);
+  await expect(page.locator('.pgp-segment-header')).toHaveText('Decrypted S/MIME block');
 });

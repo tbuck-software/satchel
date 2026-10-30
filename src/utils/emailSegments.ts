@@ -1,3 +1,4 @@
+import type { Attachment, Message } from '@/types/mail';
 /** Decryption provenance comes only from a backend result, never mail text. */
 export interface RenderSegment {
   kind: 'text' | 'pgp_decrypted' | 'pgp_encrypted' | 'smime_decrypted';
@@ -86,4 +87,31 @@ export function splitRenderSegments(text: string, provenance?: RenderSegment[] |
   return segments.flatMap((segment) => segment.kind === 'text'
     ? splitEncryptedSegments(segment.content) : [segment])
     .filter((segment) => segment.content.trim().length > 0);
+}
+
+
+/** Exact HTML and published attachment inputs belong to the same decoded text.
+ * This snapshot is transient IPC data, never parsed from sender-controlled MIME.
+ * PR54 must additionally validate the saved ContentReference/generation.
+ */
+export function matchingBodyProvenance(
+  text: string, html: string | undefined, segments: RenderSegment[] | undefined,
+  provenance: Message['bodyProvenance'], attachments: Attachment[],
+): RenderSegment[] | undefined {
+  if (!provenance || (provenance.html ?? undefined) !== html) return undefined;
+  if (!segments || segments.length !== provenance.segments.length
+    || !segments.every((segment, index) => (
+      segment.kind === provenance.segments[index]?.kind
+      && segment.content === provenance.segments[index]?.content
+    ))) return undefined;
+  if (attachments.length !== provenance.attachments.length) return undefined;
+  if (!provenance.attachments.every((expected) => attachments.some((actual) => (
+    actual.id === expected.id && actual.filename === expected.filename
+    && actual.contentType === expected.content_type && actual.size === expected.size
+    && (actual.contentId ?? null) === expected.content_id
+    && Boolean(actual.isInline) === expected.is_inline
+    && (actual.cachedPath ?? null) === expected.cached_path
+    && (!actual.dataUrl || actual.dataUrl === expected.data_url)
+  )))) return undefined;
+  return matchingBodySegments(text, segments);
 }

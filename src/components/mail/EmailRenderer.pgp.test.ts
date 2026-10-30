@@ -43,6 +43,7 @@ describe('decryption captions', () => {
   it('retains the S/MIME caption beside decrypted HTML', () => {
     const wrapper = mount(EmailRenderer, { props: {
       html: '<p>Readable <b>secret</b></p>', text: 'Readable secret',
+      bodyProvenance: { html: '<p>Readable <b>secret</b></p>', attachments: [], segments: [{ kind: 'smime_decrypted', content: 'Readable secret' }] },
       bodySegments: [{ kind: 'smime_decrypted', content: 'Readable secret' }],
     } });
     expect(wrapper.get('.pgp-segment-header').text()).toBe('Decrypted S/MIME block');
@@ -52,7 +53,7 @@ describe('decryption captions', () => {
 
   it('renders only the exact backend segment with a decrypted caption', async () => {
     const wrapper = mount(EmailRenderer, { props: {
-      text: 'coversecret', bodySegments: [
+      text: 'coversecret', bodyProvenance: { html: null, attachments: [], segments: [{ kind: 'text', content: 'cover' }, { kind: 'pgp_decrypted', content: 'secret' }] }, bodySegments: [
         { kind: 'text', content: 'cover' }, { kind: 'pgp_decrypted', content: 'secret' },
       ],
     } });
@@ -63,4 +64,91 @@ describe('decryption captions', () => {
     expect(wrapper.find('.pgp-segment-header').exists()).toBe(false);
     wrapper.unmount();
   });
+});
+
+
+describe('decoded HTML provenance', () => {
+  beforeEach(() => setActivePinia(createPinia()));
+  const html = '<p>Readable <b>secret</b></p>';
+  const text = 'Readable secret';
+  const bodySegments = [{ kind: 'smime_decrypted' as const, content: text }];
+  const bodyProvenance = { html, attachments: [], segments: bodySegments };
+
+  it('removes captions when HTML changes with identical text and segments', async () => {
+    const wrapper = mount(EmailRenderer, { props: { html, text, bodyProvenance, bodySegments } });
+    expect(wrapper.findAll('.pgp-segment-header')).toHaveLength(1);
+    await wrapper.setProps({ html: '<p><b>Substituted HTML</b></p>' });
+    expect(wrapper.get('iframe').attributes('srcdoc')).toContain('Substituted HTML');
+    expect(wrapper.findAll('.pgp-segment-header')).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it('captions empty-text image HTML from a complete decoded body', () => {
+    const html = '<img src="cid:synthetic" width="400" height="300">';
+    const wrapper = mount(EmailRenderer, { props: {
+      html, text: '', bodyProvenance: { html, attachments: [], segments: [{ kind: 'smime_decrypted', content: '' }] },
+      bodySegments: [{ kind: 'smime_decrypted', content: '' }],
+    } });
+    expect(wrapper.find('iframe').exists()).toBe(true);
+    expect(wrapper.get('.pgp-segment-header').text()).toBe('Decrypted S/MIME block');
+    wrapper.unmount();
+  });
+
+  it('keeps the selector reachable through HTML to Text to HTML', async () => {
+    const wrapper = mount(EmailRenderer, { props: { html, text, bodyProvenance, bodySegments } });
+    wrapper.getComponent({ name: 'SegmentedControl' }).vm.$emit('update:modelValue', 'text');
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get('.pgp-segment-body').text()).toBe(text);
+    wrapper.getComponent({ name: 'SegmentedControl' }).vm.$emit('update:modelValue', 'html');
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('iframe').exists()).toBe(true);
+    wrapper.unmount();
+  });
+});
+
+
+it('does not caption independently supplied HTML with text-only segments', () => {
+  setActivePinia(createPinia());
+  const wrapper = mount(EmailRenderer, { props: {
+    html: '<p><b>Ordinary HTML</b></p>', text: 'secret',
+    bodySegments: [{ kind: 'smime_decrypted', content: 'secret' }],
+  } });
+  expect(wrapper.findAll('.pgp-segment-header')).toHaveLength(0);
+  wrapper.unmount();
+});
+
+it('invalidates captions when published attachments change', async () => {
+  setActivePinia(createPinia());
+  const html = '<p><b>Secret</b><img src="cid:part"></p>';
+  const attachment = { id: 'att-1', filename: 'photo.png', contentType: 'image/png', size: 3,
+    contentId: 'part', isInline: true, cachedPath: '/cache/photo.png', dataUrl: 'data:image/png;base64,AQID' };
+  const binding = { id: attachment.id, filename: attachment.filename, content_type: attachment.contentType,
+    size: attachment.size, content_id: attachment.contentId, is_inline: attachment.isInline,
+    cached_path: attachment.cachedPath, data_url: attachment.dataUrl };
+  const wrapper = mount(EmailRenderer, { props: {
+    html, text: 'Secret', bodySegments: [{ kind: 'smime_decrypted', content: 'Secret' }],
+    bodyProvenance: { html, attachments: [binding], segments: [{ kind: 'smime_decrypted', content: 'Secret' }] }, attachments: [attachment],
+  } });
+  expect(wrapper.findAll('.pgp-segment-header')).toHaveLength(1);
+  for (const replacement of [
+    { ...attachment, filename: 'other.png' }, { ...attachment, cachedPath: '/other.png' },
+    { ...attachment, dataUrl: 'data:image/png;base64,BAUG' },
+  ]) {
+    await wrapper.setProps({ attachments: [replacement] });
+    expect(wrapper.findAll('.pgp-segment-header')).toHaveLength(0);
+  }
+  wrapper.unmount();
+});
+
+
+it('rejects redistributed segments even when their concatenated text is unchanged', () => {
+  setActivePinia(createPinia());
+  const wrapper = mount(EmailRenderer, { props: {
+    text: 'coversecret', bodySegments: [{ kind: 'smime_decrypted', content: 'coversecret' }],
+    bodyProvenance: { html: null, attachments: [], segments: [
+      { kind: 'text', content: 'cover' }, { kind: 'smime_decrypted', content: 'secret' },
+    ] },
+  } });
+  expect(wrapper.findAll('.pgp-segment-header')).toHaveLength(0);
+  wrapper.unmount();
 });

@@ -398,6 +398,8 @@ describe('messages store', () => {
         body_text: 'Stable body',
         body_html: null,
         body_loaded: true,
+        body_segments: [{ kind: 'smime_decrypted', content: 'Stable body' }],
+        body_provenance: { html: null, attachments: [], segments: [{ kind: 'smime_decrypted', content: 'Stable body' }] },
       },
     ] as never[]);
     const messages = useMessagesStore();
@@ -413,6 +415,8 @@ describe('messages store', () => {
     expect(messages.getByThread('th-live')[0]).toMatchObject({
       bodyText: 'Stable body',
       bodyLoaded: true,
+      bodySegments: [{ kind: 'smime_decrypted', content: 'Stable body' }],
+      bodyProvenance: { html: null, attachments: [], segments: [{ kind: 'smime_decrypted', content: 'Stable body' }] },
     });
 
     resolveRefresh([
@@ -431,20 +435,23 @@ describe('messages store', () => {
   it('keeps exact transient provenance with its body and clears it on replacement', async () => {
     previewMock.mockResolvedValue([backendMessage() as never]);
     const body = '  cover\r\nsecret  ';
+    const html = '  <p>Exact <b>secret</b></p>  ';
     const segments = [{ kind: 'text' as const, content: '  cover\r\n' }, { kind: 'smime_decrypted' as const, content: 'secret  ' }];
+    const provenance = { html, attachments: [], segments };
     bodiesMock.mockResolvedValueOnce([{
-      id: 'm-live', snippet: 'Preview', body_text: body, body_html: null,
-      body_segments: segments, body_loaded: true, smime_state: 'decrypted',
+      id: 'm-live', snippet: 'Preview', body_text: body, body_html: html,
+      body_provenance: provenance, body_segments: segments, body_loaded: true, smime_state: 'decrypted',
     }]);
     const messages = useMessagesStore();
     await messages.loadByThread('th-live');
-    expect(messages.getByThread('th-live')[0]).toMatchObject({ bodyText: body, bodySegments: segments });
+    expect(messages.getByThread('th-live')[0]).toMatchObject({ bodyText: body, bodyHtml: html, bodySegments: segments, bodyProvenance: provenance });
     bodiesMock.mockResolvedValueOnce([{
       id: 'm-live', snippet: 'Replacement', body_text: 'Replacement',
       body_html: null, body_loaded: true,
     }]);
     await messages.loadByThread('th-live');
     expect(messages.getByThread('th-live')[0]?.bodySegments).toBeUndefined();
+    expect(messages.getByThread('th-live')[0]?.bodyProvenance).toBeUndefined();
   });
 
   it('hydrates trusted verdicts and clears old HTML and authentication on reparse', async () => {
@@ -1148,12 +1155,14 @@ describe('a message whose full body is not stored', () => {
     bodiesMock.mockResolvedValue([{
       id: 'm-raw', snippet: '', body_text: '', body_html: null, body_loaded: false,
       body_segments: [{ kind: 'pgp_decrypted', content: text }],
+      body_provenance: { html: null, attachments: [], segments: [{ kind: 'pgp_decrypted', content: text }] },
     }] as never);
     loadBodyMock.mockResolvedValue({ body_text: text, body_html: null, fetched: true });
     const store = useMessagesStore();
     await store.loadByThread('th-live');
     await vi.waitFor(() => expect(store.messagesByThread['th-live']?.[0]?.bodyText).toBe(text));
     expect(store.messagesByThread['th-live']?.[0]?.bodySegments).toBeUndefined();
+    expect(store.messagesByThread['th-live']?.[0]?.bodyProvenance).toBeUndefined();
   });
 
   it('fetches it when the backend supplied only a preview fallback', async () => {

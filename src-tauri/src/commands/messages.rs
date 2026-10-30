@@ -54,6 +54,38 @@ pub enum BodySegment {
     SmimeDecrypted(String),
 }
 
+/// Exact transient render inputs issued together after decoding and sanitizing.
+/// PR54 integration must bind this snapshot and attachment publication to the
+/// same saved ContentReference, with generation checks around every await.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/messages/")
+)]
+pub struct BodyProvenance {
+    pub segments: Vec<BodySegment>,
+    pub html: Option<String>,
+    pub attachments: Vec<DecryptedAttachmentBinding>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/messages/")
+)]
+pub struct DecryptedAttachmentBinding {
+    pub id: String,
+    pub filename: String,
+    pub content_type: String,
+    pub size: i64,
+    pub content_id: Option<String>,
+    pub is_inline: bool,
+    pub cached_path: Option<String>,
+    pub data_url: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
 #[cfg_attr(
@@ -73,6 +105,7 @@ pub struct MessageDto {
     pub date: String,
     pub body_text: String,
     pub body_segments: Option<Vec<BodySegment>>,
+    pub body_provenance: Option<BodyProvenance>,
     pub body_html: Option<String>,
     pub body_loaded: bool,
     pub is_read: bool,
@@ -104,6 +137,7 @@ pub struct MessageBodyDto {
     pub snippet: String,
     pub body_text: String,
     pub body_segments: Option<Vec<BodySegment>>,
+    pub body_provenance: Option<BodyProvenance>,
     pub body_html: Option<String>,
     pub body_loaded: bool,
     pub pgp_state: Option<String>,
@@ -448,6 +482,7 @@ async fn message_bodies(
             snippet: dto.snippet,
             body_text: dto.body_text,
             body_segments: dto.body_segments,
+            body_provenance: dto.body_provenance,
             body_html: dto.body_html,
             body_loaded,
             pgp_state: dto.pgp_state,
@@ -584,6 +619,7 @@ fn map_stored_message_row(row: MessageReadRecord) -> MessageDto {
         date: row.date.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
         body_text,
         body_segments: None,
+        body_provenance: None,
         body_html,
         body_loaded: true,
         is_read: row.is_read.unwrap_or(1) > 0,
@@ -631,6 +667,8 @@ async fn map_message_row(
 
     let mut dto = map_stored_message_row(row);
     let original_body_text = dto.body_text.clone();
+    let mut decrypted_attachments = Vec::new();
+    let mut publication_complete = true;
 
     if (trust.root_encryption || trust.root_inline_signature)
         && message_requires_plugin_transform(&dto.body_text)
@@ -675,10 +713,14 @@ async fn map_message_row(
             Ok(Some(decrypted)) if !decrypted.plaintext.trim().is_empty() => {
                 let parsed =
                     crate::providers::imap::parse_raw_message_body(decrypted.plaintext.as_bytes());
-                if let Err(error) =
-                    persist_decrypted_pgp_attachments(app, pool, &dto.id, &parsed.attachments).await
+                match persist_decrypted_pgp_attachments(app, pool, &dto.id, &parsed.attachments)
+                    .await
                 {
-                    tracing::warn!(message_id = %dto.id, %error, "could not cache decrypted PGP attachments");
+                    Ok(bindings) => decrypted_attachments = bindings,
+                    Err(error) => {
+                        publication_complete = false;
+                        tracing::warn!(message_id = %dto.id, %error, "could not cache decrypted PGP attachments")
+                    }
                 }
                 let readable_text = parsed
                     .text
@@ -795,52 +837,49 @@ async fn map_message_row(
     if let Some(ciphertext) = smime_encrypted.as_deref() {
         dto.body_html = None;
         match decrypt_message_with_unlocked_smime_certs(app, state, pool, ciphertext).await {
-            Ok(Some(decrypted)) => {
-                match satchel_core::email::smime::parse_decrypted_body(&decrypted) {
-                    Ok(parsed) => {
-                        if let Err(error) = persist_decrypted_pgp_attachments(
-                            app,
-                            pool,
-                            &dto.id,
-                            &parsed.body.attachments,
-                        )
-                        .await
-                        {
-                            tracing::warn!(message_id = %dto.id, %error, "could not cache decrypted S/MIME attachments");
-                        }
-                        dto.body_text = parsed.body.text.unwrap_or_default();
-                        dto.body_html = parsed.body.html;
-                        dto.snippet =
-                            first_non_empty_line(&dto.body_text).unwrap_or(dto.snippet.clone());
-                        dto.body_segments =
-                            Some(vec![BodySegment::SmimeDecrypted(dto.body_text.clone())]);
-                        dto.smime_state = Some("decrypted".into());
-                        dto.smime_error_detail = None;
-                        for (payload, root_crypto) in parsed.signatures {
-                            let verified = verify_smime_message(
-                                app,
-                                pool,
-                                &dto.id,
-                                &payload,
-                                &dto.from_address,
-                            )
-                            .await;
-                            dto.smime_state = Some(verified.state);
-                            apply_signature_scope(&mut dto.smime_state, root_crypto);
-                            dto.smime_signer_email = verified.signer_email;
-                            dto.smime_signer_cn = verified.signer_cn;
-                            dto.smime_error_detail = verified.error_detail;
-                            if !matches!(dto.smime_state.as_deref(), Some("signature_valid")) {
-                                break;
-                            }
+            Ok(Some(decrypted)) => match decode_smime_body(decrypted).await {
+                Ok(parsed) => {
+                    match persist_decrypted_pgp_attachments(
+                        app,
+                        pool,
+                        &dto.id,
+                        &parsed.body.attachments,
+                    )
+                    .await
+                    {
+                        Ok(bindings) => decrypted_attachments = bindings,
+                        Err(error) => {
+                            publication_complete = false;
+                            tracing::warn!(message_id = %dto.id, %error, "could not cache decrypted S/MIME attachments")
                         }
                     }
-                    Err(error) => {
-                        dto.smime_state = Some("error".into());
-                        dto.smime_error_detail = Some(error);
+                    dto.body_text = parsed.body.text.unwrap_or_default();
+                    dto.body_html = parsed.body.html;
+                    dto.snippet =
+                        first_non_empty_line(&dto.body_text).unwrap_or(dto.snippet.clone());
+                    dto.body_segments =
+                        Some(vec![BodySegment::SmimeDecrypted(dto.body_text.clone())]);
+                    dto.smime_state = Some("decrypted".into());
+                    dto.smime_error_detail = None;
+                    for (payload, root_crypto) in parsed.signatures {
+                        let verified =
+                            verify_smime_message(app, pool, &dto.id, &payload, &dto.from_address)
+                                .await;
+                        dto.smime_state = Some(verified.state);
+                        apply_signature_scope(&mut dto.smime_state, root_crypto);
+                        dto.smime_signer_email = verified.signer_email;
+                        dto.smime_signer_cn = verified.signer_cn;
+                        dto.smime_error_detail = smime_verification_error(verified.error_detail);
+                        if !matches!(dto.smime_state.as_deref(), Some("signature_valid")) {
+                            break;
+                        }
                     }
                 }
-            }
+                Err(error) => {
+                    dto.smime_state = Some("error".into());
+                    dto.smime_error_detail = Some(error.encoded());
+                }
+            },
             Ok(_) => {
                 dto.smime_state = Some(if has_smime_private_cert {
                     "cert_available_locked".to_string()
@@ -851,7 +890,9 @@ async fn map_message_row(
             }
             Err(err) => {
                 dto.smime_state = Some("error".to_string());
-                dto.smime_error_detail = Some(err);
+                tracing::warn!(message_id = %dto.id, error = %err, "S/MIME decryption failed");
+                dto.smime_error_detail =
+                    Some(CommandError::new("backend.errors.smimeDecryptFailed").encoded());
             }
         }
     }
@@ -863,7 +904,7 @@ async fn map_message_row(
         apply_signature_scope(&mut dto.smime_state, trust.root_crypto);
         dto.smime_signer_email = verified.signer_email;
         dto.smime_signer_cn = verified.signer_cn;
-        dto.smime_error_detail = verified.error_detail;
+        dto.smime_error_detail = smime_verification_error(verified.error_detail);
     }
 
     if let Some(body_html) = dto.body_html.take() {
@@ -877,7 +918,73 @@ async fn map_message_row(
             dto.body_html = Some(sanitized);
         }
     }
+    if publication_complete {
+        if let Some(segments) = dto.body_segments.as_ref() {
+            // Include the outer encrypted file and any existing attachments too.
+            // The renderer receives this same listing, not only the inner parts.
+            match super::attachments::attachments_for_messages(pool, std::slice::from_ref(&dto.id))
+                .await
+            {
+                Ok(rows) => {
+                    let attachments = rows
+                        .into_iter()
+                        .map(|row| {
+                            let data_url = decrypted_attachments
+                                .iter()
+                                .find(|part| part.id == row.id)
+                                .and_then(|part| part.data_url.clone());
+                            DecryptedAttachmentBinding {
+                                id: row.id,
+                                filename: row.filename.unwrap_or_default(),
+                                content_type: row.content_type,
+                                size: row.size.unwrap_or(0),
+                                content_id: row.content_id,
+                                is_inline: row.is_inline != 0,
+                                cached_path: row.cached_path,
+                                data_url,
+                            }
+                        })
+                        .collect();
+                    dto.body_provenance = Some(BodyProvenance {
+                        segments: segments.clone(),
+                        html: dto.body_html.clone(),
+                        attachments,
+                    });
+                }
+                Err(error) => tracing::warn!(%error, "could not bind decrypted attachment listing"),
+            }
+        }
+    }
     dto
+}
+
+async fn decode_smime_body(
+    bytes: Vec<u8>,
+) -> CommandResult<satchel_core::email::smime::DecryptedBody> {
+    tokio::task::spawn_blocking(move || satchel_core::email::smime::parse_decrypted_body(&bytes))
+        .await
+        .map_err(|error| {
+            tracing::warn!(%error, "S/MIME decode task failed");
+            CommandError::new("backend.errors.smimeDecodeFailed")
+        })?
+        .map_err(|error| {
+            use satchel_core::email::smime::DecodeError;
+            let key = match &error {
+                DecodeError::NestingLimit => "backend.errors.smimeNestingLimit",
+                DecodeError::RemainingEncryption => "backend.errors.smimeRemainingEncryption",
+                DecodeError::MalformedSigned => "backend.errors.smimeMalformedSigned",
+                DecodeError::InvalidSignedContent(_) => "backend.errors.smimeDecodeFailed",
+            };
+            tracing::warn!(%error, "S/MIME decode failed");
+            CommandError::new(key)
+        })
+}
+
+fn smime_verification_error(detail: Option<String>) -> Option<String> {
+    detail.map(|error| {
+        tracing::warn!(%error, "S/MIME verification failed");
+        CommandError::new("backend.errors.smimeVerificationFailed").encoded()
+    })
 }
 
 fn apply_signature_scope(state: &mut Option<String>, root_crypto: bool) {
@@ -959,9 +1066,9 @@ async fn persist_decrypted_pgp_attachments(
     pool: &SqlitePool,
     message_id: &str,
     attachments: &[crate::providers::traits::RemoteAttachment],
-) -> Result<(), String> {
+) -> Result<Vec<DecryptedAttachmentBinding>, String> {
     if attachments.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let cache_dir = app
@@ -973,6 +1080,7 @@ async fn persist_decrypted_pgp_attachments(
         .map_err(|error| format!("create attachment cache: {error}"))?;
     let now = chrono::Utc::now().to_rfc3339();
 
+    let mut bindings = Vec::new();
     for attachment in attachments {
         let Some(encoded) = attachment.content_base64.as_deref() else {
             continue;
@@ -1021,6 +1129,16 @@ async fn persist_decrypted_pgp_attachments(
         .execute(pool)
         .await
         .map_err(|error| error.to_string())?;
+        bindings.push(DecryptedAttachmentBinding {
+            id: attachment_id,
+            filename,
+            content_type: attachment.content_type.clone(),
+            size: i64::try_from(bytes.len()).unwrap_or(i64::MAX),
+            content_id: attachment.content_id.clone(),
+            is_inline: attachment.is_inline,
+            cached_path: Some(path),
+            data_url: Some(format!("data:{};base64,{encoded}", attachment.content_type)),
+        });
     }
 
     sqlx::query("UPDATE messages SET has_attachments = 1 WHERE id = ?")
@@ -1036,7 +1154,7 @@ async fn persist_decrypted_pgp_attachments(
     .execute(pool)
     .await
     .map_err(|error| error.to_string())?;
-    Ok(())
+    Ok(bindings)
 }
 
 fn map_message_preview_row(row: MessagePreviewRecord) -> MessageDto {
@@ -1073,6 +1191,7 @@ fn map_message_preview_row(row: MessagePreviewRecord) -> MessageDto {
         date: row.date.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
         body_text: snippet,
         body_segments: None,
+        body_provenance: None,
         body_html: None,
         body_loaded: false,
         is_read: row.is_read.unwrap_or(1) > 0,
@@ -1777,6 +1896,34 @@ fn log_perf(operation: &str, started_at: Instant, detail: String) {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test(flavor = "current_thread")]
+    async fn smime_decode_yields_and_maps_failures_at_the_app_boundary() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let ran = AtomicBool::new(false);
+        let html = format!(
+            "Content-Type: text/html\r\n\r\n{}<script>bad()</script>",
+            "<p>secret</p>".repeat(100_000)
+        );
+        let decode = async {
+            let body = super::decode_smime_body(html.into_bytes()).await.unwrap();
+            assert!(
+                ran.load(Ordering::SeqCst),
+                "decoding must yield the async worker"
+            );
+            assert!(!body.body.html.unwrap().contains("<script"));
+        };
+        tokio::join!(biased; decode, async {
+            ran.store(true, Ordering::SeqCst);
+        });
+        let malformed = b"Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; boundary=x\r\n\r\n--x--\r\n";
+        let error = super::decode_smime_body(malformed.to_vec())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.key, "backend.errors.smimeMalformedSigned");
+        assert!(error.params.is_empty());
+    }
+
     #[test]
     fn newly_submitted_expired_schedule_is_rejected() {
         for raw in [

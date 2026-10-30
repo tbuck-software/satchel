@@ -153,7 +153,8 @@ function mapBackendMessage(row: BackendMessage, threadId: string): Message {
     subject: row.subject,
     bodyText: row.body_segments ? row.body_text : fallbackText,
     bodySegments: row.body_segments ?? undefined,
-    bodyHtml: htmlCandidate || undefined,
+    bodyProvenance: row.body_provenance ?? undefined,
+    bodyHtml: row.body_provenance ? (row.body_html ?? undefined) : htmlCandidate || undefined,
     bodyLoaded: row.body_loaded,
     bodyLoadError: undefined,
     timestamp: row.date || new Date().toISOString(),
@@ -192,7 +193,8 @@ function applyMessageBody(message: Message, body: BackendMessageBody): Message {
     sourcePayload: parseSourcePayload(body.source_payload) ?? message.sourcePayload,
     bodyText: body.body_segments ? body.body_text : fallbackText,
     bodySegments: body.body_segments ?? undefined,
-    bodyHtml: htmlCandidate || undefined,
+    bodyProvenance: body.body_provenance ?? undefined,
+    bodyHtml: body.body_provenance ? (body.body_html ?? undefined) : htmlCandidate || undefined,
     bodyLoaded: body.body_loaded,
     bodyLoadError: undefined,
     pgp: pgpStatus,
@@ -224,6 +226,7 @@ function mergeMessagePreview(preview: Message, existing?: Message): Message {
     ...preview,
     bodyText: existing.bodyText,
     bodySegments: existing.bodySegments,
+    bodyProvenance: existing.bodyProvenance,
     bodyHtml: existing.bodyHtml,
     bodyLoaded: existing.bodyLoaded,
     bodyLoadError: existing.bodyLoadError,
@@ -395,8 +398,15 @@ export const useMessagesStore = defineStore('messages', () => {
   }
 
   function messageBodyChars(message: Message): number {
+    const provenance = message.bodyProvenance;
+    const provenanceChars = (provenance?.html?.length ?? 0)
+      + (provenance?.segments.reduce((sum, segment) => sum + segment.content.length, 0) ?? 0)
+      + (provenance?.attachments.reduce((sum, part) => sum + part.id.length + part.filename.length
+        + part.content_type.length + (part.content_id?.length ?? 0)
+        + (part.cached_path?.length ?? 0) + (part.data_url?.length ?? 0), 0) ?? 0);
     return message.bodyText.length
       + (message.bodyHtml?.length ?? 0)
+      + provenanceChars
       + (message.bodySegments?.reduce((sum, segment) => sum + segment.content.length, 0) ?? 0)
       + message.attachments.reduce((sum, attachment) => sum + (attachment.dataUrl?.length ?? 0), 0);
   }
@@ -918,6 +928,7 @@ export const useMessagesStore = defineStore('messages', () => {
           id,
           // This endpoint returns raw stored/fetched bodies, never decryption results.
           body_segments: null,
+          body_provenance: null,
           body_text: loaded.body_text,
           body_html: loaded.body_html,
           body_loaded: true,

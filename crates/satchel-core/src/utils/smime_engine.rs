@@ -1531,6 +1531,75 @@ mod tests {
         );
     }
 
+    #[test]
+    fn decrypted_mime_preserves_root_attachments_and_rejects_incomplete_crypto() {
+        use crate::{
+            email::smime::{parse_decrypted_body, protect_message},
+            providers::imap::parse_raw_message_body,
+        };
+        let ca = issue_ca();
+        let leaf = issue_leaf(&ca, "Synthetic Signer", "sender@example.test");
+        let roundtrip = |payload: &[u8]| {
+            let encrypted = protect_message(
+                payload,
+                Some((&leaf.key_pem, &leaf.cert_pem, None)),
+                Some(std::slice::from_ref(&leaf.cert_pem)),
+            )
+            .unwrap();
+            let envelope = parse_raw_message_body(&encrypted);
+            let bytes = decrypt(
+                &leaf.key_pem,
+                &leaf.cert_pem,
+                None,
+                envelope.smime_encrypted.as_deref().unwrap(),
+            )
+            .unwrap();
+            parse_decrypted_body(&bytes)
+        };
+        let attachment = b"Content-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=file.bin\r\nContent-ID: <root-file>\r\nContent-Transfer-Encoding: base64\r\n\r\nAP+AQQ==";
+        let parsed = roundtrip(attachment).unwrap();
+        assert_eq!(parsed.body.attachments.len(), 1);
+        assert!(parsed.body.text.is_none() && parsed.body.html.is_none());
+        assert!(!parsed.body.attachments[0].is_inline);
+        assert_eq!(
+            parsed.body.attachments[0].filename.as_deref(),
+            Some("file.bin")
+        );
+        assert_eq!(
+            parsed.body.attachments[0].content_id.as_deref(),
+            Some("root-file")
+        );
+        assert_eq!(
+            parsed.body.attachments[0].content_base64.as_deref(),
+            Some("AP+AQQ==")
+        );
+        assert!(verify(&parsed.signatures[0].0).unwrap().valid);
+
+        // A remaining encrypted envelope is not a completed decode.
+        for signed in [false, true] {
+            let inner = protect_message(
+                attachment,
+                signed.then_some((leaf.key_pem.as_str(), leaf.cert_pem.as_str(), None)),
+                Some(std::slice::from_ref(&leaf.cert_pem)),
+            )
+            .unwrap();
+            assert!(matches!(
+                roundtrip(&inner),
+                Err(crate::email::smime::DecodeError::RemainingEncryption)
+            ));
+        }
+        let malformed = b"Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; boundary=s\r\n\r\n--s\r\nContent-Type: text/plain\r\n\r\nReadable\r\n--s\r\nContent-Type: application/pkcs7-signature\r\n\r\nAQID\r\n--s\r\nContent-Type: text/plain\r\n\r\nUnexpected\r\n--s--\r\n";
+        assert!(matches!(
+            roundtrip(malformed),
+            Err(crate::email::smime::DecodeError::MalformedSigned)
+        ));
+        let image =
+            roundtrip(b"Content-Type: text/html\r\n\r\n<img src=\"cid:synthetic\">").unwrap();
+        assert_eq!(image.body.text.as_deref(), Some(""));
+        assert!(image.body.html.unwrap().contains("<img"));
+        assert!(roundtrip(b"Content-Type: text/plain\r\n\r\n").is_ok());
+    }
+
     /// Synthetic certs only; exercises the builder and crypto functions used by
     /// the outbox, then the exact MIME helper used by the message command.
     #[test]
