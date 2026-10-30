@@ -427,7 +427,13 @@ async fn present_api_move_sources(
     .fetch_one(pool)
     .await
     .map_err(|err| format!("remote move account lookup failed: {err}"))?;
-    let config = crate::commands::accounts::decrypt_account_config(account_id, &encrypted_config)?;
+    let config = crate::utils::oauth::refresh_account_config(
+        pool,
+        account_id,
+        &provider_kind,
+        &encrypted_config,
+    )
+    .await?;
     let provider = provider_for_account(&provider_kind, &config, &email, None)?;
 
     let mut refs_by_folder: HashMap<&str, Vec<&MessageRef>> = HashMap::new();

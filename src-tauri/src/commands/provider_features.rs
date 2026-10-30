@@ -184,7 +184,13 @@ async fn load_account(pool: &SqlitePool, account_id: &str) -> Result<AccountFeat
     .await
     .map_err(|err| err.to_string())?;
     Ok(AccountFeatureRow {
-        config: crate::commands::accounts::decrypt_account_config(&row.id, &row.config)?,
+        config: crate::utils::oauth::refresh_account_config(
+            pool,
+            &row.id,
+            &row.provider,
+            &row.config,
+        )
+        .await?,
         id: row.id,
         provider: row.provider,
     })

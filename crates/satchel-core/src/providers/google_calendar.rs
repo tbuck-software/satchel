@@ -92,9 +92,10 @@ struct MappedEvent {
 pub async fn sync_account(
     pool: &SqlitePool,
     account_id: &str,
-    config_json: &crate::accounts::AccountConfig,
+    _config_json: &crate::accounts::AccountConfig,
 ) -> Result<usize, String> {
-    let token = access_token_from_account_config(OAuthProvider::Gmail, config_json).await?;
+    let config = crate::utils::oauth::fresh_account_config(pool, account_id).await?;
+    let token = access_token_from_account_config(OAuthProvider::Gmail, &config).await?;
     let client = crate::utils::http::client();
 
     let now = chrono::Utc::now();

@@ -1,3 +1,6 @@
+mod refresh;
+pub use refresh::{fresh_account_config, refresh_account_config};
+
 use base64::Engine;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
@@ -588,6 +591,13 @@ pub async fn access_token_from_account_config(
     config_json: &crate::accounts::AccountConfig,
 ) -> Result<String, String> {
     let stored = load_stored_oauth(config_json)?;
+    if stored
+        .provider
+        .as_deref()
+        .is_some_and(|stored| !stored.eq_ignore_ascii_case(provider.as_str()))
+    {
+        return Err("[transient] oauth provider changed; reload account configuration".into());
+    }
     let access_token = stored
         .access_token
         .as_deref()
@@ -603,19 +613,12 @@ pub async fn access_token_from_account_config(
         }
     }
 
-    let config = provider.load_config_for_stored(&stored)?;
-    let refresh_token = stored
-        .refresh_token
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "missing oauth refresh token".to_string())?;
-
-    let refreshed = refresh_access_token(&config, refresh_token).await?;
-    Ok(refreshed.access_token)
+    // A detached snapshot cannot save a rotated refresh token or detect a
+    // reconnect. Persistent consumers must load through fresh_account_config.
+    Err("[transient] oauth access token expired; reload account configuration".into())
 }
 
-pub async fn ensure_fresh_account_config(
+async fn ensure_fresh_account_config(
     provider: OAuthProvider,
     config_json: &crate::accounts::AccountConfig,
 ) -> Result<Option<String>, String> {

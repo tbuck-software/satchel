@@ -270,7 +270,12 @@ pub async fn sync_contact_avatars_inner(
             continue;
         }
 
-        let token = match access_token_from_account_config(provider, &account.config).await {
+        let token = match async {
+            let config = crate::utils::oauth::fresh_account_config(pool, &account.id).await?;
+            access_token_from_account_config(provider, &config).await
+        }
+        .await
+        {
             Ok(token) => token,
             Err(error) => {
                 tracing::warn!(

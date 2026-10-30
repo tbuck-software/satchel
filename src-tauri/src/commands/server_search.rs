@@ -49,7 +49,13 @@ pub async fn server_search(
             .fetch_one(pool.inner())
             .await
             .map_err(|err| err.to_string())?;
-    let config = crate::commands::accounts::decrypt_account_config(&input.account_id, &row.1)?;
+    let config = crate::utils::oauth::refresh_account_config(
+        pool.inner(),
+        &input.account_id,
+        &row.0,
+        &row.1,
+    )
+    .await?;
     let hits = match row.0.as_str() {
         "gmail" => gmail_search(&config, &input.query).await?,
         "outlook" => outlook_search(&config, &input.query).await?,
@@ -149,7 +155,9 @@ pub(crate) async fn fetch_server_search_hit_impl(
     .await
     .map_err(|err| err.to_string())?;
     let (provider, email, display_name, config) = row;
-    let config = crate::commands::accounts::decrypt_account_config(&input.account_id, &config)?;
+    let config =
+        crate::utils::oauth::refresh_account_config(pool, &input.account_id, &provider, &config)
+            .await?;
 
     let (envelope, folder_hint) = match provider.as_str() {
         "gmail" => (

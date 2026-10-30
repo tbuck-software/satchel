@@ -96,7 +96,10 @@ pub async fn set_vacation(
         .load_provider_config(&input.account_id)
         .await
         .map_err(CommandError::from)?;
-    if let Some(account) = account {
+    if let Some(mut account) = account {
+        account.config = crate::utils::oauth::fresh_account_config(pool.inner(), &input.account_id)
+            .await
+            .map_err(map_remote_update_error)?;
         push_vacation_to_remote(&account, &input)
             .await
             .map_err(map_remote_update_error)?;

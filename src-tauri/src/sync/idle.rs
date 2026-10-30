@@ -25,9 +25,6 @@ use crate::events::bus::EventBus;
 use crate::providers::imap::ImapProvider;
 use crate::providers::traits::{IdleEvent, MailProvider};
 use crate::sync::mailbox_sync::{AccountSelection, FolderSelection, MailboxSyncRequest};
-use crate::utils::oauth::{
-    ensure_fresh_account_config, oauth_config_has_fresh_access_token, OAuthProvider,
-};
 
 const API_INBOX_POLL_INTERVAL: Duration = Duration::from_secs(15);
 const POP3_POLL_INTERVAL: Duration = Duration::from_secs(60);
@@ -356,35 +353,25 @@ async fn run_account_loop(
     events: &Arc<EventBus>,
     account: &AccountRow,
 ) -> Result<(), String> {
-    let mut config =
-        crate::commands::accounts::decrypt_account_config(&account.id, &account.config)
-            .map_err(|err| format!("credential decrypt failed: {err}"))?;
-    if let Ok(oauth_provider) = OAuthProvider::parse(&account.provider) {
-        match ensure_fresh_account_config(oauth_provider, &config).await {
-            Ok(Some(updated)) => {
-                sqlx::query(
-                    "UPDATE accounts
-                     SET config = ?, updated_at = ?, last_oauth_error = NULL, last_oauth_error_at = NULL
-                     WHERE id = ?",
-                )
-                    .bind(crate::commands::accounts::encrypt_account_config(&account.id, &updated)?)
-                    .bind(chrono::Utc::now().to_rfc3339())
-                    .bind(&account.id)
-                    .execute(pool)
-                    .await
-                    .map_err(|err| err.to_string())?;
-                config = crate::commands::accounts::AccountConfig::from_plaintext(updated);
-                clear_oauth_error(pool, &account.id).await;
-            }
-            Ok(None) => {
-                clear_oauth_error(pool, &account.id).await;
-            }
-            Err(err) => {
-                record_oauth_error(pool, app, &account.id, &err).await;
-                return Err(format!("oauth refresh failed: {err}"));
-            }
+    let config = match crate::utils::oauth::refresh_account_config(
+        pool,
+        &account.id,
+        &account.provider,
+        &account.config,
+    )
+    .await
+    {
+        Ok(config) => config,
+        Err(err) => {
+            // Refresh errors are persisted conditionally in Core. The event only
+            // asks the frontend to reload that durable state.
+            let _ = app.emit(
+                "account:auth-required",
+                serde_json::json!({"account_id": account.id}),
+            );
+            return Err(err);
         }
-    }
+    };
 
     match account.provider.as_str() {
         "imap" => {
@@ -500,69 +487,6 @@ async fn sync_polled_inbox(
             );
         }
     }
-}
-
-async fn clear_oauth_error(pool: &SqlitePool, account_id: &str) {
-    let _ = sqlx::query(
-        "UPDATE accounts SET last_oauth_error = NULL, last_oauth_error_at = NULL WHERE id = ? AND last_oauth_error IS NOT NULL",
-    )
-    .bind(account_id)
-    .execute(pool)
-    .await;
-}
-
-async fn record_oauth_error(pool: &SqlitePool, app: &AppHandle, account_id: &str, err: &str) {
-    if account_has_fresh_oauth_token(pool, account_id).await {
-        clear_oauth_error(pool, account_id).await;
-        return;
-    }
-
-    let now = chrono::Utc::now().to_rfc3339();
-    if !persist_oauth_error(pool, account_id, err, &now).await {
-        return;
-    }
-
-    let _ = app.emit(
-        "account:auth-required",
-        serde_json::json!({
-            "account_id": account_id,
-            "error": err,
-            "at": now,
-        }),
-    );
-}
-
-async fn persist_oauth_error(pool: &SqlitePool, account_id: &str, err: &str, now: &str) -> bool {
-    sqlx::query(
-        "UPDATE accounts
-         SET last_oauth_error = ?, last_oauth_error_at = ?
-         WHERE id = ? AND (last_oauth_error IS NULL OR last_oauth_error <> ?)",
-    )
-    .bind(err)
-    .bind(now)
-    .bind(account_id)
-    .bind(err)
-    .execute(pool)
-    .await
-    .map(|result| result.rows_affected() > 0)
-    .unwrap_or(false)
-}
-
-async fn account_has_fresh_oauth_token(pool: &SqlitePool, account_id: &str) -> bool {
-    let config =
-        sqlx::query_scalar::<_, String>("SELECT config FROM accounts WHERE id = ? LIMIT 1")
-            .bind(account_id)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|raw| {
-                crate::commands::accounts::decrypt_account_config(account_id, &raw).ok()
-            });
-    config
-        .as_deref()
-        .map(oauth_config_has_fresh_access_token)
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -811,37 +735,5 @@ mod tests {
         let accounts = load_accounts(&pool).await.expect("load accounts");
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].config, "enc:v1:unreadable");
-    }
-
-    #[tokio::test]
-    async fn repeated_oauth_error_preserves_first_occurrence() {
-        let pool = SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("open in-memory sqlite");
-        sqlx::query(
-            "CREATE TABLE accounts (
-                id TEXT PRIMARY KEY,
-                last_oauth_error TEXT,
-                last_oauth_error_at TEXT
-            )",
-        )
-        .execute(&pool)
-        .await
-        .expect("create accounts table");
-        sqlx::query("INSERT INTO accounts (id) VALUES ('account-1')")
-            .execute(&pool)
-            .await
-            .expect("insert account");
-
-        assert!(persist_oauth_error(&pool, "account-1", "invalid_grant", "first").await);
-        assert!(!persist_oauth_error(&pool, "account-1", "invalid_grant", "second").await);
-
-        let stored = sqlx::query_as::<_, (String, String)>(
-            "SELECT last_oauth_error, last_oauth_error_at FROM accounts WHERE id = 'account-1'",
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("load stored OAuth error");
-        assert_eq!(stored, ("invalid_grant".to_string(), "first".to_string()));
     }
 }

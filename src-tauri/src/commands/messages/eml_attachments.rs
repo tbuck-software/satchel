@@ -26,6 +26,7 @@ const MAX_STEM_CHARS: usize = 80;
 #[tauri::command]
 pub async fn thread_eml_attachments(
     pool: tauri::State<'_, crate::db::ReadPool>,
+    write_pool: tauri::State<'_, SqlitePool>,
     thread_ids: Vec<String>,
 ) -> CommandResult<Vec<OutgoingAttachmentInput>> {
     let pool = pool.inner().as_ref();
@@ -37,7 +38,7 @@ pub async fn thread_eml_attachments(
         else {
             continue;
         };
-        match super::fetch_remote_message_source(pool, &message_id).await {
+        match super::fetch_remote_message_source(write_pool.inner(), &message_id).await {
             Ok(Some(raw)) => attachments.push(eml_attachment(subject.as_deref(), &raw)),
             Ok(None) => {}
             Err(error) => {

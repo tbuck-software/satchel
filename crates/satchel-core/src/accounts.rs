@@ -215,21 +215,19 @@ mod credential_tests {
         }
     }
 
-    /// Reads the token out of a decrypted config. The stored token is expired,
-    /// so this attempts a refresh and fails on the network — not on parsing.
+    /// A detached config must never refresh credentials that it cannot persist.
     #[tokio::test]
-    async fn oauth_token_lookup_parses_the_config() {
-        if let Err(err) = crate::utils::oauth::access_token_from_account_config(
+    async fn oauth_token_lookup_refuses_to_refresh_a_detached_snapshot() {
+        let error = crate::utils::oauth::access_token_from_account_config(
             crate::utils::oauth::OAuthProvider::Gmail,
             &AccountConfig::from_plaintext(OAUTH_CONFIG),
         )
         .await
-        {
-            assert!(
-                !err.contains("invalid oauth config JSON"),
-                "the config must parse; got a parse error instead: {err}"
-            );
-        }
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "[transient] oauth access token expired; reload account configuration"
+        );
     }
 
     #[test]

@@ -204,7 +204,7 @@ async fn repair_unparsed_smime_messages(
 
     let mut repaired: Vec<String> = Vec::new();
     for (message_id, thread_id) in claim.candidates.iter().cloned() {
-        let attempt = fetch_remote_message_source(pool, &message_id).await;
+        let attempt = fetch_remote_message_source(write_pool, &message_id).await;
         if let Err(error) =
             sqlx::query("UPDATE messages SET smime_repair_attempted_at = ? WHERE id = ?")
                 .bind(Utc::now().to_rfc3339())
@@ -2303,14 +2303,15 @@ struct RemoteMessageSourceTarget {
     config: String,
 }
 
+/// May refresh and persist OAuth credentials, so this requires the writer pool.
 pub(super) async fn fetch_remote_message_source(
-    pool: &SqlitePool,
+    write_pool: &SqlitePool,
     message_id: &str,
 ) -> Result<Option<Vec<u8>>, String> {
     let original_source: Option<Vec<u8>> =
         sqlx::query_scalar("SELECT original_source FROM messages WHERE id = ?")
             .bind(message_id)
-            .fetch_optional(pool)
+            .fetch_optional(write_pool)
             .await
             .map_err(|error| error.to_string())?
             .flatten();
@@ -2328,15 +2329,20 @@ pub(super) async fn fetch_remote_message_source(
          WHERE m.id = ? LIMIT 1",
     )
     .bind(message_id)
-    .fetch_optional(pool)
+    .fetch_optional(write_pool)
     .await
     .map_err(|err| err.to_string())?
     .ok_or_else(|| "message not found".to_string())?;
     let Some(remote_id) = target.remote_id.filter(|value| !value.trim().is_empty()) else {
         return Ok(None);
     };
-    let config =
-        crate::commands::accounts::decrypt_account_config(&target.account_id, &target.config)?;
+    let config = crate::utils::oauth::refresh_account_config(
+        write_pool,
+        &target.account_id,
+        &target.provider,
+        &target.config,
+    )
+    .await?;
 
     let raw = match target.provider.as_str() {
         "imap" => {
@@ -2482,7 +2488,7 @@ pub async fn get_message_source(
         .map_err(CommandError::from)?;
 
     let (raw_source, fetched_headers, fetched_size, raw_source_status) =
-        match fetch_remote_message_source(pool.inner().as_ref(), &message_id).await {
+        match fetch_remote_message_source(write_pool.inner(), &message_id).await {
             Ok(Some(raw)) => {
                 let headers = raw_header_block(&raw);
                 let size = i64::try_from(raw.len()).unwrap_or(i64::MAX);

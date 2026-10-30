@@ -10,7 +10,6 @@
 //!    Ambiguous means `submission_started_at` is set: a send that crashed before
 //!    the provider saw a byte goes back to `pending` instead of being lost.
 
-use chrono::Utc;
 use satchel_core::{
     db::{messages::SentMessageRepository, smime::SmimeRepositoryError},
     sync::errors::{SyncError, SyncResult},
@@ -26,9 +25,6 @@ use crate::{
     email::build::{build_rfc822, with_bcc_delivery_header},
     providers::{provider_for_account, traits::OutgoingMessage},
     sync::queue::QueuedAction,
-    utils::oauth::{
-        ensure_fresh_account_config, oauth_config_has_fresh_access_token, OAuthProvider,
-    },
     AppState,
 };
 
@@ -114,59 +110,13 @@ pub async fn execute_send_action(
     .fetch_one(pool)
     .await
     .map_err(|err| format!("account lookup failed: {err}"))?;
-    let mut config =
-        crate::commands::accounts::decrypt_account_config(&account.id, &account.config)?;
-
-    if let Ok(oauth_provider) = OAuthProvider::parse(&account.provider) {
-        match ensure_fresh_account_config(oauth_provider, &config).await {
-            Ok(Some(updated_config)) => {
-                let now = Utc::now().to_rfc3339();
-                sqlx::query("UPDATE accounts SET config = ?, updated_at = ?, last_oauth_error = NULL, last_oauth_error_at = NULL WHERE id = ?")
-                    .bind(crate::commands::accounts::encrypt_account_config(
-                        &account.id,
-                        &updated_config,
-                    )?)
-                    .bind(&now)
-                    .bind(&account.id)
-                    .execute(pool)
-                    .await
-                    .map_err(|err| err.to_string())?;
-                config = crate::commands::accounts::AccountConfig::from_plaintext(updated_config);
-            }
-            Ok(None) => {
-                let _ = sqlx::query(
-                    "UPDATE accounts SET last_oauth_error = NULL, last_oauth_error_at = NULL WHERE id = ? AND last_oauth_error IS NOT NULL",
-                )
-                .bind(&account.id)
-                .execute(pool)
-                .await;
-            }
-            Err(err) => {
-                if account_has_fresh_oauth_token(pool, &account.id).await {
-                    let _ = sqlx::query(
-                        "UPDATE accounts SET last_oauth_error = NULL, last_oauth_error_at = NULL WHERE id = ? AND last_oauth_error IS NOT NULL",
-                    )
-                    .bind(&account.id)
-                    .execute(pool)
-                    .await;
-                    return Err(SyncError::Transient(format!(
-                        "oauth refresh failed from stale config: {err}"
-                    )));
-                }
-
-                let now = Utc::now().to_rfc3339();
-                let _ = sqlx::query(
-                    "UPDATE accounts SET last_oauth_error = ?, last_oauth_error_at = ? WHERE id = ?",
-                )
-                .bind(&err)
-                .bind(&now)
-                .bind(&account.id)
-                .execute(pool)
-                .await;
-                return Err(format!("oauth refresh failed: {err}").into());
-            }
-        }
-    }
+    let config = crate::utils::oauth::refresh_account_config(
+        pool,
+        &account.id,
+        &account.provider,
+        &account.config,
+    )
+    .await?;
 
     let provider = provider_for_account(&account.provider, &config, &account.email, None)?;
 
@@ -654,23 +604,6 @@ fn merge_delivery_headers(original_rfc822: &str, crypto_rfc822: &str) -> String 
         .collect::<Vec<_>>()
         .join("\r\n");
     format!("{delivery_headers}\r\n{crypto_trimmed}")
-}
-
-async fn account_has_fresh_oauth_token(pool: &SqlitePool, account_id: &str) -> bool {
-    let config =
-        sqlx::query_scalar::<_, String>("SELECT config FROM accounts WHERE id = ? LIMIT 1")
-            .bind(account_id)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|raw| {
-                crate::commands::accounts::decrypt_account_config(account_id, &raw).ok()
-            });
-    config
-        .as_deref()
-        .map(oauth_config_has_fresh_access_token)
-        .unwrap_or(false)
 }
 
 #[cfg(test)]
