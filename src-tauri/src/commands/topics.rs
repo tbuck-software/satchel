@@ -4,10 +4,37 @@ use serde::{Deserialize, Serialize};
 use crate::commands::error::{CommandError, CommandResult};
 use satchel_core::db::topics::{
     AddTopicItemsRequest, RemoveTopicItemRequest, TopicAddedBy, TopicError, TopicFileContentRecord,
-    TopicFileRecord, TopicFileWriteRequest, TopicMembershipRecord, TopicMembershipsQuery,
-    TopicNoteRecord, TopicNoteWriteRequest, TopicRecord, TopicRepository, TopicStatus,
-    TopicTimelineItemRecord, TopicUpsertRequest,
+    TopicFileRecord, TopicFileWriteRequest, TopicMembershipReceipt, TopicMembershipRecord,
+    TopicMembershipsQuery, TopicNoteRecord, TopicNoteWriteRequest, TopicRecord, TopicRepository,
+    TopicStatus, TopicTimelineItemRecord, TopicUpsertRequest,
 };
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/topics/"))]
+pub struct TopicMembershipReceiptDto {
+    pub item_id: String,
+    pub revision: String,
+}
+
+impl From<TopicMembershipReceipt> for TopicMembershipReceiptDto {
+    fn from(value: TopicMembershipReceipt) -> Self {
+        Self {
+            item_id: value.item_id,
+            revision: value.revision,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/topics/"))]
+pub struct UndoTopicMembershipsInput {
+    pub topic_id: String,
+    pub item_type: String,
+    pub receipts: Vec<TopicMembershipReceiptDto>,
+    pub restore: bool,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
@@ -352,11 +379,19 @@ pub async fn delete_topic(
 pub async fn add_topic_items(
     pool: tauri::State<'_, sqlx::SqlitePool>,
     input: AddTopicItemsInput,
-) -> CommandResult<Vec<String>> {
+) -> CommandResult<Vec<TopicMembershipReceiptDto>> {
+    add_topic_items_inner(pool.inner(), input).await
+}
+
+async fn add_topic_items_inner(
+    pool: &sqlx::SqlitePool,
+    input: AddTopicItemsInput,
+) -> CommandResult<Vec<TopicMembershipReceiptDto>> {
     let request = map_add_items(input).map_err(CommandError::from)?;
-    TopicRepository::new(pool.inner())
+    TopicRepository::new(pool)
         .add_items(request)
         .await
+        .map(|rows| rows.into_iter().map(Into::into).collect())
         .map_err(Into::into)
 }
 
@@ -364,10 +399,49 @@ pub async fn add_topic_items(
 pub async fn remove_topic_item(
     pool: tauri::State<'_, sqlx::SqlitePool>,
     input: RemoveTopicItemInput,
-) -> CommandResult<bool> {
+) -> CommandResult<Option<TopicMembershipReceiptDto>> {
+    remove_topic_item_inner(pool.inner(), input).await
+}
+
+async fn remove_topic_item_inner(
+    pool: &sqlx::SqlitePool,
+    input: RemoveTopicItemInput,
+) -> CommandResult<Option<TopicMembershipReceiptDto>> {
     let request = map_remove_item(input).map_err(CommandError::from)?;
-    TopicRepository::new(pool.inner())
+    TopicRepository::new(pool)
         .remove_item(request)
+        .await
+        .map(|row| row.map(Into::into))
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn undo_topic_memberships(
+    pool: tauri::State<'_, sqlx::SqlitePool>,
+    input: UndoTopicMembershipsInput,
+) -> CommandResult<Vec<String>> {
+    undo_topic_memberships_inner(pool.inner(), input).await
+}
+
+async fn undo_topic_memberships_inner(
+    pool: &sqlx::SqlitePool,
+    input: UndoTopicMembershipsInput,
+) -> CommandResult<Vec<String>> {
+    let item_type = input
+        .item_type
+        .as_str()
+        .try_into()
+        .map_err(CommandError::from)?;
+    let receipts: Vec<_> = input
+        .receipts
+        .into_iter()
+        .map(|row| TopicMembershipReceipt {
+            item_id: row.item_id,
+            revision: row.revision,
+        })
+        .collect();
+    TopicRepository::new(pool)
+        .undo_memberships(&input.topic_id, item_type, &receipts, input.restore)
         .await
         .map_err(Into::into)
 }
@@ -558,5 +632,74 @@ mod tests {
             .unwrap_err(),
         );
         assert_eq!(item_error.key, "backend.errors.topicItemTypeInvalid");
+    }
+}
+
+#[cfg(test)]
+mod membership_command_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn wire_receipts_round_trip_and_reject_a_delayed_undo() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .unwrap();
+        let topic = TopicRepository::new(&pool)
+            .upsert(TopicUpsertRequest {
+                id: None,
+                name: "Guarded".into(),
+                description: None,
+                color: None,
+                icon: None,
+                status: None,
+                due_date: None,
+            })
+            .await
+            .unwrap();
+        let add = || AddTopicItemsInput {
+            topic_id: topic.id.clone(),
+            item_type: "event".into(),
+            item_ids: vec!["event".into()],
+            added_by: None,
+        };
+        let first = add_topic_items_inner(&pool, add()).await.unwrap();
+        let removed = remove_topic_item_inner(
+            &pool,
+            RemoveTopicItemInput {
+                topic_id: topic.id.clone(),
+                item_type: "event".into(),
+                item_id: "event".into(),
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        add_topic_items_inner(&pool, add()).await.unwrap();
+        let wire = serde_json::json!({ "topic_id": topic.id, "item_type": "event", "receipts": first, "restore": false });
+        let undo: UndoTopicMembershipsInput = serde_json::from_value(wire).unwrap();
+        assert!(undo_topic_memberships_inner(&pool, undo)
+            .await
+            .unwrap()
+            .is_empty());
+        let stale_restore = UndoTopicMembershipsInput {
+            topic_id: topic.id.clone(),
+            item_type: "event".into(),
+            receipts: vec![removed],
+            restore: true,
+        };
+        assert!(undo_topic_memberships_inner(&pool, stale_restore)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(add_topic_items_inner(&pool, add())
+            .await
+            .unwrap()
+            .is_empty());
     }
 }

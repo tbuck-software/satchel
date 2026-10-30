@@ -411,7 +411,7 @@ export function useThreadActions() {
     threadIds = Array.from(new Set(threadIds));
     if (threadIds.length === 0) return;
     const topicName = topics.byId(topicId)?.name ?? '';
-    let added: string[];
+    let added: Awaited<ReturnType<typeof topics.addItemsToTopic>>;
     try {
       added = await topics.addItemsToTopic(topicId, 'thread', threadIds);
     } catch (err) {
@@ -427,9 +427,7 @@ export function useThreadActions() {
           action: {
             label: t('thread.actions.undo'),
             handler: () => attempt(
-              () => Promise.all(
-                added.map((threadId) => topics.removeItemFromTopic(topicId, 'thread', threadId)),
-              ),
+              () => topics.undoMemberships(topicId, 'thread', added, false),
               t('thread.result.removeFromTopicFailed'),
             ),
           },
@@ -442,12 +440,12 @@ export function useThreadActions() {
     threadIds = Array.from(new Set(threadIds));
     if (threadIds.length === 0) return;
     const topicName = topics.byId(topicId)?.name ?? '';
-    let removed: string[];
+    let removed: NonNullable<Awaited<ReturnType<typeof topics.removeItemFromTopic>>>[];
     try {
       const wasMember = await Promise.all(
         threadIds.map((threadId) => topics.removeItemFromTopic(topicId, 'thread', threadId)),
       );
-      removed = threadIds.filter((_, index) => wasMember[index]);
+      removed = wasMember.filter((receipt) => receipt !== null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('thread.result.removeFromTopicFailed'));
       return;
@@ -459,7 +457,7 @@ export function useThreadActions() {
           label: t('thread.actions.undo'),
           present: 'fab',
           handler: () => attempt(
-            () => topics.addItemsToTopic(topicId, 'thread', removed),
+            () => topics.undoMemberships(topicId, 'thread', removed, true),
             t('thread.result.addToTopicFailed'),
           ),
         },

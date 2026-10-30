@@ -183,6 +183,14 @@ pub struct RemoveTopicItemRequest {
     pub item_id: String,
 }
 
+/// A changed link and its database-owned currentness token. An unchanged write
+/// produces no receipt. Only `undo_memberships` may consume this token.
+#[derive(Debug, Clone, FromRow)]
+pub struct TopicMembershipReceipt {
+    pub item_id: String,
+    pub revision: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct TopicMembershipsQuery {
     pub item_type: TopicItemType,
@@ -546,12 +554,11 @@ impl<'a> TopicRepository<'a> {
         Ok(())
     }
 
-    /// Returns only links inserted by this transaction, with each item listed once.
-    /// Callers can undo this receipt without guessing the previous membership.
+    /// Returns guarded receipts only for links inserted by this transaction.
     pub async fn add_items(
         &self,
         request: AddTopicItemsRequest,
-    ) -> Result<Vec<String>, TopicError> {
+    ) -> Result<Vec<TopicMembershipReceipt>, TopicError> {
         let added_by = request.added_by.unwrap_or(TopicAddedBy::User);
         let now = chrono::Utc::now().to_rfc3339();
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -569,24 +576,98 @@ impl<'a> TopicRepository<'a> {
             .execute(&mut *tx)
             .await?;
             if result.rows_affected() > 0 {
-                added.push(item_id.clone());
+                added.push(
+                    Self::membership_receipt(
+                        &mut tx,
+                        &request.topic_id,
+                        request.item_type,
+                        item_id,
+                    )
+                    .await?,
+                );
             }
         }
         tx.commit().await?;
         Ok(added)
     }
 
-    /// Returns whether a link was actually deleted.
-    pub async fn remove_item(&self, request: RemoveTopicItemRequest) -> Result<bool, TopicError> {
+    async fn membership_receipt(
+        tx: &mut sqlx::Transaction<'_, Sqlite>,
+        topic_id: &str,
+        item_type: TopicItemType,
+        item_id: &str,
+    ) -> Result<TopicMembershipReceipt, sqlx::Error> {
+        sqlx::query_as("SELECT item_id, revision FROM topic_membership_versions WHERE topic_id = ? AND item_type = ? AND item_id = ?")
+            .bind(topic_id).bind(item_type.as_str()).bind(item_id).fetch_one(&mut **tx).await
+    }
+
+    /// An absent link is an idempotent success without an Undo receipt.
+    pub async fn remove_item(
+        &self,
+        request: RemoveTopicItemRequest,
+    ) -> Result<Option<TopicMembershipReceipt>, TopicError> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let result = sqlx::query(
             "DELETE FROM topic_items WHERE topic_id = ? AND item_type = ? AND item_id = ?",
         )
         .bind(&request.topic_id)
         .bind(request.item_type.as_str())
         .bind(&request.item_id)
-        .execute(self.pool)
+        .execute(&mut *tx)
         .await?;
-        Ok(result.rows_affected() > 0)
+        let receipt = if result.rows_affected() > 0 {
+            Some(
+                Self::membership_receipt(
+                    &mut tx,
+                    &request.topic_id,
+                    request.item_type,
+                    &request.item_id,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        tx.commit().await?;
+        Ok(receipt)
+    }
+
+    /// Check and invert each receipt under the SQLite write lock. Tokens change
+    /// even through ABA operations; replay and stale/cross-window Undo are no-ops.
+    /// Restoring a removed link preserves its original attribution and date.
+    pub async fn undo_memberships(
+        &self,
+        topic_id: &str,
+        item_type: TopicItemType,
+        receipts: &[TopicMembershipReceipt],
+        restore: bool,
+    ) -> Result<Vec<String>, TopicError> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut changed = Vec::new();
+        for receipt in receipts {
+            let sql = if restore {
+                "INSERT INTO topic_items (topic_id, item_type, item_id, added_at, added_by)
+                 SELECT topic_id, item_type, item_id, added_at, added_by FROM topic_membership_versions v
+                 WHERE topic_id = ? AND item_type = ? AND item_id = ? AND revision = ?
+                 AND NOT EXISTS (SELECT 1 FROM topic_items i WHERE i.topic_id = v.topic_id AND i.item_type = v.item_type AND i.item_id = v.item_id)"
+            } else {
+                "DELETE FROM topic_items WHERE topic_id = ? AND item_type = ? AND item_id = ?
+                 AND EXISTS (SELECT 1 FROM topic_membership_versions v WHERE v.topic_id = topic_items.topic_id
+                   AND v.item_type = topic_items.item_type AND v.item_id = topic_items.item_id AND revision = ?)"
+            };
+            let result = sqlx::query(sql)
+                .bind(topic_id)
+                .bind(item_type.as_str())
+                .bind(&receipt.item_id)
+                .bind(&receipt.revision)
+                .execute(&mut *tx)
+                .await?;
+            if result.rows_affected() > 0 {
+                changed.push(receipt.item_id.clone());
+            }
+        }
+        tx.commit().await?;
+        Ok(changed)
     }
 
     /// Remove every thread link for a thread that is being deleted.

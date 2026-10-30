@@ -17,6 +17,7 @@ vi.mock('@/services/backend', () => ({
   backendListTopicMemberships: vi.fn(),
   backendListTopics: vi.fn(),
   backendRemoveTopicItem: vi.fn(),
+  backendUndoTopicMemberships: vi.fn(),
   backendCommandsAvailable: () => harness.native(),
   backendListTopicFiles: (...args: unknown[]) => harness.listFiles(...args),
   backendAddTopicFile: (...args: unknown[]) => harness.addFile(...args),
@@ -165,9 +166,9 @@ describe('topics store memberships', () => {
   it('reports only the items an add actually linked', async () => {
     const store = useTopicsStore();
     store.memberships['thread:member'] = ['topic-1'];
-    vi.mocked(backendAddTopicItems).mockResolvedValueOnce(['fresh'] as never);
+    vi.mocked(backendAddTopicItems).mockResolvedValueOnce([{ item_id: 'fresh', revision: 'one' }]);
 
-    await expect(store.addItemsToTopic('topic-1', 'thread', ['member', 'fresh'])).resolves.toEqual(['fresh']);
+    await expect(store.addItemsToTopic('topic-1', 'thread', ['member', 'fresh'])).resolves.toEqual([{ item_id: 'fresh', revision: 'one' }]);
     expect(store.topicIdsFor('thread', 'member')).toEqual(['topic-1']);
     expect(store.topicIdsFor('thread', 'fresh')).toEqual(['topic-1']);
   });
@@ -178,7 +179,7 @@ describe('topics store memberships', () => {
     vi.mocked(backendAddTopicItems).mockImplementationOnce(
       () => new Promise((_, reject) => { rejectAdd = reject; }),
     );
-    vi.mocked(backendAddTopicItems).mockResolvedValueOnce(['thread-1'] as never);
+    vi.mocked(backendAddTopicItems).mockResolvedValueOnce([{ item_id: 'thread-1', revision: 'one' }]);
 
     const failing = store.addItemsToTopic('topic-1', 'thread', ['thread-1']);
     await store.addItemsToTopic('topic-2', 'thread', ['thread-1']);
@@ -195,7 +196,7 @@ describe('topics store memberships', () => {
     vi.mocked(backendRemoveTopicItem).mockImplementationOnce(
       () => new Promise((_, reject) => { rejectRemove = reject; }),
     );
-    vi.mocked(backendAddTopicItems).mockResolvedValueOnce(['thread-1'] as never);
+    vi.mocked(backendAddTopicItems).mockResolvedValueOnce([{ item_id: 'thread-1', revision: 'one' }]);
 
     const failing = store.removeItemFromTopic('topic-1', 'thread', 'thread-1');
     await store.addItemsToTopic('topic-2', 'thread', ['thread-1']);

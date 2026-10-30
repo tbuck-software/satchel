@@ -1012,6 +1012,7 @@
       "sync": "Der Mail-Abgleich ist fehlgeschlagen",
       "templates": "Deine Vorlagen konnten nicht geladen werden",
       "threads": "Die Konversationen konnten nicht geladen werden",
+      "topicMemberships": "Themenzuordnungen konnten nicht geladen werden",
       "topics": "Themen konnten nicht geladen werden",
       "unknown": "In Satchel hat etwas aufgehört zu funktionieren"
     },
@@ -3472,6 +3473,9 @@
       "showGist": "Kurzfassung anzeigen",
       "showOriginal": "Original anzeigen",
       "thread": "Konversation"
+    },
+    "memberships": {
+      "loadFailed": "Themenzuordnungen konnten nicht geladen werden"
     },
     "picker": {
       "actionAdd": "Zu {name} hinzufügen",

@@ -16,6 +16,8 @@ import {
   backendListTopicMemberships,
   backendListTopics,
   backendRemoveTopicItem,
+  backendUndoTopicMemberships,
+  type TopicMembershipReceipt,
   backendUpsertTopic,
   backendUpsertTopicNote,
   type BackendTopic,
@@ -79,7 +81,8 @@ export const useTopicsStore = defineStore('topics', () => {
   const { loading } = loader;
   /** `${itemType}:${itemId}` -> topic ids shared by chips and picker. */
   const memberships = ref<Record<string, string[]>>({});
-  const loadedMemberships = new Set<string>();
+  const loadedMemberships = ref(new Set<string>());
+  const membershipFailures = ref<Record<string, { itemType: TopicItemType; itemId: string }>>({});
   /** Non-null while the "add to topic" picker overlay is open. */
   const pickerTarget = ref<TopicPickerTarget | null>(null);
   /** Topic shown in the inbox detail pane instead of a thread; '' = none. */
@@ -173,7 +176,7 @@ export const useTopicsStore = defineStore('topics', () => {
   }
 
   async function remove(id: string) {
-    const pending = loader.mutate(async () => {
+    const pending = enqueueMembershipWrite(id, () => loader.mutate(async () => {
       const guards = [fileLoader(id), ...membershipLoads.values()];
       const remove = async () => {
         await backendDeleteTopic(id);
@@ -185,7 +188,7 @@ export const useTopicsStore = defineStore('topics', () => {
       };
       membershipRevision++;
       await guardedWrite(guards, () => remove().finally(() => { membershipRevision++; }));
-    });
+    }));
     pendingTopicDeletes.add(pending);
     void pending.finally(() => pendingTopicDeletes.delete(pending)).catch(() => {});
     return pending;
@@ -224,13 +227,35 @@ export const useTopicsStore = defineStore('topics', () => {
       (loaded) => {
         memberships.value[membershipKey(itemType, id)] = loaded
           .filter((row) => row.item_id === id).map((row) => row.topic_id);
-        loadedMemberships.add(membershipKey(itemType, id));
+        loadedMemberships.value.add(membershipKey(itemType, id));
+      },
+      (error) => {
+        membershipFailures.value[membershipKey(itemType, id)] = { itemType, itemId: id };
+        connection.reportBackendError('topicMemberships', error);
+      },
+      () => {
+        delete membershipFailures.value[membershipKey(itemType, id)];
+        if (Object.keys(membershipFailures.value).length === 0) connection.clearBackendError('topicMemberships');
       },
     )));
   }
 
+  function membershipsFailedFor(itemType: TopicItemType, itemIds: string[]): boolean {
+    return itemIds.some((id) => membershipKey(itemType, id) in membershipFailures.value);
+  }
+
+  function membershipsKnownFor(itemType: TopicItemType, itemIds: string[]): boolean {
+    return itemIds.every((id) => hasMembershipsFor(itemType, id)) && !membershipsFailedFor(itemType, itemIds);
+  }
+
+  watch(() => connection.retryToken, () => {
+    for (const { itemType, itemId } of Object.values(membershipFailures.value)) {
+      void loadMembershipsFor(itemType, [itemId]);
+    }
+  });
+
   function hasMembershipsFor(itemType: TopicItemType, itemId: string): boolean {
-    return loadedMemberships.has(membershipKey(itemType, itemId));
+    return loadedMemberships.value.has(membershipKey(itemType, itemId));
   }
 
   function topicIdsFor(itemType: TopicItemType, itemId: string): string[] {
@@ -240,14 +265,8 @@ export const useTopicsStore = defineStore('topics', () => {
   // Serialize writes to the same topic. Receipts come from SQLite, never from
   // a cached or failed membership lookup. Different topics remain independent.
   const membershipWrites = new Map<string, Promise<unknown>>();
-  function writeMemberships<T>(topicId: string, itemType: TopicItemType, itemIds: string[], write: () => Promise<T>): Promise<T> {
+  function enqueueMembershipWrite<T>(topicId: string, run: () => Promise<T>): Promise<T> {
     const previous = membershipWrites.get(topicId);
-    const run = () => loader.mutate(() => {
-      membershipRevision++;
-      // Invalidate the shared batch before any per-item guard releases readers.
-      return guardedWrite(itemIds.map((id) => membershipLoader(itemType, id)),
-        () => write().finally(() => { membershipRevision++; }));
-    });
     const pending = previous ? previous.catch(() => {}).then(run) : run();
     membershipWrites.set(topicId, pending);
     void pending.finally(() => {
@@ -256,7 +275,16 @@ export const useTopicsStore = defineStore('topics', () => {
     return pending;
   }
 
-  async function addItemsToTopic(topicId: string, itemType: TopicItemType, itemIds: string[]): Promise<string[]> {
+  function writeMemberships<T>(topicId: string, itemType: TopicItemType, itemIds: string[], write: () => Promise<T>): Promise<T> {
+    return enqueueMembershipWrite(topicId, () => loader.mutate(() => {
+      membershipRevision++;
+      // Invalidate the shared batch before any per-item guard releases readers.
+      return guardedWrite(itemIds.map((id) => membershipLoader(itemType, id)),
+        () => write().finally(() => { membershipRevision++; }));
+    }));
+  }
+
+  async function addItemsToTopic(topicId: string, itemType: TopicItemType, itemIds: string[]): Promise<TopicMembershipReceipt[]> {
     const ids = [...new Set(itemIds)];
     return writeMemberships(topicId, itemType, ids, async () => {
       const added = await backendAddTopicItems({ topicId, itemType, itemIds: ids });
@@ -270,7 +298,7 @@ export const useTopicsStore = defineStore('topics', () => {
     });
   }
 
-  async function removeItemFromTopic(topicId: string, itemType: TopicItemType, itemId: string): Promise<boolean> {
+  async function removeItemFromTopic(topicId: string, itemType: TopicItemType, itemId: string): Promise<TopicMembershipReceipt | null> {
     return writeMemberships(topicId, itemType, [itemId], async () => {
       const removed = await backendRemoveTopicItem({ topicId, itemType, itemId });
       const key = membershipKey(itemType, itemId);
@@ -279,6 +307,22 @@ export const useTopicsStore = defineStore('topics', () => {
       if (topic && removed) topic.item_count = Math.max(0, topic.item_count - 1);
       return removed;
     });
+  }
+
+  async function undoMemberships(topicId: string, itemType: TopicItemType,
+    receipts: TopicMembershipReceipt[], restore: boolean): Promise<void> {
+    await writeMemberships(topicId, itemType, receipts.map((row) => row.item_id), async () => {
+      const changed = await backendUndoTopicMemberships(topicId, itemType, receipts, restore);
+      for (const id of changed) {
+        const key = membershipKey(itemType, id);
+        const others = (memberships.value[key] ?? []).filter((id) => id !== topicId);
+        memberships.value[key] = restore ? [...others, topicId] : others;
+      }
+      const topic = byId(topicId);
+      if (topic) topic.item_count = Math.max(0, topic.item_count + (restore ? changed.length : -changed.length));
+    });
+    // A rejected stale receipt says nothing about the current membership.
+    await loadMembershipsFor(itemType, receipts.map((row) => row.item_id));
   }
 
   async function fetchTimeline(topicId: string): Promise<BackendTopicTimelineItem[]> {
@@ -392,6 +436,9 @@ export const useTopicsStore = defineStore('topics', () => {
     loadMembershipsFor,
     topicIdsFor,
     hasMembershipsFor,
+    membershipsKnownFor,
+    membershipsFailedFor,
+    undoMemberships,
     addItemsToTopic,
     removeItemFromTopic,
     fetchTimeline,

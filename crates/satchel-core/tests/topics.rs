@@ -704,13 +704,213 @@ async fn membership_receipts_cover_duplicates_concurrent_adds_and_removals() {
         repository.add_items(add_input(&topic.id, "thread", &["th-1", "th-1"])),
         repository.add_items(add_input(&topic.id, "thread", &["th-1"]))
     );
-    let receipts: Vec<String> = first.unwrap().into_iter().chain(second.unwrap()).collect();
+    let receipts: Vec<String> = first
+        .unwrap()
+        .into_iter()
+        .chain(second.unwrap())
+        .map(|r| r.item_id)
+        .collect();
     assert_eq!(receipts, vec!["th-1"]);
     let remove = || RemoveTopicItemRequest {
         topic_id: topic.id.clone(),
         item_type: TopicItemType::Thread,
         item_id: "th-1".into(),
     };
-    assert!(repository.remove_item(remove()).await.unwrap());
-    assert!(!repository.remove_item(remove()).await.unwrap());
+    assert!(repository.remove_item(remove()).await.unwrap().is_some());
+    assert!(repository.remove_item(remove()).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn membership_undo_rejects_aba_replay_and_independent_writers() {
+    let pool = pool().await;
+    seed_thread(&pool).await;
+    let repository = TopicRepository::new(&pool);
+    let topic = repository.upsert(topic_input("Guarded")).await.unwrap();
+    let remove = || RemoveTopicItemRequest {
+        topic_id: topic.id.clone(),
+        item_type: TopicItemType::Thread,
+        item_id: "th-1".into(),
+    };
+    let first_add = repository
+        .add_items(add_input(&topic.id, "thread", &["th-1"]))
+        .await
+        .unwrap();
+    let first_remove = repository.remove_item(remove()).await.unwrap().unwrap();
+    let second_add = repository
+        .add_items(add_input(&topic.id, "thread", &["th-1"]))
+        .await
+        .unwrap();
+    assert_ne!(first_add[0].revision, second_add[0].revision);
+    assert!(repository
+        .undo_memberships(&topic.id, TopicItemType::Thread, &first_add, false)
+        .await
+        .unwrap()
+        .is_empty());
+    // An independent SQL writer also invalidates the receipt, without a store cache.
+    sqlx::query("DELETE FROM topic_items WHERE topic_id = ?")
+        .bind(&topic.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(repository
+        .undo_memberships(&topic.id, TopicItemType::Thread, &[first_remove], true)
+        .await
+        .unwrap()
+        .is_empty());
+    let latest = repository
+        .add_items(add_input(&topic.id, "thread", &["th-1", "th-1"]))
+        .await
+        .unwrap();
+    assert_eq!(latest.len(), 1);
+    assert_eq!(
+        repository
+            .undo_memberships(&topic.id, TopicItemType::Thread, &latest, false)
+            .await
+            .unwrap(),
+        vec!["th-1"]
+    );
+    assert!(repository
+        .undo_memberships(&topic.id, TopicItemType::Thread, &latest, false)
+        .await
+        .unwrap()
+        .is_empty());
+    let added = repository
+        .add_items(add_input(&topic.id, "thread", &["th-1"]))
+        .await
+        .unwrap();
+    sqlx::query("UPDATE topic_items SET added_by = 'rule' WHERE topic_id = ?")
+        .bind(&topic.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(repository
+        .undo_memberships(&topic.id, TopicItemType::Thread, &added, false)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn membership_undo_is_partial_batched_and_preserves_removed_metadata() {
+    let pool = pool().await;
+    let repository = TopicRepository::new(&pool);
+    let topic = repository.upsert(topic_input("Events")).await.unwrap();
+    let mut input = add_input(&topic.id, "event", &["a", "b", "c"]);
+    input.added_by = Some(TopicAddedBy::Rule);
+    let added = repository.add_items(input).await.unwrap();
+    let b = repository
+        .remove_item(RemoveTopicItemRequest {
+            topic_id: topic.id.clone(),
+            item_type: TopicItemType::Event,
+            item_id: "b".into(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    // Only still-owned members are removed, all under one transaction.
+    assert_eq!(
+        repository
+            .undo_memberships(&topic.id, TopicItemType::Event, &added, false)
+            .await
+            .unwrap(),
+        vec!["a", "c"]
+    );
+    assert_eq!(
+        repository
+            .undo_memberships(
+                &topic.id,
+                TopicItemType::Event,
+                std::slice::from_ref(&b),
+                true
+            )
+            .await
+            .unwrap(),
+        vec!["b"]
+    );
+    assert!(repository
+        .undo_memberships(&topic.id, TopicItemType::Event, &[b], true)
+        .await
+        .unwrap()
+        .is_empty());
+    let by: String =
+        sqlx::query_scalar("SELECT added_by FROM topic_items WHERE topic_id = ? AND item_id = 'b'")
+            .bind(&topic.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(by, "rule");
+    repository.delete(&topic.id).await.unwrap();
+    assert!(repository
+        .undo_memberships(&topic.id, TopicItemType::Event, &added, true)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn membership_undo_and_another_connection_serialize_the_currentness_check() {
+    let directory = tempfile::tempdir().unwrap();
+    let url = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("topics.db").display()
+    );
+    let first = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .unwrap();
+    sqlx::migrate!("./src/db/migrations")
+        .run(&first)
+        .await
+        .unwrap();
+    let second = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .unwrap();
+    let repo = TopicRepository::new(&first);
+    let other = TopicRepository::new(&second);
+    let topic = repo.upsert(topic_input("Two windows")).await.unwrap();
+    for _ in 0..10 {
+        let receipt = repo
+            .add_items(add_input(&topic.id, "event", &["event"]))
+            .await
+            .unwrap();
+        let writer = async {
+            other
+                .remove_item(RemoveTopicItemRequest {
+                    topic_id: topic.id.clone(),
+                    item_type: TopicItemType::Event,
+                    item_id: "event".into(),
+                })
+                .await
+                .unwrap();
+            other
+                .add_items(add_input(&topic.id, "event", &["event"]))
+                .await
+                .unwrap();
+        };
+        let (undo, ()) = tokio::join!(
+            repo.undo_memberships(&topic.id, TopicItemType::Event, &receipt, false),
+            writer
+        );
+        undo.unwrap();
+        assert_eq!(
+            repo.list_memberships(TopicMembershipsQuery {
+                item_type: TopicItemType::Event,
+                item_ids: vec!["event".into()]
+            })
+            .await
+            .unwrap()
+            .len(),
+            1
+        );
+        repo.remove_item(RemoveTopicItemRequest {
+            topic_id: topic.id.clone(),
+            item_type: TopicItemType::Event,
+            item_id: "event".into(),
+        })
+        .await
+        .unwrap();
+    }
 }

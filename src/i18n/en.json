@@ -1012,6 +1012,7 @@
       "sync": "Mail sync failed",
       "templates": "Your templates could not be loaded",
       "threads": "The conversations could not be loaded",
+      "topicMemberships": "Topic memberships could not be loaded",
       "topics": "Topics could not be loaded",
       "unknown": "Something in Satchel stopped working"
     },
@@ -3472,6 +3473,9 @@
       "showGist": "Show summary",
       "showOriginal": "Show original",
       "thread": "Conversation"
+    },
+    "memberships": {
+      "loadFailed": "Topic memberships could not be loaded"
     },
     "picker": {
       "actionAdd": "Add to {name}",

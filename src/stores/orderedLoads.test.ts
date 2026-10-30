@@ -8,7 +8,7 @@ const backend = vi.hoisted(() => Object.fromEntries([
   'ListDrafts', 'SaveDraft', 'DeleteDraft', 'LoadDraft',
   'ListInvites', 'ListCalendarEvents', 'ListCalendarSources', 'RespondToInvite',
   'CreateCalendarEvent', 'DeleteCalendarEvent', 'ImportIcs', 'SyncGoogleCalendar', 'SyncGroupware',
-  'ListTopics', 'UpsertTopic', 'DeleteTopic', 'AddTopicItems', 'RemoveTopicItem',
+  'ListTopics', 'UpsertTopic', 'DeleteTopic', 'AddTopicItems', 'RemoveTopicItem', 'UndoTopicMemberships',
   'ListTopicMemberships', 'ListTopicFiles', 'AddTopicFile', 'DeleteTopicFile',
   'GetTopicTimeline', 'UpsertTopicNote', 'DeleteTopicNote', 'DownloadTopicFile',
 ].map((name) => [`backend${name}`, vi.fn()])));
@@ -190,7 +190,7 @@ it('keeps membership links when a pre-link read arrives late', async () => {
     .mockResolvedValue([{ item_id: 'thread', topic_id: 'topic' }]);
   const load = store.loadMembershipsFor('thread', ['thread']);
   await nextTick();
-  backend.backendAddTopicItems!.mockResolvedValue(['thread']);
+  backend.backendAddTopicItems!.mockResolvedValue([{ item_id: 'thread', revision: 'added' }]);
   await store.addItemsToTopic('topic', 'thread', ['thread']);
   old.resolve([]);
   await load;
@@ -208,13 +208,13 @@ it('uses the database receipt when membership lookup fails or the cache is stale
 
 it('serializes concurrent writes to the same topic and returns only the actual new link', async () => {
   const store = useTopicsStore();
-  const first = deferred<string[]>();
+  const first = deferred<{ item_id: string; revision: string }[]>();
   backend.backendAddTopicItems!.mockReturnValueOnce(first.promise).mockResolvedValue([]);
   const add = store.addItemsToTopic('topic', 'thread', ['thread']);
   const again = store.addItemsToTopic('topic', 'thread', ['thread']);
   expect(backend.backendAddTopicItems).toHaveBeenCalledTimes(1);
-  first.resolve(['thread']);
-  expect(await add).toEqual(['thread']);
+  first.resolve([{ item_id: 'thread', revision: 'first' }]);
+  expect(await add).toEqual([{ item_id: 'thread', revision: 'first' }]);
   expect(await again).toEqual([]);
   expect(store.topicIdsFor('thread', 'thread')).toEqual(['topic']);
 });
@@ -267,7 +267,7 @@ it('keeps topic files saved after a file list began and rereads after deletion',
 it('allows a failed membership write to retry without removing a concurrent different topic link', async () => {
   const store = useTopicsStore();
   const failing = deferred<string[]>();
-  backend.backendAddTopicItems!.mockReturnValueOnce(failing.promise).mockResolvedValue(['thread']);
+  backend.backendAddTopicItems!.mockReturnValueOnce(failing.promise).mockResolvedValue([{ item_id: 'thread', revision: 'added' }]);
   const add = store.addItemsToTopic('first', 'thread', ['thread']);
   const rejected = expect(add).rejects.toThrow('refused');
   await store.addItemsToTopic('other', 'thread', ['thread']);
@@ -286,16 +286,19 @@ it('Undo preserves the pre-existing membership after a failed lookup, through th
   backend.backendAddTopicItems!.mockImplementation(async ({ itemIds }: { itemIds: string[] }) => {
     const added = itemIds.filter((id) => !remote.has(id));
     added.forEach((id) => remote.add(id));
-    return added;
+    return added.map((item_id) => ({ item_id, revision: 'add' }));
   });
-  backend.backendRemoveTopicItem!.mockImplementation(async ({ itemId }: { itemId: string }) => remote.delete(itemId));
+  backend.backendUndoTopicMemberships!.mockImplementation(async (_topic, _type, receipts: { item_id: string }[]) => {
+    receipts.forEach((receipt) => remote.delete(receipt.item_id));
+    return receipts.map((receipt) => receipt.item_id);
+  });
   const toast = useToast();
   toast.state.toasts.splice(0);
   await useThreadActions().addToTopic(['existing', 'fresh'], 'topic');
   const undo = toast.state.toasts.at(-1)?.action;
   expect(undo?.label).toBe('Undo');
   await undo!.handler();
-  expect(backend.backendRemoveTopicItem).toHaveBeenCalledExactlyOnceWith({ topicId: 'topic', itemType: 'thread', itemId: 'fresh' });
+  expect(backend.backendUndoTopicMemberships).toHaveBeenCalledExactlyOnceWith('topic', 'thread', [{ item_id: 'fresh', revision: 'add' }], false);
   expect([...remote]).toEqual(['existing']);
   expect(store.topicIdsFor('thread', 'existing')).toEqual(['topic']);
 });
@@ -315,7 +318,7 @@ it('a stale membership response cannot erase a newer membership request', async 
 
 it('partial receipt updates do not mark other memberships as already loaded', async () => {
   const store = useTopicsStore();
-  backend.backendAddTopicItems!.mockResolvedValue(['thread']);
+  backend.backendAddTopicItems!.mockResolvedValue([{ item_id: 'thread', revision: 'added' }]);
   await store.addItemsToTopic('new', 'thread', ['thread']);
   expect(store.hasMembershipsFor('thread', 'thread')).toBe(false);
   backend.backendListTopicMemberships!.mockResolvedValue([
@@ -361,7 +364,7 @@ it('an older draft load cannot clear a save failure, and an explicit retry can c
 
 it('refreshes every affected item when a batch membership read begins during a multi-item write', async () => {
   const store = useTopicsStore();
-  const pendingWrite = deferred<string[]>();
+  const pendingWrite = deferred<{ item_id: string; revision: string }[]>();
   let remote: string[] = [];
   backend.backendAddTopicItems!.mockReturnValueOnce(pendingWrite.promise);
   backend.backendListTopicMemberships!.mockImplementation(async () =>
@@ -371,7 +374,7 @@ it('refreshes every affected item when a batch membership read begins during a m
   await nextTick();
   expect(backend.backendListTopicMemberships).toHaveBeenCalledTimes(1);
   remote = ['a', 'b', 'c'];
-  pendingWrite.resolve(remote);
+  pendingWrite.resolve(remote.map((item_id) => ({ item_id, revision: 'added' })));
   await Promise.all([write, read]);
   for (const id of remote) expect(store.topicIdsFor('thread', id)).toEqual(['topic']);
   expect(store.topicIdsFor('thread', 'unrelated')).toEqual([]);
@@ -438,11 +441,56 @@ it('allows membership loads and deletion retry after a pending topic delete fail
 it('links and deletes a large topic selection without nesting the call stack', async () => {
   const store = useTopicsStore();
   const ids = Array.from({ length: 5000 }, (_, index) => `bulk-${index}`);
-  backend.backendAddTopicItems!.mockResolvedValue(ids);
+  const receipts = ids.map((item_id) => ({ item_id, revision: item_id }));
+  backend.backendAddTopicItems!.mockResolvedValue(receipts);
   backend.backendDeleteTopic!.mockResolvedValue(undefined);
-  await expect(store.addItemsToTopic('topic', 'thread', ids)).resolves.toEqual(ids);
+  await expect(store.addItemsToTopic('topic', 'thread', ids)).resolves.toEqual(receipts);
   expect(store.topicIdsFor('thread', ids.at(-1)!)).toEqual(['topic']);
   await store.remove('topic');
   expect(store.topicIdsFor('thread', ids[0]!)).toEqual([]);
   expect(store.topicIdsFor('thread', ids.at(-1)!)).toEqual([]);
+});
+
+for (const outcome of ['success', 'failure'] as const) {
+  it(`serializes deletion behind a delayed add ${outcome}, including finalizers and newly accessed ids`, async () => {
+    const store = useTopicsStore();
+    let remote = [{ item_id: 'unseen', topic_id: 'topic' }];
+    const addGate = deferred<{ item_id: string; revision: string }[]>();
+    backend.backendAddTopicItems!.mockReturnValueOnce(addGate.promise)
+      .mockResolvedValueOnce([{ item_id: 'other-item', revision: 'other' }]);
+    backend.backendDeleteTopic!.mockImplementationOnce(async () => { remote = []; });
+    backend.backendListTopicMemberships!.mockImplementation(async () => [...remote]);
+    const add = store.addItemsToTopic('topic', 'thread', ['thread']);
+    const observed = outcome === 'failure' ? expect(add).rejects.toThrow('late error') : add;
+    const remove = store.remove('topic');
+    const read = store.loadMembershipsFor('thread', ['unseen']);
+    await store.addItemsToTopic('other', 'thread', ['other-item']);
+    expect(store.topicIdsFor('thread', 'other-item')).toEqual(['other']);
+    expect(backend.backendDeleteTopic).not.toHaveBeenCalled();
+    if (outcome === 'success') addGate.resolve([{ item_id: 'thread', revision: 'late' }]);
+    else addGate.reject(new Error('late error'));
+    await Promise.all([observed, remove, read]);
+    expect(store.topicIdsFor('thread', 'thread')).toEqual([]);
+    expect(store.topicIdsFor('thread', 'unseen')).toEqual([]);
+    expect(store.topicIdsFor('thread', 'other-item')).toEqual(['other']);
+  });
+}
+
+it('reports membership failure, keeps it unknown, and clears only the owned error after retry', async () => {
+  const store = useTopicsStore();
+  const { useConnectionStore } = await import('./connection');
+  const connection = useConnectionStore();
+  connection.reportBackendError('templates', new Error('templates offline'));
+  backend.backendListTopicMemberships!.mockRejectedValueOnce(new Error('memberships offline'));
+  await store.loadMembershipsFor('thread', ['one']);
+  expect(store.hasMembershipsFor('thread', 'one')).toBe(false);
+  expect(store.membershipsKnownFor('thread', ['one'])).toBe(false);
+  expect(store.membershipsFailedFor('thread', ['one'])).toBe(true);
+  expect(connection.backendErrorFor('topicMemberships')).toBeTruthy();
+  backend.backendListTopicMemberships!.mockResolvedValueOnce([{ item_id: 'one', topic_id: 'topic' }]);
+  connection.requestRetry();
+  await vi.waitFor(() => expect(store.membershipsKnownFor('thread', ['one'])).toBe(true));
+  expect(store.topicIdsFor('thread', 'one')).toEqual(['topic']);
+  expect(connection.backendErrorFor('topicMemberships')).toBeNull();
+  expect(connection.backendErrorFor('templates')).toBeTruthy();
 });

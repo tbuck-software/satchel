@@ -20,6 +20,7 @@ import { translateBackendError } from '@/utils/backendErrors';
 export const BACKEND_ERROR_SOURCES = [
   'threads',
   'topics',
+  'topicMemberships',
   'messages',
   'mailboxes',
   'accounts',
@@ -36,6 +37,7 @@ export type BackendErrorSource = (typeof BACKEND_ERROR_SOURCES)[number];
 const SOURCE_KEYS: Record<string, string> = {
   threads: 'errors.source.threads',
   topics: 'errors.source.topics',
+  topicMemberships: 'errors.source.topicMemberships',
   messages: 'errors.source.messages',
   mailboxes: 'errors.source.mailboxes',
   accounts: 'errors.source.accounts',

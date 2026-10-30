@@ -59,7 +59,7 @@ vi.mock('@/stores/threads', () => ({
 }));
 vi.mock('@/stores/topics', () => ({
   useTopicsStore: () => ({
-    topicIdsFor: () => [],
+    membershipsKnownFor: () => true, membershipsFailedFor: () => false, topicIdsFor: () => [],
     hasMembershipsFor: () => true, byId: vi.fn(), loadMembershipsFor: vi.fn(), openPicker: vi.fn(),
   }),
 }));
