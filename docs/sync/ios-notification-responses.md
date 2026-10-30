@@ -43,11 +43,15 @@ lease numbers only increase; delayed readiness or disposal from an older
 bootstrap cannot revive it or stop a newer listener. Lease IPC is serialized
 within the frontend realm, including reservations that resolve after disposal.
 Android and desktop return no lease and keep their existing notification paths.
+The frontend side lives in `src/mobile/iosNotificationResponses.ts`, outside the
+startup bundle. The bootstrap asks `runtime_capabilities` for the platform and,
+on iOS only, imports the module before it reserves the first lease, so no lease
+is active before its handling exists. Android and desktop never load it.
 A failed reservation, activation or retirement reports through the connection
 `notifications` error source. The banner's Retry retires the current lease and
 connects a new one, registering the route callback only if it is still missing;
-a successful activation clears the error, unless a response is still held (see
-below). Resume, Android navigation and the
+a successful activation clears the error, unless a reply still waits for that
+Retry (see below). Resume, Android navigation and the
 focus/visibility handlers are registered separately and survive a lease failure.
 
 The gate retains response payloads and OS completion closures until ACK. The
@@ -110,10 +114,22 @@ These are transitions, not states: each one re-issues the lease at most once,
 so a response that keeps failing waits for the next thing the user does, or
 for the next pause. A re-issue never starts while a confirm dialog is open,
 because a replayed reply would ask its question and take that dialog away; it
-waits for the dialog to close. While a response is held, the `notifications`
-source reports `backend.errors.notificationResponseWaiting`, so the banner and
-its Retry, which re-issues the lease, are there as a fallback. The report clears
-when the last held response is ACKed.
+waits for the dialog to close. That is checked when the re-issue is due, again
+after a lease still connecting has settled, and once more right before the new
+lease activates: a dialog that opened during the reservation round trip makes
+the new lease retire unactivated, and the re-issue waits for the dialog to
+close. Native keeps every response meanwhile.
+
+Only a hold that nothing above brings back uses the banner: a reply whose
+action threw reports `backend.errors.notificationReplyWaiting` through the
+`notifications` source, and the banner's Retry re-issues the lease. A failed
+ACK reports its own error there, and Retry re-ACKs it. The holds that come back
+by themselves stay off the banner: `interrupted` has its toast, `unsaved` the
+composer's save-failed toast, and a failed read or archive needs none until it
+is given up. The report clears when the last such reply is ACKed. The banner
+shows `notifications` only when no other source reports, so neither kind can
+hide a sync failure, such as a rejected password, that comes with its own
+action.
 
 Read and archive ACK only on the outcome `useThreadActions()` reports: `setRead`
 resolving `true`, and `archive` resolving `true` once the thread is Done, also
@@ -127,9 +143,9 @@ gone. Any other load failure counts as transient. A read or archive gets
 `NOTIFICATION_ACTION_ATTEMPTS` (3) deliveries per response; the third failure
 is ACKed with a toast saying the action could not be completed, instead of
 replaying on every lease for the process lifetime. The paused re-issues above
-reach that cap in a running app; Retry, a restart or any other re-issue counts
-toward it as well. The count lives with the
-composer store, like deduplication. A reply is never given up: its text exists
+reach that cap in a running app; Retry or any other re-issue counts toward it as
+well. The count lives in memory with the composer store, like deduplication, so
+a new WebView or an app restart starts it again at zero. A reply is never given up: its text exists
 nowhere else, and only process termination ends its retention.
 
 These are in-process guarantees. Orderly bootstrap disposal/recreation with the

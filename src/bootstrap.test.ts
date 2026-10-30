@@ -26,7 +26,8 @@ import {
   backendTransitionThreads,
   backendGetThread,
 } from '@/services/backend';
-import { NOTIFICATION_RETRY_DELAY_MS, useAppBootstrap, useComposeWindowBootstrap } from '@/bootstrap';
+import { useAppBootstrap, useComposeWindowBootstrap } from '@/bootstrap';
+import { NOTIFICATION_RETRY_DELAY_MS } from '@/mobile/iosNotificationResponses';
 import ComposerHost from '@/components/mail/ComposerHost.vue';
 import type { Thread } from '@/types/mail';
 import { useToast } from '@/composables/useToast';
@@ -143,6 +144,7 @@ vi.mock('@/services/backend', async (importOriginal) => {
     backendMobileNotificationsFrontendReady: vi.fn(async (id: number | null) => id ?? 1),
     backendMobileNotificationResponseHandled: resolving(undefined),
     backendPendingCrashReports: resolving([]),
+    backendRuntimeCapabilities: resolving({ platform: 'ios', mobile: true }),
     backendTakePendingOpenWith: resolving([]),
     backendTakePendingNotificationThread: resolving(null),
     backendImportIcsPath: resolving(null),
@@ -185,7 +187,7 @@ const router = createRouter({
 });
 
 const REPLY_WAITING = 'Your reply from the notification is kept. Satchel offers it again once the open dialog or draft is closed.';
-const RESPONSE_WAITING = 'An action from a notification is still waiting to be completed.';
+const REPLY_WAITS_FOR_RETRY = 'A reply from a notification could not be opened. Satchel keeps it until you try again.';
 const ACTION_FAILED = 'The action from the notification could not be completed. Try it again in Satchel.';
 const SAVE_FAILED_STAYS_OPEN = 'The draft could not be saved. The composer stays open.';
 
@@ -996,7 +998,8 @@ describe('bootstrap entries', () => {
       await gate.settled();
       expect(gate.retained()).toEqual(['preempted-reply']);
       expect(useToast().state.toasts.map(toast => toast.message)).toContain(REPLY_WAITING);
-      expect(backendErrorLabel(connection.backendErrorFor('notifications'))).toBe(RESPONSE_WAITING);
+      // The toast says it; the dialog closing brings it back, not the banner.
+      expect(connection.backendErrorFor('notifications')).toBeNull();
       // Nothing comes back while the other question is still open.
       expect(gate.activations()).toBe(1);
 
@@ -1013,7 +1016,7 @@ describe('bootstrap entries', () => {
     });
 
     it('offers a reply again once the draft that could not be saved is out of the way, not before', async () => {
-      const { composer, gate } = await bootWithOpenDraft();
+      const { composer, connection, gate } = await bootWithOpenDraft();
       composeForm.persistDraft.mockResolvedValueOnce(null).mockResolvedValue('saved-draft');
       const dialog = useConfirm();
       gate.respond('unsaved-reply', notificationReply('unsaved', 'reply typed into the notification'));
@@ -1022,6 +1025,9 @@ describe('bootstrap entries', () => {
       await gate.settled();
       expect(composer.request?.body).toBe('unsent draft');
       expect(gate.retained()).toEqual(['unsaved-reply']);
+      // The composer's own toast says the draft stays open; no banner on top.
+      expect(useToast().state.toasts.map(toast => toast.message)).toContain(SAVE_FAILED_STAYS_OPEN);
+      expect(connection.backendErrorFor('notifications')).toBeNull();
 
       // Another dialog closing changes nothing for a draft that cannot be saved.
       const other = dialog.ask({ title: 'Another question', confirmLabel: 'OK' });
@@ -1076,7 +1082,8 @@ describe('bootstrap entries', () => {
       gate.respond('thrown-reply', notificationReply('thrown', 'still here'));
       await gate.settled();
       expect(gate.retained()).toEqual(['thrown-reply']);
-      expect(backendErrorLabel(connection.backendErrorFor('notifications'))).toBe(RESPONSE_WAITING);
+      // Nothing brings this one back by itself, so the banner offers Retry.
+      expect(backendErrorLabel(connection.backendErrorFor('notifications'))).toBe(REPLY_WAITS_FOR_RETRY);
       expect(gate.activations()).toBe(1);
 
       connection.requestRetry();
@@ -1104,7 +1111,8 @@ describe('bootstrap entries', () => {
       gate.respond('failing-action', { type: 'notification-tap', threadId: 'failing-thread', actionId });
       await gate.settled();
       expect(mutation).toHaveBeenCalledTimes(1);
-      expect(backendErrorLabel(connection.backendErrorFor('notifications'))).toBe(RESPONSE_WAITING);
+      // A routine retry is no failure to show; the banner stays free.
+      expect(connection.backendErrorFor('notifications')).toBeNull();
       // No tight cycle: nothing comes back before the pause is over.
       await vi.advanceTimersByTimeAsync(NOTIFICATION_RETRY_DELAY_MS - 1);
       await gate.settled();
@@ -1148,6 +1156,48 @@ describe('bootstrap entries', () => {
       await expect(question).resolves.toBe('confirmed');
       await gate.settled();
       expect(gate.activations()).toBe(2);
+      expect(mutation).toHaveBeenCalledTimes(2);
+    });
+
+    it('holds a timed retry back for a dialog that opens while its lease is reserved', async () => {
+      const pinia = createPinia();
+      vi.spyOn(useThreadsStore(pinia), 'ensureThreadLoaded').mockResolvedValue('loaded');
+      const mutation = vi.fn(async () => false);
+      const realActions = threadActionModule.useThreadActions;
+      vi.spyOn(threadActionModule, 'useThreadActions').mockImplementation(() => ({ ...realActions(), setRead: mutation }));
+      const gate = nativeRouteGate();
+      const native = vi.mocked(backendMobileNotificationsFrontendReady).getMockImplementation()!;
+      let reserved: (() => void) | null = null;
+      let holdReservation = false;
+      vi.mocked(backendMobileNotificationsFrontendReady).mockImplementation(async (id, ready) => {
+        if (id === null && holdReservation) await new Promise<void>(resolve => { reserved = resolve; });
+        return native(id, ready);
+      });
+      boot(useAppBootstrap, pinia);
+      await flushPromises();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      onTestFinished(() => { vi.useRealTimers(); });
+      gate.respond('failing-read', { type: 'notification-tap', threadId: 'failing-thread', actionId: 'satchel.read' });
+      await gate.settled();
+      expect(mutation).toHaveBeenCalledTimes(1);
+
+      holdReservation = true;
+      await vi.advanceTimersByTimeAsync(NOTIFICATION_RETRY_DELAY_MS);
+      await vi.waitFor(() => expect(reserved).not.toBeNull());
+      // The question arrives while the new lease is on its way.
+      const dialog = useConfirm();
+      const question = dialog.decide({ title: 'Delete for good?', confirmLabel: 'Delete' });
+      holdReservation = false;
+      reserved!();
+      await gate.settled();
+      expect(gate.activations()).toBe(1);
+      expect(mutation).toHaveBeenCalledTimes(1);
+      expect(dialog.state.pending).not.toBeNull();
+
+      dialog.answer(true);
+      await expect(question).resolves.toBe('confirmed');
+      await vi.waitFor(() => expect(gate.activations()).toBe(2));
+      await gate.settled();
       expect(mutation).toHaveBeenCalledTimes(2);
     });
   });

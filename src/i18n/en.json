@@ -248,7 +248,7 @@
       "messagesQuarantined": "{count} messages in {folder} could not be stored for {account}. Sync continues with the remaining messages.",
       "noActiveAccount": "Set up an active account first.",
       "notAMessageFile": "Only .eml and .msg files can be opened this way.",
-      "notificationResponseWaiting": "An action from a notification is still waiting to be completed.",
+      "notificationReplyWaiting": "A reply from a notification could not be opened. Satchel keeps it until you try again.",
       "oauthAccountConflict": "This address already belongs to an IMAP account and cannot be replaced with OAuth.",
       "oauthAccountMismatch": "Please choose the Google account you are connecting. Your existing account has not been changed.",
       "oauthAuthorizationCancelled": "The sign-in was cancelled.",

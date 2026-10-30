@@ -11,9 +11,8 @@ import {
   backendGetNotificationPreferences,
   backendImportIcs,
   backendImportIcsPath,
-  backendMobileNotificationsFrontendReady,
-  backendMobileNotificationResponseHandled,
   backendPendingCrashReports,
+  backendRuntimeCapabilities,
   backendUndoOutboxSend,
   backendRunImapSync,
   backendSetBackgroundSync,
@@ -32,10 +31,9 @@ import {
   MAIL_ACTIONS,
   notificationAction,
   notificationReplyText,
-  notificationRouteThreadId,
   notificationThreadId,
-  type NativeNotificationRoute,
 } from '@/utils/notificationNavigation';
+import type { IosNotificationResponses, NotificationActionOutcome } from '@/mobile/iosNotificationResponses';
 import { useAccountsStore } from '@/stores/accounts';
 import { useAliasesStore } from '@/stores/aliases';
 import { useConnectionStore } from '@/stores/connection';
@@ -57,7 +55,6 @@ import { useFollowUpsStore } from '@/stores/followUps';
 import { useComposerStore } from '@/stores/composer';
 import { useAppUpdateStore } from '@/stores/appUpdate';
 import { useToast } from '@/composables/useToast';
-import { useConfirm } from '@/composables/useConfirm';
 import { useQueueFailureToasts } from '@/composables/useQueueFailureToasts';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { useKeyboard } from '@/composables/useKeyboard';
@@ -76,50 +73,6 @@ import { scheduleIdleWork } from '@/utils/idleWork';
 import { crashReportForClipboard } from '@/utils/crashReport';
 import { loadOmniSearch } from '@/components/navigation/loadOmniSearch';
 import { loadPublicSuffixTable } from '@/utils/externalLinks';
-
-/**
- * How a notification action ended. `done` and `cancelled` (the user kept the
- * open draft) are final and ACKed. The rest are not: native keeps the response,
- * reply text included, and delivers it again to the next lease. `interrupted`
- * (nobody answered the reply's question) and `unsaved` (the open draft could
- * not be saved to make room) wait for the dialog or composer in their way;
- * `failed` is everything else.
- */
-type NotificationActionOutcome = 'done' | 'cancelled' | 'failed' | 'interrupted' | 'unsaved';
-
-function isFinalOutcome(outcome: NotificationActionOutcome) {
-  return outcome === 'done' || outcome === 'cancelled';
-}
-
-// Shared stores can outlive a bootstrap component. Keep response work with the
-// composer store so a replay joins a pending guard/action or ACKs finished work.
-// Completed IDs last for that store's lifetime, including a lost ACK; failed
-// ones are forgotten so a replay runs the action again. This is in-memory
-// deduplication, not recovery of JS side effects after a WebView crash.
-const notificationResponses = new WeakMap<object, Map<string, Promise<NotificationActionOutcome>>>();
-// Failed deliveries per response, with the same lifetime as the map above.
-const notificationFailures = new WeakMap<object, Map<string, number>>();
-/**
- * Deliveries after which a read or archive that keeps failing is given up:
- * ACKed with a toast instead of replaying on every lease for the process
- * lifetime. A reply is never given up; its text exists nowhere else.
- */
-const NOTIFICATION_ACTION_ATTEMPTS = 3;
-/**
- * Pause before a failed read or archive is delivered again, times the
- * deliveries it has failed so far. A failure that repeats reaches the cap
- * above in minutes instead of in a tight loop.
- */
-export const NOTIFICATION_RETRY_DELAY_MS = 15_000;
-/** The banner's cause while a response waits; a key, translated on render. */
-const NOTIFICATION_RESPONSE_WAITING = 'backend.errors.notificationResponseWaiting';
-// Keep lease reservations in request order even when IPC replies resolve late.
-let notificationLifecycle: Promise<unknown> = Promise.resolve();
-function updateNotificationListener(id: number | null, ready: boolean): Promise<number | null> {
-  const next = notificationLifecycle.then(() => backendMobileNotificationsFrontendReady(id, ready));
-  notificationLifecycle = next.catch(() => {});
-  return next;
-}
 
 /** What an event registration hands back so it can be taken down again. */
 type Disposer = () => void | Promise<void>;
@@ -313,28 +266,6 @@ export function useAppBootstrap(): void {
   const settingsStore = useSettingsStore();
   const ui = useUiStore();
   const composer = useComposerStore();
-  let responses = notificationResponses.get(composer);
-  if (!responses) {
-    responses = new Map();
-    notificationResponses.set(composer, responses);
-  }
-  const sharedResponses = responses;
-  let failures = notificationFailures.get(composer);
-  if (!failures) {
-    failures = new Map();
-    notificationFailures.set(composer, failures);
-  }
-  const responseFailures = failures;
-  let notificationListenerId: number | null = null;
-  const retireNotificationListener = () => {
-    if (notificationListenerId === null) return;
-    const id = notificationListenerId;
-    notificationListenerId = null;
-    void updateNotificationListener(id, false).catch(error => {
-      connectionStore.reportBackendError('notifications', error);
-      console.warn('mobile notification listener disposal failed', error);
-    });
-  };
   const appUpdates = useAppUpdateStore();
   onMounted(() => appUpdates.start());
   onBeforeUnmount(() => appUpdates.stop());
@@ -491,7 +422,7 @@ export function useAppBootstrap(): void {
         connectionStore.backendErrorFor('templates') ? templatesStore.load() : undefined,
         connectionStore.backendErrorFor('smartFolders') ? smartFoldersStore.load() : undefined,
         connectionStore.backendErrorFor('notifications') && backendSupportsNativeCommands()
-          ? redeliverNotificationResponses()
+          ? (iosNotifications ? iosNotifications.redeliver() : connectNotificationRoutes())
           : undefined,
         connectionStore.refresh(),
       ]);
@@ -546,40 +477,6 @@ export function useAppBootstrap(): void {
     useToast().info(t('app.notifications.mailGone'));
     await backendDismissMobileNotifications([threadId]).catch(() => {});
     return 'done';
-  }
-
-  /**
-   * Run one delivery and apply the retry policy: a failure stays unacknowledged
-   * for the next lease, up to NOTIFICATION_ACTION_ATTEMPTS deliveries of a read
-   * or archive. A thrown action counts as a failure.
-   */
-  async function settleNotificationAction(
-    notification: NativeNotificationRoute,
-    threadId: string,
-    responseId: string,
-  ): Promise<NotificationActionOutcome> {
-    let outcome: NotificationActionOutcome;
-    try {
-      outcome = await handleNotificationAction(notification, threadId);
-    } catch (error) {
-      console.warn('mobile notification action failed', error);
-      outcome = 'failed';
-    }
-    if (outcome !== 'failed') {
-      responseFailures.delete(responseId);
-      // Native keeps it for the next lease; say why nothing opened.
-      if (outcome === 'interrupted') useToast().info(t('app.notifications.replyWaiting'));
-      return outcome;
-    }
-    if (notificationAction(notification) === MAIL_ACTIONS.reply) return 'failed';
-    const attempts = (responseFailures.get(responseId) ?? 0) + 1;
-    if (attempts < NOTIFICATION_ACTION_ATTEMPTS) {
-      responseFailures.set(responseId, attempts);
-      return 'failed';
-    }
-    responseFailures.delete(responseId);
-    useToast().error(t('app.notifications.actionFailed'));
-    return 'cancelled';
   }
 
   /**
@@ -690,165 +587,41 @@ export function useAppBootstrap(): void {
     }
   }
 
-  async function onNotificationRoute({ payload }: Event<NativeNotificationRoute>) {
-    const listenerId = notificationListenerId;
-    if (bootstrapDisposed || listenerId === null || !payload || payload.listenerId !== listenerId) return;
-    const responseId = payload.responseId;
-    if (typeof responseId !== 'string' || !responseId.trim() || responseId.length > 128) return;
-    const threadId = notificationRouteThreadId(payload);
-    if (!threadId || typeof payload.actionId !== 'string'
-      || !['tap', ...Object.values(MAIL_ACTIONS)].includes(payload.actionId)) return;
-    let work = sharedResponses.get(responseId);
-    if (!work) {
-      // Defer invocation until the promise is registered, for reentrancy.
-      const started = Promise.resolve().then(() => settleNotificationAction(payload, threadId, responseId));
-      sharedResponses.set(responseId, started);
-      // Registered before any joiner awaits it, so a failure is gone
-      // from the map by the time a caller sees it.
-      void started.then(outcome => {
-        if (!isFinalOutcome(outcome) && sharedResponses.get(responseId) === started) sharedResponses.delete(responseId);
-      });
-      work = started;
-    }
-    // Retain native response/reply text for replay after recreation.
-    const outcome = await work;
-    if (!isFinalOutcome(outcome)) {
-      if (!bootstrapDisposed) holdNotificationResponse(responseId, outcome, notificationAction(payload));
-      return;
-    }
-    try {
-      await backendMobileNotificationResponseHandled(responseId);
-      releaseNotificationResponse(responseId);
-    } catch (error) {
-      // Completed work stays deduplicated, so the next delivery re-ACKs.
-      connectionStore.reportBackendError('notifications', error);
-      console.warn('mobile notification acknowledgement failed', error);
-    }
-  }
-
-  let notificationRouteListening = false;
-  let notificationConnection: Promise<void> | null = null;
+  let iosNotifications: IosNotificationResponses | null = null;
   /**
-   * Reserve an iOS listener lease, register the route callback once, then
-   * activate the lease so native replays what it retains. The banner's Retry
-   * runs this again after any step failed; a new lease replaces the old one,
-   * which also replays responses whose ACK was lost.
+   * Only iOS hands mail responses to a listener lease; Android and the desktop
+   * route theirs elsewhere. Ask the shell rather than guess from the user
+   * agent, and load the handling, which no other platform needs in its startup
+   * bundle, before the first lease: a lease without it would drop responses.
    */
-  function connectNotificationRoutes(): Promise<void> {
-    notificationConnection ??= (async () => {
+  async function connectNotificationRoutes(): Promise<void> {
+    if (!iosNotifications) {
       try {
-        retireNotificationListener();
-        if (bootstrapDisposed) return;
-        // Reserve before registration, activate only after its callback exists.
-        // A disposed bootstrap retires even a reservation that resolves late.
-        const listenerId = await updateNotificationListener(null, false);
-        notificationListenerId = listenerId;
-        if (bootstrapDisposed) {
-          retireNotificationListener();
+        const { platform } = await backendRuntimeCapabilities();
+        if (platform !== 'ios') {
+          // Nothing else reports here; a Retry after a failed query is done.
+          connectionStore.clearBackendError('notifications');
           return;
         }
-        if (!notificationRouteListening) {
-          adoptDisposer(await listen<NativeNotificationRoute>('mobile:notification-route', onNotificationRoute));
-          notificationRouteListening = true;
-        }
-        if (bootstrapDisposed || notificationListenerId !== listenerId) return;
-        if (listenerId !== null) await updateNotificationListener(listenerId, true);
-        // The lease works; a response it has yet to finish is still waiting.
-        if (heldResponses.size) connectionStore.reportBackendError('notifications', NOTIFICATION_RESPONSE_WAITING);
-        else connectionStore.clearBackendError('notifications');
+        if (bootstrapDisposed) return;
+        const { createIosNotificationResponses } = await import('@/mobile/iosNotificationResponses');
+        if (bootstrapDisposed) return;
+        iosNotifications ??= createIosNotificationResponses({
+          t,
+          composer,
+          connection: connectionStore,
+          handleNotificationAction,
+          adoptDisposer,
+          isDisposed: () => bootstrapDisposed,
+        });
       } catch (error) {
-        retireNotificationListener();
         connectionStore.reportBackendError('notifications', error);
         console.warn('mobile notification bridge failed', error);
+        return;
       }
-    })().finally(() => {
-      notificationConnection = null;
-    });
-    return notificationConnection;
-  }
-
-  const confirmDialog = useConfirm();
-  /** Responses this bootstrap was handed and could not ACK yet. */
-  const heldResponses = new Set<string>();
-  /** What has to happen before a new lease can help a held response. */
-  const redeliverWhen = { dialogCloses: false, composerCloses: false };
-  let redeliveryTimer: ReturnType<typeof setTimeout> | null = null;
-
-  /**
-   * Native keeps a response that was not ACKed, but delivers it again only to
-   * a new lease. Re-issue one once whatever stopped the response is out of the
-   * way: the dialog that took a reply's question, the composer whose draft
-   * could not be saved, or, for a read or archive, a pause. Until then the
-   * banner says a response is waiting, and its Retry re-issues the lease too.
-   * A reply whose action threw waits for that Retry.
-   */
-  function holdNotificationResponse(responseId: string, outcome: NotificationActionOutcome, action: string | null) {
-    heldResponses.add(responseId);
-    connectionStore.reportBackendError('notifications', NOTIFICATION_RESPONSE_WAITING);
-    if (outcome === 'interrupted') redeliverWhen.dialogCloses = true;
-    if (outcome === 'interrupted' || outcome === 'unsaved') {
-      redeliverWhen.composerCloses = true;
-      // Closed while the answer travelled: nothing is in the way any more.
-      if (!composer.isOpen) redeliverOnceComposerStaysClosed();
-    } else if (action !== MAIL_ACTIONS.reply) {
-      scheduleNotificationRedelivery(NOTIFICATION_RETRY_DELAY_MS * (responseFailures.get(responseId) ?? 1));
     }
+    await iosNotifications.connect();
   }
-
-  function releaseNotificationResponse(responseId: string) {
-    if (!heldResponses.delete(responseId) || heldResponses.size) return;
-    if (connectionStore.backendErrorFor('notifications') === NOTIFICATION_RESPONSE_WAITING) {
-      connectionStore.clearBackendError('notifications');
-    }
-  }
-
-  /**
-   * A replacement closes the composer on its way to the next request, the one
-   * the user asked for. Only a composer that is still closed after the current
-   * task is out of the way.
-   */
-  function redeliverOnceComposerStaysClosed() {
-    setTimeout(() => {
-      if (!composer.isOpen && redeliverWhen.composerCloses) void redeliverNotificationResponses();
-    });
-  }
-
-  function scheduleNotificationRedelivery(delay: number) {
-    if (redeliveryTimer !== null || bootstrapDisposed) return;
-    redeliveryTimer = setTimeout(() => {
-      redeliveryTimer = null;
-      void redeliverNotificationResponses();
-    }, delay);
-  }
-
-  /** Re-issue the lease, so native delivers every held response again. */
-  async function redeliverNotificationResponses() {
-    if (bootstrapDisposed) return;
-    // A replayed reply asks its question, and a new question takes the open
-    // one away. Wait for that dialog to close instead.
-    if (confirmDialog.state.pending) {
-      redeliverWhen.dialogCloses = true;
-      return;
-    }
-    redeliverWhen.dialogCloses = false;
-    redeliverWhen.composerCloses = false;
-    if (redeliveryTimer !== null) {
-      clearTimeout(redeliveryTimer);
-      redeliveryTimer = null;
-    }
-    // A lease still connecting may have delivered before the response failed.
-    await notificationConnection;
-    if (!bootstrapDisposed) await connectNotificationRoutes();
-  }
-
-  // Transitions, not states: each one re-issues the lease at most once, so a
-  // response that keeps failing waits for the next thing the user does.
-  watch(() => confirmDialog.state.pending, (pending, previous) => {
-    if (!pending && previous && redeliverWhen.dialogCloses) void redeliverNotificationResponses();
-  });
-  watch(() => composer.isOpen, (open) => {
-    if (!open && redeliverWhen.composerCloses) redeliverOnceComposerStaysClosed();
-  });
 
   async function registerStartupEvents() {
     if (!backendSupportsNativeCommands()) return;
@@ -1385,8 +1158,7 @@ export function useAppBootstrap(): void {
 
   onBeforeUnmount(() => {
     bootstrapDisposed = true;
-    retireNotificationListener();
-    if (redeliveryTimer !== null) clearTimeout(redeliveryTimer);
+    iosNotifications?.dispose();
     startupEvents.dispose();
     cancelInteractionPrefetch?.();
     cancelInteractionPrefetch = null;
