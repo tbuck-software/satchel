@@ -460,7 +460,8 @@ export function useThreadActions() {
       ...(removed.length > 0 ? {
         action: {
           label: t('thread.actions.undo'),
-          present: 'fab',
+          // Partial failures need visible text on touch screens as well.
+          present: failures.length === 0 ? 'fab' : undefined,
           handler: () => attempt(
             () => topics.undoMemberships(topicId, 'thread', removed, true),
             t('thread.result.addToTopicFailed'),
