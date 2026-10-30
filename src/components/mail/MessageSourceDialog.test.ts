@@ -13,6 +13,24 @@ vi.mock('@/stores/messages', () => ({
 
 let wrapper: VueWrapper | null = null;
 
+function source(raw: string, messageId = 'message-1') {
+  return { message_id: messageId, subject: raw, raw_source: raw, raw_source_status: 'loaded', raw_size: raw.length };
+}
+
+function deferredSource() {
+  let resolve!: (value: ReturnType<typeof source>) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<ReturnType<typeof source>>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function exportButton() {
+  return [...document.body.querySelectorAll('button')].find(element => element.textContent?.includes('Save as EML'))!;
+}
+
 beforeEach(() => {
   setActivePinia(createPinia());
 });
@@ -25,6 +43,63 @@ afterEach(() => {
 });
 
 describe('message source dialog', () => {
+  it.each(['before', 'after'])('ignores a closed request completing %s the reopened request', async (order) => {
+    const old = deferredSource();
+    const current = deferredSource();
+    loadMessageSource.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
+    wrapper = mount(MessageSourceDialog, { attachTo: document.body, props: { open: true, messageId: 'message-1' } });
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ open: true });
+    expect(loadMessageSource).toHaveBeenCalledTimes(2);
+
+    if (order === 'before') {
+      old.resolve(source('Old source'));
+      await flushPromises();
+      expect(exportButton().disabled).toBe(true);
+      expect(document.body.querySelector('pre')).toBeNull();
+    }
+    current.resolve(source('Current source'));
+    await flushPromises();
+    if (order === 'after') {
+      old.resolve(source('Old source'));
+      await flushPromises();
+    }
+    expect(document.body.querySelector('pre')?.textContent).toBe('Current source');
+    expect(exportButton().disabled).toBe(false);
+  });
+
+  it('ignores an old error and finalizer while retaining the current request error', async () => {
+    const old = deferredSource();
+    const current = deferredSource();
+    loadMessageSource.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
+    wrapper = mount(MessageSourceDialog, { attachTo: document.body, props: { open: true, messageId: 'message-1' } });
+    await wrapper.setProps({ open: false });
+    await wrapper.setProps({ open: true });
+    old.reject(new Error('Old failure'));
+    await flushPromises();
+    expect(document.body.querySelector('[role="alert"]')).toBeNull();
+    expect(exportButton().disabled).toBe(true);
+    current.reject(new Error('Current failure'));
+    await flushPromises();
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('Current failure');
+    expect(exportButton().disabled).toBe(false);
+  });
+
+  it('clears all previous source details when switching messages', async () => {
+    const current = deferredSource();
+    loadMessageSource.mockResolvedValueOnce(source('Previous subject')).mockReturnValueOnce(current.promise);
+    wrapper = mount(MessageSourceDialog, { attachTo: document.body, props: { open: true, messageId: 'message-1' } });
+    await flushPromises();
+    await wrapper.setProps({ messageId: 'message-2' });
+    expect(document.body.querySelector('.subject')).toBeNull();
+    expect(document.body.querySelector('.size')).toBeNull();
+    expect(document.body.querySelector('pre')).toBeNull();
+    expect(exportButton().disabled).toBe(true);
+    current.resolve(source('New source', 'message-2'));
+    await flushPromises();
+    expect(document.body.querySelector('pre')?.textContent).toBe('New source');
+  });
+
   it('opens on the original RFC 822 source when the provider returns it', async () => {
     loadMessageSource.mockResolvedValue({
       message_id: 'message-1',

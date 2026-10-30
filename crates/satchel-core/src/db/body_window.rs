@@ -5,6 +5,7 @@ use futures::future::BoxFuture;
 use sqlx::{SqliteConnection, SqlitePool};
 
 const NEXT_RUN_KEY: &str = "maintenance.body_window_next_at";
+const MAX_WINDOW_DAYS: i64 = 3650;
 
 pub const BODY_WINDOW: DataRepair = DataRepair {
     name: "body_window",
@@ -18,18 +19,25 @@ struct Cursor {
     after: String,
 }
 
+async fn configured_days(
+    connection: &mut SqliteConnection,
+    default: i64,
+) -> Result<i64, sqlx::Error> {
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'sync.body_window_days'")
+            .fetch_optional(connection)
+            .await?;
+    Ok(raw
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(default)
+        .clamp(0, MAX_WINDOW_DAYS))
+}
+
 /// Store the setting and reset or cancel its job in the same transaction.
 pub async fn set_days(pool: &SqlitePool, days: i64, default: i64) -> Result<bool, sqlx::Error> {
-    let days = days.clamp(0, 3650);
+    let days = days.clamp(0, MAX_WINDOW_DAYS);
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let previous: Option<String> =
-        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'sync.body_window_days'")
-            .fetch_optional(&mut *tx)
-            .await?;
-    let previous = previous
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(default)
-        .clamp(0, 3650);
+    let previous = configured_days(&mut tx, default).await?;
     if previous == days {
         tx.rollback().await?;
         return Ok(false);
@@ -62,14 +70,7 @@ pub async fn schedule_due(
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<bool, sqlx::Error> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-    let raw: Option<String> =
-        sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'sync.body_window_days'")
-            .fetch_optional(&mut *tx)
-            .await?;
-    let days = raw
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(default)
-        .clamp(0, 3650);
+    let days = configured_days(&mut tx, default).await?;
     let pending: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM app_settings WHERE key = ?)")
             .bind(BODY_WINDOW.marker_key())

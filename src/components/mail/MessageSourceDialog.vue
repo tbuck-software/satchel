@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import IconButton from '@/components/ui/IconButton.vue';
 import { useDismissable } from '@/composables/useDismissable';
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useToast } from '@/composables/useToast';
 import AppButton from '@/components/ui/AppButton.vue';
@@ -33,6 +33,7 @@ const bodyText = ref('');
 const bodyHtml = ref('');
 const subject = ref('');
 const rawSize = ref<number | null>(null);
+let loadRequest: symbol | null = null;
 
 const tabs = computed(() => [
   { id: 'source' as Tab, label: t('mail.source.tabSource'), available: rawSource.value.length > 0 },
@@ -56,17 +57,28 @@ const rawSourceNotice = computed(() => {
 
 const sizeLabel = computed(() => (rawSize.value ? formatBytes(rawSize.value) : ''));
 
-async function load(messageId: string) {
-  loading.value = true;
+function clearSource() {
+  loading.value = false;
   errorText.value = '';
+  subject.value = '';
+  rawSize.value = null;
+  activeTab.value = 'source';
   rawSource.value = '';
   rawSourceStatus.value = 'unsupported';
   rawHeaders.value = '';
   bodyText.value = '';
   bodyHtml.value = '';
+}
+
+async function load(messageId: string) {
+  const request = Symbol();
+  loadRequest = request;
+  clearSource();
+  loading.value = true;
 
   try {
     const source = await messages.loadMessageSource(messageId);
+    if (loadRequest !== request) return;
     if (!source) {
       errorText.value = t('mail.source.desktopOnly');
       return;
@@ -80,9 +92,10 @@ async function load(messageId: string) {
     rawSize.value = source.raw_size ?? null;
     activeTab.value = tabs.value.find((tab) => tab.available)?.id ?? 'source';
   } catch (err) {
+    if (loadRequest !== request) return;
     errorText.value = err instanceof Error ? err.message : t('mail.source.loadFailed');
   } finally {
-    loading.value = false;
+    if (loadRequest === request) loading.value = false;
   }
 }
 
@@ -90,9 +103,15 @@ watch(
   () => [props.open, props.messageId] as const,
   ([open, messageId]) => {
     if (open && messageId) void load(messageId);
+    else {
+      loadRequest = null;
+      clearSource();
+    }
   },
-  { immediate: true },
+  { immediate: true, flush: 'sync' },
 );
+
+onBeforeUnmount(() => { loadRequest = null; });
 
 async function exportMessage() {
   if (!props.messageId || exporting.value) return;
