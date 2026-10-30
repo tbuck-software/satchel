@@ -969,7 +969,7 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
                 let labels = if scenario == "still-inbox" { vec!["INBOX"] } else if scenario == "archive" { vec![] } else if scenario == "existing" || scenario == "target" || scenario == "listing-before-target" {
                     vec!["Label_one", "Label_two"]
                 } else { vec!["Label_one"] };
-                return ("200 OK", json!({"id":"A","threadId":"conversation","labelIds":labels,
+                return ("200 OK", json!({"id":"A","threadId":"conversation","historyId":"300","labelIds":labels,
                     "internalDate":"1767225600000", "payload":{"mimeType":"text/plain",
                     "headers":[{"name":"Message-ID","value":"<a@example.test>"}],"body":{"data":"Rml4dHVyZQ=="}}}).to_string());
             }
@@ -1379,7 +1379,7 @@ async fn gmail_snapshot_resolution_progress_survives_budget_and_restart() {
             }
             (
                 "200 OK",
-                json!({"id":id,"threadId":id,"labelIds": if id == "M001" { vec!["INBOX"] } else { vec!["Label_one"] },
+                json!({"id":id,"threadId":id,"historyId":"300","labelIds": if id == "M001" { vec!["INBOX"] } else { vec!["Label_one"] },
                 "internalDate":"1767225600000","payload":{"mimeType":"text/plain",
                 "headers":[{"name":"From","value":"sender@example.test"}],
                 "body":{"data":"Rml4dHVyZQ=="}}})
@@ -1474,7 +1474,7 @@ async fn gmail_snapshot_resolution_progress_survives_budget_and_restart() {
             .unwrap();
         (
             "200 OK",
-            json!({"id":id,"threadId":id,"labelIds": if id == "M001" { vec!["INBOX"] } else { vec!["Label_one"] },
+            json!({"id":id,"threadId":id,"historyId":"300","labelIds": if id == "M001" { vec!["INBOX"] } else { vec!["Label_one"] },
             "internalDate":"1767225600000","payload":{"mimeType":"text/plain",
             "headers":[{"name":"From","value":"sender@example.test"}],
             "body":{"data":"Rml4dHVyZQ=="}}})
@@ -1553,7 +1553,7 @@ async fn gmail_snapshot_resolution_progress_survives_budget_and_restart() {
 }
 
 fn full_response() -> serde_json::Value {
-    json!({"id":"A","threadId":"conversation","labelIds":[],
+    json!({"id":"A","threadId":"conversation","historyId":"300","labelIds":[],
         "internalDate":"1767225600000","payload":{"mimeType":"text/plain",
         "headers":[{"name":"From","value":"sender@example.test"},
                    {"name":"Subject","value":"Keep my organization"},
@@ -1566,6 +1566,15 @@ async fn gmail_incomplete_snapshot_responses_preserve_cached_content_and_work() 
     use base64::Engine;
     let _guard = PROVIDER_HTTP_FIXTURES.lock().await;
     for scenario in [
+        "missing-id",
+        "missing-thread-id",
+        "blank-thread-id",
+        "missing-history-id",
+        "blank-history-id",
+        "bad-history-id",
+        "identity-only",
+        "missing-labels",
+        "unconfirmed-labels",
         "empty-payload",
         "wrong-id",
         "missing-payload",
@@ -1597,7 +1606,29 @@ async fn gmail_incomplete_snapshot_responses_preserve_cached_content_and_work() 
             }
             let mut response = full_response();
             if failure.load(Ordering::SeqCst) {
+                let fields = response.as_object_mut().unwrap();
                 match scenario {
+                    "missing-id" => { fields.remove("id"); },
+                    "missing-thread-id" => { fields.remove("threadId"); },
+                    "blank-thread-id" => response["threadId"] = json!(" "),
+                    "missing-history-id" => { fields.remove("historyId"); },
+                    "blank-history-id" => response["historyId"] = json!(""),
+                    "bad-history-id" => response["historyId"] = json!("not-a-number"),
+                    // Probe: only the fields a usable body needs.
+                    "identity-only" => fields.retain(|key, _| matches!(key.as_str(), "id" | "internalDate" | "payload")),
+                    "missing-labels" | "unconfirmed-labels" => {
+                        fields.remove("labelIds");
+                        if line.contains("format=minimal") {
+                            fields.remove("payload");
+                            // The label set disagrees, or its confirmation is
+                            // itself cut short.
+                            if scenario == "missing-labels" {
+                                fields.insert("labelIds".into(), json!(["INBOX"]));
+                            } else {
+                                fields.remove("historyId");
+                            }
+                        }
+                    }
                     "empty-payload" => response["payload"] = json!({}),
                     "wrong-id" => response["id"] = json!("B"),
                     "missing-payload" => { response.as_object_mut().unwrap().remove("payload"); },
@@ -1740,6 +1771,17 @@ async fn gmail_complete_empty_multipart_and_crypto_messages_remain_usable() {
             .unwrap_or_else(|error| panic!("{scenario}: {error:?}"))
             .unwrap();
         assert!(message.mailbox_ids.is_empty(), "{scenario}");
+        // Gmail's JSON drops an empty label list. Only its absence needs the
+        // label-only lookup to tell an unlabeled message from a cut-short one.
+        assert_eq!(
+            requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|r| r.contains("format=minimal")),
+            scenario == "omitted-labels",
+            "{scenario}"
+        );
         assert_eq!(message.from_address, "sender@example.test");
         assert_eq!(message.date_rfc3339, "2026-01-01T00:00:00+00:00");
         if scenario.starts_with("empty-") {

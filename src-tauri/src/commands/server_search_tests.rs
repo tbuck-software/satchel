@@ -410,7 +410,7 @@ async fn fetching_evicted_body_preserves_identity_and_local_state() {
     let address = listener.local_addr().unwrap();
     let html = "<p onclick=bad()>needle</p><script>bad()</script>";
     let response = serde_json::json!({
-        "id": "remote-1", "threadId": "different-provider-thread", "labelIds": ["INBOX"],
+        "id": "remote-1", "threadId": "different-provider-thread", "historyId": "300", "labelIds": ["INBOX"],
         "internalDate": "1767225600000",
         "payload": { "mimeType": "multipart/alternative", "headers": [
             { "name": "From", "value": "remote@example.test" },

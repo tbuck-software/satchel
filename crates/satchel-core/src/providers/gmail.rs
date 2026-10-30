@@ -1040,6 +1040,10 @@ impl GmailProvider {
                 .await
                 .map_err(|err| format!("gmail message parse failed: {err}"))?;
             validate_gmail_full_message(&message)?;
+            if message.label_ids.is_none() {
+                message.label_ids =
+                    Some(Self::confirm_omitted_labels(client, token, &item.id).await?);
+            }
             if gmail_message_needs_raw_crypto(&message)
                 || message
                     .payload
@@ -1105,6 +1109,51 @@ impl GmailProvider {
         }
 
         Ok((messages, latest_ts, latest_history_id))
+    }
+
+    /// Gmail's JSON drops an empty `labelIds`, and the API reference does not
+    /// say otherwise. A full response without it is therefore either a
+    /// genuinely unlabeled message (archived and read, with no category) or a
+    /// response cut short. Ask for the labels alone (`format=minimal`: "only
+    /// email message ID and labels") and accept an empty set only from a
+    /// complete answer that again carries none.
+    async fn confirm_omitted_labels(
+        client: &reqwest::Client,
+        token: &str,
+        id: &str,
+    ) -> crate::sync::errors::SyncResult<Vec<String>> {
+        let response = send_with_rate_limit_retry(
+            || {
+                client
+                    .get(format!("{}/messages/{}", gmail_api_base(), id))
+                    .query(&[("format", "minimal")])
+                    .bearer_auth(token)
+            },
+            "message label lookup",
+            cost::MESSAGES_GET,
+        )
+        .await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(crate::sync::errors::http_failure(
+                "gmail",
+                "message label lookup",
+                status.as_u16(),
+                &body,
+            ));
+        }
+        let minimal = response
+            .json::<GmailMessageResponse>()
+            .await
+            .map_err(|err| format!("gmail label lookup parse failed: {err}"))?;
+        if minimal.id != id || !gmail_identity_is_complete(&minimal) {
+            return Err("gmail label lookup returned an incomplete message".into());
+        }
+        if minimal.label_ids.is_some() {
+            return Err("gmail message lookup omitted its labels".into());
+        }
+        Ok(Vec::new())
     }
 
     async fn fetch_current_drafts(
@@ -2314,9 +2363,13 @@ fn validate_gmail_full_message(message: &GmailMessageResponse) -> Result<(), Str
         .as_deref()
         .filter(|h| !h.is_empty())
         .ok_or_else(invalid)?;
-    if message.id.trim().is_empty()
-        // Gmail can omit an empty label list for genuinely unlabeled mail.
-        || message.label_ids.as_ref().is_some_and(|labels| labels.iter().any(|label| label.trim().is_empty()))
+    // An omitted label list is not proof of an empty one: the caller confirms
+    // it with a label-only lookup.
+    if !gmail_identity_is_complete(message)
+        || message
+            .label_ids
+            .as_ref()
+            .is_some_and(|labels| labels.iter().any(|label| label.trim().is_empty()))
         || !gmail_payload_is_usable(payload)
     {
         return Err(invalid());
@@ -2333,6 +2386,20 @@ fn validate_gmail_full_message(message: &GmailMessageResponse) -> Result<(), Str
         return Err("gmail message lookup returned an invalid or missing date".into());
     }
     Ok(())
+}
+
+/// Every message resource names its thread and its last history record.
+/// Without them a response is a fragment, whatever else it carries.
+fn gmail_identity_is_complete(message: &GmailMessageResponse) -> bool {
+    !message.id.trim().is_empty()
+        && message
+            .thread_id
+            .as_deref()
+            .is_some_and(|thread| !thread.trim().is_empty())
+        && message
+            .history_id
+            .as_deref()
+            .is_some_and(|history| history.parse::<u64>().is_ok())
 }
 
 fn gmail_header_name_is_valid(name: &str) -> bool {
