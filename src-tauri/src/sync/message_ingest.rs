@@ -17,6 +17,7 @@ use crate::events::bus::EventBus;
 use crate::providers::traits::MessageEnvelope;
 use crate::sync::attachment_processing::process_special_attachment;
 use crate::sync::folder_reconcile::{is_snooze_folder, reconcile_external_workflow_states};
+use crate::sync::gmail_reconcile::{SnapshotDeferral, SnapshotResolution};
 use crate::sync::thread_resolution::{
     deduplicate_spark_draft_versions, derive_message_id_header, derive_remote_draft_id,
     effective_from_name, message_is_sent, reconcile_sent_draft_autosaves,
@@ -230,6 +231,140 @@ pub(crate) async fn upsert_provider_messages(
     Ok(results)
 }
 
+/// Snapshot recovery must store every current label before losing the last
+/// obsolete copy. Reuse the normal persistence/organization guards, but give
+/// all targets of this delivery a single rollback boundary.
+///
+/// `Err` is reserved for failures that stop the whole snapshot run; anything
+/// specific to this delivery defers only its ID.
+pub(crate) async fn upsert_gmail_snapshot_message(
+    app: Option<&AppHandle>,
+    pool: &SqlitePool,
+    account_id: &str,
+    account_email: &str,
+    account_display_name: &str,
+    account_config: &crate::commands::accounts::AccountConfig,
+    message: &MessageEnvelope,
+    events: Option<&Arc<EventBus>>,
+    cutoff: Option<&str>,
+) -> Result<SnapshotResolution, String> {
+    use satchel_core::db::sync_quarantine::SyncQuarantineRepository;
+    let repository = SyncQuarantineRepository::new(pool);
+    let mut targets = Vec::new();
+    for label in crate::sync::gmail_reconcile::gmail_target_mailbox_ids(&message.mailbox_ids) {
+        let (folder_id, folder_type) =
+            crate::sync::gmail_reconcile::ensure_gmail_label_folder(pool, account_id, &label)
+                .await?;
+        if repository
+            .load_folder(account_id, &folder_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .is_exhausted(&message.remote_id)
+        {
+            return Ok(SnapshotResolution::Deferred(SnapshotDeferral::Quarantined));
+        }
+        targets.push((folder_id, label, folder_type));
+    }
+    // Read before the replacement: obsolete copies may sit in other threads.
+    let threads: HashSet<String> = sqlx::query_scalar(
+        "SELECT DISTINCT thread_id FROM messages WHERE account_id = ? AND remote_id = ?",
+    )
+    .bind(account_id)
+    .bind(&message.remote_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?
+    .into_iter()
+    .collect();
+    let html = prepare_message_html(std::slice::from_ref(message)).await?;
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|error| error.to_string())?;
+    if crate::sync::gmail_reconcile::gmail_snapshot_message_pinned_tx(
+        &mut tx,
+        account_id,
+        &message.remote_id,
+    )
+    .await?
+    {
+        tx.rollback().await.map_err(|error| error.to_string())?;
+        return Ok(SnapshotResolution::Deferred(
+            SnapshotDeferral::PendingMutation,
+        ));
+    }
+    let flag_locks = PendingFlagLocks::load(&mut tx, account_id).await?;
+    let mut stored = Vec::new();
+    for (folder_id, label, folder_type) in &targets {
+        match persist_provider_message(
+            &mut tx,
+            "gmail",
+            account_id,
+            account_email,
+            account_display_name,
+            folder_id,
+            label,
+            folder_type,
+            message,
+            html[0].as_deref(),
+            &flag_locks,
+            cutoff,
+        )
+        .await
+        {
+            Ok(value) => stored.push(value),
+            Err(error) => {
+                tx.rollback().await.map_err(|error| error.to_string())?;
+                let attempts = repository
+                    .record_failure(account_id, folder_id, &message.remote_id, &error)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                // The quarantine counts target failures; its last one holds
+                // the ID like any other exhausted target.
+                if attempts >= satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS {
+                    tracing::warn!(account_id, folder_id, remote_id = %message.remote_id,
+                        attempts, "snapshot target used up its attempts and is skipped: {error}");
+                    return Ok(SnapshotResolution::Deferred(SnapshotDeferral::Quarantined));
+                }
+                return Ok(SnapshotResolution::Deferred(SnapshotDeferral::Failed(
+                    crate::sync::errors::SyncError::Transient(error),
+                )));
+            }
+        }
+    }
+    // Every actual target is safe now. Clear obsolete-label failures too,
+    // otherwise they could keep rediscovering an already recovered delivery.
+    sqlx::query("DELETE FROM sync_quarantine WHERE account_id = ? AND remote_id = ?")
+        .bind(account_id)
+        .bind(&message.remote_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|error| error.to_string())?;
+    replay_ingest_effects(pool, account_id).await?;
+    for ((folder_id, label, folder_type), stored) in targets.iter().zip(stored) {
+        if let Err(error) = finish_provider_message(
+            app,
+            pool,
+            "gmail",
+            account_id,
+            account_email,
+            account_config,
+            folder_id,
+            label,
+            folder_type,
+            message,
+            stored,
+            events,
+        )
+        .await
+        {
+            tracing::warn!(%error, remote_id = %message.remote_id, "post-ingest processing deferred");
+        }
+    }
+    Ok(SnapshotResolution::Resolved(threads))
+}
+
 /// Replay rules after a commit, including intent left by a previous process.
 pub(crate) async fn replay_ingest_effects(
     pool: &SqlitePool,
@@ -285,7 +420,7 @@ async fn persist_provider_message(
     let now = chrono::Utc::now().to_rfc3339();
     let message_is_draft = provider_message_is_draft(folder_type, &message.mailbox_ids);
     let remote_draft_id = derive_remote_draft_id(message_is_draft, provider_kind, message);
-    let provider_message_row = sqlx::query_as::<_, (String, Option<String>)>(
+    let mut provider_message_row = sqlx::query_as::<_, (String, Option<String>)>(
         "SELECT id, thread_id FROM messages
          WHERE account_id = ? AND folder_id = ? AND remote_id = ?
          ORDER BY updated_at DESC LIMIT 1",
@@ -296,12 +431,56 @@ async fn persist_provider_message(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
-    let provider_message_id = provider_message_row
-        .as_ref()
-        .map(|row| row.0.clone())
-        .unwrap_or_else(|| {
-            provider_message_db_id(provider_kind, account_id, folder_remote_id, message)
-        });
+    if provider_message_row.is_none() && provider_kind.eq_ignore_ascii_case("gmail") {
+        // Reuse an obsolete label copy rather than replacing its local ID.
+        // Message topic links, cached attachments and other references survive
+        // the move along with the thread, within this message's savepoint.
+        let labels = crate::sync::gmail_reconcile::gmail_target_mailbox_ids(&message.mailbox_ids);
+        let labels = serde_json::to_string(&labels).map_err(|err| err.to_string())?;
+        provider_message_row = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT m.id, m.thread_id FROM messages m JOIN folders f ON f.id = m.folder_id
+             WHERE m.account_id = ? AND m.remote_id = ?
+               AND NOT EXISTS (SELECT 1 FROM json_each(?) label
+                               WHERE LOWER(TRIM(label.value)) = LOWER(TRIM(f.remote_id)))
+             ORDER BY m.id LIMIT 1",
+        )
+        .bind(account_id)
+        .bind(&message.remote_id)
+        .bind(&labels)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|err| err.to_string())?;
+    }
+    let provider_message_id = if let Some((id, _)) = &provider_message_row {
+        id.clone()
+    } else {
+        let mut id = provider_message_db_id(provider_kind, account_id, folder_remote_id, message);
+        // A prior relabel may have adopted this deterministic ID into another
+        // still-current folder. Allocate a distinct copy under the write lock;
+        // subsequent ingests find it by the exact account/folder/remote tuple.
+        if provider_kind.eq_ignore_ascii_case("gmail") {
+            while sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?)",
+            )
+            .bind(&id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|err| err.to_string())?
+            {
+                id = provider_local_id(
+                    "m",
+                    provider_kind,
+                    &[
+                        account_id,
+                        folder_remote_id,
+                        &message.remote_id,
+                        &uuid::Uuid::new_v4().to_string(),
+                    ],
+                );
+            }
+        }
+        id
+    };
     let message_id = if let Some(remote_draft_id) = remote_draft_id.as_deref() {
         sqlx::query_scalar::<_, String>(
             "SELECT id FROM messages
@@ -721,9 +900,16 @@ async fn persist_provider_message(
         attachment_ids.push(attachment_id);
     }
 
-    // The thread aggregate belongs to the same commit. A message whose thread
-    // still reports the previous counts is a half-state readers can see.
+    // Replacement, stale-copy cleanup and every affected thread projection
+    // belong to the same savepoint.
     let mut committed_projection_threads = vec![thread_id.clone()];
+    if provider_kind.eq_ignore_ascii_case("gmail") {
+        let touched = crate::sync::gmail_reconcile::reconcile_gmail_message_mailboxes_tx(
+            tx, account_id, message,
+        )
+        .await?;
+        committed_projection_threads.extend(touched.into_iter().filter(|id| id != &thread_id));
+    }
     if let Some(prior_thread_id) = prior_thread_id.as_ref() {
         if prior_thread_id != &thread_id {
             committed_projection_threads.push(prior_thread_id.clone());
@@ -1041,7 +1227,6 @@ mod tests {
     use crate::sync::queue::SyncQueue;
     use crate::sync::thread_resolution::{merge_reply_split_threads, standalone_thread_key};
     use sqlx::sqlite::SqlitePoolOptions;
-    use std::collections::HashSet;
 
     fn envelope(remote_id: &str) -> MessageEnvelope {
         MessageEnvelope {
@@ -3173,22 +3358,17 @@ mod tests {
         // Archived in Gmail Web: every real label is gone and only the
         // category view is left, which is what earns the synthetic ARCHIVE.
         message.mailbox_ids = vec!["CATEGORY_PERSONAL".to_string()];
-        let externally_changed_threads =
+        // Merely observing the relabel cannot remove the only stored copy.
+        assert!(
             reconcile_gmail_message_mailboxes(&pool, "account", &message)
                 .await
-                .expect("archive reconcile");
-        assert_eq!(
-            externally_changed_threads,
-            HashSet::from([crate::sync::thread_resolution::provider_thread_db_id(
-                "gmail", "account", "INBOX", &message
-            )])
+                .expect("defer archive cleanup")
+                .is_empty()
         );
-        let archive_folder_id: String = sqlx::query_scalar(
-            "SELECT id FROM folders WHERE account_id = 'account' AND folder_type = 'archive'",
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("archive folder");
+        let archive_folder_id =
+            crate::sync::gmail_reconcile::ensure_gmail_archive_folder(&pool, "account")
+                .await
+                .expect("archive folder");
         upsert_provider_message(
             None,
             &pool,

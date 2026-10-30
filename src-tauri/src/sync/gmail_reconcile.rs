@@ -9,12 +9,13 @@
 use std::collections::HashSet;
 
 use crate::providers::traits::MessageEnvelope;
+use crate::sync::errors::SyncError;
 use sqlx::SqlitePool;
 
 pub use crate::providers::gmail::gmail_label_is_state_view;
 
+#[cfg(test)]
 use super::folder_reconcile::reconcile_external_workflow_states;
-use super::thread_resolution::refresh_provider_thread_projections;
 
 pub fn gmail_labels_include(mailbox_ids: &[String], folder_id: &str) -> bool {
     mailbox_ids
@@ -37,118 +38,231 @@ pub fn gmail_message_belongs_to_folder(message: &MessageEnvelope, folder_id: &st
     gmail_labels_include(&message.mailbox_ids, folder_id)
 }
 
+/// Called only after a target copy has been stored, in the same savepoint.
+/// A rollback retains the old copy, attachments and thread organization.
+pub(crate) async fn reconcile_gmail_message_mailboxes_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    account_id: &str,
+    message: &MessageEnvelope,
+) -> Result<HashSet<String>, String> {
+    let effective_mailbox_ids = gmail_target_mailbox_ids(&message.mailbox_ids);
+    let mailbox_ids =
+        serde_json::to_string(&effective_mailbox_ids).map_err(|err| err.to_string())?;
+    // Also guard standalone callers: observing a relabel is no evidence that
+    // its target was successfully stored.
+    let target: Option<String> = sqlx::query_scalar(
+        "SELECT m.id FROM messages m JOIN folders f ON f.id = m.folder_id
+         WHERE m.account_id = ? AND m.remote_id = ?
+           AND EXISTS (SELECT 1 FROM json_each(?) label
+                       WHERE LOWER(TRIM(label.value)) = LOWER(TRIM(f.remote_id)))
+         ORDER BY m.id LIMIT 1",
+    )
+    .bind(account_id)
+    .bind(&message.remote_id)
+    .bind(&mailbox_ids)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|err| err.to_string())?;
+    let Some(target) = target else {
+        return Ok(HashSet::new());
+    };
+    let touched = sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT thread_id FROM messages
+         WHERE account_id = ? AND remote_id = ? AND thread_id IS NOT NULL",
+    )
+    .bind(account_id)
+    .bind(&message.remote_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|err| err.to_string())?
+    .into_iter()
+    .collect::<HashSet<_>>();
+
+    let stale_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT stale.id FROM messages stale
+         JOIN folders f ON f.id = stale.folder_id
+         WHERE stale.account_id = ? AND stale.remote_id = ?
+           AND NOT EXISTS (SELECT 1 FROM json_each(?) label
+                           WHERE LOWER(TRIM(label.value)) = LOWER(TRIM(f.remote_id)))
+         ORDER BY stale.id",
+    )
+    .bind(account_id)
+    .bind(&message.remote_id)
+    .bind(&mailbox_ids)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|err| err.to_string())?;
+    if stale_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let stale_ids = serde_json::to_string(&stale_ids).map_err(|err| err.to_string())?;
+
+    // Local organization belongs to the delivery, not to an obsolete label
+    // copy. Preserve destination membership metadata when both copies were
+    // already linked; source-only links retain their original attribution.
+    sqlx::query(
+        "INSERT OR IGNORE INTO topic_items (topic_id, item_type, item_id, added_at, added_by)
+         SELECT topic_id, 'message', ?, added_at, added_by FROM topic_items
+         WHERE item_type = 'message' AND item_id IN (SELECT value FROM json_each(?))
+         ORDER BY added_at, item_id",
+    )
+    .bind(&target)
+    .bind(&stale_ids)
+    .execute(&mut **tx)
+    .await
+    .map_err(|err| err.to_string())?;
+    sqlx::query(
+        "DELETE FROM topic_items WHERE item_type = 'message'
+         AND item_id IN (SELECT value FROM json_each(?))",
+    )
+    .bind(&stale_ids)
+    .execute(&mut **tx)
+    .await
+    .map_err(|err| err.to_string())?;
+    for table in ["calendar_invites", "follow_up_reminders"] {
+        sqlx::query(&format!(
+            "UPDATE {table} SET message_id = ?
+             WHERE message_id IN (SELECT value FROM json_each(?))"
+        ))
+        .bind(&target)
+        .bind(&stale_ids)
+        .execute(&mut **tx)
+        .await
+        .map_err(|err| err.to_string())?;
+    }
+    sqlx::query("DELETE FROM attachments WHERE message_id IN (SELECT value FROM json_each(?))")
+        .bind(&stale_ids)
+        .execute(&mut **tx)
+        .await
+        .map_err(|err| err.to_string())?;
+    let removed_stale_copies =
+        sqlx::query("DELETE FROM messages WHERE id IN (SELECT value FROM json_each(?))")
+            .bind(&stale_ids)
+            .execute(&mut **tx)
+            .await
+            .map_err(|err| err.to_string())?
+            .rows_affected();
+
+    if removed_stale_copies > 0 {
+        Ok(touched)
+    } else {
+        Ok(HashSet::new())
+    }
+}
+
+#[cfg(test)]
 pub async fn reconcile_gmail_message_mailboxes(
     pool: &SqlitePool,
     account_id: &str,
     message: &MessageEnvelope,
 ) -> Result<HashSet<String>, String> {
-    // Gmail history is account-wide even when labelId is supplied. A message
-    // with no real label left belongs in Satchel's synthetic ARCHIVE folder;
-    // one that still carries a label of its own belongs there and nowhere else.
-    let mut effective_mailbox_ids = gmail_effective_mailbox_ids(&message.mailbox_ids);
-    let archive_folder_id = if effective_mailbox_ids.is_empty() {
-        let folder_id = ensure_gmail_archive_folder(pool, account_id).await?;
-        effective_mailbox_ids.push("ARCHIVE".to_string());
-        Some(folder_id)
-    } else {
-        None
-    };
-    let mailbox_ids =
-        serde_json::to_string(&effective_mailbox_ids).map_err(|err| err.to_string())?;
-    let rows = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT DISTINCT thread_id FROM messages
-         WHERE account_id = ? AND remote_id = ?",
+    let threads = sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT thread_id FROM messages WHERE account_id = ? AND remote_id = ? AND thread_id IS NOT NULL",
+    ).bind(account_id).bind(&message.remote_id).fetch_all(pool).await
+        .map_err(|err| err.to_string())?.into_iter().collect();
+    let mut tx = pool.begin().await.map_err(|err| err.to_string())?;
+    let touched = reconcile_gmail_message_mailboxes_tx(&mut tx, account_id, message).await?;
+    satchel_core::db::threads::refresh_thread_projections_tx(
+        &mut tx,
+        &touched.iter().cloned().collect::<Vec<_>>(),
     )
-    .bind(account_id)
-    .bind(&message.remote_id)
-    .fetch_all(pool)
     .await
     .map_err(|err| err.to_string())?;
-    if rows.is_empty() {
-        return Ok(HashSet::new());
-    }
-    let touched = rows.into_iter().flatten().collect::<HashSet<_>>();
+    tx.commit().await.map_err(|err| err.to_string())?;
+    reconcile_external_workflow_states(pool, &threads).await?;
+    Ok(touched)
+}
+
+/// Why an owed snapshot ID stays owed after this run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SnapshotDeferral {
+    /// A queued or failed remote mutation still owns the local state.
+    PendingMutation,
+    /// A target label has used up its quarantine attempts.
+    Quarantined,
+    /// Lookup, validation or target persistence failed in this run. The error
+    /// keeps its class: a permanent one is not retried on the next poll.
+    Failed(SyncError),
+    /// Earlier failures used up its attempts. It waits for its retry time.
+    Held,
+}
+
+/// The outcome for one owed snapshot ID.
+#[derive(Debug)]
+pub(crate) enum SnapshotResolution {
+    /// Committed. These threads changed.
+    Resolved(HashSet<String>),
+    /// Nothing changed. The ID stays owed.
+    Deferred(SnapshotDeferral),
+}
+
+/// A snapshot must not undo optimistic state still owned by the queue.
+/// Check under the same write lock as the replacement/deletion.
+pub(crate) async fn gmail_snapshot_message_pinned_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    account_id: &str,
+    remote_id: &str,
+) -> Result<bool, String> {
+    let pending = crate::sync::folder_reconcile::pending_remote_message_refs(
+        &mut **tx,
+        account_id,
+        crate::sync::folder_reconcile::PendingMutations::All,
+    )
+    .await?;
+    Ok(pending.iter().any(|(_, id)| id == remote_id))
+}
+
+/// Only an account-wide point lookup's explicit 404 authorizes this path.
+/// Delete polymorphic message links before the rows, and project threads in
+/// the same transaction so a failed cleanup is safe to retry after restart.
+pub(crate) async fn reconcile_gmail_snapshot_deletion(
+    pool: &SqlitePool,
+    account_id: &str,
+    remote_id: &str,
+) -> Result<SnapshotResolution, String> {
     let mut tx = pool
         .begin_with("BEGIN IMMEDIATE")
         .await
-        .map_err(|err| err.to_string())?;
-
-    let moved_to_archive = if let Some(archive_folder_id) = archive_folder_id.as_deref() {
-        sqlx::query(
-            "UPDATE messages
-             SET folder_id = ?, updated_at = ?
-             WHERE account_id = ? AND remote_id = ?
-               AND folder_id IN (
-                 SELECT id FROM folders
-                 WHERE account_id = ? AND LOWER(TRIM(remote_id)) = 'inbox'
-               )",
-        )
-        .bind(archive_folder_id)
-        .bind(chrono::Utc::now().to_rfc3339())
-        .bind(account_id)
-        .bind(&message.remote_id)
-        .bind(account_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| err.to_string())?
-        .rows_affected()
-    } else {
-        0
-    };
-
-    sqlx::query(
-        "DELETE FROM attachments
-         WHERE message_id IN (
-           SELECT stale.id
-           FROM messages stale
-           JOIN folders stale_folder ON stale_folder.id = stale.folder_id
-           WHERE stale.account_id = ?
-             AND stale.remote_id = ?
-             AND NOT EXISTS (
-               SELECT 1
-               FROM json_each(?) current_label
-               WHERE LOWER(TRIM(current_label.value)) = LOWER(TRIM(stale_folder.remote_id))
-             )
-         )",
-    )
-    .bind(account_id)
-    .bind(&message.remote_id)
-    .bind(&mailbox_ids)
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| err.to_string())?;
-
-    let removed_stale_copies = sqlx::query(
-        "DELETE FROM messages
-         WHERE id IN (
-           SELECT stale.id
-           FROM messages stale
-           JOIN folders stale_folder ON stale_folder.id = stale.folder_id
-           WHERE stale.account_id = ?
-             AND stale.remote_id = ?
-             AND NOT EXISTS (
-               SELECT 1
-               FROM json_each(?) current_label
-               WHERE LOWER(TRIM(current_label.value)) = LOWER(TRIM(stale_folder.remote_id))
-             )
-         )",
-    )
-    .bind(account_id)
-    .bind(&message.remote_id)
-    .bind(&mailbox_ids)
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| err.to_string())?
-    .rows_affected();
-
-    tx.commit().await.map_err(|err| err.to_string())?;
-    refresh_provider_thread_projections(pool, &touched.iter().cloned().collect::<Vec<_>>()).await?;
-    reconcile_external_workflow_states(pool, &touched).await?;
-    if moved_to_archive > 0 || removed_stale_copies > 0 {
-        Ok(touched)
-    } else {
-        Ok(HashSet::new())
+        .map_err(|error| error.to_string())?;
+    if gmail_snapshot_message_pinned_tx(&mut tx, account_id, remote_id).await? {
+        tx.rollback().await.map_err(|error| error.to_string())?;
+        return Ok(SnapshotResolution::Deferred(
+            SnapshotDeferral::PendingMutation,
+        ));
     }
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, thread_id FROM messages WHERE account_id = ? AND remote_id = ?")
+            .bind(account_id)
+            .bind(remote_id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+    let touched: HashSet<String> = rows.iter().map(|(_, thread)| thread.clone()).collect();
+    for (id, _) in rows {
+        sqlx::query("DELETE FROM topic_items WHERE item_type = 'message' AND item_id = ?")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+        sqlx::query("DELETE FROM attachments WHERE message_id = ?")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+        sqlx::query("DELETE FROM messages WHERE id = ?")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    satchel_core::db::threads::refresh_thread_projections_tx(
+        &mut tx,
+        &touched.iter().cloned().collect::<Vec<_>>(),
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|error| error.to_string())?;
+    Ok(SnapshotResolution::Resolved(touched))
 }
 
 /// The labels of a message that stand for a real local folder.
@@ -164,6 +278,15 @@ pub fn gmail_effective_mailbox_ids(mailbox_ids: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Complete local targets, including the synthetic archive for unlabeled mail.
+pub fn gmail_target_mailbox_ids(mailbox_ids: &[String]) -> Vec<String> {
+    let mut labels = gmail_effective_mailbox_ids(mailbox_ids);
+    if labels.is_empty() {
+        labels.push("ARCHIVE".into());
+    }
+    labels
+}
+
 /// Whether a message has no real folder left and needs the synthetic ARCHIVE.
 ///
 /// One definition for both callers. Naming the primary mailboxes separately
@@ -172,6 +295,54 @@ pub fn gmail_effective_mailbox_ids(mailbox_ids: &[String]) -> Vec<String> {
 /// view ever collapsed again.
 pub fn gmail_message_needs_synthetic_archive(message: &MessageEnvelope) -> bool {
     gmail_effective_mailbox_ids(&message.mailbox_ids).is_empty()
+}
+
+/// History can mention a target before its turn in folder discovery/ingest.
+pub async fn ensure_gmail_label_folder(
+    pool: &SqlitePool,
+    account_id: &str,
+    remote_id: &str,
+) -> Result<(String, String), String> {
+    if remote_id == "ARCHIVE" {
+        return Ok((
+            ensure_gmail_archive_folder(pool, account_id).await?,
+            "archive".into(),
+        ));
+    }
+    if let Some(folder) = sqlx::query_as::<_, (String, String)>(
+        "SELECT id, folder_type FROM folders WHERE account_id = ? AND remote_id = ?",
+    )
+    .bind(account_id)
+    .bind(remote_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| err.to_string())?
+    {
+        return Ok(folder);
+    }
+    let id = satchel_core::db::folders::resolve_provider_folder_id(pool, account_id, remote_id)
+        .await
+        .map_err(|err| err.to_string())?;
+    let kind =
+        crate::providers::folder_mapping::provider_folder_type("gmail", remote_id, remote_id, None);
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO folders
+         (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+    )
+    .bind(&id)
+    .bind(account_id)
+    .bind(remote_id)
+    .bind(remote_id)
+    .bind(kind)
+    .bind(remote_id)
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await
+    .map_err(|err| err.to_string())?;
+    Ok((id, kind.into()))
 }
 
 pub async fn ensure_gmail_archive_folder(
@@ -443,38 +614,22 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("pool");
-        sqlx::query(
-            "CREATE TABLE folders (
-               id TEXT PRIMARY KEY,
-               account_id TEXT,
-               remote_id TEXT,
-               folder_type TEXT,
-               updated_at TEXT
-             )",
-        )
-        .execute(&pool)
-        .await
-        .expect("folders");
-        sqlx::query(
-            "CREATE TABLE messages (
-               id TEXT PRIMARY KEY,
-               account_id TEXT,
-               folder_id TEXT,
-               thread_id TEXT,
-               remote_id TEXT
-             )",
-        )
-        .execute(&pool)
-        .await
-        .expect("messages");
-        sqlx::query("CREATE TABLE attachments (id TEXT PRIMARY KEY, message_id TEXT)")
-            .execute(&pool)
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
             .await
-            .expect("attachments");
+            .expect("migrations");
+        sqlx::query(
+            "INSERT INTO accounts
+             (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('account', 'Me', 'me@example.com', 'gmail', '{}', '', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .expect("account");
         for (id, remote_id) in [("inbox", "INBOX"), ("sent", "SENT")] {
             sqlx::query(
-                "INSERT INTO folders (id, account_id, remote_id, folder_type, updated_at)
-                 VALUES (?, 'account', ?, 'custom', '')",
+                "INSERT INTO folders (id, account_id, remote_id, folder_type, name, full_path, created_at, updated_at)
+                 VALUES (?, 'account', ?, 'custom', '', '', '', '')",
             )
             .bind(id)
             .bind(remote_id)
@@ -484,8 +639,8 @@ mod tests {
         }
         for (id, folder_id) in [("copy-inbox", "inbox"), ("copy-sent", "sent")] {
             sqlx::query(
-                "INSERT INTO messages (id, account_id, folder_id, remote_id)
-                 VALUES (?, 'account', ?, 'remote-message')",
+                "INSERT INTO messages (id, account_id, folder_id, remote_id, from_address, to_addresses, subject, date, created_at, updated_at)
+                 VALUES (?, 'account', ?, 'remote-message', 'sender@example.com', '[]', '', '', '', '')",
             )
             .bind(id)
             .bind(folder_id)
@@ -493,7 +648,7 @@ mod tests {
             .await
             .expect("message");
         }
-        sqlx::query("INSERT INTO attachments (id, message_id) VALUES ('attachment', 'copy-inbox')")
+        sqlx::query("INSERT INTO attachments (id, message_id, filename, content_type, size, created_at) VALUES ('attachment', 'copy-inbox', 'fixture.txt', 'text/plain', 0, '')")
             .execute(&pool)
             .await
             .expect("attachment");

@@ -837,7 +837,7 @@ impl GmailProvider {
             Some(token) => BackfillStep::Continue(token),
             // An expired history cursor leaves a hole no incremental pass can
             // see: the `after:` catch-up matches on receive time, and the
-            // snapshot only deletes. Re-list the label instead of skipping.
+            // snapshot cannot discover IDs never cached locally. Re-list the label.
             None if parsed.state.history_expired => BackfillStep::Bootstrap,
             // A legacy `ts:` cursor never backfilled, so it starts one now.
             None if !parsed.had_checkpoint || parsed.was_legacy => BackfillStep::Bootstrap,
@@ -1041,6 +1041,11 @@ impl GmailProvider {
                 .json::<GmailMessageResponse>()
                 .await
                 .map_err(|err| format!("gmail message parse failed: {err}"))?;
+            validate_gmail_full_message(&message)?;
+            if message.label_ids.is_none() {
+                message.label_ids =
+                    Some(Self::confirm_omitted_labels(client, token, &item.id).await?);
+            }
             if gmail_message_needs_raw_crypto(&message)
                 || message
                     .payload
@@ -1071,13 +1076,17 @@ impl GmailProvider {
                 let source = raw
                     .json::<GmailMessageResponse>()
                     .await
-                    .map_err(|err| format!("gmail raw message parse failed: {err}"))?
-                    .raw
-                    .filter(|value| {
-                        decode_gmail_body_bytes(value).is_some_and(|bytes| !bytes.is_empty())
-                    })
-                    .ok_or_else(|| "gmail response did not contain message source".to_string())?;
-                message.raw = Some(source);
+                    .map_err(|err| format!("gmail raw message parse failed: {err}"))?;
+                if source.id != message.id {
+                    return Err("gmail raw lookup returned a mismatched message".into());
+                }
+                message.raw =
+                    Some(source.raw.ok_or_else(|| {
+                        "gmail response did not contain message source".to_string()
+                    })?);
+            }
+            if let Some(raw) = message.raw.as_deref() {
+                validate_gmail_raw_source(raw)?;
             }
             Ok(Some(message))
         }))
@@ -1102,6 +1111,55 @@ impl GmailProvider {
         }
 
         Ok((messages, latest_ts, latest_history_id))
+    }
+
+    /// Gmail's JSON drops an empty `labelIds`, and the API reference does not
+    /// say otherwise. A full response without it is therefore either a
+    /// genuinely unlabeled message (archived and read, with no category) or a
+    /// response cut short. Ask for the labels alone (`format=minimal`: "only
+    /// email message ID and labels") and accept an empty set only from a
+    /// complete answer that again carries none.
+    async fn confirm_omitted_labels(
+        client: &reqwest::Client,
+        token: &str,
+        id: &str,
+    ) -> crate::sync::errors::SyncResult<Vec<String>> {
+        let response = send_with_rate_limit_retry(
+            || {
+                client
+                    .get(format!("{}/messages/{}", gmail_api_base(), id))
+                    .query(&[("format", "minimal")])
+                    .bearer_auth(token)
+            },
+            "message label lookup",
+            cost::MESSAGES_GET,
+        )
+        .await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(crate::sync::errors::http_failure(
+                "gmail",
+                "message label lookup",
+                status.as_u16(),
+                &body,
+            ));
+        }
+        let minimal = response
+            .json::<GmailMessageResponse>()
+            .await
+            .map_err(|err| format!("gmail label lookup parse failed: {err}"))?;
+        if minimal.id != id || !gmail_identity_is_complete(&minimal) {
+            return Err("gmail label lookup returned an incomplete message".into());
+        }
+        if minimal.label_ids.is_some() {
+            // Both answers are complete, but they disagree: neither can be
+            // trusted to say where the message lives.
+            return Err(
+                "gmail full message response omitted labels that its label lookup returned".into(),
+            );
+        }
+        Ok(Vec::new())
     }
 
     async fn fetch_current_drafts(
@@ -1470,13 +1528,21 @@ impl MailProvider for GmailProvider {
                             }
                         }
                     }
-                    let (page_messages, page_latest_ts, page_history_id) =
+                    let (page_messages, page_latest_ts, _detail_history_id) =
                         Self::fetch_message_details(&client, &token, items).await?;
                     latest_ts = latest_ts.max(page_latest_ts);
-                    let merged =
-                        Self::newest_history_id(cursor_state.history_id.take(), page_history_id);
-                    cursor_state.history_id =
-                        Self::newest_history_id(merged, payload.history_id.clone());
+                    // Details may already reflect changes beyond this history
+                    // response. Only the completed feed authorizes progress.
+                    if payload
+                        .next_page_token
+                        .as_deref()
+                        .is_none_or(|token| token.trim().is_empty())
+                    {
+                        cursor_state.history_id = Self::newest_history_id(
+                            cursor_state.history_id.take(),
+                            payload.history_id.clone(),
+                        );
+                    }
                     messages.extend(page_messages);
 
                     match payload
@@ -1545,8 +1611,8 @@ impl MailProvider for GmailProvider {
         //
         // A backfill page is a partial, historical view of the folder — it is
         // NEVER a folder snapshot, so it must not touch `snapshot_required`:
-        // that flag drives `reconcile_imap_folder_snapshot`, which deletes every
-        // local row missing from the snapshot.
+        // reconciliation needs complete folder presence, followed by global
+        // resolution of absent local IDs. A time window cannot prove absence.
         //
         // Failures here are swallowed on purpose. These calls are rate-limited
         // far more often than the incremental pass, and propagating the error
@@ -1620,14 +1686,39 @@ impl MailProvider for GmailProvider {
         })
     }
 
+    async fn resolve_snapshot_message(
+        &self,
+        remote_id: &str,
+    ) -> crate::sync::errors::SyncResult<Option<MessageEnvelope>> {
+        let token = self.access_token().await?;
+        let (mut messages, _, _) = Self::fetch_message_details(
+            &crate::utils::http::client(),
+            &token,
+            vec![GmailMessageListItem {
+                id: remote_id.to_string(),
+            }],
+        )
+        .await?;
+        // fetch_message_details omits only explicit HTTP 404 responses.
+        // Parsing, authentication, quota and transport errors remain errors.
+        let message = messages.pop();
+        if message
+            .as_ref()
+            .is_some_and(|message| message.remote_id != remote_id)
+        {
+            return Err("gmail snapshot lookup returned a mismatched message".into());
+        }
+        Ok(message)
+    }
+
     async fn sync_message_state_snapshot(
         &self,
         folder: &str,
     ) -> crate::sync::errors::SyncResult<Option<crate::providers::traits::RemoteMessageStateSnapshot>>
     {
         // Folder snapshots repair moves/deletes even after a history cursor
-        // has expired. IDs are enough for presence reconciliation; flags remain
-        // sourced from full message payloads so this cheap pass cannot clobber them.
+        // has expired. Absent IDs still need account-wide resolution before
+        // removal; flags remain sourced from full message payloads.
 
         let token = self.access_token().await?;
         let client = crate::utils::http::client();
@@ -2270,6 +2361,146 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         auth_dmarc,
         attachments,
     }
+}
+
+/// Full responses must contain actual MIME structure before defaults in the
+/// mapper are safe. Empty text is valid; an absent body is not evidence of it.
+fn validate_gmail_full_message(message: &GmailMessageResponse) -> Result<(), String> {
+    let invalid = || "gmail message lookup returned an incomplete message".to_string();
+    let payload = message.payload.as_ref().ok_or_else(invalid)?;
+    let headers = payload
+        .headers
+        .as_deref()
+        .filter(|h| !h.is_empty())
+        .ok_or_else(invalid)?;
+    // An omitted label list is not proof of an empty one: the caller confirms
+    // it with a label-only lookup.
+    if !gmail_identity_is_complete(message)
+        || message
+            .label_ids
+            .as_ref()
+            .is_some_and(|labels| labels.iter().any(|label| label.trim().is_empty()))
+        || !gmail_payload_is_usable(payload)
+    {
+        return Err(invalid());
+    }
+    let date_is_valid = match message.internal_date.as_deref() {
+        Some(date) => date
+            .parse::<i64>()
+            .ok()
+            .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
+            .is_some(),
+        None => parse_date_header(header_value(headers, "Date").as_deref()).is_some(),
+    };
+    if !date_is_valid {
+        return Err("gmail message lookup returned an invalid or missing date".into());
+    }
+    Ok(())
+}
+
+/// Every message resource names its thread and its last history record.
+/// Without them a response is a fragment, whatever else it carries.
+fn gmail_identity_is_complete(message: &GmailMessageResponse) -> bool {
+    !message.id.trim().is_empty()
+        && message
+            .thread_id
+            .as_deref()
+            .is_some_and(|thread| !thread.trim().is_empty())
+        && message
+            .history_id
+            .as_deref()
+            .is_some_and(|history| history.parse::<u64>().is_ok())
+}
+
+fn gmail_header_name_is_valid(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| (33..=126).contains(&byte) && byte != b':')
+}
+
+fn gmail_payload_is_usable(payload: &GmailPayload) -> bool {
+    let Some(mime) = payload.mime_type.as_deref() else {
+        return false;
+    };
+    if !mime.split_once('/').is_some_and(|(kind, subtype)| {
+        !kind.is_empty() && !subtype.is_empty() && !mime.bytes().any(|b| b.is_ascii_whitespace())
+    }) || payload.headers.as_ref().is_some_and(|headers| {
+        headers
+            .iter()
+            .any(|header| !gmail_header_name_is_valid(&header.name) || header.value.contains('\0'))
+    }) {
+        return false;
+    }
+    let parts = payload.parts.as_deref().unwrap_or_default();
+    if mime.to_ascii_lowercase().starts_with("multipart/") || !parts.is_empty() {
+        return !parts.is_empty() && parts.iter().all(gmail_payload_is_usable);
+    }
+    let Some(body) = payload.body.as_ref() else {
+        return false;
+    };
+    if body.size.is_some_and(|size| size < 0) {
+        return false;
+    }
+    match body.data.as_deref() {
+        Some(data) => decode_gmail_body_bytes(data).is_some(),
+        None => {
+            body.attachment_id
+                .as_ref()
+                .is_some_and(|id| !id.trim().is_empty())
+                || body.size == Some(0)
+        }
+    }
+}
+
+/// Base64 alone is not a message. Require RFC headers and a complete container
+/// before allowing the permissive MIME body parser to replace cached content.
+fn validate_gmail_raw_source(source: &str) -> Result<(), String> {
+    let invalid = || "gmail response contained invalid message source".to_string();
+    let bytes = decode_gmail_body_bytes(source).ok_or_else(invalid)?;
+    let parsed = super::imap::parse_raw_rfc822(&bytes).map_err(|_| invalid())?;
+    let mut fields = 0;
+    for line in parsed.raw_headers.lines() {
+        if line.starts_with([' ', '\t']) && fields > 0 {
+            continue;
+        }
+        let Some((name, _)) = line.split_once(':') else {
+            return Err(invalid());
+        };
+        if !gmail_header_name_is_valid(name) || line.contains('\0') {
+            return Err(invalid());
+        }
+        fields += 1;
+    }
+    if fields == 0 {
+        return Err(invalid());
+    }
+    if let Some(content_type) = super::imap::parse_header_value(&parsed.raw_headers, "Content-Type")
+    {
+        if content_type.to_ascii_lowercase().starts_with("multipart/") {
+            let boundary = content_type
+                .split(';')
+                .skip(1)
+                .find_map(|param| {
+                    let (name, value) = param.trim().split_once('=')?;
+                    name.eq_ignore_ascii_case("boundary")
+                        .then(|| value.trim().trim_matches('"'))
+                })
+                .filter(|value| !value.is_empty())
+                .ok_or_else(invalid)?;
+            let text = String::from_utf8_lossy(&bytes);
+            if !text
+                .lines()
+                .any(|line| line.trim_end() == format!("--{boundary}"))
+                || !text
+                    .lines()
+                    .any(|line| line.trim_end() == format!("--{boundary}--"))
+            {
+                return Err(invalid());
+            }
+        }
+    }
+    Ok(())
 }
 
 fn gmail_message_needs_raw_crypto(message: &GmailMessageResponse) -> bool {
