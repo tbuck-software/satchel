@@ -1,0 +1,6 @@
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename=file.bin
+Content-ID: <root-file>
+Content-Transfer-Encoding: base64
+
+AP+AQQ==

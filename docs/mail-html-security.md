@@ -42,11 +42,23 @@ trust-origin data; the expiry bounds changes to the operating-system trust
 store and certificate validity between calls.
 
 Decrypted MIME unwrapping, charset decoding and sanitization run together in
-Core on a blocking worker. Incomplete encrypted layers and malformed signed
-structures return an error while the stored encrypted source remains intact.
+Core on a blocking worker. A decrypted S/MIME payload has no second copy, so
+`check_complete_mime` requires every part, at any depth, to reach the reader
+as text, an attachment or a signature. A multipart without a boundary or
+parts, a malformed signed structure, an encrypted layer shown in place, and a
+part with nowhere to go each return a typed error. The stored encrypted
+source remains intact.
 Transient decryption captions require an exact snapshot of the segments,
-final sanitized HTML and published attachment inputs. The store keeps that
-snapshot with its body and discards it on raw replacement; the renderer checks
-it before granting captions. Sender-controlled markers never grant provenance.
-The prepared-body cache compares exact inline-image inputs, including byte
-replacements of the same length.
+final sanitized HTML and published attachment inputs. Attachments match by
+position, because a `cid:` reference shows the first attachment that carries
+it; the listing breaks filename ties by ID so the order stays the same. The
+store keeps that snapshot with its body and discards it on raw replacement;
+the renderer checks it before granting captions. Sender-controlled markers
+never grant provenance. The prepared-body cache compares exact inline-image
+inputs, including byte replacements of the same length.
+
+Inline OpenPGP is decrypted wherever the stored text holds one armored block.
+A cover note and a suffix stay plain text segments. The block's own HTML and a
+whole-message signature scope apply only when the block is the entire root
+body. A body with several blocks is not decrypted: it shows an error instead
+of captioning one block as the decrypted message.

@@ -1,5 +1,7 @@
 //! Decode decrypted MIME without treating extracted content as a valid signature.
-use crate::providers::imap::{parse_raw_message_body, ParsedBody};
+use crate::providers::imap::{
+    check_complete_mime, parse_raw_message_body, IncompleteMime, ParsedBody,
+};
 
 /// The outbox's sign-then-encrypt transform, independent of credential storage.
 pub fn protect_message(
@@ -25,11 +27,15 @@ pub struct DecryptedBody {
     pub signatures: Vec<(Vec<u8>, bool)>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
     NestingLimit,
     RemainingEncryption,
     MalformedSigned,
+    /// A multipart entity without a boundary or without any part.
+    MalformedMime,
+    /// A part that would reach neither the body nor the attachment list.
+    UndecodedPart,
     InvalidSignedContent(String),
 }
 
@@ -39,6 +45,10 @@ impl std::fmt::Display for DecodeError {
             Self::NestingLimit => f.write_str("S/MIME nesting limit exceeded"),
             Self::RemainingEncryption => f.write_str("S/MIME content is still encrypted"),
             Self::MalformedSigned => f.write_str("Malformed S/MIME signed MIME structure"),
+            Self::MalformedMime => f.write_str("Malformed MIME structure in decrypted S/MIME"),
+            Self::UndecodedPart => {
+                f.write_str("Decrypted S/MIME contains a part that cannot be shown")
+            }
             Self::InvalidSignedContent(error) => f.write_str(error),
         }
     }
@@ -46,22 +56,22 @@ impl std::fmt::Display for DecodeError {
 
 impl std::error::Error for DecodeError {}
 
+impl From<IncompleteMime> for DecodeError {
+    fn from(gap: IncompleteMime) -> Self {
+        match gap {
+            IncompleteMime::NestingLimit => Self::NestingLimit,
+            IncompleteMime::MalformedMultipart => Self::MalformedMime,
+            IncompleteMime::MalformedSigned => Self::MalformedSigned,
+            IncompleteMime::RemainingEncryption => Self::RemainingEncryption,
+            IncompleteMime::UndecodedPart => Self::UndecodedPart,
+        }
+    }
+}
+
+/// A decrypted entity has no other copy: every part must reach the reader.
 fn parse_entity(bytes: &[u8]) -> Result<ParsedBody, DecodeError> {
-    let body = parse_raw_message_body(bytes);
-    if body.smime_encrypted.is_some() {
-        return Err(DecodeError::RemainingEncryption);
-    }
-    let header = String::from_utf8_lossy(bytes);
-    let content_type = crate::providers::imap::parse_header_value(&header, "Content-Type")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if content_type.starts_with("multipart/signed")
-        && body.smime_signed.is_none()
-        && body.pgp_signed.is_none()
-    {
-        return Err(DecodeError::MalformedSigned);
-    }
-    Ok(body)
+    check_complete_mime(bytes)?;
+    Ok(parse_raw_message_body(bytes))
 }
 
 /// Keep bytes intact until the MIME parser decodes each part's charset and CTE.

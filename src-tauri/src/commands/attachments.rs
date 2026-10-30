@@ -63,7 +63,9 @@ pub(super) async fn attachments_for_messages(
         for id in chunk {
             ids.push_bind(id);
         }
-        query.push(") ORDER BY message_id, filename");
+        // `id` breaks filename ties: the renderer resolves `cid:` references
+        // and checks decryption provenance by position.
+        query.push(") ORDER BY message_id, filename, id");
         rows.extend(
             query
                 .build_query_as::<AttachmentDto>()
@@ -789,7 +791,11 @@ mod tests {
         .execute(&pool)
         .await
         .expect("schema");
+        // `z9` is inserted first but shares `a2`'s name: a tie the order has
+        // to break the same way on every call, because the renderer resolves
+        // `cid:` references by position and checks provenance by position.
         for (id, message, name) in [
+            ("z9", "m1", "a.png"),
             ("a1", "m1", "b.pdf"),
             ("a2", "m1", "a.png"),
             ("a3", "m2", "c\u{202e}.txt"),
@@ -818,10 +824,10 @@ mod tests {
             .expect("listing");
 
         let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
-        assert_eq!(ids, ["a2", "a1", "a3"]);
+        assert_eq!(ids, ["a2", "z9", "a1", "a3"]);
         assert_eq!(rows[0].cached_path.as_deref(), shared.to_str());
-        assert_eq!(rows[2].filename.as_deref(), Some("c.txt"));
-        assert_eq!(rows[1].cached_path, None, "a1 must not expose a2's bytes");
+        assert_eq!(rows[3].filename.as_deref(), Some("c.txt"));
+        assert_eq!(rows[2].cached_path, None, "a1 must not expose a2's bytes");
         assert!(super::attachments_for_messages(&pool, &[])
             .await
             .expect("empty")

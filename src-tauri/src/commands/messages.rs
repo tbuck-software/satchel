@@ -21,7 +21,8 @@ use crate::{
     commands::error::{CommandError, CommandResult},
     commands::pgp::{
         decrypt_message_with_unlocked_keys, verify_incoming_cleartext_signature,
-        verify_incoming_detached_signature, IncomingPgpDetachedSignature, IncomingPgpSignature,
+        verify_incoming_detached_signature, IncomingPgpDecryptError, IncomingPgpDetachedSignature,
+        IncomingPgpSignature,
     },
     commands::signatures::{
         resolve_signature_for_compose, ResolveSignatureInput, SignaturePreference, SignatureVariant,
@@ -41,7 +42,7 @@ use crate::{
 };
 
 /// Transient content provenance. Never reconstructed from persisted body text.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
 #[cfg_attr(
     feature = "ipc-types",
@@ -704,16 +705,11 @@ async fn map_message_row(
         dto.body_html = None;
     }
 
-    if trust.root_encryption
-        && original_body_text
-            .trim_start()
-            .starts_with("-----BEGIN PGP MESSAGE-----")
-    {
+    if decrypts_inline_pgp(&trust, &original_body_text) {
         match decrypt_message_with_unlocked_keys(app, state, pool, &original_body_text).await {
             Ok(Some(decrypted)) if !decrypted.plaintext.trim().is_empty() => {
-                let parsed =
-                    crate::providers::imap::parse_raw_message_body(decrypted.plaintext.as_bytes());
-                match persist_decrypted_pgp_attachments(app, pool, &dto.id, &parsed.attachments)
+                let body = inline_pgp_body(&trust, decrypted);
+                match persist_decrypted_attachments(app, pool, &dto.id, &body.parsed.attachments)
                     .await
                 {
                     Ok(bindings) => decrypted_attachments = bindings,
@@ -722,31 +718,16 @@ async fn map_message_row(
                         tracing::warn!(message_id = %dto.id, %error, "could not cache decrypted PGP attachments")
                     }
                 }
-                let readable_text = parsed
-                    .text
-                    .filter(|text| !text.trim().is_empty())
-                    .unwrap_or(decrypted.plaintext);
-                dto.snippet = first_non_empty_line(&readable_text).unwrap_or(dto.snippet.clone());
-                let whole_body_decrypted =
-                    decrypted.prefix.trim().is_empty() && decrypted.suffix.trim().is_empty();
-                let segments = vec![
-                    BodySegment::Text(decrypted.prefix.clone()),
-                    BodySegment::PgpDecrypted(readable_text.clone()),
-                    BodySegment::Text(decrypted.suffix.clone()),
-                ];
-                dto.body_text =
-                    format!("{}{}{}", decrypted.prefix, readable_text, decrypted.suffix);
-                dto.body_segments = Some(segments);
-                dto.body_html = if whole_body_decrypted {
-                    parsed.html.filter(|html| !html.trim().is_empty())
-                } else {
-                    None
-                };
-                if let Some(inner_signed) = parsed.pgp_signed.as_deref() {
+                dto.snippet =
+                    first_non_empty_line(&body.decrypted_text).unwrap_or(dto.snippet.clone());
+                dto.body_text = body.text;
+                dto.body_segments = Some(body.segments);
+                dto.body_html = body.html;
+                if let Some(inner_signed) = body.parsed.pgp_signed.as_deref() {
                     apply_incoming_pgp_signed_status(&mut dto, app, pool, inner_signed).await;
                     apply_signature_scope(
                         &mut dto.pgp_state,
-                        parsed.trust.root_crypto && whole_body_decrypted,
+                        body.parsed.trust.root_crypto && body.whole_body,
                     );
                 } else {
                     dto.pgp_state = Some("decrypted".to_string());
@@ -754,10 +735,17 @@ async fn map_message_row(
                 }
             }
             Ok(_) => {}
-            Err(_) => {
+            Err(error) => {
                 dto.pgp_state = Some("error".to_string());
-                dto.pgp_error_detail =
-                    Some(CommandError::new("backend.errors.pgpDecryptFailed").encoded());
+                dto.pgp_error_detail = Some(
+                    CommandError::new(match error {
+                        IncomingPgpDecryptError::SeveralBlocks => {
+                            "backend.errors.pgpSeveralEncryptedBlocks"
+                        }
+                        IncomingPgpDecryptError::Failed(_) => "backend.errors.pgpDecryptFailed",
+                    })
+                    .encoded(),
+                );
             }
         }
     }
@@ -839,7 +827,7 @@ async fn map_message_row(
         match decrypt_message_with_unlocked_smime_certs(app, state, pool, ciphertext).await {
             Ok(Some(decrypted)) => match decode_smime_body(decrypted).await {
                 Ok(parsed) => {
-                    match persist_decrypted_pgp_attachments(
+                    match persist_decrypted_attachments(
                         app,
                         pool,
                         &dto.id,
@@ -958,6 +946,88 @@ async fn map_message_row(
     dto
 }
 
+/// Whether `map_message_row` tries the unlocked keys on this stored body.
+///
+/// Armor after a cover note is decrypted too: the segments keep the cover and
+/// the suffix as plain text, so only the block itself is captioned. A
+/// cleartext-signed body belongs to the signature branch, which replaces it.
+pub(super) fn decrypts_inline_pgp(
+    trust: &crate::providers::traits::MessageTrust,
+    stored_body: &str,
+) -> bool {
+    !trust.root_inline_signature && stored_body.contains("-----BEGIN PGP MESSAGE-----")
+}
+
+/// The display body of a decrypted inline OpenPGP block.
+pub(super) struct InlinePgpBody {
+    pub text: String,
+    pub segments: Vec<BodySegment>,
+    pub html: Option<String>,
+    /// The readable decrypted content, without cover or suffix.
+    pub decrypted_text: String,
+    /// The block was the whole body, so its HTML and signature may stand for
+    /// the message.
+    pub whole_body: bool,
+    /// The plaintext's own MIME: attachments and an inner signature.
+    pub parsed: crate::providers::imap::ParsedBody,
+}
+
+pub(super) fn inline_pgp_body(
+    trust: &crate::providers::traits::MessageTrust,
+    decrypted: crate::commands::pgp::DecryptedIncomingPgp,
+) -> InlinePgpBody {
+    let parsed = if declares_mime(&decrypted.plaintext) {
+        crate::providers::imap::parse_raw_message_body(decrypted.plaintext.as_bytes())
+    } else {
+        crate::providers::imap::ParsedBody::default()
+    };
+    let decrypted_text = parsed
+        .text
+        .clone()
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or(decrypted.plaintext);
+    // Only a block that is the entire root may speak for the message. As the
+    // text part of a multipart mail it has unencrypted parts beside it.
+    let whole_body = trust.root_encryption
+        && decrypted.prefix.trim().is_empty()
+        && decrypted.suffix.trim().is_empty();
+    InlinePgpBody {
+        text: format!("{}{}{}", decrypted.prefix, decrypted_text, decrypted.suffix),
+        segments: vec![
+            BodySegment::Text(decrypted.prefix),
+            BodySegment::PgpDecrypted(decrypted_text.clone()),
+            BodySegment::Text(decrypted.suffix),
+        ],
+        html: if whole_body {
+            parsed.html.clone().filter(|html| !html.trim().is_empty())
+        } else {
+            None
+        },
+        decrypted_text,
+        whole_body,
+        parsed,
+    }
+}
+
+/// Inline plaintext is usually bare text. Read as MIME, its first blank line
+/// would end a header block and drop the paragraph above it, so only a
+/// plaintext that opens with a header field declaring MIME is parsed as such.
+fn declares_mime(plaintext: &str) -> bool {
+    let opens_with_field = plaintext
+        .lines()
+        .next()
+        .and_then(|line| line.split_once(':'))
+        .is_some_and(|(name, _)| {
+            !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        });
+    opens_with_field
+        && (crate::providers::imap::parse_header_value(plaintext, "Content-Type").is_some()
+            || crate::providers::imap::parse_header_value(plaintext, "MIME-Version").is_some())
+}
+
 async fn decode_smime_body(
     bytes: Vec<u8>,
 ) -> CommandResult<satchel_core::email::smime::DecryptedBody> {
@@ -973,6 +1043,8 @@ async fn decode_smime_body(
                 DecodeError::NestingLimit => "backend.errors.smimeNestingLimit",
                 DecodeError::RemainingEncryption => "backend.errors.smimeRemainingEncryption",
                 DecodeError::MalformedSigned => "backend.errors.smimeMalformedSigned",
+                DecodeError::MalformedMime => "backend.errors.smimeMalformedMime",
+                DecodeError::UndecodedPart => "backend.errors.smimeUndecodedPart",
                 DecodeError::InvalidSignedContent(_) => "backend.errors.smimeDecodeFailed",
             };
             tracing::warn!(%error, "S/MIME decode failed");
@@ -1061,7 +1133,14 @@ async fn apply_incoming_pgp_signed_status(
     }
 }
 
-async fn persist_decrypted_pgp_attachments(
+/// The stored ID of a part found inside decrypted content, PGP or S/MIME.
+/// The `att-pgp-` prefix predates S/MIME decoding and stays: rows, cache file
+/// names and open attachment views are keyed by it.
+fn decrypted_attachment_id(message_id: &str, remote_part_id: &str) -> String {
+    format!("att-pgp-{message_id}-{remote_part_id}")
+}
+
+async fn persist_decrypted_attachments(
     app: &tauri::AppHandle,
     pool: &SqlitePool,
     message_id: &str,
@@ -1088,7 +1167,7 @@ async fn persist_decrypted_pgp_attachments(
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(encoded)
             .map_err(|error| format!("decode decrypted attachment: {error}"))?;
-        let attachment_id = format!("att-pgp-{message_id}-{}", attachment.remote_part_id);
+        let attachment_id = decrypted_attachment_id(message_id, &attachment.remote_part_id);
         let filename = attachment
             .filename
             .clone()
@@ -2400,6 +2479,48 @@ mod tests {
                 .await
                 .unwrap();
         assert!(imported_verdict.is_none());
+    }
+
+    #[test]
+    fn covered_inline_pgp_reaches_decryption() {
+        let parsed = crate::providers::imap::parse_raw_message_body(include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp/inline-covered.eml"
+        ));
+        assert!(!parsed.trust.root_encryption);
+        assert!(super::decrypts_inline_pgp(
+            &parsed.trust,
+            parsed.text.as_deref().unwrap()
+        ));
+    }
+
+    #[test]
+    fn only_a_whole_root_block_brings_its_own_html() {
+        use crate::providers::traits::MessageTrust;
+        let decrypted = || crate::commands::pgp::DecryptedIncomingPgp {
+            prefix: String::new(),
+            suffix: "\n".into(),
+            plaintext: "Content-Type: text/html\r\n\r\n<p>Decrypted <b>HTML</b></p>".into(),
+        };
+        let root = MessageTrust {
+            root_encryption: true,
+            ..Default::default()
+        };
+        let body = super::inline_pgp_body(&root, decrypted());
+        assert!(body.whole_body);
+        assert!(body.html.unwrap().contains("<b>HTML</b>"));
+        // The same block as the only text part of a multipart message: other
+        // parts sit beside it, so it does not stand for the message.
+        let body = super::inline_pgp_body(&MessageTrust::default(), decrypted());
+        assert!(!body.whole_body);
+        assert!(body.html.is_none());
+    }
+
+    #[test]
+    fn decrypted_attachment_ids_keep_their_persisted_form() {
+        assert_eq!(
+            super::decrypted_attachment_id("msg-1", "mime-2"),
+            "att-pgp-msg-1-mime-2"
+        );
     }
 
     #[test]

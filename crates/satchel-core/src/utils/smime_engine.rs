@@ -1531,33 +1531,42 @@ mod tests {
         );
     }
 
+    /// A decrypted payload from `tests/corpus/smime`; see the README there.
+    macro_rules! smime_corpus {
+        ($name:literal) => {
+            include_bytes!(concat!("../../tests/corpus/smime/", $name)).as_slice()
+        };
+    }
+
+    /// The outbox's transform and the read path, end to end: protect, find the
+    /// envelope in the sent MIME, decrypt, decode.
+    fn smime_roundtrip(
+        leaf: &Identity,
+        payload: &[u8],
+        signed: bool,
+    ) -> Result<crate::email::smime::DecryptedBody, crate::email::smime::DecodeError> {
+        let encrypted = crate::email::smime::protect_message(
+            payload,
+            signed.then_some((leaf.key_pem.as_str(), leaf.cert_pem.as_str(), None)),
+            Some(std::slice::from_ref(&leaf.cert_pem)),
+        )
+        .unwrap();
+        let envelope = crate::providers::imap::parse_raw_message_body(&encrypted);
+        let bytes = decrypt(
+            &leaf.key_pem,
+            &leaf.cert_pem,
+            None,
+            envelope.smime_encrypted.as_deref().unwrap(),
+        )
+        .unwrap();
+        crate::email::smime::parse_decrypted_body(&bytes)
+    }
+
     #[test]
-    fn decrypted_mime_preserves_root_attachments_and_rejects_incomplete_crypto() {
-        use crate::{
-            email::smime::{parse_decrypted_body, protect_message},
-            providers::imap::parse_raw_message_body,
-        };
-        let ca = issue_ca();
-        let leaf = issue_leaf(&ca, "Synthetic Signer", "sender@example.test");
-        let roundtrip = |payload: &[u8]| {
-            let encrypted = protect_message(
-                payload,
-                Some((&leaf.key_pem, &leaf.cert_pem, None)),
-                Some(std::slice::from_ref(&leaf.cert_pem)),
-            )
-            .unwrap();
-            let envelope = parse_raw_message_body(&encrypted);
-            let bytes = decrypt(
-                &leaf.key_pem,
-                &leaf.cert_pem,
-                None,
-                envelope.smime_encrypted.as_deref().unwrap(),
-            )
-            .unwrap();
-            parse_decrypted_body(&bytes)
-        };
-        let attachment = b"Content-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=file.bin\r\nContent-ID: <root-file>\r\nContent-Transfer-Encoding: base64\r\n\r\nAP+AQQ==";
-        let parsed = roundtrip(attachment).unwrap();
+    fn decrypted_corpus_keeps_complete_payloads_readable() {
+        let leaf = issue_leaf(&issue_ca(), "Synthetic Signer", "sender@example.test");
+        let attachment = smime_corpus!("root-attachment.eml");
+        let parsed = smime_roundtrip(&leaf, attachment, true).unwrap();
         assert_eq!(parsed.body.attachments.len(), 1);
         assert!(parsed.body.text.is_none() && parsed.body.html.is_none());
         assert!(!parsed.body.attachments[0].is_inline);
@@ -1577,27 +1586,99 @@ mod tests {
 
         // A remaining encrypted envelope is not a completed decode.
         for signed in [false, true] {
-            let inner = protect_message(
+            let inner = crate::email::smime::protect_message(
                 attachment,
                 signed.then_some((leaf.key_pem.as_str(), leaf.cert_pem.as_str(), None)),
                 Some(std::slice::from_ref(&leaf.cert_pem)),
             )
             .unwrap();
-            assert!(matches!(
-                roundtrip(&inner),
-                Err(crate::email::smime::DecodeError::RemainingEncryption)
-            ));
+            assert_eq!(
+                smime_roundtrip(&leaf, &inner, true).err(),
+                Some(crate::email::smime::DecodeError::RemainingEncryption)
+            );
         }
-        let malformed = b"Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; boundary=s\r\n\r\n--s\r\nContent-Type: text/plain\r\n\r\nReadable\r\n--s\r\nContent-Type: application/pkcs7-signature\r\n\r\nAQID\r\n--s\r\nContent-Type: text/plain\r\n\r\nUnexpected\r\n--s--\r\n";
-        assert!(matches!(
-            roundtrip(malformed),
-            Err(crate::email::smime::DecodeError::MalformedSigned)
-        ));
-        let image =
-            roundtrip(b"Content-Type: text/html\r\n\r\n<img src=\"cid:synthetic\">").unwrap();
-        assert_eq!(image.body.text.as_deref(), Some(""));
-        assert!(image.body.html.unwrap().contains("<img"));
-        assert!(roundtrip(b"Content-Type: text/plain\r\n\r\n").is_ok());
+
+        for signed in [false, true] {
+            let image = smime_roundtrip(&leaf, smime_corpus!("image-only-html.eml"), signed)
+                .unwrap()
+                .body;
+            assert_eq!(image.text.as_deref(), Some(""));
+            assert!(image.html.unwrap().contains("<img"));
+            assert!(smime_roundtrip(&leaf, smime_corpus!("empty-text.eml"), signed).is_ok());
+
+            let attached =
+                smime_roundtrip(&leaf, smime_corpus!("attached-envelope.eml"), signed).unwrap();
+            assert_eq!(attached.body.text.as_deref(), Some("Cover"));
+            assert_eq!(attached.body.attachments.len(), 1);
+            assert_eq!(
+                attached.body.attachments[0].filename.as_deref(),
+                Some("smime.p7m")
+            );
+            assert!(!attached.body.attachments[0].is_inline);
+
+            let related = smime_roundtrip(&leaf, smime_corpus!("related-inline-image.eml"), signed)
+                .unwrap()
+                .body;
+            assert!(related.html.unwrap().contains("Chart"));
+            assert_eq!(related.attachments.len(), 1);
+            assert!(related.attachments[0].is_inline);
+            assert_eq!(related.attachments[0].content_id.as_deref(), Some("chart"));
+
+            let alternative =
+                smime_roundtrip(&leaf, smime_corpus!("alternative-unknown-part.eml"), signed)
+                    .unwrap()
+                    .body;
+            assert_eq!(alternative.text.as_deref(), Some("Readable alternative"));
+        }
+    }
+
+    #[test]
+    fn decrypted_corpus_rejects_incomplete_mime_at_any_depth() {
+        use crate::email::smime::DecodeError;
+        let leaf = issue_leaf(&issue_ca(), "Synthetic Signer", "sender@example.test");
+        let mut failures = Vec::new();
+        for (name, payload, expected) in [
+            (
+                "malformed-signed-three-parts",
+                smime_corpus!("malformed-signed-three-parts.eml"),
+                DecodeError::MalformedSigned,
+            ),
+            (
+                "nested-malformed-signed",
+                smime_corpus!("nested-malformed-signed.eml"),
+                DecodeError::MalformedSigned,
+            ),
+            (
+                "nested-inline-envelope",
+                smime_corpus!("nested-inline-envelope.eml"),
+                DecodeError::RemainingEncryption,
+            ),
+            (
+                "missing-multipart-boundary",
+                smime_corpus!("missing-multipart-boundary.eml"),
+                DecodeError::MalformedMime,
+            ),
+            (
+                "unlabelled-binary",
+                smime_corpus!("unlabelled-binary.eml"),
+                DecodeError::UndecodedPart,
+            ),
+            (
+                "nested-unlabelled-binary",
+                smime_corpus!("nested-unlabelled-binary.eml"),
+                DecodeError::UndecodedPart,
+            ),
+        ] {
+            for signed in [false, true] {
+                let actual = smime_roundtrip(&leaf, payload, signed).err();
+                if actual.as_ref() != Some(&expected) {
+                    failures.push(format!(
+                        "{name} (signed: {signed}): expected {expected:?}, got {actual:?}"
+                    ));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     /// Synthetic certs only; exercises the builder and crypto functions used by
@@ -1727,30 +1808,40 @@ mod tests {
     fn decrypted_mixed_content_keeps_unsigned_cover_and_partial_signature_scope() {
         let ca = issue_ca();
         let leaf = issue_leaf(&ca, "Synthetic Signer", "sender@example.test");
-        let signed = sign(
-            &leaf.key_pem,
-            &leaf.cert_pem,
-            None,
-            b"Content-Type: text/plain\r\n\r\nSigned text",
-        )
-        .unwrap();
-        // Only inline signed content participates in body-signature scope;
-        // an attached CMS object is intentionally excluded by the MIME parser.
-        let signed = std::str::from_utf8(&signed).unwrap().replace(
-            "Content-Disposition: attachment",
-            "Content-Disposition: inline",
-        );
-        let mut mixed = b"Content-Type: multipart/mixed; boundary=m\r\n\r\n--m\r\nContent-Type: text/html\r\n\r\n<p>Unsigned cover</p>\r\n--m\r\n".to_vec();
-        mixed.extend_from_slice(signed.as_bytes());
-        mixed.extend_from_slice(b"\r\n--m--\r\n");
-        let encrypted = encrypt(std::slice::from_ref(&leaf.cert_pem), &mixed).unwrap();
-        let bytes = decrypt(&leaf.key_pem, &leaf.cert_pem, None, &encrypted).unwrap();
-        let parsed = crate::email::smime::parse_decrypted_body(&bytes).unwrap();
+        let content = b"Content-Type: text/plain\r\n\r\nSigned text";
+        let key = load_private_key(&leaf.key_pem, None).unwrap();
+        let flags = Pkcs7Flags::DETACHED | Pkcs7Flags::BINARY;
+        let detached = Pkcs7::sign(&leaf.cert, &key, &Stack::new().unwrap(), content, flags)
+            .unwrap()
+            .to_smime(content, flags)
+            .unwrap();
+        let mixed = |entity: &[u8]| {
+            let mut mixed = b"Content-Type: multipart/mixed; boundary=m\r\n\r\n--m\r\nContent-Type: text/html\r\n\r\n<p>Unsigned cover</p>\r\n--m\r\n".to_vec();
+            mixed.extend_from_slice(entity);
+            mixed.extend_from_slice(b"\r\n--m--\r\n");
+            let encrypted = encrypt(std::slice::from_ref(&leaf.cert_pem), &mixed).unwrap();
+            let bytes = decrypt(&leaf.key_pem, &leaf.cert_pem, None, &encrypted).unwrap();
+            crate::email::smime::parse_decrypted_body(&bytes)
+        };
+        let parsed = mixed(&detached).unwrap();
         assert!(parsed.body.html.unwrap().contains("Unsigned cover"));
+        assert_eq!(parsed.body.text.as_deref(), Some("Signed text"));
         assert_eq!(parsed.signatures.len(), 1);
         assert!(
             !parsed.signatures[0].1,
             "a nested signature does not cover the cover note"
+        );
+
+        // Opaque signed-data shown inline would need its own unwrapping; the
+        // reader would show the cover and a signature over text it never sees.
+        let opaque = sign(&leaf.key_pem, &leaf.cert_pem, None, content).unwrap();
+        let opaque = std::str::from_utf8(&opaque).unwrap().replace(
+            "Content-Disposition: attachment",
+            "Content-Disposition: inline",
+        );
+        assert_eq!(
+            mixed(opaque.as_bytes()).err(),
+            Some(crate::email::smime::DecodeError::UndecodedPart)
         );
     }
 

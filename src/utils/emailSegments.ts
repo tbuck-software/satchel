@@ -92,6 +92,8 @@ export function splitRenderSegments(text: string, provenance?: RenderSegment[] |
 
 /** Exact HTML and published attachment inputs belong to the same decoded text.
  * This snapshot is transient IPC data, never parsed from sender-controlled MIME.
+ * Attachments match by position: a `cid:` reference resolves to the first
+ * attachment that carries it, so the order decides which image is shown.
  * PR54 must additionally validate the saved ContentReference/generation.
  */
 export function matchingBodyProvenance(
@@ -105,13 +107,14 @@ export function matchingBodyProvenance(
       && segment.content === provenance.segments[index]?.content
     ))) return undefined;
   if (attachments.length !== provenance.attachments.length) return undefined;
-  if (!provenance.attachments.every((expected) => attachments.some((actual) => (
-    actual.id === expected.id && actual.filename === expected.filename
-    && actual.contentType === expected.content_type && actual.size === expected.size
-    && (actual.contentId ?? null) === expected.content_id
-    && Boolean(actual.isInline) === expected.is_inline
-    && (actual.cachedPath ?? null) === expected.cached_path
-    && (!actual.dataUrl || actual.dataUrl === expected.data_url)
-  )))) return undefined;
+  if (!provenance.attachments.every((expected, index) => {
+    const actual = attachments[index]!;
+    return actual.id === expected.id && actual.filename === expected.filename
+      && actual.contentType === expected.content_type && actual.size === expected.size
+      && (actual.contentId ?? null) === expected.content_id
+      && Boolean(actual.isInline) === expected.is_inline
+      && (actual.cachedPath ?? null) === expected.cached_path
+      && (!actual.dataUrl || actual.dataUrl === expected.data_url);
+  })) return undefined;
   return matchingBodySegments(text, segments);
 }

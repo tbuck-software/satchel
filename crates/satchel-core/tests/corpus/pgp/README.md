@@ -24,6 +24,15 @@ libgcrypt 1.12.0; ten passed with an isolated libgcrypt 1.12.2. A lookup flag
 also changed the outcome on the old library, but failed again under harmless
 instrumentation, so it is not a product workaround.
 
+`inline-covered.eml` and `inline-two-blocks.eml` are `text/plain` mails with
+inline armor that GnuPG 2.4.8 encrypted to the fixture's public key on
+2026-10-30. Encrypting needs only the public key, so the libgcrypt issue above
+does not affect them. The first holds one block between a cover note and a
+suffix; its plaintext is `Hello Bob,\n\nthe meeting moves to Thursday.\n`,
+without MIME headers. The second holds two blocks after a cover note, and
+Satchel refuses to decrypt it rather than show one block as the decrypted
+message. The app tests in `src-tauri/src/commands/{pgp,messages}.rs` read both.
+
 To require the optional GnuPG tests on a host with the affected library, run
 them against a newer libgcrypt in a scoped environment; do not replace the
 system library just for the test:

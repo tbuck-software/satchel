@@ -1,0 +1,13 @@
+Content-Type: multipart/mixed; boundary=m
+
+--m
+Content-Type: text/plain
+
+Cover
+--m
+Content-Type: application/pkcs7-mime; smime-type=enveloped-data; name="smime.p7m"
+Content-Disposition: inline; filename="smime.p7m"
+Content-Transfer-Encoding: base64
+
+MIAGCSqGSIb3DQEHA6CAMIACAQA=
+--m--

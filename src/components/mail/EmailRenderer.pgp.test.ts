@@ -141,6 +141,27 @@ it('invalidates captions when published attachments change', async () => {
 });
 
 
+it('drops the caption when reordered attachments change which image a shared Content-ID shows', async () => {
+  setActivePinia(createPinia());
+  const html = '<p>Secret</p><img src="cid:shared">';
+  const segments = [{ kind: 'smime_decrypted' as const, content: 'Secret' }];
+  const first = { id: 'a', filename: 'a.png', contentType: 'image/png', size: 3, contentId: 'shared',
+    isInline: true, cachedPath: '/cache/a.png', dataUrl: 'data:image/png;base64,AQID' };
+  const second = { ...first, id: 'b', filename: 'b.png', cachedPath: '/cache/b.png', dataUrl: 'data:image/png;base64,BAUG' };
+  const binding = (part: typeof first) => ({ id: part.id, filename: part.filename, content_type: part.contentType,
+    size: part.size, content_id: part.contentId, is_inline: part.isInline, cached_path: part.cachedPath, data_url: part.dataUrl });
+  const wrapper = mount(EmailRenderer, { props: {
+    html, text: 'Secret', bodySegments: segments, cacheKey: 'attachment-order',
+    bodyProvenance: { html, segments, attachments: [binding(first), binding(second)] }, attachments: [first, second],
+  } });
+  const before = wrapper.get('iframe').attributes('srcdoc');
+  expect(wrapper.findAll('.pgp-segment-header')).toHaveLength(1);
+  await wrapper.setProps({ attachments: [second, first] });
+  expect(wrapper.get('iframe').attributes('srcdoc')).not.toBe(before);
+  expect(wrapper.findAll('.pgp-segment-header')).toHaveLength(0);
+  wrapper.unmount();
+});
+
 it('rejects redistributed segments even when their concatenated text is unchanged', () => {
   setActivePinia(createPinia());
   const wrapper = mount(EmailRenderer, { props: {

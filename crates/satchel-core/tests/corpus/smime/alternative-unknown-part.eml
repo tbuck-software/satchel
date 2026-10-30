@@ -1,0 +1,11 @@
+Content-Type: multipart/alternative; boundary=a
+
+--a
+Content-Type: text/plain
+
+Readable alternative
+--a
+Content-Type: application/x-unknown-rendering
+
+Opaque alternative
+--a--

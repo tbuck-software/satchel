@@ -2958,15 +2958,9 @@ fn parse_body_part(
     }
 
     let lowered_content_type = content_type.to_ascii_lowercase();
-    if lowered_content_type.starts_with("application/pkcs7-mime")
-        || lowered_content_type.starts_with("application/x-pkcs7-mime")
-    {
+    if is_pkcs7_mime(&lowered_content_type) {
         let decoded = decode_part_bytes(raw_body, transfer_encoding);
-        let is_enveloped = match extract_header_param(content_type, "smime-type").as_deref() {
-            Some(kind) => kind.eq_ignore_ascii_case("enveloped-data"),
-            None => lowered_content_type.contains("smime.p7m"),
-        };
-        return if is_enveloped {
+        return if pkcs7_is_enveloped(content_type, &lowered_content_type) {
             ParsedBody {
                 text: None,
                 html: None,
@@ -3034,11 +3028,7 @@ fn parse_body_part(
     }
 
     if lowered_content_type.starts_with("multipart/") {
-        if lowered_content_type.starts_with("multipart/signed")
-            && (lowered_content_type.contains("application/pgp-signature")
-                || lowered_content_type.contains("application/pkcs7-signature")
-                || lowered_content_type.contains("application/x-pkcs7-signature"))
-        {
+        if is_verifiable_signed(&lowered_content_type) {
             let sections = extract_header_param(content_type, "boundary")
                 .map(|boundary| split_multipart_sections(raw_body, &boundary))
                 .unwrap_or_default();
@@ -3340,16 +3330,12 @@ fn collect_attachment_parts(
     }
 
     if lowered_content_type.starts_with("message/rfc822") {
-        let filename = extract_filename_param(disposition.unwrap_or_default())
-            .or_else(|| extract_filename_param(content_type))
-            .map(|value| decode_mime_encoded_words(&value));
-        let lowered_disposition = disposition.unwrap_or_default().to_ascii_lowercase();
-        if lowered_disposition.contains("attachment") || filename.is_some() {
+        if let Some(filename) = attached_message_filename(content_type, disposition) {
             *counter += 1;
             let bytes = decode_part_bytes(raw_body, transfer_encoding);
             out.push(ParsedAttachment {
                 remote_part_id: format!("mime-{counter}"),
-                filename: filename.or_else(|| Some("attached-message.eml".to_string())),
+                filename: Some(filename),
                 content_type: "message/rfc822".to_string(),
                 content_id,
                 is_inline: false,
@@ -3378,31 +3364,13 @@ fn collect_attachment_parts(
         return;
     }
 
-    let lowered_disposition = disposition.unwrap_or_default().to_ascii_lowercase();
-    if lowered_content_type.starts_with("application/pgp-signature")
-        || lowered_content_type.starts_with("application/pkcs7-signature")
-        || lowered_content_type.starts_with("application/x-pkcs7-signature")
-    {
+    let Some(LeafAttachment {
+        filename,
+        is_inline,
+    }) = leaf_attachment(content_type, disposition, content_id.is_some())
+    else {
         return;
-    }
-    let filename = extract_filename_param(disposition.unwrap_or_default())
-        .or_else(|| extract_filename_param(content_type))
-        .map(|value| decode_mime_encoded_words(&value));
-    let disposition_type = lowered_disposition
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim();
-    // Outlook gives regular image attachments a Content-ID too. An explicit
-    // attachment disposition takes precedence over that inline-image hint.
-    let is_inline_content = disposition_type == "inline"
-        || (disposition_type != "attachment"
-            && content_id.is_some()
-            && lowered_content_type.starts_with("image/"));
-    let is_attachment = disposition_type == "attachment" || filename.is_some() || is_inline_content;
-    if !is_attachment || lowered_content_type.starts_with("text/calendar") {
-        return;
-    }
+    };
 
     let bytes = decode_part_bytes(raw_body, transfer_encoding);
     if is_tnef_part(&lowered_content_type, filename.as_deref()) {
@@ -3419,9 +3387,246 @@ fn collect_attachment_parts(
         filename,
         content_type: crate::email::mime_type::normalize_mime_type(content_type),
         content_id,
-        is_inline: is_inline_content,
+        is_inline,
         bytes,
     });
+}
+
+/// The file name a `message/rfc822` part is kept under, `None` when the
+/// attachment scan descends into it instead.
+fn attached_message_filename(content_type: &str, disposition: Option<&str>) -> Option<String> {
+    let filename = extract_filename_param(disposition.unwrap_or_default())
+        .or_else(|| extract_filename_param(content_type))
+        .map(|value| decode_mime_encoded_words(&value));
+    let lowered_disposition = disposition.unwrap_or_default().to_ascii_lowercase();
+    (lowered_disposition.contains("attachment") || filename.is_some())
+        .then(|| filename.unwrap_or_else(|| "attached-message.eml".to_string()))
+}
+
+struct LeafAttachment {
+    filename: Option<String>,
+    is_inline: bool,
+}
+
+/// How the attachment scan keeps a leaf part, `None` when it leaves the part
+/// to the body. `check_complete_mime` asks the same question, so the two
+/// cannot disagree about which parts reach the attachment list.
+fn leaf_attachment(
+    content_type: &str,
+    disposition: Option<&str>,
+    has_content_id: bool,
+) -> Option<LeafAttachment> {
+    let lowered_content_type = content_type.to_ascii_lowercase();
+    if is_detached_signature(&lowered_content_type)
+        || lowered_content_type.starts_with("text/calendar")
+    {
+        return None;
+    }
+    let lowered_disposition = disposition.unwrap_or_default().to_ascii_lowercase();
+    let filename = extract_filename_param(disposition.unwrap_or_default())
+        .or_else(|| extract_filename_param(content_type))
+        .map(|value| decode_mime_encoded_words(&value));
+    let disposition_type = lowered_disposition
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim();
+    // Outlook gives regular image attachments a Content-ID too. An explicit
+    // attachment disposition takes precedence over that inline-image hint.
+    let is_inline = disposition_type == "inline"
+        || (disposition_type != "attachment"
+            && has_content_id
+            && lowered_content_type.starts_with("image/"));
+    (disposition_type == "attachment" || filename.is_some() || is_inline).then_some(
+        LeafAttachment {
+            filename,
+            is_inline,
+        },
+    )
+}
+
+fn is_pkcs7_mime(lowered_content_type: &str) -> bool {
+    lowered_content_type.starts_with("application/pkcs7-mime")
+        || lowered_content_type.starts_with("application/x-pkcs7-mime")
+}
+
+fn pkcs7_is_enveloped(content_type: &str, lowered_content_type: &str) -> bool {
+    match extract_header_param(content_type, "smime-type").as_deref() {
+        Some(kind) => kind.eq_ignore_ascii_case("enveloped-data"),
+        None => lowered_content_type.contains("smime.p7m"),
+    }
+}
+
+fn is_detached_signature(lowered_content_type: &str) -> bool {
+    lowered_content_type.starts_with("application/pgp-signature")
+        || lowered_content_type.starts_with("application/pkcs7-signature")
+        || lowered_content_type.starts_with("application/x-pkcs7-signature")
+}
+
+/// `multipart/signed` with a protocol Satchel verifies. Any other protocol is
+/// read as an ordinary multipart.
+fn is_verifiable_signed(lowered_content_type: &str) -> bool {
+    lowered_content_type.starts_with("multipart/signed")
+        && (lowered_content_type.contains("application/pgp-signature")
+            || lowered_content_type.contains("application/pkcs7-signature")
+            || lowered_content_type.contains("application/x-pkcs7-signature"))
+}
+
+/// A part of a MIME tree that `parse_raw_message_body` would not show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncompleteMime {
+    /// Nested deeper than the parsers descend.
+    NestingLimit,
+    /// A multipart entity without a boundary, or without a single part.
+    MalformedMultipart,
+    /// `multipart/signed` that is not one content part and one signature, or
+    /// that uses a protocol Satchel does not verify.
+    MalformedSigned,
+    /// An encrypted layer that would have to be shown in place.
+    RemainingEncryption,
+    /// A part that reaches neither the body nor the attachment list.
+    UndecodedPart,
+}
+
+/// Check that `parse_raw_message_body` accounts for every part of `raw`.
+///
+/// The parser is lenient on purpose: synced mail with one broken part still
+/// shows the rest, and the server keeps the original. A decrypted payload has
+/// no second copy, so its decoder turns each silent loss into an error.
+///
+/// A part is accounted for when the body may show it as text, the attachment
+/// scan keeps it, it is a detached signature, or it is one alternative of
+/// several that are accounted for. Which of several text parts the body shows
+/// is the parser's selection, as for any mail. An opaque signed layer at the
+/// root is the caller's to unwrap; below the root nothing would show it.
+pub fn check_complete_mime(raw: &[u8]) -> Result<(), IncompleteMime> {
+    let (header, body) = split_header_and_body(raw);
+    check_mime_part(&MimePartHead::read(header), body, 0, true)
+}
+
+struct MimePartHead {
+    content_type: String,
+    transfer_encoding: String,
+    disposition: Option<String>,
+    has_content_id: bool,
+}
+
+impl MimePartHead {
+    /// The same defaults `parse_body_part` applies to a part.
+    fn read(header: &[u8]) -> Self {
+        let header = String::from_utf8_lossy(header);
+        Self {
+            content_type: parse_header_value(&header, "Content-Type")
+                .unwrap_or_else(|| "text/plain; charset=utf-8".to_string()),
+            transfer_encoding: parse_header_value(&header, "Content-Transfer-Encoding")
+                .unwrap_or_else(|| "8bit".to_string()),
+            disposition: parse_header_value(&header, "Content-Disposition"),
+            has_content_id: parse_header_value(&header, "Content-ID")
+                .is_some_and(|value| !value.trim_matches(['<', '>']).is_empty()),
+        }
+    }
+}
+
+/// `displayed` is false below a multipart the body skips as an attachment:
+/// its text reaches the reader only if the attachment scan keeps it.
+fn check_mime_part(
+    head: &MimePartHead,
+    body: &[u8],
+    depth: usize,
+    displayed: bool,
+) -> Result<(), IncompleteMime> {
+    const MAX_DEPTH: usize = 10;
+    if depth > MAX_DEPTH {
+        return Err(IncompleteMime::NestingLimit);
+    }
+    let lowered = head.content_type.to_ascii_lowercase();
+    let disposition = head.disposition.as_deref().unwrap_or_default();
+    let attached = disposition
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .eq_ignore_ascii_case("attachment");
+
+    if lowered.starts_with("multipart/") {
+        let sections = extract_header_param(&head.content_type, "boundary")
+            .map(|boundary| split_multipart_sections(body, &boundary))
+            .unwrap_or_default();
+        if lowered.starts_with("multipart/signed") {
+            if !is_verifiable_signed(&lowered) || sections.len() != 2 {
+                return Err(IncompleteMime::MalformedSigned);
+            }
+            let (header, content) = split_header_and_body(sections[0]);
+            return check_mime_part(&MimePartHead::read(header), content, depth + 1, displayed);
+        }
+        if lowered.starts_with("multipart/encrypted") {
+            return Err(IncompleteMime::RemainingEncryption);
+        }
+        if sections.is_empty() {
+            return Err(IncompleteMime::MalformedMultipart);
+        }
+        let displayed =
+            displayed && !(depth > 0 && disposition.to_ascii_lowercase().contains("attachment"));
+        let alternative = lowered.starts_with("multipart/alternative");
+        let mut accounted = false;
+        for section in sections {
+            let (header, content) = split_header_and_body(section);
+            match check_mime_part(&MimePartHead::read(header), content, depth + 1, displayed) {
+                Ok(()) => accounted = true,
+                // The reader shows an alternative it can render instead.
+                Err(IncompleteMime::UndecodedPart) if alternative => {}
+                Err(error) => return Err(error),
+            }
+        }
+        return if accounted {
+            Ok(())
+        } else {
+            Err(IncompleteMime::UndecodedPart)
+        };
+    }
+
+    if is_pkcs7_mime(&lowered) {
+        if depth > 0 && attached {
+            // A file, such as a forwarded encrypted mail.
+            return Ok(());
+        }
+        if pkcs7_is_enveloped(&head.content_type, &lowered) {
+            return Err(IncompleteMime::RemainingEncryption);
+        }
+        return if depth == 0 {
+            Ok(())
+        } else {
+            Err(IncompleteMime::UndecodedPart)
+        };
+    }
+
+    if lowered.starts_with("message/rfc822") {
+        if attached_message_filename(&head.content_type, head.disposition.as_deref()).is_some() {
+            return Ok(());
+        }
+        let decoded = decode_part_bytes(body, &head.transfer_encoding);
+        let (header, embedded) = split_header_and_body(&decoded);
+        // The attachment scan judges the embedded root by the outer part.
+        let embedded_head = MimePartHead {
+            disposition: head.disposition.clone(),
+            has_content_id: head.has_content_id,
+            ..MimePartHead::read(header)
+        };
+        return check_mime_part(&embedded_head, embedded, depth + 1, displayed);
+    }
+
+    if is_detached_signature(&lowered)
+        || (displayed && lowered.starts_with("text/"))
+        || leaf_attachment(
+            &head.content_type,
+            head.disposition.as_deref(),
+            head.has_content_id,
+        )
+        .is_some()
+    {
+        return Ok(());
+    }
+    Err(IncompleteMime::UndecodedPart)
 }
 
 fn is_tnef_part(lowered_content_type: &str, filename: Option<&str>) -> bool {

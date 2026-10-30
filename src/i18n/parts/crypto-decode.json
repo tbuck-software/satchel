@@ -7,7 +7,10 @@
         "smimeNestingLimit": "The S/MIME message has too many nested layers.",
         "smimeRemainingEncryption": "The S/MIME message contains another encrypted layer that could not be opened.",
         "smimeMalformedSigned": "The S/MIME signature structure is incomplete or malformed.",
-        "smimeVerificationFailed": "The S/MIME signature could not be verified."
+        "smimeMalformedMime": "The decrypted S/MIME content has an incomplete or malformed MIME structure.",
+        "smimeUndecodedPart": "The decrypted S/MIME content contains a part that Satchel cannot show.",
+        "smimeVerificationFailed": "The S/MIME signature could not be verified.",
+        "pgpSeveralEncryptedBlocks": "The message contains several OpenPGP blocks. Satchel decrypts only messages with a single encrypted block."
       }
     }
   },
@@ -19,7 +22,10 @@
         "smimeNestingLimit": "Die S/MIME-Nachricht enthält zu viele verschachtelte Ebenen.",
         "smimeRemainingEncryption": "Die S/MIME-Nachricht enthält eine weitere verschlüsselte Ebene, die nicht geöffnet werden konnte.",
         "smimeMalformedSigned": "Die S/MIME-Signaturstruktur ist unvollständig oder fehlerhaft.",
-        "smimeVerificationFailed": "Die S/MIME-Signatur konnte nicht überprüft werden."
+        "smimeMalformedMime": "Der entschlüsselte S/MIME-Inhalt hat eine unvollständige oder fehlerhafte MIME-Struktur.",
+        "smimeUndecodedPart": "Der entschlüsselte S/MIME-Inhalt enthält einen Teil, den Satchel nicht anzeigen kann.",
+        "smimeVerificationFailed": "Die S/MIME-Signatur konnte nicht überprüft werden.",
+        "pgpSeveralEncryptedBlocks": "Die Nachricht enthält mehrere OpenPGP-Blöcke. Satchel entschlüsselt nur Nachrichten mit einem einzigen verschlüsselten Block."
       }
     }
   }

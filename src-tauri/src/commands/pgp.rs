@@ -55,6 +55,21 @@ pub struct DecryptedIncomingPgp {
     pub plaintext: String,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum IncomingPgpDecryptError {
+    /// More than one armored block. Decrypting one would caption a body that
+    /// still holds ciphertext as decrypted; decrypting each would need a
+    /// signature state and an attachment namespace per block. Neither is done.
+    SeveralBlocks,
+    Failed(String),
+}
+
+impl From<String> for IncomingPgpDecryptError {
+    fn from(error: String) -> Self {
+        Self::Failed(error)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/pgp/"))]
@@ -545,7 +560,7 @@ pub async fn decrypt_message_with_unlocked_keys(
     state: &AppState,
     pool: &SqlitePool,
     ciphertext: &str,
-) -> Result<Option<DecryptedIncomingPgp>, String> {
+) -> Result<Option<DecryptedIncomingPgp>, IncomingPgpDecryptError> {
     let normalized_body = normalize_newlines(ciphertext);
     let message_blocks = extract_pgp_message_blocks(&normalized_body);
     if message_blocks.is_empty() {
@@ -592,7 +607,10 @@ pub async fn decrypt_message_with_unlocked_keys(
     .map_err(|error| format!("OpenPGP decryption task failed: {error}"))?
 }
 
-/// Try every unlocked key against every block, first success wins.
+/// Try every unlocked key against the body's one armored block.
+///
+/// Several blocks are refused before any key is tried, rather than letting
+/// the first block that decrypts stand for the message.
 ///
 /// Owned and free of `AppHandle` so it can run on a blocking thread — and be
 /// tested without one.
@@ -600,7 +618,10 @@ fn try_unlocked_keys(
     normalized_body: &str,
     message_blocks: &[PgpMessageBlock],
     key_materials: &[(String, String)],
-) -> Result<Option<DecryptedIncomingPgp>, String> {
+) -> Result<Option<DecryptedIncomingPgp>, IncomingPgpDecryptError> {
+    if message_blocks.len() > 1 {
+        return Err(IncomingPgpDecryptError::SeveralBlocks);
+    }
     let mut attempted = false;
     let mut last_error = None;
     for block in message_blocks {
@@ -624,7 +645,9 @@ fn try_unlocked_keys(
     }
 
     if attempted {
-        Err(last_error.unwrap_or_else(|| "no unlocked key could decrypt the message".to_string()))
+        Err(IncomingPgpDecryptError::Failed(last_error.unwrap_or_else(
+            || "no unlocked key could decrypt the message".to_string(),
+        )))
     } else {
         Ok(None)
     }
@@ -1690,6 +1713,60 @@ mod tests {
         })
         .expect("generate test key");
         (generated.private_armored, generated.public_armored)
+    }
+
+    const GPG_FIXTURE_PRIVATE: &str =
+        include_str!("../../../crates/satchel-core/tests/corpus/pgp/gpg-private.asc");
+    const GPG_FIXTURE_PASSPHRASE: &str = "fixture-passphrase";
+
+    /// What ingest stores for a corpus message, then the unlocked fixture key.
+    fn decrypt_stored_corpus(
+        raw: &[u8],
+    ) -> (
+        crate::providers::traits::MessageTrust,
+        Result<Option<super::DecryptedIncomingPgp>, super::IncomingPgpDecryptError>,
+    ) {
+        let parsed = crate::providers::imap::parse_raw_message_body(raw);
+        let stored = super::normalize_newlines(&parsed.text.unwrap());
+        let blocks = super::extract_pgp_message_blocks(&stored);
+        let keys = [(GPG_FIXTURE_PRIVATE.into(), GPG_FIXTURE_PASSPHRASE.into())];
+        (
+            parsed.trust,
+            super::try_unlocked_keys(&stored, &blocks, &keys),
+        )
+    }
+
+    #[test]
+    fn a_covered_inline_block_keeps_its_cover_plain_and_its_plaintext_whole() {
+        use crate::commands::messages::{inline_pgp_body, BodySegment};
+        let (trust, decrypted) = decrypt_stored_corpus(include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp/inline-covered.eml"
+        ));
+        let body = inline_pgp_body(&trust, decrypted.unwrap().unwrap());
+        let [BodySegment::Text(cover), BodySegment::PgpDecrypted(plaintext), BodySegment::Text(suffix)] =
+            &body.segments[..]
+        else {
+            panic!("unexpected segments: {:?}", body.segments);
+        };
+        assert_eq!(cover.trim(), "Cover note before the block.");
+        // Plain text without MIME headers: a blank line is a paragraph break,
+        // not the end of a header block.
+        assert_eq!(plaintext, "Hello Bob,\n\nthe meeting moves to Thursday.\n");
+        assert_eq!(suffix.trim(), "Sent from a client that writes inline PGP.");
+        assert_eq!(body.text, format!("{cover}{plaintext}{suffix}"));
+        assert!(!body.whole_body);
+        assert!(body.html.is_none());
+    }
+
+    #[test]
+    fn several_inline_blocks_are_refused_instead_of_decrypting_the_first() {
+        let (_, decrypted) = decrypt_stored_corpus(include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp/inline-two-blocks.eml"
+        ));
+        assert_eq!(
+            decrypted.err(),
+            Some(super::IncomingPgpDecryptError::SeveralBlocks)
+        );
     }
 
     #[test]

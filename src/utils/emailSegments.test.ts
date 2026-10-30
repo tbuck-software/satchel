@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { splitEncryptedSegments, splitRenderSegments } from './emailSegments';
+import type { Attachment } from '@/types/mail';
+import { matchingBodyProvenance, splitEncryptedSegments, splitRenderSegments } from './emailSegments';
 
 const PGP_START = '[[SATCHEL_PGP_DECRYPTED_BLOCK_START]]';
 const PGP_END = '[[SATCHEL_PGP_DECRYPTED_BLOCK_END]]';
@@ -89,4 +90,28 @@ describe('decryption provenance', () => {
   });
 
   it('returns nothing for blank text', () => expect(splitRenderSegments('  ')).toEqual([]));
+});
+
+describe('attachment provenance', () => {
+  const html = '<p>Secret</p><img src="cid:shared">';
+  const segments = [{ kind: 'smime_decrypted' as const, content: 'Secret' }];
+  const first: Attachment = { id: 'a', filename: 'a.png', contentType: 'image/png', contentId: 'shared',
+    isInline: true, size: 3, cachedPath: '/cache/a.png', dataUrl: 'data:image/png;base64,AQID' };
+  const second: Attachment = { ...first, id: 'b', filename: 'b.png', cachedPath: '/cache/b.png',
+    dataUrl: 'data:image/png;base64,BAUG' };
+  const binding = (part: Attachment) => ({ id: part.id, filename: part.filename, content_type: part.contentType,
+    content_id: part.contentId ?? null, is_inline: Boolean(part.isInline), size: part.size,
+    cached_path: part.cachedPath ?? null, data_url: part.dataUrl ?? null });
+  const provenance = { html, segments, attachments: [binding(first), binding(second)] };
+
+  it('binds the published order, because the first matching Content-ID wins', () => {
+    expect(matchingBodyProvenance('Secret', html, segments, provenance, [first, second])).toBe(segments);
+    expect(matchingBodyProvenance('Secret', html, segments, provenance, [second, first])).toBeUndefined();
+  });
+
+  it('still accepts the same order while inline bytes are pending', () => {
+    const pending = [{ ...first, dataUrl: undefined }, { ...second, dataUrl: undefined }];
+    expect(matchingBodyProvenance('Secret', html, segments, provenance, pending)).toBe(segments);
+    expect(matchingBodyProvenance('Secret', html, segments, provenance, [...pending].reverse())).toBeUndefined();
+  });
 });

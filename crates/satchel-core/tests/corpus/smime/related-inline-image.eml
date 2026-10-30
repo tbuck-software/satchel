@@ -1,0 +1,13 @@
+Content-Type: multipart/related; boundary=r
+
+--r
+Content-Type: text/html
+
+<p>Chart</p><img src="cid:chart">
+--r
+Content-Type: image/png
+Content-ID: <chart>
+Content-Transfer-Encoding: base64
+
+iVBORw==
+--r--
