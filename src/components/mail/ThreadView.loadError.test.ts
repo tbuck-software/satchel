@@ -62,7 +62,7 @@ vi.mock('@/stores/threads', () => ({
 }));
 vi.mock('@/stores/topics', () => ({
   useTopicsStore: () => ({
-    topicIdsFor: () => [],
+    membershipsKnownFor: () => true, membershipsFailedFor: () => false, membershipsLoadingFor: () => false, topicIdsFor: () => [],
     hasMembershipsFor: () => false,
     byId: vi.fn(),
     loadMembershipsFor: vi.fn(),

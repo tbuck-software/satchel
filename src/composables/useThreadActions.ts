@@ -406,25 +406,13 @@ export function useThreadActions() {
     });
   }
 
-  /** Memberships decide what an Undo may revert; read unknown ones first. */
-  async function ensureTopicMemberships(threadIds: string[]) {
-    const unknown = threadIds.filter((threadId) => !topics.hasMembershipsFor('thread', threadId));
-    if (unknown.length === 0) return;
-    try {
-      await topics.loadMembershipsFor('thread', unknown);
-    } catch {
-      // Unknown memberships count as absent; the write itself still applies.
-    }
-  }
-
-  /** Link threads to a topic; the store applies the optimistic membership. */
+  /** Link threads to a topic; only the database receipt authorizes Undo. */
   async function addToTopic(threadIds: string[], topicId: string): Promise<void> {
     threadIds = Array.from(new Set(threadIds));
     if (threadIds.length === 0) return;
     const topicName = topics.byId(topicId)?.name ?? '';
-    let added: string[];
+    let added: Awaited<ReturnType<typeof topics.addItemsToTopic>>;
     try {
-      await ensureTopicMemberships(threadIds);
       added = await topics.addItemsToTopic(topicId, 'thread', threadIds);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('thread.result.addToTopicFailed'));
@@ -439,9 +427,7 @@ export function useThreadActions() {
           action: {
             label: t('thread.actions.undo'),
             handler: () => attempt(
-              () => Promise.all(
-                added.map((threadId) => topics.removeItemFromTopic(topicId, 'thread', threadId)),
-              ),
+              () => topics.undoMemberships(topicId, 'thread', added, false),
               t('thread.result.removeFromTopicFailed'),
             ),
           },
@@ -454,25 +440,31 @@ export function useThreadActions() {
     threadIds = Array.from(new Set(threadIds));
     if (threadIds.length === 0) return;
     const topicName = topics.byId(topicId)?.name ?? '';
-    let removed: string[];
-    try {
-      await ensureTopicMemberships(threadIds);
-      const wasMember = await Promise.all(
-        threadIds.map((threadId) => topics.removeItemFromTopic(topicId, 'thread', threadId)),
-      );
-      removed = threadIds.filter((_, index) => wasMember[index]);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('thread.result.removeFromTopicFailed'));
+    const results = await Promise.allSettled(
+      threadIds.map((threadId) => topics.removeItemFromTopic(topicId, 'thread', threadId)),
+    );
+    const removed = results.flatMap((result) =>
+      result.status === 'fulfilled' && result.value !== null ? [result.value] : []);
+    const failures = results.filter((result) => result.status === 'rejected');
+    if (failures.length > 0 && removed.length === 0) {
+      const error = failures[0]!.reason;
+      toast.error(error instanceof Error ? error.message : t('thread.result.removeFromTopicFailed'));
       return;
     }
-    toast.success(t('thread.result.removedFromTopic', { topic: topicName }), {
+    const notify = failures.length > 0 ? toast.warning : toast.success;
+    const message = failures.length > 0
+      ? t('thread.result.removedFromTopicPartially', { topic: topicName, count: removed.length, failed: failures.length })
+      : t('thread.result.removedFromTopic', { topic: topicName });
+    notify(message, {
       timeout: UNDO_TIMEOUT_MS,
       ...(removed.length > 0 ? {
         action: {
           label: t('thread.actions.undo'),
-          present: 'fab',
+          undo: true,
+          // Partial failures need visible text on touch screens as well.
+          present: failures.length === 0 ? 'fab' : undefined,
           handler: () => attempt(
-            () => topics.addItemsToTopic(topicId, 'thread', removed),
+            () => topics.undoMemberships(topicId, 'thread', removed, true),
             t('thread.result.addToTopicFailed'),
           ),
         },

@@ -437,19 +437,19 @@ test('resend prefill mounts the real editor without fetching foreign tracking pi
     requests.push(route.request().url());
     await route.fulfill({ status: 204 });
   });
-  await page.goto('/render-fidelity.html');
-  await page.evaluate(async () => {
-    const load = (path: string) => import(/* @vite-ignore */ path);
-    const { createApp, h } = await load('/node_modules/.vite/deps/vue.js');
-    const { i18n } = await load('/src/i18n/index.ts');
-    const { default: Editor } = await load('/src/components/mail/RichTextEditor.vue');
-    const { resendEditorHtml } = await load('/src/utils/composerThreadPrefill.ts');
-    const root = document.createElement('div');
-    document.body.append(root);
-    const html = resendEditorHtml('<p>Resend body</p><input type=image src=https://tracker.example.test/input><img src=https://tracker.example.test/plain><img src="&#104;ttps://tracker.example.test/encoded"><img srcset="https://tracker.example.test/srcset 2x">');
-    createApp({ render: () => h(Editor, { modelValue: '', html }) }).use(i18n).mount(root);
+  // CI captured a mounted editor despite a failed async evaluate response.
+  // Load the real editor through a module entry, then mount synchronously.
+  await page.goto('/tests/fixtures/resend-editor.html');
+  await page.waitForFunction(() => typeof window.__mountSatchelResendEditor === 'function');
+  const navigations: string[] = [];
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) navigations.push(frame.url());
+  });
+  await page.evaluate(() => {
+    window.__mountSatchelResendEditor!('<p>Resend body</p><input type=image src=https://tracker.example.test/input><img src=https://tracker.example.test/plain><img src="&#104;ttps://tracker.example.test/encoded"><img srcset="https://tracker.example.test/srcset 2x">');
   });
   await expect(page.locator('.tiptap')).toContainText('Resend body');
   await expect(page.locator('.tiptap img')).toHaveCount(0);
   expect(requests).toEqual([]);
+  expect(navigations).toEqual([]);
 });

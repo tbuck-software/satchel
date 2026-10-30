@@ -637,6 +637,7 @@ async function runSetupLoads(only?: SetupPart[]) {
   failedSetupParts.value = loaders
     .filter(([part], index) => {
       const result = results[index];
+      if (part === 'templates' && templatesStore.loadFailed) return true;
       if (result?.status !== 'rejected') return false;
       console.warn(`composer setup: ${part} failed to load`, result.reason);
       return true;

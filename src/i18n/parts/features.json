@@ -302,6 +302,9 @@
         "dueFailed": "The follow-up could not be saved.",
         "markdownCopied": "Topic copied as Markdown.",
         "copyFailed": "Copying failed."
+      },
+      "memberships": {
+        "loadFailed": "Topic memberships could not be loaded"
       }
     },
     "onboarding": {
@@ -713,6 +716,9 @@
         "dueFailed": "Wiedervorlage konnte nicht gespeichert werden.",
         "markdownCopied": "Thema als Markdown kopiert.",
         "copyFailed": "Kopieren fehlgeschlagen."
+      },
+      "memberships": {
+        "loadFailed": "Themenzuordnungen konnten nicht geladen werden"
       }
     },
     "onboarding": {
