@@ -1502,3 +1502,66 @@ describe('invalid previews and interrupted body refreshes', () => {
     expect(store.getByThread('th-live')[0]?.bodyLoadError).toBeUndefined();
   });
 });
+
+describe('inline-image requests interrupted by refresh', () => {
+  it.each(['before', 'after', 'reject'])('retains expanded images when the obsolete download completes %s', async (order) => {
+    const { watch, nextTick } = await import('vue');
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    downloadAttachmentMock.mockReset();
+    commandsAvailableMock.mockReturnValue(true);
+    previewMock.mockResolvedValue(['old', 'middle', 'latest'].map(id => backendMessage({ id, remote_uidvalidity: 7 })) as never);
+    bodiesMock.mockImplementation(async ids => ids.map(id => ({
+      ...inlineBody(id === 'old' ? '<img src="cid:image001.jpg@01DD16D4.C2220470">' : ''),
+      id, remote_uidvalidity: 7,
+    })) as never);
+    attachmentsMock.mockImplementation(async ids => ids.includes('old')
+      ? [inlineAttachmentRow({ message_id: 'old' })] as never : []);
+    type Download = Awaited<ReturnType<typeof backendDownloadAttachment>>;
+    const obsolete = deferred<Download>();
+    const current = deferred<Download>();
+    downloadAttachmentMock.mockReturnValueOnce(obsolete.promise).mockReturnValueOnce(current.promise);
+    const store = useMessagesStore();
+    await store.openThread('th-live');
+    const expansion = store.loadAttachmentsForMessages('th-live', ['old']);
+    await vi.waitFor(() => expect(downloadAttachmentMock).toHaveBeenCalledTimes(1));
+    // Match the visible-message predicate used by ThreadView for the expanded row.
+    const stop = watch(() => store.getByThread('th-live').filter(message => message.id === 'old')
+      .filter(message => (message.bodyLoaded === false && !store.isBodyLoading(message.id))
+        || (message.bodyLoaded !== false && store.needsDetails(message.id)))
+      .map(message => message.id).join('\u0000'), key => {
+        if (key) void store.loadAttachmentsForMessages('th-live', key.split('\u0000'));
+      }, { flush: 'post', immediate: true });
+    const result = (data_base64: string): Download => ({
+      filename: 'image.jpg', mime_type: 'image/jpeg', data_base64, remote_uidvalidity: 7,
+    });
+    try {
+      await store.refreshThread('th-live');
+      await vi.waitFor(() => expect(downloadAttachmentMock).toHaveBeenCalledTimes(2));
+      expect(bodiesMock.mock.calls.filter(([ids]) => ids.includes('old'))).toHaveLength(1);
+      if (order !== 'after') {
+        if (order === 'reject') obsolete.reject(new Error('obsolete download failed'));
+        else obsolete.resolve(result('b2xk'));
+        await expansion;
+        await nextTick();
+        expect(store.needsDetails('old')).toBe(false);
+        expect(store.getByThread('th-live')[0]?.attachments).toEqual([]);
+        expect(store.getByThread('th-live')[0]?.inlineImagesError).toBeUndefined();
+      }
+      current.resolve(result('bmV3'));
+      await vi.waitFor(() => expect(store.getByThread('th-live')[0]?.attachments[0]?.dataUrl)
+        .toBe('data:image/jpeg;base64,bmV3'));
+      if (order === 'after') {
+        obsolete.resolve(result('b2xk'));
+        await expansion;
+        await nextTick();
+      }
+      expect(store.getByThread('th-live')[0]?.attachments[0]?.dataUrl).toBe('data:image/jpeg;base64,bmV3');
+      expect(store.getByThread('th-live')[0]?.inlineImagesError).toBeUndefined();
+      expect(store.needsDetails('old')).toBe(false);
+      expect(downloadAttachmentMock).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+    }
+  });
+});

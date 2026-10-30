@@ -425,6 +425,23 @@ describe('composer setup', () => {
       expect(error).toMatch(/sync.*folder/i);
       expect(error).not.toContain('[object Object]');
       expect(sendButton(wrapper).attributes('disabled')).toBeDefined();
+      expect(harness.draftSetup.mock.calls[0]![0].buildInput()).toBeNull();
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it('refuses an unavailable list payload returned as a draft load', async () => {
+    harness.fetchDraft.mockResolvedValue({ id: 'draft-1', account_id: 'account-1',
+      to: [], cc: [], bcc: [], subject: '', body: '', updated_at: '',
+      content_error: JSON.stringify({ key: 'backend.errors.imapUidValidityMissing', params: { folder: 'Work/Drafts' } }),
+    });
+    const wrapper = render([], true, { initialDraftId: 'draft-1', initialBody: '' });
+    try {
+      await flushPromises();
+      expect(harness.toastError.mock.calls[0]![0]).toContain('Work/Drafts');
+      expect(sendButton(wrapper).attributes('disabled')).toBeDefined();
+      expect(harness.draftSetup.mock.calls[0]![0].buildInput()).toBeNull();
     } finally {
       wrapper.unmount();
     }

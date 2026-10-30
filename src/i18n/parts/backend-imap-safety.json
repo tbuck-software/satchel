@@ -8,6 +8,9 @@
         "imapMutationInvalidRef": "This queued IMAP action has an incomplete message identity. Sync the folder and try again.",
         "imapDraftUidWithoutValidity": "This older draft in \"{folder}\" has no verified server identity. Its server copy was left untouched."
       }
+    },
+    "drafts": {
+      "unavailable": "Draft unavailable"
     }
   },
   "de": {
@@ -19,6 +22,9 @@
         "imapMutationInvalidRef": "Für diese vorgemerkte IMAP-Aktion ist die Nachrichtenkennung unvollständig. Synchronisiere den Ordner und versuche es erneut.",
         "imapDraftUidWithoutValidity": "Für diesen älteren Entwurf in \"{folder}\" fehlt eine bestätigte Serverkennung. Seine Serverkopie wurde nicht verändert."
       }
+    },
+    "drafts": {
+      "unavailable": "Entwurf nicht verfügbar"
     }
   }
 }

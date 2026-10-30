@@ -237,6 +237,8 @@ const threadEmlDrop = useThreadEmlDrop(
   () => sending.value,
 );
 const initialized = ref(false);
+/** Failed draft loads must not persist or send an empty replacement. */
+const draftLoadFailed = ref(false);
 // A loaded reply or draft shows its history control at once, not after a pause.
 watch(initialized, (ready) => {
   if (ready) quotedHistory.settle();
@@ -351,7 +353,7 @@ const {
   initialized,
   sending,
   status,
-  buildInput: () => activeAccount.value ? composerDraftInput(currentDraftState()) : null,
+  buildInput: () => activeAccount.value && !draftLoadFailed.value ? composerDraftInput(currentDraftState()) : null,
   drafts: draftsStore,
   t,
   onCaughtUp: () => localBackup.clear(),
@@ -402,8 +404,6 @@ async function leaveComposer() {
   else await router.push({ name: 'inbox' });
 }
 
-/** A draft that could not be loaded must not be sent as an empty message. */
-const draftLoadFailed = ref(false);
 const sendBlocker = computed(() => composerSendBlocker({
   initialized: initialized.value,
   sending: sending.value,
@@ -468,7 +468,7 @@ async function loadDraft() {
   const id = props.initialDraftId || (route.query.draftId as string | undefined);
   if (!id) return;
   const draft = await draftsStore.fetchOne(id);
-  if (!draft) return;
+  if (!draft) throw new Error(t('backend.errors.messageNotAvailableLocally'));
   if (draft.send_cancelled) toast.info(t('compose.schedule.editCancelled'));
   await applyDraft(draft);
   // A reply carries the message it answers.
@@ -476,6 +476,7 @@ async function loadDraft() {
 }
 
 async function applyDraft(draft: BackendDraft) {
+  if (draft.content_error) throw new Error(translateBackendError(draft.content_error) ?? t('drafts.unavailable'));
   draftId.value = draft.id;
   draftRevision.value = draft.revision ?? null;
   contextThreadId.value = draft.thread_id ?? null;

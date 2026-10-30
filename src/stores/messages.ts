@@ -802,7 +802,8 @@ export const useMessagesStore = defineStore('messages', () => {
       const demanded = messagesByThread.value[threadId]!
         .filter(message => demandedDetails.has(message.id) || detailsNeedingRevalidation.has(message.id))
         .map(message => message.id);
-      const arrived = [...new Set([...prioritizedMessageIds(threadId), ...demanded])].filter((id) => {
+      const detailIds = [...new Set([...prioritizedMessageIds(threadId), ...demanded])];
+      const arrived = detailIds.filter((id) => {
         const message = messagesByThread.value[threadId]?.find(message => message.id === id);
         return !previousById.has(id) || changedGeneration(message?.remoteUidValidity, previousById.get(id), message?.contentError)
           || detailsNeedingRevalidation.has(id)
@@ -816,8 +817,9 @@ export const useMessagesStore = defineStore('messages', () => {
           }
         }
         await hydrateMessageBodies(threadId, arrived, version);
-        void hydrateMessageAttachments(threadId, arrived, version);
       }
+      // Refresh also replaces unfinished image requests for already loaded bodies.
+      void hydrateMessageAttachments(threadId, detailIds, version);
     }, false);
   }
 

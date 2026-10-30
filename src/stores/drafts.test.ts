@@ -1,6 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  backendLoadDraft,
   backendDeleteDraft,
   backendListDrafts,
   backendSaveDraft,
@@ -10,6 +11,10 @@ import {
 import { useDraftsStore } from './drafts';
 import { useConnectionStore } from './connection';
 import { useMessagesStore } from './messages';
+import { useDraftActions } from '@/composables/useDraftActions';
+
+const toast = vi.hoisted(() => ({ info: vi.fn(), success: vi.fn(), error: vi.fn() }));
+vi.mock('@/composables/useToast', () => ({ useToast: () => toast }));
 
 vi.mock('@/services/backend', () => ({
   backendCommandsAvailable: vi.fn(() => true),
@@ -166,5 +171,55 @@ describe('drafts store', () => {
     await useDraftsStore().save(draftInput({ id: 'draft-1', threadId: 'thread-1' }));
 
     expect(messages.getByThread('thread-1')[0]).toMatchObject({ bodyText: 'Hallo Mara, danke!', timestamp: '2026-08-01T10:30:00Z' });
+  });
+
+  it('keeps mixed availability, rejects unsafe restore/save/load, and still edits valid drafts', async () => {
+    const unavailable = storedDraft({ id: 'blocked', body: '', content_error: JSON.stringify({
+      key: 'backend.errors.imapUidValidityMissing', params: { folder: 'Work/Drafts' },
+    }) });
+    listMock.mockResolvedValueOnce([unavailable, storedDraft()]);
+    const drafts = useDraftsStore();
+    await drafts.load();
+    expect(drafts.items).toHaveLength(2);
+    await expect(drafts.restore(unavailable)).rejects.toThrow('Work/Drafts');
+    await expect(drafts.save(draftInput({ id: 'blocked' }))).rejects.toThrow('Work/Drafts');
+    vi.mocked(backendLoadDraft).mockResolvedValueOnce(unavailable);
+    await expect(drafts.fetchOne('blocked')).rejects.toThrow('Work/Drafts');
+    expect(saveMock).not.toHaveBeenCalled();
+    saveMock.mockResolvedValueOnce(storedDraft({ body: 'Edited' }));
+    expect((await drafts.save(draftInput({ id: 'draft-1', body: 'Edited' })))?.body).toBe('Edited');
+    await drafts.remove('draft-1');
+    expect(drafts.items.map((draft) => draft.id)).toEqual(['blocked']);
+  });
+
+  it('replaces unavailable list metadata after a verified fresh read so editing can resume', async () => {
+    listMock.mockResolvedValueOnce([storedDraft({ content_error: 'backend.errors.imapUidValidityMissing' })]);
+    const drafts = useDraftsStore();
+    await drafts.load();
+    vi.mocked(backendLoadDraft).mockResolvedValueOnce(storedDraft());
+    expect((await drafts.fetchOne('draft-1'))?.body).toBe('Hallo Mara');
+    expect(drafts.items[0]?.content_error).toBeUndefined();
+    saveMock.mockResolvedValueOnce(storedDraft({ body: 'Edited after sync' }));
+    expect((await drafts.save(draftInput({ id: 'draft-1', body: 'Edited after sync' })))?.body).toBe('Edited after sync');
+  });
+  it('edits, deletes and undoes a valid draft while an unavailable row remains in the real store', async () => {
+    const blocked = storedDraft({ id: 'blocked', body: '', content_error: 'backend.errors.imapUidValidityMissing' });
+    const edited = storedDraft({ body: 'Edited beside an unavailable draft' });
+    listMock.mockResolvedValueOnce([blocked, storedDraft()]);
+    const drafts = useDraftsStore();
+    await drafts.load();
+    saveMock.mockResolvedValueOnce(edited);
+    await drafts.save(draftInput({ id: 'draft-1', body: edited.body }));
+    vi.mocked(backendLoadDraft).mockResolvedValueOnce(edited);
+    deleteMock.mockResolvedValueOnce(undefined);
+    await expect(useDraftActions().discard('draft-1')).resolves.toBe(true);
+    expect(drafts.items.map((draft) => draft.id)).toEqual(['blocked']);
+    const action = toast.info.mock.calls.at(-1)?.[1].action;
+    expect(action).toBeDefined();
+    saveMock.mockResolvedValueOnce(edited);
+    action.handler();
+    await vi.waitFor(() => expect(drafts.items.find((draft) => draft.id === 'draft-1')?.body).toBe(edited.body));
+    expect(saveMock).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'draft-1', body: edited.body }));
+    expect(drafts.items.find((draft) => draft.id === 'blocked')?.content_error).toBeTruthy();
   });
 });

@@ -116,6 +116,10 @@ pub struct DraftDto {
     /// itself is valid — this only says the remote half has to wait.
     #[serde(default)]
     pub remote_error: Option<String>,
+    /// Encoded recovery key and parameters when this row's content cannot be
+    /// trusted. Only identifiers and timestamps remain; load still fails closed.
+    #[serde(default)]
+    pub content_error: Option<String>,
     #[serde(default)]
     pub send_cancelled: bool,
     #[serde(default)]
@@ -202,6 +206,7 @@ impl From<DraftRow> for DraftDto {
                 .as_deref()
                 .and_then(|raw| serde_json::from_str(raw).ok()),
             remote_error: None,
+            content_error: None,
             send_cancelled: false,
         }
     }
@@ -805,7 +810,11 @@ async fn record_remote_draft_id(
 }
 
 pub async fn list(pool: &SqlitePool) -> Result<Vec<DraftDto>, String> {
-    let rows = sqlx::query_as::<_, ReferencedDraftRow>(
+    finish_draft_list(pool, draft_list_snapshot(pool).await?).await
+}
+
+async fn draft_list_snapshot(pool: &SqlitePool) -> Result<Vec<ReferencedDraftRow>, String> {
+    sqlx::query_as::<_, ReferencedDraftRow>(
         "SELECT m.id, m.account_id, m.thread_id, m.to_addresses, m.cc_addresses, m.bcc_addresses, m.subject, m.body_text, m.body_html, m.from_address, m.from_name, m.reply_to, m.scheduled_for, m.draft_attachments_json, m.signature_id, m.signature_variant, m.signature_override_text, m.signature_override_html, m.updated_at, m.draft_send_options_json, m.draft_revision,
                 m.id AS message_id, m.folder_id, m.remote_id, m.remote_uidvalidity,
                 m.created_at, a.provider, COALESCE(f.remote_id, f.full_path) AS source_folder,
@@ -817,28 +826,70 @@ pub async fn list(pool: &SqlitePool) -> Result<Vec<DraftDto>, String> {
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| error.to_string())
+}
+
+async fn finish_draft_list(
+    pool: &SqlitePool,
+    rows: Vec<ReferencedDraftRow>,
+) -> Result<Vec<DraftDto>, String> {
     let mut drafts = Vec::with_capacity(rows.len());
     let mut references = Vec::with_capacity(rows.len());
     for row in rows {
-        row.reference.validate_cached_read()?;
+        let draft = match row.reference.validate_cached_read() {
+            Ok(()) => sanitize_draft_html(row.draft.into()).await?,
+            Err(error) => unavailable_draft(row.draft.into(), error),
+        };
         references.push(row.reference);
-        drafts.push(sanitize_draft_html(row.draft.into()).await?);
+        drafts.push(draft);
     }
+    // Sanitization yields to blocking workers. Recheck every captured identity
+    // after those awaits, retaining unavailable metadata for changed/deleted rows.
     let ids = references
         .iter()
         .map(|reference| reference.message_id.clone())
         .collect::<Vec<_>>();
     let current = ContentReference::load_many(pool, &ids).await?;
-    for reference in references {
+    for (draft, reference) in drafts.iter_mut().zip(references) {
         if !current
             .get(&reference.message_id)
             .is_some_and(|value| reference.same_identity(value))
         {
-            return Err(reference.changed_error());
+            *draft = unavailable_draft(draft.clone(), reference.changed_error());
         }
     }
     Ok(drafts)
+}
+
+fn unavailable_draft(draft: DraftDto, error: String) -> DraftDto {
+    // Construct from an empty row rather than keeping any content fields from
+    // an unverified identity, including recipients, signatures and send options.
+    DraftDto {
+        id: draft.id,
+        account_id: draft.account_id,
+        thread_id: draft.thread_id,
+        updated_at: draft.updated_at,
+        revision: draft.revision,
+        content_error: Some(error),
+        to: Vec::new(),
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: String::new(),
+        body: String::new(),
+        body_html: None,
+        from_address: None,
+        from_name: None,
+        reply_to: None,
+        scheduled_for: None,
+        attachments: Vec::new(),
+        signature_id: None,
+        signature_variant: None,
+        signature_override_text: None,
+        signature_override_html: None,
+        send_options: None,
+        send_cancelled: false,
+        remote_error: None,
+    }
 }
 
 async fn sanitize_draft_html(mut draft: DraftDto) -> Result<DraftDto, String> {
@@ -1325,7 +1376,10 @@ mod tests {
                     } else {
                         "imapUidValidityChanged"
                     };
-                    assert!(listed.unwrap_err().contains(key));
+                    let unavailable = listed.unwrap().remove(0);
+                    assert!(unavailable.content_error.unwrap().contains(key));
+                    assert!(unavailable.body.is_empty());
+                    assert!(unavailable.attachments.is_empty());
                     assert!(loaded.unwrap_err().to_string().contains(key));
                 }
             }
@@ -1353,6 +1407,153 @@ mod tests {
                 1
             );
         }
+    }
+
+    #[tokio::test]
+    async fn draft_list_keeps_valid_entries_alongside_unavailable_content() {
+        let pool = draft_test_pool().await;
+        let queue = crate::sync::queue::SyncQueue::new();
+        for (id, account, remote_id, generation) in [
+            ("local", "A", None, None),
+            (
+                "imported",
+                "A",
+                Some("import-123e4567-e89b-12d3-a456-426614174000"),
+                None,
+            ),
+            ("verified", "B", Some("42"), Some(8)),
+            ("legacy", "A", Some("43"), None),
+            ("mismatched", "B", Some("44"), Some(7)),
+        ] {
+            let mut input = draft_input(account, "Secret body");
+            input.id = Some(id.into());
+            input.to = vec!["secret@example.test".into()];
+            input.cc = input.to.clone();
+            input.bcc = input.to.clone();
+            input.body_html = Some("<p>Secret HTML</p>".into());
+            input.signature_override_text = Some("Secret signature".into());
+            input.signature_override_html = Some("<p>Secret signature</p>".into());
+            input.reply_to = Some("secret@example.test".into());
+            input.send_options = Some(serde_json::json!({"priority": "high"}));
+            input.attachments = vec![super::OutgoingAttachmentInput {
+                filename: "secret.txt".into(),
+                mime_type: "text/plain".into(),
+                content_base64: "c2VjcmV0".into(),
+                content_id: None,
+                inline: false,
+            }];
+            save(&pool, &queue, &input).await.unwrap();
+            sqlx::query("UPDATE messages SET remote_id = ?, remote_uidvalidity = ? WHERE id = ?")
+                .bind(remote_id)
+                .bind(generation)
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query("UPDATE folders SET uidvalidity = 8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let drafts = super::list(&pool).await.unwrap();
+        assert_eq!(drafts.len(), 5);
+        for draft in drafts {
+            if matches!(draft.id.as_str(), "legacy" | "mismatched") {
+                let error: serde_json::Value =
+                    serde_json::from_str(draft.content_error.as_ref().unwrap()).unwrap();
+                assert_eq!(error["params"]["folder"], "Drafts");
+                assert_eq!(
+                    error["key"],
+                    if draft.id == "legacy" {
+                        "backend.errors.imapUidValidityMissing"
+                    } else {
+                        "backend.errors.imapUidValidityChanged"
+                    }
+                );
+                assert!(draft.remote_error.is_none());
+                let mut payload = serde_json::to_value(&draft).unwrap();
+                for metadata in [
+                    "id",
+                    "account_id",
+                    "thread_id",
+                    "updated_at",
+                    "revision",
+                    "content_error",
+                ] {
+                    payload.as_object_mut().unwrap().remove(metadata);
+                }
+                assert!(
+                    payload.as_object().unwrap().values().all(|value| {
+                        value.is_null()
+                            || value.as_str() == Some("")
+                            || value.as_bool() == Some(false)
+                            || value.as_array().is_some_and(Vec::is_empty)
+                    }),
+                    "content leaked: {payload}"
+                );
+                assert!(super::load(&pool, &pool, &queue, &draft.id).await.is_err());
+            } else {
+                assert!(draft.content_error.is_none());
+                assert_eq!(draft.body, "Secret body");
+                assert_eq!(draft.attachments.len(), 1);
+                assert_eq!(
+                    super::load(&pool, &pool, &queue, &draft.id)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .body,
+                    "Secret body"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn draft_list_revalidates_each_snapshot_after_identity_change_or_removal() {
+        let pool = draft_test_pool().await;
+        let queue = crate::sync::queue::SyncQueue::new();
+        for id in ["stable", "changed", "removed"] {
+            let mut input = draft_input("A", "Saved body");
+            input.id = Some(id.into());
+            input.body_html = Some("<p>Saved HTML</p>".into());
+            save(&pool, &queue, &input).await.unwrap();
+        }
+        sqlx::raw_sql(
+            "UPDATE folders SET uidvalidity = 8;
+            UPDATE messages SET remote_id = '42', remote_uidvalidity = 8 WHERE id <> 'stable';",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let snapshot = super::draft_list_snapshot(&pool).await.unwrap();
+        sqlx::raw_sql(
+            "UPDATE messages SET remote_id = '43' WHERE id = 'changed';
+            DELETE FROM messages WHERE id = 'removed';",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let drafts = super::finish_draft_list(&pool, snapshot).await.unwrap();
+        assert_eq!(drafts.len(), 3);
+        for draft in drafts {
+            if draft.id == "stable" {
+                assert!(draft.content_error.is_none());
+                assert_eq!(draft.body, "Saved body");
+            } else {
+                assert!(draft
+                    .content_error
+                    .unwrap()
+                    .contains("imapUidValidityChanged"));
+                assert!(draft.body.is_empty());
+                assert!(draft.body_html.is_none());
+                assert!(draft.attachments.is_empty());
+            }
+        }
+        pool.close().await;
+        assert!(
+            super::list(&pool).await.is_err(),
+            "database failures must still fail the list"
+        );
     }
 
     #[tokio::test]

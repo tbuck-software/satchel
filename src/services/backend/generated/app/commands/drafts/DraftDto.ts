@@ -30,6 +30,11 @@ export type DraftDto = {
      * itself is valid — this only says the remote half has to wait.
      */
     remote_error: string | null;
+    /**
+     * Encoded recovery key and parameters when this row's content cannot be
+     * trusted. Only identifiers and timestamps remain; load still fails closed.
+     */
+    content_error: string | null;
     send_cancelled: boolean;
     send_options: JsonValue | null;
 };

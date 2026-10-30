@@ -983,6 +983,7 @@
       "waiting": "Waiting for you"
     },
     "title": "Drafts",
+    "unavailable": "Draft unavailable",
     "undo": "Undo",
     "withAttachment": "Has attachment"
   },

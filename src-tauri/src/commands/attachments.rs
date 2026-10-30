@@ -176,6 +176,12 @@ pub struct PreparedAttachmentResult {
     pub cached_path: String,
 }
 
+/// Keep the saved identity beside the file until the last asynchronous read.
+struct ReferencedAttachment {
+    result: PreparedAttachmentResult,
+    reference: ContentReference,
+}
+
 #[tauri::command]
 pub async fn download_attachment(
     app: AppHandle,
@@ -192,7 +198,19 @@ pub async fn download_attachment_inner(
     pool: &SqlitePool,
     input: DownloadAttachmentInput,
 ) -> Result<DownloadAttachmentResult, String> {
-    let prepared = prepare_attachment_inner(app, pool, input).await?;
+    let cache_dir = attachment_cache_directory(app)?;
+    let prepared = prepare_referenced_attachment(&cache_dir, pool, input).await?;
+    download_prepared_attachment(pool, prepared).await
+}
+
+async fn download_prepared_attachment(
+    pool: &SqlitePool,
+    prepared: ReferencedAttachment,
+) -> Result<DownloadAttachmentResult, String> {
+    let ReferencedAttachment {
+        result: prepared,
+        reference,
+    } = prepared;
     let size = tokio::fs::metadata(&prepared.cached_path)
         .await
         .map(|meta| meta.len())
@@ -214,6 +232,10 @@ pub async fn download_attachment_inner(
         None
     };
 
+    // Metadata, cache reads and encoding all yield. Validate the captured
+    // identity after them for both inline bytes and the large-file path.
+    let mut tx = pool.begin().await.map_err(|error| error.to_string())?;
+    reference.ensure_current(&mut tx).await?;
     Ok(DownloadAttachmentResult {
         remote_uidvalidity: prepared.remote_uidvalidity,
         filename: prepared.filename,
@@ -243,11 +265,14 @@ pub async fn prepare_attachment_inner(
     pool: &SqlitePool,
     input: DownloadAttachmentInput,
 ) -> Result<PreparedAttachmentResult, String> {
-    let cache_dir = app
-        .path()
-        .resolve("satchel/attachments", tauri::path::BaseDirectory::AppData)
-        .map_err(|err| err.to_string())?;
+    let cache_dir = attachment_cache_directory(app)?;
     prepare_attachment_in_dir(&cache_dir, pool, input).await
+}
+
+fn attachment_cache_directory(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .resolve("satchel/attachments", tauri::path::BaseDirectory::AppData)
+        .map_err(|err| err.to_string())
 }
 
 pub(super) async fn prepare_attachment_in_dir(
@@ -255,6 +280,16 @@ pub(super) async fn prepare_attachment_in_dir(
     pool: &SqlitePool,
     input: DownloadAttachmentInput,
 ) -> Result<PreparedAttachmentResult, String> {
+    Ok(prepare_referenced_attachment(cache_dir, pool, input)
+        .await?
+        .result)
+}
+
+async fn prepare_referenced_attachment(
+    cache_dir: &std::path::Path,
+    pool: &SqlitePool,
+    input: DownloadAttachmentInput,
+) -> Result<ReferencedAttachment, String> {
     let message_id: String = sqlx::query_scalar("SELECT message_id FROM attachments WHERE id = ?")
         .bind(&input.attachment_id)
         .fetch_optional(pool)
@@ -306,12 +341,15 @@ pub(super) async fn prepare_attachment_in_dir(
             if let Some(size) = validated_cached_file_size(cache_dir, path).await {
                 let mut tx = pool.begin().await.map_err(|err| err.to_string())?;
                 reference.ensure_current(&mut tx).await?;
-                return Ok(PreparedAttachmentResult {
-                    remote_uidvalidity: reference.uidvalidity(),
-                    filename,
-                    mime_type: mime,
-                    size,
-                    cached_path: path.to_string(),
+                return Ok(ReferencedAttachment {
+                    result: PreparedAttachmentResult {
+                        remote_uidvalidity: reference.uidvalidity(),
+                        filename,
+                        mime_type: mime,
+                        size,
+                        cached_path: path.to_string(),
+                    },
+                    reference,
                 });
             }
         }
@@ -388,12 +426,15 @@ pub(super) async fn prepare_attachment_in_dir(
 
     tx.commit().await.map_err(|err| err.to_string())?;
 
-    Ok(PreparedAttachmentResult {
-        remote_uidvalidity: reference.uidvalidity(),
-        filename: final_filename,
-        mime_type,
-        size,
-        cached_path: path_string,
+    Ok(ReferencedAttachment {
+        result: PreparedAttachmentResult {
+            remote_uidvalidity: reference.uidvalidity(),
+            filename: final_filename,
+            mime_type,
+            size,
+            cached_path: path_string,
+        },
+        reference,
     })
 }
 
@@ -702,6 +743,96 @@ use crate::db::remote_content::{safe_filename, MAX_CACHE_NAME_BYTES};
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn attachment_download_revalidates_after_preparation() {
+        use super::{
+            download_prepared_attachment, prepare_referenced_attachment, DownloadAttachmentInput,
+        };
+        use crate::db::remote_content::ContentReference;
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id,display_name,email,provider,config,credentials_ref,created_at,updated_at)
+            VALUES ('a','A','me@example.test','imap','{}','','','');
+            INSERT INTO folders (id,account_id,name,full_path,remote_id,folder_type,uidvalidity,created_at,updated_at)
+            VALUES ('f','a','Inbox','INBOX','INBOX','inbox',7,'','');
+            INSERT INTO threads (id,account_id,subject,last_message_date,created_at,updated_at) VALUES ('t','a','Subject','','','');
+            INSERT INTO messages (id,account_id,folder_id,thread_id,remote_id,remote_uidvalidity,from_address,to_addresses,date,created_at,updated_at)
+            VALUES ('m','a','f','t','42',7,'sender@example.test','[]','','','');
+            INSERT INTO attachments (id,message_id,filename,content_type,created_at) VALUES ('att','m','file.bin','application/octet-stream','');")
+            .execute(&pool).await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        for size in [4, super::MAX_BASE64_PAYLOAD_BYTES + 1] {
+            for scenario in ["current", "reset", "replaced", "local-reset"] {
+                sqlx::query("UPDATE folders SET uidvalidity = 7")
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                sqlx::query("UPDATE messages SET remote_id = ?, remote_uidvalidity = 7")
+                    .bind((scenario != "local-reset").then_some("42"))
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                let reference = ContentReference::load(&pool, "m").await.unwrap();
+                let path = super::attachment_cache_path(
+                    dir.path(),
+                    &reference.attachment_cache_id("att"),
+                    "file.bin",
+                );
+                std::fs::write(&path, vec![b'x'; size]).unwrap();
+                sqlx::query("UPDATE attachments SET cached_path = ?")
+                    .bind(path.to_str().unwrap())
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                let prepared = prepare_referenced_attachment(
+                    dir.path(),
+                    &pool,
+                    DownloadAttachmentInput {
+                        attachment_id: "att".into(),
+                    },
+                )
+                .await
+                .unwrap();
+                match scenario {
+                    "reset" | "local-reset" => {
+                        sqlx::query("UPDATE folders SET uidvalidity = 8")
+                            .execute(&pool)
+                            .await
+                            .unwrap();
+                    }
+                    "replaced" => {
+                        sqlx::query("UPDATE messages SET remote_id = '43'")
+                            .execute(&pool)
+                            .await
+                            .unwrap();
+                    }
+                    _ => {}
+                }
+                let result = download_prepared_attachment(&pool, prepared).await;
+                if matches!(scenario, "reset" | "replaced") {
+                    assert!(
+                        result.unwrap_err().contains("imapUidValidityChanged"),
+                        "{scenario}, {size}"
+                    );
+                } else {
+                    let result = result.unwrap();
+                    assert_eq!(result.cached_path.as_deref(), path.to_str());
+                    assert_eq!(
+                        result.data_base64.is_some(),
+                        size <= super::MAX_BASE64_PAYLOAD_BYTES
+                    );
+                    if size == 4 {
+                        assert_eq!(result.data_base64.as_deref(), Some("eHh4eA=="));
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn the_final_cache_name_is_the_opening_gate() {
         let original = format!("{}.jar{}", "A".repeat(116), "X".repeat(16));
