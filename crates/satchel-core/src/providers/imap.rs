@@ -3182,13 +3182,7 @@ fn parse_signed_body(content_type: &str, raw_body: &[u8], depth: usize) -> Parse
         return ParsedBody::default();
     }
 
-    let (part_header, part_body) = signed_mime::entity_header_and_body(parts.entity);
-    let part_header = String::from_utf8_lossy(part_header);
-    let part_type = parse_header_value(&part_header, "Content-Type")
-        .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
-    let part_encoding = parse_header_value(&part_header, "Content-Transfer-Encoding")
-        .unwrap_or_else(|| "8bit".to_string());
-    let mut parsed = parse_body_part(&part_type, &part_encoding, part_body, depth + 1);
+    let mut parsed = display_signed_entity(parts.entity, depth + 1);
     parsed.smime_encrypted = None;
     parsed.smime_signed = None;
     parsed.pgp_signed = None;
@@ -3197,6 +3191,18 @@ fn parse_signed_body(content_type: &str, raw_body: &[u8], depth: usize) -> Parse
         SignedProtocol::Smime => parsed.smime_signed = Some(bundle),
     }
     parsed
+}
+
+/// What the reader is shown of a signed entity: its headers name the type
+/// and transfer encoding of the content that follows them.
+pub(crate) fn display_signed_entity(entity: &[u8], depth: usize) -> ParsedBody {
+    let (part_header, part_body) = signed_mime::entity_header_and_body(entity);
+    let part_header = String::from_utf8_lossy(part_header);
+    let part_type = parse_header_value(&part_header, "Content-Type")
+        .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
+    let part_encoding = parse_header_value(&part_header, "Content-Transfer-Encoding")
+        .unwrap_or_else(|| "8bit".to_string());
+    parse_body_part(&part_type, &part_encoding, part_body, depth)
 }
 
 pub(super) fn root_crypto_trust(

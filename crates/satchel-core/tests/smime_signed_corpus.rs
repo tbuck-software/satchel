@@ -3,6 +3,8 @@
 //! the legitimate fixture must verify over exactly its displayed entity, the
 //! forged ones never over what they display.
 
+use satchel_core::email::sanitizer::sanitize_email_html;
+use satchel_core::email::signed_mime::{stored_body_matches, SignedMimeError};
 use satchel_core::providers::imap::{parse_header_value, parse_raw_message_body, ParsedBody};
 use satchel_core::utils::smime_engine;
 
@@ -15,6 +17,14 @@ const FORGED: &[(&str, &[u8])] = &[
     (
         "forged-preamble-delimiter",
         include_bytes!("corpus/smime-signed/forged-preamble-delimiter.eml"),
+    ),
+    (
+        "forged-padded-boundary",
+        include_bytes!("corpus/smime-signed/forged-padded-boundary.eml"),
+    ),
+    (
+        "forged-bare-cr",
+        include_bytes!("corpus/smime-signed/forged-bare-cr.eml"),
     ),
 ];
 
@@ -69,4 +79,32 @@ fn forged_smime_mail_never_verifies_over_what_it_displays() {
         let stored = format!("Content-Type: {content_type}\r\n\r\n{body}");
         assert!(!signature_holds(stored.as_bytes()), "{name}: stored bundle");
     }
+}
+
+#[test]
+fn a_stored_row_keeps_its_signature_only_over_the_entity_it_shows() {
+    let parsed = parse_raw_message_body(SIGNED);
+    let bundle = parsed.smime_signed.as_deref().unwrap();
+    // As ingest stores the row, and as body reloads rewrite it.
+    assert_eq!(
+        stored_body_matches(bundle, parsed.text.as_deref(), None),
+        Ok(())
+    );
+    // A row an older parser filled from another part.
+    assert_eq!(
+        stored_body_matches(
+            bundle,
+            Some("Forged text: the contract terms have changed."),
+            None
+        ),
+        Err(SignedMimeError::StoredBodyMismatch)
+    );
+    assert_eq!(
+        stored_body_matches(
+            bundle,
+            parsed.text.as_deref(),
+            Some(&sanitize_email_html("<p>Forged text</p>"))
+        ),
+        Err(SignedMimeError::StoredBodyMismatch)
+    );
 }

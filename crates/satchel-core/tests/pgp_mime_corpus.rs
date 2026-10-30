@@ -6,6 +6,8 @@
 //! entity; the forged fixtures must never verify over what they display.
 
 use satchel_core::email::pgp_mime::parse_signed_message;
+use satchel_core::email::sanitizer::sanitize_email_html;
+use satchel_core::email::signed_mime::{stored_body_matches, SignedMimeError};
 use satchel_core::providers::imap::{parse_raw_message_body, ParsedBody};
 use satchel_core::utils::pgp_engine::{self, DetachedVerification};
 
@@ -174,4 +176,52 @@ fn forged_signed_mail_never_verifies_over_what_it_displays() {
             );
         }
     }
+}
+
+#[test]
+fn a_stored_row_keeps_its_signature_only_over_the_entity_it_shows() {
+    for fixture in LEGITIMATE {
+        let parsed = parse_raw_message_body(fixture.raw);
+        let bundle = parsed.pgp_signed.as_deref().unwrap();
+        // As ingest stores the row: the parsed text and the sanitized HTML.
+        let html = parsed.html.as_deref().map(sanitize_email_html);
+        assert_eq!(
+            stored_body_matches(bundle, parsed.text.as_deref(), html.as_deref()),
+            Ok(()),
+            "{}",
+            fixture.name
+        );
+        // Line endings and wrapping are not content.
+        let reflowed = parsed
+            .text
+            .as_deref()
+            .map(|text| text.replace('\n', "\r\n  "));
+        assert_eq!(
+            stored_body_matches(bundle, reflowed.as_deref(), html.as_deref()),
+            Ok(()),
+            "{}",
+            fixture.name
+        );
+        // A row an older parser filled from another part keeps no verdict.
+        assert_eq!(
+            stored_body_matches(bundle, Some("Forged text"), html.as_deref()),
+            Err(SignedMimeError::StoredBodyMismatch),
+            "{}",
+            fixture.name
+        );
+    }
+
+    let nested = LEGITIMATE
+        .iter()
+        .find(|fixture| fixture.name == "nested-prefix-boundary")
+        .unwrap();
+    let parsed = parse_raw_message_body(nested.raw);
+    assert_eq!(
+        stored_body_matches(
+            parsed.pgp_signed.as_deref().unwrap(),
+            parsed.text.as_deref(),
+            Some(&sanitize_email_html("<p>Forged text</p>"))
+        ),
+        Err(SignedMimeError::StoredBodyMismatch)
+    );
 }

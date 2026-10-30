@@ -104,6 +104,20 @@ pub struct SmimeVerifyMessageResult {
     pub error_detail: Option<String>,
 }
 
+impl SmimeVerifyMessageResult {
+    /// No verdict: the structure does not tie the signature to what is shown.
+    pub fn malformed() -> Self {
+        Self {
+            state: "error".to_string(),
+            signer_email: None,
+            signer_cn: None,
+            error_detail: Some(
+                CommandError::new("backend.errors.signedMessageMalformed").encoded(),
+            ),
+        }
+    }
+}
+
 impl From<SmimeRepositoryError> for CommandError {
     fn from(error: SmimeRepositoryError) -> Self {
         match error {
@@ -462,14 +476,7 @@ pub async fn verify_smime_message(
     // The engine re-checks this; asking first keeps the reason as a key.
     if let Err(error) = crate::email::signed_mime::bind_smime_bundle(signed_payload) {
         tracing::debug!(%message_id, %error, "S/MIME signed structure rejected");
-        return SmimeVerifyMessageResult {
-            state: "error".to_string(),
-            signer_email: None,
-            signer_cn: None,
-            error_detail: Some(
-                CommandError::new("backend.errors.signedMessageMalformed").encoded(),
-            ),
-        };
+        return SmimeVerifyMessageResult::malformed();
     }
     let verified = {
         let payload = signed_payload.to_vec();

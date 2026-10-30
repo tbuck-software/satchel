@@ -75,6 +75,10 @@ pub enum SignedMimeError {
     TooLarge,
     #[error("the signature part holds no armored OpenPGP signature")]
     MissingArmor,
+    #[error("the S/MIME signed entity has a carriage return outside a line break")]
+    BareCarriageReturn,
+    #[error("the stored body is not what the signed entity displays")]
+    StoredBodyMismatch,
 }
 
 /// Split a `multipart/signed` body under the given content type.
@@ -122,6 +126,13 @@ pub fn split<'a>(content_type: &str, body: &'a [u8]) -> Result<SignedParts<'a>, 
         return Err(SignedMimeError::AmbiguousDelimiter);
     }
 
+    // OpenSSL folds every CR in front of a line break into that break before
+    // hashing, so `\r\r\n` verifies as `\r\n` while a reader splits it
+    // differently. Such an entity is not shown with a signature.
+    if protocol == SignedProtocol::Smime && has_bare_carriage_return(&body[entity.clone()]) {
+        return Err(SignedMimeError::BareCarriageReturn);
+    }
+
     let signature = &body[second.next_line..signature_end];
     let (signature_header, _) = entity_header_and_body(signature);
     let signature_type =
@@ -154,6 +165,55 @@ pub fn split_bundle(bundle: &[u8]) -> Result<SignedParts<'_>, SignedMimeError> {
     let content_type = parse_raw_header_value(&String::from_utf8_lossy(header), "Content-Type")
         .ok_or(SignedMimeError::NotSigned)?;
     split(&content_type, body)
+}
+
+/// Whether a stored row still shows exactly the entity its stored bundle signs.
+///
+/// Rows synced before this splitter existed keep the body an older parser
+/// chose. Their signature only stands if that body is what the strictly split
+/// entity displays now: the same words in the text, and the same visible words
+/// in the HTML once both are sanitized the way ingest stores HTML.
+pub fn stored_body_matches(
+    bundle: &[u8],
+    body_text: Option<&str>,
+    body_html: Option<&str>,
+) -> Result<(), SignedMimeError> {
+    let parts = split_bundle(bundle)?;
+    let shown = crate::providers::imap::display_signed_entity(parts.entity, 1);
+    let shown_html = shown
+        .html
+        .as_deref()
+        .map(crate::email::sanitizer::sanitize_email_html);
+    let same_text =
+        words(body_text.unwrap_or_default()).eq(words(shown.text.as_deref().unwrap_or_default()));
+    let same_html = visible_words(body_html.unwrap_or_default())
+        == visible_words(shown_html.as_deref().unwrap_or_default());
+    if same_text && same_html {
+        Ok(())
+    } else {
+        Err(SignedMimeError::StoredBodyMismatch)
+    }
+}
+
+fn words(text: &str) -> std::str::SplitWhitespace<'_> {
+    text.split_whitespace()
+}
+
+/// The words of sanitized HTML with its tags taken out.
+fn visible_words(html: &str) -> Vec<&str> {
+    let mut words = Vec::new();
+    let mut rest = html;
+    while !rest.is_empty() {
+        let text_end = rest.find('<').unwrap_or(rest.len());
+        words.extend(rest[..text_end].split_whitespace());
+        rest = &rest[text_end..];
+        rest = rest.find('>').map_or("", |tag_end| &rest[tag_end + 1..]);
+    }
+    words
+}
+
+fn has_bare_carriage_return(entity: &[u8]) -> bool {
+    memchr::memchr_iter(b'\r', entity).any(|index| entity.get(index + 1) != Some(&b'\n'))
 }
 
 /// Rebuild an S/MIME `multipart/signed` bundle around exactly the parts this
@@ -459,6 +519,31 @@ mod tests {
     }
 
     #[test]
+    fn a_carriage_return_outside_a_line_break_is_refused_for_smime() {
+        let smime = PGP.replace("application/pgp-signature", "application/pkcs7-signature");
+        let signature = "Content-Type: application/pkcs7-signature\r\n\r\nMIAG";
+        for entity in [
+            "Content-Type: text/plain\r\n\r\r\nText",
+            "Content-Type: text/plain\r\n\r\nText\rMore",
+            "Content-Type: text/plain\r\n\r\nText\r",
+        ] {
+            let body = format!("--b\r\n{entity}\r\n--b\r\n{signature}\r\n--b--\r\n");
+            assert_eq!(
+                split(&smime, body.as_bytes()),
+                Err(SignedMimeError::BareCarriageReturn),
+                "{entity:?}"
+            );
+        }
+        // OpenPGP verifies the entity bytes as they are.
+        let entity = "Content-Type: text/plain\r\n\r\nText\rMore";
+        let body = format!("--b\r\n{entity}\r\n--b\r\n{SIGNATURE}\r\n--b--\r\n");
+        assert_eq!(
+            split(PGP, body.as_bytes()).unwrap().entity,
+            entity.as_bytes()
+        );
+    }
+
+    #[test]
     fn delimiter_like_lines_count_only_inside_the_entity() {
         let nested = "Content-Type: multipart/mixed; boundary=\"b2\"\r\n\r\n--b2\r\n\
                       Content-Type: text/plain\r\n\r\nx\r\n--b2--\r\n";
@@ -487,6 +572,7 @@ mod tests {
             "multipart/signed; protocol=\"application/pgp-signature\"; boundary=b; boundary=c",
             "multipart/signed; protocol=\"application/pgp-signature\"; boundary=b; boundary*=c",
             "multipart/signed; protocol=\"application/pgp-signature\"; boundary='b'",
+            "multipart/signed; protocol=\"application/pgp-signature\"; boundary=\"b \"",
             "multipart/signed; protocol=\"application/pgp-signature\"; boundary=b (comment)",
             "multipart/signed; protocol=\"application/pgp-signature\"; boundary=\"b",
             "multipart/signed; protocol=\"application/pgp-signature\"; protocol=application/pkcs7-signature; boundary=b",

@@ -28,8 +28,8 @@ use crate::{
         resolve_signature_for_compose, ResolveSignatureInput, SignaturePreference, SignatureVariant,
     },
     commands::smime::{
-        decrypt_message_with_unlocked_smime_certs, verify_smime_message, SMIME_DECRYPTED_BLOCK_END,
-        SMIME_DECRYPTED_BLOCK_START,
+        decrypt_message_with_unlocked_smime_certs, verify_smime_message, SmimeVerifyMessageResult,
+        SMIME_DECRYPTED_BLOCK_END, SMIME_DECRYPTED_BLOCK_START,
     },
     email::sanitizer::sanitize_email_html,
     events::bus::AppEvent,
@@ -614,6 +614,8 @@ async fn map_message_row(
         .filter(|_| trust.root_encryption);
     let smime_signed = row.smime_signed.clone();
     let pgp_signed = row.pgp_signed.clone();
+    let stored_body = (trust.root_crypto && stored_body_is_complete(&row))
+        .then(|| (row.body_text.clone(), row.body_html.clone()));
 
     let mut dto = map_stored_message_row(row);
     let original_body_text = dto.body_text.clone();
@@ -761,8 +763,12 @@ async fn map_message_row(
     }
 
     if let Some(signed_bundle) = pgp_signed.as_deref() {
-        apply_incoming_pgp_signed_status(&mut dto, app, pool, signed_bundle).await;
-        apply_signature_scope(&mut dto.pgp_state, trust.root_crypto);
+        if stored_body_unbound(&dto.id, signed_bundle, stored_body.as_ref()).await {
+            mark_pgp_signed_malformed(&mut dto);
+        } else {
+            apply_incoming_pgp_signed_status(&mut dto, app, pool, signed_bundle).await;
+            apply_signature_scope(&mut dto.pgp_state, trust.root_crypto);
+        }
     }
 
     if let Some(ciphertext) = smime_encrypted.as_deref() {
@@ -790,8 +796,11 @@ async fn map_message_row(
     }
 
     if let Some(signed_payload) = smime_signed.as_deref() {
-        let verified =
-            verify_smime_message(app, pool, &dto.id, signed_payload, &dto.from_address).await;
+        let verified = if stored_body_unbound(&dto.id, signed_payload, stored_body.as_ref()).await {
+            SmimeVerifyMessageResult::malformed()
+        } else {
+            verify_smime_message(app, pool, &dto.id, signed_payload, &dto.from_address).await
+        };
         dto.smime_state = Some(verified.state);
         apply_signature_scope(&mut dto.smime_state, trust.root_crypto);
         dto.smime_signer_email = verified.signer_email;
@@ -811,6 +820,65 @@ async fn map_message_row(
         }
     }
     dto
+}
+
+/// Whether the row holds its whole body. An evicted or legacy-truncated body is
+/// fetched again before it is read, through the strict splitter.
+fn stored_body_is_complete(row: &MessageReadRecord) -> bool {
+    let present = |value: Option<&str>| value.is_some_and(|value| !value.trim().is_empty());
+    (present(row.body_text.as_deref()) || present(row.body_html.as_deref()))
+        && !is_legacy_truncated_body(row.body_text.as_deref())
+        && !is_legacy_truncated_body(row.body_html.as_deref())
+}
+
+/// Rows synced before signed bodies were split strictly keep the body an older
+/// parser displayed. A root signature only stands over that body while it is
+/// still what the stored bundle's signed entity displays.
+async fn stored_body_unbound(
+    message_id: &str,
+    bundle: &[u8],
+    stored_body: Option<&(Option<String>, Option<String>)>,
+) -> bool {
+    let Some((text, html)) = stored_body.cloned() else {
+        return false;
+    };
+    static CACHE: std::sync::LazyLock<
+        std::sync::Mutex<super::message_processing::ProcessingCache<bool>>,
+    > = std::sync::LazyLock::new(|| std::sync::Mutex::new(Default::default()));
+    let message_id = message_id.to_string();
+    let bundle = bundle.to_vec();
+    tokio::task::spawn_blocking(move || {
+        let fingerprint = super::message_processing::fingerprint(&[
+            &bundle,
+            text.as_deref().unwrap_or_default().as_bytes(),
+            html.as_deref().unwrap_or_default().as_bytes(),
+        ]);
+        super::message_processing::cached(&CACHE, message_id, fingerprint, || {
+            let unbound = match crate::email::signed_mime::stored_body_matches(
+                &bundle,
+                text.as_deref(),
+                html.as_deref(),
+            ) {
+                // Opaque S/MIME carries its content inside the signature itself.
+                Ok(()) | Err(crate::email::signed_mime::SignedMimeError::NotSigned) => false,
+                Err(error) => {
+                    tracing::debug!(%error, "stored signed body rejected");
+                    true
+                }
+            };
+            (unbound, 1)
+        })
+    })
+    .await
+    .unwrap_or(true)
+}
+
+fn mark_pgp_signed_malformed(dto: &mut MessageDto) {
+    dto.pgp_state = Some("error".to_string());
+    dto.pgp_error_detail =
+        Some(CommandError::new("backend.errors.signedMessageMalformed").encoded());
+    dto.pgp_signer_name = None;
+    dto.pgp_signer_fingerprint = None;
 }
 
 fn apply_signature_scope(state: &mut Option<String>, root_crypto: bool) {
@@ -837,11 +905,7 @@ async fn apply_incoming_pgp_signed_status(
             // No key is consulted for a structure that does not tie the
             // signature to the displayed entity.
             tracing::debug!(message_id = %dto.id, %error, "OpenPGP signed structure rejected");
-            dto.pgp_state = Some("error".to_string());
-            dto.pgp_error_detail =
-                Some(CommandError::new("backend.errors.signedMessageMalformed").encoded());
-            dto.pgp_signer_name = None;
-            dto.pgp_signer_fingerprint = None;
+            mark_pgp_signed_malformed(dto);
             return;
         }
     };
