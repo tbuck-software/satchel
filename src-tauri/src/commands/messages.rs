@@ -56,6 +56,10 @@ pub struct MessageDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
     pub remote_uidvalidity: Option<u32>,
+    /// A remote identity that cannot serve content until its folder is synced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
+    pub content_error: Option<String>,
     pub thread_id: String,
     pub subject: String,
     pub snippet: String,
@@ -97,6 +101,10 @@ pub struct MessageBodyDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
     pub remote_uidvalidity: Option<u32>,
+    /// A remote identity that cannot serve content until its folder is synced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
+    pub content_error: Option<String>,
     pub snippet: String,
     pub body_text: String,
     pub body_html: Option<String>,
@@ -158,16 +166,41 @@ pub async fn list_messages_preview(
         .await
         .map_err(CommandError::from)?;
 
-    let messages = rows
-        .into_iter()
-        .map(map_message_preview_row)
-        .collect::<Vec<_>>();
+    let messages = validated_previews(pool.inner().as_ref(), rows).await?;
     log_perf(
         "list_messages_preview",
         started_at,
         format!("thread_id={} rows={}", thread_id, messages.len()),
     );
     Ok(messages)
+}
+
+async fn validated_previews(
+    pool: &SqlitePool,
+    rows: Vec<MessagePreviewRecord>,
+) -> CommandResult<Vec<MessageDto>> {
+    let ids = rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>();
+    let references = ContentReference::load_many(pool, &ids).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let mut dto = map_message_preview_row(row);
+            dto.content_error = references
+                .get(&dto.id)
+                .map(|reference| {
+                    reference.validate_cached_read().err().or_else(|| {
+                        (dto.remote_uidvalidity != reference.uidvalidity())
+                            .then(|| reference.changed_error())
+                    })
+                })
+                .unwrap_or_else(|| Some("backend.errors.messageNotAvailableLocally".to_string()));
+            if dto.content_error.is_some() {
+                dto.body_text.clear();
+                dto.body_loaded = true;
+            }
+            dto
+        })
+        .collect())
 }
 
 /// Older parser versions stored the detached signature as an attachment but not
@@ -362,10 +395,7 @@ pub async fn load_thread_messages(
         .await
         .map_err(CommandError::from)?;
     let body_ids = opening_body_ids(&rows, input.body_count);
-    let messages = rows
-        .into_iter()
-        .map(map_message_preview_row)
-        .collect::<Vec<_>>();
+    let messages = validated_previews(pool.inner().as_ref(), rows).await?;
     let bodies = message_bodies(
         &app,
         &state,
@@ -385,6 +415,20 @@ pub async fn load_thread_messages(
         ),
     );
     Ok(OpenedThreadDto { messages, bodies })
+}
+
+fn gate_cached_body(row: &mut MessageReadRecord, reference: &ContentReference) -> Option<String> {
+    let content_error = reference.validate_cached_read().err().or_else(|| {
+        (saved_uidvalidity(row.remote_uidvalidity) != reference.uidvalidity())
+            .then(|| reference.changed_error())
+    });
+    if content_error.is_some() {
+        row.body_text = None;
+        row.body_html = None;
+        row.snippet = None;
+        row.source_payload = None;
+    }
+    content_error
 }
 
 async fn message_bodies(
@@ -415,13 +459,18 @@ async fn message_bodies(
     let plugin_ids = runtime.enabled_message_transform_plugins()?;
     let has_pgp_private_key = has_any_private_pgp_key(pool).await;
     let has_smime_private_cert = has_any_private_smime_cert(pool).await;
+    let references = ContentReference::load_many(pool, message_ids).await?;
     let rows = MessageReadRepository::new(pool)
         .list_message_bodies(message_ids)
         .await
         .map_err(CommandError::from)?;
 
     let mut bodies = Vec::with_capacity(rows.len());
-    for row in rows {
+    for mut row in rows {
+        let reference = references
+            .get(&row.id)
+            .ok_or_else(|| CommandError::new("backend.errors.messageNotAvailableLocally"))?;
+        let content_error = gate_cached_body(&mut row, reference);
         // Keep this state from the stored columns. `map_message_row` replaces
         // a missing body with the snippet so list views always have readable
         // text. Old IMAP bodies at the former 64-KiB cutoff likewise remain
@@ -438,21 +487,28 @@ async fn message_bodies(
             && !(row.id.starts_with("m-imap-")
                 && (is_legacy_truncated_body(row.body_text.as_deref())
                     || is_legacy_truncated_body(row.body_html.as_deref())));
-        let dto = map_message_row(
-            row,
-            app,
-            state,
-            write_pool,
-            &runtime,
-            &plugin_ids,
-            has_pgp_private_key,
-            has_smime_private_cert,
-        )
-        .await;
+        let dto = if content_error.is_some() {
+            map_stored_message_row(row)
+        } else {
+            map_message_row(
+                row,
+                app,
+                state,
+                write_pool,
+                &runtime,
+                &plugin_ids,
+                has_pgp_private_key,
+                has_smime_private_cert,
+                reference,
+            )
+            .await
+        };
 
+        let body_loaded = body_loaded || content_error.is_some();
         bodies.push(MessageBodyDto {
             id: dto.id,
             remote_uidvalidity: dto.remote_uidvalidity,
+            content_error,
             snippet: dto.snippet,
             body_text: dto.body_text,
             body_html: dto.body_html,
@@ -474,6 +530,21 @@ async fn message_bodies(
         });
     }
 
+    let current = ContentReference::load_many(pool, message_ids).await?;
+    for body in &mut bodies {
+        let reference = &references[&body.id];
+        if current
+            .get(&body.id)
+            .is_none_or(|current| !reference.same_identity(current))
+        {
+            body.content_error = Some(reference.changed_error());
+            body.body_text.clear();
+            body.body_html = None;
+            body.snippet.clear();
+            body.source_payload = None;
+            body.body_loaded = true;
+        }
+    }
     log_perf(
         "list_message_bodies",
         started_at,
@@ -581,6 +652,7 @@ fn map_stored_message_row(row: MessageReadRecord) -> MessageDto {
     MessageDto {
         id: row.id,
         remote_uidvalidity: saved_uidvalidity(row.remote_uidvalidity),
+        content_error: None,
         thread_id: row.thread_id.unwrap_or_default(),
         subject,
         snippet,
@@ -621,6 +693,7 @@ async fn map_message_row(
     plugin_ids: &[String],
     has_pgp_private_key: bool,
     has_smime_private_cert: bool,
+    reference: &ContentReference,
 ) -> MessageDto {
     let trust = row
         .trust_metadata
@@ -686,7 +759,8 @@ async fn map_message_row(
                 let parsed =
                     crate::providers::imap::parse_raw_message_body(decrypted.plaintext.as_bytes());
                 if let Err(error) =
-                    persist_decrypted_pgp_attachments(app, pool, &dto.id, &parsed.attachments).await
+                    persist_decrypted_pgp_attachments(app, pool, reference, &parsed.attachments)
+                        .await
                 {
                     tracing::warn!(message_id = %dto.id, %error, "could not cache decrypted PGP attachments");
                 }
@@ -911,7 +985,7 @@ async fn apply_incoming_pgp_signed_status(
 async fn persist_decrypted_pgp_attachments(
     app: &tauri::AppHandle,
     pool: &SqlitePool,
-    message_id: &str,
+    reference: &ContentReference,
     attachments: &[crate::providers::traits::RemoteAttachment],
 ) -> Result<(), String> {
     if attachments.is_empty() {
@@ -922,10 +996,29 @@ async fn persist_decrypted_pgp_attachments(
         .path()
         .resolve("satchel/attachments", tauri::path::BaseDirectory::AppData)
         .map_err(|error| error.to_string())?;
-    tokio::fs::create_dir_all(&cache_dir)
+    persist_decrypted_attachments_in_dir(&cache_dir, pool, reference, attachments).await
+}
+
+async fn persist_decrypted_attachments_in_dir(
+    cache_dir: &std::path::Path,
+    pool: &SqlitePool,
+    reference: &ContentReference,
+    attachments: &[crate::providers::traits::RemoteAttachment],
+) -> Result<(), String> {
+    let message_id = &reference.message_id;
+    tokio::fs::create_dir_all(cache_dir)
         .await
         .map_err(|error| format!("create attachment cache: {error}"))?;
     let now = chrono::Utc::now().to_rfc3339();
+    let cached_paths = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT id, cached_path FROM attachments WHERE message_id = ?",
+    )
+    .bind(message_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .into_iter()
+    .collect::<std::collections::HashMap<_, _>>();
 
     for attachment in attachments {
         let Some(encoded) = attachment.content_base64.as_deref() else {
@@ -939,47 +1032,74 @@ async fn persist_decrypted_pgp_attachments(
             .filename
             .clone()
             .unwrap_or_else(|| "attachment".to_string());
-        let path = crate::commands::attachments::attachment_cache_path(
-            &cache_dir,
-            &attachment_id,
-            &filename,
-        );
-        tokio::fs::write(&path, &bytes)
-            .await
-            .map_err(|error| format!("write decrypted attachment cache: {error}"))?;
-        let path = path.to_string_lossy().to_string();
-
-        sqlx::query(
-            "INSERT INTO attachments
+        let cached = cached_paths.get(&attachment_id).and_then(Option::as_deref);
+        let reusable = if let Some(path) = cached {
+            reference.owns_attachment_cache(path, &attachment_id)
+                && crate::commands::attachments::validated_cached_file_size(cache_dir, path)
+                    .await
+                    .is_some()
+                && tokio::fs::read(path)
+                    .await
+                    .is_ok_and(|saved| saved == bytes)
+        } else {
+            false
+        };
+        // Published files are immutable. Repeated decryption can reuse identical
+        // bytes; a replacement request owns a fresh file until publication.
+        let (path, staged) = if let Some(path) = cached.filter(|_| reusable) {
+            (path.to_string(), false)
+        } else {
+            let path = crate::commands::attachments::attachment_cache_path(
+                cache_dir,
+                &reference.attachment_cache_id(&attachment_id),
+                &format!("{}-{filename}", uuid::Uuid::new_v4()),
+            );
+            tokio::fs::write(&path, &bytes)
+                .await
+                .map_err(|error| format!("write decrypted attachment cache: {error}"))?;
+            (path.to_string_lossy().to_string(), true)
+        };
+        let publication: Result<(), String> = async {
+            let mut tx = reference.begin_write(pool).await?;
+            sqlx::query(
+                "INSERT INTO attachments
              (id, message_id, filename, content_type, size, content_id, storage_path, is_inline,
               cached_path, remote_uid, remote_part_id, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?)
+             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, NULL, ?)
              ON CONFLICT(id) DO UPDATE SET
                filename = excluded.filename,
                content_type = excluded.content_type,
                size = excluded.size,
                content_id = excluded.content_id,
                is_inline = excluded.is_inline,
-               cached_path = excluded.cached_path",
-        )
-        .bind(&attachment_id)
-        .bind(message_id)
-        .bind(&filename)
-        .bind(&attachment.content_type)
-        .bind(i64::try_from(bytes.len()).unwrap_or(i64::MAX))
-        .bind(attachment.content_id.as_deref())
-        .bind(if attachment.is_inline { 1 } else { 0 })
-        .bind(&path)
-        .bind(&attachment.remote_part_id)
-        .bind(&now)
-        .execute(pool)
-        .await
-        .map_err(|error| error.to_string())?;
+               cached_path = excluded.cached_path,
+               remote_part_id = NULL, content_base64 = NULL",
+            )
+            .bind(&attachment_id)
+            .bind(message_id)
+            .bind(&filename)
+            .bind(&attachment.content_type)
+            .bind(i64::try_from(bytes.len()).unwrap_or(i64::MAX))
+            .bind(attachment.content_id.as_deref())
+            .bind(if attachment.is_inline { 1 } else { 0 })
+            .bind(&path)
+            .bind(&now)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+            tx.commit().await.map_err(|error| error.to_string())
+        }
+        .await;
+        if publication.is_err() && staged {
+            let _ = tokio::fs::remove_file(&path).await;
+        }
+        publication?;
     }
 
+    let mut tx = reference.begin_write(pool).await?;
     sqlx::query("UPDATE messages SET has_attachments = 1 WHERE id = ?")
         .bind(message_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|error| error.to_string())?;
     sqlx::query(
@@ -987,9 +1107,10 @@ async fn persist_decrypted_pgp_attachments(
          WHERE id = (SELECT thread_id FROM messages WHERE id = ?)",
     )
     .bind(message_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1017,6 +1138,7 @@ fn map_message_preview_row(row: MessagePreviewRecord) -> MessageDto {
     MessageDto {
         id: row.id,
         remote_uidvalidity: saved_uidvalidity(row.remote_uidvalidity),
+        content_error: None,
         thread_id: row.thread_id.unwrap_or_default(),
         subject,
         snippet: snippet.clone(),
@@ -1835,6 +1957,239 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn cached_content_generation_regressions() {
+        use crate::commands::attachments::{prepare_attachment_in_dir, DownloadAttachmentInput};
+        use crate::db::remote_content::ContentReference;
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+            VALUES ('a','A','me@example.test','imap','{}','','','');
+            INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, uidvalidity, created_at, updated_at)
+            VALUES ('f','a','Inbox','INBOX','INBOX','inbox',7,'','');
+            INSERT INTO threads (id, account_id, subject, last_message_date, created_at, updated_at) VALUES ('t','a','Subject','','','');
+            INSERT INTO messages (id,account_id,folder_id,thread_id,remote_id,remote_uidvalidity,from_address,to_addresses,date,body_text,original_source,created_at,updated_at)
+            VALUES ('m','a','f','t','42',7,'sender@example.test','[]','','cached body',CAST('From: sender@example.test' || char(13,10,13,10) || 'cached source' AS BLOB),'','');")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO messages (id,account_id,folder_id,thread_id,remote_id,remote_uidvalidity,from_address,to_addresses,date,body_text,created_at,updated_at) VALUES ('neighbor','a','f','t','43',8,'sender@example.test','[]','','neighbor bytes','','')").execute(&pool).await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let reference = ContentReference::load(&pool, "m").await.unwrap();
+        let part = crate::providers::traits::RemoteAttachment {
+            remote_part_id: "inner".into(),
+            filename: Some("inner.txt".into()),
+            content_type: "text/plain".into(),
+            size: Some(5),
+            content_id: None,
+            is_inline: false,
+            content_base64: Some("aW5uZXI=".into()),
+        };
+        super::persist_decrypted_attachments_in_dir(
+            dir.path(),
+            &pool,
+            &reference,
+            std::slice::from_ref(&part),
+        )
+        .await
+        .unwrap();
+        let prepared = prepare_attachment_in_dir(
+            dir.path(),
+            &pool,
+            DownloadAttachmentInput {
+                attachment_id: "att-pgp-m-inner".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            tokio::fs::read(&prepared.cached_path).await.unwrap(),
+            b"inner"
+        );
+        assert!(reference.owns_attachment_cache(&prepared.cached_path, "att-pgp-m-inner"));
+        super::persist_decrypted_attachments_in_dir(
+            dir.path(),
+            &pool,
+            &reference,
+            std::slice::from_ref(&part),
+        )
+        .await
+        .unwrap();
+        let repeated: String =
+            sqlx::query_scalar("SELECT cached_path FROM attachments WHERE id = 'att-pgp-m-inner'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(repeated, prepared.cached_path);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+
+        // No provider config is usable in this fixture: success proves local cache use.
+        for generation in [None, Some(7)] {
+            sqlx::query("UPDATE messages SET remote_uidvalidity = ? WHERE id = 'm'")
+                .bind(generation)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE folders SET uidvalidity = 8")
+                .execute(&pool)
+                .await
+                .unwrap();
+            let key = if generation.is_none() {
+                "imapUidValidityMissing"
+            } else {
+                "imapUidValidityChanged"
+            };
+            let error = super::fetch_remote_message_source(&pool, "m")
+                .await
+                .unwrap_err();
+            assert!(error.contains(key));
+            let previews = super::validated_previews(
+                &pool,
+                satchel_core::db::messages::MessageReadRepository::new(&pool)
+                    .list_messages_preview("t")
+                    .await
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+            let preview = previews.iter().find(|row| row.id == "m").unwrap();
+            assert!(preview.content_error.as_deref().unwrap().contains(key));
+            assert!(preview.body_text.is_empty());
+            let current = ContentReference::load(&pool, "m").await.unwrap();
+            let repository = satchel_core::db::messages::MessageReadRepository::new(&pool);
+            for mut row in repository
+                .list_messages("t")
+                .await
+                .unwrap()
+                .into_iter()
+                .chain(repository.list_message_bodies(&["m".into()]).await.unwrap())
+            {
+                if row.id == "neighbor" {
+                    let neighbor = ContentReference::load(&pool, "neighbor").await.unwrap();
+                    assert!(super::gate_cached_body(&mut row, &neighbor).is_none());
+                    assert_eq!(row.body_text.as_deref(), Some("neighbor bytes"));
+                    continue;
+                }
+                assert!(super::gate_cached_body(&mut row, &current)
+                    .unwrap()
+                    .contains(key));
+                assert!(row.body_text.is_none());
+                assert!(row.body_html.is_none());
+            }
+            assert!(prepare_attachment_in_dir(
+                dir.path(),
+                &pool,
+                DownloadAttachmentInput {
+                    attachment_id: "att-pgp-m-inner".into()
+                }
+            )
+            .await
+            .unwrap_err()
+            .contains(key));
+        }
+        let mut stale_part = part.clone();
+        stale_part.content_base64 = Some("c3RhbGU=".into());
+        assert!(super::persist_decrypted_attachments_in_dir(
+            dir.path(),
+            &pool,
+            &reference,
+            std::slice::from_ref(&stale_part)
+        )
+        .await
+        .unwrap_err()
+        .contains("imapUidValidityChanged"));
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            1,
+            "rejected publication removes only its staged file"
+        );
+        // A verified new generation never accepts a prior generation's file.
+        // Legacy decrypted rows must not send their inner part id to a provider.
+        sqlx::query("UPDATE attachments SET remote_part_id = 'inner'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE messages SET remote_uidvalidity = 8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            prepare_attachment_in_dir(
+                dir.path(),
+                &pool,
+                DownloadAttachmentInput {
+                    attachment_id: "att-pgp-m-inner".into()
+                }
+            )
+            .await
+            .unwrap_err(),
+            "backend.errors.messageNotAvailableLocally"
+        );
+        let current = ContentReference::load(&pool, "m").await.unwrap();
+        super::persist_decrypted_attachments_in_dir(
+            dir.path(),
+            &pool,
+            &current,
+            std::slice::from_ref(&part),
+        )
+        .await
+        .unwrap();
+        let fresh = prepare_attachment_in_dir(
+            dir.path(),
+            &pool,
+            DownloadAttachmentInput {
+                attachment_id: "att-pgp-m-inner".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_ne!(prepared.cached_path, fresh.cached_path);
+        assert_eq!(tokio::fs::read(fresh.cached_path).await.unwrap(), b"inner");
+        for (provider, remote_id) in [
+            ("imap", Some("import-550e8400-e29b-41d4-a716-446655440000")),
+            ("imap", None),
+            ("gmail", Some("gmail-id")),
+            ("outlook", Some("outlook-id")),
+            ("pop3", Some("pop-id")),
+        ] {
+            sqlx::query("UPDATE accounts SET provider = ?")
+                .bind(provider)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE messages SET remote_id = ?, remote_uidvalidity = NULL")
+                .bind(remote_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let local = ContentReference::load(&pool, "m").await.unwrap();
+            super::persist_decrypted_attachments_in_dir(
+                dir.path(),
+                &pool,
+                &local,
+                std::slice::from_ref(&part),
+            )
+            .await
+            .unwrap();
+            prepare_attachment_in_dir(
+                dir.path(),
+                &pool,
+                DownloadAttachmentInput {
+                    attachment_id: "att-pgp-m-inner".into(),
+                },
+            )
+            .await
+            .unwrap();
+            assert!(super::fetch_remote_message_source(&pool, "m")
+                .await
+                .unwrap()
+                .unwrap()
+                .ends_with(b"cached source"));
+        }
+    }
+
     #[test]
     fn draft_attachment_names_are_cleaned_when_stored_and_loaded() {
         let input = super::OutgoingAttachmentInput {
@@ -2394,6 +2749,7 @@ pub(super) async fn fetch_remote_message_source(
     message_id: &str,
 ) -> Result<Option<Vec<u8>>, String> {
     let reference = ContentReference::load(pool, message_id).await?;
+    reference.validate_cached_read()?;
     let original_source: Option<Vec<u8>> =
         sqlx::query_scalar("SELECT original_source FROM messages WHERE id = ?")
             .bind(message_id)
@@ -2404,6 +2760,8 @@ pub(super) async fn fetch_remote_message_source(
     if let Some(raw) = original_source.filter(|raw| {
         !raw.starts_with(&[0xd0, 0xcf, 0x11, 0xe0]) && raw_header_block(raw).is_some()
     }) {
+        let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+        reference.ensure_current(&mut tx).await?;
         return Ok(Some(raw));
     }
     let target = sqlx::query_as::<_, RemoteMessageSourceTarget>(
@@ -2422,6 +2780,9 @@ pub(super) async fn fetch_remote_message_source(
         return Ok(None);
     };
     reference.validate_cached_read()?;
+    if target.provider == "imap" && !reference.is_remote_imap() {
+        return Ok(None);
+    }
     let config =
         crate::commands::accounts::decrypt_account_config(&target.account_id, &target.config)?;
 
@@ -2563,6 +2924,7 @@ pub async fn get_message_source(
     message_id: String,
 ) -> CommandResult<MessageSourceDto> {
     let reference = ContentReference::load(pool.inner().as_ref(), &message_id).await?;
+    reference.validate_cached_read()?;
     let source = MessageReadRepository::new(pool.inner().as_ref())
         .get_message_source(&message_id)
         .await
@@ -2598,6 +2960,13 @@ pub async fn get_message_source(
             }
         };
 
+    let mut tx = pool
+        .inner()
+        .as_ref()
+        .begin()
+        .await
+        .map_err(|e| e.to_string())?;
+    reference.ensure_current(&mut tx).await?;
     Ok(MessageSourceDto {
         message_id: source.message_id,
         subject: source.subject,

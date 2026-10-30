@@ -79,6 +79,10 @@ pub(crate) async fn load_message_body_with_pools(
     .map_err(|err| err.to_string())?
     .ok_or_else(|| CommandError::new("backend.errors.messageNotAvailableLocally"))?;
 
+    reference.validate_cached_read()?;
+    let mut tx = read.begin().await.map_err(|e| e.to_string())?;
+    reference.ensure_current(&mut tx).await?;
+    tx.rollback().await.map_err(|e| e.to_string())?;
     if has_body(&target) {
         return Ok(LoadedMessageBody {
             remote_uidvalidity: saved_uidvalidity(target.remote_uidvalidity),
@@ -189,9 +193,10 @@ fn has_body(target: &BodyTarget) -> bool {
             .body_html
             .as_deref()
             .is_some_and(|html| !html.trim().is_empty());
-    let is_truncated_imap_body = target.provider == "imap"
-        && (is_legacy_truncated_body(target.body_text.as_deref())
-            || is_legacy_truncated_body(target.body_html.as_deref()));
+    let is_truncated_imap_body =
+        crate::db::remote_content::is_remote_imap(&target.provider, target.remote_id.as_deref())
+            && (is_legacy_truncated_body(target.body_text.as_deref())
+                || is_legacy_truncated_body(target.body_html.as_deref()));
 
     has_content && !is_truncated_imap_body
 }
@@ -283,7 +288,7 @@ mod tests {
             )
         );
         sqlx::query(
-            "UPDATE messages SET body_text = NULL, body_html = NULL, remote_uidvalidity = NULL",
+            "UPDATE messages SET body_text = 'stored stale bytes', body_html = '<p>stale</p>', remote_uidvalidity = NULL",
         )
         .execute(&pool)
         .await
@@ -300,6 +305,29 @@ mod tests {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("imapUidValidityChanged"));
+        for (provider, remote_id) in [
+            ("imap", None),
+            ("imap", Some("import-550e8400-e29b-41d4-a716-446655440000")),
+            ("gmail", Some("gmail-id")),
+            ("outlook", Some("outlook-id")),
+            ("pop3", Some("pop-id")),
+        ] {
+            sqlx::query("UPDATE accounts SET provider = ?")
+                .bind(provider)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE messages SET remote_id = ?, remote_uidvalidity = NULL")
+                .bind(remote_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let cached = super::load_message_body_with_pools(&pool, &pool, "m")
+                .await
+                .unwrap();
+            assert_eq!(cached.body_text, "stored stale bytes");
+            assert!(!cached.fetched);
+        }
     }
 
     #[test]
@@ -307,7 +335,15 @@ mod tests {
         let at_old_limit = Some("x".repeat(64 * 1024));
 
         assert!(!has_body(&target("imap", at_old_limit.clone())));
-        assert!(has_body(&target("gmail", at_old_limit)));
+        assert!(has_body(&target("gmail", at_old_limit.clone())));
+        for remote_id in [
+            None,
+            Some("import-550e8400-e29b-41d4-a716-446655440000".to_string()),
+        ] {
+            let mut local = target("imap", at_old_limit.clone());
+            local.remote_id = remote_id;
+            assert!(has_body(&local));
+        }
         assert!(has_body(&target("imap", Some("complete".to_string()))));
     }
 }

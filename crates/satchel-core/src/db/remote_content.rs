@@ -39,12 +39,48 @@ impl ContentReference {
         .ok_or_else(|| "backend.errors.messageNotAvailableLocally".to_string())
     }
 
+    /// Read identities in bounded batches, including folder generation in the same snapshot.
+    pub async fn load_many(
+        pool: &SqlitePool,
+        ids: &[String],
+    ) -> Result<std::collections::HashMap<String, Self>, String> {
+        let mut result = std::collections::HashMap::new();
+        for chunk in ids.chunks(500) {
+            let mut query = sqlx::QueryBuilder::new("SELECT m.id AS message_id, m.account_id, m.folder_id, m.remote_id,
+                m.remote_uidvalidity, m.created_at, a.provider,
+                COALESCE(f.remote_id, f.full_path) AS source_folder, f.uidvalidity AS folder_uidvalidity
+                FROM messages m JOIN accounts a ON a.id = m.account_id
+                LEFT JOIN folders f ON f.id = m.folder_id WHERE m.id IN (");
+            let mut values = query.separated(",");
+            for id in chunk {
+                values.push_bind(id);
+            }
+            query.push(")");
+            for reference in query
+                .build_query_as::<Self>()
+                .fetch_all(pool)
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                result.insert(reference.message_id.clone(), reference);
+            }
+        }
+        Ok(result)
+    }
+
+    pub fn is_remote_imap(&self) -> bool {
+        is_remote_imap(&self.provider, self.remote_id.as_deref())
+    }
+
     pub fn uidvalidity(&self) -> Option<u32> {
         saved_uidvalidity(self.remote_uidvalidity)
     }
 
     pub fn message_ref(&self) -> Result<MessageRef, String> {
-        if self.provider == "imap" {
+        if self.provider == "imap" && !self.is_remote_imap() {
+            return Err("backend.errors.messageNotAvailableRemotely".to_string());
+        }
+        if self.is_remote_imap() {
             if self.uidvalidity().is_none() {
                 return Err(self.error("backend.errors.imapUidValidityMissing"));
             }
@@ -61,6 +97,21 @@ impl ContentReference {
             source_folder: self.source_folder.clone(),
             source_uidvalidity: self.uidvalidity(),
         })
+    }
+
+    /// Folder generations belong to remote IMAP identities, not to local
+    /// content merely stored under an IMAP account.
+    pub fn same_identity(&self, current: &Self) -> bool {
+        self.message_id == current.message_id
+            && self.account_id == current.account_id
+            && self.folder_id == current.folder_id
+            && self.remote_id == current.remote_id
+            && self.remote_uidvalidity == current.remote_uidvalidity
+            && self.created_at == current.created_at
+            && self.provider == current.provider
+            && (!self.is_remote_imap()
+                || (self.source_folder == current.source_folder
+                    && self.folder_uidvalidity == current.folder_uidvalidity))
     }
 
     pub async fn begin_write<'a>(
@@ -83,10 +134,11 @@ impl ContentReference {
     ) -> Result<(), String> {
         self.validate_cached_read()?;
         let current: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM messages m LEFT JOIN folders f ON f.id = m.folder_id
+            "SELECT EXISTS(SELECT 1 FROM messages m JOIN accounts a ON a.id = m.account_id
+             LEFT JOIN folders f ON f.id = m.folder_id
              WHERE m.id = ? AND m.account_id = ? AND m.folder_id IS ?
                AND m.remote_id IS ? AND m.remote_uidvalidity IS ? AND m.created_at = ?
-               AND (? != 'imap' OR (f.uidvalidity IS ?
+               AND a.provider = ? AND (? = 0 OR (f.uidvalidity IS ?
                     AND COALESCE(f.remote_id, f.full_path) IS ?)))",
         )
         .bind(&self.message_id)
@@ -96,6 +148,7 @@ impl ContentReference {
         .bind(self.remote_uidvalidity)
         .bind(&self.created_at)
         .bind(&self.provider)
+        .bind(self.is_remote_imap())
         .bind(self.folder_uidvalidity)
         .bind(&self.source_folder)
         .fetch_one(&mut **tx)
@@ -109,7 +162,7 @@ impl ContentReference {
     }
 
     pub fn changed_error(&self) -> String {
-        if self.provider == "imap" {
+        if self.is_remote_imap() {
             self.error("backend.errors.imapUidValidityChanged")
         } else {
             "backend.errors.messageNotAvailableLocally".to_string()
@@ -119,7 +172,7 @@ impl ContentReference {
     /// Local drafts have no remote identity. Remote IMAP content requires the
     /// saved generation even when its bytes already live in a cache.
     pub fn validate_cached_read(&self) -> Result<(), String> {
-        if self.provider == "imap" && self.remote_id.as_deref().is_some_and(|id| !id.is_empty()) {
+        if self.is_remote_imap() {
             self.message_ref()?;
         }
         Ok(())
@@ -130,40 +183,122 @@ impl ContentReference {
     }
 
     pub fn owns_attachment_cache(&self, path: &str, attachment_id: &str) -> bool {
-        if self.provider != "imap" || self.remote_id.as_deref().is_none_or(str::is_empty) {
-            return true;
-        }
-        use sha2::{Digest, Sha256};
-        let Some(name) = std::path::Path::new(path)
-            .file_name()
-            .and_then(|name| name.to_str())
-        else {
-            return false;
-        };
-        let key = self.attachment_cache_id(attachment_id);
-        [key.clone(), format!("{}-{key}", self.message_id)]
-            .iter()
-            .any(|key| {
-                let prefix: String = Sha256::digest(key.as_bytes())
-                    .iter()
-                    .take(12)
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect();
-                name.starts_with(&format!("{prefix}-"))
-            })
+        cache_path_is_owned_by(
+            path,
+            &self.attachment_cache_id(attachment_id),
+            &self.message_id,
+        )
     }
 
     /// New cache files cannot collide with an earlier generation, including a
     /// legacy cache whose generation was never recorded.
     pub fn attachment_cache_id(&self, attachment_id: &str) -> String {
-        if self.provider == "imap" && self.remote_id.as_deref().is_some_and(|id| !id.is_empty()) {
-            format!(
-                "{attachment_id}:imap:{}",
-                self.remote_uidvalidity.unwrap_or(0)
-            )
-        } else {
-            attachment_id.to_string()
+        attachment_cache_id(
+            &self.provider,
+            self.remote_id.as_deref(),
+            self.remote_uidvalidity,
+            attachment_id,
+        )
+    }
+}
+
+/// Only explicit identities produced by local ingestion are local. A malformed
+/// server UID must still fail closed rather than gaining access to old bytes.
+pub fn is_remote_imap(provider: &str, remote_id: Option<&str>) -> bool {
+    provider == "imap" && remote_id.is_some_and(|id| !id.is_empty() && !is_import_id(id))
+}
+
+fn is_import_id(id: &str) -> bool {
+    id.strip_prefix("import-")
+        .is_some_and(|suffix| uuid::Uuid::parse_str(suffix).is_ok())
+}
+
+pub fn attachment_cache_id(
+    provider: &str,
+    remote_id: Option<&str>,
+    generation: Option<i64>,
+    id: &str,
+) -> String {
+    if is_remote_imap(provider, remote_id) {
+        format!("{id}:imap:{}", generation.unwrap_or(0))
+    } else {
+        id.to_string()
+    }
+}
+
+pub fn short_attachment_cache_key(value: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(value.as_bytes())
+        .iter()
+        .take(12)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+pub fn cache_path_is_owned_by(path: &str, cache_id: &str, message_id: &str) -> bool {
+    let Some(name) = std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+    else {
+        return false;
+    };
+    [cache_id.to_string(), format!("{message_id}-{cache_id}")]
+        .iter()
+        .any(|key| name.starts_with(&format!("{}-", short_attachment_cache_key(key))))
+}
+
+/// Cache file name for an attachment: a digest of the attachment id plus a
+/// trimmed version of the original name.
+///
+/// The id must never reach the file name. Gmail part ids run past 500
+/// characters, so `{id}-{filename}` blows the 255-byte name limit of every
+/// common file system — and the sync path used to build exactly that. The write
+/// failed with `ENAMETOOLONG`, the error was discarded, and every freshly
+/// downloaded inline image was thrown away: 9 700 parts fetched from Gmail for
+/// nothing, then fetched again on every open until the account hit a 429.
+/// Regression guard: `cache_path_stays_within_file_name_limits`.
+pub fn attachment_cache_path(
+    cache_dir: &std::path::Path,
+    attachment_id: &str,
+    filename: &str,
+) -> std::path::PathBuf {
+    cache_dir.join(format!(
+        "{}-{}",
+        short_attachment_cache_key(attachment_id),
+        safe_filename(filename)
+    ))
+}
+
+/// Longest original name kept in a cache file name. The digest prefix already
+/// carries uniqueness, so this only has to stay recognisable in a file listing.
+pub const MAX_CACHE_NAME_BYTES: usize = 120;
+
+pub fn safe_filename(value: &str) -> String {
+    // Every branch yields ASCII, so byte and char lengths agree below.
+    let sanitized = crate::utils::filename::strip_filename_controls(value)
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if sanitized.trim_matches('_').is_empty() {
+        return "attachment".to_string();
+    }
+    if sanitized.len() <= MAX_CACHE_NAME_BYTES {
+        return sanitized;
+    }
+    // Keep the extension: it is what makes the cache dir readable, and Finder
+    // and `open` both key off it.
+    match sanitized.rsplit_once('.') {
+        Some((stem, ext)) if !ext.is_empty() && ext.len() < 16 => {
+            let budget = MAX_CACHE_NAME_BYTES - ext.len() - 1;
+            format!("{}.{ext}", &stem[..budget.min(stem.len())])
         }
+        _ => sanitized[..MAX_CACHE_NAME_BYTES].to_string(),
     }
 }
 
@@ -193,6 +328,78 @@ mod tests {
                 from_address, to_addresses, date, body_text, created_at, updated_at)
                 VALUES ('message', 'acc', 'inbox', 'thread', '42', 7, '', '[]', '', '', 'original', '');")
             .execute(pool).await.unwrap();
+    }
+
+    #[test]
+    fn local_classification_and_cache_ownership_are_shared() {
+        let import = "import-550e8400-e29b-41d4-a716-446655440000";
+        for remote in [None, Some(""), Some(import)] {
+            assert!(!is_remote_imap("imap", remote));
+            let id = attachment_cache_id("imap", remote, None, "part");
+            assert_eq!(id, "part");
+            for key in [&id, &format!("message-{id}")] {
+                let path = attachment_cache_path(std::path::Path::new("/cache"), key, "file.txt");
+                assert!(cache_path_is_owned_by(
+                    path.to_str().unwrap(),
+                    &id,
+                    "message"
+                ));
+                assert!(!cache_path_is_owned_by(
+                    path.to_str().unwrap(),
+                    "peer",
+                    "message"
+                ));
+            }
+        }
+        for remote in ["42", "invalid", "import-not-a-uuid"] {
+            assert!(is_remote_imap("imap", Some(remote)));
+            let key = attachment_cache_id("imap", Some(remote), Some(7), "part");
+            let path = attachment_cache_path(std::path::Path::new("/cache"), &key, "file.txt");
+            assert!(!cache_path_is_owned_by(
+                path.to_str().unwrap(),
+                "part:imap:8",
+                "message"
+            ));
+            assert!(!cache_path_is_owned_by(
+                path.to_str().unwrap(),
+                "part",
+                "message"
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn local_content_publication_ignores_remote_folder_generation_changes() {
+        for remote_id in [None, Some("import-550e8400-e29b-41d4-a716-446655440000")] {
+            let pool = fixture().await;
+            sqlx::query("UPDATE messages SET remote_id = ?, remote_uidvalidity = NULL")
+                .bind(remote_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let reference = ContentReference::load(&pool, "message").await.unwrap();
+            reference.validate_cached_read().unwrap();
+            assert!(reference
+                .message_ref()
+                .unwrap_err()
+                .contains("messageNotAvailableRemotely"));
+            sqlx::query("UPDATE folders SET uidvalidity = 8")
+                .execute(&pool)
+                .await
+                .unwrap();
+            let current = ContentReference::load(&pool, "message").await.unwrap();
+            assert!(reference.same_identity(&current));
+            let tx = reference.begin_write(&pool).await.unwrap();
+            tx.rollback().await.unwrap();
+        }
+        let pool = fixture().await;
+        let remote = ContentReference::load(&pool, "message").await.unwrap();
+        sqlx::query("UPDATE folders SET uidvalidity = 8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(!remote.same_identity(&ContentReference::load(&pool, "message").await.unwrap()));
+        assert!(remote.begin_write(&pool).await.is_err());
     }
 
     #[tokio::test]

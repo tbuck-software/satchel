@@ -166,3 +166,37 @@ describe('message source dialog', () => {
     );
   });
 });
+
+it.each(['resolve', 'reject'] as const)('keeps the new source when an old request finishes with %s after reopen', async (finish) => {
+  let resolve!: (value: unknown) => void;
+  let reject!: (value: unknown) => void;
+  loadMessageSource.mockReturnValueOnce(new Promise((ok, fail) => { resolve = ok; reject = fail; }))
+    .mockResolvedValueOnce({ raw_source: 'source eight', raw_source_status: 'loaded' });
+  wrapper = mount(MessageSourceDialog, { attachTo: document.body, props: { open: true, messageId: 'm', remoteUidValidity: 7 } });
+  await wrapper.setProps({ open: false });
+  await wrapper.setProps({ open: true, remoteUidValidity: 8 });
+  await flushPromises();
+  if (finish === 'resolve') resolve({ raw_source: 'source seven', raw_source_status: 'loaded' });
+  else reject(new Error('old failure'));
+  await flushPromises();
+  expect(document.body.querySelector('pre')?.textContent).toBe('source eight');
+  expect(document.body.querySelector('[role="alert"]')).toBeNull();
+});
+
+it('clears same-ID source on generation or validity change and keeps the new loader owned', async () => {
+  let resolve!: (value: unknown) => void;
+  loadMessageSource.mockResolvedValueOnce({ raw_source: 'source seven', raw_source_status: 'loaded' })
+    .mockReturnValueOnce(new Promise(done => { resolve = done; }));
+  wrapper = mount(MessageSourceDialog, { attachTo: document.body, props: { open: true, messageId: 'm', remoteUidValidity: 7 } });
+  await flushPromises();
+  await wrapper.setProps({ remoteUidValidity: 8 });
+  expect(document.body.textContent).not.toContain('source seven');
+  expect(document.body.querySelector('pre')).toBeNull();
+  resolve({ raw_source: 'source eight', raw_source_status: 'loaded' });
+  await flushPromises();
+  expect(document.body.querySelector('pre')?.textContent).toBe('source eight');
+  await wrapper.setProps({ contentError: JSON.stringify({ key: 'backend.errors.imapUidValidityChanged', params: { folder: 'INBOX' } }) });
+  expect(document.body.querySelector('pre')).toBeNull();
+  expect(document.body.querySelector('[role="alert"]')?.textContent).toMatch(/sync.*folder/i);
+  expect(loadMessageSource).toHaveBeenCalledTimes(2);
+});

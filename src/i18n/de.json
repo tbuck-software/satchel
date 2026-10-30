@@ -998,6 +998,7 @@
     "inlineImageUnavailable": "Bild nicht verfügbar",
     "messageLoadFailed": "Die Nachricht konnte nicht geladen werden.",
     "messageLoadTimeout": "Das Nachladen der Nachricht hat zu lange gedauert.",
+    "messageReferenceChanged": "Die Postfachkennung der Nachricht hat sich geändert. Synchronisiere ihren Ordner und versuche es erneut.",
     "oauth": {
       "invalidGrant": "Google akzeptiert den gespeicherten Login nicht mehr (abgelaufen oder widerrufen). Bitte erneut anmelden.",
       "missingConfig": "OAuth-Konfiguration fehlt. Bitte Satchel neu installieren oder die lokale .env prüfen."

@@ -998,6 +998,7 @@
     "inlineImageUnavailable": "Image unavailable",
     "messageLoadFailed": "The message could not be loaded.",
     "messageLoadTimeout": "Loading the message took too long.",
+    "messageReferenceChanged": "The message's mailbox identity changed. Sync its folder and try again.",
     "oauth": {
       "invalidGrant": "Google no longer accepts the stored sign-in (expired or revoked). Please sign in again.",
       "missingConfig": "OAuth configuration is missing. Please reinstall Satchel or check the local .env file."

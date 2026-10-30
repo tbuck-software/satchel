@@ -1369,3 +1369,68 @@ describe('a message whose full body is not stored', () => {
     }
   });
 });
+
+describe('content reference follow-ups', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    commandsAvailableMock.mockReturnValue(true);
+    previewMock.mockReset();
+    bodiesMock.mockReset();
+    attachmentsMock.mockReset().mockResolvedValue([]);
+    loadBodyMock.mockReset();
+  });
+it.each([null, 7])('invalidates displayed bytes when validity changes with saved generation %s unchanged', async (generation) => {
+  previewMock.mockResolvedValue([backendMessage({ remote_uidvalidity: generation })] as never);
+  bodiesMock.mockResolvedValue([{ ...inlineBody('<p>old bytes</p>'), remote_uidvalidity: generation }] as never);
+  const messages = useMessagesStore();
+  await messages.openThread('th-live');
+  const content_error = JSON.stringify({ key: generation === null ? 'backend.errors.imapUidValidityMissing' : 'backend.errors.imapUidValidityChanged', params: { folder: 'INBOX' } });
+  previewMock.mockResolvedValue([backendMessage({ remote_uidvalidity: generation, content_error, body_loaded: true, body_text: '' })] as never);
+  bodiesMock.mockResolvedValue([{ ...inlineBody(''), remote_uidvalidity: generation, content_error, body_text: '', body_loaded: true }] as never);
+  await messages.refreshThread('th-live');
+  expect(messages.getByThread('th-live')[0]?.bodyHtml).toBeUndefined();
+  expect(messages.getByThread('th-live')[0]?.attachments).toEqual([]);
+  expect(messages.getByThread('th-live')[0]?.bodyLoadError).toMatch(/sync.*folder/i);
+  expect(loadBodyMock).not.toHaveBeenCalled();
+});
+
+it('rehydrates an explicitly expanded older message after revalidating its reference without an ID watcher rerun', async () => {
+  const { watch, nextTick } = await import('vue');
+  let generation = 7;
+  const previews = () => ['old', 'middle', 'latest'].map(id => backendMessage({ id, remote_uidvalidity: generation }));
+  previewMock.mockImplementation(async () => previews() as never);
+  bodiesMock.mockImplementation(async ids => ids.map(id => ({ ...inlineBody(''), id, body_text: `${id} body`, remote_uidvalidity: id === 'old' ? 8 : generation })) as never);
+  const messages = useMessagesStore();
+  await messages.openThread('th-live');
+  let watchRuns = 0;
+  const stop = watch(() => messages.getByThread('th-live').map(message => message.id).join('|'), () => {
+    watchRuns++;
+    void messages.loadAttachmentsForMessages('th-live', ['old']);
+  }, { immediate: true });
+  generation = 8;
+  await nextTick();
+  await vi.waitFor(() => expect(messages.getByThread('th-live')[0]?.bodyText).toBe('old body'));
+  expect(messages.getByThread('th-live')[0]?.bodyLoaded).toBe(true);
+  expect(messages.getByThread('th-live')[0]?.remoteUidValidity).toBe(8);
+  expect(watchRuns).toBe(1);
+  stop();
+});
+
+});
+
+describe('bounded content revalidation', () => {
+  it('stops refreshing an unverifiable response for an unchanged preview reference', async () => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    commandsAvailableMock.mockReturnValue(true);
+    attachmentsMock.mockResolvedValue([]);
+    previewMock.mockResolvedValue([backendMessage({ remote_uidvalidity: 7 })] as never);
+    bodiesMock.mockResolvedValue([{ ...inlineBody(''), remote_uidvalidity: 8 }] as never);
+    const messages = useMessagesStore();
+    await messages.openThread('th-live');
+    await vi.waitFor(() => expect(messages.getByThread('th-live')[0]?.bodyLoadError).toMatch(/sync.*folder/i));
+    expect(previewMock).toHaveBeenCalledTimes(2);
+    expect(messages.getByThread('th-live')[0]?.bodyLoaded).toBe(true);
+  });
+});

@@ -1,13 +1,12 @@
 use base64::Engine;
 use satchel_core::utils::filename::strip_filename_controls;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use sqlx::{FromRow, SqlitePool};
 use tauri::{AppHandle, Manager};
 
 use crate::{
     commands::error::{CommandError, CommandResult},
-    db::remote_content::ContentReference,
+    db::remote_content::{attachment_cache_id, ContentReference},
     providers::provider_for_account,
 };
 
@@ -51,7 +50,9 @@ pub async fn list_attachments_for_messages(
 struct AttachmentListingRow {
     #[sqlx(flatten)]
     attachment: AttachmentDto,
-    cache_id: String,
+    provider: String,
+    remote_id: Option<String>,
+    remote_uidvalidity: Option<i64>,
 }
 
 async fn attachments_for_messages(
@@ -65,8 +66,7 @@ async fn attachments_for_messages(
     for chunk in message_ids.chunks(MAX_ATTACHMENT_LISTING_IDS) {
         let mut query = sqlx::QueryBuilder::new(
             "SELECT a.id, a.message_id, a.filename, a.content_type, a.size, a.content_id, a.is_inline, a.cached_path,
-                    CASE WHEN acc.provider = 'imap' AND NULLIF(m.remote_id, '') IS NOT NULL THEN a.id || ':imap:' || COALESCE(m.remote_uidvalidity, 0)
-                         ELSE a.id END AS cache_id
+                    acc.provider, m.remote_id, m.remote_uidvalidity
              FROM attachments a JOIN messages m ON m.id = a.message_id
              JOIN accounts acc ON acc.id = m.account_id WHERE a.message_id IN (",
         );
@@ -86,10 +86,18 @@ async fn attachments_for_messages(
         .into_iter()
         .map(|listing| {
             let mut row = listing.attachment;
+            let cache_id = attachment_cache_id(
+                &listing.provider,
+                listing.remote_id.as_deref(),
+                listing.remote_uidvalidity,
+                &row.id,
+            );
             row.filename = row.filename.as_deref().map(strip_filename_controls);
-            if row.cached_path.as_deref().is_some_and(|path| {
-                !cache_path_is_owned_by(path, &listing.cache_id, &row.message_id)
-            }) {
+            if row
+                .cached_path
+                .as_deref()
+                .is_some_and(|path| !cache_path_is_owned_by(path, &cache_id, &row.message_id))
+            {
                 row.cached_path = None;
             }
             row
@@ -235,6 +243,18 @@ pub async fn prepare_attachment_inner(
     pool: &SqlitePool,
     input: DownloadAttachmentInput,
 ) -> Result<PreparedAttachmentResult, String> {
+    let cache_dir = app
+        .path()
+        .resolve("satchel/attachments", tauri::path::BaseDirectory::AppData)
+        .map_err(|err| err.to_string())?;
+    prepare_attachment_in_dir(&cache_dir, pool, input).await
+}
+
+pub(super) async fn prepare_attachment_in_dir(
+    cache_dir: &std::path::Path,
+    pool: &SqlitePool,
+    input: DownloadAttachmentInput,
+) -> Result<PreparedAttachmentResult, String> {
     let message_id: String = sqlx::query_scalar("SELECT message_id FROM attachments WHERE id = ?")
         .bind(&input.attachment_id)
         .fetch_optional(pool)
@@ -276,18 +296,14 @@ pub async fn prepare_attachment_inner(
         return Err(reference.changed_error());
     }
     let filename = strip_filename_controls(&filename.unwrap_or_else(|| "attachment".into()));
-    let cache_dir = app
-        .path()
-        .resolve("satchel/attachments", tauri::path::BaseDirectory::AppData)
-        .map_err(|err| err.to_string())?;
-    tokio::fs::create_dir_all(&cache_dir)
+    tokio::fs::create_dir_all(cache_dir)
         .await
         .map_err(|err| format!("create attachment cache: {err}"))?;
 
     let cache_id = reference.attachment_cache_id(&id);
     if let Some(path) = cached_path.as_deref() {
         if cache_path_is_owned_by(path, &cache_id, &message_id) {
-            if let Some(size) = validated_cached_file_size(&cache_dir, path).await {
+            if let Some(size) = validated_cached_file_size(cache_dir, path).await {
                 let mut tx = pool.begin().await.map_err(|err| err.to_string())?;
                 reference.ensure_current(&mut tx).await?;
                 return Ok(PreparedAttachmentResult {
@@ -309,12 +325,15 @@ pub async fn prepare_attachment_inner(
                 .map_err(|error| format!("attachment payload decode failed: {error}"))?,
         }
     } else {
-        let remote_part_id = remote_part_id.ok_or_else(|| {
-            format!(
-                "attachment {} has no remote part id; re-sync the message first",
-                input.attachment_id
-            )
-        })?;
+        // Older decrypted rows carried inner MIME part ids too. Those ids were
+        // never valid for the encrypted message held by the provider.
+        if id.starts_with("att-pgp-") {
+            return Err("backend.errors.messageNotAvailableLocally".to_string());
+        }
+        // Decrypted inner parts are local cache entries, never parts of the
+        // encrypted provider message. Reopening the body can recreate them.
+        let remote_part_id = remote_part_id
+            .ok_or_else(|| "backend.errors.messageNotAvailableLocally".to_string())?;
         let config = crate::commands::accounts::decrypt_account_config(&account_id, &config)?;
         let provider = provider_for_account(&provider_kind, &config, &account_email, None)?;
         provider
@@ -336,7 +355,7 @@ pub async fn prepare_attachment_inner(
     // Each request owns its file. A late request must never overwrite a file
     // already published by a replacement row or another fetch.
     let path = attachment_cache_path(
-        &cache_dir,
+        cache_dir,
         &cache_id,
         &format!("{}-{final_filename}", uuid::Uuid::new_v4()),
     );
@@ -401,27 +420,15 @@ pub(crate) async fn set_attachment_cache(
     Ok(())
 }
 
-pub(crate) fn cache_path_is_owned_by(path: &str, attachment_id: &str, message_id: &str) -> bool {
-    let Some(name) = std::path::Path::new(path)
-        .file_name()
-        .and_then(|name| name.to_str())
-    else {
-        return false;
-    };
-    // Imports used the message id as an extra part of the cache key. Both
-    // forms are owned by this row; a peer's key is not, even if its UID matches.
-    [
-        attachment_id.to_string(),
-        format!("{message_id}-{attachment_id}"),
-    ]
-    .iter()
-    .any(|key| name.starts_with(&format!("{}-", short_attachment_cache_key(key))))
-}
+pub(crate) use crate::db::remote_content::cache_path_is_owned_by;
 
 /// Only paths that resolve below Satchel's attachment cache may be handed to
 /// Quick Look or another application. Canonicalization also rejects symlinks
 /// that point outside the cache even if the database row was tampered with.
-async fn validated_cached_file_size(cache_dir: &std::path::Path, path: &str) -> Option<i64> {
+pub(super) async fn validated_cached_file_size(
+    cache_dir: &std::path::Path,
+    path: &str,
+) -> Option<i64> {
     let root = tokio::fs::canonicalize(cache_dir).await.ok()?;
     let file = tokio::fs::canonicalize(path).await.ok()?;
     if !file.starts_with(root) {
@@ -689,69 +696,9 @@ pub async fn toggle_attachment_quick_look(
     }
 }
 
-/// Cache file name for an attachment: a digest of the attachment id plus a
-/// trimmed version of the original name.
-///
-/// The id must never reach the file name. Gmail part ids run past 500
-/// characters, so `{id}-{filename}` blows the 255-byte name limit of every
-/// common file system — and the sync path used to build exactly that. The write
-/// failed with `ENAMETOOLONG`, the error was discarded, and every freshly
-/// downloaded inline image was thrown away: 9 700 parts fetched from Gmail for
-/// nothing, then fetched again on every open until the account hit a 429.
-/// Regression guard: `cache_path_stays_within_file_name_limits`.
-pub(crate) fn attachment_cache_path(
-    cache_dir: &std::path::Path,
-    attachment_id: &str,
-    filename: &str,
-) -> std::path::PathBuf {
-    cache_dir.join(format!(
-        "{}-{}",
-        short_attachment_cache_key(attachment_id),
-        safe_filename(filename)
-    ))
-}
-
-/// Longest original name kept in a cache file name. The digest prefix already
-/// carries uniqueness, so this only has to stay recognisable in a file listing.
-const MAX_CACHE_NAME_BYTES: usize = 120;
-
-fn short_attachment_cache_key(value: &str) -> String {
-    let digest = Sha256::digest(value.as_bytes());
-    digest
-        .iter()
-        .take(12)
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-fn safe_filename(value: &str) -> String {
-    // Every branch yields ASCII, so byte and char lengths agree below.
-    let sanitized = strip_filename_controls(value)
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    if sanitized.trim_matches('_').is_empty() {
-        return "attachment".to_string();
-    }
-    if sanitized.len() <= MAX_CACHE_NAME_BYTES {
-        return sanitized;
-    }
-    // Keep the extension: it is what makes the cache dir readable, and Finder
-    // and `open` both key off it.
-    match sanitized.rsplit_once('.') {
-        Some((stem, ext)) if !ext.is_empty() && ext.len() < 16 => {
-            let budget = MAX_CACHE_NAME_BYTES - ext.len() - 1;
-            format!("{}.{ext}", &stem[..budget.min(stem.len())])
-        }
-        _ => sanitized[..MAX_CACHE_NAME_BYTES].to_string(),
-    }
-}
+pub(crate) use crate::db::remote_content::attachment_cache_path;
+#[cfg(test)]
+use crate::db::remote_content::{safe_filename, MAX_CACHE_NAME_BYTES};
 
 #[cfg(test)]
 mod tests {

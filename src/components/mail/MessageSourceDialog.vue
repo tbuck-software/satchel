@@ -13,6 +13,8 @@ import { formatBytes } from '@/utils/formatBytes';
 const props = defineProps<{
   open: boolean;
   messageId: string | null;
+  remoteUidValidity?: number | null;
+  contentError?: string | null;
 }>();
 
 const emit = defineEmits<{ close: [] }>();
@@ -33,7 +35,6 @@ const bodyText = ref('');
 const bodyHtml = ref('');
 const subject = ref('');
 const rawSize = ref<number | null>(null);
-let loadRequest: symbol | null = null;
 
 const tabs = computed(() => [
   { id: 'source' as Tab, label: t('mail.source.tabSource'), available: rawSource.value.length > 0 },
@@ -57,28 +58,22 @@ const rawSourceNotice = computed(() => {
 
 const sizeLabel = computed(() => (rawSize.value ? formatBytes(rawSize.value) : ''));
 
-function clearSource() {
-  loading.value = false;
+let request: symbol | null = null;
+onBeforeUnmount(() => { request = null; });
+
+async function load(messageId: string, token: symbol) {
+  const isCurrent = () => request === token;
+  loading.value = true;
   errorText.value = '';
-  subject.value = '';
-  rawSize.value = null;
-  activeTab.value = 'source';
   rawSource.value = '';
   rawSourceStatus.value = 'unsupported';
   rawHeaders.value = '';
   bodyText.value = '';
   bodyHtml.value = '';
-}
-
-async function load(messageId: string) {
-  const request = Symbol();
-  loadRequest = request;
-  clearSource();
-  loading.value = true;
 
   try {
     const source = await messages.loadMessageSource(messageId);
-    if (loadRequest !== request) return;
+    if (!isCurrent()) return;
     if (!source) {
       errorText.value = t('mail.source.desktopOnly');
       return;
@@ -92,38 +87,49 @@ async function load(messageId: string) {
     rawSize.value = source.raw_size ?? null;
     activeTab.value = tabs.value.find((tab) => tab.available)?.id ?? 'source';
   } catch (err) {
-    if (loadRequest !== request) return;
-    errorText.value = backendErrorLabel(err);
+    if (isCurrent()) errorText.value = backendErrorLabel(err);
   } finally {
-    if (loadRequest === request) loading.value = false;
+    if (isCurrent()) loading.value = false;
   }
 }
 
 watch(
-  () => [props.open, props.messageId] as const,
+  () => [props.open, props.messageId, props.remoteUidValidity, props.contentError] as const,
   ([open, messageId]) => {
-    if (open && messageId) void load(messageId);
-    else {
-      loadRequest = null;
-      clearSource();
+    request = null;
+    activeTab.value = 'source';
+    loading.value = false;
+    exporting.value = false;
+    subject.value = '';
+    rawSize.value = null;
+    rawSource.value = '';
+    rawHeaders.value = '';
+    bodyText.value = '';
+    bodyHtml.value = '';
+    errorText.value = '';
+    rawSourceStatus.value = 'unsupported';
+    if (open && messageId) {
+      const token = Symbol(messageId);
+      request = token;
+      if (props.contentError) errorText.value = backendErrorLabel(props.contentError);
+      else void load(messageId, token);
     }
   },
   { immediate: true, flush: 'sync' },
 );
 
-onBeforeUnmount(() => { loadRequest = null; });
-
 async function exportMessage() {
   if (!props.messageId || exporting.value) return;
   exporting.value = true;
+  const token = request;
   try {
-    if (await messages.exportMessage(props.messageId, subject.value)) {
+    if (await messages.exportMessage(props.messageId, subject.value) && request === token) {
       toast.success(t('mail.source.exported'));
     }
   } catch (error) {
-    toast.error(backendErrorLabel(error));
+    if (request === token) toast.error(backendErrorLabel(error));
   } finally {
-    exporting.value = false;
+    if (request === token) exporting.value = false;
   }
 }
 

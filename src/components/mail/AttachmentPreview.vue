@@ -3,7 +3,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import IconButton from '@/components/ui/IconButton.vue';
 import { useDismissable } from '@/composables/useDismissable';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { BackendDownloadAttachmentResult } from '@/types/messages';
 import { useToast } from '@/composables/useToast';
@@ -56,22 +56,40 @@ function prepareObjectUrl(result: BackendDownloadAttachmentResult, payload: Uint
   }
 }
 
-onMounted(async () => {
+let request: symbol | null = null;
+function clearPreview() {
+  if (pdfLoadTimer !== null) window.clearTimeout(pdfLoadTimer);
+  pdfLoadTimer = null;
+  releaseObjectUrl();
+  data.value = null;
+  bytes.value = null;
+  error.value = '';
+  pdfFailed.value = false;
+}
+
+watch(() => props.attachmentId, async (attachmentId) => {
+  const token = Symbol(attachmentId);
+  request = token;
+  clearPreview();
+  loading.value = true;
   try {
-    data.value = await attachmentActions.downloadAttachment(props.attachmentId);
-    bytes.value = await attachmentBytes(data.value);
-    prepareObjectUrl(data.value, bytes.value);
+    const result = await attachmentActions.downloadAttachment(attachmentId);
+    if (request !== token) return;
+    const payload = await attachmentBytes(result);
+    if (request !== token) return;
+    data.value = result;
+    bytes.value = payload;
+    prepareObjectUrl(result, payload);
   } catch (err) {
-    error.value = backendErrorLabel(err);
+    if (request === token) error.value = backendErrorLabel(err);
   } finally {
-    loading.value = false;
+    if (request === token) loading.value = false;
   }
-});
+}, { immediate: true });
 
 onBeforeUnmount(() => {
-  if (pdfLoadTimer !== null) window.clearTimeout(pdfLoadTimer);
-  releaseObjectUrl();
-  bytes.value = null;
+  request = null;
+  clearPreview();
 });
 
 const mime = computed(() => data.value?.mime_type || props.mimeType || '');

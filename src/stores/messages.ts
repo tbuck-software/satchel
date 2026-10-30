@@ -138,6 +138,7 @@ function mapBackendMessage(row: BackendMessage, threadId: string): Message {
   return {
     id: row.id,
     remoteUidValidity: row.remote_uidvalidity ?? null,
+    contentError: row.content_error ?? null,
     threadId: row.thread_id || threadId,
     from: {
       name: row.from_name || t('common.unknown'),
@@ -156,7 +157,7 @@ function mapBackendMessage(row: BackendMessage, threadId: string): Message {
     bodyText: fallbackText,
     bodyHtml: htmlCandidate || undefined,
     bodyLoaded: row.body_loaded,
-    bodyLoadError: undefined,
+    bodyLoadError: row.content_error ? backendErrorLabel(row.content_error) : undefined,
     timestamp: row.date || new Date().toISOString(),
     isRead: row.is_read,
     isDraft: row.is_draft,
@@ -191,11 +192,12 @@ function applyMessageBody(message: Message, body: BackendMessageBody): Message {
   return {
     ...message,
     remoteUidValidity: body.remote_uidvalidity ?? null,
+    contentError: body.content_error ?? null,
     sourcePayload: parseSourcePayload(body.source_payload) ?? message.sourcePayload,
     bodyText: fallbackText,
     bodyHtml: htmlCandidate || undefined,
     bodyLoaded: body.body_loaded,
-    bodyLoadError: undefined,
+    bodyLoadError: body.content_error ? backendErrorLabel(body.content_error) : undefined,
     pgp: pgpStatus,
     smime: smimeStatus,
     // Previews leave these empty; the body is where the backend sends them.
@@ -207,8 +209,9 @@ function applyMessageBody(message: Message, body: BackendMessageBody): Message {
   };
 }
 
-function changedGeneration(generation: number | null | undefined, existing?: Message): boolean {
-  return Boolean(existing) && (generation ?? null) !== (existing?.remoteUidValidity ?? null);
+function changedGeneration(generation: number | null | undefined, existing?: Message, contentError?: string | null): boolean {
+  return Boolean(existing) && ((generation ?? null) !== (existing?.remoteUidValidity ?? null)
+    || (contentError ?? null) !== (existing?.contentError ?? null));
 }
 
 /**
@@ -216,7 +219,7 @@ function changedGeneration(generation: number | null | undefined, existing?: Mes
  * screen. Preview rows deliberately omit heavy body and attachment data.
  */
 function mergeMessagePreview(preview: Message, existing?: Message): Message {
-  if (!existing || changedGeneration(preview.remoteUidValidity, existing)) return preview;
+  if (!existing || changedGeneration(preview.remoteUidValidity, existing, preview.contentError)) return preview;
 
   const stableAttachments = existing.attachments.length > 0
     ? existing.attachments
@@ -393,16 +396,27 @@ export const useMessagesStore = defineStore('messages', () => {
   const hydratingAttachmentMessageIds = new Map<string, { version: symbol }>();
   const bodyRequestTokens = new Map<string, symbol>();
   const detailsNeedingRevalidation = new Set<string>();
+  const revalidationAttempts = new Map<string, string>();
+  const demandedDetails = new Set<string>();
   const retained = new Map<string, RetainedThread>();
   let sweepTimer: ReturnType<typeof setTimeout> | null = null;
 
   function revalidateMessageReference(threadId: string, messageId: string) {
+    const message = messagesByThread.value[threadId]?.find(message => message.id === messageId);
+    if (!message) return;
+    const key = JSON.stringify([message.remoteUidValidity ?? null, message.contentError ?? null]);
+    if (revalidationAttempts.get(messageId) === key) {
+      patchMessage(threadId, messageId, current => ({ ...current, bodyLoaded: true,
+        bodyLoadError: t('errors.messageReferenceChanged') }));
+      return;
+    }
+    revalidationAttempts.set(messageId, key);
     detailsNeedingRevalidation.add(messageId);
     void refreshThread(threadId);
   }
 
-  function forgetDetailsOnGenerationChange(generation: number | null | undefined, existing?: Message) {
-    if (!existing || !changedGeneration(generation, existing)) return;
+  function forgetDetailsOnGenerationChange(generation: number | null | undefined, existing?: Message, contentError?: string | null) {
+    if (!existing || !changedGeneration(generation, existing, contentError)) return;
     hydratedAttachmentMessageIds.delete(existing.id);
     hydratingAttachmentMessageIds.delete(existing.id);
     bodyRequestTokens.delete(existing.id);
@@ -414,7 +428,7 @@ export const useMessagesStore = defineStore('messages', () => {
       hydratedAttachmentMessageIds.delete(preview.id);
       hydratingAttachmentMessageIds.delete(preview.id);
     }
-    forgetDetailsOnGenerationChange(preview.remoteUidValidity, existing);
+    forgetDetailsOnGenerationChange(preview.remoteUidValidity, existing, preview.contentError);
     return mergeMessagePreview(preview, existing);
   }
 
@@ -448,6 +462,8 @@ export const useMessagesStore = defineStore('messages', () => {
       hydratingAttachmentMessageIds.delete(id);
       bodyRequestTokens.delete(id);
       detailsNeedingRevalidation.delete(id);
+      revalidationAttempts.delete(id);
+      demandedDetails.delete(id);
     }
     loadingBodyMessageIds.value = loadingBodyMessageIds.value.filter((id) => !evictedIds.has(id));
     delete messagesByThread.value[threadId];
@@ -618,6 +634,14 @@ export const useMessagesStore = defineStore('messages', () => {
       const previousById = new Map(
         (messagesByThread.value[threadId] ?? []).map((message) => [message.id, message]),
       );
+      const currentIds = new Set(rows.map(row => row.id));
+      for (const id of previousById.keys()) {
+        if (!currentIds.has(id)) {
+          demandedDetails.delete(id);
+          revalidationAttempts.delete(id);
+          detailsNeedingRevalidation.delete(id);
+        }
+      }
       messagesByThread.value[threadId] = rows.map((row) => {
         const preview = mapBackendMessage(row, threadId);
         return mergePreview(preview, previousById.get(preview.id));
@@ -749,15 +773,27 @@ export const useMessagesStore = defineStore('messages', () => {
       const previousById = new Map(
         (messagesByThread.value[threadId] ?? []).map((message) => [message.id, message]),
       );
+      const currentIds = new Set(rows.map(row => row.id));
+      for (const id of previousById.keys()) {
+        if (!currentIds.has(id)) {
+          demandedDetails.delete(id);
+          revalidationAttempts.delete(id);
+          detailsNeedingRevalidation.delete(id);
+        }
+      }
       messagesByThread.value[threadId] = rows.map((row) => {
         const preview = mapBackendMessage(row, threadId);
         return mergePreview(preview, previousById.get(preview.id));
       });
       connectionStore.clearBackendError('messages');
-      const arrived = prioritizedMessageIds(threadId).filter((id) => {
+      const demanded = messagesByThread.value[threadId]!
+        .filter(message => demandedDetails.has(message.id) || detailsNeedingRevalidation.has(message.id))
+        .map(message => message.id);
+      const arrived = [...new Set([...prioritizedMessageIds(threadId), ...demanded])].filter((id) => {
         const message = messagesByThread.value[threadId]?.find(message => message.id === id);
-        return !previousById.has(id) || changedGeneration(message?.remoteUidValidity, previousById.get(id))
-          || detailsNeedingRevalidation.has(id);
+        return !previousById.has(id) || changedGeneration(message?.remoteUidValidity, previousById.get(id), message?.contentError)
+          || detailsNeedingRevalidation.has(id)
+          || (demandedDetails.has(id) && message?.bodyLoaded === false && !message.contentError);
       });
       if (arrived.length > 0) {
         for (const id of arrived) {
@@ -876,7 +912,7 @@ export const useMessagesStore = defineStore('messages', () => {
     const current = messagesByThread.value[threadId] ?? [];
     const currentById = new Map(current.map(message => [message.id, message]));
     const staleBodyIds = new Set(rows
-      .filter(row => changedGeneration(row.remote_uidvalidity, currentById.get(row.id)))
+      .filter(row => changedGeneration(row.remote_uidvalidity, currentById.get(row.id), row.content_error))
       .map(row => row.id));
     messagesByThread.value = {
       ...messagesByThread.value,
@@ -897,15 +933,14 @@ export const useMessagesStore = defineStore('messages', () => {
       }),
     };
     if (staleBodyIds.size > 0) {
-      for (const id of staleBodyIds) detailsNeedingRevalidation.add(id);
-      void refreshThread(threadId);
+      for (const id of staleBodyIds) revalidateMessageReference(threadId, id);
     }
 
     // A message whose complete body is not stored either comes back empty or
     // explicitly marked as incomplete (for example, an old 64-KiB IMAP
     // prefix). Fetch it now instead of showing the blank page or cached prefix.
     const emptyIds = rows
-      .filter((row) => !staleBodyIds.has(row.id) && requested.has(row.id) && (
+      .filter((row) => !row.content_error && !staleBodyIds.has(row.id) && requested.has(row.id) && (
         !row.body_loaded
         || (!(row.body_html ?? '').trim() && !row.body_text.trim())
       ))
@@ -1021,7 +1056,8 @@ export const useMessagesStore = defineStore('messages', () => {
     }
 
     const pending = messageIds.filter((messageId) =>
-      !hydratedAttachmentMessageIds.has(messageId) && hydratingAttachmentMessageIds.get(messageId)?.version !== version);
+      !messagesByThread.value[threadId]?.find(message => message.id === messageId)?.contentError
+      && !hydratedAttachmentMessageIds.has(messageId) && hydratingAttachmentMessageIds.get(messageId)?.version !== version);
     if (threadLoadVersions.get(threadId) !== version || pending.length === 0) {
       return;
     }
@@ -1126,6 +1162,9 @@ export const useMessagesStore = defineStore('messages', () => {
       return;
     }
     touchThreadCache(threadId);
+    for (const id of messageIds) {
+      if (messagesByThread.value[threadId]?.some(message => message.id === id)) demandedDetails.add(id);
+    }
 
     const missingBodyIds = (messagesByThread.value[threadId] ?? [])
       .filter((message) => messageIds.includes(message.id) && message.bodyLoaded === false)

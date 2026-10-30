@@ -2,6 +2,10 @@
 export type MessageBodyDto = {
     id: string;
     remote_uidvalidity?: number | null;
+    /**
+     * A remote identity that cannot serve content until its folder is synced.
+     */
+    content_error?: string | null;
     snippet: string;
     body_text: string;
     body_html: string | null;

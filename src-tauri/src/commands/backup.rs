@@ -356,6 +356,8 @@ async fn export_attachments(
         }
     }
 
+    let reference = crate::db::remote_content::ContentReference::load(pool, &row.id).await?;
+    reference.validate_cached_read()?;
     let rows: Vec<MboxAttachmentRow> = sqlx::query_as(
         "SELECT id, filename, content_type, content_id, is_inline,
                 COALESCE(cached_path, storage_path) AS path
@@ -376,7 +378,7 @@ async fn export_attachments(
         let path = attachment
             .path
             .ok_or_else(|| export_attachment_error(&filename))?;
-        if !crate::commands::attachments::cache_path_is_owned_by(&path, &attachment.id, &row.id) {
+        if !reference.owns_attachment_cache(&path, &attachment.id) {
             return Err(export_attachment_error(&filename));
         }
         let bytes = tokio::fs::read(&path)
@@ -390,6 +392,8 @@ async fn export_attachments(
             inline: attachment.is_inline != 0,
         });
     }
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    reference.ensure_current(&mut tx).await?;
     Ok(attachments)
 }
 
@@ -466,6 +470,14 @@ async fn export_message_source(
         Ok(Some(raw)) if valid_export_source(&raw) => Ok(raw),
         result => {
             if let Err(error) = result {
+                let structured = CommandError::from(error.clone());
+                if matches!(
+                    structured.key.as_str(),
+                    "backend.errors.imapUidValidityMissing"
+                        | "backend.errors.imapUidValidityChanged"
+                ) {
+                    return Err(error);
+                }
                 tracing::warn!(message_id = %row.id, %error, "original message unavailable for export");
             }
             Err(original_export_error(row.subject.as_deref()))
@@ -1996,6 +2008,76 @@ mod tests {
         assert_eq!(cleaned, "<p>Hi</p>");
         assert!(original.contains("<script>"));
         assert_eq!(source, raw);
+    }
+
+    #[tokio::test]
+    async fn imported_imap_source_and_attachment_remain_readable_and_exportable() {
+        let pool = migrated_pool().await;
+        seed_account_with_children(&pool).await;
+        sqlx::query("UPDATE accounts SET provider = 'imap'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let folder_id = super::ensure_import_folder(&pool, "account").await.unwrap();
+        let raw = b"From: sender@example.test\r\nMessage-ID: <import-local>\r\nContent-Type: multipart/mixed; boundary=x\r\n\r\n--x\r\nContent-Type: text/plain\r\n\r\nLocal body\r\n--x\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename=local.txt\r\n\r\nLocal attachment\r\n--x--\r\n";
+        let cache = tempfile::tempdir().unwrap();
+        super::import_parsed_message_inner(
+            cache.path(),
+            &pool,
+            "account",
+            "me@example.test",
+            &folder_id,
+            crate::providers::imap::parse_raw_rfc822(raw).unwrap(),
+            raw,
+        )
+        .await
+        .unwrap();
+        let id: String = sqlx::query_scalar(
+            "SELECT id FROM messages WHERE message_id_header = '<import-local>'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            crate::commands::messages::fetch_remote_message_source(&pool, &id)
+                .await
+                .unwrap()
+                .unwrap(),
+            raw
+        );
+        let att: String = sqlx::query_scalar("SELECT id FROM attachments WHERE message_id = ?")
+            .bind(&id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let prepared = crate::commands::attachments::prepare_attachment_in_dir(
+            cache.path(),
+            &pool,
+            crate::commands::attachments::DownloadAttachmentInput { attachment_id: att },
+        )
+        .await
+        .unwrap();
+        assert!(
+            String::from_utf8(tokio::fs::read(prepared.cached_path).await.unwrap())
+                .unwrap()
+                .contains("Local attachment")
+        );
+        let output = cache.path().join("export.eml");
+        write_message_export(&pool, output.to_str().unwrap(), &id)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(output).unwrap(), raw);
+        sqlx::query("UPDATE messages SET remote_id = '42', remote_uidvalidity = NULL WHERE id = ?")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let rejected = cache.path().join("rejected.eml");
+        assert!(write_message_export(&pool, rejected.to_str().unwrap(), &id)
+            .await
+            .unwrap_err()
+            .contains("imapUidValidityMissing"));
+        assert!(!rejected.exists());
     }
 
     /// A replacing insert would delete the account row and cascade into every

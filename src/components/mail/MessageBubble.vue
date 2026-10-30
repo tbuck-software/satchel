@@ -665,6 +665,8 @@ function openSenderDetails() {
       v-if="sourceDialogUsed"
       :open="sourceDialogOpen"
       :message-id="props.message.id"
+      :remote-uid-validity="props.message.remoteUidValidity"
+      :content-error="props.message.contentError"
       @close="sourceDialogOpen = false"
     />
 
