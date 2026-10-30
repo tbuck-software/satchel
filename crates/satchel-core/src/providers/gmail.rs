@@ -1039,9 +1039,7 @@ impl GmailProvider {
                 .json::<GmailMessageResponse>()
                 .await
                 .map_err(|err| format!("gmail message parse failed: {err}"))?;
-            if message.payload.is_none() && message.raw.is_none() {
-                return Err("gmail message lookup returned an incomplete message".into());
-            }
+            validate_gmail_full_message(&message)?;
             if gmail_message_needs_raw_crypto(&message)
                 || message
                     .payload
@@ -1072,13 +1070,17 @@ impl GmailProvider {
                 let source = raw
                     .json::<GmailMessageResponse>()
                     .await
-                    .map_err(|err| format!("gmail raw message parse failed: {err}"))?
-                    .raw
-                    .filter(|value| {
-                        decode_gmail_body_bytes(value).is_some_and(|bytes| !bytes.is_empty())
-                    })
-                    .ok_or_else(|| "gmail response did not contain message source".to_string())?;
-                message.raw = Some(source);
+                    .map_err(|err| format!("gmail raw message parse failed: {err}"))?;
+                if source.id != message.id {
+                    return Err("gmail raw lookup returned a mismatched message".into());
+                }
+                message.raw =
+                    Some(source.raw.ok_or_else(|| {
+                        "gmail response did not contain message source".to_string()
+                    })?);
+            }
+            if let Some(raw) = message.raw.as_deref() {
+                validate_gmail_raw_source(raw)?;
             }
             Ok(Some(message))
         }))
@@ -2300,6 +2302,128 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         auth_dmarc,
         attachments,
     }
+}
+
+/// Full responses must contain actual MIME structure before defaults in the
+/// mapper are safe. Empty text is valid; an absent body is not evidence of it.
+fn validate_gmail_full_message(message: &GmailMessageResponse) -> Result<(), String> {
+    let invalid = || "gmail message lookup returned an incomplete message".to_string();
+    let payload = message.payload.as_ref().ok_or_else(invalid)?;
+    let headers = payload
+        .headers
+        .as_deref()
+        .filter(|h| !h.is_empty())
+        .ok_or_else(invalid)?;
+    if message.id.trim().is_empty()
+        // Gmail can omit an empty label list for genuinely unlabeled mail.
+        || message.label_ids.as_ref().is_some_and(|labels| labels.iter().any(|label| label.trim().is_empty()))
+        || !gmail_payload_is_usable(payload)
+    {
+        return Err(invalid());
+    }
+    let date_is_valid = match message.internal_date.as_deref() {
+        Some(date) => date
+            .parse::<i64>()
+            .ok()
+            .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
+            .is_some(),
+        None => parse_date_header(header_value(headers, "Date").as_deref()).is_some(),
+    };
+    if !date_is_valid {
+        return Err("gmail message lookup returned an invalid or missing date".into());
+    }
+    Ok(())
+}
+
+fn gmail_header_name_is_valid(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| (33..=126).contains(&byte) && byte != b':')
+}
+
+fn gmail_payload_is_usable(payload: &GmailPayload) -> bool {
+    let Some(mime) = payload.mime_type.as_deref() else {
+        return false;
+    };
+    if !mime.split_once('/').is_some_and(|(kind, subtype)| {
+        !kind.is_empty() && !subtype.is_empty() && !mime.bytes().any(|b| b.is_ascii_whitespace())
+    }) || payload.headers.as_ref().is_some_and(|headers| {
+        headers
+            .iter()
+            .any(|header| !gmail_header_name_is_valid(&header.name) || header.value.contains('\0'))
+    }) {
+        return false;
+    }
+    let parts = payload.parts.as_deref().unwrap_or_default();
+    if mime.to_ascii_lowercase().starts_with("multipart/") || !parts.is_empty() {
+        return !parts.is_empty() && parts.iter().all(gmail_payload_is_usable);
+    }
+    let Some(body) = payload.body.as_ref() else {
+        return false;
+    };
+    if body.size.is_some_and(|size| size < 0) {
+        return false;
+    }
+    match body.data.as_deref() {
+        Some(data) => decode_gmail_body_bytes(data).is_some(),
+        None => {
+            body.attachment_id
+                .as_ref()
+                .is_some_and(|id| !id.trim().is_empty())
+                || body.size == Some(0)
+        }
+    }
+}
+
+/// Base64 alone is not a message. Require RFC headers and a complete container
+/// before allowing the permissive MIME body parser to replace cached content.
+fn validate_gmail_raw_source(source: &str) -> Result<(), String> {
+    let invalid = || "gmail response contained invalid message source".to_string();
+    let bytes = decode_gmail_body_bytes(source).ok_or_else(invalid)?;
+    let parsed = super::imap::parse_raw_rfc822(&bytes).map_err(|_| invalid())?;
+    let mut fields = 0;
+    for line in parsed.raw_headers.lines() {
+        if line.starts_with([' ', '\t']) && fields > 0 {
+            continue;
+        }
+        let Some((name, _)) = line.split_once(':') else {
+            return Err(invalid());
+        };
+        if !gmail_header_name_is_valid(name) || line.contains('\0') {
+            return Err(invalid());
+        }
+        fields += 1;
+    }
+    if fields == 0 {
+        return Err(invalid());
+    }
+    if let Some(content_type) = super::imap::parse_header_value(&parsed.raw_headers, "Content-Type")
+    {
+        if content_type.to_ascii_lowercase().starts_with("multipart/") {
+            let boundary = content_type
+                .split(';')
+                .skip(1)
+                .find_map(|param| {
+                    let (name, value) = param.trim().split_once('=')?;
+                    name.eq_ignore_ascii_case("boundary")
+                        .then(|| value.trim().trim_matches('"'))
+                })
+                .filter(|value| !value.is_empty())
+                .ok_or_else(invalid)?;
+            let text = String::from_utf8_lossy(&bytes);
+            if !text
+                .lines()
+                .any(|line| line.trim_end() == format!("--{boundary}"))
+                || !text
+                    .lines()
+                    .any(|line| line.trim_end() == format!("--{boundary}--"))
+            {
+                return Err(invalid());
+            }
+        }
+    }
+    Ok(())
 }
 
 fn gmail_message_needs_raw_crypto(message: &GmailMessageResponse) -> bool {

@@ -468,6 +468,7 @@ fn old_sync_state_decodes_without_a_snapshot_obligation() {
     let state: ImapSyncState =
         serde_json::from_str(r#"{"cursors":{"INBOX":"old"},"folder_snapshot_at":{}}"#).unwrap();
     assert!(state.pending_snapshots.is_empty());
+    assert!(state.resolved_snapshot_copies.is_empty());
     assert_eq!(state.cursors["INBOX"], "old");
 }
 
@@ -495,6 +496,20 @@ async fn server(
     Arc<std::sync::Mutex<Vec<String>>>,
     tokio::task::JoinHandle<()>,
 ) {
+    server_async(move |line, origin| {
+        let response = route(&line, &origin);
+        async move { response }
+    })
+    .await
+}
+
+async fn server_async<F: std::future::Future<Output = (&'static str, String)> + Send>(
+    route: impl Fn(String, String) -> F + Send + Sync + 'static,
+) -> (
+    String,
+    Arc<std::sync::Mutex<Vec<String>>>,
+    tokio::task::JoinHandle<()>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -508,7 +523,7 @@ async fn server(
             let request = String::from_utf8_lossy(&buffer[..read]);
             let line = request.lines().next().unwrap();
             recorded.lock().unwrap().push(line.to_string());
-            let (status, body) = route(line, &origin);
+            let (status, body) = route(line.to_string(), origin.clone()).await;
             socket.write_all(format!(
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len(),
@@ -524,8 +539,6 @@ fn config() -> crate::commands::accounts::AccountConfig {
     )
 }
 
-static PROVIDER_HTTP_FIXTURES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 // HTTP fixtures serialize their process-wide URL overrides.
 #[tokio::test]
 async fn provider_history_progress_and_snapshot_obligations_survive_restart() {
@@ -539,7 +552,7 @@ async fn provider_history_progress_and_snapshot_obligations_survive_restart() {
         let body = if line.contains("/messages/") {
             let id = if line.contains("/messages/A") { "A" } else { "B" };
             json!({"id":id,"threadId":id,"historyId":"130","labelIds":["INBOX"],
-                "internalDate":"1700000000000","payload":{"mimeType":"text/plain","body":{"data":"aGk="}}})
+                "internalDate":"1700000000000","payload":{"mimeType":"text/plain","headers":[{"name":"From","value":"sender@example.test"}],"body":{"data":"aGk="}}})
         } else if line.contains("startHistoryId=100") {
             json!({"historyId":"110","history":[{"id":"110","messagesAdded":[{"message":{"id":"A"}}]}]})
         } else if line.contains("startHistoryId=110") && !line.contains("pageToken") {
@@ -831,6 +844,7 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
         "lookup",
         "auth",
         "malformed",
+        "empty-payload",
         "target",
         "listing-before-target",
         "quarantine",
@@ -852,6 +866,7 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
                     match scenario {
                         "lookup" => return ("503 Service Unavailable", "{}".into()),
                         "auth" => return ("401 Unauthorized", "{}".into()),
+                        "empty-payload" => return ("200 OK", json!({"id":"A","payload":{}}).to_string()),
                         "malformed" => return ("200 OK", json!({"id":"wrong-id","payload":{"mimeType":"text/plain"}}).to_string()),
                         _ => {}
                     }
@@ -924,6 +939,12 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
             }
         }
         let mut state = ImapSyncState::default();
+        if scenario == "quarantine" {
+            // A later partial delivery must override an earlier completion.
+            state
+                .resolved_snapshot_copies
+                .insert("INBOX".into(), HashSet::from(["A".into()]));
+        }
         let old = json!({"history_id":"100","format_version":3,"latest_ts":1790000000});
         for folder in ["INBOX", "Label_one"] {
             state.cursors.insert(folder.into(), old.to_string());
@@ -966,6 +987,8 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
         persist_sync_cursors(&pool, "account", &state, &queue, None)
             .await
             .unwrap();
+        let before: String = sqlx::query_scalar("SELECT json_object('subject',subject,'from',from_address,'date',date,'text',body_text,'html',body_html) FROM messages WHERE id=?")
+            .bind(&source).fetch_one(&pool).await.unwrap();
         let result = reconcile_test_snapshot(
             &pool, &provider, "account", "inbox", "INBOX", &mut state, &queue,
         )
@@ -975,6 +998,7 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
             "lookup"
                 | "auth"
                 | "malformed"
+                | "empty-payload"
                 | "target"
                 | "listing-before-target"
                 | "quarantine"
@@ -983,6 +1007,9 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
         );
         assert_eq!(result.is_err(), should_fail, "{scenario}: {result:?}");
         if should_fail {
+            let after: String = sqlx::query_scalar("SELECT json_object('subject',subject,'from',from_address,'date',date,'text',body_text,'html',body_html) FROM messages WHERE id=?")
+                .bind(&source).fetch_one(&pool).await.unwrap();
+            assert_eq!(after, before, "{scenario}: cached metadata/content changed");
             assert_organization(&pool, &thread, &["INBOX"]).await;
             assert_eq!(
                 sqlx::query_scalar::<_, String>(
@@ -1007,6 +1034,12 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
             .unwrap();
         let mut restored: ImapSyncState = serde_json::from_str(&raw).unwrap();
         assert_eq!(restored.pending_snapshots.contains("INBOX"), should_fail);
+        if matches!(scenario, "quarantine" | "pending" | "pending-deleted") {
+            assert!(
+                restored.snapshot_resolutions["INBOX"].contains("A"),
+                "{scenario}"
+            );
+        }
         if should_fail {
             fail.store(false, Ordering::SeqCst);
             if scenario.starts_with("pending") {
@@ -1176,4 +1209,492 @@ async fn reconcile_test_snapshot(
         queue,
     )
     .await
+}
+
+/// Stop during the second 100-ID page, then reconstruct both provider and
+/// state. Completed moves, deletions and copies still in the source must not
+/// spend the next budget.
+#[tokio::test]
+async fn gmail_snapshot_resolution_progress_survives_budget_and_restart() {
+    let _guard = PROVIDER_HTTP_FIXTURES.lock().await;
+    let reached = Arc::new(tokio::sync::Notify::new());
+    let reached_server = reached.clone();
+    let (base, requests, task) = server_async(move |line, _| {
+        let reached = reached_server.clone();
+        async move {
+            if line.contains("/messages?") {
+                return ("200 OK", json!({"messages":[]}).to_string());
+            }
+            let id = line
+                .split("/messages/")
+                .nth(1)
+                .unwrap()
+                .split('?')
+                .next()
+                .unwrap();
+            if id == "M150" {
+                reached.notify_one();
+                std::future::pending::<()>().await;
+            }
+            if id == "M000" {
+                return ("404 Not Found", "{}".into());
+            }
+            (
+                "200 OK",
+                json!({"id":id,"threadId":id,"labelIds": if id == "M001" { vec!["INBOX"] } else { vec!["Label_one"] },
+                "internalDate":"1767225600000","payload":{"mimeType":"text/plain",
+                "headers":[{"name":"From","value":"sender@example.test"}],
+                "body":{"data":"Rml4dHVyZQ=="}}})
+                .to_string(),
+            )
+        }
+    })
+    .await;
+    std::env::set_var("SATCHEL_GMAIL_API_BASE", &base);
+    let pool = pool().await;
+    for n in 0..205 {
+        let mut m = message(&["INBOX"]);
+        m.remote_id = format!("M{n:03}");
+        m.remote_thread_id = Some(m.remote_id.clone());
+        m.message_id_header = Some(format!("<M{n:03}@example.test>"));
+        assert_eq!(ingest(&pool, m).await.ingested, 1);
+    }
+    let queue = SyncQueue::new();
+    let mut state = ImapSyncState::default();
+    state
+        .cursors
+        .insert("Label_other".into(), "unrelated-cursor".into());
+    state.pending_snapshots.insert("Label_other".into());
+    state.snapshot_resolutions.insert(
+        "Label_other".into(),
+        HashSet::from(["unresolved-other".into()]),
+    );
+    state.resolved_snapshot_copies.insert(
+        "Label_other".into(),
+        HashSet::from(["completed-other".into()]),
+    );
+    let provider = crate::providers::gmail::GmailProvider::from_account_config(&config());
+    let mut run = Box::pin(reconcile_test_snapshot(
+        &pool, &provider, "account", "inbox", "INBOX", &mut state, &queue,
+    ));
+    tokio::select! {
+        _ = reached.notified() => {},
+        result = &mut run => panic!("sync finished before interruption: {result:?}"),
+    }
+    // Exercise the production deadline wrapper at a deterministic network wait.
+    let result = account_run_with_deadline(std::time::Duration::from_millis(50), run).await;
+    assert!(result.unwrap_err().contains("timed out"));
+    drop(state);
+    drop(provider);
+    task.abort();
+
+    let raw: String = sqlx::query_scalar("SELECT sync_state FROM accounts")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let mut restored: ImapSyncState = serde_json::from_str(&raw).unwrap();
+    assert!(restored.pending_snapshots.contains("INBOX"));
+    assert!(!restored.folder_snapshot_at.contains_key("INBOX"));
+    let owed = &restored.snapshot_resolutions["INBOX"];
+    for n in 0..148 {
+        assert!(
+            !owed.contains(&format!("M{n:03}")),
+            "committed M{n:03} still consumes retry budget"
+        );
+    }
+    assert!(owed.contains("M150"));
+    assert_eq!(
+        restored.resolved_snapshot_copies["INBOX"],
+        HashSet::from(["M001".into()])
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM messages WHERE remote_id='M000'")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0,
+        "global deletion committed"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM messages WHERE folder_id='inbox'")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        58
+    );
+
+    let (base, retried, task) = server(|line, _| {
+        if line.contains("/messages?") {
+            return ("200 OK", json!({"messages":[]}).to_string());
+        }
+        let id = line
+            .split("/messages/")
+            .nth(1)
+            .unwrap()
+            .split('?')
+            .next()
+            .unwrap();
+        (
+            "200 OK",
+            json!({"id":id,"threadId":id,"labelIds": if id == "M001" { vec!["INBOX"] } else { vec!["Label_one"] },
+            "internalDate":"1767225600000","payload":{"mimeType":"text/plain",
+            "headers":[{"name":"From","value":"sender@example.test"}],
+            "body":{"data":"Rml4dHVyZQ=="}}})
+            .to_string(),
+        )
+    })
+    .await;
+    std::env::set_var("SATCHEL_GMAIL_API_BASE", &base);
+    let provider = crate::providers::gmail::GmailProvider::from_account_config(&config());
+    reconcile_test_snapshot(
+        &pool,
+        &provider,
+        "account",
+        "inbox",
+        "INBOX",
+        &mut restored,
+        &queue,
+    )
+    .await
+    .unwrap();
+    let retry_ids: Vec<String> = retried
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|line| line.split("/messages/").nth(1))
+        .map(|path| path.split('?').next().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        retry_ids,
+        (148..205).map(|n| format!("M{n:03}")).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|line| line.contains("/messages/M000?"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM messages")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        204
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM messages WHERE folder_id='inbox'")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1
+    );
+    let raw: String = sqlx::query_scalar("SELECT sync_state FROM accounts")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let completed: ImapSyncState = serde_json::from_str(&raw).unwrap();
+    assert!(!completed.pending_snapshots.contains("INBOX"));
+    assert!(completed.folder_snapshot_at.contains_key("INBOX"));
+    assert!(!completed.snapshot_resolutions.contains_key("INBOX"));
+    assert!(!completed.resolved_snapshot_copies.contains_key("INBOX"));
+    assert_eq!(
+        completed.resolved_snapshot_copies["Label_other"],
+        HashSet::from(["completed-other".into()])
+    );
+    assert_eq!(completed.cursors["Label_other"], "unrelated-cursor");
+    assert!(completed.pending_snapshots.contains("Label_other"));
+    assert_eq!(
+        completed.snapshot_resolutions["Label_other"],
+        HashSet::from(["unresolved-other".into()])
+    );
+    std::env::remove_var("SATCHEL_GMAIL_API_BASE");
+    task.abort();
+}
+
+fn full_response() -> serde_json::Value {
+    json!({"id":"A","threadId":"conversation","labelIds":[],
+        "internalDate":"1767225600000","payload":{"mimeType":"text/plain",
+        "headers":[{"name":"From","value":"sender@example.test"},
+                   {"name":"Subject","value":"Keep my organization"},
+                   {"name":"Message-ID","value":"<a@example.test>"}],
+        "body":{"size":7,"data":"Rml4dHVyZQ=="}}})
+}
+
+#[tokio::test]
+async fn gmail_incomplete_snapshot_responses_preserve_cached_content_and_work() {
+    use base64::Engine;
+    let _guard = PROVIDER_HTTP_FIXTURES.lock().await;
+    for scenario in [
+        "empty-payload",
+        "wrong-id",
+        "missing-payload",
+        "bad-labels",
+        "blank-label",
+        "missing-headers",
+        "empty-headers",
+        "bad-headers",
+        "bad-header-name",
+        "bad-date",
+        "missing-date",
+        "missing-mime",
+        "missing-body",
+        "bad-data",
+        "missing-data",
+        "negative-size",
+        "empty-parts",
+        "invalid-part",
+        "bad-raw",
+        "garbage-raw",
+        "truncated-raw",
+        "wrong-raw-id",
+    ] {
+        let fail = Arc::new(AtomicBool::new(true));
+        let failure = fail.clone();
+        let (base, _, task) = server(move |line, _| {
+            if line.contains("/messages?") {
+                return ("200 OK", json!({"messages":[]}).to_string());
+            }
+            let mut response = full_response();
+            if failure.load(Ordering::SeqCst) {
+                match scenario {
+                    "empty-payload" => response["payload"] = json!({}),
+                    "wrong-id" => response["id"] = json!("B"),
+                    "missing-payload" => { response.as_object_mut().unwrap().remove("payload"); },
+                    "bad-labels" => response["labelIds"] = json!([1]),
+                    "blank-label" => response["labelIds"] = json!([""]),
+                    "missing-headers" => { response["payload"].as_object_mut().unwrap().remove("headers"); },
+                    "empty-headers" => response["payload"]["headers"] = json!([]),
+                    "bad-headers" => response["payload"]["headers"] = json!([{"name":"From"}]),
+                    "bad-header-name" => response["payload"]["headers"][0]["name"] = json!(""),
+                    "bad-date" => response["internalDate"] = json!("invalid"),
+                    "missing-date" => { response.as_object_mut().unwrap().remove("internalDate"); },
+                    "missing-mime" => { response["payload"].as_object_mut().unwrap().remove("mimeType"); },
+                    "missing-body" => { response["payload"].as_object_mut().unwrap().remove("body"); },
+                    "bad-data" => response["payload"]["body"]["data"] = json!("!invalid!"),
+                    "missing-data" => response["payload"]["body"] = json!({"size":7}),
+                    "negative-size" => response["payload"]["body"]["size"] = json!(-1),
+                    "empty-parts" => { response["payload"]["mimeType"] = json!("multipart/mixed"); response["payload"]["parts"] = json!([]); },
+                    "invalid-part" => { response["payload"]["mimeType"] = json!("multipart/mixed"); response["payload"]["parts"] = json!([{}]); },
+                    _ => {
+                        // Crypto always requests source. Full metadata and MIME
+                        // structure are usable, but the source must be checked too.
+                        response["payload"]["mimeType"] = json!("application/pkcs7-mime");
+                        if line.contains("format=raw") {
+                            let raw = match scenario {
+                                "bad-raw" => "!invalid!".to_string(),
+                                "garbage-raw" => base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"not a message"),
+                                "truncated-raw" => base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"Content-Type: multipart/mixed; boundary=lost\r\n\r\ntruncated"),
+                                _ => base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"From: sender@example.test\r\nSubject: Fixture\r\n\r\nbody"),
+                            };
+                            return ("200 OK", json!({"id": if scenario == "wrong-raw-id" {"B"} else {"A"}, "raw":raw}).to_string());
+                        }
+                    }
+                }
+            }
+            ("200 OK", response.to_string())
+        }).await;
+        std::env::set_var("SATCHEL_GMAIL_API_BASE", &base);
+        let pool = pool().await;
+        assert_eq!(ingest(&pool, message(&["INBOX"])).await.ingested, 1);
+        let thread = annotate(&pool).await;
+        let before: (String, String, String, Option<String>, Option<String>) =
+            sqlx::query_as("SELECT subject,from_address,date,body_text,body_html FROM messages")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let queue = SyncQueue::new();
+        let mut state = ImapSyncState::default();
+        let provider = crate::providers::gmail::GmailProvider::from_account_config(&config());
+        let result = reconcile_test_snapshot(
+            &pool, &provider, "account", "inbox", "INBOX", &mut state, &queue,
+        )
+        .await;
+        assert!(result.is_err(), "{scenario} was acknowledged: {result:?}");
+        assert_organization(&pool, &thread, &["INBOX"]).await;
+        let after: (String, String, String, Option<String>, Option<String>) =
+            sqlx::query_as("SELECT subject,from_address,date,body_text,body_html FROM messages")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(after, before, "{scenario}");
+        let raw: String = sqlx::query_scalar("SELECT sync_state FROM accounts")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let mut restored: ImapSyncState = serde_json::from_str(&raw).unwrap();
+        assert!(restored.pending_snapshots.contains("INBOX"));
+        assert!(restored.snapshot_resolutions["INBOX"].contains("A"));
+        assert!(!restored.folder_snapshot_at.contains_key("INBOX"));
+        fail.store(false, Ordering::SeqCst);
+        reconcile_test_snapshot(
+            &pool,
+            &provider,
+            "account",
+            "inbox",
+            "INBOX",
+            &mut restored,
+            &queue,
+        )
+        .await
+        .unwrap();
+        assert_organization(&pool, &thread, &["ARCHIVE"]).await;
+        task.abort();
+    }
+    std::env::remove_var("SATCHEL_GMAIL_API_BASE");
+}
+
+#[tokio::test]
+async fn gmail_complete_empty_multipart_and_crypto_messages_remain_usable() {
+    use base64::Engine;
+    let _guard = PROVIDER_HTTP_FIXTURES.lock().await;
+    for scenario in [
+        "empty-size",
+        "empty-data",
+        "no-subject",
+        "omitted-labels",
+        "multipart",
+        "signed",
+    ] {
+        let (base, requests, task) = server(move |line, _| {
+            let mut response = full_response();
+            match scenario {
+                "empty-size" => response["payload"]["body"] = json!({"size":0}),
+                "empty-data" => response["payload"]["body"] = json!({"size":0,"data":""}),
+                "no-subject" => { response["payload"]["headers"].as_array_mut().unwrap().remove(1); },
+                "omitted-labels" => { response.as_object_mut().unwrap().remove("labelIds"); },
+                _ => {
+                    response["payload"]["mimeType"] = json!(if scenario == "signed" {"multipart/signed"} else {"multipart/alternative"});
+                    response["payload"]["body"] = json!({"size":0});
+                    response["payload"]["parts"] = json!([
+                        {"mimeType":"text/plain","body":{"data":"Rml4dHVyZQ==","size":7}},
+                        {"mimeType":"text/html","body":{"data":base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"<p>Fixture</p>"),"size":14}}
+                    ]);
+                    if scenario == "signed" {
+                        response["payload"]["headers"].as_array_mut().unwrap().push(json!({
+                            "name":"Content-Type", "value":"multipart/signed; protocol=application/x-pkcs7-signature; boundary=smime"
+                        }));
+                        response["payload"]["parts"][1] = json!({"mimeType":"application/x-pkcs7-signature", "body":{"data":"AQID","size":3}});
+                        if line.contains("format=raw") {
+                            let raw = b"From: sender@example.test\r\nContent-Type: multipart/signed; protocol=\"application/x-pkcs7-signature\"; boundary=smime\r\n\r\n--smime\r\nContent-Type: text/plain\r\n\r\nFixture\r\n--smime\r\nContent-Type: application/x-pkcs7-signature\r\n\r\nAQID\r\n--smime--\r\n";
+                            return ("200 OK", json!({"id":"A","raw":base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw)}).to_string());
+                        }
+                    }
+                }
+            }
+            ("200 OK", response.to_string())
+        }).await;
+        std::env::set_var("SATCHEL_GMAIL_API_BASE", &base);
+        let provider = crate::providers::gmail::GmailProvider::from_account_config(&config());
+        let message = provider
+            .resolve_snapshot_message("A")
+            .await
+            .unwrap_or_else(|error| panic!("{scenario}: {error:?}"))
+            .unwrap();
+        assert!(message.mailbox_ids.is_empty(), "{scenario}");
+        assert_eq!(message.from_address, "sender@example.test");
+        assert_eq!(message.date_rfc3339, "2026-01-01T00:00:00+00:00");
+        if scenario.starts_with("empty-") {
+            assert!(message.body_text.as_deref().unwrap_or_default().is_empty());
+        } else {
+            assert!(message.body_text.as_deref().unwrap().contains("Fixture"));
+        }
+        if scenario == "multipart" {
+            assert_eq!(message.body_html.as_deref(), Some("<p>Fixture</p>"));
+        }
+        if scenario == "signed" {
+            assert!(message.smime_signed.is_some());
+            assert!(requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|r| r.contains("format=raw")));
+        }
+        let pool = pool().await;
+        assert_eq!(ingest(&pool, message).await.ingested, 1, "{scenario}");
+        assert_eq!(
+            sqlx::query_scalar::<_, String>(
+                "SELECT f.remote_id FROM messages m JOIN folders f ON f.id=m.folder_id"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            "ARCHIVE"
+        );
+        task.abort();
+    }
+    std::env::remove_var("SATCHEL_GMAIL_API_BASE");
+}
+
+#[tokio::test]
+async fn gmail_snapshot_commit_before_progress_failure_is_safe_to_replay() {
+    let _guard = PROVIDER_HTTP_FIXTURES.lock().await;
+    let (base, requests, task) = server(|line, _| {
+        if line.contains("/messages?") {
+            ("200 OK", json!({"messages":[]}).to_string())
+        } else {
+            ("200 OK", full_response().to_string())
+        }
+    })
+    .await;
+    std::env::set_var("SATCHEL_GMAIL_API_BASE", &base);
+    let pool = pool().await;
+    ingest(&pool, message(&["INBOX"])).await;
+    let thread = annotate(&pool).await;
+    sqlx::raw_sql("CREATE TRIGGER fail_progress BEFORE UPDATE OF sync_state ON accounts
+        WHEN EXISTS (SELECT 1 FROM json_each(OLD.sync_state, '$.snapshot_resolutions.INBOX') WHERE value='A')
+        AND NOT EXISTS (SELECT 1 FROM json_each(NEW.sync_state, '$.snapshot_resolutions.INBOX') WHERE value='A')
+        BEGIN SELECT RAISE(ABORT, 'fixture progress interruption'); END;")
+        .execute(&pool).await.unwrap();
+    let queue = SyncQueue::new();
+    let mut state = ImapSyncState::default();
+    let provider = crate::providers::gmail::GmailProvider::from_account_config(&config());
+    let result = reconcile_test_snapshot(
+        &pool, &provider, "account", "inbox", "INBOX", &mut state, &queue,
+    )
+    .await;
+    assert!(result
+        .unwrap_err()
+        .contains("fixture progress interruption"));
+    assert_organization(&pool, &thread, &["ARCHIVE"]).await;
+    let raw: String = sqlx::query_scalar("SELECT sync_state FROM accounts")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let mut restored: ImapSyncState = serde_json::from_str(&raw).unwrap();
+    assert!(restored.snapshot_resolutions["INBOX"].contains("A"));
+    assert!(restored.pending_snapshots.contains("INBOX"));
+    assert!(!restored.folder_snapshot_at.contains_key("INBOX"));
+    sqlx::raw_sql("DROP TRIGGER fail_progress")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let provider = crate::providers::gmail::GmailProvider::from_account_config(&config());
+    reconcile_test_snapshot(
+        &pool,
+        &provider,
+        "account",
+        "inbox",
+        "INBOX",
+        &mut restored,
+        &queue,
+    )
+    .await
+    .unwrap();
+    assert_organization(&pool, &thread, &["ARCHIVE"]).await;
+    assert!(!restored.pending_snapshots.contains("INBOX"));
+    assert!(!restored.snapshot_resolutions.contains_key("INBOX"));
+    assert_eq!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|line| line.contains("/messages/A?"))
+            .count(),
+        2
+    );
+    std::env::remove_var("SATCHEL_GMAIL_API_BASE");
+    task.abort();
 }

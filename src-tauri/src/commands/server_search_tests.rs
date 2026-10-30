@@ -372,6 +372,9 @@ async fn fetching_evicted_body_preserves_identity_and_local_state() {
     use base64::Engine;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    let _http_fixture = crate::sync::mailbox_sync::PROVIDER_HTTP_FIXTURES
+        .lock()
+        .await;
     let pool = pool().await;
     seed_account(&pool).await;
     seed_message(&pool, SeedMessage::default()).await;
@@ -408,7 +411,11 @@ async fn fetching_evicted_body_preserves_identity_and_local_state() {
     let html = "<p onclick=bad()>needle</p><script>bad()</script>";
     let response = serde_json::json!({
         "id": "remote-1", "threadId": "different-provider-thread", "labelIds": ["INBOX"],
-        "payload": { "mimeType": "multipart/alternative", "headers": [], "parts": [
+        "internalDate": "1767225600000",
+        "payload": { "mimeType": "multipart/alternative", "headers": [
+            { "name": "From", "value": "remote@example.test" },
+            { "name": "Subject", "value": "Remote subject must not replace local metadata" }
+        ], "parts": [
             { "mimeType": "text/plain", "body": { "data": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("needle") } },
             { "mimeType": "text/html", "body": { "data": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(html) } },
         ] },
@@ -420,7 +427,7 @@ async fn fetching_evicted_body_preserves_identity_and_local_state() {
         assert!(String::from_utf8_lossy(&request[..len]).contains("/messages/remote-1?format=full"));
         socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).as_bytes()).await.unwrap();
     });
-    // No other app-crate test overrides the Gmail endpoint. Restore even on panic.
+    // Share the endpoint lock with sync fixtures and restore even on panic.
     struct EndpointGuard(Option<String>);
     impl Drop for EndpointGuard {
         fn drop(&mut self) {

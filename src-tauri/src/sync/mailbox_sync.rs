@@ -178,6 +178,11 @@ struct ImapSyncState {
     /// IDs stay owed even if another ingest moves their source before retry.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     snapshot_resolutions: HashMap<String, HashSet<String>>,
+    /// A lookup can still name its source after a presence-listing race.
+    /// Do not rediscover completed copies while this snapshot remains pending.
+    /// Explicit owed IDs and quarantine work bypass this exclusion.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    resolved_snapshot_copies: HashMap<String, HashSet<String>>,
 }
 
 impl ImapSyncState {
@@ -237,6 +242,7 @@ async fn reconcile_folder_snapshot(
         );
         completed.pending_snapshots.remove(remote_folder_id);
         completed.snapshot_resolutions.remove(remote_folder_id);
+        completed.resolved_snapshot_copies.remove(remote_folder_id);
         persist_sync_cursors(pool, account_id, &completed, queue, None).await?;
         *state = completed;
     } else {
@@ -266,6 +272,12 @@ async fn reconcile_gmail_snapshot(
     let mut after = String::new();
     let mut changed = HashSet::new();
     loop {
+        let resolved = state
+            .resolved_snapshot_copies
+            .get(context.folder_remote_id)
+            .cloned()
+            .unwrap_or_default();
+        let resolved_json = serde_json::to_string(&resolved).map_err(|error| error.to_string())?;
         let owed = state
             .snapshot_resolutions
             .entry(context.folder_remote_id.to_string())
@@ -275,6 +287,7 @@ async fn reconcile_gmail_snapshot(
             "SELECT remote_id FROM (
                 SELECT remote_id FROM messages
                 WHERE account_id = ? AND folder_id = ?
+                  AND remote_id NOT IN (SELECT value FROM json_each(?))
                   AND remote_id NOT IN (SELECT value FROM json_each(?))
                 UNION SELECT value FROM json_each(?)
                 UNION SELECT q.remote_id FROM sync_quarantine q
@@ -287,6 +300,7 @@ async fn reconcile_gmail_snapshot(
         .bind(&context.account.id)
         .bind(context.folder_id)
         .bind(&present)
+        .bind(&resolved_json)
         .bind(&owed_json)
         .bind(&context.account.id)
         .bind(&after)
@@ -309,6 +323,11 @@ async fn reconcile_gmail_snapshot(
             .await
             .map_err(|error| error.to_string())?;
             for (id, message) in ids.iter().zip(messages) {
+                let source_copy_remains = message.as_ref().is_some_and(|message| {
+                    gmail_target_mailbox_ids(&message.mailbox_ids)
+                        .iter()
+                        .any(|label| label.as_str() == context.folder_remote_id)
+                });
                 match message {
                     Some(message) => {
                         let threads: Vec<String> = sqlx::query_scalar(
@@ -342,6 +361,31 @@ async fn reconcile_gmail_snapshot(
                         .await?,
                     ),
                 }
+                // The target transaction committed before retiring this ID.
+                // A crash in between only replays one safe resolution. Persist
+                // each success so a later failure/deadline cannot starve work
+                // beyond the first page, including already deleted messages.
+                let mut progressed = state.clone();
+                if source_copy_remains {
+                    progressed
+                        .resolved_snapshot_copies
+                        .entry(context.folder_remote_id.to_string())
+                        .or_default()
+                        .insert(id.clone());
+                }
+                if let Some(owed) = progressed
+                    .snapshot_resolutions
+                    .get_mut(context.folder_remote_id)
+                {
+                    owed.remove(id);
+                    if owed.is_empty() {
+                        progressed
+                            .snapshot_resolutions
+                            .remove(context.folder_remote_id);
+                    }
+                }
+                persist_sync_cursors(pool, &context.account.id, &progressed, queue, None).await?;
+                *state = progressed;
             }
         }
     }
@@ -2112,6 +2156,11 @@ mod tests {
         );
     }
 }
+
+// Provider fixtures in sync and body refetch share process-wide URL overrides.
+#[cfg(test)]
+pub(crate) static PROVIDER_HTTP_FIXTURES: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
 
 #[cfg(test)]
 #[path = "mailbox_sync/consistency_tests.rs"]

@@ -17,6 +17,7 @@ fn base64url(bytes: &[u8]) -> String {
 fn full_message() -> serde_json::Value {
     json!({
         "id": "legacy-charset", "threadId": "thread", "labelIds": ["INBOX"],
+        "internalDate": "1767225600000",
         "payload": {
             "mimeType": "multipart/alternative",
             "headers": [{"name": "From", "value": "sender@example.test"}],
