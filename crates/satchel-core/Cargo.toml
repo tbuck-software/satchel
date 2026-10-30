@@ -96,6 +96,10 @@ security-framework-sys = "2.17"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography"] }
 
+[target.'cfg(unix)'.dependencies]
+# Atomic, exclusive directory publication on Linux/Android and macOS/iOS.
+rustix = { version = "1", features = ["fs"] }
+
 [target.'cfg(unix)'.dev-dependencies]
 # Exercise the Android flock implementation on Unix hosts as well.
 libc = "0.2"

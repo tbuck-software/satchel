@@ -161,6 +161,7 @@
       "backupPassphraseRejected": "Diese Passphrase öffnet den Master-Key dieser Sicherung nicht.",
       "backupPassphraseRequired": "Der Master-Key dieser Sicherung ist umschlossen. Gib die Passphrase ein, mit der sie erstellt wurde.",
       "backupPassphraseTooShort": "Verwende mindestens 12 Zeichen für die Sicherungs-Passphrase.",
+      "backupPublicationFailed": "Die Sicherung konnte nicht abgeschlossen werden. Vorhandene Sicherungen wurden beibehalten.",
       "blockedSenderOwnAddress": "Die eigene Adresse oder Domain lässt sich nicht blockieren.",
       "blockedSenderPatternEmpty": "Gib eine E-Mail-Adresse oder Domain zum Blockieren ein.",
       "blockedSenderPersistenceFailed": "Blockierte Absender sind momentan nicht verfügbar. Bitte versuche es erneut.",
