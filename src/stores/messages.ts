@@ -620,6 +620,13 @@ export const useMessagesStore = defineStore('messages', () => {
     return messages.slice(-count).map((message) => message.id);
   }
 
+  function requestedDetailIds(threadId: string): string[] {
+    const demanded = (messagesByThread.value[threadId] ?? [])
+      .filter(message => demandedDetails.has(message.id) || detailsNeedingRevalidation.has(message.id))
+      .map(message => message.id);
+    return [...new Set([...prioritizedMessageIds(threadId), ...demanded])];
+  }
+
   function forgetRemovedDetails(previousIds: Iterable<string>, rows: BackendMessage[]) {
     const currentIds = new Set(rows.map(row => row.id));
     for (const id of previousIds) {
@@ -680,10 +687,16 @@ export const useMessagesStore = defineStore('messages', () => {
       }
       enforceCacheBudget(threadId);
       if (options.remote) {
+        const detailIds = requestedDetailIds(threadId);
+        const missingBodies = detailIds.filter(id => {
+          const message = messagesByThread.value[threadId]?.find(message => message.id === id);
+          return message?.bodyLoaded === false && !message.contentError;
+        });
+        if (missingBodies.length > 0) await hydrateMessageBodies(threadId, missingBodies, version);
+        if (threadLoadVersions.get(threadId) !== version) return;
         entry.complete = true;
-        // Inline attachments can trigger remote/cache work. Start them only
-        // after the visible body is available, and only for that visible mail.
-        void hydrateMessageAttachments(threadId, prioritizedIds, version);
+        // A full reload replaces pending body and image work for expanded mail too.
+        void hydrateMessageAttachments(threadId, detailIds, version);
       }
       recordFrontendDiagnostic('messages.loaded', `thread=${threadId}`, cacheStats());
       endTotal?.();
@@ -799,10 +812,7 @@ export const useMessagesStore = defineStore('messages', () => {
         return mergePreview(preview, previousById.get(preview.id));
       });
       connectionStore.clearBackendError('messages');
-      const demanded = messagesByThread.value[threadId]!
-        .filter(message => demandedDetails.has(message.id) || detailsNeedingRevalidation.has(message.id))
-        .map(message => message.id);
-      const detailIds = [...new Set([...prioritizedMessageIds(threadId), ...demanded])];
+      const detailIds = requestedDetailIds(threadId);
       const arrived = detailIds.filter((id) => {
         const message = messagesByThread.value[threadId]?.find(message => message.id === id);
         return !previousById.has(id) || changedGeneration(message?.remoteUidValidity, previousById.get(id), message?.contentError)

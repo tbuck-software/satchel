@@ -296,12 +296,22 @@ function moveMessageFocus(delta: 1 | -1): boolean {
   return true;
 }
 
+function openThreadDraft(messageId: string) {
+  const message = messages.value.find(candidate => candidate.id === messageId && candidate.isDraft);
+  if (!message) return;
+  if (message.contentError) {
+    toast.error(backendErrorLabel(message.contentError));
+    return;
+  }
+  void composer.openDraft(messageId);
+}
+
 function toggleFocusedMessage(activateKeyboard = true): boolean {
   const messageId = ensureFocusedMessage();
   if (!messageId) return false;
   // A draft card does not fold; acting on it means going back into it.
   if (messageTargets.value.find((message) => message.id === messageId)?.isDraft) {
-    composer.openDraft(messageId);
+    openThreadDraft(messageId);
     return true;
   }
 
@@ -328,7 +338,7 @@ function openFocusedMessage(): boolean {
   const messageId = ensureFocusedMessage();
   if (!messageId) return false;
   const message = messageTargets.value.find((candidate) => candidate.id === messageId);
-  if (message?.isDraft) composer.openDraft(message.id);
+  if (message?.isDraft) openThreadDraft(message.id);
   else toggleFocusedMessage();
   return true;
 }
@@ -411,7 +421,7 @@ const ownDomains = computed(() => new Set(accountsStore.accounts
  * The newest unsent draft. While it exists it is the reply: the foot gives
  * way to its card, and Reply (`r`) opens it — see useThreadReply.
  */
-const resumableDraft = computed(() => messages.value.filter((message) => message.isDraft).at(-1));
+const resumableDraft = computed(() => messages.value.filter((message) => message.isDraft && !message.contentError).at(-1));
 
 // The draft card ends the column itself, so the column's height moves it the
 // same way it moves the foot: messages loading above it push it down.
@@ -1080,6 +1090,7 @@ function showEntireThread() {
           v-else
           :messages="visibleMessages"
           :draft-messages="draftMessages"
+          :loading="messagesLoading"
           :can-reply="canReply"
           :draft-busy="draftActions.isBusy"
           :draft-recipient="draftRecipientName"
@@ -1092,7 +1103,8 @@ function showEntireThread() {
           :editing-draft-id="composer.request?.draftId ?? null"
           @reply="replyThread"
           @forward="forwardThread"
-          @edit-draft="composer.openDraft($event)"
+          @edit-draft="openThreadDraft"
+          @retry-draft="void reloadMessages()"
           @discard-draft="void discardDraft($event)"
           @focus-message="focusMessageFromPointer"
           @toggle-collapsed="toggleMessageFromPointer"

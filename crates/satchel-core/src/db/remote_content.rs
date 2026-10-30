@@ -9,7 +9,7 @@ pub fn saved_uidvalidity(value: Option<i64>) -> Option<u32> {
         .filter(|value| *value != 0)
 }
 
-#[derive(Debug, Clone, FromRow, PartialEq, Eq)]
+#[derive(Debug, Clone, FromRow, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ContentReference {
     pub message_id: String,
     pub account_id: String,
@@ -24,6 +24,15 @@ pub struct ContentReference {
 
 impl ContentReference {
     pub async fn load(pool: &SqlitePool, message_id: &str) -> Result<Self, String> {
+        let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
+        Self::load_on(&mut connection, message_id).await
+    }
+
+    /// Read a saved identity using an already owned transaction or connection.
+    pub async fn load_on(
+        connection: &mut sqlx::SqliteConnection,
+        message_id: &str,
+    ) -> Result<Self, String> {
         sqlx::query_as(
             "SELECT m.id AS message_id, m.account_id, m.folder_id, m.remote_id,
                     m.remote_uidvalidity, m.created_at, a.provider,
@@ -33,7 +42,7 @@ impl ContentReference {
              LEFT JOIN folders f ON f.id = m.folder_id WHERE m.id = ?",
         )
         .bind(message_id)
-        .fetch_optional(pool)
+        .fetch_optional(connection)
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "backend.errors.messageNotAvailableLocally".to_string())
@@ -159,6 +168,52 @@ impl ContentReference {
         } else {
             Err(self.changed_error())
         }
+    }
+
+    /// Validate a collection in one transaction, with bounded SQL batches and
+    /// no content blobs. The caller owns the snapshot through return/publication.
+    pub async fn ensure_many_current(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        references: &[Self],
+    ) -> Result<(), String> {
+        for chunk in references.chunks(500) {
+            for reference in chunk {
+                reference.validate_cached_read()?;
+            }
+            let ids = serde_json::to_string(
+                &chunk
+                    .iter()
+                    .map(|reference| &reference.message_id)
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(|error| error.to_string())?;
+            let current: Vec<Self> = sqlx::query_as(
+                "SELECT m.id AS message_id, m.account_id, m.folder_id, m.remote_id,
+                        m.remote_uidvalidity, m.created_at, a.provider,
+                        COALESCE(f.remote_id, f.full_path) AS source_folder,
+                        f.uidvalidity AS folder_uidvalidity
+                 FROM messages m JOIN accounts a ON a.id = m.account_id
+                 LEFT JOIN folders f ON f.id = m.folder_id
+                 WHERE m.id IN (SELECT value FROM json_each(?))",
+            )
+            .bind(ids)
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(|error| error.to_string())?;
+            let current: std::collections::HashMap<_, _> = current
+                .into_iter()
+                .map(|reference| (reference.message_id.clone(), reference))
+                .collect();
+            for reference in chunk {
+                if !current
+                    .get(&reference.message_id)
+                    .is_some_and(|current| reference.same_identity(current))
+                {
+                    return Err(reference.changed_error());
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn changed_error(&self) -> String {

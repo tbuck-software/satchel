@@ -1469,7 +1469,8 @@ describe('invalid previews and interrupted body refreshes', () => {
     }
   });
 
-  it.each(['before', 'after', 'reject'])('replaces an obsolete body request whose completion arrives %s the new one', async (order) => {
+  it.each(['before', 'after', 'reject'].flatMap(order => ['refreshThread', 'loadByThread'].map(reload => ({ order, reload }))))(
+    'replaces an obsolete body request after $reload whose completion arrives $order the new one', async ({ order, reload }) => {
     previewMock.mockResolvedValue(['old', 'middle', 'latest'].map(id => backendMessage({ id, remote_uidvalidity: 7 })) as never);
     bodiesMock.mockImplementation(async ids => ids.map(id => ({ ...inlineBody(''), id, remote_uidvalidity: 7,
       body_loaded: id !== 'old', body_text: id === 'old' ? '' : 'Cached latest' })) as never);
@@ -1483,7 +1484,7 @@ describe('invalid previews and interrupted body refreshes', () => {
     await store.openThread('th-live');
     const expansion = store.loadAttachmentsForMessages('th-live', ['old']);
     await vi.waitFor(() => expect(loadBodyMock).toHaveBeenCalledTimes(1));
-    const refresh = store.refreshThread('th-live');
+    const refresh = reload === 'refreshThread' ? store.refreshThread('th-live') : store.loadByThread('th-live');
     await vi.waitFor(() => expect(loadBodyMock).toHaveBeenCalledTimes(2));
     const oldBody = { body_text: 'Obsolete body', body_html: null, remote_uidvalidity: 7, fetched: true };
     if (order !== 'after') {
@@ -1504,7 +1505,8 @@ describe('invalid previews and interrupted body refreshes', () => {
 });
 
 describe('inline-image requests interrupted by refresh', () => {
-  it.each(['before', 'after', 'reject'])('retains expanded images when the obsolete download completes %s', async (order) => {
+  it.each(['before', 'after', 'reject'].flatMap(order => ['refreshThread', 'loadByThread'].map(reload => ({ order, reload }))))(
+    'retains expanded images after $reload when the obsolete download completes $order', async ({ order, reload }) => {
     const { watch, nextTick } = await import('vue');
     setActivePinia(createPinia());
     vi.clearAllMocks();
@@ -1536,7 +1538,8 @@ describe('inline-image requests interrupted by refresh', () => {
       filename: 'image.jpg', mime_type: 'image/jpeg', data_base64, remote_uidvalidity: 7,
     });
     try {
-      await store.refreshThread('th-live');
+      if (reload === 'refreshThread') await store.refreshThread('th-live');
+      else await store.loadByThread('th-live');
       await vi.waitFor(() => expect(downloadAttachmentMock).toHaveBeenCalledTimes(2));
       expect(bodiesMock.mock.calls.filter(([ids]) => ids.includes('old'))).toHaveLength(1);
       if (order !== 'after') {

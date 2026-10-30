@@ -454,6 +454,9 @@ describe('DraftsView', () => {
       expect(harness.composer!.openDraft).not.toHaveBeenCalled();
       expect((row.findAll('[data-test="icon-button"]')[0]!.element as HTMLButtonElement).disabled).toBe(true);
       expect(wrapper.get('[role="alert"]').text()).toContain('Work/Drafts');
+      const initialLoads = harness.drafts!.load.mock.calls.length;
+      await wrapper.get('.error-state [data-test="app-button"]').trigger('click');
+      expect(harness.drafts!.load.mock.calls.length).toBe(initialLoads + 1);
       expect(wrapper.find('[data-test="thread-view"]').exists()).toBe(false);
       await wrapper.findAll('.row')[1]!.get('.row__open').trigger('dblclick');
       expect(harness.composer!.openDraft).toHaveBeenCalledWith('valid');

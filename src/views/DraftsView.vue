@@ -372,7 +372,13 @@ async function discardDraft(id: string) {
         </header>
 
         <div class="preview__body">
-          <p v-if="selectedDraft.content_error" class="preview__empty" role="alert">{{ backendErrorLabel(selectedDraft.content_error) }}</p>
+          <ErrorState
+            v-if="selectedDraft.content_error"
+            :title="$t('drafts.unavailable')"
+            :detail="backendErrorLabel(selectedDraft.content_error)"
+            :busy="drafts.loading"
+            @retry="drafts.load()"
+          />
           <p v-else-if="previewText(selectedDraft)" class="preview__text">{{ previewText(selectedDraft) }}</p>
           <p v-else class="preview__empty">{{ $t('drafts.noContent') }}</p>
 

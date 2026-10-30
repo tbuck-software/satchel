@@ -4,6 +4,8 @@ import type { Message } from '@/types/mail';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
+import ErrorState from '@/components/ui/ErrorState.vue';
+import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { useToastClearance } from '@/composables/useToastClearance';
 import { draftPreviewText } from '@/utils/draftPreview';
 import { formatMessageTimestamp } from '@/utils/listTime';
@@ -35,12 +37,16 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   edit: [];
+  retry: [];
   discard: [];
   focus: [];
 }>();
 
 const previewId = useId();
 const preview = computed(() => draftPreviewText(props.message));
+function editDraft() {
+  if (!props.message.contentError) emit('edit');
+}
 const savedAt = computed(() => formatMessageTimestamp(props.message.timestamp));
 
 // In place of the reply bar, the card ends the reader in the toast stack's corner.
@@ -54,14 +60,23 @@ useToastClearance(cardRef);
     class="draft-card"
     :class="{ 'draft-card--keyboard-focused': props.keyboardFocused }"
     :data-thread-message-id="props.message.id"
+    :aria-busy="props.busy || undefined"
     tabindex="-1"
     @pointerdown="emit('focus')"
   >
+    <ErrorState
+      v-if="props.message.contentError"
+      :title="$t('drafts.unavailable')"
+      :detail="backendErrorLabel(props.message.contentError)"
+      :busy="props.busy"
+      @retry="emit('retry')"
+    />
     <CardButton
+      v-else
       class="draft-card__body"
       :aria-label="$t('thread.draft.open', { name: props.recipient })"
       :aria-describedby="previewId"
-      @click="emit('edit')"
+      @click="editDraft"
     >
       <span class="draft-card__head">
         <span class="draft-card__label">
@@ -89,8 +104,8 @@ useToastClearance(cardRef);
       >{{ preview || $t('thread.draft.empty') }}</span>
     </CardButton>
     <!-- The row's empty stretch belongs to the card as well. -->
-    <div class="draft-card__actions" @click.self="emit('edit')">
-      <AppButton variant="primary" size="sm" @click="emit('edit')">
+    <div class="draft-card__actions" @click.self="editDraft">
+      <AppButton variant="primary" size="sm" :disabled="Boolean(props.message.contentError)" @click="editDraft">
         <template #icon>
           <AppIcon><path d="M11.2 2.6l2.2 2.2L5.8 12.4 3 13l.6-2.8z" /><path d="M2.5 14.5h11" /></AppIcon>
         </template>

@@ -268,6 +268,8 @@ struct MessageExportRow {
 
 #[derive(sqlx::FromRow)]
 struct ExportPageRow {
+    #[sqlx(flatten)]
+    reference: crate::db::remote_content::ContentReference,
     id: String,
     date: String,
     from_address: String,
@@ -291,25 +293,28 @@ async fn fetch_export_page(
     let _ = EXPORT_PAGE_QUERIES.try_with(|count| count.set(count.get() + 1));
 
     let mut query = sqlx::QueryBuilder::new(
-        "SELECT id, date, from_address, subject
-         FROM messages WHERE account_id IN (SELECT id FROM accounts WHERE kind = 'email')",
+        "SELECT m.id, m.date, m.from_address, m.subject, m.id AS message_id,
+         m.account_id, m.folder_id, m.remote_id, m.remote_uidvalidity, m.created_at, a.provider,
+         COALESCE(f.remote_id, f.full_path) AS source_folder, f.uidvalidity AS folder_uidvalidity
+         FROM messages m JOIN accounts a ON a.id = m.account_id
+         LEFT JOIN folders f ON f.id = m.folder_id WHERE a.kind = 'email'",
     );
     if let Some(account) = account_id {
-        query.push(" AND account_id = ");
+        query.push(" AND m.account_id = ");
         query.push_bind(account);
     }
     // Keyset rather than OFFSET: a message inserted mid-export must not shift
     // the window and drop a row.
     if let Some((date, id)) = cursor {
-        query.push(" AND (date > ");
+        query.push(" AND (m.date > ");
         query.push_bind(date.clone());
-        query.push(" OR (date = ");
+        query.push(" OR (m.date = ");
         query.push_bind(date.clone());
-        query.push(" AND id > ");
+        query.push(" AND m.id > ");
         query.push_bind(id.clone());
         query.push("))");
     }
-    query.push(" ORDER BY date ASC, id ASC LIMIT ");
+    query.push(" ORDER BY m.date ASC, m.id ASC LIMIT ");
     query.push_bind(limit);
 
     query
@@ -563,6 +568,7 @@ where
     let mut count = 0;
     let mut bytes = 0;
     let mut cursor = None;
+    let mut references = Vec::new();
     loop {
         let rows = fetch_export_page(pool, account_id, cursor.as_ref(), EXPORT_PAGE_ROWS).await?;
         if rows.is_empty() {
@@ -570,6 +576,7 @@ where
         }
         for row in &rows {
             let raw = source(row.id.clone()).await?;
+            references.push(row.reference.clone());
             if !valid_export_source(&raw) {
                 return Err(original_export_error(row.subject.as_deref()));
             }
@@ -605,9 +612,7 @@ where
         .await
         .map_err(|error| error.to_string())?;
     drop(out);
-    staging
-        .persist(destination)
-        .map_err(|error| error.to_string())?;
+    publish_message_export(pool, staging, destination, &references).await?;
     Ok(ExportResult {
         path: path.to_string(),
         message_count: count,
@@ -638,6 +643,34 @@ async fn write_message_export(
         .map_err(|error| error.to_string())?;
     file.sync_all().await.map_err(|error| error.to_string())?;
     drop(file);
+    publish_message_export(pool, staging, destination, &[row.reference]).await
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    static EXPORT_STAGED: (std::sync::Arc<tokio::sync::Notify>, std::sync::Arc<tokio::sync::Notify>);
+}
+
+/// All asynchronous downloads, writes and fsyncs finish before acquiring the
+/// writer. Only identity checks and the atomic rename belong to this section.
+async fn publish_message_export(
+    pool: &SqlitePool,
+    staging: tempfile::NamedTempFile,
+    destination: &Path,
+    references: &[crate::db::remote_content::ContentReference],
+) -> Result<(), String> {
+    #[cfg(test)]
+    if let Ok((reached, resume)) = EXPORT_STAGED.try_with(Clone::clone) {
+        reached.notify_one();
+        resume.notified().await;
+    }
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|error| error.to_string())?;
+    crate::db::remote_content::ContentReference::ensure_many_current(&mut tx, references).await?;
+    // persist performs one synchronous atomic replacement. Awaiting another
+    // worker here would leave a cancellation gap after scheduling publication.
     staging
         .persist(destination)
         .map(|_| ())
@@ -3177,6 +3210,183 @@ Content-Transfer-Encoding: 8bit\r\n\r\nGr\xfc\xdfe\r\n\
                 "at row {index}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn staged_exports_revalidate_at_atomic_publication() {
+        for mailbox in [false, true] {
+            for draft in [false, true] {
+                for change in [
+                    "reset",
+                    "replacement",
+                    "removed",
+                    "matching",
+                    "local",
+                    "imported",
+                ] {
+                    let pool = migrated_pool().await;
+                    seed_exportable_messages(&pool, 1).await;
+                    let raw = b"Subject: Original\r\n\r\nOriginal content\r\n";
+                    sqlx::query("UPDATE folders SET uidvalidity = 7")
+                        .execute(&pool)
+                        .await
+                        .unwrap();
+                    sqlx::query("UPDATE messages SET remote_id = ?, remote_uidvalidity = 7, is_draft = ?, original_source = ?")
+                        .bind(match change { "local" => None, "imported" => Some("import-550e8400-e29b-41d4-a716-446655440000"), _ => Some("42") })
+                        .bind(i64::from(draft)).bind(raw.as_slice()).execute(&pool).await.unwrap();
+                    let target = tempfile::tempdir().unwrap();
+                    let path = target.path().join(if mailbox {
+                        "mailbox.mbox"
+                    } else {
+                        "message.eml"
+                    });
+                    std::fs::write(&path, b"previous complete export").unwrap();
+                    let reached = std::sync::Arc::new(tokio::sync::Notify::new());
+                    let resume = std::sync::Arc::new(tokio::sync::Notify::new());
+                    let writer = tokio::spawn({
+                        let pool = pool.clone();
+                        let path = path.clone();
+                        let signal = (reached.clone(), resume.clone());
+                        async move {
+                            EXPORT_STAGED
+                                .scope(signal, async {
+                                    if mailbox {
+                                        write_mailbox_export(&pool, path.to_str().unwrap(), None)
+                                            .await
+                                            .map(|_| ())
+                                    } else {
+                                        write_message_export(
+                                            &pool,
+                                            path.to_str().unwrap(),
+                                            "message-00000",
+                                        )
+                                        .await
+                                    }
+                                })
+                                .await
+                        }
+                    });
+                    reached.notified().await;
+                    // These writes complete while the real export is paused after
+                    // fsync, proving it holds no database writer during staging.
+                    match change {
+                        "reset" | "local" | "imported" => {
+                            sqlx::query("UPDATE folders SET uidvalidity = 8")
+                                .execute(&pool)
+                                .await
+                                .unwrap();
+                        }
+                        "replacement" => {
+                            sqlx::query(
+                                "UPDATE messages SET remote_id = '43', created_at = 'replacement'",
+                            )
+                            .execute(&pool)
+                            .await
+                            .unwrap();
+                        }
+                        "removed" => {
+                            sqlx::query("DELETE FROM messages")
+                                .execute(&pool)
+                                .await
+                                .unwrap();
+                        }
+                        "matching" => {}
+                        _ => unreachable!(),
+                    }
+                    resume.notify_one();
+                    let result = writer.await.unwrap();
+                    if matches!(change, "matching" | "local" | "imported") {
+                        result.unwrap();
+                        let bytes = std::fs::read(&path).unwrap();
+                        assert_ne!(bytes, b"previous complete export");
+                        if !mailbox && !draft {
+                            assert_eq!(bytes, raw);
+                        }
+                    } else {
+                        assert!(
+                            result.unwrap_err().contains("imapUidValidityChanged"),
+                            "{mailbox}/{draft}/{change}"
+                        );
+                        assert_eq!(std::fs::read(&path).unwrap(), b"previous complete export");
+                    }
+                    assert_eq!(
+                        std::fs::read_dir(target.path()).unwrap().count(),
+                        1,
+                        "staging must be cleaned up"
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn mailbox_revalidates_earlier_sources_after_later_downloads() {
+        let pool = migrated_pool().await;
+        seed_exportable_messages(&pool, 2).await;
+        sqlx::query("UPDATE folders SET uidvalidity = 7")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE messages SET remote_id = id, remote_uidvalidity = 7")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let path = target.path().join("mailbox.mbox");
+        std::fs::write(&path, b"previous complete export").unwrap();
+        let result = write_mailbox_export_with_source(&pool, path.to_str().unwrap(), None, |id| {
+            let pool = &pool;
+            async move {
+                if id == "message-00001" {
+                    sqlx::query(
+                        "UPDATE messages SET remote_id = 'replaced' WHERE id = 'message-00000'",
+                    )
+                    .execute(pool)
+                    .await
+                    .unwrap();
+                }
+                Ok(b"Subject: Original\r\n\r\nOriginal content".to_vec())
+            }
+        })
+        .await;
+        assert!(result.unwrap_err().contains("imapUidValidityChanged"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous complete export");
+        assert_eq!(std::fs::read_dir(target.path()).unwrap().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn mailbox_publication_checks_identities_past_the_first_validation_batch() {
+        let pool = migrated_pool().await;
+        seed_exportable_messages(&pool, 501).await;
+        sqlx::query("UPDATE folders SET uidvalidity = 7")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE messages SET remote_id = id, remote_uidvalidity = 7")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let path = target.path().join("mailbox.mbox");
+        std::fs::write(&path, b"previous complete export").unwrap();
+        let result = write_mailbox_export_with_source(&pool, path.to_str().unwrap(), None, |id| {
+            let pool = &pool;
+            async move {
+                if id == "message-00500" {
+                    sqlx::query(
+                        "UPDATE messages SET remote_id = 'replacement' WHERE id = 'message-00500'",
+                    )
+                    .execute(pool)
+                    .await
+                    .unwrap();
+                }
+                Ok(b"Subject: Original\r\n\r\nOriginal content".to_vec())
+            }
+        })
+        .await;
+        assert!(result.unwrap_err().contains("imapUidValidityChanged"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous complete export");
+        assert_eq!(std::fs::read_dir(target.path()).unwrap().count(), 1);
     }
 
     #[tokio::test]
