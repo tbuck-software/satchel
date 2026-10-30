@@ -1,3 +1,11 @@
+mod credentials;
+mod refresh;
+pub use credentials::OAuthCredentials;
+pub use refresh::{
+    fresh_account_config, fresh_account_config_for_provider, refresh_account_config,
+    refresh_account_config_reporting, RecordedOAuthError, RefreshOutcome,
+};
+
 use base64::Engine;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
@@ -9,6 +17,14 @@ pub const GOOGLE_CONTACTS_SCOPE: &str = "https://www.googleapis.com/auth/contact
 pub const GOOGLE_OTHER_CONTACTS_SCOPE: &str =
     "https://www.googleapis.com/auth/contacts.other.readonly";
 pub const GOOGLE_CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar.readonly";
+
+/// Message key for credentials that changed under the caller. Reloading the
+/// account resolves it; nothing about the server or the sign-in is wrong.
+pub const OAUTH_RELOAD_REQUIRED: &str = "backend.errors.oauthReloadRequired";
+
+/// Starts the diagnostic for a token endpoint that answered with an error
+/// status; the status and the endpoint's body follow.
+const OAUTH_REFRESH_REJECTED: &str = "oauth refresh failed with status ";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -284,7 +300,7 @@ impl OAuthProvider {
                 client_secret,
                 redirect_uri,
                 auth_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
-                token_url: "https://oauth2.googleapis.com/token".into(),
+                token_url: token_endpoint(self, "https://oauth2.googleapis.com/token"),
                 scopes: vec![GOOGLE_MAIL_SCOPE],
             },
             Self::Outlook => OAuthClientConfig {
@@ -293,7 +309,10 @@ impl OAuthProvider {
                 client_secret,
                 redirect_uri,
                 auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize".into(),
-                token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token".into(),
+                token_url: token_endpoint(
+                    self,
+                    "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+                ),
                 scopes: vec![
                     "openid",
                     "email",
@@ -306,6 +325,19 @@ impl OAuthProvider {
             },
         }
     }
+}
+
+/// Token endpoint of `provider`. Debug builds read an override for local
+/// provider fixtures; release builds always use the provider's own endpoint.
+fn token_endpoint(provider: OAuthProvider, default: &str) -> String {
+    let key = match provider {
+        OAuthProvider::Gmail => "SATCHEL_GMAIL_TOKEN_URL",
+        OAuthProvider::Outlook => "SATCHEL_OUTLOOK_TOKEN_URL",
+    };
+    crate::utils::environment::debug_env(key)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| default.to_string())
 }
 
 fn required_env(key: &str) -> Result<String, String> {
@@ -586,8 +618,18 @@ pub fn load_stored_oauth(config_json: &str) -> Result<StoredOAuthConfig, String>
 pub async fn access_token_from_account_config(
     provider: OAuthProvider,
     config_json: &crate::accounts::AccountConfig,
-) -> Result<String, String> {
-    let stored = load_stored_oauth(config_json)?;
+) -> crate::sync::errors::SyncResult<String> {
+    let stored =
+        load_stored_oauth(config_json).map_err(crate::sync::errors::SyncError::Permanent)?;
+    if stored
+        .provider
+        .as_deref()
+        .is_some_and(|stored| !stored.eq_ignore_ascii_case(provider.as_str()))
+    {
+        return Err(crate::sync::errors::SyncError::Transient(
+            OAUTH_RELOAD_REQUIRED.into(),
+        ));
+    }
     let access_token = stored
         .access_token
         .as_deref()
@@ -603,42 +645,46 @@ pub async fn access_token_from_account_config(
         }
     }
 
-    let config = provider.load_config_for_stored(&stored)?;
-    let refresh_token = stored
-        .refresh_token
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "missing oauth refresh token".to_string())?;
-
-    let refreshed = refresh_access_token(&config, refresh_token).await?;
-    Ok(refreshed.access_token)
+    // A detached snapshot cannot save a rotated refresh token or detect a
+    // reconnect. Work that outlives its token holds `OAuthCredentials::stored`.
+    Err(crate::sync::errors::SyncError::Transient(
+        OAUTH_RELOAD_REQUIRED.into(),
+    ))
 }
 
-pub async fn ensure_fresh_account_config(
+async fn ensure_fresh_account_config(
     provider: OAuthProvider,
     config_json: &crate::accounts::AccountConfig,
-) -> Result<Option<String>, String> {
-    // Returns *plaintext* JSON when it refreshes; callers re-encrypt before
-    // storing (see the encrypt_account_config calls at each UPDATE).
-    let stored = load_stored_oauth(config_json)?;
+) -> crate::sync::errors::SyncResult<Option<String>> {
+    use crate::sync::errors::SyncError;
+    let stored = load_stored_oauth(config_json).map_err(SyncError::Permanent)?;
+    if stored
+        .provider
+        .as_deref()
+        .is_some_and(|stored| !stored.eq_ignore_ascii_case(provider.as_str()))
+    {
+        return Err(SyncError::Transient(OAUTH_RELOAD_REQUIRED.into()));
+    }
     if oauth_token_is_fresh(&stored) {
         return Ok(None);
     }
-
     let refresh_token = stored
         .refresh_token
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| "missing oauth refresh token".to_string())?;
-    let config = provider.load_config_for_stored(&stored)?;
-    let refreshed = refresh_access_token(&config, refresh_token).await?;
-    Ok(Some(merge_token_into_config(
-        config_json,
-        provider,
-        &refreshed,
-    )?))
+        .ok_or_else(|| SyncError::Permanent("missing oauth refresh token".into()))?;
+    let config = provider
+        .load_config_for_stored(&stored)
+        .map_err(SyncError::Permanent)?;
+    // The HTTP adapter still returns third-party diagnostics. Classify once
+    // here; callers retain the resulting variant through their retry decision.
+    let refreshed = refresh_access_token(&config, refresh_token)
+        .await
+        .map_err(SyncError::from_message)?;
+    Ok(Some(
+        merge_token_into_config(config_json, provider, &refreshed).map_err(SyncError::Permanent)?,
+    ))
 }
 
 pub fn merge_token_into_config(
@@ -721,10 +767,7 @@ async fn refresh_access_token(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(format!(
-            "oauth refresh failed with status {}: {}",
-            status, body
-        ));
+        return Err(format!("{OAUTH_REFRESH_REJECTED}{status}: {body}"));
     }
 
     let token: OAuthTokenResponse = response
@@ -753,6 +796,12 @@ fn parse_rfc3339(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
         .map(|value| value.with_timezone(&chrono::Utc))
 }
 
+/// How long a served access token must still be valid. Gmail and Graph
+/// requests keep their token through every rate-limit retry, which can wait
+/// several minutes; a token served with less left expires under the request.
+/// Renewing this early costs nothing extra: one refresh per token lifetime.
+pub const ACCESS_TOKEN_RENEWAL_MARGIN: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
 pub fn oauth_config_has_fresh_access_token(config_json: &str) -> bool {
     load_stored_oauth(config_json)
         .map(|stored| oauth_token_is_fresh(&stored))
@@ -770,13 +819,40 @@ fn oauth_token_is_fresh(stored: &StoredOAuthConfig) -> bool {
             .expires_at
             .as_deref()
             .and_then(parse_rfc3339)
-            .map(|expires_at| expires_at > chrono::Utc::now() + chrono::Duration::seconds(90))
+            .map(|expires_at| {
+                chrono::Duration::from_std(ACCESS_TOKEN_RENEWAL_MARGIN)
+                    .is_ok_and(|margin| expires_at > chrono::Utc::now() + margin)
+            })
             .unwrap_or(true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_renewal_margin_outlasts_the_longest_wait_of_one_request() {
+        use crate::providers::gmail::{MAX_RATE_LIMIT_WAIT, RATE_LIMIT_ATTEMPTS};
+        // Gmail and Graph requests reuse their token across every rate-limit
+        // retry. A token served with less left would expire before the last one.
+        assert!(ACCESS_TOKEN_RENEWAL_MARGIN >= MAX_RATE_LIMIT_WAIT * RATE_LIMIT_ATTEMPTS as u32);
+        // Bounded, so an hour-long token is still refreshed about once an hour.
+        assert!(ACCESS_TOKEN_RENEWAL_MARGIN <= std::time::Duration::from_secs(10 * 60));
+        let expiring_in = |seconds: i64| {
+            serde_json::json!({"oauth": {
+                "access_token": "access",
+                "expires_at": (chrono::Utc::now() + chrono::Duration::seconds(seconds)).to_rfc3339()
+            }})
+            .to_string()
+        };
+        let margin = ACCESS_TOKEN_RENEWAL_MARGIN.as_secs() as i64;
+        assert!(!oauth_config_has_fresh_access_token(&expiring_in(
+            margin - 30
+        )));
+        assert!(oauth_config_has_fresh_access_token(&expiring_in(
+            margin + 30
+        )));
+    }
 
     #[test]
     fn gmail_sign_in_requests_one_mail_permission_without_identity_scopes() {

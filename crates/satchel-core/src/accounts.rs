@@ -215,20 +215,39 @@ mod credential_tests {
         }
     }
 
-    /// Reads the token out of a decrypted config. The stored token is expired,
-    /// so this attempts a refresh and fails on the network — not on parsing.
+    /// A detached config must never refresh credentials that it cannot persist.
     #[tokio::test]
-    async fn oauth_token_lookup_parses_the_config() {
-        if let Err(err) = crate::utils::oauth::access_token_from_account_config(
+    async fn oauth_token_lookup_refuses_to_refresh_a_detached_snapshot() {
+        let error = crate::utils::oauth::access_token_from_account_config(
             crate::utils::oauth::OAuthProvider::Gmail,
             &AccountConfig::from_plaintext(OAUTH_CONFIG),
         )
         .await
-        {
-            assert!(
-                !err.contains("invalid oauth config JSON"),
-                "the config must parse; got a parse error instead: {err}"
-            );
+        .unwrap_err();
+        let reload = crate::utils::oauth::OAUTH_RELOAD_REQUIRED;
+        assert_eq!(
+            error,
+            crate::sync::errors::SyncError::Transient(reload.into())
+        );
+        assert!(!error.is_permanent());
+        // Not "server temporarily unavailable": the server was never asked.
+        assert_eq!(error.encoded(), reload);
+        // Providers expose the same typed variant to queue workers, rather
+        // than reconstructing it from a diagnostic string.
+        for kind in ["gmail", "outlook"] {
+            let provider = crate::providers::provider_for_account(
+                kind,
+                &AccountConfig::from_plaintext(OAUTH_CONFIG),
+                "fixture@example.test",
+                None,
+            )
+            .unwrap();
+            let failure = provider.sync_folders().await.unwrap_err();
+            assert!(matches!(
+                failure,
+                crate::sync::errors::SyncError::Transient(_)
+            ));
+            assert_eq!(failure.encoded(), reload);
         }
     }
 

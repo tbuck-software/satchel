@@ -15,7 +15,7 @@ use crate::sync::thread_resolution::refresh_provider_thread_projection;
 use crate::AppState;
 use crate::{
     providers::traits::MessageRef,
-    providers::{gmail::GmailProvider, provider_for_account},
+    providers::{gmail::GmailProvider, provider_for_stored_account},
 };
 
 /// Finish workflow moves before removing their durable queue row. IMAP assigns
@@ -427,8 +427,15 @@ async fn present_api_move_sources(
     .fetch_one(pool)
     .await
     .map_err(|err| format!("remote move account lookup failed: {err}"))?;
-    let config = crate::commands::accounts::decrypt_account_config(account_id, &encrypted_config)?;
-    let provider = provider_for_account(&provider_kind, &config, &email, None)?;
+    let config = crate::utils::oauth::refresh_account_config(
+        pool,
+        account_id,
+        &provider_kind,
+        &encrypted_config,
+    )
+    .await?;
+    let provider =
+        provider_for_stored_account(pool, account_id, &provider_kind, &config, &email, None)?;
 
     let mut refs_by_folder: HashMap<&str, Vec<&MessageRef>> = HashMap::new();
     for message in refs {
@@ -443,7 +450,9 @@ async fn present_api_move_sources(
             .keys()
             .any(|folder| folder.eq_ignore_ascii_case("ARCHIVE"))
     {
-        Some(GmailProvider::from_account_config(&config))
+        Some(GmailProvider::from_credentials(
+            crate::utils::oauth::OAuthCredentials::stored(pool, account_id, &config),
+        ))
     } else {
         None
     };

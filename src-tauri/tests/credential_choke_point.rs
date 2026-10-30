@@ -125,7 +125,7 @@ fn every_config_read_goes_through_the_accessor() {
         let handled = source.contains("decrypt_account_config")
             || source.contains("provider_for_account")
             || source.contains("access_token_from_account_config")
-            || source.contains("ensure_fresh_account_config");
+            || source.contains("refresh_account_config");
         if !handled {
             offenders.push(path.to_string_lossy().to_string());
         }

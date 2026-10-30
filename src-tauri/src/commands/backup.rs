@@ -475,7 +475,7 @@ async fn export_message_source(
         row.reference.ensure_current(&mut tx).await?;
         return build_draft_message(row, attachments);
     }
-    match crate::commands::messages::fetch_remote_message_source(pool, &row.id).await {
+    match crate::commands::messages::fetch_remote_message_source(pool, pool, &row.id).await {
         Ok(Some(raw)) if valid_export_source(&raw) => Ok(raw),
         result => {
             if let Err(error) = result {
@@ -2080,7 +2080,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            crate::commands::messages::fetch_remote_message_source(&pool, &id)
+            crate::commands::messages::fetch_remote_message_source(&pool, &pool, &id)
                 .await
                 .unwrap()
                 .unwrap(),

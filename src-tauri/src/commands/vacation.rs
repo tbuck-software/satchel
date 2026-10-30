@@ -96,7 +96,10 @@ pub async fn set_vacation(
         .load_provider_config(&input.account_id)
         .await
         .map_err(CommandError::from)?;
-    if let Some(account) = account {
+    if let Some(mut account) = account {
+        account.config = crate::utils::oauth::fresh_account_config(pool.inner(), &input.account_id)
+            .await
+            .map_err(map_remote_update_error)?;
         push_vacation_to_remote(&account, &input)
             .await
             .map_err(map_remote_update_error)?;
@@ -128,7 +131,9 @@ async fn push_gmail_vacation(
     config_json: &crate::commands::accounts::AccountConfig,
     input: &VacationInput,
 ) -> Result<(), String> {
-    let token = access_token_from_account_config(OAuthProvider::Gmail, config_json).await?;
+    let token = access_token_from_account_config(OAuthProvider::Gmail, config_json)
+        .await
+        .map_err(|err| err.encoded())?;
     let starts_ms = input
         .starts_at
         .as_deref()
@@ -180,7 +185,9 @@ async fn push_outlook_vacation(
     config_json: &crate::commands::accounts::AccountConfig,
     input: &VacationInput,
 ) -> Result<(), String> {
-    let token = access_token_from_account_config(OAuthProvider::Outlook, config_json).await?;
+    let token = access_token_from_account_config(OAuthProvider::Outlook, config_json)
+        .await
+        .map_err(|err| err.encoded())?;
     let status = if input.enabled {
         if input.starts_at.is_some() && input.ends_at.is_some() {
             "scheduled"

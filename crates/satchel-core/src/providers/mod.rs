@@ -12,6 +12,7 @@ pub mod traits;
 
 use std::sync::Arc;
 
+use crate::utils::oauth::OAuthCredentials;
 use traits::MailProvider;
 
 /// Build a provider from a stored account config.
@@ -30,12 +31,50 @@ pub fn provider_for_account(
     fallback_email: &str,
     body_window_days: Option<u32>,
 ) -> Result<Arc<dyn MailProvider>, String> {
+    let credentials = OAuthCredentials::detached(config_json);
+    provider_with_credentials(
+        kind,
+        config_json,
+        credentials,
+        fallback_email,
+        body_window_days,
+    )
+}
+
+/// Build a provider for work that can outlast its access token: a mailbox
+/// run, a send, a queued mutation. Gmail and Outlook renew an expiring token
+/// from the stored account instead of failing every later request.
+pub fn provider_for_stored_account(
+    pool: &sqlx::SqlitePool,
+    account_id: &str,
+    kind: &str,
+    config_json: &crate::accounts::AccountConfig,
+    fallback_email: &str,
+    body_window_days: Option<u32>,
+) -> Result<Arc<dyn MailProvider>, String> {
+    let credentials = OAuthCredentials::stored(pool, account_id, config_json);
+    provider_with_credentials(
+        kind,
+        config_json,
+        credentials,
+        fallback_email,
+        body_window_days,
+    )
+}
+
+fn provider_with_credentials(
+    kind: &str,
+    config_json: &crate::accounts::AccountConfig,
+    credentials: OAuthCredentials,
+    fallback_email: &str,
+    body_window_days: Option<u32>,
+) -> Result<Arc<dyn MailProvider>, String> {
     match kind {
-        "gmail" => Ok(Arc::new(gmail::GmailProvider::from_account_config(
-            config_json,
+        "gmail" => Ok(Arc::new(gmail::GmailProvider::from_credentials(
+            credentials,
         ))),
-        "outlook" => Ok(Arc::new(outlook::OutlookProvider::from_account_config(
-            config_json,
+        "outlook" => Ok(Arc::new(outlook::OutlookProvider::from_credentials(
+            credentials,
         ))),
         "imap" => {
             let mut provider =

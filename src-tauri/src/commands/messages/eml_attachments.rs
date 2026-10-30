@@ -27,11 +27,13 @@ const MAX_STEM_CHARS: usize = 80;
 #[tauri::command]
 pub async fn thread_eml_attachments(
     pool: tauri::State<'_, crate::db::ReadPool>,
+    write_pool: tauri::State<'_, SqlitePool>,
     thread_ids: Vec<String>,
 ) -> CommandResult<Vec<OutgoingAttachmentInput>> {
     let pool = pool.inner().as_ref();
+    let write_pool = write_pool.inner();
     collect_thread_eml_attachments(pool, thread_ids, |id| async move {
-        super::fetch_remote_message_source(pool, &id).await
+        super::fetch_remote_message_source(pool, write_pool, &id).await
     })
     .await
 }
@@ -200,7 +202,7 @@ mod tests {
             let result = collect_thread_eml_attachments(&pool, vec!["t1".into(), "t2".into(), "t1".into()], |id| {
                 let pool = &pool;
                 async move {
-                    let source = super::super::fetch_remote_message_source(pool, &id).await?;
+                    let source = super::super::fetch_remote_message_source(pool, pool, &id).await?;
                     if id == "m2" {
                         let sql = match change {
                             "reset" | "local" | "imported" => "UPDATE folders SET uidvalidity = 8",

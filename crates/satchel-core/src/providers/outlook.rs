@@ -13,7 +13,7 @@ use crate::{
             RemoteMessageRemoval, SyncBatch, SyncCheckpoint,
         },
     },
-    utils::oauth::{access_token_from_account_config, OAuthProvider},
+    utils::oauth::{OAuthCredentials, OAuthProvider},
 };
 
 mod batch;
@@ -49,7 +49,7 @@ fn max_delta_pages_per_run() -> usize {
 
 #[derive(Debug, Clone)]
 pub struct OutlookProvider {
-    config_json: crate::accounts::AccountConfig,
+    credentials: OAuthCredentials,
     /// One pool per provider: a client per call was a TLS handshake per call.
     client: reqwest::Client,
 }
@@ -212,14 +212,18 @@ impl OutlookProvider {
     const CURSOR_FORMAT_VERSION: u8 = 1;
 
     pub fn from_account_config(config_json: &crate::accounts::AccountConfig) -> Self {
+        Self::from_credentials(OAuthCredentials::detached(config_json))
+    }
+
+    pub fn from_credentials(credentials: OAuthCredentials) -> Self {
         Self {
-            config_json: config_json.clone(),
+            credentials,
             client: crate::utils::http::client(),
         }
     }
 
-    async fn access_token(&self) -> Result<String, String> {
-        access_token_from_account_config(OAuthProvider::Outlook, &self.config_json).await
+    async fn access_token(&self) -> crate::sync::errors::SyncResult<String> {
+        self.credentials.access_token(OAuthProvider::Outlook).await
     }
 
     /// Fetches a single message by its Graph id and maps it to an envelope,
@@ -866,7 +870,7 @@ impl MailProvider for OutlookProvider {
         folder: &str,
         since: SyncCheckpoint,
     ) -> crate::sync::errors::SyncResult<SyncBatch> {
-        let token = self.access_token().await?;
+        let mut token = self.access_token().await?;
         let client = self.client.clone();
         let parsed_cursor = Self::parse_cursor_state(&since);
         let mut cursor_state = parsed_cursor.state;
@@ -909,42 +913,49 @@ impl MailProvider for OutlookProvider {
             cursor_state.delta_next_link = None;
 
             loop {
-                let payload =
-                    match Self::load_delta_page(&client, &token, folder, delta_link.as_deref())
-                        .await
+                // Taken again for every page: a long enumeration outlasts the
+                // renewal margin a single token is served with. A failed
+                // renewal is a failed page, so earlier pages are kept.
+                let page = match self.access_token().await {
+                    Ok(renewed) => {
+                        token = renewed;
+                        Self::load_delta_page(&client, &token, folder, delta_link.as_deref()).await
+                    }
+                    Err(err) => Err(err),
+                };
+                let payload = match page {
+                    Ok(payload) => payload,
+                    // 410 Gone / resyncRequired: the delta token expired. Reset
+                    // to a fresh full delta enumeration once instead of failing
+                    // this folder on every future run with the same dead token.
+                    Err(err)
+                        if !resynced
+                            && delta_link.is_some()
+                            && (err.to_string().contains("status 410")
+                                || err.to_string().contains("resyncRequired")) =>
                     {
-                        Ok(payload) => payload,
-                        // 410 Gone / resyncRequired: the delta token expired. Reset
-                        // to a fresh full delta enumeration once instead of failing
-                        // this folder on every future run with the same dead token.
-                        Err(err)
-                            if !resynced
-                                && delta_link.is_some()
-                                && (err.to_string().contains("status 410")
-                                    || err.to_string().contains("resyncRequired")) =>
-                        {
-                            resynced = true;
-                            snapshot_required = true;
-                            delta_link = None;
-                            cursor_state.delta_link = None;
-                            continue;
-                        }
-                        // Keep what this run already read. Failing the whole call
-                        // discards those pages *and* the cursor that points past
-                        // them, which is what made a long enumeration restart from
-                        // page 1 forever. Nothing read yet is still an error.
-                        Err(err) if pages_read > 0 => {
-                            tracing::warn!(
-                                %folder,
-                                %err,
-                                pages_read,
-                                "outlook delta page failed; earlier pages kept"
-                            );
-                            cursor_state.delta_next_link = delta_link;
-                            break;
-                        }
-                        Err(err) => return Err(err),
-                    };
+                        resynced = true;
+                        snapshot_required = true;
+                        delta_link = None;
+                        cursor_state.delta_link = None;
+                        continue;
+                    }
+                    // Keep what this run already read. Failing the whole call
+                    // discards those pages *and* the cursor that points past
+                    // them, which is what made a long enumeration restart from
+                    // page 1 forever. Nothing read yet is still an error.
+                    Err(err) if pages_read > 0 => {
+                        tracing::warn!(
+                            %folder,
+                            %err,
+                            pages_read,
+                            "outlook delta page failed; earlier pages kept"
+                        );
+                        cursor_state.delta_next_link = delta_link;
+                        break;
+                    }
+                    Err(err) => return Err(err),
+                };
                 pages_read += 1;
                 for message in payload.value {
                     // Skip delta tombstones — ingesting them would resurrect

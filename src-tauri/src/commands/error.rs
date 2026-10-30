@@ -107,6 +107,38 @@ impl From<satchel_core::drafts::DraftError> for CommandError {
 mod tests {
     use super::{CommandError, MessageSearchError};
 
+    /// A refresh that lost a local race asks for a reload. An interactive
+    /// command must say that, not "unexpected" or "server unavailable".
+    #[tokio::test]
+    async fn oauth_reload_races_keep_their_key_at_the_command_boundary() {
+        satchel_core::utils::crypto::seed_master_key_for_tests();
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::init(&pool).await.unwrap();
+        let config = r#"{"oauth":{"access_token":"fresh"}}"#;
+        sqlx::query("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+            VALUES ('account', 'Fixture', 'fixture@example.test', 'outlook', ?, 'encrypted-in-config', '2026-01-01', '2026-01-01')")
+            .bind(satchel_core::accounts::encrypt_account_config("account", config).unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        // The command read the row as Gmail; a reconnect made it Outlook.
+        let error = satchel_core::utils::oauth::fresh_account_config_for_provider(
+            &pool,
+            "account",
+            satchel_core::utils::oauth::OAuthProvider::Gmail,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            CommandError::from(error.clone()),
+            CommandError::new("backend.errors.oauthReloadRequired")
+        );
+        assert_eq!(
+            CommandError::from(error.encoded()),
+            CommandError::new("backend.errors.oauthReloadRequired")
+        );
+    }
+
     #[test]
     fn serializes_as_the_ipc_translation_contract() {
         let error = CommandError::new("backend.errors.folderExists")

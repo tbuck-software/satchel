@@ -11,6 +11,7 @@ on:
       - .cargo/lettre-upstream-exception.json
       - deny.toml
       - 'vendor/lettre/**'
+      - 'vendor/wasmtime-internal-cache/**'
       - crates/satchel-core/tests/vendor_lettre.rs
       - .github/workflows/security-audit.yml
       - scripts/check-rust-audit-exceptions.py
@@ -23,6 +24,7 @@ on:
       - .cargo/lettre-upstream-exception.json
       - deny.toml
       - 'vendor/lettre/**'
+      - 'vendor/wasmtime-internal-cache/**'
       - crates/satchel-core/tests/vendor_lettre.rs
       - .github/workflows/security-audit.yml
       - scripts/check-rust-audit-exceptions.py

@@ -263,6 +263,7 @@
       "oauthMailPermissionRequired": "Der Gmail-Zugriff wurde nicht freigegeben. Bitte verbinde das Konto erneut und erlaube den Mail-Zugriff. Dein bestehendes Konto wurde nicht verändert.",
       "oauthPersistenceFailed": "Der Anmeldestatus konnte nicht gespeichert werden. Bitte versuche es erneut.",
       "oauthProviderRequestFailed": "Der Anbieter konnte die Anmeldung nicht abschließen. Bitte versuche es erneut.",
+      "oauthReloadRequired": "Die Anmeldung des Kontos hat sich währenddessen geändert. Bitte versuche es erneut.",
       "oauthUrlRejected": "Satchel hat eine unerwartete Anmeldeadresse abgelehnt.",
       "outboxActionCannotBeDiscarded": "Dieser Eintrag im Postausgang kann nicht sicher verworfen werden.",
       "passwordCheckFailed": "Die Anmeldung mit dem neuen Passwort ist fehlgeschlagen: {reason}",

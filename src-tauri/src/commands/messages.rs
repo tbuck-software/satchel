@@ -250,7 +250,7 @@ async fn repair_unparsed_smime_messages(
         let Ok(reference) = ContentReference::load(pool, &message_id).await else {
             continue;
         };
-        let attempt = fetch_remote_message_source(pool, &message_id).await;
+        let attempt = fetch_remote_message_source(pool, write_pool, &message_id).await;
         if let Err(error) = record_smime_repair_attempt(write_pool, &reference).await {
             tracing::warn!(%message_id, %error, "could not record S/MIME repair attempt");
             continue;
@@ -2048,7 +2048,7 @@ mod tests {
             } else {
                 "imapUidValidityChanged"
             };
-            let error = super::fetch_remote_message_source(&pool, "m")
+            let error = super::fetch_remote_message_source(&pool, &pool, "m")
                 .await
                 .unwrap_err();
             assert!(error.contains(key));
@@ -2192,7 +2192,7 @@ mod tests {
             )
             .await
             .unwrap();
-            assert!(super::fetch_remote_message_source(&pool, "m")
+            assert!(super::fetch_remote_message_source(&pool, &pool, "m")
                 .await
                 .unwrap()
                 .unwrap()
@@ -2448,6 +2448,48 @@ mod tests {
         assert_eq!(
             super::map_stored_message_row(row).auth_dmarc.as_deref(),
             Some("pass")
+        );
+    }
+
+    /// Opening the source of a stored message must not queue for one of the
+    /// two writer connections an ingest may be holding.
+    #[tokio::test]
+    async fn stored_message_source_is_read_without_a_writer_connection() {
+        let dir = tempfile::tempdir().unwrap();
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(dir.path().join("source.db"))
+            .create_if_missing(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
+        let write = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_secs(1))
+            .connect_with(options.clone())
+            .await
+            .unwrap();
+        crate::db::init(&write).await.unwrap();
+        for sql in [
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at) VALUES ('a', 'Account', 'me@example.test', 'imap', '{}', '', '', '')",
+            "INSERT INTO folders (id, account_id, name, full_path, folder_type, created_at, updated_at) VALUES ('f', 'a', 'Inbox', 'Inbox', 'inbox', '', '')",
+            "INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, date, original_source, created_at, updated_at) VALUES ('m', 'a', 'f', 't', 'bob@example.test', '[]', '', CAST('From: bob@example.test' || char(13, 10, 13, 10) || 'Plain' AS BLOB), '', '')",
+        ] {
+            sqlx::query(sql).execute(&write).await.unwrap();
+        }
+        let read = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options.read_only(true))
+            .await
+            .unwrap();
+        let _ingest = write.acquire().await.unwrap();
+        let raw = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::fetch_remote_message_source(&read, &write, "m"),
+        )
+        .await
+        .expect("a stored source needs no writer connection")
+        .expect("stored source");
+        assert_eq!(
+            raw.as_deref(),
+            Some(&b"From: bob@example.test\r\n\r\nPlain"[..])
         );
     }
 
@@ -2754,23 +2796,26 @@ struct RemoteMessageSourceTarget {
     config: String,
 }
 
+/// Reads on `read_pool`. Only a refresh that must persist rotated OAuth
+/// credentials takes one of the writer's connections.
 pub(super) async fn fetch_remote_message_source(
-    pool: &SqlitePool,
+    read_pool: &SqlitePool,
+    write_pool: &SqlitePool,
     message_id: &str,
 ) -> Result<Option<Vec<u8>>, String> {
-    let reference = ContentReference::load(pool, message_id).await?;
+    let reference = ContentReference::load(read_pool, message_id).await?;
     reference.validate_cached_read()?;
     let original_source: Option<Vec<u8>> =
         sqlx::query_scalar("SELECT original_source FROM messages WHERE id = ?")
             .bind(message_id)
-            .fetch_optional(pool)
+            .fetch_optional(read_pool)
             .await
             .map_err(|error| error.to_string())?
             .flatten();
     if let Some(raw) = original_source.filter(|raw| {
         !raw.starts_with(&[0xd0, 0xcf, 0x11, 0xe0]) && raw_header_block(raw).is_some()
     }) {
-        let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+        let mut tx = read_pool.begin().await.map_err(|e| e.to_string())?;
         reference.ensure_current(&mut tx).await?;
         return Ok(Some(raw));
     }
@@ -2782,7 +2827,7 @@ pub(super) async fn fetch_remote_message_source(
          WHERE m.id = ? LIMIT 1",
     )
     .bind(message_id)
-    .fetch_optional(pool)
+    .fetch_optional(read_pool)
     .await
     .map_err(|err| err.to_string())?
     .ok_or_else(|| "message not found".to_string())?;
@@ -2793,8 +2838,14 @@ pub(super) async fn fetch_remote_message_source(
     if target.provider == "imap" && !reference.is_remote_imap() {
         return Ok(None);
     }
-    let config =
-        crate::commands::accounts::decrypt_account_config(&target.account_id, &target.config)?;
+    let config = crate::utils::oauth::refresh_account_config(
+        write_pool,
+        &target.account_id,
+        &target.provider,
+        &target.config,
+    )
+    .await
+    .map_err(|err| err.encoded())?;
 
     let raw = match target.provider.as_str() {
         "imap" => {
@@ -2834,7 +2885,7 @@ pub(super) async fn fetch_remote_message_source(
             return Err("backend.errors.exportOriginalUnavailable".into());
         }
     }
-    let mut tx = pool.begin().await.map_err(|err| err.to_string())?;
+    let mut tx = read_pool.begin().await.map_err(|err| err.to_string())?;
     reference.ensure_current(&mut tx).await?;
     Ok(Some(raw))
 }
@@ -2941,7 +2992,9 @@ pub async fn get_message_source(
         .map_err(CommandError::from)?;
 
     let (raw_source, fetched_headers, fetched_size, raw_source_status) =
-        match fetch_remote_message_source(pool.inner().as_ref(), &message_id).await {
+        match fetch_remote_message_source(pool.inner().as_ref(), write_pool.inner(), &message_id)
+            .await
+        {
             Ok(Some(raw)) => {
                 let headers = raw_header_block(&raw);
                 let size = i64::try_from(raw.len()).unwrap_or(i64::MAX);

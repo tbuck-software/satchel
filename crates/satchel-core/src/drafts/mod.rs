@@ -21,12 +21,11 @@ use crate::db::messages::SentMessageRepository;
 use crate::db::remote_content::ContentReference;
 use crate::db::signatures::SignatureRepository;
 use crate::providers::{
-    provider_for_account,
+    provider_for_stored_account,
     traits::{OutgoingAttachment, OutgoingMessage},
 };
 use crate::sync::queue::{QueuedAction, SyncQueue, ACTION_SYNC_DRAFT};
 use crate::sync::remote_mutations::{RemoteMutationPayload, ACTION_REMOTE_MUTATION};
-use crate::utils::oauth::{ensure_fresh_account_config, OAuthProvider};
 pub use error::DraftError;
 
 static REMOTE_DRAFT_SYNC_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1024,8 +1023,22 @@ async fn hydrate_imported_draft_attachments(
                     row.filename.as_deref().unwrap_or("(unnamed)")
                 )
             })?;
-            let config = crate::accounts::decrypt_account_config(&row.account_id, &row.config)?;
-            let provider = provider_for_account(&row.provider, &config, &row.account_email, None)?;
+            let config = crate::utils::oauth::refresh_account_config(
+                write,
+                &row.account_id,
+                &row.provider,
+                &row.config,
+            )
+            .await
+            .map_err(|err| err.encoded())?;
+            let provider = provider_for_stored_account(
+                write,
+                &row.account_id,
+                &row.provider,
+                &config,
+                &row.account_email,
+                None,
+            )?;
             let fetched = tokio::time::timeout(
                 std::time::Duration::from_secs(60),
                 provider.fetch_attachment(&message, remote_part_id),
@@ -1206,30 +1219,17 @@ async fn push_draft_to_remote(
     else {
         return Ok(None);
     };
-    let mut config = crate::accounts::decrypt_account_config(&account_id, &stored_config)?;
+    let config = crate::utils::oauth::refresh_account_config(
+        pool,
+        &account_id,
+        &provider_kind,
+        &stored_config,
+    )
+    .await
+    .map_err(|err| err.encoded())?;
 
-    if let Ok(oauth_provider) = OAuthProvider::parse(&provider_kind) {
-        if let Some(updated) = ensure_fresh_account_config(oauth_provider, &config).await? {
-            let now = chrono::Utc::now().to_rfc3339();
-            sqlx::query(
-                "UPDATE accounts
-                 SET config = ?, updated_at = ?, last_oauth_error = NULL, last_oauth_error_at = NULL
-                 WHERE id = ?",
-            )
-            .bind(crate::accounts::encrypt_account_config(
-                &account_id,
-                &updated,
-            )?)
-            .bind(&now)
-            .bind(&input.account_id)
-            .execute(pool)
-            .await
-            .map_err(|err| err.to_string())?;
-            config = crate::accounts::AccountConfig::from_plaintext(updated);
-        }
-    }
-
-    let provider = provider_for_account(&provider_kind, &config, &email, None)?;
+    let provider =
+        provider_for_stored_account(pool, &account_id, &provider_kind, &config, &email, None)?;
     let resolved_remote_draft_id = if remote_draft_id.is_none() {
         if let Some(message_remote_id) = remote_message_id {
             provider
