@@ -24,9 +24,14 @@ notification plugin. There is no link-time initializer reference from Rust.
 The linker loads an archive member only when something references it, so the
 generated `main.mm` holds a table of the public Swift C entry points, retained
 with Clang's [`used` attribute](https://clang.llvm.org/docs/AttributeReference.html#used).
-That table is what carries the package into the final executable; it never
-calls the initializer. Simulator CI checks the final executable's export trie,
-in addition to compiling the integration.
+That table is what carries the package into the app's code image; it never
+calls the initializer. Simulator CI checks that image's export trie, in
+addition to compiling the integration. Xcode 16 Debug builds link the code into
+`Satchel.app/Satchel.debug.dylib` (`ENABLE_DEBUG_DYLIB`) and leave `Satchel` a
+stub that loads it; `dlsym(RTLD_DEFAULT, …)` searches that dylib too.
+`scripts/verify-ios-hook-exports.mjs` takes the image from
+`xcodebuild -showBuildSettings`: the debug dylib when one was built, otherwise
+the executable. It reports every missing hook and fails on any.
 
 `mobile_notifications_frontend_ready` reserves a native listener lease when
 `listenerId` is null. The frontend registers its route callback, then activates

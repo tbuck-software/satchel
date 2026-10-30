@@ -237,7 +237,8 @@ printf "%s\\n" "$@" > "$SATCHEL_XCODEGEN_ARGS"
       "node --test tests/ios-integration-generator.node.mjs",
     );
     expect(workflow).toContain("pnpm tauri ios build");
-    expect(workflow).toContain('"dyld_info", "-exports"');
-    expect(workflow).toContain("init_plugin_satchel_mail_notifications");
+    // The export check finds the built image through xcodebuild's settings.
+    expect(workflow).toContain("node scripts/verify-ios-hook-exports.mjs");
+    expect(workflow).toContain("-scheme satchel_iOS -sdk iphonesimulator -configuration debug");
   });
 });
