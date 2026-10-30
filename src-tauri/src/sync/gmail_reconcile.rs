@@ -13,8 +13,8 @@ use sqlx::SqlitePool;
 
 pub use crate::providers::gmail::gmail_label_is_state_view;
 
+#[cfg(test)]
 use super::folder_reconcile::reconcile_external_workflow_states;
-use super::thread_resolution::refresh_provider_thread_projections;
 
 pub fn gmail_labels_include(mailbox_ids: &[String], folder_id: &str) -> bool {
     mailbox_ids
@@ -37,64 +37,49 @@ pub fn gmail_message_belongs_to_folder(message: &MessageEnvelope, folder_id: &st
     gmail_labels_include(&message.mailbox_ids, folder_id)
 }
 
-pub async fn reconcile_gmail_message_mailboxes(
-    pool: &SqlitePool,
+/// Called only after a target copy has been stored, in the same savepoint.
+/// A rollback retains the old copy, attachments and thread organization.
+pub(crate) async fn reconcile_gmail_message_mailboxes_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     account_id: &str,
     message: &MessageEnvelope,
 ) -> Result<HashSet<String>, String> {
-    // Gmail history is account-wide even when labelId is supplied. A message
-    // with no real label left belongs in Satchel's synthetic ARCHIVE folder;
-    // one that still carries a label of its own belongs there and nowhere else.
     let mut effective_mailbox_ids = gmail_effective_mailbox_ids(&message.mailbox_ids);
-    let archive_folder_id = if effective_mailbox_ids.is_empty() {
-        let folder_id = ensure_gmail_archive_folder(pool, account_id).await?;
+    if effective_mailbox_ids.is_empty() {
         effective_mailbox_ids.push("ARCHIVE".to_string());
-        Some(folder_id)
-    } else {
-        None
-    };
+    }
     let mailbox_ids =
         serde_json::to_string(&effective_mailbox_ids).map_err(|err| err.to_string())?;
-    let rows = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT DISTINCT thread_id FROM messages
-         WHERE account_id = ? AND remote_id = ?",
+    // Also guard standalone callers: observing a relabel is no evidence that
+    // its target was successfully stored.
+    let has_target: bool = sqlx::query_scalar(
+        "SELECT EXISTS(
+           SELECT 1 FROM messages m JOIN folders f ON f.id = m.folder_id
+           WHERE m.account_id = ? AND m.remote_id = ?
+             AND EXISTS (SELECT 1 FROM json_each(?) label
+                         WHERE LOWER(TRIM(label.value)) = LOWER(TRIM(f.remote_id)))
+         )",
     )
     .bind(account_id)
     .bind(&message.remote_id)
-    .fetch_all(pool)
+    .bind(&mailbox_ids)
+    .fetch_one(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
-    if rows.is_empty() {
+    if !has_target {
         return Ok(HashSet::new());
     }
-    let touched = rows.into_iter().flatten().collect::<HashSet<_>>();
-    let mut tx = pool
-        .begin_with("BEGIN IMMEDIATE")
-        .await
-        .map_err(|err| err.to_string())?;
-
-    let moved_to_archive = if let Some(archive_folder_id) = archive_folder_id.as_deref() {
-        sqlx::query(
-            "UPDATE messages
-             SET folder_id = ?, updated_at = ?
-             WHERE account_id = ? AND remote_id = ?
-               AND folder_id IN (
-                 SELECT id FROM folders
-                 WHERE account_id = ? AND LOWER(TRIM(remote_id)) = 'inbox'
-               )",
-        )
-        .bind(archive_folder_id)
-        .bind(chrono::Utc::now().to_rfc3339())
-        .bind(account_id)
-        .bind(&message.remote_id)
-        .bind(account_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| err.to_string())?
-        .rows_affected()
-    } else {
-        0
-    };
+    let touched = sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT thread_id FROM messages
+         WHERE account_id = ? AND remote_id = ? AND thread_id IS NOT NULL",
+    )
+    .bind(account_id)
+    .bind(&message.remote_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|err| err.to_string())?
+    .into_iter()
+    .collect::<HashSet<_>>();
 
     sqlx::query(
         "DELETE FROM attachments
@@ -114,7 +99,7 @@ pub async fn reconcile_gmail_message_mailboxes(
     .bind(account_id)
     .bind(&message.remote_id)
     .bind(&mailbox_ids)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
 
@@ -136,19 +121,39 @@ pub async fn reconcile_gmail_message_mailboxes(
     .bind(account_id)
     .bind(&message.remote_id)
     .bind(&mailbox_ids)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .map_err(|err| err.to_string())?
     .rows_affected();
 
-    tx.commit().await.map_err(|err| err.to_string())?;
-    refresh_provider_thread_projections(pool, &touched.iter().cloned().collect::<Vec<_>>()).await?;
-    reconcile_external_workflow_states(pool, &touched).await?;
-    if moved_to_archive > 0 || removed_stale_copies > 0 {
+    if removed_stale_copies > 0 {
         Ok(touched)
     } else {
         Ok(HashSet::new())
     }
+}
+
+#[cfg(test)]
+pub async fn reconcile_gmail_message_mailboxes(
+    pool: &SqlitePool,
+    account_id: &str,
+    message: &MessageEnvelope,
+) -> Result<HashSet<String>, String> {
+    let threads = sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT thread_id FROM messages WHERE account_id = ? AND remote_id = ? AND thread_id IS NOT NULL",
+    ).bind(account_id).bind(&message.remote_id).fetch_all(pool).await
+        .map_err(|err| err.to_string())?.into_iter().collect();
+    let mut tx = pool.begin().await.map_err(|err| err.to_string())?;
+    let touched = reconcile_gmail_message_mailboxes_tx(&mut tx, account_id, message).await?;
+    satchel_core::db::threads::refresh_thread_projections_tx(
+        &mut tx,
+        &touched.iter().cloned().collect::<Vec<_>>(),
+    )
+    .await
+    .map_err(|err| err.to_string())?;
+    tx.commit().await.map_err(|err| err.to_string())?;
+    reconcile_external_workflow_states(pool, &threads).await?;
+    Ok(touched)
 }
 
 /// The labels of a message that stand for a real local folder.
@@ -172,6 +177,54 @@ pub fn gmail_effective_mailbox_ids(mailbox_ids: &[String]) -> Vec<String> {
 /// view ever collapsed again.
 pub fn gmail_message_needs_synthetic_archive(message: &MessageEnvelope) -> bool {
     gmail_effective_mailbox_ids(&message.mailbox_ids).is_empty()
+}
+
+/// History can mention a target before its turn in folder discovery/ingest.
+pub async fn ensure_gmail_label_folder(
+    pool: &SqlitePool,
+    account_id: &str,
+    remote_id: &str,
+) -> Result<(String, String), String> {
+    if remote_id == "ARCHIVE" {
+        return Ok((
+            ensure_gmail_archive_folder(pool, account_id).await?,
+            "archive".into(),
+        ));
+    }
+    if let Some(folder) = sqlx::query_as::<_, (String, String)>(
+        "SELECT id, folder_type FROM folders WHERE account_id = ? AND remote_id = ?",
+    )
+    .bind(account_id)
+    .bind(remote_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|err| err.to_string())?
+    {
+        return Ok(folder);
+    }
+    let id = satchel_core::db::folders::resolve_provider_folder_id(pool, account_id, remote_id)
+        .await
+        .map_err(|err| err.to_string())?;
+    let kind =
+        crate::providers::folder_mapping::provider_folder_type("gmail", remote_id, remote_id, None);
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO folders
+         (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+    )
+    .bind(&id)
+    .bind(account_id)
+    .bind(remote_id)
+    .bind(remote_id)
+    .bind(kind)
+    .bind(remote_id)
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await
+    .map_err(|err| err.to_string())?;
+    Ok((id, kind.into()))
 }
 
 pub async fn ensure_gmail_archive_folder(

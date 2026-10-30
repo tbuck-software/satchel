@@ -285,7 +285,7 @@ async fn persist_provider_message(
     let now = chrono::Utc::now().to_rfc3339();
     let message_is_draft = provider_message_is_draft(folder_type, &message.mailbox_ids);
     let remote_draft_id = derive_remote_draft_id(message_is_draft, provider_kind, message);
-    let provider_message_row = sqlx::query_as::<_, (String, Option<String>)>(
+    let mut provider_message_row = sqlx::query_as::<_, (String, Option<String>)>(
         "SELECT id, thread_id FROM messages
          WHERE account_id = ? AND folder_id = ? AND remote_id = ?
          ORDER BY updated_at DESC LIMIT 1",
@@ -296,6 +296,30 @@ async fn persist_provider_message(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
+    if provider_message_row.is_none() && provider_kind.eq_ignore_ascii_case("gmail") {
+        // Reuse an obsolete label copy rather than replacing its local ID.
+        // Message topic links, cached attachments and other references survive
+        // the move along with the thread, within this message's savepoint.
+        let mut labels =
+            crate::sync::gmail_reconcile::gmail_effective_mailbox_ids(&message.mailbox_ids);
+        if labels.is_empty() {
+            labels.push("ARCHIVE".into());
+        }
+        let labels = serde_json::to_string(&labels).map_err(|err| err.to_string())?;
+        provider_message_row = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT m.id, m.thread_id FROM messages m JOIN folders f ON f.id = m.folder_id
+             WHERE m.account_id = ? AND m.remote_id = ?
+               AND NOT EXISTS (SELECT 1 FROM json_each(?) label
+                               WHERE LOWER(TRIM(label.value)) = LOWER(TRIM(f.remote_id)))
+             ORDER BY m.id LIMIT 1",
+        )
+        .bind(account_id)
+        .bind(&message.remote_id)
+        .bind(&labels)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|err| err.to_string())?;
+    }
     let provider_message_id = provider_message_row
         .as_ref()
         .map(|row| row.0.clone())
@@ -721,9 +745,16 @@ async fn persist_provider_message(
         attachment_ids.push(attachment_id);
     }
 
-    // The thread aggregate belongs to the same commit. A message whose thread
-    // still reports the previous counts is a half-state readers can see.
+    // Replacement, stale-copy cleanup and every affected thread projection
+    // belong to the same savepoint.
     let mut committed_projection_threads = vec![thread_id.clone()];
+    if provider_kind.eq_ignore_ascii_case("gmail") {
+        let touched = crate::sync::gmail_reconcile::reconcile_gmail_message_mailboxes_tx(
+            tx, account_id, message,
+        )
+        .await?;
+        committed_projection_threads.extend(touched.into_iter().filter(|id| id != &thread_id));
+    }
     if let Some(prior_thread_id) = prior_thread_id.as_ref() {
         if prior_thread_id != &thread_id {
             committed_projection_threads.push(prior_thread_id.clone());
@@ -1041,7 +1072,6 @@ mod tests {
     use crate::sync::queue::SyncQueue;
     use crate::sync::thread_resolution::{merge_reply_split_threads, standalone_thread_key};
     use sqlx::sqlite::SqlitePoolOptions;
-    use std::collections::HashSet;
 
     fn envelope(remote_id: &str) -> MessageEnvelope {
         MessageEnvelope {
@@ -3173,22 +3203,17 @@ mod tests {
         // Archived in Gmail Web: every real label is gone and only the
         // category view is left, which is what earns the synthetic ARCHIVE.
         message.mailbox_ids = vec!["CATEGORY_PERSONAL".to_string()];
-        let externally_changed_threads =
+        // Merely observing the relabel cannot remove the only stored copy.
+        assert!(
             reconcile_gmail_message_mailboxes(&pool, "account", &message)
                 .await
-                .expect("archive reconcile");
-        assert_eq!(
-            externally_changed_threads,
-            HashSet::from([crate::sync::thread_resolution::provider_thread_db_id(
-                "gmail", "account", "INBOX", &message
-            )])
+                .expect("defer archive cleanup")
+                .is_empty()
         );
-        let archive_folder_id: String = sqlx::query_scalar(
-            "SELECT id FROM folders WHERE account_id = 'account' AND folder_type = 'archive'",
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("archive folder");
+        let archive_folder_id =
+            crate::sync::gmail_reconcile::ensure_gmail_archive_folder(&pool, "account")
+                .await
+                .expect("archive folder");
         upsert_provider_message(
             None,
             &pool,

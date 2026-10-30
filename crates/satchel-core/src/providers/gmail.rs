@@ -1465,13 +1465,21 @@ impl MailProvider for GmailProvider {
                             }
                         }
                     }
-                    let (page_messages, page_latest_ts, page_history_id) =
+                    let (page_messages, page_latest_ts, _detail_history_id) =
                         Self::fetch_message_details(&client, &token, items).await?;
                     latest_ts = latest_ts.max(page_latest_ts);
-                    let merged =
-                        Self::newest_history_id(cursor_state.history_id.take(), page_history_id);
-                    cursor_state.history_id =
-                        Self::newest_history_id(merged, payload.history_id.clone());
+                    // Details may already reflect changes beyond this history
+                    // response. Only the completed feed authorizes progress.
+                    if payload
+                        .next_page_token
+                        .as_deref()
+                        .is_none_or(|token| token.trim().is_empty())
+                    {
+                        cursor_state.history_id = Self::newest_history_id(
+                            cursor_state.history_id.take(),
+                            payload.history_id.clone(),
+                        );
+                    }
                     messages.extend(page_messages);
 
                     match payload

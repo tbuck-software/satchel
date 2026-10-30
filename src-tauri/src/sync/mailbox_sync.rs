@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use satchel_core::db::sync_quarantine::{FolderQuarantine, SyncQuarantineRepository};
+use satchel_core::db::sync_quarantine::SyncQuarantineRepository;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 use tauri::{AppHandle, Manager};
@@ -23,10 +23,8 @@ use crate::sync::folder_reconcile::{
     reconcile_remote_message_removals, reset_local_provider_folder_with_generation,
     should_snapshot_folder,
 };
-use crate::sync::gmail_reconcile::{
-    ensure_gmail_archive_folder, gmail_label_is_category_view, gmail_message_belongs_to_folder,
-    gmail_message_needs_synthetic_archive, reconcile_gmail_message_mailboxes,
-};
+use crate::sync::gmail_reconcile::{ensure_gmail_label_folder, gmail_effective_mailbox_ids};
+
 #[cfg(mobile)]
 use crate::sync::leases::acquire_mobile_mailbox_work_permit;
 use crate::sync::leases::sync_run_lock;
@@ -173,6 +171,64 @@ struct ImapSyncState {
     cursors: HashMap<String, String>,
     #[serde(default)]
     folder_snapshot_at: HashMap<String, String>,
+    /// Must survive a replacement cursor, failed snapshot, and process restart.
+    /// Older state decodes as empty; older readers ignore the additional field.
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    pending_snapshots: HashSet<String>,
+}
+
+impl ImapSyncState {
+    fn request_snapshot(&mut self, folder: &str, snapshot_due: bool, required: bool) -> bool {
+        if snapshot_due && required {
+            self.pending_snapshots.insert(folder.to_string());
+        }
+        self.pending_snapshots.contains(folder)
+    }
+}
+
+/// A provider returns Some only after every snapshot page has succeeded.
+/// Keep the obligation on None, network failure, or a stale IMAP generation.
+async fn reconcile_folder_snapshot(
+    pool: &SqlitePool,
+    provider: &dyn crate::providers::traits::MailProvider,
+    account_id: &str,
+    folder_id: &str,
+    remote_folder_id: &str,
+    state: &mut ImapSyncState,
+    queue: &SyncQueue,
+) -> Result<HashSet<String>, String> {
+    let Some(snapshot) = provider
+        .sync_message_state_snapshot(remote_folder_id)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(HashSet::new());
+    };
+    let changes = reconcile_imap_folder_snapshot(
+        pool,
+        account_id,
+        folder_id,
+        remote_folder_id,
+        &snapshot.states,
+        snapshot.remote_uidvalidity,
+    )
+    .await?;
+    if !changes.skipped_stale_generation {
+        state.folder_snapshot_at.insert(
+            remote_folder_id.to_string(),
+            chrono::Utc::now().to_rfc3339(),
+        );
+        state.pending_snapshots.remove(remote_folder_id);
+        persist_sync_cursors(pool, account_id, state, queue, None).await?;
+    } else {
+        tracing::warn!(
+            account_id,
+            folder = remote_folder_id,
+            snapshot_uidvalidity = ?snapshot.remote_uidvalidity,
+            "folder snapshot named another generation, kept every message"
+        );
+    }
+    Ok(changes.relocated_threads)
 }
 
 /// Persist the folder cursors reached so far, plus any remote mutation this
@@ -265,10 +321,49 @@ async fn ingest_messages_into_folder(
     folder_remote_id: &str,
     folder_type: &str,
     messages: &[MessageEnvelope],
-    quarantine: &FolderQuarantine,
     outcome: &mut FolderIngestOutcome,
 ) -> Result<(), String> {
     let account = context.account;
+    let repository = SyncQuarantineRepository::new(pool);
+    let quarantine = repository
+        .load_folder(&account.id, folder_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut candidates = Vec::new();
+    for message in messages {
+        if quarantine.is_exhausted(&message.remote_id) {
+            outcome.skipped += 1;
+            if account.provider.eq_ignore_ascii_case("gmail") {
+                let mut labels = gmail_effective_mailbox_ids(&message.mailbox_ids);
+                if labels.is_empty() {
+                    labels.push("ARCHIVE".into());
+                }
+                let labels = serde_json::to_string(&labels).map_err(|error| error.to_string())?;
+                let has_old_copy: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(
+                       SELECT 1 FROM messages m JOIN folders f ON f.id = m.folder_id
+                       WHERE m.account_id = ? AND m.remote_id = ?
+                         AND NOT EXISTS (SELECT 1 FROM json_each(?) label
+                             WHERE LOWER(TRIM(label.value)) = LOWER(TRIM(f.remote_id)))
+                     )",
+                )
+                .bind(&account.id)
+                .bind(&message.remote_id)
+                .bind(labels)
+                .fetch_one(pool)
+                .await
+                .map_err(|error| error.to_string())?;
+                // Only an unfinished relabel holds progress after exhaustion.
+                // New poison messages retain the normal quarantine skip policy.
+                if has_old_copy {
+                    outcome.failed += 1;
+                }
+            }
+        } else {
+            candidates.push(message.clone());
+        }
+    }
+    let messages = candidates;
     let results = upsert_provider_messages(
         context.app,
         pool,
@@ -280,12 +375,11 @@ async fn ingest_messages_into_folder(
         folder_id,
         folder_remote_id,
         folder_type,
-        messages,
+        &messages,
         context.events,
         account.ingest_cutoff.as_deref(),
     )
     .await?;
-    let repository = SyncQuarantineRepository::new(pool);
     for (message, result) in messages.iter().zip(results) {
         match result {
             Ok(()) => {
@@ -320,61 +414,57 @@ async fn ingest_folder_batch(
     externally_changed_threads: &mut HashSet<String>,
 ) -> Result<FolderIngestOutcome, String> {
     let account = context.account;
-    let quarantine = SyncQuarantineRepository::new(pool)
-        .load_folder(&account.id, context.folder_id)
-        .await
-        .map_err(|error| error.to_string())?;
     let mut outcome = FolderIngestOutcome::default();
-    let mut primary = Vec::new();
-    let mut archive = Vec::new();
-    for message in messages {
-        if quarantine.is_exhausted(&message.remote_id) {
-            outcome.skipped += 1;
-            continue;
-        }
-        if account.provider.eq_ignore_ascii_case("gmail") {
-            externally_changed_threads
-                .extend(reconcile_gmail_message_mailboxes(pool, &account.id, &message).await?);
-            if gmail_message_needs_synthetic_archive(&message) {
-                archive.push(message.clone());
+    if account.provider.eq_ignore_ascii_case("gmail") {
+        let mut targets = std::collections::BTreeMap::<String, Vec<MessageEnvelope>>::new();
+        for message in messages {
+            // Account-wide history must land in actual labels, even when a
+            // different folder's cursor observed it. Ingest owns stale-copy
+            // cleanup in the target savepoint, never before it.
+            let threads = sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT thread_id FROM messages WHERE account_id = ?
+                 AND remote_id = ? AND thread_id IS NOT NULL",
+            )
+            .bind(&account.id)
+            .bind(&message.remote_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|error| error.to_string())?;
+            externally_changed_threads.extend(threads);
+            let mut labels = gmail_effective_mailbox_ids(&message.mailbox_ids);
+            if labels.is_empty() {
+                labels.push("ARCHIVE".into());
             }
-            let category_view = message
-                .mailbox_ids
-                .iter()
-                .any(|label| gmail_label_is_category_view(label));
-            if (gmail_label_is_category_view(context.folder_remote_id) && category_view)
-                || !gmail_message_belongs_to_folder(&message, context.folder_remote_id)
-            {
-                continue;
+            for label in labels {
+                targets.entry(label).or_default().push(message.clone());
             }
         }
-        primary.push(message);
-    }
-    if !archive.is_empty() {
-        let folder_id = ensure_gmail_archive_folder(pool, &account.id).await?;
+        for (label, messages) in targets {
+            let (folder_id, folder_type) =
+                ensure_gmail_label_folder(pool, &account.id, &label).await?;
+            ingest_messages_into_folder(
+                pool,
+                context,
+                &folder_id,
+                &label,
+                &folder_type,
+                &messages,
+                &mut outcome,
+            )
+            .await?;
+        }
+    } else {
         ingest_messages_into_folder(
             pool,
             context,
-            &folder_id,
-            "ARCHIVE",
-            "archive",
-            &archive,
-            &quarantine,
+            context.folder_id,
+            context.folder_remote_id,
+            context.folder_type,
+            &messages,
             &mut outcome,
         )
         .await?;
     }
-    ingest_messages_into_folder(
-        pool,
-        context,
-        context.folder_id,
-        context.folder_remote_id,
-        context.folder_type,
-        &primary,
-        &quarantine,
-        &mut outcome,
-    )
-    .await?;
     Ok(outcome)
 }
 
@@ -827,7 +917,7 @@ pub(crate) async fn sync_mailboxes(
                 };
                 externally_changed_threads.extend(reset_thread_ids.iter().cloned());
 
-                if snapshot_due && batch.snapshot_required {
+                if state.request_snapshot(&folder.id, snapshot_due, batch.snapshot_required) {
                     snapshot_folders.push((folder_id.clone(), folder.id.clone()));
                 }
 
@@ -853,6 +943,11 @@ pub(crate) async fn sync_mailboxes(
                 )
                 .await?;
                 messages_synced += ingest.ingested;
+                // A failed/quarantined replacement must retain its old copy.
+                // Presence reconciliation cannot delete it before retry.
+                if account.provider.eq_ignore_ascii_case("gmail") && ingest.failed > 0 {
+                    snapshot_sync_complete = false;
+                }
 
                 // The cursor is written per folder, right after its own batch.
                 // A failed savepoint retains the cursor until it succeeds or
@@ -927,39 +1022,13 @@ pub(crate) async fn sync_mailboxes(
 
             if snapshot_sync_complete {
                 for (folder_id, remote_folder_id) in snapshot_folders {
-                    match provider.sync_message_state_snapshot(&remote_folder_id).await {
-                        Ok(Some(snapshot)) => {
-                            let changes = reconcile_imap_folder_snapshot(
-                                pool,
-                                &account.id,
-                                &folder_id,
-                                &remote_folder_id,
-                                &snapshot.states,
-                                snapshot.remote_uidvalidity,
-                            )
-                            .await?;
-                            externally_changed_threads.extend(changes.relocated_threads);
-                            if changes.skipped_stale_generation {
-                                // Retry on the next run instead of counting a
-                                // reconciliation that never happened.
-                                tracing::warn!(
-                                    account_id = %account.id,
-                                    folder = %remote_folder_id,
-                                    snapshot_uidvalidity = ?snapshot.remote_uidvalidity,
-                                    "folder snapshot named another generation, kept every message"
-                                );
-                            } else {
-                                state.folder_snapshot_at.insert(
-                                    remote_folder_id.clone(),
-                                    chrono::Utc::now().to_rfc3339(),
-                                );
-                            }
-                        }
-                        Ok(None) => {}
+                    match reconcile_folder_snapshot(
+                        pool, provider.as_ref(), &account.id, &folder_id,
+                        &remote_folder_id, &mut state, queue.as_ref(),
+                    ).await {
+                        Ok(changed) => externally_changed_threads.extend(changed),
                         Err(err) => summary.failures.push(encoded_folder_sync_failure(
-                            &account.email,
-                            &remote_folder_id,
-                            err,
+                            &account.email, &remote_folder_id, err,
                         )),
                     }
                 }
@@ -1014,6 +1083,7 @@ pub(crate) async fn sync_mailboxes(
                     .into_iter().collect();
                 state.cursors.retain(|folder_id, _| retained.contains(folder_id));
                 state.folder_snapshot_at.retain(|folder_id, _| retained.contains(folder_id));
+                state.pending_snapshots.retain(|folder_id| retained.contains(folder_id));
             }
 
             // The retained cursor set and the snapshot timestamps are the last
@@ -1927,3 +1997,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "mailbox_sync/consistency_tests.rs"]
+mod consistency_tests;
