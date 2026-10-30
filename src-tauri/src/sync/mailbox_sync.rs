@@ -194,6 +194,19 @@ impl ImapSyncState {
         }
         self.pending_snapshots.contains(folder)
     }
+
+    /// Forget every per-folder entry of folders the provider no longer returns.
+    fn retain_folders(&mut self, retained: &HashSet<String>) {
+        self.cursors.retain(|folder, _| retained.contains(folder));
+        self.folder_snapshot_at
+            .retain(|folder, _| retained.contains(folder));
+        self.pending_snapshots
+            .retain(|folder| retained.contains(folder));
+        self.snapshot_resolutions
+            .retain(|folder, _| retained.contains(folder));
+        self.resolved_snapshot_copies
+            .retain(|folder, _| retained.contains(folder));
+    }
 }
 
 /// What one folder snapshot settled. Deferred IDs stay owed durably.
@@ -1280,10 +1293,7 @@ pub(crate) async fn sync_mailboxes(
                     "SELECT COALESCE(remote_id, full_path) FROM folders WHERE account_id = ? AND folder_type != 'local'"
                 ).bind(&account.id).fetch_all(pool).await.map_err(|error| error.to_string())?
                     .into_iter().collect();
-                state.cursors.retain(|folder_id, _| retained.contains(folder_id));
-                state.folder_snapshot_at.retain(|folder_id, _| retained.contains(folder_id));
-                state.pending_snapshots.retain(|folder_id| retained.contains(folder_id));
-                state.snapshot_resolutions.retain(|folder_id, _| retained.contains(folder_id));
+                state.retain_folders(&retained);
             }
 
             // The retained cursor set and the snapshot timestamps are the last

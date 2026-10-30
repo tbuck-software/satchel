@@ -473,6 +473,31 @@ fn old_sync_state_decodes_without_a_snapshot_obligation() {
     assert_eq!(state.cursors["INBOX"], "old");
 }
 
+#[test]
+fn a_vanished_folder_leaves_no_snapshot_state_behind() {
+    let mut state = ImapSyncState::default();
+    for folder in ["Label_kept", "Label_gone"] {
+        state.cursors.insert(folder.into(), "cursor".into());
+        state
+            .folder_snapshot_at
+            .insert(folder.into(), "2026-01-01T00:00:00Z".into());
+        state.pending_snapshots.insert(folder.into());
+        state
+            .snapshot_resolutions
+            .insert(folder.into(), HashSet::from(["owed".into()]));
+        state
+            .resolved_snapshot_copies
+            .insert(folder.into(), HashSet::from(["resolved".into()]));
+    }
+    state.retain_folders(&HashSet::from(["Label_kept".into()]));
+    let kept = ["Label_kept".to_string()];
+    assert!(state.cursors.keys().eq(&kept));
+    assert!(state.folder_snapshot_at.keys().eq(&kept));
+    assert!(state.pending_snapshots.iter().eq(&kept));
+    assert!(state.snapshot_resolutions.keys().eq(&kept));
+    assert!(state.resolved_snapshot_copies.keys().eq(&kept));
+}
+
 #[tokio::test]
 async fn gmail_multiple_labels_and_synthetic_archive_remain_exclusive() {
     let pool = pool().await;
