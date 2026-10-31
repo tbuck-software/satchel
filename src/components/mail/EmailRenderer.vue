@@ -18,7 +18,7 @@ import type { QuotePart } from '@/utils/emailQuotes';
 import { missingInlineImageSource } from '@/utils/emailInlineImages';
 import { prepareEmailBody } from '@/utils/preparedEmailBody';
 import { isPersonalMailboxDomain, senderDomain } from '@/utils/senderDomains';
-import { splitRenderSegments, type RenderSegment } from '@/utils/emailSegments';
+import { matchingBodyProvenance, splitRenderSegments, type RenderSegment } from '@/utils/emailSegments';
 import { hasHoverCapablePointer } from '@/utils/pointerCapabilities';
 import ExternalLinkDialog from './ExternalLinkDialog.vue';
 import LinkDestinationPreview, { type LinkPreviewStatus } from './LinkDestinationPreview.vue';
@@ -36,6 +36,8 @@ const { t } = useI18n();
 const props = withDefaults(defineProps<{
   html?: string;
   text?: string;
+  bodySegments?: RenderSegment[];
+  bodyProvenance?: import('@/types/mail').Message['bodyProvenance'];
   pgpState?: PgpMessageState | null;
   /** Only a host with a connected decrypt action may offer the button. */
   canDecrypt?: boolean;
@@ -168,11 +170,23 @@ function onQuotesToggle(event: Event) {
 
 const missingImageSource = computed(() => missingInlineImageSource(t('errors.inlineImageUnavailable')));
 
+const trustedSegments = computed(() => matchingBodyProvenance(
+  props.text ?? '', props.html, props.bodySegments, props.bodyProvenance, props.attachments,
+));
+// A body decrypted as one piece keeps its caption over the HTML view, even
+// when it shows several parts, each a segment of its own.
+const fullBodyDecryption = computed(() => {
+  const meaningful = trustedSegments.value?.filter((segment) => segment.content.trim() || segment.kind.endsWith('_decrypted'));
+  const kinds = new Set(meaningful?.map((segment) => segment.kind));
+  const [kind] = kinds;
+  return kinds.size === 1 && kind?.endsWith('_decrypted') ? kind : undefined;
+});
+
 const prepared = computed(() => prepareEmailBody(props.cacheKey, {
   html: props.html,
   text: props.text,
   attachments: props.attachments,
-  normalizeQuotes: props.normalizeQuotes,
+  normalizeQuotes: trustedSegments.value ? false : props.normalizeQuotes,
   missingImageSource: missingImageSource.value,
 }));
 // Keeps the body's inline image URLs valid while this renderer shows it.
@@ -360,7 +374,10 @@ onBeforeUnmount(() => {
   if (linkErrorTimer) clearTimeout(linkErrorTimer);
 });
 
-const segments = computed<RenderSegment[]>(() => splitRenderSegments(displayText.value));
+const segments = computed<RenderSegment[]>(() => splitRenderSegments(
+  trustedSegments.value ? (props.text ?? '') : displayText.value,
+  trustedSegments.value,
+));
 
 const hasPgpSegments = computed(() =>
   segments.value.some((segment) => segment.kind !== 'text'),
@@ -427,15 +444,17 @@ const hasPgpSegments = computed(() =>
         </AppButton>
       </template>
     </div>
+    <SegmentedControl
+      v-if="props.showViewModeToggle && viewModeOptions.length > 1"
+      class="view-mode-toggle"
+      :options="viewModeOptions"
+      :model-value="viewMode"
+      :aria-label="$t('mail.viewMode.label')"
+      @update:model-value="setViewMode"
+    />
     <div v-if="isolatedDocument" class="html-document-group">
-      <SegmentedControl
-        v-if="props.showViewModeToggle && viewModeOptions.length > 1"
-        class="view-mode-toggle"
-        :options="viewModeOptions"
-        :model-value="viewMode"
-        :aria-label="$t('mail.viewMode.label')"
-        @update:model-value="setViewMode"
-      />
+      <header v-if="fullBodyDecryption === 'pgp_decrypted'" class="pgp-segment-header">{{ $t('mail.pgpBlock.decryptedPgp') }}</header>
+      <header v-else-if="fullBodyDecryption === 'smime_decrypted'" class="pgp-segment-header">{{ $t('mail.pgpBlock.decryptedSmime') }}</header>
       <div :class="['html-document-shell', { 'html-document-shell--auto-dark': viewMode === 'auto-dark' }]">
         <IsolatedEmailDocument
           :html="isolatedDocument"
@@ -450,14 +469,6 @@ const hasPgpSegments = computed(() =>
       </div>
     </div>
     <div v-else-if="!hasPgpSegments" class="plain-document-group">
-      <SegmentedControl
-        v-if="props.showViewModeToggle && viewModeOptions.length > 1"
-        class="view-mode-toggle"
-        :options="viewModeOptions"
-        :model-value="viewMode"
-        :aria-label="$t('mail.viewMode.label')"
-        @update:model-value="setViewMode"
-      />
       <SafeMarkdownBody
         v-if="markdownAvailable && viewMode === 'markdown'"
         class="text"
@@ -490,6 +501,11 @@ const hasPgpSegments = computed(() =>
         <section v-else-if="segment.kind === 'smime_decrypted'" class="pgp-segment">
           <header class="pgp-segment-header">{{ $t('mail.pgpBlock.decryptedSmime') }}</header>
           <pre class="pgp-segment-body">{{ segment.content }}</pre>
+        </section>
+        <section v-else-if="segment.kind === 'pgp_undecrypted'" class="pgp-segment encrypted">
+          <header class="pgp-segment-header">{{ $t('mail.pgpBlock.encryptedPgp') }}</header>
+          <p class="pgp-segment-hint">{{ $t('mail.pgpBlock.undecryptedHint') }}</p>
+          <pre class="pgp-segment-raw">{{ segment.content }}</pre>
         </section>
         <section v-else-if="segment.kind === 'pgp_encrypted'" class="pgp-segment encrypted">
           <header class="pgp-segment-header">{{ $t('mail.pgpBlock.encryptedPgp') }}</header>

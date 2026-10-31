@@ -301,3 +301,90 @@ fn a_stored_row_shows_exactly_the_entity_its_bundle_signs() {
         assert!(!text.contains("Forged"), "{forged}");
     }
 }
+
+/// The same messages as the plaintext of an encrypted one, which has no
+/// second copy. The decrypted decoder takes the entity from the splitter the
+/// display path uses: what it shows is what the bundle it hands the verifier
+/// yields, and its files are the signed entity's, bytes included.
+#[test]
+fn decrypted_signed_content_verifies_over_exactly_what_is_displayed() {
+    use satchel_core::email::decrypted::{parse_decrypted_body, DecodeError};
+    use satchel_core::providers::imap::signed_entity_attachments;
+    // Files by name. The attachment scan of synced mail also lists a body
+    // part labelled `inline` (Mutt's text) without a name; the decrypted
+    // decoder shows that part as text instead.
+    let files = |attachments: &[satchel_core::providers::traits::RemoteAttachment]| {
+        attachments
+            .iter()
+            .filter(|attachment| attachment.filename.is_some())
+            .map(|attachment| {
+                (
+                    attachment.filename.clone(),
+                    attachment.content_type.clone(),
+                    attachment.content_base64.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    for fixture in LEGITIMATE {
+        let ordinary = parse_raw_message_body(fixture.raw);
+        let stored = ordinary.pgp_signed.as_deref().unwrap();
+        let (entity, _) = verify(stored).unwrap();
+
+        let decrypted = parse_decrypted_body(fixture.raw)
+            .unwrap_or_else(|error| panic!("{}: {error}", fixture.name));
+        assert!(decrypted.signatures.is_empty(), "{}", fixture.name);
+        let [(bundle, true)] = &decrypted.pgp_signatures[..] else {
+            panic!(
+                "{}: {} OpenPGP signatures",
+                fixture.name,
+                decrypted.pgp_signatures.len()
+            );
+        };
+        let (verified, verdict) =
+            verify(bundle).unwrap_or_else(|| panic!("{}: rebuilt bundle rejected", fixture.name));
+        assert_eq!(
+            verified, entity,
+            "{}: the verifier reads another entity",
+            fixture.name
+        );
+        assert_eq!(
+            verdict,
+            DetachedVerification::Valid {
+                signer_fingerprint: GPG_FIXTURE_FINGERPRINT.to_string()
+            },
+            "{}",
+            fixture.name
+        );
+        let text = decrypted.body.text.as_deref().unwrap_or_default();
+        assert!(
+            text.contains(fixture.shows),
+            "{}: displayed {text:?}",
+            fixture.name
+        );
+        assert_eq!(
+            files(&decrypted.body.attachments),
+            files(&signed_entity_attachments(stored).unwrap()),
+            "{}: files outside the signed entity",
+            fixture.name
+        );
+    }
+
+    for forged in FORGED {
+        match parse_decrypted_body(forged.raw) {
+            Err(error) => assert_eq!(error, DecodeError::MalformedSigned, "{}", forged.name),
+            Ok(decrypted) => {
+                for (bundle, _) in &decrypted.pgp_signatures {
+                    assert!(
+                        !verify(bundle).is_some_and(|(_, verdict)| matches!(
+                            verdict,
+                            DetachedVerification::Valid { .. }
+                        )),
+                        "{}: decrypted forged content verifies",
+                        forged.name
+                    );
+                }
+            }
+        }
+    }
+}

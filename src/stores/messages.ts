@@ -129,6 +129,8 @@ function withoutInvalidContent(message: Message): Message {
   return {
     ...message,
     bodyText: '',
+    bodySegments: undefined,
+    bodyProvenance: undefined,
     bodyHtml: undefined,
     sourcePayload: undefined,
     bodyLoaded: true,
@@ -171,8 +173,10 @@ function mapBackendMessage(row: BackendMessage, threadId: string): Message {
         : undefined,
     replyTo: row.reply_to || undefined,
     subject: row.subject,
-    bodyText: fallbackText,
-    bodyHtml: htmlCandidate || undefined,
+    bodyText: row.body_segments ? row.body_text : fallbackText,
+    bodySegments: row.body_segments ?? undefined,
+    bodyProvenance: row.body_provenance ?? undefined,
+    bodyHtml: row.body_provenance ? (row.body_html ?? undefined) : htmlCandidate || undefined,
     bodyLoaded: row.body_loaded,
     bodyLoadError: row.content_error ? backendErrorLabel(row.content_error) : undefined,
     timestamp: row.date || new Date().toISOString(),
@@ -188,6 +192,19 @@ function mapBackendMessage(row: BackendMessage, threadId: string): Message {
     authDmarc: row.auth_dmarc ?? null,
     sourcePayload: parseSourcePayload(row.source_payload),
   });
+}
+
+/** What the ID of every attachment row for a part of decrypted content starts with. */
+const DECRYPTED_ATTACHMENT_PREFIX = 'att-pgp-';
+
+/**
+ * A part of decrypted content is listed only beside the body it was decrypted
+ * with: the provenance of the current read names it. Once the body shows no
+ * decrypted content, a verdict beside it does not cover the part.
+ */
+function shownWithItsDecryption(attachmentId: string, provenance: Message['bodyProvenance']): boolean {
+  return !attachmentId.startsWith(DECRYPTED_ATTACHMENT_PREFIX)
+    || Boolean(provenance?.attachments.some((part) => part.id === attachmentId));
 }
 
 /** Whether a body row carries a signature or encryption state. */
@@ -220,8 +237,10 @@ function applyMessageBody(message: Message, body: BackendMessageBody): Message {
     remoteUidValidity: body.remote_uidvalidity ?? null,
     contentError: body.content_error ?? null,
     sourcePayload: parseSourcePayload(body.source_payload) ?? message.sourcePayload,
-    bodyText: fallbackText,
-    bodyHtml: htmlCandidate || undefined,
+    bodyText: body.body_segments ? body.body_text : fallbackText,
+    bodySegments: body.body_segments ?? undefined,
+    bodyProvenance: body.body_provenance ?? undefined,
+    bodyHtml: body.body_provenance ? (body.body_html ?? undefined) : htmlCandidate || undefined,
     bodyLoaded: body.body_loaded,
     bodyLoadError: body.content_error ? backendErrorLabel(body.content_error) : undefined,
     pgp: pgpStatus,
@@ -257,6 +276,8 @@ function mergeMessagePreview(preview: Message, existing?: Message): Message {
   return {
     ...preview,
     bodyText: existing.bodyText,
+    bodySegments: existing.bodySegments,
+    bodyProvenance: existing.bodyProvenance,
     bodyHtml: existing.bodyHtml,
     bodyLoaded: existing.bodyLoaded,
     bodyLoadError: existing.bodyLoadError,
@@ -467,8 +488,16 @@ export const useMessagesStore = defineStore('messages', () => {
   }
 
   function messageBodyChars(message: Message): number {
+    const provenance = message.bodyProvenance;
+    const provenanceChars = (provenance?.html?.length ?? 0)
+      + (provenance?.segments.reduce((sum, segment) => sum + segment.content.length, 0) ?? 0)
+      + (provenance?.attachments.reduce((sum, part) => sum + part.id.length + part.filename.length
+        + part.content_type.length + (part.content_id?.length ?? 0)
+        + (part.cached_path?.length ?? 0) + (part.data_url?.length ?? 0), 0) ?? 0);
     return message.bodyText.length
       + (message.bodyHtml?.length ?? 0)
+      + provenanceChars
+      + (message.bodySegments?.reduce((sum, segment) => sum + segment.content.length, 0) ?? 0)
       + message.attachments.reduce((sum, attachment) => sum + (attachment.dataUrl?.length ?? 0), 0);
   }
 
@@ -1053,6 +1082,9 @@ export const useMessagesStore = defineStore('messages', () => {
         applyMessageBody(message, {
           ...(row ?? { id, snippet: '', body_text: '', body_loaded: true }),
           id,
+          // This endpoint returns raw stored/fetched bodies, never decryption results.
+          body_segments: null,
+          body_provenance: null,
           body_text: loaded.body_text,
           body_html: loaded.body_html,
           body_loaded: true,
@@ -1135,15 +1167,15 @@ export const useMessagesStore = defineStore('messages', () => {
           && (messagesByThread.value[threadId]?.find(message => message.id === messageId)?.remoteUidValidity ?? null) === generations.get(messageId);
         if (!isCurrent()) continue;
 
-        const body = (messagesByThread.value[threadId] ?? [])
-          .find((message) => message.id === messageId)?.bodyHtml ?? '';
-        const referencedCids = referencedInlineCids(body);
+        const current = (messagesByThread.value[threadId] ?? []).find((message) => message.id === messageId);
+        const referencedCids = referencedInlineCids(current?.bodyHtml ?? '');
         // `null` means the attachment list itself never arrived — keep whatever
         // the message already had rather than blanking it.
         let attachments: Message['attachments'] | null = null;
         let hydrationError: string | undefined = listingError;
         if (rowsByMessage) {
-          const rows = rowsByMessage.get(messageId) ?? [];
+          const rows = (rowsByMessage.get(messageId) ?? [])
+            .filter((row) => shownWithItsDecryption(row.id, current?.bodyProvenance));
           const hydrated = await Promise.all(
             rows.map(mapAttachment).map((row) => hydrateInlineAttachment(row, referencedCids, generations.get(messageId) ?? null)),
           );

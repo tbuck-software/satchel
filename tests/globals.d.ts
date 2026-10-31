@@ -16,6 +16,8 @@ interface RenderFidelityPayload {
   date?: string;
   bodyHtml?: string;
   bodyText?: string;
+  bodySegments?: import('../src/services/backend/generated/app/commands/messages/BodySegment').BodySegment[];
+  bodyProvenance?: import('../src/types/mail').Message['bodyProvenance'];
   normalizeQuotes?: boolean;
   attachments: unknown[];
   meta: string[];

@@ -1,0 +1,20 @@
+Content-Type: multipart/mixed; boundary=m
+
+--m
+Content-Type: text/plain; charset=utf-8
+
+Please accept the invitation.
+--m
+Content-Type: text/calendar; method=REQUEST; name="invite.ics"
+Content-Disposition: attachment; filename="invite.ics"
+
+BEGIN:VCALENDAR
+VERSION:2.0
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:board-1@example.test
+DTSTART:20261105T100000Z
+SUMMARY:Board meeting
+END:VEVENT
+END:VCALENDAR
+--m--

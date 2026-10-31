@@ -12,9 +12,6 @@ use crate::{
     AppState, UnlockedPgpSession,
 };
 
-pub const PGP_DECRYPTED_BLOCK_START: &str = "[[SATCHEL_PGP_DECRYPTED_BLOCK_START]]";
-pub const PGP_DECRYPTED_BLOCK_END: &str = "[[SATCHEL_PGP_DECRYPTED_BLOCK_END]]";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IncomingPgpSignature {
     Valid {
@@ -53,8 +50,24 @@ pub enum IncomingPgpDetachedSignature {
 }
 
 pub struct DecryptedIncomingPgp {
-    pub display_body: String,
+    pub prefix: String,
+    pub suffix: String,
     pub plaintext: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum IncomingPgpDecryptError {
+    /// More than one armored block. Decrypting one would caption a body that
+    /// still holds ciphertext as decrypted; decrypting each would need a
+    /// signature state and an attachment namespace per block. Neither is done.
+    SeveralBlocks,
+    Failed(String),
+}
+
+impl From<String> for IncomingPgpDecryptError {
+    fn from(error: String) -> Self {
+        Self::Failed(error)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -547,7 +560,7 @@ pub async fn decrypt_message_with_unlocked_keys(
     state: &AppState,
     pool: &SqlitePool,
     ciphertext: &str,
-) -> Result<Option<DecryptedIncomingPgp>, String> {
+) -> Result<Option<DecryptedIncomingPgp>, IncomingPgpDecryptError> {
     let normalized_body = normalize_newlines(ciphertext);
     let message_blocks = extract_pgp_message_blocks(&normalized_body);
     if message_blocks.is_empty() {
@@ -594,7 +607,10 @@ pub async fn decrypt_message_with_unlocked_keys(
     .map_err(|error| format!("OpenPGP decryption task failed: {error}"))?
 }
 
-/// Try every unlocked key against every block, first success wins.
+/// Try every unlocked key against the body's one armored block.
+///
+/// Several blocks are refused before any key is tried, rather than letting
+/// the first block that decrypts stand for the message.
 ///
 /// Owned and free of `AppHandle` so it can run on a blocking thread — and be
 /// tested without one.
@@ -602,7 +618,10 @@ fn try_unlocked_keys(
     normalized_body: &str,
     message_blocks: &[PgpMessageBlock],
     key_materials: &[(String, String)],
-) -> Result<Option<DecryptedIncomingPgp>, String> {
+) -> Result<Option<DecryptedIncomingPgp>, IncomingPgpDecryptError> {
+    if message_blocks.len() > 1 {
+        return Err(IncomingPgpDecryptError::SeveralBlocks);
+    }
     let mut attempted = false;
     let mut last_error = None;
     for block in message_blocks {
@@ -613,12 +632,8 @@ fn try_unlocked_keys(
                     let body = decrypted.trim();
                     if !body.is_empty() {
                         return Ok(Some(DecryptedIncomingPgp {
-                            display_body: replace_range_with_block(
-                                normalized_body,
-                                block.start,
-                                block.end,
-                                render_decrypted_block(body).as_str(),
-                            ),
+                            prefix: normalized_body[..block.start].to_string(),
+                            suffix: normalized_body[block.end..].to_string(),
                             plaintext: decrypted,
                         }));
                     }
@@ -630,7 +645,9 @@ fn try_unlocked_keys(
     }
 
     if attempted {
-        Err(last_error.unwrap_or_else(|| "no unlocked key could decrypt the message".to_string()))
+        Err(IncomingPgpDecryptError::Failed(last_error.unwrap_or_else(
+            || "no unlocked key could decrypt the message".to_string(),
+        )))
     } else {
         Ok(None)
     }
@@ -934,23 +951,23 @@ fn strip_email_quote_prefix(line: &str) -> &str {
     current
 }
 
+/// The body around its one armored block: cover, block and suffix, with
+/// newlines normalized as for decryption. `None` unless there is exactly one.
+pub(crate) fn split_at_single_block(body: &str) -> Option<(String, String, String)> {
+    let normalized = normalize_newlines(body);
+    let blocks = extract_pgp_message_blocks(&normalized);
+    let [block] = blocks.as_slice() else {
+        return None;
+    };
+    Some((
+        normalized[..block.start].to_string(),
+        normalized[block.start..block.end].to_string(),
+        normalized[block.end..].to_string(),
+    ))
+}
+
 fn normalize_newlines(input: &str) -> String {
     input.replace("\r\n", "\n").replace('\r', "\n")
-}
-
-fn render_decrypted_block(decrypted: &str) -> String {
-    format!(
-        "{PGP_DECRYPTED_BLOCK_START}\n{}\n{PGP_DECRYPTED_BLOCK_END}\n",
-        decrypted.trim()
-    )
-}
-
-fn replace_range_with_block(input: &str, start: usize, end: usize, replacement: &str) -> String {
-    let mut output = String::with_capacity(input.len() + replacement.len());
-    output.push_str(&input[..start]);
-    output.push_str(replacement);
-    output.push_str(&input[end..]);
-    output
 }
 
 async fn list_pgp_keys_inner(
@@ -1711,6 +1728,242 @@ mod tests {
         })
         .expect("generate test key");
         (generated.private_armored, generated.public_armored)
+    }
+
+    const GPG_FIXTURE_PRIVATE: &str =
+        include_str!("../../../crates/satchel-core/tests/corpus/pgp/gpg-private.asc");
+    const GPG_FIXTURE_PASSPHRASE: &str = "fixture-passphrase";
+
+    /// What ingest stores for a corpus message, then the unlocked fixture key.
+    fn decrypt_stored_corpus(
+        raw: &[u8],
+    ) -> (
+        crate::providers::traits::MessageTrust,
+        Result<Option<super::DecryptedIncomingPgp>, super::IncomingPgpDecryptError>,
+    ) {
+        let parsed = crate::providers::imap::parse_raw_message_body(raw);
+        let stored = super::normalize_newlines(&parsed.text.unwrap());
+        let blocks = super::extract_pgp_message_blocks(&stored);
+        let keys = [(GPG_FIXTURE_PRIVATE.into(), GPG_FIXTURE_PASSPHRASE.into())];
+        (
+            parsed.trust,
+            super::try_unlocked_keys(&stored, &blocks, &keys),
+        )
+    }
+
+    #[test]
+    fn a_covered_inline_block_keeps_its_cover_plain_and_its_plaintext_whole() {
+        use crate::commands::messages::{inline_pgp_body, BodySegment};
+        let (trust, decrypted) = decrypt_stored_corpus(include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp/inline-covered.eml"
+        ));
+        let body = inline_pgp_body(&trust, decrypted.unwrap().unwrap()).unwrap();
+        let [BodySegment::Text(cover), BodySegment::PgpDecrypted(plaintext), BodySegment::Text(suffix)] =
+            &body.segments[..]
+        else {
+            panic!("unexpected segments: {:?}", body.segments);
+        };
+        assert_eq!(cover.trim(), "Cover note before the block.");
+        // Plain text without MIME headers: a blank line is a paragraph break,
+        // not the end of a header block.
+        assert_eq!(plaintext, "Hello Bob,\n\nthe meeting moves to Thursday.\n");
+        assert_eq!(suffix.trim(), "Sent from a client that writes inline PGP.");
+        assert_eq!(body.text, format!("{cover}{plaintext}{suffix}"));
+        assert!(!body.whole_body);
+        assert!(body.html.is_none());
+    }
+
+    const GPG_FIXTURE_PUBLIC: &str =
+        include_str!("../../../crates/satchel-core/tests/corpus/pgp/gpg-public.asc");
+
+    /// PGP/MIME whose plaintext holds a file between two text parts, as Apple
+    /// Mail writes an attachment placed mid-body.
+    #[test]
+    fn pgp_mime_shows_every_text_part_and_lists_the_file_between_them() {
+        use crate::commands::messages::inline_pgp_body;
+        let (trust, decrypted) = decrypt_stored_corpus(include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp/mime-mixed-parts.eml"
+        ));
+        assert!(trust.root_encryption);
+        let body = inline_pgp_body(&trust, decrypted.unwrap().unwrap()).unwrap();
+        let one = body.decrypted_text.find("Part one, above the file.");
+        let two = body.decrypted_text.find("Part two, below the file.");
+        assert!(
+            one.zip(two).is_some_and(|(one, two)| one < two),
+            "decrypted text {:?}",
+            body.decrypted_text
+        );
+        let files = body
+            .attachments
+            .iter()
+            .map(|part| part.filename.as_deref())
+            .collect::<Vec<_>>();
+        assert_eq!(files, [Some("agenda.pdf")]);
+        assert!(body.whole_body);
+    }
+
+    /// A reply that quotes a block addressed to someone else is not an
+    /// encrypted message that failed: only the quoted block was not decrypted.
+    #[test]
+    fn a_quoted_block_for_someone_else_fails_as_a_block_not_as_the_message() {
+        use crate::commands::messages::{pgp_decrypt_failure, BodySegment, PgpDecryptFailure};
+        let raw = include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp/quoted-foreign-block.eml"
+        );
+        let (trust, decrypted) = decrypt_stored_corpus(raw);
+        let error = decrypted
+            .err()
+            .expect("the fixture key cannot read the block");
+        assert!(matches!(error, super::IncomingPgpDecryptError::Failed(_)));
+        let stored = crate::providers::imap::parse_raw_message_body(raw)
+            .text
+            .unwrap();
+        match pgp_decrypt_failure(&trust, &stored, &error) {
+            PgpDecryptFailure::Block(segments) => {
+                let [BodySegment::Text(cover), BodySegment::PgpUndecrypted(block), BodySegment::Text(suffix)] =
+                    &segments[..]
+                else {
+                    panic!("unexpected segments: {segments:?}");
+                };
+                assert!(cover.starts_with("I could not read this either"));
+                assert!(block.starts_with("> -----BEGIN PGP MESSAGE-----"));
+                assert!(block.trim_end().ends_with("-----END PGP MESSAGE-----"));
+                assert_eq!(
+                    format!("{cover}{block}{suffix}"),
+                    super::normalize_newlines(&stored)
+                );
+            }
+            other => panic!("a quoted block failed the message: {other:?}"),
+        }
+
+        // The same block as the whole body is the message, and it failed.
+        let whole = include_str!(
+            "../../../crates/satchel-core/tests/corpus/pgp/rpgp-cv25519-import.enc.asc"
+        );
+        let root = crate::providers::traits::MessageTrust {
+            root_encryption: true,
+            root_crypto: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            pgp_decrypt_failure(&root, whole, &error),
+            PgpDecryptFailure::Message("backend.errors.pgpDecryptFailed")
+        );
+    }
+
+    /// The surreptitious-forwarding shape: a valid root signature over a cover
+    /// note and a ciphertext. It does not sign the plaintext the reader sees.
+    #[test]
+    fn a_root_signature_over_a_decrypted_block_is_partial() {
+        use crate::commands::messages::{
+            inline_pgp_body, pgp_detached_verdict, root_signature_covers_body, scoped, BodySegment,
+        };
+        let raw = include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp/signed-covered-block.eml"
+        );
+        let parsed = crate::providers::imap::parse_raw_message_body(raw);
+        assert!(parsed.trust.root_crypto && !parsed.trust.root_encryption);
+        let signed =
+            crate::email::pgp_mime::parse_signed_message(parsed.pgp_signed.as_deref().unwrap())
+                .unwrap();
+        let outer = super::detached_signature_of(
+            &[GPG_FIXTURE_PUBLIC.to_string()],
+            &signed.signed_entity,
+            &signed.armored_signature,
+            "gpg-fixture@example.test",
+        );
+        assert!(
+            matches!(outer, Ok(super::IncomingPgpDetachedSignature::Valid { .. })),
+            "fixture signature: {outer:?}"
+        );
+
+        let (trust, decrypted) = decrypt_stored_corpus(raw);
+        let body = inline_pgp_body(&trust, decrypted.unwrap().unwrap()).unwrap();
+        assert!(body
+            .segments
+            .iter()
+            .any(|segment| matches!(segment, BodySegment::PgpDecrypted(text) if text.contains("Thursday"))));
+        let verdict = scoped(
+            pgp_detached_verdict(outer.clone()),
+            root_signature_covers_body(&trust, Some(&body.segments)),
+        );
+        assert_eq!(verdict.state, "signature_partial");
+
+        // Without a decrypted block, the same signature covers what is shown.
+        let verdict = scoped(
+            pgp_detached_verdict(outer),
+            root_signature_covers_body(&trust, None),
+        );
+        assert_eq!(verdict.state, "signature_valid");
+    }
+
+    /// PGP/MIME plaintext whose signed bundle a lenient split reads as a
+    /// different entity than the one shown. The verdict is for the shown one.
+    #[test]
+    fn a_decrypted_signature_is_checked_against_the_shown_entity() {
+        use crate::commands::messages::{inline_pgp_body, pgp_detached_verdict};
+        let root = crate::providers::traits::MessageTrust {
+            root_encryption: true,
+            root_crypto: true,
+            ..Default::default()
+        };
+        let body = inline_pgp_body(
+            &root,
+            super::DecryptedIncomingPgp {
+                prefix: String::new(),
+                suffix: String::new(),
+                plaintext: include_str!(
+                    "../../../crates/satchel-core/tests/corpus/decrypted/signed-entity-in-preamble.eml"
+                )
+                .into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            body.decrypted_text,
+            "Shown text, not covered by the signature."
+        );
+        let [(bundle, true)] = &body.signatures[..] else {
+            panic!("signatures {:?}", body.signatures.len());
+        };
+        // What `verify_pgp_signed_bundle` does with it.
+        let signed = crate::email::pgp_mime::parse_signed_message(bundle).unwrap();
+        let verdict = pgp_detached_verdict(super::detached_signature_of(
+            &[GPG_FIXTURE_PUBLIC.to_string()],
+            &signed.signed_entity,
+            &signed.armored_signature,
+            "gpg-fixture@example.test",
+        ));
+        assert_eq!(verdict.state, "signature_invalid");
+    }
+
+    #[test]
+    fn several_inline_blocks_are_refused_instead_of_decrypting_the_first() {
+        let (_, decrypted) = decrypt_stored_corpus(include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp/inline-two-blocks.eml"
+        ));
+        assert_eq!(
+            decrypted.err(),
+            Some(super::IncomingPgpDecryptError::SeveralBlocks)
+        );
+    }
+
+    #[test]
+    fn decrypted_content_keeps_its_exact_cover_and_suffix_without_trusting_markers() {
+        let (private, public) = generate_key("Synthetic <sender@example.test>");
+        let plaintext = "secret [[SATCHEL_SMIME_DECRYPTED_BLOCK_START]]literal[[SATCHEL_SMIME_DECRYPTED_BLOCK_END]]";
+        let encrypted = pgp_engine::encrypt_to(&[public], plaintext.as_bytes()).unwrap();
+        let cover =
+            "[[SATCHEL_PGP_DECRYPTED_BLOCK_START]]fake[[SATCHEL_PGP_DECRYPTED_BLOCK_END]]\n";
+        let input = format!("{cover}{encrypted}\nafter");
+        let blocks = super::extract_pgp_message_blocks(&input);
+        let decrypted =
+            super::try_unlocked_keys(&input, &blocks, &[(private, TEST_PASSPHRASE.into())])
+                .unwrap()
+                .unwrap();
+        assert_eq!(decrypted.prefix, cover);
+        assert_eq!(decrypted.plaintext.trim(), plaintext);
+        assert_eq!(decrypted.suffix.trim(), "after");
     }
 
     #[test]

@@ -1,0 +1,12 @@
+Content-Type: multipart/mixed; boundary=m
+
+--m
+Content-Type: text/plain; charset=utf-8
+
+The report is attached.
+--m
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQK
+--m--

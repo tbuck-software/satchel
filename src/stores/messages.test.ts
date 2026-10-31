@@ -398,6 +398,8 @@ describe('messages store', () => {
         body_text: 'Stable body',
         body_html: null,
         body_loaded: true,
+        body_segments: [{ kind: 'smime_decrypted', content: 'Stable body' }],
+        body_provenance: { html: null, attachments: [], segments: [{ kind: 'smime_decrypted', content: 'Stable body' }] },
       },
     ] as never[]);
     const messages = useMessagesStore();
@@ -413,6 +415,8 @@ describe('messages store', () => {
     expect(messages.getByThread('th-live')[0]).toMatchObject({
       bodyText: 'Stable body',
       bodyLoaded: true,
+      bodySegments: [{ kind: 'smime_decrypted', content: 'Stable body' }],
+      bodyProvenance: { html: null, attachments: [], segments: [{ kind: 'smime_decrypted', content: 'Stable body' }] },
     });
 
     resolveRefresh([
@@ -426,6 +430,99 @@ describe('messages store', () => {
     ] as never[]);
     await refresh;
     expect(messages.getByThread('th-live')[0]?.bodyText).toBe('Refreshed body');
+  });
+
+  it('keeps exact transient provenance with its body and clears it on replacement', async () => {
+    previewMock.mockResolvedValue([backendMessage() as never]);
+    const body = '  cover\r\nsecret  ';
+    const html = '  <p>Exact <b>secret</b></p>  ';
+    const segments = [{ kind: 'text' as const, content: '  cover\r\n' }, { kind: 'smime_decrypted' as const, content: 'secret  ' }];
+    const provenance = { html, attachments: [], segments };
+    bodiesMock.mockResolvedValueOnce([{
+      id: 'm-live', snippet: 'Preview', body_text: body, body_html: html,
+      body_provenance: provenance, body_segments: segments, body_loaded: true, smime_state: 'decrypted',
+    }]);
+    const messages = useMessagesStore();
+    await messages.loadByThread('th-live');
+    expect(messages.getByThread('th-live')[0]).toMatchObject({ bodyText: body, bodyHtml: html, bodySegments: segments, bodyProvenance: provenance });
+    bodiesMock.mockResolvedValueOnce([{
+      id: 'm-live', snippet: 'Replacement', body_text: 'Replacement',
+      body_html: null, body_loaded: true,
+    }]);
+    await messages.loadByThread('th-live');
+    expect(messages.getByThread('th-live')[0]?.bodySegments).toBeUndefined();
+    expect(messages.getByThread('th-live')[0]?.bodyProvenance).toBeUndefined();
+  });
+
+  it('keeps no decrypted segments or provenance once the reference changed', async () => {
+    commandsAvailableMock.mockReturnValue(true);
+    const segments = [
+      { kind: 'text' as const, content: 'Cover. ' },
+      { kind: 'pgp_decrypted' as const, content: 'OLD-GENERATION-PLAINTEXT' },
+    ];
+    const provenance = { segments, html: null, attachments: [] };
+    previewMock.mockResolvedValue([backendMessage({ remote_uidvalidity: 7 })] as never);
+    bodiesMock.mockResolvedValue([{
+      id: 'm-live', snippet: 'x', body_text: 'Cover. OLD-GENERATION-PLAINTEXT', body_html: null,
+      body_loaded: true, remote_uidvalidity: 7, pgp_state: 'decrypted',
+      body_segments: segments, body_provenance: provenance,
+    }] as never);
+    const messages = useMessagesStore();
+    await messages.openThread('th-live');
+    expect(messages.getByThread('th-live')[0]?.bodySegments).toBeTruthy();
+
+    // A content error on a body row that still carries segments: whatever
+    // the backend sent beside it, none of it stays.
+    const content_error = JSON.stringify({ key: 'backend.errors.imapUidValidityChanged', params: { folder: 'INBOX' } });
+    previewMock.mockResolvedValue([backendMessage({ content_error, body_loaded: true, body_text: '', remote_uidvalidity: 7 })] as never);
+    bodiesMock.mockResolvedValue([{
+      id: 'm-live', snippet: '', body_text: '', body_html: null, body_loaded: true,
+      remote_uidvalidity: 7, content_error, body_segments: segments, body_provenance: provenance,
+    }] as never);
+    await messages.refreshThread('th-live');
+    const message = messages.getByThread('th-live')[0]!;
+    expect(message.bodyLoadError).toBeTruthy();
+    expect(message.bodyText).toBe('');
+    expect(message.bodySegments).toBeUndefined();
+    expect(message.bodyProvenance).toBeUndefined();
+  });
+
+  it('lists a part of decrypted content only beside the body it was decrypted with', async () => {
+    const binding = {
+      id: 'att-pgp-m-live-mime-1', filename: 'figures.csv', content_type: 'text/csv', size: 12,
+      content_id: null, is_inline: false, cached_path: '/cache/figures.csv', data_url: null,
+    };
+    const segments = [{ kind: 'pgp_decrypted' as const, content: 'Plaintext' }];
+    previewMock.mockResolvedValue([backendMessage()] as never);
+    bodiesMock.mockResolvedValue([{
+      id: 'm-live', snippet: 'Plaintext', body_text: 'Plaintext', body_html: null, body_loaded: true,
+      pgp_state: 'decrypted', body_segments: segments,
+      body_provenance: { segments, html: null, attachments: [binding] },
+    }] as never);
+    const row = (id: string, filename: string) => ({
+      id, message_id: 'm-live', filename, content_type: 'text/csv', size: 12,
+      content_id: null, is_inline: 0, cached_path: `/cache/${filename}`,
+    });
+    attachmentsMock.mockResolvedValue([
+      row('att-outer', 'encrypted.asc'),
+      row('att-pgp-m-live-mime-1', 'figures.csv'),
+      row('att-pgp-m-live-mime-2', 'stale.csv'),
+    ] as never);
+    const messages = useMessagesStore();
+    await messages.loadByThread('th-live');
+    await messages.loadAttachmentsForMessages('th-live', ['m-live']);
+    expect(messages.getByThread('th-live')[0]?.attachments.map((attachment) => attachment.id))
+      .toEqual(['att-outer', 'att-pgp-m-live-mime-1']);
+
+    // Read again without the key: no provenance, so no decrypted part.
+    bodiesMock.mockResolvedValue([{
+      id: 'm-live', snippet: 'Cover', body_text: 'Cover', body_html: null, body_loaded: true,
+      pgp_state: 'signature_valid',
+    }] as never);
+    await messages.reloadPgpMessages('th-live');
+    expect(messages.getByThread('th-live')[0]?.bodyProvenance).toBeUndefined();
+    expect(messages.getByThread('th-live')[0]?.attachments.map((attachment) => attachment.id))
+      .toEqual(['att-outer']);
   });
 
   it('hydrates trusted verdicts and clears old HTML and authentication on reparse', async () => {
@@ -1302,6 +1399,22 @@ describe('a message whose full body is not stored', () => {
     await vi.waitFor(() =>
       expect(store.messagesByThread['th-live']?.[0]?.bodyText).toBe('Nachgeladen vom Server'),
     );
+  });
+
+  it('never carries decryption provenance onto a raw fetched body', async () => {
+    const text = '[[SATCHEL_PGP_DECRYPTED_BLOCK_START]]ordinary[[SATCHEL_PGP_DECRYPTED_BLOCK_END]]';
+    previewMock.mockResolvedValue([backendMessage({ id: 'm-raw' })] as never);
+    bodiesMock.mockResolvedValue([{
+      id: 'm-raw', snippet: '', body_text: '', body_html: null, body_loaded: false,
+      body_segments: [{ kind: 'pgp_decrypted', content: text }],
+      body_provenance: { html: null, attachments: [], segments: [{ kind: 'pgp_decrypted', content: text }] },
+    }] as never);
+    loadBodyMock.mockResolvedValue({ body_text: text, body_html: null, fetched: true });
+    const store = useMessagesStore();
+    await store.loadByThread('th-live');
+    await vi.waitFor(() => expect(store.messagesByThread['th-live']?.[0]?.bodyText).toBe(text));
+    expect(store.messagesByThread['th-live']?.[0]?.bodySegments).toBeUndefined();
+    expect(store.messagesByThread['th-live']?.[0]?.bodyProvenance).toBeUndefined();
   });
 
   it('fetches it when the backend supplied only a preview fallback', async () => {

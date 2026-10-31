@@ -8,12 +8,14 @@
 //! Deliberately unhurried: the run is throttled well below the provider budget
 //! so it never competes with reading mail, it steps aside when the provider
 //! signals a rate limit, and it is resumable — the work list is simply every
-//! inline image that still has no `cached_path`.
+//! inline image that still has no `cached_path`, apart from parts of decrypted
+//! content, which no provider can hand back.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+use satchel_core::email::decrypted;
 use serde::Serialize;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter};
@@ -109,22 +111,13 @@ fn update_progress(app: &AppHandle, mutate: impl FnOnce(&mut InlineCacheProgress
 pub async fn inline_image_cache_status(
     pool: tauri::State<'_, crate::db::ReadPool>,
 ) -> CommandResult<InlineCacheStatus> {
-    let (missing, missing_bytes): (i64, i64) = sqlx::query_as(
-        "SELECT COUNT(*), COALESCE(SUM(COALESCE(size, 0)), 0)
-         FROM attachments
-         WHERE is_inline = 1 AND cached_path IS NULL AND content_type LIKE 'image/%'",
-    )
-    .fetch_one(pool.inner().as_ref())
-    .await
-    .map_err(|err| err.to_string())?;
-
-    let cached: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM attachments
-         WHERE is_inline = 1 AND cached_path IS NOT NULL AND content_type LIKE 'image/%'",
-    )
-    .fetch_one(pool.inner().as_ref())
-    .await
-    .map_err(|err| err.to_string())?;
+    let pool = pool.inner().as_ref();
+    let (missing, missing_bytes) = missing_inline_images(pool)
+        .await
+        .map_err(|err| err.to_string())?;
+    let cached = cached_inline_images(pool)
+        .await
+        .map_err(|err| err.to_string())?;
 
     Ok(InlineCacheStatus {
         missing,
@@ -161,20 +154,55 @@ pub fn stop_inline_image_backfill() {
     CANCELLED.store(true, Ordering::SeqCst);
 }
 
-async fn run_backfill(app: &AppHandle, pool: &SqlitePool) {
-    // Newest first: the mail most likely to be opened next heals first.
-    let ids: Vec<String> = match sqlx::query_scalar(
+// Parts of decrypted content are left out throughout. They have no server copy
+// to heal from: the body window drops their cache, and only decrypting the
+// message again brings it back. Counted as missing, each one failed on every
+// run and could stall it before the images it can fetch.
+
+/// Inline images without a local copy: how many, and their size in bytes.
+async fn missing_inline_images(pool: &SqlitePool) -> Result<(i64, i64), sqlx::Error> {
+    sqlx::query_as(
+        "SELECT COUNT(*), COALESCE(SUM(COALESCE(size, 0)), 0)
+         FROM attachments
+         WHERE is_inline = 1 AND cached_path IS NULL AND content_type LIKE 'image/%'
+           AND id NOT LIKE ?",
+    )
+    .bind(decrypted::attachment_id_pattern())
+    .fetch_one(pool)
+    .await
+}
+
+async fn cached_inline_images(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM attachments
+         WHERE is_inline = 1 AND cached_path IS NOT NULL AND content_type LIKE 'image/%'
+           AND id NOT LIKE ?",
+    )
+    .bind(decrypted::attachment_id_pattern())
+    .fetch_one(pool)
+    .await
+}
+
+/// The images a run fetches. Newest first: the mail most likely to be opened
+/// next heals first.
+async fn backfill_queue(pool: &SqlitePool) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(
         "SELECT a.id
          FROM attachments a
          JOIN messages m ON m.id = a.message_id
          WHERE a.is_inline = 1
            AND a.cached_path IS NULL
            AND a.content_type LIKE 'image/%'
+           AND a.id NOT LIKE ?
          ORDER BY m.date DESC",
     )
+    .bind(decrypted::attachment_id_pattern())
     .fetch_all(pool)
     .await
-    {
+}
+
+async fn run_backfill(app: &AppHandle, pool: &SqlitePool) {
+    let ids = match backfill_queue(pool).await {
         Ok(ids) => ids,
         Err(err) => {
             update_progress(app, |progress| {
@@ -390,5 +418,68 @@ mod tests {
         assert_eq!(eta_seconds(Duration::from_secs(20), 10, 100), Some(180));
         assert_eq!(eta_seconds(Duration::from_secs(20), 0, 100), None);
         assert_eq!(eta_seconds(Duration::from_secs(20), 100, 100), None);
+    }
+
+    async fn pool_with_message() -> sqlx::SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("pool");
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .expect("migrations");
+        for statement in [
+            "INSERT INTO accounts
+             (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('acc', 'Me', 'me@example.com', 'imap', '{}', '', '', '')",
+            "INSERT INTO folders
+             (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES ('inbox', 'acc', 'INBOX', 'INBOX', 'inbox', 'INBOX', '', '')",
+            "INSERT INTO messages
+             (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, date,
+              created_at, updated_at)
+             VALUES ('msg', 'acc', 'inbox', 'th', 'you@example.com', '[]', 'Logo', '', '', '')",
+        ] {
+            sqlx::query(statement).execute(&pool).await.expect("seed");
+        }
+        pool
+    }
+
+    /// A part of decrypted content has no server copy to heal from, so it is
+    /// neither missing, nor stored, nor work for a run.
+    #[tokio::test]
+    async fn decrypted_inline_images_are_not_backfill_work() {
+        let pool = pool_with_message().await;
+        let decrypted_missing = satchel_core::email::decrypted::attachment_id("msg", "mime-2");
+        let decrypted_cached = satchel_core::email::decrypted::attachment_id("msg", "mime-3");
+        for (id, cached_path) in [
+            ("att-plain", None),
+            ("att-plain-cached", Some("/cache/plain.png")),
+            (decrypted_missing.as_str(), None),
+            (decrypted_cached.as_str(), Some("/cache/decrypted.png")),
+        ] {
+            sqlx::query(
+                "INSERT INTO attachments
+                 (id, message_id, filename, content_type, size, is_inline, cached_path, created_at)
+                 VALUES (?, 'msg', 'logo.png', 'image/png', 10, 1, ?, '')",
+            )
+            .bind(id)
+            .bind(cached_path)
+            .execute(&pool)
+            .await
+            .expect("attachment");
+        }
+
+        assert_eq!(
+            super::missing_inline_images(&pool).await.expect("missing"),
+            (1, 10)
+        );
+        assert_eq!(super::cached_inline_images(&pool).await.expect("cached"), 1);
+        assert_eq!(
+            super::backfill_queue(&pool).await.expect("queue"),
+            vec!["att-plain".to_string()]
+        );
     }
 }

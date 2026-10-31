@@ -38,12 +38,58 @@ const MAX_ATTACHMENT_LISTING_IDS: usize = 500;
 /// eight mails made 160 invokes for this alone; a thread is now one.
 #[tauri::command]
 pub async fn list_attachments_for_messages(
+    state: tauri::State<'_, crate::AppState>,
     pool: tauri::State<'_, crate::db::ReadPool>,
     message_ids: Vec<String>,
 ) -> CommandResult<Vec<AttachmentDto>> {
-    attachments_for_messages(pool.inner().as_ref(), &message_ids)
-        .await
-        .map_err(CommandError::unexpected)
+    attachments_for_messages(
+        pool.inner().as_ref(),
+        &message_ids,
+        &state.shown_decrypted_parts,
+    )
+    .await
+    .map_err(CommandError::unexpected)
+}
+
+/// The parts of decrypted content each message's latest read showed, by
+/// attachment cache ID, so a part belongs to the saved generation it was
+/// decrypted under.
+///
+/// Beside a root signature a part of decrypted content is listed only while
+/// the body it came from is shown decrypted: the signature covers the
+/// ciphertext, never the part. Read again without the key, the block stays
+/// armored and the verdict is valid again; the row and its cached file stay
+/// for the next decryption, and this set keeps them out of the listing. A
+/// read that shows no decrypted part forgets the message, a restart forgets
+/// every one.
+#[derive(Debug, Default)]
+pub struct ShownDecryptedParts(
+    std::sync::Mutex<std::collections::HashMap<String, std::collections::HashSet<String>>>,
+);
+
+impl ShownDecryptedParts {
+    /// What the latest read of `message_id` showed, in place of any earlier one.
+    pub(crate) fn record(&self, message_id: &str, cache_ids: std::collections::HashSet<String>) {
+        let mut shown = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        if cache_ids.is_empty() {
+            shown.remove(message_id);
+        } else {
+            shown.insert(message_id.to_string(), cache_ids);
+        }
+    }
+
+    /// The latest read of `message_id` showed nothing of it decrypted.
+    pub(crate) fn forget(&self, message_id: &str) {
+        self.record(message_id, Default::default());
+    }
+
+    fn shows(&self, message_id: &str, cache_id: &str) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(message_id)
+            .is_some_and(|shown| shown.contains(cache_id))
+    }
 }
 
 #[derive(FromRow)]
@@ -53,23 +99,27 @@ struct AttachmentListingRow {
     provider: String,
     remote_id: Option<String>,
     remote_uidvalidity: Option<i64>,
+    decrypted_beside_root_signature: bool,
 }
 
-async fn attachments_for_messages(
+pub(super) async fn attachments_for_messages(
     pool: &SqlitePool,
     message_ids: &[String],
+    shown_decrypted: &ShownDecryptedParts,
 ) -> Result<Vec<AttachmentDto>, sqlx::Error> {
     if message_ids.is_empty() {
         return Ok(Vec::new());
     }
     let mut rows = Vec::new();
     for chunk in message_ids.chunks(MAX_ATTACHMENT_LISTING_IDS) {
-        let mut query = sqlx::QueryBuilder::new(
+        let mut query = sqlx::QueryBuilder::new(format!(
             "SELECT a.id, a.message_id, a.filename, a.content_type, a.size, a.content_id, a.is_inline, a.cached_path,
-                    acc.provider, m.remote_id, m.remote_uidvalidity
+                    acc.provider, m.remote_id, m.remote_uidvalidity,
+                    {} AS decrypted_beside_root_signature
              FROM attachments a JOIN messages m ON m.id = a.message_id
              JOIN accounts acc ON acc.id = m.account_id WHERE a.message_id IN (",
-        );
+            satchel_core::db::signed_attachments::DECRYPTED_BESIDE_ROOT_SIGNATURE
+        ));
         let mut ids = query.separated(", ");
         for id in chunk {
             ids.push_bind(id);
@@ -77,7 +127,7 @@ async fn attachments_for_messages(
         // Beside a root signature, rows from older listing rules may name
         // parts from outside the signed entity; they wait for their rebuild.
         // `id` breaks filename ties: the renderer resolves `cid:` references
-        // by position.
+        // and checks decryption provenance by position.
         query.push(format!(
             ") AND NOT {} ORDER BY a.message_id, a.filename, a.id",
             satchel_core::db::signed_attachments::HIDDEN_BESIDE_ROOT_SIGNATURE
@@ -91,7 +141,7 @@ async fn attachments_for_messages(
     }
     let rows = rows
         .into_iter()
-        .map(|listing| {
+        .filter_map(|listing| {
             let mut row = listing.attachment;
             let cache_id = attachment_cache_id(
                 &listing.provider,
@@ -99,6 +149,12 @@ async fn attachments_for_messages(
                 listing.remote_uidvalidity,
                 &row.id,
             );
+            // Beside a root signature, a decrypted part only with its body.
+            if listing.decrypted_beside_root_signature
+                && !shown_decrypted.shows(&row.message_id, &cache_id)
+            {
+                return None;
+            }
             row.filename = row.filename.as_deref().map(strip_filename_controls);
             if row
                 .cached_path
@@ -107,7 +163,7 @@ async fn attachments_for_messages(
             {
                 row.cached_path = None;
             }
-            row
+            Some(row)
         })
         .collect();
     Ok(rows)
@@ -369,14 +425,12 @@ async fn prepare_referenced_attachment(
             bytes: crate::sync::attachment_fetch::decode_attachment_base64(payload)
                 .map_err(|error| format!("attachment payload decode failed: {error}"))?,
         }
+    } else if satchel_core::email::decrypted::is_attachment_id(&id) {
+        // The server holds this part only inside the encrypted message, and a
+        // part ID from the decrypted content names another part there. Older
+        // decrypted rows still carry such an ID; it is never sent.
+        return Err("backend.errors.decryptedAttachmentUnavailable".into());
     } else {
-        // Older decrypted rows carried inner MIME part ids too. Those ids were
-        // never valid for the encrypted message held by the provider.
-        if id.starts_with("att-pgp-") {
-            return Err("backend.errors.messageNotAvailableLocally".to_string());
-        }
-        // Decrypted inner parts are local cache entries, never parts of the
-        // encrypted provider message. Reopening the body can recreate them.
         let remote_part_id = remote_part_id
             .ok_or_else(|| "backend.errors.messageNotAvailableLocally".to_string())?;
         let config =
@@ -909,7 +963,7 @@ mod tests {
             attachment_id: "att".into(),
         };
 
-        let listed = super::attachments_for_messages(&pool, &["m".into()])
+        let listed = super::attachments_for_messages(&pool, &["m".into()], &Default::default())
             .await
             .unwrap();
         assert_eq!(listed.len(), 1, "the signature part is not listed");
@@ -948,7 +1002,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let listed = super::attachments_for_messages(&pool, &["m".into()])
+        let listed = super::attachments_for_messages(&pool, &["m".into()], &Default::default())
             .await
             .unwrap();
         assert_eq!(listed.len(), 1);
@@ -1025,7 +1079,11 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+        // `z9` is inserted first but shares `a2`'s name: a tie the order has
+        // to break the same way on every call, because the renderer resolves
+        // `cid:` references by position and checks provenance by position.
         for (id, message, name) in [
+            ("z9", "m1", "a.png"),
             ("a1", "m1", "b.pdf"),
             ("a2", "m1", "a.png"),
             ("a3", "m2", "c\u{202e}.txt"),
@@ -1049,15 +1107,19 @@ mod tests {
             .await
             .expect("legacy shared cache path");
 
-        let rows = super::attachments_for_messages(&pool, &["m1".into(), "m2".into()])
-            .await
-            .expect("listing");
+        let rows = super::attachments_for_messages(
+            &pool,
+            &["m1".into(), "m2".into()],
+            &Default::default(),
+        )
+        .await
+        .expect("listing");
 
         let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
-        assert_eq!(ids, ["a2", "a1", "a3"]);
+        assert_eq!(ids, ["a2", "z9", "a1", "a3"]);
         assert_eq!(rows[0].cached_path.as_deref(), shared.to_str());
-        assert_eq!(rows[2].filename.as_deref(), Some("c.txt"));
-        assert_eq!(rows[1].cached_path, None, "a1 must not expose a2's bytes");
+        assert_eq!(rows[3].filename.as_deref(), Some("c.txt"));
+        assert_eq!(rows[2].cached_path, None, "a1 must not expose a2's bytes");
         sqlx::raw_sql(
             "UPDATE accounts SET provider = 'imap';
             UPDATE messages SET remote_id = '42', remote_uidvalidity = 7;",
@@ -1065,7 +1127,7 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        let rows = super::attachments_for_messages(&pool, &["m1".into()])
+        let rows = super::attachments_for_messages(&pool, &["m1".into()], &Default::default())
             .await
             .unwrap();
         assert_eq!(
@@ -1079,7 +1141,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let rows = super::attachments_for_messages(&pool, &["m1".into()])
+        let rows = super::attachments_for_messages(&pool, &["m1".into()], &Default::default())
             .await
             .unwrap();
         assert_eq!(rows[0].cached_path.as_deref(), verified.to_str());
@@ -1087,7 +1149,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let rows = super::attachments_for_messages(&pool, &["m1".into()])
+        let rows = super::attachments_for_messages(&pool, &["m1".into()], &Default::default())
             .await
             .unwrap();
         assert_eq!(
@@ -1095,10 +1157,12 @@ mod tests {
             "a reused UID cannot expose the previous generation's file"
         );
 
-        assert!(super::attachments_for_messages(&pool, &[])
-            .await
-            .expect("empty")
-            .is_empty());
+        assert!(
+            super::attachments_for_messages(&pool, &[], &Default::default())
+                .await
+                .expect("empty")
+                .is_empty()
+        );
     }
 
     async fn attachment_schema(pool: &sqlx::SqlitePool) {
@@ -1181,6 +1245,7 @@ mod tests {
                     "nested".into(),
                     "plain".into(),
                 ],
+                &Default::default(),
             )
             .await
             .unwrap()
@@ -1319,6 +1384,115 @@ mod tests {
                 .await
                 .expect("archive path");
         assert_eq!(other, None);
+    }
+
+    /// A part of decrypted content whose cache file is gone, released by the
+    /// rolling body window or deleted by maintenance. Its part ID names a part
+    /// of the decrypted plaintext; on the server the same ID is a part of the
+    /// encrypted message, so it is never fetched under this row.
+    #[tokio::test]
+    async fn a_decrypted_part_without_its_cache_file_is_not_fetched_from_the_server() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("pool");
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .expect("migrations");
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO accounts
+             (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('acc', 'Me', 'me@example.com', 'imap', '{}', '', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("account");
+        sqlx::query(
+            "INSERT INTO folders
+             (id, account_id, name, full_path, remote_id, folder_type, uidvalidity, created_at,
+              updated_at)
+             VALUES ('fld', 'acc', 'INBOX', 'INBOX', 'INBOX', 'inbox', 7, ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("folder");
+        sqlx::query(
+            "INSERT INTO messages
+             (id, account_id, folder_id, from_address, to_addresses, date, is_draft, remote_id,
+              remote_uidvalidity, created_at, updated_at)
+             VALUES ('msg', 'acc', 'fld', 'a@b.c', '[]', ?, 0, '12', 7, ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("message");
+
+        let cache = tempfile::tempdir().expect("cache dir");
+        let id = satchel_core::email::decrypted::attachment_id("msg", "mime-1");
+        let reference = crate::db::remote_content::ContentReference::load(&pool, "msg")
+            .await
+            .expect("reference");
+        let cached = attachment_cache_path(
+            cache.path(),
+            &reference.attachment_cache_id(&id),
+            "agenda.pdf",
+        );
+        std::fs::write(&cached, b"%PDF").expect("cache file");
+        // Rows written before decrypted parts lost their remote part ID.
+        sqlx::query(
+            "INSERT INTO attachments
+             (id, message_id, filename, content_type, size, is_inline, cached_path,
+              remote_part_id, created_at)
+             VALUES (?, 'msg', 'agenda.pdf', 'application/pdf', 4, 0, ?, 'mime-1', ?)",
+        )
+        .bind(&id)
+        .bind(cached.to_string_lossy().to_string())
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("attachment");
+        let prepare = || {
+            super::prepare_attachment_in_dir(
+                cache.path(),
+                &pool,
+                super::DownloadAttachmentInput {
+                    attachment_id: id.clone(),
+                },
+            )
+        };
+        let served = prepare().await;
+        assert!(served.is_ok(), "the cached copy is served: {served:?}");
+
+        std::fs::remove_file(&cached).expect("cache file removed");
+        let missing_file = prepare().await;
+        sqlx::query("UPDATE attachments SET cached_path = NULL WHERE id = ?")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .expect("released");
+        let released = prepare().await;
+        for outcome in [missing_file, released] {
+            assert_eq!(
+                outcome.err().as_deref(),
+                Some("backend.errors.decryptedAttachmentUnavailable")
+            );
+        }
+        let row: (Option<String>, String) =
+            sqlx::query_as("SELECT filename, content_type FROM attachments WHERE id = ?")
+                .bind(&id)
+                .fetch_one(&pool)
+                .await
+                .expect("row");
+        assert_eq!(row, (Some("agenda.pdf".into()), "application/pdf".into()));
     }
 
     #[test]

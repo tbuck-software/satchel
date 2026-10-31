@@ -54,8 +54,11 @@ export interface PreparedEmailBody {
   retain(): () => void;
 }
 
+type InlineAttachmentInput = Pick<Attachment, 'id' | 'contentId' | 'contentType' | 'filename' | 'dataUrl'>;
+
 interface CacheEntry {
   signature: string;
+  attachments: InlineAttachmentInput[];
   html: string | undefined;
   text: string | undefined;
   body: PreparedEmailBody;
@@ -78,12 +81,22 @@ const MAX_CHARS = 24_000_000;
 const cache = new Map<string, CacheEntry>();
 let cachedChars = 0;
 
-function attachmentSignature(input: EmailBodyInput): string {
-  // Attachments only matter where the body points at one.
-  if (!input.html || !/cid:/i.test(input.html)) return '';
-  return input.attachments
-    .map((attachment) => `${attachment.id}:${attachment.contentId ?? ''}:${attachment.dataUrl?.length ?? 0}`)
-    .join('|');
+function inlineAttachmentInputs(input: EmailBodyInput): InlineAttachmentInput[] {
+  if (!input.html || !/cid:/i.test(input.html)) return [];
+  // Save exact inputs, including equal-length byte replacements. Copying the
+  // fields also prevents an in-place attachment edit from changing the snapshot.
+  return input.attachments.map(({ id, contentId, contentType, filename, dataUrl }) => (
+    { id, contentId, contentType, filename, dataUrl }
+  ));
+}
+
+function sameInlineAttachments(left: InlineAttachmentInput[], right: InlineAttachmentInput[]): boolean {
+  return left.length === right.length && left.every((part, index) => {
+    const other = right[index]!;
+    return part.id === other.id && part.contentId === other.contentId
+      && part.contentType === other.contentType && part.filename === other.filename
+      && part.dataUrl === other.dataUrl;
+  });
 }
 
 function createPreparedBody(input: EmailBodyInput, onGrow: (chars: number) => void): PreparedEmailBody {
@@ -219,13 +232,15 @@ export function prepareEmailBody(cacheKey: string | undefined, input: EmailBodyI
   if (!cacheKey) return createPreparedBody(input, () => {});
 
   const key = `${cacheKey}\u0000${input.normalizeQuotes ? 'quotes' : 'flat'}`;
-  const signature = `${attachmentSignature(input)}\u0000${input.missingImageSource.length}`;
+  const attachments = inlineAttachmentInputs(input);
+  const signature = input.missingImageSource;
   const existing = cache.get(key);
   if (
     existing
     && existing.html === input.html
     && existing.text === input.text
     && existing.signature === signature
+    && sameInlineAttachments(existing.attachments, attachments)
   ) {
     // Re-insert to keep the map in least-recently-used order.
     cache.delete(key);
@@ -236,6 +251,7 @@ export function prepareEmailBody(cacheKey: string | undefined, input: EmailBodyI
 
   const entry: CacheEntry = {
     signature,
+    attachments,
     html: input.html,
     text: input.text,
     size: 0,

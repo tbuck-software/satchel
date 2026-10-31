@@ -1,0 +1,30 @@
+From: Synthetic Sender <sender@example.test>
+To: Satchel GPG Fixture <gpg-fixture@example.test>
+Subject: PGP/MIME with a file between two text parts
+Date: Fri, 30 Oct 2026 11:05:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/encrypted; protocol="application/pgp-encrypted"; boundary="enc"
+
+--enc
+Content-Type: application/pgp-encrypted
+
+Version: 1
+
+--enc
+Content-Type: application/octet-stream; name="encrypted.asc"
+Content-Disposition: inline; filename="encrypted.asc"
+
+-----BEGIN PGP MESSAGE-----
+
+hF4Dut4Mfov5pmQSAQdA4/E7ebNMRYMHVd8RI9fHjvGz6KVfk8EUSpi3c07nEGAw
+V13DpdMKwwK3piWInBh7Vps9lAXdOsGLIIdkJQw8AUF0oQns0PqwDNp269y5nJjq
+0sBaAa+4VkqzU3T4RQ1cTszZ/JfnxrWLN8EZTddOPfuQrehsD/Q2avBPak4qBR2B
+lhUKAWdRQFYTTMlgDW6Tha+++0u3BYwJ0l+Ub7wTFDQOCduaz/Xdz4OeSqCqiT/f
+rPyBhRvwwE6TSqaTS7tmW7mw0Qq3KgwgLkVlaOIoy5xQGKVQe7nwQusFdFLty+ki
+jTSsBSmGe26uVzMggLOHTyx1BKhpo+nWghoXgXlXdYNGCmFFafZ8hNGYa54FcIH3
+stMYK7zj8x3DUsAsb7c0Z0aZ4QXvYcxQKrPT8d6JAODKVHyGGUn0no1+Oty78g4j
+cJnUAy6ajUMs5FrMz2P6/l76ZBsMytiLtM/sofAPsIFxlH5EIMY/0AcOlSpi
+=A+WN
+-----END PGP MESSAGE-----
+
+--enc--

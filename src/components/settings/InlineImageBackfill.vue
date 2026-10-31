@@ -6,6 +6,7 @@ import {
   backendStartInlineImageBackfill,
   backendStopInlineImageBackfill,
   backendSupportsNativeCommands,
+  translateBackendError,
   type BackendInlineCacheProgress,
   type BackendInlineCacheStatus,
 } from '@/services/backend';
@@ -44,7 +45,7 @@ async function refresh() {
     progress.value = next.progress;
     error.value = '';
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err);
+    error.value = errorText(err);
   }
 }
 
@@ -54,7 +55,7 @@ async function start() {
   try {
     await backendStartInlineImageBackfill();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err);
+    error.value = errorText(err);
   } finally {
     busy.value = false;
   }
@@ -64,9 +65,19 @@ async function stop() {
   try {
     await backendStopInlineImageBackfill();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err);
+    error.value = errorText(err);
   }
 }
+
+/** Rust names its failures by message key; a provider's own wording stays as it is. */
+function errorText(err: unknown): string {
+  return translateBackendError(err) ?? (err instanceof Error ? err.message : String(err));
+}
+
+const lastError = computed(() => {
+  const raw = progress.value?.last_error;
+  return raw ? errorText(raw) : '';
+});
 
 const running = computed(() => progress.value?.running === true);
 const missing = computed(() => status.value?.missing ?? 0);
@@ -199,7 +210,7 @@ function formatDuration(seconds: number): string {
         <span class="note">{{ $t('settings.inlineImages.note') }}</span>
       </div>
 
-      <p v-if="progress?.last_error" class="hint error">{{ progress.last_error }}</p>
+      <p v-if="lastError" class="hint error">{{ lastError }}</p>
     </template>
 
     <p v-if="error" class="hint error">{{ error }}</p>

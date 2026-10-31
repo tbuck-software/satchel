@@ -1,0 +1,37 @@
+From: Satchel GPG Fixture <gpg-fixture@example.test>
+To: Satchel GPG Fixture <gpg-fixture@example.test>
+Subject: Signed cover with a forwarded block
+Date: Fri, 30 Oct 2026 11:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/signed; micalg=pgp-sha512; protocol="application/pgp-signature"; boundary="sig"
+
+--sig
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Cover note above the forwarded block.
+
+-----BEGIN PGP MESSAGE-----
+
+hF4Dut4Mfov5pmQSAQdAz+qqpqbbv4Krd72f7KfXjJbWfIMr5jtAOuNLMmxRQyYw
+US7Ew9Aho4Yuc2PBhBk7EQhSRMapDHb7iuJUPc5TsnHHNnZk4dUEYd2fJR8+zir/
+0mYBuhLCmp6YliOprxPAJDarN8Uphwi4Ig3mbKJNeFIPYNUlD411Irt5MWfMgVfb
+je40UVnQLsA6OI+MP82Y6Ri3fmfYt4eImJNMzuaMLv2gMUPl6kSL6m6IBP1O7VjX
+D5trW9TaeT8=
+=KRbn
+-----END PGP MESSAGE-----
+
+--sig
+Content-Type: application/pgp-signature; name="signature.asc"
+Content-Disposition: attachment; filename="signature.asc"
+
+-----BEGIN PGP SIGNATURE-----
+
+iI8EABYKADcWIQTCkWCwutyFV+X+8wxaTn2RJ4W/XAUCauShrhkcZ3BnLWZpeHR1
+cmVAZXhhbXBsZS50ZXN0AAoJEFpOfZEnhb9cJjIA/3AL0HFie+w6owTnD9y3jugG
+xWvLwibSTNfKOU1TMIeqAQD86OBLMRIoKreXVhdstvHNeJxZKoaA6y39h32hQzeL
+Cg==
+=TZER
+-----END PGP SIGNATURE-----
+
+--sig--

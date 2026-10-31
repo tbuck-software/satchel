@@ -76,6 +76,7 @@ pub struct AppState {
     pub smime_unlock_sessions: Arc<Mutex<std::collections::HashMap<String, UnlockedSmimeSession>>>,
     pub pending_open_with: Arc<commands::open_with::PendingOpenWith>,
     pub write_grants: Arc<commands::write_grants::WriteGrants>,
+    pub shown_decrypted_parts: Arc<commands::attachments::ShownDecryptedParts>,
 }
 
 impl Default for AppState {
@@ -99,6 +100,7 @@ impl AppState {
             smime_unlock_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             pending_open_with: Arc::new(commands::open_with::PendingOpenWith::default()),
             write_grants: Arc::new(commands::write_grants::WriteGrants::default()),
+            shown_decrypted_parts: Arc::new(Default::default()),
         }
     }
 }

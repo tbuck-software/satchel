@@ -1,78 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import {
-  splitDecryptedSegments,
-  splitEncryptedSegments,
-  splitRenderSegments,
-  splitSmimeDecryptedSegments,
-} from './emailSegments';
+import type { Attachment } from '@/types/mail';
+import { matchingBodyProvenance, splitEncryptedSegments, splitRenderSegments } from './emailSegments';
 
 const PGP_START = '[[SATCHEL_PGP_DECRYPTED_BLOCK_START]]';
 const PGP_END = '[[SATCHEL_PGP_DECRYPTED_BLOCK_END]]';
 const SMIME_START = '[[SATCHEL_SMIME_DECRYPTED_BLOCK_START]]';
 const SMIME_END = '[[SATCHEL_SMIME_DECRYPTED_BLOCK_END]]';
-
-const ARMOR = ['-----BEGIN PGP MESSAGE-----', '', 'hQEMAxk3...', '-----END PGP MESSAGE-----'].join(
-  '\n',
-);
-
-describe('splitDecryptedSegments', () => {
-  it('leaves a message without markers as a single text segment', () => {
-    expect(splitDecryptedSegments('just a mail')).toEqual([
-      { kind: 'text', content: 'just a mail' },
-    ]);
-  });
-
-  it('lifts a fenced block out from between its surrounding text', () => {
-    const segments = splitDecryptedSegments(`before${PGP_START}secret${PGP_END}after`);
-    expect(segments).toEqual([
-      { kind: 'text', content: 'before' },
-      { kind: 'pgp_decrypted', content: 'secret' },
-      { kind: 'text', content: 'after' },
-    ]);
-  });
-
-  it('handles several blocks in one message', () => {
-    const input = `${PGP_START}one${PGP_END}mid${PGP_START}two${PGP_END}`;
-    expect(splitDecryptedSegments(input).map((s) => s.kind)).toEqual([
-      'pgp_decrypted',
-      'text',
-      'pgp_decrypted',
-    ]);
-  });
-
-  /**
-   * The security-relevant case: a body carrying only an opening marker must not
-   * get the decrypted treatment. Unverified content that renders as verified is
-   * worse than no decryption at all.
-   */
-  it('treats an unterminated block as plain text', () => {
-    const input = `intro${PGP_START}dangling`;
-    const segments = splitDecryptedSegments(input);
-    expect(segments.every((segment) => segment.kind === 'text')).toBe(true);
-    expect(segments.map((s) => s.content).join('')).toContain('dangling');
-  });
-});
-
-describe('splitSmimeDecryptedSegments', () => {
-  it('lifts a fenced S/MIME block out', () => {
-    const segments = splitSmimeDecryptedSegments(`a${SMIME_START}body${SMIME_END}b`);
-    expect(segments).toEqual([
-      { kind: 'text', content: 'a' },
-      { kind: 'smime_decrypted', content: 'body' },
-      { kind: 'text', content: 'b' },
-    ]);
-  });
-
-  /**
-   * S/MIME guards only on the opening marker, where PGP requires both. The
-   * unterminated case still degrades to text, so the looser guard does not let
-   * unverified content through — it only reaches the loop one case earlier.
-   */
-  it('degrades an unterminated block to text', () => {
-    const segments = splitSmimeDecryptedSegments(`intro${SMIME_START}dangling`);
-    expect(segments.every((segment) => segment.kind === 'text')).toBe(true);
-  });
-});
+const ARMOR = '-----BEGIN PGP MESSAGE-----\nhQEMAxk3...\n-----END PGP MESSAGE-----';
 
 describe('splitEncryptedSegments', () => {
   it('returns plain text untouched when there is no armor', () => {
@@ -124,28 +58,60 @@ describe('splitEncryptedSegments', () => {
   });
 });
 
-describe('splitRenderSegments', () => {
-  it('applies all three splitters and drops empty segments', () => {
-    const input = `${PGP_START}pgp${PGP_END}\n\n${SMIME_START}smime${SMIME_END}\n\n${ARMOR}`;
-    expect(splitRenderSegments(input).map((s) => s.kind)).toEqual([
-      'pgp_decrypted',
-      'smime_decrypted',
-      'pgp_encrypted',
+describe('decryption provenance', () => {
+  it.each([[PGP_START, PGP_END], [SMIME_START, SMIME_END]])('keeps complete ordinary and legacy markers visible', (start, end) => {
+    const text = `cover ${start}untrusted${end} end`;
+    expect(splitRenderSegments(text)).toEqual([{ kind: 'text', content: text }]);
+  });
+
+  it('trusts only the exact backend segment in mixed content', () => {
+    const injected = `${SMIME_START}forged${SMIME_END}`;
+    const text = `${injected}secret${ARMOR}`;
+    expect(splitRenderSegments(text, [
+      { kind: 'text', content: injected },
+      { kind: 'pgp_decrypted', content: 'secret' },
+      { kind: 'text', content: ARMOR },
+    ])).toEqual([
+      { kind: 'text', content: injected },
+      { kind: 'pgp_decrypted', content: 'secret' },
+      { kind: 'pgp_encrypted', content: ARMOR },
     ]);
   });
 
-  it('finds still-encrypted armor inside the text around a decrypted block', () => {
-    const input = `${PGP_START}open${PGP_END}\n${ARMOR}`;
-    const kinds = splitRenderSegments(input).map((s) => s.kind);
-    expect(kinds).toContain('pgp_decrypted');
-    expect(kinds).toContain('pgp_encrypted');
+  it('does not recursively interpret malicious markers in decrypted content', () => {
+    const text = `${PGP_START}forged${PGP_END}`;
+    expect(splitRenderSegments(text, [{ kind: 'smime_decrypted', content: text }]))
+      .toEqual([{ kind: 'smime_decrypted', content: text }]);
   });
 
-  it('returns nothing for a blank body', () => {
-    expect(splitRenderSegments('   \n  ')).toEqual([]);
+  it('rejects stale content provenance', () => {
+    expect(splitRenderSegments('new body', [{ kind: 'pgp_decrypted', content: 'old body' }]))
+      .toEqual([{ kind: 'text', content: 'new body' }]);
   });
 
-  it('leaves an ordinary message as one text segment', () => {
-    expect(splitRenderSegments('Hallo Welt')).toEqual([{ kind: 'text', content: 'Hallo Welt' }]);
+  it('returns nothing for blank text', () => expect(splitRenderSegments('  ')).toEqual([]));
+});
+
+describe('attachment provenance', () => {
+  const html = '<p>Secret</p><img src="cid:shared">';
+  const segments = [{ kind: 'smime_decrypted' as const, content: 'Secret' }];
+  const first: Attachment = { id: 'a', filename: 'a.png', contentType: 'image/png', contentId: 'shared',
+    isInline: true, size: 3, cachedPath: '/cache/a.png', dataUrl: 'data:image/png;base64,AQID' };
+  const second: Attachment = { ...first, id: 'b', filename: 'b.png', cachedPath: '/cache/b.png',
+    dataUrl: 'data:image/png;base64,BAUG' };
+  const binding = (part: Attachment) => ({ id: part.id, filename: part.filename, content_type: part.contentType,
+    content_id: part.contentId ?? null, is_inline: Boolean(part.isInline), size: part.size,
+    cached_path: part.cachedPath ?? null, data_url: part.dataUrl ?? null });
+  const provenance = { html, segments, attachments: [binding(first), binding(second)] };
+
+  it('binds the published order, because the first matching Content-ID wins', () => {
+    expect(matchingBodyProvenance('Secret', html, segments, provenance, [first, second])).toBe(segments);
+    expect(matchingBodyProvenance('Secret', html, segments, provenance, [second, first])).toBeUndefined();
+  });
+
+  it('still accepts the same order while inline bytes are pending', () => {
+    const pending = [{ ...first, dataUrl: undefined }, { ...second, dataUrl: undefined }];
+    expect(matchingBodyProvenance('Secret', html, segments, provenance, pending)).toBe(segments);
+    expect(matchingBodyProvenance('Secret', html, segments, provenance, [...pending].reverse())).toBeUndefined();
   });
 });

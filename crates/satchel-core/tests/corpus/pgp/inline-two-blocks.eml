@@ -1,0 +1,29 @@
+From: Synthetic Sender <sender@example.test>
+To: GPG Fixture <gpg-fixture@example.test>
+Subject: Two inline blocks
+Date: Fri, 30 Oct 2026 10:00:00 +0000
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Cover note.
+
+-----BEGIN PGP MESSAGE-----
+
+hF4Dut4Mfov5pmQSAQdAHxKLeKhPVTIkNBvxU7ZohCQsTqr8SAZwYUanVKrP3VAw
+A28hnJ/ERHL3eulXw8XNLCzyBq9Y33IVbUgDxMbCHyBHlsBjge9OQTWQnOgGqukP
+0nYB7ZxM2Agcl4qKaALh/wzgS4z8/udtW+qJa6jEJUHghvRCVNGo6uZsal5Dv5B3
+YYAgFir8UaQ+cJcN6NnGOmKITo+VwervCBCOMI0ue4xmCed3c9hn3/fD/J1o+7AT
+1iURdNskAXSGBKbZD3Dfir6R+7ceweIO
+=cvTc
+-----END PGP MESSAGE-----
+
+-----BEGIN PGP MESSAGE-----
+
+hF4Dut4Mfov5pmQSAQdAoHRAYKC9dNAOC742xKa72I2aC32OoZzgnm3ILgFWnSow
+QTtHk+2IdvnpUIuknJZj69hrEYkdAWffKTPTMCFx9O4rvJNQxvstjuE2JDaA4x8X
+0nMBA1C57ipirGDkMhahVsUpR3PiAL5wBE2bqE3GgTzTEPNwpLqxm4OgU9Jtkl/z
+bVYU4HO2c++e2WRItUX/hwWrn+UbZKoTf4SZ4Rnm3jSd8fmV3KWsQCxXPTrx2tjB
+T9lJsoij70QDv60huIUWw9kbFDwG
+=lFhZ
+-----END PGP MESSAGE-----

@@ -14,9 +14,9 @@ import type { InlineCacheProgress as WireInlineCacheProgress } from '../services
 import type { InlineCacheStatus as WireInlineCacheStatus } from '../services/backend/generated/app/commands/inline_cache/InlineCacheStatus';
 import type { MessageSourceDto as WireMessageSourceDto } from '../services/backend/generated/app/commands/messages/MessageSourceDto';
 import type { OptionalWireFields } from '../services/backend/wireTypes';
-export type BackendMessage = OptionalWireFields<WireMessageDto, 'reply_to' | 'body_html' | 'pgp_state' | 'pgp_error_detail' | 'pgp_signer_name' | 'pgp_signer_fingerprint' | 'smime_state' | 'smime_signer_email' | 'smime_signer_cn' | 'smime_error_detail' | 'list_unsubscribe' | 'list_unsubscribe_post' | 'auth_spf' | 'auth_dkim' | 'auth_dmarc' | 'source_payload'>;
+export type BackendMessage = OptionalWireFields<WireMessageDto, 'reply_to' | 'body_html' | 'body_segments' | 'body_provenance' | 'pgp_state' | 'pgp_error_detail' | 'pgp_signer_name' | 'pgp_signer_fingerprint' | 'smime_state' | 'smime_signer_email' | 'smime_signer_cn' | 'smime_error_detail' | 'list_unsubscribe' | 'list_unsubscribe_post' | 'auth_spf' | 'auth_dkim' | 'auth_dmarc' | 'source_payload'>;
 
-export type BackendMessageBody = OptionalWireFields<WireMessageBodyDto, 'body_html' | 'pgp_state' | 'pgp_error_detail' | 'pgp_signer_name' | 'pgp_signer_fingerprint' | 'smime_state' | 'smime_signer_email' | 'smime_signer_cn' | 'smime_error_detail' | 'list_unsubscribe' | 'list_unsubscribe_post' | 'auth_spf' | 'auth_dkim' | 'auth_dmarc' | 'source_payload'>;
+export type BackendMessageBody = OptionalWireFields<WireMessageBodyDto, 'body_html' | 'body_segments' | 'body_provenance' | 'pgp_state' | 'pgp_error_detail' | 'pgp_signer_name' | 'pgp_signer_fingerprint' | 'smime_state' | 'smime_signer_email' | 'smime_signer_cn' | 'smime_error_detail' | 'list_unsubscribe' | 'list_unsubscribe_post' | 'auth_spf' | 'auth_dkim' | 'auth_dmarc' | 'source_payload'>;
 
 export type BackendMessageSearchHit = WireMessageSearchHitDto;
 

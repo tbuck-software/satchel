@@ -22,12 +22,38 @@ use crate::providers::traits::RemoteAttachment;
 /// The rules sync and import list attachments by.
 pub const LISTING_RULES: i64 = 1;
 
+/// Whether message `m` is shown beside a root signature.
+macro_rules! beside_root_signature {
+    () => {
+        "(m.pgp_signed IS NOT NULL OR m.smime_signed IS NOT NULL)
+     AND COALESCE(CASE WHEN json_valid(m.trust_metadata)
+         THEN json_extract(m.trust_metadata, '$.root_crypto') END, 0)"
+    };
+}
+
 /// Whether attachment row `a` of message `m` stays out of a listing: written
 /// under older rules, beside a root signature.
-pub const HIDDEN_BESIDE_ROOT_SIGNATURE: &str = "(a.listing_rules < 1
-     AND (m.pgp_signed IS NOT NULL OR m.smime_signed IS NOT NULL)
-     AND COALESCE(CASE WHEN json_valid(m.trust_metadata)
-         THEN json_extract(m.trust_metadata, '$.root_crypto') END, 0))";
+///
+/// A part of decrypted content is not one of these. Its row is the decrypted
+/// body's, rewritten each time the message is decrypted, and the signed
+/// entity's own list does not hold it: see [`DECRYPTED_BESIDE_ROOT_SIGNATURE`].
+pub const HIDDEN_BESIDE_ROOT_SIGNATURE: &str = concat!(
+    "(a.listing_rules < 1
+     AND a.id NOT LIKE 'att-pgp-%'
+     AND ",
+    beside_root_signature!(),
+    ")"
+);
+
+/// Whether attachment row `a` of message `m` is a part of decrypted content
+/// beside a root signature.
+///
+/// The signature covers the ciphertext, never the part. Such a row may be
+/// listed only while the read it is listed beside shows the body it was
+/// decrypted from; without the key the block stays armored and the verdict
+/// is valid again. The listing decides that per read, not this repair.
+pub const DECRYPTED_BESIDE_ROOT_SIGNATURE: &str =
+    concat!("(a.id LIKE 'att-pgp-%' AND ", beside_root_signature!(), ")");
 
 /// What a stored bundle makes of a message's rows from older rules.
 #[derive(Debug, Clone)]
@@ -51,7 +77,8 @@ impl LegacyRows {
 /// Settle a message's rows from older rules, inside the caller's transaction.
 ///
 /// Rows written since under the current rules are the message's list; then
-/// the older rows only go.
+/// the older rows only go. Parts of decrypted content are neither: they stay
+/// as they are and do not count as the list.
 pub async fn settle_legacy_rows(
     connection: &mut SqliteConnection,
     message_id: &str,
@@ -60,11 +87,13 @@ pub async fn settle_legacy_rows(
     let attachments = match rows {
         LegacyRows::Keep => {
             sqlx::query(
-                "UPDATE attachments SET listing_rules = ? WHERE message_id = ? AND listing_rules < ?",
+                "UPDATE attachments SET listing_rules = ?
+                 WHERE message_id = ? AND listing_rules < ? AND id NOT LIKE ?",
             )
             .bind(LISTING_RULES)
             .bind(message_id)
             .bind(LISTING_RULES)
+            .bind(decrypted_attachment_ids())
             .execute(&mut *connection)
             .await?;
             return Ok(());
@@ -72,17 +101,22 @@ pub async fn settle_legacy_rows(
         LegacyRows::Rebuild(attachments) => attachments,
     };
     let listed: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM attachments WHERE message_id = ? AND listing_rules >= ?)",
+        "SELECT EXISTS(SELECT 1 FROM attachments
+                       WHERE message_id = ? AND listing_rules >= ? AND id NOT LIKE ?)",
     )
     .bind(message_id)
     .bind(LISTING_RULES)
+    .bind(decrypted_attachment_ids())
     .fetch_one(&mut *connection)
     .await?;
-    sqlx::query("DELETE FROM attachments WHERE message_id = ? AND listing_rules < ?")
-        .bind(message_id)
-        .bind(LISTING_RULES)
-        .execute(&mut *connection)
-        .await?;
+    sqlx::query(
+        "DELETE FROM attachments WHERE message_id = ? AND listing_rules < ? AND id NOT LIKE ?",
+    )
+    .bind(message_id)
+    .bind(LISTING_RULES)
+    .bind(decrypted_attachment_ids())
+    .execute(&mut *connection)
+    .await?;
     if !listed {
         insert_entity_rows(&mut *connection, message_id, attachments).await?;
     }
@@ -105,6 +139,10 @@ pub async fn settle_legacy_rows(
     .execute(&mut *connection)
     .await?;
     Ok(())
+}
+
+fn decrypted_attachment_ids() -> String {
+    crate::email::decrypted::attachment_id_pattern()
 }
 
 async fn insert_entity_rows(
@@ -392,6 +430,64 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    /// Parts of decrypted content are the decrypted body's, written again
+    /// each time the message is decrypted. The repair neither rewrites them
+    /// nor counts them as the signed entity's list. Beside a root signature
+    /// they are marked for the listing, which offers them only with the
+    /// decrypted body.
+    #[tokio::test]
+    async fn decrypted_parts_stay_outside_the_signed_entity_rules() {
+        assert_eq!(
+            crate::email::decrypted::attachment_id_pattern(),
+            "att-pgp-%",
+            "the listing conditions spell the pattern out"
+        );
+        let bundle = crate::providers::imap::parse_raw_message_body(SIGNED_WITH_ATTACHMENT)
+            .pgp_signed
+            .unwrap();
+        let pool = pool().await;
+        message(&pool, "signed", Some(&bundle), None).await;
+        let fresh = crate::email::decrypted::attachment_id("signed", "mime-1");
+        let older = crate::email::decrypted::attachment_id("signed", "mime-2");
+        attachment(&pool, "outer", "signed", 0).await;
+        attachment(&pool, &fresh, "signed", LISTING_RULES).await;
+        attachment(&pool, &older, "signed", 0).await;
+
+        let hidden: Vec<String> = sqlx::query_scalar(&format!(
+            "SELECT a.id FROM attachments a JOIN messages m ON m.id = a.message_id
+             WHERE {HIDDEN_BESIDE_ROOT_SIGNATURE} ORDER BY a.id"
+        ))
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(hidden, ["outer"]);
+        message(&pool, "unsigned", None, None).await;
+        let unsigned = crate::email::decrypted::attachment_id("unsigned", "mime-1");
+        attachment(&pool, &unsigned, "unsigned", LISTING_RULES).await;
+        let decrypted: Vec<String> = sqlx::query_scalar(&format!(
+            "SELECT a.id FROM attachments a JOIN messages m ON m.id = a.message_id
+             WHERE {DECRYPTED_BESIDE_ROOT_SIGNATURE} ORDER BY a.id"
+        ))
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let mut expected_decrypted = vec![fresh.clone(), older.clone()];
+        expected_decrypted.sort();
+        assert_eq!(decrypted, expected_decrypted);
+
+        run_repair(&pool, &SIGNED_ENTITY_ATTACHMENTS, 10, None, |_| {})
+            .await
+            .unwrap();
+
+        let mut expected = vec![
+            ("att-signed-signed-mime-1".to_string(), LISTING_RULES),
+            (fresh, LISTING_RULES),
+            (older, 0),
+        ];
+        expected.sort();
+        assert_eq!(rows(&pool, "signed").await, expected);
     }
 
     async fn threaded(pool: &SqlitePool, message: &str, thread: &str, has_attachments: i64) {

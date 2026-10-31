@@ -79,6 +79,19 @@ describe('prepareEmailBody', () => {
     expect(prepareEmailBody('m-1', input({ html: '<p>Edited</p>', attachments: [logo] }))).not.toBe(after);
   });
 
+  it('rebuilds the rendered result for equal-length attachment replacements', () => {
+    const logo: Attachment = {
+      id: 'att', filename: 'logo.png', contentType: 'image/png', size: 3,
+      contentId: 'logo@host', dataUrl: 'data:image/png;base64,AQID',
+    };
+    const before = prepareEmailBody('same-result', input({ attachments: [logo] }));
+    const oldDocument = before.document({ autoDark: false, allowRemoteImages: true });
+    logo.dataUrl = 'data:image/png;base64,BAUG';
+    const after = prepareEmailBody('same-result', input({ attachments: [logo] }));
+    expect(after).not.toBe(before);
+    expect(after.document({ autoDark: false, allowRemoteImages: true }).html).not.toBe(oldDocument.html);
+  });
+
   describe('inline images', () => {
     const logo: Attachment = {
       id: 'att', filename: 'logo.png', contentType: 'image/png', size: 4,

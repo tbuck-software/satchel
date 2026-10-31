@@ -1,0 +1,15 @@
+Content-Type: multipart/mixed; boundary=m
+
+--m
+Content-Type: text/plain; charset=utf-8
+
+My contact details are attached.
+--m
+Content-Type: text/x-vcard; charset=utf-8
+
+BEGIN:VCARD
+VERSION:3.0
+FN:Synthetic Sender
+EMAIL:sender@example.test
+END:VCARD
+--m--
