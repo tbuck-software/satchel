@@ -138,7 +138,7 @@ fn display(mime: CompleteMime) -> DisplayedBody {
         .map(|leaf| match leaf {
             ShownLeaf::Text(text) => text.clone(),
             ShownLeaf::Html(html) => crate::utils::mime::decode_html_entities(
-                &crate::email::text::strip_html_tags(&sanitize(html)),
+                &crate::email::text::visible_html_text(&sanitize(html)),
             ),
         })
         .filter(|text| !text.trim().is_empty())

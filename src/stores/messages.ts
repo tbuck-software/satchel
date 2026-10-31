@@ -129,6 +129,8 @@ function withoutInvalidContent(message: Message): Message {
   return {
     ...message,
     bodyText: '',
+    bodySegments: undefined,
+    bodyProvenance: undefined,
     bodyHtml: undefined,
     sourcePayload: undefined,
     bodyLoaded: true,
@@ -190,6 +192,19 @@ function mapBackendMessage(row: BackendMessage, threadId: string): Message {
     authDmarc: row.auth_dmarc ?? null,
     sourcePayload: parseSourcePayload(row.source_payload),
   });
+}
+
+/** What the ID of every attachment row for a part of decrypted content starts with. */
+const DECRYPTED_ATTACHMENT_PREFIX = 'att-pgp-';
+
+/**
+ * A part of decrypted content is listed only beside the body it was decrypted
+ * with: the provenance of the current read names it. Once the body shows no
+ * decrypted content, a verdict beside it does not cover the part.
+ */
+function shownWithItsDecryption(attachmentId: string, provenance: Message['bodyProvenance']): boolean {
+  return !attachmentId.startsWith(DECRYPTED_ATTACHMENT_PREFIX)
+    || Boolean(provenance?.attachments.some((part) => part.id === attachmentId));
 }
 
 /** Whether a body row carries a signature or encryption state. */
@@ -1152,15 +1167,15 @@ export const useMessagesStore = defineStore('messages', () => {
           && (messagesByThread.value[threadId]?.find(message => message.id === messageId)?.remoteUidValidity ?? null) === generations.get(messageId);
         if (!isCurrent()) continue;
 
-        const body = (messagesByThread.value[threadId] ?? [])
-          .find((message) => message.id === messageId)?.bodyHtml ?? '';
-        const referencedCids = referencedInlineCids(body);
+        const current = (messagesByThread.value[threadId] ?? []).find((message) => message.id === messageId);
+        const referencedCids = referencedInlineCids(current?.bodyHtml ?? '');
         // `null` means the attachment list itself never arrived — keep whatever
         // the message already had rather than blanking it.
         let attachments: Message['attachments'] | null = null;
         let hydrationError: string | undefined = listingError;
         if (rowsByMessage) {
-          const rows = rowsByMessage.get(messageId) ?? [];
+          const rows = (rowsByMessage.get(messageId) ?? [])
+            .filter((row) => shownWithItsDecryption(row.id, current?.bodyProvenance));
           const hydrated = await Promise.all(
             rows.map(mapAttachment).map((row) => hydrateInlineAttachment(row, referencedCids, generations.get(messageId) ?? null)),
           );

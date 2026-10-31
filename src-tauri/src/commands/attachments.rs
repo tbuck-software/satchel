@@ -38,12 +38,58 @@ const MAX_ATTACHMENT_LISTING_IDS: usize = 500;
 /// eight mails made 160 invokes for this alone; a thread is now one.
 #[tauri::command]
 pub async fn list_attachments_for_messages(
+    state: tauri::State<'_, crate::AppState>,
     pool: tauri::State<'_, crate::db::ReadPool>,
     message_ids: Vec<String>,
 ) -> CommandResult<Vec<AttachmentDto>> {
-    attachments_for_messages(pool.inner().as_ref(), &message_ids)
-        .await
-        .map_err(CommandError::unexpected)
+    attachments_for_messages(
+        pool.inner().as_ref(),
+        &message_ids,
+        &state.shown_decrypted_parts,
+    )
+    .await
+    .map_err(CommandError::unexpected)
+}
+
+/// The parts of decrypted content each message's latest read showed, by
+/// attachment cache ID, so a part belongs to the saved generation it was
+/// decrypted under.
+///
+/// Beside a root signature a part of decrypted content is listed only while
+/// the body it came from is shown decrypted: the signature covers the
+/// ciphertext, never the part. Read again without the key, the block stays
+/// armored and the verdict is valid again; the row and its cached file stay
+/// for the next decryption, and this set keeps them out of the listing. A
+/// read that shows no decrypted part forgets the message, a restart forgets
+/// every one.
+#[derive(Debug, Default)]
+pub struct ShownDecryptedParts(
+    std::sync::Mutex<std::collections::HashMap<String, std::collections::HashSet<String>>>,
+);
+
+impl ShownDecryptedParts {
+    /// What the latest read of `message_id` showed, in place of any earlier one.
+    pub(crate) fn record(&self, message_id: &str, cache_ids: std::collections::HashSet<String>) {
+        let mut shown = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        if cache_ids.is_empty() {
+            shown.remove(message_id);
+        } else {
+            shown.insert(message_id.to_string(), cache_ids);
+        }
+    }
+
+    /// The latest read of `message_id` showed nothing of it decrypted.
+    pub(crate) fn forget(&self, message_id: &str) {
+        self.record(message_id, Default::default());
+    }
+
+    fn shows(&self, message_id: &str, cache_id: &str) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(message_id)
+            .is_some_and(|shown| shown.contains(cache_id))
+    }
 }
 
 #[derive(FromRow)]
@@ -53,23 +99,27 @@ struct AttachmentListingRow {
     provider: String,
     remote_id: Option<String>,
     remote_uidvalidity: Option<i64>,
+    decrypted_beside_root_signature: bool,
 }
 
 pub(super) async fn attachments_for_messages(
     pool: &SqlitePool,
     message_ids: &[String],
+    shown_decrypted: &ShownDecryptedParts,
 ) -> Result<Vec<AttachmentDto>, sqlx::Error> {
     if message_ids.is_empty() {
         return Ok(Vec::new());
     }
     let mut rows = Vec::new();
     for chunk in message_ids.chunks(MAX_ATTACHMENT_LISTING_IDS) {
-        let mut query = sqlx::QueryBuilder::new(
+        let mut query = sqlx::QueryBuilder::new(format!(
             "SELECT a.id, a.message_id, a.filename, a.content_type, a.size, a.content_id, a.is_inline, a.cached_path,
-                    acc.provider, m.remote_id, m.remote_uidvalidity
+                    acc.provider, m.remote_id, m.remote_uidvalidity,
+                    {} AS decrypted_beside_root_signature
              FROM attachments a JOIN messages m ON m.id = a.message_id
              JOIN accounts acc ON acc.id = m.account_id WHERE a.message_id IN (",
-        );
+            satchel_core::db::signed_attachments::DECRYPTED_BESIDE_ROOT_SIGNATURE
+        ));
         let mut ids = query.separated(", ");
         for id in chunk {
             ids.push_bind(id);
@@ -91,7 +141,7 @@ pub(super) async fn attachments_for_messages(
     }
     let rows = rows
         .into_iter()
-        .map(|listing| {
+        .filter_map(|listing| {
             let mut row = listing.attachment;
             let cache_id = attachment_cache_id(
                 &listing.provider,
@@ -99,6 +149,12 @@ pub(super) async fn attachments_for_messages(
                 listing.remote_uidvalidity,
                 &row.id,
             );
+            // Beside a root signature, a decrypted part only with its body.
+            if listing.decrypted_beside_root_signature
+                && !shown_decrypted.shows(&row.message_id, &cache_id)
+            {
+                return None;
+            }
             row.filename = row.filename.as_deref().map(strip_filename_controls);
             if row
                 .cached_path
@@ -107,7 +163,7 @@ pub(super) async fn attachments_for_messages(
             {
                 row.cached_path = None;
             }
-            row
+            Some(row)
         })
         .collect();
     Ok(rows)
@@ -907,7 +963,7 @@ mod tests {
             attachment_id: "att".into(),
         };
 
-        let listed = super::attachments_for_messages(&pool, &["m".into()])
+        let listed = super::attachments_for_messages(&pool, &["m".into()], &Default::default())
             .await
             .unwrap();
         assert_eq!(listed.len(), 1, "the signature part is not listed");
@@ -946,7 +1002,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let listed = super::attachments_for_messages(&pool, &["m".into()])
+        let listed = super::attachments_for_messages(&pool, &["m".into()], &Default::default())
             .await
             .unwrap();
         assert_eq!(listed.len(), 1);
@@ -1051,9 +1107,13 @@ mod tests {
             .await
             .expect("legacy shared cache path");
 
-        let rows = super::attachments_for_messages(&pool, &["m1".into(), "m2".into()])
-            .await
-            .expect("listing");
+        let rows = super::attachments_for_messages(
+            &pool,
+            &["m1".into(), "m2".into()],
+            &Default::default(),
+        )
+        .await
+        .expect("listing");
 
         let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
         assert_eq!(ids, ["a2", "z9", "a1", "a3"]);
@@ -1067,7 +1127,7 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        let rows = super::attachments_for_messages(&pool, &["m1".into()])
+        let rows = super::attachments_for_messages(&pool, &["m1".into()], &Default::default())
             .await
             .unwrap();
         assert_eq!(
@@ -1081,7 +1141,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let rows = super::attachments_for_messages(&pool, &["m1".into()])
+        let rows = super::attachments_for_messages(&pool, &["m1".into()], &Default::default())
             .await
             .unwrap();
         assert_eq!(rows[0].cached_path.as_deref(), verified.to_str());
@@ -1089,7 +1149,7 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let rows = super::attachments_for_messages(&pool, &["m1".into()])
+        let rows = super::attachments_for_messages(&pool, &["m1".into()], &Default::default())
             .await
             .unwrap();
         assert_eq!(
@@ -1097,10 +1157,12 @@ mod tests {
             "a reused UID cannot expose the previous generation's file"
         );
 
-        assert!(super::attachments_for_messages(&pool, &[])
-            .await
-            .expect("empty")
-            .is_empty());
+        assert!(
+            super::attachments_for_messages(&pool, &[], &Default::default())
+                .await
+                .expect("empty")
+                .is_empty()
+        );
     }
 
     async fn attachment_schema(pool: &sqlx::SqlitePool) {
@@ -1183,6 +1245,7 @@ mod tests {
                     "nested".into(),
                     "plain".into(),
                 ],
+                &Default::default(),
             )
             .await
             .unwrap()

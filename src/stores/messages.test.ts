@@ -454,6 +454,77 @@ describe('messages store', () => {
     expect(messages.getByThread('th-live')[0]?.bodyProvenance).toBeUndefined();
   });
 
+  it('keeps no decrypted segments or provenance once the reference changed', async () => {
+    commandsAvailableMock.mockReturnValue(true);
+    const segments = [
+      { kind: 'text' as const, content: 'Cover. ' },
+      { kind: 'pgp_decrypted' as const, content: 'OLD-GENERATION-PLAINTEXT' },
+    ];
+    const provenance = { segments, html: null, attachments: [] };
+    previewMock.mockResolvedValue([backendMessage({ remote_uidvalidity: 7 })] as never);
+    bodiesMock.mockResolvedValue([{
+      id: 'm-live', snippet: 'x', body_text: 'Cover. OLD-GENERATION-PLAINTEXT', body_html: null,
+      body_loaded: true, remote_uidvalidity: 7, pgp_state: 'decrypted',
+      body_segments: segments, body_provenance: provenance,
+    }] as never);
+    const messages = useMessagesStore();
+    await messages.openThread('th-live');
+    expect(messages.getByThread('th-live')[0]?.bodySegments).toBeTruthy();
+
+    // A content error on a body row that still carries segments: whatever
+    // the backend sent beside it, none of it stays.
+    const content_error = JSON.stringify({ key: 'backend.errors.imapUidValidityChanged', params: { folder: 'INBOX' } });
+    previewMock.mockResolvedValue([backendMessage({ content_error, body_loaded: true, body_text: '', remote_uidvalidity: 7 })] as never);
+    bodiesMock.mockResolvedValue([{
+      id: 'm-live', snippet: '', body_text: '', body_html: null, body_loaded: true,
+      remote_uidvalidity: 7, content_error, body_segments: segments, body_provenance: provenance,
+    }] as never);
+    await messages.refreshThread('th-live');
+    const message = messages.getByThread('th-live')[0]!;
+    expect(message.bodyLoadError).toBeTruthy();
+    expect(message.bodyText).toBe('');
+    expect(message.bodySegments).toBeUndefined();
+    expect(message.bodyProvenance).toBeUndefined();
+  });
+
+  it('lists a part of decrypted content only beside the body it was decrypted with', async () => {
+    const binding = {
+      id: 'att-pgp-m-live-mime-1', filename: 'figures.csv', content_type: 'text/csv', size: 12,
+      content_id: null, is_inline: false, cached_path: '/cache/figures.csv', data_url: null,
+    };
+    const segments = [{ kind: 'pgp_decrypted' as const, content: 'Plaintext' }];
+    previewMock.mockResolvedValue([backendMessage()] as never);
+    bodiesMock.mockResolvedValue([{
+      id: 'm-live', snippet: 'Plaintext', body_text: 'Plaintext', body_html: null, body_loaded: true,
+      pgp_state: 'decrypted', body_segments: segments,
+      body_provenance: { segments, html: null, attachments: [binding] },
+    }] as never);
+    const row = (id: string, filename: string) => ({
+      id, message_id: 'm-live', filename, content_type: 'text/csv', size: 12,
+      content_id: null, is_inline: 0, cached_path: `/cache/${filename}`,
+    });
+    attachmentsMock.mockResolvedValue([
+      row('att-outer', 'encrypted.asc'),
+      row('att-pgp-m-live-mime-1', 'figures.csv'),
+      row('att-pgp-m-live-mime-2', 'stale.csv'),
+    ] as never);
+    const messages = useMessagesStore();
+    await messages.loadByThread('th-live');
+    await messages.loadAttachmentsForMessages('th-live', ['m-live']);
+    expect(messages.getByThread('th-live')[0]?.attachments.map((attachment) => attachment.id))
+      .toEqual(['att-outer', 'att-pgp-m-live-mime-1']);
+
+    // Read again without the key: no provenance, so no decrypted part.
+    bodiesMock.mockResolvedValue([{
+      id: 'm-live', snippet: 'Cover', body_text: 'Cover', body_html: null, body_loaded: true,
+      pgp_state: 'signature_valid',
+    }] as never);
+    await messages.reloadPgpMessages('th-live');
+    expect(messages.getByThread('th-live')[0]?.bodyProvenance).toBeUndefined();
+    expect(messages.getByThread('th-live')[0]?.attachments.map((attachment) => attachment.id))
+      .toEqual(['att-outer']);
+  });
+
   it('hydrates trusted verdicts and clears old HTML and authentication on reparse', async () => {
     previewMock.mockResolvedValue([backendMessage() as never]);
     bodiesMock.mockResolvedValueOnce([{

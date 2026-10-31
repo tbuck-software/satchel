@@ -22,17 +22,38 @@ use crate::providers::traits::RemoteAttachment;
 /// The rules sync and import list attachments by.
 pub const LISTING_RULES: i64 = 1;
 
+/// Whether message `m` is shown beside a root signature.
+macro_rules! beside_root_signature {
+    () => {
+        "(m.pgp_signed IS NOT NULL OR m.smime_signed IS NOT NULL)
+     AND COALESCE(CASE WHEN json_valid(m.trust_metadata)
+         THEN json_extract(m.trust_metadata, '$.root_crypto') END, 0)"
+    };
+}
+
 /// Whether attachment row `a` of message `m` stays out of a listing: written
 /// under older rules, beside a root signature.
 ///
 /// A part of decrypted content is not one of these. Its row is the decrypted
 /// body's, rewritten each time the message is decrypted, and the signed
-/// entity's own list does not hold it.
-pub const HIDDEN_BESIDE_ROOT_SIGNATURE: &str = "(a.listing_rules < 1
+/// entity's own list does not hold it: see [`DECRYPTED_BESIDE_ROOT_SIGNATURE`].
+pub const HIDDEN_BESIDE_ROOT_SIGNATURE: &str = concat!(
+    "(a.listing_rules < 1
      AND a.id NOT LIKE 'att-pgp-%'
-     AND (m.pgp_signed IS NOT NULL OR m.smime_signed IS NOT NULL)
-     AND COALESCE(CASE WHEN json_valid(m.trust_metadata)
-         THEN json_extract(m.trust_metadata, '$.root_crypto') END, 0))";
+     AND ",
+    beside_root_signature!(),
+    ")"
+);
+
+/// Whether attachment row `a` of message `m` is a part of decrypted content
+/// beside a root signature.
+///
+/// The signature covers the ciphertext, never the part. Such a row may be
+/// listed only while the read it is listed beside shows the body it was
+/// decrypted from; without the key the block stays armored and the verdict
+/// is valid again. The listing decides that per read, not this repair.
+pub const DECRYPTED_BESIDE_ROOT_SIGNATURE: &str =
+    concat!("(a.id LIKE 'att-pgp-%' AND ", beside_root_signature!(), ")");
 
 /// What a stored bundle makes of a message's rows from older rules.
 #[derive(Debug, Clone)]
@@ -413,14 +434,15 @@ mod tests {
 
     /// Parts of decrypted content are the decrypted body's, written again
     /// each time the message is decrypted. The repair neither rewrites them
-    /// nor counts them as the signed entity's list, and listings do not hide
-    /// them beside a root signature.
+    /// nor counts them as the signed entity's list. Beside a root signature
+    /// they are marked for the listing, which offers them only with the
+    /// decrypted body.
     #[tokio::test]
     async fn decrypted_parts_stay_outside_the_signed_entity_rules() {
         assert_eq!(
             crate::email::decrypted::attachment_id_pattern(),
             "att-pgp-%",
-            "HIDDEN_BESIDE_ROOT_SIGNATURE spells the pattern out"
+            "the listing conditions spell the pattern out"
         );
         let bundle = crate::providers::imap::parse_raw_message_body(SIGNED_WITH_ATTACHMENT)
             .pgp_signed
@@ -441,6 +463,19 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(hidden, ["outer"]);
+        message(&pool, "unsigned", None, None).await;
+        let unsigned = crate::email::decrypted::attachment_id("unsigned", "mime-1");
+        attachment(&pool, &unsigned, "unsigned", LISTING_RULES).await;
+        let decrypted: Vec<String> = sqlx::query_scalar(&format!(
+            "SELECT a.id FROM attachments a JOIN messages m ON m.id = a.message_id
+             WHERE {DECRYPTED_BESIDE_ROOT_SIGNATURE} ORDER BY a.id"
+        ))
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let mut expected_decrypted = vec![fresh.clone(), older.clone()];
+        expected_decrypted.sort();
+        assert_eq!(decrypted, expected_decrypted);
 
         run_repair(&pool, &SIGNED_ENTITY_ATTACHMENTS, 10, None, |_| {})
             .await

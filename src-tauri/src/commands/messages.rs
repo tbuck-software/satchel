@@ -542,6 +542,7 @@ async fn message_bodies(
             .ok_or_else(|| CommandError::new("backend.errors.messageNotAvailableLocally"))?;
         let content_error = gate_cached_body(&mut row, reference);
         let dto = if content_error.is_some() {
+            state.shown_decrypted_parts.forget(&row.id);
             map_stored_message_row(row)
         } else {
             map_message_row(
@@ -593,21 +594,8 @@ async fn message_bodies(
             .get(&body.id)
             .is_none_or(|current| !reference.same_identity(current))
         {
-            body.content_error = Some(reference.changed_error());
-            body.body_text.clear();
-            body.body_html = None;
-            body.snippet.clear();
-            body.source_payload = None;
-            body.body_loaded = true;
-            // A verdict covers the body it was shown with, which is gone.
-            body.pgp_state = None;
-            body.pgp_error_detail = None;
-            body.pgp_signer_name = None;
-            body.pgp_signer_fingerprint = None;
-            body.smime_state = None;
-            body.smime_signer_email = None;
-            body.smime_signer_cn = None;
-            body.smime_error_detail = None;
+            withdraw_content(body, reference.changed_error());
+            state.shown_decrypted_parts.forget(&body.id);
         }
     }
     log_perf(
@@ -616,6 +604,28 @@ async fn message_bodies(
         format!("message_ids={} rows={}", message_ids.len(), bodies.len()),
     );
     Ok(bodies)
+}
+
+/// The saved identity moved while the body was read: nothing read under the
+/// old one reaches the reader, only the error.
+fn withdraw_content(body: &mut MessageBodyDto, content_error: String) {
+    body.content_error = Some(content_error);
+    body.body_text.clear();
+    body.body_segments = None;
+    body.body_provenance = None;
+    body.body_html = None;
+    body.snippet.clear();
+    body.source_payload = None;
+    body.body_loaded = true;
+    // A verdict covers the body it was shown with, which is gone.
+    body.pgp_state = None;
+    body.pgp_error_detail = None;
+    body.pgp_signer_name = None;
+    body.pgp_signer_fingerprint = None;
+    body.smime_state = None;
+    body.smime_signer_email = None;
+    body.smime_signer_cn = None;
+    body.smime_error_detail = None;
 }
 
 pub use satchel_core::db::messages::{
@@ -864,27 +874,31 @@ async fn map_message_row(
                                 tracing::warn!(message_id = %dto.id, %error, "could not cache decrypted PGP attachments")
                             }
                         }
-                        dto.snippet = first_non_empty_line(&body.decrypted_text)
-                            .unwrap_or(dto.snippet.clone());
+                        // No key is consulted for a signature with nothing shown.
+                        let signs_nothing_shown = body.signs_nothing_shown();
+                        let mut checked = Vec::with_capacity(body.signatures.len());
+                        for (bundle, _) in body.signatures.iter().filter(|_| !signs_nothing_shown) {
+                            checked.push(
+                                verify_pgp_signed_bundle(
+                                    app,
+                                    pool,
+                                    &dto.id,
+                                    &dto.from_address,
+                                    bundle,
+                                )
+                                .await,
+                            );
+                        }
+                        inner_pgp = Some(decrypted_pgp_verdict(&body, checked));
+                        dto.snippet = if signs_nothing_shown {
+                            String::new()
+                        } else {
+                            first_non_empty_line(&body.decrypted_text)
+                                .unwrap_or(dto.snippet.clone())
+                        };
                         dto.body_text = body.text;
                         dto.body_segments = Some(body.segments);
                         dto.body_html = body.html;
-                        let mut verdict = PgpVerdict::decrypted();
-                        for (bundle, root) in &body.signatures {
-                            let checked = verify_pgp_signed_bundle(
-                                app,
-                                pool,
-                                &dto.id,
-                                &dto.from_address,
-                                bundle,
-                            )
-                            .await;
-                            verdict = combine_pgp_verdicts(
-                                Some(verdict),
-                                scoped(checked, *root && body.whole_body),
-                            );
-                        }
-                        inner_pgp = Some(verdict);
                     }
                     Err(key) => inner_pgp = Some(PgpVerdict::failed(key)),
                 }
@@ -1013,24 +1027,35 @@ async fn map_message_row(
                     let segments =
                         decrypted_segments(&parsed.body.text_parts, BodySegment::SmimeDecrypted);
                     dto.body_text = segments.iter().map(BodySegment::content).collect();
-                    dto.body_html = parsed.body.html;
-                    dto.snippet =
-                        first_non_empty_line(&dto.body_text).unwrap_or(dto.snippet.clone());
+                    dto.body_html = parsed.body.html.clone();
+                    // No certificate is consulted for a signature with nothing shown.
+                    let signs_nothing_shown = smime_signs_nothing_shown(&parsed);
+                    dto.snippet = if signs_nothing_shown {
+                        String::new()
+                    } else {
+                        first_non_empty_line(&dto.body_text).unwrap_or(dto.snippet.clone())
+                    };
                     dto.body_segments = Some(segments);
                     dto.smime_state = Some("decrypted".into());
                     dto.smime_error_detail = None;
-                    for (payload, root_crypto) in parsed.signatures {
+                    let mut checked = Vec::with_capacity(parsed.signatures.len());
+                    for (payload, root_crypto) in
+                        parsed.signatures.iter().filter(|_| !signs_nothing_shown)
+                    {
                         let verified =
-                            verify_smime_message(app, pool, &dto.id, &payload, &dto.from_address)
+                            verify_smime_message(app, pool, &dto.id, payload, &dto.from_address)
                                 .await;
-                        dto.smime_state = Some(verified.state);
-                        apply_signature_scope(&mut dto.smime_state, root_crypto);
-                        dto.smime_signer_email = verified.signer_email;
-                        dto.smime_signer_cn = verified.signer_cn;
-                        dto.smime_error_detail = smime_verification_error(verified.error_detail);
-                        if !keeps_verifying_smime(dto.smime_state.as_deref()) {
+                        let keeps_verifying = keeps_verifying_smime(Some(&verified.state));
+                        checked.push((verified, *root_crypto));
+                        if !keeps_verifying {
                             break;
                         }
+                    }
+                    if let Some(verified) = decrypted_smime_verdict(&parsed, checked) {
+                        dto.smime_state = Some(verified.state);
+                        dto.smime_signer_email = verified.signer_email;
+                        dto.smime_signer_cn = verified.signer_cn;
+                        dto.smime_error_detail = verified.error_detail;
                     }
                 }
                 Err(error) => {
@@ -1087,6 +1112,20 @@ async fn map_message_row(
             dto.body_html = Some(sanitized);
         }
     }
+    // Beside a root signature the listing offers a decrypted part only while
+    // a read shows it decrypted; this read decides for the next listing too.
+    state.shown_decrypted_parts.record(
+        &dto.id,
+        shown_decrypted_parts(
+            reference,
+            dto.body_segments.as_deref(),
+            if publication_complete {
+                &decrypted_attachments
+            } else {
+                &[]
+            },
+        ),
+    );
     if publication_complete {
         if let Some(segments) = dto.body_segments.as_ref() {
             let referenced = dto
@@ -1096,8 +1135,12 @@ async fn map_message_row(
                 .unwrap_or_default();
             // Include the outer encrypted file and any existing attachments too.
             // The renderer receives this same listing, not only the inner parts.
-            match super::attachments::attachments_for_messages(pool, std::slice::from_ref(&dto.id))
-                .await
+            match super::attachments::attachments_for_messages(
+                pool,
+                std::slice::from_ref(&dto.id),
+                &state.shown_decrypted_parts,
+            )
+            .await
             {
                 Ok(rows) => {
                     let attachments = rows
@@ -1447,15 +1490,35 @@ pub(super) fn root_signature_covers_body(
     trust: &crate::providers::traits::MessageTrust,
     segments: Option<&[BodySegment]>,
 ) -> bool {
-    trust.root_crypto
-        && !segments.is_some_and(|segments| {
-            segments.iter().any(|segment| {
-                matches!(
-                    segment,
-                    BodySegment::PgpDecrypted(_) | BodySegment::SmimeDecrypted(_)
-                )
-            })
+    trust.root_crypto && !shows_decrypted(segments)
+}
+
+/// The decrypted parts a read shows, by attachment cache ID: those it
+/// published, and only while its body shows decrypted content.
+fn shown_decrypted_parts(
+    reference: &ContentReference,
+    segments: Option<&[BodySegment]>,
+    published: &[DecryptedAttachmentBinding],
+) -> std::collections::HashSet<String> {
+    if !shows_decrypted(segments) {
+        return Default::default();
+    }
+    published
+        .iter()
+        .map(|part| reference.attachment_cache_id(&part.id))
+        .collect()
+}
+
+/// Whether the body shows decrypted content.
+fn shows_decrypted(segments: Option<&[BodySegment]>) -> bool {
+    segments.is_some_and(|segments| {
+        segments.iter().any(|segment| {
+            matches!(
+                segment,
+                BodySegment::PgpDecrypted(_) | BodySegment::SmimeDecrypted(_)
+            )
         })
+    })
 }
 
 /// The inline image bytes a binding carries, so the renderer can check the
@@ -1720,6 +1783,91 @@ pub(super) fn combine_pgp_verdicts(inner: Option<PgpVerdict>, outer: PgpVerdict)
         Some(inner) if pgp_severity(&inner.state) >= pgp_severity(&outer.state) => inner,
         _ => outer,
     }
+}
+
+/// Whether decrypted content carries a signature but shows and lists nothing
+/// for it to stand over. Such a signature gets no verdict, however genuine:
+/// nothing on screen is what it covers.
+fn signs_nothing_shown(
+    signed: bool,
+    text: &str,
+    html: Option<&str>,
+    attachments: &[crate::providers::traits::RemoteAttachment],
+) -> bool {
+    signed
+        && text.trim().is_empty()
+        && html.is_none_or(html_shows_nothing)
+        && attachments.is_empty()
+}
+
+/// Sanitized HTML with neither visible text nor an image: a kept `<style>`
+/// block or empty elements are all that is left of it.
+fn html_shows_nothing(html: &str) -> bool {
+    satchel_core::utils::mime::decode_html_entities(&satchel_core::email::text::visible_html_text(
+        html,
+    ))
+    .trim()
+    .is_empty()
+        && !html.contains("<img")
+}
+
+impl InlinePgpBody {
+    fn signs_nothing_shown(&self) -> bool {
+        signs_nothing_shown(
+            !self.signatures.is_empty(),
+            &self.decrypted_text,
+            self.html.as_deref(),
+            &self.attachments,
+        )
+    }
+}
+
+/// See [`signs_nothing_shown`].
+fn smime_signs_nothing_shown(parsed: &satchel_core::email::decrypted::DecryptedBody) -> bool {
+    signs_nothing_shown(
+        !parsed.signatures.is_empty(),
+        parsed.body.text.as_deref().unwrap_or_default(),
+        parsed.body.html.as_deref(),
+        &parsed.body.attachments,
+    )
+}
+
+/// The OpenPGP verdict over decrypted content, from the check of each of
+/// its signatures, in order.
+fn decrypted_pgp_verdict(body: &InlinePgpBody, checked: Vec<PgpVerdict>) -> PgpVerdict {
+    if body.signs_nothing_shown() {
+        return PgpVerdict::failed("backend.errors.signedContentUnavailable");
+    }
+    let mut verdict = PgpVerdict::decrypted();
+    for ((_, root), checked) in body.signatures.iter().zip(checked) {
+        verdict = combine_pgp_verdicts(Some(verdict), scoped(checked, *root && body.whole_body));
+    }
+    verdict
+}
+
+/// The S/MIME verdict over decrypted content, from the checks of its
+/// signatures in order, up to the first that fails. `None` when it carries
+/// no signature.
+fn decrypted_smime_verdict(
+    parsed: &satchel_core::email::decrypted::DecryptedBody,
+    checked: Vec<(SmimeVerifyMessageResult, bool)>,
+) -> Option<SmimeVerifyMessageResult> {
+    if smime_signs_nothing_shown(parsed) {
+        return Some(SmimeVerifyMessageResult::content_unavailable());
+    }
+    let mut verdict = None;
+    for (mut verified, root_crypto) in checked {
+        let mut state = Some(verified.state);
+        apply_signature_scope(&mut state, root_crypto);
+        verified.state = state.unwrap_or_default();
+        verified.error_detail = smime_verification_error(verified.error_detail);
+        let keeps_verifying = keeps_verifying_smime(Some(&verified.state));
+        verdict = Some(verified);
+        if !keeps_verifying {
+            break;
+        }
+    }
+    verdict
 }
 
 async fn verify_pgp_signed_bundle(
@@ -4185,8 +4333,13 @@ mod tests {
             panic!("bindings {bindings:?}");
         };
         assert_eq!(binding.filename, "figures.csv");
+        let shown = crate::commands::attachments::ShownDecryptedParts::default();
+        shown.record(
+            "m",
+            super::shown_decrypted_parts(&reference, Some(&body.segments), &bindings),
+        );
 
-        let listed = attachments_for_messages(&pool, &["m".into()])
+        let listed = attachments_for_messages(&pool, &["m".into()], &shown)
             .await
             .unwrap();
         let ids: Vec<&str> = listed.iter().map(|row| row.id.as_str()).collect();
@@ -4206,7 +4359,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let listed = attachments_for_messages(&pool, &["m".into()])
+        let listed = attachments_for_messages(&pool, &["m".into()], &shown)
             .await
             .unwrap();
         let ids: Vec<&str> = listed.iter().map(|row| row.id.as_str()).collect();
@@ -4233,6 +4386,295 @@ mod tests {
             expected
         );
         assert!(reference.owns_attachment_cache(&prepared.cached_path, &binding.id));
+    }
+
+    /// A root signature over a cover note and a ciphertext block whose
+    /// plaintext carries a file. Decrypted once, the file is persisted; read
+    /// again without the key, the block stays armored, the signature covers
+    /// the body and is valid again. The persisted file is no part of what it
+    /// covers, so the listing leaves it out until a read decrypts it again.
+    #[tokio::test]
+    async fn decrypted_parts_beside_a_root_signature_need_a_decrypted_read() {
+        use crate::commands::attachments::attachments_for_messages;
+        let covered = include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp/signed-covered-block.eml"
+        );
+        let parsed = parse_raw_message_body(covered);
+        let bundle = parsed.pgp_signed.clone().unwrap();
+        let signed = parsed.trust.clone();
+        assert!(signed.root_crypto && signed.signed_binding && !signed.root_encryption);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+            VALUES ('a','A','me@example.test','imap','{}','','','');
+            INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, uidvalidity, created_at, updated_at)
+            VALUES ('f','a','Inbox','INBOX','INBOX','inbox',7,'','');
+            INSERT INTO threads (id, account_id, subject, last_message_date, created_at, updated_at) VALUES ('t','a','Subject','','','');")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO messages (id, account_id, folder_id, thread_id, remote_id, remote_uidvalidity,
+                 from_address, to_addresses, date, body_text, trust_metadata, pgp_signed, created_at, updated_at)
+             VALUES ('m', 'a', 'f', 't', '42', 7, 'gpg-fixture@example.test', '[]', '', ?, ?, ?, '', '')",
+        )
+        .bind(parsed.text.as_deref().unwrap())
+        .bind(serde_json::to_string(&signed).unwrap())
+        .bind(&bundle)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Decrypted once: the block's plaintext carries a file, persisted as
+        // `map_message_row` persists it.
+        let body = super::inline_pgp_body(
+            &signed,
+            decrypted(include_bytes!(
+                "../../../crates/satchel-core/tests/corpus/pgp-mime/thunderbird-mixed-attachment.eml"
+            )),
+        )
+        .unwrap();
+        let reference = crate::db::remote_content::ContentReference::load(&pool, "m")
+            .await
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let bindings = super::persist_decrypted_attachments_in_dir(
+            dir.path(),
+            &pool,
+            &reference,
+            &body.attachments,
+        )
+        .await
+        .unwrap();
+        assert_eq!(bindings.len(), 1);
+        assert!(!super::root_signature_covers_body(
+            &signed,
+            Some(&body.segments)
+        ));
+        let shown = crate::commands::attachments::ShownDecryptedParts::default();
+        shown.record(
+            "m",
+            super::shown_decrypted_parts(&reference, Some(&body.segments), &bindings),
+        );
+        let listed = attachments_for_messages(&pool, &["m".into()], &shown)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, bindings[0].id);
+        assert_eq!(listed[0].cached_path, bindings[0].cached_path);
+
+        // Read again without the key: no decrypted segment, a valid verdict.
+        let verdict = super::scoped(
+            super::pgp_detached_verdict(Ok(
+                crate::commands::pgp::IncomingPgpDetachedSignature::Valid {
+                    signer_name: None,
+                    signer_fingerprint: "AB".into(),
+                },
+            )),
+            super::root_signature_covers_body(&signed, None),
+        );
+        assert_eq!(verdict.state, "signature_valid");
+        assert!(
+            satchel_core::providers::imap::signed_entity_attachments(&bundle)
+                .unwrap()
+                .is_empty()
+        );
+        shown.record("m", super::shown_decrypted_parts(&reference, None, &[]));
+        // A restart remembers nothing either.
+        for shown in [&shown, &Default::default()] {
+            let listed = attachments_for_messages(&pool, &["m".into()], shown)
+                .await
+                .unwrap();
+            assert!(
+                listed.is_empty(),
+                "listed beside a valid signature: {:?}",
+                listed.iter().map(|row| &row.filename).collect::<Vec<_>>()
+            );
+        }
+        // Published under another generation, the part is not this one's.
+        shown.record(
+            "m",
+            super::shown_decrypted_parts(&reference, Some(&body.segments), &bindings),
+        );
+        sqlx::query("UPDATE messages SET remote_uidvalidity = 8 WHERE id = 'm'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(attachments_for_messages(&pool, &["m".into()], &shown)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    /// Signed entities that display nothing: an empty text part, one of
+    /// blank lines, and HTML the sanitizer reduces to nothing.
+    const EMPTY_SIGNED_ENTITIES: [&str; 3] = [
+        "Content-Type: text/plain; charset=utf-8\r\n\r\n",
+        "Content-Type: text/plain; charset=utf-8\r\n\r\n\r\n   \r\n\r\n",
+        "Content-Type: text/html; charset=utf-8\r\n\r\n<script>alert(1)</script><style>p{color:red}</style><p>&nbsp;</p><div></div>",
+    ];
+
+    /// `entity` under a detached OpenPGP signature by the fixture key.
+    fn pgp_signed_entity(entity: &str) -> String {
+        let signature = satchel_core::utils::pgp_engine::sign_detached(
+            include_str!("../../../crates/satchel-core/tests/corpus/pgp/gpg-private.asc"),
+            "fixture-passphrase",
+            entity.as_bytes(),
+        )
+        .unwrap();
+        format!(
+            "Content-Type: multipart/signed; micalg=pgp-sha256; protocol=\"application/pgp-signature\"; boundary=\"S\"\r\n\r\n\
+             --S\r\n{entity}\r\n--S\r\nContent-Type: application/pgp-signature\r\n\r\n{signature}\r\n--S--\r\n"
+        )
+    }
+
+    /// A signature inside decrypted content needs something shown for it to
+    /// cover. A signed entity that shows and lists nothing gets no verdict,
+    /// however genuine the signature.
+    #[test]
+    fn a_decrypted_signed_entity_that_shows_nothing_carries_no_verdict() {
+        let public = include_str!("../../../crates/satchel-core/tests/corpus/pgp/gpg-public.asc");
+        let valid = || {
+            super::pgp_detached_verdict(Ok(
+                crate::commands::pgp::IncomingPgpDetachedSignature::Valid {
+                    signer_name: None,
+                    signer_fingerprint: "AB".into(),
+                },
+            ))
+        };
+        for entity in EMPTY_SIGNED_ENTITIES {
+            let plaintext = pgp_signed_entity(entity);
+            let body =
+                super::inline_pgp_body(&decrypted_root(), decrypted(plaintext.as_bytes())).unwrap();
+            let [(bundle, true)] = &body.signatures[..] else {
+                panic!("signatures {:?}", body.signatures.len());
+            };
+            let signed = crate::email::pgp_mime::parse_signed_message(bundle).unwrap();
+            assert!(matches!(
+                satchel_core::utils::pgp_engine::verify_detached(
+                    public,
+                    &signed.signed_entity,
+                    &signed.armored_signature
+                ),
+                Ok(satchel_core::utils::pgp_engine::DetachedVerification::Valid { .. })
+            ));
+            assert!(body.attachments.is_empty());
+            let verdict = super::decrypted_pgp_verdict(&body, vec![valid()]);
+            assert_eq!(
+                verdict,
+                super::PgpVerdict::failed("backend.errors.signedContentUnavailable"),
+                "{entity:?}"
+            );
+        }
+        let shown = pgp_signed_entity("Content-Type: text/plain\r\n\r\nSigned text\r\n");
+        let body = super::inline_pgp_body(&decrypted_root(), decrypted(shown.as_bytes())).unwrap();
+        assert_eq!(
+            super::decrypted_pgp_verdict(&body, vec![valid()]).state,
+            "signature_valid"
+        );
+    }
+
+    /// The same for S/MIME: a genuinely signed entity inside the envelope
+    /// that shows and lists nothing.
+    #[test]
+    fn a_decrypted_smime_entity_that_shows_nothing_carries_no_verdict() {
+        use satchel_core::utils::smime_engine;
+        let signer = smime_engine::generate_keypair(&smime_engine::GenerateSmimeRequest {
+            name: "Signer",
+            email: "signer@example.test",
+            passphrase: None,
+        })
+        .unwrap();
+        let valid = || crate::commands::smime::SmimeVerifyMessageResult {
+            state: "signature_valid".into(),
+            signer_email: Some("signer@example.test".into()),
+            signer_cn: Some("Signer".into()),
+            error_detail: None,
+            content: None,
+        };
+        for entity in EMPTY_SIGNED_ENTITIES {
+            let signed = smime_engine::sign(
+                &signer.pem_private_key,
+                &signer.pem_certificate,
+                None,
+                entity.as_bytes(),
+            )
+            .unwrap();
+            assert!(smime_engine::verify(&signed).unwrap().valid);
+            let parsed = satchel_core::email::decrypted::parse_decrypted_body(&signed).unwrap();
+            assert_eq!(parsed.signatures.len(), 1, "{entity:?}");
+            assert!(parsed.body.attachments.is_empty());
+            let verdict = super::decrypted_smime_verdict(&parsed, vec![(valid(), true)]).unwrap();
+            assert_eq!(verdict.state, "error", "{entity:?}");
+            assert!(verdict
+                .error_detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("backend.errors.signedContentUnavailable")));
+            assert!(verdict.signer_email.is_none() && verdict.signer_cn.is_none());
+        }
+        let signed = smime_engine::sign(
+            &signer.pem_private_key,
+            &signer.pem_certificate,
+            None,
+            b"Content-Type: text/plain\r\n\r\nSigned text\r\n",
+        )
+        .unwrap();
+        let parsed = satchel_core::email::decrypted::parse_decrypted_body(&signed).unwrap();
+        assert_eq!(
+            super::decrypted_smime_verdict(&parsed, vec![(valid(), true)])
+                .unwrap()
+                .state,
+            "signature_valid"
+        );
+    }
+
+    /// A body read while the saved identity moved keeps nothing of what was
+    /// read, decrypted plaintext and its provenance included.
+    #[test]
+    fn a_withdrawn_body_keeps_no_decrypted_content() {
+        let segments = vec![
+            super::BodySegment::Text("Cover. ".into()),
+            super::BodySegment::PgpDecrypted("Old generation plaintext".into()),
+        ];
+        let mut body = super::MessageBodyDto {
+            id: "m".into(),
+            remote_uidvalidity: Some(7),
+            content_error: None,
+            snippet: "Old generation plaintext".into(),
+            body_text: "Cover. Old generation plaintext".into(),
+            body_segments: Some(segments.clone()),
+            body_provenance: Some(super::BodyProvenance {
+                segments,
+                html: None,
+                attachments: Vec::new(),
+            }),
+            body_html: None,
+            body_loaded: true,
+            pgp_state: Some("decrypted".into()),
+            pgp_error_detail: None,
+            pgp_signer_name: None,
+            pgp_signer_fingerprint: None,
+            smime_state: None,
+            smime_signer_email: None,
+            smime_signer_cn: None,
+            smime_error_detail: None,
+            list_unsubscribe: None,
+            list_unsubscribe_post: None,
+            auth_spf: None,
+            auth_dkim: None,
+            auth_dmarc: None,
+            source_payload: None,
+        };
+        super::withdraw_content(&mut body, "changed".into());
+        assert_eq!(body.content_error.as_deref(), Some("changed"));
+        assert!(body.body_text.is_empty() && body.snippet.is_empty());
+        assert!(body.pgp_state.is_none());
+        assert!(body.body_segments.is_none());
+        assert!(body.body_provenance.is_none());
     }
 
     #[test]
