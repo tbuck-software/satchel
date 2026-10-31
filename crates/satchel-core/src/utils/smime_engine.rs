@@ -46,6 +46,10 @@ pub struct SmimeVerifyResult {
     pub signer_cert_pem: Option<String>,
     pub signer: Option<SmimeCertMetadata>,
     pub error: Option<String>,
+    /// The content an opaque signature encapsulates, as the engine read it
+    /// while checking the signature over it. Detached signatures carry none:
+    /// their content is the entity the caller split.
+    pub content: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
@@ -121,8 +125,18 @@ pub fn decrypt(
     active_engine().decrypt(pem_private_key, pem_certificate, passphrase, ciphertext)
 }
 
+/// Verify a signed payload. A `multipart/signed` bundle reaches the engine
+/// rebuilt around the entity the display path shows, so the engine's own MIME
+/// parser cannot verify a different part than the one the reader sees.
 pub fn verify(signed_payload: &[u8]) -> Result<SmimeVerifyResult, String> {
-    active_engine().verify(signed_payload)
+    let bound = crate::email::signed_mime::bind_smime_bundle(signed_payload)
+        .map_err(|error| error.to_string())?;
+    let detached = matches!(bound, std::borrow::Cow::Owned(_));
+    let mut result = active_engine().verify(&bound)?;
+    if detached {
+        result.content = None;
+    }
+    Ok(result)
 }
 
 /// Extract readable signed content only. This deliberately grants no signature
@@ -239,6 +253,7 @@ impl OpensslLibEngine {
             signer_cert_pem: None,
             signer: None,
             error: Some(error),
+            content: None,
         };
         let (pkcs7, detached_content) = match read_pkcs7(signed_payload) {
             Ok(parsed) => parsed,
@@ -248,7 +263,11 @@ impl OpensslLibEngine {
             Ok(stack) => stack,
             Err(err) => return failure(stack_error(err)),
         };
-        let outcome = pkcs7.verify(&empty, store, detached_content.as_deref(), None, flags);
+        // Opaque signed-data: the engine writes out the content it hashes.
+        let mut content = Vec::new();
+        let output = detached_content.is_none().then_some(&mut content);
+        let outcome = pkcs7.verify(&empty, store, detached_content.as_deref(), output, flags);
+        let content = (!content.is_empty()).then_some(content);
         // Report the signer either way: an invalid signature still tells the
         // user whose certificate was attached.
         let signer_cert_pem = pkcs7
@@ -278,6 +297,7 @@ impl OpensslLibEngine {
                 signer_cert_pem,
                 signer,
                 error: None,
+                content,
             },
             Err(err) => SmimeVerifyResult {
                 valid: false,
@@ -285,6 +305,7 @@ impl OpensslLibEngine {
                 signer_cert_pem,
                 signer,
                 error: Some(stack_error(err)),
+                content,
             },
         }
     }
@@ -913,6 +934,11 @@ impl SmimeEngine for OpensslCliEngine {
             chain_verified: false,
             signer_cert_pem,
             signer,
+            content: outcome
+                .as_ref()
+                .ok()
+                .filter(|content| !content.is_empty())
+                .cloned(),
             error: outcome.err(),
         };
         apply_platform_trust(signed_payload, &mut result);
@@ -2113,8 +2139,9 @@ mod tests {
             (vec!["Signed text".into()], true)
         );
 
-        // The decoder and OpenSSL read this header's boundary differently, so
-        // each finds other parts. Only the parts the decoder shows count.
+        // A lenient reader and OpenSSL read this header's boundary
+        // differently, so each finds other parts. The decoder takes the
+        // entity from the strict splitter of synced mail, which refuses it.
         let payload = format!(
             "Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; boundary=\"a;b\"\r\n\r\n\
              --a\r\nContent-Type: text/plain\r\n\r\nShown text\r\n--a\r\n{signature}\r\n--a--\r\n\
@@ -2122,8 +2149,8 @@ mod tests {
             std::str::from_utf8(content).unwrap()
         );
         assert_eq!(
-            verified(payload.as_bytes()),
-            (vec!["Shown text".into()], false)
+            crate::email::decrypted::parse_decrypted_body(payload.as_bytes()).err(),
+            Some(crate::email::decrypted::DecodeError::MalformedSigned)
         );
     }
 
@@ -2259,6 +2286,80 @@ mod tests {
         let certs = OpensslLibEngine.extract_certificates(&signed).unwrap();
         assert_eq!(certs.len(), 1);
         assert_eq!(certs[0].trim(), leaf.cert_pem.trim());
+    }
+
+    /// A detached `multipart/signed` message as it travels (OpenSSL writes the
+    /// structure with LF around a CRLF entity), and its signed entity and
+    /// signature part cut out again.
+    fn detached_signed(leaf: &Identity, entity: &[u8]) -> (Vec<u8>, String, String) {
+        let key = load_private_key(&leaf.key_pem, None).unwrap();
+        let flags = Pkcs7Flags::DETACHED;
+        let signed = Pkcs7::sign(&leaf.cert, &key, &Stack::new().unwrap(), entity, flags)
+            .unwrap()
+            .to_smime(entity, flags)
+            .unwrap();
+        let text = String::from_utf8(signed)
+            .unwrap()
+            .replace("\r\n", "\n")
+            .replace('\n', "\r\n");
+        let boundary = text
+            .split("boundary=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .unwrap();
+        let delimiter = format!("\r\n--{boundary}");
+        let mut pieces = text.split(delimiter.as_str()).skip(1);
+        let entity = pieces.next().unwrap().trim_start_matches(['\r', '\n']);
+        let signature = pieces.next().unwrap().trim_matches(['\r', '\n']);
+        (
+            text.as_bytes().to_vec(),
+            entity.to_string(),
+            signature.to_string(),
+        )
+    }
+
+    #[test]
+    fn smime_signature_holds_only_for_the_displayed_entity() {
+        let ca = issue_ca();
+        let leaf = issue_leaf(&ca, "Bob", "bob@bank.example");
+        let (signed, entity, signature) = detached_signed(
+            &leaf,
+            b"Content-Type: text/plain; charset=us-ascii\r\n\r\nOriginal signed text",
+        );
+
+        let genuine = crate::providers::imap::parse_raw_message_body(&signed);
+        assert_eq!(genuine.text.as_deref(), Some("Original signed text"));
+        let bundle = genuine.smime_signed.as_deref().expect("signed bundle kept");
+        let result = verify(bundle).unwrap();
+        assert!(result.valid, "{:?}", result.error);
+
+        let header = "Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; micalg=sha-256;";
+        let forged_part = "Content-Type: text/plain; charset=us-ascii\r\n\r\nForged text";
+        // Each shape displays text the signature does not cover.
+        let shapes = [
+            format!(
+                "{header} boundary=\"Q7;x=1\"\r\n\r\n\
+                 --Q7;x=1\r\n{entity}\r\n--Q7;x=1\r\n{signature}\r\n--Q7;x=1--\r\n\
+                 --Q7\r\n{forged_part}\r\n--Q7\r\n{signature}\r\n--Q7--\r\n"
+            ),
+            format!(
+                "{header} boundary=\"G\"\r\n\r\npreamble x--G\r\n{entity}\r\n\
+                 --G\r\nContent-Description: application/pkcs7-signature\r\n{forged_part}\r\n\
+                 --G\r\n{signature}\r\n--G--\r\n"
+            ),
+        ];
+        for shape in shapes {
+            let parsed = crate::providers::imap::parse_raw_message_body(shape.as_bytes());
+            if let Some(bundle) = parsed.smime_signed.as_deref() {
+                assert_eq!(parsed.text.as_deref(), Some("Forged text"));
+                assert!(
+                    !verify(bundle).is_ok_and(|result| result.valid),
+                    "a valid S/MIME signature is shown over text it does not cover"
+                );
+            }
+            // A bundle stored before the display path learned to reject it.
+            assert!(!verify(shape.as_bytes()).is_ok_and(|result| result.valid));
+        }
     }
 
     #[test]

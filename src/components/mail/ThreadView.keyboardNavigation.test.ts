@@ -8,6 +8,7 @@ const harness = vi.hoisted(() => ({
   messages: [] as Message[],
   messagesError: null as string | null,
   openDraft: vi.fn(),
+  toastError: vi.fn(),
   loadMessages: vi.fn().mockResolvedValue(undefined),
   loadMessageDetails: vi.fn().mockResolvedValue(undefined),
 }));
@@ -79,7 +80,7 @@ vi.mock('@/composables/useThreadActions', () => ({
   }),
 }));
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), info: vi.fn(), error: vi.fn() }),
+  useToast: () => ({ success: vi.fn(), info: vi.fn(), error: harness.toastError }),
 }));
 vi.mock('@/services/backend', () => ({
   backendBlockSender: vi.fn(), backendDownloadAttachment: vi.fn(),
@@ -248,6 +249,31 @@ describe('thread message keyboard navigation', () => {
     expect(toggleFocusedThreadMessage()).toBe(true);
     expect(harness.openDraft).toHaveBeenCalledTimes(2);
     wrapper.unmount();
+  });
+
+  it('blocks unavailable drafts at keyboard and card entry points with recovery guidance', async () => {
+    harness.messages.at(-1)!.contentError = JSON.stringify({
+      key: 'backend.errors.imapUidValidityChanged', params: { folder: 'Work/Drafts' },
+    });
+    const wrapper = render();
+    try {
+      await flushPromises();
+      moveThreadMessageFocus(1);
+      moveThreadMessageFocus(1);
+      expect(openThreadMessageFocus()).toBe(true);
+      expect(toggleFocusedThreadMessage()).toBe(true);
+      wrapper.findComponent(DraftCardStub).vm.$emit('edit');
+      expect(harness.openDraft).not.toHaveBeenCalled();
+      expect(wrapper.find('.thread-reply-foot').exists()).toBe(true);
+      expect(harness.toastError).toHaveBeenCalledTimes(3);
+      expect(harness.toastError.mock.calls.every(([text]) => text.includes('Work/Drafts'))).toBe(true);
+      const initialLoads = harness.loadMessages.mock.calls.length;
+      wrapper.findComponent(DraftCardStub).vm.$emit('retry');
+      await flushPromises();
+      expect(harness.loadMessages.mock.calls.length).toBe(initialLoads + 1);
+    } finally {
+      wrapper.unmount();
+    }
   });
 
   it('loads a body for the message it opens, not for the ones it passes', async () => {

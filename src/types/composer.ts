@@ -58,7 +58,7 @@ export type BackendDraftSendOptions = Partial<Pick<WireOutgoingMessageInput,
   'smime_encrypt_to_recipients' | 'pgp_sign_with_key_id' | 'pgp_encrypt_to_recipients'
 >> & { priority?: 'high' | 'normal' | 'low' | null };
 
-export type BackendDraft = RefinedWireFields<ProjectedWireFields<OptionalWireFields<WireDraftDto, 'send_cancelled' | 'send_options' | 'thread_id' | 'body_html' | 'from_address' | 'from_name' | 'reply_to' | 'scheduled_for' | 'attachments' | 'signature_id' | 'signature_variant' | 'signature_override_text' | 'signature_override_html' | 'revision' | 'remote_error'>, { send_options?: BackendDraftSendOptions | null; attachments?: BackendOutgoingAttachment[] }>, { signature_variant?: 'auto' | 'long' | 'short' | 'none' | null }>;
+export type BackendDraft = RefinedWireFields<ProjectedWireFields<OptionalWireFields<WireDraftDto, 'send_cancelled' | 'send_options' | 'thread_id' | 'body_html' | 'from_address' | 'from_name' | 'reply_to' | 'scheduled_for' | 'attachments' | 'signature_id' | 'signature_variant' | 'signature_override_text' | 'signature_override_html' | 'revision' | 'remote_error' | 'content_error'>, { send_options?: BackendDraftSendOptions | null; attachments?: BackendOutgoingAttachment[] }>, { signature_variant?: 'auto' | 'long' | 'short' | 'none' | null }>;
 
 export interface BackendDraftInput {
   sendOptions?: BackendDraftSendOptions | null;

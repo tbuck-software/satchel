@@ -728,6 +728,24 @@ mod tests {
         }
     }
 
+    /// POP3 has no second parser to fall back on: a signed structure that is
+    /// refused as signed must still arrive as readable, unsigned mail.
+    #[test]
+    fn a_refused_signed_structure_arrives_unsigned_not_blank() {
+        let raw = include_bytes!("../../tests/corpus/pgp-mime/forged-quoted-boundary.eml");
+        let envelope = super::envelope_from_raw("x", raw, "unknown");
+        assert!(envelope.pgp_signed.is_none());
+        assert!(!envelope.trust.root_crypto);
+        assert!(
+            envelope
+                .body_text
+                .as_deref()
+                .is_some_and(|text| !text.trim().is_empty()),
+            "{:?}",
+            envelope.body_text
+        );
+    }
+
     #[test]
     fn rejects_markup_in_attachment_mime_types() {
         let raw = b"Content-Type: multipart/related; boundary=x\r\n\r\n--x\r\nContent-Type: image/png\"><link rel=preconnect href=https://u1.t.example>\r\nContent-ID: <x>\r\nContent-Disposition: inline; filename=logo.png\r\n\r\nAAAA\r\n--x--\r\n";

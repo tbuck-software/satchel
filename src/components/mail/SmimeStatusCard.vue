@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { translateBackendError } from '@/utils/backendErrors';
 import AppButton from '@/components/ui/AppButton.vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { SmimeMessageState } from '@/types/mail';
+import { translateBackendError } from '@/utils/backendErrors';
 import AppIcon from '@/components/ui/AppIcon.vue';
 
 const { t } = useI18n();
@@ -22,6 +22,10 @@ const emit = defineEmits<{
   importCert: [];
   dismiss: [];
 }>();
+
+// Only a message key is shown. The engine's own wording is neither translated
+// nor written for readers, so the card's text stands in for it.
+const errorDetail = computed(() => translateBackendError(props.errorDetail) || undefined);
 
 // State is a closed TypeScript union; the switch covers every member.
 // oxlint-disable-next-line vue/return-in-computed-property
@@ -83,13 +87,13 @@ const config = computed(() => {
     case 'signature_invalid':
       return {
         title: t('mail.smime.signatureInvalid'),
-        description: translateBackendError(props.errorDetail) || t('mail.smime.signatureInvalidDescription'),
+        description: errorDetail.value || t('mail.smime.signatureInvalidDescription'),
         tone: 'danger',
       };
     case 'error':
       return {
         title: t('mail.smime.errorTitle'),
-        description: translateBackendError(props.errorDetail) || t('mail.smime.messageFailed'),
+        description: errorDetail.value || t('mail.smime.messageFailed'),
         tone: 'danger',
         primary: t('mail.smime.close'),
         action: () => emit('dismiss'),

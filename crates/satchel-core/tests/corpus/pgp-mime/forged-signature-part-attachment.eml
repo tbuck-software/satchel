@@ -1,0 +1,30 @@
+From: Satchel GPG Fixture <gpg-fixture@example.test>
+To: reader@example.test
+Subject: Re: build failure
+Date: Thu, 3 Sep 2026 11:30:00 +0200
+MIME-Version: 1.0
+Content-Type: multipart/signed; micalg=pgp-sha256;
+	protocol="application/pgp-signature"; boundary="Apple-Mail=_4B1E2C3D-5F60-4A7B-8C9D-0E1F2A3B4C5D"
+
+--Apple-Mail=_4B1E2C3D-5F60-4A7B-8C9D-0E1F2A3B4C5D
+Content-Transfer-Encoding: 7bit
+Content-Type: text/plain;
+	charset=us-ascii
+
+The train leaves at nine. See you on the platform.
+
+--Apple-Mail=_4B1E2C3D-5F60-4A7B-8C9D-0E1F2A3B4C5D
+Content-Type: application/pgp-signature; name="Invoice.pdf"
+Content-Disposition: attachment; filename="Invoice.pdf"
+
+%PDF-1.4 attacker bytes
+-----BEGIN PGP SIGNATURE-----
+
+iHUEABYIAB0WIQTCkWCwutyFV+X+8wxaTn2RJ4W/XAUCauTAqwAKCRBaTn2RJ4W/
+XB/0AQCCTsJnMeZLIbNkPIRBIv8Nv5PvQAKaRqhoZUExlUllUgEA6CUDXWPw2Tre
+YR6JeSEwPmCWSgqJHmGgI4DRNwq5Rg4=
+=3im0
+-----END PGP SIGNATURE-----
+
+more attacker bytes
+--Apple-Mail=_4B1E2C3D-5F60-4A7B-8C9D-0E1F2A3B4C5D--

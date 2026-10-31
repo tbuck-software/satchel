@@ -83,8 +83,11 @@
       "undoWindow": "Sende in {seconds}s — Rückgängig möglich"
     },
     "notifications": {
+      "actionFailed": "Die Aktion aus der Benachrichtigung ließ sich nicht abschließen. Versuche es in Satchel noch einmal.",
+      "mailGone": "Die E-Mail aus dieser Benachrichtigung liegt nicht mehr in Satchel.",
       "read": "Gelesen",
-      "replyPlaceholder": "Antwort schreiben …"
+      "replyPlaceholder": "Antwort schreiben …",
+      "replyWaiting": "Deine Antwort aus der Benachrichtigung bleibt erhalten. Satchel bietet sie wieder an, sobald der offene Dialog oder Entwurf geschlossen ist."
     },
     "outbox": {
       "needsAttention": "{count} E-Mail im Postausgang benötigt Aufmerksamkeit. | {count} E-Mails im Postausgang benötigen Aufmerksamkeit.",
@@ -203,6 +206,7 @@
       "exportAttachmentListUnavailable": "Für eine Nachricht fehlen lokale Angaben zu ihren Anhängen. Gleiche die Nachricht ab und versuche den Export erneut.",
       "exportAttachmentMetadataInvalid": "Die Anhangsdaten eines gespeicherten Entwurfs sind beschädigt. Öffne den Entwurf erneut und hänge die Dateien noch einmal an.",
       "exportAttachmentUnavailable": "\"{filename}\" kann nicht exportiert werden, weil die lokale Kopie fehlt oder nicht verifiziert werden kann. Lade den Anhang herunter und versuche es erneut.",
+      "exportMailboxChanged": "Während des Exports wurden Nachrichten entfernt oder ersetzt, deshalb wurde nichts gespeichert. Starte den Export erneut.",
       "exportOriginalUnavailable": "\"{subject}\" kann nicht exportiert werden, weil die vollständige Originalnachricht nicht verfügbar ist. Verbinde das Konto und versuche es erneut. Es wird keine unvollständige Nachricht exportiert.",
       "folderAccountMismatch": "Wähle einen Ordner desselben Kontos.",
       "folderContainsChildren": "Der Ordner \"{name}\" enthält noch Unterordner ({count}).",
@@ -244,8 +248,10 @@
       "messageReadFailed": "Die Nachricht konnte nicht geladen werden. Bitte versuche es erneut.",
       "messageSearchFailed": "Die Nachrichtensuche ist fehlgeschlagen. Bitte versuche es erneut.",
       "messagesQuarantined": "{count} Nachrichten in {folder} konnten für {account} nicht gespeichert werden. Die Synchronisierung läuft mit den übrigen weiter.",
+      "messagesSkipped": "{count} Nachrichten in {folder} konnten für {account} auch nach mehreren Versuchen nicht gespeichert werden. Die Synchronisierung überspringt sie und läuft weiter.",
       "noActiveAccount": "Richte zuerst ein aktives Konto ein.",
       "notAMessageFile": "So lassen sich nur .eml- und .msg-Dateien öffnen.",
+      "notificationReplyWaiting": "Eine Antwort aus einer Benachrichtigung ließ sich nicht öffnen. Satchel behält sie, bis du es erneut versuchst.",
       "oauthAccountConflict": "Diese Adresse gehört bereits zu einem IMAP-Konto und kann nicht durch OAuth ersetzt werden.",
       "oauthAccountMismatch": "Bitte wähle das Google-Konto aus, das du verbinden möchtest. Dein bestehendes Konto wurde nicht verändert.",
       "oauthAuthorizationCancelled": "Die Anmeldung wurde abgebrochen.",
@@ -309,6 +315,7 @@
       "queueRecipientRejected": "Der Server hat einen Empfänger abgelehnt. Prüfe die E-Mail-Adresse vor dem erneuten Senden.",
       "queueRejected": "Der Server hat diese Aktion abgelehnt. Prüfe die Details vor einem erneuten Versuch.",
       "queueTemporary": "Der Server ist vorübergehend nicht erreichbar. Satchel versucht es automatisch erneut.",
+      "queuedDraftNotRestorable": "Diese Nachricht lässt sich nicht mehr als Entwurf öffnen, weil sich ihr Entwurf nach dem Einreihen geändert hat. Im Postausgang kannst du sie noch ansehen oder vor dem Senden verwerfen.",
       "recipientAddressInvalid": "Das ist keine gültige Empfängeradresse: {value}",
       "replyContextLoadFailed": "Der Antwortkontext konnte nicht geladen werden. Die Nachricht wurde noch nicht gesendet.",
       "replyThreadNotFound": "Die Unterhaltung für diese Antwort ist nicht mehr verfügbar.",
@@ -345,6 +352,8 @@
       "signaturePersistenceFailed": "Signaturen sind momentan nicht verfügbar. Bitte versuche es erneut.",
       "signatureSuggestionStatusInvalid": "Wähle einen gültigen Status für den Signaturvorschlag.",
       "signatureVariantInvalid": "Wähle eine gültige Signaturvariante.",
+      "signedContentUnavailable": "Der signierte Inhalt dieser Nachricht kann nicht angezeigt werden, deshalb wird auch keine Signatur angezeigt.",
+      "signedMessageMalformed": "Die Signatur kann nicht geprüft werden, weil der Aufbau der Nachricht sie nicht eindeutig an den angezeigten Inhalt bindet.",
       "smartFolderPersistenceFailed": "Der intelligente Ordner konnte nicht gespeichert werden. Bitte versuche es erneut.",
       "smimeCertificateExists": "Dieses S/MIME-Zertifikat wurde bereits importiert.",
       "smimeCertificateNotFound": "Dieses S/MIME-Zertifikat ist nicht mehr vorhanden.",
@@ -360,6 +369,7 @@
       "smimeRemainingEncryption": "Die S/MIME-Nachricht enthält eine weitere verschlüsselte Ebene, die nicht geöffnet werden konnte.",
       "smimeUndecodedPart": "Der entschlüsselte S/MIME-Inhalt enthält einen Teil, den Satchel nicht anzeigen kann.",
       "smimeVerificationFailed": "Die S/MIME-Signatur konnte nicht überprüft werden.",
+      "snapshotMessagesHeld": "{count} Nachrichten in {folder} konnten für {account} nicht vom Server aktualisiert werden und bleiben vorerst, wo sie sind. Satchel versucht es in einem Tag erneut.",
       "systemFolderImmutable": "\"{name}\" ist ein Systemordner und kann nicht geändert werden.",
       "templateNotFound": "Die Vorlage wurde nicht gefunden.",
       "templatePersistenceFailed": "Vorlagen sind momentan nicht verfügbar. Bitte versuche es erneut.",
@@ -1000,6 +1010,7 @@
       "waiting": "Warten auf dich"
     },
     "title": "Entwürfe",
+    "unavailable": "Entwurf nicht verfügbar",
     "undo": "Rückgängig",
     "withAttachment": "Mit Anhang"
   },
@@ -1015,6 +1026,7 @@
     "inlineImageUnavailable": "Bild nicht verfügbar",
     "messageLoadFailed": "Die Nachricht konnte nicht geladen werden.",
     "messageLoadTimeout": "Das Nachladen der Nachricht hat zu lange gedauert.",
+    "messageReferenceChanged": "Die Postfachkennung der Nachricht hat sich geändert. Synchronisiere ihren Ordner und versuche es erneut.",
     "oauth": {
       "invalidGrant": "Google akzeptiert den gespeicherten Login nicht mehr (abgelaufen oder widerrufen). Bitte erneut anmelden.",
       "missingConfig": "OAuth-Konfiguration fehlt. Bitte Satchel neu installieren oder die lokale .env prüfen."
@@ -1025,6 +1037,7 @@
       "drafts": "Deine Entwürfe konnten nicht geladen werden",
       "mailboxes": "Deine Postfächer konnten nicht geladen werden",
       "messages": "Die Nachrichten konnten nicht geladen werden",
+      "notifications": "Die Verarbeitung von Benachrichtigungen ist fehlgeschlagen",
       "outbox": "Der Postausgang konnte nicht geladen werden",
       "smartFolders": "Deine intelligenten Ordner konnten nicht geladen werden",
       "sync": "Der Mail-Abgleich ist fehlgeschlagen",
@@ -1315,7 +1328,7 @@
       "signatureInvalid": "Signatur ungültig",
       "signatureInvalidDescription": "Die Signatur passt nicht zur Nachricht oder konnte nicht geprüft werden.",
       "signaturePartial": "Teilweise signiert",
-      "signaturePartialDescription": "Eine Signatur deckt einen Teil dieser Nachricht ab. Der Rest der Nachricht ist nicht signiert.",
+      "signaturePartialDescription": "Eine Signatur deckt einen Teil dieser Nachricht ab. Der Rest der Nachricht ist nicht signiert. Der angezeigte Text ist möglicherweise nicht der signierte Teil.",
       "signatureUnknownKey": "Unbekannter Signaturschlüssel",
       "signatureUnknownKeyDescription": "Die Nachricht ist signiert, aber der zugehörige öffentliche Schlüssel wurde noch nicht importiert.",
       "signatureValid": "Signatur bestätigt",
@@ -1398,7 +1411,7 @@
       "signatureInvalid": "S/MIME Signatur ungültig",
       "signatureInvalidDescription": "Die Signatur passt nicht zur Nachricht oder konnte nicht geprüft werden.",
       "signaturePartial": "Teilweise signiert",
-      "signaturePartialDescription": "Eine Signatur deckt einen Teil dieser Nachricht ab. Der Rest der Nachricht ist nicht signiert.",
+      "signaturePartialDescription": "Eine Signatur deckt einen Teil dieser Nachricht ab. Der Rest der Nachricht ist nicht signiert. Der angezeigte Text ist möglicherweise nicht der signierte Teil.",
       "signatureUnchained": "S/MIME-Zertifikat unbestätigt",
       "signatureUnchainedDescription": "Die Signatur ist unversehrt, aber die Zertifikatskette konnte nicht bestätigt werden.",
       "signatureValid": "S/MIME Signatur gültig",

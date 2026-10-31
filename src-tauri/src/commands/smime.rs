@@ -99,6 +99,32 @@ pub struct SmimeVerifyMessageResult {
     pub signer_email: Option<String>,
     pub signer_cn: Option<String>,
     pub error_detail: Option<String>,
+    /// What an opaque signature encapsulates, as the engine verified it.
+    #[serde(skip)]
+    pub content: Option<Vec<u8>>,
+}
+
+impl SmimeVerifyMessageResult {
+    /// No verdict: the structure does not tie the signature to what is shown.
+    pub fn malformed() -> Self {
+        Self::without_verdict("backend.errors.signedMessageMalformed")
+    }
+
+    /// No verdict: the signed content cannot be shown, so nothing else may be
+    /// shown in its place under the signature.
+    pub fn content_unavailable() -> Self {
+        Self::without_verdict("backend.errors.signedContentUnavailable")
+    }
+
+    fn without_verdict(key: &str) -> Self {
+        Self {
+            state: "error".to_string(),
+            signer_email: None,
+            signer_cn: None,
+            error_detail: Some(CommandError::new(key).encoded()),
+            content: None,
+        }
+    }
 }
 
 impl From<SmimeRepositoryError> for CommandError {
@@ -455,6 +481,11 @@ pub async fn verify_smime_message(
     signed_payload: &[u8],
     from_address: &str,
 ) -> SmimeVerifyMessageResult {
+    // The engine re-checks this; asking first keeps the reason as a key.
+    if let Err(error) = crate::email::signed_mime::bind_smime_bundle(signed_payload) {
+        tracing::debug!(%message_id, %error, "S/MIME signed structure rejected");
+        return SmimeVerifyMessageResult::malformed();
+    }
     let verified = {
         let payload = signed_payload.to_vec();
         let message_id = message_id.to_string();
@@ -515,6 +546,7 @@ pub async fn verify_smime_message(
                 signer_email: result.signer.as_ref().and_then(|m| m.subject_email.clone()),
                 signer_cn: result.signer.as_ref().and_then(|m| m.subject_cn.clone()),
                 error_detail: result.error,
+                content: result.content,
             }
         }
         Err(err) => SmimeVerifyMessageResult {
@@ -522,6 +554,7 @@ pub async fn verify_smime_message(
             signer_email: None,
             signer_cn: None,
             error_detail: Some(err),
+            content: None,
         },
     }
 }
@@ -835,6 +868,7 @@ mod tests {
             signer_cert_pem: None,
             signer: None,
             error: None,
+            content: None,
         }
     }
 

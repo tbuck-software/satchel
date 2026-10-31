@@ -198,6 +198,24 @@ describe('bulk workflow transitions', () => {
     expect(dismissedIds.flat().sort()).toEqual(['t-0', 't-1', 't-2']);
   });
 
+  /** A notification action is acknowledged on this answer, so it must be exact. */
+  it('resolves true once every thread is Done, including one that already was', async () => {
+    const threads = useThreadsStore();
+    threads.threads = [...seedThreads(1), { ...seedThreads(2)[1]!, workflowState: 'done' as const }];
+
+    await expect(useThreadActions().archive(['t-0', 't-1'])).resolves.toBe(true);
+    await expect(useThreadActions().archive(['t-0'])).resolves.toBe(true);
+    expect(threads.threads.every((thread) => thread.workflowState === 'done')).toBe(true);
+  });
+
+  it('resolves false for a thread it could not find or the backend no longer has', async () => {
+    const threads = useThreadsStore();
+    threads.threads = seedThreads(1);
+    await expect(useThreadActions().archive(['missing'])).resolves.toBe(false);
+    vi.mocked(backendTransitionThreads).mockResolvedValueOnce({ applied: [], failed: [{ thread_id: 't-0', error: 'thread not found' }] });
+    await expect(useThreadActions().archive(['t-0'])).resolves.toBe(false);
+  });
+
   it('undoes by snapshot id after a list load evicts the archived rows', async () => {
     const threads = useThreadsStore();
     threads.threads = seedThreads(2);
@@ -214,7 +232,7 @@ describe('bulk workflow transitions', () => {
     threads.threads = seedThreads(1);
     vi.mocked(backendSupportsNativeCommands).mockReturnValueOnce(false);
     vi.mocked(backendTransitionThreads).mockRejectedValueOnce(new Error('mock move failed'));
-    await useThreadActions().archive(['t-0']);
+    await expect(useThreadActions().archive(['t-0'])).resolves.toBe(false);
     expect(threads.find('t-0')?.workflowState).toBe('inbox');
     expect(useToast().state.toasts.every(item => item.tone === 'error')).toBe(true);
     expect(useToast().state.toasts[0]?.message).toContain('mock move failed');
@@ -238,7 +256,7 @@ describe('bulk workflow transitions', () => {
     threads.threads = seedThreads(3);
     const actions = useThreadActions();
 
-    await actions.archive(threads.threads.map((thread) => thread.id));
+    await expect(actions.archive(threads.threads.map((thread) => thread.id))).resolves.toBe(false);
 
     const toasts = useToast().state.toasts;
     expect(toasts.find((entry) => entry.tone === 'success')).toMatchObject({ count: 2 });

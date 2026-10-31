@@ -164,6 +164,8 @@
         "pgpSmimeConflict": "PGP and S/MIME cannot be used in the same message.",
         "pgpStoredPassphraseRejected": "The stored OpenPGP passphrase was rejected.",
         "pgpVerificationFailed": "The OpenPGP signature could not be verified.",
+        "signedMessageMalformed": "The signature cannot be checked because the message structure does not tie it to the displayed content.",
+        "signedContentUnavailable": "The signed content of this message cannot be shown, so its signature is not shown either.",
         "pluginCapabilityMissing": "This plugin does not declare the capability \"{capability}\" its command needs.",
         "pluginCapabilityNotGranted": "The capability \"{capability}\" has not been granted to this plugin.",
         "pluginCommandUnknown": "The plugin command \"{command}\" is not one this app dispatches.",
@@ -198,6 +200,8 @@
         "restoreSearchIndexInvalid": "The backup's search index does not match its messages. Make a fresh backup instead of restoring this one.",
         "folderIngestBlocked": "Too many messages in {folders} for {account} could not be stored ({count}). The folder is retried at its previous position.",
         "messagesQuarantined": "{count} messages in {folder} could not be stored for {account}. Sync continues with the remaining messages.",
+        "messagesSkipped": "{count} messages in {folder} still could not be stored for {account} after several attempts. Sync skips them and continues.",
+        "snapshotMessagesHeld": "{count} messages in {folder} could not be updated from the server for {account} and stay where they are for now. Satchel tries again in a day.",
         "composeWindowUnsupported": "A separate compose window is only available on the desktop.",
         "pop3PlaintextRejected": "This POP3 account is set to port 110 without encryption. Satchel will not send the password unencrypted: switch the account to port 995 with TLS.",
         "smimeRecipientCertificateAmbiguous": "Several equally trusted S/MIME certificates exist for: {recipients}. Delete the outdated one, then send again.",
@@ -225,9 +229,11 @@
         "oauthUrlRejected": "Satchel refused an unexpected sign-in address.",
         "browserWindowBlocked": "The browser blocked the new window. Allow pop-ups for Satchel and try again.",
         "browserWindowUnavailable": "There is no browser window to open this in.",
+        "notificationReplyWaiting": "A reply from a notification could not be opened. Satchel keeps it until you try again.",
         "draftSendPending": "This draft has an active send. Open it from Drafts to cancel sending before editing.",
         "draftChangedElsewhere": "This draft was changed in another window. Your text here is not saved.",
         "draftGoneElsewhere": "This draft was sent or discarded in another window. Your text here is not saved.",
+        "queuedDraftNotRestorable": "This message can no longer be reopened as a draft because its draft changed after it was queued. It is still in the Outbox, where you can view it or discard it before it is sent.",
         "accountHasNoPassword": "This account signs in through its provider and has no password to change.",
         "passwordCheckFailed": "Signing in with the new password failed: {reason}",
         "updateCheckFailed": "Updates could not be checked. Try again later.",
@@ -243,7 +249,8 @@
         "updateRestartPreparationFailed": "The verified update is installed, but macOS could not prepare it for restart. Try again.",
         "accountColorInvalid": "Choose a colour as #rrggbb.",
         "accountAvatarInvalid": "The picture must be a small PNG, JPEG or WebP image.",
-        "exportOriginalUnavailable": "Cannot export \"{subject}\" because its complete original message is unavailable. Connect the account and try again. A partial message will not be exported."
+        "exportOriginalUnavailable": "Cannot export \"{subject}\" because its complete original message is unavailable. Connect the account and try again. A partial message will not be exported.",
+        "exportMailboxChanged": "Messages were removed or replaced while the export was running, so nothing was saved. Run the export again."
       }
     }
   },
@@ -412,6 +419,8 @@
         "pgpSmimeConflict": "PGP und S/MIME können nicht in derselben Nachricht verwendet werden.",
         "pgpStoredPassphraseRejected": "Die gespeicherte OpenPGP-Passphrase wurde abgelehnt.",
         "pgpVerificationFailed": "Die OpenPGP-Signatur konnte nicht geprüft werden.",
+        "signedMessageMalformed": "Die Signatur kann nicht geprüft werden, weil der Aufbau der Nachricht sie nicht eindeutig an den angezeigten Inhalt bindet.",
+        "signedContentUnavailable": "Der signierte Inhalt dieser Nachricht kann nicht angezeigt werden, deshalb wird auch keine Signatur angezeigt.",
         "pluginCapabilityMissing": "Dieses Plugin führt die Funktion \"{capability}\" nicht auf, die sein Kommando braucht.",
         "pluginCapabilityNotGranted": "Die Funktion \"{capability}\" ist diesem Plugin nicht erlaubt.",
         "pluginCommandUnknown": "Das Plugin-Kommando \"{command}\" wird von dieser App nicht vergeben.",
@@ -446,6 +455,8 @@
         "restoreSearchIndexInvalid": "Der Suchindex der Sicherung passt nicht zu ihren Nachrichten. Lege lieber eine frische Sicherung an, statt diese zurückzuspielen.",
         "folderIngestBlocked": "In {folders} konnten für {account} zu viele Nachrichten nicht gespeichert werden ({count}). Der Ordner wird an derselben Stelle erneut geholt.",
         "messagesQuarantined": "{count} Nachrichten in {folder} konnten für {account} nicht gespeichert werden. Die Synchronisierung läuft mit den übrigen weiter.",
+        "messagesSkipped": "{count} Nachrichten in {folder} konnten für {account} auch nach mehreren Versuchen nicht gespeichert werden. Die Synchronisierung überspringt sie und läuft weiter.",
+        "snapshotMessagesHeld": "{count} Nachrichten in {folder} konnten für {account} nicht vom Server aktualisiert werden und bleiben vorerst, wo sie sind. Satchel versucht es in einem Tag erneut.",
         "composeWindowUnsupported": "Ein eigenes Schreibfenster gibt es nur auf dem Desktop.",
         "pop3PlaintextRejected": "Dieses POP3-Konto steht auf Port 110 ohne Verschlüsselung. Satchel sendet das Passwort nicht im Klartext: stelle das Konto auf Port 995 mit TLS um.",
         "smimeRecipientCertificateAmbiguous": "Für folgende Adresse liegen mehrere gleichrangige S/MIME-Zertifikate vor: {recipients}. Lösche das veraltete und sende erneut.",
@@ -473,9 +484,11 @@
         "oauthUrlRejected": "Satchel hat eine unerwartete Anmeldeadresse abgelehnt.",
         "browserWindowBlocked": "Der Browser hat das neue Fenster blockiert. Erlaube Pop-ups für Satchel und versuche es erneut.",
         "browserWindowUnavailable": "Es steht kein Browserfenster zum Öffnen zur Verfügung.",
+        "notificationReplyWaiting": "Eine Antwort aus einer Benachrichtigung ließ sich nicht öffnen. Satchel behält sie, bis du es erneut versuchst.",
         "draftSendPending": "Dieser Entwurf hat einen aktiven Versand. Öffne ihn unter Entwürfe, um den Versand vor dem Bearbeiten abzubrechen.",
         "draftChangedElsewhere": "Dieser Entwurf wurde in einem anderen Fenster geändert. Dein Text hier ist nicht gespeichert.",
         "draftGoneElsewhere": "Dieser Entwurf wurde in einem anderen Fenster gesendet oder verworfen. Dein Text hier ist nicht gespeichert.",
+        "queuedDraftNotRestorable": "Diese Nachricht lässt sich nicht mehr als Entwurf öffnen, weil sich ihr Entwurf nach dem Einreihen geändert hat. Im Postausgang kannst du sie noch ansehen oder vor dem Senden verwerfen.",
         "accountHasNoPassword": "Dieses Konto meldet sich über seinen Anbieter an und hat kein Passwort, das sich ändern ließe.",
         "passwordCheckFailed": "Die Anmeldung mit dem neuen Passwort ist fehlgeschlagen: {reason}",
         "updateCheckFailed": "Updates konnten nicht geprüft werden. Versuche es später erneut.",
@@ -491,7 +504,8 @@
         "updateRestartPreparationFailed": "Das geprüfte Update ist installiert, aber macOS konnte den Neustart nicht vorbereiten. Versuche es erneut.",
         "accountColorInvalid": "Wähle eine Farbe im Format #rrggbb.",
         "accountAvatarInvalid": "Das Bild muss ein kleines PNG-, JPEG- oder WebP-Bild sein.",
-        "exportOriginalUnavailable": "\"{subject}\" kann nicht exportiert werden, weil die vollständige Originalnachricht nicht verfügbar ist. Verbinde das Konto und versuche es erneut. Es wird keine unvollständige Nachricht exportiert."
+        "exportOriginalUnavailable": "\"{subject}\" kann nicht exportiert werden, weil die vollständige Originalnachricht nicht verfügbar ist. Verbinde das Konto und versuche es erneut. Es wird keine unvollständige Nachricht exportiert.",
+        "exportMailboxChanged": "Während des Exports wurden Nachrichten entfernt oder ersetzt, deshalb wurde nichts gespeichert. Starte den Export erneut."
       }
     }
   }

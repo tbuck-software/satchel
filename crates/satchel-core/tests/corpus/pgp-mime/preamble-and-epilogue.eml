@@ -1,0 +1,27 @@
+From: Satchel GPG Fixture <gpg-fixture@example.test>
+To: reader@example.test
+Subject: Meeting notes
+MIME-Version: 1.0
+Content-Type: multipart/signed; protocol="application/pgp-signature"; micalg=pgp-sha512; boundary="=_notes_7f3a"
+
+This is a multi-part message in MIME format.
+Readers without MIME support show this preamble.
+
+--=_notes_7f3a
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Notes from today: we ship on Friday. Grüße.
+
+--=_notes_7f3a
+Content-Type: application/pgp-signature
+
+-----BEGIN PGP SIGNATURE-----
+
+iHUEABYKAB0WIQTCkWCwutyFV+X+8wxaTn2RJ4W/XAUCauTAqwAKCRBaTn2RJ4W/
+XB+dAP49oAwHQKEhxjz4vh6uDQgl9NPP0BjhF1fVzm46ZMUnzQD/a5DLQfehCH0M
+Lv3ItpilIFTqHCYq5eHhnWT/nqJ7nQ8=
+=Hs6g
+-----END PGP SIGNATURE-----
+--=_notes_7f3a--
+This epilogue is ignored by MIME readers.

@@ -192,7 +192,7 @@
         "unlockTitleDescription": "The key is available. Enter your passphrase to read the message.",
         "unlocked": "PGP key unlocked for this session.",
         "signaturePartial": "Partially signed",
-        "signaturePartialDescription": "A signature covers one part of this message. The rest of the message is unsigned."
+        "signaturePartialDescription": "A signature covers one part of this message. The rest of the message is unsigned. The text shown may not be the signed part."
       },
       "pgpBlock": {
         "decryptHint": "Decrypt this block with your stored private keys. Satchel will ask for a passphrase if needed.",
@@ -276,7 +276,7 @@
         "unlockTitleDescription": "The certificate is available. Enter its passphrase to read the message.",
         "unlocked": "S/MIME certificate unlocked for this session.",
         "signaturePartial": "Partially signed",
-        "signaturePartialDescription": "A signature covers one part of this message. The rest of the message is unsigned."
+        "signaturePartialDescription": "A signature covers one part of this message. The rest of the message is unsigned. The text shown may not be the signed part."
       },
       "source": {
         "copied": "Copied to the clipboard.",
@@ -532,7 +532,7 @@
         "unlockTitleDescription": "Der Schlüssel ist vorhanden. Gib deine Passphrase ein, um die Nachricht zu lesen.",
         "unlocked": "PGP-Schlüssel für diese Sitzung entsperrt.",
         "signaturePartial": "Teilweise signiert",
-        "signaturePartialDescription": "Eine Signatur deckt einen Teil dieser Nachricht ab. Der Rest der Nachricht ist nicht signiert."
+        "signaturePartialDescription": "Eine Signatur deckt einen Teil dieser Nachricht ab. Der Rest der Nachricht ist nicht signiert. Der angezeigte Text ist möglicherweise nicht der signierte Teil."
       },
       "pgpBlock": {
         "decryptHint": "Entschlüssle diesen Block mit deinen gespeicherten privaten Schlüsseln. Falls nötig, fragt Satchel nach der Passphrase.",
@@ -616,7 +616,7 @@
         "unlockTitleDescription": "Das Zertifikat ist vorhanden. Gib dessen Passphrase ein, um die Nachricht zu lesen.",
         "unlocked": "S/MIME-Zertifikat für diese Sitzung entsperrt.",
         "signaturePartial": "Teilweise signiert",
-        "signaturePartialDescription": "Eine Signatur deckt einen Teil dieser Nachricht ab. Der Rest der Nachricht ist nicht signiert."
+        "signaturePartialDescription": "Eine Signatur deckt einen Teil dieser Nachricht ab. Der Rest der Nachricht ist nicht signiert. Der angezeigte Text ist möglicherweise nicht der signierte Teil."
       },
       "source": {
         "copied": "In die Zwischenablage kopiert.",

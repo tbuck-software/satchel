@@ -8,6 +8,7 @@ const props = defineProps<{
   messages: Message[];
   draftMessages: Message[];
   canReply: boolean;
+  loading?: boolean;
   draftBusy: (messageId: string) => boolean;
   /** Who a draft is addressed to, as the thread knows them. */
   draftRecipient: (message: Message) => string;
@@ -27,6 +28,7 @@ const emit = defineEmits<{
   reply: [];
   forward: [];
   editDraft: [messageId: string];
+  retryDraft: [messageId: string];
   discardDraft: [messageId: string];
   focusMessage: [messageId: string];
   toggleCollapsed: [messageId: string];
@@ -64,9 +66,10 @@ const shownDrafts = computed(() => props.draftMessages.filter((draft) => draft.i
       :recipient="props.draftRecipient(draft)"
       :identity="props.draftIdentity"
       :identity-color="props.draftIdentityColor"
-      :busy="props.draftBusy(draft.id)"
+      :busy="props.loading || props.draftBusy(draft.id)"
       :keyboard-focused="props.keyboardActive && props.focusedMessageId === draft.id"
       @edit="emit('editDraft', draft.id)"
+      @retry="emit('retryDraft', draft.id)"
       @discard="emit('discardDraft', draft.id)"
       @focus="emit('focusMessage', draft.id)"
     />

@@ -11,8 +11,8 @@ import {
   backendGetNotificationPreferences,
   backendImportIcs,
   backendImportIcsPath,
-  backendMobileNotificationsFrontendReady,
   backendPendingCrashReports,
+  backendRuntimeCapabilities,
   backendUndoOutboxSend,
   backendRunImapSync,
   backendSetBackgroundSync,
@@ -31,10 +31,9 @@ import {
   MAIL_ACTIONS,
   notificationAction,
   notificationReplyText,
-  notificationRouteThreadId,
   notificationThreadId,
-  type NativeNotificationRoute,
 } from '@/utils/notificationNavigation';
+import type { IosNotificationResponses, NotificationActionOutcome } from '@/mobile/iosNotificationResponses';
 import { useAccountsStore } from '@/stores/accounts';
 import { useAliasesStore } from '@/stores/aliases';
 import { useConnectionStore } from '@/stores/connection';
@@ -58,6 +57,7 @@ import { useAppUpdateStore } from '@/stores/appUpdate';
 import { useToast } from '@/composables/useToast';
 import { useQueueFailureToasts } from '@/composables/useQueueFailureToasts';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
+import { queuedDraftNeedsOutbox } from '@/utils/outboxLabels';
 import { useKeyboard } from '@/composables/useKeyboard';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { createMobileResume } from '@/mobile/resume';
@@ -422,6 +422,9 @@ export function useAppBootstrap(): void {
         connectionStore.backendErrorFor('drafts') ? draftsStore.load() : undefined,
         connectionStore.backendErrorFor('templates') ? templatesStore.load() : undefined,
         connectionStore.backendErrorFor('smartFolders') ? smartFoldersStore.load() : undefined,
+        connectionStore.backendErrorFor('notifications') && backendSupportsNativeCommands()
+          ? (iosNotifications ? iosNotifications.redeliver() : connectNotificationRoutes())
+          : undefined,
         connectionStore.refresh(),
       ]);
     } finally {
@@ -467,6 +470,17 @@ export function useAppBootstrap(): void {
   const refreshMobileMailState = mobileResume.refreshMailState;
 
   /**
+   * The backend says the mail is gone. Nothing a retry could change, so the
+   * response is final; the notification goes too, and the user learns why
+   * nothing happened.
+   */
+  async function settleMissingThread(threadId: string): Promise<NotificationActionOutcome> {
+    useToast().info(t('app.notifications.mailGone'));
+    await backendDismissMobileNotifications([threadId]).catch(() => {});
+    return 'done';
+  }
+
+  /**
    * Act on a notification without making the user open the app first.
    *
    * Filing and marking read finish in place; only replying needs the composer,
@@ -476,19 +490,18 @@ export function useAppBootstrap(): void {
   async function handleNotificationAction(
     notification: Parameters<typeof notificationThreadId>[0],
     threadId: string,
-  ) {
+  ): Promise<NotificationActionOutcome> {
     const action = notificationAction(notification);
 
     if (action === MAIL_ACTIONS.archive) {
-      await threadsStore.ensureThreadLoaded(threadId);
-      await threadActions.archive([threadId]);
+      if ((await threadsStore.ensureThreadLoaded(threadId)) === 'missing') return settleMissingThread(threadId);
+      if (!(await threadActions.archive([threadId]))) return 'failed';
       await backendDismissMobileNotifications([threadId]).catch(() => {});
-      return;
+      return 'done';
     }
     if (action === MAIL_ACTIONS.read) {
-      await threadsStore.ensureThreadLoaded(threadId);
-      await threadActions.setRead([threadId], true);
-      return;
+      if ((await threadsStore.ensureThreadLoaded(threadId)) === 'missing') return settleMissingThread(threadId);
+      return (await threadActions.setRead([threadId], true)) ? 'done' : 'failed';
     }
 
     if (action === MAIL_ACTIONS.reply) {
@@ -501,9 +514,19 @@ export function useAppBootstrap(): void {
       // Opened rather than sent: a reply the user cannot re-read before it
       // leaves is not a favour, and the notification field has no formatting,
       // no recipient list and no signature.
-      composer.open({ mode: 'reply', threadId, body: notificationReplyText(notification) });
+      const opened = await composer.openWithOutcome({
+        mode: 'reply',
+        threadId,
+        body: notificationReplyText(notification),
+        unsavedBody: true,
+      });
+      // Nobody answered the replacement question, or the user agreed but the
+      // open draft could not be saved: the reply text exists nowhere else yet.
+      if (opened === 'unsaved' || opened === 'interrupted') return opened;
+      if (opened !== 'opened') return 'cancelled';
       await backendDismissMobileNotifications([threadId]).catch(() => {});
     }
+    return 'done';
   }
 
   /**
@@ -537,6 +560,68 @@ export function useAppBootstrap(): void {
   function adoptDisposer(dispose: Disposer) {
     if (bootstrapDisposed) void dispose();
     else eventDisposers.push(dispose);
+  }
+
+  /**
+   * Resume and Android navigation do not depend on the iOS notification lease,
+   * so a failure there must not take them down; neither do they each other.
+   */
+  function registerMobileLifecycleListeners() {
+    mobileVisibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshMobileMailState();
+      }
+    };
+    window.addEventListener('focus', mobileVisibilityHandler);
+    document.addEventListener('visibilitychange', mobileVisibilityHandler);
+    const registrations: { name: string; register: () => Promise<Disposer> }[] = [
+      { name: 'mobile:resumed', register: () => listen('mobile:resumed', () => void refreshMobileMailState()) },
+      {
+        name: 'mobile:notification-navigation',
+        register: () => listen('mobile:notification-navigation', () => void consumePendingMobileNavigation()),
+      },
+    ];
+    for (const entry of registrations) {
+      entry.register().then(adoptDisposer, (error) => {
+        console.warn(`event listener ${entry.name} failed to register`, error);
+      });
+    }
+  }
+
+  let iosNotifications: IosNotificationResponses | null = null;
+  /**
+   * Only iOS hands mail responses to a listener lease; Android and the desktop
+   * route theirs elsewhere. Ask the shell rather than guess from the user
+   * agent, and load the handling, which no other platform needs in its startup
+   * bundle, before the first lease: a lease without it would drop responses.
+   */
+  async function connectNotificationRoutes(): Promise<void> {
+    if (!iosNotifications) {
+      try {
+        const { platform } = await backendRuntimeCapabilities();
+        if (platform !== 'ios') {
+          // Nothing else reports here; a Retry after a failed query is done.
+          connectionStore.clearBackendError('notifications');
+          return;
+        }
+        if (bootstrapDisposed) return;
+        const { createIosNotificationResponses } = await import('@/mobile/iosNotificationResponses');
+        if (bootstrapDisposed) return;
+        iosNotifications ??= createIosNotificationResponses({
+          t,
+          composer,
+          connection: connectionStore,
+          handleNotificationAction,
+          adoptDisposer,
+          isDisposed: () => bootstrapDisposed,
+        });
+      } catch (error) {
+        connectionStore.reportBackendError('notifications', error);
+        console.warn('mobile notification bridge failed', error);
+        return;
+      }
+    }
+    await iosNotifications.connect();
   }
 
   async function registerStartupEvents() {
@@ -573,7 +658,12 @@ export function useAppBootstrap(): void {
                 } catch (err) {
                   toast.error(t('app.mail.cancelFailed', {
                     error: err instanceof Error ? err.message : String(err),
-                  }));
+                  }), queuedDraftNeedsOutbox(err) ? {
+                    action: {
+                      label: t('nav.folders.outbox'),
+                      handler: () => router.push({ name: 'outbox' }),
+                    },
+                  } : {});
                   return false;
                 }
               },
@@ -659,33 +749,8 @@ export function useAppBootstrap(): void {
     void notificationRestore;
 
     if (backendSupportsNativeCommands()) {
-      void (async () => {
-        try {
-          const { listen } = await import('@tauri-apps/api/event');
-          // iOS: a tap the native side held back until this listener existed.
-          adoptDisposer(await listen<NativeNotificationRoute>('mobile:notification-route', ({ payload }) => {
-            const threadId = notificationRouteThreadId(payload);
-            if (threadId) void router.push({ name: 'thread', params: { id: threadId } });
-          }));
-          adoptDisposer(await listen('mobile:resumed', () => {
-            void refreshMobileMailState();
-          }));
-          adoptDisposer(await listen('mobile:notification-navigation', () => {
-            void consumePendingMobileNavigation();
-          }));
-          if (bootstrapDisposed) return;
-          mobileVisibilityHandler = () => {
-            if (document.visibilityState === 'visible') {
-              void refreshMobileMailState();
-            }
-          };
-          window.addEventListener('focus', mobileVisibilityHandler);
-          document.addEventListener('visibilitychange', mobileVisibilityHandler);
-          await backendMobileNotificationsFrontendReady();
-        } catch (error) {
-          console.warn('mobile notification bridge failed', error);
-        }
-      })();
+      registerMobileLifecycleListeners();
+      void connectNotificationRoutes();
     }
 
     // Follow a notification before the full Inbox query. A large local mailbox
@@ -929,10 +994,8 @@ export function useAppBootstrap(): void {
             }),
           },
           {
-            // The mobile half of the same story. `onAction` fires when the OS reports
-            // a tap on Android and iOS, where the plugin does deliver actions; on the
-            // desktop it never fires and the native delegate in `utils::mac_notify`
-            // emits `mail:focus-thread` instead. Both end at the same route.
+            // Android plugin actions carry extra. iOS mail responses exclusively use
+            // mobile:notification-route; desktop uses mail:focus-thread.
             name: 'notification:action',
             register: async () => {
               const { onAction, registerActionTypes } = await import('@tauri-apps/plugin-notification');
@@ -949,6 +1012,7 @@ export function useAppBootstrap(): void {
                     {
                       id: MAIL_ACTIONS.reply,
                       title: t('common.reply'),
+                      foreground: true,
                       input: true,
                       inputButtonTitle: t('ui.send'),
                       inputPlaceholder: t('app.notifications.replyPlaceholder'),
@@ -1100,6 +1164,7 @@ export function useAppBootstrap(): void {
 
   onBeforeUnmount(() => {
     bootstrapDisposed = true;
+    iosNotifications?.dispose();
     startupEvents.dispose();
     cancelInteractionPrefetch?.();
     cancelInteractionPrefetch = null;

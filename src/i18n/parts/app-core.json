@@ -11,6 +11,7 @@
       },
       "inlineImageUnavailable": "Image unavailable",
       "messageLoadFailed": "The message could not be loaded.",
+      "messageReferenceChanged": "The message's mailbox identity changed. Sync its folder and try again.",
       "messageLoadTimeout": "Loading the message took too long.",
       "oauth": {
         "invalidGrant": "Google no longer accepts the stored sign-in (expired or revoked). Please sign in again.",
@@ -22,6 +23,7 @@
         "drafts": "Your drafts could not be loaded",
         "mailboxes": "Your mailboxes could not be loaded",
         "messages": "The messages could not be loaded",
+        "notifications": "Notification handling failed",
         "outbox": "The outbox could not be loaded",
         "sync": "Mail sync failed",
         "threads": "The conversations could not be loaded",
@@ -330,6 +332,7 @@
       },
       "inlineImageUnavailable": "Bild nicht verfügbar",
       "messageLoadFailed": "Die Nachricht konnte nicht geladen werden.",
+      "messageReferenceChanged": "Die Postfachkennung der Nachricht hat sich geändert. Synchronisiere ihren Ordner und versuche es erneut.",
       "messageLoadTimeout": "Das Nachladen der Nachricht hat zu lange gedauert.",
       "oauth": {
         "invalidGrant": "Google akzeptiert den gespeicherten Login nicht mehr (abgelaufen oder widerrufen). Bitte erneut anmelden.",
@@ -341,6 +344,7 @@
         "drafts": "Deine Entwürfe konnten nicht geladen werden",
         "mailboxes": "Deine Postfächer konnten nicht geladen werden",
         "messages": "Die Nachrichten konnten nicht geladen werden",
+        "notifications": "Die Verarbeitung von Benachrichtigungen ist fehlgeschlagen",
         "outbox": "Der Postausgang konnte nicht geladen werden",
         "sync": "Der Mail-Abgleich ist fehlgeschlagen",
         "threads": "Die Konversationen konnten nicht geladen werden",

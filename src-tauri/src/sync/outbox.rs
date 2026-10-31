@@ -50,6 +50,7 @@ pub fn build_idempotent_send_action(
     let payload = SendActionPayload {
         account_id: account_id.clone(),
         input,
+        draft_reference: None,
         scheduled_for: None,
         message_id_header: Some(format!("<calendar-rsvp-{digest}@satchel.local>")),
     };

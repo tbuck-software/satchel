@@ -13,6 +13,8 @@
 
 use std::fs;
 use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 use std::process::Command;
 
 /// Every command registered with `generate_handler!`.
@@ -247,6 +249,7 @@ const COMMANDS: &[&str] = &[
     "consume_pending_mobile_notification",
     "dismiss_mobile_notifications",
     "mobile_notifications_frontend_ready",
+    "mobile_notification_response_handled",
 ];
 
 /// Permission set covering all of [`COMMANDS`].
@@ -306,6 +309,72 @@ fn emit_git_revision() {
     }
 }
 
+/// Builds the iOS notification plugin's Swift package and links it into the
+/// app library.
+///
+/// The plugin imports the `Tauri` Swift module, which exists only in the Rust
+/// build: tauri's own build script links it into the app library. The Xcode
+/// target `tauri ios init` generates has no such module, so a Swift file there
+/// fails with "no such module 'Tauri'". Plugin crates link their Swift code
+/// this way through `tauri_plugin::Builder::ios_path`, which an app crate
+/// cannot use without generating plugin permissions for itself.
+///
+/// Nothing in Rust references the package's entry points (they are resolved at
+/// runtime), so the hook table that `scripts/apply-ios-integration.mjs` writes
+/// into `main.mm` is what makes the final link load them from the archive.
+#[cfg(target_os = "macos")]
+fn link_ios_integration() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("ios") {
+        return;
+    }
+    let manifest_dir =
+        PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets the manifest dir"));
+    let package = manifest_dir.join("ios");
+    println!(
+        "cargo:rerun-if-changed={}",
+        package.join("Package.swift").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        package.join("Sources").display()
+    );
+    // `tauri` declares `links = "Tauri"` and publishes its Swift package to the
+    // build scripts of crates that depend on it directly.
+    println!("cargo:rerun-if-env-changed=DEP_TAURI_IOS_LIBRARY_PATH");
+    let tauri_api = std::env::var_os("DEP_TAURI_IOS_LIBRARY_PATH")
+        .expect("tauri publishes its iOS Swift package as DEP_TAURI_IOS_LIBRARY_PATH");
+    // Package.swift resolves `Tauri` here, where a plugin finds its own copy.
+    let copy = manifest_dir.join(".tauri").join("tauri-api");
+    let _ = fs::remove_dir_all(&copy);
+    copy_swift_package(Path::new(&tauri_api), &copy, true).expect("copy tauri's Swift package");
+    tauri_utils::build::link_apple_library("SatchelIOS", &package);
+}
+
+/// Copies a Swift package without what tauri-plugin leaves behind as well: build
+/// output, the dependency lock and the test target.
+#[cfg(target_os = "macos")]
+fn copy_swift_package(source: &Path, target: &Path, top_level: bool) -> std::io::Result<()> {
+    fs::create_dir_all(target)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if top_level
+            && [".build", "Package.resolved", "Tests"]
+                .iter()
+                .any(|skip| name == *skip)
+        {
+            continue;
+        }
+        let destination = target.join(&name);
+        if entry.file_type()?.is_dir() {
+            copy_swift_package(&entry.path(), &destination, false)?;
+        } else {
+            fs::copy(entry.path(), destination)?;
+        }
+    }
+    Ok(())
+}
+
 fn main() {
     println!("cargo:rerun-if-env-changed=SATCHEL_RELEASE_CHANNEL");
     if let Ok(channel) = std::env::var("SATCHEL_RELEASE_CHANNEL") {
@@ -317,6 +386,8 @@ fn main() {
     }
     emit_git_revision();
     write_full_command_set();
+    #[cfg(target_os = "macos")]
+    link_ios_integration();
     tauri_build::try_build(
         tauri_build::Attributes::new()
             .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),

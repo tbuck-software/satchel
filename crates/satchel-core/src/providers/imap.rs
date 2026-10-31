@@ -13,6 +13,7 @@ use tokio::net::TcpStream;
 use tokio::time::{timeout, Duration};
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
+use crate::email::signed_mime::{self, SignedProtocol};
 use crate::providers::{
     cursor,
     imap_sessions::{read_with_pool, SessionOutcome, SessionPool, IDLE_SESSION_TTL},
@@ -54,6 +55,40 @@ async fn close_session(mut session: ImapSession) {
     let _ = timeout(ImapProvider::op_timeout(), session.logout()).await;
 }
 
+fn read_generation_error(key: &str, folder: &str) -> String {
+    serde_json::json!({"key": key, "params": {"folder": folder}}).to_string()
+}
+
+async fn select_read_folder<T>(
+    session: &mut async_imap::Session<T>,
+    folder: &str,
+    expected_uidvalidity: Option<u32>,
+) -> Result<(), String>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    let Some(expected) = expected_uidvalidity.filter(|value| *value != 0) else {
+        return Err(read_generation_error(
+            "backend.errors.imapUidValidityMissing",
+            folder,
+        ));
+    };
+    match timeout(ImapProvider::op_timeout(), session.select(folder)).await {
+        Err(_) => Err(format!("imap SELECT {folder} timed out")),
+        Ok(Err(err)) => Err(format!("imap SELECT {folder} failed: {err}")),
+        Ok(Ok(mailbox)) => {
+            if mailbox.uid_validity == Some(expected) {
+                Ok(())
+            } else {
+                Err(read_generation_error(
+                    "backend.errors.imapUidValidityChanged",
+                    folder,
+                ))
+            }
+        }
+    }
+}
+
 /// SELECT `folder` and fetch `query` for one UID on a borrowed session.
 ///
 /// `Ok(None)` means the server answered and has no such message: the session
@@ -69,19 +104,21 @@ async fn fetch_one_on_session<T>(
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
 {
-    let selected = match timeout(ImapProvider::op_timeout(), session.select(folder)).await {
-        Err(_) => Err(format!("imap SELECT {folder} timed out")),
-        Ok(Err(err)) => Err(format!("imap SELECT {folder} failed: {err}")),
-        Ok(Ok(mailbox)) => match expected_uidvalidity {
-            Some(expected) if mailbox.uid_validity != Some(expected) => {
-                Err("backend.errors.imapUidValidityChanged".to_string())
-            }
-            _ => Ok(()),
-        },
-    };
-    if let Err(error) = selected {
+    if let Err(error) = select_read_folder(&mut session, folder, expected_uidvalidity).await {
         return (None, Err(error));
     }
+    fetch_selected_on_session(session, uid, query, operation).await
+}
+
+async fn fetch_selected_on_session<T>(
+    mut session: async_imap::Session<T>,
+    uid: &str,
+    query: &str,
+    operation: &str,
+) -> SessionOutcome<async_imap::Session<T>, Option<async_imap::types::Fetch>>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
     match collect_imap_response(
         ImapProvider::op_timeout(),
         session.uid_fetch(uid, query),
@@ -94,11 +131,57 @@ where
     }
 }
 
+async fn attachment_parts_on_session<T>(
+    mut session: async_imap::Session<T>,
+    key: &AttachmentCacheKey,
+) -> SessionOutcome<async_imap::Session<T>, Arc<Vec<ParsedAttachment>>>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    // Validate even a cache hit: the server may have reset since the last read.
+    if let Err(error) = select_read_folder(&mut session, &key.folder, key.uidvalidity).await {
+        return (None, Err(error));
+    }
+    if let Some(parts) = cached_attachment_parts(key, Instant::now()) {
+        return (Some(session), Ok(parts));
+    }
+    let parts = ImapProvider::attachment_parts(key, || async {
+        let mut entries = collect_imap_response(
+            ImapProvider::op_timeout(),
+            session.uid_fetch(&key.remote_id, "(BODY.PEEK[HEADER] BODY.PEEK[TEXT])"),
+            "UID FETCH attachment",
+        )
+        .await?;
+        let entry = entries
+            .pop()
+            .ok_or_else(|| "imap attachment message not found".to_string())?;
+        let header = entry
+            .header()
+            .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+            .unwrap_or_default();
+        let content_type = parse_header_value(&header, "Content-Type")
+            .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
+        let transfer_encoding = parse_header_value(&header, "Content-Transfer-Encoding")
+            .unwrap_or_else(|| "8bit".to_string());
+        Ok(parse_attachments_from_body(
+            &content_type,
+            &transfer_encoding,
+            entry.text().unwrap_or_default(),
+        ))
+    })
+    .await;
+    match parts {
+        Ok(parts) => (Some(session), Ok(parts)),
+        Err(error) => (None, Err(error.to_string())),
+    }
+}
+
 /// One message body, header plus text, on a borrowed session.
 pub(crate) async fn fetch_body_on_session<T>(
     session: async_imap::Session<T>,
     folder: String,
     uid: String,
+    expected_uidvalidity: Option<u32>,
 ) -> SessionOutcome<async_imap::Session<T>, ParsedBody>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
@@ -109,7 +192,7 @@ where
         &uid,
         "(BODY.PEEK[HEADER] BODY.PEEK[TEXT])",
         "UID FETCH body",
-        None,
+        expected_uidvalidity,
     )
     .await;
     let parsed = fetched.and_then(|entry| {
@@ -517,11 +600,28 @@ impl ImapProvider {
     /// that already exists rather than ingesting a second copy.
     pub async fn fetch_message_body(&self, message: &MessageRef) -> Result<ParsedBody, String> {
         let folder = message.source_folder.as_deref().unwrap_or("INBOX");
+        if message
+            .source_uidvalidity
+            .filter(|value| *value != 0)
+            .is_none()
+        {
+            return Err(read_generation_error(
+                "backend.errors.imapUidValidityMissing",
+                folder,
+            ));
+        }
         read_with_pool(
             &READ_SESSIONS,
             &self.session_key(),
             || self.login_session(),
-            |session| fetch_body_on_session(session, folder.to_string(), message.remote_id.clone()),
+            |session| {
+                fetch_body_on_session(
+                    session,
+                    folder.to_string(),
+                    message.remote_id.clone(),
+                    message.source_uidvalidity,
+                )
+            },
             close_session,
         )
         .await
@@ -546,7 +646,10 @@ impl ImapProvider {
             .filter(|value| *value != 0)
             .is_none()
         {
-            return Err("backend.errors.imapUidValidityMissing".into());
+            return Err(read_generation_error(
+                "backend.errors.imapUidValidityMissing",
+                message.source_folder.as_deref().unwrap_or("INBOX"),
+            ));
         }
         let folder = message.source_folder.as_deref().unwrap_or("INBOX");
         read_with_pool(
@@ -616,55 +719,18 @@ impl ImapProvider {
         Ok(parts)
     }
 
-    /// Fetch a message body and parse out its attachment parts.
-    async fn load_attachment_parts(
-        &self,
-        folder: &str,
-        remote_id: &str,
-    ) -> crate::sync::errors::SyncResult<Vec<ParsedAttachment>> {
-        let attachments = read_with_pool(
-            &READ_SESSIONS,
-            &self.session_key(),
-            || self.login_session(),
-            |session| async move {
-                let (session, fetched) = fetch_one_on_session(
-                    session,
-                    folder,
-                    remote_id,
-                    "(BODY.PEEK[HEADER] BODY.PEEK[TEXT])",
-                    "UID FETCH attachment",
-                    None,
-                )
-                .await;
-                let parts = fetched.and_then(|entry| {
-                    let entry =
-                        entry.ok_or_else(|| "imap attachment message not found".to_string())?;
-                    let header = entry
-                        .header()
-                        .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
-                        .unwrap_or_default();
-                    let content_type = parse_header_value(&header, "Content-Type")
-                        .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
-                    let transfer_encoding =
-                        parse_header_value(&header, "Content-Transfer-Encoding")
-                            .unwrap_or_else(|| "8bit".to_string());
-                    Ok(parse_attachments_from_body(
-                        &content_type,
-                        &transfer_encoding,
-                        entry.text().unwrap_or_default(),
-                    ))
-                });
-                (session, parts)
-            },
-            close_session,
-        )
-        .await?;
-        Ok(attachments)
-    }
+    // v5 replays envelopes to establish each message's saved UIDVALIDITY.
+    // Legacy rows cannot adopt a folder's current generation without a fetch.
+    const CURSOR_FORMAT_VERSION: u8 = 5;
 
-    // v4 deliberately replays every envelope once so installations that
-    // predate reply-aware IMAP sync recover Message-ID/In-Reply-To/References.
-    const CURSOR_FORMAT_VERSION: u8 = 4;
+    fn prepare_envelope_repair(state: &mut ImapCursorState, has_cursor: bool, exists: u32) {
+        if has_cursor && state.format_version < Self::CURSOR_FORMAT_VERSION {
+            // Include already-synced messages even if an older backfill was
+            // still in progress. None of them has a saved generation yet.
+            state.backfill_next_seq = exists;
+            state.backfill_total_seq = exists;
+        }
+    }
 
     fn op_timeout() -> Duration {
         let secs = std::env::var("SATCHEL_IMAP_TIMEOUT_SECS")
@@ -1507,15 +1573,7 @@ impl MailProvider for ImapProvider {
         let anchored = decision != GenerationDecision::WindowOnly;
         let since_uid = if anchored { cursor_state.high_uid } else { 0 };
         let since_seq = if anchored { cursor_state.high_seq } else { 0 };
-        let needs_envelope_repair =
-            has_cursor && cursor_state.format_version < Self::CURSOR_FORMAT_VERSION;
-
-        if needs_envelope_repair && cursor_state.backfill_next_seq == 0 {
-            // One-time repair pass: rewrite legacy rows with complete envelope
-            // headers so reply threading can recover existing conversations.
-            cursor_state.backfill_next_seq = exists;
-            cursor_state.backfill_total_seq = exists;
-        }
+        Self::prepare_envelope_repair(&mut cursor_state, has_cursor, exists);
 
         let incremental_window = if has_cursor {
             fetch_window
@@ -2285,9 +2343,22 @@ impl MailProvider for ImapProvider {
     ) -> crate::sync::errors::SyncResult<FetchedAttachment> {
         let folder = message.source_folder.as_deref().unwrap_or("INBOX");
         let key = self.attachment_cache_key(folder, message);
-        let parts = Self::attachment_parts(&key, || {
-            self.load_attachment_parts(folder, &message.remote_id)
-        })
+        if message
+            .source_uidvalidity
+            .filter(|value| *value != 0)
+            .is_none()
+        {
+            return Err(
+                read_generation_error("backend.errors.imapUidValidityMissing", folder).into(),
+            );
+        }
+        let parts = read_with_pool(
+            &READ_SESSIONS,
+            &self.session_key(),
+            || self.login_session(),
+            |session| attachment_parts_on_session(session, &key),
+            close_session,
+        )
         .await?;
 
         Ok(parts
@@ -2460,6 +2531,11 @@ fn is_trycreate_response(error: &str) -> bool {
 }
 
 pub fn parse_header_value(header: &str, key: &str) -> Option<String> {
+    parse_raw_header_value(header, key).map(|value| decode_mime_encoded_words(&value))
+}
+
+/// The unfolded value of a header, encoded words left as they are.
+pub(crate) fn parse_raw_header_value(header: &str, key: &str) -> Option<String> {
     let mut collecting = false;
     let mut value = String::new();
 
@@ -2491,11 +2567,7 @@ pub fn parse_header_value(header: &str, key: &str) -> Option<String> {
         }
     }
 
-    if collecting {
-        Some(decode_mime_encoded_words(&value))
-    } else {
-        None
-    }
+    collecting.then_some(value)
 }
 
 pub fn parse_from_address(header: &str) -> Option<String> {
@@ -2711,8 +2783,15 @@ fn merge_extracted_imap_fallback(
             parsed_body.html = extracted.html;
         }
     }
-    if parsed_body.attachments.is_empty() {
+    // A signed root's attachments are its signed entity's; another parser's
+    // list is not bound to that entity.
+    if parsed_body.attachments.is_empty() && !parsed_body.trust.signed_binding {
         parsed_body.attachments = extracted.attachments;
+        if parsed_body.trust.root_crypto {
+            parsed_body.attachments.retain(|attachment| {
+                !signed_mime::is_signature_media_type(&attachment.content_type)
+            });
+        }
     }
 }
 
@@ -3000,31 +3079,11 @@ fn parse_body_part(
     }
 
     if lowered_content_type.starts_with("multipart/") {
-        if is_verifiable_signed(&lowered_content_type) {
-            let sections = extract_header_param(content_type, "boundary")
-                .map(|boundary| split_multipart_sections(raw_body, &boundary))
-                .unwrap_or_default();
-            if sections.len() != 2 {
-                return ParsedBody::default();
+        let signed_container = lowered_content_type.starts_with("multipart/signed");
+        if signed_container && SignedProtocol::declared(content_type).is_some() {
+            if let Some(parsed) = parse_signed_body(content_type, raw_body, depth) {
+                return parsed;
             }
-            let (part_header, part_body) = split_header_and_body(sections[0]);
-            let part_header = String::from_utf8_lossy(part_header);
-            let part_type = parse_header_value(&part_header, "Content-Type")
-                .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
-            let part_encoding = parse_header_value(&part_header, "Content-Transfer-Encoding")
-                .unwrap_or_else(|| "8bit".to_string());
-            let mut parsed = parse_body_part(&part_type, &part_encoding, part_body, depth + 1);
-            let mut bundle = format!("Content-Type: {content_type}\r\n\r\n").into_bytes();
-            bundle.extend_from_slice(raw_body);
-            parsed.smime_encrypted = None;
-            parsed.smime_signed = None;
-            parsed.pgp_signed = None;
-            if lowered_content_type.contains("application/pgp-signature") {
-                parsed.pgp_signed = Some(bundle);
-            } else {
-                parsed.smime_signed = Some(bundle);
-            }
-            return parsed;
         }
         if lowered_content_type.starts_with("multipart/encrypted")
             && lowered_content_type.contains("application/pgp-encrypted")
@@ -3128,6 +3187,13 @@ fn parse_body_part(
                     parsed.text = Some(fallback);
                 }
             }
+            if signed_container {
+                // The strict splitter did not take this container, so it is
+                // shown like any multipart, unsigned. A signature found inside
+                // covers one nested entity, never what the walk above shows.
+                parsed.smime_signed = None;
+                parsed.pgp_signed = None;
+            }
             return parsed;
         }
     }
@@ -3178,6 +3244,50 @@ fn parse_body_part(
     }
 }
 
+/// Display exactly the entity a `multipart/signed` signature covers, and keep
+/// the bundle that verification later reads it back from.
+///
+/// Both sides take the entity from `signed_mime`. What it refuses comes back
+/// as `None` and is shown as an unsigned multipart, so no signature state can
+/// attach to it. At the root, the result is marked as bound: its body is the
+/// signed entity's display, written together with its bundle.
+fn parse_signed_body(content_type: &str, raw_body: &[u8], depth: usize) -> Option<ParsedBody> {
+    let parts = signed_mime::split(content_type, raw_body).ok()?;
+    let mut bundle = format!("Content-Type: {content_type}\r\n\r\n").into_bytes();
+    bundle.extend_from_slice(raw_body);
+    // Verification splits the stored bundle, not this body. Show nothing it
+    // would not find there byte for byte.
+    if signed_mime::split_bundle(&bundle).map(|stored| stored.entity) != Ok(parts.entity) {
+        return None;
+    }
+
+    let mut parsed = display_signed_entity(parts.entity, depth + 1);
+    parsed.smime_encrypted = None;
+    parsed.smime_signed = None;
+    parsed.pgp_signed = None;
+    parsed.trust = super::traits::MessageTrust {
+        signed_binding: depth == 0,
+        ..Default::default()
+    };
+    match parts.protocol {
+        SignedProtocol::OpenPgp => parsed.pgp_signed = Some(bundle),
+        SignedProtocol::Smime => parsed.smime_signed = Some(bundle),
+    }
+    Some(parsed)
+}
+
+/// What the reader is shown of a signed entity: its headers name the type
+/// and transfer encoding of the content that follows them.
+pub(crate) fn display_signed_entity(entity: &[u8], depth: usize) -> ParsedBody {
+    let (part_header, part_body) = signed_mime::entity_header_and_body(entity);
+    let part_header = String::from_utf8_lossy(part_header);
+    let part_type = parse_header_value(&part_header, "Content-Type")
+        .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
+    let part_encoding = parse_header_value(&part_header, "Content-Transfer-Encoding")
+        .unwrap_or_else(|| "8bit".to_string());
+    parse_body_part(&part_type, &part_encoding, part_body, depth)
+}
+
 pub(super) fn root_crypto_trust(
     content_type: &str,
     body: &ParsedBody,
@@ -3201,19 +3311,127 @@ pub(super) fn root_crypto_trust(
         || ((inline || mime == "multipart/encrypted")
             && text.starts_with("-----BEGIN PGP MESSAGE-----")
             && text.ends_with("-----END PGP MESSAGE-----"));
+    // Only the strict splitter, run on this very root, makes it signed. A
+    // bundle found anywhere else signs a nested entity, never the message.
+    let signed_binding = mime == "multipart/signed"
+        && body.trust.signed_binding
+        && (body.smime_signed.is_some() || body.pgp_signed.is_some());
     let root_crypto = root_encryption
         || root_inline_signature
-        || match mime.as_str() {
-            "multipart/signed" => body.smime_signed.is_some() || body.pgp_signed.is_some(),
-            "application/pkcs7-mime" | "application/x-pkcs7-mime" => body.smime_signed.is_some(),
-            _ => false,
-        };
+        || signed_binding
+        || (matches!(
+            mime.as_str(),
+            "application/pkcs7-mime" | "application/x-pkcs7-mime"
+        ) && body.smime_signed.is_some());
     super::traits::MessageTrust {
         root_crypto,
         root_encryption,
         root_inline_signature,
+        signed_binding,
         ..Default::default()
     }
+}
+
+/// Whether a walk offers files of a signature type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SignatureFiles {
+    /// No: the walk lists what a parse of the message lists.
+    Skip,
+    /// Those inside the walked entity, sent as files: the detached signature
+    /// of a download. A signature part beside an entity is never reached.
+    Keep,
+}
+
+/// The attachments of a stored bundle's signed entity, bytes included: the
+/// parts verification reads, found the way a parse of the message finds them.
+pub fn signed_entity_attachments(
+    bundle: &[u8],
+) -> Result<Vec<RemoteAttachment>, signed_mime::SignedMimeError> {
+    entity_attachments(bundle, SignatureFiles::Skip)
+}
+
+fn entity_attachments(
+    bundle: &[u8],
+    signature_files: SignatureFiles,
+) -> Result<Vec<RemoteAttachment>, signed_mime::SignedMimeError> {
+    let parts = signed_mime::split_bundle(bundle)?;
+    let (header, body) = signed_mime::entity_header_and_body(parts.entity);
+    let mut counter = 0usize;
+    let mut found = Vec::new();
+    collect_section_attachments(header, body, 0, signature_files, &mut counter, &mut found);
+    Ok(found
+        .into_iter()
+        .map(|attachment| remote_attachment_from(attachment, EmbedPolicy::All))
+        .collect())
+}
+
+/// What a provider's attachment size counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProviderSize {
+    /// The part's decoded bytes, as Gmail reports them.
+    Decoded,
+    /// Something else: Graph sizes its own attachment item.
+    Unrelated,
+}
+
+/// Keep only the attachments a provider listed by its own parse that match a
+/// part of the signed entity, under a root the strict splitter took as signed.
+///
+/// The provider knows a part by headers nobody signed and serves it by its
+/// own id. Each listed attachment has to match an entity part no other one
+/// took: type and file name, Content-ID where both name one, size where the
+/// provider counts decoded bytes, bytes where it sent them. It then carries
+/// that part's description and bytes, so a download serves what the
+/// signature covers. A signature part under any name, and a part the entity
+/// does not hold, are not listed; neither is anything when the bundle does
+/// not split.
+pub(super) fn bind_to_signed_entity(
+    attachments: &mut Vec<RemoteAttachment>,
+    trust: &super::traits::MessageTrust,
+    bundle: Option<&[u8]>,
+    sizes: ProviderSize,
+) {
+    if !trust.signed_binding {
+        return;
+    }
+    let listed = std::mem::take(attachments);
+    let Some(mut entity) =
+        bundle.and_then(|bundle| entity_attachments(bundle, SignatureFiles::Keep).ok())
+    else {
+        return;
+    };
+    for attachment in listed {
+        let Some(index) = entity
+            .iter()
+            .position(|part| same_part(&attachment, part, sizes))
+        else {
+            continue;
+        };
+        attachments.push(RemoteAttachment {
+            remote_part_id: attachment.remote_part_id,
+            ..entity.remove(index)
+        });
+    }
+}
+
+fn same_part(listed: &RemoteAttachment, part: &RemoteAttachment, sizes: ProviderSize) -> bool {
+    use crate::email::mime_type::normalize_mime_type;
+    let decoded = |payload: &str| {
+        base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .ok()
+    };
+    normalize_mime_type(&listed.content_type) == normalize_mime_type(&part.content_type)
+        && listed.filename == part.filename
+        && match (listed.content_id.as_deref(), part.content_id.as_deref()) {
+            (Some(listed), Some(part)) => listed.trim_matches(['<', '>']) == part,
+            _ => true,
+        }
+        && (sizes == ProviderSize::Unrelated || listed.size.is_none() || listed.size == part.size)
+        && listed.content_base64.as_deref().is_none_or(|payload| {
+            decoded(payload).is_some()
+                && decoded(payload) == part.content_base64.as_deref().and_then(decoded)
+        })
 }
 
 fn merge_parsed_body(target: &mut ParsedBody, candidate: ParsedBody) {
@@ -3250,6 +3468,7 @@ fn parse_attachments_from_body(
         None,
         None,
         0,
+        SignatureFiles::Skip,
         &mut counter,
         &mut out,
     );
@@ -3264,6 +3483,7 @@ fn collect_attachment_parts(
     disposition: Option<&str>,
     content_id: Option<String>,
     depth: usize,
+    signature_files: SignatureFiles,
     counter: &mut usize,
     out: &mut Vec<ParsedAttachment>,
 ) {
@@ -3274,25 +3494,31 @@ fn collect_attachment_parts(
 
     let lowered_content_type = content_type.to_ascii_lowercase();
     if lowered_content_type.starts_with("multipart/") {
+        // A signed body offers the attachments of the entity its signature
+        // covers, as the display path splits it. The signature part's own
+        // headers are not signed and name nothing to open.
+        if lowered_content_type.starts_with("multipart/signed") {
+            if let Ok(parts) = signed_mime::split(content_type, raw_body) {
+                let (part_header, part_body) = signed_mime::entity_header_and_body(parts.entity);
+                collect_section_attachments(
+                    part_header,
+                    part_body,
+                    depth,
+                    signature_files,
+                    counter,
+                    out,
+                );
+                return;
+            }
+        }
         if let Some(boundary) = extract_header_param(content_type, "boundary") {
             for section in split_multipart_sections(raw_body, &boundary) {
                 let (part_header, part_body) = split_header_and_body(section);
-                let part_header = String::from_utf8_lossy(part_header);
-                let part_type = parse_header_value(&part_header, "Content-Type")
-                    .unwrap_or_else(|| "application/octet-stream".to_string());
-                let part_disposition = parse_header_value(&part_header, "Content-Disposition");
-                let part_encoding = parse_header_value(&part_header, "Content-Transfer-Encoding")
-                    .unwrap_or_else(|| "8bit".to_string());
-                let part_content_id = parse_header_value(&part_header, "Content-ID")
-                    .map(|value| value.trim_matches(['<', '>']).to_string())
-                    .filter(|value| !value.is_empty());
-                collect_attachment_parts(
-                    &part_type,
-                    &part_encoding,
+                collect_section_attachments(
+                    part_header,
                     part_body,
-                    part_disposition.as_deref(),
-                    part_content_id,
-                    depth + 1,
+                    depth,
+                    signature_files,
                     counter,
                     out,
                 );
@@ -3330,6 +3556,7 @@ fn collect_attachment_parts(
             disposition,
             content_id,
             depth + 1,
+            signature_files,
             counter,
             out,
         );
@@ -3339,7 +3566,12 @@ fn collect_attachment_parts(
     let Some(LeafAttachment {
         filename,
         is_inline,
-    }) = leaf_attachment(content_type, disposition, content_id.is_some())
+    }) = leaf_attachment(
+        content_type,
+        disposition,
+        content_id.is_some(),
+        signature_files,
+    )
     else {
         return;
     };
@@ -3419,14 +3651,23 @@ fn leaf_attachment(
     content_type: &str,
     disposition: Option<&str>,
     has_content_id: bool,
+    signature_files: SignatureFiles,
 ) -> Option<LeafAttachment> {
     let lowered_content_type = content_type.to_ascii_lowercase();
+    let leaf = attachment_leaf(content_type, disposition, has_content_id);
+    let sent_as_file = leaf.filename.is_some()
+        || disposition
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .starts_with("attachment");
     if is_detached_signature(&lowered_content_type)
-        || lowered_content_type.starts_with("text/calendar")
+        && !(signature_files == SignatureFiles::Keep && sent_as_file)
     {
         return None;
     }
-    let leaf = attachment_leaf(content_type, disposition, has_content_id);
+    if lowered_content_type.starts_with("text/calendar") {
+        return None;
+    }
     (disposition_type(disposition) == "attachment" || leaf.filename.is_some() || leaf.is_inline)
         .then_some(leaf)
 }
@@ -3447,15 +3688,6 @@ fn is_detached_signature(lowered_content_type: &str) -> bool {
     lowered_content_type.starts_with("application/pgp-signature")
         || lowered_content_type.starts_with("application/pkcs7-signature")
         || lowered_content_type.starts_with("application/x-pkcs7-signature")
-}
-
-/// `multipart/signed` with a protocol Satchel verifies. Any other protocol is
-/// read as an ordinary multipart.
-fn is_verifiable_signed(lowered_content_type: &str) -> bool {
-    lowered_content_type.starts_with("multipart/signed")
-        && (lowered_content_type.contains("application/pgp-signature")
-            || lowered_content_type.contains("application/pkcs7-signature")
-            || lowered_content_type.contains("application/x-pkcs7-signature"))
 }
 
 /// Why a decrypted MIME tree cannot be shown completely.
@@ -3641,11 +3873,9 @@ fn decode_mime_part(
             return Err(IncompleteMime::RemainingEncryption);
         }
         if lowered.starts_with("multipart/signed") && place != PartPlace::Attached {
-            let signed = boundary
-                .as_deref()
-                .and_then(|boundary| SignedParts::split(&head.content_type, body, boundary))
-                .ok_or(IncompleteMime::MalformedSigned)?;
-            let (header, content) = split_exact_part(signed.entity);
+            let signed =
+                split_signed(&head.content_type, body).ok_or(IncompleteMime::MalformedSigned)?;
+            let (header, content) = signed_mime::entity_header_and_body(signed.entity);
             // A signature over the root covers what its content shows.
             let content_place = if place == PartPlace::Root {
                 PartPlace::Root
@@ -3659,7 +3889,7 @@ fn decode_mime_part(
                 content_place,
                 counter,
             )?;
-            let signature = signed.for_verifier()?;
+            let signature = verifier_bundle(&signed)?;
             if place == PartPlace::Root {
                 part.root_signatures.insert(0, signature);
             } else {
@@ -3772,179 +4002,66 @@ fn decode_mime_part(
     Ok(attachment_part(head, body, counter))
 }
 
-/// The two parts of a `multipart/signed` entity, byte for byte.
-struct SignedParts<'a> {
-    protocol: SignatureProtocol,
-    /// What the signature covers, and what the decoder shows.
-    entity: &'a [u8],
-    /// The signature part, headers included.
-    signature: &'a [u8],
+/// The two parts of a `multipart/signed` entity, byte for byte, as
+/// `signed_mime` splits them for display and verification of synced mail.
+/// `None` for anything it refuses, and for an entity with nothing in it.
+fn split_signed<'a>(content_type: &str, body: &'a [u8]) -> Option<signed_mime::SignedParts<'a>> {
+    signed_mime::split(content_type, body)
+        .ok()
+        .filter(|parts| !parts.entity.trim_ascii().is_empty())
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SignatureProtocol {
-    Pgp,
-    Smime,
-}
-
-impl SignatureProtocol {
-    /// The protocol a media type names, from `protocol=` or a part's own
-    /// `Content-Type`; `None` for any protocol Satchel does not verify.
-    fn of(media_type: &str) -> Option<Self> {
-        let media_type = media_type.split(';').next()?.trim();
-        if media_type.eq_ignore_ascii_case("application/pgp-signature") {
-            Some(Self::Pgp)
-        } else if media_type.eq_ignore_ascii_case("application/pkcs7-signature")
-            || media_type.eq_ignore_ascii_case("application/x-pkcs7-signature")
-        {
-            Some(Self::Smime)
-        } else {
-            None
-        }
-    }
-
-    fn media_type(self) -> &'static str {
-        match self {
-            Self::Pgp => "application/pgp-signature",
-            Self::Smime => "application/pkcs7-signature",
-        }
-    }
-}
-
-impl<'a> SignedParts<'a> {
-    /// `None` unless the body holds exactly one content part and one signature
-    /// part, and the signature part's own `Content-Type` is the declared
-    /// protocol.
-    ///
-    /// An S/MIME entity must not hold a CR outside a CRLF. OpenSSL reads
-    /// CR CR LF as one line break, the decoder reads a CR and a line break,
-    /// so the two would split the entity's header from its body differently.
-    fn split(content_type: &str, body: &'a [u8], boundary: &str) -> Option<Self> {
-        let protocol = SignatureProtocol::of(&extract_header_param(content_type, "protocol")?)?;
-        let [entity, signature] = exact_multipart_parts(body, boundary)[..] else {
-            return None;
-        };
-        if entity.trim_ascii().is_empty() {
-            return None;
-        }
-        if protocol == SignatureProtocol::Smime && has_bare_cr(entity) {
-            return None;
-        }
-        let (signature_header, _) = split_exact_part(signature);
-        let signature_type = MimePartHead::read(signature_header).content_type;
-        (SignatureProtocol::of(&signature_type) == Some(protocol)).then_some(Self {
-            protocol,
-            entity,
-            signature,
-        })
-    }
-
-    /// The bundle the verifier splits again, built so that it can only find
-    /// the entity the decoder shows.
-    ///
-    /// Verifiers read `multipart/signed` with parsers of their own. Handed the
-    /// original body, one that took a delimiter or boundary differently from
-    /// the decoder would check a signature over parts the reader never sees.
-    /// Here the boundary is derived from both parts and occurs in neither, so
-    /// every reading agrees.
-    fn for_verifier(&self) -> Result<DetachedSignature, IncompleteMime> {
-        use sha2::{Digest, Sha256};
-        let digest = Sha256::new()
-            .chain_update(self.entity)
-            .chain_update([0u8])
-            .chain_update(self.signature)
-            .finalize();
-        let boundary = format!(
-            "=_satchel_signed_{}",
-            digest[..16]
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>()
-        );
-        if [self.entity, self.signature]
+/// The bundle the verifier splits again, built so that it can only find the
+/// entity the decoder shows.
+///
+/// Verifiers read `multipart/signed` with parsers of their own. Handed the
+/// original body, one that took a delimiter or boundary differently from the
+/// decoder would check a signature over parts the reader never sees. Here the
+/// boundary is derived from both parts and occurs in neither, so every reading
+/// agrees.
+fn verifier_bundle(
+    signed: &signed_mime::SignedParts<'_>,
+) -> Result<DetachedSignature, IncompleteMime> {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::new()
+        .chain_update(signed.entity)
+        .chain_update([0u8])
+        .chain_update(signed.signature)
+        .finalize();
+    let boundary = format!(
+        "=_satchel_signed_{}",
+        digest[..16]
             .iter()
-            .any(|part| find_bytes(part, boundary.as_bytes()).is_some())
-        {
-            return Err(IncompleteMime::MalformedSigned);
-        }
-        let mut bundle = format!(
-            "Content-Type: multipart/signed; boundary=\"{boundary}\"; protocol=\"{}\"\r\n\r\n--{boundary}\r\n",
-            self.protocol.media_type()
-        )
-        .into_bytes();
-        bundle.extend_from_slice(self.entity);
-        bundle.extend_from_slice(format!("\r\n--{boundary}\r\n").as_bytes());
-        bundle.extend_from_slice(self.signature);
-        bundle.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-        Ok(match self.protocol {
-            SignatureProtocol::Pgp => {
-                // The OpenPGP verifier's own split must yield the same bytes.
-                if crate::email::pgp_mime::parse_signed_message(&bundle)
-                    .is_ok_and(|parsed| parsed.signed_entity != self.entity)
-                {
-                    return Err(IncompleteMime::MalformedSigned);
-                }
-                DetachedSignature::Pgp(bundle)
-            }
-            SignatureProtocol::Smime => DetachedSignature::Smime(bundle),
-        })
-    }
-}
-
-/// Whether `bytes` holds a CR that is not followed by LF.
-fn has_bare_cr(bytes: &[u8]) -> bool {
-    memchr::memchr_iter(b'\r', bytes).any(|index| bytes.get(index + 1) != Some(&b'\n'))
-}
-
-/// The parts of a multipart body as a signature covers them: from the line
-/// after one delimiter to the line break before the next (RFC 2046). Unlike
-/// [`split_multipart_sections`], nothing is trimmed and empty parts count.
-fn exact_multipart_parts<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
-    let marker = format!("--{boundary}").into_bytes();
-    let mut parts = Vec::new();
-    let mut part_start: Option<usize> = None;
-    for index in memchr::memmem::find_iter(body, &marker) {
-        if index != 0 && body[index - 1] != b'\n' {
-            continue;
-        }
-        let after = index + marker.len();
-        let closing = body[after..].starts_with(b"--");
-        let Some(next_line) = delimiter_line_end(body, if closing { after + 2 } else { after })
-        else {
-            continue;
-        };
-        if let Some(start) = part_start.take() {
-            // The line break before a delimiter belongs to the delimiter.
-            let mut end = index;
-            if end > start && body[end - 1] == b'\n' {
-                end -= 1;
-            }
-            if end > start && body[end - 1] == b'\r' {
-                end -= 1;
-            }
-            parts.push(&body[start..end]);
-        }
-        if closing {
-            return parts;
-        }
-        part_start = Some(next_line);
-    }
-    if let Some(start) = part_start {
-        parts.push(&body[start..]);
-    }
-    parts
-}
-
-/// Header and body of an untrimmed part. One that opens with a blank line has
-/// no header, rather than a header made of its first paragraph.
-fn split_exact_part(part: &[u8]) -> (&[u8], &[u8]) {
-    match part
-        .strip_prefix(b"\r\n")
-        .or_else(|| part.strip_prefix(b"\n"))
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
+    if [signed.entity, signed.signature]
+        .iter()
+        .any(|part| find_bytes(part, boundary.as_bytes()).is_some())
     {
-        Some(body) => (b"", body),
-        None => split_header_and_body(part),
+        return Err(IncompleteMime::MalformedSigned);
     }
+    let protocol = match signed.protocol {
+        SignedProtocol::OpenPgp => "application/pgp-signature",
+        SignedProtocol::Smime => "application/pkcs7-signature",
+    };
+    let mut bundle = format!(
+        "Content-Type: multipart/signed; boundary=\"{boundary}\"; protocol=\"{protocol}\"\r\n\r\n--{boundary}\r\n"
+    )
+    .into_bytes();
+    bundle.extend_from_slice(signed.entity);
+    bundle.extend_from_slice(format!("\r\n--{boundary}\r\n").as_bytes());
+    bundle.extend_from_slice(signed.signature);
+    bundle.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    // Both verifiers split the bundle with `signed_mime` again; it must find
+    // the same entity.
+    if signed_mime::split_bundle(&bundle).map(|parts| parts.entity) != Ok(signed.entity) {
+        return Err(IncompleteMime::MalformedSigned);
+    }
+    Ok(match signed.protocol {
+        SignedProtocol::OpenPgp => DetachedSignature::Pgp(bundle),
+        SignedProtocol::Smime => DetachedSignature::Smime(bundle),
+    })
 }
 
 /// One rendering per view. Files are never renderings: an invitation offered
@@ -4047,6 +4164,37 @@ fn attachment_part(head: &MimePartHead, body: &[u8], counter: &mut usize) -> Dec
         }],
         ..Default::default()
     }
+}
+
+/// The attachments of one body part of a multipart at `depth`.
+fn collect_section_attachments(
+    part_header: &[u8],
+    part_body: &[u8],
+    depth: usize,
+    signature_files: SignatureFiles,
+    counter: &mut usize,
+    out: &mut Vec<ParsedAttachment>,
+) {
+    let part_header = String::from_utf8_lossy(part_header);
+    let part_type = parse_header_value(&part_header, "Content-Type")
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    let part_disposition = parse_header_value(&part_header, "Content-Disposition");
+    let part_encoding = parse_header_value(&part_header, "Content-Transfer-Encoding")
+        .unwrap_or_else(|| "8bit".to_string());
+    let part_content_id = parse_header_value(&part_header, "Content-ID")
+        .map(|value| value.trim_matches(['<', '>']).to_string())
+        .filter(|value| !value.is_empty());
+    collect_attachment_parts(
+        &part_type,
+        &part_encoding,
+        part_body,
+        part_disposition.as_deref(),
+        part_content_id,
+        depth + 1,
+        signature_files,
+        counter,
+        out,
+    );
 }
 
 fn is_tnef_part(lowered_content_type: &str, filename: Option<&str>) -> bool {
@@ -4206,7 +4354,7 @@ fn split_header_and_body(section: &[u8]) -> (&[u8], &[u8]) {
     (b"", section)
 }
 
-fn extract_header_param(input: &str, key: &str) -> Option<String> {
+pub(crate) fn extract_header_param(input: &str, key: &str) -> Option<String> {
     let needle = key.to_ascii_lowercase();
     for raw_part in input.split(';').skip(1) {
         // An empty or valueless segment is not the end of the header. Bounce
@@ -4467,10 +4615,10 @@ pub fn parse_message_date(
 ///
 /// The fallback re-parses the whole message, and `merge_extracted_imap_fallback`
 /// only ever fills a gap: a missing text or HTML body (not on a root crypto
-/// part) or an empty attachment list. Without a gap its result would be
-/// thrown away.
+/// part) or an empty attachment list (not on a signed root). Without a gap its
+/// result would be thrown away.
 fn extracted_fallback_could_help(parsed: &ParsedBody) -> bool {
-    parsed.attachments.is_empty()
+    (parsed.attachments.is_empty() && !parsed.trust.signed_binding)
         || (!parsed.trust.root_crypto && (parsed.text.is_none() || parsed.html.is_none()))
 }
 
@@ -4841,6 +4989,140 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, OnceLock};
     use std::time::{Duration, Instant};
+
+    async fn generation_test_session(
+        generation: u32,
+        payload: &str,
+    ) -> (
+        async_imap::Session<tokio::io::DuplexStream>,
+        Arc<std::sync::atomic::AtomicU32>,
+        Arc<AtomicUsize>,
+    ) {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        let (client, server) = tokio::io::duplex(8192);
+        let generation = Arc::new(std::sync::atomic::AtomicU32::new(generation));
+        let current = generation.clone();
+        let fetches = Arc::new(AtomicUsize::new(0));
+        let count = fetches.clone();
+        let payload = payload.to_string();
+        tokio::spawn(async move {
+            let (reader, mut writer) = tokio::io::split(server);
+            let mut reader = tokio::io::BufReader::new(reader);
+            writer.write_all(b"* OK test server\r\n").await.unwrap();
+            let mut line = String::new();
+            while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
+                let mut words = line.split_whitespace();
+                let tag = words.next().unwrap();
+                let command = words.next().unwrap();
+                let reply = match command {
+                    "LOGIN" => format!("{tag} OK login\r\n"),
+                    "SELECT" => {
+                        let generation = current.load(Ordering::SeqCst);
+                        let validity = if generation == 0 {
+                            String::new()
+                        } else {
+                            format!("* OK [UIDVALIDITY {generation}] generation\r\n")
+                        };
+                        format!("* 1 EXISTS\r\n{validity}{tag} OK selected\r\n")
+                    }
+                    "UID" => {
+                        count.fetch_add(1, Ordering::SeqCst);
+                        let header = "Content-Type: multipart/mixed; boundary=x\r\n\r\n";
+                        let body = format!("--x\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=file.bin\r\n\r\n{payload}\r\n--x--\r\n");
+                        format!("* 1 FETCH (UID 42 BODY[HEADER] {{{}}}\r\n{header} BODY[TEXT] {{{}}}\r\n{body})\r\n{tag} OK fetched\r\n", header.len(), body.len())
+                    }
+                    _ => format!("{tag} BAD unexpected command\r\n"),
+                };
+                if writer.write_all(reply.as_bytes()).await.is_err() {
+                    break;
+                }
+                line.clear();
+            }
+        });
+        let mut client = async_imap::Client::new(client);
+        client.read_response().await.unwrap();
+        (
+            client.login("user", "pass").await.unwrap(),
+            generation,
+            fetches,
+        )
+    }
+
+    #[tokio::test]
+    async fn content_reads_reject_unknown_or_mismatched_generations_before_uid_fetch() {
+        for (expected, actual) in [(None, 7), (Some(0), 7), (Some(7), 0), (Some(7), 8)] {
+            let (session, _, fetches) = generation_test_session(actual, "unrelated message").await;
+            let (session, body) =
+                super::fetch_body_on_session(session, "INBOX".into(), "42".into(), expected).await;
+            assert!(session.is_none());
+            let error: serde_json::Value = serde_json::from_str(&body.unwrap_err()).unwrap();
+            assert_eq!(error["params"]["folder"], "INBOX");
+            assert_eq!(fetches.load(Ordering::SeqCst), 0);
+
+            let (session, _, fetches) =
+                generation_test_session(actual, "unrelated attachment").await;
+            let mut key = cache_key("42");
+            key.uidvalidity = expected;
+            let (session, parts) = super::attachment_parts_on_session(session, &key).await;
+            assert!(session.is_none());
+            assert!(parts.is_err());
+            assert_eq!(fetches.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn attachment_cache_hits_validate_select_and_never_cross_generations() {
+        let _guard = cache_lock().lock().await;
+        let mut key = cache_key("42");
+        key.account = "generation-cache".into();
+        key.uidvalidity = Some(7);
+        let (session, generation, fetches) = generation_test_session(7, "old payload").await;
+        let (session, first) = super::attachment_parts_on_session(session, &key).await;
+        let first = first.unwrap();
+        assert_eq!(first[0].bytes, b"old payload");
+        let (session, second) = super::attachment_parts_on_session(session.unwrap(), &key).await;
+        assert_eq!(second.unwrap()[0].bytes, b"old payload");
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+        generation.store(8, Ordering::SeqCst);
+        let (session, stale) = super::attachment_parts_on_session(session.unwrap(), &key).await;
+        assert!(session.is_none());
+        assert!(stale.unwrap_err().contains("imapUidValidityChanged"));
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+        key.uidvalidity = Some(8);
+        let (session, _, fetches) = generation_test_session(8, "new payload").await;
+        let (_, fresh) = super::attachment_parts_on_session(session, &key).await;
+        assert_eq!(fresh.unwrap()[0].bytes, b"new payload");
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn public_content_fetches_reject_missing_generation_without_connecting() {
+        use crate::providers::traits::MailProvider;
+        let provider = ImapProvider::default();
+        for generation in [None, Some(0)] {
+            let message = crate::providers::traits::MessageRef {
+                remote_id: "42".into(),
+                source_folder: Some("INBOX".into()),
+                source_uidvalidity: generation,
+            };
+            assert!(provider
+                .fetch_message_body(&message)
+                .await
+                .unwrap_err()
+                .contains("imapUidValidityMissing"));
+            assert!(provider
+                .fetch_raw_message(&message)
+                .await
+                .unwrap_err()
+                .contains("imapUidValidityMissing"));
+            assert!(provider
+                .fetch_attachment(&message, "mime-1")
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("imapUidValidityMissing"));
+        }
+    }
 
     #[test]
     fn login_errors_tell_a_refusal_from_a_dropped_connection() {
@@ -5440,6 +5722,98 @@ AQID\r\n\
     }
 
     #[test]
+    fn a_signed_structure_the_stored_bundle_cannot_reproduce_shows_unsigned() {
+        let body = b"--s\r\nContent-Type: text/plain\r\n\r\nSigned body\r\n\
+--s\r\nContent-Type: application/pgp-signature\r\n\r\nSignature\r\n--s--\r\n";
+        let plain = "multipart/signed; protocol=\"application/pgp-signature\"; boundary=s";
+        let signed = parse_message_body(&format!("Content-Type: {plain}\r\n"), Some(body));
+        assert!(signed.pgp_signed.is_some());
+        assert!(signed.trust.root_crypto && signed.trust.signed_binding);
+
+        // Decoded once for display, the type gains line breaks; written into
+        // the bundle and read back, it would name a different structure.
+        let header = format!("Content-Type: {plain}; x=\"=?us-ascii?q?=0D=0A=0D=0A?=\"\r\n");
+        let parsed = parse_message_body(&header, Some(body));
+        assert!(parsed.pgp_signed.is_none());
+        assert_eq!(parsed.text.as_deref(), Some("Signed body"));
+        assert!(!parsed.trust.root_crypto);
+        assert!(!parsed.trust.signed_binding);
+    }
+
+    #[test]
+    fn a_signed_container_without_a_known_protocol_adopts_no_inner_signature() {
+        let inner = "Content-Type: multipart/signed; protocol=\"application/pgp-signature\"; boundary=i\r\n\r\n\
+--i\r\nContent-Type: text/plain\r\n\r\nSigned body\r\n\
+--i\r\nContent-Type: application/pgp-signature\r\n\r\nSignature\r\n--i--\r\n";
+        let body = format!(
+            "--o\r\nContent-Type: text/plain\r\n\r\nForged text\r\n--o\r\n{inner}\r\n--o--\r\n"
+        );
+        for outer in [
+            "multipart/signed; boundary=o",
+            "multipart/signed; protocol=\"application/x-unknown\"; boundary=o",
+        ] {
+            let parsed =
+                parse_message_body(&format!("Content-Type: {outer}\r\n"), Some(body.as_bytes()));
+            assert!(parsed.pgp_signed.is_none(), "{outer}");
+            assert!(parsed.smime_signed.is_none(), "{outer}");
+            assert!(!parsed.trust.root_crypto, "{outer}");
+            assert_eq!(parsed.text.as_deref(), Some("Forged text"), "{outer}");
+        }
+    }
+
+    /// The signature part's headers are not signed: nothing they name may
+    /// turn into an attachment next to a valid signature.
+    #[test]
+    fn a_signed_root_offers_no_attachment_from_its_signature_part() {
+        let raw =
+            include_bytes!("../../tests/corpus/pgp-mime/forged-signature-part-attachment.eml");
+        let (header, body) = super::split_header_and_body(raw);
+        let header = String::from_utf8_lossy(header);
+        let mut parsed = parse_message_body(&header, Some(body));
+        assert!(parsed.trust.root_crypto);
+        if super::extracted_fallback_could_help(&parsed) {
+            super::merge_extracted_imap_fallback(
+                &mut parsed,
+                parse_extracted_imap_email(
+                    &header,
+                    Some(body),
+                    SourceId::new("imap/account-1"),
+                    "INBOX",
+                    77,
+                    42,
+                ),
+            );
+        }
+        let names: Vec<_> = parsed
+            .attachments
+            .iter()
+            .map(|attachment| (attachment.filename.clone(), attachment.content_type.clone()))
+            .collect();
+        assert!(
+            parsed.attachments.iter().all(|attachment| {
+                attachment.filename.as_deref() != Some("Invoice.pdf")
+                    && !super::signed_mime::is_signature_media_type(&attachment.content_type)
+            }),
+            "{names:?}"
+        );
+    }
+
+    /// Attachments of a signed root come from its signed entity, the bytes
+    /// the signature covers, and keep the part numbers the download resolves.
+    #[test]
+    fn signed_attachments_are_listed_from_the_signed_entity() {
+        let raw = include_bytes!("../../tests/corpus/pgp-mime/thunderbird-mixed-attachment.eml");
+        let (header, body) = super::split_header_and_body(raw);
+        let header = String::from_utf8_lossy(header);
+        let content_type = super::parse_header_value(&header, "Content-Type").unwrap();
+        let listed = parse_message_body(&header, Some(body)).attachments;
+        let resolved = parse_attachments_from_body(&content_type, "7bit", body);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].filename.as_deref(), Some("figures.csv"));
+        assert_eq!(listed[0].remote_part_id, resolved[0].remote_part_id);
+    }
+
+    #[test]
     fn raw_message_parser_embeds_decrypted_attachments() {
         let raw = b"Content-Type: multipart/mixed; boundary=inner\r\n\r\n\
 --inner\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello\r\n\
@@ -5841,6 +6215,25 @@ Content-Type: text/html\r\n\r\n\
                 "cursor {cursor}, database {database:?}, server {server}"
             );
         }
+    }
+
+    #[test]
+    fn generation_repair_revisits_messages_above_an_unfinished_legacy_backfill() {
+        let mut state = super::ImapCursorState {
+            format_version: 4,
+            backfill_next_seq: 10,
+            backfill_total_seq: 100,
+            ..Default::default()
+        };
+        ImapProvider::prepare_envelope_repair(&mut state, true, 100);
+        assert_eq!(state.backfill_next_seq, 100);
+        state.format_version = ImapProvider::CURSOR_FORMAT_VERSION;
+        state.backfill_next_seq = 10;
+        ImapProvider::prepare_envelope_repair(&mut state, true, 100);
+        assert_eq!(
+            state.backfill_next_seq, 10,
+            "a verified cursor keeps its progress"
+        );
     }
 
     #[test]

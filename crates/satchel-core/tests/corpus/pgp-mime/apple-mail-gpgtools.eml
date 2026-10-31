@@ -1,0 +1,37 @@
+From: Satchel GPG Fixture <gpg-fixture@example.test>
+Content-Type: multipart/signed;
+	boundary="Apple-Mail=_4B1E2C3D-5F60-4A7B-8C9D-0E1F2A3B4C5D";
+	protocol="application/pgp-signature";
+	micalg=pgp-sha256
+Mime-Version: 1.0 (Mac OS X Mail 16.0 \(3774.600.62\))
+Subject: Travel plans
+Message-Id: <apple-signed-1@example.test>
+Date: Wed, 02 Sep 2026 09:15:00 +0200
+To: reader@example.test
+X-Mailer: Apple Mail (2.3774.600.62)
+
+
+--Apple-Mail=_4B1E2C3D-5F60-4A7B-8C9D-0E1F2A3B4C5D
+Content-Transfer-Encoding: 7bit
+Content-Type: text/plain;
+	charset=us-ascii
+
+The train leaves at nine. See you on the platform.
+
+--Apple-Mail=_4B1E2C3D-5F60-4A7B-8C9D-0E1F2A3B4C5D
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment;
+	filename=signature.asc
+Content-Type: application/pgp-signature;
+	name=signature.asc
+Content-Description: Message signed with OpenPGP
+
+-----BEGIN PGP SIGNATURE-----
+
+iHUEABYIAB0WIQTCkWCwutyFV+X+8wxaTn2RJ4W/XAUCauTAqwAKCRBaTn2RJ4W/
+XB/0AQCCTsJnMeZLIbNkPIRBIv8Nv5PvQAKaRqhoZUExlUllUgEA6CUDXWPw2Tre
+YR6JeSEwPmCWSgqJHmGgI4DRNwq5Rg4=
+=3im0
+-----END PGP SIGNATURE-----
+
+--Apple-Mail=_4B1E2C3D-5F60-4A7B-8C9D-0E1F2A3B4C5D--

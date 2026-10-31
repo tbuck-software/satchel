@@ -17,6 +17,7 @@ use crate::events::bus::EventBus;
 use crate::providers::traits::MessageEnvelope;
 use crate::sync::attachment_processing::process_special_attachment;
 use crate::sync::folder_reconcile::{is_snooze_folder, reconcile_external_workflow_states};
+use crate::sync::gmail_reconcile::{SnapshotDeferral, SnapshotResolution};
 use crate::sync::thread_resolution::{
     deduplicate_spark_draft_versions, derive_message_id_header, derive_remote_draft_id,
     effective_from_name, message_is_sent, reconcile_sent_draft_autosaves,
@@ -230,6 +231,140 @@ pub(crate) async fn upsert_provider_messages(
     Ok(results)
 }
 
+/// Snapshot recovery must store every current label before losing the last
+/// obsolete copy. Reuse the normal persistence/organization guards, but give
+/// all targets of this delivery a single rollback boundary.
+///
+/// `Err` is reserved for failures that stop the whole snapshot run; anything
+/// specific to this delivery defers only its ID.
+pub(crate) async fn upsert_gmail_snapshot_message(
+    app: Option<&AppHandle>,
+    pool: &SqlitePool,
+    account_id: &str,
+    account_email: &str,
+    account_display_name: &str,
+    account_config: &crate::commands::accounts::AccountConfig,
+    message: &MessageEnvelope,
+    events: Option<&Arc<EventBus>>,
+    cutoff: Option<&str>,
+) -> Result<SnapshotResolution, String> {
+    use satchel_core::db::sync_quarantine::SyncQuarantineRepository;
+    let repository = SyncQuarantineRepository::new(pool);
+    let mut targets = Vec::new();
+    for label in crate::sync::gmail_reconcile::gmail_target_mailbox_ids(&message.mailbox_ids) {
+        let (folder_id, folder_type) =
+            crate::sync::gmail_reconcile::ensure_gmail_label_folder(pool, account_id, &label)
+                .await?;
+        if repository
+            .load_folder(account_id, &folder_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .is_exhausted(&message.remote_id)
+        {
+            return Ok(SnapshotResolution::Deferred(SnapshotDeferral::Quarantined));
+        }
+        targets.push((folder_id, label, folder_type));
+    }
+    // Read before the replacement: obsolete copies may sit in other threads.
+    let threads: HashSet<String> = sqlx::query_scalar(
+        "SELECT DISTINCT thread_id FROM messages WHERE account_id = ? AND remote_id = ?",
+    )
+    .bind(account_id)
+    .bind(&message.remote_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|error| error.to_string())?
+    .into_iter()
+    .collect();
+    let html = prepare_message_html(std::slice::from_ref(message)).await?;
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|error| error.to_string())?;
+    if crate::sync::gmail_reconcile::gmail_snapshot_message_pinned_tx(
+        &mut tx,
+        account_id,
+        &message.remote_id,
+    )
+    .await?
+    {
+        tx.rollback().await.map_err(|error| error.to_string())?;
+        return Ok(SnapshotResolution::Deferred(
+            SnapshotDeferral::PendingMutation,
+        ));
+    }
+    let flag_locks = PendingFlagLocks::load(&mut tx, account_id).await?;
+    let mut stored = Vec::new();
+    for (folder_id, label, folder_type) in &targets {
+        match persist_provider_message(
+            &mut tx,
+            "gmail",
+            account_id,
+            account_email,
+            account_display_name,
+            folder_id,
+            label,
+            folder_type,
+            message,
+            html[0].as_deref(),
+            &flag_locks,
+            cutoff,
+        )
+        .await
+        {
+            Ok(value) => stored.push(value),
+            Err(error) => {
+                tx.rollback().await.map_err(|error| error.to_string())?;
+                let attempts = repository
+                    .record_failure(account_id, folder_id, &message.remote_id, &error)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                // The quarantine counts target failures; its last one holds
+                // the ID like any other exhausted target.
+                if attempts >= satchel_core::db::sync_quarantine::MAX_INGEST_ATTEMPTS {
+                    tracing::warn!(account_id, folder_id, remote_id = %message.remote_id,
+                        attempts, "snapshot target used up its attempts and is skipped: {error}");
+                    return Ok(SnapshotResolution::Deferred(SnapshotDeferral::Quarantined));
+                }
+                return Ok(SnapshotResolution::Deferred(SnapshotDeferral::Failed(
+                    crate::sync::errors::SyncError::Transient(error),
+                )));
+            }
+        }
+    }
+    // Every actual target is safe now. Clear obsolete-label failures too,
+    // otherwise they could keep rediscovering an already recovered delivery.
+    sqlx::query("DELETE FROM sync_quarantine WHERE account_id = ? AND remote_id = ?")
+        .bind(account_id)
+        .bind(&message.remote_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|error| error.to_string())?;
+    replay_ingest_effects(pool, account_id).await?;
+    for ((folder_id, label, folder_type), stored) in targets.iter().zip(stored) {
+        if let Err(error) = finish_provider_message(
+            app,
+            pool,
+            "gmail",
+            account_id,
+            account_email,
+            account_config,
+            folder_id,
+            label,
+            folder_type,
+            message,
+            stored,
+            events,
+        )
+        .await
+        {
+            tracing::warn!(%error, remote_id = %message.remote_id, "post-ingest processing deferred");
+        }
+    }
+    Ok(SnapshotResolution::Resolved(threads))
+}
+
 /// Replay rules after a commit, including intent left by a previous process.
 pub(crate) async fn replay_ingest_effects(
     pool: &SqlitePool,
@@ -285,7 +420,7 @@ async fn persist_provider_message(
     let now = chrono::Utc::now().to_rfc3339();
     let message_is_draft = provider_message_is_draft(folder_type, &message.mailbox_ids);
     let remote_draft_id = derive_remote_draft_id(message_is_draft, provider_kind, message);
-    let provider_message_row = sqlx::query_as::<_, (String, Option<String>)>(
+    let mut provider_message_row = sqlx::query_as::<_, (String, Option<String>)>(
         "SELECT id, thread_id FROM messages
          WHERE account_id = ? AND folder_id = ? AND remote_id = ?
          ORDER BY updated_at DESC LIMIT 1",
@@ -296,12 +431,56 @@ async fn persist_provider_message(
     .fetch_optional(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
-    let provider_message_id = provider_message_row
-        .as_ref()
-        .map(|row| row.0.clone())
-        .unwrap_or_else(|| {
-            provider_message_db_id(provider_kind, account_id, folder_remote_id, message)
-        });
+    if provider_message_row.is_none() && provider_kind.eq_ignore_ascii_case("gmail") {
+        // Reuse an obsolete label copy rather than replacing its local ID.
+        // Message topic links, cached attachments and other references survive
+        // the move along with the thread, within this message's savepoint.
+        let labels = crate::sync::gmail_reconcile::gmail_target_mailbox_ids(&message.mailbox_ids);
+        let labels = serde_json::to_string(&labels).map_err(|err| err.to_string())?;
+        provider_message_row = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT m.id, m.thread_id FROM messages m JOIN folders f ON f.id = m.folder_id
+             WHERE m.account_id = ? AND m.remote_id = ?
+               AND NOT EXISTS (SELECT 1 FROM json_each(?) label
+                               WHERE LOWER(TRIM(label.value)) = LOWER(TRIM(f.remote_id)))
+             ORDER BY m.id LIMIT 1",
+        )
+        .bind(account_id)
+        .bind(&message.remote_id)
+        .bind(&labels)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(|err| err.to_string())?;
+    }
+    let provider_message_id = if let Some((id, _)) = &provider_message_row {
+        id.clone()
+    } else {
+        let mut id = provider_message_db_id(provider_kind, account_id, folder_remote_id, message);
+        // A prior relabel may have adopted this deterministic ID into another
+        // still-current folder. Allocate a distinct copy under the write lock;
+        // subsequent ingests find it by the exact account/folder/remote tuple.
+        if provider_kind.eq_ignore_ascii_case("gmail") {
+            while sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?)",
+            )
+            .bind(&id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|err| err.to_string())?
+            {
+                id = provider_local_id(
+                    "m",
+                    provider_kind,
+                    &[
+                        account_id,
+                        folder_remote_id,
+                        &message.remote_id,
+                        &uuid::Uuid::new_v4().to_string(),
+                    ],
+                );
+            }
+        }
+        id
+    };
     let message_id = if let Some(remote_draft_id) = remote_draft_id.as_deref() {
         sqlx::query_scalar::<_, String>(
             "SELECT id FROM messages
@@ -535,6 +714,35 @@ async fn persist_provider_message(
     .await
     .map_err(|err| err.to_string())?;
 
+    if provider_kind == "imap" {
+        // A legacy row can retain its local id when sync verifies it again.
+        // Content from its unverified or earlier generation must not survive
+        // COALESCE in the upsert, even when this envelope is header-only.
+        sqlx::query(
+            "UPDATE attachments SET cached_path = NULL, content_base64 = NULL, calendar_scan_at = NULL
+            WHERE message_id = ? AND EXISTS (SELECT 1 FROM messages
+                WHERE id = ? AND remote_uidvalidity IS NOT ?)",
+        )
+        .bind(&message_id)
+        .bind(&message_id)
+        .bind(message.remote_uidvalidity.map(i64::from))
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| error.to_string())?;
+        sqlx::query(
+            "UPDATE messages SET body_text = NULL, body_html = NULL,
+                original_body_html = NULL, original_source = NULL, raw_headers = NULL, raw_size = NULL,
+                draft_attachments_json = NULL,
+                smime_repair_attempted_at = NULL
+            WHERE id = ? AND remote_uidvalidity IS NOT ?",
+        )
+        .bind(&message_id)
+        .bind(message.remote_uidvalidity.map(i64::from))
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+
     // `has_attachments` only ever rises. A re-sync that returns the envelope
     // without its parts is missing information, not reporting a message that
     // lost its attachments — mail is immutable on the server.
@@ -642,6 +850,14 @@ async fn persist_provider_message(
     .await
     .map_err(|err| err.to_string())?;
 
+    // Stamp the generation from the fetched envelope, never from current folder state.
+    sqlx::query("UPDATE messages SET remote_uidvalidity = ? WHERE id = ?")
+        .bind(message.remote_uidvalidity.map(i64::from))
+        .bind(&message_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| error.to_string())?;
+
     remember_provider_thread_connection(
         &mut *tx,
         provider_kind,
@@ -692,8 +908,8 @@ async fn persist_provider_message(
             .fetch_optional(&mut **tx).await.map_err(|error| error.to_string())?
             .unwrap_or_else(|| provider_local_id("att", provider_kind, &[&message_id, &attachment.remote_part_id]));
         sqlx::query(
-            "INSERT INTO attachments (id, message_id, filename, content_type, size, content_id, storage_path, is_inline, cached_path, remote_uid, remote_part_id, created_at, content_base64)
-             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?)
+            "INSERT INTO attachments (id, message_id, filename, content_type, size, content_id, storage_path, is_inline, cached_path, remote_uid, remote_part_id, created_at, content_base64, listing_rules)
+             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                 filename = excluded.filename,
                 content_type = excluded.content_type,
@@ -706,7 +922,8 @@ async fn persist_provider_message(
                 END,
                 remote_uid = excluded.remote_uid,
                 remote_part_id = excluded.remote_part_id,
-                content_base64 = COALESCE(excluded.content_base64, attachments.content_base64)",
+                content_base64 = COALESCE(excluded.content_base64, attachments.content_base64),
+                listing_rules = excluded.listing_rules",
         )
         .bind(&attachment_id)
         .bind(&message_id)
@@ -719,15 +936,23 @@ async fn persist_provider_message(
         .bind(&attachment.remote_part_id)
         .bind(&now)
         .bind(attachment.content_base64.as_deref())
+        .bind(satchel_core::db::signed_attachments::LISTING_RULES)
         .execute(&mut **tx)
         .await
         .map_err(|err| err.to_string())?;
         attachment_ids.push(attachment_id);
     }
 
-    // The thread aggregate belongs to the same commit. A message whose thread
-    // still reports the previous counts is a half-state readers can see.
+    // Replacement, stale-copy cleanup and every affected thread projection
+    // belong to the same savepoint.
     let mut committed_projection_threads = vec![thread_id.clone()];
+    if provider_kind.eq_ignore_ascii_case("gmail") {
+        let touched = crate::sync::gmail_reconcile::reconcile_gmail_message_mailboxes_tx(
+            tx, account_id, message,
+        )
+        .await?;
+        committed_projection_threads.extend(touched.into_iter().filter(|id| id != &thread_id));
+    }
     if let Some(prior_thread_id) = prior_thread_id.as_ref() {
         if prior_thread_id != &thread_id {
             committed_projection_threads.push(prior_thread_id.clone());
@@ -814,6 +1039,7 @@ async fn finish_provider_message(
             &message_id,
             &message.remote_id,
             folder_remote_id,
+            message.remote_uidvalidity,
             attachment_id,
             attachment,
         )
@@ -1045,7 +1271,6 @@ mod tests {
     use crate::sync::queue::SyncQueue;
     use crate::sync::thread_resolution::{merge_reply_split_threads, standalone_thread_key};
     use sqlx::sqlite::SqlitePoolOptions;
-    use std::collections::HashSet;
 
     fn envelope(remote_id: &str) -> MessageEnvelope {
         MessageEnvelope {
@@ -1925,6 +2150,15 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(stored_name, "report.pdf");
+        // Sync lists by today's rules, so a root signature never hides these.
+        let rules: Vec<i64> = sqlx::query_scalar("SELECT listing_rules FROM attachments")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            rules,
+            [satchel_core::db::signed_attachments::LISTING_RULES; 2]
+        );
         sqlx::query("UPDATE attachments SET cached_path = '/cache/' || id")
             .execute(&pool)
             .await
@@ -2677,6 +2911,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn verifying_a_new_generation_discards_old_bodies_and_attachment_caches() {
+        let pool = ingest_pool().await;
+        let mut message = envelope("42");
+        message.remote_uidvalidity = Some(7);
+        message.body_text = Some("old body".into());
+        message.attachments.push(RemoteAttachment {
+            remote_part_id: "part.1".into(),
+            filename: Some("file.bin".into()),
+            content_type: "application/octet-stream".into(),
+            size: Some(3),
+            content_id: None,
+            is_inline: false,
+            content_base64: Some("b2xk".into()),
+        });
+        ingest_identity_fixture(&pool, "imap", "inbox", "INBOX", &message).await;
+        let original_id: String = sqlx::query_scalar("SELECT id FROM messages")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE attachments SET cached_path = '/cache/old', calendar_scan_at = 'old generation'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE messages SET raw_headers = 'old headers', raw_size = 99")
+            .execute(&pool)
+            .await
+            .unwrap();
+        message.remote_uidvalidity = Some(8);
+        message.body_text = None;
+        message.body_html = None;
+        message.original_source = None;
+        message.attachments.clear();
+        ingest_identity_fixture(&pool, "imap", "inbox", "INBOX", &message).await;
+        let (id, generation, body): (String, i64, Option<String>) =
+            sqlx::query_as("SELECT id, remote_uidvalidity, body_text FROM messages")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            id, original_id,
+            "retaining a local id must still invalidate its content"
+        );
+        assert_eq!(generation, 8);
+        assert_eq!(body, None);
+        let source: (Option<String>, Option<i64>) =
+            sqlx::query_as("SELECT raw_headers, raw_size FROM messages")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(source, (None, None));
+        let (path, payload, scan): (Option<String>, Option<String>, Option<String>) =
+            sqlx::query_as("SELECT cached_path, content_base64, calendar_scan_at FROM attachments")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(path, None);
+        assert_eq!(payload, None);
+        assert_eq!(scan, None);
+    }
+
+    #[tokio::test]
     async fn legacy_ids_memberships_and_attachment_cache_survive_resync_and_folder_copies() {
         let pool = ingest_pool().await;
         sqlx::query("INSERT INTO threads (id, account_id, subject, last_message_date, workflow_state, board_column, category, category_source, priority, priority_source, created_at, updated_at) VALUES ('th-imap-legacy', 'account', 'Legacy', '', 'todo', 'todo', 'personal', 'manual_thread', 3, 'manual_thread', '', '')").execute(&pool).await.unwrap();
@@ -3225,22 +3520,17 @@ mod tests {
         // Archived in Gmail Web: every real label is gone and only the
         // category view is left, which is what earns the synthetic ARCHIVE.
         message.mailbox_ids = vec!["CATEGORY_PERSONAL".to_string()];
-        let externally_changed_threads =
+        // Merely observing the relabel cannot remove the only stored copy.
+        assert!(
             reconcile_gmail_message_mailboxes(&pool, "account", &message)
                 .await
-                .expect("archive reconcile");
-        assert_eq!(
-            externally_changed_threads,
-            HashSet::from([crate::sync::thread_resolution::provider_thread_db_id(
-                "gmail", "account", "INBOX", &message
-            )])
+                .expect("defer archive cleanup")
+                .is_empty()
         );
-        let archive_folder_id: String = sqlx::query_scalar(
-            "SELECT id FROM folders WHERE account_id = 'account' AND folder_type = 'archive'",
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("archive folder");
+        let archive_folder_id =
+            crate::sync::gmail_reconcile::ensure_gmail_archive_folder(&pool, "account")
+                .await
+                .expect("archive folder");
         upsert_provider_message(
             None,
             &pool,
@@ -3553,5 +3843,241 @@ mod tests {
         .await
         .expect("replacement attachment");
         assert_eq!(attachment_state, ("replacement-message".into(), None));
+    }
+
+    /// A queued send saves its draft's identity. Ordinary sync then adopts the
+    /// draft row for the server copy, before or after the enqueue, and assigns
+    /// it a UID (first ingest) or a new one (autosave re-upload) in the same
+    /// mailbox generation. Undo, scheduled-draft Edit and Discard must survive
+    /// that for every provider; only a new UIDVALIDITY may refuse the snapshot.
+    mod queued_draft_identity {
+        use super::*;
+        use satchel_core::drafts::{self, send_queue::build_send_action, DraftError};
+
+        const SNAPSHOT_BODY: &str = "Queued text";
+
+        async fn draft_pool(provider: &str) -> sqlx::SqlitePool {
+            let pool = ingest_pool().await;
+            sqlx::query("UPDATE accounts SET provider = ?")
+                .bind(provider)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, created_at, updated_at)
+                 VALUES ('drafts', 'account', 'Drafts', 'Drafts', 'drafts', ?, ?, '', '')",
+            )
+            .bind(if provider == "gmail" { "DRAFT" } else { "Drafts" })
+            .bind((provider == "imap").then_some(7_i64))
+            .execute(&pool)
+            .await
+            .unwrap();
+            pool
+        }
+
+        fn server_copy(provider: &str, version: u32, generation: u32) -> MessageEnvelope {
+            let mut message = envelope(&match provider {
+                "imap" => (40 + version).to_string(),
+                "gmail" => format!("gmail-message-{version}"),
+                // Outlook updates a draft in place; its id is the draft id.
+                _ => "outlook-draft".to_string(),
+            });
+            message.remote_uidvalidity = (provider == "imap").then_some(generation);
+            message.remote_draft_id = (provider != "outlook").then(|| "stable-draft".to_string());
+            message.mailbox_ids = vec!["DRAFT".to_string()];
+            message.message_id_header = Some("<draft@example.com>".to_string());
+            message.subject = "Subject".to_string();
+            message.body_text = Some(format!("Server copy {version}"));
+            message.from_address = "account@example.com".to_string();
+            message.date_rfc3339 = format!("2026-01-01T00:00:0{version}Z");
+            message
+        }
+
+        async fn ingest(pool: &sqlx::SqlitePool, provider: &str, message: &MessageEnvelope) {
+            upsert_provider_message(
+                None,
+                pool,
+                provider,
+                "account",
+                "account@example.com",
+                "Account",
+                &crate::commands::accounts::AccountConfig::from_plaintext("{}"),
+                "drafts",
+                if provider == "gmail" {
+                    "DRAFT"
+                } else {
+                    "Drafts"
+                },
+                "drafts",
+                message,
+                None,
+            )
+            .await
+            .unwrap();
+        }
+
+        async fn identity(pool: &sqlx::SqlitePool) -> (String, Option<String>, Option<i64>) {
+            sqlx::query_as(
+                "SELECT id, remote_id, remote_uidvalidity FROM messages WHERE is_draft = 1",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap()
+        }
+
+        /// Saves draft `d1`, records its provider id as an upload would, then
+        /// queues a scheduled send of `SNAPSHOT_BODY` from it.
+        async fn queue_send(
+            pool: &sqlx::SqlitePool,
+            queue: &SyncQueue,
+            provider: &str,
+            ingest_before: bool,
+        ) -> String {
+            let input: drafts::DraftInput = serde_json::from_value(serde_json::json!({
+                "id": "d1", "account_id": "account", "to": ["you@example.test"],
+                "subject": "Subject", "body": "Autosaved text", "from_address": "account@example.com",
+            }))
+            .unwrap();
+            drafts::save(pool, queue, &input).await.unwrap();
+            sqlx::query("UPDATE messages SET remote_draft_id = ? WHERE id = 'd1'")
+                .bind(if provider == "outlook" {
+                    "outlook-draft"
+                } else {
+                    "stable-draft"
+                })
+                .execute(pool)
+                .await
+                .unwrap();
+            if ingest_before {
+                ingest(pool, provider, &server_copy(provider, 1, 7)).await;
+            }
+            let outgoing = serde_json::from_value(serde_json::json!({
+                "draft_id": "d1", "to": ["you@example.test"], "subject": "Subject",
+                "body": SNAPSHOT_BODY, "from_address": "account@example.com",
+            }))
+            .unwrap();
+            let action = build_send_action(
+                "account".into(),
+                outgoing,
+                Some(chrono::Utc::now() + chrono::Duration::days(1)),
+            )
+            .unwrap();
+            drafts::enqueue_send_with_draft(pool, queue, &action)
+                .await
+                .unwrap();
+            action.id
+        }
+
+        async fn queued_sends(pool: &sqlx::SqlitePool) -> i64 {
+            sqlx::query_scalar("SELECT COUNT(*) FROM sync_queue WHERE action_type = 'send_message'")
+                .fetch_one(pool)
+                .await
+                .unwrap()
+        }
+
+        #[tokio::test]
+        async fn sync_adopting_the_server_copy_keeps_undo_edit_and_discard() {
+            for provider in ["imap", "gmail", "outlook"] {
+                for ordering in ["first_ingest_after_enqueue", "reupload_after_enqueue"] {
+                    for operation in ["undo", "edit", "discard"] {
+                        let case = format!("{provider}/{ordering}/{operation}");
+                        let pool = draft_pool(provider).await;
+                        let queue = SyncQueue::new();
+                        let reupload = ordering == "reupload_after_enqueue";
+                        let queued = queue_send(&pool, &queue, provider, reupload).await;
+                        let before = identity(&pool).await;
+                        ingest(
+                            &pool,
+                            provider,
+                            &server_copy(provider, 1 + u32::from(reupload), 7),
+                        )
+                        .await;
+                        let after = identity(&pool).await;
+                        assert_eq!(after.0, "d1", "{case}: sync adopts the local draft row");
+                        assert!(after.1.is_some(), "{case}");
+                        if reupload && provider != "outlook" {
+                            assert_ne!(before.1, after.1, "{case}: the re-upload replaces the UID");
+                        } else if !reupload {
+                            assert_eq!(before.1, None, "{case}: the draft was local when queued");
+                        }
+                        match operation {
+                            "undo" | "edit" => {
+                                let draft = if operation == "undo" {
+                                    drafts::restore_queued_draft(&pool, &queue, &queued).await
+                                } else {
+                                    drafts::load(&pool, &pool, &queue, "d1")
+                                        .await
+                                        .map(|draft| draft.expect("draft"))
+                                }
+                                .unwrap_or_else(|error| panic!("{case}: {error:?}"));
+                                assert_eq!(draft.id, "d1", "{case}");
+                                assert_eq!(draft.body, SNAPSHOT_BODY, "{case}");
+                            }
+                            _ => {
+                                drafts::discard(&pool, &queue, "d1")
+                                    .await
+                                    .unwrap_or_else(|error| panic!("{case}: {error:?}"));
+                                let remaining: i64 = sqlx::query_scalar(
+                                    "SELECT COUNT(*) FROM messages WHERE id = 'd1'",
+                                )
+                                .fetch_one(&pool)
+                                .await
+                                .unwrap();
+                                assert_eq!(remaining, 0, "{case}");
+                            }
+                        }
+                        assert_eq!(queued_sends(&pool).await, 0, "{case}");
+                    }
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn a_new_mailbox_generation_still_refuses_the_queued_snapshot() {
+            for ingest_before in [false, true] {
+                for operation in ["undo", "edit"] {
+                    let pool = draft_pool("imap").await;
+                    let queue = SyncQueue::new();
+                    let queued = queue_send(&pool, &queue, "imap", ingest_before).await;
+                    // The server reset Drafts; sync adopts the same draft row
+                    // under the new UIDVALIDITY.
+                    sqlx::query("UPDATE folders SET uidvalidity = 8 WHERE id = 'drafts'")
+                        .execute(&pool)
+                        .await
+                        .unwrap();
+                    ingest(&pool, "imap", &server_copy("imap", 1, 8)).await;
+                    assert_eq!(
+                        identity(&pool).await,
+                        ("d1".to_string(), Some("41".to_string()), Some(8))
+                    );
+                    let result = if operation == "undo" {
+                        drafts::restore_queued_draft(&pool, &queue, &queued).await
+                    } else {
+                        drafts::load(&pool, &pool, &queue, "d1")
+                            .await
+                            .map(|draft| draft.expect("draft"))
+                    };
+                    if ingest_before {
+                        assert!(
+                            matches!(result, Err(DraftError::QueuedDraftNotRestorable)),
+                            "{operation}: {result:?}"
+                        );
+                        let body: Option<String> =
+                            sqlx::query_scalar("SELECT body_text FROM messages WHERE id = 'd1'")
+                                .fetch_one(&pool)
+                                .await
+                                .unwrap();
+                        assert_eq!(body.as_deref(), Some("Server copy 1"));
+                        assert_eq!(queued_sends(&pool).await, 1);
+                        // Discard needs no snapshot: it stops the send and removes the draft.
+                        drafts::discard(&pool, &queue, "d1").await.unwrap();
+                        assert_eq!(queued_sends(&pool).await, 0);
+                    } else {
+                        // Queued while still local, the snapshot never had a generation.
+                        assert_eq!(result.unwrap().body, SNAPSHOT_BODY, "{operation}");
+                    }
+                }
+            }
+        }
     }
 }

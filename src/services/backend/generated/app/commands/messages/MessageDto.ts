@@ -3,6 +3,14 @@ import type { BodyProvenance } from "./BodyProvenance";
 import type { BodySegment } from "./BodySegment";
 export type MessageDto = {
     id: string;
+    /**
+     * The saved IMAP generation also identifies cached bodies and inline bytes.
+     */
+    remote_uidvalidity?: number | null;
+    /**
+     * A remote identity that cannot serve content until its folder is synced.
+     */
+    content_error?: string | null;
     thread_id: string;
     subject: string;
     snippet: string;

@@ -27,12 +27,18 @@ use crate::{
     commands::signatures::{
         resolve_signature_for_compose, ResolveSignatureInput, SignaturePreference, SignatureVariant,
     },
-    commands::smime::{decrypt_message_with_unlocked_smime_certs, verify_smime_message},
+    commands::smime::{
+        decrypt_message_with_unlocked_smime_certs, verify_smime_message, SmimeVerifyMessageResult,
+    },
+    db::remote_content::{saved_uidvalidity, ContentReference},
     email::sanitizer::sanitize_email_html,
+    email::signed_mime::{self, EntityDisplay, SignedMimeError, StoredSignedBody},
     events::bus::AppEvent,
     plugins::runtime::{MessageTransformInput, PluginRuntime},
-    providers::imap::{is_legacy_truncated_body, parse_header_value, parse_raw_message_body},
-    providers::traits::MessageRef,
+    providers::imap::{
+        build_snippet, is_legacy_truncated_body, parse_header_value, parse_raw_message_body,
+    },
+    providers::traits::MessageTrust,
     sync::outbox::{build_send_action, execute_send_action},
     utils::mime::{
         decode_html_entities, decode_mime_encoded_words, extract_email_address,
@@ -109,6 +115,14 @@ pub struct DecryptedAttachmentBinding {
 )]
 pub struct MessageDto {
     pub id: String,
+    /// The saved IMAP generation also identifies cached bodies and inline bytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
+    pub remote_uidvalidity: Option<u32>,
+    /// A remote identity that cannot serve content until its folder is synced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
+    pub content_error: Option<String>,
     pub thread_id: String,
     pub subject: String,
     pub snippet: String,
@@ -149,6 +163,13 @@ pub struct MessageDto {
 )]
 pub struct MessageBodyDto {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
+    pub remote_uidvalidity: Option<u32>,
+    /// A remote identity that cannot serve content until its folder is synced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
+    pub content_error: Option<String>,
     pub snippet: String,
     pub body_text: String,
     pub body_segments: Option<Vec<BodySegment>>,
@@ -212,16 +233,44 @@ pub async fn list_messages_preview(
         .await
         .map_err(CommandError::from)?;
 
-    let messages = rows
-        .into_iter()
-        .map(map_message_preview_row)
-        .collect::<Vec<_>>();
+    let messages = validated_previews(pool.inner().as_ref(), rows).await?;
     log_perf(
         "list_messages_preview",
         started_at,
         format!("thread_id={} rows={}", thread_id, messages.len()),
     );
     Ok(messages)
+}
+
+async fn validated_previews(
+    pool: &SqlitePool,
+    rows: Vec<MessagePreviewRecord>,
+) -> CommandResult<Vec<MessageDto>> {
+    let ids = rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>();
+    let references = ContentReference::load_many(pool, &ids).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let mut dto = map_message_preview_row(row);
+            dto.content_error = references
+                .get(&dto.id)
+                .map(|reference| {
+                    reference.validate_cached_read().err().or_else(|| {
+                        (dto.remote_uidvalidity != reference.uidvalidity())
+                            .then(|| reference.changed_error())
+                    })
+                })
+                .unwrap_or_else(|| Some("backend.errors.messageNotAvailableLocally".to_string()));
+            if dto.content_error.is_some() {
+                dto.snippet.clear();
+                dto.body_html = None;
+                dto.source_payload = None;
+                dto.body_text.clear();
+                dto.body_loaded = true;
+            }
+            dto
+        })
+        .collect())
 }
 
 /// Older parser versions stored the detached signature as an attachment but not
@@ -265,19 +314,17 @@ async fn repair_unparsed_smime_messages(
 
     let mut repaired: Vec<String> = Vec::new();
     for (message_id, thread_id) in claim.candidates.iter().cloned() {
+        let Ok(reference) = ContentReference::load(pool, &message_id).await else {
+            continue;
+        };
         let attempt = fetch_remote_message_source(pool, write_pool, &message_id).await;
-        if let Err(error) =
-            sqlx::query("UPDATE messages SET smime_repair_attempted_at = ? WHERE id = ?")
-                .bind(Utc::now().to_rfc3339())
-                .bind(&message_id)
-                .execute(write_pool)
-                .await
-        {
+        if let Err(error) = record_smime_repair_attempt(write_pool, &reference).await {
             tracing::warn!(%message_id, %error, "could not record S/MIME repair attempt");
+            continue;
         }
         match attempt {
             Ok(Some(raw)) => {
-                match persist_raw_message_metadata(write_pool, &message_id, &raw).await {
+                match persist_raw_message_metadata(write_pool, &reference, &raw).await {
                     Ok(true) => {
                         if !repaired.contains(&thread_id) {
                             repaired.push(thread_id);
@@ -296,6 +343,20 @@ async fn repair_unparsed_smime_messages(
         }
     }
     repaired
+}
+
+async fn record_smime_repair_attempt(
+    pool: &SqlitePool,
+    reference: &ContentReference,
+) -> Result<(), String> {
+    let mut tx = reference.begin_write(pool).await?;
+    sqlx::query("UPDATE messages SET smime_repair_attempted_at = ? WHERE id = ?")
+        .bind(Utc::now().to_rfc3339())
+        .bind(&reference.message_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|error| error.to_string())
 }
 
 /// How long a message the S/MIME repair could not fix waits for another try.
@@ -404,10 +465,7 @@ pub async fn load_thread_messages(
         .await
         .map_err(CommandError::from)?;
     let body_ids = opening_body_ids(&rows, input.body_count);
-    let messages = rows
-        .into_iter()
-        .map(map_message_preview_row)
-        .collect::<Vec<_>>();
+    let messages = validated_previews(pool.inner().as_ref(), rows).await?;
     let bodies = message_bodies(
         &app,
         &state,
@@ -427,6 +485,20 @@ pub async fn load_thread_messages(
         ),
     );
     Ok(OpenedThreadDto { messages, bodies })
+}
+
+fn gate_cached_body(row: &mut MessageReadRecord, reference: &ContentReference) -> Option<String> {
+    let content_error = reference.validate_cached_read().err().or_else(|| {
+        (saved_uidvalidity(row.remote_uidvalidity) != reference.uidvalidity())
+            .then(|| reference.changed_error())
+    });
+    if content_error.is_some() {
+        row.body_text = None;
+        row.body_html = None;
+        row.snippet = None;
+        row.source_payload = None;
+    }
+    content_error
 }
 
 async fn message_bodies(
@@ -457,43 +529,40 @@ async fn message_bodies(
     let plugin_ids = runtime.enabled_message_transform_plugins()?;
     let has_pgp_private_key = has_any_private_pgp_key(pool).await;
     let has_smime_private_cert = has_any_private_smime_cert(pool).await;
+    let references = ContentReference::load_many(pool, message_ids).await?;
     let rows = MessageReadRepository::new(pool)
         .list_message_bodies(message_ids)
         .await
         .map_err(CommandError::from)?;
 
     let mut bodies = Vec::with_capacity(rows.len());
-    for row in rows {
-        // Keep this state from the stored columns. `map_message_row` replaces
-        // a missing body with the snippet so list views always have readable
-        // text. Old IMAP bodies at the former 64-KiB cutoff likewise remain
-        // readable as a cached prefix while the full body is fetched.
-        let has_stored_body = row
-            .body_text
-            .as_deref()
-            .is_some_and(|text| !text.trim().is_empty())
-            || row
-                .body_html
-                .as_deref()
-                .is_some_and(|html| !html.trim().is_empty());
-        let body_loaded = has_stored_body
-            && !(row.id.starts_with("m-imap-")
-                && (is_legacy_truncated_body(row.body_text.as_deref())
-                    || is_legacy_truncated_body(row.body_html.as_deref())));
-        let dto = map_message_row(
-            row,
-            app,
-            state,
-            write_pool,
-            &runtime,
-            &plugin_ids,
-            has_pgp_private_key,
-            has_smime_private_cert,
-        )
-        .await;
+    for mut row in rows {
+        let reference = references
+            .get(&row.id)
+            .ok_or_else(|| CommandError::new("backend.errors.messageNotAvailableLocally"))?;
+        let content_error = gate_cached_body(&mut row, reference);
+        let dto = if content_error.is_some() {
+            map_stored_message_row(row)
+        } else {
+            map_message_row(
+                row,
+                app,
+                state,
+                write_pool,
+                &runtime,
+                &plugin_ids,
+                has_pgp_private_key,
+                has_smime_private_cert,
+                reference,
+            )
+            .await
+        };
 
+        let body_loaded = dto.body_loaded || content_error.is_some();
         bodies.push(MessageBodyDto {
             id: dto.id,
+            remote_uidvalidity: dto.remote_uidvalidity,
+            content_error,
             snippet: dto.snippet,
             body_text: dto.body_text,
             body_segments: dto.body_segments,
@@ -517,6 +586,30 @@ async fn message_bodies(
         });
     }
 
+    let current = ContentReference::load_many(pool, message_ids).await?;
+    for body in &mut bodies {
+        let reference = &references[&body.id];
+        if current
+            .get(&body.id)
+            .is_none_or(|current| !reference.same_identity(current))
+        {
+            body.content_error = Some(reference.changed_error());
+            body.body_text.clear();
+            body.body_html = None;
+            body.snippet.clear();
+            body.source_payload = None;
+            body.body_loaded = true;
+            // A verdict covers the body it was shown with, which is gone.
+            body.pgp_state = None;
+            body.pgp_error_detail = None;
+            body.pgp_signer_name = None;
+            body.pgp_signer_fingerprint = None;
+            body.smime_state = None;
+            body.smime_signer_email = None;
+            body.smime_signer_cn = None;
+            body.smime_error_detail = None;
+        }
+    }
     log_perf(
         "list_message_bodies",
         started_at,
@@ -623,6 +716,8 @@ fn map_stored_message_row(row: MessageReadRecord) -> MessageDto {
     let body_html = row.body_html.filter(|value| !value.trim().is_empty());
     MessageDto {
         id: row.id,
+        remote_uidvalidity: saved_uidvalidity(row.remote_uidvalidity),
+        content_error: None,
         thread_id: row.thread_id.unwrap_or_default(),
         subject,
         snippet,
@@ -665,6 +760,7 @@ async fn map_message_row(
     plugin_ids: &[String],
     has_pgp_private_key: bool,
     has_smime_private_cert: bool,
+    reference: &ContentReference,
 ) -> MessageDto {
     let trust = row
         .trust_metadata
@@ -679,11 +775,45 @@ async fn map_message_row(
         .filter(|_| trust.root_encryption);
     let smime_signed = row.smime_signed.clone();
     let pgp_signed = row.pgp_signed.clone();
+    let has_stored_body = row_has_body(&row);
+    // `map_stored_message_row` replaces a missing body with the snippet so
+    // list views always have readable text; whether the body is really there
+    // comes from the stored columns. Old IMAP bodies at the former 64-KiB
+    // cutoff likewise remain readable as a cached prefix while the full body
+    // is fetched.
+    let body_loaded = has_stored_body
+        && !(row.id.starts_with("m-imap-")
+            && (is_legacy_truncated_body(row.body_text.as_deref())
+                || is_legacy_truncated_body(row.body_html.as_deref())));
 
     let mut dto = map_stored_message_row(row);
-    let original_body_text = dto.body_text.clone();
+    dto.body_loaded = body_loaded;
     let mut decrypted_attachments = Vec::new();
     let mut publication_complete = true;
+
+    // What a stored signature covers goes on the DTO before anything decodes
+    // the body. An armored block inside a signed entity is then decrypted from
+    // the entity the signature is checked over, not from a stored body that
+    // only the binding mark may vouch for.
+    let pgp_display = match pgp_signed.as_deref() {
+        Some(bundle) => Some(show_signed_body(&mut dto, bundle, &trust, has_stored_body).await),
+        None => None,
+    };
+    let smime_display = match smime_signed.as_deref() {
+        Some(payload) => Some(show_signed_body(&mut dto, payload, &trust, has_stored_body).await),
+        None => None,
+    };
+    // Opaque S/MIME carries its content inside the signature, and only the
+    // engine's verification reads it out.
+    let mut smime_encapsulated = match (smime_display, smime_signed.as_deref()) {
+        (Some(SignedDisplay::Encapsulated), Some(payload)) => {
+            let verified =
+                verify_smime_message(app, pool, &dto.id, payload, &dto.from_address).await;
+            Some(show_encapsulated_body(&mut dto, verified).await)
+        }
+        _ => None,
+    };
+    let original_body_text = dto.body_text.clone();
 
     if (trust.root_encryption || trust.root_inline_signature)
         && message_requires_plugin_transform(&dto.body_text)
@@ -725,7 +855,7 @@ async fn map_message_row(
             Ok(Some(decrypted)) if !decrypted.plaintext.trim().is_empty() => {
                 match decode_inline_pgp_body(trust.clone(), decrypted).await {
                     Ok(body) => {
-                        match persist_decrypted_attachments(app, pool, &dto.id, &body.attachments)
+                        match persist_decrypted_attachments(app, pool, reference, &body.attachments)
                             .await
                         {
                             Ok(bindings) => decrypted_attachments = bindings,
@@ -751,7 +881,7 @@ async fn map_message_row(
                             .await;
                             verdict = combine_pgp_verdicts(
                                 Some(verdict),
-                                scoped(pgp_detached_verdict(checked), *root && body.whole_body),
+                                scoped(checked, *root && body.whole_body),
                             );
                         }
                         inner_pgp = Some(verdict);
@@ -837,16 +967,23 @@ async fn map_message_row(
         }
     }
 
-    let outer_pgp = match pgp_signed.as_deref() {
-        Some(bundle) => {
+    let outer_pgp = match (pgp_display, pgp_signed.as_deref()) {
+        (Some(SignedDisplay::Covered), Some(bundle)) => {
             let checked =
                 verify_pgp_signed_bundle(app, pool, &dto.id, &dto.from_address, bundle).await;
             Some(scoped(
-                pgp_detached_verdict(checked),
+                checked,
                 root_signature_covers_body(&trust, dto.body_segments.as_deref()),
             ))
         }
-        None => None,
+        (Some(SignedDisplay::Unavailable), _) => Some(PgpVerdict::failed(
+            "backend.errors.signedContentUnavailable",
+        )),
+        // OpenPGP has no opaque form: such a bundle signs nothing shown.
+        (Some(SignedDisplay::Encapsulated | SignedDisplay::Malformed), _) => {
+            Some(PgpVerdict::failed("backend.errors.signedMessageMalformed"))
+        }
+        _ => None,
     };
     match (inner_pgp, outer_pgp) {
         (inner, Some(outer)) => combine_pgp_verdicts(inner, outer).apply(&mut dto),
@@ -862,7 +999,7 @@ async fn map_message_row(
                     match persist_decrypted_attachments(
                         app,
                         pool,
-                        &dto.id,
+                        reference,
                         &parsed.body.attachments,
                     )
                     .await
@@ -918,9 +1055,17 @@ async fn map_message_row(
         }
     }
 
-    if let Some(signed_payload) = smime_signed.as_deref() {
-        let verified =
-            verify_smime_message(app, pool, &dto.id, signed_payload, &dto.from_address).await;
+    if let (Some(display), Some(signed_payload)) = (smime_display, smime_signed.as_deref()) {
+        let verified = match display {
+            SignedDisplay::Covered => {
+                verify_smime_message(app, pool, &dto.id, signed_payload, &dto.from_address).await
+            }
+            SignedDisplay::Encapsulated => smime_encapsulated
+                .take()
+                .unwrap_or_else(SmimeVerifyMessageResult::content_unavailable),
+            SignedDisplay::Unavailable => SmimeVerifyMessageResult::content_unavailable(),
+            SignedDisplay::Malformed => SmimeVerifyMessageResult::malformed(),
+        };
         dto.smime_state = Some(verified.state);
         apply_signature_scope(
             &mut dto.smime_state,
@@ -989,6 +1134,155 @@ async fn map_message_row(
         }
     }
     dto
+}
+
+/// Whether the row stores a body at all. A stored empty string counts as absent.
+fn row_has_body(row: &MessageReadRecord) -> bool {
+    let present = |value: Option<&str>| value.is_some_and(|value| !value.trim().is_empty());
+    present(row.body_text.as_deref()) || present(row.body_html.as_deref())
+}
+
+/// What a stored signature may be shown next to, once the DTO holds the body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SignedDisplay {
+    /// The DTO shows what the signature covers.
+    Covered,
+    /// Opaque S/MIME: only the engine reads the content, while verifying.
+    Encapsulated,
+    /// The signed entity displays nothing, so no verdict may stand over it.
+    Unavailable,
+    /// The bundle does not split; it signs nothing shown.
+    Malformed,
+}
+
+/// Put on the DTO the body a stored signature covers, before it is verified.
+///
+/// A row the strict splitter wrote with its bundle keeps its body. Every other
+/// root-signed row shows the entity decoded from the bundle, the bytes
+/// verification reads, so display and verdict cannot part.
+async fn show_signed_body(
+    dto: &mut MessageDto,
+    bundle: &[u8],
+    trust: &MessageTrust,
+    has_stored_body: bool,
+) -> SignedDisplay {
+    static CACHE: std::sync::LazyLock<
+        std::sync::Mutex<
+            super::message_processing::ProcessingCache<
+                Result<(StoredSignedBody, String), SignedMimeError>,
+            >,
+        >,
+    > = std::sync::LazyLock::new(|| std::sync::Mutex::new(Default::default()));
+    let message_id = dto.id.clone();
+    let subject = dto.subject.clone();
+    let bundle = bundle.to_vec();
+    let trust = trust.clone();
+    let shown = tokio::task::spawn_blocking(move || {
+        let fingerprint = super::message_processing::fingerprint(&[
+            &bundle,
+            &[
+                u8::from(trust.root_crypto),
+                u8::from(trust.signed_binding),
+                u8::from(has_stored_body),
+            ],
+            subject.as_bytes(),
+        ]);
+        super::message_processing::cached(&CACHE, message_id, fingerprint, || {
+            let shown =
+                signed_mime::stored_signed_body(&bundle, &trust, has_stored_body).map(|shown| {
+                    let snippet = match &shown {
+                        StoredSignedBody::Entity(entity) => {
+                            build_snippet(&subject, entity.text.as_deref(), entity.html.as_deref())
+                        }
+                        _ => String::new(),
+                    };
+                    (shown, snippet)
+                });
+            (shown, bundle.len())
+        })
+    })
+    .await
+    .unwrap_or_else(|error| {
+        tracing::warn!(%error, "signed body task failed");
+        Err(SignedMimeError::NotSigned)
+    });
+    match shown {
+        Ok((StoredSignedBody::Entity(entity), _))
+            if shows_nothing(
+                entity.text.as_deref().unwrap_or_default(),
+                entity.html.as_deref(),
+            ) =>
+        {
+            show_entity(dto, EntityDisplay::default(), String::new());
+            dto.snippet.clear();
+            SignedDisplay::Unavailable
+        }
+        Ok((StoredSignedBody::Entity(entity), snippet)) => {
+            show_entity(dto, entity, snippet);
+            SignedDisplay::Covered
+        }
+        Ok((StoredSignedBody::Stored, _)) => SignedDisplay::Covered,
+        Ok((StoredSignedBody::Encapsulated, _)) => SignedDisplay::Encapsulated,
+        Err(error) => {
+            tracing::debug!(message_id = %dto.id, %error, "stored signed bundle rejected");
+            SignedDisplay::Malformed
+        }
+    }
+}
+
+/// Whether a signed display has nothing for a verdict to stand over.
+fn shows_nothing(text: &str, html: Option<&str>) -> bool {
+    text.trim().is_empty() && html.is_none_or(|html| html.trim().is_empty())
+}
+
+/// The DTO shows exactly this signed entity: nothing of the stored body, the
+/// snippet or the subject stands in for a part it does not display.
+fn show_entity(dto: &mut MessageDto, entity: EntityDisplay, snippet: String) {
+    dto.body_text = entity.text.unwrap_or_default();
+    dto.body_html = entity.html;
+    dto.body_segments = None;
+    if !snippet.is_empty() {
+        dto.snippet = snippet;
+    }
+    // A body fetched again would not be what this verdict covers.
+    dto.body_loaded = true;
+}
+
+/// Opaque S/MIME carries its content inside the signature. Show what the
+/// engine read there while verifying, or no body and no verdict.
+async fn show_encapsulated_body(
+    dto: &mut MessageDto,
+    mut verified: SmimeVerifyMessageResult,
+) -> SmimeVerifyMessageResult {
+    let content = verified.content.take();
+    let entity = tokio::task::spawn_blocking(move || {
+        content
+            .as_deref()
+            .map(signed_mime::display_entity)
+            .filter(|entity| entity.text.is_some() || entity.html.is_some())
+    })
+    .await
+    .ok()
+    .flatten();
+    match entity {
+        Some(entity) => {
+            let snippet = entity
+                .text
+                .as_deref()
+                .and_then(first_non_empty_line)
+                .unwrap_or_default();
+            show_entity(dto, entity, snippet);
+            verified
+        }
+        None => {
+            show_entity(dto, EntityDisplay::default(), String::new());
+            if verified.state == "error" {
+                verified
+            } else {
+                SmimeVerifyMessageResult::content_unavailable()
+            }
+        }
+    }
 }
 
 /// Whether `map_message_row` tries the unlocked keys on this stored body.
@@ -1300,10 +1594,15 @@ fn keeps_verifying_smime(state: Option<&str>) -> bool {
     matches!(state, Some("signature_valid" | "signature_partial"))
 }
 
+/// The error a verdict carries: a message key, never the engine's own text.
+/// A key the verification already chose, such as a refused structure, stays.
 fn smime_verification_error(detail: Option<String>) -> Option<String> {
-    detail.map(|error| {
-        tracing::warn!(%error, "S/MIME verification failed");
-        CommandError::new("backend.errors.smimeVerificationFailed").encoded()
+    detail.map(|error| match CommandError::from(error.clone()) {
+        keyed if keyed.key != "backend.errors.unexpected" => keyed.encoded(),
+        _ => {
+            tracing::warn!(%error, "S/MIME verification failed");
+            CommandError::new("backend.errors.smimeVerificationFailed").encoded()
+        }
     })
 }
 
@@ -1429,23 +1728,33 @@ async fn verify_pgp_signed_bundle(
     message_id: &str,
     from_address: &str,
     signed_bundle: &[u8],
-) -> Result<IncomingPgpDetachedSignature, String> {
-    let parsed = crate::email::pgp_mime::parse_signed_message(signed_bundle)?;
-    verify_incoming_detached_signature(
-        app,
-        pool,
-        message_id,
-        &parsed.signed_entity,
-        &parsed.armored_signature,
-        from_address,
+) -> PgpVerdict {
+    let parsed = match crate::email::pgp_mime::parse_signed_message(signed_bundle) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            // No key is consulted for a structure that does not tie the
+            // signature to the displayed entity.
+            tracing::debug!(%message_id, %error, "OpenPGP signed structure rejected");
+            return PgpVerdict::failed("backend.errors.signedMessageMalformed");
+        }
+    };
+    pgp_detached_verdict(
+        verify_incoming_detached_signature(
+            app,
+            pool,
+            message_id,
+            &parsed.signed_entity,
+            &parsed.armored_signature,
+            from_address,
+        )
+        .await,
     )
-    .await
 }
 
 async fn persist_decrypted_attachments(
     app: &tauri::AppHandle,
     pool: &SqlitePool,
-    message_id: &str,
+    reference: &ContentReference,
     attachments: &[crate::providers::traits::RemoteAttachment],
 ) -> Result<Vec<DecryptedAttachmentBinding>, String> {
     if attachments.is_empty() {
@@ -1456,10 +1765,29 @@ async fn persist_decrypted_attachments(
         .path()
         .resolve("satchel/attachments", tauri::path::BaseDirectory::AppData)
         .map_err(|error| error.to_string())?;
-    tokio::fs::create_dir_all(&cache_dir)
+    persist_decrypted_attachments_in_dir(&cache_dir, pool, reference, attachments).await
+}
+
+async fn persist_decrypted_attachments_in_dir(
+    cache_dir: &std::path::Path,
+    pool: &SqlitePool,
+    reference: &ContentReference,
+    attachments: &[crate::providers::traits::RemoteAttachment],
+) -> Result<Vec<DecryptedAttachmentBinding>, String> {
+    let message_id = &reference.message_id;
+    tokio::fs::create_dir_all(cache_dir)
         .await
         .map_err(|error| format!("create attachment cache: {error}"))?;
     let now = chrono::Utc::now().to_rfc3339();
+    let cached_paths = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT id, cached_path FROM attachments WHERE message_id = ?",
+    )
+    .bind(message_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .into_iter()
+    .collect::<std::collections::HashMap<_, _>>();
 
     let mut bindings = Vec::new();
     for attachment in attachments {
@@ -1475,25 +1803,46 @@ async fn persist_decrypted_attachments(
             .filename
             .clone()
             .unwrap_or_else(|| "attachment".to_string());
-        let path = crate::commands::attachments::attachment_cache_path(
-            &cache_dir,
-            &attachment_id,
-            &filename,
-        );
-        tokio::fs::write(&path, &bytes)
-            .await
-            .map_err(|error| format!("write decrypted attachment cache: {error}"))?;
-        let path = path.to_string_lossy().to_string();
-
+        let cached = cached_paths.get(&attachment_id).and_then(Option::as_deref);
+        let reusable = if let Some(path) = cached {
+            reference.owns_attachment_cache(path, &attachment_id)
+                && crate::commands::attachments::validated_cached_file_size(cache_dir, path)
+                    .await
+                    .is_some()
+                && tokio::fs::read(path)
+                    .await
+                    .is_ok_and(|saved| saved == bytes)
+        } else {
+            false
+        };
+        // Published files are immutable. Repeated decryption can reuse identical
+        // bytes; a replacement request owns a fresh file until publication.
+        let (path, staged) = if let Some(path) = cached.filter(|_| reusable) {
+            (path.to_string(), false)
+        } else {
+            let path = crate::commands::attachments::attachment_cache_path(
+                cache_dir,
+                &reference.attachment_cache_id(&attachment_id),
+                &format!("{}-{filename}", uuid::Uuid::new_v4()),
+            );
+            tokio::fs::write(&path, &bytes)
+                .await
+                .map_err(|error| format!("write decrypted attachment cache: {error}"))?;
+            (path.to_string_lossy().to_string(), true)
+        };
         // No remote part: the decoder numbers parts of the plaintext, and the
         // same number names a part of the encrypted message on the server.
         // Sync would match the row to that part, and a download would fetch
-        // its ciphertext under this file's name.
-        sqlx::query(
-            "INSERT INTO attachments
+        // its ciphertext under this file's name. The row is written under the
+        // current listing rules; the signed-entity rules for rows beside a
+        // root signature do not apply to it (`decrypted::is_attachment_id`).
+        let publication: Result<(), String> = async {
+            let mut tx = reference.begin_write(pool).await?;
+            sqlx::query(
+                "INSERT INTO attachments
              (id, message_id, filename, content_type, size, content_id, storage_path, is_inline,
-              cached_path, remote_uid, remote_part_id, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, NULL, ?)
+              cached_path, remote_uid, remote_part_id, created_at, listing_rules)
+             VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, NULL, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                filename = excluded.filename,
                content_type = excluded.content_type,
@@ -1501,21 +1850,29 @@ async fn persist_decrypted_attachments(
                content_id = excluded.content_id,
                is_inline = excluded.is_inline,
                cached_path = excluded.cached_path,
-               remote_uid = NULL,
-               remote_part_id = NULL",
-        )
-        .bind(&attachment_id)
-        .bind(message_id)
-        .bind(&filename)
-        .bind(&attachment.content_type)
-        .bind(i64::try_from(bytes.len()).unwrap_or(i64::MAX))
-        .bind(attachment.content_id.as_deref())
-        .bind(if attachment.is_inline { 1 } else { 0 })
-        .bind(&path)
-        .bind(&now)
-        .execute(pool)
-        .await
-        .map_err(|error| error.to_string())?;
+               remote_uid = NULL, remote_part_id = NULL, content_base64 = NULL,
+               listing_rules = excluded.listing_rules",
+            )
+            .bind(&attachment_id)
+            .bind(message_id)
+            .bind(&filename)
+            .bind(&attachment.content_type)
+            .bind(i64::try_from(bytes.len()).unwrap_or(i64::MAX))
+            .bind(attachment.content_id.as_deref())
+            .bind(if attachment.is_inline { 1 } else { 0 })
+            .bind(&path)
+            .bind(&now)
+            .bind(satchel_core::db::signed_attachments::LISTING_RULES)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| error.to_string())?;
+            tx.commit().await.map_err(|error| error.to_string())
+        }
+        .await;
+        if publication.is_err() && staged {
+            let _ = tokio::fs::remove_file(&path).await;
+        }
+        publication?;
         bindings.push(DecryptedAttachmentBinding {
             id: attachment_id,
             filename,
@@ -1533,9 +1890,10 @@ async fn persist_decrypted_attachments(
         });
     }
 
+    let mut tx = reference.begin_write(pool).await?;
     sqlx::query("UPDATE messages SET has_attachments = 1 WHERE id = ?")
         .bind(message_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|error| error.to_string())?;
     sqlx::query(
@@ -1543,9 +1901,10 @@ async fn persist_decrypted_attachments(
          WHERE id = (SELECT thread_id FROM messages WHERE id = ?)",
     )
     .bind(message_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|error| error.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
     Ok(bindings)
 }
 
@@ -1572,6 +1931,8 @@ fn map_message_preview_row(row: MessagePreviewRecord) -> MessageDto {
 
     MessageDto {
         id: row.id,
+        remote_uidvalidity: saved_uidvalidity(row.remote_uidvalidity),
+        content_error: None,
         thread_id: row.thread_id.unwrap_or_default(),
         subject,
         snippet: snippet.clone(),
@@ -2372,6 +2733,7 @@ mod tests {
     fn opening_a_thread_loads_the_latest_bodies_and_every_draft() {
         let row = |id: &str, draft: i64| super::MessagePreviewRecord {
             id: id.to_string(),
+            remote_uidvalidity: None,
             thread_id: Some("t".to_string()),
             subject: None,
             snippet: None,
@@ -2413,6 +2775,246 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn cached_content_generation_regressions() {
+        use crate::commands::attachments::{prepare_attachment_in_dir, DownloadAttachmentInput};
+        use crate::db::remote_content::ContentReference;
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+            VALUES ('a','A','me@example.test','imap','{}','','','');
+            INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, uidvalidity, created_at, updated_at)
+            VALUES ('f','a','Inbox','INBOX','INBOX','inbox',7,'','');
+            INSERT INTO threads (id, account_id, subject, last_message_date, created_at, updated_at) VALUES ('t','a','Subject','','','');
+            INSERT INTO messages (id,account_id,folder_id,thread_id,remote_id,remote_uidvalidity,from_address,to_addresses,date,body_text,original_source,created_at,updated_at)
+            VALUES ('m','a','f','t','42',7,'sender@example.test','[]','','cached body',CAST('From: sender@example.test' || char(13,10,13,10) || 'cached source' AS BLOB),'','');")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO messages (id,account_id,folder_id,thread_id,remote_id,remote_uidvalidity,from_address,to_addresses,date,body_text,created_at,updated_at) VALUES ('neighbor','a','f','t','43',8,'sender@example.test','[]','','neighbor bytes','','')").execute(&pool).await.unwrap();
+        sqlx::query("UPDATE messages SET snippet = 'cached snippet' WHERE id = 'm'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let reference = ContentReference::load(&pool, "m").await.unwrap();
+        let part = crate::providers::traits::RemoteAttachment {
+            remote_part_id: "inner".into(),
+            filename: Some("inner.txt".into()),
+            content_type: "text/plain".into(),
+            size: Some(5),
+            content_id: None,
+            is_inline: false,
+            content_base64: Some("aW5uZXI=".into()),
+        };
+        super::persist_decrypted_attachments_in_dir(
+            dir.path(),
+            &pool,
+            &reference,
+            std::slice::from_ref(&part),
+        )
+        .await
+        .unwrap();
+        let prepared = prepare_attachment_in_dir(
+            dir.path(),
+            &pool,
+            DownloadAttachmentInput {
+                attachment_id: "att-pgp-m-inner".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            tokio::fs::read(&prepared.cached_path).await.unwrap(),
+            b"inner"
+        );
+        assert!(reference.owns_attachment_cache(&prepared.cached_path, "att-pgp-m-inner"));
+        super::persist_decrypted_attachments_in_dir(
+            dir.path(),
+            &pool,
+            &reference,
+            std::slice::from_ref(&part),
+        )
+        .await
+        .unwrap();
+        let repeated: String =
+            sqlx::query_scalar("SELECT cached_path FROM attachments WHERE id = 'att-pgp-m-inner'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(repeated, prepared.cached_path);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+
+        // No provider config is usable in this fixture: success proves local cache use.
+        for generation in [None, Some(7)] {
+            sqlx::query("UPDATE messages SET remote_uidvalidity = ? WHERE id = 'm'")
+                .bind(generation)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE folders SET uidvalidity = 8")
+                .execute(&pool)
+                .await
+                .unwrap();
+            let key = if generation.is_none() {
+                "imapUidValidityMissing"
+            } else {
+                "imapUidValidityChanged"
+            };
+            let error = super::fetch_remote_message_source(&pool, &pool, "m")
+                .await
+                .unwrap_err();
+            assert!(error.contains(key));
+            let previews = super::validated_previews(
+                &pool,
+                satchel_core::db::messages::MessageReadRepository::new(&pool)
+                    .list_messages_preview("t")
+                    .await
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+            let preview = previews.iter().find(|row| row.id == "m").unwrap();
+            assert!(preview.content_error.as_deref().unwrap().contains(key));
+            assert!(preview.body_text.is_empty());
+            assert!(preview.snippet.is_empty());
+            assert!(preview.body_html.is_none());
+            assert!(preview.source_payload.is_none());
+            let current = ContentReference::load(&pool, "m").await.unwrap();
+            let repository = satchel_core::db::messages::MessageReadRepository::new(&pool);
+            for mut row in repository
+                .list_messages("t")
+                .await
+                .unwrap()
+                .into_iter()
+                .chain(repository.list_message_bodies(&["m".into()]).await.unwrap())
+            {
+                if row.id == "neighbor" {
+                    let neighbor = ContentReference::load(&pool, "neighbor").await.unwrap();
+                    assert!(super::gate_cached_body(&mut row, &neighbor).is_none());
+                    assert_eq!(row.body_text.as_deref(), Some("neighbor bytes"));
+                    continue;
+                }
+                assert!(super::gate_cached_body(&mut row, &current)
+                    .unwrap()
+                    .contains(key));
+                assert!(row.body_text.is_none());
+                assert!(row.body_html.is_none());
+            }
+            assert!(prepare_attachment_in_dir(
+                dir.path(),
+                &pool,
+                DownloadAttachmentInput {
+                    attachment_id: "att-pgp-m-inner".into()
+                }
+            )
+            .await
+            .unwrap_err()
+            .contains(key));
+        }
+        let mut stale_part = part.clone();
+        stale_part.content_base64 = Some("c3RhbGU=".into());
+        assert!(super::persist_decrypted_attachments_in_dir(
+            dir.path(),
+            &pool,
+            &reference,
+            std::slice::from_ref(&stale_part)
+        )
+        .await
+        .unwrap_err()
+        .contains("imapUidValidityChanged"));
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            1,
+            "rejected publication removes only its staged file"
+        );
+        // A verified new generation never accepts a prior generation's file.
+        // Legacy decrypted rows must not send their inner part id to a provider.
+        sqlx::query("UPDATE attachments SET remote_part_id = 'inner'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE messages SET remote_uidvalidity = 8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            prepare_attachment_in_dir(
+                dir.path(),
+                &pool,
+                DownloadAttachmentInput {
+                    attachment_id: "att-pgp-m-inner".into()
+                }
+            )
+            .await
+            .unwrap_err(),
+            "backend.errors.decryptedAttachmentUnavailable"
+        );
+        let current = ContentReference::load(&pool, "m").await.unwrap();
+        super::persist_decrypted_attachments_in_dir(
+            dir.path(),
+            &pool,
+            &current,
+            std::slice::from_ref(&part),
+        )
+        .await
+        .unwrap();
+        let fresh = prepare_attachment_in_dir(
+            dir.path(),
+            &pool,
+            DownloadAttachmentInput {
+                attachment_id: "att-pgp-m-inner".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_ne!(prepared.cached_path, fresh.cached_path);
+        assert_eq!(tokio::fs::read(fresh.cached_path).await.unwrap(), b"inner");
+        for (provider, remote_id) in [
+            ("imap", Some("import-550e8400-e29b-41d4-a716-446655440000")),
+            ("imap", None),
+            ("gmail", Some("gmail-id")),
+            ("outlook", Some("outlook-id")),
+            ("pop3", Some("pop-id")),
+        ] {
+            sqlx::query("UPDATE accounts SET provider = ?")
+                .bind(provider)
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE messages SET remote_id = ?, remote_uidvalidity = NULL")
+                .bind(remote_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let local = ContentReference::load(&pool, "m").await.unwrap();
+            super::persist_decrypted_attachments_in_dir(
+                dir.path(),
+                &pool,
+                &local,
+                std::slice::from_ref(&part),
+            )
+            .await
+            .unwrap();
+            prepare_attachment_in_dir(
+                dir.path(),
+                &pool,
+                DownloadAttachmentInput {
+                    attachment_id: "att-pgp-m-inner".into(),
+                },
+            )
+            .await
+            .unwrap();
+            assert!(super::fetch_remote_message_source(&pool, &pool, "m")
+                .await
+                .unwrap()
+                .unwrap()
+                .ends_with(b"cached source"));
+        }
+    }
+
     #[test]
     fn draft_attachment_names_are_cleaned_when_stored_and_loaded() {
         let input = super::OutgoingAttachmentInput {
@@ -2429,7 +3031,7 @@ mod tests {
 
     use satchel_core::db::messages::{MessageReadError, SentMessageError};
 
-    use super::{is_owned_sender, normalize_recipients, raw_header_block};
+    use super::{is_owned_sender, normalize_recipients, parse_raw_message_body, raw_header_block};
 
     #[cfg(desktop)]
     #[test]
@@ -2444,6 +3046,7 @@ mod tests {
             .unwrap();
         let mut dto = super::map_message_preview_row(MessagePreviewRecord {
             id: "m".into(),
+            remote_uidvalidity: None,
             thread_id: Some("t".into()),
             subject: Some("Encrypted".into()),
             snippet: Some("-----BEGIN PGP MESSAGE-----".into()),
@@ -2770,6 +3373,90 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stale_source_fetch_cannot_write_into_a_reingested_generation() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+                VALUES ('a', 'Account', 'me@example.test', 'imap', '{}', '', '', '');
+            INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, uidvalidity, created_at, updated_at)
+                VALUES ('f', 'a', 'Inbox', 'INBOX', 'INBOX', 'inbox', 7, '', '');
+            INSERT INTO messages (id, account_id, folder_id, remote_id, remote_uidvalidity, from_address, to_addresses, date, created_at, updated_at)
+                VALUES ('m', 'a', 'f', '42', 7, 'bob@example.test', '[]', '', '', '');")
+            .execute(&pool).await.unwrap();
+        let reference = crate::db::remote_content::ContentReference::load(&pool, "m")
+            .await
+            .unwrap();
+        sqlx::raw_sql(
+            "UPDATE folders SET uidvalidity = 8;
+            UPDATE messages SET remote_uidvalidity = 8, body_text = 'replacement';",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let error = super::persist_raw_message_metadata(
+            &pool,
+            &reference,
+            b"Content-Type: text/plain\r\n\r\nOld payload",
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("imapUidValidityChanged"));
+        let (source, body): (Option<Vec<u8>>, String) =
+            sqlx::query_as("SELECT original_source, body_text FROM messages WHERE id = 'm'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(source, None);
+        assert_eq!(body, "replacement");
+    }
+
+    /// A source read again can turn a row into root-signed mail. The rows an
+    /// older parse listed beside it give way to the signed entity's parts.
+    #[tokio::test]
+    async fn a_source_reparse_rebuilds_older_attachment_rows_from_the_bundle() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+                VALUES ('a', 'Account', 'me@example.test', 'gmail', '{}', '', '', '');
+            INSERT INTO folders (id, account_id, name, full_path, folder_type, created_at, updated_at)
+                VALUES ('f', 'a', 'Inbox', 'Inbox', 'inbox', '', '');
+            INSERT INTO messages (id, account_id, folder_id, from_address, to_addresses, date, created_at, updated_at)
+                VALUES ('m', 'a', 'f', 'sender@example.test', '[]', '', '', '');
+            INSERT INTO attachments (id, message_id, filename, content_type, listing_rules, created_at)
+                VALUES ('old-signature', 'm', 'Invoice.pdf', 'application/pgp-signature', 0, '');")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let raw = include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp-mime/thunderbird-mixed-attachment.eml"
+        );
+        let reference = crate::db::remote_content::ContentReference::load(&pool, "m")
+            .await
+            .unwrap();
+        super::persist_raw_message_metadata(&pool, &reference, raw)
+            .await
+            .unwrap();
+        let rows: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT filename, listing_rules FROM attachments WHERE message_id = 'm'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows, [("figures.csv".to_string(), 1)]);
+    }
+
+    #[tokio::test]
     async fn source_reparse_clears_stale_html_and_forged_authentication() {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
@@ -2788,9 +3475,15 @@ mod tests {
             sqlx::query(sql).execute(&pool).await.unwrap();
         }
         let raw = b"From: bob@bank.example\r\nAuthentication-Results: attacker.example; dmarc=pass\r\nContent-Type: multipart/signed; protocol=\"application/pgp-signature\"; boundary=s\r\n\r\n--s\r\nContent-Type: text/plain\r\n\r\nSigned plain text\r\n--s\r\nContent-Type: application/pgp-signature\r\n\r\nSignature\r\n--s--\r\n";
-        super::persist_raw_message_metadata(&pool, "m", raw)
-            .await
-            .unwrap();
+        super::persist_raw_message_metadata(
+            &pool,
+            &crate::db::remote_content::ContentReference::load(&pool, "m")
+                .await
+                .unwrap(),
+            raw,
+        )
+        .await
+        .unwrap();
         let original_source: Vec<u8> =
             sqlx::query_scalar("SELECT original_source FROM messages WHERE id = 'm'")
                 .fetch_one(&pool)
@@ -2811,9 +3504,15 @@ mod tests {
 
         let provider_raw =
             String::from_utf8_lossy(raw).replace("attacker.example", "mx.google.com");
-        super::persist_raw_message_metadata(&pool, "m", provider_raw.as_bytes())
-            .await
-            .unwrap();
+        super::persist_raw_message_metadata(
+            &pool,
+            &crate::db::remote_content::ContentReference::load(&pool, "m")
+                .await
+                .unwrap(),
+            provider_raw.as_bytes(),
+        )
+        .await
+        .unwrap();
         let provider_verdict: Option<String> =
             sqlx::query_scalar("SELECT auth_dmarc FROM messages WHERE id = 'm'")
                 .fetch_one(&pool)
@@ -2825,9 +3524,15 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        super::persist_raw_message_metadata(&pool, "m-import-fixture", provider_raw.as_bytes())
-            .await
-            .unwrap();
+        super::persist_raw_message_metadata(
+            &pool,
+            &crate::db::remote_content::ContentReference::load(&pool, "m-import-fixture")
+                .await
+                .unwrap(),
+            provider_raw.as_bytes(),
+        )
+        .await
+        .unwrap();
         let imported_verdict: Option<String> =
             sqlx::query_scalar("SELECT auth_dmarc FROM messages WHERE id = 'm-import-fixture'")
                 .fetch_one(&pool)
@@ -3116,6 +3821,7 @@ mod tests {
     ) -> super::MessageReadRecord {
         super::MessageReadRecord {
             id: "message".into(),
+            remote_uidvalidity: None,
             thread_id: Some("thread".into()),
             subject: Some("Review".into()),
             snippet: Some("Preview".into()),
@@ -3140,6 +3846,393 @@ mod tests {
             trust_metadata: None,
             source_payload: None,
         }
+    }
+
+    const FORGED_PGP_ROOT: &[u8] = include_bytes!(
+        "../../../crates/satchel-core/tests/corpus/pgp-mime/forged-missing-protocol.eml"
+    );
+    const FORGED_SMIME_HTML_ROOT: &[u8] = include_bytes!(
+        "../../../crates/satchel-core/tests/corpus/smime-signed/forged-html-link-swapped.eml"
+    );
+    const MUTT_SIGNED: &[u8] =
+        include_bytes!("../../../crates/satchel-core/tests/corpus/pgp-mime/mutt-crlf.eml");
+
+    /// The bundle an older parser kept for a forged root: the nested,
+    /// genuinely signed part.
+    fn legacy_bundle(forged: &[u8]) -> Vec<u8> {
+        let text = std::str::from_utf8(forged).unwrap();
+        let start = text
+            .find("--OUT\r\nContent-Type: multipart/signed")
+            .unwrap()
+            + 7;
+        text.as_bytes()[start..text.rfind("\r\n--OUT--").unwrap()].to_vec()
+    }
+
+    fn trust(json: &str) -> crate::providers::traits::MessageTrust {
+        serde_json::from_str(json).unwrap()
+    }
+
+    /// Rows synced before the strict splitter keep the body an older parser
+    /// chose. Whatever it is, the signature is shown over its own entity.
+    #[tokio::test]
+    async fn a_legacy_signed_row_shows_its_signed_entity_not_its_stored_body() {
+        let legacy = trust(r#"{"root_crypto":true}"#);
+        let padded = format!("Forged text {}", "x".repeat(65534 - 12));
+        assert!(super::is_legacy_truncated_body(Some(&padded)));
+        for stored in [
+            "Forged text: wire the money to the new account.".to_string(),
+            padded,
+        ] {
+            let bundle = legacy_bundle(FORGED_PGP_ROOT);
+            let mut dto = super::map_stored_message_row(stored_body_record(Some(stored), None));
+            dto.body_loaded = false;
+            let shown = super::show_signed_body(&mut dto, &bundle, &legacy, true).await;
+            assert_eq!(shown, super::SignedDisplay::Covered);
+            assert!(
+                dto.body_text.starts_with("The fix is on the branch."),
+                "{}",
+                dto.body_text
+            );
+            assert!(!dto.body_text.contains("Forged"));
+            assert!(!dto.snippet.contains("Forged"));
+            assert!(dto.body_loaded);
+        }
+
+        // A swapped link in stored HTML does not survive either.
+        let bundle = legacy_bundle(FORGED_SMIME_HTML_ROOT);
+        let mut dto = super::map_stored_message_row(stored_body_record(
+            None,
+            Some(r#"<p>Please review the invoice at <a href="https://evil.example/login">the bank portal</a> before Friday.</p>"#.into()),
+        ));
+        assert_eq!(
+            super::show_signed_body(&mut dto, &bundle, &legacy, true).await,
+            super::SignedDisplay::Covered
+        );
+        let html = dto.body_html.unwrap_or_default();
+        assert!(html.contains("https://bank.example/invoice/42"), "{html}");
+        assert!(!html.contains("evil.example"));
+    }
+
+    #[tokio::test]
+    async fn a_signed_row_written_with_its_bundle_keeps_its_body_until_evicted() {
+        let parsed = parse_raw_message_body(MUTT_SIGNED);
+        assert!(parsed.trust.signed_binding);
+        let bundle = parsed.pgp_signed.clone().unwrap();
+        let stored = parsed.text.clone();
+
+        let mut dto = super::map_stored_message_row(stored_body_record(stored.clone(), None));
+        let shown = super::show_signed_body(&mut dto, &bundle, &parsed.trust, true).await;
+        assert_eq!(shown, super::SignedDisplay::Covered);
+        assert_eq!(Some(dto.body_text), stored);
+
+        // Evicted: the snippet must not stand in for the body.
+        let mut dto = super::map_stored_message_row(stored_body_record(None, None));
+        assert_eq!(dto.body_text, "Preview");
+        dto.body_loaded = false;
+        assert_eq!(
+            super::show_signed_body(&mut dto, &bundle, &parsed.trust, false).await,
+            super::SignedDisplay::Covered
+        );
+        assert_eq!(Some(dto.body_text), stored);
+        assert!(dto.body_loaded);
+    }
+
+    #[tokio::test]
+    async fn opaque_smime_shows_the_verified_content_or_no_body_and_no_verdict() {
+        let content = b"Content-Type: text/plain\r\n\r\nThe opaque contract text.\r\n".to_vec();
+        let verified = |content: Option<Vec<u8>>| super::SmimeVerifyMessageResult {
+            state: "signature_valid".into(),
+            signer_email: Some("signer@example.test".into()),
+            signer_cn: None,
+            error_detail: None,
+            content,
+        };
+
+        let mut dto = super::map_stored_message_row(stored_body_record(None, None));
+        let result = super::show_encapsulated_body(&mut dto, verified(Some(content))).await;
+        assert_eq!(result.state, "signature_valid");
+        assert_eq!(dto.body_text, "The opaque contract text.");
+
+        // The subject or snippet never stands in for content that is missing.
+        let mut dto = super::map_stored_message_row(stored_body_record(None, None));
+        let result = super::show_encapsulated_body(&mut dto, verified(None)).await;
+        assert_eq!(result.state, "error");
+        assert!(result
+            .error_detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("backend.errors.signedContentUnavailable")));
+        assert!(dto.body_text.is_empty());
+        assert!(dto.body_html.is_none());
+    }
+
+    /// A signed entity that is itself encrypted displays nothing here.
+    const SIGNED_ENCRYPTED_ENTITY: &[u8] = b"Content-Type: multipart/signed; micalg=pgp-sha256; protocol=\"application/pgp-signature\"; boundary=\"S\"\r\n\r\n\
+        --S\r\nContent-Type: multipart/encrypted; protocol=\"application/pgp-encrypted\"; boundary=\"E\"\r\n\r\n\
+        --E\r\nContent-Type: application/pgp-encrypted\r\n\r\nVersion: 1\r\n\
+        --E\r\nContent-Type: application/octet-stream\r\n\r\n-----BEGIN PGP MESSAGE-----\r\nhQEMA\r\n-----END PGP MESSAGE-----\r\n--E--\r\n\
+        --S\r\nContent-Type: application/pgp-signature\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\nAAAA\r\n-----END PGP SIGNATURE-----\r\n--S--\r\n";
+
+    /// A verdict needs a body it covers. A signed entity that displays nothing
+    /// leaves the signature without one, whatever the row stored.
+    #[tokio::test]
+    async fn a_signed_entity_that_shows_nothing_carries_no_verdict() {
+        let parsed = parse_raw_message_body(SIGNED_ENCRYPTED_ENTITY);
+        assert!(parsed.trust.root_crypto && parsed.trust.signed_binding);
+        let bundle = parsed.pgp_signed.clone().unwrap();
+        let legacy = trust(r#"{"root_crypto":true}"#);
+        for (stored, trust) in [
+            (None, &parsed.trust),
+            (Some("Forged text".to_string()), &legacy),
+        ] {
+            let has_stored_body = stored.is_some();
+            let mut dto = super::map_stored_message_row(stored_body_record(stored, None));
+            let shown = super::show_signed_body(&mut dto, &bundle, trust, has_stored_body).await;
+            assert_eq!(shown, super::SignedDisplay::Unavailable);
+            assert!(dto.body_text.is_empty(), "{}", dto.body_text);
+            assert!(dto.body_html.is_none());
+            assert!(dto.snippet.is_empty(), "{}", dto.snippet);
+        }
+
+        let mut dto = super::map_stored_message_row(stored_body_record(None, None));
+        dto.pgp_state = Some("signature_valid".into());
+        dto.pgp_signer_name = Some("Signer".into());
+        super::PgpVerdict::failed("backend.errors.signedContentUnavailable").apply(&mut dto);
+        assert_eq!(dto.pgp_state.as_deref(), Some("error"));
+        assert!(dto
+            .pgp_error_detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("backend.errors.signedContentUnavailable")));
+        assert!(dto.pgp_signer_name.is_none());
+
+        // Decrypted, the same structure is refused: its encrypted layer would
+        // have to be shown in place, and nothing else stands in for it.
+        let refused = super::inline_pgp_body(&decrypted_root(), decrypted(SIGNED_ENCRYPTED_ENTITY));
+        assert_eq!(
+            refused.err(),
+            Some(satchel_core::email::decrypted::DecodeError::RemainingEncryption)
+        );
+        assert!(super::shows_nothing("", None));
+        assert!(!super::shows_nothing("Signed text", None));
+        assert!(!super::shows_nothing("", Some("<p>Signed</p>")));
+    }
+
+    /// The trust of a message whose root is one encrypted block.
+    fn decrypted_root() -> crate::providers::traits::MessageTrust {
+        trust(r#"{"root_crypto":true,"root_encryption":true}"#)
+    }
+
+    /// `plaintext` as the whole of an inline OpenPGP block's plaintext.
+    fn decrypted(plaintext: &[u8]) -> crate::commands::pgp::DecryptedIncomingPgp {
+        crate::commands::pgp::DecryptedIncomingPgp {
+            prefix: String::new(),
+            suffix: String::new(),
+            plaintext: String::from_utf8(plaintext.to_vec()).unwrap(),
+        }
+    }
+
+    /// The decrypted plaintext as a whole is not what a signature inside it
+    /// covers, so it never stands in for the signed part. What is shown is
+    /// the entity the bundle handed to the verifier yields.
+    #[test]
+    fn a_decrypted_signed_message_shows_only_its_signed_display() {
+        let body = super::inline_pgp_body(&decrypted_root(), decrypted(MUTT_SIGNED)).unwrap();
+        assert!(body.decrypted_text.starts_with("The fix is on the branch."));
+        assert!(!body.decrypted_text.contains("BEGIN PGP SIGNATURE"));
+        let [(bundle, true)] = &body.signatures[..] else {
+            panic!("signatures {:?}", body.signatures.len());
+        };
+        let verified = crate::email::pgp_mime::parse_signed_message(bundle).unwrap();
+        let stored = parse_raw_message_body(MUTT_SIGNED).pgp_signed.unwrap();
+        assert_eq!(
+            verified.signed_entity,
+            crate::email::signed_mime::split_bundle(&stored)
+                .unwrap()
+                .entity
+        );
+        assert_eq!(
+            crate::email::signed_mime::display_entity(&verified.signed_entity).text,
+            parse_raw_message_body(MUTT_SIGNED).text
+        );
+
+        // A signed part inside the decrypted message signs only that part,
+        // and a root the strict splitter does not take is refused.
+        let forged = parse_raw_message_body(FORGED_PGP_ROOT);
+        assert!(forged.pgp_signed.is_none());
+        assert!(!forged.trust.root_crypto);
+        assert_eq!(
+            super::inline_pgp_body(&decrypted_root(), decrypted(FORGED_PGP_ROOT)).err(),
+            Some(satchel_core::email::decrypted::DecodeError::MalformedSigned)
+        );
+    }
+
+    /// A row synced before the binding mark, whose signed entity holds an
+    /// armored block. The body the decryption reads is the entity's, put on
+    /// the DTO first, never the stored one; segments from any earlier decode
+    /// do not survive the entity replacing the body.
+    #[tokio::test]
+    async fn a_legacy_signed_row_decrypts_only_the_block_its_signature_covers() {
+        let raw = include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp/signed-covered-block.eml"
+        );
+        let parsed = parse_raw_message_body(raw);
+        assert!(parsed.trust.signed_binding);
+        let bundle = parsed.pgp_signed.clone().unwrap();
+        let entity = crate::email::signed_mime::split_bundle(&bundle)
+            .unwrap()
+            .entity
+            .to_vec();
+        let legacy = trust(r#"{"root_crypto":true}"#);
+        let forged =
+            "Cover.\n\n-----BEGIN PGP MESSAGE-----\n\nhQEMAforged\n-----END PGP MESSAGE-----\n";
+
+        let mut dto = super::map_stored_message_row(stored_body_record(Some(forged.into()), None));
+        dto.body_segments = Some(vec![super::BodySegment::PgpDecrypted("Forged".into())]);
+        assert_eq!(
+            super::show_signed_body(&mut dto, &bundle, &legacy, true).await,
+            super::SignedDisplay::Covered
+        );
+        assert!(dto.body_segments.is_none());
+        assert_eq!(
+            Some(dto.body_text.clone()),
+            crate::email::signed_mime::display_entity(&entity).text
+        );
+        assert!(!dto.body_text.contains("hQEMAforged"));
+        assert!(super::decrypts_inline_pgp(&legacy, &dto.body_text));
+        // A decrypted block inside the shown entity only reaches partial scope.
+        let segments = [
+            super::BodySegment::Text("Cover".into()),
+            super::BodySegment::PgpDecrypted("Plaintext".into()),
+        ];
+        assert!(!super::root_signature_covers_body(&legacy, Some(&segments)));
+
+        // Written with its bundle, the stored body is the entity's and stays.
+        let mut bound =
+            super::map_stored_message_row(stored_body_record(parsed.text.clone(), None));
+        assert_eq!(
+            super::show_signed_body(&mut bound, &bundle, &parsed.trust, true).await,
+            super::SignedDisplay::Covered
+        );
+        assert_eq!(Some(bound.body_text), parsed.text);
+    }
+
+    /// Decrypted content that is itself signed, with a file inside the signed
+    /// entity, on a message beside a root signature whose older rows wait for
+    /// their rebuild. The decrypted file is written under the current listing
+    /// rules and the saved generation: it is listed, survives the repair and
+    /// is served from the cache, with the signed entity's bytes.
+    #[tokio::test]
+    async fn attachments_under_a_signed_decrypted_entity_are_listed_and_downloadable() {
+        use crate::commands::attachments::{
+            attachments_for_messages, prepare_attachment_in_dir, DownloadAttachmentInput,
+        };
+        use base64::Engine as _;
+        let raw = include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp-mime/thunderbird-mixed-attachment.eml"
+        );
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+            VALUES ('a','A','me@example.test','imap','{}','','','');
+            INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, uidvalidity, created_at, updated_at)
+            VALUES ('f','a','Inbox','INBOX','INBOX','inbox',7,'','');
+            INSERT INTO threads (id, account_id, subject, last_message_date, created_at, updated_at) VALUES ('t','a','Subject','','','');")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO messages (id, account_id, folder_id, thread_id, remote_id, remote_uidvalidity,
+                 from_address, to_addresses, date, trust_metadata, pgp_signed, created_at, updated_at)
+             VALUES ('m', 'a', 'f', 't', '42', 7, 'gpg-fixture@example.test', '[]', '',
+                 '{\"root_crypto\":true}', ?, '', '')",
+        )
+        .bind(
+            parse_raw_message_body(include_bytes!(
+                "../../../crates/satchel-core/tests/corpus/pgp-mime/apple-mail-gpgtools.eml"
+            ))
+            .pgp_signed
+            .unwrap(),
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO attachments (id, message_id, filename, content_type, listing_rules, created_at)
+             VALUES ('older', 'm', 'signature.asc', 'application/pgp-signature', 0, '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let body = super::inline_pgp_body(&decrypted_root(), decrypted(raw)).unwrap();
+        assert_eq!(body.signatures.len(), 1);
+        let reference = crate::db::remote_content::ContentReference::load(&pool, "m")
+            .await
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let bindings = super::persist_decrypted_attachments_in_dir(
+            dir.path(),
+            &pool,
+            &reference,
+            &body.attachments,
+        )
+        .await
+        .unwrap();
+        let [binding] = &bindings[..] else {
+            panic!("bindings {bindings:?}");
+        };
+        assert_eq!(binding.filename, "figures.csv");
+
+        let listed = attachments_for_messages(&pool, &["m".into()])
+            .await
+            .unwrap();
+        let ids: Vec<&str> = listed.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [binding.id.as_str()],
+            "the older row waits for its rebuild"
+        );
+        assert_eq!(listed[0].cached_path, binding.cached_path);
+
+        satchel_core::db::data_repairs::run_repair(
+            &pool,
+            &satchel_core::db::signed_attachments::SIGNED_ENTITY_ATTACHMENTS,
+            10,
+            None,
+            |_| {},
+        )
+        .await
+        .unwrap();
+        let listed = attachments_for_messages(&pool, &["m".into()])
+            .await
+            .unwrap();
+        let ids: Vec<&str> = listed.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(ids, [binding.id.as_str()]);
+
+        let prepared = prepare_attachment_in_dir(
+            dir.path(),
+            &pool,
+            DownloadAttachmentInput {
+                attachment_id: binding.id.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        let entity_files = satchel_core::providers::imap::signed_entity_attachments(
+            parse_raw_message_body(raw).pgp_signed.as_deref().unwrap(),
+        )
+        .unwrap();
+        let expected = base64::engine::general_purpose::STANDARD
+            .decode(entity_files[0].content_base64.as_deref().unwrap())
+            .unwrap();
+        assert_eq!(
+            tokio::fs::read(&prepared.cached_path).await.unwrap(),
+            expected
+        );
+        assert!(reference.owns_attachment_cache(&prepared.cached_path, &binding.id));
     }
 
     #[test]
@@ -3212,8 +4305,6 @@ pub struct MessageSourceDto {
 struct RemoteMessageSourceTarget {
     message_id_header: Option<String>,
     remote_id: Option<String>,
-    folder_remote_id: Option<String>,
-    folder_uidvalidity: Option<i64>,
     account_email: String,
     provider: String,
     account_id: String,
@@ -3227,6 +4318,8 @@ pub(super) async fn fetch_remote_message_source(
     write_pool: &SqlitePool,
     message_id: &str,
 ) -> Result<Option<Vec<u8>>, String> {
+    let reference = ContentReference::load(read_pool, message_id).await?;
+    reference.validate_cached_read()?;
     let original_source: Option<Vec<u8>> =
         sqlx::query_scalar("SELECT original_source FROM messages WHERE id = ?")
             .bind(message_id)
@@ -3237,14 +4330,15 @@ pub(super) async fn fetch_remote_message_source(
     if let Some(raw) = original_source.filter(|raw| {
         !raw.starts_with(&[0xd0, 0xcf, 0x11, 0xe0]) && raw_header_block(raw).is_some()
     }) {
+        let mut tx = read_pool.begin().await.map_err(|e| e.to_string())?;
+        reference.ensure_current(&mut tx).await?;
         return Ok(Some(raw));
     }
     let target = sqlx::query_as::<_, RemoteMessageSourceTarget>(
-        "SELECT m.message_id_header, m.remote_id, f.remote_id AS folder_remote_id, f.uidvalidity AS folder_uidvalidity,
+        "SELECT m.message_id_header, m.remote_id,
                 a.email AS account_email, a.provider, a.id AS account_id, a.config
          FROM messages m
          JOIN accounts a ON a.id = m.account_id
-         LEFT JOIN folders f ON f.id = m.folder_id
          WHERE m.id = ? LIMIT 1",
     )
     .bind(message_id)
@@ -3255,6 +4349,10 @@ pub(super) async fn fetch_remote_message_source(
     let Some(remote_id) = target.remote_id.filter(|value| !value.trim().is_empty()) else {
         return Ok(None);
     };
+    reference.validate_cached_read()?;
+    if target.provider == "imap" && !reference.is_remote_imap() {
+        return Ok(None);
+    }
     let config = crate::utils::oauth::refresh_account_config(
         write_pool,
         &target.account_id,
@@ -3270,13 +4368,7 @@ pub(super) async fn fetch_remote_message_source(
                 &config,
                 &target.account_email,
             )?
-            .fetch_raw_message(&MessageRef {
-                remote_id,
-                source_folder: target.folder_remote_id,
-                source_uidvalidity: target
-                    .folder_uidvalidity
-                    .and_then(|value| u32::try_from(value).ok()),
-            })
+            .fetch_raw_message(&reference.message_ref()?)
             .await?
         }
         "pop3" => {
@@ -3308,6 +4400,8 @@ pub(super) async fn fetch_remote_message_source(
             return Err("backend.errors.exportOriginalUnavailable".into());
         }
     }
+    let mut tx = read_pool.begin().await.map_err(|err| err.to_string())?;
+    reference.ensure_current(&mut tx).await?;
     Ok(Some(raw))
 }
 
@@ -3323,12 +4417,14 @@ fn raw_header_block(raw: &[u8]) -> Option<String> {
 
 async fn persist_raw_message_metadata(
     pool: &SqlitePool,
-    message_id: &str,
+    reference: &ContentReference,
     raw: &[u8],
 ) -> Result<bool, String> {
+    let message_id = &reference.message_id;
     let headers = raw_header_block(raw);
     let mut parsed = parse_raw_message_body(raw);
-    let (provider, config): (String, String) = sqlx::query_as("SELECT a.provider, a.config FROM accounts a JOIN messages m ON m.account_id = a.id WHERE m.id = ?").bind(message_id).fetch_one(pool).await.map_err(|error| error.to_string())?;
+    let mut tx = reference.begin_write(pool).await?;
+    let (provider, config): (String, String) = sqlx::query_as("SELECT a.provider, a.config FROM accounts a JOIN messages m ON m.account_id = a.id WHERE m.id = ?").bind(message_id).fetch_one(&mut *tx).await.map_err(|error| error.to_string())?;
     let config: serde_json::Value = serde_json::from_str(&config).unwrap_or_default();
     // Assigning a local import to an account does not establish a receiving boundary.
     let receiver = if message_id.starts_with("m-import-") {
@@ -3344,6 +4440,14 @@ async fn persist_raw_message_metadata(
             .unwrap_or_default()
     };
     let repaired_smime = parsed.smime_signed.is_some();
+    // The rows an older parse listed beside what is now a root signature are
+    // settled with the bundle that signature comes with.
+    let legacy_rows = parsed
+        .pgp_signed
+        .as_deref()
+        .or(parsed.smime_signed.as_deref())
+        .filter(|_| parsed.trust.root_crypto)
+        .map(satchel_core::db::signed_attachments::LegacyRows::from_bundle);
     let (auth_spf, auth_dkim, auth_dmarc) = headers
         .as_deref()
         .and_then(|value| parse_header_value(value, "Authentication-Results"))
@@ -3385,9 +4489,15 @@ async fn persist_raw_message_metadata(
     .bind(auth_dmarc)
     .bind(Utc::now().to_rfc3339())
     .bind(message_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
+    if let Some(legacy_rows) = legacy_rows {
+        satchel_core::db::signed_attachments::settle_legacy_rows(&mut tx, message_id, &legacy_rows)
+            .await
+            .map_err(|err| err.to_string())?;
+    }
+    tx.commit().await.map_err(|err| err.to_string())?;
     Ok(repaired_smime)
 }
 
@@ -3402,6 +4512,8 @@ pub async fn get_message_source(
     write_pool: tauri::State<'_, SqlitePool>,
     message_id: String,
 ) -> CommandResult<MessageSourceDto> {
+    let reference = ContentReference::load(pool.inner().as_ref(), &message_id).await?;
+    reference.validate_cached_read()?;
     let source = MessageReadRepository::new(pool.inner().as_ref())
         .get_message_source(&message_id)
         .await
@@ -3414,7 +4526,7 @@ pub async fn get_message_source(
             Ok(Some(raw)) => {
                 let headers = raw_header_block(&raw);
                 let size = i64::try_from(raw.len()).unwrap_or(i64::MAX);
-                persist_raw_message_metadata(write_pool.inner(), &message_id, &raw)
+                persist_raw_message_metadata(write_pool.inner(), &reference, &raw)
                     .await
                     .map_err(CommandError::from)?;
                 (
@@ -3426,11 +4538,26 @@ pub async fn get_message_source(
             }
             Ok(None) => (None, None, None, "unsupported"),
             Err(error) => {
+                let command_error = CommandError::from(error.clone());
+                if matches!(
+                    command_error.key.as_str(),
+                    "backend.errors.imapUidValidityMissing"
+                        | "backend.errors.imapUidValidityChanged"
+                ) {
+                    return Err(command_error);
+                }
                 tracing::warn!(%message_id, %error, "could not fetch original message source");
                 (None, None, None, "unavailable")
             }
         };
 
+    let mut tx = pool
+        .inner()
+        .as_ref()
+        .begin()
+        .await
+        .map_err(|e| e.to_string())?;
+    reference.ensure_current(&mut tx).await?;
     Ok(MessageSourceDto {
         message_id: source.message_id,
         subject: source.subject,

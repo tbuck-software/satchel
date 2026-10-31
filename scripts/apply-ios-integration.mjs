@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import {
-  copyFileSync,
   existsSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -14,12 +14,13 @@ import process from "node:process";
 const root = resolve(process.cwd());
 const apple = join(root, "src-tauri", "gen", "apple");
 const projectPath = join(apple, "project.yml");
-const templatePath = join(
-  root,
-  "src-tauri",
-  "ios",
+// The Swift side is a package that src-tauri/build.rs links into libapp.a:
+// it imports `Tauri`, which only the Rust build has (see Package.swift).
+const swiftPackageSources = join(root, "src-tauri", "ios", "Sources", "SatchelIOS");
+const swiftSources = [
   "SatchelMobileIntegration.swift",
-);
+  "SatchelNotificationRouting.swift",
+];
 const expectedBundleId = "de.tbuck.satchel";
 
 /**
@@ -38,31 +39,21 @@ function readRequired(path) {
 }
 /**
  * @param {string} directory
- * @param {string} filename
+ * @param {string | ((entry: string) => boolean)} filename
  * @returns {string[]}
  */
 function filesBelow(directory, filename) {
+  const matches =
+    typeof filename === "string" ? (/** @type {string} */ entry) => entry === filename : filename;
   const found = [];
   for (const entry of readdirSync(directory)) {
     const path = join(directory, entry);
     const stat = statSync(path);
-    if (stat.isDirectory()) found.push(...filesBelow(path, filename));
-    else if (entry === filename) found.push(path);
+    if (stat.isDirectory()) found.push(...filesBelow(path, matches));
+    else if (matches(entry)) found.push(path);
   }
   return found;
 }
-/**
- * @param {string} text
- * @param {string} needle
- * @param {string} replacement
- * @param {string} label
- */
-function replaceOnce(text, needle, replacement, label) {
-  const count = text.split(needle).length - 1;
-  if (count !== 1) fail(`expected one ${label}, found ${count}`);
-  return text.replace(needle, replacement);
-}
-
 /** The custom URL schemes `plugins.deep-link` registers for mobile. */
 function deepLinkSchemes() {
   /** @type {{ plugins?: { "deep-link"?: { mobile?: Array<{ scheme?: string | string[] }> } } }} */
@@ -118,27 +109,61 @@ if (mainFiles.length !== 1)
   fail(`expected one generated main.mm, found ${mainFiles.length}`);
 const mainPath = mainFiles[0];
 let main = readRequired(mainPath);
-if (!main.includes("satchel_mobile_install();")) {
-  main = replaceOnce(
-    main,
-    '#include "bindings/bindings.h"\n',
-    '#include "bindings/bindings.h"\n\nextern "C" void satchel_mobile_install(void);\n',
-    "Tauri bindings include",
-  );
-  main = replaceOnce(
-    main,
-    "int main(int argc, char * argv[]) {\n",
-    "int main(int argc, char * argv[]) {\n\tsatchel_mobile_install();\n",
-    "generated main entry point",
-  );
+// Remove the pre-plugin installation injected by earlier versions. Plugin
+// registration now owns installation, after NotificationManager.init.
+main = main.replace('\nextern "C" void satchel_mobile_install(void);\n', "");
+main = main.replace("\tsatchel_mobile_install();\n", "");
+if (main.includes("satchel_mobile_install"))
+  fail("unexpected legacy delegate installation");
+// The Swift entry points live in libapp.a, and the linker loads an archive
+// member only when something references it. Rust resolves them with dlsym, so
+// this table is that reference; Mach-O's `used` attribute keeps it through dead
+// stripping/LTO. It never calls the initializer: plugin setup still installs
+// the delegate after the notification plugin.
+const hooksStart = "// Satchel notification native hooks: begin";
+const hooksEnd = "// Satchel notification native hooks: end";
+if (main.includes(hooksStart) !== main.includes(hooksEnd)
+    || main.split(hooksStart).length > 2 || main.split(hooksEnd).length > 2
+    || (main.includes(hooksStart) && main.indexOf(hooksEnd) < main.indexOf(hooksStart)))
+  fail("unexpected native hook retention block");
+if (main.includes(hooksStart)) {
+  const start = main.indexOf(hooksStart);
+  const end = main.indexOf(hooksEnd) + hooksEnd.length;
+  main = main.slice(0, start) + main.slice(end).replace(/^\n/, "");
 }
+const include = '#include "bindings/bindings.h"\n';
+if (main.split(include).length !== 2)
+  fail("unexpected generated main.mm bindings include");
+const hooks = `${hooksStart}
+#include <stdint.h>
+extern "C" void *init_plugin_satchel_mail_notifications(void);
+extern "C" uint32_t satchel_mobile_frontend_ready(uint32_t, bool);
+extern "C" void satchel_mobile_response_handled(const char *);
+__attribute__((used)) static const struct {
+  void *(*initialize)(void);
+  uint32_t (*lifecycle)(uint32_t, bool);
+  void (*handled)(const char *);
+} satchel_notification_native_hooks = {
+  init_plugin_satchel_mail_notifications,
+  satchel_mobile_frontend_ready,
+  satchel_mobile_response_handled,
+};
+${hooksEnd}
+`;
+main = main.replace(include, include + hooks);
 writeFileSync(mainPath, main);
 
-readRequired(templatePath);
-const swiftPath = join(dirname(mainPath), "SatchelMobileIntegration.swift");
-copyFileSync(templatePath, swiftPath);
+// Earlier generations copied the Swift into the app target. A second copy there
+// cannot import `Tauri` and would define the entry points twice.
+for (const filename of swiftSources) {
+  rmSync(join(dirname(mainPath), filename), { force: true });
+}
+for (const swift of filesBelow(join(apple, "Sources"), (entry) => entry.endsWith(".swift"))) {
+  if (/^\s*import\s+Tauri\b/m.test(readFileSync(swift, "utf8")))
+    fail(`${relative(root, swift)} imports Tauri, which the Xcode target cannot see`);
+}
 
-// The Swift file is new to the generated project; xcodegen has to see it.
+// The removed files must leave the generated project too; xcodegen rewrites it.
 const xcodeProjects = readdirSync(apple).filter((entry) =>
   entry.endsWith(".xcodeproj"),
 );
@@ -156,12 +181,22 @@ if (xcodeProjects.length === 1) {
 }
 
 for (const required of [
-  "satchel_mobile_install();",
+  "init_plugin_satchel_mail_notifications",
   "UNUserNotificationCenterDelegate",
   "satchel_mobile_frontend_ready",
+  "satchel_mobile_response_handled",
 ]) {
-  const all = `${main}\n${readRequired(swiftPath)}`;
+  const all = swiftSources
+    .map((name) => readRequired(join(swiftPackageSources, name)))
+    .join("\n");
   if (!all.includes(required)) fail(`verification failed for ${required}`);
+}
+for (const required of [
+  '.package(name: "Tauri", path: "../.tauri/tauri-api")',
+  'name: "SatchelIOS"',
+]) {
+  if (!readRequired(join(root, "src-tauri", "ios", "Package.swift")).includes(required))
+    fail(`Package.swift verification failed for ${required}`);
 }
 
 for (const scheme of schemes) {

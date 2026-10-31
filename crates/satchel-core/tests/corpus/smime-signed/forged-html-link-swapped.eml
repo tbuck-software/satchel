@@ -1,0 +1,64 @@
+From: Satchel S/MIME Fixture <smime-fixture@example.test>
+To: reader@example.test
+Subject: Re: build failure
+Date: Thu, 3 Sep 2026 11:30:00 +0200
+MIME-Version: 1.0
+Content-Type: multipart/signed; boundary="OUT"
+
+--OUT
+Content-Type: text/html; charset=us-ascii
+
+<html><body><p>Please review the invoice at <a href="https://evil.example/login">the bank portal</a> before Friday.</p></body></html>
+--OUT
+Content-Type: multipart/signed; protocol="application/pkcs7-signature";
+ micalg=sha-256; boundary="----=_smime_7c41d2e09ab3"
+
+This is an S/MIME signed message
+
+------=_smime_7c41d2e09ab3
+Content-Type: text/html; charset=us-ascii
+Content-Transfer-Encoding: 7bit
+
+<html><body><p>Please review the invoice at <a href="https://bank.example/invoice/42">the bank portal</a> before Friday.</p></body></html>
+
+------=_smime_7c41d2e09ab3
+Content-Type: application/pkcs7-signature; name="smime.p7s"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="smime.p7s"
+
+MIIF1wYJKoZIhvcNAQcCoIIFyDCCBcQCAQExDzANBglghkgBZQMEAgEFADALBgkq
+hkiG9w0BBwGgggNdMIIDWTCCAkGgAwIBAgIUF9FaVAsIF9ojyr88gagryNL3lBgw
+DQYJKoZIhvcNAQELBQAwFDESMBAGA1UEAwwJU2F0Y2hlbCBTMCAXDTI2MTAzMDE4
+NDUwOFoYDzIxMjYxMDA2MTg0NTA4WjAUMRIwEAYDVQQDDAlTYXRjaGVsIFMwggEi
+MA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDCoxxXrKCFltjHMDTsJ3cKFl4I
+/YuOoGLVlXDP4AwRvFspOt/wD3JEqSzV4JQYrkJ7DYA1cwBCzFMQIjiqsvBrmF4U
+632l4TCK2OhlRu5ajNIwF5Uz/KBpJfuLPdseg3at3uMdd12HhMXa9YtUC+xhYB6z
+RBL5x8jUaCcP1M4skL2D2cvePB7MyISkhqxVyp2JX5JsSAfoAUexW9TMmgoXeHkO
+zi9Jm+sxGWXUvC5XYBDxGZhSDEfRDDDeVcZKdV5ZqWq4Mf2d7VXUsgYwHBCYvpqN
+s9iD6aXXT41V2yM4m4HeaATeVN0a3/VhW2P+N8tECxWfsklHx6pEVQQdmGc5AgMB
+AAGjgaAwgZ0wHQYDVR0OBBYEFB58hIuz+Y3T1Nb8r7h/pot1y+9bMB8GA1UdIwQY
+MBaAFB58hIuz+Y3T1Nb8r7h/pot1y+9bMA8GA1UdEwEB/wQFMAMBAf8wJQYDVR0R
+BB4wHIEac21pbWUtZml4dHVyZUBleGFtcGxlLnRlc3QwDgYDVR0PAQH/BAQDAgeA
+MBMGA1UdJQQMMAoGCCsGAQUFBwMEMA0GCSqGSIb3DQEBCwUAA4IBAQAFdDWPitDF
+t9YHSsh8NQiZe7YQR+N199d4Og5GgZojaPekuRh5eHr1szg0clHM+/VBTfg3t3Uz
+Jc6ZP8UC0GxWsgQBSxxmcinoOJ4SHdK6SaOdglWhaPXYtC2xc7HSjkzFRSo0a/e1
+ODUgTqd0rTiaNPK4C56xWJee46Y2f06QuLWdHbQfloNs0/x4UoUWQnj0MaWDpgYo
+lhQB1HnqlE1MjkOTkAuRj7WPXV7fd2IQChkI2D/JWCZgjR4aeOu7N/DVT8cP7Wec
+HYZ2jvaJXbGScl9nppEvmVCNu6CbCxW4B5AnkXoHg8rvzKmDSD9CnCzCw7fmaW9O
++WtqSatYyTCOMYICPjCCAjoCAQEwLDAUMRIwEAYDVQQDDAlTYXRjaGVsIFMCFBfR
+WlQLCBfaI8q/PIGoK8jS95QYMA0GCWCGSAFlAwQCAQUAoIHkMBgGCSqGSIb3DQEJ
+AzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MTAzMDE4NDUwOFowLwYJ
+KoZIhvcNAQkEMSIEIOnDAEjQFZ55KBP5Vrf8074svwHFqyxqNcMkNPBrRG05MHkG
+CSqGSIb3DQEJDzFsMGowCwYJYIZIAWUDBAEqMAsGCWCGSAFlAwQBFjALBglghkgB
+ZQMEAQIwCgYIKoZIhvcNAwcwDgYIKoZIhvcNAwICAgCAMA0GCCqGSIb3DQMCAgFA
+MAcGBSsOAwIHMA0GCCqGSIb3DQMCAgEoMA0GCSqGSIb3DQEBAQUABIIBAJ5QrEAR
+BkBKV+aFgUE8yef9+fp/MfGXwdCcC7gVToTkAOdUxsiwRnulrfaPpR6WJ5GsGAdv
+mN3u2oYC+R6dsVyAUOmeTcte6XrsEnWJXjSBkY+cr7tFT7KBLubRg4XXueMi6ZF3
+3ZMJNDb37AdoBzo9JWpdjoSAZzEZDdjBJAsOI/+a+nQurt0HFkZ85C1CaE6EfwYP
+Le+xevIG62RAQ0TCVjMEqy+/zgCWNxy6/WSGefi6ISQXiPFNrccGK9ILCXPOqzHx
+iauIoPbAa3vMbcrIuNqbM9ntGmLc9KPCOUhey08b95O7mfDSLANBUKNIeuL2DtH0
+hgoSmDBTyO0zqi4=
+
+------=_smime_7c41d2e09ab3--
+
+--OUT--

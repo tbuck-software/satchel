@@ -25,13 +25,18 @@ export function useThreadReply() {
     // Resolved on use, not on setup: most callers never reply.
     const messages = useMessagesStore();
     const drafts = useDraftsStore();
+    const threadMessages = messages.getByThread(threadId);
+    // Either loaded source can already know that a cached draft is unavailable.
+    const unavailable = new Set([
+      ...threadMessages.filter(message => message.contentError).map(message => message.id),
+      ...drafts.items.filter(draft => draft.content_error).map(draft => draft.id),
+    ]);
     const scheduled = new Set(drafts.items.filter((draft) => draft.scheduled_for).map((draft) => draft.id));
-    const shown = messages
-      .getByThread(threadId)
-      .filter((message) => message.isDraft && !scheduled.has(message.id))
+    const shown = threadMessages
+      .filter((message) => message.isDraft && !unavailable.has(message.id) && !scheduled.has(message.id))
       .at(-1);
     if (shown) return shown.id;
-    return drafts.sorted.find((draft) => draft.thread_id === threadId && !draft.scheduled_for)?.id ?? null;
+    return drafts.sorted.find((draft) => draft.thread_id === threadId && !draft.scheduled_for && !unavailable.has(draft.id))?.id ?? null;
   }
 
   function reply(threadId: string, replyAll = false) {

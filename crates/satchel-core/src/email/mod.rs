@@ -7,6 +7,7 @@ pub mod mime_type;
 pub mod pgp_mime;
 pub mod renderer;
 pub mod sanitizer;
+pub mod signed_mime;
 pub mod smime;
 pub mod subject;
 pub mod text;

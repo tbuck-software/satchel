@@ -837,7 +837,7 @@ impl GmailProvider {
             Some(token) => BackfillStep::Continue(token),
             // An expired history cursor leaves a hole no incremental pass can
             // see: the `after:` catch-up matches on receive time, and the
-            // snapshot only deletes. Re-list the label instead of skipping.
+            // snapshot cannot discover IDs never cached locally. Re-list the label.
             None if parsed.state.history_expired => BackfillStep::Bootstrap,
             // A legacy `ts:` cursor never backfilled, so it starts one now.
             None if !parsed.had_checkpoint || parsed.was_legacy => BackfillStep::Bootstrap,
@@ -1041,6 +1041,11 @@ impl GmailProvider {
                 .json::<GmailMessageResponse>()
                 .await
                 .map_err(|err| format!("gmail message parse failed: {err}"))?;
+            validate_gmail_full_message(&message)?;
+            if message.label_ids.is_none() {
+                message.label_ids =
+                    Some(Self::confirm_omitted_labels(client, token, &item.id).await?);
+            }
             if gmail_message_needs_raw_crypto(&message)
                 || message
                     .payload
@@ -1071,13 +1076,17 @@ impl GmailProvider {
                 let source = raw
                     .json::<GmailMessageResponse>()
                     .await
-                    .map_err(|err| format!("gmail raw message parse failed: {err}"))?
-                    .raw
-                    .filter(|value| {
-                        decode_gmail_body_bytes(value).is_some_and(|bytes| !bytes.is_empty())
-                    })
-                    .ok_or_else(|| "gmail response did not contain message source".to_string())?;
-                message.raw = Some(source);
+                    .map_err(|err| format!("gmail raw message parse failed: {err}"))?;
+                if source.id != message.id {
+                    return Err("gmail raw lookup returned a mismatched message".into());
+                }
+                message.raw =
+                    Some(source.raw.ok_or_else(|| {
+                        "gmail response did not contain message source".to_string()
+                    })?);
+            }
+            if let Some(raw) = message.raw.as_deref() {
+                validate_gmail_raw_source(raw)?;
             }
             Ok(Some(message))
         }))
@@ -1102,6 +1111,55 @@ impl GmailProvider {
         }
 
         Ok((messages, latest_ts, latest_history_id))
+    }
+
+    /// Gmail's JSON drops an empty `labelIds`, and the API reference does not
+    /// say otherwise. A full response without it is therefore either a
+    /// genuinely unlabeled message (archived and read, with no category) or a
+    /// response cut short. Ask for the labels alone (`format=minimal`: "only
+    /// email message ID and labels") and accept an empty set only from a
+    /// complete answer that again carries none.
+    async fn confirm_omitted_labels(
+        client: &reqwest::Client,
+        token: &str,
+        id: &str,
+    ) -> crate::sync::errors::SyncResult<Vec<String>> {
+        let response = send_with_rate_limit_retry(
+            || {
+                client
+                    .get(format!("{}/messages/{}", gmail_api_base(), id))
+                    .query(&[("format", "minimal")])
+                    .bearer_auth(token)
+            },
+            "message label lookup",
+            cost::MESSAGES_GET,
+        )
+        .await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(crate::sync::errors::http_failure(
+                "gmail",
+                "message label lookup",
+                status.as_u16(),
+                &body,
+            ));
+        }
+        let minimal = response
+            .json::<GmailMessageResponse>()
+            .await
+            .map_err(|err| format!("gmail label lookup parse failed: {err}"))?;
+        if minimal.id != id || !gmail_identity_is_complete(&minimal) {
+            return Err("gmail label lookup returned an incomplete message".into());
+        }
+        if minimal.label_ids.is_some() {
+            // Both answers are complete, but they disagree: neither can be
+            // trusted to say where the message lives.
+            return Err(
+                "gmail full message response omitted labels that its label lookup returned".into(),
+            );
+        }
+        Ok(Vec::new())
     }
 
     async fn fetch_current_drafts(
@@ -1470,13 +1528,21 @@ impl MailProvider for GmailProvider {
                             }
                         }
                     }
-                    let (page_messages, page_latest_ts, page_history_id) =
+                    let (page_messages, page_latest_ts, _detail_history_id) =
                         Self::fetch_message_details(&client, &token, items).await?;
                     latest_ts = latest_ts.max(page_latest_ts);
-                    let merged =
-                        Self::newest_history_id(cursor_state.history_id.take(), page_history_id);
-                    cursor_state.history_id =
-                        Self::newest_history_id(merged, payload.history_id.clone());
+                    // Details may already reflect changes beyond this history
+                    // response. Only the completed feed authorizes progress.
+                    if payload
+                        .next_page_token
+                        .as_deref()
+                        .is_none_or(|token| token.trim().is_empty())
+                    {
+                        cursor_state.history_id = Self::newest_history_id(
+                            cursor_state.history_id.take(),
+                            payload.history_id.clone(),
+                        );
+                    }
                     messages.extend(page_messages);
 
                     match payload
@@ -1545,8 +1611,8 @@ impl MailProvider for GmailProvider {
         //
         // A backfill page is a partial, historical view of the folder — it is
         // NEVER a folder snapshot, so it must not touch `snapshot_required`:
-        // that flag drives `reconcile_imap_folder_snapshot`, which deletes every
-        // local row missing from the snapshot.
+        // reconciliation needs complete folder presence, followed by global
+        // resolution of absent local IDs. A time window cannot prove absence.
         //
         // Failures here are swallowed on purpose. These calls are rate-limited
         // far more often than the incremental pass, and propagating the error
@@ -1620,14 +1686,39 @@ impl MailProvider for GmailProvider {
         })
     }
 
+    async fn resolve_snapshot_message(
+        &self,
+        remote_id: &str,
+    ) -> crate::sync::errors::SyncResult<Option<MessageEnvelope>> {
+        let token = self.access_token().await?;
+        let (mut messages, _, _) = Self::fetch_message_details(
+            &crate::utils::http::client(),
+            &token,
+            vec![GmailMessageListItem {
+                id: remote_id.to_string(),
+            }],
+        )
+        .await?;
+        // fetch_message_details omits only explicit HTTP 404 responses.
+        // Parsing, authentication, quota and transport errors remain errors.
+        let message = messages.pop();
+        if message
+            .as_ref()
+            .is_some_and(|message| message.remote_id != remote_id)
+        {
+            return Err("gmail snapshot lookup returned a mismatched message".into());
+        }
+        Ok(message)
+    }
+
     async fn sync_message_state_snapshot(
         &self,
         folder: &str,
     ) -> crate::sync::errors::SyncResult<Option<crate::providers::traits::RemoteMessageStateSnapshot>>
     {
         // Folder snapshots repair moves/deletes even after a history cursor
-        // has expired. IDs are enough for presence reconciliation; flags remain
-        // sourced from full message payloads so this cheap pass cannot clobber them.
+        // has expired. Absent IDs still need account-wide resolution before
+        // removal; flags remain sourced from full message payloads.
 
         let token = self.access_token().await?;
         let client = crate::utils::http::client();
@@ -2184,7 +2275,6 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         };
         body.calendar = parsed.calendar.clone().or(body.calendar);
     }
-    let attachments = extract_attachments(&payload);
     let snippet = decode_html_entities(&decode_mime_encoded_words(
         message
             .snippet
@@ -2228,6 +2318,23 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         });
     trust.auth_verified = auth_spf.is_some() || auth_dkim.is_some() || auth_dmarc.is_some();
     let pgp_signed = raw_body.and_then(|parsed| parsed.pgp_signed);
+    // Under a root the strict splitter took as signed, only the signed
+    // entity's parts are offered. Gmail keeps the MIME tree, so the entity is
+    // known by position: the root's first part, beside the signature part.
+    // What Gmail lists there is then matched against the entity itself.
+    let mut attachments = if trust.signed_binding {
+        signed_entity_payload(&payload)
+            .map(extract_attachments)
+            .unwrap_or_default()
+    } else {
+        extract_attachments(&payload)
+    };
+    super::imap::bind_to_signed_entity(
+        &mut attachments,
+        &trust,
+        pgp_signed.as_deref().or(smime_signed.as_deref()),
+        super::imap::ProviderSize::Decoded,
+    );
 
     MessageEnvelope {
         remote_id: message.id,
@@ -2270,6 +2377,146 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         auth_dmarc,
         attachments,
     }
+}
+
+/// Full responses must contain actual MIME structure before defaults in the
+/// mapper are safe. Empty text is valid; an absent body is not evidence of it.
+fn validate_gmail_full_message(message: &GmailMessageResponse) -> Result<(), String> {
+    let invalid = || "gmail message lookup returned an incomplete message".to_string();
+    let payload = message.payload.as_ref().ok_or_else(invalid)?;
+    let headers = payload
+        .headers
+        .as_deref()
+        .filter(|h| !h.is_empty())
+        .ok_or_else(invalid)?;
+    // An omitted label list is not proof of an empty one: the caller confirms
+    // it with a label-only lookup.
+    if !gmail_identity_is_complete(message)
+        || message
+            .label_ids
+            .as_ref()
+            .is_some_and(|labels| labels.iter().any(|label| label.trim().is_empty()))
+        || !gmail_payload_is_usable(payload)
+    {
+        return Err(invalid());
+    }
+    let date_is_valid = match message.internal_date.as_deref() {
+        Some(date) => date
+            .parse::<i64>()
+            .ok()
+            .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
+            .is_some(),
+        None => parse_date_header(header_value(headers, "Date").as_deref()).is_some(),
+    };
+    if !date_is_valid {
+        return Err("gmail message lookup returned an invalid or missing date".into());
+    }
+    Ok(())
+}
+
+/// Every message resource names its thread and its last history record.
+/// Without them a response is a fragment, whatever else it carries.
+fn gmail_identity_is_complete(message: &GmailMessageResponse) -> bool {
+    !message.id.trim().is_empty()
+        && message
+            .thread_id
+            .as_deref()
+            .is_some_and(|thread| !thread.trim().is_empty())
+        && message
+            .history_id
+            .as_deref()
+            .is_some_and(|history| history.parse::<u64>().is_ok())
+}
+
+fn gmail_header_name_is_valid(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| (33..=126).contains(&byte) && byte != b':')
+}
+
+fn gmail_payload_is_usable(payload: &GmailPayload) -> bool {
+    let Some(mime) = payload.mime_type.as_deref() else {
+        return false;
+    };
+    if !mime.split_once('/').is_some_and(|(kind, subtype)| {
+        !kind.is_empty() && !subtype.is_empty() && !mime.bytes().any(|b| b.is_ascii_whitespace())
+    }) || payload.headers.as_ref().is_some_and(|headers| {
+        headers
+            .iter()
+            .any(|header| !gmail_header_name_is_valid(&header.name) || header.value.contains('\0'))
+    }) {
+        return false;
+    }
+    let parts = payload.parts.as_deref().unwrap_or_default();
+    if mime.to_ascii_lowercase().starts_with("multipart/") || !parts.is_empty() {
+        return !parts.is_empty() && parts.iter().all(gmail_payload_is_usable);
+    }
+    let Some(body) = payload.body.as_ref() else {
+        return false;
+    };
+    if body.size.is_some_and(|size| size < 0) {
+        return false;
+    }
+    match body.data.as_deref() {
+        Some(data) => decode_gmail_body_bytes(data).is_some(),
+        None => {
+            body.attachment_id
+                .as_ref()
+                .is_some_and(|id| !id.trim().is_empty())
+                || body.size == Some(0)
+        }
+    }
+}
+
+/// Base64 alone is not a message. Require RFC headers and a complete container
+/// before allowing the permissive MIME body parser to replace cached content.
+fn validate_gmail_raw_source(source: &str) -> Result<(), String> {
+    let invalid = || "gmail response contained invalid message source".to_string();
+    let bytes = decode_gmail_body_bytes(source).ok_or_else(invalid)?;
+    let parsed = super::imap::parse_raw_rfc822(&bytes).map_err(|_| invalid())?;
+    let mut fields = 0;
+    for line in parsed.raw_headers.lines() {
+        if line.starts_with([' ', '\t']) && fields > 0 {
+            continue;
+        }
+        let Some((name, _)) = line.split_once(':') else {
+            return Err(invalid());
+        };
+        if !gmail_header_name_is_valid(name) || line.contains('\0') {
+            return Err(invalid());
+        }
+        fields += 1;
+    }
+    if fields == 0 {
+        return Err(invalid());
+    }
+    if let Some(content_type) = super::imap::parse_header_value(&parsed.raw_headers, "Content-Type")
+    {
+        if content_type.to_ascii_lowercase().starts_with("multipart/") {
+            let boundary = content_type
+                .split(';')
+                .skip(1)
+                .find_map(|param| {
+                    let (name, value) = param.trim().split_once('=')?;
+                    name.eq_ignore_ascii_case("boundary")
+                        .then(|| value.trim().trim_matches('"'))
+                })
+                .filter(|value| !value.is_empty())
+                .ok_or_else(invalid)?;
+            let text = String::from_utf8_lossy(&bytes);
+            if !text
+                .lines()
+                .any(|line| line.trim_end() == format!("--{boundary}"))
+                || !text
+                    .lines()
+                    .any(|line| line.trim_end() == format!("--{boundary}--"))
+            {
+                return Err(invalid());
+            }
+        }
+    }
+    Ok(())
 }
 
 fn gmail_message_needs_raw_crypto(message: &GmailMessageResponse) -> bool {
@@ -2434,6 +2681,26 @@ fn extract_bodies_recursive(payload: &GmailPayload, result: &mut ExtractedBody) 
     }
 }
 
+/// The signed entity of a `multipart/signed` root, if Gmail's tree has the
+/// shape RFC 1847 gives it: exactly two parts, the second of the declared
+/// signature type. Any other tree does not say which part the signature
+/// covers.
+fn signed_entity_payload(payload: &GmailPayload) -> Option<&GmailPayload> {
+    let content_type = payload
+        .headers
+        .as_deref()
+        .and_then(|headers| header_value(headers, "Content-Type"))?;
+    let protocol = crate::email::signed_mime::SignedProtocol::declared(&content_type)?;
+    let [entity, signature] = payload.parts.as_deref()? else {
+        return None;
+    };
+    protocol
+        .accepts(&crate::email::mime_type::normalize_mime_type(
+            signature.mime_type.as_deref().unwrap_or_default(),
+        ))
+        .then_some(entity)
+}
+
 fn extract_attachments(payload: &GmailPayload) -> Vec<RemoteAttachment> {
     let mut result = Vec::new();
     extract_attachments_recursive(payload, &mut result);
@@ -2577,12 +2844,12 @@ mod tests {
     use super::{
         build_gmail_raw_message, cost, decode_gmail_part, gmail_message_needs_raw_crypto,
         gmail_move_label_changes, is_rate_limited, map_gmail_message, rate_limit_delay,
-        BackfillStep, GmailCursorState, GmailHeader, GmailHistoryResponse, GmailMessageResponse,
-        GmailPayload, GmailProvider, Priority, QuotaPacer, BACKGROUND_COOLDOWN,
-        BACKGROUND_UNITS_PER_SECOND, BLOCK_LAPSE_MARGIN, MAX_BLOCK_WAIT, MAX_RATE_LIMIT_WAIT,
-        QUOTA_BURST_UNITS, QUOTA_UNITS_PER_SECOND, REPEAT_BLOCK_WINDOW,
+        BackfillStep, GmailBody, GmailCursorState, GmailHeader, GmailHistoryResponse,
+        GmailMessageResponse, GmailPayload, GmailProvider, Priority, QuotaPacer,
+        BACKGROUND_COOLDOWN, BACKGROUND_UNITS_PER_SECOND, BLOCK_LAPSE_MARGIN, MAX_BLOCK_WAIT,
+        MAX_RATE_LIMIT_WAIT, QUOTA_BURST_UNITS, QUOTA_UNITS_PER_SECOND, REPEAT_BLOCK_WINDOW,
     };
-    use crate::providers::traits::{MessageRef, OutgoingMessage, SyncCheckpoint};
+    use crate::providers::traits::{MessageEnvelope, MessageRef, OutgoingMessage, SyncCheckpoint};
     use base64::Engine;
 
     #[test]
@@ -2711,6 +2978,226 @@ mod tests {
 
         assert!(mapped.smime_signed.is_some());
         assert!(mapped.pgp_signed.is_none());
+    }
+
+    /// Gmail lists every part with an attachment id, the signature part too.
+    /// Its headers are not signed, so they must not add an attachment to a
+    /// message shown with a signature.
+    #[test]
+    fn a_signed_root_drops_the_signature_part_gmail_lists() {
+        let raw =
+            include_bytes!("../../tests/corpus/pgp-mime/forged-signature-part-attachment.eml");
+        let mut payload = payload_with_headers(
+            "multipart/signed",
+            &[(
+                "Content-Type",
+                "multipart/signed; micalg=pgp-sha256; protocol=\"application/pgp-signature\"; boundary=\"Apple-Mail=_4B1E2C3D-5F60-4A7B-8C9D-0E1F2A3B4C5D\"",
+            )],
+        );
+        let part =
+            |mime_type: &str, filename: Option<&str>, attachment_id: Option<&str>| GmailPayload {
+                filename: filename.map(str::to_string),
+                mime_type: Some(mime_type.to_string()),
+                headers: None,
+                body: Some(GmailBody {
+                    data: None,
+                    attachment_id: attachment_id.map(str::to_string),
+                    size: Some(99),
+                }),
+                parts: None,
+            };
+        payload.parts = Some(vec![
+            part("text/plain", None, None),
+            part(
+                "application/pgp-signature",
+                Some("Invoice.pdf"),
+                Some("sig-part"),
+            ),
+        ]);
+        let message = GmailMessageResponse {
+            id: "signed-message".to_string(),
+            thread_id: None,
+            history_id: None,
+            label_ids: None,
+            snippet: None,
+            internal_date: None,
+            payload: Some(payload),
+            raw: Some(base64url(raw)),
+        };
+
+        let mapped = map_gmail_message(message);
+
+        assert!(mapped.trust.root_crypto);
+        assert!(mapped.pgp_signed.is_some());
+        assert!(mapped.attachments.is_empty(), "{:?}", mapped.attachments);
+    }
+
+    /// A signed entity that carries a file of a signature type, the detached
+    /// signature of a download, beside a signature part that names itself an
+    /// attachment.
+    const SIGNATURE_FILE_IN_ENTITY: &[u8] = b"From: releases@example.test\r\n\
+        Content-Type: multipart/signed; micalg=pgp-sha256; protocol=\"application/pgp-signature\"; boundary=\"S\"\r\n\r\n\
+--S\r\nContent-Type: multipart/mixed; boundary=\"M\"\r\n\r\n\
+--M\r\nContent-Type: text/plain\r\n\r\nRelease 2.1 is out; its signature file is attached.\r\n\
+--M\r\nContent-Type: application/pgp-signature; name=\"release.tar.gz.asc\"\r\nContent-Disposition: attachment; filename=\"release.tar.gz.asc\"\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\nBBBB\r\n-----END PGP SIGNATURE-----\r\n--M--\r\n\
+--S\r\nContent-Type: application/pgp-signature; name=\"Invoice.pdf\"\r\nContent-Disposition: attachment; filename=\"Invoice.pdf\"\r\n\r\n-----BEGIN PGP SIGNATURE-----\r\nAAAA\r\n-----END PGP SIGNATURE-----\r\n--S--\r\n";
+
+    /// The decoded size of the signature file inside `SIGNATURE_FILE_IN_ENTITY`.
+    const SIGNATURE_FILE_SIZE: i64 = 64;
+
+    fn leaf(
+        mime_type: &str,
+        filename: Option<&str>,
+        attachment_id: Option<&str>,
+        size: i64,
+    ) -> GmailPayload {
+        GmailPayload {
+            filename: filename.map(str::to_string),
+            mime_type: Some(mime_type.to_string()),
+            headers: None,
+            body: Some(GmailBody {
+                data: None,
+                attachment_id: attachment_id.map(str::to_string),
+                size: Some(size),
+            }),
+            parts: None,
+        }
+    }
+
+    fn signed_root(parts: Vec<GmailPayload>) -> GmailMessageResponse {
+        let mut payload = payload_with_headers(
+            "multipart/signed",
+            &[(
+                "Content-Type",
+                "multipart/signed; micalg=pgp-sha256; protocol=\"application/pgp-signature\"; boundary=\"S\"",
+            )],
+        );
+        payload.parts = Some(parts);
+        GmailMessageResponse {
+            id: "signed-message".to_string(),
+            thread_id: None,
+            history_id: None,
+            label_ids: None,
+            snippet: None,
+            internal_date: None,
+            payload: Some(payload),
+            raw: Some(base64url(SIGNATURE_FILE_IN_ENTITY)),
+        }
+    }
+
+    fn entity(parts: Vec<GmailPayload>) -> GmailPayload {
+        let mut entity = payload_with_headers("multipart/mixed", &[]);
+        entity.parts = Some(parts);
+        entity
+    }
+
+    fn listed_ids(mapped: &MessageEnvelope) -> Vec<&str> {
+        mapped
+            .attachments
+            .iter()
+            .map(|attachment| attachment.remote_part_id.as_str())
+            .collect()
+    }
+
+    /// Only the signature part is dropped, known by its position: the root's
+    /// second part. A signature-typed file inside the signed entity stays.
+    #[test]
+    fn a_signed_root_keeps_signature_typed_files_inside_its_entity() {
+        let message = signed_root(vec![
+            entity(vec![
+                leaf("text/plain", None, None, 10),
+                leaf(
+                    "application/pgp-signature",
+                    Some("release.tar.gz.asc"),
+                    Some("file-asc"),
+                    SIGNATURE_FILE_SIZE,
+                ),
+            ]),
+            leaf(
+                "application/pgp-signature",
+                Some("Invoice.pdf"),
+                Some("sig-part"),
+                99,
+            ),
+        ]);
+
+        let mapped = map_gmail_message(message);
+
+        assert!(mapped.trust.signed_binding);
+        assert_eq!(listed_ids(&mapped), ["file-asc"]);
+    }
+
+    /// Gmail's tree under the first part is matched against the entity the
+    /// strict splitter cut: a part Gmail places there that the entity does
+    /// not hold, or holds at another size, stays out. A listed file carries
+    /// the entity's bytes.
+    #[test]
+    fn a_signed_root_lists_only_gmail_parts_that_match_its_entity() {
+        let message = signed_root(vec![
+            entity(vec![
+                leaf("text/plain", None, None, 10),
+                leaf(
+                    "application/pgp-signature",
+                    Some("release.tar.gz.asc"),
+                    Some("file-asc"),
+                    SIGNATURE_FILE_SIZE,
+                ),
+                leaf("application/pdf", Some("Invoice.pdf"), Some("outside"), 99),
+                leaf(
+                    "application/pgp-signature",
+                    Some("release.tar.gz.asc"),
+                    Some("resized"),
+                    99,
+                ),
+            ]),
+            leaf(
+                "application/pgp-signature",
+                Some("Invoice.pdf"),
+                Some("sig-part"),
+                99,
+            ),
+        ]);
+
+        let mapped = map_gmail_message(message);
+
+        assert!(mapped.trust.signed_binding);
+        assert_eq!(listed_ids(&mapped), ["file-asc"]);
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(mapped.attachments[0].content_base64.as_deref().unwrap())
+            .unwrap();
+        assert_eq!(
+            bytes,
+            b"-----BEGIN PGP SIGNATURE-----\r\nBBBB\r\n-----END PGP SIGNATURE-----"
+        );
+    }
+
+    /// A root whose Gmail tree is not the signed entity followed by a part of
+    /// the declared signature type lists nothing: its first part need not be
+    /// the entity the signature covers.
+    #[test]
+    fn a_signed_root_of_another_shape_lists_nothing() {
+        let file = || {
+            leaf(
+                "application/pgp-signature",
+                Some("release.tar.gz.asc"),
+                Some("file-asc"),
+                SIGNATURE_FILE_SIZE,
+            )
+        };
+        let signature = || leaf("application/pgp-signature", None, Some("sig-part"), 99);
+        for parts in [
+            vec![entity(vec![file()]), signature(), signature()],
+            vec![entity(vec![file()])],
+            vec![
+                entity(vec![file()]),
+                leaf("application/pdf", None, Some("pdf"), 99),
+            ],
+        ] {
+            let mapped = map_gmail_message(signed_root(parts));
+
+            assert!(mapped.trust.signed_binding);
+            assert!(mapped.attachments.is_empty(), "{:?}", mapped.attachments);
+        }
     }
 
     #[test]

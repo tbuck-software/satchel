@@ -5,7 +5,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import ComposeView from '@/views/ComposeView.vue';
-import { composerModeTitleKey, useComposerStore, type ComposerRequest } from '@/stores/composer';
+import {
+  composerModeTitleKey,
+  useComposerStore,
+  type ComposerReplaceOutcome,
+  type ComposerRequest,
+} from '@/stores/composer';
 import { useUiStore } from '@/stores/ui';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
@@ -182,9 +187,12 @@ onBeforeUnmount(
   }),
 );
 
-/** Resolves `true` once the composer is gone, `false` when it had to stay. */
-async function requestCloseComposer(): Promise<boolean> {
-  if (!formRef.value?.shouldConfirmClose()) {
+/**
+ * Resolves `true` once the composer is gone, `false` when it had to stay.
+ * `save` keeps content the form calls untouched but that is on no disk yet.
+ */
+async function requestCloseComposer({ save = false }: { save?: boolean } = {}): Promise<boolean> {
+  if (!save && !formRef.value?.shouldConfirmClose()) {
     await formRef.value?.closeWithoutSaving();
     composer.close();
     return true;
@@ -202,7 +210,7 @@ async function requestCloseComposer(): Promise<boolean> {
       toast.error(t('compose.draft.saveFailedStaysOpen'), {
         action: {
           label: t('common.retry'),
-          handler: () => void requestCloseComposer(),
+          handler: () => void requestCloseComposer({ save }),
         },
       });
       return false;
@@ -224,23 +232,30 @@ async function requestCloseComposer(): Promise<boolean> {
  * A second request (reply, mailto, tray, notification) while a composer is
  * open. Untouched composers make way; one with work in it asks first and is
  * then saved through the regular close path, which keeps it open if that fails.
+ * That failure is `unsaved`, not `kept`: the user agreed to the replacement.
+ * A question another dialog took away is `interrupted`: nobody answered it.
  */
-async function confirmReplace(next: ComposerRequest): Promise<boolean> {
+async function confirmReplace(next: ComposerRequest): Promise<ComposerReplaceOutcome> {
   const form = formRef.value;
-  if (!form) return true;
+  if (!form) return 'replaced';
   // The same draft is already in front of the user.
-  if (next.draftId && next.draftId === form.currentDraftId()) return false;
-  if (!form.shouldConfirmClose()) {
+  if (next.draftId && next.draftId === form.currentDraftId()) return 'kept';
+  // The form measures edits from what it opened with, so a notification reply
+  // looks untouched, yet until its first save it exists nowhere else.
+  const open = composer.request;
+  const unsavedReply = Boolean(open?.unsavedBody && open.body?.trim()) && !form.currentDraftId();
+  if (!unsavedReply && !form.shouldConfirmClose()) {
     await form.closeWithoutSaving();
-    return true;
+    return 'replaced';
   }
-  const replace = await confirm.ask({
+  const decision = await confirm.decide({
     title: t('compose.replace.title'),
     body: t('compose.replace.body'),
     confirmLabel: t('compose.replace.confirm'),
   });
-  if (!replace) return false;
-  return requestCloseComposer();
+  if (decision === 'preempted') return 'interrupted';
+  if (decision === 'declined') return 'kept';
+  return (await requestCloseComposer({ save: unsavedReply })) ? 'replaced' : 'unsaved';
 }
 
 onBeforeUnmount(composer.setReplaceGuard(confirmReplace));
@@ -352,7 +367,7 @@ onBeforeUnmount(() => {
             v-if="ui.isMobile"
             class="composer-back"
             :aria-label="$t('common.back')"
-            @click.stop="requestCloseComposer"
+            @click.stop="requestCloseComposer()"
            :title="$t('common.back')">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M15 18l-6-6 6-6" />
@@ -373,7 +388,7 @@ onBeforeUnmount(() => {
             <IconButton :title="$t('compose.window.popOut')" :aria-label="$t('compose.window.popOut')" @click.stop="openInOwnWindow">
               <AppIcon><rect x="2" y="4.5" width="9.5" height="9.5" rx="2"/><path d="M6 2h8v8M13.5 2.5L8 8"/></AppIcon>
             </IconButton>
-            <IconButton :title="$t('compose.window.close')" :aria-label="$t('compose.window.close')" @click.stop="requestCloseComposer">
+            <IconButton :title="$t('compose.window.close')" :aria-label="$t('compose.window.close')" @click.stop="requestCloseComposer()">
               <AppIcon><path d="M3 3l10 10M13 3L3 13"/></AppIcon>
             </IconButton>
           </div>

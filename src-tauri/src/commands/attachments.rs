@@ -1,13 +1,13 @@
 use base64::Engine;
 use satchel_core::utils::filename::strip_filename_controls;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use sqlx::{FromRow, SqlitePool};
 use tauri::{AppHandle, Manager};
 
 use crate::{
     commands::error::{CommandError, CommandResult},
-    providers::{provider_for_account, traits::MessageRef},
+    db::remote_content::{attachment_cache_id, ContentReference},
+    providers::provider_for_account,
 };
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -46,6 +46,15 @@ pub async fn list_attachments_for_messages(
         .map_err(CommandError::unexpected)
 }
 
+#[derive(FromRow)]
+struct AttachmentListingRow {
+    #[sqlx(flatten)]
+    attachment: AttachmentDto,
+    provider: String,
+    remote_id: Option<String>,
+    remote_uidvalidity: Option<i64>,
+}
+
 pub(super) async fn attachments_for_messages(
     pool: &SqlitePool,
     message_ids: &[String],
@@ -56,33 +65,51 @@ pub(super) async fn attachments_for_messages(
     let mut rows = Vec::new();
     for chunk in message_ids.chunks(MAX_ATTACHMENT_LISTING_IDS) {
         let mut query = sqlx::QueryBuilder::new(
-            "SELECT id, message_id, filename, content_type, size, content_id, is_inline, cached_path
-             FROM attachments WHERE message_id IN (",
+            "SELECT a.id, a.message_id, a.filename, a.content_type, a.size, a.content_id, a.is_inline, a.cached_path,
+                    acc.provider, m.remote_id, m.remote_uidvalidity
+             FROM attachments a JOIN messages m ON m.id = a.message_id
+             JOIN accounts acc ON acc.id = m.account_id WHERE a.message_id IN (",
         );
         let mut ids = query.separated(", ");
         for id in chunk {
             ids.push_bind(id);
         }
+        // Beside a root signature, rows from older listing rules may name
+        // parts from outside the signed entity; they wait for their rebuild.
         // `id` breaks filename ties: the renderer resolves `cid:` references
         // and checks decryption provenance by position.
-        query.push(") ORDER BY message_id, filename, id");
+        query.push(format!(
+            ") AND NOT {} ORDER BY a.message_id, a.filename, a.id",
+            satchel_core::db::signed_attachments::HIDDEN_BESIDE_ROOT_SIGNATURE
+        ));
         rows.extend(
             query
-                .build_query_as::<AttachmentDto>()
+                .build_query_as::<AttachmentListingRow>()
                 .fetch_all(pool)
                 .await?,
         );
     }
-    for row in &mut rows {
-        row.filename = row.filename.as_deref().map(strip_filename_controls);
-        if row
-            .cached_path
-            .as_deref()
-            .is_some_and(|path| !cache_path_is_owned_by(path, &row.id, &row.message_id))
-        {
-            row.cached_path = None;
-        }
-    }
+    let rows = rows
+        .into_iter()
+        .map(|listing| {
+            let mut row = listing.attachment;
+            let cache_id = attachment_cache_id(
+                &listing.provider,
+                listing.remote_id.as_deref(),
+                listing.remote_uidvalidity,
+                &row.id,
+            );
+            row.filename = row.filename.as_deref().map(strip_filename_controls);
+            if row
+                .cached_path
+                .as_deref()
+                .is_some_and(|path| !cache_path_is_owned_by(path, &cache_id, &row.message_id))
+            {
+                row.cached_path = None;
+            }
+            row
+        })
+        .collect();
     Ok(rows)
 }
 
@@ -129,6 +156,9 @@ const MAX_BASE64_PAYLOAD_BYTES: usize = 4 * 1024 * 1024;
     ts(export, export_to = "app/commands/attachments/")
 )]
 pub struct DownloadAttachmentResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
+    pub remote_uidvalidity: Option<u32>,
     pub filename: String,
     pub mime_type: String,
     /// Base64 payload, only up to [`MAX_BASE64_PAYLOAD_BYTES`]. Above that it
@@ -144,10 +174,19 @@ pub struct DownloadAttachmentResult {
     ts(export, export_to = "app/commands/attachments/")
 )]
 pub struct PreparedAttachmentResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ipc-types", ts(optional = nullable))]
+    pub remote_uidvalidity: Option<u32>,
     pub filename: String,
     pub mime_type: String,
     pub size: i64,
     pub cached_path: String,
+}
+
+/// Keep the saved identity beside the file until the last asynchronous read.
+struct ReferencedAttachment {
+    result: PreparedAttachmentResult,
+    reference: ContentReference,
 }
 
 #[tauri::command]
@@ -166,7 +205,19 @@ pub async fn download_attachment_inner(
     pool: &SqlitePool,
     input: DownloadAttachmentInput,
 ) -> Result<DownloadAttachmentResult, String> {
-    let prepared = prepare_attachment_inner(app, pool, input).await?;
+    let cache_dir = attachment_cache_directory(app)?;
+    let prepared = prepare_referenced_attachment(&cache_dir, pool, input).await?;
+    download_prepared_attachment(pool, prepared).await
+}
+
+async fn download_prepared_attachment(
+    pool: &SqlitePool,
+    prepared: ReferencedAttachment,
+) -> Result<DownloadAttachmentResult, String> {
+    let ReferencedAttachment {
+        result: prepared,
+        reference,
+    } = prepared;
     let size = tokio::fs::metadata(&prepared.cached_path)
         .await
         .map(|meta| meta.len())
@@ -188,7 +239,12 @@ pub async fn download_attachment_inner(
         None
     };
 
+    // Metadata, cache reads and encoding all yield. Validate the captured
+    // identity after them for both inline bytes and the large-file path.
+    let mut tx = pool.begin().await.map_err(|error| error.to_string())?;
+    reference.ensure_current(&mut tx).await?;
     Ok(DownloadAttachmentResult {
+        remote_uidvalidity: prepared.remote_uidvalidity,
         filename: prepared.filename,
         mime_type: prepared.mime_type,
         data_base64,
@@ -196,51 +252,73 @@ pub async fn download_attachment_inner(
     })
 }
 
+#[derive(FromRow)]
+struct AttachmentTarget {
+    id: String,
+    filename: Option<String>,
+    mime: String,
+    cached_path: Option<String>,
+    account_id: String,
+    provider_kind: String,
+    config: String,
+    remote_part_id: Option<String>,
+    account_email: String,
+    message_id: String,
+    content_base64: Option<String>,
+}
+
 pub async fn prepare_attachment_inner(
     app: &AppHandle,
     pool: &SqlitePool,
     input: DownloadAttachmentInput,
 ) -> Result<PreparedAttachmentResult, String> {
-    let cache_dir = app
-        .path()
-        .resolve("satchel/attachments", tauri::path::BaseDirectory::AppData)
-        .map_err(|err| err.to_string())?;
-    prepare_attachment_in(&cache_dir, pool, input).await
+    let cache_dir = attachment_cache_directory(app)?;
+    prepare_attachment_in_dir(&cache_dir, pool, input).await
 }
 
-async fn prepare_attachment_in(
+fn attachment_cache_directory(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .resolve("satchel/attachments", tauri::path::BaseDirectory::AppData)
+        .map_err(|err| err.to_string())
+}
+
+pub(super) async fn prepare_attachment_in_dir(
     cache_dir: &std::path::Path,
     pool: &SqlitePool,
     input: DownloadAttachmentInput,
 ) -> Result<PreparedAttachmentResult, String> {
-    let row: Option<(
-        String,
-        Option<String>,
-        String,
-        Option<String>,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        String,
-        Option<String>,
-        String,
-        String,
-        Option<String>,
-    )> = sqlx::query_as(
-        "SELECT a.id, a.filename, a.content_type, a.cached_path, m.account_id, acc.provider, acc.config, COALESCE(a.remote_uid, m.remote_id), a.remote_part_id, acc.email, f.remote_id, f.full_path, m.id, a.content_base64
+    Ok(prepare_referenced_attachment(cache_dir, pool, input)
+        .await?
+        .result)
+}
+
+async fn prepare_referenced_attachment(
+    cache_dir: &std::path::Path,
+    pool: &SqlitePool,
+    input: DownloadAttachmentInput,
+) -> Result<ReferencedAttachment, String> {
+    let message_id: String = sqlx::query_scalar("SELECT message_id FROM attachments WHERE id = ?")
+        .bind(&input.attachment_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| "backend.errors.messageNotAvailableLocally".to_string())?;
+    let reference = ContentReference::load(pool, &message_id).await?;
+    reference.validate_cached_read()?;
+    let row: Option<AttachmentTarget> = sqlx::query_as(
+        "SELECT a.id, a.filename, a.content_type AS mime, a.cached_path, m.account_id,
+                acc.provider AS provider_kind, acc.config, a.remote_part_id,
+                acc.email AS account_email, m.id AS message_id, a.content_base64
          FROM attachments a
          JOIN messages m ON m.id = a.message_id
          JOIN accounts acc ON acc.id = m.account_id
-         JOIN folders f ON f.id = m.folder_id
          WHERE a.id = ?",
     )
     .bind(&input.attachment_id)
     .fetch_optional(pool)
     .await
     .map_err(|err| err.to_string())?;
-    let Some((
+    let Some(AttachmentTarget {
         id,
         filename,
         mime,
@@ -248,30 +326,37 @@ async fn prepare_attachment_in(
         account_id,
         provider_kind,
         config,
-        remote_uid,
         remote_part_id,
         account_email,
-        folder_remote_id,
-        folder_path,
         message_id,
         content_base64,
-    )) = row
+    }) = row
     else {
-        return Err("attachment not found".into());
+        return Err("backend.errors.messageNotAvailableLocally".into());
     };
+    if message_id != reference.message_id {
+        return Err(reference.changed_error());
+    }
     let filename = strip_filename_controls(&filename.unwrap_or_else(|| "attachment".into()));
     tokio::fs::create_dir_all(cache_dir)
         .await
         .map_err(|err| format!("create attachment cache: {err}"))?;
 
+    let cache_id = reference.attachment_cache_id(&id);
     if let Some(path) = cached_path.as_deref() {
-        if cache_path_is_owned_by(path, &id, &message_id) {
+        if cache_path_is_owned_by(path, &cache_id, &message_id) {
             if let Some(size) = validated_cached_file_size(cache_dir, path).await {
-                return Ok(PreparedAttachmentResult {
-                    filename,
-                    mime_type: mime,
-                    size,
-                    cached_path: path.to_string(),
+                let mut tx = pool.begin().await.map_err(|err| err.to_string())?;
+                reference.ensure_current(&mut tx).await?;
+                return Ok(ReferencedAttachment {
+                    result: PreparedAttachmentResult {
+                        remote_uidvalidity: reference.uidvalidity(),
+                        filename,
+                        mime_type: mime,
+                        size,
+                        cached_path: path.to_string(),
+                    },
+                    reference,
                 });
             }
         }
@@ -286,35 +371,19 @@ async fn prepare_attachment_in(
         }
     } else if satchel_core::email::decrypted::is_attachment_id(&id) {
         // The server holds this part only inside the encrypted message, and a
-        // part ID from the decrypted content names another part there.
+        // part ID from the decrypted content names another part there. Older
+        // decrypted rows still carry such an ID; it is never sent.
         return Err("backend.errors.decryptedAttachmentUnavailable".into());
     } else {
-        let remote_uid = remote_uid.ok_or_else(|| {
-            format!(
-                "attachment {} has no remote message id; re-sync the message first",
-                input.attachment_id
-            )
-        })?;
-        let remote_part_id = remote_part_id.ok_or_else(|| {
-            format!(
-                "attachment {} has no remote part id; re-sync the message first",
-                input.attachment_id
-            )
-        })?;
+        let remote_part_id = remote_part_id
+            .ok_or_else(|| "backend.errors.messageNotAvailableLocally".to_string())?;
         let config =
             crate::utils::oauth::refresh_account_config(pool, &account_id, &provider_kind, &config)
                 .await
                 .map_err(|err| err.encoded())?;
         let provider = provider_for_account(&provider_kind, &config, &account_email, None)?;
         provider
-            .fetch_attachment(
-                &MessageRef {
-                    remote_id: remote_uid.clone(),
-                    source_folder: folder_remote_id.or(Some(folder_path)),
-                    source_uidvalidity: None,
-                },
-                &remote_part_id,
-            )
+            .fetch_attachment(&reference.message_ref()?, &remote_part_id)
             .await
             .map_err(|error| error.to_string())?
     };
@@ -329,7 +398,13 @@ async fn prepare_attachment_in(
         fetched.content_type
     };
     let final_filename = fetched.filename.unwrap_or(filename.clone());
-    let path = attachment_cache_path(cache_dir, &id, &final_filename);
+    // Each request owns its file. A late request must never overwrite a file
+    // already published by a replacement row or another fetch.
+    let path = attachment_cache_path(
+        cache_dir,
+        &cache_id,
+        &format!("{}-{final_filename}", uuid::Uuid::new_v4()),
+    );
     if tokio::fs::symlink_metadata(&path)
         .await
         .is_ok_and(|metadata| metadata.file_type().is_symlink())
@@ -343,7 +418,8 @@ async fn prepare_attachment_in(
         .map_err(|err| format!("write attachment cache: {err}"))?;
     let path_string = path.to_string_lossy().to_string();
     let size = i64::try_from(fetched.bytes.len()).unwrap_or(i64::MAX);
-    set_attachment_cache(pool, &id, &path_string, size).await?;
+    let mut tx = reference.begin_write(pool).await?;
+    set_attachment_cache(&mut tx, &id, &message_id, &path_string, size).await?;
     sqlx::query(
         "UPDATE attachments
          SET filename = ?, content_type = ?
@@ -352,55 +428,56 @@ async fn prepare_attachment_in(
     .bind(&final_filename)
     .bind(&mime_type)
     .bind(&id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
 
-    Ok(PreparedAttachmentResult {
-        filename: final_filename,
-        mime_type,
-        size,
-        cached_path: path_string,
+    tx.commit().await.map_err(|err| err.to_string())?;
+
+    Ok(ReferencedAttachment {
+        result: PreparedAttachmentResult {
+            remote_uidvalidity: reference.uidvalidity(),
+            filename: final_filename,
+            mime_type,
+            size,
+            cached_path: path_string,
+        },
+        reference,
     })
 }
 
-async fn set_attachment_cache(
-    pool: &SqlitePool,
+pub(crate) async fn set_attachment_cache(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     id: &str,
+    message_id: &str,
     path: &str,
     size: i64,
 ) -> Result<(), String> {
-    sqlx::query("UPDATE attachments SET cached_path = ?, size = ? WHERE id = ?")
-        .bind(path)
-        .bind(size)
-        .bind(id)
-        .execute(pool)
-        .await
-        .map_err(|err| err.to_string())?;
+    let result = sqlx::query(
+        "UPDATE attachments SET cached_path = ?, size = ? WHERE id = ? AND message_id = ?",
+    )
+    .bind(path)
+    .bind(size)
+    .bind(id)
+    .bind(message_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|err| err.to_string())?;
+    if result.rows_affected() != 1 {
+        return Err("backend.errors.messageNotAvailableLocally".into());
+    }
     Ok(())
 }
 
-pub(crate) fn cache_path_is_owned_by(path: &str, attachment_id: &str, message_id: &str) -> bool {
-    let Some(name) = std::path::Path::new(path)
-        .file_name()
-        .and_then(|name| name.to_str())
-    else {
-        return false;
-    };
-    // Imports used the message id as an extra part of the cache key. Both
-    // forms are owned by this row; a peer's key is not, even if its UID matches.
-    [
-        attachment_id.to_string(),
-        format!("{message_id}-{attachment_id}"),
-    ]
-    .iter()
-    .any(|key| name.starts_with(&format!("{}-", short_attachment_cache_key(key))))
-}
+pub(crate) use crate::db::remote_content::cache_path_is_owned_by;
 
 /// Only paths that resolve below Satchel's attachment cache may be handed to
 /// Quick Look or another application. Canonicalization also rejects symlinks
 /// that point outside the cache even if the database row was tampered with.
-async fn validated_cached_file_size(cache_dir: &std::path::Path, path: &str) -> Option<i64> {
+pub(super) async fn validated_cached_file_size(
+    cache_dir: &std::path::Path,
+    path: &str,
+) -> Option<i64> {
     let root = tokio::fs::canonicalize(cache_dir).await.ok()?;
     let file = tokio::fs::canonicalize(path).await.ok()?;
     if !file.starts_with(root) {
@@ -668,72 +745,215 @@ pub async fn toggle_attachment_quick_look(
     }
 }
 
-/// Cache file name for an attachment: a digest of the attachment id plus a
-/// trimmed version of the original name.
-///
-/// The id must never reach the file name. Gmail part ids run past 500
-/// characters, so `{id}-{filename}` blows the 255-byte name limit of every
-/// common file system — and the sync path used to build exactly that. The write
-/// failed with `ENAMETOOLONG`, the error was discarded, and every freshly
-/// downloaded inline image was thrown away: 9 700 parts fetched from Gmail for
-/// nothing, then fetched again on every open until the account hit a 429.
-/// Regression guard: `cache_path_stays_within_file_name_limits`.
-pub(crate) fn attachment_cache_path(
-    cache_dir: &std::path::Path,
-    attachment_id: &str,
-    filename: &str,
-) -> std::path::PathBuf {
-    cache_dir.join(format!(
-        "{}-{}",
-        short_attachment_cache_key(attachment_id),
-        safe_filename(filename)
-    ))
-}
-
-/// Longest original name kept in a cache file name. The digest prefix already
-/// carries uniqueness, so this only has to stay recognisable in a file listing.
-const MAX_CACHE_NAME_BYTES: usize = 120;
-
-fn short_attachment_cache_key(value: &str) -> String {
-    let digest = Sha256::digest(value.as_bytes());
-    digest
-        .iter()
-        .take(12)
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-fn safe_filename(value: &str) -> String {
-    // Every branch yields ASCII, so byte and char lengths agree below.
-    let sanitized = strip_filename_controls(value)
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    if sanitized.trim_matches('_').is_empty() {
-        return "attachment".to_string();
-    }
-    if sanitized.len() <= MAX_CACHE_NAME_BYTES {
-        return sanitized;
-    }
-    // Keep the extension: it is what makes the cache dir readable, and Finder
-    // and `open` both key off it.
-    match sanitized.rsplit_once('.') {
-        Some((stem, ext)) if !ext.is_empty() && ext.len() < 16 => {
-            let budget = MAX_CACHE_NAME_BYTES - ext.len() - 1;
-            format!("{}.{ext}", &stem[..budget.min(stem.len())])
-        }
-        _ => sanitized[..MAX_CACHE_NAME_BYTES].to_string(),
-    }
-}
+pub(crate) use crate::db::remote_content::attachment_cache_path;
+#[cfg(test)]
+use crate::db::remote_content::{safe_filename, MAX_CACHE_NAME_BYTES};
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn attachment_download_revalidates_after_preparation() {
+        use super::{
+            download_prepared_attachment, prepare_referenced_attachment, DownloadAttachmentInput,
+        };
+        use crate::db::remote_content::ContentReference;
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id,display_name,email,provider,config,credentials_ref,created_at,updated_at)
+            VALUES ('a','A','me@example.test','imap','{}','','','');
+            INSERT INTO folders (id,account_id,name,full_path,remote_id,folder_type,uidvalidity,created_at,updated_at)
+            VALUES ('f','a','Inbox','INBOX','INBOX','inbox',7,'','');
+            INSERT INTO threads (id,account_id,subject,last_message_date,created_at,updated_at) VALUES ('t','a','Subject','','','');
+            INSERT INTO messages (id,account_id,folder_id,thread_id,remote_id,remote_uidvalidity,from_address,to_addresses,date,created_at,updated_at)
+            VALUES ('m','a','f','t','42',7,'sender@example.test','[]','','','');
+            INSERT INTO attachments (id,message_id,filename,content_type,created_at) VALUES ('att','m','file.bin','application/octet-stream','');")
+            .execute(&pool).await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        for size in [4, super::MAX_BASE64_PAYLOAD_BYTES + 1] {
+            for scenario in ["current", "reset", "replaced", "local-reset"] {
+                sqlx::query("UPDATE folders SET uidvalidity = 7")
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                sqlx::query("UPDATE messages SET remote_id = ?, remote_uidvalidity = 7")
+                    .bind((scenario != "local-reset").then_some("42"))
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                let reference = ContentReference::load(&pool, "m").await.unwrap();
+                let path = super::attachment_cache_path(
+                    dir.path(),
+                    &reference.attachment_cache_id("att"),
+                    "file.bin",
+                );
+                std::fs::write(&path, vec![b'x'; size]).unwrap();
+                sqlx::query("UPDATE attachments SET cached_path = ?")
+                    .bind(path.to_str().unwrap())
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                let prepared = prepare_referenced_attachment(
+                    dir.path(),
+                    &pool,
+                    DownloadAttachmentInput {
+                        attachment_id: "att".into(),
+                    },
+                )
+                .await
+                .unwrap();
+                match scenario {
+                    "reset" | "local-reset" => {
+                        sqlx::query("UPDATE folders SET uidvalidity = 8")
+                            .execute(&pool)
+                            .await
+                            .unwrap();
+                    }
+                    "replaced" => {
+                        sqlx::query("UPDATE messages SET remote_id = '43'")
+                            .execute(&pool)
+                            .await
+                            .unwrap();
+                    }
+                    _ => {}
+                }
+                let result = download_prepared_attachment(&pool, prepared).await;
+                if matches!(scenario, "reset" | "replaced") {
+                    assert!(
+                        result.unwrap_err().contains("imapUidValidityChanged"),
+                        "{scenario}, {size}"
+                    );
+                } else {
+                    let result = result.unwrap();
+                    assert_eq!(result.cached_path.as_deref(), path.to_str());
+                    assert_eq!(
+                        result.data_base64.is_some(),
+                        size <= super::MAX_BASE64_PAYLOAD_BYTES
+                    );
+                    if size == 4 {
+                        assert_eq!(result.data_base64.as_deref(), Some("eHh4eA=="));
+                    }
+                }
+            }
+        }
+    }
+
+    /// The parts a strict signed entity lists are served from the generation
+    /// they were synced in, the signature part not at all.
+    #[tokio::test]
+    async fn an_attachment_under_a_signature_is_served_only_within_its_generation() {
+        use super::{
+            download_prepared_attachment, prepare_referenced_attachment, DownloadAttachmentInput,
+        };
+        use crate::db::remote_content::ContentReference;
+        let parsed = crate::providers::imap::parse_raw_message_body(include_bytes!(
+            "../../../crates/satchel-core/tests/corpus/pgp-mime/thunderbird-mixed-attachment.eml"
+        ));
+        assert!(parsed.trust.root_crypto && parsed.trust.signed_binding);
+        let [figures] = parsed.attachments.as_slice() else {
+            panic!(
+                "expected only the signed attachment: {:?}",
+                parsed.attachments
+            );
+        };
+        assert_eq!(figures.filename.as_deref(), Some("figures.csv"));
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id,display_name,email,provider,config,credentials_ref,created_at,updated_at)
+            VALUES ('a','A','me@example.test','imap','{}','','','');
+            INSERT INTO folders (id,account_id,name,full_path,remote_id,folder_type,uidvalidity,created_at,updated_at)
+            VALUES ('f','a','Inbox','INBOX','INBOX','inbox',7,'','');")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO messages (id,account_id,folder_id,remote_id,remote_uidvalidity,from_address,to_addresses,date,pgp_signed,trust_metadata,created_at,updated_at)
+            VALUES ('m','a','f','42',7,'sender@example.test','[]','',?,?,'','')")
+            .bind(parsed.pgp_signed.as_deref())
+            .bind(serde_json::to_string(&parsed.trust).unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        // The part as sync lists it today, and the signature part as an older
+        // sync stored it, under a name its unsigned headers chose.
+        sqlx::query("INSERT INTO attachments (id,message_id,filename,content_type,remote_part_id,listing_rules,created_at)
+            VALUES ('att', 'm', ?, ?, ?, 1, ''), ('phantom', 'm', 'Invoice.pdf', 'application/pgp-signature', '3', 0, '')")
+            .bind(figures.filename.as_deref())
+            .bind(&figures.content_type)
+            .bind(&figures.remote_part_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let reference = ContentReference::load(&pool, "m").await.unwrap();
+        let path = super::attachment_cache_path(
+            dir.path(),
+            &reference.attachment_cache_id("att"),
+            "figures.csv",
+        );
+        std::fs::write(&path, b"q1,q2").unwrap();
+        sqlx::query("UPDATE attachments SET cached_path = ? WHERE id = 'att'")
+            .bind(path.to_str().unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let input = || DownloadAttachmentInput {
+            attachment_id: "att".into(),
+        };
+
+        let listed = super::attachments_for_messages(&pool, &["m".into()])
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1, "the signature part is not listed");
+        assert_eq!(listed[0].cached_path.as_deref(), path.to_str());
+        let served = download_prepared_attachment(
+            &pool,
+            prepare_referenced_attachment(dir.path(), &pool, input())
+                .await
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(served.data_base64.as_deref(), Some("cTEscTI="));
+
+        // A reset after preparation refuses the bytes already read.
+        let prepared = prepare_referenced_attachment(dir.path(), &pool, input())
+            .await
+            .unwrap();
+        sqlx::query("UPDATE folders SET uidvalidity = 8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(download_prepared_attachment(&pool, prepared)
+            .await
+            .unwrap_err()
+            .contains("imapUidValidityChanged"));
+        assert!(prepare_referenced_attachment(dir.path(), &pool, input())
+            .await
+            .err()
+            .unwrap()
+            .contains("imapUidValidityChanged"));
+
+        // Synced again in the new generation, the earlier file is no longer
+        // this attachment's, and the signature part stays hidden.
+        sqlx::query("UPDATE messages SET remote_uidvalidity = 8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let listed = super::attachments_for_messages(&pool, &["m".into()])
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, "att");
+        assert_eq!(listed[0].cached_path, None);
+    }
+
     #[test]
     fn the_final_cache_name_is_the_opening_gate() {
         let original = format!("{}.jar{}", "A".repeat(116), "X".repeat(16));
@@ -798,14 +1018,11 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("pool");
-        sqlx::query(
-            "CREATE TABLE attachments (id TEXT PRIMARY KEY, message_id TEXT NOT NULL,
-             filename TEXT, content_type TEXT NOT NULL, size INTEGER, content_id TEXT,
-             is_inline INTEGER NOT NULL DEFAULT 0, cached_path TEXT)",
-        )
-        .execute(&pool)
-        .await
-        .expect("schema");
+        attachment_schema(&pool).await;
+        sqlx::query("INSERT INTO messages (id, account_id) VALUES ('m1', 'acc'), ('m2', 'acc'), ('m3', 'acc')")
+            .execute(&pool)
+            .await
+            .unwrap();
         // `z9` is inserted first but shares `a2`'s name: a tie the order has
         // to break the same way on every call, because the renderer resolves
         // `cid:` references by position and checks provenance by position.
@@ -843,10 +1060,176 @@ mod tests {
         assert_eq!(rows[0].cached_path.as_deref(), shared.to_str());
         assert_eq!(rows[3].filename.as_deref(), Some("c.txt"));
         assert_eq!(rows[2].cached_path, None, "a1 must not expose a2's bytes");
+        sqlx::raw_sql(
+            "UPDATE accounts SET provider = 'imap';
+            UPDATE messages SET remote_id = '42', remote_uidvalidity = 7;",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let rows = super::attachments_for_messages(&pool, &["m1".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            rows[0].cached_path, None,
+            "a legacy cache has no verified generation"
+        );
+        let verified =
+            super::attachment_cache_path(std::path::Path::new("/cache"), "a2:imap:7", "a.png");
+        sqlx::query("UPDATE attachments SET cached_path = ? WHERE id = 'a2'")
+            .bind(verified.to_str().unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+        let rows = super::attachments_for_messages(&pool, &["m1".into()])
+            .await
+            .unwrap();
+        assert_eq!(rows[0].cached_path.as_deref(), verified.to_str());
+        sqlx::query("UPDATE messages SET remote_uidvalidity = 8")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let rows = super::attachments_for_messages(&pool, &["m1".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            rows[0].cached_path, None,
+            "a reused UID cannot expose the previous generation's file"
+        );
+
         assert!(super::attachments_for_messages(&pool, &[])
             .await
             .expect("empty")
             .is_empty());
+    }
+
+    async fn attachment_schema(pool: &sqlx::SqlitePool) {
+        for sql in [
+            "CREATE TABLE attachments (id TEXT PRIMARY KEY, message_id TEXT NOT NULL,
+             filename TEXT, content_type TEXT NOT NULL, size INTEGER, content_id TEXT,
+             is_inline INTEGER NOT NULL DEFAULT 0, cached_path TEXT,
+             listing_rules INTEGER NOT NULL DEFAULT 0)",
+            "CREATE TABLE accounts (id TEXT PRIMARY KEY, provider TEXT)",
+            "CREATE TABLE messages (id TEXT PRIMARY KEY, account_id TEXT, remote_id TEXT,
+             remote_uidvalidity INTEGER, trust_metadata TEXT, pgp_signed BLOB, smime_signed BLOB)",
+            "INSERT INTO accounts VALUES ('acc', 'gmail')",
+        ] {
+            sqlx::query(sql).execute(pool).await.expect("schema");
+        }
+    }
+
+    const SIGNED_WITH_ATTACHMENT: &[u8] = include_bytes!(
+        "../../../crates/satchel-core/tests/corpus/pgp-mime/thunderbird-mixed-attachment.eml"
+    );
+
+    /// An older sync could list parts from outside the signed entity next to
+    /// a root signature: a signature part under a name its unsigned headers
+    /// chose, or an outer part whose Content-ID fills the signed HTML. Those
+    /// rows stay hidden, so no `cid:` resolves from them, until the repair has
+    /// rebuilt them from the bundle. Rows written under the current rules stay
+    /// listed, also once a refetched body has cleared the signed binding.
+    #[tokio::test]
+    async fn legacy_rows_beside_a_root_signature_stay_hidden_until_rebuilt() {
+        let bundle = crate::providers::imap::parse_raw_message_body(SIGNED_WITH_ATTACHMENT)
+            .pgp_signed
+            .unwrap();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+                VALUES ('a', 'Account', 'me@example.test', 'gmail', '{}', '', '', '');
+            INSERT INTO folders (id, account_id, name, full_path, folder_type, created_at, updated_at)
+                VALUES ('f', 'a', 'Inbox', 'INBOX', 'inbox', '', '');")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for (id, trust, signed) in [
+            ("legacy", Some(r#"{"root_crypto":true}"#), true),
+            (
+                "refetched",
+                Some(r#"{"root_crypto":true,"signed_binding":false}"#),
+                true,
+            ),
+            ("nested", Some(r#"{"root_crypto":false}"#), true),
+            ("plain", None, false),
+        ] {
+            sqlx::query("INSERT INTO messages (id, account_id, folder_id, from_address, to_addresses, date, trust_metadata, pgp_signed, created_at, updated_at)
+                VALUES (?, 'a', 'f', 'sender@example.test', '[]', '', ?, ?, '', '')")
+                .bind(id)
+                .bind(trust)
+                .bind(signed.then_some(bundle.as_slice()))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::raw_sql("INSERT INTO attachments (id, message_id, filename, content_type, content_id, is_inline, listing_rules, created_at) VALUES
+                ('phantom', 'legacy', 'Invoice.pdf', 'application/pgp-signature', NULL, 0, 0, ''),
+                ('outer-logo', 'legacy', 'logo.png', 'image/png', 'logo@example.test', 1, 0, ''),
+                ('current', 'refetched', 'figures.csv', 'text/csv', NULL, 0, 1, ''),
+                ('nested-old', 'nested', 'outer.pdf', 'application/pdf', NULL, 0, 0, ''),
+                ('plain-old', 'plain', 'notes.txt', 'text/plain', NULL, 0, 0, '');")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let ids = || async {
+            super::attachments_for_messages(
+                &pool,
+                &[
+                    "legacy".into(),
+                    "refetched".into(),
+                    "nested".into(),
+                    "plain".into(),
+                ],
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| (row.message_id, row.filename.unwrap_or_default()))
+            .collect::<Vec<_>>()
+        };
+        let pair = |message: &str, name: &str| (message.to_string(), name.to_string());
+        assert_eq!(
+            ids().await,
+            [
+                pair("nested", "outer.pdf"),
+                pair("plain", "notes.txt"),
+                pair("refetched", "figures.csv"),
+            ]
+        );
+
+        let repair = satchel_core::db::signed_attachments::SIGNED_ENTITY_ATTACHMENTS;
+        satchel_core::db::data_repairs::run_repair(&pool, &repair, 100, None, |_| {})
+            .await
+            .unwrap();
+        assert_eq!(
+            ids().await,
+            [
+                pair("legacy", "figures.csv"),
+                pair("nested", "outer.pdf"),
+                pair("plain", "notes.txt"),
+                pair("refetched", "figures.csv"),
+            ]
+        );
+        // The rebuilt row carries the bytes of the signed entity.
+        let (payload, remote_part): (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT content_base64, remote_part_id FROM attachments WHERE message_id = 'legacy'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let bytes =
+            crate::sync::attachment_fetch::decode_attachment_base64(&payload.unwrap()).unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains(','), "{bytes:?}");
+        assert_eq!(remote_part, None);
+        let current: String =
+            sqlx::query_scalar("SELECT id FROM attachments WHERE message_id = 'refetched'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(current, "current");
     }
 
     use super::{attachment_cache_path, attachment_open_risk, safe_filename, MAX_CACHE_NAME_BYTES};
@@ -912,14 +1295,25 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("pool");
-        sqlx::query("CREATE TABLE attachments (id TEXT PRIMARY KEY, remote_uid TEXT, remote_part_id TEXT, cached_path TEXT, size INTEGER)")
+        sqlx::query("CREATE TABLE attachments (id TEXT PRIMARY KEY, message_id TEXT, remote_uid TEXT, remote_part_id TEXT, cached_path TEXT, size INTEGER)")
             .execute(&pool).await.expect("schema");
-        sqlx::query("INSERT INTO attachments (id, remote_uid, remote_part_id) VALUES ('inbox', '42', '1'), ('archive', '42', '1')")
+        sqlx::query("INSERT INTO attachments (id, message_id, remote_uid, remote_part_id) VALUES ('inbox', 'message-inbox', '42', '1'), ('archive', 'message-archive', '42', '1')")
             .execute(&pool).await.expect("rows");
 
-        super::set_attachment_cache(&pool, "inbox", "/cache/inbox.pdf", 4)
+        let mut tx = pool.begin().await.unwrap();
+        assert!(super::set_attachment_cache(
+            &mut tx,
+            "inbox",
+            "replacement-message",
+            "/cache/stale.pdf",
+            9
+        )
+        .await
+        .is_err());
+        super::set_attachment_cache(&mut tx, "inbox", "message-inbox", "/cache/inbox.pdf", 4)
             .await
             .expect("cache inbox");
+        tx.commit().await.unwrap();
 
         let other: Option<String> =
             sqlx::query_scalar("SELECT cached_path FROM attachments WHERE id = 'archive'")
@@ -957,8 +1351,9 @@ mod tests {
         .expect("account");
         sqlx::query(
             "INSERT INTO folders
-             (id, account_id, name, full_path, remote_id, folder_type, created_at, updated_at)
-             VALUES ('fld', 'acc', 'INBOX', 'INBOX', 'INBOX', 'inbox', ?, ?)",
+             (id, account_id, name, full_path, remote_id, folder_type, uidvalidity, created_at,
+              updated_at)
+             VALUES ('fld', 'acc', 'INBOX', 'INBOX', 'INBOX', 'inbox', 7, ?, ?)",
         )
         .bind(&now)
         .bind(&now)
@@ -968,8 +1363,8 @@ mod tests {
         sqlx::query(
             "INSERT INTO messages
              (id, account_id, folder_id, from_address, to_addresses, date, is_draft, remote_id,
-              created_at, updated_at)
-             VALUES ('msg', 'acc', 'fld', 'a@b.c', '[]', ?, 0, '12', ?, ?)",
+              remote_uidvalidity, created_at, updated_at)
+             VALUES ('msg', 'acc', 'fld', 'a@b.c', '[]', ?, 0, '12', 7, ?, ?)",
         )
         .bind(&now)
         .bind(&now)
@@ -980,7 +1375,14 @@ mod tests {
 
         let cache = tempfile::tempdir().expect("cache dir");
         let id = satchel_core::email::decrypted::attachment_id("msg", "mime-1");
-        let cached = attachment_cache_path(cache.path(), &id, "agenda.pdf");
+        let reference = crate::db::remote_content::ContentReference::load(&pool, "msg")
+            .await
+            .expect("reference");
+        let cached = attachment_cache_path(
+            cache.path(),
+            &reference.attachment_cache_id(&id),
+            "agenda.pdf",
+        );
         std::fs::write(&cached, b"%PDF").expect("cache file");
         // Rows written before decrypted parts lost their remote part ID.
         sqlx::query(
@@ -996,7 +1398,7 @@ mod tests {
         .await
         .expect("attachment");
         let prepare = || {
-            super::prepare_attachment_in(
+            super::prepare_attachment_in_dir(
                 cache.path(),
                 &pool,
                 super::DownloadAttachmentInput {
@@ -1004,7 +1406,8 @@ mod tests {
                 },
             )
         };
-        assert!(prepare().await.is_ok(), "the cached copy is served");
+        let served = prepare().await;
+        assert!(served.is_ok(), "the cached copy is served: {served:?}");
 
         std::fs::remove_file(&cached).expect("cache file removed");
         let missing_file = prepare().await;

@@ -10,6 +10,7 @@ import {
   type BackendDraft,
   type BackendDraftInput,
 } from '@/services/backend';
+import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { useConnectionStore } from '@/stores/connection';
 import { useMessagesStore } from '@/stores/messages';
 
@@ -26,7 +27,7 @@ export const useDraftsStore = defineStore('drafts', () => {
   );
 
   const scheduled = computed(() =>
-    items.value.filter((draft) => draft.scheduled_for && new Date(draft.scheduled_for) > new Date()),
+    items.value.filter((draft) => !draft.content_error && draft.scheduled_for && new Date(draft.scheduled_for) > new Date()),
   );
 
   async function load() {
@@ -45,6 +46,8 @@ export const useDraftsStore = defineStore('drafts', () => {
     if (!backendCommandsAvailable()) return null;
     return loader.mutate(async () => {
       try {
+        const known = items.value.find((item) => item.id === input.id);
+        if (known?.content_error) throw new Error(backendErrorLabel(known.content_error), { cause: known.content_error });
         const draft = await backendSaveDraft(input);
         const idx = items.value.findIndex((item) => item.id === draft.id);
         if (idx >= 0) items.value.splice(idx, 1, draft);
@@ -61,7 +64,14 @@ export const useDraftsStore = defineStore('drafts', () => {
 
   async function fetchOne(id: string): Promise<BackendDraft | null> {
     if (!backendCommandsAvailable()) return null;
-    return backendLoadDraft(id);
+    // The fresh row replaces list metadata, so an older list snapshot must reread.
+    return loader.mutate(async () => {
+      const draft = await backendLoadDraft(id);
+      if (draft?.content_error) throw new Error(backendErrorLabel(draft.content_error), { cause: draft.content_error });
+      const idx = items.value.findIndex((item) => item.id === id);
+      if (draft && idx >= 0) items.value.splice(idx, 1, draft);
+      return draft;
+    });
   }
 
   async function remove(id: string) {
@@ -78,6 +88,7 @@ export const useDraftsStore = defineStore('drafts', () => {
    * an undo honest.
    */
   async function restore(draft: BackendDraft): Promise<BackendDraft | null> {
+    if (draft.content_error) throw new Error(backendErrorLabel(draft.content_error), { cause: draft.content_error });
     return save({
       id: draft.id,
       sendOptions: draft.send_options,

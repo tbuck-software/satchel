@@ -5,6 +5,8 @@
 //! noise by clients that do not understand it. RFC 3156 keeps the signed entity
 //! a normal MIME part, so a signed mail stays readable everywhere.
 
+use super::signed_mime::{self, SignedMimeError, SignedProtocol};
+
 const MAX_SIGNED_BUNDLE_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,120 +127,38 @@ pub fn signed_entity_for_encryption(rfc822: &str, armored_signature: &str) -> St
     entity
 }
 
-/// Recover the exact first MIME entity and armored detached signature from an
-/// RFC 3156 `multipart/signed` bundle. The entity bytes are not normalized:
-/// even a harmless line-ending rewrite would invalidate a binary signature.
-pub fn parse_signed_message(bundle: &[u8]) -> Result<ParsedSignedMessage, String> {
+/// Recover the signed entity and armored detached signature from an RFC 3156
+/// `multipart/signed` bundle.
+///
+/// The entity comes from the same splitter the display path uses, so it is
+/// byte for byte the entity the reader is shown. It is not normalized: even a
+/// harmless line-ending rewrite would invalidate a binary signature.
+pub fn parse_signed_message(bundle: &[u8]) -> Result<ParsedSignedMessage, SignedMimeError> {
     if bundle.len() > MAX_SIGNED_BUNDLE_BYTES {
-        return Err("OpenPGP signed message exceeds the size limit".to_string());
+        return Err(SignedMimeError::TooLarge);
     }
-    let (header, body) = split_header_bytes(bundle)
-        .ok_or_else(|| "OpenPGP signed message has no MIME header boundary".to_string())?;
-    let header_text = String::from_utf8_lossy(header);
-    let boundary = multipart_boundary(&header_text)
-        .ok_or_else(|| "OpenPGP signed message has no multipart boundary".to_string())?;
-    if boundary.len() > 200 {
-        return Err("OpenPGP multipart boundary is too long".to_string());
-    }
-
-    let delimiter = format!("--{boundary}").into_bytes();
-    let first_delimiter = find_subslice(body, &delimiter)
-        .ok_or_else(|| "OpenPGP signed message has no first MIME part".to_string())?;
-    let first_start = after_delimiter_line(body, first_delimiter + delimiter.len())?;
-    let mut crlf_delimiter = b"\r\n".to_vec();
-    crlf_delimiter.extend_from_slice(&delimiter);
-    let next_crlf =
-        find_subslice(&body[first_start..], &crlf_delimiter).map(|offset| first_start + offset);
-    let mut lf_delimiter = b"\n".to_vec();
-    lf_delimiter.extend_from_slice(&delimiter);
-    let next_lf =
-        find_subslice(&body[first_start..], &lf_delimiter).map(|offset| first_start + offset);
-    let first_end = match (next_crlf, next_lf) {
-        (Some(crlf), Some(lf)) => crlf.min(lf),
-        (Some(crlf), None) => crlf,
-        (None, Some(lf)) => lf,
-        (None, None) => return Err("OpenPGP signed message has no signature part".to_string()),
-    };
-
-    let signature_part_start = if body[first_end..].starts_with(b"\r\n") {
-        first_end + 2 + delimiter.len()
-    } else {
-        first_end + 1 + delimiter.len()
-    };
-    let signature_part_start = after_delimiter_line(body, signature_part_start)?;
-    let signature_part = &body[signature_part_start..];
-    let signature_header_end = split_header_bytes(signature_part)
-        .ok_or_else(|| "OpenPGP signature part has no MIME headers".to_string())?;
-    if !String::from_utf8_lossy(signature_header_end.0)
-        .to_ascii_lowercase()
-        .contains("application/pgp-signature")
-    {
-        return Err("multipart signature part is not OpenPGP".to_string());
+    let parts = signed_mime::split_bundle(bundle)?;
+    if parts.protocol != SignedProtocol::OpenPgp {
+        return Err(SignedMimeError::UnsupportedProtocol);
     }
 
     const BEGIN: &[u8] = b"-----BEGIN PGP SIGNATURE-----";
     const END: &[u8] = b"-----END PGP SIGNATURE-----";
-    let signature_body = signature_header_end.1;
-    let armor_start = find_subslice(signature_body, BEGIN)
-        .ok_or_else(|| "OpenPGP signature armor is missing".to_string())?;
-    let armor_end = find_subslice(&signature_body[armor_start..], END)
+    // Only the signature part's own body: armor further down the message is
+    // not this part's signature.
+    let (_, signature_body) = signed_mime::entity_header_and_body(parts.signature);
+    let armor_start =
+        memchr::memmem::find(signature_body, BEGIN).ok_or(SignedMimeError::MissingArmor)?;
+    let armor_end = memchr::memmem::find(&signature_body[armor_start..], END)
         .map(|offset| armor_start + offset + END.len())
-        .ok_or_else(|| "OpenPGP signature armor is incomplete".to_string())?;
+        .ok_or(SignedMimeError::MissingArmor)?;
     let armored_signature = String::from_utf8(signature_body[armor_start..armor_end].to_vec())
-        .map_err(|error| format!("OpenPGP signature armor is not UTF-8: {error}"))?;
+        .map_err(|_| SignedMimeError::MissingArmor)?;
 
     Ok(ParsedSignedMessage {
-        signed_entity: body[first_start..first_end].to_vec(),
+        signed_entity: parts.entity.to_vec(),
         armored_signature,
     })
-}
-
-fn split_header_bytes(input: &[u8]) -> Option<(&[u8], &[u8])> {
-    if let Some(offset) = find_subslice(input, b"\r\n\r\n") {
-        return Some((&input[..offset], &input[offset + 4..]));
-    }
-    find_subslice(input, b"\n\n").map(|offset| (&input[..offset], &input[offset + 2..]))
-}
-
-fn multipart_boundary(header: &str) -> Option<String> {
-    let unfolded = header.replace("\r\n", "\n").replace(['\n', '\t'], " ");
-    let lower = unfolded.to_ascii_lowercase();
-    let marker = "boundary=";
-    let start = lower.find(marker)? + marker.len();
-    let value = unfolded[start..].trim_start();
-    if let Some(quoted) = value.strip_prefix('"') {
-        return quoted
-            .split_once('"')
-            .map(|(boundary, _)| boundary.to_string());
-    }
-    let boundary = value
-        .split(|character: char| character == ';' || character.is_ascii_whitespace())
-        .next()?
-        .trim();
-    (!boundary.is_empty()).then(|| boundary.to_string())
-}
-
-fn after_delimiter_line(body: &[u8], offset: usize) -> Result<usize, String> {
-    if body
-        .get(offset..)
-        .is_some_and(|rest| rest.starts_with(b"\r\n"))
-    {
-        Ok(offset + 2)
-    } else if body.get(offset) == Some(&b'\n') {
-        Ok(offset + 1)
-    } else {
-        Err("OpenPGP multipart delimiter is not line-terminated".to_string())
-    }
-}
-
-fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    (!needle.is_empty())
-        .then(|| {
-            haystack
-                .windows(needle.len())
-                .position(|window| window == needle)
-        })
-        .flatten()
 }
 
 #[cfg(test)]
@@ -369,7 +289,10 @@ mod tests {
     fn signed_message_round_trips_into_exact_verification_parts() {
         let signature = "-----BEGIN PGP SIGNATURE-----\nabc\n-----END PGP SIGNATURE-----";
         let signed = build_signed(MSG, signature);
-        let parsed = parse_signed_message(signed.as_bytes()).expect("parse signed message");
+        // Verification reads the bundle ingest stores, never the whole message.
+        let stored = crate::providers::imap::parse_raw_message_body(signed.as_bytes());
+        let parsed = parse_signed_message(stored.pgp_signed.as_deref().expect("stored bundle"))
+            .expect("parse signed message");
 
         assert_eq!(parsed.signed_entity, signable_entity(MSG).as_bytes());
         assert_eq!(parsed.armored_signature, normalize_crlf(signature));

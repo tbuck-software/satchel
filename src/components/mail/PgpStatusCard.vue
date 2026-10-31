@@ -2,7 +2,7 @@
 import AppButton from '@/components/ui/AppButton.vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { translateBackendError } from '@/utils/backendErrors';
+import { backendErrorKey, translateBackendError } from '@/utils/backendErrors';
 
 export type PgpState =
   | 'encrypted_no_key'
@@ -37,6 +37,12 @@ const { t } = useI18n();
 
 const localizedErrorDetail = computed(
   () => translateBackendError(props.errorDetail) ?? t('mail.pgp.decryptFailed'),
+);
+
+// The same structure checked again still does not tie its signature to the
+// content; only a new copy of the message could.
+const retryable = computed(
+  () => backendErrorKey(props.errorDetail) !== 'backend.errors.signedMessageMalformed',
 );
 
 interface StateConfig {
@@ -136,8 +142,9 @@ const config = computed<StateConfig>(() => {
       return {
         title: t('mail.pgp.errorTitle'),
         description: localizedErrorDetail.value,
-        primaryLabel: t('common.retry'),
-        primaryAction: () => emit('retry'),
+        ...(retryable.value
+          ? { primaryLabel: t('common.retry'), primaryAction: () => emit('retry') }
+          : {}),
         secondaryLabel: t('common.close'),
         secondaryAction: () => emit('dismiss'),
         tone: 'danger',

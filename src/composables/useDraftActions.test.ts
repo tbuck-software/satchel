@@ -56,15 +56,26 @@ describe('useDraftActions undo snapshot', () => {
   it('restores the version on disk, not the list row loaded at startup', async () => {
     // A popout saved "v2"; the drafts list still holds "v1".
     harness.items = [draft('v1')];
-    harness.fetchOne.mockResolvedValue(draft('v2'));
+    harness.fetchOne.mockResolvedValue({ ...draft('v2'), remote_error: 'provider save delayed' });
 
     expect((await discardAndUndo())?.body).toBe('v2');
   });
 
-  it('falls back to the cached row when the backend cannot be read', async () => {
+  it('offers no Undo when a fresh read fails, even with cached content', async () => {
     harness.items = [draft('v1')];
     harness.fetchOne.mockRejectedValue(new Error('offline'));
 
-    expect((await discardAndUndo())?.body).toBe('v1');
+    expect(await discardAndUndo()).toBeUndefined();
+    expect(harness.info.mock.calls.at(-1)?.[1].action).toBeUndefined();
   });
+  it.each([null, { ...draft(''), content_error: 'backend.errors.imapUidValidityMissing' }])(
+    'does not use cached content or an unavailable payload as an Undo snapshot', async (fresh) => {
+      harness.items = [draft('cached secret')];
+      harness.fetchOne.mockResolvedValue(fresh);
+      expect(await discardAndUndo()).toBeUndefined();
+      expect(harness.remove).toHaveBeenCalledWith('draft-1');
+      expect(harness.info.mock.calls.at(-1)?.[1].action).toBeUndefined();
+    },
+  );
+
 });

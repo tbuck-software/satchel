@@ -86,6 +86,7 @@ vi.mock('@/services/backend', async (importOriginal) => {
     backendConsumePendingMobileNotification: resolving({ threadId: null, actionId: null }),
     backendMobileNotificationsFrontendReady: resolving(undefined),
     backendPendingCrashReports: resolving([]),
+    backendRuntimeCapabilities: resolving({ platform: 'macos', mobile: false }),
     backendTakePendingNotificationThread: vi.fn(async () => null),
     backendTakePendingOpenWith: resolving([]),
     backendSyncGroupware: resolving({}),

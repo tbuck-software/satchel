@@ -207,11 +207,12 @@ pub fn registered_repairs() -> &'static [DataRepair] {
         THREAD_FOLDERS,
         MESSAGE_ADDRESSES,
         FTS_PREFIX,
+        super::signed_attachments::SIGNED_ENTITY_ATTACHMENTS,
     ]
 }
 
 /// Run blocking CPU work off the async runtime.
-async fn off_runtime<T: Send + 'static>(
+pub(super) async fn off_runtime<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, sqlx::Error> {
     tokio::task::spawn_blocking(work)
@@ -385,10 +386,16 @@ fn legacy_mime_block<'c>(
         };
         for fix in work.fixes {
             let now = chrono::Utc::now().to_rfc3339();
-            // Only the body the fix was parsed from is replaced.
+            // Only the body the fix was parsed from is replaced. It is no
+            // longer the body the strict splitter wrote with a signature
+            // bundle, so a verdict shows that bundle's entity instead.
             let affected = sqlx::query(
                 "UPDATE messages
-                 SET body_text = ?, body_html = ?, original_body_html = ?, snippet = ?, updated_at = ?
+                 SET body_text = ?, body_html = ?, original_body_html = ?, snippet = ?, updated_at = ?,
+                     trust_metadata = CASE WHEN json_valid(trust_metadata)
+                         AND json_extract(trust_metadata, '$.signed_binding')
+                         THEN json_set(trust_metadata, '$.signed_binding', json('false'))
+                         ELSE trust_metadata END
                  WHERE id = ? AND body_html IS NULL AND body_text = ?",
             )
             .bind(fix.text.as_deref())

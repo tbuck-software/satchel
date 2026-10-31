@@ -240,6 +240,12 @@ pub struct MessageTrust {
     pub root_encryption: bool,
     #[serde(default)]
     pub root_inline_signature: bool,
+    /// The root is `multipart/signed`, and the strict splitter wrote the
+    /// stored body as the display of its signed entity, together with the
+    /// bundle. Rows without it predate that splitter; their stored body is
+    /// never shown under the signature.
+    #[serde(default)]
+    pub signed_binding: bool,
     /// Header verdicts came through the receiving provider's trust boundary.
     #[serde(default)]
     pub auth_verified: bool,
@@ -394,6 +400,15 @@ pub trait MailProvider: Send + Sync {
         _folder: &str,
     ) -> SyncResult<Option<RemoteMessageStateSnapshot>> {
         Ok(None)
+    }
+    /// Resolve an account-wide ID absent from a folder snapshot. `None` is
+    /// proof of global deletion, never a transient failure or label removal.
+    /// Providers without globally stable IDs must not implement this seam.
+    async fn resolve_snapshot_message(
+        &self,
+        _remote_id: &str,
+    ) -> SyncResult<Option<MessageEnvelope>> {
+        Err("provider does not support global snapshot resolution".into())
     }
     /// Exactly these messages of `folder`, with the folder's generation in
     /// `remote_uidvalidity`. `None`: the provider cannot address single
