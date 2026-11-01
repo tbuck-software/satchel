@@ -30,7 +30,9 @@ function findCommandErrorPayload(error: unknown): BackendCommandErrorPayload | n
   const direct = commandErrorPayload(error);
   if (direct) return direct;
   if (!(error instanceof Error)) return null;
-  return commandErrorPayload(error.cause) ?? commandErrorPayload(error.message);
+  // A normalized error keeps what it wrapped as its cause, which may itself be
+  // an Error whose message is the key.
+  return findCommandErrorPayload(error.cause) ?? commandErrorPayload(error.message);
 }
 
 const FALLBACK_KEY = 'backend.errors.unexpected';

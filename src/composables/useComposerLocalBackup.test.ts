@@ -17,11 +17,12 @@ function editor() {
     signatureOverrideText: null, signatureOverrideHtml: null,
   });
   const read = vi.fn(() => content.value);
+  let backup!: ReturnType<typeof useComposerLocalBackup>;
   const wrapper = mount(defineComponent({ setup() {
-    useComposerLocalBackup({ enabled: ref(true), draftId: ref(null), content: read });
+    backup = useComposerLocalBackup({ enabled: ref(true), draftId: ref(null), content: read });
     return () => h('div');
   } }));
-  return { wrapper, content, read };
+  return { wrapper, content, read, backup };
 }
 
 it('reads the composer once typing pauses, not on every keystroke', async () => {
@@ -75,5 +76,20 @@ it('retains encryption, reply policy and scheduling across recovery', async () =
       body: 'Private message', replyTo: 'reply@example.com', scheduledFor: '2026-11-01T12:00:00Z',
       sendOptions: { pgp_encrypt_to_recipients: true, priority: 'high' },
     });
+  } finally { wrapper.unmount(); }
+});
+
+it('keeps the content on demand even when a save had cleared the copy', async () => {
+  const { wrapper, content, backup } = editor();
+  try {
+    content.value.body = 'Saved once, then gone elsewhere';
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(350);
+    backup.clear();
+    expect(composerBackupPersistence.findOrphan({}, Date.now() + 20_000)).toBeNull();
+
+    expect(backup.keep()).toBe(true);
+    expect(composerBackupPersistence.findOrphan({}, Date.now() + 20_000)?.content.body)
+      .toBe('Saved once, then gone elsewhere');
   } finally { wrapper.unmount(); }
 });

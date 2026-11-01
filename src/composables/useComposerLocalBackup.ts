@@ -65,6 +65,16 @@ export function useComposerLocalBackup(options: ComposerLocalBackupOptions) {
     changes.settle();
   }
 
+  /**
+   * Writes the editor's content now, changed or not. `true` once it is stored,
+   * or when there is nothing worth keeping.
+   */
+  function keep(): boolean {
+    changes.settle();
+    writeNow();
+    return stored || !hasMeaningfulComposerContent(options.content());
+  }
+
   /** The draft on disk has caught up with the editor. */
   function clear() {
     changes.rebaseline();
@@ -92,5 +102,5 @@ export function useComposerLocalBackup(options: ComposerLocalBackupOptions) {
     stopHeartbeat();
   });
 
-  return { flush, clear, findOrphan, discardOrphan };
+  return { flush, keep, clear, findOrphan, discardOrphan };
 }

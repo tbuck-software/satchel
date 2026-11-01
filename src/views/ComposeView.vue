@@ -49,6 +49,7 @@ import { useComposerLocalBackup } from '@/composables/useComposerLocalBackup';
 import { useDraftEditorClaim } from '@/composables/useDraftEditorClaim';
 import { useComposerSignature } from '@/composables/useComposerSignature';
 import { useComposerTransport } from '@/composables/useComposerTransport';
+import { useConfirm } from '@/composables/useConfirm';
 import { useToast } from '@/composables/useToast';
 import { useToastClearance } from '@/composables/useToastClearance';
 import { outboxErrorLabel, queuedDraftNeedsOutbox } from '@/utils/outboxLabels';
@@ -118,6 +119,7 @@ const messagesStore = useMessagesStore();
 const attachmentActions = useAttachmentActions();
 const composerTransport = useComposerTransport();
 const toast = useToast();
+const confirm = useConfirm();
 const supportsBackend = composerTransport.commandsAvailable();
 
 const accountId = ref<string>('');
@@ -358,6 +360,7 @@ const {
   t,
   onCaughtUp: () => localBackup.clear(),
   onSaved: (input) => markCloseBaselineSaved(input),
+  keepLocalCopy: () => localBackup.keep(),
 });
 const {
   captureBaseline: captureCloseBaseline,
@@ -377,6 +380,8 @@ const {
   persistDraft,
   finishDraftPersistence,
   closeDraftWithoutSaving,
+  draftConflict,
+  confirmLeaveAfterConflict,
 });
 const localBackup = useComposerLocalBackup({
   enabled: initialized,
@@ -394,6 +399,26 @@ const editorClaim = useDraftEditorClaim(draftId, {
 async function closeWithoutSaving() {
   localBackup.clear();
   await closeGuardWithoutSaving();
+}
+
+/** Another window or app sent or discarded this draft; saving under its id cannot succeed. */
+function draftConflict() {
+  return saveError.value?.kind === 'conflict';
+}
+
+/**
+ * Closing must stay possible when saving no longer can. It asks first, because
+ * what is in this editor is on no disk.
+ */
+async function confirmLeaveAfterConflict(): Promise<boolean> {
+  const leave = await confirm.ask({
+    title: t('compose.draft.conflictClose.title'),
+    body: t('compose.draft.conflictClose.body'),
+    confirmLabel: t('compose.draft.conflictClose.confirm'),
+    tone: 'danger',
+  });
+  if (leave) await closeWithoutSaving();
+  return leave;
 }
 
 /** Leaves without saving: embedded composers close, popouts close their window. */
@@ -1144,6 +1169,8 @@ defineExpose({
   hasMeaningfulContent,
   shouldConfirmClose,
   closeWithoutSaving,
+  draftConflict,
+  confirmLeaveAfterConflict,
   currentDraftId: () => draftId.value,
   canSend,
   sending,
@@ -1729,6 +1756,9 @@ textarea:focus {
 .compose-after-send {
   flex: none;
   display: grid;
+  /* An auto track grows to the banner's longest line and pushes its actions
+     past the composer's edge, out of reach. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-xs);
   margin-bottom: var(--space-sm);
 }
@@ -1737,6 +1767,11 @@ textarea:focus {
 .compose-after-send :deep(.banner) {
   border: var(--border-muted);
   border-radius: var(--radius-sm);
+}
+
+/* The detail says what is at stake; cut off with an ellipsis it says nothing. */
+.compose-notices :deep(.banner__detail) {
+  white-space: normal;
 }
 
 /* Composer window layout */

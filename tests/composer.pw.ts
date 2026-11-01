@@ -156,6 +156,45 @@ test('editable composer lines stay close to the text height', async ({ page }) =
   }
 });
 
+test('a draft sent or discarded elsewhere still lets the composer close', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New message', exact: true }).click();
+  const composer = page.getByRole('dialog', { name: 'Compose email' });
+  const recipient = composer.locator('.recipient-row input').first();
+  await recipient.fill('ada@example.com');
+  await recipient.press('Enter');
+  await composer.locator('.ProseMirror').first().fill('First version.');
+  // Saved and reopened, the editor holds the draft's id and revision.
+  await composer.getByRole('button', { name: 'Close composer' }).click();
+  await page.locator('.toast__action').filter({ hasText: 'Continue editing' }).click();
+  await expect(composer.locator('.ProseMirror').first()).toHaveText('First version.');
+  // Another window or app sends the draft; this editor still holds it.
+  await page.evaluate(async (mockModule) => {
+    type Mock = { sendCommand: (command: string, payload?: Record<string, unknown>) => Promise<unknown> };
+    const backend = await import(/* @vite-ignore */ mockModule) as Mock;
+    const drafts = await backend.sendCommand('list_drafts') as { id: string }[];
+    for (const draft of drafts) await backend.sendCommand('delete_draft', { id: draft.id });
+  }, '/src/services/backend/mock.ts');
+  await composer.locator('.ProseMirror').first().fill('Written after the draft went away.');
+
+  await composer.getByRole('button', { name: 'Close composer' }).click();
+  const question = page.getByRole('dialog', { name: 'Close without saving?' });
+  await expect(question).toBeVisible();
+  await question.getByRole('button', { name: 'Cancel' }).click();
+  await expect(composer).toBeVisible();
+
+  // The banner's way out sits inside the composer, not past its edge.
+  const composerBox = (await composer.boundingBox())!;
+  for (const name of ['Save as new draft', 'Discard my changes']) {
+    const box = (await composer.getByRole('button', { name, exact: true }).boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(composerBox.x + composerBox.width);
+  }
+
+  await composer.getByRole('button', { name: 'Close composer' }).click();
+  await question.getByRole('button', { name: 'Close without saving' }).click();
+  await expect(composer).toHaveCount(0);
+});
+
 test('phone ComposeFab opens a full-screen composer and returns to the mailbox', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/?mockSignatures=1');
