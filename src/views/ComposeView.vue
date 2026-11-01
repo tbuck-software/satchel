@@ -52,7 +52,7 @@ import { useComposerTransport } from '@/composables/useComposerTransport';
 import { useToast } from '@/composables/useToast';
 import { useToastClearance } from '@/composables/useToastClearance';
 import { outboxErrorLabel, queuedDraftNeedsOutbox } from '@/utils/outboxLabels';
-import { translateBackendError } from '@/utils/backendErrors';
+import { backendErrorStringParam, translateBackendError } from '@/utils/backendErrors';
 import {
   formatTimestamp,
   mergeRecipients,
@@ -1023,7 +1023,10 @@ async function send() {
       const raw = err instanceof Error ? err.message : String(err);
       const cause = outboxErrorLabel(raw) || t('errors.backendUnknown');
       const text = t('compose.status.sendFailed', { error: cause });
-      status.value = { tone: 'error', text, raw: cause === raw ? null : raw };
+      // A command error arrives already translated; what Rust actually hit
+      // travels in its `message` parameter and would be lost otherwise.
+      const detail = backendErrorStringParam(err, 'message') ?? (cause === raw ? null : raw);
+      status.value = { tone: 'error', text, raw: detail };
       // Outlives the composer — closing the window must not close the news.
       toast.error(text);
     }

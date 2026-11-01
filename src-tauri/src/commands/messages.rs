@@ -2365,6 +2365,20 @@ pub async fn send_message(
     account_id: String,
     input: OutgoingMessageInput,
 ) -> CommandResult<SendMessageResult> {
+    // The composer shows only a translated headline; without this line a
+    // refused send leaves no trace of what Rust actually hit.
+    send_message_inner(app, state, pool, account_id.clone(), input)
+        .await
+        .inspect_err(|error| tracing::warn!(%account_id, %error, "send_message failed"))
+}
+
+async fn send_message_inner(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    pool: tauri::State<'_, SqlitePool>,
+    account_id: String,
+    input: OutgoingMessageInput,
+) -> CommandResult<SendMessageResult> {
     let mut input = input;
     // Any of To, Cc and Bcc is enough: all three go into the envelope.
     let has_recipient = !normalize_recipients(&input.to)?.is_empty()
