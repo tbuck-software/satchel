@@ -49,6 +49,19 @@ export function normalizeInvokeError(error: unknown): Error {
 }
 
 
+type CommandFailureListener = (command: string, error: Error) => void;
+
+let commandFailureListener: CommandFailureListener | null = null;
+
+/**
+ * Hears every failed command. The main window logs them next to its clicks;
+ * this module stays free of that import, which the viewer and tray bundles
+ * would otherwise carry.
+ */
+export function setCommandFailureListener(listener: CommandFailureListener | null): void {
+  commandFailureListener = listener;
+}
+
 export async function invoke<T>(command: string, payload?: Record<string, unknown>): Promise<T> {
   if (!backendCommandsAvailable()) {
     throw new BackendError('backend.errors.desktopUnavailable');
@@ -65,6 +78,8 @@ export async function invoke<T>(command: string, payload?: Record<string, unknow
     if (startedAt > 0) {
       console.info(`[perf] invoke:${command}:error ${(performance.now() - startedAt).toFixed(1)}ms`);
     }
-    throw normalizeInvokeError(error);
+    const normalized = normalizeInvokeError(error);
+    commandFailureListener?.(command, normalized);
+    throw normalized;
   }
 }

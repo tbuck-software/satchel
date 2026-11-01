@@ -8,6 +8,7 @@ import './styles/tokens.css';
 import './styles/tailwind.css';
 import './styles/base.css';
 import './styles/transitions.css';
+import { installCommandFailureDiagnostics } from '@/utils/commandFailureDiagnostics';
 import { installInteractionDiagnostics } from '@/utils/diagnostics';
 import { installGlobalErrorHandlers } from '@/utils/globalErrors';
 import { renderUnsupportedRuntimeNotice, supportsRequiredCss } from '@/utils/webviewSupport';
@@ -91,6 +92,7 @@ function mountApp() {
   configureRuntimeShell();
   installKeyboardInset();
   installInteractionDiagnostics();
+  installCommandFailureDiagnostics();
   const app = createApp(App).use(createPinia()).use(i18n).use(router);
   installGlobalErrorHandlers(app, {
     openDiagnostics: () => router.push({ name: 'settings', query: { section: 'diagnostics' } }),
