@@ -89,7 +89,7 @@ export default defineConfig(({ mode, command }) => {
     test: {
       // Agent worktrees carry a full source copy; vitest must not walk into them.
       exclude: ['**/node_modules/**', '**/dist/**', '**/.claude/**', '**/target/**'],
-      setupFiles: ['./src/test/setup.ts'],
+      setupFiles: ['./src/test/pinLanguage.ts', './src/test/setup.ts'],
     },
   };
 });
