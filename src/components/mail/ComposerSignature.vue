@@ -393,7 +393,7 @@ useDismissable(
   width: 100%;
   color: var(--text-secondary);
   font-size: var(--font-size-md);
-  line-height: 1.55;
+  line-height: var(--leading-editable);
 }
 
 .sig-html-edit {

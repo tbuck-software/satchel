@@ -128,6 +128,10 @@
      680 and 620 in three files. */
   --weight-strong: 650;
   --weight-bold: 700;
+  /* Line height of text the user types into. WebKit on macOS draws the caret
+     over the whole line box, so at the composer's former 1.68 it stood half
+     a line taller than the letters beside it. */
+  --leading-editable: 1.35;
 
   /* Spacing: a 2px grid. Named where the rung has a role, numbered (the
      Tailwind rung) where it is the half step between two of them. */

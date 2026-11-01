@@ -139,6 +139,23 @@ test('signature switches in place and survives saving and reopening a reply draf
   await expect(composer.locator('[data-composer-history]')).toContainText(/On .+ wrote:/);
 });
 
+test('editable composer lines stay close to the text height', async ({ page }) => {
+  // WebKit on macOS draws the caret over the whole line box, not the glyphs:
+  // at 1.68 it stood half a line taller than the letters. Linux WebKit and
+  // Chromium draw it at font height, so the line box is the part to check.
+  await page.goto('/');
+  await page.getByRole('region', { name: 'Unsent drafts' }).getByRole('button', { name: 'Discard', exact: true }).click();
+  await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
+  const composer = page.getByRole('dialog', { name: 'Compose email' });
+  const writer = composer.locator('.ProseMirror').first();
+  await writer.fill('One line.');
+  for (const editor of [writer, composer.locator('[data-composer-history] .ProseMirror')]) {
+    const ratio = await editor.locator('p').first().evaluate((line) =>
+      line.getBoundingClientRect().height / parseFloat(getComputedStyle(line).fontSize));
+    expect(ratio).toBeLessThanOrEqual(1.4);
+  }
+});
+
 test('phone ComposeFab opens a full-screen composer and returns to the mailbox', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/?mockSignatures=1');

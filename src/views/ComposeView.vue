@@ -1314,7 +1314,7 @@ defineExpose({
         :disabled="sending"
         :autofocus="props.embedded && !startsInRecipients"
         :focus-position="!props.initialDraftId && (props.mode === 'reply' || props.mode === 'reply-all' || props.mode === 'forward') ? 'start' : 'end'"
-        :min-height="historyHtml ? '1.68em' : '5.04em'"
+        :min-height="historyHtml ? 'calc(1em * var(--leading-editable))' : 'calc(3em * var(--leading-editable))'"
         :placeholder="$t('compose.editor.placeholder')"
         @update:html="(v) => (writingHtml = v)"
         @inline-image-added="composerInlineAttachments.onInlineImageAdded"
@@ -1568,7 +1568,7 @@ defineExpose({
   color: var(--text-primary);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--font-size-md);
-  line-height: 1.6;
+  line-height: var(--leading-editable);
 }
 
 .plain-editor::placeholder {
@@ -1649,7 +1649,7 @@ textarea:focus {
   min-height: 320px;
   resize: vertical;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
-  line-height: 1.55;
+  line-height: var(--leading-editable);
 }
 
 .footer {
@@ -1887,7 +1887,7 @@ textarea:focus {
 
 /* Reserve three writing lines so the signature also fits at minimum height. */
 .compose .body > .plain-editor {
-  min-height: 5.04em;
+  min-height: calc(3em * var(--leading-editable));
 }
 
 /* The signature follows the answer's last line, including in plain-text mode. */
@@ -1911,7 +1911,7 @@ textarea:focus {
   padding: 2px 0;
   cursor: text;
   font-size: var(--font-size-lg);
-  line-height: 1.68;
+  line-height: var(--leading-editable);
 }
 
 /* The answer is what is being written; the history under it is reference.
@@ -1919,7 +1919,7 @@ textarea:focus {
 .compose .body .quoted-history :deep(.content) {
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
-  line-height: 1.55;
+  line-height: var(--leading-editable);
 }
 
 .compose .compose-attachments {
