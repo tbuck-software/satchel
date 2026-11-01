@@ -702,6 +702,11 @@
     },
     "discardDraft": "Entwurf verwerfen",
     "draft": {
+      "conflictClose": {
+        "body": "Dieser Entwurf wurde anderswo gesendet oder verworfen und lässt sich nicht mehr speichern. Was in diesem Fenster steht, ist nirgends gesichert. Wenn du es behalten willst, wähle stattdessen „Als neuen Entwurf speichern“.",
+        "confirm": "Ohne Speichern schließen",
+        "title": "Ohne Speichern schließen?"
+      },
       "openElsewhere": "Dieser Entwurf ist bereits in einem anderen Fenster geöffnet.",
       "saveFailedStaysOpen": "Der Entwurf konnte nicht gespeichert werden. Der Composer bleibt geöffnet.",
       "savedAsDraft": "Als Entwurf gespeichert."

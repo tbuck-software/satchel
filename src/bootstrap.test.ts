@@ -55,6 +55,8 @@ const composeForm = vi.hoisted(() => ({
   shouldConfirmClose: vi.fn(() => false),
   closeWithoutSaving: vi.fn(async () => {}),
   currentDraftId: vi.fn((): string | null => null),
+  draftConflict: vi.fn(() => false),
+  confirmLeaveAfterConflict: vi.fn(async () => false),
 }));
 
 vi.mock('@/views/ComposeView.vue', () => ({

@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BackendSendMessageResult } from '@/types/composer';
 import type { Message } from '@/types/mail';
 import type { ComposerDraftPersistenceOptions } from '@/composables/useComposerDraftPersistence';
+import { normalizeInvokeError } from '@/services/backend/core';
 
 const harness = vi.hoisted(() => ({
   sendMessage: vi.fn(),
@@ -540,6 +541,20 @@ describe('composer send failure', () => {
     await send(wrapper);
 
     expect(wrapper.get('details pre').text()).toBe('invalid_grant: token expired');
+  });
+
+  it('shows the cause Rust attached to an unexpected failure', async () => {
+    harness.sendMessage.mockRejectedValue(normalizeInvokeError({
+      key: 'backend.errors.unexpected',
+      params: { message: 'encode send payload: key must be a string' },
+    }));
+    const wrapper = render();
+    await flushPromises();
+
+    await send(wrapper);
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('An unexpected backend error occurred.');
+    expect(wrapper.get('details pre').text()).toBe('encode send payload: key must be a string');
   });
 
   it('raises exactly one toast, which outlives the composer', async () => {

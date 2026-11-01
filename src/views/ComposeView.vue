@@ -49,10 +49,11 @@ import { useComposerLocalBackup } from '@/composables/useComposerLocalBackup';
 import { useDraftEditorClaim } from '@/composables/useDraftEditorClaim';
 import { useComposerSignature } from '@/composables/useComposerSignature';
 import { useComposerTransport } from '@/composables/useComposerTransport';
+import { useConfirm } from '@/composables/useConfirm';
 import { useToast } from '@/composables/useToast';
 import { useToastClearance } from '@/composables/useToastClearance';
 import { outboxErrorLabel, queuedDraftNeedsOutbox } from '@/utils/outboxLabels';
-import { translateBackendError } from '@/utils/backendErrors';
+import { backendErrorStringParam, translateBackendError } from '@/utils/backendErrors';
 import {
   formatTimestamp,
   mergeRecipients,
@@ -118,6 +119,7 @@ const messagesStore = useMessagesStore();
 const attachmentActions = useAttachmentActions();
 const composerTransport = useComposerTransport();
 const toast = useToast();
+const confirm = useConfirm();
 const supportsBackend = composerTransport.commandsAvailable();
 
 const accountId = ref<string>('');
@@ -358,6 +360,7 @@ const {
   t,
   onCaughtUp: () => localBackup.clear(),
   onSaved: (input) => markCloseBaselineSaved(input),
+  keepLocalCopy: () => localBackup.keep(),
 });
 const {
   captureBaseline: captureCloseBaseline,
@@ -377,6 +380,8 @@ const {
   persistDraft,
   finishDraftPersistence,
   closeDraftWithoutSaving,
+  draftConflict,
+  confirmLeaveAfterConflict,
 });
 const localBackup = useComposerLocalBackup({
   enabled: initialized,
@@ -394,6 +399,26 @@ const editorClaim = useDraftEditorClaim(draftId, {
 async function closeWithoutSaving() {
   localBackup.clear();
   await closeGuardWithoutSaving();
+}
+
+/** Another window or app sent or discarded this draft; saving under its id cannot succeed. */
+function draftConflict() {
+  return saveError.value?.kind === 'conflict';
+}
+
+/**
+ * Closing must stay possible when saving no longer can. It asks first, because
+ * what is in this editor is on no disk.
+ */
+async function confirmLeaveAfterConflict(): Promise<boolean> {
+  const leave = await confirm.ask({
+    title: t('compose.draft.conflictClose.title'),
+    body: t('compose.draft.conflictClose.body'),
+    confirmLabel: t('compose.draft.conflictClose.confirm'),
+    tone: 'danger',
+  });
+  if (leave) await closeWithoutSaving();
+  return leave;
 }
 
 /** Leaves without saving: embedded composers close, popouts close their window. */
@@ -1023,7 +1048,10 @@ async function send() {
       const raw = err instanceof Error ? err.message : String(err);
       const cause = outboxErrorLabel(raw) || t('errors.backendUnknown');
       const text = t('compose.status.sendFailed', { error: cause });
-      status.value = { tone: 'error', text, raw: cause === raw ? null : raw };
+      // A command error arrives already translated; what Rust actually hit
+      // travels in its `message` parameter and would be lost otherwise.
+      const detail = backendErrorStringParam(err, 'message') ?? (cause === raw ? null : raw);
+      status.value = { tone: 'error', text, raw: detail };
       // Outlives the composer — closing the window must not close the news.
       toast.error(text);
     }
@@ -1141,6 +1169,8 @@ defineExpose({
   hasMeaningfulContent,
   shouldConfirmClose,
   closeWithoutSaving,
+  draftConflict,
+  confirmLeaveAfterConflict,
   currentDraftId: () => draftId.value,
   canSend,
   sending,
@@ -1314,7 +1344,7 @@ defineExpose({
         :disabled="sending"
         :autofocus="props.embedded && !startsInRecipients"
         :focus-position="!props.initialDraftId && (props.mode === 'reply' || props.mode === 'reply-all' || props.mode === 'forward') ? 'start' : 'end'"
-        :min-height="historyHtml ? '1.68em' : '5.04em'"
+        :min-height="historyHtml ? 'calc(1em * var(--leading-editable))' : 'calc(3em * var(--leading-editable))'"
         :placeholder="$t('compose.editor.placeholder')"
         @update:html="(v) => (writingHtml = v)"
         @inline-image-added="composerInlineAttachments.onInlineImageAdded"
@@ -1568,7 +1598,7 @@ defineExpose({
   color: var(--text-primary);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--font-size-md);
-  line-height: 1.6;
+  line-height: var(--leading-editable);
 }
 
 .plain-editor::placeholder {
@@ -1649,7 +1679,7 @@ textarea:focus {
   min-height: 320px;
   resize: vertical;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
-  line-height: 1.55;
+  line-height: var(--leading-editable);
 }
 
 .footer {
@@ -1726,6 +1756,9 @@ textarea:focus {
 .compose-after-send {
   flex: none;
   display: grid;
+  /* An auto track grows to the banner's longest line and pushes its actions
+     past the composer's edge, out of reach. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-xs);
   margin-bottom: var(--space-sm);
 }
@@ -1734,6 +1767,11 @@ textarea:focus {
 .compose-after-send :deep(.banner) {
   border: var(--border-muted);
   border-radius: var(--radius-sm);
+}
+
+/* The detail says what is at stake; cut off with an ellipsis it says nothing. */
+.compose-notices :deep(.banner__detail) {
+  white-space: normal;
 }
 
 /* Composer window layout */
@@ -1887,7 +1925,7 @@ textarea:focus {
 
 /* Reserve three writing lines so the signature also fits at minimum height. */
 .compose .body > .plain-editor {
-  min-height: 5.04em;
+  min-height: calc(3em * var(--leading-editable));
 }
 
 /* The signature follows the answer's last line, including in plain-text mode. */
@@ -1911,7 +1949,7 @@ textarea:focus {
   padding: 2px 0;
   cursor: text;
   font-size: var(--font-size-lg);
-  line-height: 1.68;
+  line-height: var(--leading-editable);
 }
 
 /* The answer is what is being written; the history under it is reference.
@@ -1919,7 +1957,7 @@ textarea:focus {
 .compose .body .quoted-history :deep(.content) {
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
-  line-height: 1.55;
+  line-height: var(--leading-editable);
 }
 
 .compose .compose-attachments {

@@ -842,7 +842,7 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
   padding: 8px 12px;
   color: var(--text-primary);
   font-size: var(--font-size-md);
-  line-height: 1.6;
+  line-height: var(--leading-editable);
 }
 .content :deep(.ProseMirror) {
   outline: none;

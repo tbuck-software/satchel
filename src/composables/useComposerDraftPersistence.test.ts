@@ -42,6 +42,7 @@ interface HarnessOptions {
   intervalMs?: number;
   onCaughtUp?: () => void;
   onSaved?: (input: Omit<BackendDraftInput, 'id' | 'expectedRevision'>) => void;
+  keepLocalCopy?: () => boolean;
 }
 
 function createHarness(options: HarnessOptions = {}) {
@@ -94,6 +95,7 @@ function createHarness(options: HarnessOptions = {}) {
         autosaveIntervalMs: options.intervalMs ?? 1_000,
         onCaughtUp: options.onCaughtUp,
         onSaved: options.onSaved,
+        keepLocalCopy: options.keepLocalCopy,
       });
       return () => h('div');
     },
@@ -555,9 +557,9 @@ describe('flushing before the app exits', () => {
     vi.unstubAllGlobals();
   });
 
-  function open() {
+  function open(options: HarnessOptions = {}) {
     vi.stubGlobal('crypto', { randomUUID: vi.fn(() => 'stable-id') });
-    const result = createHarness();
+    const result = createHarness(options);
     wrappers.push(result.wrapper);
     return result;
   }
@@ -593,6 +595,28 @@ describe('flushing before the app exits', () => {
 
     await expect(flushOpenComposerDrafts()).resolves.toBe(false);
     // Still unsaved on the next attempt, even though nothing changed since.
+    await expect(flushOpenComposerDrafts()).resolves.toBe(false);
+  });
+
+  /**
+   * Sent or discarded elsewhere, the draft can never be saved again, so a quit
+   * waiting for that save never happened. The device copy stands in for it.
+   */
+  it('lets a quit through a conflict once the content is kept on this device', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const keepLocalCopy = vi.fn(() => true);
+    const composer = open({ keepLocalCopy });
+    composer.save.mockRejectedValue({ key: 'backend.errors.draftGoneElsewhere' });
+    composer.subject.value = 'Halbfertig';
+    await nextTick();
+
+    await expect(flushOpenComposerDrafts()).resolves.toBe(true);
+    // Nothing changed since, and still no save can succeed.
+    await expect(flushOpenComposerDrafts()).resolves.toBe(true);
+    expect(composer.save).toHaveBeenCalledTimes(1);
+    expect(keepLocalCopy).toHaveBeenCalledTimes(2);
+
+    keepLocalCopy.mockReturnValue(false);
     await expect(flushOpenComposerDrafts()).resolves.toBe(false);
   });
 

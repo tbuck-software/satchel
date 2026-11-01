@@ -35,8 +35,13 @@ impl CommandError {
         self
     }
 
+    /// A failure no key describes. The webview only shows a generic headline, so
+    /// the log is the one place its cause survives.
+    #[track_caller]
     pub fn unexpected(error: impl ToString) -> Self {
-        Self::new("backend.errors.unexpected").with_param("message", error.to_string())
+        let message = error.to_string();
+        log_unexpected(&message, std::panic::Location::caller());
+        Self::new("backend.errors.unexpected").with_param("message", message)
     }
 
     /// Encode the same contract for persisted or nested string fields.
@@ -60,7 +65,18 @@ impl fmt::Display for CommandError {
 
 impl std::error::Error for CommandError {}
 
+fn log_unexpected(message: &str, location: &std::panic::Location<'_>) {
+    // Through a fn pointer (`map_err(CommandError::unexpected)`) the caller is
+    // core's call shim, which would point every such line at the same wrong place.
+    if location.file().contains("library/core/") {
+        tracing::warn!(%message, "unexpected command error");
+    } else {
+        tracing::warn!(%message, at = %location, "unexpected command error");
+    }
+}
+
 impl From<String> for CommandError {
+    #[track_caller]
     fn from(error: String) -> Self {
         if error.starts_with("backend.errors.") {
             Self::new(error)
@@ -76,12 +92,14 @@ impl From<String> for CommandError {
 }
 
 impl From<&str> for CommandError {
+    #[track_caller]
     fn from(error: &str) -> Self {
         error.to_string().into()
     }
 }
 
 impl From<crate::sync::errors::SyncError> for CommandError {
+    #[track_caller]
     fn from(error: crate::sync::errors::SyncError) -> Self {
         error.to_string().into()
     }
@@ -170,6 +188,67 @@ mod tests {
             CommandError::from("database is closed").key,
             "backend.errors.unexpected"
         );
+    }
+
+    /// Captures what one closure logs, as the formatted lines the log file would get.
+    fn logged(run: impl FnOnce()) -> String {
+        use std::sync::{Arc, Mutex};
+        use tracing_subscriber::prelude::*;
+
+        #[derive(Clone, Default)]
+        struct Sink(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Sink {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let sink = Sink::default();
+        let writer = sink.clone();
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(move || writer.clone()),
+        );
+        tracing::subscriber::with_default(subscriber, run);
+        let bytes = sink.0.lock().unwrap().clone();
+        String::from_utf8(bytes).unwrap()
+    }
+
+    /// The webview shows only "unexpected"; the log is the one place the cause survives.
+    #[test]
+    fn logs_an_unexpected_failure_with_where_it_arose() {
+        fn fails() -> Result<(), CommandError> {
+            Err::<(), String>("encode send payload: key must be a string".into())?;
+            Ok(())
+        }
+        let log = logged(|| {
+            let _ = fails();
+        });
+        assert!(
+            log.contains("encode send payload: key must be a string"),
+            "{log}"
+        );
+        assert!(log.contains("commands/error.rs"), "{log}");
+
+        // Through a fn pointer the caller is core's shim; naming it would mislead.
+        fn closed() -> Result<(), &'static str> {
+            Err("database is closed")
+        }
+        let log = logged(|| {
+            let _ = closed().map_err(CommandError::unexpected);
+        });
+        assert!(log.contains("database is closed"), "{log}");
+        assert!(!log.contains("library/core"), "{log}");
+
+        // A keyed failure is an expected outcome, not an incident.
+        let log = logged(|| {
+            let _ = CommandError::from("backend.errors.asideFolderMissing".to_string());
+        });
+        assert!(log.is_empty(), "{log}");
     }
 
     #[test]

@@ -14,6 +14,8 @@ const composeView = vi.hoisted(() => ({
   shouldConfirmClose: vi.fn(() => false),
   closeWithoutSaving: vi.fn(async () => undefined),
   currentDraftId: vi.fn(() => null as string | null),
+  draftConflict: vi.fn(() => false),
+  confirmLeaveAfterConflict: vi.fn(async () => true),
 }));
 
 const confirm = vi.hoisted(() => ({
@@ -22,6 +24,7 @@ const confirm = vi.hoisted(() => ({
 
 const toast = vi.hoisted(() => ({
   error: vi.fn(),
+  dismiss: vi.fn(),
   info: vi.fn(),
   success: vi.fn(),
   warning: vi.fn(),
@@ -46,6 +49,8 @@ vi.mock('@/views/ComposeView.vue', () => ({
         shouldConfirmClose: composeView.shouldConfirmClose,
         closeWithoutSaving: composeView.closeWithoutSaving,
         currentDraftId: composeView.currentDraftId,
+        draftConflict: composeView.draftConflict,
+        confirmLeaveAfterConflict: composeView.confirmLeaveAfterConflict,
       });
       return () => undefined;
     },
@@ -69,6 +74,8 @@ beforeEach(() => {
   composeView.persistDraft.mockResolvedValue('draft-1');
   composeView.shouldConfirmClose.mockReturnValue(false);
   composeView.currentDraftId.mockReturnValue(null);
+  composeView.draftConflict.mockReturnValue(false);
+  composeView.confirmLeaveAfterConflict.mockResolvedValue(true);
   confirm.decide.mockResolvedValue('confirmed');
 });
 
@@ -241,6 +248,7 @@ describe('a close that cannot save the draft', () => {
   it('keeps the window, announces the failure and offers the retry', async () => {
     composeView.shouldConfirmClose.mockReturnValue(true);
     composeView.persistDraft.mockResolvedValue(null);
+    toast.error.mockReturnValueOnce('toast-failed');
     const wrapper = await mountOpenComposer();
 
     await wrapper.get('button[title="Close composer"]').trigger('click');
@@ -256,6 +264,43 @@ describe('a close that cannot save the draft', () => {
     await toast.error.mock.calls[0]?.[1]?.action?.handler();
     await flushPromises();
     expect(useComposerStore().isOpen).toBe(false);
+    // "Could not be saved" would now contradict "Saved as draft".
+    expect(toast.dismiss).toHaveBeenCalledWith('toast-failed');
+  });
+
+  it('replaces its failure toast on every attempt instead of stacking them', async () => {
+    composeView.shouldConfirmClose.mockReturnValue(true);
+    composeView.persistDraft.mockResolvedValue(null);
+    toast.error.mockReturnValueOnce('toast-1').mockReturnValueOnce('toast-2');
+    const wrapper = await mountOpenComposer();
+
+    await wrapper.get('button[title="Close composer"]').trigger('click');
+    await flushPromises();
+    await wrapper.get('button[title="Close composer"]').trigger('click');
+    await flushPromises();
+
+    expect(toast.error).toHaveBeenCalledTimes(2);
+    expect(toast.dismiss).toHaveBeenCalledWith('toast-1');
+    expect(toast.dismiss).not.toHaveBeenCalledWith('toast-2');
+  });
+
+  it('closes after asking when the draft was sent or discarded elsewhere', async () => {
+    composeView.shouldConfirmClose.mockReturnValue(true);
+    composeView.persistDraft.mockResolvedValue(null);
+    composeView.draftConflict.mockReturnValue(true);
+    composeView.confirmLeaveAfterConflict.mockResolvedValueOnce(false);
+    const wrapper = await mountOpenComposer();
+
+    await wrapper.get('button[title="Close composer"]').trigger('click');
+    await flushPromises();
+    expect(useComposerStore().isOpen).toBe(true);
+
+    await wrapper.get('button[title="Close composer"]').trigger('click');
+    await flushPromises();
+    expect(useComposerStore().isOpen).toBe(false);
+    expect(composeView.confirmLeaveAfterConflict).toHaveBeenCalledTimes(2);
+    // Saving again could never succeed; it is a question now, not a failure.
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });
 

@@ -30,7 +30,12 @@
       "draft": {
         "saveFailedStaysOpen": "The draft could not be saved. The composer stays open.",
         "savedAsDraft": "Saved as draft.",
-        "openElsewhere": "This draft is already open in another window."
+        "openElsewhere": "This draft is already open in another window.",
+        "conflictClose": {
+          "title": "Close without saving?",
+          "body": "This draft was sent or discarded somewhere else, so it can no longer be saved. What is in this window is not stored anywhere. To keep it, choose Save as new draft instead.",
+          "confirm": "Close without saving"
+        }
       },
       "status": {
         "draftSaved": "Draft saved.",
@@ -380,7 +385,12 @@
       "draft": {
         "saveFailedStaysOpen": "Der Entwurf konnte nicht gespeichert werden. Der Composer bleibt geöffnet.",
         "savedAsDraft": "Als Entwurf gespeichert.",
-        "openElsewhere": "Dieser Entwurf ist bereits in einem anderen Fenster geöffnet."
+        "openElsewhere": "Dieser Entwurf ist bereits in einem anderen Fenster geöffnet.",
+        "conflictClose": {
+          "title": "Ohne Speichern schließen?",
+          "body": "Dieser Entwurf wurde anderswo gesendet oder verworfen und lässt sich nicht mehr speichern. Was in diesem Fenster steht, ist nirgends gesichert. Wenn du es behalten willst, wähle stattdessen „Als neuen Entwurf speichern“.",
+          "confirm": "Ohne Speichern schließen"
+        }
       },
       "status": {
         "draftSaved": "Entwurf gespeichert.",

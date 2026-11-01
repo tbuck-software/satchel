@@ -50,6 +50,11 @@ export interface ComposerDraftPersistenceOptions {
   onCaughtUp?: () => void;
   /** A save landed; `input` is exactly what is on disk now. */
   onSaved?: (input: Omit<BackendDraftInput, 'id' | 'expectedRevision'>) => void;
+  /**
+   * Stores the editor's content on this device; `true` once nothing would be
+   * lost. A quit relies on it when the draft can no longer be saved.
+   */
+  keepLocalCopy?: () => boolean;
 }
 
 /**
@@ -279,8 +284,12 @@ export function useComposerDraftPersistence(options: ComposerDraftPersistenceOpt
   /** What a quit waits for. `false` keeps the app open: the edit is not on disk. */
   async function flushBeforeExit(): Promise<boolean> {
     if (options.sending.value || paused) return true;
-    if (!hasUnsavedChanges()) return saveError.value === null;
-    await persist({ silent: true });
+    if (hasUnsavedChanges() && saveError.value?.kind !== 'conflict') {
+      await persist({ silent: true });
+    }
+    // Sent or discarded elsewhere: no save can succeed, so a quit waiting for
+    // one would never happen. The next composer offers the device copy back.
+    if (saveError.value?.kind === 'conflict') return options.keepLocalCopy?.() ?? false;
     return saveError.value === null;
   }
 

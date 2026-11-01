@@ -18,6 +18,10 @@ interface ComposerCloseGuardOptions {
   persistDraft: (options: { silent?: boolean }) => Promise<string | null>;
   finishDraftPersistence: () => void;
   closeDraftWithoutSaving: () => Promise<void>;
+  /** Saving failed because the draft was sent or discarded elsewhere. */
+  draftConflict: () => boolean;
+  /** Asks to close without saving; `true` once the editor let go of its content. */
+  confirmLeaveAfterConflict: () => Promise<boolean>;
 }
 
 /** Owns change detection and native standalone-window close handling. */
@@ -74,9 +78,11 @@ export function useComposerCloseGuard(options: ComposerCloseGuardOptions) {
     standaloneCloseBusy.value = true;
     const savedDraftId = await options.persistDraft({ silent: false });
     if (!savedDraftId) {
-      // Saving failed while there is content. Keep the window open so the
-      // sender can retry without losing their work.
+      // A conflict never heals by saving again, so the window would never
+      // close. Anything else keeps it open so the sender can retry.
+      const leave = options.draftConflict() && await options.confirmLeaveAfterConflict();
       standaloneCloseBusy.value = false;
+      if (leave) await standaloneWindow?.destroy();
       return;
     }
     options.finishDraftPersistence();

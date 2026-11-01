@@ -702,6 +702,11 @@
     },
     "discardDraft": "Discard draft",
     "draft": {
+      "conflictClose": {
+        "body": "This draft was sent or discarded somewhere else, so it can no longer be saved. What is in this window is not stored anywhere. To keep it, choose Save as new draft instead.",
+        "confirm": "Close without saving",
+        "title": "Close without saving?"
+      },
       "openElsewhere": "This draft is already open in another window.",
       "saveFailedStaysOpen": "The draft could not be saved. The composer stays open.",
       "savedAsDraft": "Saved as draft."

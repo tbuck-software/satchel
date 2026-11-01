@@ -24,6 +24,8 @@ interface ComposeViewHandle {
   shouldConfirmClose: () => boolean;
   closeWithoutSaving: () => Promise<void>;
   currentDraftId: () => string | null;
+  draftConflict: () => boolean;
+  confirmLeaveAfterConflict: () => Promise<boolean>;
 }
 
 const GAP = COMPOSER_DOCK_GAP;
@@ -55,6 +57,14 @@ const resizeDirection = ref<ResizeDirection>('se');
 const manuallyPlaced = ref(false);
 const popoutError = ref('');
 const closeBusy = ref(false);
+/** The failure toast of the last close attempt; a retry replaces it rather than stacking. */
+let closeFailureToast: string | null = null;
+
+/** A close got through; an older "could not be saved" would now be wrong. */
+function clearCloseFailure() {
+  if (closeFailureToast) toast.dismiss(closeFailureToast);
+  closeFailureToast = null;
+}
 
 let startPointerX = 0;
 let startPointerY = 0;
@@ -202,12 +212,21 @@ async function requestCloseComposer({ save = false }: { save?: boolean } = {}): 
   popoutError.value = '';
   try {
     const savedDraftId = await formRef.value?.persistDraft({ silent: true });
+    if (!savedDraftId && formRef.value?.draftConflict()) {
+      // Sent or discarded elsewhere: saving again cannot succeed, and the X
+      // must not turn into a wall. The form asks before letting go.
+      if (!(await formRef.value.confirmLeaveAfterConflict())) return false;
+      clearCloseFailure();
+      composer.close();
+      return true;
+    }
     if (!savedDraftId) {
       // The window stays open on purpose — dropping it would take the text
       // with it. But the thin line under the title bar was the only sign, so
       // the X read as broken rather than as "your draft is not on disk".
       popoutError.value = t('compose.draft.saveFailedStaysOpen');
-      toast.error(t('compose.draft.saveFailedStaysOpen'), {
+      clearCloseFailure();
+      closeFailureToast = toast.error(t('compose.draft.saveFailedStaysOpen'), {
         action: {
           label: t('common.retry'),
           handler: () => void requestCloseComposer({ save }),
@@ -215,6 +234,7 @@ async function requestCloseComposer({ save = false }: { save?: boolean } = {}): 
       });
       return false;
     }
+    clearCloseFailure();
     composer.close();
     toast.info(t('compose.draft.savedAsDraft'), {
       timeout: UNDO_TIMEOUT_MS,

@@ -55,6 +55,8 @@ interface HarnessOptions {
   state?: ComposerDraftState;
   persistDraft?: (options: { silent?: boolean }) => Promise<string | null>;
   closeDraftWithoutSaving?: () => Promise<void>;
+  draftConflict?: () => boolean;
+  confirmLeaveAfterConflict?: () => Promise<boolean>;
   closeRegistration?: Promise<() => void>;
 }
 
@@ -76,6 +78,7 @@ function createHarness(options: HarnessOptions = {}) {
   const closeDraftWithoutSaving = vi.fn(
     options.closeDraftWithoutSaving ?? (async () => undefined),
   );
+  const confirmLeaveAfterConflict = vi.fn(options.confirmLeaveAfterConflict ?? (async () => false));
   let closeGuard!: ReturnType<typeof useComposerCloseGuard>;
   const wrapper = mount(defineComponent({
     setup() {
@@ -88,6 +91,8 @@ function createHarness(options: HarnessOptions = {}) {
         persistDraft,
         finishDraftPersistence,
         closeDraftWithoutSaving,
+        draftConflict: options.draftConflict ?? (() => false),
+        confirmLeaveAfterConflict,
       });
       return () => h('div');
     },
@@ -100,6 +105,7 @@ function createHarness(options: HarnessOptions = {}) {
     persistDraft,
     finishDraftPersistence,
     closeDraftWithoutSaving,
+    confirmLeaveAfterConflict,
     onCloseRequested,
     destroy,
     unlisten,
@@ -249,6 +255,23 @@ describe('useComposerCloseGuard', () => {
 
     pendingSave.resolve('saved-draft');
     await flushPromises();
+  });
+
+  it('closes the window after asking when the draft was sent or discarded elsewhere', async () => {
+    const { closeGuard, setState, requestClose, confirmLeaveAfterConflict, destroy } = harness({
+      persistDraft: async () => null,
+      draftConflict: () => true,
+      confirmLeaveAfterConflict: async () => true,
+    });
+    closeGuard.captureBaseline();
+    setState(draftState({ subject: 'Changed' }));
+    await closeGuard.installStandaloneCloseGuard();
+
+    requestClose();
+    await flushPromises();
+
+    expect(confirmLeaveAfterConflict).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the window open after a failed save and allows another close attempt', async () => {

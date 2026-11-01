@@ -38,6 +38,13 @@ describe('backend error translation', () => {
     expect(translateBackendError('backend.errors.webhookUrlInvalid')).toBe('backend.errors.webhookUrlInvalid');
   });
 
+  it('keeps the key of an Error a normalized error wrapped', () => {
+    activate({ backend: { errors: { draftGoneElsewhere: 'Gone elsewhere' } } });
+    const wrapped = new Error('Gone elsewhere', { cause: new Error('backend.errors.draftGoneElsewhere') });
+
+    expect(backendErrorKey(wrapped)).toBe('backend.errors.draftGoneElsewhere');
+  });
+
   it('ignores errors that are not command errors', () => {
     activate({ backend: { errors: { unexpected: 'Unexpected' } } });
 
