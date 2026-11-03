@@ -979,6 +979,29 @@ impl<'a> ThreadRepository<'a> {
         Ok(())
     }
 
+    /// Muting and its local read projection commit together. Unmuting never
+    /// turns already read messages unread.
+    pub async fn set_muted(&self, thread_id: &str, muted: bool) -> Result<(), ThreadError> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::query("UPDATE threads SET is_muted = ?, updated_at = ? WHERE id = ?")
+            .bind(muted)
+            .bind(&now)
+            .bind(thread_id)
+            .execute(&mut *tx)
+            .await?;
+        if muted {
+            sqlx::query("UPDATE messages SET is_read = 1, updated_at = ? WHERE thread_id = ?")
+                .bind(&now)
+                .bind(thread_id)
+                .execute(&mut *tx)
+                .await?;
+            refresh_thread_projections_tx(&mut tx, &[thread_id.into()]).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Permanently remove eligible trash threads and their local dependents.
     ///
     /// Selection and deletion share one transaction so a maintenance pass
@@ -3187,6 +3210,32 @@ mod tests {
             .await
             .expect("message state");
         assert_eq!(is_read, 0);
+    }
+
+    #[tokio::test]
+    async fn muting_keeps_message_flags_and_thread_projection_atomic() {
+        let pool = migrated_pool().await;
+        seed_thread(&pool).await;
+        sqlx::query("INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, date, is_read, created_at, updated_at) VALUES ('m', 'acc', 'inbox', 'thread-1', 'sender@example.test', '[]', '', 0, '', '')")
+            .execute(&pool).await.unwrap();
+        let repository = ThreadRepository::new(&pool);
+        repository.set_muted("thread-1", true).await.unwrap();
+        repository.set_muted("thread-1", false).await.unwrap();
+        let state = || {
+            sqlx::query_as::<_, (bool, i64, bool)>(
+            "SELECT is_muted, unread_count, (SELECT is_read FROM messages WHERE id = 'm') FROM threads WHERE id = 'thread-1'",
+        ).fetch_one(&pool)
+        };
+        assert_eq!(state().await.unwrap(), (false, 0, true));
+        sqlx::query("UPDATE messages SET is_read = 0 WHERE id = 'm'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let before = state().await.unwrap();
+        sqlx::query("CREATE TRIGGER fail_mute_projection BEFORE UPDATE OF unread_count ON threads BEGIN SELECT RAISE(ABORT, 'projection failed'); END")
+            .execute(&pool).await.unwrap();
+        assert!(repository.set_muted("thread-1", true).await.is_err());
+        assert_eq!(state().await.unwrap(), before);
     }
 
     #[tokio::test]

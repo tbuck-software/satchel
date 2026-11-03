@@ -13,6 +13,7 @@ import {
   outboxActionCanBeReopenedAsDraft,
   outboxActionCanBeRetried,
   outboxActionLabel,
+  syncActionDiscardHintKey,
   outboxAttemptsLabel,
   outboxErrorLabel,
   outboxIsOverdue,
@@ -49,6 +50,9 @@ const selectedId = ref('');
 const selectedItem = computed(() =>
   outbox.items.find((item) => item.id === selectedId.value),
 );
+const discardHintKey = computed(() => selectedItem.value
+  ? syncActionDiscardHintKey(selectedItem.value.action_type, selectedItem.value.mutation_kind)
+  : null);
 
 onMounted(() => {
   // `load()` reports its own failure into `outbox.error` and the connection
@@ -143,12 +147,12 @@ function isOverdue(item: BackendOutboxItem): boolean {
 function headline(item: BackendOutboxItem): string {
   if (item.subject) return item.subject;
   if (item.action_type === 'send_message') return t('compose.noSubject');
-  return outboxActionLabel(item.action_type);
+  return outboxActionLabel(item.action_type, item.mutation_kind);
 }
 
 /** The row's first line, where an inbox row names the sender. */
 function who(item: BackendOutboxItem): string {
-  return recipientLine(item) || outboxActionLabel(item.action_type);
+  return recipientLine(item) || outboxActionLabel(item.action_type, item.mutation_kind);
 }
 
 function recipientLine(item: BackendOutboxItem): string {
@@ -168,7 +172,7 @@ function recipientLine(item: BackendOutboxItem): string {
 function metaParts(item: BackendOutboxItem): string[] {
   const parts: string[] = [];
   if (item.subject && item.recipients.length > 0 && item.action_type !== 'send_message') {
-    parts.push(outboxActionLabel(item.action_type));
+    parts.push(outboxActionLabel(item.action_type, item.mutation_kind));
   }
   if (item.retry_count > 0) parts.push(outboxAttemptsLabel(item.retry_count));
   return parts;
@@ -354,7 +358,7 @@ async function cancel(item: BackendOutboxItem) {
                       </AppIcon>
                     </IconButton>
                     <IconButton
-                      v-if="outboxActionCanBeCancelled(item.action_type, item.status)"
+                      v-if="outboxActionCanBeCancelled(item.action_type, item.status, item.mutation_kind)"
                       size="sm"
                       tone="danger"
                       :title="$t('common.discard')"
@@ -391,7 +395,7 @@ async function cancel(item: BackendOutboxItem) {
                     {{ outboxRetryLabel(item.action_type, item.status) }}
                   </AppButton>
                   <AppButton
-                    v-if="outboxActionCanBeCancelled(item.action_type, item.status) || outboxActionCanBeDismissed(item.action_type, item.status)"
+                    v-if="outboxActionCanBeCancelled(item.action_type, item.status, item.mutation_kind) || outboxActionCanBeDismissed(item.action_type, item.status)"
                     size="sm"
                     variant="ghost"
                     :disabled="busy.has(item.id)"
@@ -449,7 +453,7 @@ async function cancel(item: BackendOutboxItem) {
               {{ $t('outbox.openAsDraft') }}
             </AppButton>
             <AppButton
-              v-if="outboxActionCanBeCancelled(selectedItem.action_type, selectedItem.status) || outboxActionCanBeDismissed(selectedItem.action_type, selectedItem.status)"
+              v-if="outboxActionCanBeCancelled(selectedItem.action_type, selectedItem.status, selectedItem.mutation_kind) || outboxActionCanBeDismissed(selectedItem.action_type, selectedItem.status)"
               size="sm"
               variant="ghost"
               :disabled="busy.has(selectedItem.id)"
@@ -460,14 +464,14 @@ async function cancel(item: BackendOutboxItem) {
           </div>
         </header>
 
-        <p v-if="selectedItem.action_type === 'remote_mutation'" class="move-discard-hint">
-          {{ t('outbox.moveDiscardHint') }}
+        <p v-if="discardHintKey" class="move-discard-hint">
+          {{ t(discardHintKey) }}
         </p>
 
         <dl class="detail__facts">
           <div>
             <dt>{{ $t('outbox.action.label') }}</dt>
-            <dd>{{ outboxActionLabel(selectedItem.action_type) }}</dd>
+            <dd>{{ outboxActionLabel(selectedItem.action_type, selectedItem.mutation_kind) }}</dd>
           </div>
           <div>
             <dt>{{ isDeliveryWarning(selectedItem) ? outboxTimeLabel(selectedItem.status, relevantTime(selectedItem)) : $t('outbox.time.queued') }}</dt>

@@ -14,7 +14,7 @@ mod signatures;
 
 pub use reads::{
     MessagePreviewRecord, MessageReadError, MessageReadRecord, MessageReadRepository,
-    MessageSourceRecord,
+    MessageSourceRecord, UnsubscribeHeaders,
 };
 pub use sent::{
     ReplyThreadContext, SentAttachmentMetadata, SentMessageError, SentMessageRecord,

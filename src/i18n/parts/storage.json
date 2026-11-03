@@ -1,0 +1,30 @@
+{
+  "en": {
+    "settings": {
+      "diagnostics": {
+        "storage": {
+          "title": "Storage",
+          "database": "Database",
+          "reusable": "Reusable database space",
+          "wal": "Write-ahead log",
+          "target": "Active database target",
+          "targetHint": "Downloaded bodies are released when needed. Headers, drafts and mail that exists only on this device are kept, even above the target. Freed database space is reused."
+        }
+      }
+    }
+  },
+  "de": {
+    "settings": {
+      "diagnostics": {
+        "storage": {
+          "title": "Speicher",
+          "database": "Datenbank",
+          "reusable": "Wiederverwendbarer Datenbankplatz",
+          "wal": "Schreibprotokoll",
+          "target": "Ziel für aktive Datenbankdaten",
+          "targetHint": "Heruntergeladene Inhalte werden bei Bedarf freigegeben. Kopfzeilen, Entwürfe und Mails, die nur auf diesem Gerät liegen, bleiben auch oberhalb des Ziels erhalten. Freier Datenbankplatz wird wiederverwendet."
+        }
+      }
+    }
+  }
+}

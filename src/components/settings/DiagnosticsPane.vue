@@ -15,6 +15,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import { useToast } from '@/composables/useToast';
+import { formatBytes } from '@/utils/formatBytes';
 
 const { locale, t } = useI18n();
 const toast = useToast();
@@ -258,6 +259,30 @@ onMounted(() => {
     <p v-if="status" class="status">{{ status }}</p>
 
     <template v-if="overview">
+      <article data-testid="storage-usage">
+        <h4>{{ $t('settings.diagnostics.storage.title') }}</h4>
+        <dl class="meta">
+          <div>
+            <dt>{{ $t('settings.diagnostics.storage.database') }}</dt>
+            <dd>{{ formatBytes(overview.storage.database_bytes, locale) }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('settings.diagnostics.storage.reusable') }}</dt>
+            <dd>{{ formatBytes(overview.storage.reusable_bytes, locale) }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('settings.diagnostics.storage.wal') }}</dt>
+            <dd>{{ formatBytes(overview.storage.wal_bytes, locale) }}</dd>
+          </div>
+          <div v-if="overview.storage.target_bytes !== null">
+            <dt>{{ $t('settings.diagnostics.storage.target') }}</dt>
+            <dd>{{ formatBytes(overview.storage.target_bytes, locale) }}</dd>
+          </div>
+        </dl>
+        <p v-if="overview.storage.target_bytes !== null" class="hint">
+          {{ $t('settings.diagnostics.storage.targetHint') }}
+        </p>
+      </article>
       <article>
         <h4>{{ $t('settings.diagnostics.syncErrors.title') }}</h4>
         <EmptyState

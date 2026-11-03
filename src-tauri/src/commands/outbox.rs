@@ -44,6 +44,8 @@ pub struct OutboxItemDto {
     pub attachments: Vec<OutboxAttachmentDto>,
     /// Set once the provider has seen bytes of this attempt.
     pub submission_started_at: Option<String>,
+    /// The `kind` of a remote mutation (`flags`, `delete`, `append_sent`, …).
+    pub mutation_kind: Option<String>,
 }
 
 fn payload_strings(input: Option<&serde_json::Value>, field: &str) -> Vec<String> {
@@ -89,6 +91,9 @@ fn payload_attachments(input: Option<&serde_json::Value>) -> Vec<OutboxAttachmen
 impl From<QueuedAction> for OutboxItemDto {
     fn from(action: QueuedAction) -> Self {
         let input = action.payload.get("input");
+        let mutation_kind = (action.action_type == "remote_mutation")
+            .then(|| payload_text(Some(&action.payload), "kind"))
+            .flatten();
         Self {
             id: action.id,
             account_id: action.account_id,
@@ -108,6 +113,7 @@ impl From<QueuedAction> for OutboxItemDto {
             body_html: payload_text(input, "body_html"),
             attachments: payload_attachments(input),
             submission_started_at: action.submission_started_at,
+            mutation_kind,
         }
     }
 }
@@ -127,22 +133,72 @@ pub async fn list_failed_sync_actions(
     pool: State<'_, SqlitePool>,
 ) -> CommandResult<Vec<OutboxItemDto>> {
     let mut items = Vec::new();
-    for action in state.queue.list_failed_moves(pool.inner()).await? {
-        let thread_id = satchel_core::sync::remote_mutations::remote_move_thread_id_from_json(
-            &action.payload.to_string(),
-        );
+    for action in state.queue.list_failed_sync_actions(pool.inner()).await? {
+        let subject = failed_action_subject(pool.inner(), &action)
+            .await
+            .map_err(CommandError::unexpected)?;
         let mut item = OutboxItemDto::from(action);
-        if let Some(thread_id) = thread_id {
-            item.subject = sqlx::query_scalar("SELECT subject FROM threads WHERE id = ?")
-                .bind(thread_id)
-                .fetch_optional(pool.inner())
-                .await
-                .map_err(CommandError::unexpected)?
-                .flatten();
+        if subject.is_some() {
+            item.subject = subject;
         }
         items.push(item);
     }
     Ok(items)
+}
+
+/// What the failed change was about: the thread or message it touched, or
+/// the folder path. `None` leaves the label to the action kind.
+async fn failed_action_subject(
+    pool: &SqlitePool,
+    action: &QueuedAction,
+) -> Result<Option<String>, sqlx::Error> {
+    use satchel_core::sync::remote_mutations::{
+        remote_move_thread_id_from_json, RemoteMutationPayload,
+    };
+    if action.action_type != "remote_mutation" {
+        return Ok(None);
+    }
+    if let Some(thread_id) = remote_move_thread_id_from_json(&action.payload.to_string()) {
+        return Ok(
+            sqlx::query_scalar("SELECT subject FROM threads WHERE id = ?")
+                .bind(thread_id)
+                .fetch_optional(pool)
+                .await?
+                .flatten(),
+        );
+    }
+    let Ok(payload) = serde_json::from_value::<RemoteMutationPayload>(action.payload.clone())
+    else {
+        return Ok(None);
+    };
+    let reference = match payload {
+        RemoteMutationPayload::Flags { refs, .. }
+        | RemoteMutationPayload::Delete { refs }
+        | RemoteMutationPayload::Move { refs, .. } => refs.into_iter().next(),
+        RemoteMutationPayload::CreateFolder { path }
+        | RemoteMutationPayload::DeleteFolder { path }
+        | RemoteMutationPayload::RenameFolder { to_path: path, .. } => return Ok(Some(path)),
+        _ => None,
+    };
+    let Some(reference) = reference else {
+        return Ok(None);
+    };
+    sqlx::query_scalar(
+        "SELECT m.subject FROM messages m LEFT JOIN folders f ON f.id = m.folder_id AND f.account_id = m.account_id
+         WHERE m.account_id = ? AND m.remote_id = ?
+           AND (? IS NULL OR COALESCE(f.remote_id, f.full_path) = ?)
+           AND (? IS NULL OR m.remote_uidvalidity = ?)
+         ORDER BY m.date DESC LIMIT 1",
+    )
+    .bind(&action.account_id)
+    .bind(&reference.remote_id)
+    .bind(&reference.source_folder)
+    .bind(&reference.source_folder)
+    .bind(reference.source_uidvalidity)
+    .bind(reference.source_uidvalidity)
+    .fetch_optional(pool)
+    .await
+    .map(Option::flatten)
 }
 
 #[tauri::command]
@@ -151,7 +207,7 @@ pub async fn discard_failed_sync_action(
     state: State<'_, AppState>,
     id: String,
 ) -> CommandResult<()> {
-    if !satchel_core::mail_actions::discard_failed_move(pool.inner(), &id).await? {
+    if !satchel_core::mail_actions::discard_failed_sync_action(pool.inner(), &id).await? {
         return Err(CommandError::new(
             "backend.errors.outboxActionCannotBeDiscarded",
         ));
@@ -168,7 +224,11 @@ pub async fn retry_outbox_action(
     pool: State<'_, SqlitePool>,
     id: String,
 ) -> CommandResult<()> {
-    if state.queue.requeue_failed_move(pool.inner(), &id).await? {
+    if state
+        .queue
+        .requeue_failed_sync_action(pool.inner(), &id)
+        .await?
+    {
         return Ok(());
     }
     Ok(state.queue.requeue_mail(pool.inner(), &id).await?)
@@ -260,6 +320,61 @@ mod tests {
         assert!(dto.body.is_none());
         assert!(dto.recipients.is_empty());
         assert!(dto.attachments.is_empty());
+    }
+
+    /// A failed change must say what it touched, or the user cannot decide
+    /// whether to retry or discard it.
+    #[tokio::test]
+    async fn failed_changes_name_the_message_or_folder_they_touched() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('acc', '', 'a@example.test', 'imap', '{}', '', '', '');
+             INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, created_at, updated_at)
+             VALUES ('inbox', 'acc', 'INBOX', 'INBOX', 'INBOX', 'inbox', '', ''),
+                    ('work', 'acc', 'Work', 'Work', 'Work', 'custom', '', '');
+             INSERT INTO messages (id, account_id, folder_id, remote_id, from_address, to_addresses, subject, date, created_at, updated_at)
+             VALUES ('in', 'acc', 'inbox', '9', 'a@b', '[]', 'Invoice', '2026', '', ''),
+                    ('other', 'acc', 'work', '9', 'a@b', '[]', 'Unrelated', '2026', '', '');",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE messages SET remote_uidvalidity = 7")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let subject = |payload: serde_json::Value| {
+            let pool = pool.clone();
+            async move {
+                super::failed_action_subject(
+                    &pool,
+                    &QueuedAction::new("acc".into(), "remote_mutation", payload),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let flags = serde_json::json!({ "kind": "flags", "read": true, "starred": null,
+            "refs": [{ "remote_id": "9", "source_folder": "INBOX", "source_uidvalidity": 7 }] });
+        assert_eq!(subject(flags.clone()).await.as_deref(), Some("Invoice"));
+        let mut stale_flags = flags;
+        stale_flags["refs"][0]["source_uidvalidity"] = serde_json::json!(6);
+        assert_eq!(subject(stale_flags).await, None);
+        let rename =
+            serde_json::json!({ "kind": "rename_folder", "from_path": "A", "to_path": "B" });
+        assert_eq!(subject(rename).await.as_deref(), Some("B"));
+        let sent =
+            serde_json::json!({ "kind": "append_sent", "raw_base64": "", "folder_hint": null });
+        assert_eq!(subject(sent).await, None);
     }
 
     /// The list the DELETE in `Queue::discard_mail_action` carries in its

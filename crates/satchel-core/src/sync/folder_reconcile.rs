@@ -70,8 +70,16 @@ where
         let message_refs = match mutation {
             RemoteMutationPayload::Move { refs, .. }
             | RemoteMutationPayload::BlockedMove { refs, .. }
-            | RemoteMutationPayload::Delete { refs }
-            | RemoteMutationPayload::Flags { refs, .. } => refs,
+            | RemoteMutationPayload::Delete { refs } => refs,
+            RemoteMutationPayload::Flags {
+                refs,
+                read,
+                starred,
+                superseded,
+            } => super::flag_intents::batches(refs, read, starred, &superseded)
+                .into_iter()
+                .flat_map(|(refs, _)| refs)
+                .collect(),
             RemoteMutationPayload::WorkflowMove { refs, .. } => refs,
             // A draft waiting to be removed on the server must not be pulled
             // back in locally while that delete is still queued.
@@ -161,8 +169,16 @@ where
                 add_refs(&mut paths, &refs);
                 paths.insert(normalized_remote_folder(&target_remote_folder_id));
             }
-            RemoteMutationPayload::Delete { refs } | RemoteMutationPayload::Flags { refs, .. } => {
-                add_refs(&mut paths, &refs)
+            RemoteMutationPayload::Delete { refs } => add_refs(&mut paths, &refs),
+            RemoteMutationPayload::Flags {
+                refs,
+                read,
+                starred,
+                superseded,
+            } => {
+                for (refs, _) in super::flag_intents::batches(refs, read, starred, &superseded) {
+                    add_refs(&mut paths, &refs);
+                }
             }
             RemoteMutationPayload::DeleteDraft { source_folder, .. } => {
                 if let Some(folder) = source_folder {

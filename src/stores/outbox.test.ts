@@ -68,6 +68,26 @@ describe('outbox store', () => {
     expect(outbox.items.map((item) => item.id)).toEqual(['q-1']);
   });
 
+  it('retries and discards failed non-move changes and draft uploads one by one', async () => {
+    listMock.mockResolvedValue([]);
+    vi.mocked(backendListFailedSyncActions).mockResolvedValueOnce([
+      outboxItem({ id: 'flags', action_type: 'remote_mutation', mutation_kind: 'flags', recipients: [] }),
+      outboxItem({ id: 'draft', action_type: 'sync_draft', recipients: [] }),
+    ]);
+    const outbox = useOutboxStore();
+    const refresh = vi.spyOn(useConnectionStore(), 'refresh').mockResolvedValue(undefined);
+    await outbox.load();
+    expect(outbox.failedChangeCount).toBe(2);
+
+    await outbox.retry('flags');
+    expect(retryMock).toHaveBeenCalledWith('flags');
+    await outbox.cancel('draft');
+    expect(backendDiscardFailedSyncAction).toHaveBeenCalledWith('draft');
+    expect(cancelMock).not.toHaveBeenCalled();
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(outbox.items).toEqual([]);
+  });
+
   it('loads queued actions and resets the loading flag afterwards', async () => {
     listMock.mockResolvedValue([outboxItem()]);
     const outbox = useOutboxStore();

@@ -303,6 +303,11 @@ async fn execute_background_mail_sync_inner(
         },
     )
     .await;
+    // Android may keep the UI process stopped for days. Its maintenance loop
+    // cannot enforce the storage target while WorkManager is the only writer.
+    if let Err(error) = crate::db::storage::maintain_mobile_budget(&pool).await {
+        tracing::warn!(%error, "background storage budget pass failed");
+    }
     let rows = crate::commands::notifications::pending_headless_mail_notifications(&pool).await?;
 
     let sound = read_background_notification_setting(&pool, "notifications.sound")

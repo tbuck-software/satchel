@@ -357,6 +357,7 @@ impl From<SyncLeaseRow> for DiagnosticsSyncLeaseDto {
 )]
 pub struct DiagnosticsOverviewDto {
     pub generated_at: String,
+    pub storage: satchel_core::db::storage::StorageUsage,
     pub accounts: Vec<DiagnosticsAccountDto>,
     pub queue: DiagnosticsQueueDto,
     pub notifications: DiagnosticsNotificationsDto,
@@ -571,6 +572,9 @@ pub async fn build_overview(pool: &SqlitePool) -> Result<DiagnosticsOverviewDto,
 
     Ok(DiagnosticsOverviewDto {
         generated_at: chrono::Utc::now().to_rfc3339(),
+        storage: satchel_core::db::storage::usage(pool)
+            .await
+            .map_err(|error| error.to_string())?,
         accounts,
         queue: DiagnosticsQueueDto {
             by_status: queue_by_status.into_iter().map(Into::into).collect(),

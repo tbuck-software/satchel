@@ -310,6 +310,39 @@ describe('OutboxView', () => {
     expect(failedRow!.attributes('aria-current')).toBeUndefined();
   });
 
+  it('offers retry and discard for a failed flag change but only retry for a Sent copy', async () => {
+    harness.outbox!.items = [
+      makeItem({ id: 'flags', action_type: 'remote_mutation', mutation_kind: 'flags', status: 'failed', subject: 'Invoice', recipients: [], last_error: 'timeout' }),
+      makeItem({ id: 'sent', action_type: 'remote_mutation', mutation_kind: 'append_sent', status: 'failed', subject: null, recipients: [], last_error: 'timeout' }),
+    ];
+    const wrapper = render();
+    const rows = wrapper.findAll('.row');
+    const flagsRow = rows.find((row) => row.get('.row__who').text() === 'Read or star status')!;
+    const sentRow = rows.find((row) => row.get('.row__who').text() === 'File sent copy')!;
+
+    expect(flagsRow.get('.row__subject').text()).toBe('Invoice');
+    expect(flagsRow.findAll('.row__fix .app-button').map((button) => button.text())).toEqual(['Try again', 'Discard']);
+    expect(sentRow.findAll('.row__fix .app-button').map((button) => button.text())).toEqual(['Try again']);
+
+    await flagsRow.trigger('click');
+    expect(wrapper.get('.move-discard-hint').text()).toContain('The server keeps its current state');
+    await flagsRow.findAll('.row__fix .app-button')[1]!.trigger('click');
+    expect(harness.outbox!.cancel).toHaveBeenCalledWith('flags');
+    await sentRow.trigger('click');
+    expect(wrapper.get('.move-discard-hint').text()).toContain('retried but not discarded');
+  });
+
+  it.each(['delete', 'delete_draft'])('explains that discarding %s does not restore removed mail', async (mutationKind) => {
+    harness.outbox!.items = [makeItem({ id: 'delete', action_type: 'remote_mutation', mutation_kind: mutationKind, status: 'failed', recipients: [], last_error: 'timeout' })];
+    const wrapper = render();
+    await wrapper.get('.row').trigger('click');
+    expect(wrapper.get('.move-discard-hint').text()).toContain('Messages already removed from this device are not restored');
+    expect(wrapper.get('.move-discard-hint').text()).toContain('Any remaining server copies are kept');
+    expect(wrapper.get('.move-discard-hint').text()).not.toContain('the next sync');
+    await wrapper.get('.row').findAll('.row__fix .app-button')[1]!.trigger('click');
+    expect(harness.outbox!.cancel).toHaveBeenCalledWith('delete');
+  });
+
   it('retries a failed item once at a time and confirms success', async () => {
     harness.outbox!.items = [makeItem({ id: 'failed', status: 'failed', last_error: 'timeout' })];
     let resolveRetry!: () => void;

@@ -340,14 +340,19 @@ async fn discarding_a_failed_move_restores_confirmed_folder_and_unblocks_flags()
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert!(!satchel_core::mail_actions::discard_failed_move(&pool, &id)
-        .await
-        .unwrap());
+    assert!(
+        !satchel_core::mail_actions::discard_failed_sync_action(&pool, &id)
+            .await
+            .unwrap()
+    );
     queue
         .mark_failed_permanent(&pool, &id, "folder removed")
         .await
         .unwrap();
-    assert_eq!(queue.list_failed_moves(&pool).await.unwrap().len(), 1);
+    assert_eq!(
+        queue.list_failed_sync_actions(&pool).await.unwrap().len(),
+        1
+    );
     assert!(remote_mutations::enqueue_thread_flags(
         &pool,
         &queue,
@@ -357,9 +362,11 @@ async fn discarding_a_failed_move_restores_confirmed_folder_and_unblocks_flags()
     )
     .await
     .is_err());
-    assert!(satchel_core::mail_actions::discard_failed_move(&pool, &id)
-        .await
-        .unwrap());
+    assert!(
+        satchel_core::mail_actions::discard_failed_sync_action(&pool, &id)
+            .await
+            .unwrap()
+    );
     let identity: (String, String, Option<String>) = sqlx::query_as(
         "SELECT remote_id, folder_id, pending_folder_id FROM messages WHERE id = 'msg-1'",
     )
@@ -367,11 +374,99 @@ async fn discarding_a_failed_move_restores_confirmed_folder_and_unblocks_flags()
     .await
     .unwrap();
     assert_eq!(identity, ("42".into(), "fld-inbox".into(), None));
-    assert!(queue.list_failed_moves(&pool).await.unwrap().is_empty());
+    assert!(queue
+        .list_failed_sync_actions(&pool)
+        .await
+        .unwrap()
+        .is_empty());
     remote_mutations::enqueue_thread_flags(&pool, &queue, &["th-1".into()], Some(true), None)
         .await
         .unwrap();
-    assert!(!satchel_core::mail_actions::discard_failed_move(&pool, &id)
+    assert!(
+        !satchel_core::mail_actions::discard_failed_sync_action(&pool, &id)
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn every_failed_sync_action_is_listed_retryable_and_discardable_except_a_sent_copy() {
+    use satchel_core::{
+        mail_actions::discard_failed_sync_action,
+        sync::queue::{QueuedAction, ACTION_SYNC_DRAFT},
+    };
+    let pool = seed_pool().await;
+    let queue = SyncQueue::new();
+    remote_mutations::enqueue_thread_flags(&pool, &queue, &["th-1".into()], Some(true), None)
+        .await
+        .unwrap();
+    remote_mutations::enqueue_append_sent(&pool, &queue, "acc-1", b"Subject: x\r\n\r\nx", None)
+        .await
+        .unwrap();
+    queue
+        .enqueue(
+            &pool,
+            QueuedAction::new(
+                "acc-1".into(),
+                ACTION_SYNC_DRAFT,
+                serde_json::json!({ "input": { "id": "d-1" } }),
+            ),
+        )
+        .await
+        .unwrap();
+    let ids: Vec<(String, String)> = sqlx::query_as(
+        "SELECT id, CASE WHEN action_type = 'sync_draft' THEN 'sync_draft'
+                ELSE json_extract(payload, '$.kind') END FROM sync_queue",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let id_of = |kind: &str| ids.iter().find(|(_, k)| k == kind).unwrap().0.clone();
+    let (flags, sent, draft) = (id_of("flags"), id_of("append_sent"), id_of("sync_draft"));
+    assert!(
+        !discard_failed_sync_action(&pool, &flags).await.unwrap(),
+        "only failed work is discardable"
+    );
+    for id in [&flags, &sent, &draft] {
+        queue
+            .mark_failed_permanent(&pool, id, "timeout")
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        queue.list_failed_sync_actions(&pool).await.unwrap().len(),
+        3
+    );
+
+    assert!(queue
+        .requeue_failed_sync_action(&pool, &flags)
+        .await
+        .unwrap());
+    assert_eq!(
+        queue.list_failed_sync_actions(&pool).await.unwrap().len(),
+        2
+    );
+    queue
+        .mark_failed_permanent(&pool, &flags, "timeout")
+        .await
+        .unwrap();
+
+    assert!(discard_failed_sync_action(&pool, &flags).await.unwrap());
+    assert!(discard_failed_sync_action(&pool, &draft).await.unwrap());
+    assert!(
+        !discard_failed_sync_action(&pool, &sent).await.unwrap(),
+        "the queued Sent copy may be the only copy of the delivered mail"
+    );
+    let left: Vec<String> = queue
+        .list_failed_sync_actions(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|action| action.id)
+        .collect();
+    assert_eq!(left, std::slice::from_ref(&sent));
+    assert!(queue
+        .requeue_failed_sync_action(&pool, &sent)
         .await
         .unwrap());
 }

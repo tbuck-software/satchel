@@ -12,6 +12,7 @@ import {
   type BackendOutboxItem,
 } from '@/services/backend';
 import { useConnectionStore } from '@/stores/connection';
+import { isSyncAction } from '@/utils/outboxLabels';
 
 /**
  * The queue events that make the outbox reload.
@@ -71,8 +72,11 @@ export const useOutboxStore = defineStore('outbox', () => {
   }
 
   async function retry(id: string) {
+    const actionType = items.value.find((item) => item.id === id)?.action_type;
     await backendRetryOutboxAction(id);
     items.value = items.value.filter((i) => i.id !== id);
+    // The attention badge reads the snapshot count; refresh it like `cancel`.
+    if (actionType && isSyncAction(actionType)) await connectionStore.refresh();
   }
 
   async function retryFailedSyncActions() {
@@ -82,7 +86,8 @@ export const useOutboxStore = defineStore('outbox', () => {
   }
 
   async function cancel(id: string) {
-    if (items.value.find((item) => item.id === id)?.action_type === 'remote_mutation') {
+    const actionType = items.value.find((item) => item.id === id)?.action_type;
+    if (actionType && isSyncAction(actionType)) {
       await backendDiscardFailedSyncAction(id);
       await connectionStore.refresh();
     } else {

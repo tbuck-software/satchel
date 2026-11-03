@@ -199,7 +199,10 @@ impl SyncQueue {
     }
 
     pub async fn enqueue(&self, pool: &SqlitePool, action: QueuedAction) -> Result<(), String> {
-        let mut tx = pool.begin().await.map_err(|err| err.to_string())?;
+        let mut tx = pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(|err| err.to_string())?;
         self.enqueue_in_transaction(&mut tx, &action).await?;
         tx.commit().await.map_err(|err| err.to_string())?;
         self.wake_worker();
@@ -214,6 +217,7 @@ impl SyncQueue {
         tx: &mut Transaction<'_, Sqlite>,
         action: &QueuedAction,
     ) -> Result<(), String> {
+        super::flag_intents::supersede(tx, action).await?;
         let payload = serde_json::to_string(&action.payload).unwrap_or_else(|_| "null".into());
         let now_ms = Utc::now().timestamp_millis();
         sqlx::query(
@@ -911,23 +915,45 @@ impl SyncQueue {
         Ok(())
     }
 
-    pub async fn list_failed_moves(&self, pool: &SqlitePool) -> Result<Vec<QueuedAction>, String> {
+    /// Failed non-send work the user can inspect: every remote mutation and
+    /// draft upload. Moves are no longer the only kind that can fail for good.
+    pub async fn list_failed_sync_actions(
+        &self,
+        pool: &SqlitePool,
+    ) -> Result<Vec<QueuedAction>, String> {
         let rows = sqlx::query_as::<_, QueueRow>(
             "SELECT id, account_id, action_type, payload, status, retry_count, created_at, updated_at,
              last_error, next_retry_at, scheduled_for, submission_started_at, rate_limit_rounds
-             FROM sync_queue WHERE action_type = 'remote_mutation' AND status = 'failed'
-             AND json_valid(payload) AND json_extract(payload, '$.kind') IN ('workflow_move', 'blocked_move') ORDER BY created_at LIMIT 200",
-        ).fetch_all(pool).await.map_err(|e| e.to_string())?;
+             FROM sync_queue WHERE action_type IN (?, ?) AND status = 'failed'
+             ORDER BY created_at LIMIT 200",
+        )
+        .bind(crate::sync::remote_mutations::ACTION_REMOTE_MUTATION)
+        .bind(ACTION_SYNC_DRAFT)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| e.to_string())?;
         Ok(rows.into_iter().map(QueueRow::into_action).collect())
     }
 
-    pub async fn requeue_failed_move(&self, pool: &SqlitePool, id: &str) -> Result<bool, String> {
+    pub async fn requeue_failed_sync_action(
+        &self,
+        pool: &SqlitePool,
+        id: &str,
+    ) -> Result<bool, String> {
         let changed = sqlx::query(
             "UPDATE sync_queue SET status = 'pending', retry_count = 0, next_retry_at = NULL, last_error = NULL,
-             updated_at = ?, updated_at_ms = CASE WHEN id LIKE 'notification:%' THEN 0 ELSE ? END WHERE id = ? AND action_type = 'remote_mutation' AND status = 'failed'
-             AND json_valid(payload) AND json_extract(payload, '$.kind') IN ('workflow_move', 'blocked_move')",
-        ).bind(Utc::now().to_rfc3339()).bind(Utc::now().timestamp_millis()).bind(id)
-            .execute(pool).await.map_err(|e| e.to_string())?.rows_affected();
+             updated_at = ?, updated_at_ms = CASE WHEN id LIKE 'notification:%' THEN 0 ELSE ? END
+             WHERE id = ? AND action_type IN (?, ?) AND status = 'failed'",
+        )
+        .bind(Utc::now().to_rfc3339())
+        .bind(Utc::now().timestamp_millis())
+        .bind(id)
+        .bind(crate::sync::remote_mutations::ACTION_REMOTE_MUTATION)
+        .bind(ACTION_SYNC_DRAFT)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .rows_affected();
         if changed > 0 {
             self.wake_worker();
         }
@@ -2052,7 +2078,7 @@ mod tests {
             .mark_failed_permanent(&pool, &id, "imapUidValidityChanged")
             .await
             .unwrap();
-        assert!(queue.requeue_failed_move(&pool, &id).await.unwrap());
+        assert!(queue.requeue_failed_sync_action(&pool, &id).await.unwrap());
         assert_eq!(head_ids(&queue, &pool).await, vec![id]);
     }
 

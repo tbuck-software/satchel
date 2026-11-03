@@ -1770,20 +1770,33 @@
   },
   "outbox": {
     "action": {
+      "appendSent": "Gesendete Kopie ablegen",
+      "createFolder": "Ordner anlegen",
+      "delete": "Löschen",
+      "deleteDraft": "Entwurf auf dem Server löschen",
+      "deleteFolder": "Ordner löschen",
+      "flags": "Gelesen- oder Stern-Status",
       "label": "Aktion",
+      "move": "Verschieben",
       "remoteMutation": "Serverabgleich",
-      "sendMessage": "Senden"
+      "renameFolder": "Ordner umbenennen",
+      "sendMessage": "Senden",
+      "syncDraft": "Entwurf auf dem Server speichern",
+      "undoTrash": "Aus dem Papierkorb wiederherstellen"
     },
     "attemptCount": "Versuche",
     "attempts": "{count} Versuch | {count} Versuche",
     "cancelFailed": "Konnte nicht verworfen werden: {error}",
     "cancelled": "Aus dem Postausgang verworfen.",
+    "changeDiscardHint": "Verwerfen beendet die Wiederholungen dieser Änderung. Der Server behält seinen Stand.",
+    "deleteDiscardHint": "Verwerfen beendet die Löschversuche. Bereits von diesem Gerät entfernte Mails werden dabei nicht wiederhergestellt. Noch vorhandene Serverkopien bleiben erhalten.",
     "detail": {
       "emptyDescription": "Wähle links einen Eintrag, um Status und Details zu sehen.",
       "emptyTitle": "Kein Eintrag ausgewählt"
     },
     "dismiss": "Hinweis schließen",
     "dismissed": "Hinweis geschlossen.",
+    "draftDiscardHint": "Verwerfen beendet das Hochladen dieses Entwurfs. Der Entwurf bleibt auf diesem Gerät.",
     "empty": {
       "description": "Hier erscheinen E-Mails, die noch gesendet werden oder Aufmerksamkeit brauchen.",
       "title": "Postausgang ist leer"
@@ -1813,6 +1826,7 @@
       "now": "Jetzt senden"
     },
     "retryFailed": "Konnte nicht erneut eingereiht werden: {error}",
+    "sentCopyHint": "Diese gesendete E-Mail liegt womöglich nur in diesem Eintrag vor. Deshalb lässt sich der Eintrag erneut versuchen, aber nicht verwerfen.",
     "status": {
       "delivered": "Gesendet · lokal nicht gespeichert",
       "deliveryUnknown": "Zustellung unklar",
@@ -2276,6 +2290,14 @@
         "copyFailed": "Diagnose konnte nicht kopiert werden.",
         "copyHint": "Version, Sync-Zustand und letzte Fehler, ohne Adressen, Servernamen und Mailinhalte.",
         "openLogs": "Log-Ordner öffnen"
+      },
+      "storage": {
+        "database": "Datenbank",
+        "reusable": "Wiederverwendbarer Datenbankplatz",
+        "target": "Ziel für aktive Datenbankdaten",
+        "targetHint": "Heruntergeladene Inhalte werden bei Bedarf freigegeben. Kopfzeilen, Entwürfe und Mails, die nur auf diesem Gerät liegen, bleiben auch oberhalb des Ziels erhalten. Freier Datenbankplatz wird wiederverwendet.",
+        "title": "Speicher",
+        "wal": "Schreibprotokoll"
       },
       "syncErrors": {
         "emptyDescription": "Alle aktiven Konten haben zuletzt fehlerfrei synchronisiert.",

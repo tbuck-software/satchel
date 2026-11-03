@@ -398,6 +398,41 @@ mod tests {
         assert_restored(&pool).await;
     }
     #[tokio::test]
+    async fn discarding_failed_undo_releases_the_thread_guard() {
+        let pool = pool("gmail").await;
+        let queue = SyncQueue::new();
+        let token = trash(&pool, &queue).await;
+        let forward = queue.claim_next(&pool).await.unwrap().unwrap();
+        undo_trash(&pool, &queue, &token).await.unwrap();
+        queue.mark_completed(&pool, &forward.id).await.unwrap();
+        let undo_id = format!("undo-trash:{token}");
+        sqlx::query("UPDATE sync_queue SET status = 'failed' WHERE id = ?")
+            .bind(&undo_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            super::super::set_flags(&pool, &queue, &["thread".into()], Some(true), None, None)
+                .await
+                .is_err()
+        );
+        assert!(super::super::discard_failed_sync_action(&pool, &undo_id)
+            .await
+            .unwrap());
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT state FROM mail_action_receipts WHERE id = ?")
+                .bind(&token)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            "conflicted"
+        );
+        super::super::set_flags(&pool, &queue, &["thread".into()], Some(true), None, None)
+            .await
+            .expect("discarded undo releases the thread for new actions");
+    }
+
+    #[tokio::test]
     async fn claimed_delivery_accepts_durable_undo_then_reverses_after_completion() {
         let pool = pool("gmail").await;
         let queue = SyncQueue::new();

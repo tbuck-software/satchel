@@ -30,6 +30,7 @@ const NOW = Date.parse('2026-08-27T12:00:00Z');
 
 const EMPTY = {
   generated_at: '2026-08-27T12:00:00Z',
+  storage: { database_bytes: 0, reusable_bytes: 0, wal_bytes: 0, target_bytes: null },
   accounts: [],
   queue: { by_status: [], recent_failures: [] },
   notifications: { by_status: [], recent: [] },
@@ -40,6 +41,7 @@ const EMPTY = {
 
 const POPULATED = {
   generated_at: '2026-08-27T12:00:00Z',
+  storage: { database_bytes: 600_000_000, reusable_bytes: 200_000_000, wal_bytes: 1_000_000, target_bytes: 500_000_000 },
   accounts: [
     {
       id: 'acc-ok',
@@ -200,6 +202,16 @@ describe('an installation with nothing wrong', () => {
 describe('an installation with problems', () => {
   beforeEach(() => {
     backend.backendDiagnosticsOverview.mockResolvedValue(structuredClone(POPULATED));
+  });
+
+  it('distinguishes reusable database pages and the WAL from the mobile target', async () => {
+    const wrapper = await mountPane();
+    const storage = wrapper.get('[data-testid="storage-usage"]');
+    expect(storage.text()).toContain('600 MB');
+    expect(storage.text()).toContain('200 MB');
+    expect(storage.text()).toContain('1 MB');
+    expect(storage.text()).toContain('500 MB');
+    expect(storage.text()).toContain('mail that exists only on this device');
   });
 
   /** A healthy account in the list would bury the one that needs attention. */

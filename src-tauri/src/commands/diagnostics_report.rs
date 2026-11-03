@@ -91,6 +91,13 @@ fn render_report(build: &BuildInfo, overview: &DiagnosticsOverviewDto, log: &[St
         if build.debug { "debug" } else { "release" }
     );
     let _ = writeln!(out, "generated: {}", overview.generated_at);
+    let _ = writeln!(
+        out,
+        "database_bytes: {} reusable_bytes: {} wal_bytes: {}",
+        overview.storage.database_bytes,
+        overview.storage.reusable_bytes,
+        overview.storage.wal_bytes
+    );
 
     let _ = writeln!(out, "\n## Accounts");
     for entry in &overview.accounts {
@@ -286,6 +293,9 @@ mod tests {
     fn overview() -> DiagnosticsOverviewDto {
         DiagnosticsOverviewDto {
             generated_at: "2026-10-13T08:00:00Z".into(),
+            storage: satchel_core::db::storage::StorageUsage {
+                database_bytes: 1_000_000, reusable_bytes: 0, wal_bytes: 0, target_bytes: None,
+            },
             accounts: vec![DiagnosticsAccountDto {
                 id: "acc-1".into(),
                 email: "jane@firma-intern.de".into(),

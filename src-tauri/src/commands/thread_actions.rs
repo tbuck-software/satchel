@@ -20,37 +20,10 @@ pub async fn set_thread_muted(
     pool: tauri::State<'_, SqlitePool>,
     input: MuteThreadInput,
 ) -> CommandResult<()> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let mut tx = pool
-        .begin_with("BEGIN IMMEDIATE")
+    satchel_core::db::threads::ThreadRepository::new(pool.inner())
+        .set_muted(&input.thread_id, input.muted)
         .await
-        .map_err(|err| err.to_string())?;
-    sqlx::query("UPDATE threads SET is_muted = ?, updated_at = ? WHERE id = ?")
-        .bind(input.muted)
-        .bind(&now)
-        .bind(&input.thread_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| err.to_string())?;
-    if input.muted {
-        // Muting silences the thread, so its messages are read. Zeroing
-        // `threads.unread_count` on its own only held until the next
-        // projection refresh derived it from `messages` again.
-        sqlx::query("UPDATE messages SET is_read = 1, updated_at = ? WHERE thread_id = ?")
-            .bind(&now)
-            .bind(&input.thread_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|err| err.to_string())?;
-        satchel_core::db::threads::refresh_thread_projections_tx(
-            &mut tx,
-            std::slice::from_ref(&input.thread_id),
-        )
-        .await
-        .map_err(|err| err.to_string())?;
-    }
-    tx.commit().await.map_err(|err| err.to_string())?;
-    Ok(())
+        .map_err(Into::into)
 }
 
 #[derive(Debug, Clone, Deserialize)]

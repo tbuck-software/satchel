@@ -317,7 +317,17 @@
       "action": {
         "label": "Action",
         "sendMessage": "Send",
-        "remoteMutation": "Server sync"
+        "remoteMutation": "Server sync",
+        "syncDraft": "Save draft on server",
+        "flags": "Read or star status",
+        "move": "Move",
+        "delete": "Delete",
+        "undoTrash": "Restore from trash",
+        "deleteDraft": "Delete draft on server",
+        "createFolder": "Create folder",
+        "renameFolder": "Rename folder",
+        "deleteFolder": "Delete folder",
+        "appendSent": "File sent copy"
       },
       "retry": {
         "again": "Send again",
@@ -351,7 +361,11 @@
         "attachmentsDropped": "The draft is open. 1 attachment was not kept — add it again. | The draft is open. {count} attachments were not kept — add them again."
       },
       "openAsDraft": "Open as draft",
-      "moveDiscardHint": "Discard stops retrying this move and returns the conversation to its last confirmed folder. It does not delete any email."
+      "moveDiscardHint": "Discard stops retrying this move and returns the conversation to its last confirmed folder. It does not delete any email.",
+      "changeDiscardHint": "Discard stops retrying this change. The server keeps its current state.",
+      "deleteDiscardHint": "Discard stops retrying this deletion. Messages already removed from this device are not restored. Any remaining server copies are kept.",
+      "draftDiscardHint": "Discard stops uploading this draft. The draft stays on this device.",
+      "sentCopyHint": "This sent email may exist only in this entry, so it can be retried but not discarded."
     }
   },
   "de": {
@@ -672,7 +686,17 @@
       "action": {
         "label": "Aktion",
         "sendMessage": "Senden",
-        "remoteMutation": "Serverabgleich"
+        "remoteMutation": "Serverabgleich",
+        "syncDraft": "Entwurf auf dem Server speichern",
+        "flags": "Gelesen- oder Stern-Status",
+        "move": "Verschieben",
+        "delete": "Löschen",
+        "undoTrash": "Aus dem Papierkorb wiederherstellen",
+        "deleteDraft": "Entwurf auf dem Server löschen",
+        "createFolder": "Ordner anlegen",
+        "renameFolder": "Ordner umbenennen",
+        "deleteFolder": "Ordner löschen",
+        "appendSent": "Gesendete Kopie ablegen"
       },
       "retry": {
         "again": "Erneut senden",
@@ -706,7 +730,11 @@
         "attachmentsDropped": "Der Entwurf ist offen. 1 Anhang wurde nicht übernommen — füge ihn erneut hinzu. | Der Entwurf ist offen. {count} Anhänge wurden nicht übernommen — füge sie erneut hinzu."
       },
       "openAsDraft": "Als Entwurf öffnen",
-      "moveDiscardHint": "Verwerfen beendet die Wiederholungen dieses Verschiebens und zeigt die Unterhaltung im zuletzt bestätigten Ordner. Es löscht keine E-Mails."
+      "moveDiscardHint": "Verwerfen beendet die Wiederholungen dieses Verschiebens und zeigt die Unterhaltung im zuletzt bestätigten Ordner. Es löscht keine E-Mails.",
+      "changeDiscardHint": "Verwerfen beendet die Wiederholungen dieser Änderung. Der Server behält seinen Stand.",
+      "deleteDiscardHint": "Verwerfen beendet die Löschversuche. Bereits von diesem Gerät entfernte Mails werden dabei nicht wiederhergestellt. Noch vorhandene Serverkopien bleiben erhalten.",
+      "draftDiscardHint": "Verwerfen beendet das Hochladen dieses Entwurfs. Der Entwurf bleibt auf diesem Gerät.",
+      "sentCopyHint": "Diese gesendete E-Mail liegt womöglich nur in diesem Eintrag vor. Deshalb lässt sich der Eintrag erneut versuchen, aber nicht verwerfen."
     }
   }
 }
