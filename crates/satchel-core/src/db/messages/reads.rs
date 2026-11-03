@@ -222,6 +222,14 @@ pub enum MessageReadError {
     NotFound,
 }
 
+/// The account and list headers needed to plan an unsubscribe operation.
+#[derive(Debug, FromRow)]
+pub struct UnsubscribeHeaders {
+    pub account_id: String,
+    pub list_unsubscribe: Option<String>,
+    pub list_unsubscribe_post: Option<String>,
+}
+
 /// Persistence boundary for the message display/read projections.
 pub struct MessageReadRepository<'a> {
     pool: &'a SqlitePool,
@@ -230,6 +238,18 @@ pub struct MessageReadRepository<'a> {
 impl<'a> MessageReadRepository<'a> {
     pub fn new(pool: &'a SqlitePool) -> Self {
         Self { pool }
+    }
+
+    pub async fn unsubscribe_headers(
+        &self,
+        message_id: &str,
+    ) -> Result<Option<UnsubscribeHeaders>, MessageReadError> {
+        Ok(sqlx::query_as(
+            "SELECT account_id, list_unsubscribe, list_unsubscribe_post FROM messages WHERE id = ?",
+        )
+        .bind(message_id)
+        .fetch_optional(self.pool)
+        .await?)
     }
 
     pub async fn list_messages(

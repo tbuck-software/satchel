@@ -170,6 +170,11 @@ async fn run_data_repairs_at(
             blocks,
         });
     }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    if let Err(error) = satchel_core::db::storage::maintain_mobile_budget(pool).await {
+        warn!(target: "satchel::maintenance", %error, "storage budget pass failed");
+        failure = Some(error);
+    }
     match failure {
         Some(error) => Err(error.to_string()),
         None => Ok(()),
@@ -624,7 +629,7 @@ async fn trash_cleanup(pool: &SqlitePool) -> Result<u64, String> {
         .unwrap_or(30)
         .clamp(0, 3650);
     let removed = if days == 0 {
-        0 // 0 = disabled; queue retention below remains independent.
+        0
     } else {
         let cutoff = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
         crate::db::threads::ThreadRepository::new(pool)
@@ -632,12 +637,6 @@ async fn trash_cleanup(pool: &SqlitePool) -> Result<u64, String> {
             .await
             .map_err(|err| err.to_string())?
     };
-
-    // Drop failed outbox actions older than 60 days independently from the
-    // thread purge. Queue rows are durable retry state and must not share the
-    // Core repository's aggregate transaction.
-    let outbox_cutoff = (chrono::Utc::now() - chrono::Duration::days(60)).to_rfc3339();
-    satchel_core::mail_actions::purge_failed_queue_rows(pool, &outbox_cutoff).await?;
 
     Ok(removed)
 }
@@ -774,8 +773,9 @@ mod body_window_tests {
         .expect("account");
         sqlx::query(
             "INSERT INTO folders
-             (id, account_id, name, full_path, remote_id, folder_type, created_at, updated_at)
-             VALUES ('fld', 'acc', 'INBOX', 'INBOX', 'INBOX', 'inbox', ?, ?)",
+             (id, account_id, name, full_path, remote_id, folder_type, uidvalidity,
+              created_at, updated_at)
+             VALUES ('fld', 'acc', 'INBOX', 'INBOX', 'INBOX', 'inbox', 7, ?, ?)",
         )
         .bind(&now)
         .bind(&now)
@@ -792,9 +792,10 @@ mod body_window_tests {
             sqlx::query(
                 "INSERT INTO messages
                  (id, account_id, folder_id, from_address, to_addresses, date, body_text,
-                  body_html, snippet, is_draft, remote_id, created_at, updated_at)
+                  body_html, snippet, is_draft, remote_id, remote_uidvalidity,
+                  created_at, updated_at)
                  VALUES (?, 'acc', 'fld', 'a@b.c', '[]', ?, 'Rumpf', '<p>Rumpf</p>',
-                         'Vorschau', ?, ?, ?, ?)",
+                         'Vorschau', ?, ?, 7, ?, ?)",
             )
             .bind(id)
             .bind(date)
@@ -824,6 +825,41 @@ mod body_window_tests {
             .fetch_one(pool)
             .await
             .expect("row")
+    }
+
+    #[tokio::test]
+    async fn trash_cleanup_keeps_offline_actions_regardless_of_age_or_status() {
+        let pool = pool_with_messages().await;
+        let queue = satchel_core::sync::queue::SyncQueue::new();
+        for status in ["pending", "failed", "scheduled", "delivery_unknown"] {
+            let mut action = satchel_core::sync::queue::QueuedAction::new(
+                "acc".into(),
+                "remote_mutation",
+                serde_json::json!({ "kind": "flags", "read": true, "refs": [] }),
+            );
+            action.id = status.into();
+            action.status = status.into();
+            action.created_at = "2000-01-01T00:00:00+00:00".into();
+            action.updated_at = action.created_at.clone();
+            queue.enqueue(&pool, action).await.unwrap();
+        }
+        let snapshot = || {
+            sqlx::query_as::<_, (String, String, String, String)>(
+                "SELECT id, status, payload, updated_at FROM sync_queue ORDER BY id",
+            )
+            .fetch_all(&pool)
+        };
+        let before = snapshot().await.unwrap();
+        for trash_days in ["0", "30"] {
+            sqlx::query("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('maintenance.trash_auto_delete_days', ?, '')")
+                .bind(trash_days).execute(&pool).await.unwrap();
+            super::trash_cleanup(&pool).await.unwrap();
+            assert_eq!(
+                snapshot().await.unwrap(),
+                before,
+                "trash retention must not expire durable sync intent"
+            );
+        }
     }
 
     #[tokio::test]
@@ -963,9 +999,10 @@ mod body_window_tests {
         sqlx::query(
             "INSERT INTO messages
              (id, account_id, folder_id, from_address, to_addresses, subject, date,
-              body_text, body_html, snippet, is_draft, remote_id, created_at, updated_at)
+              body_text, body_html, snippet, is_draft, remote_id, remote_uidvalidity,
+              created_at, updated_at)
              VALUES ('indexed', 'acc', 'fld', 'a@b.c', '[]', 'Quokka', ?,
-                     'Zebrafisch', '<p>Zebrafisch</p>', 'Vorschau', 0, '99', ?, ?)",
+                     'Zebrafisch', '<p>Zebrafisch</p>', 'Vorschau', 0, '99', 7, ?, ?)",
         )
         .bind(&old)
         .bind(&old)

@@ -31,6 +31,29 @@ async fn pool() -> SqlitePool {
     pool
 }
 
+#[tokio::test]
+async fn unsubscribe_headers_keep_the_message_account_and_distinguish_missing_mail() {
+    let pool = pool().await;
+    sqlx::query("INSERT INTO messages (id, account_id, folder_id, from_address, to_addresses, date, list_unsubscribe, list_unsubscribe_post, created_at, updated_at) VALUES ('m', 'account', 'inbox', 'list@example.test', '[]', '', '<https://example.test/unsubscribe>', 'List-Unsubscribe=One-Click', '', '')")
+        .execute(&pool).await.unwrap();
+    let repository = MessageReadRepository::new(&pool);
+    let headers = repository.unsubscribe_headers("m").await.unwrap().unwrap();
+    assert_eq!(headers.account_id, "account");
+    assert_eq!(
+        headers.list_unsubscribe.as_deref(),
+        Some("<https://example.test/unsubscribe>")
+    );
+    assert_eq!(
+        headers.list_unsubscribe_post.as_deref(),
+        Some("List-Unsubscribe=One-Click")
+    );
+    assert!(repository
+        .unsubscribe_headers("missing")
+        .await
+        .unwrap()
+        .is_none());
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn insert_message(
     pool: &SqlitePool,

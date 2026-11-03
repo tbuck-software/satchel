@@ -1,4 +1,5 @@
 // Generated from Rust. Run pnpm ipc:generate.
+import type { StorageUsage } from "../../../core/db/storage/StorageUsage";
 import type { DiagnosticsAccountDto } from "./DiagnosticsAccountDto";
 import type { DiagnosticsNotificationOutboxDto } from "./DiagnosticsNotificationOutboxDto";
 import type { DiagnosticsNotificationsDto } from "./DiagnosticsNotificationsDto";
@@ -7,6 +8,7 @@ import type { DiagnosticsRateLimitDto } from "./DiagnosticsRateLimitDto";
 import type { DiagnosticsSyncLeaseDto } from "./DiagnosticsSyncLeaseDto";
 export type DiagnosticsOverviewDto = {
     generated_at: string;
+    storage: StorageUsage;
     accounts: Array<DiagnosticsAccountDto>;
     queue: DiagnosticsQueueDto;
     notifications: DiagnosticsNotificationsDto;

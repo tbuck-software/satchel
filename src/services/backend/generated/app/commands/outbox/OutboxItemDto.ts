@@ -26,4 +26,8 @@ export type OutboxItemDto = {
      * Set once the provider has seen bytes of this attempt.
      */
     submission_started_at: string | null;
+    /**
+     * The `kind` of a remote mutation (`flags`, `delete`, `append_sent`, …).
+     */
+    mutation_kind: string | null;
 };

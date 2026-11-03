@@ -1175,9 +1175,10 @@ const handlers: Record<string, Handler> = {
 
   /* --- outbox --------------------------------------------------------- */
   list_outbox: () => outbox.filter((item) => item.action_type === 'send_message').map((item) => ({ ...item })),
-  list_failed_sync_actions: () => outbox.filter((item) => item.action_type === 'remote_mutation' && item.status === 'failed').map((item) => ({ ...item })),
+  list_failed_sync_actions: () => outbox.filter((item) => item.action_type !== 'send_message' && item.status === 'failed').map((item) => ({ ...item })),
   discard_failed_sync_action: (payload) => {
-    const index = outbox.findIndex((item) => item.id === payload.id && item.action_type === 'remote_mutation' && item.status === 'failed');
+    const index = outbox.findIndex((item) => item.id === payload.id && item.action_type !== 'send_message'
+      && item.status === 'failed' && item.mutation_kind !== 'append_sent');
     if (index < 0) throw new Error('backend.errors.outboxActionCannotBeDiscarded');
     outbox.splice(index, 1);
   },
@@ -1429,7 +1430,7 @@ const handlers: Record<string, Handler> = {
     pending_sends: outbox.filter((item) => item.action_type === 'send_message').length,
     failed_outbox: outbox.filter((item) => item.status === 'failed').length,
     failed_sends: outbox.filter((item) => item.action_type === 'send_message' && item.status === 'failed').length,
-    failed_remote_mutations: outbox.filter((item) => item.action_type === 'remote_mutation' && item.status === 'failed').length,
+    failed_remote_mutations: outbox.filter((item) => item.action_type !== 'send_message' && item.status === 'failed').length,
   }),
   record_frontend_diagnostic: () => undefined,
   app_build_info: () => ({ version: '0.1.0', commit: 'mock', os: 'macos', arch: 'aarch64', debug: true }),
@@ -1440,6 +1441,7 @@ const handlers: Record<string, Handler> = {
     for (const item of outbox) statuses.set(item.status, (statuses.get(item.status) ?? 0) + 1);
     return {
       generated_at: now,
+      storage: { database_bytes: 0, reusable_bytes: 0, wal_bytes: 0, target_bytes: null },
       accounts: accounts.map((account) => ({
         id: account.id,
         email: account.email,

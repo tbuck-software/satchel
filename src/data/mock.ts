@@ -637,6 +637,7 @@ export const mockMessagesByThread = seededMessagesByThread;
 export const mockOutboxItems: BackendOutboxItem[] = [
   {
     id: 'failed-move', account_id: 'acc-1', action_type: 'remote_mutation', status: 'failed',
+    mutation_kind: 'workflow_move',
     subject: 'Project archive', recipients: [], retry_count: 6,
     created_at: new Date(Date.now() - 3600000).toISOString(),
     updated_at: new Date(Date.now() - 600000).toISOString(),

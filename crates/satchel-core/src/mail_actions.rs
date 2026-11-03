@@ -94,68 +94,55 @@ async fn ensure_no_pending_move_except_receipt(
     Ok(())
 }
 
-/// Discard a failed move and its unconfirmed destination under one write lock.
-pub async fn discard_failed_move(pool: &SqlitePool, id: &str) -> Result<bool, String> {
+/// Give up a failed remote mutation or draft upload. The provider keeps its
+/// state and the next sync reconciles to it; a move also returns its thread to
+/// the confirmed folder. A Sent copy is never discarded: its payload may be
+/// the only copy of the delivered mail.
+pub async fn discard_failed_sync_action(pool: &SqlitePool, id: &str) -> Result<bool, String> {
     let mut tx = pool
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|e| e.to_string())?;
-    let row: Option<(String, String)> = sqlx::query_as(
-        "DELETE FROM sync_queue WHERE id = ? AND action_type = 'remote_mutation' AND status = 'failed'
-         AND json_valid(payload) AND json_extract(payload, '$.kind') IN ('workflow_move', 'blocked_move') RETURNING account_id, payload",
-    ).bind(id).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())?;
-    let Some((account_id, payload)) = row else {
-        return Ok(false);
-    };
-    let thread_id =
-        remote_move_thread_id_from_json(&payload).ok_or("backend.errors.mailMovePending")?;
-    release_move_destination(&mut tx, &account_id, &thread_id).await?;
-    crate::db::threads::refresh_thread_projections_tx(&mut tx, &[thread_id])
-        .await
-        .map_err(|e| e.to_string())?;
-    tx.commit().await.map_err(|e| e.to_string())?;
-    Ok(true)
-}
-
-/// Drop failed queue rows last updated before `cutoff` (RFC 3339), as retention.
-///
-/// A failed move still owns its unconfirmed destination, and mailbox queries
-/// list the thread under `pending_folder_id`. Deleting the row alone left the
-/// thread in the target folder for good, so each purged move releases its
-/// destination in the same transaction, as [`discard_failed_move`] does.
-/// Failed sends are never purged: without a draft, the payload is the only
-/// copy of a mail that did not go out.
-pub async fn purge_failed_queue_rows(pool: &SqlitePool, cutoff: &str) -> Result<u64, String> {
-    let mut tx = pool
-        .begin_with("BEGIN IMMEDIATE")
-        .await
-        .map_err(|e| e.to_string())?;
-    let rows: Vec<(String, String, String)> = sqlx::query_as(
-        "DELETE FROM sync_queue WHERE status = 'failed' AND updated_at < ? AND action_type <> ?
+    let row: Option<(String, String, String)> = sqlx::query_as(
+        "DELETE FROM sync_queue WHERE id = ? AND status = 'failed'
+           AND (action_type = 'sync_draft' OR (action_type = 'remote_mutation'
+                AND CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END
+                    IS NOT 'append_sent'))
          RETURNING account_id, action_type, payload",
     )
-    .bind(cutoff)
-    .bind(crate::sync::queue::ACTION_SEND_MESSAGE)
-    .fetch_all(&mut *tx)
+    .bind(id)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
-    let mut released = Vec::new();
-    for (account_id, action_type, payload) in &rows {
-        if action_type != ACTION_REMOTE_MUTATION {
-            continue;
-        }
-        if let Some(thread_id) = remote_move_thread_id_from_json(payload) {
-            release_move_destination(&mut tx, account_id, &thread_id).await?;
-            released.push(thread_id);
+    let Some((account_id, action_type, payload)) = row else {
+        return Ok(false);
+    };
+    let kind = serde_json::from_str::<serde_json::Value>(&payload)
+        .ok()
+        .and_then(|value| value.get("kind")?.as_str().map(str::to_owned));
+    if action_type == "remote_mutation"
+        && matches!(kind.as_deref(), Some("workflow_move" | "blocked_move"))
+    {
+        let thread_id =
+            remote_move_thread_id_from_json(&payload).ok_or("backend.errors.mailMovePending")?;
+        release_move_destination(&mut tx, &account_id, &thread_id).await?;
+        crate::db::threads::refresh_thread_projections_tx(&mut tx, &[thread_id])
+            .await
+            .map_err(|e| e.to_string())?;
+    } else if action_type == "remote_mutation" && kind.as_deref() == Some("undo_trash") {
+        if let Ok(RemoteMutationPayload::UndoTrash { receipt_id }) = serde_json::from_str(&payload)
+        {
+            // Abandoning the reversal must also release its durable thread guard.
+            sqlx::query("UPDATE mail_action_receipts SET state = 'conflicted' WHERE id = ? AND state = 'requested' AND EXISTS (SELECT 1 FROM mail_action_threads WHERE receipt_id = mail_action_receipts.id AND account_id = ?)")
+                .bind(receipt_id)
+                .bind(&account_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
         }
     }
-    released.sort();
-    released.dedup();
-    crate::db::threads::refresh_thread_projections_tx(&mut tx, &released)
-        .await
-        .map_err(|e| e.to_string())?;
     tx.commit().await.map_err(|e| e.to_string())?;
-    Ok(rows.len() as u64)
+    Ok(true)
 }
 
 /// Return a thread whose move will not run to its confirmed provider folder.
@@ -341,6 +328,7 @@ pub async fn set_flags_in_transaction(
                         refs,
                         read,
                         starred,
+                        superseded: Vec::new(),
                     },
                     prefix,
                 )
@@ -496,6 +484,7 @@ async fn move_threads_with_receipt(
                             refs: refs.clone(),
                             read: Some(true),
                             starred: None,
+                            superseded: Vec::new(),
                         },
                         None,
                     )
@@ -742,59 +731,5 @@ mod tests {
         let moves: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_move'")
             .fetch_one(&pool).await.expect("move count");
         assert_eq!(moves, 0);
-    }
-
-    #[tokio::test]
-    async fn purging_old_failed_rows_releases_moves_and_keeps_unsent_mail() {
-        let pool = pop3_pool().await;
-        let queue = SyncQueue::new();
-        sqlx::query("UPDATE messages SET pending_folder_id = 'custom' WHERE id = 'message'")
-            .execute(&pool)
-            .await
-            .expect("pending move");
-        let old = "2025-01-01T00:00:00+00:00";
-        let failed = |action_type: &str, payload: serde_json::Value, updated_at: &str| {
-            let mut action = QueuedAction::new("acc".into(), action_type, payload);
-            action.status = "failed".into();
-            action.updated_at = updated_at.into();
-            action
-        };
-        let rows = [
-            failed(
-                ACTION_REMOTE_MUTATION,
-                serde_json::json!({"kind":"workflow_move","workflow_thread_id":"thread"}),
-                old,
-            ),
-            failed(
-                crate::sync::queue::ACTION_SEND_MESSAGE,
-                serde_json::json!({"input": {"subject": "only copy"}}),
-                old,
-            ),
-            failed(
-                ACTION_REMOTE_MUTATION,
-                serde_json::json!({"kind":"set_flags"}),
-                &chrono::Utc::now().to_rfc3339(),
-            ),
-        ];
-        for row in &rows {
-            queue.enqueue(&pool, row.clone()).await.expect("failed row");
-        }
-
-        let cutoff = "2025-06-01T00:00:00+00:00";
-        assert_eq!(purge_failed_queue_rows(&pool, cutoff).await.unwrap(), 1);
-
-        let pending: Option<String> =
-            sqlx::query_scalar("SELECT pending_folder_id FROM messages WHERE id = 'message'")
-                .fetch_one(&pool)
-                .await
-                .expect("message");
-        assert!(pending.is_none(), "the purged move kept its destination");
-        let left: Vec<String> = sqlx::query_scalar("SELECT id FROM sync_queue ORDER BY id")
-            .fetch_all(&pool)
-            .await
-            .expect("rows");
-        let mut expected = vec![rows[1].id.clone(), rows[2].id.clone()];
-        expected.sort();
-        assert_eq!(left, expected);
     }
 }

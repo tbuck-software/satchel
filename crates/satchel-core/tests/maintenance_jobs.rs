@@ -21,12 +21,13 @@ async fn fixture_at(url: &str) -> SqlitePool {
         .unwrap();
     db::init(&pool).await.unwrap();
     sqlx::query("INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, sync_state, created_at, updated_at) VALUES ('a', 'A', 'a@b.test', 'imap', '{}', '', '{}', '', '')").execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO folders (id, account_id, name, full_path, folder_type, created_at, updated_at) VALUES ('f', 'a', 'Trash', 'Trash', 'trash', '', '')").execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO folders (id, account_id, name, full_path, folder_type, uidvalidity, created_at, updated_at) VALUES ('f', 'a', 'Trash', 'Trash', 'trash', 7, '', '')").execute(&pool).await.unwrap();
     pool
 }
 
+/// A verified IMAP copy: its saved generation matches the folder's.
 async fn message(pool: &SqlitePool, id: &str, body: &str) {
-    sqlx::query("INSERT INTO messages (id, account_id, folder_id, from_address, to_addresses, subject, body_text, date, remote_id, created_at, updated_at) VALUES (?, 'a', 'f', 'a@b.test', '[]', 'Subject', ?, '2020-01-01', ?, '', '')")
+    sqlx::query("INSERT INTO messages (id, account_id, folder_id, from_address, to_addresses, subject, body_text, date, remote_id, remote_uidvalidity, created_at, updated_at) VALUES (?, 'a', 'f', 'a@b.test', '[]', 'Subject', ?, '2020-01-01', ?, 7, '', '')")
         .bind(id).bind(body).bind(id).execute(pool).await.unwrap();
 }
 

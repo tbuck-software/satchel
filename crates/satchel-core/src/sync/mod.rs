@@ -1,6 +1,7 @@
 pub mod attachment_fetch;
 pub mod calendar_backfill;
 pub mod errors;
+pub mod flag_intents;
 pub mod folder_reconcile;
 pub mod provider_identity;
 pub mod queue;

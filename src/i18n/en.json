@@ -1770,20 +1770,32 @@
   },
   "outbox": {
     "action": {
+      "appendSent": "File sent copy",
+      "createFolder": "Create folder",
+      "delete": "Delete",
+      "deleteDraft": "Delete draft on server",
+      "deleteFolder": "Delete folder",
+      "flags": "Read or star status",
       "label": "Action",
+      "move": "Move",
       "remoteMutation": "Server sync",
-      "sendMessage": "Send"
+      "renameFolder": "Rename folder",
+      "sendMessage": "Send",
+      "syncDraft": "Save draft on server",
+      "undoTrash": "Restore from trash"
     },
     "attemptCount": "Attempts",
     "attempts": "{count} attempt | {count} attempts",
     "cancelFailed": "Could not discard it: {error}",
     "cancelled": "Discarded from the outbox.",
+    "changeDiscardHint": "Discard stops retrying this change. The server keeps its current state, and the next sync shows it here again. It does not delete any email.",
     "detail": {
       "emptyDescription": "Pick an entry on the left to see its status and details.",
       "emptyTitle": "No entry selected"
     },
     "dismiss": "Close warning",
     "dismissed": "Warning closed.",
+    "draftDiscardHint": "Discard stops uploading this draft. The draft stays on this device.",
     "empty": {
       "description": "Emails still being sent or requiring attention show up here.",
       "title": "The outbox is empty"
@@ -1813,6 +1825,7 @@
       "now": "Send now"
     },
     "retryFailed": "Could not queue it again: {error}",
+    "sentCopyHint": "This sent email may exist only in this entry, so it can be retried but not discarded.",
     "status": {
       "delivered": "Sent · local save failed",
       "deliveryUnknown": "Delivery status uncertain",
@@ -2276,6 +2289,14 @@
         "copyFailed": "Diagnostics could not be copied.",
         "copyHint": "Version, sync state and recent errors, without addresses, server names or mail content.",
         "openLogs": "Open logs folder"
+      },
+      "storage": {
+        "database": "Database",
+        "reusable": "Reusable database space",
+        "target": "Active database target",
+        "targetHint": "Downloaded bodies are released when needed. Headers, drafts and mail that exists only on this device are kept, even above the target. Freed database space is reused.",
+        "title": "Storage",
+        "wal": "Write-ahead log"
       },
       "syncErrors": {
         "emptyDescription": "All active accounts synced without errors last time.",

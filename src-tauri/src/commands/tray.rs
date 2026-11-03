@@ -1329,6 +1329,7 @@ mod tests {
                 refs,
                 read,
                 starred,
+                ..
             } => {
                 assert_eq!(read, Some(true));
                 assert_eq!(starred, None);

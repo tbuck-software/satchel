@@ -6,9 +6,7 @@ use sqlx::{FromRow, QueryBuilder, Sqlite, SqlitePool, Transaction};
 
 use crate::{
     providers::{
-        folder_mapping::default_remote_folder,
-        provider_for_stored_account,
-        traits::{FlagUpdate, MessageRef},
+        folder_mapping::default_remote_folder, provider_for_stored_account, traits::MessageRef,
     },
     sync::queue::{QueuedAction, SyncQueue},
 };
@@ -85,6 +83,8 @@ pub enum RemoteMutationPayload {
         refs: Vec<MessageRef>,
         read: Option<bool>,
         starred: Option<bool>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        superseded: Vec<super::flag_intents::FlagSupersession>,
     },
     DeleteDraft {
         /// Local draft whose former account owns this cleanup. When that draft
@@ -605,6 +605,21 @@ pub async fn execute_remote_mutation(
     account_id: &str,
     payload: serde_json::Value,
 ) -> crate::sync::errors::SyncResult<()> {
+    let mutation: RemoteMutationPayload =
+        serde_json::from_value(payload).map_err(|err| format!("decode remote mutation: {err}"))?;
+    if let RemoteMutationPayload::Flags {
+        refs,
+        read,
+        starred,
+        superseded,
+    } = &mutation
+    {
+        if super::flag_intents::batches(refs.clone(), *read, *starred, superseded).is_empty() {
+            // Superseded retries have nothing left to send. They must settle
+            // even when this account is offline or its OAuth token expired.
+            return Ok(());
+        }
+    }
     let account = sqlx::query_as::<_, (String, String, String, String)>(
         "SELECT id, provider, email, config FROM accounts WHERE id = ? AND is_active = 1 LIMIT 1",
     )
@@ -618,8 +633,6 @@ pub async fn execute_remote_mutation(
 
     let provider =
         provider_for_stored_account(pool, &account.0, &account.1, &config, &account.2, None)?;
-    let mutation: RemoteMutationPayload =
-        serde_json::from_value(payload).map_err(|err| format!("decode remote mutation: {err}"))?;
     match mutation {
         RemoteMutationPayload::Move {
             refs,
@@ -671,10 +684,12 @@ pub async fn execute_remote_mutation(
             refs,
             read,
             starred,
+            superseded,
         } => {
-            provider
-                .set_flags(&refs, FlagUpdate { read, starred })
-                .await
+            for (refs, flags) in super::flag_intents::batches(refs, read, starred, &superseded) {
+                provider.set_flags(&refs, flags).await?;
+            }
+            Ok(())
         }
         RemoteMutationPayload::DeleteDraft {
             remote_draft_id,

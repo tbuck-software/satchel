@@ -52,7 +52,28 @@ const STATUS_TONES: Record<string, OutboxTone> = {
 const ACTION_KEYS: Record<string, string> = {
   send_message: 'outbox.action.sendMessage',
   remote_mutation: 'outbox.action.remoteMutation',
+  sync_draft: 'outbox.action.syncDraft',
 };
+
+/** Remote mutation `kind`s, so a failed change says what it was. */
+const MUTATION_KEYS: Record<string, string> = {
+  flags: 'outbox.action.flags',
+  move: 'outbox.action.move',
+  workflow_move: 'outbox.action.move',
+  blocked_move: 'outbox.action.move',
+  delete: 'outbox.action.delete',
+  undo_trash: 'outbox.action.undoTrash',
+  delete_draft: 'outbox.action.deleteDraft',
+  create_folder: 'outbox.action.createFolder',
+  rename_folder: 'outbox.action.renameFolder',
+  delete_folder: 'outbox.action.deleteFolder',
+  append_sent: 'outbox.action.appendSent',
+};
+
+/** Failed background work, as opposed to a mail send. */
+export function isSyncAction(actionType: string): boolean {
+  return actionType === 'remote_mutation' || actionType === 'sync_draft';
+}
 
 const OVERDUE_KEY = 'outbox.time.overdueSince';
 
@@ -65,15 +86,30 @@ export function outboxStatusTone(status: string): OutboxTone {
   return STATUS_TONES[status] ?? 'neutral';
 }
 
-export function outboxActionLabel(actionType: string): string {
-  const key = ACTION_KEYS[actionType];
+export function outboxActionLabel(actionType: string, mutationKind?: string | null): string {
+  const key = (actionType === 'remote_mutation' && mutationKind && MUTATION_KEYS[mutationKind])
+    || ACTION_KEYS[actionType];
   return key ? t(key) : actionType;
 }
 
-export function outboxActionCanBeCancelled(actionType: string, status: string): boolean {
+export function outboxActionCanBeCancelled(
+  actionType: string,
+  status: string,
+  mutationKind?: string | null,
+): boolean {
+  // A queued Sent copy may hold the only bytes of a delivered mail.
+  if (isSyncAction(actionType)) return status === 'failed' && mutationKind !== 'append_sent';
   // Only mail that is known not to have reached the provider may be discarded.
-  return (actionType === 'remote_mutation' && status === 'failed') || actionType === 'send_message'
-    && ['pending', 'scheduled', 'failed'].includes(status);
+  return actionType === 'send_message' && ['pending', 'scheduled', 'failed'].includes(status);
+}
+
+/** What discarding a failed background action leaves behind. */
+export function syncActionDiscardHintKey(actionType: string, mutationKind?: string | null): string | null {
+  if (actionType === 'sync_draft') return 'outbox.draftDiscardHint';
+  if (actionType !== 'remote_mutation') return null;
+  if (mutationKind === 'append_sent') return 'outbox.sentCopyHint';
+  if (mutationKind === 'workflow_move' || mutationKind === 'blocked_move') return 'outbox.moveDiscardHint';
+  return 'outbox.changeDiscardHint';
 }
 
 /** Terminal delivery warnings may be acknowledged, never retried or discarded. */
@@ -92,7 +128,7 @@ export function outboxActionCanBeRetried(
   status: string,
   submissionStartedAt?: string | null,
 ): boolean {
-  if (actionType !== 'send_message') return actionType === 'remote_mutation' && status === 'failed';
+  if (actionType !== 'send_message') return isSyncAction(actionType) && status === 'failed';
   if (status === 'sending' || status === 'delivered') return false;
   if (status === 'delivery_unknown') return !submissionStartedAt;
   return true;

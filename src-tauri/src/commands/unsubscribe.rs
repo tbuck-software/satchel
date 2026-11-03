@@ -56,24 +56,20 @@ pub async fn unsubscribe(
     pool: tauri::State<'_, SqlitePool>,
     input: UnsubscribeInput,
 ) -> CommandResult<UnsubscribeResult> {
-    let row: Option<(String, Option<String>, Option<String>, String)> = sqlx::query_as(
-        "SELECT account_id, list_unsubscribe, list_unsubscribe_post, from_address
-         FROM messages WHERE id = ?",
-    )
-    .bind(&input.message_id)
-    .fetch_optional(pool.inner())
-    .await
-    .map_err(CommandError::unexpected)?;
-    let Some((account_id, list_unsub, list_unsub_post, _from)) = row else {
+    let row = satchel_core::db::messages::MessageReadRepository::new(pool.inner())
+        .unsubscribe_headers(&input.message_id)
+        .await
+        .map_err(CommandError::unexpected)?;
+    let Some(headers) = row else {
         return Err(CommandError::new(
             "backend.errors.unsubscribeMessageNotFound",
         ));
     };
-    let Some(list_unsub) = list_unsub else {
+    let Some(list_unsub) = headers.list_unsubscribe else {
         return Err(CommandError::new("backend.errors.unsubscribeHeaderMissing"));
     };
 
-    let plan = plan_unsubscribe(&list_unsub, list_unsub_post.as_deref()).await?;
+    let plan = plan_unsubscribe(&list_unsub, headers.list_unsubscribe_post.as_deref()).await?;
     let mut last_error = None;
     for action in plan {
         match action {
@@ -97,7 +93,7 @@ pub async fn unsubscribe(
                     body: parsed.body.unwrap_or_else(|| "unsubscribe".into()),
                     ..Default::default()
                 };
-                let mut action = build_send_action(account_id, outgoing, None)?;
+                let mut action = build_send_action(headers.account_id, outgoing, None)?;
                 // build_send_action marks immediate sends as 'sending' because the
                 // send_message command executes them in-line right after persisting.
                 // Here nobody executes the action — it must be 'pending' so the outbox

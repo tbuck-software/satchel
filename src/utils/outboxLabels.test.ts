@@ -11,6 +11,7 @@ import {
   outboxStatusTone,
   outboxTimeLabel,
   outboxVisibleCount,
+  syncActionDiscardHintKey,
 } from './outboxLabels';
 
 describe('outboxStatusLabel', () => {
@@ -44,6 +45,23 @@ describe('outboxActionLabel', () => {
     expect(outboxActionCanBeCancelled('remote_mutation', 'pending')).toBe(false);
     expect(outboxActionCanBeDismissed('send_message', 'delivered')).toBe(true);
     expect(outboxActionCanBeDismissed('send_message', 'delivery_unknown')).toBe(true);
+  });
+
+  it('names each failed background change and keeps a queued Sent copy', () => {
+    expect(outboxActionLabel('remote_mutation', 'flags')).toBe('Read or star status');
+    expect(outboxActionLabel('remote_mutation', 'workflow_move')).toBe('Move');
+    expect(outboxActionLabel('remote_mutation', 'unknown_kind')).toBe('Server sync');
+    expect(outboxActionLabel('sync_draft')).toBe('Save draft on server');
+    expect(outboxActionCanBeCancelled('remote_mutation', 'failed', 'delete')).toBe(true);
+    expect(outboxActionCanBeCancelled('sync_draft', 'failed')).toBe(true);
+    expect(outboxActionCanBeRetried('sync_draft', 'failed')).toBe(true);
+    expect(outboxActionCanBeCancelled('remote_mutation', 'failed', 'append_sent')).toBe(false);
+    expect(outboxActionCanBeRetried('remote_mutation', 'failed')).toBe(true);
+    expect(syncActionDiscardHintKey('remote_mutation', 'append_sent')).toBe('outbox.sentCopyHint');
+    expect(syncActionDiscardHintKey('remote_mutation', 'blocked_move')).toBe('outbox.moveDiscardHint');
+    expect(syncActionDiscardHintKey('remote_mutation', 'flags')).toBe('outbox.changeDiscardHint');
+    expect(syncActionDiscardHintKey('sync_draft')).toBe('outbox.draftDiscardHint');
+    expect(syncActionDiscardHintKey('send_message')).toBeNull();
   });
 
   it('uses retry copy that matches the queued operation', () => {

@@ -71,7 +71,7 @@ function openOutbox() {
         <p>{{ t('app.sync.failures.explanation') }}</p>
         <ul v-if="failures.length" class="sync-failures__list">
           <li v-for="item in failures" :key="item.id">
-            <strong>{{ item.subject || outboxActionLabel(item.action_type) }}</strong>
+            <strong>{{ item.subject || outboxActionLabel(item.action_type, item.mutation_kind) }}</strong>
             <span class="sync-failures__reason">{{ outboxErrorLabel(item.last_error) }}</span>
           </li>
         </ul>
