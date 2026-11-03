@@ -362,7 +362,8 @@
       },
       "openAsDraft": "Open as draft",
       "moveDiscardHint": "Discard stops retrying this move and returns the conversation to its last confirmed folder. It does not delete any email.",
-      "changeDiscardHint": "Discard stops retrying this change. The server keeps its current state, and the next sync shows it here again. It does not delete any email.",
+      "changeDiscardHint": "Discard stops retrying this change. The server keeps its current state.",
+      "deleteDiscardHint": "Discard stops retrying this deletion. Messages already removed from this device are not restored. Any remaining server copies are kept.",
       "draftDiscardHint": "Discard stops uploading this draft. The draft stays on this device.",
       "sentCopyHint": "This sent email may exist only in this entry, so it can be retried but not discarded."
     }
@@ -730,7 +731,8 @@
       },
       "openAsDraft": "Als Entwurf öffnen",
       "moveDiscardHint": "Verwerfen beendet die Wiederholungen dieses Verschiebens und zeigt die Unterhaltung im zuletzt bestätigten Ordner. Es löscht keine E-Mails.",
-      "changeDiscardHint": "Verwerfen beendet die Wiederholungen dieser Änderung. Der Server behält seinen Stand, und der nächste Abgleich zeigt ihn hier wieder. Es löscht keine E-Mails.",
+      "changeDiscardHint": "Verwerfen beendet die Wiederholungen dieser Änderung. Der Server behält seinen Stand.",
+      "deleteDiscardHint": "Verwerfen beendet die Löschversuche. Bereits von diesem Gerät entfernte Mails werden dabei nicht wiederhergestellt. Noch vorhandene Serverkopien bleiben erhalten.",
       "draftDiscardHint": "Verwerfen beendet das Hochladen dieses Entwurfs. Der Entwurf bleibt auf diesem Gerät.",
       "sentCopyHint": "Diese gesendete E-Mail liegt womöglich nur in diesem Eintrag vor. Deshalb lässt sich der Eintrag erneut versuchen, aber nicht verwerfen."
     }

@@ -95,8 +95,8 @@ async fn ensure_no_pending_move_except_receipt(
 }
 
 /// Give up a failed remote mutation or draft upload. The provider keeps its
-/// state and the next sync reconciles to it; a move also returns its thread to
-/// the confirmed folder. A Sent copy is never discarded: its payload may be
+/// state. Already removed local messages are not restored; a move returns its
+/// thread to the confirmed folder. A Sent copy is never discarded: its payload may be
 /// the only copy of the delivered mail.
 pub async fn discard_failed_sync_action(pool: &SqlitePool, id: &str) -> Result<bool, String> {
     let mut tx = pool

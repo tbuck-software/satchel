@@ -108,6 +108,7 @@ export function syncActionDiscardHintKey(actionType: string, mutationKind?: stri
   if (actionType === 'sync_draft') return 'outbox.draftDiscardHint';
   if (actionType !== 'remote_mutation') return null;
   if (mutationKind === 'append_sent') return 'outbox.sentCopyHint';
+  if (mutationKind === 'delete' || mutationKind === 'delete_draft') return 'outbox.deleteDiscardHint';
   if (mutationKind === 'workflow_move' || mutationKind === 'blocked_move') return 'outbox.moveDiscardHint';
   return 'outbox.changeDiscardHint';
 }

@@ -332,6 +332,17 @@ describe('OutboxView', () => {
     expect(wrapper.get('.move-discard-hint').text()).toContain('retried but not discarded');
   });
 
+  it.each(['delete', 'delete_draft'])('explains that discarding %s does not restore removed mail', async (mutationKind) => {
+    harness.outbox!.items = [makeItem({ id: 'delete', action_type: 'remote_mutation', mutation_kind: mutationKind, status: 'failed', recipients: [], last_error: 'timeout' })];
+    const wrapper = render();
+    await wrapper.get('.row').trigger('click');
+    expect(wrapper.get('.move-discard-hint').text()).toContain('Messages already removed from this device are not restored');
+    expect(wrapper.get('.move-discard-hint').text()).toContain('Any remaining server copies are kept');
+    expect(wrapper.get('.move-discard-hint').text()).not.toContain('the next sync');
+    await wrapper.get('.row').findAll('.row__fix .app-button')[1]!.trigger('click');
+    expect(harness.outbox!.cancel).toHaveBeenCalledWith('delete');
+  });
+
   it('retries a failed item once at a time and confirms success', async () => {
     harness.outbox!.items = [makeItem({ id: 'failed', status: 'failed', last_error: 'timeout' })];
     let resolveRetry!: () => void;

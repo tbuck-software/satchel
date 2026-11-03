@@ -1788,7 +1788,8 @@
     "attempts": "{count} attempt | {count} attempts",
     "cancelFailed": "Could not discard it: {error}",
     "cancelled": "Discarded from the outbox.",
-    "changeDiscardHint": "Discard stops retrying this change. The server keeps its current state, and the next sync shows it here again. It does not delete any email.",
+    "changeDiscardHint": "Discard stops retrying this change. The server keeps its current state.",
+    "deleteDiscardHint": "Discard stops retrying this deletion. Messages already removed from this device are not restored. Any remaining server copies are kept.",
     "detail": {
       "emptyDescription": "Pick an entry on the left to see its status and details.",
       "emptyTitle": "No entry selected"

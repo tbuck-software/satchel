@@ -1788,7 +1788,8 @@
     "attempts": "{count} Versuch | {count} Versuche",
     "cancelFailed": "Konnte nicht verworfen werden: {error}",
     "cancelled": "Aus dem Postausgang verworfen.",
-    "changeDiscardHint": "Verwerfen beendet die Wiederholungen dieser Änderung. Der Server behält seinen Stand, und der nächste Abgleich zeigt ihn hier wieder. Es löscht keine E-Mails.",
+    "changeDiscardHint": "Verwerfen beendet die Wiederholungen dieser Änderung. Der Server behält seinen Stand.",
+    "deleteDiscardHint": "Verwerfen beendet die Löschversuche. Bereits von diesem Gerät entfernte Mails werden dabei nicht wiederhergestellt. Noch vorhandene Serverkopien bleiben erhalten.",
     "detail": {
       "emptyDescription": "Wähle links einen Eintrag, um Status und Details zu sehen.",
       "emptyTitle": "Kein Eintrag ausgewählt"
