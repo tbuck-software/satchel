@@ -116,6 +116,7 @@ const undoKey = computed(() =>
       :aria-keyshortcuts="undoKey?.aria"
       @click="void runActive()"
     >
+      <span class="undo-fab__dial">
       <svg class="undo-fab__ring" viewBox="0 0 36 36" aria-hidden="true">
         <circle class="undo-fab__ring-track" cx="18" cy="18" :r="RING_RADIUS" />
         <circle
@@ -131,6 +132,13 @@ const undoKey = computed(() =>
         <path d="M3.5 6.5h6a3.2 3.2 0 010 6.4H6" />
         <path d="M6 3.5L3 6.5l3 3" />
       </AppIcon>
+      </span>
+      <!-- Phone: what happened and the word Undo, on the button itself, so
+           the whole receipt is one thumb target (as Mail, Gmail, Proton do). -->
+      <span v-if="props.variant === 'floating'" class="undo-fab__inline" aria-hidden="true">
+        <span class="undo-fab__label">{{ label }}</span>
+        <span class="undo-fab__action">{{ t('thread.actions.undo') }}</span>
+      </span>
     </button>
 
     <button
@@ -169,9 +177,30 @@ const undoKey = computed(() =>
 
 .undo-fab--floating {
   position: fixed;
-  /* Mirrors the compose FAB on the right: same lane, other side. */
+  /* Mirrors the compose FAB on the right: same lane, other side, and stops
+     short of it (FAB 56px + its 20px margin + a gap). */
   left: calc(20px + var(--satchel-safe-area-left));
   bottom: calc(20px + var(--satchel-tab-bar-inset, 0px) + var(--satchel-safe-area-bottom));
+  max-width: calc(100vw - 40px - 56px - var(--space-md) - var(--satchel-safe-area-left) - var(--satchel-safe-area-right));
+}
+
+.undo-fab--floating .undo-fab__main {
+  display: flex;
+  gap: var(--space-2xs);
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 48px;
+  padding: var(--space-2xs) var(--space-lg) var(--space-2xs) var(--space-2xs);
+}
+
+.undo-fab__inline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
 }
 
 .undo-fab--docked {
@@ -193,6 +222,11 @@ const undoKey = computed(() =>
   height: 36px;
   border: 0;
   box-shadow: none;
+}
+
+.undo-fab--docked .undo-fab__dial {
+  width: 36px;
+  height: 36px;
 }
 
 .undo-fab--docked .undo-fab__receipt {
@@ -229,6 +263,15 @@ const undoKey = computed(() =>
 
 .undo-fab__main:active {
   transform: translateY(0);
+}
+
+.undo-fab__dial {
+  position: relative;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 40px;
+  height: 40px;
 }
 
 .undo-fab__ring {
