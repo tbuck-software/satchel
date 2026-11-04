@@ -77,7 +77,6 @@ function reselect(id: string) {
 </template>
 
 <style scoped>
-<style scoped>
 .mobile-tab-bar :deep(.tab-bar__icon) {
   position: relative;
 }
