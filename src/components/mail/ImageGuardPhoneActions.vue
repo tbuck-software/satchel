@@ -2,7 +2,7 @@
 /**
  * The phone's half of the blocked-images notice. In a message it is Show
  * alone: the two "always allow" choices join the message's actions (its ⋯,
- * or the thread's nav-bar ⋯ for the newest message), reported through
+ * or the thread's More menu for the newest message), reported through
  * IMAGE_GUARD_CHOICES. Where no message provides that (the topic feed), they
  * keep a chevron joined to Show, each a 44pt row in a sheet.
  *

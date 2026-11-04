@@ -342,7 +342,7 @@ const messageMenu = computed<MessageMenu>(() => ({
 }));
 
 /*
- * In the thread reader the newest message hands its actions to the nav bar's
+ * In the thread reader the newest message hands its actions to the More menu's
  * ⋯, and only the messages the reader names keep a ⋯ beside their sender.
  */
 const threadMenu = inject(THREAD_MESSAGE_MENU, null);

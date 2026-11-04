@@ -208,17 +208,14 @@ beforeEach(() => {
 });
 
 describe('the phone thread\'s nav-bar ⋯', () => {
-  it('stands at the trailing edge of the nav bar, and the bottom bar has no More', async () => {
+  it('opens from More in the bottom bar, not from a ⋯ in the nav bar', async () => {
     const wrapper = render();
     await settle();
 
-    const bar = wrapper.get('.mobile-top-bar');
-    const menu = bar.get('[aria-label="More actions"]');
-    expect(bar.element.lastElementChild).toBe(menu.element);
-    expect(menu.classes()).toContain('mobile-menu-btn');
-    expect(menu.attributes('aria-haspopup')).toBe('dialog');
-    expect(menu.attributes('aria-expanded')).toBe('false');
-    expect(wrapper.get('.mobile-bar').text()).not.toContain('More');
+    expect(wrapper.get('.mobile-top-bar').find('[aria-haspopup]').exists()).toBe(false);
+    const more = wrapper.get('.mobile-bar [title="More actions"]');
+    expect(more.attributes('aria-haspopup')).toBe('dialog');
+    expect(more.attributes('aria-expanded')).toBe('false');
     wrapper.unmount();
   });
 
@@ -226,10 +223,10 @@ describe('the phone thread\'s nav-bar ⋯', () => {
     const wrapper = render();
     await settle();
 
-    await wrapper.get('.mobile-menu-btn').trigger('click');
+    await wrapper.get('.mobile-bar [title="More actions"]').trigger('click');
     await settle();
 
-    expect(wrapper.get('.mobile-menu-btn').attributes('aria-expanded')).toBe('true');
+    expect(wrapper.get('.mobile-bar [title="More actions"]').attributes('aria-expanded')).toBe('true');
     const sheet = wrapper.get('.thread-menu');
     expect(sheet.findAll('.thread-menu__heading').map((heading) => heading.text()))
       .toEqual(['This conversation', 'Latest message']);
@@ -243,7 +240,7 @@ describe('the phone thread\'s nav-bar ⋯', () => {
     expect(run).toHaveBeenCalledWith('source');
     expect(wrapper.find('.thread-menu').exists()).toBe(false);
 
-    await wrapper.get('.mobile-menu-btn').trigger('click');
+    await wrapper.get('.mobile-bar [title="More actions"]').trigger('click');
     await wrapper.findAll('.thread-menu .menu-item').find((row) => row.text() === 'Delete')!.trigger('click');
     await flushPromises();
     expect(harness.trash).toHaveBeenCalledWith(['thread-1']);

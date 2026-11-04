@@ -1,12 +1,12 @@
 <script setup lang="ts">
 /**
- * The phone thread's one overflow menu, opened from the ⋯ in its nav bar:
+ * The phone thread's one overflow menu, opened from More in its bottom bar:
  * what the conversation offers beyond the bottom bar, then the newest
  * message's actions — the commands, Show as and, while its images are
  * blocked, the always-allow choices. The message runs its own actions; this
  * sheet only lists them (MessageActionList.vue).
  *
- * Its own chunk, loaded on the first tap of the ⋯.
+ * Its own chunk, loaded on the first tap of More.
  */
 import AppIcon from '@/components/ui/AppIcon.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';

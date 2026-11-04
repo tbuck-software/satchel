@@ -128,7 +128,7 @@ const visibleMessages = computed(() => messageVisibility.value.visibleMessages);
 const draftMessages = computed(() => messageVisibility.value.draftMessages);
 
 /*
- * The phone's one overflow menu is the ⋯ in the nav bar: the thread's actions
+ * The phone's one overflow menu opens from More in the bottom bar: the thread's actions
  * and the newest message's, which that message reports here. Which other
  * messages keep a ⋯ beside their sender is inlineMessageMenuIds' rule.
  */
@@ -1030,15 +1030,6 @@ function showEntireThread() {
       <div class="mobile-top-meta">
         <span class="mobile-top-count">{{ $t('thread.row.messages', { count: sentMessageCount }) }}</span>
       </div>
-      <IconButton
-        class="mobile-menu-btn"
-        :title="$t('thread.toolbar.moreActions')"
-        aria-haspopup="dialog"
-        :aria-expanded="threadMenuOpen"
-        @click="threadMenuOpen = true"
-      >
-        <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>
-      </IconButton>
     </div>
 
     <!-- ═══ SCROLLABLE CONTENT ═══ -->
@@ -1179,6 +1170,8 @@ function showEntireThread() {
       @reply="replyThread"
       @toggle-read="void toggleReadState()"
       @snooze="snoozeThread"
+      :menu-open="threadMenuOpen"
+      @more="threadMenuOpen = true"
     />
 
     <!-- Stays mounted across a viewport change, like the sheet it replaced. -->
@@ -1354,17 +1347,7 @@ function showEntireThread() {
   background: var(--bg-hover);
 }
 
-.mobile-top-bar .mobile-menu-btn {
-  width: var(--touch-target);
-  height: var(--touch-target);
-  margin-inline-start: auto;
-  border-radius: var(--radius-md);
-  -webkit-tap-highlight-color: transparent;
-}
 
-.mobile-top-bar .mobile-menu-btn:active {
-  background: var(--bg-hover);
-}
 
 .mobile-top-meta {
   display: flex;

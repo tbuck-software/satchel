@@ -58,22 +58,25 @@ describe('ThreadMobileActions', () => {
     expect(wrapper.emitted('archive')).toBeUndefined();
   });
 
-  it('has no More: the thread\'s other actions are behind the nav bar\'s ⋯', () => {
+  it('opens the thread\'s one menu from More, under the thumb', async () => {
     const wrapper = mount(ThreadMobileActions, { props: baseProps });
 
-    expect(hasBar(wrapper, 'More')).toBe(false);
-    expect(wrapper.find('[aria-haspopup]').exists()).toBe(false);
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    const more = bar(wrapper, 'More');
+    expect(more.attributes('aria-haspopup')).toBe('dialog');
+    expect(more.attributes('aria-expanded')).toBe('false');
+    // The menu itself belongs to the thread view; the bar only asks for it.
     expect(document.body.querySelector('.sheet-panel')).toBeNull();
+    await more.trigger('click');
+    expect(wrapper.emitted('more')).toHaveLength(1);
   });
 
-  it('labels the three actions under their icons beside the Done pill', () => {
+  it('labels the four actions under their icons beside the Done pill', () => {
     const wrapper = mount(ThreadMobileActions, { props: baseProps });
 
-    // Three whole-cell buttons, icon over a short label…
+    // Four whole-cell buttons, icon over a short label…
     const cells = wrapper.findAll('.mobile-bar-actions > .toolbar-cell');
     expect(cells.map((cell) => cell.get('.toolbar-cell__label').text()))
-      .toEqual(['Reply', 'Read', 'Later']);
+      .toEqual(['More', 'Reply', 'Read', 'Later']);
     for (const cell of cells) {
       expect(cell.element.tagName).toBe('BUTTON');
       expect(cell.find('.toolbar-cell__icon svg').exists()).toBe(true);

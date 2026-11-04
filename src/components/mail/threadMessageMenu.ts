@@ -24,7 +24,7 @@ export type MessageMenuCommand = 'reply' | 'replyAll' | 'forward' | 'topic' | 's
 
 /**
  * What one message offers on the phone: its own ⋯ sheet and, for the newest
- * message, the thread's nav-bar sheet render the same list from this, and the
+ * message, the thread's More sheet render the same list from this, and the
  * message runs every command itself.
  */
 export interface MessageMenu {
@@ -39,8 +39,8 @@ export interface MessageMenu {
 
 /**
  * The thread reader's side (ThreadView.vue): which message hands its actions
- * to the nav bar's ⋯, which messages keep a ⋯ beside their sender, and the
- * menu the nav-bar message reported. Outside a thread every message keeps
+ * to the More menu, which messages keep a ⋯ beside their sender, and the
+ * menu the More-menu message reported. Outside a thread every message keeps
  * its own ⋯.
  */
 export interface ThreadMessageMenuHost {
@@ -53,7 +53,7 @@ export const THREAD_MESSAGE_MENU: InjectionKey<ThreadMessageMenuHost> = Symbol('
 
 /**
  * The messages that keep a ⋯ beside their sender, given the thread's messages
- * oldest first (drafts aside). A thread of one has its ⋯ in the nav bar only.
+ * oldest first (drafts aside). A thread of one has its menu behind More only.
  * In a longer thread every message keeps its own, the newest included: its
  * actions are in the nav-bar sheet as well, where a reader of the latest
  * reply looks first.

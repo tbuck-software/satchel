@@ -10,6 +10,8 @@ const props = defineProps<{
   isUnread: boolean;
   isDone: boolean;
   selectionCount?: number;
+  /** Whether the thread's menu (opened by More) is showing. */
+  menuOpen?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -18,16 +20,31 @@ const emit = defineEmits<{
   reply: [];
   toggleRead: [];
   snooze: [];
+  more: [];
 }>();
 </script>
 
 <template>
   <!-- ═══ MOBILE BOTTOM BAR ═══
-       Three labelled cells, icon over a short label and the whole cell the
-       target, beside the prominent Done pill. Everything else the thread
-       offers is behind the ⋯ in its nav bar (ThreadMenuSheet.vue). -->
+       Four labelled cells, icon over a short label and the whole cell the
+       target, beside the prominent Done pill. More opens the thread's one
+       menu (ThreadMenuSheet.vue): the conversation, its newest message and
+       that message's image choices. It sits here, under the thumb, rather
+       than as a ⋯ in the nav bar's far corner. -->
   <div v-if="props.visible" class="mobile-bar">
     <div class="mobile-bar-actions">
+      <ToolbarCell
+        class="bar-btn"
+        :label="$t('common.more')"
+        :title="$t('thread.toolbar.moreActions')"
+        aria-haspopup="dialog"
+        :aria-expanded="props.menuOpen ?? false"
+        @click="emit('more')"
+      >
+        <template #icon>
+          <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>
+        </template>
+      </ToolbarCell>
       <ToolbarCell
         v-if="props.canReply"
         class="bar-btn"

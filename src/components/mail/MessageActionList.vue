@@ -2,7 +2,7 @@
 /**
  * One message's actions on the phone, as rows: the commands, the body's
  * Original / Auto-dark / Text choice and, while its images are blocked, the
- * always-allow choices. The message's own ⋯ sheet and the thread's nav-bar
+ * always-allow choices. The message's own ⋯ sheet and the thread's More
  * sheet both render this; the message runs every command (see MessageMenu).
  *
  * Its own chunk: it loads with the first sheet that opens.
@@ -12,7 +12,7 @@ import type { MessageMenu, MessageMenuCommand } from './threadMessageMenu';
 
 const props = withDefaults(defineProps<{
   menu: MessageMenu;
-  /** The nav-bar sheet leaves Reply to the bottom bar. */
+  /** The More sheet leaves Reply to the bottom bar's own cell. */
   withReply?: boolean;
 }>(), { withReply: true });
 
