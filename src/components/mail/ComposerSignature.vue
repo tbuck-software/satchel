@@ -334,21 +334,6 @@ useDismissable(
   transform: rotate(180deg);
 }
 
-/* On a phone the menu rises from the bottom edge instead of hanging off a
-   button halfway up the screen, and stops being positioned by script so
-   nothing fights the pinning. */
-.sig-menu--sheet {
-  inset: auto 0 0 0;
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  max-height: 60vh;
-  padding-right: var(--satchel-safe-area-right);
-  padding-bottom: calc(5px + var(--satchel-safe-area-bottom));
-  padding-left: var(--satchel-safe-area-left);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-}
-
 /* Placed from JS against the button's viewport rect — see positionMenu(). */
 .sig-menu {
   position: fixed;
@@ -364,6 +349,27 @@ useDismissable(
   border-radius: var(--radius-md);
   background: var(--bg-overlay);
   box-shadow: var(--shadow-lg);
+}
+
+/* On a phone the menu rises from the bottom edge instead of hanging off a
+   button halfway up the screen, and stops being positioned by script so
+   nothing fights the pinning. After .sig-menu, whose width cap and padding
+   would otherwise win and shrink the sheet off the keyboard's edge. */
+.sig-menu--sheet {
+  inset: auto 0 0 0;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  /* The bottom padding carries the keyboard while it is up; the items keep
+     their 60vh on top of it, short of the navigation bar. */
+  max-height: min(
+    calc(60vh + var(--satchel-safe-area-bottom)),
+    calc(100vh - var(--satchel-safe-area-top) - 56px)
+  );
+  padding-right: var(--satchel-safe-area-right);
+  padding-bottom: calc(5px + var(--satchel-safe-area-bottom));
+  padding-left: var(--satchel-safe-area-left);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 .sig-menu-sep {

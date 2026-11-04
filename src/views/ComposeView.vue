@@ -2225,6 +2225,16 @@ textarea:focus {
   overflow: hidden;
 }
 
+/* The ⋯ panel hangs from the toolbar's left edge, not from the ⋯ button,
+   which would push it off the right edge of the screen. */
+.compose--phone .footer {
+  position: relative;
+}
+
+.compose--phone .more-settings {
+  position: static;
+}
+
 .compose--phone .recipient-row {
   grid-template-columns: var(--compose-label-w) minmax(0, 1fr);
 }
