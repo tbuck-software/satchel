@@ -20,3 +20,4 @@ keine Statusquelle.
 | 0011 | Plugins nach Contribution-Modell | angenommen |
 | 0012 | Frontend-Schichtung für Mail-Zustand | angenommen |
 | 0013 | Doppelt geführte Spalten im Mail-Modell | angenommen |
+| 0014 | Ausnahmen für abgelaufene Server-Zertifikate | angenommen |

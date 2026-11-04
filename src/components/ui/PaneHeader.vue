@@ -32,10 +32,11 @@ const ui = useUiStore();
          a back arrow is the more specific answer to "how do I leave". -->
     <div v-if="$slots.leading || (ui.isMobile && !noMenu)" class="pane-header__leading">
       <slot v-if="$slots.leading" name="leading" />
-      <IconButton v-else :title="$t('common.menu')" @click="ui.toggleMobileSidebar()">
+      <IconButton v-else class="pane-header__menu" :title="$t('common.menu')" @click="ui.toggleMobileSidebar()">
         <AppIcon size="lg">
           <path d="M2 4h12M2 8h12M2 12h12" />
         </AppIcon>
+        <span v-if="ui.drawerAttention" class="pane-header__menu-dot" aria-hidden="true" />
       </IconButton>
     </div>
     <div class="pane-header__copy">
@@ -52,6 +53,22 @@ const ui = useUiStore();
 </template>
 
 <style scoped>
+/* The dot says "look in the drawer"; the drawer says what. */
+.pane-header__menu {
+  position: relative;
+}
+
+.pane-header__menu-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--accent-orange);
+  box-shadow: 0 0 0 2px var(--bg-base);
+}
+
 .pane-header {
   display: flex;
   align-items: center;

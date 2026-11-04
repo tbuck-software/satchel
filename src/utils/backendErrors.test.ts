@@ -18,6 +18,20 @@ afterEach(() => {
 });
 
 describe('backend error translation', () => {
+  it('translates a keyed cause inside an envelope, as message or as reason', () => {
+    activate({ backend: { errors: {
+      accountSyncFailed: 'Sync for {account} failed: {message}',
+      imapConnectionFailed: 'Could not connect: {reason}',
+      tlsCertificateRejected: 'The certificate of {host} was not accepted.',
+    } } });
+    const cause = JSON.stringify({ key: 'backend.errors.tlsCertificateRejected', params: { host: 'mail.example.test' } });
+
+    expect(translateBackendError({ key: 'backend.errors.accountSyncFailed', params: { account: 'Work', message: cause } }))
+      .toBe('Sync for Work failed: The certificate of mail.example.test was not accepted.');
+    expect(translateBackendError({ key: 'backend.errors.imapConnectionFailed', params: { reason: cause } }))
+      .toBe('Could not connect: The certificate of mail.example.test was not accepted.');
+  });
+
   it('translates a known key with its parameters', () => {
     activate({ backend: { errors: { folderExists: 'Folder {path} exists', unexpected: 'Unexpected' } } });
 

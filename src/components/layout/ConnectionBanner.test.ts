@@ -132,4 +132,88 @@ describe('ConnectionBanner', () => {
       expect(connection.syncFailures).toEqual([]);
     });
   });
+  // One IMAP node behind a load balancer presented a certificate that had expired that morning;
+  // the banner showed a cut-off rustls error chain in red over the whole app.
+  describe('a rejected server certificate', () => {
+    const rejection = (fingerprint = '6D:39:A7:FC') => JSON.stringify({
+      key: 'backend.errors.tlsCertificateRejected',
+      params: {
+        protocol: 'imap',
+        host: 'gwimap.example.test',
+        port: '993',
+        reason: 'expired',
+        subject: 'gwimap-02.example.test',
+        issuer: 'GEANT TLS RSA 1',
+        notBefore: '2025-11-04T11:06:26Z',
+        notAfter: '2026-11-04T11:06:26Z',
+        fingerprint,
+        exceptionAllowed: true,
+      },
+    });
+
+    beforeEach(() => {
+      window.localStorage.clear();
+      useAccountsStore().accounts = [
+        { ...account('acc-work', 'tom@example.test', 'imap'), displayName: 'Work' },
+        account('acc-other', 'tom@other.example', 'imap'),
+      ];
+    });
+
+    it('names the account, the server and who has to act, in the warning tone', () => {
+      useConnectionStore().reportSyncFailures([syncFailure('acc-work', 'tom@example.test', rejection())]);
+      const wrapper = mount(ConnectionBanner);
+
+      const banner = wrapper.get('.banner');
+      expect(banner.classes()).toContain('banner--warning');
+      expect(banner.attributes('role')).toBe('status');
+      expect(wrapper.get('.banner__title').text()).toBe("Work: The mail server's certificate has expired");
+      expect(wrapper.get('.banner__detail').text()).toContain('gwimap.example.test has presented an expired certificate since');
+      expect(wrapper.text()).not.toContain('handshake');
+    });
+
+    it('stays hidden for that certificate once hidden, also after a restart', async () => {
+      const connection = useConnectionStore();
+      connection.reportSyncFailures([syncFailure('acc-work', 'tom@example.test', rejection())]);
+      const wrapper = mount(ConnectionBanner);
+
+      await wrapper.findAll('button').find((button) => button.text() === 'Hide')!.trigger('click');
+      expect(wrapper.find('.banner').exists()).toBe(false);
+
+      // The next run fails the same way: still nothing to see.
+      connection.reportSyncFailures([syncFailure('acc-work', 'tom@example.test', rejection())]);
+      await wrapper.vm.$nextTick();
+      expect(wrapper.find('.banner').exists()).toBe(false);
+
+      // A fresh app with the same certificate rejected.
+      setActivePinia(createPinia());
+      useAccountsStore().accounts = [{ ...account('acc-work', 'tom@example.test', 'imap'), displayName: 'Work' }];
+      useConnectionStore().reportSyncFailures([syncFailure('acc-work', 'tom@example.test', rejection())]);
+      expect(mount(ConnectionBanner).find('.banner').exists()).toBe(false);
+    });
+
+    it('comes back for a different certificate', async () => {
+      const connection = useConnectionStore();
+      connection.reportSyncFailures([syncFailure('acc-work', 'tom@example.test', rejection())]);
+      const wrapper = mount(ConnectionBanner);
+      await wrapper.findAll('button').find((button) => button.text() === 'Hide')!.trigger('click');
+
+      connection.reportSyncFailures([syncFailure('acc-work', 'tom@example.test', rejection('AA:BB:CC'))]);
+      await wrapper.vm.$nextTick();
+
+      expect(wrapper.find('.banner--warning').exists()).toBe(true);
+    });
+
+    it('leaves other failures to the danger banner, without the certificate', () => {
+      useConnectionStore().reportSyncFailures([
+        syncFailure('acc-work', 'tom@example.test', rejection()),
+        syncFailure('acc-other', 'tom@other.example', 'imap tcp connect timed out'),
+      ]);
+      const wrapper = mount(ConnectionBanner);
+
+      expect(wrapper.findAll('.banner')).toHaveLength(1);
+      expect(wrapper.get('.banner').classes()).toContain('banner--danger');
+      expect(wrapper.get('.banner__detail').text()).toContain('tom@other.example');
+      expect(wrapper.get('.banner__detail').text()).not.toContain('gwimap');
+    });
+  });
 });

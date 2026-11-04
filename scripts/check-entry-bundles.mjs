@@ -22,9 +22,13 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * startup, add 1.1 KiB (100.5 KiB, initial 233.8 KiB).
  * Main 102 / 236 KiB since 2026-11-01: main measured 100.9 / 234.8 KiB; the
  * composer's conflict close and the command-failure log line add 0.2 / 0.4 KiB
- * (101.1 / 235.2 KiB). Loading the log line lazily saved under 0.2 KiB. */
+ * (101.1 / 235.2 KiB). Loading the log line lazily saved under 0.2 KiB.
+ * Initial 238 KiB since 2026-11-04: main measured 101.5 / 235.9 KiB; the
+ * certificate notices (banner, details, exception) add 1.26 KiB to the German
+ * catalogue and nothing to the entry, because their code loads with the
+ * connection banner (101.5 / 237.3 KiB). */
 const budgets = {
-  'index.html': { entryGzip: 102 * 1024, initialGzip: 236 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
+  'index.html': { entryGzip: 102 * 1024, initialGzip: 238 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 124 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };

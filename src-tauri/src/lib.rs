@@ -241,6 +241,13 @@ pub fn run() {
             // Before any worker can call a provider: a block recorded by an
             // earlier run is still running on the server, and knocking renews it.
             tauri::async_runtime::block_on(sync::rate_limit_state::restore(&pool));
+            // Before the first handshake too: IDLE and body fetches connect
+            // without waiting for a sync run.
+            if let Err(error) =
+                tauri::async_runtime::block_on(satchel_core::providers::tls_trust::refresh(&pool))
+            {
+                tracing::warn!(error = %error, "certificate exceptions could not be loaded");
+            }
             commands::sources::spawn_rss_worker(pool.clone(), state.events.clone());
 
             let app_handle = app.handle().clone();
@@ -830,6 +837,9 @@ pub fn run() {
             commands::blocked_senders::list_blocked_senders,
             commands::blocked_senders::block_sender,
             commands::blocked_senders::unblock_sender,
+            commands::tls_exceptions::list_certificate_exceptions,
+            commands::tls_exceptions::trust_expired_certificate,
+            commands::tls_exceptions::revoke_certificate_exception,
             commands::smart_folders::list_smart_folders,
             commands::smart_folders::upsert_smart_folder,
             commands::smart_folders::delete_smart_folder,

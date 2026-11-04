@@ -40,6 +40,9 @@ vi.mock('@/stores/threads', () => ({
   useThreadsStore: () => ({ load: vi.fn(), threads: [] }),
 }));
 vi.mock('@/stores/ui', () => ({ useUiStore: () => ({ openAccountSetup: vi.fn() }) }));
+vi.mock('@/stores/certificateTrust', () => ({
+  useCertificateTrustStore: () => ({ problemFor: () => null, exceptionFor: () => null, openDetails: vi.fn() }),
+}));
 
 vi.mock('./AccountVisibilitySettings.vue', () => ({ default: { template: '<div />' } }));
 

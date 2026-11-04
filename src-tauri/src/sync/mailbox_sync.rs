@@ -1063,6 +1063,12 @@ pub(crate) async fn sync_mailboxes(
 
     let mut summary = MailboxSyncSummary::default();
 
+    // An exception granted in another process (the app, while this is a
+    // mobile background worker) has to be known before the first handshake.
+    if let Err(error) = satchel_core::providers::tls_trust::refresh(pool).await {
+        tracing::warn!(error = %error, "certificate exceptions could not be loaded");
+    }
+
     for account_id in account_ids {
         let result = account_run_exclusive(&account_id, ACCOUNT_SYNC_TIMEOUT, async {
         // Re-reading under the lock prevents a concurrent run from restoring a
@@ -1085,6 +1091,19 @@ pub(crate) async fn sync_mailboxes(
         if crate::sync::is_seeded_demo_account(&account.id, &account.email) {
             return Ok(());
         }
+        // The Inbox is polled every few seconds; the log hears about a
+        // failure when it starts or changes, and about the recovery.
+        let (previously_failed, previous_failure) =
+            sqlx::query_as::<_, (Option<String>, Option<String>)>(
+                "SELECT sync_status, last_sync_error FROM accounts WHERE id = ?",
+            )
+            .bind(&account.id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(status, error)| (status.as_deref() == Some("error"), error))
+            .unwrap_or_default();
 
         #[cfg(target_os = "android")]
         let cross_process_lease = match CrossProcessSyncLease::acquire(pool, &account.id).await? {
@@ -1687,6 +1706,10 @@ pub(crate) async fn sync_mailboxes(
                 backfill_remaining_messages,
                 backfill_total_messages,
             )) => {
+                if previously_failed {
+                    tracing::info!(account_id = %account.id, provider = %account.provider,
+                        "account sync recovered");
+                }
                 summary.accounts_synced += 1;
                 summary.folders_synced += folders_synced;
                 summary.messages_synced += messages_synced;
@@ -1699,6 +1722,14 @@ pub(crate) async fn sync_mailboxes(
             Err(error) => {
                 let now = chrono::Utc::now().to_rfc3339();
                 let failure = encoded_account_sync_failure(&account.email, &account.id, &error);
+                // The UI shows the translated form; the log is where the
+                // server's own words and the timing survive.
+                if previously_failed && previous_failure.as_deref() == Some(failure.as_str()) {
+                    tracing::debug!(account_id = %account.id, "account sync still failing");
+                } else {
+                    tracing::warn!(account_id = %account.id, provider = %account.provider,
+                        error = %error, "account sync failed");
+                }
                 let _ = sqlx::query(
                     "UPDATE accounts
                      SET sync_status = 'error',
@@ -1725,6 +1756,7 @@ pub(crate) async fn sync_mailboxes(
         Ok(())
         }).await;
         if let Err(error) = result {
+            tracing::warn!(account_id = %account_id, error = %error, "account sync failed");
             let now = chrono::Utc::now().to_rfc3339();
             let failure = encoded_account_sync_failure(&account_id, &account_id, &error);
             let _ = sqlx::query(
@@ -1746,6 +1778,11 @@ pub(crate) async fn sync_mailboxes(
     // A block earned during this run has to outlive the process, or the next
     // start knocks on it and renews it.
     crate::sync::rate_limit_state::persist(pool).await;
+
+    // A server that presents a valid certificate again needs no exception.
+    if let Err(error) = satchel_core::providers::tls_trust::settle(pool).await {
+        tracing::warn!(error = %error, "certificate exceptions could not be settled");
+    }
 
     // Re-publish any durable intents left behind by a process exit between
     // message ingestion and native delivery. The renderer uses the message id,
