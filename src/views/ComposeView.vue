@@ -2256,6 +2256,9 @@ textarea:focus {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* Room inside the clip for the body's focus edge, given back outside. */
+  padding-inline: var(--space-sm);
+  margin-inline: calc(-1 * var(--space-sm));
 }
 
 .compose--phone .compose-fold {
@@ -2291,6 +2294,12 @@ textarea:focus {
   overflow: visible;
   -webkit-mask-image: none;
   mask-image: none;
+}
+
+/* Where typing goes, as for the fields above: the body has no rule of its
+   own, so a thin accent edge marks it while it holds the focus. */
+.compose--phone .body:focus-within {
+  box-shadow: -6px 0 0 -4px var(--accent-primary);
 }
 
 /* The signature follows the last written line, not the bottom of the screen;
