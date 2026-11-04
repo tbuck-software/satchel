@@ -563,6 +563,21 @@ describe('InboxView', () => {
     expect(harness.ui!.openMailboxSwitcher).toHaveBeenCalledOnce();
   });
 
+  it('keeps the phone search folded behind a title-row button until it is used', async () => {
+    setup({ mobile: true, singlePane: true });
+
+    const wrapper = render();
+    const bar = wrapper.get('.list-search-bar');
+    // Folded, the field gives its row to the list and is out of reach.
+    expect(bar.classes()).toContain('inbox-search--collapsed');
+    expect(bar.attributes('inert')).toBeDefined();
+
+    await wrapper.get('.large-title [title="common.search"]').trigger('click');
+    expect(bar.classes()).not.toContain('inbox-search--collapsed');
+    expect(bar.attributes('inert')).toBeUndefined();
+    expect(wrapper.get('.large-title').isVisible()).toBe(false);
+  });
+
   it('offers account and layout filtering in one list filter menu', async () => {
     setup({
       accounts: [

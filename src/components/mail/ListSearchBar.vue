@@ -18,7 +18,11 @@ import { useUiStore } from '@/stores/ui';
 const props = defineProps<{
   /** The list's name, for the placeholder: "Search Inbox…". */
   mailboxLabel: string;
+  /** Opened on purpose (the phone's search button): offer Cancel before a query exists. */
+  cancelable?: boolean;
 }>();
+
+const emit = defineEmits<{ cancel: [] }>();
 
 const store = useListSearchStore();
 const ui = useUiStore();
@@ -53,6 +57,7 @@ function enterResults(event: KeyboardEvent) {
 function cancel() {
   store.clear();
   input.value?.blur();
+  emit('cancel');
 }
 
 function clear() {
@@ -86,7 +91,7 @@ function clear() {
     </SearchInput>
     <!-- While a search runs on the phone, Cancel (as on iOS) takes the
          filter's place: the way out of the search, not into a menu. -->
-    <AppButton v-if="ui.isMobile && store.active" variant="ghost" size="sm" @click="cancel">
+    <AppButton v-if="ui.isMobile && (store.active || props.cancelable)" variant="ghost" size="sm" @click="cancel">
       {{ $t('common.cancel') }}
     </AppButton>
     <slot v-else />

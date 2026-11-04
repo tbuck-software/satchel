@@ -13,6 +13,7 @@ import { useComposerStore } from '@/stores/composer';
 import { useConnectionStore } from '@/stores/connection';
 import { useSettingsStore } from '@/stores/settings';
 import { useListSearchStore } from '@/stores/listSearch';
+import { focusListSearch } from '@/composables/listSearchFocus';
 import { useThreadsStore, type NewSenderDomainSuggestion, type NewSenderGroup } from '@/stores/threads';
 import { useTopicsStore } from '@/stores/topics';
 import { THREAD_LIST_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
@@ -414,6 +415,37 @@ const listScope = computed(() => {
 
 // ── List search: the field above the list narrows it in place ──
 const searchActive = computed(() => listSearch.active && !activeBundle.value);
+
+/*
+ * Phone: the search field waits behind a button in the title row and takes
+ * the whole row when used, so the list keeps that row the rest of the time.
+ * The collapsed bar stays in the DOM: iOS only raises the keyboard for a
+ * focus() inside the tap itself, and a field that mounts a tick later misses it.
+ */
+const phoneSearchOpen = ref(false);
+const phoneSearchShown = computed(() => ui.isMobile && (searchActive.value || phoneSearchOpen.value));
+const phoneSearchCollapsed = computed(() => ui.isMobile && !phoneSearchShown.value);
+const searchBarRef = ref<{ $el: HTMLElement } | null>(null);
+
+function openPhoneSearch() {
+  const bar = searchBarRef.value?.$el;
+  bar?.removeAttribute('inert');
+  focusListSearch();
+  phoneSearchOpen.value = true;
+}
+
+function closePhoneSearch() {
+  phoneSearchOpen.value = false;
+}
+
+/** Leaving an empty search folds the field back behind its button. */
+function onSearchFocusOut(event: FocusEvent) {
+  if (!ui.isMobile || listSearch.active) return;
+  const bar = searchBarRef.value?.$el;
+  const next = event.relatedTarget as Node | null;
+  if (bar && next && bar.contains(next)) return;
+  phoneSearchOpen.value = false;
+}
 const searchMailbox = computed(() => ({
   accountId: accounts.activeAccountId,
   workflowFilter: threads.workflowFilter,
@@ -893,7 +925,7 @@ function acceptExistingSenders() {
            the filter sits beside it; a running search takes the screen. -->
       <LargeTitleHeader
         v-if="!activeBundle && ui.isMobile"
-        v-show="!searchActive"
+        v-show="!phoneSearchShown"
         class="inbox-large-title"
         :title="listTitle"
         :subtitle="listScope"
@@ -901,6 +933,9 @@ function acceptExistingSenders() {
         @switch="ui.openMailboxSwitcher()"
       >
         <template #actions>
+          <IconButton size="lg" :title="$t('common.search')" @click="openPhoneSearch">
+            <AppIcon size="lg"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></AppIcon>
+          </IconButton>
           <ListFilterMenu :show-layout="!folderViewActive" />
         </template>
       </LargeTitleHeader>
@@ -951,7 +986,16 @@ function acceptExistingSenders() {
         </template>
       </PaneHeader>
 
-      <ListSearchBar v-if="!activeBundle" :mailbox-label="listTitle" :class="{ 'inbox-search--app-bar': ui.isMobile && searchActive }">
+      <ListSearchBar
+        v-if="!activeBundle"
+        ref="searchBarRef"
+        :mailbox-label="listTitle"
+        :cancelable="phoneSearchOpen"
+        :class="{ 'inbox-search--app-bar': phoneSearchShown, 'inbox-search--collapsed': phoneSearchCollapsed }"
+        :inert="phoneSearchCollapsed || undefined"
+        @cancel="closePhoneSearch"
+        @focusout="onSearchFocusOut"
+      >
         <ListFilterMenu v-if="!ui.isMobile" :show-layout="!folderViewActive" />
       </ListSearchBar>
 
@@ -1213,5 +1257,12 @@ function acceptExistingSenders() {
 /* The search field as app bar sits under the status bar like a title would. */
 .inbox-search--app-bar {
   padding-top: var(--space-sm);
+}
+
+/* Folded behind the title row's search button; still focusable (see openPhoneSearch). */
+.inbox-search--collapsed {
+  height: 0;
+  padding-block: 0;
+  overflow: hidden;
 }
 </style>
