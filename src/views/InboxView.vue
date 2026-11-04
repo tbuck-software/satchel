@@ -19,7 +19,7 @@ import { useTopicsStore } from '@/stores/topics';
 import { THREAD_LIST_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
 import { useFollowUpsStore } from '@/stores/followUps';
 import { formatListTime } from '@/utils/listTime';
-import { NEW_SENDER_PREVIEW_LIMIT } from '@/utils/threadList';
+import { NEW_SENDER_PREVIEW_LIMIT, layoutPhoneInbox } from '@/utils/threadList';
 import type { WorkflowState } from '@/types/workflow';
 import SmartBucketIcon from '@/components/mail/SmartBucketIcon.vue';
 import ThreadGroupList from '@/components/mail/ThreadGroupList.vue';
@@ -152,9 +152,12 @@ const smartInboxActive = computed(() =>
     && !laterViewActive.value
     && (settings.inboxGroupingMode === 'smart' || Boolean(activeBucket.value)),
 );
-const listItems = computed(() =>
-  smartInboxActive.value ? threads.smartListEntries : threads.listEntries,
-);
+const listItems = computed(() => {
+  if (!smartInboxActive.value) return threads.listEntries;
+  // The phone folds Priority to two rows; keyboard targets read this list,
+  // so they follow the same rows the list renders.
+  return ui.isMobile ? layoutPhoneInbox(threads.smartListEntries) : threads.smartListEntries;
+});
 // The topics folder lives inside the smart folder section when there is one;
 // otherwise (classic list, empty smart inbox) it keeps its spot above the list.
 const smartFolderRowVisible = computed(() =>
@@ -1059,6 +1062,7 @@ function acceptExistingSenders() {
           :active-group-id="activeBundle?.id"
           :sender-review-setup-complete="Boolean(settings.senderReviewStartedAt)"
           :new-senders-expanded="ui.newSendersExpanded"
+          :phone-layout="ui.isMobile"
           :bulk-busy="bulkBusy"
           :topics="topicsStore.activeTopics"
           @load-more="void threads.loadMore()"

@@ -3337,6 +3337,7 @@
       "loading": "Loading emails",
       "markAllRead": "Mark all read",
       "morePriority": "+{count} more email | +{count} more emails",
+      "morePriorityRow": "{count} more priority email | {count} more priority emails",
       "showAllPriority": "Show all priority emails",
       "smartGroups": "Smart inbox groups",
       "unreadCount": "{count} unread"

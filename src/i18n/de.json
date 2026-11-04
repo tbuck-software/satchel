@@ -3337,6 +3337,7 @@
       "loading": "E-Mails werden geladen",
       "markAllRead": "Alle gelesen",
       "morePriority": "+{count} weitere E-Mail | +{count} weitere E-Mails",
+      "morePriorityRow": "{count} weitere Prioritäts-E-Mail | {count} weitere Prioritäts-E-Mails",
       "showAllPriority": "Alle Prioritäts-E-Mails anzeigen",
       "smartGroups": "Smart Inbox Gruppen",
       "unreadCount": "{count} ungelesen"
