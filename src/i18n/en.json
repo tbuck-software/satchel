@@ -869,7 +869,9 @@
     "status": {
       "draftSaved": "Draft saved.",
       "draftSavedRemotePending": "Draft saved. Sync with the server is still pending: {error}",
+      "offline": "You're offline. Send puts the message in the Outbox; it goes out when you're back online.",
       "queued": "Queued in the outbox in the background.",
+      "queuedOffline": "You're offline. The message is in the Outbox and will be sent when you're back online.",
       "saveFailed": "Saving failed: {error}",
       "scheduledFor": "Scheduled for {time}.",
       "sendFailed": "Sending failed: {error}",

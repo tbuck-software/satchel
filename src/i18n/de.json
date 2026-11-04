@@ -869,7 +869,9 @@
     "status": {
       "draftSaved": "Entwurf gespeichert.",
       "draftSavedRemotePending": "Entwurf gespeichert. Abgleich mit dem Server steht aus: {error}",
+      "offline": "Du bist offline. Senden legt die Nachricht in den Postausgang; sie geht raus, sobald du wieder online bist.",
       "queued": "Im Hintergrund in den Postausgang eingereiht.",
+      "queuedOffline": "Du bist offline. Die Nachricht liegt im Postausgang und wird gesendet, sobald du wieder online bist.",
       "saveFailed": "Speichern fehlgeschlagen: {error}",
       "scheduledFor": "Eingeplant für {time}.",
       "sendFailed": "Senden fehlgeschlagen: {error}",

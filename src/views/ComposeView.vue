@@ -12,6 +12,7 @@ import type {
   BackendSendMessageResult,
 } from '@/types/composer';
 import { useAccountsStore } from '@/stores/accounts';
+import { useConnectionStore } from '@/stores/connection';
 import { useAliasesStore } from '@/stores/aliases';
 import { useDraftsStore } from '@/stores/drafts';
 import { bodyHtmlWithInlineImages, useMessagesStore } from '@/stores/messages';
@@ -140,6 +141,9 @@ const attachments = ref<BackendOutgoingAttachment[]>([]);
 const sending = ref(false);
 const discarding = ref(false);
 const status = ref<ComposerStatus | null>(null);
+// Without a network a send only reaches the Outbox; say so before and after.
+const connection = useConnectionStore();
+const offline = computed(() => !connection.online);
 const scheduledFor = ref<string | null>(null);
 const scheduleClock = useActionClock(() => scheduledFor.value !== null);
 const followUpAt = ref<string | null>(null);
@@ -1032,7 +1036,7 @@ async function send() {
       emit('sent');
       await leaveAfterSend(result, { name: 'inbox' });
     } else {
-      status.value = { tone: 'info', text: t('compose.status.queued') };
+      status.value = { tone: 'info', text: t(offline.value ? 'compose.status.queuedOffline' : 'compose.status.queued') };
       // With an undo window the native `outbox:undo-window` event raises the
       // Undo toast; a second toast would only repeat it.
       if (!result.undo_until) announceAfterClose('info', status.value.text);
@@ -1419,6 +1423,7 @@ defineExpose({
     />
 
     <footer ref="footerRef" class="footer">
+      <p v-if="offline && !status" class="status status--warning" role="status">{{ $t('compose.status.offline') }}</p>
       <div v-if="status" class="status-block">
         <p
           class="status"
