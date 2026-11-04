@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { flushPromises, mount } from '@vue/test-utils';
+import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { nextTick } from 'vue';
@@ -24,8 +24,9 @@ function setup(accountCount = 2) {
 }
 
 describe('ListFilterMenu scope chip', () => {
-  it('names the chosen account only when one of several is chosen', async () => {
-    const { wrapper, accounts } = setup();
+  it('names the chosen account on the phone only when one of several is chosen', async () => {
+    const { wrapper, accounts, ui } = setup();
+    ui.isMobile = true;
     expect(wrapper.find('.list-filter-menu__scope').exists()).toBe(false);
 
     accounts.setActiveAccount('personal');
@@ -37,6 +38,7 @@ describe('ListFilterMenu scope chip', () => {
     wrapper.unmount();
 
     const single = setup(1);
+    single.ui.isMobile = true;
     single.accounts.setActiveAccount('work');
     await nextTick();
     expect(single.wrapper.find('.list-filter-menu__scope').exists()).toBe(false);
@@ -55,18 +57,13 @@ describe('ListFilterMenu scope chip', () => {
     wrapper.unmount();
   });
 
-  it('opens the filter menu with its account section on the desktop', async () => {
+  it('leaves the scope to the sidebar on the desktop', async () => {
     const { wrapper, accounts, ui } = setup();
     ui.isMobile = false;
     accounts.setActiveAccount('work');
     await nextTick();
 
-    await wrapper.get('.list-filter-menu__scope').trigger('click');
-    await vi.dynamicImportSettled();
-    await flushPromises();
-
-    expect(ui.mailboxSwitcherOpen).toBe(false);
-    expect(document.body.querySelector('[role="menu"]')?.textContent).toContain('Personal');
+    expect(wrapper.find('.list-filter-menu__scope').exists()).toBe(false);
     wrapper.unmount();
   });
 });

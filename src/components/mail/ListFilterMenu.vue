@@ -25,11 +25,12 @@ const accounts = useAccountsStore();
 const ui = useUiStore();
 
 /*
- * The chosen account as a chip before the filter button, only when one of
- * several is chosen ("All accounts" has nothing to point at). It opens the
- * account choice: the mailbox sheet on the phone, this menu on the desktop.
+ * The phone's chosen account as a chip before the filter button, only when
+ * one of several is chosen ("All accounts" has nothing to point at); it opens
+ * the mailbox sheet. The desktop sidebar already marks the scope in view, and
+ * a chip there only repeated it and narrowed the search field.
  */
-const scope = computed(() => (accounts.emailAccounts.length > 1 ? accounts.activeAccount : undefined));
+const scope = computed(() => (ui.isMobile && accounts.emailAccounts.length > 1 ? accounts.activeAccount : undefined));
 
 const anchor = ref<AnchorBox | null>(null);
 let trigger: HTMLElement | null = null;
@@ -61,7 +62,7 @@ function closeMenu() {
       :dot="scope.color"
       :aria-pressed="undefined"
       aria-haspopup="true"
-      @click="ui.isMobile ? ui.openMailboxSwitcher() : openMenu($event)"
+      @click="ui.openMailboxSwitcher()"
     />
     <IconButton
       class="list-filter-menu__trigger"
