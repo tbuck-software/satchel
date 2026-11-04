@@ -795,6 +795,7 @@
       "backspaceAgain": "{address} ausgewählt. Erneut Rücktaste drücken, um die Adresse zu entfernen.",
       "bccPlaceholder": "Name oder E-Mail",
       "ccBcc": "Cc/Bcc",
+      "ccBccFrom": "Cc/Bcc, Von:",
       "ccPlaceholder": "Name oder E-Mail",
       "collapseCcBcc": "Cc und Bcc einklappen",
       "invalid": "Das ist keine gültige E-Mail-Adresse.",

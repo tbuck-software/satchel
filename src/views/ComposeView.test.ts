@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { defineComponent, h, ref } from 'vue';
-import { createPinia } from 'pinia';
+import { createPinia, setActivePinia } from 'pinia';
 import { EditorContent } from '@tiptap/vue-3';
 import type { Editor } from '@tiptap/vue-3';
 import { flushPromises, mount } from '@vue/test-utils';
@@ -170,6 +170,7 @@ vi.mock('@/composables/useToast', () => ({
 }));
 
 import ComposeView from './ComposeView.vue';
+import { useUiStore } from '@/stores/ui';
 
 const DRAFT_BODY = 'The quarterly figures are attached.';
 
@@ -932,4 +933,102 @@ it.each(['restored', 'tick', 'submit'])('blocks an expired schedule on %s', asyn
   expect(sendButton(wrapper).attributes('disabled')).toBeUndefined();
   wrapper.unmount();
   vi.useRealTimers();
+});
+
+describe('phone composer', () => {
+  const focusCc = vi.fn();
+  const RecipientChipsStub = defineComponent({
+    name: 'RecipientChips',
+    props: { modelValue: { type: Array, default: () => [] }, inputId: String, label: String, placeholder: String },
+    setup(props, { expose }) {
+      expose({ focus: () => { if (props.inputId?.startsWith('compose-cc')) focusCc(); } });
+      return () => h('recipient-chips-stub', { 'data-input-id': props.inputId });
+    },
+  });
+
+  function renderPhone(props: Partial<InstanceType<typeof ComposeView>['$props']> = {}) {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    useUiStore().isMobile = true;
+    return mount(ComposeView, {
+      attachTo: document.body,
+      props: { embedded: true, initialTo: ['boss@example.com'], initialBody: DRAFT_BODY, ...props },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          AttachmentDropZone: true,
+          ComposerSignature: true,
+          ComposerThreadContext: true,
+          RecipientChips: RecipientChipsStub,
+          RichTextEditor: true,
+          SegmentedControl: true,
+          SendLaterMenu: true,
+          TemplatePicker: true,
+        },
+      },
+    });
+  }
+
+  function fieldOrder(wrapper: ReturnType<typeof renderPhone>) {
+    return wrapper.findAll('select.sender-select, recipient-chips-stub, .compose-subject, .plain-editor')
+      .map((field) => field.element.tagName === 'RECIPIENT-CHIPS-STUB'
+        ? field.attributes('data-input-id')!.replace(/^compose-(\w+)-.*$/, '$1')
+        : field.element.tagName);
+  }
+
+  it('scrolls fields and body as one column', async () => {
+    const wrapper = renderPhone();
+    await flushPromises();
+
+    expect(wrapper.get('.compose').classes()).toContain('compose--phone');
+    const column = wrapper.get('[data-testid="compose-scroll"]');
+    for (const selector of ['.recipient-row', '.subject-row', '.body', '.plain-editor']) {
+      expect(column.find(selector).exists()).toBe(true);
+    }
+    // Send stays docked below the column, above the keyboard.
+    expect(column.find('.footer').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('folds Cc, Bcc and From into one row under To that opens onto Cc', async () => {
+    const wrapper = renderPhone();
+    await flushPromises();
+
+    const summary = wrapper.get('[data-testid="compose-fold-summary"]');
+    expect(summary.text()).toBe('Cc/Bcc, From: me@example.com');
+    const fold = wrapper.get('[data-testid="compose-fold"]');
+    expect(fold.classes()).toContain('compose-fold--closed');
+    expect(fold.attributes('inert')).toBeDefined();
+    // Folded, the From picker no longer heads the form.
+    expect(fieldOrder(wrapper)).toEqual(['to', 'cc', 'bcc', 'SELECT', 'INPUT', 'TEXTAREA']);
+    expect(wrapper.find('.cc-link').exists()).toBe(false);
+
+    await summary.trigger('click');
+
+    expect(focusCc).toHaveBeenCalledTimes(1);
+    expect(fold.classes()).not.toContain('compose-fold--closed');
+    expect(fold.attributes('inert')).toBeUndefined();
+    expect(wrapper.find('[data-testid="compose-fold-summary"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('shows the rows unfolded when Cc or Bcc already hold recipients', async () => {
+    const wrapper = renderPhone({ initialCc: ['copy@example.com'] });
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="compose-fold-summary"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="compose-fold"]').attributes('inert')).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('keeps the desktop form as it was', async () => {
+    const wrapper = render(['boss@example.com'], true);
+    await flushPromises();
+
+    expect(wrapper.get('.compose').classes()).not.toContain('compose--phone');
+    expect(wrapper.find('[data-testid="compose-fold-summary"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="compose-fold"]').exists()).toBe(false);
+    expect(wrapper.find('.cc-link').exists()).toBe(true);
+    wrapper.unmount();
+  });
 });
