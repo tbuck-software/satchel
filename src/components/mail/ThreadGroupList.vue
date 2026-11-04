@@ -1301,6 +1301,20 @@ onBeforeUnmount(() => {
   transform: rotate(180deg);
 }
 
+/* Touch: the chevron at the far end of the toggle sat a few pixels from
+   Review, so a thumb aimed at one hit the other. It moves beside the count,
+   where it reads as part of the title the whole row toggles, and a clear gap
+   separates the row from Review, whose own hit area is 44px tall. */
+@media (pointer: coarse) {
+  .review-card__banner {
+    gap: var(--space-md);
+  }
+
+  .review-card__chevron {
+    margin-left: 0;
+  }
+}
+
 .review-card__setup {
   color: var(--text-accent);
 }

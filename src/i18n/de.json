@@ -1240,6 +1240,7 @@
       "allowSender": "Absender erlauben",
       "allowSenderTitle": "Bilder von {email} künftig immer laden",
       "blocked": "{count} externes Bild blockiert | {count} externe Bilder blockiert",
+      "choicesLabel": "Bilder immer laden",
       "shieldTitle": "Tracking-Pixel-Schutz: externe Bilder werden erst nach Freigabe geladen",
       "showOnce": "Anzeigen",
       "showOnceTitle": "Externe Bilder nur in dieser Nachricht laden"

@@ -173,7 +173,8 @@ defineEmits<{
 }
 
 /* Touch: the small pill is 30px; its hit area reaches 44px without the pill
-   growing, so rows and headers keep their rhythm. */
+   growing, so rows and headers keep their rhythm. A pill narrower than a
+   fingertip (an icon with a short word) gets the width too, centred on it. */
 @media (pointer: coarse) {
   .app-button--sm {
     position: relative;
@@ -182,7 +183,10 @@ defineEmits<{
   .app-button--sm::after {
     content: '';
     position: absolute;
-    inset: -7px 0;
+    inset: -7px auto;
+    left: 50%;
+    width: max(100%, var(--touch-target));
+    transform: translateX(-50%);
   }
 }
 </style>

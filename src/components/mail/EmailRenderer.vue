@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Attachment, PgpMessageState } from '@/types/mail';
 import { useImagePolicy } from '@/composables/useImagePolicy';
@@ -26,6 +26,7 @@ import PlainTextLinks from './PlainTextLinks.vue';
 import SafeMarkdownBody from './SafeMarkdownBody.vue';
 import IsolatedEmailDocument from './IsolatedEmailDocument.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
+import { IMAGE_GUARD_PHONE_ACTIONS } from './imageGuardActions';
 import { useUiStore } from '@/stores/ui';
 import { formattingFreeText, isFormattingFreeHtml } from '@/utils/formattingFreeHtml';
 
@@ -274,6 +275,10 @@ const blockedImagesCount = computed(() => {
   return 0;
 });
 
+/** The phone's Show / ⋯ pair, when the app shell provides it (not the viewer). */
+const imageGuardPhoneActions = inject(IMAGE_GUARD_PHONE_ACTIONS, null);
+const imageGuardPhone = computed(() => ui.isMobile && imageGuardPhoneActions !== null);
+
 const viewModeOptions = computed(() => {
   const options: Array<{ value: ViewMode; label: string; title: string }> = [];
   if (htmlAvailable.value) {
@@ -390,6 +395,7 @@ const hasPgpSegments = computed(() =>
     <div
       v-if="blockedImagesCount > 0 && !imagesEffectivelyAllowed"
       class="image-guard"
+      :class="{ 'image-guard--phone': imageGuardPhone }"
       role="status"
     >
       <svg
@@ -410,6 +416,18 @@ const hasPgpSegments = computed(() =>
       >
         {{ blockedImagesLabel }}
       </span>
+      <!-- Phone: one row — the notice, Show, and the always-allow choices
+           behind one ⋯ (ImageGuardPhoneActions.vue). -->
+      <component
+        :is="imageGuardPhoneActions"
+        v-if="imageGuardPhone"
+        :sender-email="props.senderEmail ?? ''"
+        :domain="canTrustDomain ? senderDomainName : ''"
+        @show-once="showImagesOnce"
+        @allow-sender="trustSender"
+        @allow-domain="trustDomain"
+      />
+      <template v-else>
       <AppButton
         class="image-guard__action image-guard__action--primary"
         :title="$t('mail.imagePolicy.showOnceTitle')"
@@ -442,6 +460,7 @@ const hasPgpSegments = computed(() =>
         >
           {{ $t('mail.imagePolicy.allowDomain', { domain: senderDomainName }) }}
         </AppButton>
+      </template>
       </template>
     </div>
     <SegmentedControl
@@ -857,5 +876,20 @@ const hasPgpSegments = computed(() =>
 
 .image-guard__sep {
   color: var(--text-tertiary);
+}
+
+/* Phone: one row that never wraps; the text gives way, the buttons do not. */
+.image-guard--phone {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.image-guard--phone .image-guard__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

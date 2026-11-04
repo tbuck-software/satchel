@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, provide, ref, watch } from 'vue';
 import { RouterView, useRoute } from 'vue-router';
 import Sidebar from '@/components/layout/Sidebar.vue';
 import PaneResizeHandle from '@/components/ui/PaneResizeHandle.vue';
@@ -14,6 +14,7 @@ import { SIDEBAR_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
 import { useAppBootstrap, useComposeWindowBootstrap } from '@/bootstrap';
 import { loadOmniSearch } from '@/components/navigation/loadOmniSearch';
 import { keyboardVisible } from '@/mobile/keyboardInset';
+import { IMAGE_GUARD_PHONE_ACTIONS } from '@/components/mail/imageGuardActions';
 
 const route = useRoute();
 /**
@@ -58,6 +59,11 @@ const loadComposerHost = () => import('@/components/mail/ComposerHost.vue');
 const ComposerHost = defineAsyncComponent(loadComposerHost);
 const ToastStack = defineAsyncComponent(() => import('@/components/ui/ToastStack.vue'));
 const UndoFab = defineAsyncComponent(() => import('@/components/ui/UndoFab.vue'));
+// The phone's buttons on a blocked-images notice; the viewer has no provider.
+provide(
+  IMAGE_GUARD_PHONE_ACTIONS,
+  defineAsyncComponent(() => import('@/components/mail/ImageGuardPhoneActions.vue')),
+);
 const SyncStatusLine = defineAsyncComponent(() => import('@/components/layout/SyncStatusLine.vue'));
 const OmniSearch = defineAsyncComponent(loadOmniSearch);
 // Phone-only, and shown only while the backend reports trouble: neither is

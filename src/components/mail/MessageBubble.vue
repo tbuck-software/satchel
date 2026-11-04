@@ -388,7 +388,10 @@ function openSenderDetails() {
   >
     <!-- Header -->
     <div class="message-header flex items-start justify-between gap-3">
-      <div class="message-sender-group flex min-w-0 items-center gap-3.5">
+      <div
+        class="message-sender-group flex min-w-0 items-center gap-3.5"
+        :class="{ 'message-sender-group--target': ui.isMobile && !props.collapsed }"
+      >
         <CardButton
           v-if="props.canReply && !ui.isMobile && senderAccountId"
           class="sender-avatar-trigger"
@@ -406,7 +409,7 @@ function openSenderDetails() {
           <!-- A folded message keeps one line and lets its snippet give way. -->
           <div class="flex items-center gap-x-2 gap-y-0.5">
             <AppButton
-              class="sender-identity-trigger text-md font-semibold text-primary"
+              class="sender-identity-trigger sender-name-trigger text-md font-semibold text-primary"
               :aria-label="$t('mail.recipients.showSenderDetails', { name: senderName })"
               @click.stop="openSenderDetails"
               variant="link"
@@ -773,6 +776,36 @@ function openSenderDetails() {
   box-shadow:
     inset 0 0 0 2px color-mix(in srgb, var(--accent-primary) 70%, transparent),
     inset 0 0 0 4px var(--bg-surface);
+}
+
+/* Phone: the whole sender block — avatar, name, "To:" line — is one target
+   for the sender and recipient details. The name's button stretches its hit
+   area over the block (it already opened them); the To line and security
+   badge inside it open the same sheet. A folded message is left alone: there
+   a tap anywhere unfolds it. */
+.message-sender-group--target {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: var(--touch-target);
+}
+
+.message-sender-group--target .sender-name-trigger {
+  position: static;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.message-sender-group--target .sender-name-trigger::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: auto;
+  transform: none;
+  border-radius: var(--radius-md);
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.message-sender-group--target .sender-name-trigger:active::after {
+  background: var(--bg-hover);
 }
 
 /* The body, attachments and banners line up under the sender's name; the
