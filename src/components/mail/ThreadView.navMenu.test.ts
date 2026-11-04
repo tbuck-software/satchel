@@ -266,4 +266,19 @@ describe('the phone thread\'s nav-bar ⋯', () => {
     expect(bubbles(wrapper).filter((bubble) => bubble.host).map((bubble) => bubble.id)).toEqual(['message-2']);
     wrapper.unmount();
   });
+
+  it('keeps a ⋯ beside every sender of a longer thread, the newest included', async () => {
+    harness.messages = [sent('message-1', 0), sent('message-2', 1), sent('message-3', 2)];
+    const wrapper = render();
+    await settle();
+    // The earlier messages wait behind "Show earlier".
+    await wrapper.get('.thread-earlier-row').trigger('click');
+
+    expect(bubbles(wrapper)).toEqual([
+      { id: 'message-1', host: false, inlineMenu: true },
+      { id: 'message-2', host: false, inlineMenu: true },
+      { id: 'message-3', host: true, inlineMenu: true },
+    ]);
+    wrapper.unmount();
+  });
 });

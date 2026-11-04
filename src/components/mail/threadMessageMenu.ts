@@ -54,6 +54,9 @@ export const THREAD_MESSAGE_MENU: InjectionKey<ThreadMessageMenuHost> = Symbol('
 /**
  * The messages that keep a ⋯ beside their sender, given the thread's messages
  * oldest first (drafts aside). A thread of one has its ⋯ in the nav bar only.
+ * In a longer thread every message keeps its own, the newest included: its
+ * actions are in the nav-bar sheet as well, where a reader of the latest
+ * reply looks first.
  */
 export function inlineMessageMenuIds(messageIds: readonly string[]): ReadonlySet<string> {
   if (messageIds.length < 2) return new Set();
