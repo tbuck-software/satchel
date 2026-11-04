@@ -301,6 +301,19 @@ describe('useThreadActions', () => {
     );
   });
 
+  it('gives an unread thread its unread mark back when Done is undone', async () => {
+    threadState.threads = [seedThread({ workflowState: 'inbox', unreadCount: 2 }), seedThread({ id: 'thread-2', unreadCount: 0 })];
+    readMock.mockReset();
+    readMock.mockResolvedValue(undefined);
+    const actions = useThreadActions();
+
+    await actions.archive(['thread-1', 'thread-2']);
+    await runGroupedUndo();
+
+    await vi.waitFor(() => expect(readMock).toHaveBeenCalledWith(['thread-1'], false));
+    expect(readMock).toHaveBeenCalledTimes(1);
+  });
+
   it('starts the visible undo window before a slow list refresh finishes', async () => {
     let finishRefresh!: () => void;
     refreshHeadMock.mockImplementationOnce(

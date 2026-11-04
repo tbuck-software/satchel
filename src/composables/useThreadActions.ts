@@ -23,6 +23,8 @@ interface StateSnapshot {
   snoozeUntil?: string;
   /** State confirmed by the action; used for undo even after row eviction. */
   expectedState?: WorkflowState;
+  /** Done includes Read; Undo has to give the unread mark back. */
+  wasUnread?: boolean;
 }
 
 const actionQueues = new WeakMap<ReturnType<typeof useThreadsStore>, ReturnType<typeof createThreadActionQueue>>();
@@ -71,7 +73,12 @@ export function useThreadActions() {
   function snapshotStates(threadIds: string[]): StateSnapshot[] {
     return threadIds.flatMap((threadId) => {
       const thread = threads.find(threadId);
-      return thread ? [{ threadId, previousState: thread.workflowState, snoozeUntil: thread.snoozeUntil }] : [];
+      return thread ? [{
+        threadId,
+        previousState: thread.workflowState,
+        snoozeUntil: thread.snoozeUntil,
+        ...((thread.unreadCount ?? 0) > 0 ? { wasUnread: true } : {}),
+      }] : [];
     });
   }
 
@@ -121,8 +128,21 @@ export function useThreadActions() {
       toast.error(t('thread.result.restoreEmpty'));
       return false;
     }
-    await refreshLists();
     const restoredIds = new Set(restored.flat());
+    // The backend commits Read with Done; the threads that were unread before
+    // must come back unread, or Undo leaves the list different from before.
+    const unreadAgain = snapshot
+      .filter((entry) => entry.wasUnread && entry.expectedState === 'done' && restoredIds.has(entry.threadId))
+      .map((entry) => entry.threadId);
+    if (unreadAgain.length > 0) {
+      try {
+        await threads.setThreadsRead(unreadAgain, false);
+      } catch (error) {
+        // The workflow restore stands; the read mark is a lesser loss.
+        console.warn('restoring unread after undo failed', error);
+      }
+    }
+    await refreshLists();
     await restorePlace(snapshot.filter(entry => restoredIds.has(entry.threadId)).map(entry => entry.threadId));
     return true;
   }
