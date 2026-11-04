@@ -10,7 +10,7 @@ const settings = useSettingsStore();
 const ui = useUiStore();
 
 function setTheme(value: string) {
-  if (value === 'light' || value === 'dark') settings.theme = value;
+  if (value === 'light' || value === 'dark' || value === 'system') settings.setThemePreference(value);
 }
 
 function setAttachmentOpenBehavior(value: string) {
@@ -37,10 +37,11 @@ function setAttachmentOpenBehavior(value: string) {
               <span class="setting-hint">{{ $t('settings.theme.appearanceHint') }}</span>
             </div>
             <SegmentedControl
-              :model-value="settings.theme"
+              :model-value="settings.themeFollowsSystem ? 'system' : settings.theme"
               :options="[
                 { value: 'light', label: $t('settings.theme.light') },
                 { value: 'dark', label: $t('settings.theme.dark') },
+                { value: 'system', label: $t('settings.theme.system') },
               ]"
               :aria-label="$t('settings.theme.appearance')"
               @update:model-value="setTheme"

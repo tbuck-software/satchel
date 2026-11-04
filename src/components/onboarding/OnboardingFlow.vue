@@ -290,7 +290,7 @@ watch(
 
 function selectTheme(theme: 'dark' | 'light') {
   chosenTheme.value = theme;
-  settings.theme = theme;
+  settings.setThemePreference(theme);
   document.documentElement.dataset.theme = theme;
 }
 

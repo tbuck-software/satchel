@@ -17,36 +17,51 @@ import {
   type LocalePreference,
 } from '@/i18n/locale';
 import { applyLocalePreference } from '@/i18n/runtime';
-import { hasStoredTheme, readTheme, writeTheme } from '@/persistence/theme';
+import { clearTheme, hasStoredTheme, readTheme, systemTheme, writeTheme } from '@/persistence/theme';
 import { settingsPersistence } from '@/persistence/settings';
 import type {
   AttachmentOpenBehavior,
   InboxGroupingMode,
   InboxSenderBucket,
   Theme,
+  ThemePreference,
 } from '@/types/settings';
 
 export type { AttachmentOpenBehavior, InboxGroupingMode, InboxSenderBucket } from '@/types/settings';
 
-function applyTheme(theme: Theme) {
+function showTheme(theme: Theme) {
   if (typeof document === 'undefined') return;
   document.documentElement.dataset.theme = theme;
-  writeTheme(theme);
 }
 
 export const useSettingsStore = defineStore('settings', () => {
+  /** The look on screen, always resolved to light or dark. */
   const theme = ref<Theme>(readTheme());
-  applyTheme(theme.value);
-  watch(theme, (next) => applyTheme(next));
+  /*
+   * "System": nothing is stored and the look follows the OS as it changes.
+   * Choosing Light or Dark stores it and stops that. Startup used to store
+   * the resolved look straight away, so the following never outlived the
+   * first launch.
+   */
+  const themeFollowsSystem = ref(!hasStoredTheme());
+  showTheme(theme.value);
+  watch(theme, showTheme);
 
-  // React to OS theme changes when user hasn't explicitly chosen.
   if (typeof window !== 'undefined' && window.matchMedia) {
     const mql = window.matchMedia('(prefers-color-scheme: light)');
     mql.addEventListener?.('change', (event) => {
-      if (!hasStoredTheme()) {
-        theme.value = event.matches ? 'light' : 'dark';
-      }
+      if (themeFollowsSystem.value) theme.value = event.matches ? 'light' : 'dark';
     });
+  }
+
+  /** The one way to change the look: it stores a choice, or clears it for System. */
+  function setThemePreference(preference: ThemePreference) {
+    themeFollowsSystem.value = preference === 'system';
+    if (preference === 'system') {
+      clearTheme();
+      preference = systemTheme();
+    } else writeTheme(preference);
+    theme.value = preference;
   }
 
   /*
@@ -153,7 +168,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   function toggleTheme() {
-    theme.value = theme.value === 'dark' ? 'light' : 'dark';
+    setThemePreference(theme.value === 'dark' ? 'light' : 'dark');
   }
 
   function completeOnboarding() {
@@ -310,6 +325,8 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     theme,
+    themeFollowsSystem,
+    setThemePreference,
     locale,
     localePreference,
     setLocalePreference,

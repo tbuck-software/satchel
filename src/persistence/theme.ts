@@ -40,3 +40,8 @@ export function hasStoredTheme(): boolean {
 export function writeTheme(theme: Theme): void {
   persistence.write(themeSlot, theme);
 }
+
+/** Forget the chosen look, so the next start follows the system again. */
+export function clearTheme(): void {
+  persistence.remove(themeSlot);
+}

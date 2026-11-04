@@ -192,7 +192,7 @@
       },
       "theme": {
         "appearance": "Appearance",
-        "appearanceHint": "Switch between the dark and the light look.",
+        "appearanceHint": "Light, dark, or whatever your system shows.",
         "attachmentOpen": "Open attachments with",
         "attachmentOpenAria": "Default action for attachments",
         "attachmentOpenHint": "The space bar always opens Quick Look, whichever you choose.",
@@ -206,6 +206,7 @@
         "groupInterface": "Interface",
         "groupMail": "Mail",
         "light": "Light",
+        "system": "System",
         "plainTextCompose": "Compose new messages as plain text",
         "plainTextComposeHint": "The composer then sends no HTML.",
         "plainTextRead": "Show mail as plain text",
@@ -445,7 +446,7 @@
       },
       "theme": {
         "appearance": "Erscheinungsbild",
-        "appearanceHint": "Zwischen dunkler und heller Darstellung wechseln.",
+        "appearanceHint": "Hell, dunkel oder wie das System eingestellt ist.",
         "attachmentOpen": "Anhänge öffnen mit",
         "attachmentOpenAria": "Standardaktion für Anhänge",
         "attachmentOpenHint": "Die Leertaste öffnet unabhängig davon immer die Schnellansicht.",
@@ -459,6 +460,7 @@
         "groupInterface": "Oberfläche",
         "groupMail": "Mail",
         "light": "Hell",
+        "system": "System",
         "plainTextCompose": "Neue Nachrichten als reinen Text verfassen",
         "plainTextComposeHint": "Der Composer sendet dann kein HTML mit.",
         "plainTextRead": "Mails als reinen Text anzeigen",

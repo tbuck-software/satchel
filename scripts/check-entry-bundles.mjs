@@ -33,9 +33,13 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * connection banner (101.5 / 237.3 KiB).
  * Viewer initial 125 KiB since 2026-11-04: with main's certificate notices
  * and the phone reader's strings together, the German viewer catalogue path
- * measured 124.05 KiB (56 B over); the viewer's code did not grow. */
+ * measured 124.05 KiB (56 B over); the viewer's code did not grow.
+ * Main initial 239 KiB since 2026-11-05: main measured 101.9 / 237.9 KiB; the
+ * System appearance has to live in the settings store, which loads at
+ * startup to paint the first frame in the right look, and adds 0.1 KiB
+ * (238.03 KiB, 29 B over). Its selector and copy load with the settings. */
 const budgets = {
-  'index.html': { entryGzip: 102 * 1024, initialGzip: 238 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
+  'index.html': { entryGzip: 102 * 1024, initialGzip: 239 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 125 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };
