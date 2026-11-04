@@ -604,6 +604,68 @@ const baseMessages: Message[] = [
   },
 ];
 
+/*
+ * Two designed HTML mails as senders ship them: fixed desktop-width tables,
+ * px font sizes with px line heights, multi-column grids, Outlook's MsoNormal
+ * paragraphs. The phone reader has to keep these legible; the plain fixtures
+ * above never exercise that.
+ */
+const NEWSLETTER_HTML = `<html><head><style>
+  .hero-title { font-family: Arial, sans-serif; font-size: 30px; line-height: 32px; font-weight: bold; color: #003d7c; }
+  .cell { font-family: Arial, sans-serif; font-size: 14px; line-height: 17px; color: #333333; }
+  .price { font-family: Arial, sans-serif; font-size: 22px; line-height: 24px; font-weight: bold; color: #e30613; }
+  .small { font-family: Arial, sans-serif; font-size: 11px; line-height: 13px; color: #777777; }
+</style></head><body style="margin:0;padding:0;background:#f2f2f2">
+<table width="600" cellpadding="0" cellspacing="0" border="0" align="center" bgcolor="#ffffff" style="width:600px">
+  <tr><td style="padding:16px 24px;background:#003d7c"><span style="font-family:Arial,sans-serif;font-size:20px;line-height:22px;color:#ffe600;font-weight:bold">METRO</span>
+    <span style="font-family:Arial,sans-serif;font-size:11px;line-height:12px;color:#ffffff;float:right">Im Browser ansehen</span></td></tr>
+  <tr><td style="padding:24px 24px 8px" class="hero-title">Wochenangebote für Büro, Küche und Vorrat</td></tr>
+  <tr><td style="padding:0 24px 16px" class="cell">Gültig von Montag, 26.10. bis Samstag, 31.10. in allen Märkten und im Onlineshop. Solange der Vorrat reicht.</td></tr>
+  <tr><td style="padding:0 24px 16px"><a href="https://www.metro.de/angebote" style="display:inline-block;background:#e30613;color:#ffffff;font-family:Arial,sans-serif;font-size:15px;line-height:18px;font-weight:bold;padding:12px 28px;text-decoration:none;border-radius:3px">Alle Angebote ansehen</a></td></tr>
+  <tr><td style="padding:0 16px 16px"><table width="568" cellpadding="0" cellspacing="0" border="0"><tr>
+    <td width="284" valign="top" style="padding:8px" class="cell"><img src="https://img.metro.de/kaffee.jpg" width="268" height="160" alt="Kaffeebohnen 1 kg" style="display:block;background:#e8e2d6"><br><b>Kaffee Crema, ganze Bohne, 1 kg</b><br>Kräftig und mild geröstet, für Vollautomaten.<br><span class="price">12,99 €</span><br><span class="small">1 kg = 12,99 € · zzgl. MwSt.</span></td>
+    <td width="284" valign="top" style="padding:8px" class="cell"><img src="https://img.metro.de/papier.jpg" width="268" height="160" alt="Kopierpapier A4" style="display:block;background:#e8e2d6"><br><b>Kopierpapier A4, 80 g/m², 2500 Blatt</b><br>Für Laser- und Tintenstrahldrucker.<br><span class="price">19,49 €</span><br><span class="small">1000 Blatt = 7,80 € · zzgl. MwSt.</span></td>
+  </tr></table></td></tr>
+  <tr><td style="padding:16px 24px;background:#f2f2f2" class="small">Sie erhalten diesen Newsletter, weil Sie sich mit tom@satchel.dev angemeldet haben. <a href="https://www.metro.de/abmelden" style="color:#003d7c">Abmelden</a> · <a href="https://www.metro.de/datenschutz" style="color:#003d7c">Datenschutz</a><br>METRO Deutschland GmbH · Metro-Straße 1 · 40235 Düsseldorf</td></tr>
+</table></body></html>`;
+
+const DIGEST_HTML = `<html><head><style>
+  p.MsoNormal { margin: 0cm; font-size: 11.0pt; font-family: Calibri, sans-serif; }
+  .headline { font-size: 17px; line-height: 19px; font-weight: 600; color: #0a66c2; margin: 0; }
+  .meta { font-size: 12px; line-height: 14px; color: #666666; margin: 0; }
+</style></head><body style="margin:0">
+<table width="640" cellpadding="0" cellspacing="0" style="width:640px;font-family:-apple-system,Helvetica,Arial,sans-serif">
+  <tr><td style="padding:20px 24px 4px"><p class="MsoNormal" style="font-size:24px;line-height:26px;font-weight:700">TechCrunch Daily</p></td></tr>
+  <tr><td style="padding:0 24px 16px"><p class="meta">Tuesday, October 27 · 4 stories · 6 min read</p></td></tr>
+  <tr><td style="padding:12px 24px;border-top:1px solid #e0e0e0"><p class="headline">A payments startup raises $40M to take on card fees in Europe</p><p class="meta">Funding · 2 min</p></td></tr>
+  <tr><td style="padding:12px 24px;border-top:1px solid #e0e0e0"><p class="headline">The new on-device models are fast enough to replace cloud calls for mail triage</p><p class="meta">AI · 3 min</p></td></tr>
+  <tr><td style="padding:12px 24px;border-top:1px solid #e0e0e0"><p class="headline">Why local-first apps are back</p><p class="meta">Opinion · 4 min</p></td></tr>
+  <tr><td style="padding:16px 24px"><p class="MsoNormal">You are receiving this digest because you follow TechCrunch on LinkedIn.</p><p class="MsoNormal" style="font-size:9pt;line-height:10pt;color:#999999">LinkedIn Corporation, 1000 W Maude Ave, Sunnyvale, CA 94085. <a href="https://www.linkedin.com/unsubscribe">Unsubscribe</a></p></td></tr>
+</table></body></html>`;
+
+baseMessages.push(
+  {
+    id: 'm-th-16', threadId: 'th-16',
+    from: { name: 'METRO Wochenangebote', email: 'newsletter@metro.de' },
+    to: [{ name: 'Tom', email: 'tom@satchel.dev' }],
+    subject: 'METRO Wochenangebote',
+    bodyText: 'Neue Angebote für Büro, Küche und Vorrat sind verfügbar.',
+    bodyHtml: NEWSLETTER_HTML,
+    timestamp: new Date(Date.now() - 3 * 60 * 60_000).toISOString(),
+    isRead: false, attachments: [],
+  },
+  {
+    id: 'm-th-17', threadId: 'th-17',
+    from: { name: 'TechCrunch via LinkedIn', email: 'news@linkedin.com' },
+    to: [{ name: 'Tom', email: 'tom@satchel.dev' }],
+    subject: 'TechCrunch Daily: Funding rounds and AI launches',
+    bodyText: 'Today in startups: new AI launches, acquisitions and funding rounds.',
+    bodyHtml: DIGEST_HTML,
+    timestamp: new Date(Date.now() - 3.3 * 60 * 60_000).toISOString(),
+    isRead: true, attachments: [],
+  },
+);
+
 const seededMessagesByThread = baseMessages.reduce<Record<string, Message[]>>((acc, message) => {
   const list = acc[message.threadId] ?? [];
   list.push(message);
