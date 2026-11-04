@@ -2099,6 +2099,13 @@ textarea:focus {
   .tool-button :deep(.app-button__icon) { margin: 0; }
 }
 
+/* A fingertip, not a cursor: the footer's tools reach the 44pt target on
+   touch, like the template button (IconButton) beside them already does. */
+@media (pointer: coarse) {
+  .tool-button { min-width: var(--touch-target); min-height: var(--touch-target); }
+  .compose .more-summary { width: var(--touch-target); height: var(--touch-target); }
+}
+
 .more-summary {
   width: 38px;
   height: 38px;
