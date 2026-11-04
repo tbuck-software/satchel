@@ -7,7 +7,9 @@
 import { computed, defineAsyncComponent, nextTick, ref } from 'vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
+import FilterPill from '@/components/ui/FilterPill.vue';
 import { useAccountsStore } from '@/stores/accounts';
+import { useUiStore } from '@/stores/ui';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 
 const props = defineProps<{
@@ -20,6 +22,14 @@ const ListFilterMenuPanel = defineAsyncComponent(() => import('./ListFilterMenuP
 const menuMounted = ref(false);
 
 const accounts = useAccountsStore();
+const ui = useUiStore();
+
+/*
+ * The chosen account as a chip before the filter button, only when one of
+ * several is chosen ("All accounts" has nothing to point at). It opens the
+ * account choice: the mailbox sheet on the phone, this menu on the desktop.
+ */
+const scope = computed(() => (accounts.emailAccounts.length > 1 ? accounts.activeAccount : undefined));
 
 const anchor = ref<AnchorBox | null>(null);
 let trigger: HTMLElement | null = null;
@@ -44,6 +54,15 @@ function closeMenu() {
 
 <template>
   <template v-if="visible">
+    <FilterPill
+      v-if="scope"
+      class="list-filter-menu__scope"
+      :label="scope.displayName"
+      :dot="scope.color"
+      :aria-pressed="undefined"
+      aria-haspopup="true"
+      @click="ui.isMobile ? ui.openMailboxSwitcher() : openMenu($event)"
+    />
     <IconButton
       class="list-filter-menu__trigger"
       :title="$t('inbox.filterMenu')"
@@ -65,6 +84,25 @@ function closeMenu() {
 </template>
 
 <style scoped>
+.list-filter-menu__scope {
+  min-width: 0;
+  max-width: 160px;
+  background: var(--bg-raised);
+}
+
+/* The phone's title row (below the 768px of `ui.isMobile`) is shared with
+   the title itself; the chip yields. */
+@media (max-width: 767px) {
+  .list-filter-menu__scope {
+    max-width: 104px;
+  }
+}
+
+.list-filter-menu__scope :deep(.filter-pill__label) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .list-filter-menu__trigger {
   flex-shrink: 0;
   width: var(--input-height);
