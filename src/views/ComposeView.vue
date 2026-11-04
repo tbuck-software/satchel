@@ -1344,6 +1344,8 @@ defineExpose({
     >
       <!-- One line, so the name reads "Cc/Bcc, From: address". -->
       <span class="label">{{ $t('compose.recipients.ccBccFrom') }}</span> <span class="compose-fold-from">{{ fromAddress }}</span>
+      <!-- Says the row opens; as bare text it read like a caption. -->
+      <AppIcon class="compose-fold-chevron"><path d="m4.5 6.5 3.5 3.5 3.5-3.5" /></AppIcon>
     </AppButton>
 
     <div
@@ -2305,7 +2307,7 @@ textarea:focus {
 .compose .compose-fold-summary {
   flex: none;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   justify-content: start;
   align-items: center;
   gap: var(--space-xs);
@@ -2323,6 +2325,10 @@ textarea:focus {
   background: transparent;
 }
 
+.compose-fold-chevron {
+  color: var(--text-tertiary);
+}
+
 .compose-fold-from {
   min-width: 0;
   overflow: hidden;
@@ -2334,6 +2340,10 @@ textarea:focus {
 
 @media (max-width: 620px) {
   .compose { padding: var(--space-3-5) var(--space-3-5) var(--space-2-5); }
+  /* The recipient suggestions span the whole row, label column included, so
+     the row below is covered whole instead of cut off mid-word. */
+  .compose .row:has(:deep(.chips-wrap)) { position: relative; }
+  .compose .row :deep(.chips-wrap) { position: static; }
   /* A phone has no width to spare for an empty label column. */
   .compose .body { padding-left: 0; }
   .compose .compose-attachments { margin-left: 0; }
