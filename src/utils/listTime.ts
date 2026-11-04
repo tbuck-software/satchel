@@ -3,14 +3,14 @@ import type { AppLocale } from '@/i18n/locale';
 
 const DAY_MS = 86_400_000;
 
-const TIME_OPTIONS: Intl.DateTimeFormatOptions = {
+export const TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   hour: '2-digit',
   minute: '2-digit',
   hour12: false,
 };
 const WEEKDAY_OPTIONS: Intl.DateTimeFormatOptions = { weekday: 'short' };
 const DATE_OPTIONS: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
-const DATE_WITH_YEAR_OPTIONS: Intl.DateTimeFormatOptions = {
+export const DATE_WITH_YEAR_OPTIONS: Intl.DateTimeFormatOptions = {
   day: 'numeric',
   month: 'short',
   year: 'numeric',
@@ -44,7 +44,7 @@ export function localeFormatter(
   return formatter;
 }
 
-function localDayNumber(date: Date): number {
+export function localDayNumber(date: Date): number {
   return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS;
 }
 
@@ -75,18 +75,3 @@ export function formatMessageTimestamp(value: string): string {
   return localeFormatter('messageTimestamp', MESSAGE_TIMESTAMP_OPTIONS).format(new Date(value));
 }
 
-/**
- * Compact time for a message header, the way phone mail apps write it:
- * "08:30" today, "Yesterday, 08:30", "27 Oct, 08:30" this year, then with the
- * year. The date only appears when it says something.
- */
-export function formatMessageHeaderTime(value: string): string {
-  const date = new Date(value);
-  const now = new Date();
-  const diffDays = localDayNumber(now) - localDayNumber(date);
-  const time = localeFormatter('time', TIME_OPTIONS).format(date);
-  if (diffDays === 0) return time;
-  if (diffDays === 1) return `${t('common.yesterday')}, ${time}`;
-  if (date.getFullYear() === now.getFullYear()) return formatMessageTimestamp(value);
-  return `${localeFormatter('dateWithYear', DATE_WITH_YEAR_OPTIONS).format(date)}, ${time}`;
-}

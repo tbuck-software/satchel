@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { formatMessageHeaderTime } from './listTime';
+import { formatMessageHeaderTime } from './messageHeaderTime';
 
 describe('formatMessageHeaderTime', () => {
   beforeEach(() => {
