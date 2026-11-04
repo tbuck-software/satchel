@@ -97,7 +97,10 @@ test('the phone list searches and filters above itself', async ({ page }) => {
   await menu.getByRole('menuitemcheckbox', { name: 'All accounts' }).click();
   await expect(page.locator('.list-pane')).toContainText('All accounts');
 
+  // The field waits behind the title row's search button and takes the row.
   const field = page.getByRole('searchbox', { name: 'Search this list' });
+  await page.locator('.list-pane').getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(field).toBeFocused();
   await field.fill('Google');
   const results = page.getByRole('region', { name: 'Search results' });
   await results.getByText('Google AI Studio quota warning').click();
