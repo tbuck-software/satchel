@@ -70,6 +70,32 @@ function isLocalResourceUrl(url: string): boolean {
     || lower.startsWith('https://asset.localhost/');
 }
 
+const BLOCKED_IMG_TAG = /<img\b[^>]*\sdata-blocked-src(?:set)?\s*=[^>]*>/gi;
+const SIZE_ATTR = (name: string) => new RegExp(`\\s${name}\\s*=\\s*(['"]?)(\\d+(?:\\.\\d+)?)(?:px)?\\1(?=[\\s/>])`, 'i');
+const STYLE_ATTR = /\sstyle\s*=\s*(['"])/i;
+const MIN_PLACEHOLDER_SIDE = 24;
+
+/**
+ * A blocked image keeps the box its width and height attributes promise.
+ *
+ * The mail document scales every image with `height: auto`, which a picture
+ * that never loads has nothing to scale from: it collapsed to its alt text,
+ * and two products side by side got boxes of different heights. An
+ * `aspect-ratio` from the attributes holds the shape the sender laid out.
+ */
+function keepBlockedImageShape(html: string): string {
+  return html.replace(BLOCKED_IMG_TAG, (tag) => {
+    const width = Number(SIZE_ATTR('width').exec(tag)?.[2]);
+    const height = Number(SIZE_ATTR('height').exec(tag)?.[2]);
+    // A tracking pixel stays a pixel; only a picture gets a placeholder.
+    if (!(width >= MIN_PLACEHOLDER_SIDE && height >= MIN_PLACEHOLDER_SIDE)) return tag;
+    const ratio = `aspect-ratio:${width}/${height};`;
+    const marked = tag.replace(/^<img\b/i, '<img data-blocked-shape');
+    if (STYLE_ATTR.test(marked)) return marked.replace(STYLE_ATTR, (attr) => `${attr}${ratio}`);
+    return marked.replace(/^<img\b/i, `<img style="${ratio}"`);
+  });
+}
+
 /**
  * Rewrite remote resource references (`img src`, `img srcset`, the legacy
  * `background` attribute, `background: url(...)` in style attrs) into inert
@@ -122,7 +148,7 @@ export function blockRemoteImages(html: string): { html: string; blockedCount: n
       },
     );
   // Also strip background-image: url(...) on style attrs to avoid pixel loaders.
-  const stripped = next.replace(
+  const stripped = keepBlockedImageShape(next).replace(
     /style\s*=\s*(['"])([^'"]*background[^'"]*url\([^'"]*?\)[^'"]*?)\1/gi,
     (_full, quote: string, body: string) => {
       const cleaned = body.replace(/background[^;]*url\([^)]*\)\s*;?/gi, '');

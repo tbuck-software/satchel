@@ -12,8 +12,8 @@ import { describe, expect, it } from 'vitest';
  *   child reaching past a narrower one) and pads its parts back in;
  * - EmailRenderer takes the document shell out by the same amount;
  * - IsolatedEmailDocument's flush rules pad every body without a fixed-width
- *   layout table by the inset plus the 2px simple mail always had, so only
- *   designed layouts touch the edges.
+ *   layout table by the inset itself, so its text lines up with the header
+ *   and only designed layouts touch the edges.
  */
 const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 
@@ -57,6 +57,6 @@ describe('designed mail runs edge to edge on the phone', () => {
     const flush = /props\.flush \? `([\s\S]*?)` : ''/.exec(isolated)?.[1] ?? '';
     const simple = /\.satchel-email-body:not\(:has\(table\[width\][^{]*\{\s*padding: (\d+)px (\d+)px (\d+)px/.exec(flush);
     expect(simple).not.toBeNull();
-    expect(Number(simple![2])).toBe(inset + 2);
+    expect(Number(simple![2])).toBe(inset);
   });
 });

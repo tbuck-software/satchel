@@ -94,12 +94,12 @@ describe('IsolatedEmailDocument', () => {
     const flushRules = srcdoc.slice(srcdoc.indexOf('</style>'), srcdoc.indexOf('<body'));
 
     expect(flushRules).toMatch(
-      /\.satchel-email-body:not\(:has\(table\[width\]:not\(\[width\$="%"\]\)\)\)\s*\{\s*padding:\s*8px 18px 16px/,
+      /\.satchel-email-body:not\(:has\(table\[width\]:not\(\[width\$="%"\]\)\)\)\s*\{\s*padding:\s*8px 16px 16px/,
     );
     flush.unmount();
 
     const desktop = mountDocument();
-    expect(desktop.get('iframe').attributes('srcdoc')).not.toContain('8px 18px 16px');
+    expect(desktop.get('iframe').attributes('srcdoc')).not.toContain('8px 16px 16px');
     desktop.unmount();
   });
 

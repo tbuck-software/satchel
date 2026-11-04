@@ -137,6 +137,16 @@ const shellCss = `
     height: auto !important;
   }
 
+  /* A blocked picture (useImagePolicy keeps its shape): its alt text as a
+     quiet caption inside the box, not the sender's type jammed in a corner. */
+  img[data-blocked-shape] {
+    box-sizing: border-box;
+    padding: 8px 10px;
+    overflow: hidden;
+    font: 12px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: color-mix(in srgb, currentColor 62%, transparent);
+  }
+
   .satchel-email-body[data-satchel-auto-dark="on"] {
     color-scheme: dark;
     color: var(--satchel-email-ink) !important;
@@ -199,7 +209,8 @@ function escapeAttribute(value: string): string {
  * newsletter column, already narrowed to the screen above) keeps its own
  * margins there. Every other body — simple mail, and "designed" mail whose
  * only table holds data or a signature — is padded back to the reader's 16px
- * inset plus the 2px it always had, so its text never touches the edge.
+ * inset, so its text never touches the edge and starts on the line the
+ * sender's avatar starts on (18px put the body two points off the header).
  */
 function buildSourceDocument(): string {
   // Inline importance keeps sender html/body rules from repainting the reader
@@ -223,7 +234,7 @@ function buildSourceDocument(): string {
         background: transparent !important;
       }
       .satchel-email-body:not(:has(table[width]:not([width$="%"]))) {
-        padding: 8px 18px 16px !important;
+        padding: 8px 16px 16px !important;
       }
     </style>` : ''}
     <style>
