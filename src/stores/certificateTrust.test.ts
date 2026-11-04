@@ -15,7 +15,6 @@ vi.mock('@/services/backend', async (importOriginal) => ({
 
 import { useCertificateTrustStore } from './certificateTrust';
 import { useConnectionStore } from './connection';
-import { useUiStore } from './ui';
 
 const exception = {
   account_id: 'acc-work',
@@ -90,24 +89,6 @@ describe('certificate trust', () => {
     expect(backend.backendRevokeCertificateException).toHaveBeenCalledWith('acc-work', 'gwimap.example.test');
     expect(trust.exceptionFor('acc-work')).toBeNull();
     expect(connection.retryToken).toBe(2);
-  });
-
-  it('puts a dot on the drawer handle while any account is affected, hidden or not', async () => {
-    const connection = useConnectionStore();
-    const trust = useCertificateTrustStore();
-    const ui = useUiStore();
-
-    connection.reportSyncFailures([failure('acc-work')]);
-    await Promise.resolve();
-    expect(ui.drawerAttention).toBe(true);
-
-    trust.dismiss('acc-work');
-    await Promise.resolve();
-    expect(ui.drawerAttention).toBe(true);
-
-    connection.reportSyncFailures([]);
-    await Promise.resolve();
-    expect(ui.drawerAttention).toBe(false);
   });
 
   // Seven days later the same certificate may be rejected again; trusting it

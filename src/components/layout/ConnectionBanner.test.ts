@@ -5,6 +5,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAccountsStore } from '@/stores/accounts';
 import { useConnectionStore } from '@/stores/connection';
+import { useUiStore } from '@/stores/ui';
 import type { Account } from '@/types/mail';
 
 const router = vi.hoisted(() => ({ push: vi.fn() }));
@@ -12,10 +13,10 @@ vi.mock('vue-router', () => ({ useRouter: () => router }));
 
 import ConnectionBanner from './ConnectionBanner.vue';
 
-function syncFailure(accountId: string, account: string, message: string): string {
+function syncFailure(accountId: string, account: string, message: string, since?: string): string {
   return JSON.stringify({
     key: 'backend.errors.accountSyncFailed',
-    params: { account, accountId, message },
+    params: { account, accountId, message, ...(since ? { since } : {}) },
   });
 }
 
@@ -214,6 +215,102 @@ describe('ConnectionBanner', () => {
       expect(wrapper.get('.banner').classes()).toContain('banner--danger');
       expect(wrapper.get('.banner__detail').text()).toContain('tom@other.example');
       expect(wrapper.get('.banner__detail').text()).not.toContain('gwimap');
+    });
+  });
+  // October: one account did not sync for two days, and the banner read the
+  // same as a hiccup a minute old.
+  describe('an account that has not synced for a while', () => {
+    const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
+
+    beforeEach(() => {
+      router.push.mockClear();
+      useAccountsStore().accounts = [
+        { ...account('acc-work', 'tom@example.test', 'imap'), displayName: 'Work' },
+        account('acc-other', 'tom@other.example', 'imap'),
+      ];
+    });
+
+    it('says since when, and leads to the account', async () => {
+      useConnectionStore().reportSyncFailures([
+        syncFailure('acc-work', 'tom@example.test', 'imap tcp connect timed out', hoursAgo(30)),
+      ]);
+      const wrapper = mount(ConnectionBanner);
+
+      expect(wrapper.get('.banner__title').text()).toMatch(/^Work has not synced since /);
+      expect(wrapper.get('.banner__detail').text()).toContain('imap tcp connect timed out');
+      await wrapper.findAll('button').find((button) => button.text() === 'Account settings')!.trigger('click');
+      expect(router.push).toHaveBeenCalledWith({
+        name: 'settings',
+        query: { section: 'accounts', account: 'acc-work' },
+      });
+    });
+
+    it('keeps the plain headline for a failure that just began', () => {
+      useConnectionStore().reportSyncFailures([
+        syncFailure('acc-work', 'tom@example.test', 'imap tcp connect timed out', hoursAgo(0.1)),
+      ]);
+      const wrapper = mount(ConnectionBanner);
+
+      expect(wrapper.get('.banner__title').text()).toBe('Mail sync failed');
+      expect(wrapper.text()).not.toContain('Account settings');
+    });
+
+    it('keeps the plain headline when several accounts fail at once', () => {
+      useConnectionStore().reportSyncFailures([
+        syncFailure('acc-work', 'tom@example.test', 'offline', hoursAgo(3)),
+        syncFailure('acc-other', 'tom@other.example', 'offline', hoursAgo(3)),
+      ]);
+      const wrapper = mount(ConnectionBanner);
+
+      expect(wrapper.get('.banner__title').text()).toBe('Mail sync failed');
+    });
+
+    it('puts a dot on the drawer handle for an outage, not for a hiccup', async () => {
+      const connection = useConnectionStore();
+      const ui = useUiStore();
+      connection.reportSyncFailures([syncFailure('acc-work', 'tom@example.test', 'offline', hoursAgo(0.1))]);
+      const wrapper = mount(ConnectionBanner);
+      expect(ui.drawerAttention).toBe(false);
+
+      connection.reportSyncFailures([syncFailure('acc-work', 'tom@example.test', 'offline', hoursAgo(2))]);
+      await wrapper.vm.$nextTick();
+      expect(ui.drawerAttention).toBe(true);
+
+      connection.reportSyncFailures([]);
+      await wrapper.vm.$nextTick();
+      expect(ui.drawerAttention).toBe(false);
+    });
+
+    // A blocked folder reports a bare entry of its own before the account's.
+    it('still names the account when a blocked folder reports alongside it', () => {
+      const blocked = JSON.stringify({
+        key: 'backend.errors.folderIngestBlocked',
+        params: { account: 'tom@example.test', folders: 'INBOX', count: 3 },
+      });
+      useConnectionStore().reportSyncFailures([
+        blocked,
+        syncFailure('acc-work', 'tom@example.test', blocked, hoursAgo(48)),
+      ]);
+      const wrapper = mount(ConnectionBanner);
+
+      expect(wrapper.get('.banner__title').text()).toMatch(/^Work has not synced since /);
+    });
+
+    it('turns the headline at the hour without a new report', async () => {
+      vi.useFakeTimers();
+      try {
+        useConnectionStore().reportSyncFailures([
+          syncFailure('acc-work', 'tom@example.test', 'offline', new Date(Date.now() - 59 * 60_000).toISOString()),
+        ]);
+        const wrapper = mount(ConnectionBanner);
+        expect(wrapper.get('.banner__title').text()).toBe('Mail sync failed');
+
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+
+        expect(wrapper.get('.banner__title').text()).toMatch(/^Work has not synced since /);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

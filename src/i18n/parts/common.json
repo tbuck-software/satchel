@@ -64,7 +64,8 @@
       "unknown": "Unknown",
       "you": "You",
       "yes": "Yes",
-      "yesterday": "Yesterday"
+      "yesterday": "Yesterday",
+      "todayAt": "today, {time}"
     }
   },
   "de": {
@@ -132,7 +133,8 @@
       "unknown": "Unbekannt",
       "you": "Du",
       "yes": "Ja",
-      "yesterday": "Gestern"
+      "yesterday": "Gestern",
+      "todayAt": "heute, {time}"
     }
   }
 }

@@ -216,6 +216,8 @@ pub async fn create_source_inner(
         config: config.to_string(),
         sync_state: Some("{}".into()),
     };
+    // Sources keep their own status columns; `sync_failing_since` belongs to
+    // mail accounts (see mailbox_sync) and stays untouched here.
     if dto.kind == "rss" {
         if let Err(error) = poll_rss_inner(pool, &id, true).await {
             let now = chrono::Utc::now().to_rfc3339();

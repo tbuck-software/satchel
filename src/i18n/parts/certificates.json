@@ -1,7 +1,6 @@
 {
   "en": {
     "certificates": {
-      "todayAt": "today, {time}",
       "banner": {
         "title": {
           "expired": "{account}: The mail server's certificate has expired",
@@ -64,7 +63,6 @@
   },
   "de": {
     "certificates": {
-      "todayAt": "heute, {time}",
       "banner": {
         "title": {
           "expired": "{account}: Das Zertifikat des Mailservers ist abgelaufen",

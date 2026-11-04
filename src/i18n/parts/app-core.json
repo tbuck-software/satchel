@@ -7,7 +7,10 @@
         "retrying": "Trying again…",
         "passwordRejected": "{account} did not accept the password.",
         "updatePassword": "Update password",
-        "serverResponse": "Server response"
+        "serverResponse": "Server response",
+        "accountOutage": "{account} has not synced since {since}",
+        "outageShort": "{account}: no sync since {since}",
+        "openAccount": "Account settings"
       },
       "inlineImageUnavailable": "Image unavailable",
       "messageLoadFailed": "The message could not be loaded.",
@@ -328,7 +331,10 @@
         "retrying": "Wird wiederholt …",
         "passwordRejected": "{account} hat das Passwort nicht angenommen.",
         "updatePassword": "Passwort ändern",
-        "serverResponse": "Antwort des Servers"
+        "serverResponse": "Antwort des Servers",
+        "accountOutage": "{account} gleicht seit {since} nicht ab",
+        "outageShort": "{account}: kein Abgleich seit {since}",
+        "openAccount": "Kontoeinstellungen"
       },
       "inlineImageUnavailable": "Bild nicht verfügbar",
       "messageLoadFailed": "Die Nachricht konnte nicht geladen werden.",
