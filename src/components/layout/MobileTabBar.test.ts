@@ -6,6 +6,7 @@ import { createMemoryHistory, createRouter } from 'vue-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerListScrollTop } from '@/composables/listScrollTop';
 import MobileTabBar from './MobileTabBar.vue';
+import { useUiStore } from '@/stores/ui';
 
 const blank = { template: '<div />' };
 
@@ -35,6 +36,17 @@ afterEach(() => {
 });
 
 describe('MobileTabBar', () => {
+  it('draws one icon per tab and puts the attention dot on Mail only', async () => {
+    const { wrapper } = await mountAt('/inbox');
+    useUiStore().drawerAttention = true;
+    await wrapper.vm.$nextTick();
+    for (const id of ['mail', 'calendar', 'contacts', 'settings']) {
+      expect(tab(wrapper, id).findAll('svg')).toHaveLength(1);
+    }
+    expect(tab(wrapper, 'mail').find('.mobile-tab-bar__dot').exists()).toBe(true);
+    expect(wrapper.findAll('.mobile-tab-bar__dot')).toHaveLength(1);
+  });
+
   it('names the four areas and marks the one on screen', async () => {
     const { wrapper } = await mountAt('/contacts');
 
