@@ -20,6 +20,68 @@ export const mockAccounts: Account[] = [
   },
 ];
 
+/** Yesterday at a fixed clock time, so the fixture lands in Yesterday whenever it runs. */
+function yesterdayAt(hours: number, minutes: number): number {
+  const day = new Date();
+  day.setHours(0, 0, 0, 0);
+  day.setDate(day.getDate() - 1);
+  day.setHours(hours, minutes);
+  return day.getTime();
+}
+
+/*
+ * Personal mail from people Tom has written to before: each thread holds his
+ * earlier message and their answer. These are the mails the smart Inbox lists
+ * as plain rows of their day — not Priority, not a bundle, not a new sender.
+ */
+const knownCorrespondents = [
+  {
+    id: 'th-30',
+    subject: 'Release notes for 4.2',
+    sender: { name: 'Lena Vogel', email: 'lena.vogel@app.io' },
+    snippet: 'I added the migration notes you asked for. Could you read the upgrade section once more?',
+    at: Date.now() - 35 * 60_000,
+    unread: true,
+    asked: 'Could you add the migration notes to the 4.2 release notes?',
+  },
+  {
+    id: 'th-31',
+    subject: 'Floor plan for the new office',
+    sender: { name: 'Marco Rossi', email: 'marco@studio-rossi.example' },
+    snippet: 'Here is the revised plan with the quiet room by the window, as discussed.',
+    at: Date.now() - 95 * 60_000,
+    unread: false,
+    asked: 'Could the quiet room move to the window side?',
+  },
+  {
+    id: 'th-32',
+    subject: 'Lunch on Friday?',
+    sender: { name: 'Priya Nair', email: 'priya.nair@app.io' },
+    snippet: 'Friday works. The place around the corner at 12:30?',
+    at: Date.now() - 140 * 60_000,
+    unread: false,
+    asked: 'Lunch on Friday? I owe you one for the review.',
+  },
+  {
+    id: 'th-33',
+    subject: 'Contract draft, second round',
+    sender: { name: 'Daniel Becker', email: 'daniel@becker-law.example' },
+    snippet: 'Clause 7 now limits the liability as agreed. Two small open points remain.',
+    at: yesterdayAt(16, 40),
+    unread: false,
+    asked: 'Thanks for the first draft. Clause 7 still needs the liability cap.',
+  },
+  {
+    id: 'th-34',
+    subject: 'Retro notes and action items',
+    sender: { name: 'Ana Costa', email: 'ana.costa@app.io' },
+    snippet: 'Three action items came out of the retro; the first one is yours.',
+    at: yesterdayAt(11, 15),
+    unread: false,
+    asked: 'Could you send the retro notes around when they are ready?',
+  },
+];
+
 // `messageCount` is the number of messages seeded for the thread below, drafts
 // included, as the backend's projection counts them. A thread without seeded
 // messages gets one, so its count is 1.
@@ -513,6 +575,25 @@ const mockThreadSeeds: Omit<Thread, 'lastMessageAtMs'>[] = [
     tags: ['personal'],
     category: 'personal',
   },
+  ...knownCorrespondents.map(({ id, subject, sender, snippet, at, unread }): Omit<Thread, 'lastMessageAtMs'> => ({
+    id,
+    accountId: 'acc-work',
+    subject,
+    participants: [sender, { name: 'Tom', email: 'tom@satchel.dev' }],
+    snippet,
+    lastMessageAt: new Date(at).toISOString(),
+    messageCount: 2,
+    unreadCount: unread ? 1 : 0,
+    hasAttachments: false,
+    workflowState: 'inbox',
+    priority: 0,
+    mailboxNames: ['INBOX'],
+    tags: [],
+    category: 'personal',
+    // The core sets this when the thread holds a message we sent: the
+    // correspondence below is what makes these senders known.
+    senderKnown: true,
+  })),
 ];
 
 export const mockThreads: Thread[] = mockThreadSeeds.map((seed) => ({
@@ -665,6 +746,32 @@ baseMessages.push(
     isRead: true, attachments: [],
   },
 );
+
+// Tom's message first, then the answer that brought the thread back.
+baseMessages.push(...knownCorrespondents.flatMap(({ id, subject, sender, snippet, at, unread, asked }) => [
+  {
+    id: `m-${id}-sent`,
+    threadId: id,
+    from: { name: 'Tom', email: 'tom@satchel.dev' },
+    to: [sender],
+    subject,
+    bodyText: asked,
+    timestamp: new Date(at - 3 * 60 * 60_000).toISOString(),
+    isRead: true,
+    attachments: [],
+  },
+  {
+    id: `m-${id}`,
+    threadId: id,
+    from: sender,
+    to: [{ name: 'Tom', email: 'tom@satchel.dev' }],
+    subject: `Re: ${subject}`,
+    bodyText: `Hi Tom,\n\n${snippet}\n\n${sender.name.split(' ')[0]}`,
+    timestamp: new Date(at).toISOString(),
+    isRead: !unread,
+    attachments: [],
+  },
+]));
 
 const seededMessagesByThread = baseMessages.reduce<Record<string, Message[]>>((acc, message) => {
   const list = acc[message.threadId] ?? [];
