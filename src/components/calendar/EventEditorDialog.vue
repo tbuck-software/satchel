@@ -321,6 +321,10 @@ useDismissable(() => props.draft !== null, () => emit('close'));
   gap: 12px;
   min-height: 0;
   overflow-y: auto;
+  /* A scroller clips sideways too: room for the fields' focus ring, taken
+     back from the margin so the fields keep their place. */
+  padding-inline: var(--space-xs);
+  margin-inline: calc(-1 * var(--space-xs));
 }
 
 .field {
