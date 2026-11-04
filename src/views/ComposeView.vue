@@ -2344,6 +2344,12 @@ textarea:focus {
      the row below is covered whole instead of cut off mid-word. */
   .compose .row:has(:deep(.chips-wrap)) { position: relative; }
   .compose .row :deep(.chips-wrap) { position: static; }
+  /* As in iOS Mail, the suggestions own the column below the To row: the
+     fields under them are covered whole, not left peeking out beneath. */
+  .compose .row :deep(.suggestions) {
+    box-shadow: 0 0 0 100vmax var(--bg-surface);
+    clip-path: inset(0 -100vmax -100vmax -100vmax);
+  }
   /* A phone has no width to spare for an empty label column. */
   .compose .body { padding-left: 0; }
   .compose .compose-attachments { margin-left: 0; }
