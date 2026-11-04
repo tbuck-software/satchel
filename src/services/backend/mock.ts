@@ -832,7 +832,9 @@ const handlers: Record<string, Handler> = {
       .sort(byDateDesc);
     const keys = ['priority', 'pinned', 'invitations', 'notifications', 'newsletter'] as const;
     const buckets = keys.flatMap((key) => {
-      const rows = inbox.filter((thread) => classifySmartBucket(thread) === key);
+      // Like the core's summary: a starred thread counts as Pinned as well as
+      // in its own bucket, the same rows `list_threads` returns for 'pinned'.
+      const rows = inbox.filter((thread) => key === 'pinned' ? thread.isStarred : classifySmartBucket(thread) === key);
       if (rows.length === 0) return [];
       return [{
         key,
