@@ -67,13 +67,20 @@ export function translateBackendError(error: unknown): string | null {
 }
 
 /**
- * Envelopes such as `accountSyncFailed` carry their cause as `message`. When
- * Rust already named that cause with a key, it reads as a sentence too; a
- * provider's own wording stays verbatim.
+ * Envelopes such as `accountSyncFailed` carry their cause as `message`, and
+ * `imapConnectionFailed` as `reason`. When Rust already named that cause with
+ * a key, it reads as a sentence too; a provider's own wording stays verbatim.
  */
+const CAUSE_PARAMS = ['message', 'reason'] as const;
+
 function withTranslatedCause(params?: Record<string, unknown>): Record<string, unknown> | undefined {
-  const cause = typeof params?.message === 'string' ? commandErrorPayload(params.message) : null;
-  return cause ? { ...params, message: translateBackendError(cause) } : params;
+  if (!params) return params;
+  let translated = params;
+  for (const name of CAUSE_PARAMS) {
+    const cause = typeof params[name] === 'string' ? commandErrorPayload(params[name]) : null;
+    if (cause) translated = { ...translated, [name]: translateBackendError(cause) };
+  }
+  return translated;
 }
 
 /** Return the stable message key without coupling callers to Tauri's wrapper shape. */

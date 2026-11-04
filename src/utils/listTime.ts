@@ -75,3 +75,18 @@ export function formatMessageTimestamp(value: string): string {
   return localeFormatter('messageTimestamp', MESSAGE_TIMESTAMP_OPTIONS).format(new Date(value));
 }
 
+const MOMENT_TIME_OPTIONS: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12: false };
+
+/**
+ * A moment for a sentence: "today, 12:06" for today, otherwise "4 Nov, 12:06".
+ * `null` for a missing or unreadable value, so the caller picks the wording.
+ */
+export function formatMoment(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  if (date.toDateString() === new Date().toDateString()) {
+    return t('common.todayAt', { time: localeFormatter('momentTime', MOMENT_TIME_OPTIONS).format(date) });
+  }
+  return formatMessageTimestamp(value);
+}

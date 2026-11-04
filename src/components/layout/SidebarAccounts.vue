@@ -5,9 +5,17 @@ import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { useThreadsStore } from '@/stores/threads';
+import { useUiStore } from '@/stores/ui';
 import NavItem from '@/components/ui/NavItem.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import AccountAvatar from '@/components/common/AccountAvatar.vue';
+import IconButton from '@/components/ui/IconButton.vue';
+import { useCertificateTrustStore } from '@/stores/certificateTrust';
+import { certificateShort, formatCertificateMoment } from '@/utils/certificateLabels';
+import { useConnectionStore } from '@/stores/connection';
+import { backendErrorKey, backendErrorStringParam } from '@/utils/backendErrors';
+import { accountCertificateRejection } from '@/utils/certificateRejection';
+import { formatMoment } from '@/utils/listTime';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 
 const SidebarAccountMenu = defineAsyncComponent(() => import('./SidebarAccountMenu.vue'));
@@ -17,6 +25,62 @@ const accounts = useAccountsStore();
 const mailboxes = useMailboxesStore();
 const threads = useThreadsStore();
 const router = useRouter();
+const ui = useUiStore();
+const certificates = useCertificateTrustStore();
+const connection = useConnectionStore();
+
+/** Since when each account's other sync failures have run, from the live run. */
+const failingSince = computed(() => {
+  const since = new Map<string, string | null>();
+  for (const failure of connection.syncFailures) {
+    if (backendErrorKey(failure) !== 'backend.errors.accountSyncFailed') continue;
+    if (accountCertificateRejection(failure)) continue;
+    const accountId = backendErrorStringParam(failure, 'accountId');
+    if (accountId) since.set(accountId, backendErrorStringParam(failure, 'since'));
+  }
+  return since;
+});
+
+type Marker = { kind: 'certificate' | 'exception' | 'outage'; label: string };
+
+/**
+ * The account row's marker and its tooltip, the short form of the banner. A
+ * rejected certificate wins over the generic failure: it has its own dialog.
+ */
+function markerFor(accountId: string, name: string): Marker | null {
+  const problem = certificates.problemFor(accountId);
+  if (problem) {
+    return { kind: 'certificate', label: t('certificates.sidebar.problem', { account: name, problem: certificateShort(problem.rejection) }) };
+  }
+  if (failingSince.value.has(accountId)) {
+    const since = formatMoment(failingSince.value.get(accountId)) ?? t('common.unknown');
+    return { kind: 'outage', label: t('errors.banner.outageShort', { account: name, since }) };
+  }
+  const exception = certificates.exceptionFor(accountId);
+  if (exception) {
+    return {
+      kind: 'exception',
+      label: t('certificates.sidebar.exception', {
+        account: name,
+        problem: t('certificates.exceptionShort', { until: formatCertificateMoment(exception.expires_at) }),
+      }),
+    };
+  }
+  return null;
+}
+
+const markers = computed(() => new Map(
+  accounts.emailAccounts.map((account) => [account.id, markerFor(account.id, account.displayName)]),
+));
+
+function openMarker(accountId: string, marker: Marker) {
+  ui.closeMailboxSwitcher();
+  if (marker.kind === 'outage') {
+    void router.push({ name: 'settings', query: { section: 'accounts', account: accountId } });
+  } else {
+    certificates.openDetails(accountId);
+  }
+}
 
 /**
  * An account is a scope, not a place: the view on screen stays and is drawn
@@ -105,6 +169,28 @@ function openMenu(accountId: string, event: MouseEvent) {
           <span v-if="inboxCount(account.id) > 0" class="sidebar-accounts__count">{{ inboxCount(account.id) }}</span>
         </template>
       </NavItem>
+      <!-- A sibling, not inside NavItem: that is a button already. Orange while
+           the account cannot sync (a rejected certificate opens its details,
+           anything else the account settings); a quiet shield while a
+           certificate exception lets it through. -->
+      <IconButton
+        v-if="markers.get(account.id)"
+        class="sidebar-accounts__certificate"
+        :class="{ 'sidebar-accounts__certificate--problem': markers.get(account.id)!.kind !== 'exception' }"
+        :size="ui.isMobile ? 'lg' : 'sm'"
+        :title="markers.get(account.id)!.label"
+        @click="openMarker(account.id, markers.get(account.id)!)"
+      >
+        <AppIcon v-if="markers.get(account.id)!.kind !== 'exception'">
+          <path d="M8 2.4 14.2 13H1.8L8 2.4Z" />
+          <path d="M8 6.6v3" />
+          <path d="M8 11.6h.01" />
+        </AppIcon>
+        <AppIcon v-else>
+          <path d="M8 1.8 2.8 3.8v3.7c0 3.2 2.2 5.5 5.2 6.4 3-.9 5.2-3.2 5.2-6.4V3.8L8 1.8Z" />
+          <path d="M8 5.6v2.5l1.6 1" />
+        </AppIcon>
+      </IconButton>
     </div>
     <SidebarAccountMenu v-if="menuAccountId" :account-id="menuAccountId" :anchor="menuAnchor" @close="menuAnchor = null" />
   </nav>
@@ -128,6 +214,15 @@ function openMenu(accountId: string, event: MouseEvent) {
 .sidebar-accounts__asleep { display: inline-flex; align-items: center; gap: var(--space-xs); color: var(--text-tertiary); }
 .sidebar-accounts__asleep-label { font-size: var(--font-size-xs); }
 .sidebar-accounts__peek { display: inline-flex; color: var(--text-accent); }
+/* Prefixed with the row to outrank IconButton's own colours. */
+.sidebar-accounts__row .sidebar-accounts__certificate { color: var(--text-tertiary); }
+.sidebar-accounts__row .sidebar-accounts__certificate--problem { color: var(--accent-orange); }
+@media (hover: hover) {
+  .sidebar-accounts__row .sidebar-accounts__certificate--problem:hover:not(:disabled) {
+    color: var(--accent-orange);
+    background: color-mix(in srgb, var(--accent-orange) 12%, transparent);
+  }
+}
 /* NavItem's own count, kept beside the clock that took its slot. */
 .sidebar-accounts__count {
   margin-left: var(--space-xs);

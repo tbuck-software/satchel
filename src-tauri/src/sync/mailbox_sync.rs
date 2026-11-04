@@ -79,11 +79,18 @@ fn prepare_folders_for_sync(
 }
 
 /// `accountId` lets the UI open that account's settings, e.g. to replace a rejected password.
-fn encoded_account_sync_failure(account: &str, account_id: &str, message: impl ToString) -> String {
+/// `since` is when this run of failures began, so a long outage reads as one.
+fn encoded_account_sync_failure(
+    account: &str,
+    account_id: &str,
+    message: impl ToString,
+    since: &str,
+) -> String {
     crate::commands::error::CommandError::new("backend.errors.accountSyncFailed")
         .with_param("account", account)
         .with_param("accountId", account_id)
         .with_param("message", message.to_string())
+        .with_param("since", since)
         .encoded()
 }
 
@@ -1063,6 +1070,12 @@ pub(crate) async fn sync_mailboxes(
 
     let mut summary = MailboxSyncSummary::default();
 
+    // An exception granted in another process (the app, while this is a
+    // mobile background worker) has to be known before the first handshake.
+    if let Err(error) = satchel_core::providers::tls_trust::refresh(pool).await {
+        tracing::warn!(error = %error, "certificate exceptions could not be loaded");
+    }
+
     for account_id in account_ids {
         let result = account_run_exclusive(&account_id, ACCOUNT_SYNC_TIMEOUT, async {
         // Re-reading under the lock prevents a concurrent run from restoring a
@@ -1085,6 +1098,19 @@ pub(crate) async fn sync_mailboxes(
         if crate::sync::is_seeded_demo_account(&account.id, &account.email) {
             return Ok(());
         }
+        // The Inbox is polled every few seconds; the log hears about a
+        // failure when it starts or changes, and about the recovery.
+        let (previously_failed, previous_failure, failing_since) =
+            sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
+                "SELECT sync_status, last_sync_error, sync_failing_since FROM accounts WHERE id = ?",
+            )
+            .bind(&account.id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(status, error, since)| (status.as_deref() == Some("error"), error, since))
+            .unwrap_or_default();
 
         #[cfg(target_os = "android")]
         let cross_process_lease = match CrossProcessSyncLease::acquire(pool, &account.id).await? {
@@ -1658,6 +1684,7 @@ pub(crate) async fn sync_mailboxes(
                  SET sync_status = 'idle',
                      last_sync_error = NULL,
                      last_sync_error_at = NULL,
+                     sync_failing_since = NULL,
                      sync_progress_json = ?,
                      updated_at = ?
                  WHERE id = ?",
@@ -1687,6 +1714,10 @@ pub(crate) async fn sync_mailboxes(
                 backfill_remaining_messages,
                 backfill_total_messages,
             )) => {
+                if previously_failed {
+                    tracing::info!(account_id = %account.id, provider = %account.provider,
+                        "account sync recovered");
+                }
                 summary.accounts_synced += 1;
                 summary.folders_synced += folders_synced;
                 summary.messages_synced += messages_synced;
@@ -1698,18 +1729,30 @@ pub(crate) async fn sync_mailboxes(
             }
             Err(error) => {
                 let now = chrono::Utc::now().to_rfc3339();
-                let failure = encoded_account_sync_failure(&account.email, &account.id, &error);
+                let since = failing_since.clone().unwrap_or_else(|| now.clone());
+                let failure =
+                    encoded_account_sync_failure(&account.email, &account.id, &error, &since);
+                // The UI shows the translated form; the log is where the
+                // server's own words and the timing survive.
+                if previously_failed && previous_failure.as_deref() == Some(failure.as_str()) {
+                    tracing::debug!(account_id = %account.id, "account sync still failing");
+                } else {
+                    tracing::warn!(account_id = %account.id, provider = %account.provider,
+                        error = %error, "account sync failed");
+                }
                 let _ = sqlx::query(
                     "UPDATE accounts
                      SET sync_status = 'error',
                          last_sync_error = ?,
                          last_sync_error_at = ?,
+                         sync_failing_since = ?,
                          sync_progress_json = ?,
                          updated_at = ?
                      WHERE id = ?",
                 )
                 .bind(&failure)
                 .bind(&now)
+                .bind(&since)
                 .bind(serde_json::json!({"phase": "error"}).to_string())
                 .bind(&now)
                 .bind(&account.id)
@@ -1725,14 +1768,27 @@ pub(crate) async fn sync_mailboxes(
         Ok(())
         }).await;
         if let Err(error) = result {
+            tracing::warn!(account_id = %account_id, error = %error, "account sync failed");
             let now = chrono::Utc::now().to_rfc3339();
-            let failure = encoded_account_sync_failure(&account_id, &account_id, &error);
+            let since = sqlx::query_scalar::<_, Option<String>>(
+                "SELECT sync_failing_since FROM accounts WHERE id = ?",
+            )
+            .bind(&account_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .flatten()
+            .unwrap_or_else(|| now.clone());
+            let failure = encoded_account_sync_failure(&account_id, &account_id, &error, &since);
             let _ = sqlx::query(
                 "UPDATE accounts SET sync_status = 'error', last_sync_error = ?,
-                last_sync_error_at = ?, sync_progress_json = ?, updated_at = ? WHERE id = ?",
+                last_sync_error_at = ?, sync_failing_since = ?, sync_progress_json = ?,
+                updated_at = ? WHERE id = ?",
             )
             .bind(&failure)
             .bind(&now)
+            .bind(&since)
             .bind(serde_json::json!({"phase": "error"}).to_string())
             .bind(&now)
             .bind(&account_id)
@@ -1746,6 +1802,11 @@ pub(crate) async fn sync_mailboxes(
     // A block earned during this run has to outlive the process, or the next
     // start knocks on it and renews it.
     crate::sync::rate_limit_state::persist(pool).await;
+
+    // A server that presents a valid certificate again needs no exception.
+    if let Err(error) = satchel_core::providers::tls_trust::settle(pool).await {
+        tracing::warn!(error = %error, "certificate exceptions could not be settled");
+    }
 
     // Re-publish any durable intents left behind by a process exit between
     // message ingestion and native delivery. The renderer uses the message id,
@@ -2526,8 +2587,12 @@ mod tests {
 
     #[test]
     fn account_failures_cross_the_ui_boundary_as_message_keys() {
-        let failure =
-            encoded_account_sync_failure("person@example.test", "account-1", "provider refused");
+        let failure = encoded_account_sync_failure(
+            "person@example.test",
+            "account-1",
+            "provider refused",
+            "2026-10-14T11:00:00Z",
+        );
 
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&failure).unwrap(),
@@ -2536,10 +2601,58 @@ mod tests {
                 "params": {
                     "account": "person@example.test",
                     "accountId": "account-1",
-                    "message": "provider refused"
+                    "message": "provider refused",
+                    "since": "2026-10-14T11:00:00Z"
                 }
             })
         );
+    }
+
+    async fn failing_since(pool: &sqlx::SqlitePool) -> Option<String> {
+        sqlx::query_scalar("SELECT sync_failing_since FROM accounts")
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    // A two-day outage used to read as "failed just now" on every attempt.
+    #[tokio::test]
+    async fn a_run_of_failures_keeps_the_moment_it_began() {
+        let server = Pop3Fake::spawn(vec![(1, "fail-listing")]).await;
+        let pool = pop3_pool(server.port, true).await;
+
+        let first = sync_pop3_account(&pool).await;
+        let began = failing_since(&pool)
+            .await
+            .expect("set on the first failure");
+        let second = sync_pop3_account(&pool).await;
+
+        assert_eq!(failing_since(&pool).await.as_deref(), Some(began.as_str()));
+        for summary in [&first, &second] {
+            let account_failure = summary
+                .failures
+                .iter()
+                .map(|raw| serde_json::from_str::<serde_json::Value>(raw).unwrap())
+                .find(|failure| failure["key"] == "backend.errors.accountSyncFailed")
+                .expect("an account failure");
+            assert_eq!(account_failure["params"]["since"], began.as_str());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_successful_sync_ends_the_run_of_failures() {
+        let server = Pop3Fake::spawn(vec![(1, "uidl-1")]).await;
+        let pool = pop3_pool(server.port, true).await;
+        sqlx::query("UPDATE accounts SET sync_status = 'error', sync_failing_since = ?")
+            .bind("2026-10-14T11:00:00Z")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let summary = sync_pop3_account(&pool).await;
+
+        assert!(summary.failures.is_empty(), "{:?}", summary.failures);
+        assert_eq!(failing_since(&pool).await, None);
     }
 }
 

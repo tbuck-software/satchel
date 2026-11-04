@@ -28,6 +28,7 @@ pub mod storage;
 pub mod sync_quarantine;
 pub mod templates;
 pub mod threads;
+pub mod tls_exceptions;
 pub mod topics;
 pub mod trash;
 pub mod vacation;

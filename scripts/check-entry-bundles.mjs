@@ -26,11 +26,18 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * Main initial 237 KiB since 2026-11-04: the phone's tab bar and large title
  * measured 235.9 KiB (the tab bar and mailbox sheet already load lazily); the
  * phone search button, Undo restoring the unread mark and the bucket summary
- * renewed on an account change add 0.5 KiB (101.8 / 236.4 KiB). */
+ * renewed on an account change add 0.5 KiB (101.8 / 236.4 KiB).
+ * Initial 238 KiB since 2026-11-04: main measured 101.5 / 235.9 KiB; the
+ * certificate notices (banner, details, exception) add 1.26 KiB to the German
+ * catalogue and nothing to the entry, because their code loads with the
+ * connection banner (101.5 / 237.3 KiB).
+ * Viewer initial 125 KiB since 2026-11-04: with main's certificate notices
+ * and the phone reader's strings together, the German viewer catalogue path
+ * measured 124.05 KiB (56 B over); the viewer's code did not grow. */
 const budgets = {
-  'index.html': { entryGzip: 102 * 1024, initialGzip: 237 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
+  'index.html': { entryGzip: 102 * 1024, initialGzip: 238 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
-  'viewer.html': { entryGzip: 5 * 1024, initialGzip: 124 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
+  'viewer.html': { entryGzip: 5 * 1024, initialGzip: 125 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };
 
 /**

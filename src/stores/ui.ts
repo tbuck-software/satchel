@@ -67,6 +67,12 @@ export const useUiStore = defineStore('ui', () => {
    * itself as an overlay, so Back and Escape close it like any other.
    */
   const mailboxSwitcherOpen = ref(false);
+  /**
+   * Something behind the phone's mailbox switcher wants a look (an account
+   * whose server certificate is rejected). The switcher carries a dot; whoever
+   * owns the condition sets it, so this store stays ignorant of what it is.
+   */
+  const drawerAttention = ref(false);
 
   function updateLayout() {
     if (typeof window !== 'undefined') {
@@ -346,6 +352,7 @@ export const useUiStore = defineStore('ui', () => {
     settingsDetailOpen,
     openSettingsDetail,
     mailboxSwitcherOpen,
+    drawerAttention,
     setSidebarWidth,
     toggleNewSendersExpanded,
     setThreadListWidth,

@@ -7,6 +7,8 @@ import { useConnectionStore } from '@/stores/connection';
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { useThreadsStore } from '@/stores/threads';
 import { useUiStore } from '@/stores/ui';
+import { useCertificateTrustStore } from '@/stores/certificateTrust';
+import { certificateShort, formatCertificateMoment } from '@/utils/certificateLabels';
 import {
   backendAutoconfigureGroupware,
   backendDeleteAccount,
@@ -33,6 +35,17 @@ const connection = useConnectionStore();
 const mailboxes = useMailboxesStore();
 const threads = useThreadsStore();
 const ui = useUiStore();
+const certificates = useCertificateTrustStore();
+
+/** A rejected certificate or a running exception, as one line that opens the details. */
+function certificateLine(accountId: string): string | null {
+  const problem = certificates.problemFor(accountId);
+  if (problem) return certificateShort(problem.rejection);
+  const exception = certificates.exceptionFor(accountId);
+  return exception
+    ? t('certificates.exceptionShort', { until: formatCertificateMoment(exception.expires_at) })
+    : null;
+}
 const { ask } = useConfirm();
 const oauthAvailable = backendSupportsNativeCommands();
 const emailAccounts = computed(() => accounts.emailAccounts);
@@ -480,6 +493,15 @@ async function removeAccount(accountId: string, email: string) {
               · {{ translateBackendError(account.lastSyncError) ?? account.lastSyncError }}
             </template>
           </span>
+          <AppButton
+            v-if="certificateLine(account.id)"
+            class="account-certificate"
+            variant="link"
+            size="sm"
+            @click.stop.prevent="certificates.openDetails(account.id)"
+          >
+            {{ certificateLine(account.id) }}
+          </AppButton>
         </div>
         <span class="account-provider">{{ providerLabel(account.provider) }}</span>
         <IconButton
@@ -746,6 +768,12 @@ async function removeAccount(accountId: string, email: string) {
 
 .account-sync.error {
   color: var(--accent-red-soft);
+}
+
+.account-certificate {
+  justify-self: start;
+  color: var(--accent-orange);
+  font-size: var(--font-size-xs);
 }
 
 .account-provider {

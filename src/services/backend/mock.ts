@@ -689,6 +689,9 @@ function oauthStatus(accountId: string) {
 
 let appUpdateChannel: 'stable' | 'nightly' = 'stable';
 
+/** Expired-certificate exceptions granted in this session. */
+const certificateExceptions: Array<{ account_id: string; host: string; fingerprint: string; expires_at: string; created_at: string }> = [];
+
 const handlers: Record<string, Handler> = {
   oauth_status: (payload) => oauthStatus(String(payload.accountId)),
   start_oauth_flow: (payload) => {
@@ -1568,6 +1571,28 @@ const handlers: Record<string, Handler> = {
   sync_local_contact_avatars: () => 0,
   list_blocked_senders: () => [],
   list_rules: () => [],
+  list_certificate_exceptions: () => certificateExceptions.filter((exception) => Date.parse(exception.expires_at) > Date.now()),
+  trust_expired_certificate: ({ input: raw }) => {
+    const input = raw as { account_id: string; host: string; fingerprint: string };
+    const now = new Date();
+    const exception = {
+      account_id: input.account_id,
+      host: input.host.toLowerCase(),
+      fingerprint: input.fingerprint,
+      expires_at: new Date(now.getTime() + 7 * 86_400_000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+      created_at: now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    };
+    const index = certificateExceptions.findIndex((entry) => entry.account_id === exception.account_id && entry.host === exception.host);
+    if (index >= 0) certificateExceptions.splice(index, 1, exception);
+    else certificateExceptions.push(exception);
+    return exception;
+  },
+  revoke_certificate_exception: ({ accountId, host }) => {
+    const index = certificateExceptions.findIndex((entry) => entry.account_id === accountId && entry.host === String(host).toLowerCase());
+    if (index < 0) return false;
+    certificateExceptions.splice(index, 1);
+    return true;
+  },
 };
 
 /* -------------------------------------------------------------------------- */

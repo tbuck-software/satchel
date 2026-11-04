@@ -1030,6 +1030,10 @@ export default {
                 }
             }
         },
+        "list_certificate_exceptions": {
+            "kind": "object",
+            "fields": {}
+        },
         "list_contacts": {
             "kind": "object",
             "fields": {}
@@ -1677,6 +1681,23 @@ export default {
                 }
             }
         },
+        "revoke_certificate_exception": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "host": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "run_imap_sync": {
             "kind": "object",
             "fields": {}
@@ -2238,6 +2259,18 @@ export default {
         "tray_snapshot": {
             "kind": "object",
             "fields": {}
+        },
+        "trust_expired_certificate": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::tls_exceptions::TrustExpiredCertificateInput"
+                    }
+                }
+            }
         },
         "unblock_sender": {
             "kind": "object",
@@ -4446,6 +4479,29 @@ export default {
                         "item": {
                             "kind": "value"
                         }
+                    }
+                }
+            }
+        },
+        "app::commands::tls_exceptions::TrustExpiredCertificateInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "fingerprint": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "host": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
                     }
                 }
             }

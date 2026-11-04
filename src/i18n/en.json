@@ -377,6 +377,11 @@
       "threadNotFound": "The thread was not found.",
       "threadPersistenceFailed": "The thread data could not be accessed. Please try again.",
       "threadSmartBucketInvalid": "The smart inbox bucket is invalid.",
+      "tlsCertificateRejected": "The certificate of {host} was not accepted.",
+      "tlsExceptionCertificateChanged": "The server now presents a different certificate. Look at the details again before trusting it.",
+      "tlsExceptionNoRejection": "Satchel could not reach the server to check its certificate again. Try again in a moment.",
+      "tlsExceptionNotAllowed": "This certificate has a problem beyond its expiry date, so Satchel offers no exception.",
+      "tlsExceptionPersistenceFailed": "The certificate exception could not be saved.",
       "topicAddedByInvalid": "The topic attribution is invalid.",
       "topicFileContentInvalid": "The topic file could not be decoded.",
       "topicFileNotFound": "The topic file was not found.",
@@ -534,6 +539,66 @@
       "weekTitle": "Week view (2)"
     }
   },
+  "certificates": {
+    "banner": {
+      "detail": {
+        "expired": "{host} has presented an expired certificate since {since}. The people who run your mail server have to fix this. Your mail stays readable, and Satchel keeps trying.",
+        "nameMismatch": "The certificate {host} presented was issued for a different name. Satchel does not connect, because someone else could be answering.",
+        "notYetValid": "{host} presents a certificate that only becomes valid on {from}. Check this device's date and time first.",
+        "other": "Satchel did not accept the certificate {host} presented.",
+        "unknownIssuer": "{host} presents a certificate from an issuer Satchel does not trust. Ask the people who run your mail server which certificate it should present."
+      },
+      "details": "Details",
+      "hide": "Hide",
+      "title": {
+        "expired": "{account}: The mail server's certificate has expired",
+        "nameMismatch": "{account}: The certificate belongs to a different server",
+        "notYetValid": "{account}: The mail server's certificate is not valid yet",
+        "other": "{account}: The mail server's certificate was rejected",
+        "unknownIssuer": "{account}: The mail server's certificate is not trusted"
+      }
+    },
+    "dialog": {
+      "confirm": "Trust",
+      "confirmBody": "Satchel then accepts exactly this certificate (SHA-256 {fingerprint}) for {account} until {until}. A different certificate is still rejected. The exception ends early as soon as the server presents a valid one again.",
+      "confirmTitle": "Trust this certificate for 7 days?",
+      "copy": "Copy message",
+      "copyFailed": "The message could not be copied. Select it and copy it by hand.",
+      "exceptionBody": "{account} accepts the expired certificate of {host}. As soon as the server presents a valid one, the exception ends by itself.",
+      "exceptionTitle": "Exception active until {until}",
+      "explainExpired": "The connection would be encrypted, but Satchel can no longer confirm that it really is your mail server answering. Usually someone just forgot to install the renewed certificate.",
+      "fingerprint": "SHA-256",
+      "issuer": "Issuer",
+      "lastSuccess": "Last successful sync",
+      "never": "Never",
+      "note": "Message for your administrators",
+      "noteBody": "Hello,\n\nmy mail client cannot connect to {host}:{port} ({protocol}): {problem}.\n\nCertificate: {subject}\nValid from: {notBefore}\nValid until: {notAfter}\nIssuer: {issuer}\nSHA-256: {fingerprint}\n\nCould you take a look?",
+      "revoke": "End exception",
+      "revokeFailed": "The exception could not be ended: {error}",
+      "revoked": "Exception ended",
+      "server": "Server",
+      "subject": "Issued to",
+      "title": "{account}: Server certificate",
+      "trust": "Trust for 7 days…",
+      "trustFailed": "The exception was not saved: {error}",
+      "trusted": "{account} trusts the certificate until {until}",
+      "unknown": "Unknown",
+      "validFrom": "Valid from",
+      "validUntil": "Valid until"
+    },
+    "exceptionShort": "Exception until {until}, certificate expired",
+    "short": {
+      "expired": "Certificate expired since {since}",
+      "nameMismatch": "Certificate for another server",
+      "notYetValid": "Certificate not valid yet",
+      "other": "Certificate rejected",
+      "unknownIssuer": "Certificate not trusted"
+    },
+    "sidebar": {
+      "exception": "{account}: {problem}",
+      "problem": "{account}: {problem}"
+    }
+  },
   "commands": {
     "blockAddress": "Block this sender",
     "blockDomain": "Block the sender's whole domain",
@@ -659,6 +724,7 @@
     "subject": "Subject",
     "to": "To",
     "today": "Today",
+    "todayAt": "today, {time}",
     "tomorrow": "Tomorrow",
     "undo": "Undo",
     "unknown": "Unknown",
@@ -1025,6 +1091,9 @@
     "attachmentEmpty": "The attachment came back without any data.",
     "backendUnknown": "Unknown backend error",
     "banner": {
+      "accountOutage": "{account} has not synced since {since}",
+      "openAccount": "Account settings",
+      "outageShort": "{account}: no sync since {since}",
       "passwordRejected": "{account} did not accept the password.",
       "retrying": "Trying again…",
       "serverResponse": "Server response",

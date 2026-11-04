@@ -17,6 +17,16 @@ export interface SyncFailure {
   /** What the server said, verbatim; for a bug report, not for the headline. */
   serverText: string;
   passwordRejected: boolean;
+  /** When this account's run of failed syncs began (RFC 3339), if known. */
+  since: string | null;
+}
+
+/** From this long on, a failure is an outage and the banner says since when. */
+export const OUTAGE_AFTER_MS = 60 * 60 * 1000;
+
+export function isOutage(failure: Pick<SyncFailure, 'since'>, now = Date.now()): boolean {
+  const began = failure.since ? Date.parse(failure.since) : Number.NaN;
+  return Number.isFinite(began) && now - began >= OUTAGE_AFTER_MS;
 }
 
 /**
@@ -42,5 +52,6 @@ export function describeSyncFailure(raw: string, passwordAccounts: ReadonlySet<s
     account,
     serverText,
     passwordRejected,
+    since: keyed ? backendErrorStringParam(raw, 'since') : null,
   };
 }

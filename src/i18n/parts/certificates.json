@@ -1,0 +1,126 @@
+{
+  "en": {
+    "certificates": {
+      "banner": {
+        "title": {
+          "expired": "{account}: The mail server's certificate has expired",
+          "notYetValid": "{account}: The mail server's certificate is not valid yet",
+          "nameMismatch": "{account}: The certificate belongs to a different server",
+          "unknownIssuer": "{account}: The mail server's certificate is not trusted",
+          "other": "{account}: The mail server's certificate was rejected"
+        },
+        "detail": {
+          "expired": "{host} has presented an expired certificate since {since}. The people who run your mail server have to fix this. Your mail stays readable, and Satchel keeps trying.",
+          "notYetValid": "{host} presents a certificate that only becomes valid on {from}. Check this device's date and time first.",
+          "nameMismatch": "The certificate {host} presented was issued for a different name. Satchel does not connect, because someone else could be answering.",
+          "unknownIssuer": "{host} presents a certificate from an issuer Satchel does not trust. Ask the people who run your mail server which certificate it should present.",
+          "other": "Satchel did not accept the certificate {host} presented."
+        },
+        "hide": "Hide",
+        "details": "Details"
+      },
+      "short": {
+        "expired": "Certificate expired since {since}",
+        "notYetValid": "Certificate not valid yet",
+        "nameMismatch": "Certificate for another server",
+        "unknownIssuer": "Certificate not trusted",
+        "other": "Certificate rejected"
+      },
+      "exceptionShort": "Exception until {until}, certificate expired",
+      "dialog": {
+        "title": "{account}: Server certificate",
+        "explainExpired": "The connection would be encrypted, but Satchel can no longer confirm that it really is your mail server answering. Usually someone just forgot to install the renewed certificate.",
+        "server": "Server",
+        "subject": "Issued to",
+        "issuer": "Issuer",
+        "validFrom": "Valid from",
+        "validUntil": "Valid until",
+        "fingerprint": "SHA-256",
+        "lastSuccess": "Last successful sync",
+        "never": "Never",
+        "unknown": "Unknown",
+        "note": "Message for your administrators",
+        "noteBody": "Hello,\n\nmy mail client cannot connect to {host}:{port} ({protocol}): {problem}.\n\nCertificate: {subject}\nValid from: {notBefore}\nValid until: {notAfter}\nIssuer: {issuer}\nSHA-256: {fingerprint}\n\nCould you take a look?",
+        "copy": "Copy message",
+        "copyFailed": "The message could not be copied. Select it and copy it by hand.",
+        "trust": "Trust for 7 days…",
+        "confirmTitle": "Trust this certificate for 7 days?",
+        "confirmBody": "Satchel then accepts exactly this certificate (SHA-256 {fingerprint}) for {account} until {until}. A different certificate is still rejected. The exception ends early as soon as the server presents a valid one again.",
+        "confirm": "Trust",
+        "trusted": "{account} trusts the certificate until {until}",
+        "trustFailed": "The exception was not saved: {error}",
+        "exceptionTitle": "Exception active until {until}",
+        "exceptionBody": "{account} accepts the expired certificate of {host}. As soon as the server presents a valid one, the exception ends by itself.",
+        "revoke": "End exception",
+        "revoked": "Exception ended",
+        "revokeFailed": "The exception could not be ended: {error}"
+      },
+      "sidebar": {
+        "problem": "{account}: {problem}",
+        "exception": "{account}: {problem}"
+      }
+    }
+  },
+  "de": {
+    "certificates": {
+      "banner": {
+        "title": {
+          "expired": "{account}: Das Zertifikat des Mailservers ist abgelaufen",
+          "notYetValid": "{account}: Das Zertifikat des Mailservers ist noch nicht gültig",
+          "nameMismatch": "{account}: Das Zertifikat gehört zu einem anderen Server",
+          "unknownIssuer": "{account}: Dem Zertifikat des Mailservers wird nicht vertraut",
+          "other": "{account}: Das Zertifikat des Mailservers wurde abgelehnt"
+        },
+        "detail": {
+          "expired": "{host} zeigt seit {since} ein abgelaufenes Zertifikat. Das muss die IT deines Mailservers beheben. Deine Mails bleiben lesbar, Satchel versucht es weiter.",
+          "notYetValid": "{host} zeigt ein Zertifikat, das erst ab {from} gilt. Prüfe zuerst Datum und Uhrzeit dieses Geräts.",
+          "nameMismatch": "Das Zertifikat, das {host} zeigt, ist für einen anderen Namen ausgestellt. Satchel verbindet sich nicht, weil jemand anderes antworten könnte.",
+          "unknownIssuer": "{host} zeigt ein Zertifikat eines Ausstellers, dem Satchel nicht vertraut. Frag die IT deines Mailservers, welches Zertifikat er zeigen sollte.",
+          "other": "Satchel hat das Zertifikat von {host} nicht akzeptiert."
+        },
+        "hide": "Ausblenden",
+        "details": "Details"
+      },
+      "short": {
+        "expired": "Zertifikat abgelaufen seit {since}",
+        "notYetValid": "Zertifikat noch nicht gültig",
+        "nameMismatch": "Zertifikat für einen anderen Server",
+        "unknownIssuer": "Zertifikat nicht vertrauenswürdig",
+        "other": "Zertifikat abgelehnt"
+      },
+      "exceptionShort": "Ausnahme bis {until}, Zertifikat abgelaufen",
+      "dialog": {
+        "title": "{account}: Server-Zertifikat",
+        "explainExpired": "Die Verbindung wäre verschlüsselt, aber Satchel kann nicht mehr bestätigen, dass am anderen Ende wirklich dein Mailserver sitzt. Meistens hat nur jemand vergessen, das erneuerte Zertifikat einzuspielen.",
+        "server": "Server",
+        "subject": "Ausgestellt für",
+        "issuer": "Aussteller",
+        "validFrom": "Gültig ab",
+        "validUntil": "Gültig bis",
+        "fingerprint": "SHA-256",
+        "lastSuccess": "Zuletzt erfolgreich abgeglichen",
+        "never": "Noch nie",
+        "unknown": "Unbekannt",
+        "note": "Meldung an die IT",
+        "noteBody": "Hallo,\n\nmein Mailprogramm kann sich nicht mit {host}:{port} ({protocol}) verbinden: {problem}.\n\nZertifikat: {subject}\nGültig ab: {notBefore}\nGültig bis: {notAfter}\nAussteller: {issuer}\nSHA-256: {fingerprint}\n\nKönnt ihr euch das ansehen?",
+        "copy": "Meldung kopieren",
+        "copyFailed": "Die Meldung ließ sich nicht kopieren. Markiere sie und kopiere sie von Hand.",
+        "trust": "7 Tage vertrauen …",
+        "confirmTitle": "Diesem Zertifikat 7 Tage vertrauen?",
+        "confirmBody": "Satchel akzeptiert dann für {account} genau dieses Zertifikat (SHA-256 {fingerprint}) bis {until}. Ein anderes Zertifikat wird weiter abgelehnt. Die Ausnahme endet früher, sobald der Server wieder ein gültiges zeigt.",
+        "confirm": "Vertrauen",
+        "trusted": "{account} vertraut dem Zertifikat bis {until}",
+        "trustFailed": "Die Ausnahme wurde nicht gespeichert: {error}",
+        "exceptionTitle": "Ausnahme aktiv bis {until}",
+        "exceptionBody": "{account} akzeptiert das abgelaufene Zertifikat von {host}. Sobald der Server wieder ein gültiges zeigt, endet die Ausnahme von selbst.",
+        "revoke": "Ausnahme beenden",
+        "revoked": "Ausnahme beendet",
+        "revokeFailed": "Die Ausnahme ließ sich nicht beenden: {error}"
+      },
+      "sidebar": {
+        "problem": "{account}: {problem}",
+        "exception": "{account}: {problem}"
+      }
+    }
+  }
+}
