@@ -8,6 +8,7 @@ pub mod imap_sessions;
 pub mod outlook;
 pub mod pop3;
 pub mod smtp;
+pub mod tls_trust;
 pub mod traits;
 
 use std::sync::Arc;

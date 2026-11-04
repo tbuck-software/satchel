@@ -17,9 +17,28 @@ const ui = useUiStore();
 </script>
 
 <template>
-  <IconButton v-if="ui.isMobile" :title="$t('common.menu')" @click="ui.toggleMobileSidebar()">
+  <IconButton v-if="ui.isMobile" class="drawer-button" :title="$t('common.menu')" @click="ui.toggleMobileSidebar()">
     <AppIcon>
       <path d="M2 4h12M2 8h12M2 12h12" />
     </AppIcon>
+    <span v-if="ui.drawerAttention" class="drawer-button__dot" aria-hidden="true" />
   </IconButton>
 </template>
+
+<style scoped>
+/* Same dot as PaneHeader's handle. */
+.drawer-button {
+  position: relative;
+}
+
+.drawer-button__dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--accent-orange);
+  box-shadow: 0 0 0 2px var(--bg-base);
+}
+</style>

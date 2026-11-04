@@ -272,7 +272,9 @@ impl Pop3Provider {
             let stream = timeout(Self::op_timeout(), connector.connect(server_name, tcp))
                 .await
                 .map_err(|_| "pop3 tls handshake timed out".to_string())?
-                .map_err(|err| format!("pop3 tls handshake failed: {err}"))?;
+                .map_err(|err| {
+                    super::tls_trust::handshake_error("pop3", &cfg.host, cfg.port, &err)
+                })?;
             Pop3Session::new(Box::new(stream))
         } else {
             Pop3Session::new(Box::new(tcp))

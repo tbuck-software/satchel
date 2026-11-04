@@ -377,6 +377,11 @@
       "threadNotFound": "Die Unterhaltung wurde nicht gefunden.",
       "threadPersistenceFailed": "Auf die Unterhaltungsdaten konnte nicht zugegriffen werden. Bitte versuche es erneut.",
       "threadSmartBucketInvalid": "Der Smart-Inbox-Bucket ist ungültig.",
+      "tlsCertificateRejected": "Das Zertifikat von {host} wurde nicht akzeptiert.",
+      "tlsExceptionCertificateChanged": "Der Server zeigt inzwischen ein anderes Zertifikat. Sieh dir die Details erneut an, bevor du ihm vertraust.",
+      "tlsExceptionNoRejection": "Satchel hat den Server nicht erreicht, um das Zertifikat erneut zu prüfen. Versuch es gleich noch einmal.",
+      "tlsExceptionNotAllowed": "Dieses Zertifikat hat ein Problem über das Ablaufdatum hinaus, deshalb bietet Satchel keine Ausnahme an.",
+      "tlsExceptionPersistenceFailed": "Die Zertifikatsausnahme ließ sich nicht speichern.",
       "topicAddedByInvalid": "Die Themenzuordnung ist ungültig.",
       "topicFileContentInvalid": "Die Themendatei konnte nicht dekodiert werden.",
       "topicFileNotFound": "Die Themendatei wurde nicht gefunden.",
@@ -533,6 +538,67 @@
       "week": "Woche",
       "weekTitle": "Wochenansicht (2)"
     }
+  },
+  "certificates": {
+    "banner": {
+      "detail": {
+        "expired": "{host} zeigt seit {since} ein abgelaufenes Zertifikat. Das muss die IT deines Mailservers beheben. Deine Mails bleiben lesbar, Satchel versucht es weiter.",
+        "nameMismatch": "Das Zertifikat, das {host} zeigt, ist für einen anderen Namen ausgestellt. Satchel verbindet sich nicht, weil jemand anderes antworten könnte.",
+        "notYetValid": "{host} zeigt ein Zertifikat, das erst ab {from} gilt. Prüfe zuerst Datum und Uhrzeit dieses Geräts.",
+        "other": "Satchel hat das Zertifikat von {host} nicht akzeptiert.",
+        "unknownIssuer": "{host} zeigt ein Zertifikat eines Ausstellers, dem Satchel nicht vertraut. Frag die IT deines Mailservers, welches Zertifikat er zeigen sollte."
+      },
+      "details": "Details",
+      "hide": "Ausblenden",
+      "title": {
+        "expired": "{account}: Das Zertifikat des Mailservers ist abgelaufen",
+        "nameMismatch": "{account}: Das Zertifikat gehört zu einem anderen Server",
+        "notYetValid": "{account}: Das Zertifikat des Mailservers ist noch nicht gültig",
+        "other": "{account}: Das Zertifikat des Mailservers wurde abgelehnt",
+        "unknownIssuer": "{account}: Dem Zertifikat des Mailservers wird nicht vertraut"
+      }
+    },
+    "dialog": {
+      "confirm": "Vertrauen",
+      "confirmBody": "Satchel akzeptiert dann für {account} genau dieses Zertifikat (SHA-256 {fingerprint}) bis {until}. Ein anderes Zertifikat wird weiter abgelehnt. Die Ausnahme endet früher, sobald der Server wieder ein gültiges zeigt.",
+      "confirmTitle": "Diesem Zertifikat 7 Tage vertrauen?",
+      "copy": "Meldung kopieren",
+      "copyFailed": "Die Meldung ließ sich nicht kopieren. Markiere sie und kopiere sie von Hand.",
+      "exceptionBody": "{account} akzeptiert das abgelaufene Zertifikat von {host}. Sobald der Server wieder ein gültiges zeigt, endet die Ausnahme von selbst.",
+      "exceptionTitle": "Ausnahme aktiv bis {until}",
+      "explainExpired": "Die Verbindung wäre verschlüsselt, aber Satchel kann nicht mehr bestätigen, dass am anderen Ende wirklich dein Mailserver sitzt. Meistens hat nur jemand vergessen, das erneuerte Zertifikat einzuspielen.",
+      "fingerprint": "SHA-256",
+      "issuer": "Aussteller",
+      "lastSuccess": "Zuletzt erfolgreich abgeglichen",
+      "never": "Noch nie",
+      "note": "Meldung an die IT",
+      "noteBody": "Hallo,\n\nmein Mailprogramm kann sich nicht mit {host}:{port} ({protocol}) verbinden: {problem}.\n\nZertifikat: {subject}\nGültig ab: {notBefore}\nGültig bis: {notAfter}\nAussteller: {issuer}\nSHA-256: {fingerprint}\n\nKönnt ihr euch das ansehen?",
+      "revoke": "Ausnahme beenden",
+      "revokeFailed": "Die Ausnahme ließ sich nicht beenden: {error}",
+      "revoked": "Ausnahme beendet",
+      "server": "Server",
+      "subject": "Ausgestellt für",
+      "title": "{account}: Server-Zertifikat",
+      "trust": "7 Tage vertrauen …",
+      "trustFailed": "Die Ausnahme wurde nicht gespeichert: {error}",
+      "trusted": "{account} vertraut dem Zertifikat bis {until}",
+      "unknown": "Unbekannt",
+      "validFrom": "Gültig ab",
+      "validUntil": "Gültig bis"
+    },
+    "exceptionShort": "Ausnahme bis {until}, Zertifikat abgelaufen",
+    "short": {
+      "expired": "Zertifikat abgelaufen seit {since}",
+      "nameMismatch": "Zertifikat für einen anderen Server",
+      "notYetValid": "Zertifikat noch nicht gültig",
+      "other": "Zertifikat abgelehnt",
+      "unknownIssuer": "Zertifikat nicht vertrauenswürdig"
+    },
+    "sidebar": {
+      "exception": "{account}: {problem}",
+      "problem": "{account}: {problem}"
+    },
+    "todayAt": "heute, {time}"
   },
   "commands": {
     "blockAddress": "Diesen Absender blockieren",

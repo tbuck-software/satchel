@@ -4,8 +4,6 @@ use futures::TryStreamExt;
 use postroom::SourceId;
 use postroom_imap::imap_message_identity;
 use postroom_rfc5322::{parse_rfc822 as parse_core_rfc822, EmailMetadata, MimeContext};
-#[cfg(any(target_os = "android", target_os = "ios"))]
-use rustls_platform_verifier::BuilderVerifierExt;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
@@ -946,13 +944,15 @@ impl ImapProvider {
             )
             .await
             .map_err(|_| "imap tls handshake timed out".to_string())?
-            .map_err(|err| format!("imap tls handshake failed: {err}"))?;
+            .map_err(|err| super::tls_trust::handshake_error("imap", &cfg.host, cfg.port, &err))?;
             async_imap::Client::new(tls_stream)
         } else {
             let tls_stream = timeout(Self::op_timeout(), tls.connect(server_name, tcp_stream))
                 .await
                 .map_err(|_| "imap tls handshake timed out".to_string())?
-                .map_err(|err| format!("imap tls handshake failed: {err}"))?;
+                .map_err(|err| {
+                    super::tls_trust::handshake_error("imap", &cfg.host, cfg.port, &err)
+                })?;
             let mut client = async_imap::Client::new(tls_stream);
             let _ = timeout(Self::op_timeout(), client.read_response())
                 .await
@@ -2499,24 +2499,37 @@ fn login_error_text(err: &async_imap::error::Error) -> String {
 /// Trust anchors differ by platform on purpose. Desktop pins the bundled
 /// webpki roots; mobile defers to the OS store, because both platforms let the
 /// user and an MDM profile install CAs, and mail servers behind a corporate
-/// proxy depend on exactly that.
+/// proxy depend on exactly that. Both are wrapped in `MailCertVerifier`, which
+/// adds nothing but the record of a rejection and the one pinned exception.
 pub fn mail_tls_client_config() -> Result<rustls::ClientConfig, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let builder = rustls::ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .map_err(|err| format!("failed to configure mail TLS protocol versions: {err}"))?;
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
-    let config = builder
-        .with_platform_verifier()
-        .map_err(|err| format!("failed to configure the mobile platform TLS verifier: {err}"))?
-        .with_no_client_auth();
+    let platform: Arc<dyn rustls::client::danger::ServerCertVerifier> = Arc::new(
+        rustls_platform_verifier::Verifier::new(provider.clone()).map_err(|err| {
+            format!("failed to configure the mobile platform TLS verifier: {err}")
+        })?,
+    );
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let config = builder
-        .with_root_certificates(rustls::RootCertStore::from_iter(
-            webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
-        ))
+    let platform: Arc<dyn rustls::client::danger::ServerCertVerifier> =
+        rustls::client::WebPkiServerVerifier::builder_with_provider(
+            Arc::new(rustls::RootCertStore::from_iter(
+                webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
+            )),
+            provider.clone(),
+        )
+        .build()
+        .map_err(|err| format!("failed to configure the mail TLS verifier: {err}"))?;
+
+    // Records why a certificate was rejected and applies the expired-
+    // certificate exceptions a person granted; see `tls_trust`.
+    let verifier = Arc::new(super::tls_trust::MailCertVerifier::new(platform));
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|err| format!("failed to configure mail TLS protocol versions: {err}"))?
+        .dangerous()
+        .with_custom_certificate_verifier(verifier)
         .with_no_client_auth();
 
     Ok(config)

@@ -250,7 +250,12 @@
         "accountColorInvalid": "Choose a colour as #rrggbb.",
         "accountAvatarInvalid": "The picture must be a small PNG, JPEG or WebP image.",
         "exportOriginalUnavailable": "Cannot export \"{subject}\" because its complete original message is unavailable. Connect the account and try again. A partial message will not be exported.",
-        "exportMailboxChanged": "Messages were removed or replaced while the export was running, so nothing was saved. Run the export again."
+        "exportMailboxChanged": "Messages were removed or replaced while the export was running, so nothing was saved. Run the export again.",
+        "tlsCertificateRejected": "The certificate of {host} was not accepted.",
+        "tlsExceptionNoRejection": "Satchel could not reach the server to check its certificate again. Try again in a moment.",
+        "tlsExceptionCertificateChanged": "The server now presents a different certificate. Look at the details again before trusting it.",
+        "tlsExceptionNotAllowed": "This certificate has a problem beyond its expiry date, so Satchel offers no exception.",
+        "tlsExceptionPersistenceFailed": "The certificate exception could not be saved."
       }
     }
   },
@@ -505,7 +510,12 @@
         "accountColorInvalid": "Wähle eine Farbe im Format #rrggbb.",
         "accountAvatarInvalid": "Das Bild muss ein kleines PNG-, JPEG- oder WebP-Bild sein.",
         "exportOriginalUnavailable": "\"{subject}\" kann nicht exportiert werden, weil die vollständige Originalnachricht nicht verfügbar ist. Verbinde das Konto und versuche es erneut. Es wird keine unvollständige Nachricht exportiert.",
-        "exportMailboxChanged": "Während des Exports wurden Nachrichten entfernt oder ersetzt, deshalb wurde nichts gespeichert. Starte den Export erneut."
+        "exportMailboxChanged": "Während des Exports wurden Nachrichten entfernt oder ersetzt, deshalb wurde nichts gespeichert. Starte den Export erneut.",
+        "tlsCertificateRejected": "Das Zertifikat von {host} wurde nicht akzeptiert.",
+        "tlsExceptionNoRejection": "Satchel hat den Server nicht erreicht, um das Zertifikat erneut zu prüfen. Versuch es gleich noch einmal.",
+        "tlsExceptionCertificateChanged": "Der Server zeigt inzwischen ein anderes Zertifikat. Sieh dir die Details erneut an, bevor du ihm vertraust.",
+        "tlsExceptionNotAllowed": "Dieses Zertifikat hat ein Problem über das Ablaufdatum hinaus, deshalb bietet Satchel keine Ausnahme an.",
+        "tlsExceptionPersistenceFailed": "Die Zertifikatsausnahme ließ sich nicht speichern."
       }
     }
   }

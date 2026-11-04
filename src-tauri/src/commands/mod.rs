@@ -57,6 +57,7 @@ pub mod sync;
 pub mod templates;
 pub mod thread_actions;
 pub mod threads;
+pub mod tls_exceptions;
 pub mod topics;
 #[cfg(desktop)]
 pub mod tray;

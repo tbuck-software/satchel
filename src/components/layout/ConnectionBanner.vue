@@ -10,19 +10,37 @@
  *
  * A rejected password is the one sync failure the person has to fix, so it
  * says so and offers the way there; the server's own words stay one click away.
+ *
+ * A rejected server certificate is the server's fault, not the person's: it
+ * gets the warning tone, names the account and the date, and can be hidden.
+ * Hidden stays hidden for that certificate; the account keeps its marker in
+ * the sidebar, and a different certificate is a new notice.
  */
-import { computed } from 'vue';
+import { computed, defineAsyncComponent } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { useAccountsStore } from '@/stores/accounts';
 import { useConnectionStore } from '@/stores/connection';
 import { backendErrorLabel, backendErrorSourceLabel } from '@/utils/backendErrorLabels';
 import { describeSyncFailure } from '@/utils/syncFailures';
+import { certificateRejection } from '@/utils/certificateRejection';
+import { certificateDetail, certificateShort, certificateTitle } from '@/utils/certificateLabels';
+import { useCertificateTrustStore } from '@/stores/certificateTrust';
+import { useUiStore } from '@/stores/ui';
 import AppBanner from '@/components/ui/AppBanner.vue';
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
+import IconButton from '@/components/ui/IconButton.vue';
+
+// Mounted here rather than in App: this banner already loads on demand and is
+// always present, and the certificate code stays out of the startup bundle.
+// The sidebar marker and the account settings open the same dialog.
+const CertificateDialog = defineAsyncComponent(() => import('./CertificateDialog.vue'));
 
 const connection = useConnectionStore();
 const accounts = useAccountsStore();
+const certificates = useCertificateTrustStore();
+const ui = useUiStore();
 const router = useRouter();
 const { t } = useI18n();
 
@@ -31,11 +49,24 @@ const passwordAccounts = computed(() => new Set(
     .filter((account) => account.provider === 'imap' || account.provider === 'pop3')
     .map((account) => account.id),
 ));
+const isSync = computed(() => connection.backendErrorSource === 'sync');
+// Certificate failures have their own banner below; everything else keeps this one.
 const syncFailures = computed(() => (
-  connection.backendErrorSource === 'sync'
-    ? connection.syncFailures.map((failure) => describeSyncFailure(failure, passwordAccounts.value))
+  isSync.value
+    ? connection.syncFailures
+      .filter((failure) => !certificateRejection(failure))
+      .map((failure) => describeSyncFailure(failure, passwordAccounts.value))
     : []
 ));
+const onlyCertificates = computed(() => isSync.value
+  && connection.syncFailures.length > 0
+  && syncFailures.value.length === 0);
+const certificateProblem = computed(() => (onlyCertificates.value ? certificates.visibleProblems[0] ?? null : null));
+const certificateAccount = computed(() => {
+  const id = certificateProblem.value?.accountId;
+  const account = accounts.accounts.find((entry) => entry.id === id);
+  return account?.displayName || account?.email || '';
+});
 const rejected = computed(() => {
   const byAccount = new Map(
     syncFailures.value
@@ -59,7 +90,39 @@ function updatePassword(accountId: string) {
 
 <template>
   <AppBanner
-    v-if="connection.backendError"
+    v-if="certificateProblem"
+    class="connection-banner connection-banner--certificate"
+    :class="{ 'connection-banner--compact': ui.isMobile }"
+    tone="warning"
+    :title="ui.isMobile
+      ? t('certificates.sidebar.problem', { account: certificateAccount, problem: certificateShort(certificateProblem.rejection) })
+      : certificateTitle(certificateProblem.rejection, certificateAccount)"
+    :detail="ui.isMobile ? undefined : certificateDetail(certificateProblem.rejection)"
+  >
+    <template #actions>
+      <template v-if="ui.isMobile">
+        <AppButton size="sm" variant="soft" @click="certificates.openDetails(certificateProblem.accountId)">
+          {{ t('certificates.banner.details') }}
+        </AppButton>
+        <IconButton size="sm" :title="t('certificates.banner.hide')" @click="certificates.dismiss(certificateProblem.accountId)">
+          <AppIcon><path d="m4 4 8 8m0-8-8 8" /></AppIcon>
+        </IconButton>
+      </template>
+      <template v-else>
+        <AppButton size="sm" variant="ghost" @click="certificates.dismiss(certificateProblem.accountId)">
+          {{ t('certificates.banner.hide') }}
+        </AppButton>
+        <AppButton size="sm" variant="soft" @click="certificates.openDetails(certificateProblem.accountId)">
+          {{ t('certificates.banner.details') }}
+        </AppButton>
+        <AppButton size="sm" variant="primary" :disabled="connection.retrying" @click="connection.requestRetry()">
+          {{ connection.retrying ? t('errors.banner.retrying') : t('common.retry') }}
+        </AppButton>
+      </template>
+    </template>
+  </AppBanner>
+  <AppBanner
+    v-else-if="connection.backendError && !onlyCertificates"
     class="connection-banner"
     tone="danger"
     :title="title"
@@ -90,12 +153,41 @@ function updatePassword(accountId: string) {
       </AppButton>
     </template>
   </AppBanner>
+  <CertificateDialog v-if="certificates.detailsAccountId" />
 </template>
 
 <style scoped>
 /* The shell is a flex column; without this the banner is squeezed to nothing. */
 .connection-banner {
   flex-shrink: 0;
+}
+
+/* Orange rather than the amber warning: the same colour as the account's
+   marker in the sidebar, so banner and marker read as one fact. */
+.connection-banner--certificate {
+  background: color-mix(in srgb, var(--accent-orange) 10%, var(--bg-surface));
+  border-bottom-color: color-mix(in srgb, var(--accent-orange) 26%, transparent);
+}
+
+.connection-banner--certificate :deep(.banner__icon) {
+  color: var(--accent-orange);
+}
+
+/* The sentence says who has to act and since when; it may take two lines
+   rather than lose its end to an ellipsis, as the raw error did. */
+.connection-banner--certificate :deep(.banner__detail) {
+  white-space: normal;
+}
+
+/* The phone keeps one line: the title, Details and the cross. */
+.connection-banner--compact :deep(.banner__title) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-banner--compact :deep(.banner__copy) {
+  min-width: 0;
 }
 
 .connection-banner__server {

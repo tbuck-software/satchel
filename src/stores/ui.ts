@@ -62,6 +62,12 @@ export const useUiStore = defineStore('ui', () => {
   const isSinglePane = ref(initialLayout.isSinglePane);
   const isTablet = ref(initialLayout.isTablet);
   const mobileSidebarOpen = ref(false);
+  /**
+   * Something behind the closed drawer wants a look (an account whose server
+   * certificate is rejected). The drawer handle carries a dot; whoever owns
+   * the condition sets it, so this store stays ignorant of what it is.
+   */
+  const drawerAttention = ref(false);
 
   function updateLayout() {
     if (typeof window !== 'undefined') {
@@ -355,6 +361,7 @@ export const useUiStore = defineStore('ui', () => {
     settingsDetailOpen,
     openSettingsDetail,
     mobileSidebarOpen,
+    drawerAttention,
     setSidebarWidth,
     toggleNewSendersExpanded,
     setThreadListWidth,

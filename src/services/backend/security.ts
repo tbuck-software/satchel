@@ -8,6 +8,8 @@ import type { ValidatePgpBundlePassphraseResult as WireValidatePgpBundlePassphra
 import type { GenerateSmimeResult as WireGenerateSmimeResult } from './generated/app/commands/smime/GenerateSmimeResult';
 import type { UnlockSmimeResult as WireUnlockSmimeResult } from './generated/app/commands/smime/UnlockSmimeResult';
 import type { PgpEngineStatus as WirePgpEngineStatus } from './generated/app/commands/pgp/PgpEngineStatus';
+import type { CertificateExceptionDto as WireCertificateExceptionDto } from './generated/app/commands/tls_exceptions/CertificateExceptionDto';
+import type { TrustExpiredCertificateInput as WireTrustExpiredCertificateInput } from './generated/app/commands/tls_exceptions/TrustExpiredCertificateInput';
 // Auto-split from services/backend.ts — domain module.
 import { invoke } from './core';
 
@@ -182,4 +184,22 @@ export async function backendUnlockSmimeCerts(payload?: {
 
 export async function backendDeleteSmimeCert(certId: string): Promise<void> {
   return invoke<void>('delete_smime_certificate', { certId });
+}
+
+
+/** An expired server certificate the person accepted for a while. */
+export type BackendCertificateException = WireCertificateExceptionDto;
+
+export async function backendListCertificateExceptions(): Promise<BackendCertificateException[]> {
+  return invoke<BackendCertificateException[]>('list_certificate_exceptions');
+}
+
+export async function backendTrustExpiredCertificate(
+  input: WireTrustExpiredCertificateInput,
+): Promise<BackendCertificateException> {
+  return invoke<BackendCertificateException>('trust_expired_certificate', { input });
+}
+
+export async function backendRevokeCertificateException(accountId: string, host: string): Promise<boolean> {
+  return invoke<boolean>('revoke_certificate_exception', { accountId, host });
 }

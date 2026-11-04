@@ -10,6 +10,9 @@ import NavItem from '@/components/ui/NavItem.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import AccountAvatar from '@/components/common/AccountAvatar.vue';
+import IconButton from '@/components/ui/IconButton.vue';
+import { useCertificateTrustStore } from '@/stores/certificateTrust';
+import { certificateShort, formatCertificateMoment } from '@/utils/certificateLabels';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 
 const SidebarAccountMenu = defineAsyncComponent(() => import('./SidebarAccountMenu.vue'));
@@ -20,6 +23,26 @@ const mailboxes = useMailboxesStore();
 const threads = useThreadsStore();
 const router = useRouter();
 const ui = useUiStore();
+const certificates = useCertificateTrustStore();
+
+/** The marker's tooltip and accessible name: the short form of the banner. */
+function certificateLabel(accountId: string, name: string): string | null {
+  const problem = certificates.problemFor(accountId);
+  if (problem) return t('certificates.sidebar.problem', { account: name, problem: certificateShort(problem.rejection) });
+  const exception = certificates.exceptionFor(accountId);
+  if (exception) {
+    return t('certificates.sidebar.exception', {
+      account: name,
+      problem: t('certificates.exceptionShort', { until: formatCertificateMoment(exception.expires_at) }),
+    });
+  }
+  return null;
+}
+
+function openCertificate(accountId: string) {
+  ui.closeMobileSidebar();
+  certificates.openDetails(accountId);
+}
 function open(accountId: string) {
   accounts.setActiveAccount(accountId);
   threads.workflowFilter = 'all';
@@ -99,6 +122,27 @@ function openMenu(accountId: string, event: MouseEvent) {
           <span v-if="inboxCount(account.id) > 0" class="sidebar-accounts__count">{{ inboxCount(account.id) }}</span>
         </template>
       </NavItem>
+      <!-- A sibling, not inside NavItem: that is a button already. Orange while
+           the server's certificate is rejected; a quiet shield while an
+           exception lets it through. Either opens the details. -->
+      <IconButton
+        v-if="certificateLabel(account.id, account.displayName)"
+        class="sidebar-accounts__certificate"
+        :class="{ 'sidebar-accounts__certificate--problem': certificates.problemFor(account.id) }"
+        :size="ui.isMobile ? 'lg' : 'sm'"
+        :title="certificateLabel(account.id, account.displayName) ?? undefined"
+        @click="openCertificate(account.id)"
+      >
+        <AppIcon v-if="certificates.problemFor(account.id)">
+          <path d="M8 2.4 14.2 13H1.8L8 2.4Z" />
+          <path d="M8 6.6v3" />
+          <path d="M8 11.6h.01" />
+        </AppIcon>
+        <AppIcon v-else>
+          <path d="M8 1.8 2.8 3.8v3.7c0 3.2 2.2 5.5 5.2 6.4 3-.9 5.2-3.2 5.2-6.4V3.8L8 1.8Z" />
+          <path d="M8 5.6v2.5l1.6 1" />
+        </AppIcon>
+      </IconButton>
     </div>
     <SidebarAccountMenu v-if="menuAccountId" :account-id="menuAccountId" :anchor="menuAnchor" @close="menuAnchor = null" />
   </nav>
@@ -113,6 +157,15 @@ function openMenu(accountId: string, event: MouseEvent) {
 .sidebar-accounts__asleep { display: inline-flex; align-items: center; gap: var(--space-xs); color: var(--text-tertiary); }
 .sidebar-accounts__asleep-label { font-size: var(--font-size-xs); }
 .sidebar-accounts__peek { display: inline-flex; color: var(--text-accent); }
+/* Prefixed with the row to outrank IconButton's own colours. */
+.sidebar-accounts__row .sidebar-accounts__certificate { color: var(--text-tertiary); }
+.sidebar-accounts__row .sidebar-accounts__certificate--problem { color: var(--accent-orange); }
+@media (hover: hover) {
+  .sidebar-accounts__row .sidebar-accounts__certificate--problem:hover:not(:disabled) {
+    color: var(--accent-orange);
+    background: color-mix(in srgb, var(--accent-orange) 12%, transparent);
+  }
+}
 /* NavItem's own count, kept beside the clock that took its slot. */
 .sidebar-accounts__count {
   margin-left: var(--space-xs);
