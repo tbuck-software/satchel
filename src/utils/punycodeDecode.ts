@@ -5,7 +5,8 @@
  * in the entry chunk; the full `punycode` package (encode, toASCII, UCS-2
  * helpers) cost several KiB there for the one call that turns `xn--` labels
  * back into what a lookalike domain shows. Behaviour matches `toUnicode` from
- * that package (the test compares both); invalid input throws a RangeError.
+ * that package (the test compares both); invalid input throws a bare
+ * RangeError, which the caller catches — it is never shown.
  */
 const BASE = 36;
 const T_MIN = 1;
@@ -38,7 +39,7 @@ function decodeLabel(input: string): string {
   let basic = input.lastIndexOf('-');
   if (basic < 0) basic = 0;
   for (let j = 0; j < basic; j += 1) {
-    if (input.charCodeAt(j) >= 0x80) throw new RangeError('Illegal input >= 0x80 (not a basic code point)');
+    if (input.charCodeAt(j) >= 0x80) throw new RangeError();
     output.push(input.charCodeAt(j));
   }
   let n = 0x80;
@@ -47,19 +48,19 @@ function decodeLabel(input: string): string {
   for (let index = basic > 0 ? basic + 1 : 0; index < input.length;) {
     const oldi = i;
     for (let w = 1, k = BASE; ; k += BASE) {
-      if (index >= input.length) throw new RangeError('Invalid input');
+      if (index >= input.length) throw new RangeError();
       const d = digit(input.charCodeAt(index++));
-      if (d >= BASE) throw new RangeError('Invalid input');
-      if (d > Math.floor((MAX_INT - i) / w)) throw new RangeError('Overflow: input needs wider integers to process');
+      if (d >= BASE) throw new RangeError();
+      if (d > Math.floor((MAX_INT - i) / w)) throw new RangeError();
       i += d * w;
       const t = k <= bias ? T_MIN : k >= bias + T_MAX ? T_MAX : k - bias;
       if (d < t) break;
-      if (w > Math.floor(MAX_INT / (BASE - t))) throw new RangeError('Overflow: input needs wider integers to process');
+      if (w > Math.floor(MAX_INT / (BASE - t))) throw new RangeError();
       w *= BASE - t;
     }
     const length = output.length + 1;
     bias = adapt(i - oldi, length, oldi === 0);
-    if (Math.floor(i / length) > MAX_INT - n) throw new RangeError('Overflow: input needs wider integers to process');
+    if (Math.floor(i / length) > MAX_INT - n) throw new RangeError();
     n += Math.floor(i / length);
     i %= length;
     output.splice(i++, 0, n);
