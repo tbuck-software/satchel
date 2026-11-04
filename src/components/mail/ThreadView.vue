@@ -26,6 +26,7 @@ import ThreadMessageList from './ThreadMessageList.vue';
 import ThreadSelectionSummary from './ThreadSelectionSummary.vue';
 import ThreadPaneSkeleton from './ThreadPaneSkeleton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
+import ListRowButton from '@/components/ui/ListRowButton.vue';
 import { threadActionTargets } from '@/composables/threadActionTargets';
 import ThreadToolbar from './ThreadToolbar.vue';
 import ThreadPrintSheet from './ThreadPrintSheet.vue';
@@ -1012,7 +1013,7 @@ function showEntireThread() {
       ref="scrollRoot"
       :class="[
         'flex-1 overflow-y-auto',
-        ui.isMobile ? 'thread-reading-content--phone px-4 py-5' : 'thread-reading-content',
+        ui.isMobile ? 'thread-reading-content--phone' : 'thread-reading-content',
         { 'thread-reading-content--reply': showReplyFoot },
       ]"
       :style="showReplyFoot ? { '--reply-foot-h': `${replyFootHeight}px` } : undefined"
@@ -1028,12 +1029,12 @@ function showEntireThread() {
           :context="{ threadId: thread.id, subject: thread.subject }"
         />
         <!-- Thread heading -->
-        <div :class="ui.isMobile ? 'mb-4' : 'mb-3'">
+        <div :class="ui.isMobile ? 'mb-1' : 'mb-3'">
           <h1 class="text-2xl font-semibold leading-tight tracking-tight text-primary">{{ thread.normalizedSubject ?? thread.subject }}</h1>
           <!-- Which mailbox this arrived in, how long the thread is and, once
                it is done, that it is. Answered by scrolling or by the list;
                the line saves both. -->
-          <div class="mt-1.5 flex flex-wrap items-center gap-2.5 text-xs text-secondary">
+          <div :class="[ui.isMobile ? 'mt-1' : 'mt-1.5', 'flex flex-wrap items-center gap-2.5 text-xs text-secondary']">
             <span v-if="threadAccount" class="inline-flex items-center gap-1.5">
               <span
                 class="h-[7px] w-[7px] rounded-full"
@@ -1056,7 +1057,7 @@ function showEntireThread() {
             </span>
           </div>
           <TopicMembershipState v-if="threadId" item-type="thread" :item-ids="[threadId]" />
-          <div v-if="threadTopics.length > 0" class="mt-2 flex flex-wrap items-center gap-1.5">
+          <div v-if="threadTopics.length > 0" :class="[ui.isMobile ? 'mt-1.5' : 'mt-2', 'flex flex-wrap items-center gap-1.5']">
             <TopicChip
               v-for="topic in threadTopics"
               :key="topic.id"
@@ -1070,9 +1071,16 @@ function showEntireThread() {
         </div>
 
         <!-- Messages -->
-        <div v-if="hiddenMessageCount > 0" class="mb-5">
+        <!-- Phone: a row across the column, as tall as a thumb, rather than a
+             pill whose text is the only thing that answers a tap. -->
+        <div v-if="hiddenMessageCount > 0 && ui.isMobile" class="thread-earlier">
+          <ListRowButton class="thread-earlier-row" @click="showEntireThread">
+            <AppIcon size="sm"><path d="m4 10 4-4 4 4" /></AppIcon>
+            {{ $t('thread.view.showEarlier', { count: hiddenMessageCount }) }}
+          </ListRowButton>
+        </div>
+        <div v-else-if="hiddenMessageCount > 0" class="mb-5">
           <AppButton
-
             @click="showEntireThread"
             variant="secondary"
             size="sm"
@@ -1200,8 +1208,13 @@ function showEntireThread() {
 /* The phone's action bar sits right under the scroll area. Without a fade the
    last card ended in a hard cut through its text, which read as clipped
    rather than as more to scroll to. The mask reads only alpha; any opaque
-   token does. */
+   token does.
+   --reader-inline-inset is the side inset, named so a message can step out
+   of it: MessageBubble takes its own box to the screen edges and pads its
+   parts back in, and EmailRenderer lets designed HTML mail run edge to edge. */
 .thread-reading-content--phone {
+  --reader-inline-inset: var(--space-lg);
+  padding: var(--space-md) var(--reader-inline-inset) var(--space-5);
   -webkit-mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-xl)), transparent);
   mask-image: linear-gradient(to bottom, var(--bg-surface) calc(100% - var(--space-xl)), transparent);
 }
@@ -1244,6 +1257,29 @@ function showEntireThread() {
 
 .thread-state--later svg {
   color: var(--text-accent);
+}
+
+/* The hairline under it parts the folded history from the open messages the
+   way the rule between two messages does. */
+.thread-earlier {
+  margin-top: var(--space-xs);
+  padding-bottom: var(--space-2xs);
+  border-bottom: 1px solid var(--border-color-muted);
+}
+
+.thread-earlier-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-height: var(--touch-target);
+  padding-inline: var(--space-2xs);
+  color: var(--text-accent);
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-medium);
+}
+
+.thread-earlier-row:active {
+  background: var(--bg-hover);
 }
 
 /* ── Mobile top bar ── */

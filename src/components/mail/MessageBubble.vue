@@ -227,11 +227,12 @@ const visibleAttachments = computed(() => {
 /*
  * One rhythm on the desktop: the same step above and below a message, so the
  * rule between two of them sits halfway. Drafts are not messages here; they
- * end the thread as ThreadDraftCard.
+ * end the thread as ThreadDraftCard. The phone starts the sender closer to
+ * the subject: the top of the reader is where a newsletter loses its screen.
  */
 const surfaceClasses = computed(() => {
   return ui.isMobile
-    ? ['border-b border-border-muted py-4']
+    ? ['message-surface--phone border-b border-border-muted pt-3 pb-4']
     : ['message-surface--indented border-b border-border-muted py-5 last:border-b-0'];
 });
 
@@ -806,6 +807,19 @@ function openSenderDetails() {
 
 .message-sender-group--target .sender-name-trigger:active::after {
   background: var(--bg-hover);
+}
+
+/* Phone: the message spans the screen and pads its parts back to the reader's
+   inset, so EmailRenderer can let designed HTML mail out of it. The box has
+   to be the wide one: `content-visibility` contains paint, and a child
+   reaching past a narrower box would be clipped at its edge. Outside the
+   thread reader the inset is unset and both rules come to nothing. */
+.message-surface--phone {
+  margin-inline: calc(var(--reader-inline-inset, 0px) * -1);
+}
+
+.message-surface--phone > * {
+  padding-inline: var(--reader-inline-inset, 0px);
 }
 
 /* The body, attachments and banners line up under the sender's name; the

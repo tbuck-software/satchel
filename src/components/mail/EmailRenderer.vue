@@ -688,6 +688,20 @@ const hasPgpSegments = computed(() =>
   }
 }
 
+/*
+  On a phone the document leaves the reader's side inset (set by the thread
+  reader as --reader-inline-inset; unset elsewhere, so nothing moves). A
+  designed mail brings its own margins, and the app's inset on top of them
+  ran its text in a column 40pt from each edge. Every other body gets the
+  inset back inside the frame (IsolatedEmailDocument's flush rules), so only
+  fixed-width layouts run edge to edge.
+*/
+@media (max-width: 767px) {
+  .html-document-shell {
+    margin-inline: calc(var(--reader-inline-inset, 0px) * -1);
+  }
+}
+
 .html-document-shell--auto-dark {
   border-color: transparent;
   background: var(--bg-surface);
