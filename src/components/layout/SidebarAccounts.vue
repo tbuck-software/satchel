@@ -197,13 +197,14 @@ function openMenu(accountId: string, event: MouseEvent) {
 </template>
 
 <style scoped>
-/* One lightly tinted surface holds the scope choice. It reaches 4px past the
-   view rows below, so its rows' icons and labels line up with theirs. */
+/* One lightly tinted surface holds the scope choice, edge to edge with the
+   view rows below it, so both its edges and its rows' icons and labels line
+   up with theirs. */
 .sidebar-accounts {
   display: grid;
   gap: var(--space-2xs);
-  margin: var(--space-md) var(--space-sm) var(--space-xs);
-  padding: var(--space-xs);
+  margin: var(--space-md) var(--space-md) var(--space-xs);
+  padding: var(--space-xs) 0;
   border-radius: var(--radius-md);
   background: var(--bg-raised);
 }
