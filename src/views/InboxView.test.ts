@@ -260,7 +260,7 @@ function setup(options: {
     threadListWidth: 420,
     setThreadListWidth: vi.fn(),
     openOmni: vi.fn(),
-    closeMobileSidebar: vi.fn(),
+    openMailboxSwitcher: vi.fn(),
     registerBackNavigation: harness.registerBackNavigation,
     // Context menus register while open.
     registerOverlay: vi.fn(() => vi.fn()),

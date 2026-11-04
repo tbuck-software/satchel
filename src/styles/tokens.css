@@ -149,6 +149,8 @@
 
   --input-height: 38px;
   --touch-target: 44px;
+  /* The phone's tab bar, safe area not included: a 44px target plus its label. */
+  --tab-bar-height: 56px;
 
   --directory-content-max: 960px;
   --directory-provenance-max: 120px;

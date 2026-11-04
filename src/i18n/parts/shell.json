@@ -253,7 +253,12 @@
       },
       "toggleSection": "Toggle {name}",
       "unpinContact": "Unpin contact",
-      "unpinContactNamed": "Unpin {name}"
+      "unpinContactNamed": "Unpin {name}",
+      "mailboxes": {
+        "title": "Mailboxes",
+        "switch": "Switch mailbox",
+        "current": "{mailbox}, switch mailbox"
+      }
     },
     "shortcuts": {
       "actions": {
@@ -689,7 +694,12 @@
       },
       "toggleSection": "{name} auf- oder zuklappen",
       "unpinContact": "Kontakt loslösen",
-      "unpinContactNamed": "{name} loslösen"
+      "unpinContactNamed": "{name} loslösen",
+      "mailboxes": {
+        "title": "Postfächer",
+        "switch": "Postfach wechseln",
+        "current": "{mailbox}, Postfach wechseln"
+      }
     },
     "shortcuts": {
       "actions": {

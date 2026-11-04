@@ -27,6 +27,7 @@ import ErrorState from '@/components/ui/ErrorState.vue';
 import SkeletonRow from '@/components/ui/SkeletonRow.vue';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { NEW_SENDER_PREVIEW_LIMIT } from '@/utils/threadList';
+import { registerListScrollTop } from '@/composables/listScrollTop';
 
 const props = defineProps<{
   items: ThreadListEntry[];
@@ -525,6 +526,17 @@ function onScroll(event: Event) {
     maybeLoadMore();
   });
 }
+
+/** The Mail tab tapped again: back to the newest mail. */
+function scrollToTop() {
+  const el = scrollerRef.value;
+  if (!el) return;
+  const reduce = typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (typeof el.scrollTo === 'function') el.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+  else el.scrollTop = 0;
+}
+onBeforeUnmount(registerListScrollTop(scrollToTop));
 
 function folderChips(folder: { previewItems: SmartInboxBucketPreviewItem[] }) {
   return folder.previewItems.map((preview) => ({

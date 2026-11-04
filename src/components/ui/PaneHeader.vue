@@ -1,42 +1,23 @@
 <script setup lang="ts">
-import IconButton from './IconButton.vue';
-import { useUiStore } from '@/stores/ui';
-import AppIcon from '@/components/ui/AppIcon.vue';
-
 withDefaults(
   defineProps<{
     title: string;
     subtitle?: string;
     count?: number;
-    /**
-     * Suppress the drawer handle. For headers that are already a step *inside*
-     * something — a thread, a topic — where the leading slot carries back and a
-     * second way out would only compete with it.
-     */
-    noMenu?: boolean;
   }>(),
   {
     subtitle: undefined,
     count: undefined,
-    noMenu: false,
   },
 );
-
-const ui = useUiStore();
 </script>
 
 <template>
   <header class="pane-header" data-tauri-drag-region>
-    <!-- Every pane header offers the drawer on a phone, so no screen can be a
-         place you get into and cannot get out of. An explicit leading slot wins:
-         a back arrow is the more specific answer to "how do I leave". -->
-    <div v-if="$slots.leading || (ui.isMobile && !noMenu)" class="pane-header__leading">
-      <slot v-if="$slots.leading" name="leading" />
-      <IconButton v-else :title="$t('common.menu')" @click="ui.toggleMobileSidebar()">
-        <AppIcon size="lg">
-          <path d="M2 4h12M2 8h12M2 12h12" />
-        </AppIcon>
-      </IconButton>
+    <!-- A back arrow, or on the phone the mailbox switcher. The way between
+         areas is the tab bar, so a header no longer carries a menu of its own. -->
+    <div v-if="$slots.leading" class="pane-header__leading">
+      <slot name="leading" />
     </div>
     <div class="pane-header__copy">
       <div class="pane-header__title-row">

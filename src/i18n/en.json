@@ -631,7 +631,6 @@
     "from": "From",
     "hide": "Hide",
     "loading": "Loading…",
-    "menu": "Menu",
     "more": "More",
     "name": "Name",
     "next": "Next",
@@ -1573,6 +1572,11 @@
     },
     "frequent": "Frequent",
     "mail": "Mail",
+    "mailboxes": {
+      "current": "{mailbox}, switch mailbox",
+      "switch": "Switch mailbox",
+      "title": "Mailboxes"
+    },
     "modules": "Areas",
     "newMessage": "New message",
     "omni": {

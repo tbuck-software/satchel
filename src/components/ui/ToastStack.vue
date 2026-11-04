@@ -476,8 +476,11 @@ function showPreviousCompactUndo() {
   .stack {
     right: var(--space-md);
     left: var(--space-md);
-    /* Clear both the 56px compose FAB and the thread detail action bar. */
-    bottom: calc(92px + var(--satchel-safe-area-bottom) + var(--toast-clearance, 0px));
+    /* Clear both the 56px compose FAB and the thread detail action bar, and
+       the phone's tab bar under either. */
+    bottom: calc(
+      92px + var(--satchel-tab-bar-inset, 0px) + var(--satchel-safe-area-bottom) + var(--toast-clearance, 0px)
+    );
     max-width: none;
   }
 

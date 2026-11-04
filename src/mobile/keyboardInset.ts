@@ -14,12 +14,23 @@
  * and `env(safe-area-inset-bottom)` from base.css applies again.
  */
 
+import { readonly, ref } from 'vue';
+
 /** Anything smaller is a browser toolbar or rounding, not a keyboard. */
 const MIN_KEYBOARD_PX = 80;
 
 const PROPERTY = '--satchel-safe-area-bottom';
 /** The keyboard alone, for what should stay behind it rather than ride on it. */
 const KEYBOARD_PROPERTY = '--satchel-keyboard-inset';
+
+const keyboardUp = ref(false);
+
+/**
+ * Whether the on-screen keyboard is up, for chrome that should step aside
+ * while it is (the phone's tab bar). Only ever hide things that cannot hold
+ * focus this way: hiding a focused field blurs it.
+ */
+export const keyboardVisible = readonly(keyboardUp);
 
 export interface KeyboardViewport {
   height: number;
@@ -45,6 +56,7 @@ export function installKeyboardInset(win: Window = window): () => void {
     const inset = keyboardInset(win.innerHeight, viewport);
     if (inset === applied) return;
     applied = inset;
+    keyboardUp.value = inset > 0;
     if (inset) {
       root.style.setProperty(PROPERTY, `${inset}px`);
       root.style.setProperty(KEYBOARD_PROPERTY, `${inset}px`);
@@ -66,5 +78,6 @@ export function installKeyboardInset(win: Window = window): () => void {
     viewport.removeEventListener('scroll', update);
     root.style.removeProperty(PROPERTY);
     root.style.removeProperty(KEYBOARD_PROPERTY);
+    keyboardUp.value = false;
   };
 }

@@ -14,7 +14,6 @@ import { useToast } from '@/composables/useToast';
 import ColorSwatchPicker from '@/components/ui/ColorSwatchPicker.vue';
 import { ACCOUNT_COLORS } from '@/config/accountColors';
 import { useAccountsStore } from '@/stores/accounts';
-import { useUiStore } from '@/stores/ui';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 
 const props = defineProps<{ accountId: string; anchor: AnchorBox | null }>();
@@ -23,7 +22,6 @@ const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
 const router = useRouter();
 const accounts = useAccountsStore();
-const ui = useUiStore();
 const toast = useToast();
 const account = computed(() => accounts.accounts.find((item) => item.id === props.accountId));
 const swatches = computed(() => ACCOUNT_COLORS.map((color) => ({ value: color.value, label: t(`accountAppearance.colors.${color.id}`) })));
@@ -60,7 +58,6 @@ async function setShown(shown: boolean) {
 
 function openSettings() {
   emit('close');
-  ui.closeMobileSidebar();
   void router.push({ name: 'settings', query: { section: 'accounts' } });
 }
 </script>

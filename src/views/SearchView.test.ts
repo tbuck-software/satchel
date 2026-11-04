@@ -179,7 +179,6 @@ function mountView(query: Record<string, string> = { q: 'invoice' }) {
       stubs: {
         AppButton: AppButtonStub,
         Avatar: true,
-        DrawerButton: true,
         EmptyState: EmptyStateStub,
         ListDetailLayout: ListDetailLayoutStub,
         ThreadView: ThreadViewStub,

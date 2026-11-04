@@ -171,7 +171,7 @@ const undoKey = computed(() =>
   position: fixed;
   /* Mirrors the compose FAB on the right: same lane, other side. */
   left: calc(20px + var(--satchel-safe-area-left));
-  bottom: calc(20px + var(--satchel-safe-area-bottom));
+  bottom: calc(20px + var(--satchel-tab-bar-inset, 0px) + var(--satchel-safe-area-bottom));
 }
 
 .undo-fab--docked {

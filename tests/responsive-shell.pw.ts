@@ -88,7 +88,7 @@ test('sync button fits beside the logo in the narrow native macOS header', async
   expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 });
 
-test('the phone list searches and filters above itself, not in the drawer', async ({ page }) => {
+test('the phone list searches and filters above itself', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   const filter = page.locator('.list-pane').getByRole('button', { name: 'Filter and view' });
@@ -106,12 +106,41 @@ test('the phone list searches and filters above itself, not in the drawer', asyn
   await expect(field).toHaveValue('Google');
   await expect(results.getByText('Google AI Studio quota warning')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Menu', exact: true }).click();
-  const drawer = page.locator('.mobile-sidebar-panel');
-  await expect(drawer).toBeVisible();
-  await expect(drawer.getByRole('searchbox')).toHaveCount(0);
-  await expect(drawer.getByRole('button', { name: 'Settings' })).toBeVisible();
-  await expect(drawer.getByRole('button', { name: 'Calendar' })).toBeVisible();
+});
+
+test('the phone reaches its areas by tab bar and its lists by the mailbox sheet', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Menu', exact: true })).toHaveCount(0);
+
+  const tabs = page.getByRole('navigation', { name: 'Areas', exact: true });
+  await expect(tabs.getByRole('button', { name: 'Mail', exact: true })).toHaveAttribute('aria-current', 'page');
+  for (const name of ['Mail', 'Calendar', 'Contacts', 'Settings']) {
+    const box = await tabs.getByRole('button', { name, exact: true }).boundingBox();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  // The compose button stands above the bar, not on it.
+  const fab = await page.locator('.fab').boundingBox();
+  expect(fab!.y + fab!.height).toBeLessThanOrEqual((await tabs.boundingBox())!.y);
+
+  await page.locator('.list-pane').getByRole('button', { name: /switch mailbox/i }).click();
+  const sheet = page.getByRole('dialog', { name: 'Mailboxes', exact: true });
+  await expect(sheet).toBeVisible();
+  for (const name of ['Inbox', 'Later', 'Set aside', 'Outbox', 'Done']) {
+    await expect(sheet.getByRole('button', { name: new RegExp(`^${name}`) }).first()).toBeVisible();
+  }
+  await sheet.getByRole('button', { name: /^Later/ }).click();
+  await expect(sheet).toHaveCount(0);
+  await expect(page.locator('.list-pane')).toContainText('Later');
+
+  await tabs.getByRole('button', { name: 'Calendar', exact: true }).click();
+  await expect(page).toHaveURL(/\/calendar/);
+  await expect(tabs.getByRole('button', { name: 'Calendar', exact: true })).toHaveAttribute('aria-current', 'page');
+
+  // A thread has its own bottom bar; the tabs step aside there.
+  await page.goto('/thread/th-2');
+  await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible();
+  await expect(tabs).toHaveCount(0);
 });
 
 test('saved wide panes switch to a reachable single-pane layout and back', async ({ page }) => {

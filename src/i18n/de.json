@@ -631,7 +631,6 @@
     "from": "Von",
     "hide": "Ausblenden",
     "loading": "Wird geladen…",
-    "menu": "Menü",
     "more": "Mehr",
     "name": "Name",
     "next": "Weiter",
@@ -1573,6 +1572,11 @@
     },
     "frequent": "Häufig",
     "mail": "E-Mail",
+    "mailboxes": {
+      "current": "{mailbox}, Postfach wechseln",
+      "switch": "Postfach wechseln",
+      "title": "Postfächer"
+    },
     "modules": "Bereiche",
     "newMessage": "Neue E-Mail",
     "omni": {

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import AppIcon from '@/components/ui/AppIcon.vue';
-import DrawerButton from '@/components/layout/DrawerButton.vue';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useInvitesStore } from '@/stores/invites';
 import { useAccountsStore } from '@/stores/accounts';
@@ -341,7 +340,7 @@ function onKeydown(event: KeyboardEvent) {
   <section class="calendar" :class="{ 'calendar--phone': ui.isMobile }">
     <header class="calendar__toolbar">
       <div class="calendar__heading">
-        <DrawerButton /><h2 v-if="!ui.isMobile">{{ $t('calendar.title') }}</h2>
+        <h2 v-if="!ui.isMobile">{{ $t('calendar.title') }}</h2>
         <span class="calendar__range">{{ rangeLabel }}</span>
       </div>
       <!-- A phone has no room for a text toolbar: Import and New event become

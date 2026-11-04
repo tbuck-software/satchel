@@ -5,7 +5,6 @@ import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { useThreadsStore } from '@/stores/threads';
-import { useUiStore } from '@/stores/ui';
 import NavItem from '@/components/ui/NavItem.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -19,12 +18,13 @@ const accounts = useAccountsStore();
 const mailboxes = useMailboxesStore();
 const threads = useThreadsStore();
 const router = useRouter();
-const ui = useUiStore();
+/** Fires on every pick, so a host sheet can close. */
+const emit = defineEmits<{ navigate: [] }>();
 function open(accountId: string) {
   accounts.setActiveAccount(accountId);
   threads.workflowFilter = 'all';
   threads.setMailboxFilter({ kind: 'section', value: 'inbox' });
-  ui.closeMobileSidebar();
+  emit('navigate');
   void router.push({ name: 'inbox' });
 }
 

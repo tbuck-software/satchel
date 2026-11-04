@@ -8,7 +8,6 @@ import IconButton from '@/components/ui/IconButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import { useConnectionStore } from '@/stores/connection';
 import { useOutboxStore } from '@/stores/outbox';
-import { useUiStore } from '@/stores/ui';
 import { useMailSync } from '@/composables/useMailSync';
 import { useToast } from '@/composables/useToast';
 import { outboxActionLabel, outboxErrorLabel } from '@/utils/outboxLabels';
@@ -20,7 +19,6 @@ const { t } = useI18n();
 const connection = useConnectionStore();
 const outbox = useOutboxStore();
 const router = useRouter();
-const ui = useUiStore();
 const toast = useToast();
 const busy = ref(false);
 const { syncing, syncMail } = useMailSync();
@@ -53,7 +51,6 @@ async function retryChanges() {
 }
 function openOutbox() {
   emit('close');
-  ui.closeMobileSidebar();
   void router.push({ name: 'outbox' });
 }
 </script>

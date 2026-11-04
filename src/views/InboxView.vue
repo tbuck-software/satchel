@@ -413,7 +413,7 @@ const listScope = computed(() => {
 
 // ── List search: the field above the list narrows it in place ──
 /**
- * The Inbox on a phone: the search field is the app bar, drawer button and
+ * The Inbox on a phone: the search field is the app bar, mailbox switcher and
  * filter at its ends, as in Gmail. Other lists keep their title, which is
  * the only thing telling you where you are.
  */
@@ -687,7 +687,7 @@ onBeforeUnmount(registerListKeyboardNavigation({
 
 // These screens are store state rather than routes. Register each level with
 // the shared Back stack so Android's edge gesture follows the same hierarchy
-// as the visible back buttons. Dialogs and the mobile drawer remain above
+// as the visible back buttons. Dialogs and sheets remain above
 // these entries and are dismissed first by the ui store.
 onBeforeUnmount(ui.registerBackNavigation({
   isOpen: () =>
@@ -946,9 +946,9 @@ function acceptExistingSenders() {
       </PaneHeader>
 
       <ListSearchBar v-if="!activeBundle" :mailbox-label="listTitle" :class="{ 'inbox-search--app-bar': searchAppBar || (ui.isMobile && searchActive) }">
-        <template v-if="searchAppBar" #leading>
-          <IconButton :title="$t('common.menu')" @click="ui.toggleMobileSidebar()">
-            <AppIcon size="lg"><path d="M2 4h12M2 8h12M2 12h12" /></AppIcon>
+        <template v-if="ui.isMobile" #leading>
+          <IconButton :title="$t('nav.mailboxes.switch')" @click="ui.openMailboxSwitcher()">
+            <AppIcon size="lg"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" /></AppIcon>
           </IconButton>
         </template>
         <ListFilterMenu :show-layout="!folderViewActive" />

@@ -1,14 +1,11 @@
 <script setup lang="ts">
-import CollectionLoadState from '@/components/ui/CollectionLoadState.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
-import { useSmartFoldersStore } from '@/stores/smartFolders';
 import { useSettingsStore } from '@/stores/settings';
-import { useUiStore } from '@/stores/ui';
 import { useAppUpdateStore } from '@/stores/appUpdate';
 import { useListSearchStore } from '@/stores/listSearch';
 import { useThreadsStore, type ContactThreadSummary } from '@/stores/threads';
@@ -19,14 +16,11 @@ import Avatar from '@/components/common/Avatar.vue';
 import SidebarMailTools from './SidebarMailTools.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
-import NavItem from '@/components/ui/NavItem.vue';
-import PluginSlotHost from '@/components/plugins/PluginSlotHost.vue';
-import MailboxTree from './MailboxTree.vue';
+import SidebarMailNav from './SidebarMailNav.vue';
 import SyncButton from './SyncButton.vue';
 
 // Route-specific sidebars used to pull calendar grids and the complete
 // settings navigation into the Inbox bundle even though their v-if was false.
-const SidebarAccounts = defineAsyncComponent(() => import('./SidebarAccounts.vue'));
 const CalendarSidebar = defineAsyncComponent(() => import('@/components/calendar/CalendarSidebar.vue'));
 const ContactsSidebar = defineAsyncComponent(() => import('@/components/contacts/ContactsSidebar.vue'));
 const SettingsSidebar = defineAsyncComponent(() => import('@/components/settings/SettingsSidebar.vue'));
@@ -41,9 +35,7 @@ const router = useRouter();
 const accounts = useAccountsStore();
 const threads = useThreadsStore();
 const settings = useSettingsStore();
-const ui = useUiStore();
 const composer = useComposerStore();
-const smartFolders = useSmartFoldersStore();
 const appUpdate = useAppUpdateStore();
 const listSearch = useListSearchStore();
 const composeWindow = useComposeWindow(router);
@@ -82,29 +74,7 @@ const frequentContacts = computed(() => {
 function isPinned(contact: ContactThreadSummary): boolean {
   return settings.pinnedContacts.includes(contact.email.toLowerCase());
 }
-const sourceAccounts = computed(() => accounts.accounts.filter((account) => account.kind !== 'email'));
-
-function openSource(id: string) {
-  ui.closeMobileSidebar();
-  accounts.setActiveAccount(id);
-  threads.workflowFilter = 'all';
-  threads.setMailboxFilter({ kind: 'section', value: 'inbox' });
-  void router.push({ name: 'inbox' });
-}
-
-/**
- * A smart folder is a saved search: it opens as the list search over all
- * mail, the same backend search with its operator syntax (`from:`,
- * `has:attachment`, …) that `parse_search_query` understands.
- */
-function openSmartFolder(query: string) {
-  ui.closeMobileSidebar();
-  listSearch.open(query, 'all');
-  void router.push({ name: 'inbox' });
-}
-
 async function onComposeClick(event: MouseEvent) {
-  ui.closeMobileSidebar();
   if (event.shiftKey || event.metaKey || event.ctrlKey) {
     try {
       if (await composeWindow.openNative()) return;
@@ -116,12 +86,10 @@ async function onComposeClick(event: MouseEvent) {
 }
 
 function goTo(name: string) {
-  ui.closeMobileSidebar();
   void router.push({ name });
 }
 
 function returnToMail() {
-  ui.closeMobileSidebar();
   // Leaving a contextual module must not silently reset the mailbox, account
   // or workflow the user had selected before opening it.
   void router.push({ name: 'inbox' });
@@ -170,7 +138,6 @@ watch(
  * Contacts span accounts, so it searches all mail.
  */
 function openContact(contact: ContactThreadSummary) {
-  ui.closeMobileSidebar();
   listSearch.open(`from:${contact.email}`, 'all');
   void router.push({ name: 'inbox' });
 }
@@ -219,40 +186,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
       <CalendarSidebar v-else-if="calendarModuleActive" />
       <ContactsSidebar v-else-if="contactsModuleActive" />
       <template v-else>
-      <SidebarAccounts />
-      <nav class="px-3">
-        <MailboxTree @open-folders-panel="foldersPanelOpen = true" @navigate="ui.closeMobileSidebar()" />
-        <PluginSlotHost slot-name="sidebar_section" />
-      </nav>
-      <!-- Smart folders (saved searches) -->
-      <nav v-if="smartFolders.items.length > 0 || smartFolders.loadFailed" class="grid gap-0.5 px-3 pb-2 pt-5" :aria-busy="smartFolders.loading">
-        <span class="text-2xs font-semibold text-tertiary px-3 mb-1">{{ $t('nav.smartFolders') }}</span>
-        <CollectionLoadState
-          :loading="smartFolders.loading"
-          :failed="smartFolders.loadFailed"
-          :has-content="smartFolders.items.length > 0"
-          :error-label="$t('settings.smartFolders.loadFailed')"
-          @retry="smartFolders.load()"
-        />
-        <NavItem
-          v-for="folder in smartFolders.items"
-          :key="folder.id"
-          :label="folder.name"
-          @click="openSmartFolder(folder.query)"
-        >
-          <template #icon>
-            <span class="text-base leading-none">{{ folder.icon || '🔍' }}</span>
-          </template>
-        </NavItem>
-      </nav>
-
-      <!-- Mailbox tree -->
-      <nav v-if="sourceAccounts.length" class="grid gap-1 px-2 py-3 border-t border-border-muted">
-        <span class="text-2xs font-bold uppercase tracking-[0.08em] text-tertiary px-2">{{ $t('nav.feedsAndSources') }}</span>
-        <NavItem v-for="source in sourceAccounts" :key="source.id" :label="source.displayName" :active="accounts.activeAccountId===source.id" @click="openSource(source.id)">
-          <template #icon><span class="source-orb" :style="{background:source.color}" /></template>
-        </NavItem>
-      </nav>
+      <SidebarMailNav @open-folders-panel="foldersPanelOpen = true" />
       <!-- Frequent contacts -->
       <nav v-if="frequentContacts.length > 0" class="grid gap-1 px-3 pb-3 pt-5">
         <div class="flex items-center justify-between px-2 pb-1">
@@ -307,50 +241,11 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
     <!-- Kept outside the scroll container so every primary destination stays
          anchored to the bottom, even with a long mailbox tree. -->
     <footer class="sidebar-footer">
-      <Suspense v-if="!contextualSidebarActive && !ui.isMobile">
+      <Suspense v-if="!contextualSidebarActive">
         <SidebarAgenda />
       </Suspense>
       <!-- One row: the areas on the left, the app on the right. -->
-      <!-- The phone's areas, named: four bare icons were a guessing game. -->
-      <nav v-if="ui.isMobile" class="sidebar-tabs" :aria-label="$t('nav.modules')">
-        <CardButton
-          class="sidebar-tab"
-          :class="{ 'sidebar-tab--active': !contextualSidebarActive }"
-          :aria-current="!contextualSidebarActive ? 'page' : undefined"
-          @click="returnToMail"
-        >
-          <AppIcon><rect x="2" y="3.5" width="12" height="9" rx="1.5" /><path d="m2.5 4.5 5.5 4 5.5-4" /></AppIcon>
-          <span>{{ $t('nav.mail') }}</span>
-        </CardButton>
-        <CardButton
-          class="sidebar-tab"
-          :class="{ 'sidebar-tab--active': calendarModuleActive }"
-          :aria-current="calendarModuleActive ? 'page' : undefined"
-          @click="goTo('calendar')"
-        >
-          <AppIcon><rect x="2" y="3" width="12" height="11" rx="2" /><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" /></AppIcon>
-          <span>{{ $t('nav.calendar') }}</span>
-        </CardButton>
-        <CardButton
-          class="sidebar-tab"
-          :class="{ 'sidebar-tab--active': contactsModuleActive }"
-          :aria-current="contactsModuleActive ? 'page' : undefined"
-          @click="goTo('contacts')"
-        >
-          <AppIcon><circle cx="6" cy="5.5" r="2.5" /><path d="M1.5 13.5c0-2.2 2-4 4.5-4s4.5 1.8 4.5 4M10.5 3.2a2.5 2.5 0 0 1 0 4.6M11.5 9.7c1.7.5 3 2 3 3.8" /></AppIcon>
-          <span>{{ $t('nav.contacts') }}</span>
-        </CardButton>
-        <CardButton
-          class="sidebar-tab"
-          :class="{ 'sidebar-tab--active': settingsModuleActive }"
-          :aria-current="settingsModuleActive ? 'page' : undefined"
-          @click="goTo('settings')"
-        >
-          <AppIcon><circle cx="8" cy="8" r="2" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" /></AppIcon>
-          <span>{{ $t('common.settings') }}</span>
-        </CardButton>
-      </nav>
-      <div v-if="!ui.isMobile" class="sidebar-footer__row">
+      <div class="sidebar-footer__row">
         <nav class="sidebar-footer__areas" :aria-label="$t('nav.modules')">
           <IconButton
             :title="$t('nav.mail')"
@@ -405,7 +300,6 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
       v-if="foldersPanelOpen"
       :open="foldersPanelOpen"
       @close="foldersPanelOpen = false"
-      @navigate="ui.closeMobileSidebar()"
     />
   </aside>
 </template>
@@ -479,7 +373,6 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
   flex: 1 1 0;
   scrollbar-gutter: stable;
 }
-.source-orb{display:block;width:10px;height:10px;border-radius:50%;box-shadow:0 0 0 4px color-mix(in srgb,currentColor 10%,transparent)}
 
 .contact-pin {
   display: grid;
@@ -518,30 +411,6 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
   padding: 8px;
   border-top: 1px solid var(--border-color-muted);
   background: var(--bg-sidebar);
-}
-
-.sidebar-tabs {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-2xs);
-}
-
-.sidebar-tab {
-  display: grid;
-  justify-items: center;
-  align-content: center;
-  gap: 3px;
-  min-height: 52px;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: var(--font-size-2xs);
-  font-weight: var(--weight-semibold);
-}
-
-.sidebar-tab--active {
-  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
-  color: var(--accent-primary);
 }
 
 .sidebar-footer__row {

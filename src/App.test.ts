@@ -24,6 +24,7 @@ const router = createRouter({
   routes: [
     { path: '/inbox', name: 'inbox', component: { template: '<div />' } },
     { path: '/compose', name: 'compose', component: { template: '<div />' } },
+    { path: '/thread/:id', name: 'thread', component: { template: '<div />' } },
   ],
 });
 
@@ -65,17 +66,32 @@ describe('App bootstrap entry', () => {
     wrapper.unmount();
   });
 
-  it('keeps the mobile drawer open for internal controls and closes on its backdrop', async () => {
+  it('gives the phone a tab bar on mail lists and areas, not on pushed screens', async () => {
     const wrapper = await mountAppAt('/inbox');
     const ui = useUiStore();
     ui.isMobile = true;
-    ui.openMobileSidebar();
     await nextTick();
+    expect(wrapper.get('.shell').classes()).toContain('shell--tab-bar');
 
-    await wrapper.get('.mobile-sidebar-panel').trigger('click');
-    expect(ui.mobileSidebarOpen).toBe(true);
-    await wrapper.get('.mobile-sidebar-backdrop').trigger('click');
-    expect(ui.mobileSidebarOpen).toBe(false);
+    await router.push('/thread/t1');
+    await nextTick();
+    expect(wrapper.get('.shell').classes()).not.toContain('shell--tab-bar');
+
+    await router.push('/inbox');
+    ui.isMobile = false;
+    await nextTick();
+    expect(wrapper.get('.shell').classes()).not.toContain('shell--tab-bar');
+    wrapper.unmount();
+  });
+
+  it('closes the mailbox switcher when the route changes', async () => {
+    const wrapper = await mountAppAt('/inbox');
+    const ui = useUiStore();
+    ui.isMobile = true;
+    ui.openMailboxSwitcher();
+    await router.push('/thread/t2');
+    await nextTick();
+    expect(ui.mailboxSwitcherOpen).toBe(false);
     wrapper.unmount();
   });
 });

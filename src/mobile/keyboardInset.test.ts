@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from 'vitest';
-import { installKeyboardInset, keyboardInset } from './keyboardInset';
+import { installKeyboardInset, keyboardInset, keyboardVisible } from './keyboardInset';
 
 describe('keyboardInset', () => {
   it('measures what the keyboard covers below the visual viewport', () => {
@@ -38,10 +38,12 @@ describe('installKeyboardInset', () => {
     viewport.height = 516;
     viewport.dispatchEvent(new Event('resize'));
     expect(root.style.getPropertyValue('--satchel-safe-area-bottom')).toBe('336px');
+    expect(keyboardVisible.value).toBe(true);
 
     viewport.height = 852;
     viewport.dispatchEvent(new Event('resize'));
     expect(root.style.getPropertyValue('--satchel-safe-area-bottom')).toBe('');
+    expect(keyboardVisible.value).toBe(false);
     dispose();
   });
 });

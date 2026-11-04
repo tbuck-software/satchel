@@ -61,7 +61,12 @@ export const useUiStore = defineStore('ui', () => {
   const isMobile = ref(initialLayout.isMobile);
   const isSinglePane = ref(initialLayout.isSinglePane);
   const isTablet = ref(initialLayout.isTablet);
-  const mobileSidebarOpen = ref(false);
+  /**
+   * The phone's mailbox switcher: the bottom sheet that took over what the
+   * drawer offered for mail (lists, folders, accounts). The sheet registers
+   * itself as an overlay, so Back and Escape close it like any other.
+   */
+  const mailboxSwitcherOpen = ref(false);
 
   function updateLayout() {
     if (typeof window !== 'undefined') {
@@ -70,7 +75,7 @@ export const useUiStore = defineStore('ui', () => {
       isSinglePane.value = layout.isSinglePane;
       isTablet.value = layout.isTablet;
       if (!isMobile.value) {
-        mobileSidebarOpen.value = false;
+        mailboxSwitcherOpen.value = false;
       }
     }
   }
@@ -81,7 +86,6 @@ export const useUiStore = defineStore('ui', () => {
   watch([sidebarWidth, threadListWidth], updateLayout, { flush: 'sync' });
 
   function openOmni() {
-    mobileSidebarOpen.value = false;
     omniMode.value = 'default';
     omniTargetThreadIds.value = [];
     omniOpen.value = true;
@@ -120,14 +124,10 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   function toggleShortcuts() {
-    mobileSidebarOpen.value = false;
     shortcutsOpen.value = !shortcutsOpen.value;
   }
 
   function openSettings(section?: string) {
-    // Reached from the mobile sidebar, which is not a route and so would stay
-    // open underneath — and be sitting there again once settings close.
-    mobileSidebarOpen.value = false;
     settingsSection.value = section ?? null;
     // Jumping straight to a section — "Signatur bearbeiten" from a toast —
     // should land on that section, not on the list it lives in.
@@ -207,11 +207,11 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   /**
-   * Register a state-backed screen below dialogs and the mobile sidebar.
+   * Register a state-backed screen below dialogs and sheets.
    *
    * Inbox folders and grouped lists are not routes, but on a phone they still
    * behave like navigation destinations. Keeping them separate from overlays
-   * makes Back close a drawer or composer first, then leave the folder below.
+   * makes Back close a sheet or composer first, then leave the folder below.
    */
   function registerBackNavigation(entry: { isOpen: () => boolean; dismiss: () => void }) {
     const id = (nextOverlayId += 1);
@@ -224,7 +224,6 @@ export const useUiStore = defineStore('ui', () => {
   const overlayDepth = computed(() => {
     let depth = externalOverlays.value.filter((entry) => entry.isOpen()).length;
     depth += backNavigations.value.filter((entry) => entry.isOpen()).length;
-    if (mobileSidebarOpen.value) depth += 1;
     if (omniOpen.value) depth += 1;
     if (shortcutsOpen.value) depth += 1;
     if (settingsOpen.value) depth += 1;
@@ -273,10 +272,6 @@ export const useUiStore = defineStore('ui', () => {
       closeOmni();
       return true;
     }
-    if (mobileSidebarOpen.value) {
-      closeMobileSidebar();
-      return true;
-    }
     const navigations = backNavigations.value.filter((entry) => entry.isOpen());
     const topNavigation = navigations.at(-1);
     if (topNavigation) {
@@ -286,16 +281,12 @@ export const useUiStore = defineStore('ui', () => {
     return false;
   }
 
-  function openMobileSidebar() {
-    mobileSidebarOpen.value = true;
+  function openMailboxSwitcher() {
+    mailboxSwitcherOpen.value = true;
   }
 
-  function closeMobileSidebar() {
-    mobileSidebarOpen.value = false;
-  }
-
-  function toggleMobileSidebar() {
-    mobileSidebarOpen.value = !mobileSidebarOpen.value;
+  function closeMailboxSwitcher() {
+    mailboxSwitcherOpen.value = false;
   }
 
   function setSidebarWidth(width: number) {
@@ -354,12 +345,11 @@ export const useUiStore = defineStore('ui', () => {
     registerBackNavigation,
     settingsDetailOpen,
     openSettingsDetail,
-    mobileSidebarOpen,
+    mailboxSwitcherOpen,
     setSidebarWidth,
     toggleNewSendersExpanded,
     setThreadListWidth,
-    openMobileSidebar,
-    closeMobileSidebar,
-    toggleMobileSidebar,
+    openMailboxSwitcher,
+    closeMailboxSwitcher,
   };
 });

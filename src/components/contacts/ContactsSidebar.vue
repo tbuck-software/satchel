@@ -5,7 +5,6 @@ import { useRoute, useRouter } from 'vue-router';
 import { useContactsStore } from '@/stores/contacts';
 import { useSettingsStore } from '@/stores/settings';
 import { useThreadsStore } from '@/stores/threads';
-import { useUiStore } from '@/stores/ui';
 import { resolveContactsSection, type ContactsSection } from './contactNavigation';
 import { useI18n } from 'vue-i18n';
 
@@ -15,7 +14,6 @@ const { t } = useI18n();
 const addressBook = useContactsStore();
 const settings = useSettingsStore();
 const threads = useThreadsStore();
-const ui = useUiStore();
 
 const activeSection = computed(() => resolveContactsSection(route.query.section));
 const allCount = computed(() => new Set([
@@ -61,7 +59,6 @@ const visibleSections = computed(() => sections.value.filter(
 ));
 
 function selectSection(section: ContactsSection) {
-  ui.closeMobileSidebar();
   void router.replace({
     name: 'contacts',
     query: section === 'all' ? {} : { section },
