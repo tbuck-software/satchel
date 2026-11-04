@@ -597,8 +597,7 @@
     "sidebar": {
       "exception": "{account}: {problem}",
       "problem": "{account}: {problem}"
-    },
-    "todayAt": "heute, {time}"
+    }
   },
   "commands": {
     "blockAddress": "Diesen Absender blockieren",
@@ -726,6 +725,7 @@
     "subject": "Betreff",
     "to": "An",
     "today": "Heute",
+    "todayAt": "heute, {time}",
     "tomorrow": "Morgen",
     "undo": "Rückgängig",
     "unknown": "Unbekannt",
@@ -1089,6 +1089,9 @@
     "attachmentEmpty": "Der Anhang kam ohne Daten zurück.",
     "backendUnknown": "Unbekannter Backend-Fehler",
     "banner": {
+      "accountOutage": "{account} gleicht seit {since} nicht ab",
+      "openAccount": "Kontoeinstellungen",
+      "outageShort": "{account}: kein Abgleich seit {since}",
       "passwordRejected": "{account} hat das Passwort nicht angenommen.",
       "retrying": "Wird wiederholt …",
       "serverResponse": "Antwort des Servers",

@@ -597,8 +597,7 @@
     "sidebar": {
       "exception": "{account}: {problem}",
       "problem": "{account}: {problem}"
-    },
-    "todayAt": "today, {time}"
+    }
   },
   "commands": {
     "blockAddress": "Block this sender",
@@ -726,6 +725,7 @@
     "subject": "Subject",
     "to": "To",
     "today": "Today",
+    "todayAt": "today, {time}",
     "tomorrow": "Tomorrow",
     "undo": "Undo",
     "unknown": "Unknown",
@@ -1089,6 +1089,9 @@
     "attachmentEmpty": "The attachment came back without any data.",
     "backendUnknown": "Unknown backend error",
     "banner": {
+      "accountOutage": "{account} has not synced since {since}",
+      "openAccount": "Account settings",
+      "outageShort": "{account}: no sync since {since}",
       "passwordRejected": "{account} did not accept the password.",
       "retrying": "Trying again…",
       "serverResponse": "Server response",

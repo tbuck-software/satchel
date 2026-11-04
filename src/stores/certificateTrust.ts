@@ -9,7 +9,6 @@ import {
 } from '@/services/backend';
 import { certificateNoticePersistence } from '@/persistence/certificateNotices';
 import { useConnectionStore } from '@/stores/connection';
-import { useUiStore } from '@/stores/ui';
 import {
   accountCertificateRejection,
   rejectionSignature,
@@ -67,7 +66,7 @@ export const useCertificateTrustStore = defineStore('certificateTrust', () => {
   /** Problems the banner still has to show. */
   const visibleProblems = computed(() => problems.value.filter((problem) => !problem.dismissed));
 
-  /** Whether the drawer handle should carry a dot: some account needs a look. */
+  /** Whether some account's certificate needs a look (the drawer dot reads this). */
   const needsAttention = computed(() => problems.value.length > 0);
 
   function problemFor(accountId: string): CertificateProblem | null {
@@ -150,8 +149,6 @@ export const useCertificateTrustStore = defineStore('certificateTrust', () => {
   watch(() => connection.syncFailures, () => { awaitingRun.value = []; }, { flush: 'sync' });
   void load();
 
-  const ui = useUiStore();
-  watch(needsAttention, (value) => { ui.drawerAttention = value; }, { immediate: true });
 
   return {
     exceptions,

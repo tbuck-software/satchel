@@ -1,5 +1,5 @@
 import { t } from '@/i18n/runtime';
-import { formatMessageTimestamp, localeFormatter } from '@/utils/listTime';
+import { formatMoment } from '@/utils/listTime';
 import type { CertificateRejection, CertificateRejectionReason } from '@/utils/certificateRejection';
 
 /**
@@ -30,18 +30,9 @@ const SHORT: Record<CertificateRejectionReason, string> = {
   other: 'certificates.short.other',
 };
 
-const TIME_OPTIONS: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12: false };
-
 /** "today, 12:06" for today, otherwise "4 Nov, 12:06". Unknown stays unknown. */
 export function formatCertificateMoment(value: string | null | undefined): string {
-  if (!value) return t('certificates.dialog.unknown');
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return t('certificates.dialog.unknown');
-  const now = new Date();
-  if (date.toDateString() === now.toDateString()) {
-    return t('certificates.todayAt', { time: localeFormatter('certificateTime', TIME_OPTIONS).format(date) });
-  }
-  return formatMessageTimestamp(value);
+  return formatMoment(value) ?? t('certificates.dialog.unknown');
 }
 
 function moments(rejection: CertificateRejection) {

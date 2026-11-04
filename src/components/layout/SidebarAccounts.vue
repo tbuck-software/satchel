@@ -13,6 +13,10 @@ import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { useCertificateTrustStore } from '@/stores/certificateTrust';
 import { certificateShort, formatCertificateMoment } from '@/utils/certificateLabels';
+import { useConnectionStore } from '@/stores/connection';
+import { backendErrorKey, backendErrorStringParam } from '@/utils/backendErrors';
+import { accountCertificateRejection } from '@/utils/certificateRejection';
+import { formatMoment } from '@/utils/listTime';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 
 const SidebarAccountMenu = defineAsyncComponent(() => import('./SidebarAccountMenu.vue'));
@@ -24,24 +28,59 @@ const threads = useThreadsStore();
 const router = useRouter();
 const ui = useUiStore();
 const certificates = useCertificateTrustStore();
+const connection = useConnectionStore();
 
-/** The marker's tooltip and accessible name: the short form of the banner. */
-function certificateLabel(accountId: string, name: string): string | null {
+/** Since when each account's other sync failures have run, from the live run. */
+const failingSince = computed(() => {
+  const since = new Map<string, string | null>();
+  for (const failure of connection.syncFailures) {
+    if (backendErrorKey(failure) !== 'backend.errors.accountSyncFailed') continue;
+    if (accountCertificateRejection(failure)) continue;
+    const accountId = backendErrorStringParam(failure, 'accountId');
+    if (accountId) since.set(accountId, backendErrorStringParam(failure, 'since'));
+  }
+  return since;
+});
+
+type Marker = { kind: 'certificate' | 'exception' | 'outage'; label: string };
+
+/**
+ * The account row's marker and its tooltip, the short form of the banner. A
+ * rejected certificate wins over the generic failure: it has its own dialog.
+ */
+function markerFor(accountId: string, name: string): Marker | null {
   const problem = certificates.problemFor(accountId);
-  if (problem) return t('certificates.sidebar.problem', { account: name, problem: certificateShort(problem.rejection) });
+  if (problem) {
+    return { kind: 'certificate', label: t('certificates.sidebar.problem', { account: name, problem: certificateShort(problem.rejection) }) };
+  }
+  if (failingSince.value.has(accountId)) {
+    const since = formatMoment(failingSince.value.get(accountId)) ?? t('common.unknown');
+    return { kind: 'outage', label: t('errors.banner.outageShort', { account: name, since }) };
+  }
   const exception = certificates.exceptionFor(accountId);
   if (exception) {
-    return t('certificates.sidebar.exception', {
-      account: name,
-      problem: t('certificates.exceptionShort', { until: formatCertificateMoment(exception.expires_at) }),
-    });
+    return {
+      kind: 'exception',
+      label: t('certificates.sidebar.exception', {
+        account: name,
+        problem: t('certificates.exceptionShort', { until: formatCertificateMoment(exception.expires_at) }),
+      }),
+    };
   }
   return null;
 }
 
-function openCertificate(accountId: string) {
+const markers = computed(() => new Map(
+  accounts.emailAccounts.map((account) => [account.id, markerFor(account.id, account.displayName)]),
+));
+
+function openMarker(accountId: string, marker: Marker) {
   ui.closeMobileSidebar();
-  certificates.openDetails(accountId);
+  if (marker.kind === 'outage') {
+    void router.push({ name: 'settings', query: { section: 'accounts', account: accountId } });
+  } else {
+    certificates.openDetails(accountId);
+  }
 }
 function open(accountId: string) {
   accounts.setActiveAccount(accountId);
@@ -123,17 +162,18 @@ function openMenu(accountId: string, event: MouseEvent) {
         </template>
       </NavItem>
       <!-- A sibling, not inside NavItem: that is a button already. Orange while
-           the server's certificate is rejected; a quiet shield while an
-           exception lets it through. Either opens the details. -->
+           the account cannot sync (a rejected certificate opens its details,
+           anything else the account settings); a quiet shield while a
+           certificate exception lets it through. -->
       <IconButton
-        v-if="certificateLabel(account.id, account.displayName)"
+        v-if="markers.get(account.id)"
         class="sidebar-accounts__certificate"
-        :class="{ 'sidebar-accounts__certificate--problem': certificates.problemFor(account.id) }"
+        :class="{ 'sidebar-accounts__certificate--problem': markers.get(account.id)!.kind !== 'exception' }"
         :size="ui.isMobile ? 'lg' : 'sm'"
-        :title="certificateLabel(account.id, account.displayName) ?? undefined"
-        @click="openCertificate(account.id)"
+        :title="markers.get(account.id)!.label"
+        @click="openMarker(account.id, markers.get(account.id)!)"
       >
-        <AppIcon v-if="certificates.problemFor(account.id)">
+        <AppIcon v-if="markers.get(account.id)!.kind !== 'exception'">
           <path d="M8 2.4 14.2 13H1.8L8 2.4Z" />
           <path d="M8 6.6v3" />
           <path d="M8 11.6h.01" />
