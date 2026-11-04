@@ -4,9 +4,27 @@ import { nextTick } from 'vue';
 import { enableAutoUnmount, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { useUiStore } from '@/stores/ui';
+import de from '@/i18n/de.json';
 import ThreadMobileActions from './ThreadMobileActions.vue';
 
 enableAutoUnmount(afterEach);
+
+type Wrapper = ReturnType<typeof mount>;
+
+/** A bar action by its visible label, which is also its accessible name. */
+function findBar(wrapper: Wrapper, label: string) {
+  return wrapper.findAll('.bar-btn').find((cell) => cell.get('.toolbar-cell__label').text() === label);
+}
+
+function bar(wrapper: Wrapper, label: string) {
+  const cell = findBar(wrapper, label);
+  if (!cell) throw new Error(`no bar action labelled ${label}`);
+  return cell;
+}
+
+function hasBar(wrapper: Wrapper, label: string) {
+  return findBar(wrapper, label) !== undefined;
+}
 
 const baseProps = {
   visible: true,
@@ -32,19 +50,19 @@ describe('ThreadMobileActions', () => {
       props: { ...baseProps, isStarred: true, isAside: true, isDone: true },
     });
 
-    expect(wrapper.find('.bar-btn[title="More"]').exists()).toBe(true);
-    expect(wrapper.find('.bar-btn[title="Reply"]').exists()).toBe(true);
-    expect(wrapper.find('.bar-btn[title="Mark as read"]').exists()).toBe(true);
-    expect(wrapper.find('.bar-btn[title="Snooze"]').exists()).toBe(true);
+    expect(hasBar(wrapper, 'More')).toBe(true);
+    expect(hasBar(wrapper, 'Reply')).toBe(true);
+    expect(hasBar(wrapper, 'Read')).toBe(true);
+    expect(hasBar(wrapper, 'Later')).toBe(true);
     expect(wrapper.get('.bar-done').attributes('disabled')).toBeUndefined();
     expect(wrapper.get('.bar-done').text()).toBe('Move to inbox');
     await wrapper.get('.bar-done').trigger('click');
     expect(wrapper.emitted('moveToInbox')).toHaveLength(1);
     expect(wrapper.emitted('archive')).toBeUndefined();
 
-    await wrapper.get('.bar-btn[title="More"]').trigger('click');
-    expect(wrapper.get('.bar-btn[title="More"]').attributes('aria-haspopup')).toBe('dialog');
-    expect(wrapper.get('.bar-btn[title="More"]').attributes('aria-expanded')).toBe('true');
+    await bar(wrapper, 'More').trigger('click');
+    expect(bar(wrapper, 'More').attributes('aria-haspopup')).toBe('dialog');
+    expect(bar(wrapper, 'More').attributes('aria-expanded')).toBe('true');
     expect(wrapper.get('[role="dialog"]').attributes('aria-label')).toBe('More actions');
     expect(wrapper.get('.sheet-panel').text()).toContain('Unpin');
     expect(wrapper.get('.sheet-panel').text()).toContain('Back to the inbox');
@@ -59,7 +77,7 @@ describe('ThreadMobileActions', () => {
       global: { stubs: { Transition: { template: '<slot />' } } },
     });
 
-    await wrapper.get('.bar-btn[title="More"]').trigger('click');
+    await bar(wrapper, 'More').trigger('click');
     expect(ui.overlayDepth).toBe(1);
     expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
 
@@ -81,20 +99,52 @@ describe('ThreadMobileActions', () => {
     expect(wrapper.emitted('togglePin')).toEqual([[]]);
   });
 
+  it('labels the four actions under their icons beside the Done pill', () => {
+    const wrapper = mount(ThreadMobileActions, { props: baseProps });
+
+    // Four whole-cell buttons, icon over a short label…
+    const cells = wrapper.findAll('.mobile-bar-actions > .toolbar-cell');
+    expect(cells.map((cell) => cell.get('.toolbar-cell__label').text()))
+      .toEqual(['More', 'Reply', 'Read', 'Later']);
+    for (const cell of cells) {
+      expect(cell.element.tagName).toBe('BUTTON');
+      expect(cell.find('.toolbar-cell__icon svg').exists()).toBe(true);
+      // The visible label is the accessible name; no aria-label overrides it.
+      expect(cell.attributes('aria-label')).toBeUndefined();
+    }
+    // …and Done stays the prominent pill, outside the cells.
+    const done = wrapper.get('.mobile-bar > .bar-done');
+    expect(done.classes()).toEqual(expect.arrayContaining(['app-button', 'app-button--primary']));
+    expect(done.text()).toBe('Done');
+    // A short label keeps the long phrase as its title.
+    expect(bar(wrapper, 'Read').attributes('title')).toBe('Mark as read');
+    expect(bar(wrapper, 'Later').attributes('title')).toBe('Snooze');
+  });
+
+  it('has short German labels for every cell', () => {
+    // Tests run in English; the catalogue says what a German phone shows.
+    const label = (key: string) => key.split('.').reduce<unknown>(
+      (node, part) => (node as Record<string, unknown> | undefined)?.[part],
+      de,
+    );
+    expect(['common.more', 'common.reply', 'thread.actions.unread', 'thread.actions.read', 'thread.actions.later', 'common.done'].map(label))
+      .toEqual(['Mehr', 'Antworten', 'Ungelesen', 'Gelesen', 'Später', 'Erledigt']);
+  });
+
   it('hides reply actions when replying is unavailable and emits bar intents', async () => {
     const wrapper = mount(ThreadMobileActions, {
       props: { ...baseProps, canReply: false, isUnread: false },
     });
 
-    expect(wrapper.find('.bar-btn[title="Reply"]').exists()).toBe(false);
-    expect(wrapper.find('.bar-btn[title="Mark as unread"]').exists()).toBe(true);
+    expect(hasBar(wrapper, 'Reply')).toBe(false);
+    expect(hasBar(wrapper, 'Unread')).toBe(true);
 
-    await wrapper.get('.bar-btn[title="Mark as unread"]').trigger('click');
-    await wrapper.get('.bar-btn[title="Snooze"]').trigger('click');
+    await bar(wrapper, 'Unread').trigger('click');
+    await bar(wrapper, 'Later').trigger('click');
     expect(wrapper.emitted('toggleRead')).toEqual([[]]);
     expect(wrapper.emitted('snooze')).toEqual([[]]);
 
-    await wrapper.get('.bar-btn[title="More"]').trigger('click');
+    await bar(wrapper, 'More').trigger('click');
     expect(wrapper.get('.sheet-panel').text()).not.toContain('Forward');
   });
 
@@ -104,14 +154,14 @@ describe('ThreadMobileActions', () => {
       global: { stubs: { Transition: { template: '<slot />' } } },
     });
     const clickSheetAction = async (label: string) => {
-      await wrapper.get('.bar-btn[title="More"]').trigger('click');
+      await bar(wrapper, 'More').trigger('click');
       const action = wrapper.findAll('.sheet-item').find((button) => button.text() === label);
       expect(action).toBeDefined();
       await action!.trigger('click');
       expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
     };
 
-    await wrapper.get('.bar-btn[title="Reply"]').trigger('click');
+    await bar(wrapper, 'Reply').trigger('click');
     await wrapper.get('.bar-done').trigger('click');
     await clickSheetAction('Set aside');
     await clickSheetAction('Forward');
@@ -123,7 +173,7 @@ describe('ThreadMobileActions', () => {
     expect(wrapper.emitted('forward')).toEqual([[]]);
     expect(wrapper.emitted('delete')).toEqual([[]]);
 
-    await wrapper.get('.bar-btn[title="More"]').trigger('click');
+    await bar(wrapper, 'More').trigger('click');
     await wrapper.get('.sheet-scrim').trigger('click');
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
   });
@@ -135,7 +185,7 @@ describe('ThreadMobileActions', () => {
       global: { stubs: { Transition: { template: '<slot />' } } },
     });
 
-    await wrapper.get('.bar-btn[title="More"]').trigger('click');
+    await bar(wrapper, 'More').trigger('click');
     const sheet = wrapper.get('[role="dialog"]');
 
     await sheet.trigger('pointerdown', {

@@ -3,7 +3,7 @@ import { ref } from 'vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
-import IconButton from '@/components/ui/IconButton.vue';
+import ToolbarCell from '@/components/ui/ToolbarCell.vue';
 
 const props = defineProps<{
   /** Keep the mobile actions mounted while the viewport changes. */
@@ -50,58 +50,67 @@ function sheetAction(action: SheetAction) {
 </script>
 
 <template>
-  <!-- ═══ MOBILE BOTTOM BAR ═══ -->
+  <!-- ═══ MOBILE BOTTOM BAR ═══
+       Four labelled cells, icon over a short label and the whole cell the
+       target, beside the prominent Done pill. -->
   <div v-if="props.visible" class="mobile-bar">
     <div class="mobile-bar-actions">
-      <IconButton
+      <ToolbarCell
         class="bar-btn"
-        size="lg"
-        :title="$t('common.more')"
+        :label="$t('common.more')"
+        :title="$t('thread.toolbar.moreActions')"
         aria-haspopup="dialog"
         :aria-expanded="moreSheetOpen"
         @click="openMore"
       >
-        <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>
-      </IconButton>
-      <IconButton
+        <template #icon>
+          <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>
+        </template>
+      </ToolbarCell>
+      <ToolbarCell
         v-if="props.canReply"
         class="bar-btn"
-        size="lg"
-        :title="$t('common.reply')"
+        :label="$t('common.reply')"
         @click="emit('reply')"
       >
-        <AppIcon size="lg">
-          <path d="M6 3L1 8l5 5" />
-          <path d="M1 8h9a5 5 0 015 5" />
-        </AppIcon>
-      </IconButton>
-      <IconButton
+        <template #icon>
+          <AppIcon size="lg">
+            <path d="M6 3L1 8l5 5" />
+            <path d="M1 8h9a5 5 0 015 5" />
+          </AppIcon>
+        </template>
+      </ToolbarCell>
+      <ToolbarCell
         class="bar-btn"
-        size="lg"
+        :label="props.isUnread ? $t('thread.actions.read') : $t('thread.actions.unread')"
         :title="props.isUnread ? $t('thread.actions.markRead') : $t('thread.actions.markUnread')"
         @click="emit('toggleRead')"
       >
-        <AppIcon size="lg" v-if="props.isUnread">
-          <path d="M2 4.5h12v7a2 2 0 01-2 2H4a2 2 0 01-2-2z" />
-          <path d="M2 5l6 4 6-4" />
-        </AppIcon>
-        <AppIcon size="lg" v-else>
-          <path d="M2 5.5l6 4 6-4" />
-          <path d="M2 5.5V12a2 2 0 002 2h8a2 2 0 002-2V5.5" />
-          <path d="M5 3.5h6" />
-        </AppIcon>
-      </IconButton>
-      <IconButton
+        <template #icon>
+          <AppIcon size="lg" v-if="props.isUnread">
+            <path d="M2 4.5h12v7a2 2 0 01-2 2H4a2 2 0 01-2-2z" />
+            <path d="M2 5l6 4 6-4" />
+          </AppIcon>
+          <AppIcon size="lg" v-else>
+            <path d="M2 5.5l6 4 6-4" />
+            <path d="M2 5.5V12a2 2 0 002 2h8a2 2 0 002-2V5.5" />
+            <path d="M5 3.5h6" />
+          </AppIcon>
+        </template>
+      </ToolbarCell>
+      <ToolbarCell
         class="bar-btn"
-        size="lg"
+        :label="$t('thread.actions.later')"
         :title="$t('thread.actions.snooze')"
         @click="emit('snooze')"
       >
-        <AppIcon size="lg">
-          <circle cx="8" cy="8" r="6" />
-          <path d="M8 4v4l2.5 1.5" />
-        </AppIcon>
-      </IconButton>
+        <template #icon>
+          <AppIcon size="lg">
+            <circle cx="8" cy="8" r="6" />
+            <path d="M8 4v4l2.5 1.5" />
+          </AppIcon>
+        </template>
+      </ToolbarCell>
     </div>
     <!-- A done thread gets the way back, not a Done that would do nothing. -->
     <AppButton
@@ -208,37 +217,37 @@ function sheetAction(action: SheetAction) {
 .mobile-bar {
   flex-shrink: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-sm) var(--space-md);
+  align-items: stretch;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
   background: var(--bg-surface);
   border-top: var(--border-default);
 }
 
+/* Each cell at least as wide as its label and a fingertip, the rest of the
+   row shared out: "Antworten" and "Ungelesen" fit beside the pill at 360pt,
+   with their own padding so neighbouring labels never run together. */
 .mobile-bar-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  grid-auto-columns: minmax(max-content, 1fr);
+  grid-auto-flow: column;
 }
 
-.mobile-bar .bar-btn {
-  width: var(--touch-target);
-  height: var(--touch-target);
+.mobile-bar-actions .bar-btn {
   min-width: var(--touch-target);
-  min-height: var(--touch-target);
-  border-radius: var(--radius-md);
-  -webkit-tap-highlight-color: transparent;
-}
-
-.mobile-bar .bar-btn:active {
-  background: var(--bg-hover);
+  min-height: 100%;
+  padding-inline: var(--space-xs);
 }
 
 .mobile-bar .bar-done {
   position: relative;
-  min-width: 124px;
+  align-self: center;
+  /* Prominent, but no wider than German "Erledigt" leaves room for at 360pt. */
+  min-width: calc(2.5 * var(--touch-target));
   height: 56px;
-  padding: 0 var(--space-xl);
+  padding: 0 var(--space-md);
   overflow: hidden;
   gap: var(--space-sm);
   -webkit-tap-highlight-color: transparent;
@@ -325,7 +334,6 @@ function sheetAction(action: SheetAction) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mobile-bar .bar-btn,
   .mobile-bar .bar-done,
   .bar-done::before {
     transition: none;
