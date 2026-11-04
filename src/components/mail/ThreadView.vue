@@ -839,7 +839,9 @@ async function printThread(scope: 'latest' | 'conversation') {
     await nextTick();
     window.addEventListener('afterprint', cleanupPrintView, { once: true });
     printCleanupTimer = window.setTimeout(cleanupPrintView, PRINT_CLEANUP_FALLBACK_MS);
-    window.print();
+    // Tauri swaps `window.print` for an IPC call on macOS/iOS that returns a
+    // promise; await it so a rejected print reaches the toast below.
+    await (window.print() as unknown);
   } catch {
     cleanupPrintView();
     toast.error(t('thread.print.failed'));
