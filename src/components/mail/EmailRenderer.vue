@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Attachment, PgpMessageState } from '@/types/mail';
 import { useImagePolicy } from '@/composables/useImagePolicy';
@@ -26,6 +26,8 @@ import PlainTextLinks from './PlainTextLinks.vue';
 import SafeMarkdownBody from './SafeMarkdownBody.vue';
 import IsolatedEmailDocument from './IsolatedEmailDocument.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
+import { IMAGE_GUARD_PHONE_ACTIONS } from './imageGuardActions';
+import { BODY_VIEW_SWITCH } from './bodyViewSwitch';
 import { useUiStore } from '@/stores/ui';
 import { formattingFreeText, isFormattingFreeHtml } from '@/utils/formattingFreeHtml';
 
@@ -69,10 +71,6 @@ const quotesExpanded = ref(false);
  */
 type ViewMode = 'html' | 'auto-dark' | 'markdown' | 'text';
 const viewMode = ref<ViewMode>('text');
-
-function setViewMode(value: string) {
-  viewMode.value = value as ViewMode;
-}
 const linkOpener = useLinkOpener({
   onOpenFailed: (href, anchor) => showLinkError(href, anchor, t('mail.link.browserFailed')),
 });
@@ -274,6 +272,10 @@ const blockedImagesCount = computed(() => {
   return 0;
 });
 
+/** The phone's Show / ⋯ pair, when the app shell provides it (not the viewer). */
+const imageGuardPhoneActions = inject(IMAGE_GUARD_PHONE_ACTIONS, null);
+const imageGuardPhone = computed(() => ui.isMobile && imageGuardPhoneActions !== null);
+
 const viewModeOptions = computed(() => {
   const options: Array<{ value: ViewMode; label: string; title: string }> = [];
   if (htmlAvailable.value) {
@@ -305,6 +307,15 @@ const viewModeOptions = computed(() => {
   return options;
 });
 
+/** The mode this body opens in; a provided switch offers it as the way back. */
+const defaultViewMode = computed<ViewMode>(() => {
+  // Text is what will show, so its Markdown check is due either way.
+  if (!htmlAvailable.value || settings.preferPlainTextReading) {
+    return prepared.value.markdownAvailable ? 'markdown' : 'text';
+  }
+  return shouldAutoDarkHtml.value ? 'auto-dark' : 'html';
+});
+
 watch(
   () => [
     props.html,
@@ -314,15 +325,13 @@ watch(
     settings.preferPlainTextReading,
   ],
   () => {
-    if (!htmlAvailable.value || settings.preferPlainTextReading) {
-      // Text is what will show, so its Markdown check is due either way.
-      viewMode.value = prepared.value.markdownAvailable ? 'markdown' : 'text';
-    } else {
-      viewMode.value = shouldAutoDarkHtml.value ? 'auto-dark' : 'html';
-    }
+    viewMode.value = defaultViewMode.value;
   },
   { immediate: true },
 );
+
+/* The message around the renderer may stand its own switch in (bodyViewSwitch.ts). */
+const viewSwitch = inject(BODY_VIEW_SWITCH, null);
 
 /**
  * Opening feedback beyond the click itself is noise: the browser takes over
@@ -390,6 +399,7 @@ const hasPgpSegments = computed(() =>
     <div
       v-if="blockedImagesCount > 0 && !imagesEffectivelyAllowed"
       class="image-guard"
+      :class="{ 'image-guard--phone': imageGuardPhone }"
       role="status"
     >
       <svg
@@ -410,6 +420,18 @@ const hasPgpSegments = computed(() =>
       >
         {{ blockedImagesLabel }}
       </span>
+      <!-- Phone: one row — the notice, Show, and the always-allow choices
+           behind one ⋯ (ImageGuardPhoneActions.vue). -->
+      <component
+        :is="imageGuardPhoneActions"
+        v-if="imageGuardPhone"
+        :sender-email="props.senderEmail ?? ''"
+        :domain="canTrustDomain ? senderDomainName : ''"
+        @show-once="showImagesOnce"
+        @allow-sender="trustSender"
+        @allow-domain="trustDomain"
+      />
+      <template v-else>
       <AppButton
         class="image-guard__action image-guard__action--primary"
         :title="$t('mail.imagePolicy.showOnceTitle')"
@@ -443,14 +465,17 @@ const hasPgpSegments = computed(() =>
           {{ $t('mail.imagePolicy.allowDomain', { domain: senderDomainName }) }}
         </AppButton>
       </template>
+      </template>
     </div>
-    <SegmentedControl
+    <component
+      :is="viewSwitch ?? SegmentedControl"
       v-if="props.showViewModeToggle && viewModeOptions.length > 1"
       class="view-mode-toggle"
       :options="viewModeOptions"
       :model-value="viewMode"
       :aria-label="$t('mail.viewMode.label')"
-      @update:model-value="setViewMode"
+      :default-value="viewSwitch && defaultViewMode"
+      @update:model-value="(value: ViewMode) => (viewMode = value)"
     />
     <div v-if="isolatedDocument" class="html-document-group">
       <header v-if="fullBodyDecryption === 'pgp_decrypted'" class="pgp-segment-header">{{ $t('mail.pgpBlock.decryptedPgp') }}</header>
@@ -669,6 +694,20 @@ const hasPgpSegments = computed(() =>
   }
 }
 
+/*
+  On a phone the document leaves the reader's side inset (set by the thread
+  reader as --reader-inline-inset; unset elsewhere, so nothing moves). A
+  designed mail brings its own margins, and the app's inset on top of them
+  ran its text in a column 40pt from each edge. Every other body gets the
+  inset back inside the frame (IsolatedEmailDocument's flush rules), so only
+  fixed-width layouts run edge to edge.
+*/
+@media (max-width: 767px) {
+  .html-document-shell {
+    margin-inline: calc(var(--reader-inline-inset, 0px) * -1);
+  }
+}
+
 .html-document-shell--auto-dark {
   border-color: transparent;
   background: var(--bg-surface);
@@ -857,5 +896,20 @@ const hasPgpSegments = computed(() =>
 
 .image-guard__sep {
   color: var(--text-tertiary);
+}
+
+/* Phone: one row that never wraps; the text gives way, the buttons do not. */
+.image-guard--phone {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.image-guard--phone .image-guard__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

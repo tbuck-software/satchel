@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import CardButton from '@/components/ui/CardButton.vue';
-import MenuItem from '@/components/ui/MenuItem.vue';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, inject, onBeforeUnmount, provide, ref, shallowRef, watch, watchEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type {
   Message,
@@ -40,10 +39,23 @@ import { isOwnEmail, participantDisplayName } from '@/utils/mailIdentity';
 import { isKnownInviteBoilerplate } from '@/utils/inviteText';
 import { detectSenderSpoofing } from '@/utils/senderSpoofing';
 import { formatMessageTimestamp } from '@/utils/listTime';
+import { formatMessageHeaderTime } from '@/utils/messageHeaderTime';
 import { isSmimeSignatureAttachment, isSystemAttachment } from '@/utils/messageAttachments';
 import { summarizeAuthentication } from '@/utils/messageAuthentication';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 import { useMessageSecurityActions } from '@/composables/useMessageSecurityActions';
+import MessageBodyViewSwitch from './MessageBodyViewSwitch.vue';
+import { BODY_VIEW_SWITCH } from './bodyViewSwitch';
+import { BODY_VIEW_STATE, type BodyViewState } from './bodyViewState';
+import {
+  IMAGE_GUARD_CHOICES,
+  THREAD_MESSAGE_MENU,
+  type ImageGuardChoices,
+  type MessageMenu,
+  type MessageMenuCommand,
+} from './threadMessageMenu';
+
+const MessageActionList = defineAsyncComponent(() => import('./MessageActionList.vue'));
 
 const props = withDefaults(defineProps<{
   message: Message;
@@ -60,6 +72,7 @@ const props = withDefaults(defineProps<{
 });
 const emit = defineEmits<{
   reply: [];
+  replyAll: [];
   forward: [];
   focusMessage: [];
   toggleCollapsed: [];
@@ -133,6 +146,7 @@ async function retryInlineImages() {
 }
 
 const fullTimestamp = computed(() => formatMessageTimestamp(props.message.timestamp));
+const headerTime = computed(() => formatMessageHeaderTime(props.message.timestamp));
 
 /* Folded away, the avatar is a marker beside one line, not the head of a
    block of text. The indent under it stays put — see --indented below. */
@@ -225,11 +239,12 @@ const visibleAttachments = computed(() => {
 /*
  * One rhythm on the desktop: the same step above and below a message, so the
  * rule between two of them sits halfway. Drafts are not messages here; they
- * end the thread as ThreadDraftCard.
+ * end the thread as ThreadDraftCard. The phone starts the sender closer to
+ * the subject: the top of the reader is where a newsletter loses its screen.
  */
 const surfaceClasses = computed(() => {
   return ui.isMobile
-    ? ['border-b border-border-muted py-4']
+    ? ['message-surface--phone pt-3 pb-4']
     : ['message-surface--indented border-b border-border-muted py-5 last:border-b-0'];
 });
 
@@ -276,9 +291,72 @@ watch(sourceDialogOpen, (open) => { if (open) sourceDialogUsed.value = true; });
 watch(messageActionsOpen, (open) => { if (open) messageActionsUsed.value = true; });
 watch(senderMenuAnchor, (anchor) => { if (anchor) senderMenuUsed.value = true; });
 
-function runMessageAction(action: () => void) {
-  messageActionsOpen.value = false;
-  action();
+
+/*
+ * The body's Original / Auto-dark / Text choice. On the phone it leaves the
+ * body for this message's ⋯ sheet: the renderer hands its modes to
+ * MessageBodyViewSwitch, which reports them here.
+ */
+const bodyView = shallowRef<BodyViewState | null>(null);
+provide(BODY_VIEW_SWITCH, MessageBodyViewSwitch);
+provide(BODY_VIEW_STATE, bodyView);
+const bodyViewChoices = computed(() => (
+  ui.isMobile && !props.collapsed && bodyView.value && bodyView.value.options.length > 1
+    ? bodyView.value
+    : null
+));
+
+/* The phone's blocked-images notice keeps only Show; its always-allow
+   choices join this message's actions (ImageGuardPhoneActions reports them). */
+const imageGuard = shallowRef<ImageGuardChoices | null>(null);
+provide(IMAGE_GUARD_CHOICES, imageGuard);
+
+/** Someone besides the sender and us would get a reply all. */
+const canReplyAll = computed(() => {
+  const others = new Set(
+    [props.message.from, ...props.message.to, ...(props.message.cc ?? [])]
+      .map((person) => person.email.trim().toLowerCase())
+      .filter((email) => email && !isOwnEmail(accountsStore.accounts, email)),
+  );
+  return others.size > 1;
+});
+
+function runCommand(command: MessageMenuCommand) {
+  switch (command) {
+    case 'reply': emit('reply'); break;
+    case 'replyAll': emit('replyAll'); break;
+    case 'forward': emit('forward'); break;
+    case 'topic': topicsStore.openPicker({ itemType: 'message', itemIds: [props.message.id] }); break;
+    case 'source': sourceDialogOpen.value = true; break;
+    case 'toggleCollapsed': emit('toggleCollapsed'); break;
+  }
+}
+
+const messageMenu = computed<MessageMenu>(() => ({
+  canReply: props.canReply,
+  canReplyAll: canReplyAll.value,
+  collapsed: props.collapsed,
+  bodyView: bodyViewChoices.value,
+  images: ui.isMobile && !props.collapsed ? imageGuard.value : null,
+  run: runCommand,
+}));
+
+/*
+ * In the thread reader the newest message hands its actions to the More menu's
+ * ⋯, and only the messages the reader names keep a ⋯ beside their sender.
+ */
+const threadMenu = inject(THREAD_MESSAGE_MENU, null);
+const hostsThreadMenu = computed(() => threadMenu?.hostId.value === props.message.id);
+const showMenuButton = computed(() => !threadMenu || threadMenu.inlineIds.value.has(props.message.id));
+if (threadMenu) {
+  watchEffect(() => {
+    if (hostsThreadMenu.value) threadMenu.menu.value = messageMenu.value;
+  });
+  const release = () => {
+    if (threadMenu.menu.value?.run === runCommand) threadMenu.menu.value = null;
+  };
+  watch(hostsThreadMenu, (hosts) => { if (!hosts) release(); });
+  onBeforeUnmount(release);
 }
 
 const pgpState = computed<PgpMessageState | null>(() => props.message.pgp?.state ?? null);
@@ -385,8 +463,11 @@ function openSenderDetails() {
     @click="openFoldedFromClick"
   >
     <!-- Header -->
-    <div class="message-header flex items-start justify-between">
-      <div class="message-sender-group flex min-w-0 items-center gap-3.5">
+    <div class="message-header flex items-start justify-between gap-3">
+      <div
+        class="message-sender-group flex min-w-0 items-center gap-3.5"
+        :class="{ 'message-sender-group--target': ui.isMobile && !props.collapsed }"
+      >
         <CardButton
           v-if="props.canReply && !ui.isMobile && senderAccountId"
           class="sender-avatar-trigger"
@@ -404,13 +485,13 @@ function openSenderDetails() {
           <!-- A folded message keeps one line and lets its snippet give way. -->
           <div class="flex items-center gap-x-2 gap-y-0.5">
             <AppButton
-              class="sender-identity-trigger text-md font-semibold text-primary"
+              class="sender-identity-trigger sender-name-trigger text-md font-semibold text-primary"
               :aria-label="$t('mail.recipients.showSenderDetails', { name: senderName })"
               @click.stop="openSenderDetails"
               variant="link"
               size="sm"
             >
-              {{ senderName }}
+              <span class="sender-name-text">{{ senderName }}</span>
             </AppButton>
             <span v-if="props.collapsed && collapsedSnippet" class="message-collapsed-snippet">
               {{ collapsedSnippet }}
@@ -498,7 +579,7 @@ function openSenderDetails() {
           </IconButton>
         </div>
         <div class="text-right">
-          <div class="text-xs text-secondary font-medium">{{ fullTimestamp }}</div>
+          <time class="block text-xs text-secondary font-medium" :datetime="props.message.timestamp" :title="fullTimestamp">{{ headerTime }}</time>
         </div>
         <IconButton
           v-if="!ui.isMobile"
@@ -512,7 +593,7 @@ function openSenderDetails() {
           </svg>
         </IconButton>
         <IconButton
-          v-else
+          v-else-if="showMenuButton"
           size="lg"
           :title="$t('mail.message.actions')"
           @click="messageActionsOpen = true"
@@ -682,34 +763,7 @@ function openSenderDetails() {
       >
         <nav role="menu" class="message-action-sheet" :aria-label="$t('mail.message.actionsNav')">
           <h2>{{ $t('mail.message.actions') }}</h2>
-          <MenuItem label=""
-            v-if="props.canReply"
-            @select="runMessageAction(() => emit('reply'))"
-          >
-            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 4-5 5 5 5" /><path d="M3 9h9a5 5 0 0 1 5 5" /></svg></template>
-            {{ $t('common.reply') }}
-          </MenuItem>
-          <MenuItem label=""
-            v-if="props.canReply"
-            @select="runMessageAction(() => emit('forward'))"
-          >
-            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 4 5 5-5 5" /><path d="M17 9H8a5 5 0 0 0-5 5" /></svg></template>
-            {{ $t('common.forward') }}
-          </MenuItem>
-          <MenuItem label=""
-            @select="runMessageAction(() => topicsStore.openPicker({ itemType: 'message', itemIds: [props.message.id] }))"
-          >
-            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5a2 2 0 0 1 2-2h3l2 2h5a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M10 8v6M7 11h6" /></svg></template>
-            {{ $t('mail.message.addToTopic') }}
-          </MenuItem>
-          <MenuItem label="" @select="runMessageAction(() => { sourceDialogOpen = true; })">
-            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5-4 5 4 5M12 5l4 5-4 5" /></svg></template>
-            {{ $t('mail.message.showSource') }}
-          </MenuItem>
-          <MenuItem label="" @select="runMessageAction(() => emit('toggleCollapsed'))">
-            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path v-if="props.collapsed" d="m5 8 5 5 5-5" /><path v-else d="m5 12 5-5 5 5" /></svg></template>
-            {{ props.collapsed ? $t('mail.message.expand') : $t('mail.message.collapse') }}
-          </MenuItem>
+          <MessageActionList :menu="messageMenu" @done="messageActionsOpen = false" />
         </nav>
       </BottomSheet>
     </Teleport>
@@ -773,6 +827,61 @@ function openSenderDetails() {
     inset 0 0 0 4px var(--bg-surface);
 }
 
+/* Phone: the whole sender block — avatar, name, "To:" line — is one target
+   for the sender and recipient details. The name's button stretches its hit
+   area over the block (it already opened them); the To line and security
+   badge inside it open the same sheet. A folded message is left alone: there
+   a tap anywhere unfolds it. */
+.message-sender-group--target {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: var(--touch-target);
+}
+
+.message-sender-group--target .sender-name-trigger {
+  position: static;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.message-sender-group--target .sender-name-trigger::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: auto;
+  transform: none;
+  border-radius: var(--radius-md);
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.message-sender-group--target .sender-name-trigger:active::after {
+  background: var(--bg-hover);
+}
+
+/* Phone: the message spans the screen and pads its parts back to the reader's
+   inset, so EmailRenderer can let designed HTML mail out of it. The box has
+   to be the wide one: `content-visibility` contains paint, and a child
+   reaching past a narrower box would be clipped at its edge. Outside the
+   thread reader the inset is unset and both rules come to nothing. */
+.message-surface--phone {
+  margin-inline: calc(var(--reader-inline-inset, 0px) * -1);
+  position: relative;
+}
+
+/* The message spans the screen so a designed mail can; the line between
+   messages keeps the reader's inset, as it had before. */
+.message-surface--phone::after {
+  content: '';
+  position: absolute;
+  inset-inline: var(--reader-inline-inset, 0px);
+  bottom: 0;
+  border-bottom: 1px solid var(--border-color-muted);
+  pointer-events: none;
+}
+
+.message-surface--phone > * {
+  padding-inline: var(--reader-inline-inset, 0px);
+}
+
 /* The body, attachments and banners line up under the sender's name; the
    header keeps the avatar in the margin. 52px = the 40px avatar plus its gap. */
 .message-surface--indented > :not(.message-header) {
@@ -833,7 +942,16 @@ function openSenderDetails() {
   font-size: var(--font-size-sm);
 }
 
-.sender-identity-trigger { min-width: 0; }
+/* A long sender name gives way before the date does: the kit's buttons
+   never shrink, so this one is allowed to, and its text ends in an ellipsis. */
+.sender-identity-trigger { min-width: 0; flex-shrink: 1; max-width: 100%; }
+
+.sender-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .message-address-line {
   display: flex;

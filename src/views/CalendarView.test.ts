@@ -208,7 +208,6 @@ const EventEditorDialogStub = defineComponent({
   `,
 });
 
-const DrawerButtonStub = defineComponent({ name: 'DrawerButton', template: '<span />' });
 
 function makeEvent(overrides: Partial<BackendCalendarEvent> = {}): BackendCalendarEvent {
   return {
@@ -308,7 +307,6 @@ function render() {
         CalendarMonthGrid: CalendarMonthGridStub,
         CalendarPopover: CalendarPopoverStub,
         CalendarWeekGrid: CalendarWeekGridStub,
-        DrawerButton: DrawerButtonStub,
         EventDetailsPopover: EventDetailsPopoverStub,
         EventEditorDialog: EventEditorDialogStub,
         IconButton: IconButtonStub,

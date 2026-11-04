@@ -696,7 +696,6 @@
     "from": "From",
     "hide": "Hide",
     "loading": "Loading…",
-    "menu": "Menu",
     "more": "More",
     "name": "Name",
     "next": "Next",
@@ -862,6 +861,7 @@
       "backspaceAgain": "{address} selected. Press Backspace again to remove it.",
       "bccPlaceholder": "Name or email",
       "ccBcc": "Cc/Bcc",
+      "ccBccFrom": "Cc/Bcc, From:",
       "ccPlaceholder": "Name or email",
       "collapseCcBcc": "Collapse Cc and Bcc",
       "invalid": "This is not a valid email address.",
@@ -936,7 +936,9 @@
     "status": {
       "draftSaved": "Draft saved.",
       "draftSavedRemotePending": "Draft saved. Sync with the server is still pending: {error}",
+      "offline": "You're offline. Send puts the message in the Outbox; it goes out when you're back online.",
       "queued": "Queued in the outbox in the background.",
+      "queuedOffline": "You're offline. The message is in the Outbox and will be sent when you're back online.",
       "saveFailed": "Saving failed: {error}",
       "scheduledFor": "Scheduled for {time}.",
       "sendFailed": "Sending failed: {error}",
@@ -1308,6 +1310,7 @@
       "allowSender": "Allow sender",
       "allowSenderTitle": "Always load images from {email}",
       "blocked": "{count} external image blocked | {count} external images blocked",
+      "choicesLabel": "Always load images",
       "shieldTitle": "Tracking-pixel protection: external images load only once you allow them",
       "showOnce": "Show",
       "showOnceTitle": "Load external images in this message only"
@@ -1535,11 +1538,19 @@
     "viewMode": {
       "autoDark": "Auto-dark",
       "autoDarkTitle": "Colours adapted to the dark theme",
+      "backTo": "Show as {mode}",
       "label": "Message rendering",
       "markdown": "Markdown",
       "markdownTitle": "Text with formatting",
       "original": "Original",
       "originalTitle": "HTML view as sent",
+      "showAs": "Show as",
+      "shownAs": {
+        "autoDark": "Shown in auto-dark",
+        "markdown": "Shown as Markdown",
+        "original": "Shown as original",
+        "text": "Shown as text"
+      },
       "text": "Text",
       "textTitle": "Plain text"
     }
@@ -1642,6 +1653,10 @@
     },
     "frequent": "Frequent",
     "mail": "Mail",
+    "mailboxes": {
+      "current": "{mailbox}, switch mailbox",
+      "title": "Mailboxes"
+    },
     "modules": "Areas",
     "newMessage": "New message",
     "omni": {
@@ -3287,6 +3302,7 @@
       "blockSender": "Block sender",
       "fileTo": "File…",
       "inbox": "Inbox",
+      "later": "Later",
       "markRead": "Mark as read",
       "markUnread": "Mark as unread",
       "moveToInbox": "Back to the inbox",
@@ -3390,6 +3406,7 @@
       "loading": "Loading emails",
       "markAllRead": "Mark all read",
       "morePriority": "+{count} more email | +{count} more emails",
+      "morePriorityRow": "{count} more priority email | {count} more priority emails",
       "showAllPriority": "Show all priority emails",
       "smartGroups": "Smart inbox groups",
       "unreadCount": "{count} unread"
@@ -3522,6 +3539,8 @@
       "empty": "Pick a conversation",
       "loadFailed": "This conversation could not be loaded.",
       "loading": "Loading conversation",
+      "menuLatest": "Latest message",
+      "menuThread": "This conversation",
       "showEarlier": "Show {count} earlier message | Show {count} earlier messages",
       "unsentDrafts": "Unsent drafts"
     },

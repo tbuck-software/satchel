@@ -340,6 +340,49 @@ test('drops the document frame and nested canvas background at phone width', asy
 });
 
 /**
+ * On a phone a newsletter built on a fixed-width table runs edge to edge; the
+ * app's inset on top of its own margins left its text a narrow column. Every
+ * other body is padded back to the reader's inset inside the frame, including
+ * "designed" mail whose only table holds data, which has no margins of its own.
+ */
+test('pads all but fixed-width layouts inside the phone frame', async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 852 });
+  const cases: Array<[string, string, string]> = [
+    ['simple', '<p><strong>Hallo</strong></p>', '18px'],
+    ['data table', '<div><p>Numbers below.</p><table><tr><td>EU</td><td>12%</td></tr></table></div>', '18px'],
+    ['full-width table', '<table width="100%"><tr><td>Hallo</td></tr></table>', '18px'],
+    ['layout', '<table width="600" style="width:600px"><tr><td style="padding:16px 24px">Angebote</td></tr></table>', '0px'],
+  ];
+  for (const [label, html, padding] of cases) {
+    const frame = await renderMail(page, html);
+    const body = frame.locator('.satchel-email-body');
+    await expect(body, label).toHaveCSS('padding-left', padding);
+    await expect(body, label).toHaveCSS('padding-right', padding);
+  }
+});
+
+test('lets a designed newsletter reach the phone screen edges while the header keeps its inset', async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 852 });
+  await page.goto('/thread/th-16');
+  const frame = page.locator('iframe.satchel-email-document').first();
+  await expect(frame).toBeVisible();
+
+  const scroller = page.locator('.thread-reading-content--phone');
+  const inner = await scroller.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return { left: box.left, right: box.left + element.clientWidth };
+  });
+  const frameBox = (await frame.boundingBox())!;
+  expect(frameBox.x).toBe(inner.left);
+  expect(Math.round(frameBox.x + frameBox.width)).toBe(Math.round(inner.right));
+
+  const sender = (await page.locator('.message-sender-group').first().boundingBox())!;
+  expect(sender.x).toBe(inner.left + 16);
+  const notice = (await page.locator('.image-guard').first().boundingBox())!;
+  expect(notice.x).toBe(inner.left + 16);
+});
+
+/**
  * What the composer sends for a reply without formatting: paragraphs and line
  * breaks. In the frame it took the frame's system font and padding and offered
  * Original / Auto-dark / Text for one sentence; it reads as text instead.

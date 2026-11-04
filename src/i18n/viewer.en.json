@@ -92,6 +92,7 @@
       "allowSender": "Allow sender",
       "allowSenderTitle": "Always load images from {email}",
       "blocked": "{count} external image blocked | {count} external images blocked",
+      "choicesLabel": "Always load images",
       "shieldTitle": "Tracking-pixel protection: external images load only once you allow them",
       "showOnce": "Show",
       "showOnceTitle": "Load external images in this message only"

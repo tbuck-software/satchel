@@ -3,14 +3,14 @@ import type { AppLocale } from '@/i18n/locale';
 
 const DAY_MS = 86_400_000;
 
-const TIME_OPTIONS: Intl.DateTimeFormatOptions = {
+export const TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   hour: '2-digit',
   minute: '2-digit',
   hour12: false,
 };
 const WEEKDAY_OPTIONS: Intl.DateTimeFormatOptions = { weekday: 'short' };
 const DATE_OPTIONS: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
-const DATE_WITH_YEAR_OPTIONS: Intl.DateTimeFormatOptions = {
+export const DATE_WITH_YEAR_OPTIONS: Intl.DateTimeFormatOptions = {
   day: 'numeric',
   month: 'short',
   year: 'numeric',
@@ -44,7 +44,7 @@ export function localeFormatter(
   return formatter;
 }
 
-function localDayNumber(date: Date): number {
+export function localDayNumber(date: Date): number {
   return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS;
 }
 

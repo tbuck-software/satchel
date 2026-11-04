@@ -13,12 +13,13 @@ import { useComposerStore } from '@/stores/composer';
 import { useConnectionStore } from '@/stores/connection';
 import { useSettingsStore } from '@/stores/settings';
 import { useListSearchStore } from '@/stores/listSearch';
+import { focusListSearch } from '@/composables/listSearchFocus';
 import { useThreadsStore, type NewSenderDomainSuggestion, type NewSenderGroup } from '@/stores/threads';
 import { useTopicsStore } from '@/stores/topics';
 import { THREAD_LIST_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
 import { useFollowUpsStore } from '@/stores/followUps';
 import { formatListTime } from '@/utils/listTime';
-import { NEW_SENDER_PREVIEW_LIMIT } from '@/utils/threadList';
+import { NEW_SENDER_PREVIEW_LIMIT, layoutPhoneInbox } from '@/utils/threadList';
 import type { WorkflowState } from '@/types/workflow';
 import SmartBucketIcon from '@/components/mail/SmartBucketIcon.vue';
 import ThreadGroupList from '@/components/mail/ThreadGroupList.vue';
@@ -31,6 +32,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import CountBadge from '@/components/ui/CountBadge.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
+import LargeTitleHeader from '@/components/ui/LargeTitleHeader.vue';
 import FilterPill from '@/components/ui/FilterPill.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import PaneResizeHandle from '@/components/ui/PaneResizeHandle.vue';
@@ -150,9 +152,12 @@ const smartInboxActive = computed(() =>
     && !laterViewActive.value
     && (settings.inboxGroupingMode === 'smart' || Boolean(activeBucket.value)),
 );
-const listItems = computed(() =>
-  smartInboxActive.value ? threads.smartListEntries : threads.listEntries,
-);
+const listItems = computed(() => {
+  if (!smartInboxActive.value) return threads.listEntries;
+  // The phone folds Priority to two rows; keyboard targets read this list,
+  // so they follow the same rows the list renders.
+  return ui.isMobile ? layoutPhoneInbox(threads.smartListEntries) : threads.smartListEntries;
+});
 // The topics folder lives inside the smart folder section when there is one;
 // otherwise (classic list, empty smart inbox) it keeps its spot above the list.
 const smartFolderRowVisible = computed(() =>
@@ -412,16 +417,38 @@ const listScope = computed(() => {
 });
 
 // ── List search: the field above the list narrows it in place ──
-/**
- * The Inbox on a phone: the search field is the app bar, drawer button and
- * filter at its ends, as in Gmail. Other lists keep their title, which is
- * the only thing telling you where you are.
- */
-const searchAppBar = computed(() => ui.isMobile
-  && threads.mailboxFilter.kind === 'section'
-  && threads.mailboxFilter.value === 'inbox'
-  && !threads.activeContact);
 const searchActive = computed(() => listSearch.active && !activeBundle.value);
+
+/*
+ * Phone: the search field waits behind a button in the title row and takes
+ * the whole row when used, so the list keeps that row the rest of the time.
+ * The collapsed bar stays in the DOM: iOS only raises the keyboard for a
+ * focus() inside the tap itself, and a field that mounts a tick later misses it.
+ */
+const phoneSearchOpen = ref(false);
+const phoneSearchShown = computed(() => ui.isMobile && (searchActive.value || phoneSearchOpen.value));
+const phoneSearchCollapsed = computed(() => ui.isMobile && !phoneSearchShown.value);
+const searchBarRef = ref<{ $el: HTMLElement } | null>(null);
+
+function openPhoneSearch() {
+  const bar = searchBarRef.value?.$el;
+  bar?.removeAttribute('inert');
+  focusListSearch();
+  phoneSearchOpen.value = true;
+}
+
+function closePhoneSearch() {
+  phoneSearchOpen.value = false;
+}
+
+/** Leaving an empty search folds the field back behind its button. */
+function onSearchFocusOut(event: FocusEvent) {
+  if (!ui.isMobile || listSearch.active) return;
+  const bar = searchBarRef.value?.$el;
+  const next = event.relatedTarget as Node | null;
+  if (bar && next && bar.contains(next)) return;
+  phoneSearchOpen.value = false;
+}
 const searchMailbox = computed(() => ({
   accountId: accounts.activeAccountId,
   workflowFilter: threads.workflowFilter,
@@ -687,7 +714,7 @@ onBeforeUnmount(registerListKeyboardNavigation({
 
 // These screens are store state rather than routes. Register each level with
 // the shared Back stack so Android's edge gesture follows the same hierarchy
-// as the visible back buttons. Dialogs and the mobile drawer remain above
+// as the visible back buttons. Dialogs and sheets remain above
 // these entries and are dismissed first by the ui store.
 onBeforeUnmount(ui.registerBackNavigation({
   isOpen: () =>
@@ -897,9 +924,26 @@ function acceptExistingSenders() {
       </template>
 
       <template v-else>
+      <!-- Phone: an iOS large title. The list's name is the mailbox switcher,
+           the filter sits beside it; a running search takes the screen. -->
+      <LargeTitleHeader
+        v-if="!activeBundle && ui.isMobile"
+        v-show="!phoneSearchShown"
+        class="inbox-large-title"
+        :title="listTitle"
+        :subtitle="listScope"
+        :switch-label="$t('nav.mailboxes.current', { mailbox: listTitle })"
+        @switch="ui.openMailboxSwitcher()"
+      >
+        <template #actions>
+          <IconButton size="lg" :title="$t('common.search')" @click="openPhoneSearch">
+            <AppIcon size="lg"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></AppIcon>
+          </IconButton>
+          <ListFilterMenu :show-layout="!folderViewActive" />
+        </template>
+      </LargeTitleHeader>
       <PaneHeader
-        v-if="!activeBundle"
-        v-show="!searchAppBar && !(ui.isMobile && searchActive)"
+        v-else-if="!activeBundle"
         class="inbox-header"
         :title="listTitle"
         :subtitle="listScope"
@@ -945,13 +989,17 @@ function acceptExistingSenders() {
         </template>
       </PaneHeader>
 
-      <ListSearchBar v-if="!activeBundle" :mailbox-label="listTitle" :class="{ 'inbox-search--app-bar': searchAppBar || (ui.isMobile && searchActive) }">
-        <template v-if="searchAppBar" #leading>
-          <IconButton :title="$t('common.menu')" @click="ui.toggleMobileSidebar()">
-            <AppIcon size="lg"><path d="M2 4h12M2 8h12M2 12h12" /></AppIcon>
-          </IconButton>
-        </template>
-        <ListFilterMenu :show-layout="!folderViewActive" />
+      <ListSearchBar
+        v-if="!activeBundle"
+        ref="searchBarRef"
+        :mailbox-label="listTitle"
+        :cancelable="phoneSearchOpen"
+        :class="{ 'inbox-search--app-bar': phoneSearchShown, 'inbox-search--collapsed': phoneSearchCollapsed }"
+        :inert="phoneSearchCollapsed || undefined"
+        @cancel="closePhoneSearch"
+        @focusout="onSearchFocusOut"
+      >
+        <ListFilterMenu v-if="!ui.isMobile" :show-layout="!folderViewActive" />
       </ListSearchBar>
 
       <!-- How the list is sliced. The account it is drawn from is chosen in
@@ -1014,6 +1062,7 @@ function acceptExistingSenders() {
           :active-group-id="activeBundle?.id"
           :sender-review-setup-complete="Boolean(settings.senderReviewStartedAt)"
           :new-senders-expanded="ui.newSendersExpanded"
+          :phone-layout="ui.isMobile"
           :bulk-busy="bulkBusy"
           :topics="topicsStore.activeTopics"
           @load-more="void threads.loadMore()"
@@ -1212,5 +1261,12 @@ function acceptExistingSenders() {
 /* The search field as app bar sits under the status bar like a title would. */
 .inbox-search--app-bar {
   padding-top: var(--space-sm);
+}
+
+/* Folded behind the title row's search button; still focusable (see openPhoneSearch). */
+.inbox-search--collapsed {
+  height: 0;
+  padding-block: 0;
+  overflow: hidden;
 }
 </style>

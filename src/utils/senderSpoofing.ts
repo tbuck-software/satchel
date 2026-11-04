@@ -1,6 +1,6 @@
 import { t } from '@/i18n/runtime';
 import { senderDomain } from './senderDomains';
-import { toUnicode } from 'punycode/';
+import { toUnicode } from './punycodeDecode';
 import confusables from './data/confusablesAscii.json';
 
 interface BrandEntry {

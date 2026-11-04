@@ -2,6 +2,7 @@ import { watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useOutboxStore } from '@/stores/outbox';
+import { useUiStore } from '@/stores/ui';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { useToast } from '@/composables/useToast';
 
@@ -11,11 +12,24 @@ export function useQueueFailureToasts() {
   const toast = useToast();
   const router = useRouter();
   const { t } = useI18n();
+  const ui = useUiStore();
   let previous = new Set<string>();
+  // The phone keeps standing failures in a banner above the list. What was
+  // already failed when the queue first came back is that banner's to show; a
+  // toast on top only repeated it and covered the list.
+  let standingSeeded = false;
   watch(
-    () => outbox.items.filter((item) => ['failed', 'delivery_unknown', 'delivered'].includes(item.status))
-      .map((item) => ({ id: `${item.id}:${item.status}`, send: item.action_type === 'send_message' })),
-    (failures) => {
+    () => [
+      outbox.loadedOnce,
+      outbox.items.filter((item) => ['failed', 'delivery_unknown', 'delivered'].includes(item.status))
+        .map((item) => ({ id: `${item.id}:${item.status}`, send: item.action_type === 'send_message' })),
+    ] as const,
+    ([loadedOnce, failures]) => {
+      if (ui.isMobile && !standingSeeded) {
+        previous = new Set(failures.map((item) => item.id));
+        if (loadedOnce) standingSeeded = true;
+        return;
+      }
       const fresh = failures.filter((item) => !previous.has(item.id));
       previous = new Set(failures.map((item) => item.id));
       // The Outbox lists these items itself; a toast pointing there from there

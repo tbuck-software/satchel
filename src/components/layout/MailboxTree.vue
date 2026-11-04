@@ -56,7 +56,8 @@ const resolvedSections = computed<ResolvedSection[]>(() =>
   MAILBOX_SECTIONS
     .filter((section) => section.forceVisible || sectionHasContent(section))
     .map((section) => {
-      const total = sectionCount(section);
+      // Rows stay put across accounts; their numbers follow the chosen scope.
+      const total = sectionCount(section, accounts.activeAccountId);
       return {
         ...section,
         total,

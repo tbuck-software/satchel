@@ -13,6 +13,11 @@ import { useConfirm } from '@/composables/useConfirm';
 
 const props = defineProps<{
   open: boolean;
+  /**
+   * Drawn in the flow of a host surface (the phone's mailbox sheet) instead of
+   * floating beside the sidebar. The host owns dismissal then.
+   */
+  inline?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -186,7 +191,7 @@ watch(
       return;
     }
 
-    if (open) {
+    if (open && !props.inline) {
       document.addEventListener('pointerdown', onDocumentPointerDown);
     } else {
       document.removeEventListener('pointerdown', onDocumentPointerDown);
@@ -203,7 +208,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <aside v-if="props.open" ref="panelRef" class="panel">
+  <aside v-if="props.open" ref="panelRef" class="panel" :class="{ 'panel--inline': props.inline }">
     <header class="panel-header">
       <div>
         <h3>{{ $t('nav.folderBrowser.title') }}</h3>
@@ -408,6 +413,17 @@ onBeforeUnmount(() => {
   z-index: 30;
 }
 
+.panel--inline {
+  position: static;
+  width: auto;
+  padding: var(--space-xs) var(--space-lg) var(--space-lg);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
 .panel-header {
   display: flex;
   align-items: start;
@@ -536,6 +552,11 @@ h3 {
   min-width: 0;
   padding: 8px 0;
   text-align: left;
+}
+
+/* In the phone's sheet every row is a thumb's height. */
+.panel--inline .folder-btn {
+  min-height: var(--touch-target);
 }
 
 .folder-btn:hover {

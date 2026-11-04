@@ -91,4 +91,37 @@ defineEmits<{
   opacity: 1;
   background: color-mix(in srgb, var(--chip-color) 18%, transparent);
 }
+
+/*
+  Touch: the pill stays 30px, and two targets share it without a gap. The
+  name's button runs from the pill's left edge to the ×, so the whole chip
+  opens the topic (AppButton reaches its hit area to 44px above and below);
+  the × gets a 44px square of its own, its height reaching past the pill the
+  same way, instead of growing the pill to 44px and the header with it.
+*/
+@media (pointer: coarse) {
+  .topic-chip {
+    height: 30px;
+    padding: 0;
+  }
+
+  .topic-chip__label {
+    align-self: stretch;
+    padding-inline: var(--space-md) var(--space-2xs);
+  }
+
+  .topic-chip .topic-chip__remove {
+    position: relative;
+    align-self: stretch;
+    min-height: 0;
+    min-width: var(--touch-target);
+    padding: 0;
+  }
+
+  .topic-chip .topic-chip__remove::after {
+    content: '';
+    position: absolute;
+    inset: -7px 0;
+  }
+}
 </style>

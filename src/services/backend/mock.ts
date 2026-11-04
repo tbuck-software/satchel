@@ -835,7 +835,9 @@ const handlers: Record<string, Handler> = {
       .sort(byDateDesc);
     const keys = ['priority', 'pinned', 'invitations', 'notifications', 'newsletter'] as const;
     const buckets = keys.flatMap((key) => {
-      const rows = inbox.filter((thread) => classifySmartBucket(thread) === key);
+      // Like the core's summary: a starred thread counts as Pinned as well as
+      // in its own bucket, the same rows `list_threads` returns for 'pinned'.
+      const rows = inbox.filter((thread) => key === 'pinned' ? thread.isStarred : classifySmartBucket(thread) === key);
       if (rows.length === 0) return [];
       return [{
         key,
@@ -1336,6 +1338,28 @@ const handlers: Record<string, Handler> = {
       };
     }
 
+    // Like the backend without a network: the SMTP attempt fails with a
+    // transient error, the send stays queued for a retry (`Outcome::Retry`).
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      const queuedId = nextId('outbox');
+      const draft = putDraft(draftFromInput({ ...scope, account_id: accountId, id: scope.draft_id ?? nextId('draft') }));
+      queuedDrafts.set(queuedId, draft);
+      outbox.unshift({
+        id: queuedId,
+        account_id: accountId,
+        action_type: 'send_message',
+        status: 'pending',
+        retry_count: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        recipients,
+        subject: (scope.subject as string) ?? '',
+        last_error: 'network is unreachable',
+        next_retry_at: new Date(Date.now() + 60_000).toISOString(),
+        scheduled_for: null,
+      });
+      return { status: 'queued', thread_id: (scope.thread_id as string) ?? '', message_id: messageId, queued_id: queuedId };
+    }
     const account = accounts.find((entry) => entry.id === accountId);
     const threadId = (scope.thread_id as string | null) || nextId('th');
     const now = new Date().toISOString();

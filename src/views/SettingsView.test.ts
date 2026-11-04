@@ -61,10 +61,9 @@ const PaneHeaderStub = defineComponent({
   props: {
     title: { type: String, required: true },
     subtitle: { type: String, default: '' },
-    noMenu: { type: Boolean, default: false },
   },
   template: `
-    <header data-test="pane-header" :data-title="title" :data-subtitle="subtitle" :data-no-menu="noMenu">
+    <header data-test="pane-header" :data-title="title" :data-subtitle="subtitle">
       <div data-test="leading"><slot name="leading" /></div>
       <slot />
     </header>

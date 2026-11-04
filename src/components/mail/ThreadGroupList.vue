@@ -27,6 +27,7 @@ import ErrorState from '@/components/ui/ErrorState.vue';
 import SkeletonRow from '@/components/ui/SkeletonRow.vue';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { NEW_SENDER_PREVIEW_LIMIT } from '@/utils/threadList';
+import { registerListScrollTop } from '@/composables/listScrollTop';
 
 const props = defineProps<{
   items: ThreadListEntry[];
@@ -52,6 +53,11 @@ const props = defineProps<{
   bulkBusy: boolean;
   /** When set, the topics folder joins the smart folder section as its first card. */
   topics?: BackendTopic[];
+  /**
+   * The phone Inbox: the new-sender review is a plain row instead of a card,
+   * and the priority header and its "more" row are thumb-sized.
+   */
+  phoneLayout?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -137,6 +143,10 @@ const REVIEW_SECTION_PADDING = 16;
 const PHONE_REVIEW_SECTION_PADDING = 8;
 /** Expanded review card `pb-1`. */
 const REVIEW_CARD_BOTTOM_PADDING = 4;
+/** Phone priority header and "N more priority emails" row: thumb rows, not captions. */
+const PHONE_PRIORITY_ROW_HEIGHT = 44;
+/** The phone's review is one plain list row with a hairline, no card and no inset. */
+const SLIM_REVIEW_ROW_HEIGHT = 48;
 const FOLDER_CARD_GAP = 2;
 const FOLDER_SECTION_FOOTER_HEIGHT = 12;
 
@@ -156,6 +166,17 @@ const cardHeaderHeight = computed(() => phoneTypeScale.value ? PHONE_CARD_HEADER
  * one at the phone type scale, where two halves would truncate both.
  */
 const folderPreviewLimit = computed(() => (phoneTypeScale.value ? 1 : 2));
+/*
+ * The priority section overrides `--card-header-h` for its own header and
+ * "more" row, so both read this one number; the review footer keeps the
+ * list-wide value.
+ */
+const priorityRowHeight = computed(() => (props.phoneLayout ? PHONE_PRIORITY_ROW_HEIGHT : cardHeaderHeight.value));
+const reviewBannerHeight = computed(() => (props.phoneLayout ? SLIM_REVIEW_ROW_HEIGHT : rows.value.banner));
+const reviewSectionPadding = computed(() => {
+  if (props.phoneLayout) return 0;
+  return phoneTypeScale.value ? PHONE_REVIEW_SECTION_PADDING : REVIEW_SECTION_PADDING;
+});
 /** The review row sits inside a thread-height wrapper, inset two pixels a side. */
 const reviewRowHeight = computed(() => rows.value.thread - 4);
 
@@ -168,7 +189,7 @@ const rowHeights = computed(() => ({
   '--folder-card-gap': `${FOLDER_CARD_GAP}px`,
   '--card-header-h': `${cardHeaderHeight.value}px`,
   '--review-row-h': `${reviewRowHeight.value}px`,
-  '--review-banner-h': `${rows.value.banner}px`,
+  '--review-banner-h': `${reviewBannerHeight.value}px`,
 }));
 
 const scrollerRef = ref<HTMLElement | null>(null);
@@ -218,16 +239,15 @@ function itemHeight(item: ThreadListEntry): number {
       + FOLDER_SECTION_FOOTER_HEIGHT;
   }
   if (item.kind === 'priority-card') {
-    // Rows add a thread height each, the optional "+N weitere" footer a card header.
-    return PRIORITY_SECTION_PADDING + cardHeaderHeight.value
+    // Rows add a thread height each, the optional "+N weitere" footer a header's.
+    return PRIORITY_SECTION_PADDING + priorityRowHeight.value
       + item.threads.length * thread
-      + (item.hiddenCount > 0 ? cardHeaderHeight.value : 0);
+      + (item.hiddenCount > 0 ? priorityRowHeight.value : 0);
   }
   if (item.kind === 'date-header') return dateHeader;
   if (item.kind === 'bucket') return BUCKET_HEIGHT;
   if (item.kind === 'new-sender-stack') {
-    const padding = phoneTypeScale.value ? PHONE_REVIEW_SECTION_PADDING : REVIEW_SECTION_PADDING;
-    const collapsed = padding + rows.value.banner;
+    const collapsed = reviewSectionPadding.value + reviewBannerHeight.value;
     if (!props.newSendersExpanded) return collapsed;
     const footer = newSenderFooter(item.stack);
     return collapsed
@@ -526,6 +546,17 @@ function onScroll(event: Event) {
   });
 }
 
+/** The Mail tab tapped again: back to the newest mail. */
+function scrollToTop() {
+  const el = scrollerRef.value;
+  if (!el) return;
+  const reduce = typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (typeof el.scrollTo === 'function') el.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+  else el.scrollTop = 0;
+}
+onBeforeUnmount(registerListScrollTop(scrollToTop));
+
 function folderChips(folder: { previewItems: SmartInboxBucketPreviewItem[] }) {
   return folder.previewItems.map((preview) => ({
     id: preview.id,
@@ -713,6 +744,7 @@ onBeforeUnmount(() => {
   <div
     ref="scrollerRef"
     class="thread-list-scroller h-full min-h-0 overflow-x-hidden overflow-y-auto bg-list"
+    :class="{ 'thread-list--phone': props.phoneLayout }"
     :style="rowHeights"
     role="group"
     :aria-label="$t('thread.list.ariaLabel')"
@@ -859,7 +891,7 @@ onBeforeUnmount(() => {
             <section
               v-else-if="item.kind === 'priority-card'"
               class="priority-group bg-list pb-2 pt-1"
-              :style="{ height: `${itemHeight(item)}px` }"
+              :style="{ height: `${itemHeight(item)}px`, '--card-header-h': `${priorityRowHeight}px` }"
               :aria-label="$t('thread.bucket.priority')"
             >
               <CardButton
@@ -908,7 +940,10 @@ onBeforeUnmount(() => {
                 :title="$t('thread.list.showAllPriority')"
                 @click="emit('openBucket', item.bucket.id)"
               >
-                {{ $t('thread.list.morePriority', { count: item.hiddenCount }) }}
+                {{ $t(props.phoneLayout ? 'thread.list.morePriorityRow' : 'thread.list.morePriority', { count: item.hiddenCount }) }}
+                <AppIcon v-if="props.phoneLayout" size="sm" class="shrink-0">
+                  <path d="M6 3.5L10.5 8 6 12.5" />
+                </AppIcon>
               </CardButton>
             </section>
 
@@ -940,11 +975,13 @@ onBeforeUnmount(() => {
 
             <section
               v-else-if="item.kind === 'new-sender-stack'"
-              class="bg-list px-2"
+              class="review-section bg-list px-2"
               :class="phoneTypeScale ? 'py-1' : 'py-2'"
               :style="{ height: `${itemHeight(item)}px` }"
               :aria-label="$t('thread.newSenders.title')"
             >
+              <!-- On the phone the review is a list row like the mail below it,
+                   not a card: the card's chrome cost a row of mail. -->
               <article class="review-card overflow-hidden rounded-xl" :class="{ 'pb-1': props.newSendersExpanded }">
                 <!-- Collapsed, the review is this one line: who is waiting and
                      the way in. The rows open in place; the page holds them all. -->
@@ -969,6 +1006,7 @@ onBeforeUnmount(() => {
                     </AppIcon>
                   </CardButton>
                   <AppButton
+                    class="review-card__open"
                     :title="$t('thread.newSenders.showAll')"
                     @click="emit('openNewSenders')"
                     variant="soft"
@@ -1266,6 +1304,41 @@ onBeforeUnmount(() => {
   transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
+/* The phone's "N more priority emails": a row of its own in the priority ink,
+   not a caption under the last mail. */
+.thread-list--phone .priority-group__more {
+  color: var(--accent-amber-soft);
+  font-size: var(--font-size-sm);
+}
+
+/* The phone's review is a list row: no padding, no surface, a hairline under
+   it, the accent on the glyph and on Review. */
+.thread-list--phone .review-section {
+  padding-block: 0;
+  box-shadow: inset 0 -1px 0 var(--border-color-muted);
+}
+
+.thread-list--phone .review-card {
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.thread-list--phone .review-card__banner {
+  padding-right: 0;
+}
+
+/* Review as a text action the full height of the row: the thumb target is
+   the row's 48px, not a 30px pill. */
+.thread-list--phone .review-card__open {
+  height: 100%;
+  padding-inline: var(--space-md);
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text-accent);
+  font-size: var(--font-size-sm);
+}
+
 /* The one triage card in the list, and a quiet one: the collection fill with
    a hairline, the accent only on the glyph. */
 .review-card {
@@ -1287,6 +1360,20 @@ onBeforeUnmount(() => {
 
 .review-card__chevron--open {
   transform: rotate(180deg);
+}
+
+/* Touch: the chevron at the far end of the toggle sat a few pixels from
+   Review, so a thumb aimed at one hit the other. It moves beside the count,
+   where it reads as part of the title the whole row toggles, and a clear gap
+   separates the row from Review, whose own hit area is 44px tall. */
+@media (pointer: coarse) {
+  .review-card__banner {
+    gap: var(--space-md);
+  }
+
+  .review-card__chevron {
+    margin-left: 0;
+  }
 }
 
 .review-card__setup {

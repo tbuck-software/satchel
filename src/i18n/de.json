@@ -696,7 +696,6 @@
     "from": "Von",
     "hide": "Ausblenden",
     "loading": "Wird geladen…",
-    "menu": "Menü",
     "more": "Mehr",
     "name": "Name",
     "next": "Weiter",
@@ -862,6 +861,7 @@
       "backspaceAgain": "{address} ausgewählt. Erneut Rücktaste drücken, um die Adresse zu entfernen.",
       "bccPlaceholder": "Name oder E-Mail",
       "ccBcc": "Cc/Bcc",
+      "ccBccFrom": "Cc/Bcc, Von:",
       "ccPlaceholder": "Name oder E-Mail",
       "collapseCcBcc": "Cc und Bcc einklappen",
       "invalid": "Das ist keine gültige E-Mail-Adresse.",
@@ -936,7 +936,9 @@
     "status": {
       "draftSaved": "Entwurf gespeichert.",
       "draftSavedRemotePending": "Entwurf gespeichert. Abgleich mit dem Server steht aus: {error}",
+      "offline": "Du bist offline. Senden legt die Nachricht in den Postausgang; sie geht raus, sobald du wieder online bist.",
       "queued": "Im Hintergrund in den Postausgang eingereiht.",
+      "queuedOffline": "Du bist offline. Die Nachricht liegt im Postausgang und wird gesendet, sobald du wieder online bist.",
       "saveFailed": "Speichern fehlgeschlagen: {error}",
       "scheduledFor": "Eingeplant für {time}.",
       "sendFailed": "Senden fehlgeschlagen: {error}",
@@ -1308,6 +1310,7 @@
       "allowSender": "Absender erlauben",
       "allowSenderTitle": "Bilder von {email} künftig immer laden",
       "blocked": "{count} externes Bild blockiert | {count} externe Bilder blockiert",
+      "choicesLabel": "Bilder immer laden",
       "shieldTitle": "Tracking-Pixel-Schutz: externe Bilder werden erst nach Freigabe geladen",
       "showOnce": "Anzeigen",
       "showOnceTitle": "Externe Bilder nur in dieser Nachricht laden"
@@ -1535,11 +1538,19 @@
     "viewMode": {
       "autoDark": "Auto-Dark",
       "autoDarkTitle": "Farben an das dunkle Design angepasst",
+      "backTo": "Als {mode} anzeigen",
       "label": "Darstellung der Nachricht",
       "markdown": "Markdown",
       "markdownTitle": "Text mit Formatierung",
       "original": "Original",
       "originalTitle": "HTML-Ansicht wie gesendet",
+      "showAs": "Anzeigen als",
+      "shownAs": {
+        "autoDark": "In Auto-Dark angezeigt",
+        "markdown": "Als Markdown angezeigt",
+        "original": "Im Original angezeigt",
+        "text": "Als Text angezeigt"
+      },
       "text": "Text",
       "textTitle": "Reiner Text"
     }
@@ -1642,6 +1653,10 @@
     },
     "frequent": "Häufig",
     "mail": "E-Mail",
+    "mailboxes": {
+      "current": "{mailbox}, Postfach wechseln",
+      "title": "Postfächer"
+    },
     "modules": "Bereiche",
     "newMessage": "Neue E-Mail",
     "omni": {
@@ -3287,6 +3302,7 @@
       "blockSender": "Absender blockieren",
       "fileTo": "Ablegen …",
       "inbox": "Inbox",
+      "later": "Später",
       "markRead": "Als gelesen markieren",
       "markUnread": "Als ungelesen markieren",
       "moveToInbox": "Zurück in die Inbox",
@@ -3390,6 +3406,7 @@
       "loading": "E-Mails werden geladen",
       "markAllRead": "Alle gelesen",
       "morePriority": "+{count} weitere E-Mail | +{count} weitere E-Mails",
+      "morePriorityRow": "{count} weitere Prioritäts-E-Mail | {count} weitere Prioritäts-E-Mails",
       "showAllPriority": "Alle Prioritäts-E-Mails anzeigen",
       "smartGroups": "Smart Inbox Gruppen",
       "unreadCount": "{count} ungelesen"
@@ -3522,6 +3539,8 @@
       "empty": "Wähle eine Konversation",
       "loadFailed": "Diese Konversation konnte nicht geladen werden.",
       "loading": "Konversation wird geladen",
+      "menuLatest": "Neueste Nachricht",
+      "menuThread": "Diese Konversation",
       "showEarlier": "{count} frühere Nachricht anzeigen | {count} frühere Nachrichten anzeigen",
       "unsentDrafts": "Nicht gesendete Entwürfe"
     },

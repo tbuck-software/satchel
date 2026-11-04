@@ -4,12 +4,12 @@
  * how it is laid out. The account choice used to sit in the sidebar and the
  * layout behind a second funnel beside the title — two funnels for one list.
  */
-import { computed, defineAsyncComponent, nextTick, ref, shallowRef } from 'vue';
+import { computed, defineAsyncComponent, nextTick, ref } from 'vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
+import FilterPill from '@/components/ui/FilterPill.vue';
 import { useAccountsStore } from '@/stores/accounts';
-import { useSettingsStore, type InboxGroupingMode } from '@/stores/settings';
-import { useThreadsStore } from '@/stores/threads';
+import { useUiStore } from '@/stores/ui';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 
 const props = defineProps<{
@@ -18,21 +18,19 @@ const props = defineProps<{
 }>();
 
 // Mounted on first open and then kept, so closing still plays its transition.
-// Resolve the items before mounting the menu, which measures and focuses them.
-const MenuItem = shallowRef<typeof import('@/components/ui/MenuItem.vue')['default']>();
-const ContextMenu = defineAsyncComponent(async () => {
-  const [menu, item] = await Promise.all([
-    import('@/components/ui/ContextMenu.vue'),
-    import('@/components/ui/MenuItem.vue'),
-  ]);
-  MenuItem.value = item.default;
-  return menu.default;
-});
+const ListFilterMenuPanel = defineAsyncComponent(() => import('./ListFilterMenuPanel.vue'));
 const menuMounted = ref(false);
 
 const accounts = useAccountsStore();
-const settings = useSettingsStore();
-const threads = useThreadsStore();
+const ui = useUiStore();
+
+/*
+ * The phone's chosen account as a chip before the filter button, only when
+ * one of several is chosen ("All accounts" has nothing to point at); it opens
+ * the mailbox sheet. The desktop sidebar already marks the scope in view, and
+ * a chip there only repeated it and narrowed the search field.
+ */
+const scope = computed(() => (ui.isMobile && accounts.emailAccounts.length > 1 ? accounts.activeAccount : undefined));
 
 const anchor = ref<AnchorBox | null>(null);
 let trigger: HTMLElement | null = null;
@@ -53,67 +51,59 @@ function closeMenu() {
   anchor.value = null;
   void nextTick(() => trigger?.focus({ preventScroll: true }));
 }
-
-function selectAccount(id: string) {
-  accounts.setActiveAccount(id);
-  closeMenu();
-}
-
-function chooseGroupingMode(mode: InboxGroupingMode) {
-  settings.setInboxGroupingMode(mode);
-  if (mode === 'classic') threads.closeSmartBucket();
-  if (mode === 'smart') threads.categoryFilter = 'all';
-  closeMenu();
-}
 </script>
 
 <template>
   <template v-if="visible">
+    <FilterPill
+      v-if="scope"
+      class="list-filter-menu__scope"
+      :label="scope.displayName"
+      :dot="scope.color"
+      :aria-pressed="undefined"
+      aria-haspopup="true"
+      @click="ui.openMailboxSwitcher()"
+    />
     <IconButton
       class="list-filter-menu__trigger"
       :title="$t('inbox.filterMenu')"
-      :active="!!accounts.activeAccountId || !!anchor"
+      :active="(!!accounts.activeAccountId && accounts.emailAccounts.length > 1) || !!anchor"
       aria-haspopup="menu"
       :aria-expanded="!!anchor"
       @click="openMenu"
     >
       <AppIcon><path d="M2.5 4.5h11M4.5 8h7M6 11.5h4" /></AppIcon>
     </IconButton>
-    <ContextMenu v-if="menuMounted" :open="!!anchor" :anchor="anchor" :label="$t('inbox.filterMenu')" @close="closeMenu">
-      <div v-if="showAccounts" class="menu-group" role="group" :aria-label="$t('inbox.filterAccounts')">
-        <p class="list-filter-menu__label" aria-hidden="true">{{ $t('inbox.filterAccounts') }}</p>
-        <MenuItem :label="$t('folders.allAccounts')" icon="inbox" :checked="!accounts.activeAccountId" @select="selectAccount('')" />
-        <MenuItem
-          v-for="account in accounts.accounts"
-          :key="account.id"
-          :label="account.displayName"
-          :title="account.email"
-          :checked="accounts.activeAccountId === account.id"
-          @select="selectAccount(account.id)"
-        >
-          <template #icon><span class="list-filter-menu__account" :style="{ background: account.color }" /></template>
-        </MenuItem>
-      </div>
-      <div v-if="props.showLayout" class="menu-group" role="group" :aria-label="$t('inbox.view')">
-        <p class="list-filter-menu__label" aria-hidden="true">{{ $t('inbox.view') }}</p>
-        <MenuItem
-          :label="$t('inbox.viewGrouped')"
-          selection="radio"
-          :checked="settings.inboxGroupingMode === 'smart'"
-          @select="chooseGroupingMode('smart')"
-        />
-        <MenuItem
-          :label="$t('inbox.viewList')"
-          selection="radio"
-          :checked="settings.inboxGroupingMode === 'classic'"
-          @select="chooseGroupingMode('classic')"
-        />
-      </div>
-    </ContextMenu>
+    <ListFilterMenuPanel
+      v-if="menuMounted"
+      :anchor="anchor"
+      :show-accounts="showAccounts"
+      :show-layout="props.showLayout"
+      @close="closeMenu"
+    />
   </template>
 </template>
 
 <style scoped>
+.list-filter-menu__scope {
+  min-width: 0;
+  max-width: 160px;
+  background: var(--bg-raised);
+}
+
+/* The phone's title row (below the 768px of `ui.isMobile`) is shared with
+   the title itself; the chip yields. */
+@media (max-width: 767px) {
+  .list-filter-menu__scope {
+    max-width: 104px;
+  }
+}
+
+.list-filter-menu__scope :deep(.filter-pill__label) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .list-filter-menu__trigger {
   flex-shrink: 0;
   width: var(--input-height);
@@ -123,20 +113,5 @@ function chooseGroupingMode(mode: InboxGroupingMode) {
 
 .list-filter-menu__trigger:not(.icon-button--active) {
   background: var(--bg-raised);
-}
-
-.list-filter-menu__label {
-  margin: var(--space-2xs) var(--space-2-5);
-  color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.list-filter-menu__account {
-  width: var(--space-2-5);
-  height: var(--space-2-5);
-  border-radius: var(--radius-full);
 }
 </style>

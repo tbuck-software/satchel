@@ -67,7 +67,8 @@ function setAttachmentOpenBehavior(value: string) {
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">{{ $t('settings.theme.attachmentOpen') }}</span>
-              <span class="setting-hint">{{ $t('settings.theme.attachmentOpenHint') }}</span>
+              <!-- A phone has no space bar and no Quick Look. -->
+              <span v-if="!ui.isMobile" class="setting-hint">{{ $t('settings.theme.attachmentOpenHint') }}</span>
             </div>
             <SegmentedControl
               :model-value="settings.attachmentOpenBehavior"

@@ -100,7 +100,6 @@ function render() {
     global: {
       stubs: {
         Avatar: true,
-        DrawerButton: true,
       },
     },
   });

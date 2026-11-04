@@ -78,7 +78,14 @@ let observedFrameWidth = 0;
 
 // Hex on purpose: this CSS is injected into the iframe srcdoc, a separate
 // document that never sees the app's custom properties.
+// iOS inflates text it judges too small, but not the line heights senders pin
+// in px beside it, so lines run into each other; the mail keeps its sizes.
 const shellCss = `
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
   html,
   body {
     box-sizing: border-box;
@@ -186,6 +193,14 @@ function escapeAttribute(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
+/*
+ * The flush canvas is the phone's, where EmailRenderer takes the document out
+ * to the screen edges. A layout built on a fixed-width table (the 600px
+ * newsletter column, already narrowed to the screen above) keeps its own
+ * margins there. Every other body — simple mail, and "designed" mail whose
+ * only table holds data or a signature — is padded back to the reader's 16px
+ * inset plus the 2px it always had, so its text never touches the edge.
+ */
 function buildSourceDocument(): string {
   // Inline importance keeps sender html/body rules from repainting the reader
   // canvas, while coloured panels inside the message retain their own fills.
@@ -207,8 +222,8 @@ function buildSourceDocument(): string {
       .satchel-email-body[data-satchel-auto-dark="on"] {
         background: transparent !important;
       }
-      .satchel-email-body[data-satchel-simple="on"] {
-        padding: 8px 2px 16px !important;
+      .satchel-email-body:not(:has(table[width]:not([width$="%"]))) {
+        padding: 8px 18px 16px !important;
       }
     </style>` : ''}
     <style>

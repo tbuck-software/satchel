@@ -285,6 +285,12 @@ function formatDate(value: string): string {
   padding: 10px 12px;
 }
 
+/* The card's side padding is the inset a phone's flush document steps out of
+   (see EmailRenderer): designed mail reaches the card's edges. */
+.card__mail-body {
+  --reader-inline-inset: var(--space-md);
+}
+
 .card__mail-body :deep(.html-document-shell) {
   border: 0;
   border-radius: 0;

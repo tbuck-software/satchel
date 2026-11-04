@@ -13,8 +13,20 @@ for (const theme of ['dark', 'light'] as const) {
         await page.addInitScript((value) => localStorage.setItem('satchel.theme', value), theme);
         await page.goto('/');
         await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();
-        await expect(page.locator('.stack')).toBeAttached({ timeout: 30_000 });
+        if (viewport.width >= 640) {
+          // The desktop announces standing failures once, then the toast expires.
+          await expect(page.locator('.stack')).toBeAttached({ timeout: 30_000 });
+        }
+        // The phone leaves them to the banner below: no toast on top of it.
         await expect(page.locator('.toast')).toHaveCount(0, { timeout: 20_000 });
+        // Without that toast's expiry to wait out, let the queue's first load
+        // settle before driving focus: it re-renders the indicator.
+        await page.waitForFunction(async () => {
+          const storePath = '/src/stores/outbox.ts';
+          const { useOutboxStore } = await import(storePath) as { useOutboxStore: () => { loadedOnce: boolean; loading: boolean } };
+          const outbox = useOutboxStore();
+          return outbox.loadedOnce && !outbox.loading;
+        });
         const indicator = viewport.width < 640
           // The phone shows a banner that names the count, with Review as its way in.
           ? page.getByRole('status').filter({ hasText: '2 items need attention' })

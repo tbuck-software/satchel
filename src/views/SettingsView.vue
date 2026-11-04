@@ -120,9 +120,10 @@ onBeforeUnmount(() => unregisterFilter?.());
       :class="{ 'settings-view__header': !ui.isSinglePane }"
       :title="showOverview ? $t('common.settings') : (ui.isSinglePane ? activeLabel : $t('common.settings'))"
       :subtitle="ui.isMobile ? undefined : showOverview ? $t('settings.overview.subtitle') : (ui.isSinglePane ? $t('common.settings') : undefined)"
-      :no-menu="ui.isSinglePane"
     >
-      <template v-if="ui.isSinglePane" #leading>
+      <!-- The phone reaches the overview from its tab bar: it is a root, with
+           nothing behind it to go back to. -->
+      <template v-if="ui.isSinglePane && !(ui.isMobile && showOverview)" #leading>
         <IconButton :title="$t('common.back')" size="lg" @click="goBack">
           <AppIcon size="lg"><path d="m10.5 3-5 5 5 5" /></AppIcon>
         </IconButton>

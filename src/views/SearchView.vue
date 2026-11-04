@@ -4,7 +4,6 @@ import SearchInput from '@/components/ui/SearchInput.vue';
 import { highlightMatches, searchHighlightTerms } from '@/utils/highlight';
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
-import DrawerButton from '@/components/layout/DrawerButton.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { SEARCH_DEBOUNCE_MS, useSearch, type SearchResult } from '@/composables/useSearch';
@@ -231,6 +230,11 @@ function appendOperator(token: string) {
   flushUrlSync();
   searchInput.value?.focus();
 }
+
+function goBack() {
+  if (window.history.length > 1) router.back();
+  else void router.push({ name: 'inbox' });
+}
 </script>
 
 <template>
@@ -238,7 +242,13 @@ function appendOperator(token: string) {
     <template #list>
     <section class="search-pane">
       <header class="search-header" :class="{ 'search-header--loading': showLoading }">
-        <DrawerButton /><h2 class="search-title">{{ $t('search.title') }}</h2>
+        <div class="search-title-row">
+          <!-- A pushed screen on the phone: the tab bar steps aside, Back leads out. -->
+          <IconButton v-if="ui.isMobile" :title="$t('common.back')" @click="goBack">
+            <AppIcon size="lg"><path d="m10.5 3-5 5 5 5" /></AppIcon>
+          </IconButton>
+          <h2 class="search-title">{{ $t('search.title') }}</h2>
+        </div>
         <div class="search-entry">
           <SearchInput
             ref="searchInput"
@@ -503,6 +513,13 @@ function appendOperator(token: string) {
 
 @keyframes search-progress {
   to { transform: scaleX(1); }
+}
+
+.search-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
 }
 
 .search-title {

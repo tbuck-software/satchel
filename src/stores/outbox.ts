@@ -32,6 +32,8 @@ export const OUTBOX_EVENTS = [
 export const useOutboxStore = defineStore('outbox', () => {
   const items = ref<BackendOutboxItem[]>([]);
   const loading = ref(false);
+  /** True once a list has come back: an empty queue is then known, not unread. */
+  const loadedOnce = ref(false);
   /** Raw cause of the last failed list, so the view can tell empty from broken. */
   const error = ref<string | null>(null);
   const connectionStore = useConnectionStore();
@@ -57,6 +59,7 @@ export const useOutboxStore = defineStore('outbox', () => {
       const [mail, moves] = await Promise.all([backendListOutbox(), backendListFailedSyncActions()]);
       if (requestId !== loadRequestId) return;
       items.value = [...moves, ...mail];
+      loadedOnce.value = true;
       error.value = null;
       connectionStore.clearBackendError('outbox');
     } catch (err) {
@@ -140,5 +143,5 @@ export const useOutboxStore = defineStore('outbox', () => {
     unlisteners = [];
   }
 
-  return { items, loading, error, failedSendCount, failedChangeCount, attentionCount, load, retry, retryFailedSyncActions, cancel, start, stop };
+  return { items, loading, loadedOnce, error, failedSendCount, failedChangeCount, attentionCount, load, retry, retryFailedSyncActions, cancel, start, stop };
 });

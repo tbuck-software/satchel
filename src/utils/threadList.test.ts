@@ -8,13 +8,16 @@ import {
   buildTopContactSummaries,
   collectNewSenderThreadIds,
   buildPriorityCardEntry,
+  buildSmartDateGroupedEntries,
   buildLaterSections,
+  layoutPhoneInbox,
+  PHONE_PRIORITY_CARD_MAX_THREADS,
   compareLaterThreads,
   isNewSenderThread,
   PRIORITY_CARD_MAX_THREADS,
   threadSentParticipants,
 } from './threadList';
-import type { SmartInboxBucketGroup } from './threadList';
+import type { SmartInboxBucketGroup, ThreadListEntry } from './threadList';
 
 function thread(input: Partial<Thread> & Pick<Thread, 'id' | 'participants'>): Thread {
   return {
@@ -375,6 +378,73 @@ describe('buildPriorityCardEntry', () => {
 
     expect(card.threads).toHaveLength(0);
     expect(card.hiddenCount).toBe(0);
+  });
+});
+
+describe('layoutPhoneInbox', () => {
+  const priorityThreads = Array.from({ length: 6 }, (_, index) =>
+    thread({ id: `prio-${index}`, priority: 3, participants: [{ name: 'A', email: 'a@example.test' }] }));
+  const review = { kind: 'new-sender-stack', id: 'new-sender-stack' } as ThreadListEntry;
+  const today = { kind: 'date-header', id: 'date-today', label: 'Today', count: 0, threadIds: [] } as ThreadListEntry;
+
+  it('folds Priority to two rows and one row to the rest', () => {
+    const entries = [review, buildPriorityCardEntry(priorityBucket(priorityThreads, 6)), today];
+
+    const laidOut = layoutPhoneInbox(entries);
+
+    const card = laidOut[0] as Extract<ThreadListEntry, { kind: 'priority-card' }>;
+    expect(PHONE_PRIORITY_CARD_MAX_THREADS).toBe(2);
+    expect(card.threads.map((entry) => entry.id)).toEqual(['prio-0', 'prio-1']);
+    // The fold counts from the bucket, as the desktop card does.
+    expect(card.hiddenCount).toBe(4);
+    expect(laidOut.map((entry) => entry.kind)).toEqual(['priority-card', 'new-sender-stack', 'date-header']);
+    // The store's entries stay the desktop's.
+    expect((entries[1] as typeof card).threads).toHaveLength(PRIORITY_CARD_MAX_THREADS);
+  });
+
+  it('leaves a short card and the other entries as they are', () => {
+    const short = buildPriorityCardEntry(priorityBucket(priorityThreads.slice(0, 2), 2));
+
+    const laidOut = layoutPhoneInbox([short, today]);
+
+    expect(laidOut[0]).toBe(short);
+    expect(laidOut[1]).toBe(today);
+  });
+
+  it('moves New senders below the priority block, before the first day', () => {
+    const card = buildPriorityCardEntry(priorityBucket(priorityThreads, 6));
+
+    expect(layoutPhoneInbox([review, card, today]).map((entry) => entry.kind))
+      .toEqual(['priority-card', 'new-sender-stack', 'date-header']);
+    // Without Priority the review keeps the top.
+    expect(layoutPhoneInbox([review, today])).toEqual([review, today]);
+  });
+});
+
+describe('buildSmartDateGroupedEntries', () => {
+  /** Mail of a day first, that day's bundles after it, then the next day. */
+  it('lists the day\'s own mail before its bundles', () => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const at = (ms: number) => new Date(ms).toISOString();
+    const person = (name: string) => [{ name, email: `${name.toLowerCase()}@example.test` }];
+    const threads = [
+      thread({ id: 'today-1', participants: person('Lena'), lastMessageAt: at(startOfToday.getTime() + 60_000) }),
+      thread({ id: 'today-2', participants: person('Marco'), lastMessageAt: at(startOfToday.getTime() + 30_000) }),
+      thread({ id: 'yesterday-1', participants: person('Ana'), lastMessageAt: at(startOfToday.getTime() - 6 * 3_600_000) }),
+    ];
+    const folderRow = { kind: 'folder-row' as const, id: 'smart-folders', folders: [] };
+
+    const entries = buildSmartDateGroupedEntries(threads, folderRow);
+
+    expect(entries.map((entry) => entry.id)).toEqual([
+      'date-today',
+      'thread-today-1',
+      'thread-today-2',
+      'smart-folders',
+      'date-yesterday',
+      'thread-yesterday-1',
+    ]);
   });
 });
 

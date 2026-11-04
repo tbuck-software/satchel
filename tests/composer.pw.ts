@@ -215,6 +215,48 @@ test('phone ComposeFab opens a full-screen composer and returns to the mailbox',
   await expect(page.locator('.fab')).toBeVisible();
 });
 
+test('phone composer scrolls fields and body as one column and keeps the typed line above Send', async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 852 });
+  await page.goto('/?mockSignatures=1&mockOutbox=0');
+  await page.locator('.fab').click();
+  const composer = page.getByRole('dialog', { name: 'Compose email' });
+  await expect(composer).toBeVisible();
+  // From folds under To with Cc and Bcc.
+  const summary = composer.getByRole('button', { name: 'Cc/Bcc, From: tom@satchel.dev' });
+  await expect(summary).toBeVisible();
+  const fold = composer.getByTestId('compose-fold');
+  expect((await fold.boundingBox())?.height).toBe(0);
+  // What keyboardInset does when iOS raises the keyboard.
+  await page.evaluate(() => {
+    document.documentElement.style.setProperty('--satchel-safe-area-bottom', '336px');
+    document.documentElement.style.setProperty('--satchel-keyboard-inset', '336px');
+  });
+  const editor = composer.locator('.ProseMirror').first();
+  await editor.click();
+  for (let line = 1; line <= 14; line += 1) {
+    await page.keyboard.type(`Line ${line}: what changed in this release and why it matters.`);
+    await page.keyboard.press('Enter');
+  }
+  await page.keyboard.type('The line being typed');
+  const column = composer.getByTestId('compose-scroll');
+  const footer = (await composer.locator('.footer').boundingBox())!;
+  await expect.poll(async () => {
+    const line = (await editor.locator('p').last().boundingBox())!;
+    return line.y + line.height <= footer.y;
+  }).toBe(true);
+  // The fields went up with the text instead of staying pinned over it.
+  const toRow = (await composer.locator('.recipient-row').boundingBox())!;
+  const columnBox = (await column.boundingBox())!;
+  expect(toRow.y + toRow.height).toBeLessThanOrEqual(columnBox.y);
+  // ...and come back on scrolling up.
+  await column.evaluate((element) => element.scrollTo(0, 0));
+  await expect(composer.locator('.recipient-row')).toBeInViewport();
+  await summary.click();
+  await expect(composer.getByRole('combobox', { name: 'Cc', exact: true })).toBeFocused();
+  await expect.poll(async () => (await fold.boundingBox())?.height ?? 0).toBeGreaterThan(100);
+  await expect(composer.getByRole('combobox', { name: 'Sender' })).toBeInViewport();
+});
+
 test('drag, resize, maximize and reopen keep the composer inside the window', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/?mockSignatures=1');

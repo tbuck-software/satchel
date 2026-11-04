@@ -11,6 +11,7 @@ import {
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { useThreadsStore } from '@/stores/threads';
 import { useTopicsStore } from '@/stores/topics';
+import { useUiStore } from '@/stores/ui';
 import { useToast } from '@/composables/useToast';
 import { useWorkflow } from '@/composables/useWorkflow';
 import { createThreadActionQueue } from './threadActionQueue';
@@ -23,6 +24,8 @@ interface StateSnapshot {
   snoozeUntil?: string;
   /** State confirmed by the action; used for undo even after row eviction. */
   expectedState?: WorkflowState;
+  /** Done includes Read; Undo has to give the unread mark back. */
+  wasUnread?: boolean;
 }
 
 const actionQueues = new WeakMap<ReturnType<typeof useThreadsStore>, ReturnType<typeof createThreadActionQueue>>();
@@ -62,6 +65,7 @@ export function useThreadActions() {
   const threads = useThreadsStore();
   const mailboxes = useMailboxesStore();
   const topics = useTopicsStore();
+  const ui = useUiStore();
   const workflow = useWorkflow();
   const toast = useToast();
 
@@ -71,7 +75,12 @@ export function useThreadActions() {
   function snapshotStates(threadIds: string[]): StateSnapshot[] {
     return threadIds.flatMap((threadId) => {
       const thread = threads.find(threadId);
-      return thread ? [{ threadId, previousState: thread.workflowState, snoozeUntil: thread.snoozeUntil }] : [];
+      return thread ? [{
+        threadId,
+        previousState: thread.workflowState,
+        snoozeUntil: thread.snoozeUntil,
+        ...((thread.unreadCount ?? 0) > 0 ? { wasUnread: true } : {}),
+      }] : [];
     });
   }
 
@@ -85,6 +94,10 @@ export function useThreadActions() {
     // Flush projection watchers before restoring selection. Revealing a bucket
     // can clear selection too, so the list gets its turn before we reselect.
     await nextTick();
+    // A tap on the phone's Undo in the list has no keyboard to hand focus to:
+    // a focus ring and a selection on the restored row only left the list
+    // looking unlike it did before. The row back in place is the receipt.
+    if (ui.isMobile && route?.name !== 'thread') return;
     await focusListThread(first);
     threads.selectThread(first);
     threads.selectedThreadIds = ids.length > 1 ? ids : [];
@@ -121,8 +134,21 @@ export function useThreadActions() {
       toast.error(t('thread.result.restoreEmpty'));
       return false;
     }
-    await refreshLists();
     const restoredIds = new Set(restored.flat());
+    // The backend commits Read with Done; the threads that were unread before
+    // must come back unread, or Undo leaves the list different from before.
+    const unreadAgain = snapshot
+      .filter((entry) => entry.wasUnread && entry.expectedState === 'done' && restoredIds.has(entry.threadId))
+      .map((entry) => entry.threadId);
+    if (unreadAgain.length > 0) {
+      try {
+        await threads.setThreadsRead(unreadAgain, false);
+      } catch (error) {
+        // The workflow restore stands; the read mark is a lesser loss.
+        console.warn('restoring unread after undo failed', error);
+      }
+    }
+    await refreshLists();
     await restorePlace(snapshot.filter(entry => restoredIds.has(entry.threadId)).map(entry => entry.threadId));
     return true;
   }

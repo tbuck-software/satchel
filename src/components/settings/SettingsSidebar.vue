@@ -5,7 +5,6 @@ import SearchInput from '@/components/ui/SearchInput.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
-import { useUiStore } from '@/stores/ui';
 import { registerSettingsFilterField } from '@/composables/settingsFilterFocus';
 import { useSettingsFilter } from '@/composables/useSettingsFilter';
 import {
@@ -16,7 +15,6 @@ import {
 
 const route = useRoute();
 const router = useRouter();
-const ui = useUiStore();
 const { t } = useI18n();
 const { query, filtering, results, groups } = useSettingsFilter();
 const activeSection = computed(() => resolveSettingsSection(route.query.section));
@@ -48,7 +46,6 @@ onBeforeUnmount(() => {
 });
 
 function selectSection(section: SettingsSection) {
-  ui.closeMobileSidebar();
   void router.replace({ name: 'settings', query: { section } });
 }
 

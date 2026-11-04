@@ -2,7 +2,6 @@
 import AppButton from '@/components/ui/AppButton.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
-import DrawerButton from '@/components/layout/DrawerButton.vue';
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { registerListKeyboardNavigation } from '@/composables/useListKeyboardNavigation';
@@ -93,7 +92,7 @@ async function block(sender: NewSenderGroup) {
       <AppButton @click="router.push({ name: 'inbox' })" variant="ghost" size="sm">{{ $t('newSenders.backToInbox') }}</AppButton>
       <div>
         <p>{{ $t('newSenders.eyebrow') }}</p>
-        <DrawerButton /><h2>{{ $t('newSenders.title') }}</h2>
+        <h2>{{ $t('newSenders.title') }}</h2>
       </div>
       <span>{{ threads.newSenderStack?.count ?? 0 }}</span>
     </header>

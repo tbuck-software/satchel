@@ -171,7 +171,7 @@ test.describe('touch targets', () => {
 
   test('lets a finger hit the calendar icon buttons 21px off centre', async ({ page }) => {
     await page.goto('/calendar');
-    const buttons = ['Menu', 'Back (←)', 'Forward (→)'].map((name) => page.getByRole('button', { name, exact: true }));
+    const buttons = ['Back (←)', 'Forward (→)'].map((name) => page.getByRole('button', { name, exact: true }));
     for (const button of buttons) await expect(button).toBeVisible();
 
     for (const button of buttons) {

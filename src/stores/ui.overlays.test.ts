@@ -39,31 +39,6 @@ describe('dismissing the topmost overlay', () => {
   });
 
   /**
-   * Settings are reached *from* the mobile drawer, so the drawer has served its
-   * purpose by then. Leaving it open only meant finding it again underneath
-   * once settings closed.
-   */
-  it('closes the mobile sidebar when settings open from it', () => {
-    const ui = useUiStore();
-    ui.openMobileSidebar();
-    ui.openSettings();
-
-    expect(ui.mobileSidebarOpen).toBe(false);
-
-    ui.dismissTopmostOverlay();
-    expect(ui.settingsOpen).toBe(false);
-    expect(ui.dismissTopmostOverlay()).toBe(false);
-  });
-
-  it('closes the mobile sidebar on its own', () => {
-    const ui = useUiStore();
-    ui.openMobileSidebar();
-
-    expect(ui.dismissTopmostOverlay()).toBe(true);
-    expect(ui.mobileSidebarOpen).toBe(false);
-  });
-
-  /**
    * Single pane, the settings detail is a screen of its own: back returns to
    * the section list first, and only the next one leaves settings. With both
    * panes visible there is nothing to step back from.

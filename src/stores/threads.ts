@@ -109,6 +109,14 @@ export const useThreadsStore = defineStore('threads', () => {
     if (!accountsStore.activeAccountId) selection.surface.activeThreadId.value = '';
     void persistence.surface.load();
   });
+  // The list scope and the bucket summary are keyed by the active account.
+  // At startup the account store settles on the sole account after the first
+  // load has already run; without a refresh the summary no longer matches its
+  // scope and the bucket rows fall back to counting loaded rows, then jump to
+  // the server's numbers on the next action.
+  watch(() => accountsStore.activeAccountId, () => {
+    void persistence.surface.refreshHead();
+  });
   filterBuckets.startWatching();
   selection.startWatching();
 

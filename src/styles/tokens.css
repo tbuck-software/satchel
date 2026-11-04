@@ -91,7 +91,7 @@
   /* Swipe-action tracks. Read underneath a moving row rather than on a pane,
      so they keep one value across both themes. */
   --swipe-blue: #1688ee;
-  --swipe-green: #82cc31;
+  --swipe-green: #24843c; /* white label 4.7:1; the lime it replaced was 2:1 */
   --swipe-amber: #c98516;
   --swipe-cyan: #188fa3;
   --swipe-red: #dc4545;
@@ -149,6 +149,8 @@
 
   --input-height: 38px;
   --touch-target: 44px;
+  /* The phone's tab bar, safe area not included: a 44px target plus its label. */
+  --tab-bar-height: 56px;
 
   --directory-content-max: 960px;
   --directory-provenance-max: 120px;

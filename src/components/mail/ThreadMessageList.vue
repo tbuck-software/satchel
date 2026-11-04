@@ -26,6 +26,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   reply: [];
+  replyAll: [];
   forward: [];
   editDraft: [messageId: string];
   retryDraft: [messageId: string];
@@ -48,6 +49,7 @@ const shownDrafts = computed(() => props.draftMessages.filter((draft) => draft.i
     :focused-message-id="props.focusedMessageId"
     :keyboard-active="props.keyboardActive"
     @reply="emit('reply')"
+    @reply-all="emit('replyAll')"
     @forward="emit('forward')"
     @focus-message="emit('focusMessage', $event)"
     @toggle-collapsed="emit('toggleCollapsed', $event)"

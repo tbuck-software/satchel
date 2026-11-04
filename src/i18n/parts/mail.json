@@ -86,6 +86,7 @@
         "allowDomainTitle": "Always load images from authenticated senders at {domain}",
         "allowSender": "Allow sender",
         "allowSenderTitle": "Always load images from {email}",
+        "choicesLabel": "Always load images",
         "blocked": "{count} external image blocked | {count} external images blocked",
         "shieldTitle": "Tracking-pixel protection: external images load only once you allow them",
         "showOnce": "Show",
@@ -314,11 +315,19 @@
       "viewMode": {
         "autoDark": "Auto-dark",
         "autoDarkTitle": "Colours adapted to the dark theme",
+        "backTo": "Show as {mode}",
         "label": "Message rendering",
         "markdown": "Markdown",
         "markdownTitle": "Text with formatting",
         "original": "Original",
         "originalTitle": "HTML view as sent",
+        "showAs": "Show as",
+        "shownAs": {
+          "autoDark": "Shown in auto-dark",
+          "markdown": "Shown as Markdown",
+          "original": "Shown as original",
+          "text": "Shown as text"
+        },
         "text": "Text",
         "textTitle": "Plain text"
       }
@@ -426,6 +435,7 @@
         "allowDomainTitle": "Bilder von authentifizierten Absendern unter {domain} künftig immer laden",
         "allowSender": "Absender erlauben",
         "allowSenderTitle": "Bilder von {email} künftig immer laden",
+        "choicesLabel": "Bilder immer laden",
         "blocked": "{count} externes Bild blockiert | {count} externe Bilder blockiert",
         "shieldTitle": "Tracking-Pixel-Schutz: externe Bilder werden erst nach Freigabe geladen",
         "showOnce": "Anzeigen",
@@ -654,11 +664,19 @@
       "viewMode": {
         "autoDark": "Auto-Dark",
         "autoDarkTitle": "Farben an das dunkle Design angepasst",
+        "backTo": "Als {mode} anzeigen",
         "label": "Darstellung der Nachricht",
         "markdown": "Markdown",
         "markdownTitle": "Text mit Formatierung",
         "original": "Original",
         "originalTitle": "HTML-Ansicht wie gesendet",
+        "showAs": "Anzeigen als",
+        "shownAs": {
+          "autoDark": "In Auto-Dark angezeigt",
+          "markdown": "Als Markdown angezeigt",
+          "original": "Im Original angezeigt",
+          "text": "Als Text angezeigt"
+        },
         "text": "Text",
         "textTitle": "Reiner Text"
       }

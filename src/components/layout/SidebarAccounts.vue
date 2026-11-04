@@ -7,7 +7,6 @@ import { useMailboxesStore } from '@/stores/mailboxes';
 import { useThreadsStore } from '@/stores/threads';
 import { useUiStore } from '@/stores/ui';
 import NavItem from '@/components/ui/NavItem.vue';
-import SectionHeading from '@/components/ui/SectionHeading.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import IconButton from '@/components/ui/IconButton.vue';
@@ -75,19 +74,29 @@ const markers = computed(() => new Map(
 ));
 
 function openMarker(accountId: string, marker: Marker) {
-  ui.closeMobileSidebar();
+  ui.closeMailboxSwitcher();
   if (marker.kind === 'outage') {
     void router.push({ name: 'settings', query: { section: 'accounts', account: accountId } });
   } else {
     certificates.openDetails(accountId);
   }
 }
+
+/**
+ * An account is a scope, not a place: the view on screen stays and is drawn
+ * from the chosen account (Later → Personal's Later). Only a folder, which
+ * belongs to one account, falls back to the Inbox. No `navigate` event — the
+ * phone sheet stays open so the list behind it can be seen switching.
+ */
 function open(accountId: string) {
+  if (accounts.activeAccountId === accountId) return;
   accounts.setActiveAccount(accountId);
-  threads.workflowFilter = 'all';
-  threads.setMailboxFilter({ kind: 'section', value: 'inbox' });
-  ui.closeMobileSidebar();
-  void router.push({ name: 'inbox' });
+  if (threads.mailboxFilter.kind === 'folder') {
+    threads.workflowFilter = 'all';
+    threads.setMailboxFilter({ kind: 'section', value: 'inbox' });
+  }
+  const route = router.currentRoute.value.name;
+  if (route !== 'inbox' && route !== 'outbox') void router.push({ name: 'inbox' });
 }
 
 // A lone account that is always visible has nothing to switch to or look
@@ -125,8 +134,7 @@ function openMenu(accountId: string, event: MouseEvent) {
 
 <template>
   <nav v-if="shown" class="sidebar-accounts" :aria-label="t('accountVisibility.accounts')">
-    <SectionHeading :label="t('accountVisibility.accounts')" />
-    <NavItem v-if="accounts.emailAccounts.length > 1" :label="t('folders.allAccounts')" :active="!accounts.activeAccountId" :count="inboxCount()" @click="open('')">
+    <NavItem v-if="accounts.emailAccounts.length > 1" :label="t('folders.allAccounts')" :class="{ 'nav-item--scope': !accounts.activeAccountId }" :aria-current="!accounts.activeAccountId || undefined" :count="inboxCount()" @click="open('')">
       <template #leading>
         <span class="sidebar-accounts__stack" :class="`sidebar-accounts__stack--${stack.length}`" aria-hidden="true">
           <AccountAvatar v-for="account in stack" :key="account.id" :name="account.displayName" :color="account.color" :avatar="account.avatar" :size="11" />
@@ -140,7 +148,7 @@ function openMenu(accountId: string, event: MouseEvent) {
       :class="{ 'sidebar-accounts__row--resting': !accounts.isVisible(account.id) }"
       @contextmenu.prevent="openMenu(account.id, $event)"
     >
-      <NavItem :label="account.displayName" :active="accounts.activeAccountId === account.id" :count="inboxCount(account.id)" :title="accounts.isVisible(account.id) ? t('accountVisibility.openAccount', { account: account.email }) : t('accountVisibility.restingHint', { account: account.email })" @click="open(account.id)">
+      <NavItem :label="account.displayName" :class="{ 'nav-item--scope': accounts.activeAccountId === account.id }" :aria-current="accounts.activeAccountId === account.id || undefined" :count="inboxCount(account.id)" :title="accounts.isVisible(account.id) ? t('accountVisibility.openAccount', { account: account.email }) : t('accountVisibility.restingHint', { account: account.email })" @click="open(account.id)">
         <template #leading>
           <AccountAvatar :name="account.displayName" :color="account.color" :avatar="account.avatar" :size="18" :resting="!accounts.isVisible(account.id)" />
         </template>
@@ -189,7 +197,17 @@ function openMenu(accountId: string, event: MouseEvent) {
 </template>
 
 <style scoped>
-.sidebar-accounts { display: grid; gap: var(--space-2xs); padding: var(--space-md) var(--space-md) var(--space-xs); }
+/* One lightly tinted surface holds the scope choice, edge to edge with the
+   view rows below it, so both its edges and its rows' icons and labels line
+   up with theirs. */
+.sidebar-accounts {
+  display: grid;
+  gap: var(--space-2xs);
+  margin: var(--space-md) var(--space-md) var(--space-xs);
+  padding: var(--space-xs) 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
 .sidebar-accounts__row { display: flex; align-items: center; min-width: 0; }
 .sidebar-accounts__row > :first-child { flex: 1; }
 .sidebar-accounts__row--resting { color: var(--text-tertiary); }
@@ -214,9 +232,15 @@ function openMenu(accountId: string, event: MouseEvent) {
   font-variant-numeric: tabular-nums;
 }
 
-/* Rings cut each avatar out of the one behind it, in the row's own colour. */
-.sidebar-accounts { --avatar-ring: var(--bg-sidebar); }
-.sidebar-accounts :deep(.nav-item--active) { --avatar-ring: var(--bg-surface); }
+/* Rings cut each avatar out of the one behind it, in the surface's colour. */
+.sidebar-accounts { --avatar-ring: var(--bg-raised); }
+/* A tap leaves :hover behind on touch screens; it would read as a selection. */
+@media (hover: hover) {
+  .sidebar-accounts :deep(.nav-item:hover) { background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
+}
+@media (hover: none) {
+  .sidebar-accounts :deep(.nav-item:hover) { background: transparent; }
+}
 
 /* "All accounts": up to three small faces in the box of one avatar, which
    is the 18px of the icons below, so every label starts on the same line. */

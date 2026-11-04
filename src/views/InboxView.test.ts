@@ -260,7 +260,7 @@ function setup(options: {
     threadListWidth: 420,
     setThreadListWidth: vi.fn(),
     openOmni: vi.fn(),
-    closeMobileSidebar: vi.fn(),
+    openMailboxSwitcher: vi.fn(),
     registerBackNavigation: harness.registerBackNavigation,
     // Context menus register while open.
     registerOverlay: vi.fn(() => vi.fn()),
@@ -547,6 +547,35 @@ describe('InboxView', () => {
     expect(labels).not.toContain('Work');
     expect(labels).not.toContain('inbox.allAccounts');
     expect(wrapper.find('.list-filter-menu__trigger').exists()).toBe(true);
+  });
+
+  it('titles a phone list in large type, the name opening the mailbox switcher', async () => {
+    setup({ mobile: true, singlePane: true });
+
+    const wrapper = render();
+    const title = wrapper.get('.large-title');
+    // The filter shares the title row; the search field below has the width.
+    expect(title.find('.list-filter-menu__trigger').exists()).toBe(true);
+    expect(wrapper.get('.list-search-bar').find('.list-filter-menu__trigger').exists()).toBe(false);
+    expect(wrapper.find('.pane-header').exists()).toBe(false);
+
+    await title.get('.large-title__switch').trigger('click');
+    expect(harness.ui!.openMailboxSwitcher).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the phone search folded behind a title-row button until it is used', async () => {
+    setup({ mobile: true, singlePane: true });
+
+    const wrapper = render();
+    const bar = wrapper.get('.list-search-bar');
+    // Folded, the field gives its row to the list and is out of reach.
+    expect(bar.classes()).toContain('inbox-search--collapsed');
+    expect(bar.attributes('inert')).toBeDefined();
+
+    await wrapper.get('.large-title [title="common.search"]').trigger('click');
+    expect(bar.classes()).not.toContain('inbox-search--collapsed');
+    expect(bar.attributes('inert')).toBeUndefined();
+    expect(wrapper.get('.large-title').isVisible()).toBe(false);
   });
 
   it('offers account and layout filtering in one list filter menu', async () => {

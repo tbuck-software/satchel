@@ -76,6 +76,33 @@ describe('IsolatedEmailDocument', () => {
     wrapper.unmount();
   });
 
+  it('keeps iOS from inflating the mail text against its fixed line heights', () => {
+    const wrapper = mountDocument();
+    const srcdoc = wrapper.get('iframe').attributes('srcdoc')!;
+    const head = srcdoc.slice(0, srcdoc.indexOf('<body'));
+
+    expect(head).toMatch(/html\s*\{[^}]*-webkit-text-size-adjust:\s*100%/);
+    expect(head).toMatch(/html\s*\{[^}]*[^-]text-size-adjust:\s*100%/);
+    wrapper.unmount();
+  });
+
+  // Which bodies the rule matches is checked in both engines, at phone
+  // width, by tests/email-rendering.pw.ts: jsdom cannot evaluate `:has()`.
+  it('on the flush canvas pads every body but a fixed-width layout', () => {
+    const flush = mountDocument({ flush: true });
+    const srcdoc = flush.get('iframe').attributes('srcdoc')!;
+    const flushRules = srcdoc.slice(srcdoc.indexOf('</style>'), srcdoc.indexOf('<body'));
+
+    expect(flushRules).toMatch(
+      /\.satchel-email-body:not\(:has\(table\[width\]:not\(\[width\$="%"\]\)\)\)\s*\{\s*padding:\s*8px 18px 16px/,
+    );
+    flush.unmount();
+
+    const desktop = mountDocument();
+    expect(desktop.get('iframe').attributes('srcdoc')).not.toContain('8px 18px 16px');
+    desktop.unmount();
+  });
+
   it('builds a new document for new content or a new image policy', async () => {
     const wrapper = mountDocument();
     const first = wrapper.get('iframe').attributes('srcdoc');

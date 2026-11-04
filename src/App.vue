@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, provide, ref, watch } from 'vue';
 import { RouterView, useRoute } from 'vue-router';
 import Sidebar from '@/components/layout/Sidebar.vue';
 import PaneResizeHandle from '@/components/ui/PaneResizeHandle.vue';
@@ -13,6 +13,8 @@ import { useSettingsStore } from '@/stores/settings';
 import { SIDEBAR_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
 import { useAppBootstrap, useComposeWindowBootstrap } from '@/bootstrap';
 import { loadOmniSearch } from '@/components/navigation/loadOmniSearch';
+import { keyboardVisible } from '@/mobile/keyboardInset';
+import { IMAGE_GUARD_PHONE_ACTIONS } from '@/components/mail/imageGuardActions';
 
 const route = useRoute();
 /**
@@ -21,6 +23,11 @@ const route = useRoute();
  * mail pencil would only compete with.
  */
 const COMPOSE_FAB_HIDDEN_ON = new Set(['thread', 'settings', 'calendar', 'contacts']);
+/**
+ * Screens without the phone's tab bar: pushed details with a Back of their own,
+ * and those with their own bottom bar (a thread's actions, the composer's send).
+ */
+const TAB_BAR_HIDDEN_ON = new Set(['thread', 'compose', 'search', 'topic', 'new-senders']);
 const topicsStore = useTopicsStore();
 const settingsStore = useSettingsStore();
 const ui = useUiStore();
@@ -33,6 +40,17 @@ const { state: promptState } = usePrompt();
 const standaloneCompose = computed(() =>
   route.name === 'compose' && route.query.standalone === '1',
 );
+// Steps aside while the keyboard is up: it holds no focus, so hiding it cannot
+// blur the field being typed in, and the field gets the height back.
+const tabBarVisible = computed(() =>
+  ui.isMobile
+  && !standaloneCompose.value
+  && !composer.isOpen
+  && !keyboardVisible.value
+  && !TAB_BAR_HIDDEN_ON.has(String(route.name)),
+);
+const mailboxSwitcherMounted = ref(false);
+watch(() => ui.mailboxSwitcherOpen, (open) => { if (open) mailboxSwitcherMounted.value = true; });
 
 // These surfaces are absent during the common mailbox startup. Keeping both
 // the async boundary and the outer v-if is intentional: an async component is
@@ -41,11 +59,18 @@ const loadComposerHost = () => import('@/components/mail/ComposerHost.vue');
 const ComposerHost = defineAsyncComponent(loadComposerHost);
 const ToastStack = defineAsyncComponent(() => import('@/components/ui/ToastStack.vue'));
 const UndoFab = defineAsyncComponent(() => import('@/components/ui/UndoFab.vue'));
+// The phone's buttons on a blocked-images notice; the viewer has no provider.
+provide(
+  IMAGE_GUARD_PHONE_ACTIONS,
+  defineAsyncComponent(() => import('@/components/mail/ImageGuardPhoneActions.vue')),
+);
 const SyncStatusLine = defineAsyncComponent(() => import('@/components/layout/SyncStatusLine.vue'));
 const OmniSearch = defineAsyncComponent(loadOmniSearch);
 // Phone-only, and shown only while the backend reports trouble: neither is
 // needed to draw the first desktop frame.
 const ComposeFab = defineAsyncComponent(() => import('@/components/layout/ComposeFab.vue'));
+const MobileTabBar = defineAsyncComponent(() => import('@/components/layout/MobileTabBar.vue'));
+const MailboxSwitcherSheet = defineAsyncComponent(() => import('@/components/layout/MailboxSwitcherSheet.vue'));
 const ConnectionBanner = defineAsyncComponent(() => import('@/components/layout/ConnectionBanner.vue'));
 const ShortcutHelper = defineAsyncComponent(() => import('@/components/navigation/ShortcutHelper.vue'));
 const FilePickerOverlay = defineAsyncComponent(() => import('@/components/mail/FilePickerOverlay.vue'));
@@ -57,8 +82,8 @@ const ConfirmDialog = defineAsyncComponent(() => import('@/components/ui/Confirm
 const PromptDialog = defineAsyncComponent(() => import('@/components/ui/PromptDialog.vue'));
 
 watch(() => route.fullPath, () => {
-  if (ui.mobileSidebarOpen) {
-    ui.closeMobileSidebar();
+  if (ui.mailboxSwitcherOpen) {
+    ui.closeMailboxSwitcher();
   }
 });
 
@@ -75,7 +100,7 @@ if (standaloneCompose.value) {
 
 <template>
   <div
-    :class="['shell', { 'shell--mobile': ui.isMobile, 'shell--composer-standalone': standaloneCompose }]"
+    :class="['shell', { 'shell--mobile': ui.isMobile, 'shell--tab-bar': tabBarVisible, 'shell--composer-standalone': standaloneCompose }]"
     :style="!ui.isMobile ? { '--sidebar-w': `${ui.sidebarWidth}px` } : undefined"
   >
     <!-- Desktop: sidebar + resize handle -->
@@ -100,8 +125,8 @@ if (standaloneCompose.value) {
       <AccountReauthBanner v-if="!standaloneCompose" />
       <ConnectionBanner v-if="!standaloneCompose" />
 
-      <!-- On the phone the sidebar's sync button lives in a closed drawer.
-           Keep connection status visible here, with resting state suppressed. -->
+      <!-- The phone has no sidebar and so no sync button. Keep connection
+           status visible here, with resting state suppressed. -->
       <SyncStatusLine
         v-if="ui.isMobile && !standaloneCompose"
         class="mobile-sync-status"
@@ -112,28 +137,21 @@ if (standaloneCompose.value) {
       <main>
         <RouterView />
       </main>
+
+      <!-- Phone: the four areas. In the flow, so the list ends at its top
+           edge instead of running underneath it. -->
+      <MobileTabBar v-if="tabBarVisible" />
     </div>
 
     <ComposerHost v-if="composer.isOpen" />
 
-    <!-- Mobile: bottom navigation (hidden on thread detail — ThreadView has its own action bar) -->
-    <!-- The bottom bar held Inbox, Schreiben and Menu. Inbox is where you
-         already are, Schreiben is an action rather than a place, and the drawer
-         belongs under the thumb at the top-left of the header — so the bar
-         itself had nothing left to carry. -->
+    <!-- Writing is an action, not a place: a button above the tab bar, not a tab. -->
     <ComposeFab
       v-if="ui.isMobile && !standaloneCompose && !COMPOSE_FAB_HIDDEN_ON.has(String(route.name))"
     />
 
-    <!-- Mobile: sidebar overlay -->
-    <Transition name="sidebar-slide">
-      <div v-if="ui.mobileSidebarOpen" class="mobile-sidebar-overlay">
-        <div class="mobile-sidebar-panel">
-          <Sidebar />
-        </div>
-        <div class="mobile-sidebar-backdrop" @click="ui.closeMobileSidebar()" />
-      </div>
-    </Transition>
+    <!-- Phone: lists, folders and accounts, opened from the mail list header. -->
+    <MailboxSwitcherSheet v-if="ui.isMobile && mailboxSwitcherMounted" />
 
     <OmniSearch v-if="ui.omniOpen" />
     <ShortcutHelper v-if="ui.shortcutsOpen" />
@@ -261,67 +279,11 @@ main {
   -webkit-app-region: drag;
 }
 
-/* Mobile sidebar overlay */
-/* Full bleed like a native drawer: the panel runs under the status bar and
-   the gesture pill and pads its own content, and the backdrop dims the whole
-   screen. Inset by the safe areas, the clock row stayed bright and the panel
-   floated with a strip of the list above it. */
-.mobile-sidebar-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 300;
-  display: flex;
-}
-
-.mobile-sidebar-panel {
-  width: min(320px, 86vw);
-  height: 100%;
-  padding:
-    var(--satchel-safe-area-top)
-    0
-    var(--satchel-safe-area-bottom)
-    var(--satchel-safe-area-left);
-  background: var(--bg-sidebar);
-  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
-  z-index: 1;
-  overflow: hidden;
-}
-
-.mobile-sidebar-backdrop {
-  flex: 1;
-  background: rgba(0, 0, 0, 0.5);
-}
-
-/* Sidebar slide transition */
-.sidebar-slide-enter-active {
-  transition: opacity var(--duration-normal) var(--ease-out);
-}
-
-.sidebar-slide-enter-active .mobile-sidebar-panel {
-  transition: transform var(--duration-slow) var(--ease-out);
-}
-
-.sidebar-slide-leave-active {
-  transition: opacity var(--duration-normal) var(--ease-out);
-}
-
-.sidebar-slide-leave-active .mobile-sidebar-panel {
-  transition: transform var(--duration-normal) var(--ease-out);
-}
-
-.sidebar-slide-enter-from {
-  opacity: 0;
-}
-
-.sidebar-slide-enter-from .mobile-sidebar-panel {
-  transform: translateX(-100%);
-}
-
-.sidebar-slide-leave-to {
-  opacity: 0;
-}
-
-.sidebar-slide-leave-to .mobile-sidebar-panel {
-  transform: translateX(-100%);
+/* Phone with the tab bar: it sits on the bottom safe area and pads itself,
+   so the shell stops short of it. Fixed bottom-lane surfaces (compose FAB,
+   undo, toasts) read the inset to stay clear of it. */
+.shell--tab-bar {
+  padding-bottom: 0;
+  --satchel-tab-bar-inset: var(--tab-bar-height);
 }
 </style>

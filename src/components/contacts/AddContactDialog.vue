@@ -41,7 +41,7 @@ async function save() {
 
 <template>
   <ModalShell :label="t('contacts.add.title')" width="440px" height="auto" @dismiss="dismiss">
-    <PaneHeader :title="t('contacts.add.title')" no-menu />
+    <PaneHeader :title="t('contacts.add.title')" />
     <form class="contact-form" @submit.prevent="save">
       <label>{{ t('contacts.add.email') }}<input v-model="email" type="email" autocomplete="email" required :disabled="saving" /></label>
       <label>{{ t('contacts.add.name') }}<input v-model="name" autocomplete="name" :disabled="saving" /></label>

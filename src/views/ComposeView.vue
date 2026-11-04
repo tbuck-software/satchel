@@ -12,6 +12,7 @@ import type {
   BackendSendMessageResult,
 } from '@/types/composer';
 import { useAccountsStore } from '@/stores/accounts';
+import { useConnectionStore } from '@/stores/connection';
 import { useAliasesStore } from '@/stores/aliases';
 import { useDraftsStore } from '@/stores/drafts';
 import { bodyHtmlWithInlineImages, useMessagesStore } from '@/stores/messages';
@@ -24,6 +25,7 @@ import TemplatePicker from '@/components/mail/TemplatePicker.vue';
 import RichTextEditor from '@/components/mail/RichTextEditor.vue';
 import ComposerSignature from '@/components/mail/ComposerSignature.vue';
 import ComposerThreadContext from '@/components/mail/ComposerThreadContext.vue';
+import ComposerSenderField from '@/components/mail/ComposerSenderField.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import AppBanner from '@/components/ui/AppBanner.vue';
 import AppButton from '@/components/ui/AppButton.vue';
@@ -49,6 +51,8 @@ import { useComposerLocalBackup } from '@/composables/useComposerLocalBackup';
 import { useDraftEditorClaim } from '@/composables/useDraftEditorClaim';
 import { useComposerSignature } from '@/composables/useComposerSignature';
 import { useComposerTransport } from '@/composables/useComposerTransport';
+import { useComposerCaretFollow } from '@/composables/useComposerCaretFollow';
+import { useUiStore } from '@/stores/ui';
 import { useConfirm } from '@/composables/useConfirm';
 import { useToast } from '@/composables/useToast';
 import { useToastClearance } from '@/composables/useToastClearance';
@@ -112,6 +116,12 @@ const { t } = useI18n();
 const accountsStore = useAccountsStore();
 const aliasesStore = useAliasesStore();
 const settings = useSettingsStore();
+const ui = useUiStore();
+/**
+ * The phone composer is one scrolling column, Apple Mail style: the fields
+ * scroll away with the body instead of staying pinned over the keyboard.
+ */
+const isPhone = computed(() => ui.isMobile);
 const templatesStore = useTemplatesStore();
 const draftsStore = useDraftsStore();
 const threadsStore = useThreadsStore();
@@ -140,6 +150,9 @@ const attachments = ref<BackendOutgoingAttachment[]>([]);
 const sending = ref(false);
 const discarding = ref(false);
 const status = ref<ComposerStatus | null>(null);
+// Without a network a send only reaches the Outbox; say so before and after.
+const connection = useConnectionStore();
+const offline = computed(() => !connection.online);
 const scheduledFor = ref<string | null>(null);
 const scheduleClock = useActionClock(() => scheduledFor.value !== null);
 const followUpAt = ref<string | null>(null);
@@ -162,6 +175,8 @@ const priority = ref<'high' | 'normal' | 'low'>('normal');
  */
 const plainTextCompose = ref(settings.composePlainText);
 const richEditorRef = ref<InstanceType<typeof RichTextEditor> | null>(null);
+const signatureRef = ref<InstanceType<typeof ComposerSignature> | null>(null);
+const moreSettingsRef = ref<HTMLDetailsElement | null>(null);
 const historyEditorRef = ref<InstanceType<typeof RichTextEditor> | null>(null);
 /**
  * Finding the quote parses the whole body, so it is looked for once typing
@@ -193,6 +208,26 @@ async function removeQuotedHistory() {
   quotedHistory.settle();
 }
 const toFieldRef = ref<InstanceType<typeof RecipientChips> | null>(null);
+const ccFieldRef = ref<InstanceType<typeof RecipientChips> | null>(null);
+const scrollRef = ref<HTMLElement | null>(null);
+useComposerCaretFollow(scrollRef, () => isPhone.value);
+
+/*
+ * Phone: Cc, Bcc and From wait behind one "Cc/Bcc, From:" row under To. They
+ * stay in the DOM while folded (inert, zero height): iOS only raises the
+ * keyboard for a focus() inside the tap itself, and a field that mounts a tick
+ * later misses it. Once open they stay open, so a field never folds away
+ * under the user's focus.
+ */
+const phoneFoldOpen = ref(false);
+const phoneFoldRef = ref<HTMLElement | null>(null);
+const phoneFoldClosed = computed(() => isPhone.value && !phoneFoldOpen.value);
+
+function openPhoneFold() {
+  phoneFoldRef.value?.removeAttribute('inert');
+  ccFieldRef.value?.focus();
+  phoneFoldOpen.value = true;
+}
 
 /**
  * Where a fresh composer starts typing.
@@ -282,8 +317,7 @@ const currentIdentityKey = computed(
   () => `${accountId.value}|${fromAddress.value.toLowerCase()}`,
 );
 
-function onIdentitySelected(event: Event) {
-  const key = (event.target as HTMLSelectElement).value;
+function onIdentitySelected(key: string) {
   const choice = identityChoices.value
     .flatMap((group) => group.options)
     .find((option) => option.key === key);
@@ -495,6 +529,16 @@ watch(accountId, () => {
 watch(aliasEmail, () => {
   if (initialized.value) syncSignatureSelection();
 });
+
+// Recipients already in Cc/Bcc, or a sender other than the account's own
+// address, are shown rather than folded away.
+watch(
+  () => cc.value.length > 0 || bcc.value.length > 0 || aliasEmail.value !== null,
+  (shown) => {
+    if (shown) phoneFoldOpen.value = true;
+  },
+  { immediate: true },
+);
 
 function ownedAddresses() {
   return normalizeOwnedAddresses([
@@ -1032,7 +1076,7 @@ async function send() {
       emit('sent');
       await leaveAfterSend(result, { name: 'inbox' });
     } else {
-      status.value = { tone: 'info', text: t('compose.status.queued') };
+      status.value = { tone: 'info', text: t(offline.value ? 'compose.status.queuedOffline' : 'compose.status.queued') };
       // With an undo window the native `outbox:undo-window` event raises the
       // Undo toast; a second toast would only repeat it.
       if (!result.undo_until) announceAfterClose('info', status.value.text);
@@ -1157,6 +1201,17 @@ const advancedActive = computed(
     || cryptoMethod.value !== 'none',
 );
 
+/** The phone's signature has no header; its switcher opens from the ⋯ menu. */
+const signatureName = computed(() =>
+  availableSignatures.value.find((signature) => signature.id === selectedSignatureId.value)?.name
+    ?? t('compose.signature.none'),
+);
+
+function openSignatureMenu() {
+  if (moreSettingsRef.value) moreSettingsRef.value.open = false;
+  signatureRef.value?.openMenu();
+}
+
 const priorityOptions = computed(() => [
   { value: 'high', label: t('compose.priority.high') },
   { value: 'normal', label: t('compose.priority.normal') },
@@ -1179,7 +1234,7 @@ defineExpose({
 
 <template>
   <section
-    :class="['compose', { 'compose--embedded': props.embedded }]"
+    :class="['compose', { 'compose--embedded': props.embedded, 'compose--phone': isPhone }]"
     @dragenter.capture="threadEmlDrop.onDragEnter"
     @dragover.capture="threadEmlDrop.onDragOver"
     @dragleave.capture="threadEmlDrop.onDragLeave"
@@ -1252,43 +1307,24 @@ defineExpose({
       </AppBanner>
     </div>
 
-    <div class="row sender-row">
+    <!-- On the phone the fields and the body scroll as one column; on the
+         desktop this wrapper is display: contents and changes nothing. -->
+    <div ref="scrollRef" class="compose-scroll" data-testid="compose-scroll">
+    <div v-if="!isPhone" class="row sender-row">
       <label class="label" :for="senderFieldId">{{ $t('common.from') }}</label>
-      <div class="sender-field">
-        <select
-          class="sender-select"
-          :id="senderFieldId"
-          :disabled="sending"
-          :title="$t('compose.sender')"
-          :aria-label="$t('compose.sender')"
-          :value="currentIdentityKey"
-          @change="onIdentitySelected"
-        >
-          <template v-if="identityChoices.length > 1">
-            <optgroup
-              v-for="group in identityChoices"
-              :key="group.account.id"
-              :label="group.account.displayName"
-            >
-              <option v-for="option in group.options" :key="option.key" :value="option.key">{{ option.label }}</option>
-            </optgroup>
-          </template>
-          <template v-else>
-            <option
-              v-for="option in identityChoices[0]?.options ?? []"
-              :key="option.key"
-              :value="option.key"
-            >{{ option.label }}</option>
-          </template>
-        </select>
-        <AppIcon class="sender-chevron" size="sm"><path d="m4 6 4 4 4-4" /></AppIcon>
-      </div>
+      <ComposerSenderField
+        :id="senderFieldId"
+        :choices="identityChoices"
+        :value="currentIdentityKey"
+        :disabled="sending"
+        @change="onIdentitySelected"
+      />
     </div>
 
     <div class="row recipient-row">
       <label class="label" :for="toFieldId">{{ $t('common.to') }}</label>
       <RecipientChips ref="toFieldRef" v-model="to" :input-id="toFieldId" :label="$t('common.to')" :placeholder="$t('compose.recipients.toPlaceholder')" class="field" @submit="send" />
-      <AppButton size="sm" variant="ghost" class="cc-link"
+      <AppButton v-if="!isPhone" size="sm" variant="ghost" class="cc-link"
         :aria-expanded="showCcBcc"
         :title="showCcBcc ? $t('compose.recipients.collapseCcBcc') : $t('compose.recipients.showCcBcc')"
         @click="showCcBcc = !showCcBcc"
@@ -1298,16 +1334,46 @@ defineExpose({
       </AppButton>
     </div>
 
-    <template v-if="showCcBcc">
+    <AppButton
+      v-if="phoneFoldClosed"
+      variant="ghost"
+      class="compose-fold-summary"
+      :aria-expanded="false"
+      data-testid="compose-fold-summary"
+      @click="openPhoneFold"
+    >
+      <!-- One line, so the name reads "Cc/Bcc, From: address". -->
+      <span class="label">{{ $t('compose.recipients.ccBccFrom') }}</span> <span class="compose-fold-from">{{ fromAddress }}</span>
+      <!-- Says the row opens; as bare text it read like a caption. -->
+      <AppIcon class="compose-fold-chevron"><path d="m4.5 6.5 3.5 3.5 3.5-3.5" /></AppIcon>
+    </AppButton>
+
+    <div
+      v-if="isPhone || showCcBcc"
+      ref="phoneFoldRef"
+      :class="['compose-fold', { 'compose-fold--closed': phoneFoldClosed }]"
+      :inert="phoneFoldClosed || undefined"
+      data-testid="compose-fold"
+    >
       <div class="row">
         <label class="label" :for="ccFieldId">{{ $t('common.cc') }}</label>
-        <RecipientChips v-model="cc" :input-id="ccFieldId" :label="$t('common.cc')" :placeholder="$t('compose.recipients.ccPlaceholder')" class="field" @submit="send" />
+        <RecipientChips ref="ccFieldRef" v-model="cc" :input-id="ccFieldId" :label="$t('common.cc')" :placeholder="$t('compose.recipients.ccPlaceholder')" class="field" @submit="send" />
       </div>
       <div class="row">
         <label class="label" :for="bccFieldId">{{ $t('common.bcc') }}</label>
         <RecipientChips v-model="bcc" :input-id="bccFieldId" :label="$t('common.bcc')" :placeholder="$t('compose.recipients.bccPlaceholder')" class="field" @submit="send" />
       </div>
-    </template>
+      <div v-if="isPhone" class="row sender-row">
+        <label class="label" :for="senderFieldId">{{ $t('common.from') }}</label>
+        <ComposerSenderField
+          :id="senderFieldId"
+          :choices="identityChoices"
+          :value="currentIdentityKey"
+          :disabled="sending"
+          @change="onIdentitySelected"
+        />
+      </div>
+    </div>
 
     <div class="row subject-row">
       <label class="label" :for="subjectFieldId">{{ $t('common.subject') }}</label>
@@ -1344,7 +1410,7 @@ defineExpose({
         :disabled="sending"
         :autofocus="props.embedded && !startsInRecipients"
         :focus-position="!props.initialDraftId && (props.mode === 'reply' || props.mode === 'reply-all' || props.mode === 'forward') ? 'start' : 'end'"
-        :min-height="historyHtml ? 'calc(1em * var(--leading-editable))' : 'calc(3em * var(--leading-editable))'"
+        :min-height="historyHtml && !isPhone ? 'calc(1em * var(--leading-editable))' : 'calc(3em * var(--leading-editable))'"
         :placeholder="$t('compose.editor.placeholder')"
         @update:html="(v) => (writingHtml = v)"
         @inline-image-added="composerInlineAttachments.onInlineImageAdded"
@@ -1354,6 +1420,8 @@ defineExpose({
       />
       <ComposerSignature
         v-if="supportsBackend && availableSignatures.length > 0"
+        ref="signatureRef"
+        :inline="isPhone"
         :signatures="availableSignatures"
         :selected-id="selectedSignatureId"
         :variant="signatureVariant"
@@ -1417,8 +1485,10 @@ defineExpose({
       @remove-inline="composerInlineAttachments.onInlineAttachmentRemoved"
       @move-to-attachment="composerInlineAttachments.onInlineAttachmentRemoved"
     />
+    </div>
 
     <footer ref="footerRef" class="footer">
+      <p v-if="offline && !status" class="status status--warning" role="status">{{ $t('compose.status.offline') }}</p>
       <div v-if="status" class="status-block">
         <p
           class="status"
@@ -1447,11 +1517,26 @@ defineExpose({
         <IconButton size="lg" v-if="supportsBackend" :title="$t('compose.toolbar.template')" :aria-label="$t('compose.toolbar.template')" @click="showTemplatePicker = true">
           <AppIcon size="lg"><path d="M3 1.5h7l3 3v10H3z"/><path d="M10 1.5v3h3M5.5 8h5M5.5 11h4"/></AppIcon>
         </IconButton>
-        <details class="more-settings">
+        <details ref="moreSettingsRef" class="more-settings">
           <summary class="more-summary" :title="$t('compose.toolbar.more')" :aria-label="$t('compose.toolbar.more')">
             <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon><span v-if="advancedActive" class="tool-dot" aria-hidden="true" />
           </summary>
           <div class="advanced-panel">
+            <div v-if="isPhone && supportsBackend && availableSignatures.length > 0" class="panel-row">
+              <span class="panel-label">{{ $t('compose.signature.title') }}</span>
+              <AppButton
+                variant="ghost"
+                class="panel-signature"
+                aria-haspopup="menu"
+                :disabled="sending"
+                :title="$t('compose.signature.switch')"
+                data-testid="compose-signature-choice"
+                @click="openSignatureMenu"
+              >
+                <span class="panel-signature-name">{{ signatureName }}</span>
+                <AppIcon size="sm"><path d="m4 6 4 4 4-4" /></AppIcon>
+              </AppButton>
+            </div>
             <div class="panel-row">
               <span class="panel-label">{{ $t('compose.options.priority') }}</span>
               <SegmentedControl
@@ -1593,12 +1678,19 @@ defineExpose({
   padding: 2px 0;
   resize: none;
   border: 0;
-  outline: none;
   background: transparent;
   color: var(--text-primary);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--font-size-md);
   line-height: var(--leading-editable);
+}
+
+/* The plain-text editor fills the body, which is its frame. On the phone the
+   subject's row draws where typing goes — accent rule and label, as for To —
+   so a ring on the field itself stacked a square box on that rule. */
+.plain-editor,
+.compose--phone .compose-subject {
+  outline: none;
 }
 
 .plain-editor::placeholder {
@@ -2007,6 +2099,13 @@ textarea:focus {
   .tool-button :deep(.app-button__icon) { margin: 0; }
 }
 
+/* A fingertip, not a cursor: the footer's tools reach the 44pt target on
+   touch, like the template button (IconButton) beside them already does. */
+@media (pointer: coarse) {
+  .tool-button { min-width: var(--touch-target); min-height: var(--touch-target); }
+  .compose .more-summary { width: var(--touch-target); height: var(--touch-target); }
+}
+
 .more-summary {
   width: 38px;
   height: 38px;
@@ -2094,6 +2193,19 @@ textarea:focus {
   line-height: 1.45;
 }
 
+.panel-signature {
+  justify-self: start;
+  max-width: 100%;
+  min-height: 44px;
+  padding-inline: 0;
+}
+
+.panel-signature-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .panel-sep {
   height: 1px;
   margin: 2px 0;
@@ -2125,43 +2237,6 @@ textarea:focus {
 
 .send-wrap { display: inline-flex; }
 
-.sender-field {
-  position: relative;
-  min-width: 0;
-  justify-self: start;
-  max-width: 100%;
-}
-
-.sender-select {
-  appearance: none;
-  width: 100%;
-  min-width: 0;
-  min-height: 36px;
-  padding: var(--space-sm) var(--space-2xl) var(--space-sm) 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.sender-select option,
-.sender-select optgroup {
-  background: var(--bg-overlay);
-  color: var(--text-primary);
-}
-
-.sender-chevron {
-  position: absolute;
-  right: var(--space-sm);
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-secondary);
-  pointer-events: none;
-}
-
 .send-wrap :deep(.split-button button:disabled) {
   opacity: 1;
   background: color-mix(in srgb, var(--accent-primary) 75%, var(--bg-raised));
@@ -2172,8 +2247,137 @@ textarea:focus {
 .compose .status,
 .compose .schedule-info { font-size: var(--font-size-xs); }
 
+/* Desktop: the wrapper adds no box; fields and body stay pinned as before. */
+.compose-scroll,
+.compose-fold {
+  display: contents;
+}
+
+/* Phone: fields and body scroll as one column between the navigation bar and
+   the docked toolbar, so the text being written gets the whole height. */
+.compose--phone .compose-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Room inside the clip for the body's focus edge, given back outside. */
+  padding-inline: var(--space-md);
+  margin-inline: calc(-1 * var(--space-md));
+}
+
+.compose--phone .compose-fold {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+}
+
+/* Folded, not hidden: the Cc field has to take focus inside the tap. */
+.compose--phone .compose-fold--closed {
+  height: 0;
+  overflow: hidden;
+}
+
+/* The ⋯ panel hangs from the toolbar's left edge, not from the ⋯ button,
+   which would push it off the right edge of the screen. */
+.compose--phone .footer {
+  position: relative;
+}
+
+.compose--phone .more-settings {
+  position: static;
+}
+
+.compose--phone .recipient-row {
+  grid-template-columns: var(--compose-label-w) minmax(0, 1fr);
+}
+
+/* The body is part of the column now: it grows with its text instead of
+   scrolling in a box of its own, and fills what is left below a short one. */
+.compose--phone .body {
+  flex: 1 0 auto;
+  overflow: visible;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* Where typing goes, as for the fields above: the body has no rule of its
+   own, so a thin accent edge marks it while it holds the focus. */
+.compose--phone .body {
+  position: relative;
+}
+
+/* 2px wide, 8px clear of the text, 4px short of the body's ends. */
+.compose--phone .body:focus-within::before {
+  content: '';
+  position: absolute;
+  inset-block: var(--space-xs);
+  left: calc(-1 * var(--space-2-5));
+  width: 2px;
+  border-radius: var(--radius-full);
+  background: var(--accent-primary);
+  pointer-events: none;
+}
+
+/* The signature follows the last written line, not the bottom of the screen;
+   the empty space under it still focuses the editor (focusComposeBody). */
+.compose--phone .body > :deep(.rt-editor),
+.compose--phone .body > .plain-editor {
+  flex: none;
+}
+
+.compose--phone .body > .plain-editor {
+  min-height: calc(3em * var(--leading-editable));
+}
+
+.compose .compose-fold-summary {
+  flex: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  justify-content: start;
+  align-items: center;
+  gap: var(--space-xs);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-xs) 0;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+  color: var(--text-secondary);
+  font-weight: var(--weight-regular);
+  text-align: left;
+}
+
+.compose .compose-fold-summary:hover {
+  background: transparent;
+}
+
+.compose-fold-chevron {
+  color: var(--text-tertiary);
+}
+
+.compose-fold-from {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 620px) {
   .compose { padding: var(--space-3-5) var(--space-3-5) var(--space-2-5); }
+  /* The recipient suggestions span the whole row, label column included, so
+     the row below is covered whole instead of cut off mid-word. */
+  .compose .row:has(:deep(.chips-wrap)) { position: relative; }
+  .compose .row :deep(.chips-wrap) { position: static; }
+  /* As in iOS Mail, the suggestions own the column below the To row: the
+     fields under them are covered whole, not left peeking out beneath. */
+  .compose .row :deep(.suggestions) {
+    box-shadow: 0 0 0 100vmax var(--bg-surface);
+    clip-path: inset(0 -100vmax -100vmax -100vmax);
+  }
   /* A phone has no width to spare for an empty label column. */
   .compose .body { padding-left: 0; }
   .compose .compose-attachments { margin-left: 0; }

@@ -30,6 +30,7 @@ import EmptyState from '@/components/ui/EmptyState.vue';
 import ErrorState from '@/components/ui/ErrorState.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
+import LargeTitleHeader from '@/components/ui/LargeTitleHeader.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import SkeletonRow from '@/components/ui/SkeletonRow.vue';
 import Avatar from '@/components/common/Avatar.vue';
@@ -236,7 +237,22 @@ async function cancel(item: BackendOutboxItem) {
   <ListDetailLayout :has-detail="!!selectedItem">
     <template #list>
     <section class="outbox">
-    <PaneHeader :title="$t('outbox.title')" :subtitle="subtitle" :count="outbox.items.length">
+    <!-- Phone: the same large title as the mail lists, so the Outbox is one
+         of them and the switcher is where it is everywhere else. -->
+    <LargeTitleHeader
+      v-if="ui.isMobile"
+      :title="$t('outbox.title')"
+      :subtitle="subtitle"
+      :switch-label="$t('nav.mailboxes.current', { mailbox: $t('outbox.title') })"
+      @switch="ui.openMailboxSwitcher()"
+    >
+      <template #actions>
+        <IconButton :title="$t('common.refresh')" :disabled="outbox.loading" @click="outbox.load()">
+          <AppIcon :class="{ spinning: outbox.loading }"><path d="M13.5 8a5.5 5.5 0 1 1-1.7-3.9" /><path d="M13.5 2v3.2h-3.2" /></AppIcon>
+        </IconButton>
+      </template>
+    </LargeTitleHeader>
+    <PaneHeader v-else :title="$t('outbox.title')" :subtitle="subtitle" :count="outbox.items.length">
       <template #actions>
         <IconButton
           :title="$t('common.refresh')"

@@ -76,6 +76,27 @@ const emit = defineEmits<{
   border-inline-start: 1px solid color-mix(in srgb, var(--text-on-accent) 35%, transparent);
 }
 
+/* Touch: the pill keeps its 36px, each segment's hit area reaches 44px
+   above and below it, and the arrow gets a real fingertip of width — at
+   33px it sat where a thumb meant to Send. */
+@media (pointer: coarse) {
+  .split-button__primary,
+  .split-button__secondary {
+    position: relative;
+  }
+
+  .split-button__primary::after,
+  .split-button__secondary::after {
+    content: '';
+    position: absolute;
+    inset: calc((var(--touch-target) - 100%) / -2) 0;
+  }
+
+  .split-button__secondary {
+    min-width: var(--touch-target);
+  }
+}
+
 /* Keep each segment's focus ring above its neighbour. */
 .split-button :deep(button:focus-visible) {
   position: relative;

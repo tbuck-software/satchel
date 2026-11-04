@@ -99,6 +99,27 @@ defineEmits<{
   font-weight: var(--weight-semibold);
 }
 
+/* The quiet mark of a scope (an account the list is drawn from), set by the
+   caller as `class="nav-item--scope"` with `aria-current`: accent text and a
+   dot at the row's end, no lift. `active` stays the one strong mark — the
+   view on screen — so a scope row and a view row never compete. A class and
+   not a prop, because the entry chunk pays for every prop of this row. */
+.nav-item--scope,
+.nav-item--scope:hover,
+.nav-item--scope .nav-item__count {
+  color: var(--text-accent);
+  font-weight: var(--weight-semibold);
+}
+
+.nav-item--scope::after {
+  content: '';
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--text-accent);
+}
+
 .nav-item__icon {
   display: inline-flex;
   align-items: center;

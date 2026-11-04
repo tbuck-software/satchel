@@ -138,6 +138,7 @@ vi.mock('@/composables/useToast', () => ({
 }));
 
 import { useThreadActions } from './useThreadActions';
+import { useUiStore } from '@/stores/ui';
 import { registerListKeyboardNavigation } from './useListKeyboardNavigation';
 
 
@@ -299,6 +300,32 @@ describe('useThreadActions', () => {
     await vi.waitFor(() =>
       expect(transitionManyMock).toHaveBeenCalledWith(['thread-1'], 'inbox', 'manual', undefined, expect.objectContaining({ refresh: false })),
     );
+  });
+
+  it('gives an unread thread its unread mark back when Done is undone', async () => {
+    threadState.threads = [seedThread({ workflowState: 'inbox', unreadCount: 2 }), seedThread({ id: 'thread-2', unreadCount: 0 })];
+    readMock.mockReset();
+    readMock.mockResolvedValue(undefined);
+    const actions = useThreadActions();
+
+    await actions.archive(['thread-1', 'thread-2']);
+    await runGroupedUndo();
+
+    await vi.waitFor(() => expect(readMock).toHaveBeenCalledWith(['thread-1'], false));
+    expect(readMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the phone list unselected after a tapped Undo', async () => {
+    useUiStore().isMobile = true;
+    threadState.threads = [seedThread({ workflowState: 'inbox' })];
+    threadState.selectThread.mockClear();
+    const actions = useThreadActions();
+
+    await actions.archive(['thread-1']);
+    await runGroupedUndo();
+
+    await vi.waitFor(() => expect(transitionManyMock).toHaveBeenLastCalledWith(['thread-1'], 'inbox', 'manual', undefined, expect.anything()));
+    expect(threadState.selectThread).not.toHaveBeenCalled();
   });
 
   it('starts the visible undo window before a slow list refresh finishes', async () => {
