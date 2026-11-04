@@ -72,7 +72,7 @@ function chooseGroupingMode(mode: InboxGroupingMode) {
     <IconButton
       class="list-filter-menu__trigger"
       :title="$t('inbox.filterMenu')"
-      :active="!!accounts.activeAccountId || !!anchor"
+      :active="(!!accounts.activeAccountId && accounts.emailAccounts.length > 1) || !!anchor"
       aria-haspopup="menu"
       :aria-expanded="!!anchor"
       @click="openMenu"
