@@ -32,10 +32,28 @@ const props = withDefaults(defineProps<{
 
 const SyncFailures = defineAsyncComponent(() => import('./SyncFailures.vue'));
 const failuresOpen = ref(false);
+let opener: HTMLElement | null = null;
 function openFailures(event: MouseEvent) {
-  (event.currentTarget as HTMLElement).focus();
+  opener = event.currentTarget as HTMLElement;
+  opener.focus();
   failuresOpen.value = true;
 }
+/*
+ * The sheet hands the focus back to what opened it, but on a busy page that
+ * hand-back can miss and the focus stays in the leaving sheet, then drops to
+ * <body>. Then this line's own button takes it.
+ */
+function closeFailures() {
+  failuresOpen.value = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const active = document.activeElement;
+    // Still on <body>, or still inside the sheet that is leaving.
+    if (active && active !== document.body && !active.closest('.sheet-root')) return;
+    const button = opener?.isConnected ? opener : root.value?.querySelector<HTMLElement>('[aria-haspopup="dialog"]');
+    button?.focus({ preventScroll: true });
+  }));
+}
+const root = ref<HTMLElement | null>(null);
 const outbox = useOutboxStore();
 const failureCount = computed(() => outbox.attentionCount);
 const connection = useConnectionStore();
@@ -55,7 +73,7 @@ const label = computed(() => {
 </script>
 
 <template>
-  <div v-if="failureCount > 0 || visible">
+  <div v-if="failureCount > 0 || visible" ref="root">
   <AppBanner
     v-if="failureCount > 0 && props.bannerFailures"
     class="sync-failure-banner"
@@ -74,7 +92,7 @@ const label = computed(() => {
     <span class="sync-status__dot" aria-hidden="true" />
     <span class="sync-status__text">{{ label }}</span>
   </p>
-  <SyncFailures v-if="failureCount > 0 || failuresOpen" :open="failuresOpen" @close="failuresOpen = false" />
+  <SyncFailures v-if="failureCount > 0 || failuresOpen" :open="failuresOpen" @close="closeFailures" />
   </div>
 </template>
 
