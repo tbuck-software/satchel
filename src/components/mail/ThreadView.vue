@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
 import { useConnectionStore } from '@/stores/connection';
@@ -53,6 +53,9 @@ import { refreshToastClearance } from '@/composables/useToastClearance';
 import { usePrompt } from '@/composables/usePrompt';
 import { useConfirm } from '@/composables/useConfirm';
 import type { Message } from '@/types/mail';
+import { inlineMessageMenuIds, THREAD_MESSAGE_MENU, type MessageMenu } from './threadMessageMenu';
+
+const ThreadMenuSheet = defineAsyncComponent(() => import('./ThreadMenuSheet.vue'));
 
 const props = defineProps<{
   threadId?: string;
@@ -123,6 +126,22 @@ const sentMessageCount = computed(() => messages.value.filter((message) => !mess
 const draftMessageCount = computed(() => messages.value.length - sentMessageCount.value);
 const visibleMessages = computed(() => messageVisibility.value.visibleMessages);
 const draftMessages = computed(() => messageVisibility.value.draftMessages);
+
+/*
+ * The phone's one overflow menu is the ⋯ in the nav bar: the thread's actions
+ * and the newest message's, which that message reports here. Which other
+ * messages keep a ⋯ beside their sender is inlineMessageMenuIds' rule.
+ */
+const sentMessageIds = computed(() => messages.value.filter((message) => !message.isDraft).map((message) => message.id));
+const threadMenuMessage = shallowRef<MessageMenu | null>(null);
+provide(THREAD_MESSAGE_MENU, {
+  hostId: computed(() => (ui.isMobile ? sentMessageIds.value.at(-1) ?? '' : '')),
+  inlineIds: computed(() => inlineMessageMenuIds(sentMessageIds.value)),
+  menu: threadMenuMessage,
+});
+const threadMenuOpen = ref(false);
+const threadMenuUsed = ref(false);
+watch(threadMenuOpen, (open) => { if (open) threadMenuUsed.value = true; });
 /** Selected, but its load waits for the selection to settle. */
 const awaitingMessages = ref(false);
 const initialMessagesLoading = computed(() =>
@@ -693,6 +712,11 @@ function replyThread() {
   threadReply.reply(thread.value.id);
 }
 
+function replyAllThread() {
+  if (!canReply.value || !thread.value) return;
+  threadReply.reply(thread.value.id, true);
+}
+
 function forwardThread() {
   if (!canReply.value || !thread.value) return;
   composer.openForward(thread.value.id);
@@ -1006,6 +1030,15 @@ function showEntireThread() {
       <div class="mobile-top-meta">
         <span class="mobile-top-count">{{ $t('thread.row.messages', { count: sentMessageCount }) }}</span>
       </div>
+      <IconButton
+        class="mobile-menu-btn"
+        :title="$t('thread.toolbar.moreActions')"
+        aria-haspopup="dialog"
+        :aria-expanded="threadMenuOpen"
+        @click="threadMenuOpen = true"
+      >
+        <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>
+      </IconButton>
     </div>
 
     <!-- ═══ SCROLLABLE CONTENT ═══ -->
@@ -1112,6 +1145,7 @@ function showEntireThread() {
           :keyboard-active="messageKeyboardActive"
           :editing-draft-id="composer.request?.draftId ?? null"
           @reply="replyThread"
+          @reply-all="replyAllThread"
           @forward="forwardThread"
           @edit-draft="openThreadDraft"
           @retry-draft="void reloadMessages()"
@@ -1139,17 +1173,24 @@ function showEntireThread() {
       :can-reply="canReply"
       :is-unread="actionUnread"
       :selection-count="selectionCount"
-      :is-starred="selectionCount ? actionPinned : Boolean(thread.isStarred)"
-      :is-aside="!selectionCount && thread.workflowState === 'aside'"
       :is-done="!selectionCount && thread.workflowState === 'done'"
       @archive="archiveThread"
       @move-to-inbox="void moveToInbox()"
       @reply="replyThread"
       @toggle-read="void toggleReadState()"
       @snooze="snoozeThread"
+    />
+
+    <!-- Stays mounted across a viewport change, like the sheet it replaced. -->
+    <ThreadMenuSheet
+      v-if="threadMenuUsed"
+      :open="threadMenuOpen"
+      :is-starred="selectionCount ? actionPinned : Boolean(thread.isStarred)"
+      :is-aside="!selectionCount && thread.workflowState === 'aside'"
+      :message="threadMenuMessage"
+      @dismiss="threadMenuOpen = false"
       @toggle-pin="void togglePin()"
       @set-aside="void toggleAside()"
-      @forward="forwardThread"
       @delete="void deleteThread()"
     />
 
@@ -1310,6 +1351,18 @@ function showEntireThread() {
 }
 
 .mobile-back-btn:active {
+  background: var(--bg-hover);
+}
+
+.mobile-top-bar .mobile-menu-btn {
+  width: var(--touch-target);
+  height: var(--touch-target);
+  margin-inline-start: auto;
+  border-radius: var(--radius-md);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-top-bar .mobile-menu-btn:active {
   background: var(--bg-hover);
 }
 

@@ -3470,6 +3470,8 @@
       "empty": "Pick a conversation",
       "loadFailed": "This conversation could not be loaded.",
       "loading": "Loading conversation",
+      "menuLatest": "Latest message",
+      "menuThread": "This conversation",
       "showEarlier": "Show {count} earlier message | Show {count} earlier messages",
       "unsentDrafts": "Unsent drafts"
     },

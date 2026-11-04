@@ -40,6 +40,14 @@ function render() {
   });
 }
 
+/** The sheet's rows load with the first sheet that opens. */
+async function openActions(target: VueWrapper) {
+  await target.get('.message-header [aria-label="Message actions"]').trigger('click');
+  await flushPromises();
+  await vi.dynamicImportSettled();
+  await flushPromises();
+}
+
 function sheetChoices(): HTMLButtonElement[] {
   return Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Show as"] [role="menuitemradio"]'));
 }
@@ -80,8 +88,7 @@ describe('the render-mode switch', () => {
     expect(wrapper.find('.body-view-note').exists()).toBe(false);
     expect(wrapper.find('iframe.satchel-email-document').exists()).toBe(true);
 
-    await wrapper.get('.message-header [aria-label="Message actions"]').trigger('click');
-    await flushPromises();
+    await openActions(wrapper);
     const choices = sheetChoices();
     expect(choices.map((choice) => choice.textContent?.trim())).toEqual(['Original', 'Text']);
     expect(choices.map((choice) => choice.getAttribute('aria-checked'))).toEqual(['true', 'false']);
@@ -112,8 +119,7 @@ describe('the render-mode switch', () => {
     wrapper = render();
     await flushPromises();
 
-    await wrapper.get('.message-header [aria-label="Message actions"]').trigger('click');
-    await flushPromises();
+    await openActions(wrapper);
     const choices = sheetChoices();
     expect(choices.map((choice) => choice.textContent?.trim())).toEqual(['Original', 'Auto-dark', 'Text']);
     expect(choices[1]!.getAttribute('aria-checked')).toBe('true');
@@ -134,8 +140,7 @@ describe('the render-mode switch', () => {
       global: { stubs: { SenderFilingMenu: true } },
     });
     await flushPromises();
-    await wrapper.get('.message-header [aria-label="Message actions"]').trigger('click');
-    await flushPromises();
+    await openActions(wrapper);
 
     expect(sheetChoices()).toHaveLength(0);
     expect(document.body.textContent).not.toContain('Show as');

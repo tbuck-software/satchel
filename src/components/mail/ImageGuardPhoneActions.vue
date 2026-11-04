@@ -1,18 +1,20 @@
 <script setup lang="ts">
 /**
- * The phone's half of the blocked-images notice: one split button, "Show"
- * and an attached chevron for the two "always allow" choices, each a 44pt
- * target. Inline links there were 24pt tall and wrapped into a line led by a
- * stray "·"; a separate ⋯ sat right under the message's own ⋯ and read as a
- * second menu for the same thing.
+ * The phone's half of the blocked-images notice. In a message it is Show
+ * alone: the two "always allow" choices join the message's actions (its ⋯,
+ * or the thread's nav-bar ⋯ for the newest message), reported through
+ * IMAGE_GUARD_CHOICES. Where no message provides that (the topic feed), they
+ * keep a chevron joined to Show, each a 44pt row in a sheet.
  *
  * Its own chunk, loaded only on the phone: the message-file viewer renders
  * the same notice and stays inside its bundle budget without it.
  */
-import { ref } from 'vue';
+import { computed, defineAsyncComponent, inject, onBeforeUnmount, ref, watchEffect } from 'vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
-import ImagePolicyChoices from './ImagePolicyChoices.vue';
+import { IMAGE_GUARD_CHOICES } from './threadMessageMenu';
+
+const ImagePolicyChoices = defineAsyncComponent(() => import('./ImagePolicyChoices.vue'));
 
 const props = defineProps<{
   senderEmail: string;
@@ -26,14 +28,30 @@ const emit = defineEmits<{
   allowDomain: [];
 }>();
 
+const reported = inject(IMAGE_GUARD_CHOICES, null);
+const ownChoices = computed(() => !reported && Boolean(props.senderEmail || props.domain));
 const choicesOpen = ref(false);
+
+if (reported) {
+  watchEffect(() => {
+    reported.value = props.senderEmail || props.domain
+      ? {
+        senderEmail: props.senderEmail,
+        domain: props.domain,
+        allowSender: () => emit('allowSender'),
+        allowDomain: () => emit('allowDomain'),
+      }
+      : null;
+  });
+  onBeforeUnmount(() => { reported.value = null; });
+}
 </script>
 
 <template>
   <span class="image-guard__split">
     <AppButton
       class="image-guard__show"
-      :class="{ 'image-guard__show--joined': props.senderEmail || props.domain }"
+      :class="{ 'image-guard__show--joined': ownChoices }"
       :title="$t('mail.imagePolicy.showOnceTitle')"
       @click="emit('showOnce')"
       variant="soft"
@@ -42,7 +60,7 @@ const choicesOpen = ref(false);
       {{ $t('mail.imagePolicy.showOnce') }}
     </AppButton>
     <AppButton
-      v-if="props.senderEmail || props.domain"
+      v-if="ownChoices"
       class="image-guard__choices"
       :title="$t('mail.imagePolicy.choicesLabel')"
       :aria-label="$t('mail.imagePolicy.choicesLabel')"
@@ -56,6 +74,7 @@ const choicesOpen = ref(false);
     </AppButton>
   </span>
   <ImagePolicyChoices
+    v-if="ownChoices"
     :open="choicesOpen"
     :sender-email="props.senderEmail"
     :domain="props.domain"

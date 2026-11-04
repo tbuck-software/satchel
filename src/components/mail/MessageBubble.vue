@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import CardButton from '@/components/ui/CardButton.vue';
-import MenuItem from '@/components/ui/MenuItem.vue';
-import { computed, onBeforeUnmount, provide, ref, shallowRef, watch } from 'vue';
+import { computed, defineAsyncComponent, inject, onBeforeUnmount, provide, ref, shallowRef, watch, watchEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type {
   Message,
@@ -48,6 +47,15 @@ import { useMessageSecurityActions } from '@/composables/useMessageSecurityActio
 import MessageBodyViewSwitch from './MessageBodyViewSwitch.vue';
 import { BODY_VIEW_SWITCH } from './bodyViewSwitch';
 import { BODY_VIEW_STATE, type BodyViewState } from './bodyViewState';
+import {
+  IMAGE_GUARD_CHOICES,
+  THREAD_MESSAGE_MENU,
+  type ImageGuardChoices,
+  type MessageMenu,
+  type MessageMenuCommand,
+} from './threadMessageMenu';
+
+const MessageActionList = defineAsyncComponent(() => import('./MessageActionList.vue'));
 
 const props = withDefaults(defineProps<{
   message: Message;
@@ -64,6 +72,7 @@ const props = withDefaults(defineProps<{
 });
 const emit = defineEmits<{
   reply: [];
+  replyAll: [];
   forward: [];
   focusMessage: [];
   toggleCollapsed: [];
@@ -282,10 +291,6 @@ watch(sourceDialogOpen, (open) => { if (open) sourceDialogUsed.value = true; });
 watch(messageActionsOpen, (open) => { if (open) messageActionsUsed.value = true; });
 watch(senderMenuAnchor, (anchor) => { if (anchor) senderMenuUsed.value = true; });
 
-function runMessageAction(action: () => void) {
-  messageActionsOpen.value = false;
-  action();
-}
 
 /*
  * The body's Original / Auto-dark / Text choice. On the phone it leaves the
@@ -300,6 +305,59 @@ const bodyViewChoices = computed(() => (
     ? bodyView.value
     : null
 ));
+
+/* The phone's blocked-images notice keeps only Show; its always-allow
+   choices join this message's actions (ImageGuardPhoneActions reports them). */
+const imageGuard = shallowRef<ImageGuardChoices | null>(null);
+provide(IMAGE_GUARD_CHOICES, imageGuard);
+
+/** Someone besides the sender and us would get a reply all. */
+const canReplyAll = computed(() => {
+  const others = new Set(
+    [props.message.from, ...props.message.to, ...(props.message.cc ?? [])]
+      .map((person) => person.email.trim().toLowerCase())
+      .filter((email) => email && !isOwnEmail(accountsStore.accounts, email)),
+  );
+  return others.size > 1;
+});
+
+function runCommand(command: MessageMenuCommand) {
+  switch (command) {
+    case 'reply': emit('reply'); break;
+    case 'replyAll': emit('replyAll'); break;
+    case 'forward': emit('forward'); break;
+    case 'topic': topicsStore.openPicker({ itemType: 'message', itemIds: [props.message.id] }); break;
+    case 'source': sourceDialogOpen.value = true; break;
+    case 'toggleCollapsed': emit('toggleCollapsed'); break;
+  }
+}
+
+const messageMenu = computed<MessageMenu>(() => ({
+  canReply: props.canReply,
+  canReplyAll: canReplyAll.value,
+  collapsed: props.collapsed,
+  bodyView: bodyViewChoices.value,
+  images: ui.isMobile && !props.collapsed ? imageGuard.value : null,
+  run: runCommand,
+}));
+
+/*
+ * In the thread reader the newest message hands its actions to the nav bar's
+ * ⋯, and only the messages the reader names keep a ⋯ beside their sender.
+ */
+const threadMenu = inject(THREAD_MESSAGE_MENU, null);
+const hostsThreadMenu = computed(() => threadMenu?.hostId.value === props.message.id);
+const showMenuButton = computed(() => !threadMenu || threadMenu.inlineIds.value.has(props.message.id));
+if (threadMenu) {
+  watchEffect(() => {
+    if (hostsThreadMenu.value) threadMenu.menu.value = messageMenu.value;
+  });
+  const release = () => {
+    if (threadMenu.menu.value?.run === runCommand) threadMenu.menu.value = null;
+  };
+  watch(hostsThreadMenu, (hosts) => { if (!hosts) release(); });
+  onBeforeUnmount(release);
+}
 
 const pgpState = computed<PgpMessageState | null>(() => props.message.pgp?.state ?? null);
 const smimeState = computed<SmimeMessageState | null>(() => props.message.smime?.state ?? null);
@@ -535,7 +593,7 @@ function openSenderDetails() {
           </svg>
         </IconButton>
         <IconButton
-          v-else
+          v-else-if="showMenuButton"
           size="lg"
           :title="$t('mail.message.actions')"
           @click="messageActionsOpen = true"
@@ -705,55 +763,7 @@ function openSenderDetails() {
       >
         <nav role="menu" class="message-action-sheet" :aria-label="$t('mail.message.actionsNav')">
           <h2>{{ $t('mail.message.actions') }}</h2>
-          <MenuItem label=""
-            v-if="props.canReply"
-            @select="runMessageAction(() => emit('reply'))"
-          >
-            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 4-5 5 5 5" /><path d="M3 9h9a5 5 0 0 1 5 5" /></svg></template>
-            {{ $t('common.reply') }}
-          </MenuItem>
-          <MenuItem label=""
-            v-if="props.canReply"
-            @select="runMessageAction(() => emit('forward'))"
-          >
-            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 4 5 5-5 5" /><path d="M17 9H8a5 5 0 0 0-5 5" /></svg></template>
-            {{ $t('common.forward') }}
-          </MenuItem>
-          <MenuItem label=""
-            @select="runMessageAction(() => topicsStore.openPicker({ itemType: 'message', itemIds: [props.message.id] }))"
-          >
-            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5a2 2 0 0 1 2-2h3l2 2h5a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M10 8v6M7 11h6" /></svg></template>
-            {{ $t('mail.message.addToTopic') }}
-          </MenuItem>
-          <MenuItem label="" @select="runMessageAction(() => { sourceDialogOpen = true; })">
-            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5-4 5 4 5M12 5l4 5-4 5" /></svg></template>
-            {{ $t('mail.message.showSource') }}
-          </MenuItem>
-          <template v-if="bodyViewChoices">
-            <h3 class="message-action-sheet__section" aria-hidden="true">{{ $t('mail.viewMode.showAs') }}</h3>
-            <div role="group" :aria-label="$t('mail.viewMode.showAs')" class="message-action-sheet__choices">
-              <MenuItem
-                v-for="option in bodyViewChoices.options"
-                :key="option.value"
-                :label="option.label"
-                :checked="option.value === bodyViewChoices.mode"
-                selection="radio"
-                @select="runMessageAction(() => bodyViewChoices?.set(option.value))"
-              >
-                <template #icon>
-                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path v-if="option.value === 'auto-dark'" d="M15.5 12.5A6 6 0 0 1 7.5 4.5a6 6 0 1 0 8 8z" />
-                    <path v-else-if="option.value === 'text' || option.value === 'markdown'" d="M4 5h12M4 9h12M4 13h8" />
-                    <template v-else><rect x="3.5" y="3.5" width="13" height="13" rx="2" /><path d="M3.5 8h13M8 8v8.5" /></template>
-                  </svg>
-                </template>
-              </MenuItem>
-            </div>
-          </template>
-          <MenuItem label="" @select="runMessageAction(() => emit('toggleCollapsed'))">
-            <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path v-if="props.collapsed" d="m5 8 5 5 5-5" /><path v-else d="m5 12 5-5 5 5" /></svg></template>
-            {{ props.collapsed ? $t('mail.message.expand') : $t('mail.message.collapse') }}
-          </MenuItem>
+          <MessageActionList :menu="messageMenu" @done="messageActionsOpen = false" />
         </nav>
       </BottomSheet>
     </Teleport>
@@ -994,34 +1004,11 @@ function openSenderDetails() {
   padding: 8px 12px calc(14px + var(--satchel-safe-area-bottom));
 }
 
-/* Thumb-sized rows: the sheet is the phone's only way to these actions. */
-.message-action-sheet .menu-item {
-  min-height: var(--touch-target);
-}
-
 .message-action-sheet h2 {
   margin: 0;
   padding: 10px 8px 12px;
   color: var(--text-primary);
   font-size: var(--font-size-lg);
-}
-
-/* The render modes are one choice among the actions: a quiet label and a
-   hairline above them set the group apart from the commands. */
-.message-action-sheet__section {
-  margin: var(--space-xs) 0 0;
-  padding: var(--space-md) var(--space-sm) var(--space-xs);
-  border-top: 1px solid var(--border-color-muted);
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-  font-weight: var(--weight-semibold);
-}
-
-.message-action-sheet__choices {
-  display: grid;
-  padding-bottom: var(--space-xs);
-  margin-bottom: var(--space-xs);
-  border-bottom: 1px solid var(--border-color-muted);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import AppButton from '@/components/ui/AppButton.vue';
-import BottomSheet from '@/components/ui/BottomSheet.vue';
 import ToolbarCell from '@/components/ui/ToolbarCell.vue';
 
 const props = defineProps<{
@@ -10,8 +8,6 @@ const props = defineProps<{
   visible: boolean;
   canReply: boolean;
   isUnread: boolean;
-  isStarred: boolean;
-  isAside: boolean;
   isDone: boolean;
   selectionCount?: number;
 }>();
@@ -22,51 +18,16 @@ const emit = defineEmits<{
   reply: [];
   toggleRead: [];
   snooze: [];
-  togglePin: [];
-  setAside: [];
-  forward: [];
-  delete: [];
 }>();
-
-const moreSheetOpen = ref(false);
-
-function openMore() {
-  moreSheetOpen.value = true;
-}
-
-function closeSheet() {
-  moreSheetOpen.value = false;
-}
-
-type SheetAction = 'togglePin' | 'setAside' | 'forward' | 'delete';
-
-function sheetAction(action: SheetAction) {
-  closeSheet();
-  if (action === 'togglePin') emit('togglePin');
-  if (action === 'setAside') emit('setAside');
-  if (action === 'forward') emit('forward');
-  if (action === 'delete') emit('delete');
-}
 </script>
 
 <template>
   <!-- ═══ MOBILE BOTTOM BAR ═══
-       Four labelled cells, icon over a short label and the whole cell the
-       target, beside the prominent Done pill. -->
+       Three labelled cells, icon over a short label and the whole cell the
+       target, beside the prominent Done pill. Everything else the thread
+       offers is behind the ⋯ in its nav bar (ThreadMenuSheet.vue). -->
   <div v-if="props.visible" class="mobile-bar">
     <div class="mobile-bar-actions">
-      <ToolbarCell
-        class="bar-btn"
-        :label="$t('common.more')"
-        :title="$t('thread.toolbar.moreActions')"
-        aria-haspopup="dialog"
-        :aria-expanded="moreSheetOpen"
-        @click="openMore"
-      >
-        <template #icon>
-          <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon>
-        </template>
-      </ToolbarCell>
       <ToolbarCell
         v-if="props.canReply"
         class="bar-btn"
@@ -143,73 +104,6 @@ function sheetAction(action: SheetAction) {
       {{ selectionCount ? $t('thread.selection.done', { count: selectionCount }) : $t('common.done') }}
     </AppButton>
   </div>
-
-  <!-- The sheet intentionally stays mounted and open across a viewport-mode change. -->
-  <BottomSheet
-    :label="$t('thread.toolbar.moreActions')"
-    :open="moreSheetOpen"
-    @dismiss="closeSheet"
-  >
-    <nav class="sheet-list" :aria-label="$t('thread.toolbar.moreActions')">
-      <AppButton
-        class="sheet-item"
-        variant="ghost"
-        @click="sheetAction('togglePin')"
-      >
-        <template #icon>
-          <AppIcon>
-            <path d="M5.2 2.3h5.6l-.8 4 2.1 2.1v1.1H3.9V8.4L6 6.3l-.8-4Z" />
-            <path d="M8 9.5v4.2" />
-          </AppIcon>
-        </template>
-        {{ props.isStarred ? $t('thread.actions.unpin') : $t('thread.actions.pin') }}
-      </AppButton>
-      <AppButton
-        class="sheet-item"
-        variant="ghost"
-        @click="sheetAction('setAside')"
-      >
-        <template #icon>
-          <AppIcon>
-            <path d="M2.5 5.5h11v7.5h-11z" />
-            <path d="M5.5 8.5h5" />
-            <path d="M8 1.8v4" />
-            <path d="M6.2 4 8 5.8 9.8 4" />
-          </AppIcon>
-        </template>
-        {{ props.isAside ? $t('thread.actions.moveToInbox') : $t('thread.actions.setAside') }}
-      </AppButton>
-      <div class="sheet-divider" />
-      <AppButton
-        v-if="props.canReply"
-        class="sheet-item"
-        variant="ghost"
-        @click="sheetAction('forward')"
-      >
-        <template #icon>
-          <AppIcon>
-            <path d="M10 3l5 5-5 5" />
-            <path d="M15 8H6a5 5 0 00-5 5" />
-          </AppIcon>
-        </template>
-        {{ $t('common.forward') }}
-      </AppButton>
-      <div v-if="props.canReply" class="sheet-divider" />
-      <AppButton
-        class="sheet-item sheet-item--danger"
-        variant="ghost"
-        @click="sheetAction('delete')"
-      >
-        <template #icon>
-          <AppIcon>
-            <path d="M2 4h12M5 4V2.5A1.5 1.5 0 016.5 1h3A1.5 1.5 0 0111 2.5V4" />
-            <path d="M13 4v9.5a1.5 1.5 0 01-1.5 1.5h-7A1.5 1.5 0 013 13.5V4" />
-          </AppIcon>
-        </template>
-        {{ $t('common.delete') }}
-      </AppButton>
-    </nav>
-  </BottomSheet>
 </template>
 
 <style scoped>
@@ -289,48 +183,6 @@ function sheetAction(action: SheetAction) {
 .bar-done__icon {
   position: relative;
   flex: 0 0 auto;
-}
-
-/* ── Bottom-sheet action rows ── */
-.sheet-list {
-  display: flex;
-  flex-direction: column;
-  padding: var(--space-xs) var(--space-sm) var(--space-sm);
-}
-
-.sheet-list .sheet-item {
-  justify-content: flex-start;
-  width: 100%;
-  min-height: 48px;
-  gap: var(--space-md);
-  padding: var(--space-md) var(--space-lg);
-  border-radius: var(--radius-md);
-  font-weight: var(--weight-regular);
-  text-align: left;
-  white-space: normal;
-}
-
-.sheet-list .sheet-item:active:not(:disabled) {
-  background: var(--bg-hover);
-}
-
-.sheet-list .sheet-item svg {
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-.sheet-list .sheet-item--danger {
-  color: var(--accent-red);
-}
-
-.sheet-list .sheet-item--danger svg {
-  color: var(--accent-red);
-}
-
-.sheet-divider {
-  height: 1px;
-  margin: var(--space-xs) var(--space-lg);
-  background: var(--border-color-muted);
 }
 
 @media (prefers-reduced-motion: reduce) {

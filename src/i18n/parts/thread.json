@@ -244,7 +244,9 @@
         "loadFailed": "This conversation could not be loaded.",
         "loading": "Loading conversation",
         "showEarlier": "Show {count} earlier message | Show {count} earlier messages",
-        "unsentDrafts": "Unsent drafts"
+        "unsentDrafts": "Unsent drafts",
+        "menuThread": "This conversation",
+        "menuLatest": "Latest message"
       },
       "workflow": {
         "failedMany": "Could not mark {count} emails as “{label}”: {detail}",
@@ -500,7 +502,9 @@
         "loadFailed": "Diese Konversation konnte nicht geladen werden.",
         "loading": "Konversation wird geladen",
         "showEarlier": "{count} frühere Nachricht anzeigen | {count} frühere Nachrichten anzeigen",
-        "unsentDrafts": "Nicht gesendete Entwürfe"
+        "unsentDrafts": "Nicht gesendete Entwürfe",
+        "menuThread": "Diese Konversation",
+        "menuLatest": "Neueste Nachricht"
       },
       "workflow": {
         "failedMany": "{count} E-Mails konnten nicht als „{label}“ markiert werden: {detail}",

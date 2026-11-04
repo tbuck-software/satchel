@@ -3470,6 +3470,8 @@
       "empty": "Wähle eine Konversation",
       "loadFailed": "Diese Konversation konnte nicht geladen werden.",
       "loading": "Konversation wird geladen",
+      "menuLatest": "Neueste Nachricht",
+      "menuThread": "Diese Konversation",
       "showEarlier": "{count} frühere Nachricht anzeigen | {count} frühere Nachrichten anzeigen",
       "unsentDrafts": "Nicht gesendete Entwürfe"
     },

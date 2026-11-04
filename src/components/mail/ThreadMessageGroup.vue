@@ -14,6 +14,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   reply: [];
+  replyAll: [];
   forward: [];
   focusMessage: [messageId: string];
   toggleCollapsed: [messageId: string];
@@ -30,6 +31,7 @@ const emit = defineEmits<{
     :body-mounted="props.bodyMountedIds?.has(message.id) ?? true"
     :keyboard-focused="props.keyboardActive && props.focusedMessageId === message.id"
     @reply="emit('reply')"
+    @reply-all="emit('replyAll')"
     @forward="emit('forward')"
     @focus-message="emit('focusMessage', message.id)"
     @toggle-collapsed="emit('toggleCollapsed', message.id)"
