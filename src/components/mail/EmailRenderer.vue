@@ -27,6 +27,7 @@ import SafeMarkdownBody from './SafeMarkdownBody.vue';
 import IsolatedEmailDocument from './IsolatedEmailDocument.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import { IMAGE_GUARD_PHONE_ACTIONS } from './imageGuardActions';
+import { BODY_VIEW_SWITCH } from './bodyViewSwitch';
 import { useUiStore } from '@/stores/ui';
 import { formattingFreeText, isFormattingFreeHtml } from '@/utils/formattingFreeHtml';
 
@@ -70,10 +71,6 @@ const quotesExpanded = ref(false);
  */
 type ViewMode = 'html' | 'auto-dark' | 'markdown' | 'text';
 const viewMode = ref<ViewMode>('text');
-
-function setViewMode(value: string) {
-  viewMode.value = value as ViewMode;
-}
 const linkOpener = useLinkOpener({
   onOpenFailed: (href, anchor) => showLinkError(href, anchor, t('mail.link.browserFailed')),
 });
@@ -310,6 +307,15 @@ const viewModeOptions = computed(() => {
   return options;
 });
 
+/** The mode this body opens in; a provided switch offers it as the way back. */
+const defaultViewMode = computed<ViewMode>(() => {
+  // Text is what will show, so its Markdown check is due either way.
+  if (!htmlAvailable.value || settings.preferPlainTextReading) {
+    return prepared.value.markdownAvailable ? 'markdown' : 'text';
+  }
+  return shouldAutoDarkHtml.value ? 'auto-dark' : 'html';
+});
+
 watch(
   () => [
     props.html,
@@ -319,15 +325,13 @@ watch(
     settings.preferPlainTextReading,
   ],
   () => {
-    if (!htmlAvailable.value || settings.preferPlainTextReading) {
-      // Text is what will show, so its Markdown check is due either way.
-      viewMode.value = prepared.value.markdownAvailable ? 'markdown' : 'text';
-    } else {
-      viewMode.value = shouldAutoDarkHtml.value ? 'auto-dark' : 'html';
-    }
+    viewMode.value = defaultViewMode.value;
   },
   { immediate: true },
 );
+
+/* The message around the renderer may stand its own switch in (bodyViewSwitch.ts). */
+const viewSwitch = inject(BODY_VIEW_SWITCH, null);
 
 /**
  * Opening feedback beyond the click itself is noise: the browser takes over
@@ -463,13 +467,15 @@ const hasPgpSegments = computed(() =>
       </template>
       </template>
     </div>
-    <SegmentedControl
+    <component
+      :is="viewSwitch ?? SegmentedControl"
       v-if="props.showViewModeToggle && viewModeOptions.length > 1"
       class="view-mode-toggle"
       :options="viewModeOptions"
       :model-value="viewMode"
       :aria-label="$t('mail.viewMode.label')"
-      @update:model-value="setViewMode"
+      :default-value="viewSwitch && defaultViewMode"
+      @update:model-value="(value: ViewMode) => (viewMode = value)"
     />
     <div v-if="isolatedDocument" class="html-document-group">
       <header v-if="fullBodyDecryption === 'pgp_decrypted'" class="pgp-segment-header">{{ $t('mail.pgpBlock.decryptedPgp') }}</header>

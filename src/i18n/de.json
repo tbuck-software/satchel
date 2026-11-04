@@ -1469,11 +1469,19 @@
     "viewMode": {
       "autoDark": "Auto-Dark",
       "autoDarkTitle": "Farben an das dunkle Design angepasst",
+      "backTo": "Als {mode} anzeigen",
       "label": "Darstellung der Nachricht",
       "markdown": "Markdown",
       "markdownTitle": "Text mit Formatierung",
       "original": "Original",
       "originalTitle": "HTML-Ansicht wie gesendet",
+      "showAs": "Anzeigen als",
+      "shownAs": {
+        "autoDark": "In Auto-Dark angezeigt",
+        "markdown": "Als Markdown angezeigt",
+        "original": "Im Original angezeigt",
+        "text": "Als Text angezeigt"
+      },
       "text": "Text",
       "textTitle": "Reiner Text"
     }

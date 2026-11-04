@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import CardButton from '@/components/ui/CardButton.vue';
 import MenuItem from '@/components/ui/MenuItem.vue';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, provide, ref, shallowRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type {
   Message,
@@ -45,6 +45,9 @@ import { isSmimeSignatureAttachment, isSystemAttachment } from '@/utils/messageA
 import { summarizeAuthentication } from '@/utils/messageAuthentication';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 import { useMessageSecurityActions } from '@/composables/useMessageSecurityActions';
+import MessageBodyViewSwitch from './MessageBodyViewSwitch.vue';
+import { BODY_VIEW_SWITCH } from './bodyViewSwitch';
+import { BODY_VIEW_STATE, type BodyViewState } from './bodyViewState';
 
 const props = withDefaults(defineProps<{
   message: Message;
@@ -283,6 +286,20 @@ function runMessageAction(action: () => void) {
   messageActionsOpen.value = false;
   action();
 }
+
+/*
+ * The body's Original / Auto-dark / Text choice. On the phone it leaves the
+ * body for this message's ⋯ sheet: the renderer hands its modes to
+ * MessageBodyViewSwitch, which reports them here.
+ */
+const bodyView = shallowRef<BodyViewState | null>(null);
+provide(BODY_VIEW_SWITCH, MessageBodyViewSwitch);
+provide(BODY_VIEW_STATE, bodyView);
+const bodyViewChoices = computed(() => (
+  ui.isMobile && !props.collapsed && bodyView.value && bodyView.value.options.length > 1
+    ? bodyView.value
+    : null
+));
 
 const pgpState = computed<PgpMessageState | null>(() => props.message.pgp?.state ?? null);
 const smimeState = computed<SmimeMessageState | null>(() => props.message.smime?.state ?? null);
@@ -712,6 +729,27 @@ function openSenderDetails() {
             <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5-4 5 4 5M12 5l4 5-4 5" /></svg></template>
             {{ $t('mail.message.showSource') }}
           </MenuItem>
+          <template v-if="bodyViewChoices">
+            <h3 class="message-action-sheet__section" aria-hidden="true">{{ $t('mail.viewMode.showAs') }}</h3>
+            <div role="group" :aria-label="$t('mail.viewMode.showAs')" class="message-action-sheet__choices">
+              <MenuItem
+                v-for="option in bodyViewChoices.options"
+                :key="option.value"
+                :label="option.label"
+                :checked="option.value === bodyViewChoices.mode"
+                selection="radio"
+                @select="runMessageAction(() => bodyViewChoices?.set(option.value))"
+              >
+                <template #icon>
+                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path v-if="option.value === 'auto-dark'" d="M15.5 12.5A6 6 0 0 1 7.5 4.5a6 6 0 1 0 8 8z" />
+                    <path v-else-if="option.value === 'text' || option.value === 'markdown'" d="M4 5h12M4 9h12M4 13h8" />
+                    <template v-else><rect x="3.5" y="3.5" width="13" height="13" rx="2" /><path d="M3.5 8h13M8 8v8.5" /></template>
+                  </svg>
+                </template>
+              </MenuItem>
+            </div>
+          </template>
           <MenuItem label="" @select="runMessageAction(() => emit('toggleCollapsed'))">
             <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path v-if="props.collapsed" d="m5 8 5 5 5-5" /><path v-else d="m5 12 5-5 5 5" /></svg></template>
             {{ props.collapsed ? $t('mail.message.expand') : $t('mail.message.collapse') }}
@@ -944,11 +982,34 @@ function openSenderDetails() {
   padding: 8px 12px calc(14px + var(--satchel-safe-area-bottom));
 }
 
+/* Thumb-sized rows: the sheet is the phone's only way to these actions. */
+.message-action-sheet .menu-item {
+  min-height: var(--touch-target);
+}
+
 .message-action-sheet h2 {
   margin: 0;
   padding: 10px 8px 12px;
   color: var(--text-primary);
   font-size: var(--font-size-lg);
+}
+
+/* The render modes are one choice among the actions: a quiet label and a
+   hairline above them set the group apart from the commands. */
+.message-action-sheet__section {
+  margin: var(--space-xs) 0 0;
+  padding: var(--space-md) var(--space-sm) var(--space-xs);
+  border-top: 1px solid var(--border-color-muted);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.message-action-sheet__choices {
+  display: grid;
+  padding-bottom: var(--space-xs);
+  margin-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--border-color-muted);
 }
 
 @media (prefers-reduced-motion: reduce) {
