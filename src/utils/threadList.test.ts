@@ -392,12 +392,12 @@ describe('layoutPhoneInbox', () => {
 
     const laidOut = layoutPhoneInbox(entries);
 
-    const card = laidOut[1] as Extract<ThreadListEntry, { kind: 'priority-card' }>;
+    const card = laidOut[0] as Extract<ThreadListEntry, { kind: 'priority-card' }>;
     expect(PHONE_PRIORITY_CARD_MAX_THREADS).toBe(2);
     expect(card.threads.map((entry) => entry.id)).toEqual(['prio-0', 'prio-1']);
     // The fold counts from the bucket, as the desktop card does.
     expect(card.hiddenCount).toBe(4);
-    expect(laidOut.map((entry) => entry.kind)).toEqual(['new-sender-stack', 'priority-card', 'date-header']);
+    expect(laidOut.map((entry) => entry.kind)).toEqual(['priority-card', 'new-sender-stack', 'date-header']);
     // The store's entries stay the desktop's.
     expect((entries[1] as typeof card).threads).toHaveLength(PRIORITY_CARD_MAX_THREADS);
   });
@@ -405,11 +405,19 @@ describe('layoutPhoneInbox', () => {
   it('leaves a short card and the other entries as they are', () => {
     const short = buildPriorityCardEntry(priorityBucket(priorityThreads.slice(0, 2), 2));
 
-    const laidOut = layoutPhoneInbox([review, short, today]);
+    const laidOut = layoutPhoneInbox([short, today]);
 
-    expect(laidOut[0]).toBe(review);
-    expect(laidOut[1]).toBe(short);
-    expect(laidOut[2]).toBe(today);
+    expect(laidOut[0]).toBe(short);
+    expect(laidOut[1]).toBe(today);
+  });
+
+  it('moves New senders below the priority block, before the first day', () => {
+    const card = buildPriorityCardEntry(priorityBucket(priorityThreads, 6));
+
+    expect(layoutPhoneInbox([review, card, today]).map((entry) => entry.kind))
+      .toEqual(['priority-card', 'new-sender-stack', 'date-header']);
+    // Without Priority the review keeps the top.
+    expect(layoutPhoneInbox([review, today])).toEqual([review, today]);
   });
 });
 

@@ -1084,15 +1084,22 @@ export function buildPriorityCardEntry(
 /**
  * The smart Inbox as the phone lays it out: the priority card folds to
  * PHONE_PRIORITY_CARD_MAX_THREADS rows, so the day's own mail reaches the
- * first screen. The store's entries stay the desktop's; this only reshapes them.
+ * first screen, and the new-sender review follows the priority block: what
+ * matters leads, the triage chore waits below it. The store's entries stay
+ * the desktop's; this only reshapes them.
  */
 export function layoutPhoneInbox(entries: ThreadListEntry[]): ThreadListEntry[] {
-  return entries.map((entry) => {
+  const laidOut = entries.map((entry) => {
     if (entry.kind !== 'priority-card' || entry.threads.length <= PHONE_PRIORITY_CARD_MAX_THREADS) return entry;
     const threads = entry.threads.slice(0, PHONE_PRIORITY_CARD_MAX_THREADS);
     // Counted from the bucket, as buildPriorityCardEntry counts the desktop fold.
     return { ...entry, threads, hiddenCount: Math.max(0, entry.bucket.count - threads.length) };
   });
+  const review = laidOut.findIndex((entry) => entry.kind === 'new-sender-stack');
+  const priority = laidOut.findIndex((entry) => entry.kind === 'priority-card');
+  // Out at `review`, in again right behind the priority card, which moved up one.
+  if (review >= 0 && priority > review) laidOut.splice(priority, 0, ...laidOut.splice(review, 1));
+  return laidOut;
 }
 
 /**
