@@ -138,6 +138,7 @@ vi.mock('@/composables/useToast', () => ({
 }));
 
 import { useThreadActions } from './useThreadActions';
+import { useUiStore } from '@/stores/ui';
 import { registerListKeyboardNavigation } from './useListKeyboardNavigation';
 
 
@@ -312,6 +313,19 @@ describe('useThreadActions', () => {
 
     await vi.waitFor(() => expect(readMock).toHaveBeenCalledWith(['thread-1'], false));
     expect(readMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the phone list unselected after a tapped Undo', async () => {
+    useUiStore().isMobile = true;
+    threadState.threads = [seedThread({ workflowState: 'inbox' })];
+    threadState.selectThread.mockClear();
+    const actions = useThreadActions();
+
+    await actions.archive(['thread-1']);
+    await runGroupedUndo();
+
+    await vi.waitFor(() => expect(transitionManyMock).toHaveBeenLastCalledWith(['thread-1'], 'inbox', 'manual', undefined, expect.anything()));
+    expect(threadState.selectThread).not.toHaveBeenCalled();
   });
 
   it('starts the visible undo window before a slow list refresh finishes', async () => {

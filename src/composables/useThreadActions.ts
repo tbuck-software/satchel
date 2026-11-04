@@ -11,6 +11,7 @@ import {
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { useThreadsStore } from '@/stores/threads';
 import { useTopicsStore } from '@/stores/topics';
+import { useUiStore } from '@/stores/ui';
 import { useToast } from '@/composables/useToast';
 import { useWorkflow } from '@/composables/useWorkflow';
 import { createThreadActionQueue } from './threadActionQueue';
@@ -64,6 +65,7 @@ export function useThreadActions() {
   const threads = useThreadsStore();
   const mailboxes = useMailboxesStore();
   const topics = useTopicsStore();
+  const ui = useUiStore();
   const workflow = useWorkflow();
   const toast = useToast();
 
@@ -92,6 +94,10 @@ export function useThreadActions() {
     // Flush projection watchers before restoring selection. Revealing a bucket
     // can clear selection too, so the list gets its turn before we reselect.
     await nextTick();
+    // A tap on the phone's Undo in the list has no keyboard to hand focus to:
+    // a focus ring and a selection on the restored row only left the list
+    // looking unlike it did before. The row back in place is the receipt.
+    if (ui.isMobile && route?.name !== 'thread') return;
     await focusListThread(first);
     threads.selectThread(first);
     threads.selectedThreadIds = ids.length > 1 ? ids : [];
