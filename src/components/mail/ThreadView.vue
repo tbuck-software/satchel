@@ -1099,7 +1099,8 @@ function showEntireThread() {
              pill whose text is the only thing that answers a tap. -->
         <div v-if="hiddenMessageCount > 0 && ui.isMobile" class="thread-earlier">
           <ListRowButton class="thread-earlier-row" @click="showEntireThread">
-            <AppIcon size="sm"><path d="m4 10 4-4 4 4" /></AppIcon>
+            <!-- Unfold, not a caret: an up caret read as "collapse". -->
+            <AppIcon size="sm"><path d="M5 6l3-3 3 3M5 10l3 3 3-3" /></AppIcon>
             {{ $t('thread.view.showEarlier', { count: hiddenMessageCount }) }}
           </ListRowButton>
         </div>
