@@ -6,6 +6,7 @@ import {
   backendListThreads,
 } from '@/services/backend';
 import { useThreadsStore } from './threads';
+import { useAccountsStore } from './accounts';
 
 vi.mock('@/services/backend', () => ({
   backendCommandsAvailable: vi.fn(() => true),
@@ -75,6 +76,22 @@ describe('smart inbox bucket rows', () => {
         .filter((entry) => entry.kind === 'thread')
         .map((entry) => entry.thread.id),
     ).toEqual(['netcup']);
+  });
+
+  it('renews the bucket summary when the active account settles after the first load', async () => {
+    const threads = useThreadsStore();
+    const accounts = useAccountsStore();
+    listThreads.mockResolvedValue(
+      { threads: [machineRow()], next_cursor: null, has_more: false } as never,
+    );
+    listSummary.mockResolvedValue({ total_count: 1, buckets: [] } as never);
+
+    await threads.load();
+    expect(listSummary).toHaveBeenLastCalledWith(null);
+
+    accounts.accounts = [{ id: 'acc', displayName: 'Work', email: 'w@example.test', provider: 'imap', kind: 'email', color: '#000' }] as never;
+    accounts.setActiveAccount('acc');
+    await vi.waitFor(() => expect(listSummary).toHaveBeenLastCalledWith('acc'));
   });
 
   it('keeps a bucket row the server summary confirms', async () => {
