@@ -39,7 +39,7 @@ import { useAccountsStore } from '@/stores/accounts';
 import { isOwnEmail, participantDisplayName } from '@/utils/mailIdentity';
 import { isKnownInviteBoilerplate } from '@/utils/inviteText';
 import { detectSenderSpoofing } from '@/utils/senderSpoofing';
-import { formatMessageTimestamp } from '@/utils/listTime';
+import { formatMessageHeaderTime, formatMessageTimestamp } from '@/utils/listTime';
 import { isSmimeSignatureAttachment, isSystemAttachment } from '@/utils/messageAttachments';
 import { summarizeAuthentication } from '@/utils/messageAuthentication';
 import type { AnchorBox } from '@/utils/popoverPlacement';
@@ -133,6 +133,7 @@ async function retryInlineImages() {
 }
 
 const fullTimestamp = computed(() => formatMessageTimestamp(props.message.timestamp));
+const headerTime = computed(() => formatMessageHeaderTime(props.message.timestamp));
 
 /* Folded away, the avatar is a marker beside one line, not the head of a
    block of text. The indent under it stays put — see --indented below. */
@@ -385,7 +386,7 @@ function openSenderDetails() {
     @click="openFoldedFromClick"
   >
     <!-- Header -->
-    <div class="message-header flex items-start justify-between">
+    <div class="message-header flex items-start justify-between gap-3">
       <div class="message-sender-group flex min-w-0 items-center gap-3.5">
         <CardButton
           v-if="props.canReply && !ui.isMobile && senderAccountId"
@@ -410,7 +411,7 @@ function openSenderDetails() {
               variant="link"
               size="sm"
             >
-              {{ senderName }}
+              <span class="sender-name-text">{{ senderName }}</span>
             </AppButton>
             <span v-if="props.collapsed && collapsedSnippet" class="message-collapsed-snippet">
               {{ collapsedSnippet }}
@@ -498,7 +499,7 @@ function openSenderDetails() {
           </IconButton>
         </div>
         <div class="text-right">
-          <div class="text-xs text-secondary font-medium">{{ fullTimestamp }}</div>
+          <time class="block text-xs text-secondary font-medium" :datetime="props.message.timestamp" :title="fullTimestamp">{{ headerTime }}</time>
         </div>
         <IconButton
           v-if="!ui.isMobile"
@@ -833,7 +834,16 @@ function openSenderDetails() {
   font-size: var(--font-size-sm);
 }
 
-.sender-identity-trigger { min-width: 0; }
+/* A long sender name gives way before the date does: the kit's buttons
+   never shrink, so this one is allowed to, and its text ends in an ellipsis. */
+.sender-identity-trigger { min-width: 0; flex-shrink: 1; max-width: 100%; }
+
+.sender-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .message-address-line {
   display: flex;
