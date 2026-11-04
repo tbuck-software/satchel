@@ -15,8 +15,9 @@ import MailboxTree from './MailboxTree.vue';
  * sections and favourite folders, smart folders, feeds and sources.
  *
  * The desktop sidebar renders it in its scroll area; the phone shows the same
- * rows in the mailbox switcher sheet. `navigate` fires on every pick so the
- * sheet can close, and `openFoldersPanel` asks the host for the folder browser.
+ * rows in the mailbox switcher sheet. `navigate` fires on every view pick so
+ * the sheet can close — an account is a scope and leaves it open — and
+ * `openFoldersPanel` asks the host for the folder browser.
  */
 const emit = defineEmits<{
   navigate: [];
@@ -54,7 +55,7 @@ function openSmartFolder(query: string) {
 </script>
 
 <template>
-  <SidebarAccounts @navigate="emit('navigate')" />
+  <SidebarAccounts />
   <nav class="px-3">
     <MailboxTree @open-folders-panel="emit('openFoldersPanel')" @navigate="emit('navigate')" />
     <PluginSlotHost slot-name="sidebar_section" />
@@ -84,7 +85,7 @@ function openSmartFolder(query: string) {
   <!-- Feeds and other non-mail sources -->
   <nav v-if="sourceAccounts.length" class="grid gap-1 px-2 py-3 border-t border-border-muted">
     <span class="text-2xs font-bold uppercase tracking-[0.08em] text-tertiary px-2">{{ $t('nav.feedsAndSources') }}</span>
-    <NavItem v-for="source in sourceAccounts" :key="source.id" :label="source.displayName" :active="accounts.activeAccountId===source.id" @click="openSource(source.id)">
+    <NavItem v-for="source in sourceAccounts" :key="source.id" :label="source.displayName" :class="{'nav-item--scope':accounts.activeAccountId===source.id}" :aria-current="accounts.activeAccountId===source.id||undefined" @click="openSource(source.id)">
       <template #icon><span class="source-orb" :style="{background:source.color}" /></template>
     </NavItem>
   </nav>

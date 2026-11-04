@@ -13,6 +13,9 @@ const FolderBrowserPanel = defineAsyncComponent(() => import('./FolderBrowserPan
  * The rows are the desktop sidebar's own (`SidebarMailNav`), so a list added
  * there arrives here too. "All folders" swaps the sheet's content for the
  * folder browser rather than stacking a second surface on the first.
+ *
+ * A view row closes the sheet; an account row does not. The account is the
+ * list's scope, and the list behind the sheet switches while it stays open.
  */
 const ui = useUiStore();
 const foldersOpen = ref(false);
@@ -64,14 +67,5 @@ watch(() => ui.mailboxSwitcherOpen, (open) => {
 .mailbox-sheet :deep(.nav-item--active:hover) {
   background: var(--bg-active);
   box-shadow: none;
-}
-
-/* SidebarAccounts cuts its avatar stack out of the surface behind it. */
-.mailbox-sheet :deep(.sidebar-accounts) {
-  --avatar-ring: var(--bg-surface);
-}
-
-.mailbox-sheet :deep(.sidebar-accounts .nav-item--active) {
-  --avatar-ring: var(--bg-active);
 }
 </style>
