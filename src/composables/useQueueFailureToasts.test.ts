@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useQueueFailureToasts } from './useQueueFailureToasts';
 import { useToast } from './useToast';
 import { useOutboxStore } from '@/stores/outbox';
+import { useUiStore } from '@/stores/ui';
 import type { BackendOutboxItem } from '@/types/outbox';
 
 const push = vi.fn();
@@ -70,5 +71,20 @@ it('stays quiet on the Outbox and does not announce those failures later', async
   outbox.items = outbox.items.map((item) => ({ ...item }));
   await nextTick();
   expect(toast.state.toasts).toHaveLength(0);
+  wrapper.unmount();
+});
+
+/** On the phone the banner shows standing failures; only new ones get a toast. */
+it('leaves failures that stood before the first load to the phone banner', async () => {
+  useUiStore().isMobile = true;
+  const outbox = useOutboxStore();
+  const wrapper = mount(Host);
+  outbox.items = [failed('send'), failed('move', 'remote_mutation')];
+  outbox.loadedOnce = true;
+  await nextTick();
+  expect(toast.state.toasts).toHaveLength(0);
+  outbox.items = [...outbox.items, failed('late', 'remote_mutation')];
+  await nextTick();
+  expect(toast.state.toasts).toHaveLength(1);
   wrapper.unmount();
 });
