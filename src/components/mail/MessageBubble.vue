@@ -235,7 +235,7 @@ const visibleAttachments = computed(() => {
  */
 const surfaceClasses = computed(() => {
   return ui.isMobile
-    ? ['message-surface--phone border-b border-border-muted pt-3 pb-4']
+    ? ['message-surface--phone pt-3 pb-4']
     : ['message-surface--indented border-b border-border-muted py-5 last:border-b-0'];
 });
 
@@ -854,6 +854,18 @@ function openSenderDetails() {
    thread reader the inset is unset and both rules come to nothing. */
 .message-surface--phone {
   margin-inline: calc(var(--reader-inline-inset, 0px) * -1);
+  position: relative;
+}
+
+/* The message spans the screen so a designed mail can; the line between
+   messages keeps the reader's inset, as it had before. */
+.message-surface--phone::after {
+  content: '';
+  position: absolute;
+  inset-inline: var(--reader-inline-inset, 0px);
+  bottom: 0;
+  border-bottom: 1px solid var(--border-color-muted);
+  pointer-events: none;
 }
 
 .message-surface--phone > * {
