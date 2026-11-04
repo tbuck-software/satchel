@@ -109,4 +109,46 @@ describe('certificate trust', () => {
     await Promise.resolve();
     expect(ui.drawerAttention).toBe(false);
   });
+
+  // Seven days later the same certificate may be rejected again; trusting it
+  // once must not have hidden it for good.
+  it('hides a trusted notice only until the next run reports', async () => {
+    const connection = useConnectionStore();
+    const trust = useCertificateTrustStore();
+    connection.reportSyncFailures([failure('acc-work')]);
+    trust.dismiss('acc-work');
+
+    await trust.trust('acc-work');
+    expect(trust.visibleProblems).toEqual([]);
+    expect(window.localStorage.getItem('satchel.certificateNotices.dismissed.v1')).toBe('[]');
+
+    connection.reportSyncFailures([]);
+    connection.reportSyncFailures([failure('acc-work')]);
+    expect(trust.visibleProblems.map((problem) => problem.accountId)).toEqual(['acc-work']);
+  });
+
+  it('shows the notice again once an exception is ended', async () => {
+    const connection = useConnectionStore();
+    const trust = useCertificateTrustStore();
+    connection.reportSyncFailures([failure('acc-work')]);
+    await trust.trust('acc-work');
+    connection.reportSyncFailures([]);
+
+    connection.reportSyncFailures([failure('acc-work')]);
+    trust.dismiss('acc-work');
+    await trust.revoke('acc-work', 'gwimap.example.test');
+    connection.reportSyncFailures([failure('acc-work')]);
+
+    expect(trust.visibleProblems.map((problem) => problem.accountId)).toEqual(['acc-work']);
+  });
+
+  it('leaves a rejection outside an account envelope to the ordinary failures', () => {
+    const connection = useConnectionStore();
+    const trust = useCertificateTrustStore();
+    const bare = JSON.parse(failure('acc-work')).params.message as string;
+
+    connection.reportSyncFailures([bare]);
+
+    expect(trust.problems).toEqual([]);
+  });
 });

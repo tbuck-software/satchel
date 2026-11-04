@@ -922,7 +922,7 @@ impl ImapProvider {
 
         crate::utils::network::enable_mail_keepalive(&tcp_stream)
             .map_err(|error| format!("imap keepalive setup failed: {error}"))?;
-        let tls = TlsConnector::from(Arc::new(mail_tls_client_config()?));
+        let tls = TlsConnector::from(Arc::new(mail_tls_client_config(&cfg.username)?));
         let server_name = rustls_pki_types::ServerName::try_from(cfg.host.clone())
             .map_err(|err| format!("invalid IMAP TLS server name: {err}"))?;
         let client = if cfg.port == 143 {
@@ -2490,6 +2490,7 @@ fn login_error_text(err: &async_imap::error::Error) -> String {
 }
 
 /// TLS settings shared by every mail transport (IMAP here, POP3 next door).
+/// `login` is the account's sign-in name, which scopes certificate exceptions.
 ///
 /// The crypto provider is named explicitly rather than left to `rustls`'
 /// process-wide default: several dependencies install one, and whichever
@@ -2501,7 +2502,7 @@ fn login_error_text(err: &async_imap::error::Error) -> String {
 /// user and an MDM profile install CAs, and mail servers behind a corporate
 /// proxy depend on exactly that. Both are wrapped in `MailCertVerifier`, which
 /// adds nothing but the record of a rejection and the one pinned exception.
-pub fn mail_tls_client_config() -> Result<rustls::ClientConfig, String> {
+pub fn mail_tls_client_config(login: &str) -> Result<rustls::ClientConfig, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -2524,7 +2525,7 @@ pub fn mail_tls_client_config() -> Result<rustls::ClientConfig, String> {
 
     // Records why a certificate was rejected and applies the expired-
     // certificate exceptions a person granted; see `tls_trust`.
-    let verifier = Arc::new(super::tls_trust::MailCertVerifier::new(platform));
+    let verifier = Arc::new(super::tls_trust::MailCertVerifier::new(platform, login));
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
         .map_err(|err| format!("failed to configure mail TLS protocol versions: {err}"))?

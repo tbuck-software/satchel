@@ -23,7 +23,7 @@ import { useAccountsStore } from '@/stores/accounts';
 import { useConnectionStore } from '@/stores/connection';
 import { backendErrorLabel, backendErrorSourceLabel } from '@/utils/backendErrorLabels';
 import { describeSyncFailure } from '@/utils/syncFailures';
-import { certificateRejection } from '@/utils/certificateRejection';
+import { accountCertificateRejection } from '@/utils/certificateRejection';
 import { certificateDetail, certificateShort, certificateTitle } from '@/utils/certificateLabels';
 import { useCertificateTrustStore } from '@/stores/certificateTrust';
 import { useUiStore } from '@/stores/ui';
@@ -54,7 +54,7 @@ const isSync = computed(() => connection.backendErrorSource === 'sync');
 const syncFailures = computed(() => (
   isSync.value
     ? connection.syncFailures
-      .filter((failure) => !certificateRejection(failure))
+      .filter((failure) => !accountCertificateRejection(failure))
       .map((failure) => describeSyncFailure(failure, passwordAccounts.value))
     : []
 ));

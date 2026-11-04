@@ -10,9 +10,8 @@ import {
 import { certificateNoticePersistence } from '@/persistence/certificateNotices';
 import { useConnectionStore } from '@/stores/connection';
 import { useUiStore } from '@/stores/ui';
-import { backendErrorKey, backendErrorStringParam } from '@/utils/backendErrors';
 import {
-  certificateRejection,
+  accountCertificateRejection,
   rejectionSignature,
   type CertificateRejection,
 } from '@/utils/certificateRejection';
@@ -31,11 +30,17 @@ export interface CertificateProblem {
  * again its problem is gone, whatever an older stored error says. "Hide" is
  * remembered per certificate, so the same expired certificate does not come
  * back on the next run or the next launch, and a different one does.
+ *
+ * Trusting a certificate hides its notice only until the next run reports:
+ * success clears it anyway, and when the exception later runs out or is
+ * ended, the same certificate has to be able to show up again.
  */
 export const useCertificateTrustStore = defineStore('certificateTrust', () => {
   const connection = useConnectionStore();
   const exceptions = ref<BackendCertificateException[]>([]);
   const dismissed = ref<string[]>(certificateNoticePersistence.dismissed.read());
+  /** Notices waiting for the run that follows a granted exception. */
+  const awaitingRun = ref<string[]>([]);
   /** The account whose details are open, or null. */
   const detailsAccountId = ref<string | null>(null);
 
@@ -46,14 +51,14 @@ export const useCertificateTrustStore = defineStore('certificateTrust', () => {
   const problems = computed<CertificateProblem[]>(() => {
     const byAccount = new Map<string, CertificateProblem>();
     for (const failure of connection.syncFailures) {
-      if (backendErrorKey(failure) !== 'backend.errors.accountSyncFailed') continue;
-      const accountId = backendErrorStringParam(failure, 'accountId');
-      const rejection = certificateRejection(failure);
-      if (!accountId || !rejection) continue;
+      const found = accountCertificateRejection(failure);
+      if (!found) continue;
+      const { accountId, rejection } = found;
+      const key = noticeKey(accountId, rejection);
       byAccount.set(accountId, {
         accountId,
         rejection,
-        dismissed: dismissed.value.includes(noticeKey(accountId, rejection)),
+        dismissed: dismissed.value.includes(key) || awaitingRun.value.includes(key),
       });
     }
     return [...byAccount.values()];
@@ -82,6 +87,14 @@ export const useCertificateTrustStore = defineStore('certificateTrust', () => {
     certificateNoticePersistence.dismissed.write(dismissed.value);
   }
 
+  /** Drops every remembered "Hide" of an account, so its next notice shows. */
+  function forget(accountId: string) {
+    const kept = dismissed.value.filter((key) => !key.startsWith(`${accountId}|`));
+    if (kept.length === dismissed.value.length) return;
+    dismissed.value = kept;
+    certificateNoticePersistence.dismissed.write(kept);
+  }
+
   async function load() {
     if (!backendCommandsAvailable()) return;
     try {
@@ -105,7 +118,8 @@ export const useCertificateTrustStore = defineStore('certificateTrust', () => {
       host: problem.rejection.host,
       fingerprint: problem.rejection.fingerprint,
     });
-    dismiss(accountId);
+    forget(accountId);
+    awaitingRun.value = [...awaitingRun.value, noticeKey(accountId, problem.rejection)];
     exceptions.value = [
       ...exceptions.value.filter((entry) => !(entry.account_id === accountId && entry.host === exception.host)),
       exception,
@@ -116,6 +130,7 @@ export const useCertificateTrustStore = defineStore('certificateTrust', () => {
 
   async function revoke(accountId: string, host: string) {
     await backendRevokeCertificateException(accountId, host);
+    forget(accountId);
     exceptions.value = exceptions.value.filter((entry) => !(entry.account_id === accountId && entry.host === host));
     connection.requestRetry();
   }
@@ -131,6 +146,8 @@ export const useCertificateTrustStore = defineStore('certificateTrust', () => {
   // A finished run may have ended an exception (the server is valid again)
   // or let one expire; the backend settles both, this only reads the result.
   watch(() => connection.lastSyncAt, () => { void load(); });
+  // The store replaces the list on every report, so this fires once per run.
+  watch(() => connection.syncFailures, () => { awaitingRun.value = []; }, { flush: 'sync' });
   void load();
 
   const ui = useUiStore();

@@ -96,18 +96,28 @@ fn leaf(ca: &Ca, dns_name: &str, from: i64, until: i64) -> CertificateDer<'stati
     CertificateDer::from(builder.build().to_der().unwrap())
 }
 
+/// The login the test account signs in with.
+const LOGIN: &str = "me@example.test";
+
 fn verifier(ca: &Ca) -> MailCertVerifier {
+    verifier_for(ca, LOGIN)
+}
+
+fn verifier_for(ca: &Ca, login: &str) -> MailCertVerifier {
+    MailCertVerifier::new(webpki(ca), login)
+}
+
+fn webpki(ca: &Ca) -> Arc<dyn ServerCertVerifier> {
     let mut roots = rustls::RootCertStore::empty();
     roots
         .add(CertificateDer::from(ca.certificate.to_der().unwrap()))
         .unwrap();
-    let inner = rustls::client::WebPkiServerVerifier::builder_with_provider(
+    rustls::client::WebPkiServerVerifier::builder_with_provider(
         Arc::new(roots),
         Arc::new(rustls::crypto::ring::default_provider()),
     )
     .build()
-    .unwrap();
-    MailCertVerifier::new(inner)
+    .unwrap()
 }
 
 fn verify(
@@ -209,6 +219,7 @@ async fn a_granted_exception_accepts_exactly_that_certificate() {
         &pool,
         "acc-pinned",
         host,
+        LOGIN,
         &fingerprint(certificate.as_ref()),
     )
     .await
@@ -234,13 +245,13 @@ async fn a_grant_needs_the_certificate_that_was_confirmed() {
     let pool = pool_with_account("acc-confirm").await;
 
     assert_eq!(
-        grant(&pool, "acc-confirm", host, "00").await,
+        grant(&pool, "acc-confirm", host, LOGIN, "00").await,
         Err(GrantError::NoRejection)
     );
     let certificate = leaf(&ca, host, now() - 365 * DAY, now() - DAY);
     verify(&verifier(&ca), &certificate, host).expect_err("expired");
     assert_eq!(
-        grant(&pool, "acc-confirm", host, "00").await,
+        grant(&pool, "acc-confirm", host, LOGIN, "00").await,
         Err(GrantError::CertificateChanged)
     );
 
@@ -252,13 +263,36 @@ async fn a_grant_needs_the_certificate_that_was_confirmed() {
     );
     verify(&verifier(&ca), &other, host).expect_err("expired and misnamed");
     assert_eq!(
-        grant(&pool, "acc-confirm", host, &fingerprint(other.as_ref())).await,
+        grant(
+            &pool,
+            "acc-confirm",
+            host,
+            LOGIN,
+            &fingerprint(other.as_ref())
+        )
+        .await,
         Err(GrantError::NotAllowed)
     );
 }
 
+/// Moves an exception's creation and last use into the past, as if it had
+/// been granted long ago and its certificate not been needed since.
+async fn age_exception(pool: &SqlitePool, host: &str, hours: i64) {
+    let then = timestamp(Utc::now() - chrono::Duration::hours(hours));
+    sqlx::query(
+        "UPDATE tls_certificate_exceptions SET created_at = ?, last_used_at = ? WHERE host = ?",
+    )
+    .bind(&then)
+    .bind(&then)
+    .bind(host)
+    .execute(pool)
+    .await
+    .unwrap();
+    refresh(pool).await.unwrap();
+}
+
 #[tokio::test]
-async fn a_valid_certificate_ends_the_exception_for_its_host() {
+async fn a_valid_certificate_ends_an_exception_that_is_no_longer_needed() {
     let _turn = SERIAL.lock().await;
     let ca = ca();
     let host = "renewed.example.test";
@@ -266,9 +300,16 @@ async fn a_valid_certificate_ends_the_exception_for_its_host() {
     let verifier = verifier(&ca);
     let expired = leaf(&ca, host, now() - 365 * DAY, now() - DAY);
     verify(&verifier, &expired, host).expect_err("expired");
-    grant(&pool, "acc-renewed", host, &fingerprint(expired.as_ref()))
-        .await
-        .unwrap();
+    grant(
+        &pool,
+        "acc-renewed",
+        host,
+        LOGIN,
+        &fingerprint(expired.as_ref()),
+    )
+    .await
+    .unwrap();
+    age_exception(&pool, host, QUIET_HOURS + 1).await;
 
     let renewed = leaf(&ca, host, now() - DAY, now() + 365 * DAY);
     verify(&verifier, &renewed, host).expect("valid");
@@ -287,6 +328,216 @@ async fn a_valid_certificate_ends_the_exception_for_its_host() {
     assert!(last_rejection(host).is_none());
 }
 
+// One node behind a load balancer is renewed, another still serves the
+// expired certificate. Meeting the renewed one must not take the exception
+// away from the connections that still land on the old one.
+#[tokio::test]
+async fn an_exception_survives_a_renewed_node_while_the_old_one_still_answers() {
+    let _turn = SERIAL.lock().await;
+    let ca = ca();
+    let host = "balanced.example.test";
+    let pool = pool_with_account("acc-balanced").await;
+    let verifier = verifier(&ca);
+    let stale_node = leaf(&ca, host, now() - 365 * DAY, now() - DAY);
+    let renewed_node = leaf(&ca, host, now() - DAY, now() + 365 * DAY);
+    verify(&verifier, &stale_node, host).expect_err("expired");
+    grant(
+        &pool,
+        "acc-balanced",
+        host,
+        LOGIN,
+        &fingerprint(stale_node.as_ref()),
+    )
+    .await
+    .unwrap();
+    age_exception(&pool, host, QUIET_HOURS + 1).await;
+
+    verify(&verifier, &stale_node, host).expect("pinned node, under the exception");
+    verify(&verifier, &renewed_node, host).expect("renewed node");
+    assert!(settle(&pool).await.unwrap().is_empty());
+
+    verify(&verifier, &stale_node, host).expect("the old node still works");
+    let stored = TlsExceptionRepository::new(&pool).list().await.unwrap();
+    assert_eq!(stored.len(), 1);
+    assert!(stored[0].last_used_at.is_some());
+}
+
+#[tokio::test]
+async fn an_exception_covers_only_the_account_that_granted_it() {
+    let _turn = SERIAL.lock().await;
+    let ca = ca();
+    let host = "shared.example.test";
+    let pool = pool_with_account("acc-mine").await;
+    let certificate = leaf(&ca, host, now() - 365 * DAY, now() - DAY);
+    verify(&verifier(&ca), &certificate, host).expect_err("expired");
+    grant(
+        &pool,
+        "acc-mine",
+        host,
+        LOGIN,
+        &fingerprint(certificate.as_ref()),
+    )
+    .await
+    .unwrap();
+
+    verify(&verifier_for(&ca, "ME@EXAMPLE.TEST"), &certificate, host).expect("same login");
+    verify(
+        &verifier_for(&ca, "colleague@example.test"),
+        &certificate,
+        host,
+    )
+    .expect_err("another account on the same server");
+}
+
+#[tokio::test]
+async fn hosts_are_matched_without_regard_to_case() {
+    let _turn = SERIAL.lock().await;
+    let ca = ca();
+    let host = "case.example.test";
+    let pool = pool_with_account("acc-case").await;
+    let certificate = leaf(&ca, host, now() - 365 * DAY, now() - DAY);
+    verify(&verifier(&ca), &certificate, "CASE.example.test").expect_err("expired");
+    assert!(last_rejection("Case.Example.Test").is_some());
+    grant(
+        &pool,
+        "acc-case",
+        "Case.Example.Test",
+        LOGIN,
+        &fingerprint(certificate.as_ref()),
+    )
+    .await
+    .unwrap();
+
+    verify(&verifier(&ca), &certificate, host).expect("same host, other spelling");
+}
+
+#[tokio::test]
+async fn an_exception_past_its_end_is_refused_before_any_refresh() {
+    let _turn = SERIAL.lock().await;
+    let ca = ca();
+    let host = "lapsed.example.test";
+    let certificate = leaf(&ca, host, now() - 365 * DAY, now() - DAY);
+    state().exceptions.push(CertificateException {
+        account_id: "acc-lapsed".into(),
+        host: host.into(),
+        login: LOGIN.into(),
+        fingerprint: fingerprint(certificate.as_ref()),
+        expires_at: Utc::now() - chrono::Duration::minutes(1),
+        created_at: Utc::now() - chrono::Duration::days(EXCEPTION_DAYS),
+        last_used_at: None,
+    });
+
+    let refused = verify(&verifier(&ca), &certificate, host);
+    state()
+        .exceptions
+        .retain(|exception| exception.host != host);
+
+    refused.expect_err("expired exception");
+}
+
+#[tokio::test]
+async fn a_certificate_that_is_not_valid_yet_is_named_and_never_excepted() {
+    let _turn = SERIAL.lock().await;
+    let ca = ca();
+    let host = "early.example.test";
+    let certificate = leaf(&ca, host, now() + DAY, now() + 365 * DAY);
+
+    verify(&verifier(&ca), &certificate, host).expect_err("not valid yet");
+
+    let rejection = last_rejection(host).expect("recorded");
+    assert_eq!(rejection.reason, RejectionReason::NotYetValid);
+    assert!(!rejection.exception_allowed);
+}
+
+#[tokio::test]
+async fn an_expired_certificate_from_an_unknown_issuer_may_not_be_excepted() {
+    let _turn = SERIAL.lock().await;
+    let trusted = ca();
+    let stranger = named_ca("Somebody Else's Root");
+    let host = "stranger-expired.example.test";
+    let certificate = leaf(&stranger, host, now() - 365 * DAY, now() - DAY);
+
+    verify(&verifier(&trusted), &certificate, host).expect_err("untrusted and expired");
+
+    assert!(!last_rejection(host).expect("recorded").exception_allowed);
+}
+
+/// Apple's platform verifier: any expiry comes back as an untyped error.
+#[derive(Debug)]
+struct UntypedExpiry(Arc<dyn ServerCertVerifier>);
+
+impl ServerCertVerifier for UntypedExpiry {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        server_name: &ServerName<'_>,
+        ocsp_response: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        self.0
+            .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+            .map_err(|error| match error {
+                rustls::Error::InvalidCertificate(
+                    CertificateError::Expired
+                    | CertificateError::ExpiredContext { .. }
+                    | CertificateError::NotValidYet
+                    | CertificateError::NotValidYetContext { .. },
+                ) => rustls::Error::InvalidCertificate(CertificateError::Other(
+                    rustls::OtherError(Arc::new(std::io::Error::other("errSecCertificateExpired"))),
+                )),
+                other => other,
+            })
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.0.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        self.0.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.0.supported_verify_schemes()
+    }
+}
+
+#[tokio::test]
+async fn an_untyped_platform_error_is_read_from_the_certificate_dates() {
+    let _turn = SERIAL.lock().await;
+    let ca = ca();
+    let apple = MailCertVerifier::new(Arc::new(UntypedExpiry(webpki(&ca))), LOGIN);
+    let expired_host = "apple-expired.example.test";
+    let early_host = "apple-early.example.test";
+    let expired = leaf(&ca, expired_host, now() - 365 * DAY, now() - DAY);
+    let early = leaf(&ca, early_host, now() + DAY, now() + 365 * DAY);
+
+    verify(&apple, &expired, expired_host).expect_err("expired");
+    verify(&apple, &early, early_host).expect_err("not valid yet");
+
+    let expired = last_rejection(expired_host).expect("recorded");
+    assert_eq!(expired.reason, RejectionReason::Expired);
+    assert!(
+        expired.exception_allowed,
+        "chain and name verify inside the window"
+    );
+    assert_eq!(
+        last_rejection(early_host).expect("recorded").reason,
+        RejectionReason::NotYetValid
+    );
+}
+
 #[tokio::test]
 async fn refresh_drops_exceptions_that_ran_out() {
     let _turn = SERIAL.lock().await;
@@ -295,9 +546,11 @@ async fn refresh_drops_exceptions_that_ran_out() {
         .upsert(&TlsExceptionRecord {
             account_id: "acc-old".into(),
             host: "old.example.test".into(),
+            login: LOGIN.into(),
             fingerprint: "AA".into(),
             expires_at: timestamp(Utc::now() - chrono::Duration::minutes(1)),
             created_at: timestamp(Utc::now() - chrono::Duration::days(EXCEPTION_DAYS)),
+            last_used_at: None,
         })
         .await
         .unwrap();

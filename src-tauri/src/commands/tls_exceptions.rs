@@ -88,16 +88,31 @@ pub async fn trust_expired_certificate(
     input: TrustExpiredCertificateInput,
 ) -> CommandResult<CertificateExceptionDto> {
     let pool = pool.inner();
-    match tls_trust::grant(pool, &input.account_id, &input.host, &input.fingerprint).await {
+    // Host and login come from the account itself; the UI only names the
+    // certificate it showed. An exception for a server the account does not
+    // use would never apply, and one for another account's login must not.
+    let connection = account_connection(pool, &input.account_id)
+        .await
+        .ok_or_else(|| CommandError::new("backend.errors.tlsExceptionNotAllowed"))?;
+    if !same_host(&connection.host, &input.host) {
+        return Err(CommandError::new("backend.errors.tlsExceptionNotAllowed"));
+    }
+    let grant = || {
+        tls_trust::grant(
+            pool,
+            &input.account_id,
+            &connection.host,
+            &connection.login,
+            &input.fingerprint,
+        )
+    };
+    match grant().await {
         // The rejection lives in memory. After a restart the person may confirm
         // what the stored error showed before a sync has met the server again;
         // one connection attempt puts the rejection back on record.
         Err(GrantError::NoRejection) => {
-            probe_account(pool, &input.account_id).await;
-            tls_trust::grant(pool, &input.account_id, &input.host, &input.fingerprint)
-                .await
-                .map(Into::into)
-                .map_err(Into::into)
+            probe(&connection).await;
+            grant().await.map(Into::into).map_err(Into::into)
         }
         result => result.map(Into::into).map_err(Into::into),
     }
@@ -114,30 +129,67 @@ pub async fn revoke_certificate_exception(
         .map_err(persistence_failed)
 }
 
-/// Opens one connection for the account so its certificate is checked again.
-/// Only the side effect matters; the outcome is read from `tls_trust`.
-async fn probe_account(pool: &SqlitePool, account_id: &str) {
-    let account = sqlx::query_as::<_, (String, String, String)>(
+/// What a mail account connects to, read from its own configuration.
+struct AccountConnection {
+    account_id: String,
+    host: String,
+    login: String,
+    provider: std::sync::Arc<dyn satchel_core::providers::traits::MailProvider>,
+}
+
+async fn account_connection(pool: &SqlitePool, account_id: &str) -> Option<AccountConnection> {
+    let (kind, email, encrypted_config) = sqlx::query_as::<_, (String, String, String)>(
         "SELECT provider, email, config FROM accounts
          WHERE id = ? AND provider IN ('imap', 'pop3') AND is_active = 1",
     )
     .bind(account_id)
     .fetch_optional(pool)
-    .await;
-    let Ok(Some((provider_kind, email, encrypted_config))) = account else {
-        return;
+    .await
+    .ok()??;
+    let config =
+        crate::commands::accounts::decrypt_account_config(account_id, &encrypted_config).ok()?;
+    let (host, login) = if kind == "pop3" {
+        let cfg = satchel_core::providers::pop3::Pop3Provider::from_account_config(
+            config.as_str(),
+            &email,
+        )
+        .ok()?
+        .config?;
+        (cfg.host, cfg.username)
+    } else {
+        let cfg = satchel_core::providers::imap::ImapProvider::from_account_config(
+            config.as_str(),
+            &email,
+        )
+        .ok()?
+        .config?;
+        (cfg.host, cfg.username)
     };
-    let Ok(config) =
-        crate::commands::accounts::decrypt_account_config(account_id, &encrypted_config)
-    else {
-        return;
-    };
-    let Ok(provider) =
-        crate::providers::provider_for_account(&provider_kind, &config, &email, None)
-    else {
-        return;
-    };
-    if let Err(error) = provider.sync_folders().await {
-        tracing::debug!(account_id, error = %error, "certificate probe connection failed");
+    let provider = crate::providers::provider_for_account(&kind, &config, &email, None).ok()?;
+    Some(AccountConnection {
+        account_id: account_id.to_string(),
+        host,
+        login,
+        provider,
+    })
+}
+
+fn same_host(left: &str, right: &str) -> bool {
+    left.trim_end_matches('.')
+        .eq_ignore_ascii_case(right.trim_end_matches('.'))
+}
+
+/// How long the dialog waits for the check connection before giving up.
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Opens one connection for the account so its certificate is checked again.
+/// Only the side effect matters; the outcome is read from `tls_trust`.
+async fn probe(connection: &AccountConnection) {
+    match tokio::time::timeout(PROBE_TIMEOUT, connection.provider.sync_folders()).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => tracing::debug!(account_id = %connection.account_id, error = %error,
+            "certificate probe connection failed"),
+        Err(_) => tracing::debug!(account_id = %connection.account_id,
+            "certificate probe connection timed out"),
     }
 }

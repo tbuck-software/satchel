@@ -8,12 +8,16 @@
 //! - A rejection is recorded per host, so the handshake error can name the
 //!   reason, the certificate and its dates instead of a rustls error chain.
 //! - An expired certificate passes only when an exception pins its exact
-//!   SHA-256 fingerprint for that host, and only when the chain and the host
-//!   name verify at a moment inside the certificate's validity window. A wrong
-//!   name, an unknown issuer or a certificate that is not yet valid always
-//!   fails.
-//! - Once the host presents a valid certificate again, its exceptions end
-//!   ([`settle`]). They also end on their expiry date or when revoked.
+//!   SHA-256 fingerprint for that host and that login (the account that
+//!   granted it), and only when the chain and the host name verify at a
+//!   moment inside the certificate's validity window. A wrong name, an
+//!   unknown issuer or a certificate that is not yet valid always fails.
+//! - Once the host presents a valid certificate again and the pinned one has
+//!   not been needed for [`QUIET_HOURS`] hours, its exceptions end
+//!   ([`settle`]). Behind a load balancer one node can be renewed while
+//!   another still serves the expired certificate; ending at the first valid
+//!   handshake would take the exception away while it is still needed. They
+//!   also end on their expiry date or when revoked.
 //!
 //! Exceptions live in `tls_certificate_exceptions` and are mirrored into
 //! process memory, because a verifier runs synchronously inside the handshake.
@@ -34,6 +38,10 @@ use crate::db::tls_exceptions::{TlsExceptionRecord, TlsExceptionRepository};
 
 /// How long an exception lasts at most.
 pub const EXCEPTION_DAYS: i64 = 7;
+
+/// How long a host has to do without its pinned certificate, while presenting
+/// valid ones, before the exception ends early.
+pub const QUIET_HOURS: i64 = 24;
 
 /// The key a rejected certificate travels under, inside the account's sync error.
 pub const REJECTION_KEY: &str = "backend.errors.tlsCertificateRejected";
@@ -98,9 +106,13 @@ pub struct CertificateRejection {
 pub struct CertificateException {
     pub account_id: String,
     pub host: String,
+    /// The login of the account that granted it; only its connections may use it.
+    pub login: String,
     pub fingerprint: String,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+    /// When the pinned certificate was last accepted, as last persisted.
+    pub last_used_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Default)]
@@ -109,6 +121,8 @@ struct TrustState {
     rejections: HashMap<String, CertificateRejection>,
     /// Hosts with an exception that presented a valid certificate since the last [`settle`].
     valid_again: HashSet<String>,
+    /// Hosts whose pinned certificate was accepted since the last [`settle`], and when.
+    used_since_settle: HashMap<String, DateTime<Utc>>,
     /// When an exception was last reported as used, per host, to keep the log readable.
     last_use_logged: HashMap<String, DateTime<Utc>>,
 }
@@ -209,17 +223,44 @@ pub async fn refresh(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-/// Ends the exceptions of every host that presented a valid certificate since
-/// the last call. Returns the exceptions it removed.
+/// Records when pinned certificates were used, then ends the exceptions of
+/// hosts that presented a valid certificate since the last call and have not
+/// needed the pinned one for [`QUIET_HOURS`] hours. Returns the ones it ended.
 pub async fn settle(pool: &SqlitePool) -> Result<Vec<CertificateException>, sqlx::Error> {
-    let hosts: Vec<String> = state().valid_again.drain().collect();
-    if hosts.is_empty() {
+    let (used, hosts) = {
+        let mut state = state();
+        let used: Vec<(String, DateTime<Utc>)> = state.used_since_settle.drain().collect();
+        let hosts: Vec<String> = state.valid_again.drain().collect();
+        (used, hosts)
+    };
+    if used.is_empty() && hosts.is_empty() {
         return Ok(Vec::new());
     }
+    let result = settle_rows(pool, &used, &hosts).await;
+    if result.is_err() {
+        // Nothing is lost on a database hiccup: the next run tries again.
+        let mut state = state();
+        for (host, at) in used {
+            state.used_since_settle.entry(host).or_insert(at);
+        }
+        state.valid_again.extend(hosts);
+    }
+    result
+}
+
+async fn settle_rows(
+    pool: &SqlitePool,
+    used: &[(String, DateTime<Utc>)],
+    hosts: &[String],
+) -> Result<Vec<CertificateException>, sqlx::Error> {
     let repository = TlsExceptionRepository::new(pool);
+    for (host, at) in used {
+        repository.mark_used(host, &timestamp(*at)).await?;
+    }
+    let quiet_since = timestamp(Utc::now() - chrono::Duration::hours(QUIET_HOURS));
     let mut ended = Vec::new();
     for host in hosts {
-        for record in repository.delete_host(&host).await? {
+        for record in repository.delete_quiet_host(host, &quiet_since).await? {
             tracing::info!(account_id = %record.account_id, host = %record.host,
                 "server presents a valid certificate again, certificate exception ended");
             if let Some(exception) = exception_from_record(&record) {
@@ -242,13 +283,15 @@ pub enum GrantError {
     Persistence(String),
 }
 
-/// Accepts the expired certificate the host presented last, for this account,
-/// for [`EXCEPTION_DAYS`] days. `fingerprint` is the one the person confirmed;
-/// it has to be the one on record.
+/// Accepts the expired certificate the host presented last, for this account
+/// (identified on the wire by its `login`), for [`EXCEPTION_DAYS`] days.
+/// `fingerprint` is the one the person confirmed; it has to be the one on
+/// record. The caller checks that `host` and `login` are the account's own.
 pub async fn grant(
     pool: &SqlitePool,
     account_id: &str,
     host: &str,
+    login: &str,
     fingerprint: &str,
 ) -> Result<CertificateException, GrantError> {
     let rejection = last_rejection(host).ok_or(GrantError::NoRejection)?;
@@ -262,9 +305,11 @@ pub async fn grant(
     let record = TlsExceptionRecord {
         account_id: account_id.to_string(),
         host: host_key(host),
+        login: login.to_string(),
         fingerprint: rejection.fingerprint.clone(),
         expires_at: timestamp(now + chrono::Duration::days(EXCEPTION_DAYS)),
         created_at: timestamp(now),
+        last_used_at: None,
     };
     let repository = TlsExceptionRepository::new(pool);
     repository
@@ -301,16 +346,19 @@ fn exception_from_record(record: &TlsExceptionRecord) -> Option<CertificateExcep
     Some(CertificateException {
         account_id: record.account_id.clone(),
         host: host_key(&record.host),
+        login: record.login.clone(),
         fingerprint: record.fingerprint.clone(),
         expires_at: parse(&record.expires_at)?,
         created_at: parse(&record.created_at)?,
+        last_used_at: record.last_used_at.as_deref().and_then(parse),
     })
 }
 
-/// Whether an exception in force pins this certificate for this host.
-fn exception_covers(host: &str, fingerprint: &str, now: DateTime<Utc>) -> bool {
+/// Whether an exception in force pins this certificate for this host and login.
+fn exception_covers(host: &str, login: &str, fingerprint: &str, now: DateTime<Utc>) -> bool {
     state().exceptions.iter().any(|exception| {
         exception.host == host
+            && exception.login.eq_ignore_ascii_case(login)
             && exception.fingerprint.eq_ignore_ascii_case(fingerprint)
             && exception.expires_at > now
     })
@@ -330,6 +378,7 @@ fn note_valid_certificate(host: &str) {
 
 fn note_exception_used(host: &str, now: DateTime<Utc>) {
     let mut state = state();
+    state.used_since_settle.insert(host.to_string(), now);
     let due = state
         .last_use_logged
         .get(host)
@@ -412,11 +461,17 @@ impl CertificateFacts {
 #[derive(Debug)]
 pub struct MailCertVerifier {
     inner: Arc<dyn ServerCertVerifier>,
+    /// The login this connection signs in with: an exception only covers the
+    /// account that granted it, not every account on the same server.
+    login: String,
 }
 
 impl MailCertVerifier {
-    pub fn new(inner: Arc<dyn ServerCertVerifier>) -> Self {
-        Self { inner }
+    pub fn new(inner: Arc<dyn ServerCertVerifier>, login: impl Into<String>) -> Self {
+        Self {
+            inner,
+            login: login.into(),
+        }
     }
 
     /// Whether the chain and the name verify at a moment the certificate was
@@ -498,7 +553,7 @@ impl ServerCertVerifier for MailCertVerifier {
                 facts.not_after,
             );
         let wall_clock = DateTime::<Utc>::from_timestamp(checked_at, 0).unwrap_or_else(Utc::now);
-        if exception_allowed && exception_covers(&host, &fingerprint, wall_clock) {
+        if exception_allowed && exception_covers(&host, &self.login, &fingerprint, wall_clock) {
             note_exception_used(&host, wall_clock);
             return Ok(ServerCertVerified::assertion());
         }

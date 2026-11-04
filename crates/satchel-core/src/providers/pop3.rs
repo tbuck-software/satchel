@@ -266,7 +266,7 @@ impl Pop3Provider {
             .map_err(|error| format!("pop3 keepalive setup failed: {error}"))?;
 
         let mut session = if cfg.tls {
-            let connector = TlsConnector::from(Arc::new(mail_tls_client_config()?));
+            let connector = TlsConnector::from(Arc::new(mail_tls_client_config(&cfg.username)?));
             let server_name = rustls_pki_types::ServerName::try_from(cfg.host.clone())
                 .map_err(|err| format!("invalid POP3 TLS server name: {err}"))?;
             let stream = timeout(Self::op_timeout(), connector.connect(server_name, tcp))

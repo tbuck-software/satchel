@@ -98,6 +98,17 @@ export function certificateRejection(raw: string | null | undefined): Certificat
   return embedded(raw);
 }
 
+/**
+ * The account and rejection behind one `accountSyncFailed` entry of a sync
+ * run. Only these become notices; anything else stays an ordinary failure.
+ */
+export function accountCertificateRejection(raw: string): { accountId: string; rejection: CertificateRejection } | null {
+  if (backendErrorKey(raw) !== 'backend.errors.accountSyncFailed') return null;
+  const accountId = backendErrorStringParam(raw, 'accountId');
+  const rejection = certificateRejection(raw);
+  return accountId && rejection ? { accountId, rejection } : null;
+}
+
 /** Two rejections are the same notice when the reason and the certificate match. */
 export function rejectionSignature(rejection: CertificateRejection): string {
   return `${rejection.host}|${rejection.reason}|${rejection.fingerprint}`;
