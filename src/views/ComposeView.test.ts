@@ -613,7 +613,7 @@ describe('composer send failure', () => {
     await send(wrapper);
 
     // The status line closes with the window; the toast outlives it.
-    expect(harness.toastSuccess).toHaveBeenCalledWith('Mail sent.');
+    expect(harness.toastSuccess).toHaveBeenCalledWith('Mail sent.', {});
   });
 });
 

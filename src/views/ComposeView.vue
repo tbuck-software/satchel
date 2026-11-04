@@ -54,7 +54,7 @@ import { useComposerTransport } from '@/composables/useComposerTransport';
 import { useComposerCaretFollow } from '@/composables/useComposerCaretFollow';
 import { useUiStore } from '@/stores/ui';
 import { useConfirm } from '@/composables/useConfirm';
-import { useToast } from '@/composables/useToast';
+import { useToast, type ToastAction } from '@/composables/useToast';
 import { useToastClearance } from '@/composables/useToastClearance';
 import { outboxErrorLabel, queuedDraftNeedsOutbox } from '@/utils/outboxLabels';
 import { backendErrorStringParam, translateBackendError } from '@/utils/backendErrors';
@@ -991,11 +991,12 @@ watch(subject, (value) => {
  * composer that line was the only sign a mail went out. Repeat the outcome as
  * a toast, which outlives the window. A page or pop-out keeps its own line.
  */
-function announceAfterClose(tone: 'success' | 'info' | 'warning', text: string) {
+function announceAfterClose(tone: 'success' | 'info' | 'warning', text: string, action?: ToastAction) {
   if (!props.embedded) return;
-  if (tone === 'success') toast.success(text);
-  else if (tone === 'warning') toast.warning(text);
-  else toast.info(text);
+  const options = action ? { action } : {};
+  if (tone === 'success') toast.success(text, options);
+  else if (tone === 'warning') toast.warning(text, options);
+  else toast.info(text, options);
 }
 
 async function send() {
@@ -1079,7 +1080,11 @@ async function send() {
       status.value = { tone: 'info', text: t(offline.value ? 'compose.status.queuedOffline' : 'compose.status.queued') };
       // With an undo window the native `outbox:undo-window` event raises the
       // Undo toast; a second toast would only repeat it.
-      if (!result.undo_until) announceAfterClose('info', status.value.text);
+      // Offline, the toast says where the mail waits and goes there.
+      const toOutbox = offline.value
+        ? { label: t('nav.folders.outbox'), handler: () => router.push({ name: 'outbox' }) }
+        : undefined;
+      if (!result.undo_until) announceAfterClose('info', status.value.text, toOutbox);
       emit('sent');
       await leaveAfterSend(result, { name: 'inbox' });
     }

@@ -45,7 +45,7 @@
         "sentLocalSaveFailed": "The message was sent, but Satchel could not save its local Sent record. Details are in the outbox.",
         "scheduledFor": "Scheduled for {time}.",
         "queued": "Queued in the outbox in the background.",
-        "queuedOffline": "You're offline. The message is in the Outbox and will be sent when you're back online.",
+        "queuedOffline": "Offline: in the Outbox until you're back online.",
         "offline": "You're offline. Send puts the message in the Outbox; it goes out when you're back online.",
         "sendFailed": "Sending failed: {error}",
         "technical": "Technical details"
@@ -417,7 +417,7 @@
         "sentLocalSaveFailed": "Die Nachricht wurde gesendet, aber Satchel konnte den lokalen Gesendet-Eintrag nicht speichern. Details stehen im Postausgang.",
         "scheduledFor": "Eingeplant für {time}.",
         "queued": "Im Hintergrund in den Postausgang eingereiht.",
-        "queuedOffline": "Du bist offline. Die Nachricht liegt im Postausgang und wird gesendet, sobald du wieder online bist.",
+        "queuedOffline": "Offline: wartet im Postausgang, bis du wieder online bist.",
         "offline": "Du bist offline. Senden legt die Nachricht in den Postausgang; sie geht raus, sobald du wieder online bist.",
         "sendFailed": "Senden fehlgeschlagen: {error}",
         "technical": "Technische Details"

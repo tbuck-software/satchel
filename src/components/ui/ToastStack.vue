@@ -506,7 +506,29 @@ function showPreviousCompactUndo() {
 
   .toast__action,
   .toast__queue {
+    position: relative;
     height: 36px;
+  }
+
+  /* The thumb's 44px without a taller toast: the target reaches into the
+     toast's own padding above and below. */
+  .toast__action::after,
+  .toast__queue::after {
+    content: '';
+    position: absolute;
+    inset: calc((36px - var(--touch-target)) / 2) 0;
+  }
+
+  /* Beside the compose FAB (ComposeFab, a child of the shell), the feedback
+     takes the lane left of it, as the undo receipt does: one band at the
+     FAB's height instead of a card across the list's last rows. A receipt in
+     the lane lifts the stack above it. */
+  :global(.shell:has(> .fab) .stack) {
+    left: calc(20px + var(--satchel-safe-area-left));
+    right: calc(20px + 56px + var(--space-md) + var(--satchel-safe-area-right));
+    bottom: calc(
+      20px + var(--satchel-tab-bar-inset, 0px) + var(--satchel-safe-area-bottom) + var(--toast-clearance, 0px)
+    );
   }
 }
 

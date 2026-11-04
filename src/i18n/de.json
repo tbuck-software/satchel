@@ -938,7 +938,7 @@
       "draftSavedRemotePending": "Entwurf gespeichert. Abgleich mit dem Server steht aus: {error}",
       "offline": "Du bist offline. Senden legt die Nachricht in den Postausgang; sie geht raus, sobald du wieder online bist.",
       "queued": "Im Hintergrund in den Postausgang eingereiht.",
-      "queuedOffline": "Du bist offline. Die Nachricht liegt im Postausgang und wird gesendet, sobald du wieder online bist.",
+      "queuedOffline": "Offline: wartet im Postausgang, bis du wieder online bist.",
       "saveFailed": "Speichern fehlgeschlagen: {error}",
       "scheduledFor": "Eingeplant für {time}.",
       "sendFailed": "Senden fehlgeschlagen: {error}",
@@ -3077,7 +3077,7 @@
     },
     "theme": {
       "appearance": "Erscheinungsbild",
-      "appearanceHint": "Zwischen dunkler und heller Darstellung wechseln.",
+      "appearanceHint": "Hell, dunkel oder wie das System eingestellt ist.",
       "attachmentOpen": "Anhänge öffnen mit",
       "attachmentOpenAria": "Standardaktion für Anhänge",
       "attachmentOpenHint": "Die Leertaste öffnet unabhängig davon immer die Schnellansicht.",
@@ -3097,6 +3097,7 @@
       "plainTextReadHint": "HTML wird nicht gerendert. Pro Nachricht jederzeit umschaltbar.",
       "singleKeyShortcuts": "Einzeltasten-Shortcuts",
       "singleKeyShortcutsHint": "Mit einzelnen Tasten durch Mails navigieren und Aktionen ausführen, ohne Cmd, Strg oder Alt zu drücken.",
+      "system": "System",
       "title": "Allgemein",
       "vim": "Vim-Navigation",
       "vimHint": "Mit j/k navigieren und Nachrichten per Tastatur bearbeiten."
