@@ -30,6 +30,7 @@ const harness = vi.hoisted(() => ({
   composePlainText: true,
   realEditor: false,
   draftSetup: vi.fn<(options: ComposerDraftPersistenceOptions) => void>(),
+  signatures: [] as Array<{ id: string; name: string }>,
 }));
 
 vi.mock('vue-router', () => ({
@@ -136,8 +137,8 @@ vi.mock('@/composables/useComposerInlineAttachments', () => ({
 vi.mock('@/composables/useComposerSignature', () => ({
   useComposerSignature: () => ({
     load: vi.fn().mockResolvedValue(undefined),
-    availableSignatures: ref([]),
-    selectedSignatureId: ref<string | null>(null),
+    availableSignatures: ref(harness.signatures),
+    selectedSignatureId: ref<string | null>(harness.signatures[0]?.id ?? null),
     signatureVariant: ref('full'),
     signaturePreviewLoading: ref(false),
     signatureOverrideText: ref<string | null>(null),
@@ -223,6 +224,7 @@ beforeEach(() => {
   harness.loadAttachmentsForMessages.mockResolvedValue(undefined);
   harness.composePlainText = true;
   harness.realEditor = false;
+  harness.signatures = [];
 });
 
 describe('composer fields and actions', () => {
@@ -946,6 +948,16 @@ describe('phone composer', () => {
     },
   });
 
+  const openSignatureMenu = vi.fn();
+  const ComposerSignatureStub = defineComponent({
+    name: 'ComposerSignature',
+    props: { inline: Boolean },
+    setup(props, { expose }) {
+      expose({ openMenu: openSignatureMenu });
+      return () => h('composer-signature-stub', { 'data-inline': String(props.inline) });
+    },
+  });
+
   function renderPhone(props: Partial<InstanceType<typeof ComposeView>['$props']> = {}) {
     const pinia = createPinia();
     setActivePinia(pinia);
@@ -957,7 +969,7 @@ describe('phone composer', () => {
         plugins: [pinia],
         stubs: {
           AttachmentDropZone: true,
-          ComposerSignature: true,
+          ComposerSignature: ComposerSignatureStub,
           ComposerThreadContext: true,
           RecipientChips: RecipientChipsStub,
           RichTextEditor: true,
@@ -1018,6 +1030,25 @@ describe('phone composer', () => {
 
     expect(wrapper.find('[data-testid="compose-fold-summary"]').exists()).toBe(false);
     expect(wrapper.get('[data-testid="compose-fold"]').attributes('inert')).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('writes the signature inline and chooses it from the ⋯ menu', async () => {
+    harness.signatures = [{ id: 'sig-default', name: 'Default' }];
+    const wrapper = renderPhone();
+    await flushPromises();
+
+    expect(wrapper.get('composer-signature-stub').attributes('data-inline')).toBe('true');
+    const more = wrapper.get('details.more-settings');
+    (more.element as HTMLDetailsElement).open = true;
+    const choice = wrapper.get('[data-testid="compose-signature-choice"]');
+    expect(choice.text()).toBe('Default');
+    expect(more.get('.advanced-panel').element.firstElementChild!.contains(choice.element)).toBe(true);
+
+    await choice.trigger('click');
+
+    expect(openSignatureMenu).toHaveBeenCalledTimes(1);
+    expect((more.element as HTMLDetailsElement).open).toBe(false);
     wrapper.unmount();
   });
 

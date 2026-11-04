@@ -175,6 +175,8 @@ const priority = ref<'high' | 'normal' | 'low'>('normal');
  */
 const plainTextCompose = ref(settings.composePlainText);
 const richEditorRef = ref<InstanceType<typeof RichTextEditor> | null>(null);
+const signatureRef = ref<InstanceType<typeof ComposerSignature> | null>(null);
+const moreSettingsRef = ref<HTMLDetailsElement | null>(null);
 const historyEditorRef = ref<InstanceType<typeof RichTextEditor> | null>(null);
 /**
  * Finding the quote parses the whole body, so it is looked for once typing
@@ -1199,6 +1201,17 @@ const advancedActive = computed(
     || cryptoMethod.value !== 'none',
 );
 
+/** The phone's signature has no header; its switcher opens from the ⋯ menu. */
+const signatureName = computed(() =>
+  availableSignatures.value.find((signature) => signature.id === selectedSignatureId.value)?.name
+    ?? t('compose.signature.none'),
+);
+
+function openSignatureMenu() {
+  if (moreSettingsRef.value) moreSettingsRef.value.open = false;
+  signatureRef.value?.openMenu();
+}
+
 const priorityOptions = computed(() => [
   { value: 'high', label: t('compose.priority.high') },
   { value: 'normal', label: t('compose.priority.normal') },
@@ -1405,6 +1418,8 @@ defineExpose({
       />
       <ComposerSignature
         v-if="supportsBackend && availableSignatures.length > 0"
+        ref="signatureRef"
+        :inline="isPhone"
         :signatures="availableSignatures"
         :selected-id="selectedSignatureId"
         :variant="signatureVariant"
@@ -1500,11 +1515,26 @@ defineExpose({
         <IconButton size="lg" v-if="supportsBackend" :title="$t('compose.toolbar.template')" :aria-label="$t('compose.toolbar.template')" @click="showTemplatePicker = true">
           <AppIcon size="lg"><path d="M3 1.5h7l3 3v10H3z"/><path d="M10 1.5v3h3M5.5 8h5M5.5 11h4"/></AppIcon>
         </IconButton>
-        <details class="more-settings">
+        <details ref="moreSettingsRef" class="more-settings">
           <summary class="more-summary" :title="$t('compose.toolbar.more')" :aria-label="$t('compose.toolbar.more')">
             <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon><span v-if="advancedActive" class="tool-dot" aria-hidden="true" />
           </summary>
           <div class="advanced-panel">
+            <div v-if="isPhone && supportsBackend && availableSignatures.length > 0" class="panel-row">
+              <span class="panel-label">{{ $t('compose.signature.title') }}</span>
+              <AppButton
+                variant="ghost"
+                class="panel-signature"
+                aria-haspopup="menu"
+                :disabled="sending"
+                :title="$t('compose.signature.switch')"
+                data-testid="compose-signature-choice"
+                @click="openSignatureMenu"
+              >
+                <span class="panel-signature-name">{{ signatureName }}</span>
+                <AppIcon size="sm"><path d="m4 6 4 4 4-4" /></AppIcon>
+              </AppButton>
+            </div>
             <div class="panel-row">
               <span class="panel-label">{{ $t('compose.options.priority') }}</span>
               <SegmentedControl
@@ -2152,6 +2182,19 @@ textarea:focus {
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
   line-height: 1.45;
+}
+
+.panel-signature {
+  justify-self: start;
+  max-width: 100%;
+  min-height: 44px;
+  padding-inline: 0;
+}
+
+.panel-signature-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .panel-sep {

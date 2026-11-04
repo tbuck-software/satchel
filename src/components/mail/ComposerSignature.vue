@@ -13,6 +13,10 @@ import { placePopoverAgainstAnchor, type PopoverPlacement } from '@/utils/popove
  * a visible, separate area of the message. The header carries a switcher
  * popover (which signature, which variant), the content itself is editable —
  * edits apply to this message only and are reported upward as an override.
+ *
+ * `inline` (the phone) drops the header: the signature is plain text under
+ * the message, as in Apple Mail, and the composer's ⋯ menu opens the switcher
+ * through `openMenu()`, as a sheet.
  */
 const props = defineProps<{
   signatures: BackendSignature[];
@@ -26,6 +30,7 @@ const props = defineProps<{
   overrideActive: boolean;
   plainText: boolean;
   disabled: boolean;
+  inline?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -74,6 +79,20 @@ function positionMenu() {
     height: window.innerHeight,
   });
 }
+
+/** Opens the switcher from outside the block (the phone's ⋯ menu). */
+function openMenu() {
+  if (props.disabled) return;
+  positionMenu();
+  menuOpen.value = true;
+}
+
+function reset() {
+  menuOpen.value = false;
+  emit('reset');
+}
+
+defineExpose({ openMenu });
 
 function toggleMenu() {
   // Place before opening, so the menu never paints at an unpositioned spot.
@@ -167,8 +186,8 @@ useDismissable(
 </script>
 
 <template>
-  <div ref="rootRef" class="sig-block" data-composer-signature>
-    <div class="sig-head">
+  <div ref="rootRef" :class="['sig-block', { 'sig-block--inline': inline }]" data-composer-signature>
+    <div v-if="!inline" class="sig-head">
       <span class="sig-title">{{ $t('compose.signature.title') }}</span>
       <template v-if="overrideActive">
         <span class="sig-edited" :title="$t('compose.signature.customizedTitle')">{{ $t('compose.signature.customized') }}</span>
@@ -208,50 +227,55 @@ useDismissable(
           aria-hidden="true"
         ><path d="m3.5 4.5 2.5 2.5 2.5-2.5" /></svg>
       </AppButton>
-
-      <Teleport to="body">
-        <div
-          v-if="menuOpen"
-          ref="menuRef"
-          class="sig-menu"
-          :class="{ 'sig-menu--sheet': ui.isSinglePane }"
-          :style="ui.isSinglePane ? undefined : menuStyle"
-          role="menu"
-          :aria-label="$t('compose.signature.switch')"
-        >
-          <MenuItem
-            selection="radio"
-            :label="$t('compose.signature.none')"
-            :checked="selectedId === null"
-            @select="choose(null)"
-          />
-          <MenuItem
-            selection="radio"
-            v-for="signature in signatures"
-            :key="signature.id"
-            :label="signature.name"
-            :checked="signature.id === selectedId"
-            @select="choose(signature.id)"
-          />
-          <template v-if="selectedId">
-            <div class="sig-menu-sep" role="separator" />
-            <div class="sig-menu-label">{{ $t('compose.signature.variant') }}</div>
-            <MenuItem
-            selection="radio"
-              v-for="option in variantOptions"
-              :key="option.value"
-              :label="option.label"
-              :checked="variant === option.value"
-              @select="chooseVariant(option.value)"
-          />
-          </template>
-        </div>
-      </Teleport>
     </div>
 
-    <p v-if="loading" class="sig-loading" aria-live="polite">{{ $t('compose.signature.loading') }}</p>
-    <p v-else-if="!selectedId" class="sig-none">{{ $t('compose.signature.willSendWithout') }}</p>
-    <template v-else>
+    <Teleport to="body">
+      <div
+        v-if="menuOpen"
+        ref="menuRef"
+        class="sig-menu"
+        :class="{ 'sig-menu--sheet': ui.isSinglePane }"
+        :style="ui.isSinglePane ? undefined : menuStyle"
+        role="menu"
+        :aria-label="$t('compose.signature.switch')"
+      >
+        <MenuItem
+          selection="radio"
+          :label="$t('compose.signature.none')"
+          :checked="selectedId === null"
+          @select="choose(null)"
+        />
+        <MenuItem
+          selection="radio"
+          v-for="signature in signatures"
+          :key="signature.id"
+          :label="signature.name"
+          :checked="signature.id === selectedId"
+          @select="choose(signature.id)"
+        />
+        <template v-if="selectedId">
+          <div class="sig-menu-sep" role="separator" />
+          <div class="sig-menu-label">{{ $t('compose.signature.variant') }}</div>
+          <MenuItem
+          selection="radio"
+            v-for="option in variantOptions"
+            :key="option.value"
+            :label="option.label"
+            :checked="variant === option.value"
+            @select="chooseVariant(option.value)"
+        />
+        </template>
+        <!-- Inline, the block has no header to carry Reset; the sheet does. -->
+        <template v-if="inline && overrideActive">
+          <div class="sig-menu-sep" role="separator" />
+          <MenuItem :label="$t('compose.signature.resetTitle')" @select="reset" />
+        </template>
+      </div>
+    </Teleport>
+
+    <p v-if="loading && !inline" class="sig-loading" aria-live="polite">{{ $t('compose.signature.loading') }}</p>
+    <p v-else-if="!selectedId && !inline" class="sig-none">{{ $t('compose.signature.willSendWithout') }}</p>
+    <template v-else-if="selectedId">
       <textarea
         v-if="plainText"
         class="sig-text-edit"
@@ -286,6 +310,23 @@ useDismissable(
   padding-top: 8px;
   border-top: 1px dashed var(--border-color-muted);
   cursor: default;
+}
+
+.sig-block--inline {
+  margin: var(--space-lg) 0 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* Text under the message, at the message's size: the signature reads as its
+   last lines rather than as a form field. */
+.sig-block--inline .sig-html-edit,
+.sig-block--inline .sig-text-edit {
+  font-size: var(--font-size-lg);
+}
+
+.sig-block--inline .sig-text-edit {
+  padding-inline: 0;
 }
 
 .sig-head {
