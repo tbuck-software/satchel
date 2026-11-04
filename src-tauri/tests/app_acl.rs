@@ -338,3 +338,40 @@ fn narrow_windows_have_only_the_resolved_commands_they_need() {
         }
     }
 }
+
+/// On macOS and iOS Tauri replaces `window.print` with an invoke of
+/// `plugin:webview|print` (`tauri::webview::plugin`, `scripts/print.js`), which
+/// `core:default` does not grant. Without it, Print shows only an ACL error on
+/// exactly the platforms where it is swapped, and works everywhere else.
+#[test]
+fn main_window_may_print_where_tauri_routes_print_through_the_acl() {
+    use std::collections::BTreeMap;
+    use tauri::utils::{
+        acl::{capability::Capability, manifest::Manifest, resolved::Resolved},
+        platform::Target,
+    };
+    let manifests: BTreeMap<String, Manifest> =
+        serde_json::from_str(&read("gen/schemas/acl-manifests.json")).unwrap();
+    let capabilities: BTreeMap<String, Capability> =
+        std::fs::read_dir(crate_root().join("capabilities"))
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                let capability: Capability =
+                    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+                (capability.identifier.clone(), capability)
+            })
+            .collect();
+    for target in [Target::MacOS, Target::Ios] {
+        let resolved = Resolved::resolve(&manifests, capabilities.clone(), target).unwrap();
+        let granted = resolved
+            .allowed_commands
+            .get("plugin:webview|print")
+            .is_some_and(|grants| {
+                grants
+                    .iter()
+                    .any(|grant| grant.windows.iter().any(|pattern| pattern.matches("main")))
+            });
+        assert!(granted, "main window cannot print on {target}");
+    }
+}
