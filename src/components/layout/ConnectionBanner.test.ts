@@ -265,16 +265,52 @@ describe('ConnectionBanner', () => {
       expect(wrapper.get('.banner__title').text()).toBe('Mail sync failed');
     });
 
-    it('puts a dot on the drawer handle while an account cannot sync, and takes it away after', async () => {
+    it('puts a dot on the drawer handle for an outage, not for a hiccup', async () => {
       const connection = useConnectionStore();
       const ui = useUiStore();
       connection.reportSyncFailures([syncFailure('acc-work', 'tom@example.test', 'offline', hoursAgo(0.1))]);
       const wrapper = mount(ConnectionBanner);
+      expect(ui.drawerAttention).toBe(false);
+
+      connection.reportSyncFailures([syncFailure('acc-work', 'tom@example.test', 'offline', hoursAgo(2))]);
+      await wrapper.vm.$nextTick();
       expect(ui.drawerAttention).toBe(true);
 
       connection.reportSyncFailures([]);
       await wrapper.vm.$nextTick();
       expect(ui.drawerAttention).toBe(false);
+    });
+
+    // A blocked folder reports a bare entry of its own before the account's.
+    it('still names the account when a blocked folder reports alongside it', () => {
+      const blocked = JSON.stringify({
+        key: 'backend.errors.folderIngestBlocked',
+        params: { account: 'tom@example.test', folders: 'INBOX', count: 3 },
+      });
+      useConnectionStore().reportSyncFailures([
+        blocked,
+        syncFailure('acc-work', 'tom@example.test', blocked, hoursAgo(48)),
+      ]);
+      const wrapper = mount(ConnectionBanner);
+
+      expect(wrapper.get('.banner__title').text()).toMatch(/^Work has not synced since /);
+    });
+
+    it('turns the headline at the hour without a new report', async () => {
+      vi.useFakeTimers();
+      try {
+        useConnectionStore().reportSyncFailures([
+          syncFailure('acc-work', 'tom@example.test', 'offline', new Date(Date.now() - 59 * 60_000).toISOString()),
+        ]);
+        const wrapper = mount(ConnectionBanner);
+        expect(wrapper.get('.banner__title').text()).toBe('Mail sync failed');
+
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+
+        expect(wrapper.get('.banner__title').text()).toMatch(/^Work has not synced since /);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

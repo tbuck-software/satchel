@@ -16,13 +16,12 @@
  * Hidden stays hidden for that certificate; the account keeps its marker in
  * the sidebar, and a different certificate is a new notice.
  */
-import { computed, defineAsyncComponent, watchEffect } from 'vue';
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watchEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { useAccountsStore } from '@/stores/accounts';
 import { useConnectionStore } from '@/stores/connection';
 import { backendErrorLabel, backendErrorSourceLabel } from '@/utils/backendErrorLabels';
-import { backendErrorKey } from '@/utils/backendErrors';
 import { describeSyncFailure, isOutage } from '@/utils/syncFailures';
 import { formatMoment } from '@/utils/listTime';
 import { accountCertificateRejection } from '@/utils/certificateRejection';
@@ -83,10 +82,19 @@ const rejected = computed(() => {
  * hiccup: the headline names it and says since when. The October outage ran
  * for two days and was noticed only because no mail arrived.
  */
+// Sync reports arrive every few seconds while it polls, but not during a
+// backoff; the clock makes the headline turn at the hour regardless.
+const now = ref(Date.now());
+const clock = setInterval(() => { now.value = Date.now(); }, 60_000);
+onBeforeUnmount(() => clearInterval(clock));
+
+/** Failures that belong to an account. A blocked folder also reports a bare entry of its own. */
+const accountFailures = computed(() => syncFailures.value.filter((failure) => failure.accountId));
+
 const outage = computed(() => {
-  const accountIds = new Set(syncFailures.value.map((failure) => failure.accountId));
-  const [first] = syncFailures.value;
-  if (accountIds.size !== 1 || !first?.accountId || !isOutage(first)) return null;
+  const accountIds = new Set(accountFailures.value.map((failure) => failure.accountId));
+  const [first] = accountFailures.value;
+  if (accountIds.size !== 1 || !first?.accountId || !isOutage(first, now.value)) return null;
   const account = accounts.accounts.find((entry) => entry.id === first.accountId);
   return {
     accountId: first.accountId,
@@ -99,12 +107,17 @@ const title = computed(() => (outage.value
   ? t('errors.banner.accountOutage', { account: outage.value.account, since: outage.value.since })
   : backendErrorSourceLabel(connection.backendErrorSource)));
 
-// The drawer handle on a phone: a dot while any account cannot sync, so the
-// marker behind the closed drawer is not the only sign. Owned here because
-// this banner is always mounted and already knows both kinds of failure.
+// The drawer handle on a phone: a dot while a certificate is rejected or an
+// account has been failing for an hour, so the marker behind the closed
+// drawer is not the only sign. A failure a minute old gets no dot: the handle
+// would flicker with every hiccup. Owned here because this banner is always
+// mounted and already knows both kinds of failure.
 watchEffect(() => {
-  ui.drawerAttention = certificates.needsAttention || connection.syncFailures.some((failure) =>
-    backendErrorKey(failure) === 'backend.errors.accountSyncFailed');
+  ui.drawerAttention = certificates.needsAttention || connection.syncFailures.some((raw) => {
+    if (accountCertificateRejection(raw)) return false;
+    const failure = describeSyncFailure(raw, passwordAccounts.value);
+    return failure.accountId !== null && isOutage(failure, now.value);
+  });
 });
 const detail = computed(() => (
   syncFailures.value.length > 0
