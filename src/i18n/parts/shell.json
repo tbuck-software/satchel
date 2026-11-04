@@ -256,7 +256,6 @@
       "unpinContactNamed": "Unpin {name}",
       "mailboxes": {
         "title": "Mailboxes",
-        "switch": "Switch mailbox",
         "current": "{mailbox}, switch mailbox"
       }
     },
@@ -697,7 +696,6 @@
       "unpinContactNamed": "{name} loslösen",
       "mailboxes": {
         "title": "Postfächer",
-        "switch": "Postfach wechseln",
         "current": "{mailbox}, Postfach wechseln"
       }
     },

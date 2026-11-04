@@ -95,7 +95,7 @@ test('the phone list searches and filters above itself', async ({ page }) => {
   await filter.click();
   const menu = page.getByRole('menu', { name: 'Filter and view' });
   await menu.getByRole('menuitemcheckbox', { name: 'All accounts' }).click();
-  await expect(page.locator('.pane-header')).toContainText('All accounts');
+  await expect(page.locator('.list-pane')).toContainText('All accounts');
 
   const field = page.getByRole('searchbox', { name: 'Search this list' });
   await field.fill('Google');

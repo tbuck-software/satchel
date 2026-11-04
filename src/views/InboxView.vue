@@ -31,6 +31,7 @@ import AppButton from '@/components/ui/AppButton.vue';
 import CountBadge from '@/components/ui/CountBadge.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
+import LargeTitleHeader from '@/components/ui/LargeTitleHeader.vue';
 import FilterPill from '@/components/ui/FilterPill.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import PaneResizeHandle from '@/components/ui/PaneResizeHandle.vue';
@@ -412,15 +413,6 @@ const listScope = computed(() => {
 });
 
 // ── List search: the field above the list narrows it in place ──
-/**
- * The Inbox on a phone: the search field is the app bar, mailbox switcher and
- * filter at its ends, as in Gmail. Other lists keep their title, which is
- * the only thing telling you where you are.
- */
-const searchAppBar = computed(() => ui.isMobile
-  && threads.mailboxFilter.kind === 'section'
-  && threads.mailboxFilter.value === 'inbox'
-  && !threads.activeContact);
 const searchActive = computed(() => listSearch.active && !activeBundle.value);
 const searchMailbox = computed(() => ({
   accountId: accounts.activeAccountId,
@@ -897,9 +889,23 @@ function acceptExistingSenders() {
       </template>
 
       <template v-else>
+      <!-- Phone: an iOS large title. The list's name is the mailbox switcher,
+           the filter sits beside it; a running search takes the screen. -->
+      <LargeTitleHeader
+        v-if="!activeBundle && ui.isMobile"
+        v-show="!searchActive"
+        class="inbox-large-title"
+        :title="listTitle"
+        :subtitle="listScope"
+        :switch-label="$t('nav.mailboxes.current', { mailbox: listTitle })"
+        @switch="ui.openMailboxSwitcher()"
+      >
+        <template #actions>
+          <ListFilterMenu :show-layout="!folderViewActive" />
+        </template>
+      </LargeTitleHeader>
       <PaneHeader
-        v-if="!activeBundle"
-        v-show="!searchAppBar && !(ui.isMobile && searchActive)"
+        v-else-if="!activeBundle"
         class="inbox-header"
         :title="listTitle"
         :subtitle="listScope"
@@ -945,13 +951,8 @@ function acceptExistingSenders() {
         </template>
       </PaneHeader>
 
-      <ListSearchBar v-if="!activeBundle" :mailbox-label="listTitle" :class="{ 'inbox-search--app-bar': searchAppBar || (ui.isMobile && searchActive) }">
-        <template v-if="ui.isMobile" #leading>
-          <IconButton :title="$t('nav.mailboxes.switch')" @click="ui.openMailboxSwitcher()">
-            <AppIcon size="lg"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" /></AppIcon>
-          </IconButton>
-        </template>
-        <ListFilterMenu :show-layout="!folderViewActive" />
+      <ListSearchBar v-if="!activeBundle" :mailbox-label="listTitle" :class="{ 'inbox-search--app-bar': ui.isMobile && searchActive }">
+        <ListFilterMenu v-if="!ui.isMobile" :show-layout="!folderViewActive" />
       </ListSearchBar>
 
       <!-- How the list is sliced. The account it is drawn from is chosen in

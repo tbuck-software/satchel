@@ -549,6 +549,20 @@ describe('InboxView', () => {
     expect(wrapper.find('.list-filter-menu__trigger').exists()).toBe(true);
   });
 
+  it('titles a phone list in large type, the name opening the mailbox switcher', async () => {
+    setup({ mobile: true, singlePane: true });
+
+    const wrapper = render();
+    const title = wrapper.get('.large-title');
+    // The filter shares the title row; the search field below has the width.
+    expect(title.find('.list-filter-menu__trigger').exists()).toBe(true);
+    expect(wrapper.get('.list-search-bar').find('.list-filter-menu__trigger').exists()).toBe(false);
+    expect(wrapper.find('.pane-header').exists()).toBe(false);
+
+    await title.get('.large-title__switch').trigger('click');
+    expect(harness.ui!.openMailboxSwitcher).toHaveBeenCalledOnce();
+  });
+
   it('offers account and layout filtering in one list filter menu', async () => {
     setup({
       accounts: [
