@@ -91,9 +91,19 @@ defineEmits<{
   color: var(--action-neutral-ink);
 }
 
+/* Touch: the pill draws 36px so a strip of them stays one quiet line; its
+   target reaches 44px above and below (clipped where a scrolling strip
+   clips it, which keeps neighbouring rows' taps their own). */
 @media (pointer: coarse) {
   .filter-pill {
+    position: relative;
     height: 36px;
+  }
+
+  .filter-pill::after {
+    content: '';
+    position: absolute;
+    inset: calc((36px - var(--touch-target)) / 2) 0;
   }
 }
 </style>

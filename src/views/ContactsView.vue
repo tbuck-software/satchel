@@ -180,7 +180,17 @@ function openContact(email: string) {
       :count="filteredCount"
     >
       <template #actions>
-        <AppButton variant="secondary" size="sm" :aria-label="t('contacts.addressBookSettings')" @click="ui.openSettings('contacts')">
+        <!-- On the phone both header actions are bare icons of the same size;
+             an outlined pill beside a bare + read as two kinds of control. -->
+        <IconButton
+          v-if="ui.isMobile"
+          :title="t('contacts.addressBookSettings')"
+          :aria-label="t('contacts.addressBookSettings')"
+          @click="ui.openSettings('contacts')"
+        >
+          <AppIcon><path d="M3 2.5h10v11H3zM5.5 5h5M5.5 8h5" /></AppIcon>
+        </IconButton>
+        <AppButton v-else variant="secondary" size="sm" :aria-label="t('contacts.addressBookSettings')" @click="ui.openSettings('contacts')">
           <template #icon><AppIcon><path d="M3 2.5h10v11H3zM5.5 5h5M5.5 8h5" /></AppIcon></template>
           <span class="contact-settings-label">{{ t('contacts.addressBookSettings') }}</span>
         </AppButton>
@@ -360,7 +370,6 @@ function openContact(email: string) {
 }
 
 @media (max-width: 700px) {
-  .contact-settings-label { display: none; }
   .contact-group .contact-row {
     grid-template-columns: var(--list-avatar-size) minmax(0, 1fr);
     row-gap: var(--space-2xs);

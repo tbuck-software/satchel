@@ -23,7 +23,7 @@ defineEmits<{
       :title="option.title"
       @click="$emit('update:modelValue', option.value)"
     >
-      {{ option.label }}
+      <span class="segmented__label">{{ option.label }}</span>
     </button>
   </div>
 </template>
@@ -73,11 +73,20 @@ defineEmits<{
   box-shadow: var(--shadow-sm);
 }
 
-/* Touch: the track's padding brings a 36px option to a thumb's 44px. */
+/* Touch: the option draws 36px and its target reaches 44px, over the track's
+   rim and a little past it, so the control keeps its size in a settings row
+   and a tap on the rim still picks the segment under it. */
 @media (pointer: coarse) {
   .segmented__option {
+    position: relative;
     height: 36px;
     padding-inline: var(--space-md);
+  }
+
+  .segmented__option::before {
+    content: '';
+    position: absolute;
+    inset: calc((36px - var(--touch-target)) / 2) calc(-0.5 * var(--space-2xs));
   }
 }
 </style>

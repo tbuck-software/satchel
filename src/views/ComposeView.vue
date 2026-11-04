@@ -1441,9 +1441,12 @@ defineExpose({
              of sitting above the subject line, far from what it removes. -->
         <div v-if="hasQuotedHistory" class="history-control" @click.stop>
           <span>{{ $t('compose.context.included') }}</span>
-          <IconButton :title="$t('compose.context.remove')" :disabled="sending" size="sm" @click="removeQuotedHistory">
-            <AppIcon size="sm"><path d="m4 4 8 8M12 4l-8 8" /></AppIcon>
-          </IconButton>
+          <!-- Named, not a bare ×: it drops the whole quote, and a lone glyph
+               beside a sentence read as closing the note. -->
+          <AppButton variant="ghost" size="sm" :title="$t('compose.context.remove')" :disabled="sending" @click="removeQuotedHistory">
+            <template #icon><AppIcon size="sm"><path d="m4 4 8 8M12 4l-8 8" /></AppIcon></template>
+            {{ $t('common.remove') }}
+          </AppButton>
         </div>
         <textarea
           v-if="plainTextCompose"
