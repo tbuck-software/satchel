@@ -6,10 +6,12 @@
       },
       "sections": {
         "groups": {
-          "app": { "title": "App" },
-          "identity": { "title": "Identity" },
-          "mail": { "title": "Mail" },
-          "advanced": { "title": "Advanced" }
+          "essentials": { "title": "Essentials" },
+          "writing": { "title": "Writing" },
+          "organising": { "title": "Organising" },
+          "privacy": { "title": "Privacy & security" },
+          "people": { "title": "Calendar & contacts" },
+          "app": { "title": "App & data" }
         },
         "general": { "label": "General", "description": "Appearance, language and behaviour" },
         "about": { "label": "About Satchel", "description": "Version, updates and licenses" },
@@ -25,7 +27,11 @@
         "aliases": { "label": "Aliases", "description": "Manage additional sender addresses" },
         "smime": { "label": "S/MIME", "description": "Certificates and encrypted email" },
         "pgp": { "label": "OpenPGP", "description": "Keys and end-to-end encryption" },
-        "sending": { "label": "Sending", "description": "Delivery, undo send and confirmations" },
+        "sending": { "label": "Sending", "description": "Undo send and confirmations" },
+        "composing": { "label": "Composing", "description": "Plain text, send delay, receipts" },
+        "senders": { "label": "Senders & images", "description": "Blocked senders and who may load images" },
+        "encryption": { "label": "Encryption", "description": "S/MIME certificates and OpenPGP keys" },
+        "storage": { "label": "Storage & backup", "description": "What is kept, export and backups" },
         "data": { "label": "Data & storage", "description": "Local data, cache and attachments" },
         "vacation": { "label": "Out of office", "description": "Automatic out-of-office replies" },
         "blocked": { "label": "Blocked senders", "description": "Manage blocked email addresses" },
@@ -64,6 +70,7 @@
           "saved": "Password for {email} updated. Mail syncs again.",
           "failed": "Password not saved: {error}"
         },
+        "actions": { "calendars": "Calendars & contacts", "renew": "Renew sign-in", "sync": "Sync now", "test": "Test connection" },
         "checkOrRenew": "Check or renew sign-in",
         "connected": "connected",
         "disconnected": "disconnected",
@@ -150,7 +157,7 @@
       },
       "aliases": {
         "title": "Sender addresses",
-        "hint": "Send mail from additional addresses that you own in your mail account (for example Gmail aliases configured under \"Send mail as\").",
+        "hint": "Other addresses you own and send from, like Gmail’s “Send mail as”.",
         "account": "Account",
         "empty": "No aliases yet.",
         "addTitle": "Add alias",
@@ -184,10 +191,19 @@
         "recentAccess": "Recent API access"
       },
       "backup": {
+        "description": "Take your mail and settings elsewhere, or keep a copy to restore.",
+        "transferTitle": "Export & import",
+        "backUpNow": "Back up now",
+        "needsPassphrase": "Set a passphrase above, or allow writing the key unprotected.",
+        "mailboxLabel": "Mailbox",
+        "platformLabel": "Settings & data",
+        "platformHint": "Accounts, signatures, templates, rules, contacts and calendar — everything but the mail.",
+        "importShort": "Import…",
+        "exportShort": "Export…",
         "hintBefore": "Exports all locally cached mail as a",
         "mboxExtension": ".mbox",
         "hintAfter": "file. Compatible with Apple Mail, Thunderbird, mutt, mu, etc.",
-        "accountLabel": "Account (empty = all)",
+        "accountLabel": "Account",
         "allAccounts": "All accounts",
         "exporting": "Exporting…",
         "exportMailbox": "Export mailbox…",
@@ -247,10 +263,11 @@
         "restore": "Restore…"
       },
       "blocked": {
+        "purpose": "Mail from these addresses or domains is archived on arrival.",
         "hintBefore": "Email address or domain pattern, for example",
         "exampleDomain": "spam.example.com",
         "hintAfter": ". Matches are archived automatically on arrival.",
-        "placeholder": "alice{'@'}example.com or spam.example.com",
+        "placeholder": "Address or domain",
         "add": "Add",
         "unblock": "Unblock",
         "empty": "No blocked senders.",
@@ -270,7 +287,11 @@
         "syncFailed": "Sync failed: {error}"
       },
       "contacts": {
-        "priorityHint": "Priority: manual, macOS Contacts, Google/Microsoft contacts, BIMI, Gravatar, favicon, initials.",
+        "priorityHint": "Your own choice comes first, then contacts, sender logos and initials.",
+        "individualTitle": "Pictures per contact",
+        "individualHint": "Set, fetch or lock the picture of each of {count} contacts.",
+        "showIndividual": "Show",
+        "hideIndividual": "Hide",
         "thirdPartyLabel": "Allow third-party contact pictures",
         "thirdPartyHint": "On import, share address hashes with Gravatar and sender domains with Google and Cloudflare for favicons and BIMI. Off by default.",
         "statsLabel": "Contact picture statistics",
@@ -455,7 +476,7 @@
       },
       "inlineImages": {
         "title": "Embedded images",
-        "description": "Logos and graphics from signatures are normally stored locally. If they are missing, Satchel fetches them from the provider every time you open the message — that costs time and fails offline.",
+        "description": "Logos in signatures are kept on this device so they show offline and load quickly.",
         "desktopOnly": "Only available in the desktop app.",
         "missingLocally": "missing locally ({size})",
         "alreadyStored": "already stored",
@@ -488,10 +509,12 @@
       },
       "sections": {
         "groups": {
-          "app": { "title": "App" },
-          "identity": { "title": "Identität" },
-          "mail": { "title": "Mail" },
-          "advanced": { "title": "Erweitert" }
+          "essentials": { "title": "Grundlagen" },
+          "writing": { "title": "Schreiben" },
+          "organising": { "title": "Ordnen" },
+          "privacy": { "title": "Privatsphäre & Sicherheit" },
+          "people": { "title": "Kalender & Kontakte" },
+          "app": { "title": "App & Daten" }
         },
         "general": { "label": "Allgemein", "description": "Darstellung, Sprache und Verhalten" },
         "about": { "label": "Über Satchel", "description": "Version, Updates und Lizenzen" },
@@ -508,6 +531,10 @@
         "smime": { "label": "S/MIME", "description": "Zertifikate und verschlüsselte E-Mails" },
         "pgp": { "label": "OpenPGP", "description": "Schlüssel und Ende-zu-Ende-Verschlüsselung" },
         "sending": { "label": "Senden", "description": "Versand, Rückruf und Bestätigungen" },
+        "composing": { "label": "Verfassen", "description": "Nur-Text, Verzögerung, Bestätigungen" },
+        "senders": { "label": "Absender & Bilder", "description": "Blockierte Absender und wer Bilder laden darf" },
+        "encryption": { "label": "Verschlüsselung", "description": "S/MIME-Zertifikate und OpenPGP-Schlüssel" },
+        "storage": { "label": "Speicher & Backup", "description": "Was aufbewahrt wird, Export und Sicherungen" },
         "data": { "label": "Daten & Speicher", "description": "Lokale Daten, Cache und Anhänge" },
         "vacation": { "label": "Abwesenheit", "description": "Automatische Abwesenheitsantworten" },
         "blocked": { "label": "Blockierte Absender", "description": "Gesperrte E-Mail-Adressen verwalten" },
@@ -546,6 +573,7 @@
           "saved": "Passwort für {email} geändert. Die Synchronisierung läuft wieder.",
           "failed": "Passwort nicht gespeichert: {error}"
         },
+        "actions": { "calendars": "Kalender & Kontakte", "renew": "Anmeldung erneuern", "sync": "Jetzt synchronisieren", "test": "Verbindung testen" },
         "checkOrRenew": "Anmeldung prüfen oder erneuern",
         "connected": "verbunden",
         "disconnected": "nicht verbunden",
@@ -632,7 +660,7 @@
       },
       "aliases": {
         "title": "Absenderadressen",
-        "hint": "Versende Mails über zusätzliche Adressen, die du in deinem Mail-Konto besitzt (z.B. Gmail-Aliasses, die unter \"Send mail as\" konfiguriert sind).",
+        "hint": "Weitere eigene Adressen zum Versenden, etwa Gmails „Senden als“.",
         "account": "Account",
         "empty": "Noch keine Aliases.",
         "addTitle": "Alias hinzufügen",
@@ -666,10 +694,19 @@
         "recentAccess": "Letzte API-Zugriffe"
       },
       "backup": {
+        "description": "Mails und Einstellungen mitnehmen oder eine Kopie zum Wiederherstellen anlegen.",
+        "transferTitle": "Export & Import",
+        "backUpNow": "Jetzt sichern",
+        "needsPassphrase": "Oben eine Passphrase setzen oder das ungeschützte Schreiben erlauben.",
+        "mailboxLabel": "Postfach",
+        "platformLabel": "Einstellungen & Daten",
+        "platformHint": "Konten, Signaturen, Vorlagen, Regeln, Kontakte und Kalender – alles außer den Mails.",
+        "importShort": "Importieren …",
+        "exportShort": "Exportieren …",
         "hintBefore": "Exportiert alle lokal gecachten Mails als",
         "mboxExtension": ".mbox",
         "hintAfter": "-Datei. Kompatibel mit Apple Mail, Thunderbird, mutt, mu, etc.",
-        "accountLabel": "Account (leer = alle)",
+        "accountLabel": "Konto",
         "allAccounts": "Alle Accounts",
         "exporting": "Exportiere…",
         "exportMailbox": "Mailbox exportieren…",
@@ -729,10 +766,11 @@
         "restore": "Wiederherstellen…"
       },
       "blocked": {
+        "purpose": "Mail von diesen Adressen oder Domains wird beim Eintreffen archiviert.",
         "hintBefore": "E-Mail-Adresse oder Domain-Pattern, zum Beispiel",
         "exampleDomain": "spam.example.com",
         "hintAfter": ". Treffer landen automatisch im Archiv beim Eingang.",
-        "placeholder": "alice{'@'}example.com oder spam.example.com",
+        "placeholder": "Adresse oder Domain",
         "add": "Hinzufügen",
         "unblock": "Entsperren",
         "empty": "Keine blockierten Absender.",
@@ -752,7 +790,11 @@
         "syncFailed": "Synchronisierung fehlgeschlagen: {error}"
       },
       "contacts": {
-        "priorityHint": "Priorität: manuell, macOS Kontakte, Google/Microsoft Kontakte, BIMI, Gravatar, Favicon, Initialen.",
+        "priorityHint": "Deine eigene Wahl zuerst, dann Kontakte, Absender-Logos und Initialen.",
+        "individualTitle": "Bilder pro Kontakt",
+        "individualHint": "Bild für jeden der {count} Kontakte setzen, abrufen oder sperren.",
+        "showIndividual": "Anzeigen",
+        "hideIndividual": "Ausblenden",
         "thirdPartyLabel": "Kontaktbilder von Drittanbietern erlauben",
         "thirdPartyHint": "Beim Import werden Adress-Hashes an Gravatar und Absender-Domains an Google und Cloudflare für Favicons und BIMI übermittelt. Standardmäßig aus.",
         "statsLabel": "Kontaktbild Statistik",
@@ -937,7 +979,7 @@
       },
       "inlineImages": {
         "title": "Eingebettete Bilder",
-        "description": "Logos und Grafiken aus Signaturen liegen normalerweise lokal vor. Fehlen sie, holt Satchel sie bei jedem Öffnen erneut beim Anbieter — das kostet Zeit und läuft offline ins Leere.",
+        "description": "Logos in Signaturen bleiben auf diesem Gerät, damit sie offline erscheinen und schnell laden.",
         "desktopOnly": "Nur in der Desktop-App verfügbar.",
         "missingLocally": "fehlen lokal ({size})",
         "alreadyStored": "bereits gesichert",

@@ -31,12 +31,12 @@
     "hideAccount": "Hide {account}",
     "invalidTime": "The end must be later than the start, on the same day.",
     "localTime": "Local time · leave blank for all day",
-    "manual": "Only when I open it",
+    "manual": "On demand",
     "openAccount": "Open {account}, including resting mail",
     "resting": "Resting",
     "restingHint": "{account} is resting: no counts, no notifications. Click to look in; right-click to show it until midnight.",
     "saveFailed": "Could not save account visibility.",
-    "schedule": "On a schedule",
+    "schedule": "Scheduled",
     "scopeResting": "{accounts} resting | {accounts} resting",
     "showAccount": "Show {account} now",
     "showToday": "Show until midnight",
@@ -305,6 +305,7 @@
       "pluginDisabled": "The plugin \"{plugin}\" is disabled: {reason}",
       "pluginNotRegistered": "The plugin \"{plugin}\" is not registered.",
       "pluginPermissionPersistenceFailed": "Plugin permissions are currently unavailable. Please try again.",
+      "pluginsFolderUnavailable": "The plugins folder could not be opened.",
       "pop3CredentialsRejected": "No POP3 configuration accepted these credentials. Check the username or enter the server manually.",
       "pop3PlaintextRejected": "This POP3 account is set to port 110 without encryption. Satchel will not send the password unencrypted: switch the account to port 995 with TLS.",
       "queueActionFailed": "The queued action failed: {message}",
@@ -2013,6 +2014,12 @@
       "version": "Installed version"
     },
     "accounts": {
+      "actions": {
+        "calendars": "Calendars & contacts",
+        "renew": "Renew sign-in",
+        "sync": "Sync now",
+        "test": "Test connection"
+      },
       "addAccount": "Add email account",
       "allAccounts": "All accounts",
       "checkOrRenew": "Check or renew sign-in",
@@ -2128,7 +2135,7 @@
       "editTitle": "Edit alias",
       "emailPlaceholder": "alias{'@'}example.com",
       "empty": "No aliases yet.",
-      "hint": "Send mail from additional addresses that you own in your mail account (for example Gmail aliases configured under \"Send mail as\").",
+      "hint": "Other addresses you own and send from, like Gmail’s “Send mail as”.",
       "invalidEmail": "Please enter a valid email address.",
       "saved": "Saved.",
       "title": "Sender addresses",
@@ -2157,10 +2164,11 @@
     },
     "backup": {
       "accountCount": "{count} accounts",
-      "accountLabel": "Account (empty = all)",
+      "accountLabel": "Account",
       "acknowledgeUnprotectedKey": "Write the key unprotected",
       "acknowledgeUnprotectedKeyHint": "Treat this folder like a password file. Anyone who copies it can read every account credential without being asked for anything.",
       "allAccounts": "All accounts",
+      "backUpNow": "Back up now",
       "cancelImport": "Cancel",
       "createDatabaseBackup": "Create backup…",
       "credentialsSummary": "{total} accounts, {encrypted} encrypted · Master key {masterKey} · Database {database}",
@@ -2168,6 +2176,7 @@
       "databaseDescription": "Creates a consistent copy of the database and master key in a folder. A restore is staged and applied on the next start.",
       "databaseDesktopOnly": "Database backups are only available in the desktop app.",
       "databaseTitle": "Database backup",
+      "description": "Take your mail and settings elsewhere, or keep a copy to restore.",
       "desktopOnlyBackup": "Backup is only available in the desktop app.",
       "desktopOnlyExport": "Export is only available in the desktop app.",
       "desktopOnlyImport": "Import is only available in the desktop app.",
@@ -2177,6 +2186,7 @@
       "durationSeconds": "{count} second | {count} seconds",
       "exportMailbox": "Export mailbox…",
       "exportPlatform": "Export platform data…",
+      "exportShort": "Export…",
       "exported": "Exported: {count} messages ({size}) → {path}",
       "exporting": "Exporting…",
       "hintAfter": "file. Compatible with Apple Mail, Thunderbird, mutt, mu, etc.",
@@ -2186,21 +2196,26 @@
       "importMbox": "Import mbox…",
       "importPlatform": "Import platform data…",
       "importProgressLabel": "Import progress",
+      "importShort": "Import…",
       "imported": "Imported: {count} messages, {skipped} skipped.",
       "importingMessages": "{done} of about {total} messages",
       "importingTables": "{done} of {total} tables",
       "keyPassphrase": "Passphrase for the master key",
       "keyPassphraseHint": "The backup folder carries the key to every stored password, OAuth token and private PGP or S/MIME key. With a passphrase the key is wrapped and the folder is useless without it.",
       "keyPassphrasePlaceholder": "Leave empty to export the key unprotected",
+      "mailboxLabel": "Mailbox",
       "masterKeyMissing": "missing",
       "masterKeyPresent": "present",
       "mboxExtension": ".mbox",
       "messageCount": "{count} messages",
       "missingMasterKeyWarning": " Warning: no master key was found, so encrypted credentials in this backup cannot be read.",
+      "needsPassphrase": "Set a passphrase above, or allow writing the key unprotected.",
       "noBackups": "No backups in this folder.",
       "nothingToPrune": "Nothing to delete.",
       "platformExported": "Exported: {rows} platform records from {tables} tables → {path}",
+      "platformHint": "Accounts, signatures, templates, rules, contacts and calendar — everything but the mail.",
       "platformImported": "Imported: {rows} platform records from {tables} tables.",
+      "platformLabel": "Settings & data",
       "pruneBackups": "Delete older backups",
       "pruneConfirm": "Delete every backup except the newest {count}?",
       "pruned": "Deleted {count} older backups.",
@@ -2215,6 +2230,7 @@
       "restoreStaged": "Staged: {messages} messages, {accounts} accounts. The restore will be applied the next time Satchel starts.",
       "selectTargetAccount": "Please select a target account first.",
       "showBackups": "Show backups…",
+      "transferTitle": "Export & import",
       "withoutMasterKey": "without master key",
       "wrappedMasterKey": "key wrapped"
     },
@@ -2225,7 +2241,8 @@
       "exampleDomain": "spam.example.com",
       "hintAfter": ". Matches are archived automatically on arrival.",
       "hintBefore": "Email address or domain pattern, for example",
-      "placeholder": "alice{'@'}example.com or spam.example.com",
+      "placeholder": "Address or domain",
+      "purpose": "Mail from these addresses or domains is archived on arrival.",
       "unblock": "Unblock"
     },
     "calendar": {
@@ -2251,19 +2268,23 @@
       "avatarSetFailed": "The profile picture could not be set.",
       "desktopOnly": "The import is only available in the desktop app.",
       "file": "File",
+      "hideIndividual": "Hide",
       "imageReadFailed": "The image could not be read.",
       "imageUrlPlaceholder": "Image URL",
       "importFailed": "Profile pictures could not be imported.",
       "importing": "Importing…",
+      "individualHint": "Set, fetch or lock the picture of each of {count} contacts.",
+      "individualTitle": "Pictures per contact",
       "lock": "Lock",
       "noAutoImportBody": "The import only starts after you click. On the first run macOS may show its usual Contacts permission dialog.",
       "noAutoImportTitle": "No import on app start",
       "ofTotal": "of {count}",
       "pinned": "Pinned",
-      "priorityHint": "Priority: manual, macOS Contacts, Google/Microsoft contacts, BIMI, Gravatar, favicon, initials.",
+      "priorityHint": "Your own choice comes first, then contacts, sender logos and initials.",
       "refreshImport": "Refresh import",
       "searchPlaceholder": "Search contact",
       "set": "Set",
+      "showIndividual": "Show",
       "source": {
         "bimi": "BIMI",
         "fallback": "Fallback",
@@ -2430,19 +2451,21 @@
     },
     "images": {
       "allow": "Allow",
+      "allowFrom": "Always load images from",
       "empty": "Nothing allowed — remote images stay blocked everywhere.",
       "entryPlaceholder": "alice{'@'}example.com or {'@'}example.com",
-      "hint": "Remote images in mail can be tracking pixels: loading them tells the sender whether and when a mail was opened.",
-      "modeAccepted": "Accepted senders",
+      "hint": "Remote images can tell a sender when you opened a mail.",
+      "modeAccepted": "Known",
       "modeAcceptedHint": "Images load automatically for senders and domains you accepted while screening new senders. Everything else stays blocked until you allow it.",
       "modeAcceptedTitle": "Load images automatically for senders you accepted in the inbox",
       "modeAll": "Always",
       "modeAllHint": "This lets senders see when and where a mail was opened. The allowlist below is kept but has no effect while everything loads.",
       "modeAllTitle": "Load remote images in every message",
-      "modeAllowlist": "Only once allowed",
+      "modeAllowlist": "Ask first",
       "modeAllowlistHint": "Remote images load only after you allow them from the notice in the message.",
       "modeAllowlistTitle": "Remote images load only once you allow them in the message",
       "modeAria": "When remote images are loaded",
+      "modeLabel": "Load remote images",
       "sender": "sender",
       "title": "Remote images",
       "wholeDomain": "entire domain"
@@ -2451,7 +2474,7 @@
       "allPresent": "All embedded images are stored locally.",
       "alreadyStored": "already stored",
       "cancelled": "Cancelled after {count} images{tail}.",
-      "description": "Logos and graphics from signatures are normally stored locally. If they are missing, Satchel fetches them from the provider every time you open the message — that costs time and fails offline.",
+      "description": "Logos in signatures are kept on this device so they show offline and load quickly.",
       "desktopOnly": "Only available in the desktop app.",
       "duration": {
         "hours": "{count} hour | {count} hours",
@@ -2521,32 +2544,39 @@
       "unknownTime": "Time unknown"
     },
     "notifications": {
-      "bodyWindowHint": "Older mail keeps sender, subject and date and reloads its content when opened. Its text leaves the search index, so full-text search only finds it by subject or sender. With 0 days everything stays stored.",
+      "bodyWindowHint": "Older mail keeps sender, subject and date; its text reloads when opened and leaves full-text search.",
       "bodyWindowLabel": "Keep mail content",
       "dataDescription": "Retention and local housekeeping.",
       "dataTitle": "Data & storage",
       "days": "days",
+      "daysShort": "{n} days",
       "description": "Decide when Satchel tells you about new messages.",
-      "enabledHint": "Native notices through the system.",
-      "enabledLabel": "Notifications",
+      "enabledHint": "Alerts through your system's notification centre.",
+      "enabledLabel": "Show notifications",
+      "keepAll": "All",
+      "never": "Never",
       "permissionDenied": "The system does not allow Satchel to show notifications. You can re-enable this in the system settings for Satchel.",
       "receiptsHint": "Recipients can see that a receipt was requested.",
       "receiptsLabel": "Request read receipt",
       "saved": "Saved.",
       "scopeAll": "All new mail",
+      "scopeAllShort": "All mail",
       "scopeHint": "Which new mail triggers a notice.",
       "scopeInbox": "Personal inbox only",
+      "scopeInboxShort": "Inbox only",
       "scopeLabel": "Scope",
       "seconds": "sec",
-      "sendingDescription": "Safety net and confirmations for outgoing messages.",
+      "secondsShort": "{n} s",
+      "sendingDescription": "How new messages are written and sent.",
       "sendingTitle": "Sending",
       "soundHint": "Play a sound on a new notice.",
       "soundLabel": "Sound",
       "title": "Notifications",
-      "trashHint": "With 0 days the content is kept.",
+      "trashHint": "Deletes messages in the trash after this long.",
       "trashLabel": "Empty trash automatically",
       "undoHint": "Time to undo before a message really goes out.",
-      "undoLabel": "Delay sending"
+      "undoLabel": "Delay sending",
+      "undoOff": "Off"
     },
     "overview": {
       "subtitle": "What would you like to change?"
@@ -2640,6 +2670,8 @@
       "verifyPassphrase": "Verify passphrase"
     },
     "plugins": {
+      "addHint": "Put a plugin into the plugins folder of your profile, then restart Satchel.",
+      "addTitle": "Add integrations",
       "addWebhook": "Add webhook",
       "auditTitle": "Plugin audit",
       "bearerToken": "Bearer {token}",
@@ -2656,9 +2688,13 @@
       "loading": "Loading plugins…",
       "localApiTitle": "Local API / MCP",
       "metrics": "Calls: {calls}, denied: {denied}, errors: {errors}",
+      "newWebhook": "New webhook",
       "noCapabilities": "no capabilities",
       "noContent": "No content.",
-      "noneFound": "No plugins found in `/plugins`.",
+      "noneFound": "No integrations installed yet",
+      "noneFoundHint": "Integrations add features to Satchel, such as OpenPGP encryption.",
+      "openFolder": "Open plugins folder",
+      "openIntegrations": "Open Integrations",
       "permissionUpdateFailed": "Could not update plugin permission: {error}",
       "pgpPluginDescription": "Detect and normalize OpenPGP signed/encrypted message content.",
       "pgpPluginMissing": "The OpenPGP plugin is not installed. Without it there is no PGP support.",
@@ -2677,6 +2713,8 @@
       "webhookToggleFailed": "Could not switch webhook: {error}",
       "webhookUrl": "URL",
       "webhookUrlPlaceholder": "https://example.com/satchel",
+      "webhooksDescription": "Satchel calls these addresses when mail arrives or a thread changes.",
+      "webhooksEmpty": "No webhooks yet.",
       "webhooksTitle": "Webhooks"
     },
     "providerFeatures": {
@@ -2702,8 +2740,8 @@
       "addAction": "Add action",
       "addCondition": "Add condition",
       "appliedCount": "{count} rule action applied. | {count} rule actions applied.",
-      "applyToOpenMail": "Apply to the open mail",
-      "applyToVisibleMails": "Apply to visible mails",
+      "applyToOpenMail": "Apply to the open message",
+      "applyToVisibleMails": "Apply to visible messages",
       "applyVisibleConfirm": "Apply rules to {count} visible mail? | Apply rules to {count} visible mails?",
       "categories": {
         "personal": "Personal",
@@ -2718,13 +2756,15 @@
         "toContains": "Recipient contains"
       },
       "conditionsLegend": "Conditions",
-      "createFromOpenMail": "Create rule from the open mail",
+      "createFromOpenMail": "Create a rule from the open message",
       "createTitle": "Create rule",
       "deleteConfirm": "Delete rule “{name}”?",
       "description": "Sort incoming mail by sender, recipient, subject or content.",
       "duplicateCondition": "Use each condition field only once.",
       "editTitle": "Edit rule",
       "empty": "No rules yet.",
+      "emptyHint": "Rules handle new mail as it arrives: sort it into a category, add a tag, set its priority or mark it read.",
+      "emptyTitle": "No rules yet",
       "loadFailed": "Could not load rules: {error}",
       "loading": "Loading rules…",
       "matchAll": "Match all",
@@ -2798,6 +2838,10 @@
         "description": "Calendars, working hours and invitations",
         "label": "Calendar"
       },
+      "composing": {
+        "description": "Plain text, send delay, receipts",
+        "label": "Composing"
+      },
       "contacts": {
         "description": "Sources and display of contact pictures",
         "label": "Profile pictures"
@@ -2810,22 +2854,32 @@
         "description": "Sync errors, queue and rate limits",
         "label": "Diagnostics"
       },
+      "encryption": {
+        "description": "S/MIME certificates and OpenPGP keys",
+        "label": "Encryption"
+      },
       "general": {
         "description": "Appearance, language and behaviour",
         "label": "General"
       },
       "groups": {
-        "advanced": {
-          "title": "Advanced"
-        },
         "app": {
-          "title": "App"
+          "title": "App & data"
         },
-        "identity": {
-          "title": "Identity"
+        "essentials": {
+          "title": "Essentials"
         },
-        "mail": {
-          "title": "Mail"
+        "organising": {
+          "title": "Organising"
+        },
+        "people": {
+          "title": "Calendar & contacts"
+        },
+        "privacy": {
+          "title": "Privacy & security"
+        },
+        "writing": {
+          "title": "Writing"
         }
       },
       "images": {
@@ -2856,8 +2910,12 @@
         "description": "Process email automatically",
         "label": "Rules"
       },
+      "senders": {
+        "description": "Blocked senders and who may load images",
+        "label": "Senders & images"
+      },
       "sending": {
-        "description": "Delivery, undo send and confirmations",
+        "description": "Undo send and confirmations",
         "label": "Sending"
       },
       "shortcuts": {
@@ -2879,6 +2937,10 @@
       "sources": {
         "description": "Additional feeds and message sources",
         "label": "Feeds & sources"
+      },
+      "storage": {
+        "description": "What is kept, export and backups",
+        "label": "Storage & backup"
       },
       "swipes": {
         "description": "Actions for swiping left and right",
@@ -2905,7 +2967,6 @@
       "conflict": "Conflict",
       "custom": "Custom",
       "description": "Every action stays the same across search, menus and keyboard.",
-      "eyebrow": "Tastatur zuerst",
       "footerRecord": "Click a row and press the new key combination",
       "noMatch": "No matching command.",
       "reservedConflict": "Taken by a fixed key: {keys}",
@@ -2918,6 +2979,7 @@
       "adopt": "Adopt and edit",
       "checkAgain": "Check again",
       "checking": "Checking…",
+      "description": "Added to the messages you write, per sender address.",
       "discovering": "Checking sent messages…",
       "editTitle": "Edit signature",
       "emptyList": "No signature for this account yet.",
@@ -2960,6 +3022,7 @@
       "iconLabel": "Icon (emoji, optional)",
       "loadFailed": "Could not load smart folders. Try again.",
       "newTitle": "New smart folder",
+      "purpose": "Saved searches that show up as folders in the sidebar.",
       "queryLabel": "Search query",
       "queryPlaceholder": "from:boss has:attachment",
       "saved": "Saved.",
@@ -3028,6 +3091,7 @@
       "intervalHours": "{count} hour | {count} hours",
       "intervalMinutes": "{count} minute | {count} minutes",
       "namePlaceholder": "Builds, blog, monitoring…",
+      "newFeed": "New feed",
       "notify": "Notify",
       "opmlImported": "{created} feeds imported, {skipped} skipped.",
       "opmlImportedWithErrors": "{created} feeds imported, {skipped} skipped. {errors} errors.",
@@ -3054,7 +3118,6 @@
       "directionLeftHint": "The action appears to the right of the message.",
       "directionRight": "To the right",
       "directionRightHint": "The action appears to the left of the message.",
-      "eyebrow": "Touch controls",
       "long": "Far",
       "longHint": "from about two fifths",
       "previewPin": "Pin",
@@ -3075,12 +3138,14 @@
       "empty": "No templates.",
       "loadFailed": "Could not load templates. Try again.",
       "nameRequired": "Please enter a name.",
+      "purpose": "Reusable texts you insert while writing.",
       "saved": "Saved.",
       "shortcutOptional": "Shortcut (optional)",
       "shortcutPlaceholder": "e.g. /thx",
       "subjectOptional": "Subject (optional)",
       "title": "Templates",
-      "variablesHint": "Variables {recipient}, {myName} and {date} are replaced on insert."
+      "variablesHint": "Variables {recipient}, {myName} and {date} are replaced on insert.",
+      "variablesLead": "Filled in on insert:"
     },
     "theme": {
       "appearance": "Appearance",
@@ -3122,9 +3187,10 @@
       "bodyLabel": "Reply text",
       "defaultSubject": "Out of office",
       "enable": "Enable auto-reply",
-      "hint": "Set directly at the mail server — so it stays active even when Satchel is not running. Currently supported for Gmail and Outlook/Microsoft 365 (OAuth accounts). For plain IMAP accounts you have to set up the server-side Sieve rule in your webmail.",
-      "imapWarning": "This account is a generic IMAP account — the vacation auto-reply is not pushed to the server.",
+      "hint": "An automatic reply, set at your mail server so it works while Satchel is closed.",
+      "imapWarning": "Set the automatic reply in your provider's webmail. Satchel can set it for you only on Gmail and Outlook accounts.",
       "onlyContacts": "Only reply to known contacts",
+      "openWebmail": "Open webmail",
       "saved": "Saved.",
       "title": "Out of office",
       "until": "Until"

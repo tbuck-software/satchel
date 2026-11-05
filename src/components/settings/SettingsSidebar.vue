@@ -2,22 +2,21 @@
 import NavItem from '@/components/ui/NavItem.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import SearchInput from '@/components/ui/SearchInput.vue';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRoute, useRouter } from 'vue-router';
 import { registerSettingsFilterField } from '@/composables/settingsFilterFocus';
 import { useSettingsFilter } from '@/composables/useSettingsFilter';
+import { useSettingsLocation } from '@/composables/useSettingsLocation';
 import {
   resolveSettingsSection,
   settingsSectionIcons,
   type SettingsSection,
 } from './settingsSections';
 
-const route = useRoute();
-const router = useRouter();
 const { t } = useI18n();
 const { query, filtering, results, groups } = useSettingsFilter();
-const activeSection = computed(() => resolveSettingsSection(route.query.section));
+const location = useSettingsLocation();
+const activeSection = computed(() => resolveSettingsSection(location.section.value));
 const filterInput = ref<InstanceType<typeof SearchInput> | null>(null);
 const highlighted = ref(0);
 
@@ -35,6 +34,19 @@ watch(results, () => {
   highlighted.value = 0;
 });
 
+// Opened on About or Diagnostics, the list starts scrolled to the top and the
+// current section sits out of sight; bring it in, without moving the page.
+const root = ref<HTMLElement | null>(null);
+function revealActive() {
+  void nextTick(() => {
+    root.value?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest' });
+  });
+}
+onMounted(revealActive);
+// Sections the shell confirms late (Shortcuts, System tray) push the rest
+// down after the first scroll, so follow the list as well as the selection.
+watch([activeSection, () => shownGroups.value.length, () => groups.value.flatMap((group) => group.items).length], revealActive);
+
 const unregister = registerSettingsFilterField(() => {
   filterInput.value?.focus();
   filterInput.value?.select();
@@ -46,7 +58,7 @@ onBeforeUnmount(() => {
 });
 
 function selectSection(section: SettingsSection) {
-  void router.replace({ name: 'settings', query: { section } });
+  location.show(section);
 }
 
 function onFilterKeydown(event: KeyboardEvent) {
@@ -73,26 +85,61 @@ function onFilterKeydown(event: KeyboardEvent) {
   }
 }
 
+/**
+ * The matching line, cut so the match shows: a little lead-in, the match
+ * marked, then the rest. Truncating from the start hid the very word that
+ * made the section a result.
+ */
+function excerpt(hint: string): Array<{ text: string; match: boolean }> {
+  const needle = query.value.trim().toLowerCase();
+  const lower = hint.toLowerCase();
+  // Prefer the match at a word start, the one that made this a result.
+  const wordStart = needle ? lower.search(new RegExp(`(?:^|[^\\p{L}\\p{N}])${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u')) : -1;
+  const at = wordStart < 0 ? (needle ? lower.indexOf(needle) : -1)
+    : lower.startsWith(needle, wordStart) ? wordStart : wordStart + 1;
+  if (at < 0) return [{ text: hint, match: false }];
+  const LEAD = 14;
+  let start = Math.max(0, at - LEAD);
+  if (start > 0) {
+    const space = hint.indexOf(' ', start);
+    start = space >= 0 && space < at ? space + 1 : start;
+  }
+  return [
+    { text: `${start > 0 ? '…' : ''}${hint.slice(start, at)}`, match: false },
+    { text: hint.slice(at, at + needle.length), match: true },
+    { text: hint.slice(at + needle.length), match: false },
+  ];
+}
+
+// While filtering, the pane shows the highlighted result: one selection,
+// and the search leads straight to the setting instead of next to it.
+watch([filtering, highlighted, results], ([active]) => {
+  const result = results.value[highlighted.value];
+  if (active && result && result.id !== activeSection.value) location.show(result.id);
+});
+
 function isHighlighted(section: SettingsSection): boolean {
   return filtering.value && results.value[highlighted.value]?.id === section;
 }
 </script>
 
 <template>
-  <nav class="settings-sidebar" :aria-label="$t('common.settings')">
-    <h2>{{ $t('common.settings') }}</h2>
-    <div class="settings-filter">
-      <SearchInput
-        ref="filterInput"
-        v-model="query"
-        data-settings-filter
-        :placeholder="$t('settings.search.placeholder')"
-        :label="$t('settings.search.label')"
-        aria-keyshortcuts="/"
-        @keydown="onFilterKeydown"
-      >
-        <template #trailing><kbd v-if="!query" aria-hidden="true">/</kbd></template>
-      </SearchInput>
+  <nav ref="root" class="settings-sidebar" :aria-label="$t('common.settings')">
+    <div class="settings-sidebar__head">
+      <h2>{{ $t('common.settings') }}</h2>
+      <div class="settings-filter">
+        <SearchInput
+          ref="filterInput"
+          v-model="query"
+          data-settings-filter
+          :placeholder="$t('settings.search.placeholder')"
+          :label="$t('settings.search.label')"
+          aria-keyshortcuts="/"
+          @keydown="onFilterKeydown"
+        >
+          <template #trailing><kbd v-if="!query" aria-hidden="true">/</kbd></template>
+        </SearchInput>
+      </div>
     </div>
     <template v-for="group in shownGroups" :key="group.title">
       <h3>{{ group.title }}</h3>
@@ -106,7 +153,11 @@ function isHighlighted(section: SettingsSection): boolean {
             <template #icon><AppIcon :grid="24"><g v-html="settingsSectionIcons[section.id]" /></AppIcon></template>
             <span class="settings-sidebar__copy">
               <span>{{ section.label }}</span>
-              <small v-if="section.hint">{{ section.hint }}</small>
+              <small v-if="section.hint">
+                <template v-for="(part, index) in excerpt(section.hint)" :key="index">
+                  <mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template>
+                </template>
+              </small>
             </span>
           </NavItem>
         </li>
@@ -119,6 +170,17 @@ function isHighlighted(section: SettingsSection): boolean {
 </template>
 
 <style scoped>
+/* Title and filter stay put while the list scrolls: opened on About, the
+   list scrolled them away to show the current row. */
+.settings-sidebar__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -18px -10px 0;
+  padding: 18px 10px 6px;
+  background: var(--bg-sidebar);
+}
+
 .settings-sidebar {
   display: flex;
   flex-direction: column;
@@ -154,9 +216,18 @@ ul {
 
 .highlighted { background: var(--bg-hover); }
 
+/* Scrolled into view below the pinned head, not under it. */
+li { scroll-margin-top: 120px; scroll-margin-bottom: calc(2 * var(--space-2xl)); }
+
 .settings-sidebar__copy {
   display: grid;
   min-width: 0;
+}
+
+.settings-sidebar__copy mark {
+  background: none;
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
 }
 
 .settings-sidebar__copy small {

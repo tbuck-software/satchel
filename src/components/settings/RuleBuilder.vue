@@ -12,6 +12,8 @@ import {
 } from '@/services/backend';
 import { useThreadsStore } from '@/stores/threads';
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
+import EmptyState from '@/components/ui/EmptyState.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
 
@@ -260,6 +262,8 @@ function ruleSummary(rule: BackendRule): string {
     : 'settings.rules.summaryAnd'));
 }
 
+const hasActiveRule = computed(() => rules.value.some((rule) => rule.is_active));
+
 onMounted(load);
 </script>
 
@@ -267,7 +271,7 @@ onMounted(load);
   <section class="rules-section">
     <header class="section-header">
       <div>
-        <h3>{{ $t('settings.rules.title') }}</h3>
+        <h3 class="settings-page-title">{{ $t('settings.sections.rules.label') }}</h3>
         <p>{{ $t('settings.rules.description') }}</p>
       </div>
       <AppButton variant="primary" @click="startCreate">{{ $t('settings.rules.newRule') }}</AppButton>
@@ -276,7 +280,17 @@ onMounted(load);
     <p v-if="error" role="alert" class="message error">{{ error }}</p>
     <p v-if="notice" class="message notice">{{ notice }}</p>
     <p v-if="loading" class="empty">{{ $t('settings.rules.loading') }}</p>
-    <p v-else-if="rules.length === 0 && !editorOpen" class="empty">{{ $t('settings.rules.empty') }}</p>
+    <!-- An empty list says what rules are for and how to start, in one place. -->
+    <div v-else-if="rules.length === 0 && !editorOpen" class="rules-empty">
+      <EmptyState :title="$t('settings.rules.emptyTitle')" :description="$t('settings.rules.emptyHint')">
+        <template #icon>
+          <AppIcon size="lg" :grid="24"><path d="M22 3H2l8 9.46V19l4 2v-8.54Z" /></AppIcon>
+        </template>
+      </EmptyState>
+      <AppButton v-if="threads.activeThreadId" variant="secondary" size="sm" @click="startFromActiveThread">
+        {{ $t('settings.rules.createFromOpenMail') }}
+      </AppButton>
+    </div>
 
     <div class="rule-list">
       <article v-for="rule in rules" :key="rule.id" class="rule-card">
@@ -367,20 +381,34 @@ onMounted(load);
       </div>
     </form>
 
-    <div class="run-actions">
+    <!-- Applying needs a rule to apply; the empty list offered both anyway. -->
+    <div v-if="rules.length > 0 && (threads.activeThreadId || hasActiveRule)" class="run-actions">
       <AppButton v-if="threads.activeThreadId" size="sm" @click="startFromActiveThread">
         {{ $t('settings.rules.createFromOpenMail') }}
       </AppButton>
-      <AppButton v-if="threads.activeThreadId" size="sm" @click="void runNow">
+      <AppButton v-if="threads.activeThreadId && hasActiveRule" size="sm" @click="void runNow">
         {{ $t('settings.rules.applyToOpenMail') }}
       </AppButton>
-      <AppButton size="sm" @click="void runVisible">{{ $t('settings.rules.applyToVisibleMails') }}</AppButton>
+      <AppButton v-if="hasActiveRule" size="sm" @click="void runVisible">{{ $t('settings.rules.applyToVisibleMails') }}</AppButton>
     </div>
   </section>
 </template>
 
 <style scoped>
 .rules-section { display: grid; gap: 16px; }
+.rules-empty :deep(.empty) {
+  padding: var(--space-sm) var(--space-md) 0;
+}
+
+.rules-empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-lg);
+  border: 1px solid var(--border-color-muted);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
 .section-header, .editor-heading, .rule-card, .rule-title, .rule-actions, .editor-actions, .inline { display: flex; align-items: center; }
 .section-header, .editor-heading, .rule-card { justify-content: space-between; gap: 16px; }
 h3, h4, p { margin: 0; }

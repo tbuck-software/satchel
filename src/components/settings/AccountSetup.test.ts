@@ -8,7 +8,6 @@ const backend = vi.hoisted(() => ({
 vi.mock('@/services/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/backend')>()),
   backendCommandsAvailable: () => true,
-  backendSupportsNativeCommands: () => true,
   ...backend,
 }));
 
@@ -56,7 +55,7 @@ describe('Mail reconnect', () => {
   it('uses shared account recovery without requesting calendar access', async () => {
     accounts.startReauth.mockResolvedValue(undefined);
     const wrapper = mount(AccountSetup);
-    const reconnect = wrapper.findAll('button.icon-button')[0];
+    const reconnect = wrapper.findAll('button').find((button) => button.text() === 'Renew sign-in');
     await reconnect!.trigger('click');
     await vi.waitFor(() => expect(accounts.startReauth).toHaveBeenCalledWith(accounts.account.id));
     expect(backend.backendSyncGoogleCalendar).not.toHaveBeenCalled();
@@ -69,7 +68,7 @@ describe('Mail reconnect', () => {
   it('shows a failed reconnect as an alert in the error tone', async () => {
     accounts.startReauth.mockRejectedValue(new Error('consent revoked'));
     const wrapper = mount(AccountSetup);
-    await wrapper.findAll('button.icon-button')[0]!.trigger('click');
+    await wrapper.findAll('button').find((button) => button.text() === 'Renew sign-in')!.trigger('click');
 
     await vi.waitFor(() =>
       expect(wrapper.get('.status-msg').classes()).toContain('status-msg--error'),

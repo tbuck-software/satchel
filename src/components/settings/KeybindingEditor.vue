@@ -37,6 +37,8 @@ function conflictTitle(action: string): string | undefined {
   return t('settings.shortcuts.reservedConflict', { keys: fixed.map((binding) => formatBinding(binding)).join(', ') });
 }
 
+/** No changed or clashing key: the status column would be empty, so it goes. */
+const hasStatus = computed(() => conflicts.value.size > 0 || modifiedCount.value > 0);
 const modifiedCount = computed(() => KEYBINDING_DEFINITIONS.filter(
   (definition) => settings.keybindings[definition.action] !== definition.defaultBinding,
 ).length);
@@ -84,8 +86,7 @@ function displayStrokes(action: string): string[] {
   <section class="keybindings">
     <header class="keybindings__header">
       <div>
-        <span class="eyebrow">{{ $t('settings.shortcuts.eyebrow') }}</span>
-        <h2>{{ $t('settings.shortcuts.title') }}</h2>
+        <h2 class="settings-page-title">{{ $t('settings.sections.shortcuts.label') }}</h2>
         <p>{{ $t('settings.shortcuts.description') }}</p>
       </div>
       <div class="header-actions">
@@ -102,7 +103,12 @@ function displayStrokes(action: string): string[] {
       <kbd>/</kbd>
     </label>
 
-    <div class="binding-table" role="table" :aria-label="$t('settings.shortcuts.title')">
+    <div
+      class="binding-table"
+      :class="{ 'binding-table--quiet': !hasStatus }"
+      role="table"
+      :aria-label="$t('settings.shortcuts.title')"
+    >
       <div class="table-head" role="row">
         <span role="columnheader">{{ $t('settings.shortcuts.colCommand') }}</span>
         <span role="columnheader">{{ $t('settings.shortcuts.colKeys') }}</span>
@@ -126,7 +132,6 @@ function displayStrokes(action: string): string[] {
       >
         <span class="command-cell" role="cell">
           <strong>{{ definition.label }}</strong>
-          <small>{{ definition.action }}</small>
         </span>
         <span class="key-cell" role="cell">
           <template v-for="(stroke, strokeIndex) in displayStrokes(definition.action)" :key="`${stroke}-${strokeIndex}`">
@@ -148,7 +153,7 @@ function displayStrokes(action: string): string[] {
             v-else-if="settings.keybindings[definition.action] !== DEFAULT_KEYBINDINGS[definition.action]"
             class="status status--custom"
           >{{ $t('settings.shortcuts.custom') }}</span>
-          <span v-else class="status">{{ $t('common.default') }}</span>
+          <!-- Default needs no label on 40 rows; only a change or a clash does. -->
         </span>
       </CardButton>
 
@@ -174,14 +179,6 @@ function displayStrokes(action: string): string[] {
   align-items: end;
   justify-content: space-between;
   gap: 28px;
-}
-
-.eyebrow {
-  color: var(--accent-primary);
-  font-size: var(--font-size-3xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: .14em;
-  text-transform: uppercase;
 }
 
 h2 {
@@ -276,7 +273,7 @@ kbd {
 
 .binding-row {
   width: 100%;
-  min-height: 58px;
+  min-height: 44px;
   padding: 8px 16px;
   border: 0;
   border-top: 1px solid var(--border-color-muted);
@@ -300,7 +297,6 @@ kbd {
 
 .command-cell { display: grid; gap: 3px; min-width: 0; }
 .command-cell strong { overflow: hidden; color: var(--text-primary); font-size: var(--font-size-sm); font-weight: var(--weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
-.command-cell small { color: var(--text-tertiary); font-family: var(--font-mono); font-size: var(--font-size-3xs); }
 
 .key-cell { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .key-chord { display: inline-flex; gap: 3px; }
@@ -325,6 +321,16 @@ kbd {
 }
 
 .keybindings__footer span { display: inline-flex; align-items: center; gap: 8px; }
+
+.binding-table--quiet .table-head,
+.binding-table--quiet .binding-row {
+  grid-template-columns: minmax(200px, 1.6fr) minmax(150px, 1fr) minmax(120px, .9fr);
+}
+
+.binding-table--quiet .table-head > :nth-child(4),
+.binding-table--quiet .status-cell {
+  display: none;
+}
 
 @media (max-width: 800px) {
   .table-head,

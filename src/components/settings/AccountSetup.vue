@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRoute } from 'vue-router';
 import { useAccountsStore } from '@/stores/accounts';
 import { useConnectionStore } from '@/stores/connection';
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { useThreadsStore } from '@/stores/threads';
 import { useUiStore } from '@/stores/ui';
+import { useSettingsLocation } from '@/composables/useSettingsLocation';
 import { useCertificateTrustStore } from '@/stores/certificateTrust';
 import { certificateShort, formatCertificateMoment } from '@/utils/certificateLabels';
 import {
   backendAutoconfigureGroupware,
   backendDeleteAccount,
-  backendSupportsNativeCommands,
+  backendCommandsAvailable,
   backendConfigureGroupware,
   backendOauthStatus,
   backendRunImapSync,
@@ -27,7 +27,6 @@ import AccountVisibilitySettings from './AccountVisibilitySettings.vue';
 import AccountAppearanceSettings from './AccountAppearanceSettings.vue';
 import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import AppButton from '@/components/ui/AppButton.vue';
-import IconButton from '@/components/ui/IconButton.vue';
 
 const { locale, t } = useI18n();
 const accounts = useAccountsStore();
@@ -47,7 +46,7 @@ function certificateLine(accountId: string): string | null {
     : null;
 }
 const { ask } = useConfirm();
-const oauthAvailable = backendSupportsNativeCommands();
+const oauthAvailable = backendCommandsAvailable();
 const emailAccounts = computed(() => accounts.emailAccounts);
 
 const syncBusy = ref(false);
@@ -74,7 +73,7 @@ const groupwareUsername = ref('');
 const groupwarePassword = ref('');
 const caldavServer = ref('');
 const carddavServer = ref('');
-const route = useRoute();
+const settingsLocation = useSettingsLocation();
 const passwordAccountId = ref('');
 const newPassword = ref('');
 const passwordBusy = ref(false);
@@ -263,7 +262,7 @@ function togglePasswordForm(accountId: string) {
 
 // `?account=` is how the connection banner's "Update password" lands here.
 watch(
-  () => [route?.query.account, emailAccounts.value.length] as const,
+  () => [settingsLocation.account.value, emailAccounts.value.length] as const,
   ([requested]) => {
     if (typeof requested !== 'string' || passwordAccountId.value === requested) return;
     const account = emailAccounts.value.find((candidate) => candidate.id === requested);
@@ -470,104 +469,108 @@ async function removeAccount(accountId: string, email: string) {
 <template>
   <div class="section">
     <header class="section-header">
-      <h3>{{ $t('settings.sections.accounts.label') }}</h3>
+      <h3 class="settings-page-title">{{ $t('settings.sections.accounts.label') }}</h3>
       <p class="section-desc">{{ $t('settings.accounts.description') }}</p>
     </header>
 
     <!-- Account Cards -->
     <div class="account-list">
       <article v-for="account in emailAccounts" :key="account.id" class="account-card">
-        <AccountAvatar :name="account.displayName" :color="account.color" :avatar="account.avatar" :size="32" />
-        <div class="account-info">
-          <span class="account-name">{{ account.displayName }}</span>
-          <span class="account-email">{{ account.email }}</span>
-          <span
-            class="account-sync"
-            :class="{ error: account.syncStatus === 'error', busy: account.syncStatus === 'syncing' }"
-          >
-            {{ syncStatusLabel(account) }}
-            <template v-if="syncProgressLabel(account.syncProgressJson)">
-              · {{ syncProgressLabel(account.syncProgressJson) }}
-            </template>
-            <template v-if="account.lastSyncError">
-              · {{ translateBackendError(account.lastSyncError) ?? account.lastSyncError }}
-            </template>
-          </span>
+        <div class="account-card__head">
+          <AccountAvatar :name="account.displayName" :color="account.color" :avatar="account.avatar" :size="32" />
+          <div class="account-info">
+            <span class="account-name">{{ account.displayName }}</span>
+            <span class="account-email">{{ account.email }}</span>
+            <span
+              class="account-sync"
+              :class="{ error: account.syncStatus === 'error', busy: account.syncStatus === 'syncing' }"
+            >
+              {{ syncStatusLabel(account) }}
+              <template v-if="syncProgressLabel(account.syncProgressJson)">
+                · {{ syncProgressLabel(account.syncProgressJson) }}
+              </template>
+              <template v-if="account.lastSyncError">
+                · {{ translateBackendError(account.lastSyncError) ?? account.lastSyncError }}
+              </template>
+            </span>
+            <AppButton
+              v-if="certificateLine(account.id)"
+              class="account-certificate"
+              variant="link"
+              size="sm"
+              @click.stop.prevent="certificates.openDetails(account.id)"
+            >
+              {{ certificateLine(account.id) }}
+            </AppButton>
+          </div>
+          <span class="account-provider">{{ providerLabel(account.provider) }}</span>
+        </div>
+        <!-- Named actions: four bare icons asked the user to hover each one,
+             and the trash sat between them. Removal stands apart. -->
+        <div class="account-card__actions">
           <AppButton
-            v-if="certificateLine(account.id)"
-            class="account-certificate"
-            variant="link"
+            v-if="account.provider === 'imap'"
+            variant="secondary"
             size="sm"
-            @click.stop.prevent="certificates.openDetails(account.id)"
+            :title="$t('settings.accounts.groupware.connectTitle')"
+            :disabled="!oauthAvailable || groupwareBusy"
+            @click.stop.prevent="connectGroupware(account)"
           >
-            {{ certificateLine(account.id) }}
+            {{ $t('settings.accounts.actions.calendars') }}
+          </AppButton>
+          <AppButton
+            v-if="usesPassword(account.provider)"
+            variant="secondary"
+            size="sm"
+            :disabled="!oauthAvailable"
+            @click.stop.prevent="togglePasswordForm(account.id)"
+          >
+            {{ $t('settings.accounts.password.action') }}
+          </AppButton>
+          <AppButton
+            v-if="account.provider === 'gmail' || account.provider === 'outlook'"
+            variant="secondary"
+            size="sm"
+            :title="$t('settings.accounts.reconnect.buttonTitle')"
+            :disabled="!oauthAvailable || reauthBusyId === account.id"
+            @click.stop.prevent="reconnectOauth(account)"
+          >
+            {{ $t('settings.accounts.actions.renew') }}
+          </AppButton>
+          <!-- Sync belongs to the account it syncs, not under the list. -->
+          <AppButton
+            v-if="account.provider === 'imap'"
+            variant="secondary"
+            size="sm"
+            :disabled="!oauthAvailable || syncBusy"
+            @click.stop.prevent="syncImapNow()"
+          >
+            {{ syncBusy ? $t('settings.accounts.sync.syncing') : $t('settings.accounts.actions.sync') }}
+          </AppButton>
+          <AppButton
+            variant="secondary"
+            size="sm"
+            :title="statusButtonTitle(account.provider)"
+            :disabled="!oauthAvailable"
+            @click.stop.prevent="checkStatus(account.id, account.provider)"
+          >
+            {{ $t('settings.accounts.actions.test') }}
           </AppButton>
         </div>
-        <span class="account-provider">{{ providerLabel(account.provider) }}</span>
-        <IconButton
-          v-if="account.provider === 'imap'"
-          :title="$t('settings.accounts.groupware.connectTitle')"
-          :disabled="!oauthAvailable || groupwareBusy"
-          @click.stop.prevent="connectGroupware(account)"
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="2" y="3.5" width="12" height="10.5" rx="1.5" />
-            <path d="M5 1.5v4M11 1.5v4M2 7h12" />
-          </svg>
-        </IconButton>
-        <IconButton
-          v-if="usesPassword(account.provider)"
-          :title="$t('settings.accounts.password.action')"
-          :active="passwordAccountId === account.id"
-          :disabled="!oauthAvailable"
-          @click.stop.prevent="togglePasswordForm(account.id)"
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="5.5" cy="10.5" r="3" />
-            <path d="m7.6 8.4 6-6M11.5 4.5l2 2M10 6l1.5 1.5" />
-          </svg>
-        </IconButton>
-        <IconButton
-          v-if="account.provider === 'gmail' || account.provider === 'outlook'"
-          :title="$t('settings.accounts.reconnect.buttonTitle')"
-          :disabled="!oauthAvailable || reauthBusyId === account.id"
-          @click.stop.prevent="reconnectOauth(account)"
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M13.5 8A5.5 5.5 0 1 1 11.9 4.1" />
-            <path d="M13.5 1.5v3h-3" />
-          </svg>
-        </IconButton>
-        <IconButton
-          :title="statusButtonTitle(account.provider)"
-          :disabled="!oauthAvailable"
-          @click.stop.prevent="checkStatus(account.id, account.provider)"
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path v-if="account.provider === 'imap'" d="M6 1.5v3M10 1.5v3" />
-            <path
-              v-if="account.provider === 'imap'"
-              d="M4 6h8a1 1 0 011 1v2a3 3 0 01-3 3H6a3 3 0 01-3-3V7a1 1 0 011-1z"
-            />
-            <path v-if="account.provider === 'imap'" d="M8 12.5V15" />
-            <path v-if="account.provider !== 'imap'" d="M1 8a7 7 0 0114 0 7 7 0 01-14 0z" />
-            <path v-if="account.provider !== 'imap'" d="M8 5v3l2 1" />
-          </svg>
-        </IconButton>
-        <IconButton
-          tone="danger"
-          :title="$t('settings.accounts.removeTitle')"
-          :disabled="!oauthAvailable"
-          @click.stop.prevent="removeAccount(account.id, account.email)"
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M2.5 4h11" />
-            <path d="M6 2.5h4" />
-            <path d="M4 4l.6 9a1 1 0 001 1h4.8a1 1 0 001-1L12 4" />
-          </svg>
-        </IconButton>
         <AccountAppearanceSettings :account-id="account.id" />
         <AccountVisibilitySettings :account-id="account.id" />
+        <!-- Removal last and on its own, away from the everyday actions. -->
+        <div class="account-card__danger">
+          <AppButton
+            class="account-card__remove"
+            variant="ghost"
+            size="sm"
+            :disabled="!oauthAvailable"
+            @click.stop.prevent="removeAccount(account.id, account.email)"
+          >
+            {{ $t('settings.accounts.removeTitle') }}
+          </AppButton>
+        </div>
       </article>
     </div>
 
@@ -670,12 +673,6 @@ async function removeAccount(accountId: string, email: string) {
       <pre>{{ statusDetail }}</pre>
     </details>
 
-    <div class="form-actions">
-      <AppButton :disabled="!oauthAvailable || syncBusy" @click="syncImapNow()">
-        {{ syncBusy ? $t('settings.accounts.sync.syncing') : $t('settings.accounts.sync.syncImapNow') }}
-      </AppButton>
-    </div>
-
     <button type="button" class="add-account-button" @click="ui.openAccountSetup()">
       <span class="add-account-icon">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -717,20 +714,60 @@ async function removeAccount(accountId: string, email: string) {
 }
 
 .account-card {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  display: grid;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-color-muted);
   border-radius: var(--radius-md);
-  background: var(--bg-raised);
-  --swatch-ring: var(--bg-raised);
-  transition: background var(--duration-fast) var(--ease-out);
+  background: var(--bg-surface);
+  --swatch-ring: var(--bg-surface);
 }
 
-.account-card:hover {
-  background: var(--bg-overlay);
-  --swatch-ring: var(--bg-overlay);
+.account-card__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.account-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+/* Destructive, so it keeps its distance from the everyday actions. */
+.account-card__danger {
+  display: flex;
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-color-muted);
+}
+
+.account-card__remove {
+  color: var(--accent-red-soft);
+}
+
+/* Phone: the actions as a two-column grid of full touch rows, with removal on
+   its own line underneath instead of filling whatever slot was left. */
+@media (max-width: 767px) {
+  /* Phone: the actions as a list of tappable rows, not a block of pills. */
+  .account-card__actions {
+    display: grid;
+    gap: 0;
+    margin-inline: calc(-1 * var(--space-lg));
+  }
+
+  .account-card__actions > * {
+    justify-content: flex-start;
+    min-height: var(--touch-target);
+    padding-inline: var(--space-lg);
+    border: 0;
+    border-top: 1px solid var(--border-color-muted);
+    border-radius: 0;
+    background: transparent;
+    font-size: var(--font-size-md);
+    font-weight: var(--weight-regular);
+  }
 }
 
 .account-info {

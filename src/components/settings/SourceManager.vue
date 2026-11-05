@@ -13,6 +13,7 @@ import {
 import { useAccountsStore } from "@/stores/accounts";
 import { useThreadsStore } from "@/stores/threads";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppIcon from "@/components/ui/AppIcon.vue";
 import ToggleSwitch from "@/components/ui/ToggleSwitch.vue";
 
 type SourceKind = "rss";
@@ -31,6 +32,9 @@ const pollMinutes = ref(30);
 const notify = ref(false);
 const status = ref("");
 const busy = ref(false);
+/** The create form opens on demand; the list and its Add row come first. */
+const formOpen = ref(false);
+const opmlInput = ref<HTMLInputElement | null>(null);
 
 const identityPlaceholder = computed(() => t("settings.sources.feedUrlPlaceholder"));
 
@@ -61,6 +65,7 @@ async function createSource() {
     identity.value = "";
     await Promise.all([load(), accounts.load(), threads.load()]);
     status.value = t("settings.sources.created");
+    formOpen.value = false;
   } catch (error) {
     status.value = String(error);
   } finally {
@@ -132,11 +137,69 @@ onMounted(() => void load());
 <template>
   <section class="sources">
     <header>
-      <h3>{{ $t("settings.sources.title") }}</h3>
+      <h3 class="settings-page-title">{{ $t('settings.sections.sources.label') }}</h3>
       <p>{{ $t("settings.sources.description") }}</p>
     </header>
 
-    <form class="source-form" @submit.prevent="createSource">
+    <!-- Feeds as a list with an Add row, like the other collections. -->
+    <div class="setting-group">
+      <div v-for="source in sources" :key="source.id" class="setting-row">
+        <div class="setting-info">
+          <span class="setting-label">{{ source.display_name }}</span>
+          <span class="setting-hint" :title="source.identity">
+            {{ source.identity }} ·
+            <template v-if="source.kind !== 'rss'">{{ $t("settings.sources.pushSourceUnsupported") }}</template>
+            <template v-else>
+              {{
+                $t(
+                  sourceConfig(source).notify
+                    ? "settings.sources.pollWithNotify"
+                    : "settings.sources.pollWithoutNotify",
+                  { minutes: Number(sourceConfig(source).poll_minutes || 30) },
+                )
+              }}
+            </template>
+          </span>
+        </div>
+        <div class="card-actions">
+          <AppButton
+            v-if="source.kind === 'rss'"
+            variant="secondary"
+            size="sm"
+            :disabled="busy"
+            @click="pollSource(source.id)"
+          >
+            {{ $t("settings.sources.pollNow") }}
+          </AppButton>
+          <AppButton variant="ghost" size="sm" @click="removeSource(source.id)">
+            {{ $t("common.remove") }}
+          </AppButton>
+        </div>
+      </div>
+      <div v-if="!sources.length" class="setting-row setting-row--single">
+        <span class="setting-hint">{{ $t("settings.sources.empty") }}</span>
+      </div>
+      <div v-if="!formOpen" class="setting-row setting-row--single">
+        <div class="card-actions">
+          <AppButton variant="secondary" size="sm" @click="formOpen = true">
+            <template #icon><AppIcon><path d="M8 3v10M3 8h10" /></AppIcon></template>
+            {{ $t("settings.sources.newFeed") }}
+          </AppButton>
+          <AppButton variant="ghost" size="sm" :disabled="busy" @click="opmlInput?.click()">
+            {{ $t("settings.sources.importOpml") }}
+          </AppButton>
+          <input
+            ref="opmlInput"
+            class="file-input"
+            type="file"
+            accept=".opml,.xml,text/xml,application/xml"
+            @change="importOpmlFile"
+          />
+        </div>
+      </div>
+    </div>
+
+    <form v-if="formOpen" class="source-form" @submit.prevent="createSource">
       <div class="form-grid">
         <label>
           <span>{{ $t("settings.sources.type") }}</span>
@@ -173,58 +236,16 @@ onMounted(() => void load());
       </div>
       <div class="form-footer">
         <ToggleSwitch v-model="notify">{{ $t("settings.sources.notify") }}</ToggleSwitch>
-        <AppButton variant="primary" type="submit" :disabled="busy">
+        <span class="form-footer__spacer" />
+        <AppButton variant="ghost" size="sm" @click="formOpen = false">{{ $t("common.cancel") }}</AppButton>
+        <AppButton variant="primary" size="sm" type="submit" :disabled="busy">
           {{ $t("settings.sources.createSource") }}
         </AppButton>
       </div>
     </form>
 
-    <label class="opml-import">
-      <span>{{ $t("settings.sources.importOpml") }}</span>
-      <input
-        type="file"
-        accept=".opml,.xml,text/xml,application/xml"
-        :disabled="busy"
-        @change="importOpmlFile"
-      />
-    </label>
-
     <p v-if="status" class="status" role="status">{{ status }}</p>
 
-    <div v-if="sources.length" class="source-grid">
-      <article v-for="source in sources" :key="source.id">
-        <span :class="['badge', source.kind]">{{ source.kind }}</span>
-        <strong>{{ source.display_name }}</strong>
-        <small :title="source.identity">{{ source.identity }}</small>
-        <small v-if="source.kind !== 'rss'">
-          {{ $t("settings.sources.pushSourceUnsupported") }}
-        </small>
-        <small v-else>
-          {{
-            $t(
-              sourceConfig(source).notify
-                ? "settings.sources.pollWithNotify"
-                : "settings.sources.pollWithoutNotify",
-              { minutes: Number(sourceConfig(source).poll_minutes || 30) },
-            )
-          }}
-        </small>
-        <div class="card-actions">
-          <AppButton
-            v-if="source.kind === 'rss'"
-            size="sm"
-            :disabled="busy"
-            @click="pollSource(source.id)"
-          >
-            {{ $t("settings.sources.pollNow") }}
-          </AppButton>
-          <AppButton variant="danger" size="sm" @click="removeSource(source.id)">
-            {{ $t("common.remove") }}
-          </AppButton>
-        </div>
-      </article>
-    </div>
-    <p v-else class="empty">{{ $t("settings.sources.empty") }}</p>
   </section>
 </template>
 
@@ -272,73 +293,35 @@ label {
   min-width: 0;
 }
 label span {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
-  font-weight: var(--weight-strong);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-medium);
 }
 input,
 select {
   min-width: 0;
-  border: 1px solid var(--border-color-muted);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
-  background: var(--bg-raised);
+  background: var(--bg-surface);
   color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
 }
 input[type="color"] {
   width: 100%;
   min-height: 35px;
   padding: 3px;
 }
-.opml-import {
-  justify-self: start;
-  padding: 10px 12px;
-  border: 1px dashed var(--border-color-muted);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-}
-.source-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 10px;
-}
-.source-grid article {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-  padding: 15px;
-  border: 1px solid var(--border-color-muted);
-  border-radius: var(--radius-md);
-  background: linear-gradient(145deg, var(--bg-surface), var(--bg-raised));
-}
-.source-grid small,
-.source-grid code {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-tertiary);
-}
-.card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 3px;
-}
-.badge {
-  justify-self: start;
-  padding: 3px 8px;
-  border-radius: var(--radius-full);
-  background: var(--bg-overlay);
-  color: var(--accent-primary);
-  font: 700 10px var(--font-mono);
-  text-transform: uppercase;
-}
-.badge.rss {
-  color: var(--accent-amber);
-}
 .status {
   color: var(--accent-green);
 }
 </style>
+
+<style scoped>
+.file-input { display: none; }
+.form-footer__spacer { flex: 1; }
+.card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
+</style>
+
+<style scoped src="./settingsRows.css"></style>

@@ -771,6 +771,7 @@ pub fn run() {
             commands::sources::poll_source,
             commands::sources::import_opml,
             commands::plugins::list_plugins,
+            commands::plugins::open_plugins_folder,
             commands::plugins::set_plugin_permission,
             commands::plugins::set_plugin_enabled,
             commands::plugins::execute_plugin_command,

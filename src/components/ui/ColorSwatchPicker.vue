@@ -149,6 +149,24 @@ function onKeydown(event: KeyboardEvent) {
   background: var(--swatch-color);
 }
 
+/* Touch: a swatch a finger can pick — larger, with a 44pt hit area. */
+@media (pointer: coarse) {
+  .color-swatches {
+    gap: var(--space-md);
+  }
+
+  .color-swatch {
+    width: 32px;
+    height: 32px;
+  }
+
+  .color-swatch::before {
+    content: '';
+    position: absolute;
+    inset: calc((32px - var(--touch-target)) / 2);
+  }
+}
+
 .color-swatch--custom:focus-within {
   outline: 2px solid var(--accent-primary);
   outline-offset: 2px;

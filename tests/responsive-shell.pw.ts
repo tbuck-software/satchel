@@ -31,10 +31,12 @@ test('nightly updates keep the same app and announce a download without moving t
 });
 
 test('sync activity keeps the sidebar geometry stable', async ({ page }) => {
-  await page.goto('/settings');
+  // An area without the agenda, which loads late and would grow the footer;
+  // Settings, which had none either, is a dialog over the mail now.
+  await page.goto('/calendar');
   const sidebar = page.locator('aside').first();
   const footer = sidebar.locator('.sidebar-footer');
-  await expect(footer.getByRole('button', { name: 'Settings', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(footer.getByRole('button', { name: 'Calendar', exact: true })).toHaveAttribute('aria-current', 'page');
   const button = sidebar.locator('.sidebar-brand .sync-button');
   await expect(button).toBeVisible();
   const restingButton = await button.boundingBox();

@@ -57,49 +57,41 @@ async function toggleAutostart(value: boolean) {
 
 <template>
   <section>
-    <h3>{{ $t('settings.tray.title') }}</h3>
+    <h3 class="settings-page-title">{{ $t('settings.sections.tray.label') }}</h3>
     <p class="hint">{{ $t('settings.tray.hint') }}</p>
 
-    <ToggleSwitch :model-value="!prefs.quit_on_close" @update:model-value="toggleQuit(!$event)">
-      {{ $t('settings.tray.minimizeToTray') }}
-    </ToggleSwitch>
-
-    <ToggleSwitch
-      :model-value="prefs.autostart_enabled"
-      @update:model-value="toggleAutostart($event)"
-    >
-      {{ $t('settings.tray.autostart') }}
-    </ToggleSwitch>
-
-    <ToggleSwitch
-      :model-value="prefs.start_minimized"
-      :disabled="!prefs.autostart_enabled"
-      @update:model-value="toggleStartMinimized($event)"
-    >
-      {{ $t('settings.tray.startMinimized') }}
-    </ToggleSwitch>
+    <div class="setting-group">
+      <div class="setting-row">
+        <span class="setting-label">{{ $t('settings.tray.minimizeToTray') }}</span>
+        <ToggleSwitch
+          :model-value="!prefs.quit_on_close"
+          :label="$t('settings.tray.minimizeToTray')"
+          @update:model-value="toggleQuit(!$event)"
+        />
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">{{ $t('settings.tray.autostart') }}</span>
+        <ToggleSwitch
+          :model-value="prefs.autostart_enabled"
+          :label="$t('settings.tray.autostart')"
+          @update:model-value="toggleAutostart($event)"
+        />
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">{{ $t('settings.tray.startMinimized') }}</span>
+        <ToggleSwitch
+          :model-value="prefs.start_minimized"
+          :disabled="!prefs.autostart_enabled"
+          :label="$t('settings.tray.startMinimized')"
+          @update:model-value="toggleStartMinimized($event)"
+        />
+      </div>
+    </div>
 
     <p v-if="status" class="status">{{ status }}</p>
   </section>
 </template>
 
-<style scoped>
-section {
-  display: grid;
-  gap: 14px;
-}
-h3 {
-  margin: 0;
-  color: var(--text-primary);
-}
-.hint {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-}
-.status {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-}
-</style>
+<style scoped src="./settingsForms.css"></style>
+
+<style scoped src="./settingsRows.css"></style>

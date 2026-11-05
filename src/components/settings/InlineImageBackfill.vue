@@ -5,7 +5,7 @@ import {
   backendInlineImageCacheStatus,
   backendStartInlineImageBackfill,
   backendStopInlineImageBackfill,
-  backendSupportsNativeCommands,
+  backendCommandsAvailable,
   translateBackendError,
   type BackendInlineCacheProgress,
   type BackendInlineCacheStatus,
@@ -21,7 +21,7 @@ const error = ref('');
 const busy = ref(false);
 let unlisten: (() => void) | null = null;
 
-const native = backendSupportsNativeCommands();
+const native = backendCommandsAvailable();
 
 onMounted(async () => {
   if (!native) return;
@@ -165,51 +165,48 @@ function formatDuration(seconds: number): string {
 
     <p v-if="!native" class="hint">{{ $t('settings.inlineImages.desktopOnly') }}</p>
 
+    <!-- One status row with its action; progress below it while it runs. -->
     <template v-else-if="status">
-      <div class="counts">
-        <div>
-          <strong>{{ formatCount(missing) }}</strong>
-          <span>{{ $t('settings.inlineImages.missingLocally', { size: formatBytes(status.missing_bytes) }) }}</span>
+      <div class="setting-group">
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">
+              {{ missing === 0 && !running
+                ? $t('settings.inlineImages.allPresent')
+                : `${formatCount(missing)} ${$t('settings.inlineImages.missingLocally', { size: formatBytes(status.missing_bytes) })}` }}
+            </span>
+            <span class="setting-hint">
+              {{ formatCount(status.cached) }} {{ $t('settings.inlineImages.alreadyStored') }}<template v-if="upfrontLabel && missing > 0"> · {{ upfrontLabel }}</template>
+            </span>
+          </div>
+          <AppButton v-if="running" variant="secondary" size="sm" @click="stop">{{ $t('settings.inlineImages.stop') }}</AppButton>
+          <AppButton
+            v-else
+            variant="secondary"
+            size="sm"
+            :title="$t('settings.inlineImages.note')"
+            :disabled="busy || missing === 0"
+            @click="start"
+          >
+            {{ $t('settings.inlineImages.startNow') }}
+          </AppButton>
         </div>
-        <div>
-          <strong>{{ formatCount(status.cached) }}</strong>
-          <span>{{ $t('settings.inlineImages.alreadyStored') }}</span>
+        <div v-if="running || progress?.finished_reason" class="setting-row setting-row--single">
+          <div class="run">
+            <div class="bar" role="progressbar" :aria-valuenow="percent" aria-valuemin="0" aria-valuemax="100">
+              <span :style="{ width: `${percent}%` }" :class="{ paused }" />
+            </div>
+            <p class="run-line">
+              <span>{{ $t('settings.inlineImages.progressOf', { done: formatCount(handled), total: formatCount(progress?.total ?? 0) }) }}</span>
+              <span v-if="paused" class="paused-note">
+                {{ $t('settings.inlineImages.throttled', { duration: formatDuration(progress?.paused_seconds ?? 0) }) }}
+              </span>
+              <span v-else-if="etaLabel">{{ etaLabel }}</span>
+              <span v-else-if="finishedLabel">{{ finishedLabel }}</span>
+            </p>
+          </div>
         </div>
       </div>
-
-      <div v-if="running || progress?.finished_reason" class="run">
-        <div class="bar" role="progressbar" :aria-valuenow="percent" aria-valuemin="0" aria-valuemax="100">
-          <span :style="{ width: `${percent}%` }" :class="{ paused }" />
-        </div>
-        <p class="run-line">
-          <span>{{ $t('settings.inlineImages.progressOf', { done: formatCount(handled), total: formatCount(progress?.total ?? 0) }) }}</span>
-          <span v-if="paused" class="paused-note">
-            {{ $t('settings.inlineImages.throttled', { duration: formatDuration(progress?.paused_seconds ?? 0) }) }}
-          </span>
-          <span v-else-if="etaLabel">{{ etaLabel }}</span>
-          <span v-else-if="finishedLabel">{{ finishedLabel }}</span>
-        </p>
-      </div>
-
-      <p v-if="missing === 0 && !running" class="hint ok">
-        {{ $t('settings.inlineImages.allPresent') }}
-      </p>
-      <p v-else-if="upfrontLabel" class="hint">{{ upfrontLabel }}</p>
-
-      <div class="actions">
-        <AppButton v-if="running" variant="soft" size="sm" @click="stop">{{ $t('settings.inlineImages.stop') }}</AppButton>
-        <AppButton
-          v-else
-          variant="primary"
-          size="sm"
-          :disabled="busy || missing === 0"
-          @click="start"
-        >
-          {{ $t('settings.inlineImages.startNow') }}
-        </AppButton>
-        <span class="note">{{ $t('settings.inlineImages.note') }}</span>
-      </div>
-
       <p v-if="lastError" class="hint error">{{ lastError }}</p>
     </template>
 
@@ -327,3 +324,10 @@ header p {
   color: var(--accent-red);
 }
 </style>
+
+<style scoped>
+.run { width: 100%; }
+.backfill header h3 { margin: 0; font-size: var(--font-size-md); font-weight: var(--weight-semibold); color: var(--text-primary); }
+</style>
+
+<style scoped src="./settingsRows.css"></style>

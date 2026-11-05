@@ -60,7 +60,7 @@ onBeforeUnmount(() => window.removeEventListener("focus", refreshOnFocus));
 <template>
   <section class="mobile-sync">
     <header>
-      <h2>{{ t("settings.mobileSync.androidTitle") }}</h2>
+      <h2 class="settings-page-title">{{ t("settings.mobileSync.androidTitle") }}</h2>
       <p>{{ t("settings.mobileSync.androidDescription") }}</p>
     </header>
     <div class="health-card">

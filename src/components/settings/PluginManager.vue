@@ -12,11 +12,9 @@ import {
   backendListPgpKeys,
   backendPgpEngineStatus,
   backendListPlugins,
-  backendDeleteWebhook,
-  backendListWebhooks,
+  backendOpenPluginsFolder,
   backendSetPluginEnabled,
   backendSetPluginPermission,
-  backendUpsertWebhook,
   backendUnlockPgpKeys,
   backendValidatePgpBundlePassphrase,
   translateBackendError,
@@ -26,20 +24,20 @@ import {
   type BackendPgpEngineStatus,
   type BackendPgpKey,
   type BackendPlugin,
-  type BackendWebhook,
 } from '@/services/backend';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { useToast } from '@/composables/useToast';
 import AppButton from '@/components/ui/AppButton.vue';
-import IconButton from '@/components/ui/IconButton.vue';
+import EmptyState from '@/components/ui/EmptyState.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
-import TimeAgo from '@/components/common/TimeAgo.vue';
 import AppBanner from '@/components/ui/AppBanner.vue';
 import { useMessagesStore } from '@/stores/messages';
 
 const { t } = useI18n();
 const { ask } = useConfirm();
 const toast = useToast();
+const emit = defineEmits<{ 'open-integrations': [] }>();
 const messages = useMessagesStore();
 
 interface PluginView {
@@ -87,10 +85,7 @@ const keys = ref<BackendPgpKey[]>([]);
 const engineStatus = ref<BackendPgpEngineStatus | null>(null);
 const pluginMetrics = ref<BackendPluginMetrics[]>([]);
 const pluginAudit = ref<BackendPluginAuditRecord[]>([]);
-const webhooks = ref<BackendWebhook[]>([]);
 const statusText = ref('');
-const webhookUrl = ref('');
-const webhookEvents = ref('message.received, thread.updated');
 const fileInput = ref<HTMLInputElement | null>(null);
 
 const importLabelPrefix = ref('');
@@ -203,6 +198,14 @@ async function setPluginEnabled(plugin: PluginView, enabled: boolean) {
   }
 }
 
+async function openPluginsFolder() {
+  try {
+    await backendOpenPluginsFolder();
+  } catch (error) {
+    toast.error(backendErrorLabel(error));
+  }
+}
+
 async function loadPlugins() {
   loadingPlugins.value = true;
   try {
@@ -210,82 +213,12 @@ async function loadPlugins() {
     plugins.value = rows.map(toViewModel);
     pluginMetrics.value = showPlugins.value ? await backendListPluginMetrics() : [];
     pluginAudit.value = showPlugins.value ? (await backendListPluginAuditLog()).slice(-20).reverse() : [];
-    webhooks.value = showPlugins.value ? await backendListWebhooks() : [];
   } catch {
     plugins.value = [];
     pluginMetrics.value = [];
     pluginAudit.value = [];
-    webhooks.value = [];
   } finally {
     loadingPlugins.value = false;
-  }
-}
-
-/**
- * The subscribed events, as a list.
- *
- * `events_json` is storage, not copy. A row whose JSON is unreadable still has
- * a URL worth showing and a delete button worth reaching — parsing must not be
- * able to take the section down with it.
- */
-function webhookEventList(webhook: BackendWebhook): string[] {
-  try {
-    const parsed: unknown = JSON.parse(webhook.events_json);
-    return Array.isArray(parsed) ? parsed.map((event) => String(event)) : [];
-  } catch {
-    return [];
-  }
-}
-
-async function setWebhookEnabled(webhook: BackendWebhook, enabled: boolean) {
-  const previous = webhook.enabled;
-  // Optimistic: the switch has to move under the finger, not after a round trip.
-  webhook.enabled = enabled ? 1 : 0;
-  try {
-    await backendUpsertWebhook({
-      id: webhook.id,
-      url: webhook.url,
-      events: webhookEventList(webhook),
-      enabled,
-    });
-  } catch (error) {
-    webhook.enabled = previous;
-    toast.error(t('settings.plugins.webhookToggleFailed', { error: backendErrorLabel(error) }));
-  }
-}
-
-async function removeWebhook(webhook: BackendWebhook) {
-  // A webhook forwards message metadata to a foreign host. Name the host in
-  // the question, so nobody deletes the wrong one from a list of two.
-  const confirmed = await ask({
-    title: t('settings.plugins.webhookDeleteTitle'),
-    body: t('settings.plugins.webhookDeleteConfirm', { url: webhook.url }),
-    confirmLabel: t('settings.plugins.deleteWebhook'),
-    tone: 'danger',
-  });
-  if (!confirmed) return;
-  try {
-    await backendDeleteWebhook(webhook.id);
-    webhooks.value = webhooks.value.filter((entry) => entry.id !== webhook.id);
-    statusText.value = t('settings.plugins.webhookDeleted', { url: webhook.url });
-  } catch (error) {
-    toast.error(t('settings.plugins.webhookDeleteFailed', { error: backendErrorLabel(error) }));
-  }
-}
-
-async function addWebhook() {
-  try {
-    await backendUpsertWebhook({
-      url: webhookUrl.value.trim(),
-      events: webhookEvents.value.split(',').map((event) => event.trim()).filter(Boolean),
-      enabled: true,
-    });
-    webhookUrl.value = '';
-    await loadPlugins();
-  } catch (error) {
-    statusText.value = t('settings.plugins.webhookSaveFailed', {
-      error: (error as Error).message ?? String(error),
-    });
   }
 }
 
@@ -705,7 +638,7 @@ onMounted(() => {
 <template>
   <div class="section">
     <header class="section-header">
-      <h3>{{ props.only === 'pgp' ? $t('settings.pgp.title') : $t('settings.plugins.title') }}</h3>
+      <h3 class="settings-page-title">{{ props.only === 'pgp' ? $t('settings.sections.pgp.label') : $t('settings.sections.plugins.label') }}</h3>
       <p class="section-desc">
         {{ props.only === 'pgp'
           ? $t('settings.pgp.description')
@@ -714,9 +647,39 @@ onMounted(() => {
     </header>
 
     <p v-if="loadingPlugins" class="empty">{{ $t('settings.plugins.loading') }}</p>
-    <p v-else-if="plugins.length === 0" class="empty">{{ $t('settings.plugins.noneFound') }}</p>
-
-    <p v-else-if="props.only === 'pgp' && !pgpPlugin" class="empty">{{ $t('settings.plugins.pgpPluginMissing') }}</p>
+    <!-- Under Encryption the missing piece is the OpenPGP plugin, and the
+         way on is the Integrations section, not a dead-end sentence. -->
+    <div v-else-if="props.only === 'pgp' && !pgpPlugin" class="setting-group">
+      <div class="setting-row">
+        <span class="setting-hint">{{ $t('settings.plugins.pgpPluginMissing') }}</span>
+        <AppButton variant="secondary" size="sm" @click="emit('open-integrations')">
+          {{ $t('settings.plugins.openIntegrations') }}
+        </AppButton>
+      </div>
+    </div>
+    <!-- Plugins install like editor or game add-ons: a folder in the profile.
+         The way there is a button, not a path to look up. -->
+    <div v-if="showPlugins && props.only !== 'all'" class="setting-group plugins-folder">
+      <div class="setting-row">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('settings.plugins.addTitle') }}</span>
+          <span class="setting-hint">{{ $t('settings.plugins.addHint') }}</span>
+        </div>
+        <AppButton variant="secondary" size="sm" @click="openPluginsFolder">
+          {{ $t('settings.plugins.openFolder') }}
+        </AppButton>
+      </div>
+    </div>
+    <EmptyState
+      v-if="!loadingPlugins && props.only === 'plugins' && plugins.length === 0"
+      class="plugins-empty"
+      :title="$t('settings.plugins.noneFound')"
+      :description="$t('settings.plugins.noneFoundHint')"
+    >
+      <template #icon>
+        <AppIcon size="lg" :grid="24"><path d="M12 2v5M12 17v5M4.93 4.93l3.54 3.54M15.53 15.53l3.54 3.54M2 12h5M17 12h5M4.93 19.07l3.54-3.54M15.53 8.47l3.54-3.54" /><circle cx="12" cy="12" r="3" /></AppIcon>
+      </template>
+    </EmptyState>
 
     <p v-if="showPgp && pgpPlugin && engineStatus && !engineStatus.available" class="pgp-engine-warning" role="alert">
       <strong>{{ $t('settings.pgp.engineUnavailableTitle') }}</strong>
@@ -1042,57 +1005,6 @@ onMounted(() => {
           <span>{{ record.command }}</span>
           <span :class="record.decision === 'allowed' ? 'audit-ok' : 'audit-denied'">{{ record.decision }}</span>
           <small>{{ record.reason || record.capability || record.created_at }}</small>
-        </div>
-      </div>
-    </section>
-
-    <section v-if="showPlugins" class="keys">
-      <header class="keys-header">
-        <h4>{{ $t('settings.plugins.webhooksTitle') }}</h4>
-      </header>
-      <div class="field-grid">
-        <label class="field">
-          <span class="field-label">{{ $t('settings.plugins.webhookUrl') }}</span>
-          <input v-model="webhookUrl" :placeholder="$t('settings.plugins.webhookUrlPlaceholder')" />
-        </label>
-        <label class="field">
-          <span class="field-label">{{ $t('settings.plugins.webhookEvents') }}</span>
-          <input v-model="webhookEvents" />
-        </label>
-      </div>
-      <div class="key-actions">
-        <AppButton :disabled="!webhookUrl.trim()" @click="addWebhook">
-          {{ $t('settings.plugins.addWebhook') }}
-        </AppButton>
-      </div>
-      <div v-if="webhooks.length" class="webhook-list">
-        <div v-for="webhook in webhooks" :key="webhook.id" class="webhook-row">
-          <span class="webhook-url">{{ webhook.url }}</span>
-          <span class="webhook-events">
-            <span v-for="event in webhookEventList(webhook)" :key="event" class="webhook-chip">
-              {{ event }}
-            </span>
-            <small v-if="!webhookEventList(webhook).length">
-              {{ $t('settings.plugins.webhookNoEvents') }}
-            </small>
-          </span>
-          <TimeAgo :date="webhook.updated_at" />
-          <ToggleSwitch
-            :model-value="webhook.enabled !== 0"
-            @update:model-value="setWebhookEnabled(webhook, $event)"
-          >
-            {{ webhook.enabled ? $t('common.enabled') : $t('common.disabled') }}
-          </ToggleSwitch>
-          <IconButton
-            size="sm"
-            tone="danger"
-            :title="$t('settings.plugins.deleteWebhook')"
-            @click="removeWebhook(webhook)"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-              <path d="M3 4h10M6.5 4V2.8h3V4M5 4l.6 9h4.8L11 4" />
-            </svg>
-          </IconButton>
         </div>
       </div>
     </section>
@@ -1454,40 +1366,10 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.webhook-list {
-  display: grid;
-  gap: var(--space-sm);
-}
 
-.webhook-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.4fr) auto auto auto;
-  gap: var(--space-sm);
-  align-items: center;
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-}
 
-.webhook-url {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.webhook-events {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-xs);
-  min-width: 0;
-}
 
-.webhook-chip {
-  padding: 1px var(--space-sm);
-  border: 1px solid var(--border-color-muted);
-  border-radius: var(--radius-xs);
-  font-size: var(--font-size-2xs);
-}
 
 .audit-ok {
   color: var(--accent-green);
@@ -1627,3 +1509,14 @@ onMounted(() => {
   }
 }
 </style>
+
+<style scoped>
+.plugins-empty {
+  padding: var(--space-xl) var(--space-lg);
+  border: 1px solid var(--border-color-muted);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+</style>
+
+<style scoped src="./settingsRows.css"></style>

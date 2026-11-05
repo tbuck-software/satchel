@@ -51,12 +51,11 @@ function updateAction(slot: SwipeSlot, event: Event) {
   <section class="swipe-settings">
     <header class="swipe-settings__header">
       <div>
-        <p class="eyebrow">{{ $t('settings.swipes.eyebrow') }}</p>
-        <h2>{{ $t('settings.swipes.title') }}</h2>
+        <h2 class="settings-page-title">{{ $t('settings.sections.swipes.label') }}</h2>
         <p class="description">{{ $t('settings.swipes.description') }}</p>
       </div>
       <AppButton variant="secondary" size="sm" :disabled="isDefault" @click="settings.resetSwipeActions()">
-        {{ $t('common.default') }}
+        {{ $t('common.reset') }}
       </AppButton>
     </header>
 
@@ -149,15 +148,6 @@ function updateAction(slot: SwipeSlot, event: Event) {
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-}
-
-.eyebrow {
-  margin: 0 0 6px;
-  color: var(--accent-primary);
-  font-size: var(--font-size-3xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: .11em;
-  text-transform: uppercase;
 }
 
 h2,
@@ -265,8 +255,8 @@ h2 {
 
 .direction-card__title p {
   margin-top: 3px;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
   line-height: 1.4;
 }
 
@@ -308,8 +298,8 @@ h2 {
 }
 
 .action-field small {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-3xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
 }
 
 .action-field select {
@@ -317,11 +307,11 @@ h2 {
   width: 100%;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  padding: 8px 28px 8px 9px;
-  background: var(--bg-raised);
+  padding: 8px 28px 8px 10px;
+  background: var(--bg-surface);
   color: var(--text-primary);
   font: inherit;
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-sm);
 }
 
 .action-field select:focus-visible {
@@ -329,8 +319,8 @@ h2 {
 }
 
 .device-note {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
   line-height: 1.5;
 }
 

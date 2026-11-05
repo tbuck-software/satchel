@@ -691,6 +691,15 @@ function oauthStatus(accountId: string) {
 }
 
 let appUpdateChannel: 'stable' | 'nightly' = 'stable';
+let notificationPreferences = {
+  enabled: true,
+  scope: 'inbox' as 'all' | 'inbox' | 'off',
+  sound: true,
+  undo_send_seconds: 5,
+  trash_auto_delete_days: 30,
+  send_read_receipts: false,
+  body_window_days: 0,
+};
 
 /** Expired-certificate exceptions granted in this session. */
 const certificateExceptions: Array<{ account_id: string; host: string; fingerprint: string; expires_at: string; created_at: string }> = [];
@@ -727,6 +736,30 @@ const handlers: Record<string, Handler> = {
     contacts_synced: 0,
     errors: [],
   }),
+  inline_image_cache_status: () => ({
+    missing: 0, missing_bytes: 0, cached: 0, estimated_seconds: 0,
+    progress: { total: 0, done: 0, failed: 0, running: false, eta_seconds: null, paused_seconds: null, last_error: null, finished_reason: null },
+  }),
+  start_inline_image_backfill: () => null,
+  stop_inline_image_backfill: () => null,
+  get_notification_preferences: () => ({ ...notificationPreferences }),
+  set_notification_preferences: ({ preferences }) => {
+    notificationPreferences = { ...(preferences as typeof notificationPreferences) };
+    return { ...notificationPreferences };
+  },
+  set_background_sync: () => null,
+  // The shell answers for itself; the mock answers for the device it runs on,
+  // so a phone-sized run hides the tray and keyboard settings as a phone does.
+  runtime_capabilities: () => {
+    const agent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+    const platform = /Android/.test(agent) ? 'android' : /iPhone|iPad/.test(agent) ? 'ios' : 'macos';
+    const mobile = platform !== 'macos';
+    return {
+      platform, mobile, tray: !mobile, autostart: !mobile, single_instance: !mobile, plugins: !mobile,
+      native_crypto: !mobile, background_sync: mobile, contacts: true, file_associations: !mobile,
+      deep_links: mobile, push: mobile,
+    };
+  },
   get_app_update_preferences: () => ({ channel: appUpdateChannel, supported: true }),
   set_app_update_channel: (payload) => { appUpdateChannel = payload.channel as 'stable' | 'nightly'; },
   check_app_update: () => ({ channel: appUpdateChannel, version: null }),
@@ -1463,8 +1496,9 @@ const handlers: Record<string, Handler> = {
     failed_remote_mutations: outbox.filter((item) => item.action_type !== 'send_message' && item.status === 'failed').length,
   }),
   record_frontend_diagnostic: () => undefined,
-  app_build_info: () => ({ version: '0.1.0', commit: 'mock', os: 'macos', arch: 'aarch64', debug: true }),
+  app_build_info: () => ({ version: '0.1.0', commit: '44689dd', os: 'macos', arch: 'aarch64', debug: true }),
   open_logs_folder: () => undefined,
+  open_plugins_folder: () => undefined,
   diagnostics_overview: () => {
     const now = new Date().toISOString();
     const statuses = new Map<string, number>();
@@ -1508,7 +1542,7 @@ const handlers: Record<string, Handler> = {
   diagnostics_report: () => [
     'Satchel diagnostics (redacted)',
     'version: 0.1.0',
-    'commit: mock',
+    'commit: 44689dd',
     `generated: ${new Date().toISOString()}`,
   ].join('\n'),
   take_pending_notification_thread: () => null,

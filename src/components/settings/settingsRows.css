@@ -1,8 +1,12 @@
+/* One grouped-list surface for every section: a sheet on the pane with a
+   hairline, as General had alone. Grey slabs on some pages and white sheets
+   on others made each section look like a different app. */
 .setting-group {
   display: grid;
   overflow: hidden;
+  border: 1px solid var(--border-color-muted);
   border-radius: var(--radius-md);
-  background: var(--bg-raised);
+  background: var(--bg-surface);
 }
 
 .setting-row {
@@ -19,6 +23,15 @@
 .setting-row > :last-child {
   justify-self: end;
   max-width: 100%;
+}
+
+/* A row with one thing in it (a note, an Add action) starts at the left. */
+.setting-row.setting-row--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.setting-row.setting-row--single > :last-child {
+  justify-self: start;
 }
 
 /* The full border step: --border-color-muted is barely a step off the
@@ -53,6 +66,17 @@
    full width. Side by side, the copy wrapped to five lines in a third of
    the row while the control took the rest. Switches stay inline. */
 @media (max-width: 767px) {
+  /* A status with its action: the copy takes the width, the action goes
+     under it, instead of the copy wrapping into a narrow column. */
+  .setting-row.setting-row--stack-phone {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-sm);
+  }
+
+  .setting-row.setting-row--stack-phone > :last-child {
+    justify-self: start;
+  }
+
   .setting-row:has(> .segmented) {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-sm);

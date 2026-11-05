@@ -16,6 +16,7 @@ const contactsStore = useContactsStore();
 const settings = useSettingsStore();
 const status = ref('');
 const query = ref('');
+const showContacts = ref(false);
 const urlInputs = ref<Record<string, string>>({});
 const fileInput = ref<HTMLInputElement | null>(null);
 const fileTarget = ref<BackendContact | null>(null);
@@ -166,7 +167,7 @@ async function clearAvatar(contact: BackendContact, locked: boolean) {
   <section>
     <header class="section-header">
       <div>
-        <h3>{{ $t('settings.sections.contacts.label') }}</h3>
+        <h3 class="settings-page-title">{{ $t('settings.sections.contacts.label') }}</h3>
         <p class="hint">
           {{ $t('settings.contacts.priorityHint') }}
         </p>
@@ -177,7 +178,7 @@ async function clearAvatar(contact: BackendContact, locked: boolean) {
       </div>
     </header>
 
-    <div class="permission-note">
+    <div v-if="canImport" class="permission-note">
       <div class="note-icon" aria-hidden="true">
         <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="8" cy="5" r="2.5" />
@@ -194,14 +195,29 @@ async function clearAvatar(contact: BackendContact, locked: boolean) {
 
     <GoogleConnections purpose="contacts" @connected="importAvatars" />
 
-    <div class="third-party-setting">
-      <ToggleSwitch v-model="settings.thirdPartyContactAvatars" :label="t('settings.contacts.thirdPartyLabel')">
-        {{ t('settings.contacts.thirdPartyLabel') }}
-      </ToggleSwitch>
-      <p class="hint">{{ t('settings.contacts.thirdPartyHint') }}</p>
+    <!-- The consent is the setting; the per-contact pictures are a tool
+         behind it, folded away until someone wants them. -->
+    <div class="setting-group">
+      <div class="setting-row setting-row--toggle">
+        <ToggleSwitch v-model="settings.thirdPartyContactAvatars" :label="t('settings.contacts.thirdPartyLabel')">
+          <span class="setting-info">
+            <span class="setting-label">{{ t('settings.contacts.thirdPartyLabel') }}</span>
+            <span class="setting-hint">{{ t('settings.contacts.thirdPartyHint') }}</span>
+          </span>
+        </ToggleSwitch>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <span class="setting-label">{{ t('settings.contacts.individualTitle') }}</span>
+          <span class="setting-hint">{{ t('settings.contacts.individualHint', { count: contactCount }) }}</span>
+        </div>
+        <AppButton variant="secondary" size="sm" :aria-expanded="showContacts" @click="showContacts = !showContacts">
+          {{ showContacts ? t('settings.contacts.hideIndividual') : t('settings.contacts.showIndividual') }}
+        </AppButton>
+      </div>
     </div>
 
-    <div class="toolbar">
+    <div v-if="showContacts" class="toolbar">
       <input
         v-model="query"
         type="search"
@@ -228,7 +244,7 @@ async function clearAvatar(contact: BackendContact, locked: boolean) {
       @change="onFileSelected"
     />
 
-    <div class="contact-list">
+    <div v-if="showContacts" class="contact-list">
       <article v-for="contact in filteredContacts" :key="contact.id" class="contact-row">
         <Avatar
           :name="contact.display_name || contact.email"
@@ -472,3 +488,21 @@ h3 {
   }
 }
 </style>
+
+<style scoped>
+/* The switch's own label carries the copy, so the whole row toggles; laid
+   out like every other row: copy left, switch right. */
+.setting-row--toggle :deep(.toggle-switch) {
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  gap: var(--space-xl);
+  width: 100%;
+}
+
+.setting-row--toggle :deep(.toggle-switch__label) {
+  flex: 1;
+}
+</style>
+
+<style scoped src="./settingsRows.css"></style>

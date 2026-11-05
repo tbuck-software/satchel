@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -36,6 +37,7 @@ const isDefault = ref(false);
 const identityEmail = ref('');
 const firstContactMode = ref<'always_full' | 'full_then_short' | 'always_short'>('always_full');
 const adoptedSuggestionId = ref<string | null>(null);
+const editorOpen = ref(false);
 const status = ref('');
 const editorRef = ref<HTMLElement | null>(null);
 const nameInputRef = ref<HTMLInputElement | null>(null);
@@ -113,6 +115,7 @@ watch(identityEmail, () => {
 });
 
 function reset() {
+  editorOpen.value = false;
   editingId.value = null;
   name.value = '';
   bodyText.value = '';
@@ -128,6 +131,7 @@ function edit(id: string) {
   const sig = signaturesStore.items.find((s) => s.id === id);
   if (!sig) return;
   editingId.value = id;
+  editorOpen.value = true;
   name.value = sig.name;
   bodyText.value = sig.body_text;
   shortBodyText.value = sig.short_body_text ?? '';
@@ -144,6 +148,15 @@ function edit(id: string) {
     ? hydrateHtml(sig.short_body_html)
     : textToHtml(sig.short_body_text ?? '');
   isDefault.value = sig.is_default === 1;
+}
+
+function startNew() {
+  reset();
+  editorOpen.value = true;
+  void nextTick(() => {
+    editorRef.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    nameInputRef.value?.focus();
+  });
 }
 
 async function save() {
@@ -181,7 +194,9 @@ async function save() {
     if (adoptedSuggestionId.value) {
       await signaturesStore.setSuggestionStatus(adoptedSuggestionId.value, 'accepted');
     }
-    status.value = t('settings.signatures.saved');
+    // The form closes on save, so the confirmation cannot live inside it.
+    status.value = '';
+    toast.success(t('settings.signatures.saved'));
     reset();
   } catch (err) {
     status.value = err instanceof Error ? err.message : String(err);
@@ -218,6 +233,7 @@ async function discoverForIdentities() {
 
 function adoptSuggestion(suggestion: BackendSignatureSuggestion) {
   editingId.value = null;
+  editorOpen.value = true;
   identityEmail.value = suggestion.identity_email;
   name.value = t('settings.signatures.suggestionName', { email: suggestion.identity_email });
   bodyText.value = suggestion.body_text;
@@ -314,35 +330,62 @@ function escapeHtml(value: string) {
 
 <template>
   <section>
-    <h3>{{ $t('settings.signatures.title') }}</h3>
+    <h3 class="settings-page-title">{{ $t('settings.sections.signatures.label') }}</h3>
 
-    <label class="field">
-      <span>{{ $t('settings.signatures.account') }}</span>
-      <select v-model="accountId">
-        <option v-for="acc in accountsStore.accounts" :key="acc.id" :value="acc.id">
-          {{ acc.displayName }} &lt;{{ acc.email }}&gt;
-        </option>
-      </select>
-    </label>
+    <p class="lead">{{ $t('settings.signatures.description') }}</p>
 
-    <div :class="['suggestions', { 'suggestions--empty': accountSuggestions.length === 0 }]">
-      <div class="suggestions-heading">
-        <div>
-          <h4>{{ accountSuggestions.length ? $t('settings.signatures.suggestionsFound') : $t('settings.signatures.suggestionsTitle') }}</h4>
-          <p v-if="accountSuggestions.length">{{ $t('settings.signatures.suggestionsHint') }}</p>
-          <p v-else-if="discovering">{{ $t('settings.signatures.discovering') }}</p>
-          <p v-else>{{ $t('settings.signatures.noSuggestions') }}</p>
+    <div class="setting-group list">
+      <label class="setting-row">
+        <span class="setting-label">{{ $t('settings.signatures.account') }}</span>
+        <select v-model="accountId">
+          <option v-for="acc in accountsStore.accounts" :key="acc.id" :value="acc.id">
+            {{ acc.displayName }} &lt;{{ acc.email }}&gt;
+          </option>
+        </select>
+      </label>
+      <!-- Discovery is a row, not a card: it reports, and offers one action. -->
+      <div class="setting-row setting-row--stack-phone">
+        <div class="setting-info">
+          <span class="setting-label">
+            {{ accountSuggestions.length ? $t('settings.signatures.suggestionsFound') : $t('settings.signatures.suggestionsTitle') }}
+          </span>
+          <span v-if="accountSuggestions.length" class="setting-hint">{{ $t('settings.signatures.suggestionsHint') }}</span>
+          <span v-else-if="discovering" class="setting-hint">{{ $t('settings.signatures.discovering') }}</span>
+          <span v-else class="setting-hint">{{ $t('settings.signatures.noSuggestions') }}</span>
         </div>
         <AppButton
-          class="ghost"
           :disabled="discovering"
           @click="discoverForIdentities"
-          variant="ghost"
+          variant="secondary"
           size="sm"
         >
           {{ discovering ? $t('settings.signatures.checking') : $t('settings.signatures.checkAgain') }}
         </AppButton>
       </div>
+      <!-- The signatures follow in the same group as their account, with an
+           Add row; the form opens on demand. -->
+      <div v-for="sig in accountSignatures" :key="sig.id" class="setting-row signature-row">
+        <CardButton class="row" @click="edit(sig.id)">
+          <span class="name">
+            {{ sig.name }}
+            <span v-if="sig.is_default === 1" class="badge">{{ $t('common.default') }}</span>
+          </span>
+          <span class="preview">{{ sig.body_text.slice(0, 80) }}</span>
+        </CardButton>
+        <AppButton class="delete" @click="remove(sig.id)" variant="ghost" size="sm">{{ $t('common.delete') }}</AppButton>
+      </div>
+      <div v-if="accountSignatures.length === 0" class="setting-row setting-row--single">
+        <span class="setting-hint">{{ $t('settings.signatures.emptyList') }}</span>
+      </div>
+      <div v-if="!editorOpen" class="setting-row setting-row--single">
+        <AppButton variant="secondary" size="sm" @click="startNew">
+          <template #icon><AppIcon><path d="M8 3v10M3 8h10" /></AppIcon></template>
+          {{ $t('settings.signatures.newTitle') }}
+        </AppButton>
+      </div>
+    </div>
+
+    <div v-if="accountSuggestions.length" class="suggestions">
       <article
         v-for="suggestion in accountSuggestions"
         :key="suggestion.id"
@@ -380,21 +423,7 @@ function escapeHtml(value: string) {
       </article>
     </div>
 
-    <ul v-if="accountSignatures.length > 0" class="list">
-      <li v-for="sig in accountSignatures" :key="sig.id">
-        <CardButton class="row" @click="edit(sig.id)">
-          <span class="name">
-            {{ sig.name }}
-            <span v-if="sig.is_default === 1" class="badge">{{ $t('common.default') }}</span>
-          </span>
-          <span class="preview">{{ sig.body_text.slice(0, 80) }}</span>
-        </CardButton>
-        <AppButton class="delete" @click="remove(sig.id)" variant="danger" size="sm">{{ $t('common.delete') }}</AppButton>
-      </li>
-    </ul>
-    <p v-else class="empty">{{ $t('settings.signatures.emptyList') }}</p>
-
-    <div ref="editorRef" class="editor">
+    <div v-if="editorOpen" ref="editorRef" class="editor">
       <h4>{{ editingId ? $t('settings.signatures.editTitle') : $t('settings.signatures.newTitle') }}</h4>
       <label class="field">
         <span>{{ $t('common.name') }}</span>
@@ -457,7 +486,7 @@ function escapeHtml(value: string) {
       <ToggleSwitch v-model="isDefault">{{ $t('settings.signatures.useAsDefault') }}</ToggleSwitch>
 
       <div class="actions">
-        <AppButton v-if="editingId" class="ghost" @click="reset" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
+        <AppButton class="ghost" @click="reset" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
         <AppButton class="primary" @click="save" variant="primary" size="sm">{{ $t('common.save') }}</AppButton>
       </div>
       <p v-if="status" class="status">{{ status }}</p>
@@ -468,6 +497,9 @@ function escapeHtml(value: string) {
 <style scoped>
 section {
   display: grid;
+  /* A long account address in the select must not widen the column past the
+     phone's right margin. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -489,38 +521,40 @@ h4 {
   color: var(--text-secondary);
 }
 
+.lead {
+  margin: var(--space-2xs) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* One field style in the form and in the rows: the Name input was a grey
+   slab beside white editors. */
 .field input,
 .field select,
-.field textarea {
+.field textarea,
+.setting-row select {
   border: 1px solid var(--border-color);
-  background: var(--bg-raised);
+  background: var(--bg-surface);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
   color: var(--text-primary);
   font-family: inherit;
 }
 
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.setting-row select {
+  max-width: 280px;
+  font-size: var(--font-size-sm);
 }
 
-.list li {
-  display: flex;
-  gap: 6px;
+.signature-row {
+  padding-block: var(--space-xs);
 }
 
 .row {
   flex: 1;
   text-align: left;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-color-muted);
   border-radius: var(--radius-sm);
-  padding: 8px 12px;
+  padding: 8px 4px;
   cursor: pointer;
   display: grid;
   gap: 2px;
@@ -561,8 +595,8 @@ h4 {
   gap: 10px;
   border: 1px solid var(--border-color-muted);
   border-radius: var(--radius-md);
-  padding: 14px;
-  background: var(--bg-base);
+  padding: var(--space-lg);
+  background: var(--bg-surface);
 }
 
 .suggestions {
@@ -687,3 +721,5 @@ h4 {
   font-size: var(--font-size-xs);
 }
 </style>
+
+<style scoped src="./settingsRows.css"></style>

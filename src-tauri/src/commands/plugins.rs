@@ -35,6 +35,26 @@ pub struct PluginDto {
     pub enforced_capabilities: Vec<PluginCapability>,
 }
 
+/// Opens the folder Satchel loads the user's own plugins from — drop a plugin
+/// in and restart, as with editor or game add-ons. Created on first use, so a
+/// fresh profile has somewhere to put one.
+#[tauri::command]
+pub fn open_plugins_folder(app: tauri::AppHandle) -> CommandResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let unavailable = || CommandError::new("backend.errors.pluginsFolderUnavailable");
+    let directory = crate::utils::profile_dir(&app)
+        .map_err(|_| unavailable())?
+        .join("plugins");
+    std::fs::create_dir_all(&directory).map_err(|_| unavailable())?;
+    app.opener()
+        .open_path(directory.to_string_lossy(), None::<&str>)
+        .map_err(|err| {
+            tracing::warn!("open plugins folder: {err}");
+            unavailable()
+        })
+}
+
 #[tauri::command]
 pub async fn list_plugins(
     state: tauri::State<'_, AppState>,

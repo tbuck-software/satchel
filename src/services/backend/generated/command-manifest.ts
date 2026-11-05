@@ -1454,6 +1454,10 @@ export default {
                 }
             }
         },
+        "open_plugins_folder": {
+            "kind": "object",
+            "fields": {}
+        },
         "open_tray_destination": {
             "kind": "object",
             "fields": {

@@ -305,6 +305,7 @@
       "pluginDisabled": "Das Plugin \"{plugin}\" ist deaktiviert: {reason}",
       "pluginNotRegistered": "Das Plugin \"{plugin}\" ist nicht registriert.",
       "pluginPermissionPersistenceFailed": "Plugin-Berechtigungen sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "pluginsFolderUnavailable": "Der Plugin-Ordner konnte nicht geöffnet werden.",
       "pop3CredentialsRejected": "Keine POP3-Konfiguration hat diese Zugangsdaten akzeptiert. Prüfe den Benutzernamen oder trage den Server von Hand ein.",
       "pop3PlaintextRejected": "Dieses POP3-Konto steht auf Port 110 ohne Verschlüsselung. Satchel sendet das Passwort nicht im Klartext: stelle das Konto auf Port 995 mit TLS um.",
       "queueActionFailed": "Die vorgemerkte Aktion ist fehlgeschlagen: {message}",
@@ -2013,6 +2014,12 @@
       "version": "Installierte Version"
     },
     "accounts": {
+      "actions": {
+        "calendars": "Kalender & Kontakte",
+        "renew": "Anmeldung erneuern",
+        "sync": "Jetzt synchronisieren",
+        "test": "Verbindung testen"
+      },
       "addAccount": "E-Mail-Konto hinzufügen",
       "allAccounts": "Alle Konten",
       "checkOrRenew": "Anmeldung prüfen oder erneuern",
@@ -2128,7 +2135,7 @@
       "editTitle": "Alias bearbeiten",
       "emailPlaceholder": "alias{'@'}example.com",
       "empty": "Noch keine Aliases.",
-      "hint": "Versende Mails über zusätzliche Adressen, die du in deinem Mail-Konto besitzt (z.B. Gmail-Aliasses, die unter \"Send mail as\" konfiguriert sind).",
+      "hint": "Weitere eigene Adressen zum Versenden, etwa Gmails „Senden als“.",
       "invalidEmail": "Bitte gültige E-Mail-Adresse angeben.",
       "saved": "Gespeichert.",
       "title": "Absenderadressen",
@@ -2157,10 +2164,11 @@
     },
     "backup": {
       "accountCount": "{count} Konten",
-      "accountLabel": "Account (leer = alle)",
+      "accountLabel": "Konto",
       "acknowledgeUnprotectedKey": "Schlüssel ungeschützt schreiben",
       "acknowledgeUnprotectedKeyHint": "Behandle diesen Ordner wie eine Passwortdatei. Wer ihn kopiert, liest alle Zugangsdaten, ohne nach irgendetwas gefragt zu werden.",
       "allAccounts": "Alle Accounts",
+      "backUpNow": "Jetzt sichern",
       "cancelImport": "Abbrechen",
       "createDatabaseBackup": "Sicherung erstellen…",
       "credentialsSummary": "{total} Konten, davon {encrypted} verschlüsselt · Master-Key {masterKey} · Datenbank {database}",
@@ -2168,6 +2176,7 @@
       "databaseDescription": "Legt eine konsistente Kopie der Datenbank samt Master-Key in einem Ordner an. Eine Wiederherstellung wird vorgemerkt und beim nächsten Start eingespielt.",
       "databaseDesktopOnly": "Datenbank-Sicherungen sind nur in der Desktop-App verfügbar.",
       "databaseTitle": "Datenbank-Sicherung",
+      "description": "Mails und Einstellungen mitnehmen oder eine Kopie zum Wiederherstellen anlegen.",
       "desktopOnlyBackup": "Backup nur in der Desktop-App verfügbar.",
       "desktopOnlyExport": "Export nur in der Desktop-App verfügbar.",
       "desktopOnlyImport": "Import nur in der Desktop-App verfügbar.",
@@ -2177,6 +2186,7 @@
       "durationSeconds": "{count} Sekunde | {count} Sekunden",
       "exportMailbox": "Mailbox exportieren…",
       "exportPlatform": "Plattformdaten exportieren…",
+      "exportShort": "Exportieren …",
       "exported": "Exportiert: {count} Mails ({size}) → {path}",
       "exporting": "Exportiere…",
       "hintAfter": "-Datei. Kompatibel mit Apple Mail, Thunderbird, mutt, mu, etc.",
@@ -2186,21 +2196,26 @@
       "importMbox": "Mbox importieren…",
       "importPlatform": "Plattformdaten importieren…",
       "importProgressLabel": "Import-Fortschritt",
+      "importShort": "Importieren …",
       "imported": "Importiert: {count} Mails, {skipped} übersprungen.",
       "importingMessages": "{done} von ca. {total} Mails",
       "importingTables": "{done} von {total} Tabellen",
       "keyPassphrase": "Passphrase für den Master-Key",
       "keyPassphraseHint": "Der Sicherungsordner enthält den Schlüssel zu allen gespeicherten Passwörtern, OAuth-Tokens und privaten PGP- und S/MIME-Schlüsseln. Mit einer Passphrase wird der Schlüssel umschlossen und der Ordner ohne sie wertlos.",
       "keyPassphrasePlaceholder": "Leer lassen, um den Schlüssel ungeschützt zu exportieren",
+      "mailboxLabel": "Postfach",
       "masterKeyMissing": "fehlt",
       "masterKeyPresent": "vorhanden",
       "mboxExtension": ".mbox",
       "messageCount": "{count} Nachrichten",
       "missingMasterKeyWarning": " Achtung: Kein Master-Key gefunden, verschlüsselte Zugangsdaten sind in dieser Sicherung nicht lesbar.",
+      "needsPassphrase": "Oben eine Passphrase setzen oder das ungeschützte Schreiben erlauben.",
       "noBackups": "Keine Sicherungen in diesem Ordner.",
       "nothingToPrune": "Nichts zu löschen.",
       "platformExported": "Exportiert: {rows} Plattform-Datensätze aus {tables} Tabellen → {path}",
+      "platformHint": "Konten, Signaturen, Vorlagen, Regeln, Kontakte und Kalender – alles außer den Mails.",
       "platformImported": "Importiert: {rows} Plattform-Datensätze aus {tables} Tabellen.",
+      "platformLabel": "Einstellungen & Daten",
       "pruneBackups": "Ältere löschen",
       "pruneConfirm": "Alle Sicherungen außer den neuesten {count} löschen?",
       "pruned": "{count} ältere Sicherungen gelöscht.",
@@ -2215,6 +2230,7 @@
       "restoreStaged": "Vorgemerkt: {messages} Nachrichten, {accounts} Konten. Die Wiederherstellung greift beim nächsten Start von Satchel.",
       "selectTargetAccount": "Bitte zuerst einen Ziel-Account auswählen.",
       "showBackups": "Sicherungen anzeigen…",
+      "transferTitle": "Export & Import",
       "withoutMasterKey": "ohne Master-Key",
       "wrappedMasterKey": "Schlüssel umschlossen"
     },
@@ -2225,7 +2241,8 @@
       "exampleDomain": "spam.example.com",
       "hintAfter": ". Treffer landen automatisch im Archiv beim Eingang.",
       "hintBefore": "E-Mail-Adresse oder Domain-Pattern, zum Beispiel",
-      "placeholder": "alice{'@'}example.com oder spam.example.com",
+      "placeholder": "Adresse oder Domain",
+      "purpose": "Mail von diesen Adressen oder Domains wird beim Eintreffen archiviert.",
       "unblock": "Entsperren"
     },
     "calendar": {
@@ -2251,19 +2268,23 @@
       "avatarSetFailed": "Profilbild konnte nicht gesetzt werden.",
       "desktopOnly": "Der Import ist nur in der Desktop-App verfügbar.",
       "file": "Datei",
+      "hideIndividual": "Ausblenden",
       "imageReadFailed": "Bild konnte nicht gelesen werden.",
       "imageUrlPlaceholder": "Bild-URL",
       "importFailed": "Profilbilder konnten nicht importiert werden.",
       "importing": "Importiere…",
+      "individualHint": "Bild für jeden der {count} Kontakte setzen, abrufen oder sperren.",
+      "individualTitle": "Bilder pro Kontakt",
       "lock": "Sperren",
       "noAutoImportBody": "Der Import startet erst nach deinem Klick. macOS kann beim ersten Mal einen normalen Kontakte-Systemdialog anzeigen.",
       "noAutoImportTitle": "Kein Import beim App-Start",
       "ofTotal": "von {count}",
       "pinned": "Fixiert",
-      "priorityHint": "Priorität: manuell, macOS Kontakte, Google/Microsoft Kontakte, BIMI, Gravatar, Favicon, Initialen.",
+      "priorityHint": "Deine eigene Wahl zuerst, dann Kontakte, Absender-Logos und Initialen.",
       "refreshImport": "Import aktualisieren",
       "searchPlaceholder": "Kontakt suchen",
       "set": "Setzen",
+      "showIndividual": "Anzeigen",
       "source": {
         "bimi": "BIMI",
         "fallback": "Fallback",
@@ -2430,19 +2451,21 @@
     },
     "images": {
       "allow": "Zulassen",
+      "allowFrom": "Bilder immer laden von",
       "empty": "Keine Freigaben — externe Bilder bleiben überall blockiert.",
       "entryPlaceholder": "alice{'@'}example.com oder {'@'}example.com",
-      "hint": "Externe Bilder in Mails können Tracking-Pixel sein: Der Absender sieht beim Laden, ob und wann eine Mail geöffnet wurde.",
-      "modeAccepted": "Akzeptierte Absender",
+      "hint": "Externe Bilder können dem Absender verraten, wann du eine Mail geöffnet hast.",
+      "modeAccepted": "Bekannte",
       "modeAcceptedHint": "Bilder laden automatisch bei Absendern und Domains, die du beim Prüfen neuer Absender akzeptiert hast. Alle übrigen bleiben blockiert, bis du sie freigibst.",
       "modeAcceptedTitle": "Bilder laden automatisch bei Absendern, die du in der Inbox akzeptiert hast",
       "modeAll": "Immer",
       "modeAllHint": "Absender sehen dadurch, wann und wo eine Mail geöffnet wurde. Die Freigabeliste unten bleibt erhalten, ist aber wirkungslos, solange alles geladen wird.",
       "modeAllTitle": "Externe Bilder in jeder Nachricht laden",
-      "modeAllowlist": "Nur nach Freigabe",
+      "modeAllowlist": "Nachfragen",
       "modeAllowlistHint": "Externe Bilder laden erst nach Freigabe über den Hinweis in der Nachricht.",
       "modeAllowlistTitle": "Externe Bilder laden erst, wenn du sie in der Nachricht freigibst",
       "modeAria": "Wann externe Bilder geladen werden",
+      "modeLabel": "Externe Bilder laden",
       "sender": "Absender",
       "title": "Externe Bilder",
       "wholeDomain": "ganze Domain"
@@ -2451,7 +2474,7 @@
       "allPresent": "Alle eingebetteten Bilder liegen lokal vor.",
       "alreadyStored": "bereits gesichert",
       "cancelled": "Abgebrochen nach {count} Bildern{tail}.",
-      "description": "Logos und Grafiken aus Signaturen liegen normalerweise lokal vor. Fehlen sie, holt Satchel sie bei jedem Öffnen erneut beim Anbieter — das kostet Zeit und läuft offline ins Leere.",
+      "description": "Logos in Signaturen bleiben auf diesem Gerät, damit sie offline erscheinen und schnell laden.",
       "desktopOnly": "Nur in der Desktop-App verfügbar.",
       "duration": {
         "hours": "{count} Stunde | {count} Stunden",
@@ -2521,32 +2544,39 @@
       "unknownTime": "Zeitpunkt unbekannt"
     },
     "notifications": {
-      "bodyWindowHint": "Ältere Mail behält Absender, Betreff und Datum und lädt ihren Inhalt beim Öffnen nach. Ihr Text verlässt den Suchindex: Die Volltextsuche findet sie dann nur noch über Betreff oder Absender. Mit 0 Tagen bleibt alles gespeichert.",
+      "bodyWindowHint": "Ältere Mail behält Absender, Betreff und Datum; ihr Text lädt beim Öffnen nach und fällt aus der Volltextsuche.",
       "bodyWindowLabel": "Mail-Inhalte behalten",
       "dataDescription": "Aufbewahrung und lokale Datenpflege.",
       "dataTitle": "Daten & Speicher",
       "days": "Tage",
+      "daysShort": "{n} Tage",
       "description": "Lege fest, wann Satchel dich über neue Nachrichten informiert.",
-      "enabledHint": "Native Hinweise über das System.",
-      "enabledLabel": "Benachrichtigungen",
+      "enabledHint": "Hinweise über die Mitteilungszentrale des Systems.",
+      "enabledLabel": "Benachrichtigungen zeigen",
+      "keepAll": "Alles",
+      "never": "Nie",
       "permissionDenied": "Das System erlaubt Satchel keine Benachrichtigungen. Du kannst das in den Systemeinstellungen für Satchel wieder freigeben.",
       "receiptsHint": "Empfänger können sehen, dass eine Bestätigung angefordert wurde.",
       "receiptsLabel": "Lesebestätigung anfordern",
       "saved": "Gespeichert.",
       "scopeAll": "Alle neuen Mails",
+      "scopeAllShort": "Alle Mails",
       "scopeHint": "Welche neuen Mails einen Hinweis auslösen.",
       "scopeInbox": "Nur persönliche Inbox",
+      "scopeInboxShort": "Nur Posteingang",
       "scopeLabel": "Umfang",
       "seconds": "Sek.",
-      "sendingDescription": "Sicherheitsnetz und Bestätigungen für ausgehende Nachrichten.",
+      "secondsShort": "{n} s",
+      "sendingDescription": "Wie neue Nachrichten geschrieben und versendet werden.",
       "sendingTitle": "Senden",
       "soundHint": "Bei einem neuen Hinweis einen Ton abspielen.",
       "soundLabel": "Ton",
       "title": "Benachrichtigungen",
-      "trashHint": "Mit 0 Tagen bleibt der Inhalt erhalten.",
+      "trashHint": "Löscht Nachrichten im Papierkorb nach dieser Zeit.",
       "trashLabel": "Papierkorb automatisch leeren",
       "undoHint": "Zeit zum Rückgängigmachen vor dem tatsächlichen Versand.",
-      "undoLabel": "Versand verzögern"
+      "undoLabel": "Versand verzögern",
+      "undoOff": "Aus"
     },
     "overview": {
       "subtitle": "Was möchtest du anpassen?"
@@ -2640,6 +2670,8 @@
       "verifyPassphrase": "Passphrase prüfen"
     },
     "plugins": {
+      "addHint": "Lege ein Plugin in den Plugin-Ordner deines Profils und starte Satchel neu.",
+      "addTitle": "Integrationen hinzufügen",
       "addWebhook": "Webhook hinzufügen",
       "auditTitle": "Plugin-Audit",
       "bearerToken": "Bearer {token}",
@@ -2656,9 +2688,13 @@
       "loading": "Plugins werden geladen …",
       "localApiTitle": "Local API / MCP",
       "metrics": "Aufrufe: {calls}, abgelehnt: {denied}, Fehler: {errors}",
+      "newWebhook": "Neuer Webhook",
       "noCapabilities": "keine Funktionen",
       "noContent": "Kein Inhalt.",
-      "noneFound": "Keine Plugins in `/plugins` gefunden.",
+      "noneFound": "Noch keine Integrationen installiert",
+      "noneFoundHint": "Integrationen erweitern Satchel um Funktionen, etwa OpenPGP-Verschlüsselung.",
+      "openFolder": "Plugin-Ordner öffnen",
+      "openIntegrations": "Integrationen öffnen",
       "permissionUpdateFailed": "Plugin-Berechtigung konnte nicht aktualisiert werden: {error}",
       "pgpPluginDescription": "Erkennt und normalisiert OpenPGP-signierte und -verschlüsselte Nachrichteninhalte.",
       "pgpPluginMissing": "Das OpenPGP-Plugin ist nicht installiert. Ohne es steht keine PGP-Unterstützung zur Verfügung.",
@@ -2677,6 +2713,8 @@
       "webhookToggleFailed": "Webhook konnte nicht umgeschaltet werden: {error}",
       "webhookUrl": "URL",
       "webhookUrlPlaceholder": "https://example.com/satchel",
+      "webhooksDescription": "Satchel ruft diese Adressen auf, wenn Mail eintrifft oder sich ein Thread ändert.",
+      "webhooksEmpty": "Noch keine Webhooks.",
       "webhooksTitle": "Webhooks"
     },
     "providerFeatures": {
@@ -2725,6 +2763,8 @@
       "duplicateCondition": "Jedes Bedingungsfeld darf nur einmal verwendet werden.",
       "editTitle": "Regel bearbeiten",
       "empty": "Noch keine Regeln angelegt.",
+      "emptyHint": "Regeln bearbeiten neue Mails beim Eintreffen: Kategorie zuordnen, Tag setzen, Priorität festlegen oder als gelesen markieren.",
+      "emptyTitle": "Noch keine Regeln",
       "loadFailed": "Regeln konnten nicht geladen werden: {error}",
       "loading": "Regeln werden geladen …",
       "matchAll": "Alle erfüllen",
@@ -2798,6 +2838,10 @@
         "description": "Kalender, Arbeitszeiten und Einladungen",
         "label": "Kalender"
       },
+      "composing": {
+        "description": "Nur-Text, Verzögerung, Bestätigungen",
+        "label": "Verfassen"
+      },
       "contacts": {
         "description": "Quellen und Anzeige von Kontaktbildern",
         "label": "Profilbilder"
@@ -2810,22 +2854,32 @@
         "description": "Sync-Fehler, Warteschlange und Rate-Limits",
         "label": "Diagnose"
       },
+      "encryption": {
+        "description": "S/MIME-Zertifikate und OpenPGP-Schlüssel",
+        "label": "Verschlüsselung"
+      },
       "general": {
         "description": "Darstellung, Sprache und Verhalten",
         "label": "Allgemein"
       },
       "groups": {
-        "advanced": {
-          "title": "Erweitert"
-        },
         "app": {
-          "title": "App"
+          "title": "App & Daten"
         },
-        "identity": {
-          "title": "Identität"
+        "essentials": {
+          "title": "Grundlagen"
         },
-        "mail": {
-          "title": "Mail"
+        "organising": {
+          "title": "Ordnen"
+        },
+        "people": {
+          "title": "Kalender & Kontakte"
+        },
+        "privacy": {
+          "title": "Privatsphäre & Sicherheit"
+        },
+        "writing": {
+          "title": "Schreiben"
         }
       },
       "images": {
@@ -2856,6 +2910,10 @@
         "description": "E-Mails automatisch verarbeiten",
         "label": "Regeln"
       },
+      "senders": {
+        "description": "Blockierte Absender und wer Bilder laden darf",
+        "label": "Absender & Bilder"
+      },
       "sending": {
         "description": "Versand, Rückruf und Bestätigungen",
         "label": "Senden"
@@ -2879,6 +2937,10 @@
       "sources": {
         "description": "Zusätzliche Feeds und Nachrichtenquellen",
         "label": "Feeds & Quellen"
+      },
+      "storage": {
+        "description": "Was aufbewahrt wird, Export und Sicherungen",
+        "label": "Speicher & Backup"
       },
       "swipes": {
         "description": "Aktionen für Wischen nach links und rechts",
@@ -2905,7 +2967,6 @@
       "conflict": "Konflikt",
       "custom": "Eigene",
       "description": "Jede Aktion bleibt über Suche, Menüs und Tastatur dieselbe.",
-      "eyebrow": "Keyboard first",
       "footerRecord": "Zeile anklicken und neue Tastenkombination drücken",
       "noMatch": "Kein passender Befehl.",
       "reservedConflict": "Von einer festen Taste belegt: {keys}",
@@ -2918,6 +2979,7 @@
       "adopt": "Übernehmen und anpassen",
       "checkAgain": "Erneut prüfen",
       "checking": "Prüft…",
+      "description": "Hängt an deine Mails, je Absenderadresse.",
       "discovering": "Gesendete Nachrichten werden geprüft…",
       "editTitle": "Signatur bearbeiten",
       "emptyList": "Noch keine Signatur für diesen Account.",
@@ -2960,6 +3022,7 @@
       "iconLabel": "Icon (Emoji, optional)",
       "loadFailed": "Intelligente Ordner konnten nicht geladen werden. Bitte erneut versuchen.",
       "newTitle": "Neuer Smart Folder",
+      "purpose": "Gespeicherte Suchen, die als Ordner in der Seitenleiste erscheinen.",
       "queryLabel": "Suchanfrage",
       "queryPlaceholder": "from:boss has:attachment",
       "saved": "Gespeichert.",
@@ -3028,6 +3091,7 @@
       "intervalHours": "{count} Stunde | {count} Stunden",
       "intervalMinutes": "{count} Minute | {count} Minuten",
       "namePlaceholder": "Builds, Blog, Monitoring …",
+      "newFeed": "Neuer Feed",
       "notify": "Benachrichtigen",
       "opmlImported": "{created} Feeds importiert, {skipped} übersprungen.",
       "opmlImportedWithErrors": "{created} Feeds importiert, {skipped} übersprungen. {errors} Fehler.",
@@ -3054,7 +3118,6 @@
       "directionLeftHint": "Die Aktion erscheint rechts hinter der Nachricht.",
       "directionRight": "Nach rechts",
       "directionRightHint": "Die Aktion erscheint links hinter der Nachricht.",
-      "eyebrow": "Touch-Steuerung",
       "long": "Weit",
       "longHint": "ab etwa zwei Fünfteln",
       "previewPin": "Anheften",
@@ -3075,12 +3138,14 @@
       "empty": "Keine Vorlagen.",
       "loadFailed": "Vorlagen konnten nicht geladen werden. Bitte erneut versuchen.",
       "nameRequired": "Bitte Name angeben.",
+      "purpose": "Wiederverwendbare Texte zum Einfügen beim Schreiben.",
       "saved": "Gespeichert.",
       "shortcutOptional": "Shortcut (optional)",
       "shortcutPlaceholder": "z. B. /thx",
       "subjectOptional": "Betreff (optional)",
       "title": "Vorlagen",
-      "variablesHint": "Variablen {recipient}, {myName} und {date} werden beim Einfügen ersetzt."
+      "variablesHint": "Variablen {recipient}, {myName} und {date} werden beim Einfügen ersetzt.",
+      "variablesLead": "Beim Einfügen ersetzt:"
     },
     "theme": {
       "appearance": "Erscheinungsbild",
@@ -3122,9 +3187,10 @@
       "bodyLabel": "Antworttext",
       "defaultSubject": "Out of Office",
       "enable": "Auto-Reply aktivieren",
-      "hint": "Wird direkt am Mail-Server gesetzt — also auch aktiv, wenn Satchel nicht läuft. Aktuell unterstützt für Gmail und Outlook/Microsoft 365 (OAuth-Accounts). Für reine IMAP-Konten musst du die Server-Sieve-Regel in deinem Webmail einrichten.",
-      "imapWarning": "Dieser Account ist ein generischer IMAP-Account — Vacation Auto-Reply wird nicht zum Server gepusht.",
+      "hint": "Eine automatische Antwort, am Mail-Server gesetzt, damit sie auch bei geschlossenem Satchel greift.",
+      "imapWarning": "Richte die automatische Antwort im Webmail deines Anbieters ein. Satchel kann sie nur bei Gmail- und Outlook-Konten selbst setzen.",
       "onlyContacts": "Nur an bekannte Kontakte antworten",
+      "openWebmail": "Webmail öffnen",
       "saved": "Gespeichert.",
       "title": "Out of Office / Abwesenheit",
       "until": "Bis"

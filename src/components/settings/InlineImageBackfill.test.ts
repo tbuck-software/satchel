@@ -6,7 +6,7 @@ const backend = vi.hoisted(() => ({
   backendInlineImageCacheStatus: vi.fn(),
   backendStartInlineImageBackfill: vi.fn(),
   backendStopInlineImageBackfill: vi.fn(),
-  backendSupportsNativeCommands: vi.fn(() => true),
+  backendCommandsAvailable: vi.fn(() => true),
 }));
 
 vi.mock('@/services/backend', async (importOriginal) => ({
@@ -42,7 +42,7 @@ function status(lastError: string | null) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  backend.backendSupportsNativeCommands.mockReturnValue(true);
+  backend.backendCommandsAvailable.mockReturnValue(true);
 });
 
 describe('inline image backfill errors', () => {

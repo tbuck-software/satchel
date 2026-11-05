@@ -57,7 +57,7 @@ async function syncNow() {
 <template>
   <section class="calendar-settings">
     <header>
-      <h3>{{ $t('settings.sections.calendar.label') }}</h3>
+      <h3 class="settings-page-title">{{ $t('settings.sections.calendar.label') }}</h3>
       <p>{{ $t('settings.calendar.description') }}</p>
     </header>
 
@@ -95,18 +95,18 @@ async function syncNow() {
         </NavItem>
       </div>
       <p v-else class="source-empty">{{ $t('settings.calendar.noSources') }}</p>
+      <!-- The actions belong to the calendars above, as the card's footer. -->
+      <div class="calendar-actions">
+        <AppButton variant="secondary" size="sm" :disabled="syncing" @click="syncNow">
+          {{ syncing ? $t('settings.calendar.syncing') : $t('settings.calendar.syncNow') }}
+        </AppButton>
+        <AppButton variant="ghost" size="sm" @click="emit('manageAccounts')">
+          {{ $t('settings.calendar.manageAccounts') }}
+        </AppButton>
+      </div>
     </div>
 
     <p v-if="syncMessage" class="sync-message" role="status">{{ syncMessage }}</p>
-
-    <div class="calendar-actions">
-      <AppButton variant="primary" :disabled="syncing" @click="syncNow">
-        {{ syncing ? $t('settings.calendar.syncing') : $t('settings.calendar.syncNow') }}
-      </AppButton>
-      <AppButton variant="soft" @click="emit('manageAccounts')">
-        {{ $t('settings.calendar.manageAccounts') }}
-      </AppButton>
-    </div>
   </section>
 </template>
 
@@ -197,5 +197,7 @@ header p {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-top: 1px solid var(--border-color-muted);
 }
 </style>

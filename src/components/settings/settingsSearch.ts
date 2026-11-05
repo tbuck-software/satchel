@@ -9,7 +9,7 @@ import type { SettingsSection } from './settingsSections';
  */
 const SECTION_KEYS: Record<SettingsSection, readonly string[]> = {
   about: ['settings.about', 'app.update'],
-  general: ['settings.theme', 'settings.language'],
+  general: ['settings.theme', 'settings.language', 'settings.tray'],
   swipes: ['settings.swipes', 'swipe.'],
   calendar: ['settings.calendar'],
   notifications: [
@@ -19,34 +19,30 @@ const SECTION_KEYS: Record<SettingsSection, readonly string[]> = {
     'settings.notifications.scope',
     'settings.notifications.sound',
     'settings.notifications.permission',
+    'settings.mobileSync',
   ],
-  'mobile-sync': ['settings.mobileSync'],
-  tray: ['settings.tray'],
   shortcuts: ['settings.shortcuts'],
-  accounts: ['settings.accounts'],
+  accounts: ['settings.accounts', 'settings.sources', 'settings.providerFeatures', 'settings.plugins.webhook'],
   contacts: ['settings.contacts'],
   signatures: ['settings.signatures'],
   aliases: ['settings.aliases'],
-  smime: ['settings.smime'],
-  pgp: ['settings.pgp'],
-  sending: [
+  encryption: ['settings.smime', 'settings.pgp'],
+  composing: [
     'settings.notifications.sending',
     'settings.notifications.undo',
     'settings.notifications.receipts',
+    'settings.theme.plainTextCompose',
   ],
-  data: [
+  storage: [
     'settings.notifications.data',
     'settings.notifications.bodyWindow',
     'settings.notifications.trash',
     'settings.inlineImages',
+    'settings.backup',
   ],
   vacation: ['settings.vacation'],
-  blocked: ['settings.blocked'],
-  images: ['settings.images'],
+  senders: ['settings.blocked', 'settings.images'],
   'smart-folders': ['settings.smartFolders'],
-  'provider-features': ['settings.providerFeatures'],
-  backup: ['settings.backup'],
-  sources: ['settings.sources'],
   templates: ['settings.templates'],
   rules: ['settings.rules'],
   plugins: ['settings.plugins', 'settings.api'],
@@ -123,20 +119,29 @@ export function searchSettings(
 ): SettingsSearchResult[] {
   const query = searchQuery(raw);
   if (query.tokens.length === 0) return items.map((item) => ({ ...item, hint: null }));
+  // A short word only counts where a word starts: "sign" means signatures,
+  // not "designs" or "assignment". Longer words may sit inside compounds
+  // ("bestätigung" in "Lesebestätigung").
+  const startsWord = (text: string, token: string) =>
+    new RegExp(`(?:^|[^\\p{L}\\p{N}])${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u').test(text);
+  const fair = (term: string) => {
+    const text = normalizeSearchText(term);
+    return query.tokens.every((token) => token.length >= 5 || !text.includes(token) || startsWord(text, token));
+  };
   return items
     .flatMap((item, order) => {
-      const terms = index.get(item.id) ?? [];
+      const terms = (index.get(item.id) ?? []).filter(fair);
       // Name and description first; a hit only inside the section ranks below every such match.
-      const named = rankSearchMatch(query, item.label, [item.description]);
+      const named = rankSearchMatch(query, item.label, [item.description].filter(fair));
       const rank = named !== null
         ? 10 + named
-        : rankSearchMatch(query, item.label, [item.description, ...terms]);
+        : rankSearchMatch(query, item.label, [item.description, ...terms].filter(fair));
       if (rank === null) return [];
       const label = normalizeSearchText(item.label);
       const hint = query.tokens.every((token) => label.includes(token))
         ? null
-        : [item.description, ...terms].find((term) => normalizeSearchText(term).includes(query.phrase))
-          ?? [item.description, ...terms].find((term) => normalizeSearchText(term).includes(query.tokens[0]!))
+        : [item.description, ...terms].filter(fair).find((term) => normalizeSearchText(term).includes(query.phrase))
+          ?? [item.description, ...terms].filter(fair).find((term) => normalizeSearchText(term).includes(query.tokens[0]!))
           ?? null;
       return [{ result: { ...item, hint }, rank, order }];
     })
