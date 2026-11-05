@@ -112,8 +112,8 @@ function cellText(cell: TableTreeNode): string {
     .replace(/\|/g, '\\|');
 }
 
-// Grapheme clusters are the same in every language (UAX #29): the root locale.
-const graphemes = new Intl.Segmenter('und', { granularity: 'grapheme' });
+// Grapheme clusters are the same in every language (UAX #29); the locale is a formality.
+const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
 
 /**
  * East Asian Wide and Fullwidth blocks (Hangul Jamo, CJK, Hangul syllables,
