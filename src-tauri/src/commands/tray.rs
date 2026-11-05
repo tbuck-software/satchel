@@ -1367,7 +1367,7 @@ mod tests {
              CREATE TABLE calendar_invites (
                id TEXT PRIMARY KEY, account_id TEXT, uid TEXT, summary TEXT,
                starts_at TEXT, ends_at TEXT, all_day INTEGER, location TEXT,
-               cancelled INTEGER, rsvp_status TEXT
+               method TEXT, cancelled INTEGER, rsvp_status TEXT
              );",
         )
         .execute(&pool)
