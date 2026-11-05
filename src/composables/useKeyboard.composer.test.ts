@@ -27,6 +27,7 @@ const harness = vi.hoisted(() => ({
   },
   actions: {
     archive: vi.fn(),
+    toggleDone: vi.fn(),
     trash: vi.fn(),
     setRead: vi.fn(),
     setAside: vi.fn(),
@@ -107,7 +108,7 @@ describe('shortcuts while the composer is open', () => {
     press('Backspace');
     press('Delete');
 
-    expect(harness.actions.archive).not.toHaveBeenCalled();
+    expect(harness.actions.toggleDone).not.toHaveBeenCalled();
     expect(harness.actions.trash).not.toHaveBeenCalled();
     expect(harness.actions.setRead).not.toHaveBeenCalled();
   });

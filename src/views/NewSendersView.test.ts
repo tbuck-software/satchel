@@ -20,8 +20,11 @@ const harness = vi.hoisted(() => ({
   settings: {
     senderReviewStartedAt: null as string | null,
   },
+  setMailboxFilter: vi.fn(),
   threads: {
     newSenderStack: null as NewSenderStack | null,
+    workflowFilter: 'all' as string,
+    mailboxFilter: { kind: 'section', value: 'inbox' } as { kind: string; value: string | null },
   },
 }));
 
@@ -47,6 +50,17 @@ vi.mock('@/stores/threads', () => ({
     get newSenderStack() {
       return harness.threads.newSenderStack;
     },
+    get workflowFilter() {
+      return harness.threads.workflowFilter;
+    },
+    set workflowFilter(value: string) {
+      harness.threads.workflowFilter = value;
+    },
+    get mailboxFilter() {
+      return harness.threads.mailboxFilter;
+    },
+    activeContactEmail: '',
+    setMailboxFilter: harness.setMailboxFilter,
     load: harness.load,
     selectThread: harness.selectThread,
   }),
@@ -124,6 +138,24 @@ describe('NewSendersView', () => {
     harness.selectThread.mockReset();
     harness.settings.senderReviewStartedAt = null;
     harness.threads.newSenderStack = null;
+    harness.threads.workflowFilter = 'all';
+    harness.threads.mailboxFilter = { kind: 'section', value: 'inbox' };
+    harness.setMailboxFilter.mockReset();
+  });
+
+  it('reviews the Inbox senders even when opened from Spam', () => {
+    harness.threads.mailboxFilter = { kind: 'section', value: 'spam' };
+
+    render();
+
+    expect(harness.threads.workflowFilter).toBe('all');
+    expect(harness.setMailboxFilter).toHaveBeenCalledWith({ kind: 'section', value: 'inbox' });
+  });
+
+  it('leaves the Inbox scope alone', () => {
+    render();
+
+    expect(harness.setMailboxFilter).not.toHaveBeenCalled();
   });
 
   it('offers sender allow for personal mailboxes without offering domain allow', async () => {

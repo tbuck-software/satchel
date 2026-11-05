@@ -112,6 +112,54 @@ describe('threads store interactions', () => {
     expect(store.smartListEntries.some((entry) => entry.kind === 'thread' && entry.thread.id === 'replied-person')).toBe(true);
   });
 
+  // Owner report: Spam showed "Neue Absender" with "Alle 111 Absender zulassen".
+  it('reviews new senders in the Inbox only', () => {
+    const store = useThreadsStore();
+    store.threads = [
+      thread({ id: 'inbox-unknown', participants: [{ name: 'Neue Person', email: 'person@example.com' }] }),
+      thread({
+        id: 'spam-unknown',
+        participants: [{ name: 'Prize Desk', email: 'claims@prize.example' }],
+        mailboxNames: ['Spam'],
+      }),
+      thread({
+        id: 'folder-unknown',
+        participants: [{ name: 'Portal', email: 'tickets@portal.example' }],
+        mailboxNames: ['Abuse'],
+      }),
+      thread({
+        id: 'done-unknown',
+        participants: [{ name: 'Erledigt', email: 'done@example.com' }],
+        workflowState: 'done',
+      }),
+    ];
+    expect(store.newSenderStack?.threadIds).toEqual(['inbox-unknown']);
+
+    for (const scope of [
+      () => store.setMailboxFilter({ kind: 'section', value: 'spam' }),
+      () => store.setMailboxFilter({ kind: 'section', value: 'sent' }),
+      () => store.setMailboxFilter({ kind: 'section', value: 'trash' }),
+      () => store.setMailboxFilter({ kind: 'folder', value: 'Abuse' }),
+      () => {
+        store.workflowFilter = 'done';
+        store.setMailboxFilter({ kind: 'all', value: null });
+      },
+    ]) {
+      store.workflowFilter = 'all';
+      scope();
+      expect(store.newSenderStack).toBeNull();
+      expect(store.smartListEntries.some((entry) => entry.kind === 'new-sender-stack')).toBe(false);
+    }
+
+    // Spam lists its unknown senders as ordinary mail.
+    store.workflowFilter = 'all';
+    store.setMailboxFilter({ kind: 'section', value: 'spam' });
+    expect(store.visibleThreads.map((item) => item.id)).toEqual(['spam-unknown']);
+    const listed = store.smartListEntries.flatMap((entry) => (entry.kind === 'thread' ? [entry.thread.id] : []));
+    const bucketed = store.smartInboxBuckets.flatMap((bucket) => bucket.threads.map((item) => item.id));
+    expect([...listed, ...bucketed]).toContain('spam-unknown');
+  });
+
   it('uses focused-list precedence for priority, pins, invitations and notifications', () => {
     const store = useThreadsStore();
     store.threads = [

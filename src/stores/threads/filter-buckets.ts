@@ -22,6 +22,7 @@ import {
   buildSmartInboxBuckets,
   cleanThreadSnippet,
   collectNewSenderThreadIds,
+  senderReviewInScope,
   isVisibleInCurrentScope,
   matchesMailboxFilter,
   normalizedParticipantEmail,
@@ -260,8 +261,13 @@ export function createThreadFilterBuckets({
    * the same line. Each used to run the sender test over every thread, so a
    * single-row patch paid for it twice.
    */
-  const newSenderThreadIds = computed(() =>
-    collectNewSenderThreadIds(visibleThreads.value, {
+  const newSenderThreadIds = computed(() => !senderReviewInScope({
+    workflow: workflowFilter.value,
+    mailbox: mailboxFilter.value,
+    contactEmail: activeContactEmail.value,
+  })
+    ? new Set<string>()
+    : collectNewSenderThreadIds(visibleThreads.value, {
       senderBuckets: inboxSenderBuckets(),
       acceptedSenders: acceptedSenders(),
       acceptedDomains: acceptedDomains(),

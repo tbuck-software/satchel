@@ -3,7 +3,7 @@ import { computed, defineAsyncComponent, provide, ref, watch } from 'vue';
 import { RouterView, useRoute } from 'vue-router';
 import Sidebar from '@/components/layout/Sidebar.vue';
 import PaneResizeHandle from '@/components/ui/PaneResizeHandle.vue';
-import AccountReauthBanner from '@/components/settings/AccountReauthBanner.vue';
+import { useAccountsStore } from '@/stores/accounts';
 import { useComposerStore } from '@/stores/composer';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
@@ -58,6 +58,11 @@ watch(() => ui.mailboxSwitcherOpen, (open) => { if (open) mailboxSwitcherMounted
 const loadComposerHost = () => import('@/components/mail/ComposerHost.vue');
 const ComposerHost = defineAsyncComponent(loadComposerHost);
 const ToastStack = defineAsyncComponent(() => import('@/components/ui/ToastStack.vue'));
+// Only an expired sign-in or an unreadable credential store shows it.
+const AccountReauthBanner = defineAsyncComponent(() => import('@/components/settings/AccountReauthBanner.vue'));
+const accounts = useAccountsStore();
+const reauthNeeded = computed(() =>
+  Boolean(accounts.credentialLock) || accounts.accountsWithAuthError.length > 0);
 const UndoFab = defineAsyncComponent(() => import('@/components/ui/UndoFab.vue'));
 // The phone's buttons on a blocked-images notice; the viewer has no provider.
 provide(
@@ -122,7 +127,7 @@ if (standaloneCompose.value) {
         data-tauri-drag-region
       />
 
-      <AccountReauthBanner v-if="!standaloneCompose" />
+      <AccountReauthBanner v-if="!standaloneCompose && reauthNeeded" />
       <ConnectionBanner v-if="!standaloneCompose" />
 
       <!-- The phone has no sidebar and so no sync button. Keep connection

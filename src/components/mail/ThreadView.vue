@@ -604,11 +604,15 @@ const selectionCount = computed(() => threadsStore.selectedThreadIds?.length ?? 
 const showSelectionSummary = computed(() => selectionCount.value > 1 && !ui.isMobile);
 const actionUnread = computed(() => actionIds.value.some(id => (threadsStore.find(id)?.unreadCount ?? 0) > 0));
 const actionPinned = computed(() => actionIds.value.every(id => threadsStore.find(id)?.isStarred));
+/** Done on mail that is done already does nothing; the toolbar offers the way back instead. */
+const actionDone = computed(() => (selectionCount.value
+  ? threadActions.allDone(actionIds.value)
+  : thread.value?.workflowState === 'done'));
 const snoozeTargetIds = ref<string[]>([]);
 
 function archiveThread() {
   const current = thread.value;
-  if (!current || (!selectionCount.value && current.workflowState === 'done')) return;
+  if (!current || actionDone.value) return;
 
   // The shared action applies its optimistic list state before its first await. A
   // routed phone detail can therefore close in the same tap while archive and
@@ -986,7 +990,7 @@ function showEntireThread() {
         :selection-count="selectionCount"
         :is-starred="selectionCount ? actionPinned : thread.isStarred"
         :is-aside="!selectionCount && thread.workflowState === 'aside'"
-        :is-done="!selectionCount && thread.workflowState === 'done'"
+        :is-done="actionDone"
         :is-muted="actionIds.every(id => threadsStore.find(id)?.isMuted)"
         :show-back="showBack"
         :position="props.position ?? 0"
@@ -1167,7 +1171,7 @@ function showEntireThread() {
       :can-reply="canReply"
       :is-unread="actionUnread"
       :selection-count="selectionCount"
-      :is-done="!selectionCount && thread.workflowState === 'done'"
+      :is-done="actionDone"
       @archive="archiveThread"
       @move-to-inbox="void moveToInbox()"
       @reply="replyThread"

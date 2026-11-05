@@ -35,6 +35,7 @@ const harness = vi.hoisted(() => ({
   },
   actions: {
     archive: vi.fn(),
+    toggleDone: vi.fn(),
     trash: vi.fn(),
     setRead: vi.fn(),
     setAside: vi.fn(),
@@ -103,7 +104,7 @@ function pressMailKeys() {
 }
 
 function expectNoMailAction() {
-  expect(harness.actions.archive).not.toHaveBeenCalled();
+  expect(harness.actions.toggleDone).not.toHaveBeenCalled();
   expect(harness.actions.trash).not.toHaveBeenCalled();
   expect(harness.threads.nextThread).not.toHaveBeenCalled();
   expect(harness.threads.prevThread).not.toHaveBeenCalled();
@@ -168,7 +169,7 @@ describe('shortcut context', () => {
     press('e');
     press('x');
 
-    expect(harness.actions.archive).toHaveBeenCalledWith(['hit-1']);
+    expect(harness.actions.toggleDone).toHaveBeenCalledWith(['hit-1']);
     expect(harness.threads.toggleSelectionForThread).not.toHaveBeenCalled();
   });
 
@@ -182,7 +183,7 @@ describe('shortcut context', () => {
     press('#');
 
     expect(harness.threads.toggleSelectionForThread).toHaveBeenCalledWith('hit-1');
-    expect(harness.actions.archive).toHaveBeenCalledWith(['hit-1']);
+    expect(harness.actions.toggleDone).toHaveBeenCalledWith(['hit-1']);
     expect(harness.actions.trash).toHaveBeenCalledWith(['hit-1', 'hit-2']);
   });
 
@@ -202,7 +203,7 @@ describe('shortcut context', () => {
     harness.route = { name: 'thread' };
     press('#');
 
-    expect(harness.actions.archive).toHaveBeenCalledWith(['thread-1']);
+    expect(harness.actions.toggleDone).toHaveBeenCalledWith(['thread-1']);
     expect(harness.actions.trash).toHaveBeenCalledWith(['thread-1']);
   });
 
@@ -262,7 +263,7 @@ describe('single-key switch per binding', () => {
     press('e');
     press('e', { metaKey: true });
 
-    expect(harness.actions.archive).toHaveBeenCalledTimes(1);
+    expect(harness.actions.toggleDone).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the arrows and Delete with the switch off', () => {

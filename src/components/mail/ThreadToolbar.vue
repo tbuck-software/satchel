@@ -208,14 +208,14 @@ function runExport(format: ExportFormat) {
         v-if="isDone"
         variant="primary"
         class="thread-toolbar__done"
-        :title="$t('commands.moveToInbox')"
+        :title="targetLabel($t('commands.moveToInbox'))"
         :shortcut="hint('moveInbox')"
         @click="emit('moveToInbox')"
       >
         <template #icon>
           <AppIcon size="lg"><path d="M8 11V3.4M5.4 8.4 8 11l2.6-2.6" /><path d="M2.8 11.2v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2" /></AppIcon>
         </template>
-        {{ $t('commands.moveToInbox') }}
+        {{ selectionCount ? $t('thread.selection.toInbox', { count: selectionCount }) : $t('commands.moveToInbox') }}
       </AppButton>
       <AppButton
         v-else

@@ -104,7 +104,7 @@ const emit = defineEmits<{
           <path d="M2.8 11.2v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2" />
         </AppIcon>
       </template>
-      {{ $t('commands.moveToInbox') }}
+      {{ selectionCount ? $t('thread.selection.toInbox', { count: selectionCount }) : $t('commands.moveToInbox') }}
     </AppButton>
     <AppButton
       v-else

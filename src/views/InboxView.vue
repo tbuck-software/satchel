@@ -552,9 +552,22 @@ async function runStateForThreads(threadIds: string[], nextState: WorkflowState,
   }
 }
 
+/**
+ * A stack's "check all", from its card or its open header. A stack of done
+ * mail goes back to the Inbox: Done on Done would change nothing.
+ */
+function runDoneToggle(threadIds: string[]) {
+  return threadActions.allDone(threadIds)
+    ? runStateForThreads(threadIds, 'inbox', t('thread.state.inbox'))
+    : runStateForThreads(threadIds, 'done', t('common.done'));
+}
+
+const activeBundleDone = computed(() =>
+  threadActions.allDone(activeBundle.value?.threads.map((thread) => thread.id) ?? []));
+
 async function runActiveGroupDone() {
   const threadIds = activeBundle.value?.threads.map((thread) => thread.id) ?? [];
-  await runStateForThreads(threadIds, 'done', t('common.done'));
+  await runDoneToggle(threadIds);
   // Checking off the last member already clears the group through the store's
   // own watcher, which returns to the enclosing list in the same beat. Calling
   // closeGroup() here would find no group left and fall through to its
@@ -751,7 +764,7 @@ async function onBucketAction(payload: { threadIds: string[]; action: 'done' | '
 }
 
 async function onGroupDone(threadIds: string[]) {
-  await runStateForThreads(threadIds, 'done', t('common.done'));
+  await runDoneToggle(threadIds);
 }
 
 async function onDateGroupDone(payload: { groupId: string; threadIds: string[] }) {
@@ -978,13 +991,19 @@ function acceptExistingSenders() {
           />
         </template>
         <template #actions>
-          <AppButton size="sm" :disabled="bulkBusy" :title="$t('inbox.bundleDoneTitle')" @click="void runActiveGroupDone()">
+          <AppButton
+            size="sm"
+            :disabled="bulkBusy"
+            :title="activeBundleDone ? $t('inbox.bundleToInboxTitle') : $t('inbox.bundleDoneTitle')"
+            @click="void runActiveGroupDone()"
+          >
             <template #icon>
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3.5 8.4l2.5 2.5 6.5-6.8" />
+                <path v-if="activeBundleDone" d="M8 11V3.4M5.4 8.4 8 11l2.6-2.6M2.8 11.2v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2" />
+                <path v-else d="M3.5 8.4l2.5 2.5 6.5-6.8" />
               </svg>
             </template>
-            {{ $t('inbox.bundleDone') }}
+            {{ activeBundleDone ? $t('inbox.bundleToInbox') : $t('inbox.bundleDone') }}
           </AppButton>
         </template>
       </PaneHeader>
@@ -1064,6 +1083,7 @@ function acceptExistingSenders() {
           :new-senders-expanded="ui.newSendersExpanded"
           :phone-layout="ui.isMobile"
           :bulk-busy="bulkBusy"
+          :all-done="threadActions.allDone"
           :topics="topicsStore.activeTopics"
           @load-more="void threads.loadMore()"
           @load-previous="void threads.loadPrevious()"

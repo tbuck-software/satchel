@@ -101,6 +101,8 @@ const primaryParticipantLabel = computed(() => {
   });
 });
 const isUnread = computed(() => props.thread.unreadCount > 0);
+/** Done mail gets the way back wherever the row offers Done. */
+const isDone = computed(() => props.thread.workflowState === 'done');
 const {
   swipeTracking,
   swipeSettling,
@@ -126,7 +128,7 @@ const {
       case 'toggle-read': return isUnread.value
         ? t('thread.actions.read')
         : t('thread.actions.unread');
-      case 'done': return t('common.done');
+      case 'done': return isDone.value ? t('thread.actions.inbox') : t('common.done');
       case 'pin': return props.thread.isStarred
         ? t('thread.actions.unpin')
         : t('thread.actions.pin');
@@ -144,7 +146,7 @@ const {
         void threadActions.setRead([props.thread.id], isUnread.value);
         break;
       case 'done':
-        void threadActions.archive([props.thread.id]);
+        void threadActions.toggleDone([props.thread.id]);
         break;
       case 'pin':
         void threadActions.setPinned([props.thread.id], !props.thread.isStarred);
@@ -310,9 +312,10 @@ async function toggleAside() {
   else await threadActions.setAside(ids);
 }
 
+/** Done, or back to the Inbox when every target is done already. */
 async function markDone() {
   closeContextMenu();
-  await threadActions.archive(targetThreadIds());
+  await threadActions.toggleDone(targetThreadIds());
 }
 
 async function toggleRead() {
@@ -436,6 +439,10 @@ function onDragStart(event: DragEvent) {
             <svg v-if="swipeCandidateAction === 'toggle-read'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="7.5" />
               <path v-if="isUnread" d="m8.7 12.2 2.1 2.1 4.6-4.7" />
+            </svg>
+            <svg v-else-if="swipeCandidateAction === 'done' && isDone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 16.5V5.1M8.1 12.6 12 16.5l3.9-3.9" />
+              <path d="M4.2 16.8v1.8a1.5 1.5 0 0 0 1.5 1.5h12.6a1.5 1.5 0 0 0 1.5-1.5v-1.8" />
             </svg>
             <svg v-else-if="swipeCandidateAction === 'done'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="m5.5 12.4 4.1 4.1 8.9-9" />
@@ -618,7 +625,7 @@ function onDragStart(event: DragEvent) {
       </div>
       <!-- In the text column, so the time sits on the sender line at any row height. -->
       <ListRowMeta class="thread-row__meta" :time="formattedTime">
-        <ThreadListQuickActions @action="quickAction" />
+        <ThreadListQuickActions :done="isDone" @action="quickAction" />
       </ListRowMeta>
     </div>
     <SnoozePicker
@@ -643,7 +650,11 @@ function onDragStart(event: DragEvent) {
     @close="closeContextMenu"
   >
     <div class="menu-group" @mouseenter="senderMenuAnchor = null">
-      <MenuItem icon="check" :label="$t('common.done')" @select="markDone" />
+      <MenuItem
+        :icon="threadActions.allDone(targetThreadIds()) ? 'inbox' : 'check'"
+        :label="threadActions.allDone(targetThreadIds()) ? $t('thread.actions.moveToInbox') : $t('common.done')"
+        @select="markDone"
+      />
       <MenuItem
         icon="clock"
         :label="$t('thread.actions.snooze')"

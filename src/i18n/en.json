@@ -1097,6 +1097,9 @@
       "passwordRejected": "{account} did not accept the password.",
       "retrying": "Trying again…",
       "serverResponse": "Server response",
+      "signInAgain": "Sign in again",
+      "signingIn": "Signing in…",
+      "syncAgain": "Sync again",
       "updatePassword": "Update password"
     },
     "inlineImageUnavailable": "Image unavailable",
@@ -1166,6 +1169,8 @@
   "inbox": {
     "bundleDone": "Check all off",
     "bundleDoneTitle": "Check off every message and go back",
+    "bundleToInbox": "All to inbox",
+    "bundleToInboxTitle": "Move every message back to the inbox and go back",
     "category": {
       "personal": "Personal",
       "promotions": "Promotions",
@@ -3493,7 +3498,8 @@
       "label": "{count} selected",
       "summaryHint": "The actions above apply to all of them.",
       "summaryMore": "and {count} more",
-      "summaryTitle": "{count} conversation selected | {count} conversations selected"
+      "summaryTitle": "{count} conversation selected | {count} conversations selected",
+      "toInbox": "To inbox ({count})"
     },
     "state": {
       "aside": "Set aside",

@@ -1097,6 +1097,9 @@
       "passwordRejected": "{account} hat das Passwort nicht angenommen.",
       "retrying": "Wird wiederholt …",
       "serverResponse": "Antwort des Servers",
+      "signInAgain": "Erneut anmelden",
+      "signingIn": "Anmeldung läuft …",
+      "syncAgain": "Erneut abgleichen",
       "updatePassword": "Passwort ändern"
     },
     "inlineImageUnavailable": "Bild nicht verfügbar",
@@ -1166,6 +1169,8 @@
   "inbox": {
     "bundleDone": "Alle abhaken",
     "bundleDoneTitle": "Alle Mails abhaken und zurück",
+    "bundleToInbox": "Alle in die Inbox",
+    "bundleToInboxTitle": "Alle Mails zurück in die Inbox legen und zurückgehen",
     "category": {
       "personal": "Persönlich",
       "promotions": "Werbung",
@@ -3493,7 +3498,8 @@
       "label": "{count} ausgewählt",
       "summaryHint": "Die Aktionen oben gelten für alle.",
       "summaryMore": "und {count} weitere",
-      "summaryTitle": "{count} Unterhaltung ausgewählt | {count} Unterhaltungen ausgewählt"
+      "summaryTitle": "{count} Unterhaltung ausgewählt | {count} Unterhaltungen ausgewählt",
+      "toInbox": "In die Inbox ({count})"
     },
     "state": {
       "aside": "Beiseitegelegt",

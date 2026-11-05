@@ -298,7 +298,8 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         keywords: t('commands.keywords.forward'),
         run: () => currentId() && composer.openForward(currentId()),
       },
-      {
+      // Mail that is done already has Move to inbox below; Done would do nothing.
+      ...(threadActions.allDone(targetIds()) ? [] : [{
         id: 'thread:done',
         icon: 'done' as const,
         title: targetIds().length > 1
@@ -308,7 +309,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         shortcut: hint('markDone'),
         keywords: t('commands.keywords.markDone'),
         run: () => void threadActions.archive(targetIds()),
-      },
+      }]),
       {
         id: 'thread:snooze',
         icon: 'clock' as const,

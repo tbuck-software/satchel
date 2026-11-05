@@ -312,6 +312,25 @@ export function useThreadActions() {
     await transitionThreads(threadIds, 'inbox', t('thread.state.inbox'));
   }
 
+  /**
+   * Whether every given thread is Done already. Done on such a set would do
+   * nothing, so each surface that offers Done offers the way back instead.
+   */
+  function allDone(threadIds: readonly string[]): boolean {
+    return threadIds.length > 0
+      && threadIds.every((threadId) => threads.find(threadId)?.workflowState === 'done');
+  }
+
+  /**
+   * The primary action of a row, the reader, a selection or a section: Done,
+   * or — for mail that is done already — back to the Inbox. A mixed set is
+   * checked off, since that is the part that still changes anything.
+   */
+  async function toggleDone(threadIds: string[]): Promise<boolean> {
+    if (allDone(threadIds)) return transitionThreads(threadIds, 'inbox', t('thread.state.inbox'));
+    return archive(threadIds);
+  }
+
   /** Block a sender; the backend atomically files matching threads remotely and locally. */
   async function blockSender(input: {
     pattern: string;
@@ -630,6 +649,8 @@ export function useThreadActions() {
     waitForReply,
     setAside,
     moveToInbox,
+    allDone,
+    toggleDone,
     blockSender,
     moveToFolder,
     trash,

@@ -30,6 +30,9 @@ const threadActions = useThreadActions();
 
 const threadIds = computed(() => props.group.threads.map((thread) => thread.id));
 const isUnread = computed(() => props.group.unreadCount > 0);
+/** A stack of done mail offers the way back instead of a Done that does nothing. */
+const isDone = computed(() =>
+  props.group.threads.length > 0 && props.group.threads.every((thread) => thread.workflowState === 'done'));
 
 const {
   swipeTracking,
@@ -56,7 +59,7 @@ const {
       case 'toggle-read': return isUnread.value
         ? t('thread.actions.read')
         : t('thread.actions.unread');
-      case 'done': return t('common.done');
+      case 'done': return isDone.value ? t('thread.actions.inbox') : t('common.done');
       case 'pin': return t('thread.actions.pin');
       case 'aside': return t('thread.actions.aside');
       case 'trash': return t('common.delete');
@@ -71,7 +74,7 @@ const {
         void threadActions.setRead(ids, isUnread.value);
         break;
       case 'done':
-        void threadActions.archive(ids);
+        void threadActions.toggleDone(ids);
         break;
       case 'pin':
         void threadActions.setPinned(ids, true);
@@ -165,6 +168,10 @@ function onDragStart(event: DragEvent) {
               <circle cx="12" cy="12" r="7.5" />
               <path v-if="isUnread" d="m8.7 12.2 2.1 2.1 4.6-4.7" />
             </svg>
+            <svg v-else-if="swipeCandidateAction === 'done' && isDone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 16.5V5.1M8.1 12.6 12 16.5l3.9-3.9" />
+              <path d="M4.2 16.8v1.8a1.5 1.5 0 0 0 1.5 1.5h12.6a1.5 1.5 0 0 0 1.5-1.5v-1.8" />
+            </svg>
             <svg v-else-if="swipeCandidateAction === 'done'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <path d="m5.5 12.4 4.1 4.1 8.9-9" />
             </svg>
@@ -231,7 +238,7 @@ function onDragStart(event: DragEvent) {
 
     <!-- Outermost slot, identical to the done quick action of single rows. -->
     <ListRowMeta class="bundle-card__meta" :time="formattedTime">
-      <ThreadListQuickActions :bundle-count="props.group.count" :busy="props.busy" @action="emit('done', threadIds)" />
+      <ThreadListQuickActions :bundle-count="props.group.count" :busy="props.busy" :done="isDone" @action="emit('done', threadIds)" />
     </ListRowMeta>
   </div>
 </template>

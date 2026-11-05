@@ -8,8 +8,10 @@
  * shown belongs in `useToast().error` instead; this one stays until the cause
  * is gone, because the problem does.
  *
- * A rejected password is the one sync failure the person has to fix, so it
- * says so and offers the way there; the server's own words stay one click away.
+ * A sync failure offers the fix that fits it: a rejected password leads to
+ * the password, an expired OAuth grant signs in again, a host or TLS setup the
+ * server refuses opens the account's settings; the server's own words stay
+ * one click away. Everything else syncs again, and the button says that.
  *
  * A rejected server certificate is the server's fault, not the person's: it
  * gets the warning tone, names the account and the date, and can be hidden.
@@ -28,6 +30,7 @@ import { accountCertificateRejection } from '@/utils/certificateRejection';
 import { certificateDetail, certificateShort, certificateTitle } from '@/utils/certificateLabels';
 import { useCertificateTrustStore } from '@/stores/certificateTrust';
 import { useUiStore } from '@/stores/ui';
+import { useToast } from '@/composables/useToast';
 import AppBanner from '@/components/ui/AppBanner.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -43,22 +46,52 @@ const accounts = useAccountsStore();
 const certificates = useCertificateTrustStore();
 const ui = useUiStore();
 const router = useRouter();
+const toast = useToast();
 const { t } = useI18n();
 
-const passwordAccounts = computed(() => new Set(
-  accounts.accounts
-    .filter((account) => account.provider === 'imap' || account.provider === 'pop3')
-    .map((account) => account.id),
-));
 const isSync = computed(() => connection.backendErrorSource === 'sync');
 // Certificate failures have their own banner below; everything else keeps this one.
 const syncFailures = computed(() => (
   isSync.value
     ? connection.syncFailures
       .filter((failure) => !accountCertificateRejection(failure))
-      .map((failure) => describeSyncFailure(failure, passwordAccounts.value))
+      .map((failure) => describeSyncFailure(failure, accounts.accounts))
     : []
 ));
+
+/**
+ * The button that fits each failure, once per account: a new password, a new
+ * sign-in, or the server settings. Whatever has none of these is fixed, if at
+ * all, by syncing again — the button every sync banner keeps.
+ */
+const remedies = computed(() => {
+  const seen = new Set<string>();
+  return syncFailures.value.flatMap((failure) => {
+    if (failure.remedy === 'retry' || !failure.remedyAccountId) return [];
+    const key = `${failure.remedy}:${failure.remedyAccountId}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ key, remedy: failure.remedy, accountId: failure.remedyAccountId, account: failure.account }];
+  });
+});
+const signingIn = ref(new Set<string>());
+
+/** OAuth accounts sign in again in place; the settings page has the same button. */
+async function signIn(accountId: string) {
+  if (signingIn.value.has(accountId)) return;
+  signingIn.value = new Set(signingIn.value).add(accountId);
+  try {
+    await accounts.startReauth(accountId);
+  } catch (err) {
+    toast.error(t('settings.accounts.reauth.failed', {
+      error: err instanceof Error ? err.message : String(err),
+    }));
+  } finally {
+    const next = new Set(signingIn.value);
+    next.delete(accountId);
+    signingIn.value = next;
+  }
+}
 const onlyCertificates = computed(() => isSync.value
   && connection.syncFailures.length > 0
   && syncFailures.value.length === 0);
@@ -115,7 +148,7 @@ const title = computed(() => (outage.value
 watchEffect(() => {
   ui.drawerAttention = certificates.needsAttention || connection.syncFailures.some((raw) => {
     if (accountCertificateRejection(raw)) return false;
-    const failure = describeSyncFailure(raw, passwordAccounts.value);
+    const failure = describeSyncFailure(raw, accounts.accounts);
     return failure.accountId !== null && isOutage(failure, now.value);
   });
 });
@@ -176,31 +209,45 @@ function updatePassword(accountId: string) {
       <code v-for="failure in rejected" :key="failure.accountId!">{{ failure.serverText }}</code>
     </details>
     <template #actions>
+      <template v-for="remedy in remedies" :key="remedy.key">
+        <AppButton
+          v-if="remedy.remedy === 'signIn'"
+          size="sm"
+          variant="primary"
+          :title="remedy.account"
+          :disabled="signingIn.has(remedy.accountId)"
+          @click="void signIn(remedy.accountId)"
+        >
+          {{ signingIn.has(remedy.accountId) ? t('errors.banner.signingIn') : t('errors.banner.signInAgain') }}
+        </AppButton>
+        <AppButton
+          v-else
+          size="sm"
+          variant="primary"
+          :title="remedy.account"
+          @click="updatePassword(remedy.accountId)"
+        >
+          {{ remedy.remedy === 'password' ? t('errors.banner.updatePassword') : t('errors.banner.openAccount') }}
+        </AppButton>
+      </template>
       <AppButton
-        v-for="failure in rejected"
-        :key="failure.accountId!"
-        size="sm"
-        variant="primary"
-        :title="failure.account"
-        @click="updatePassword(failure.accountId!)"
-      >
-        {{ t('errors.banner.updatePassword') }}
-      </AppButton>
-      <AppButton
-        v-if="outage && rejected.length === 0"
+        v-if="outage && remedies.length === 0"
         size="sm"
         variant="ghost"
         @click="updatePassword(outage.accountId)"
       >
         {{ t('errors.banner.openAccount') }}
       </AppButton>
+      <!-- A failed sync is retried by syncing, and says so. -->
       <AppButton
         size="sm"
-        :variant="rejected.length > 0 ? 'ghost' : 'primary'"
+        :variant="remedies.length > 0 ? 'ghost' : 'primary'"
         :disabled="connection.retrying"
         @click="connection.requestRetry()"
       >
-        {{ connection.retrying ? t('errors.banner.retrying') : t('common.retry') }}
+        {{ connection.retrying
+          ? t('errors.banner.retrying')
+          : syncFailures.length > 0 ? t('errors.banner.syncAgain') : t('common.retry') }}
       </AppButton>
     </template>
   </AppBanner>
