@@ -74,7 +74,7 @@ test('a slow template refresh keeps rows in place and displays progress', async 
   });
   const progress = page.locator('.collection-refresh');
   await expect(progress).toBeVisible();
-  await expect(page.locator('ul.list')).toHaveAttribute('aria-busy', 'true');
+  await expect(page.locator('.list')).toHaveAttribute('aria-busy', 'true');
   expect(await row.boundingBox()).toEqual(before);
   await expect(row).toBeVisible();
   await page.evaluate(() => {

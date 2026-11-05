@@ -48,38 +48,35 @@ async function remove(id: string) {
       <code>{{ $t('settings.blocked.exampleDomain') }}</code>{{ $t('settings.blocked.hintAfter') }}
     </p>
 
-    <div class="add">
-      <input v-model="newPattern" :placeholder="$t('settings.blocked.placeholder')" @keydown.enter="add" />
-      <AppButton variant="primary" @click="add">{{ $t('settings.blocked.add') }}</AppButton>
-    </div>
-
-    <ul v-if="items.length > 0" class="list">
-      <li v-for="item in items" :key="item.id">
-        <span>
-          <strong>{{ item.pattern }}</strong>
-          <small>· {{ item.pattern_type }}</small>
-        </span>
-        <AppButton variant="secondary" size="sm" @click="remove(item.id)">
+    <!-- One list: the add field is its first row, the entries follow. -->
+    <div class="setting-group list">
+      <form class="setting-row add-row" @submit.prevent="add">
+        <input v-model="newPattern" :placeholder="$t('settings.blocked.placeholder')" :aria-label="$t('settings.blocked.placeholder')" />
+        <AppButton type="submit" variant="secondary" size="sm" :disabled="!newPattern.trim()">{{ $t('settings.blocked.add') }}</AppButton>
+      </form>
+      <div v-for="item in items" :key="item.id" class="setting-row">
+        <div class="setting-info">
+          <span class="setting-label">{{ item.pattern }}</span>
+          <span class="setting-hint">{{ item.pattern_type }}</span>
+        </div>
+        <AppButton variant="ghost" size="sm" @click="remove(item.id)">
           {{ $t('settings.blocked.unblock') }}
         </AppButton>
-      </li>
-    </ul>
-    <p v-else class="empty">{{ $t('settings.blocked.empty') }}</p>
+      </div>
+      <div v-if="items.length === 0" class="setting-row setting-row--single">
+        <span class="setting-hint">{{ $t('settings.blocked.empty') }}</span>
+      </div>
+    </div>
 
     <p v-if="status" class="status">{{ status }}</p>
   </section>
 </template>
 
 <style scoped>
-section { display: grid; gap: 12px; }
-h3 { margin: 0; color: var(--text-primary); }
-.hint { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-sm); }
-code { background: var(--bg-raised); padding: 1px 6px; border-radius: var(--radius-xs); font-size: 0.9em; }
-.add { display: flex; gap: 8px; }
-.add input { flex: 1; border: 1px solid var(--border-color); background: var(--bg-raised); border-radius: var(--radius-sm); padding: 8px 10px; color: var(--text-primary); font-family: inherit; }
-.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.list li { display: flex; justify-content: space-between; align-items: center; background: var(--bg-raised); padding: 8px 12px; border-radius: var(--radius-sm); color: var(--text-primary); font-size: var(--font-size-sm); }
-.list small { color: var(--text-tertiary); margin-left: 6px; }
-.empty { color: var(--text-tertiary); font-size: var(--font-size-sm); margin: 0; }
-.status { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-xs); }
+.setting-row.add-row { grid-template-columns: minmax(0, 1fr) auto; }
+.add-row input { width: 100%; max-width: none; }
 </style>
+
+<style scoped src="./settingsForms.css"></style>
+
+<style scoped src="./settingsRows.css"></style>

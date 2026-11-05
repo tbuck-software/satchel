@@ -11,6 +11,8 @@ const { t } = useI18n();
 const { ask } = useConfirm();
 const prompt = usePrompt();
 const store = useSmimeStore();
+/** Which add form is open: import, generate, or none (the list alone). */
+const panel = ref<'import' | 'generate' | null>(null);
 const pem = ref('');
 const label = ref('');
 const passphrase = ref('');
@@ -40,6 +42,7 @@ async function importPem() {
     label.value = '';
     passphrase.value = '';
     status.value = t('settings.smime.imported');
+    panel.value = null;
   } catch (err) {
     status.value = t('settings.smime.importFailed', {
       error: err instanceof Error ? err.message : String(err),
@@ -71,6 +74,7 @@ async function importPkcs12(event: Event) {
     const base64 = btoa(String.fromCharCode(...bytes));
     await store.importPkcs12({ label: label.value || file.name, p12Base64: base64, passphrase: phrase });
     status.value = t('settings.smime.pkcs12Imported');
+    panel.value = null;
   } catch (err) {
     status.value = t('settings.smime.pkcs12ImportFailed', {
       error: err instanceof Error ? err.message : String(err),
@@ -92,6 +96,7 @@ async function generateSelfSigned() {
       passphrase: generatePassphrase.value,
     });
     status.value = t('settings.smime.selfSignedCreated');
+    panel.value = null;
   } catch (err) {
     status.value = t('settings.smime.generateFailed', {
       error: err instanceof Error ? err.message : String(err),
@@ -142,7 +147,41 @@ async function remove(cert: BackendSmimeCert) {
       <AppButton variant="secondary" @click="store.load">{{ $t('common.refresh') }}</AppButton>
     </header>
 
-    <div class="panel">
+    <!-- Certificates first, then the two ways to add one, each opening its
+         form on demand instead of two forms standing open above the list. -->
+    <div class="setting-group cert-list">
+      <article v-for="cert in certs" :key="cert.id" class="setting-row cert-row">
+        <div class="setting-info">
+          <span class="setting-label">{{ cert.label }}</span>
+          <span class="setting-hint">{{ cert.subject_email || cert.subject_cn || $t('settings.smime.noSubject') }}</span>
+          <code>{{ cert.fingerprint }}</code>
+        </div>
+        <div class="cert-actions">
+          <span class="badge">{{ cert.cert_type === 'private' ? $t('settings.smime.typePrivate') : $t('settings.smime.typePublic') }}</span>
+          <span v-if="cert.is_unlocked" class="badge">{{ $t('settings.smime.unlockedBadge') }}</span>
+          <AppButton
+            v-if="cert.cert_type === 'private' && !cert.is_unlocked"
+            variant="secondary"
+            size="sm"
+            @click="unlock(cert)"
+          >
+            {{ $t('settings.smime.unlock') }}
+          </AppButton>
+          <AppButton variant="ghost" size="sm" @click="remove(cert)">{{ $t('common.delete') }}</AppButton>
+        </div>
+      </article>
+      <div v-if="!store.loading && certs.length === 0" class="setting-row setting-row--single">
+        <span class="setting-hint">{{ $t('settings.smime.empty') }}</span>
+      </div>
+      <div v-if="panel === null" class="setting-row setting-row--single">
+        <div class="cert-add">
+          <AppButton variant="secondary" size="sm" @click="panel = 'import'">{{ $t('settings.smime.importTitle') }}</AppButton>
+          <AppButton variant="ghost" size="sm" @click="panel = 'generate'">{{ $t('settings.smime.selfSignedTitle') }}</AppButton>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="panel === 'import'" class="panel">
       <h3>{{ $t('settings.smime.importTitle') }}</h3>
       <p class="hint">{{ $t('settings.smime.importHint') }}</p>
       <div class="field-grid">
@@ -160,6 +199,7 @@ async function remove(cert: BackendSmimeCert) {
         <textarea v-model="pem" rows="7" :placeholder="$t('settings.smime.pemPlaceholder')" />
       </label>
       <div class="actions">
+        <AppButton variant="ghost" size="sm" @click="panel = null">{{ $t('common.cancel') }}</AppButton>
         <AppButton variant="primary" :disabled="!pem.trim()" @click="importPem">
           {{ $t('settings.smime.importPem') }}
         </AppButton>
@@ -177,7 +217,7 @@ async function remove(cert: BackendSmimeCert) {
       </div>
     </div>
 
-    <div class="panel">
+    <div v-if="panel === 'generate'" class="panel">
       <h3>{{ $t('settings.smime.selfSignedTitle') }}</h3>
       <p class="hint">{{ $t('settings.smime.selfSignedHint') }}</p>
       <div class="field-grid">
@@ -195,7 +235,8 @@ async function remove(cert: BackendSmimeCert) {
         </label>
       </div>
       <div class="actions">
-        <AppButton variant="secondary" :disabled="generating" @click="generateSelfSigned">
+        <AppButton variant="ghost" size="sm" @click="panel = null">{{ $t('common.cancel') }}</AppButton>
+        <AppButton variant="primary" :disabled="generating" @click="generateSelfSigned">
           {{ generating ? $t('settings.smime.generating') : $t('settings.smime.selfSignedTitle') }}
         </AppButton>
       </div>
@@ -203,28 +244,6 @@ async function remove(cert: BackendSmimeCert) {
 
     <p v-if="status" class="status">{{ status }}</p>
 
-    <div class="cert-list">
-      <article v-for="cert in certs" :key="cert.id" class="cert-row">
-        <div>
-          <strong>{{ cert.label }}</strong>
-          <span>{{ cert.subject_email || cert.subject_cn || $t('settings.smime.noSubject') }}</span>
-          <code>{{ cert.fingerprint }}</code>
-        </div>
-        <div class="badges">
-          <span>{{ cert.cert_type === 'private' ? $t('settings.smime.typePrivate') : $t('settings.smime.typePublic') }}</span>
-          <span v-if="cert.is_unlocked">{{ $t('settings.smime.unlockedBadge') }}</span>
-        </div>
-        <AppButton
-          v-if="cert.cert_type === 'private' && !cert.is_unlocked"
-          variant="secondary"
-          @click="unlock(cert)"
-        >
-          {{ $t('settings.smime.unlock') }}
-        </AppButton>
-        <AppButton variant="danger" @click="remove(cert)">{{ $t('common.delete') }}</AppButton>
-      </article>
-      <p v-if="!store.loading && certs.length === 0" class="empty">{{ $t('settings.smime.empty') }}</p>
-    </div>
   </section>
 </template>
 
@@ -235,13 +254,11 @@ async function remove(cert: BackendSmimeCert) {
 }
 header,
 .actions,
-.cert-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.actions,
-.cert-row {
+.cert-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-xs); }
+.cert-add { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+.badge { padding: 1px 8px; border-radius: var(--radius-full); background: var(--bg-raised); color: var(--text-secondary); font-size: var(--font-size-xs); }
+.cert-row code { overflow: hidden; color: var(--text-tertiary); font-size: var(--font-size-xs); text-overflow: ellipsis; white-space: nowrap; }
+.actions {
   flex-wrap: wrap;
 }
 header {
@@ -284,11 +301,9 @@ h3 {
 }
 .field-grid label span,
 .pem-field span {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
-  font-weight: var(--weight-strong);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-medium);
 }
 input,
 textarea {
@@ -297,9 +312,9 @@ textarea {
   box-sizing: border-box;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  background: var(--bg-base);
+  background: var(--bg-surface);
   color: var(--text-primary);
-  padding: 9px 10px;
+  padding: 8px 10px;
   font: inherit;
 }
 textarea {
@@ -318,40 +333,7 @@ textarea {
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
 }
-.cert-list {
-  display: grid;
-  gap: 8px;
-}
-.cert-row {
-  justify-content: space-between;
-  padding: 12px;
-  border: 1px solid var(--border-color-muted);
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
-}
-.cert-row > div:first-child {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-.cert-row strong {
-  color: var(--text-primary);
-}
-.cert-row span,
-.cert-row code {
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-}
-.cert-row code {
-  word-break: break-all;
-}
-.badges {
-  display: flex;
-  gap: 6px;
-}
-.badges span {
-  border: 1px solid var(--border-color-muted);
-  border-radius: var(--radius-full);
-  padding: 3px 7px;
-}
+/* Labels in sentence case at body size, like every other form. */
 </style>
+
+<style scoped src="./settingsRows.css"></style>

@@ -206,11 +206,8 @@ const KNOWN_SCALE_LITERAL_GROUPS: KnownGroup[] = [
     files: {
       'src/components/settings/AccountSetup.vue': 1,
       'src/components/settings/BackupExport.vue': 1,
-      'src/components/settings/BlockedSendersEditor.vue': 1,
       'src/components/settings/MobileSyncSettings.vue': 1,
-      'src/components/settings/SmartFoldersEditor.vue': 2,
       'src/components/settings/SwipeSettings.vue': 3,
-      'src/components/settings/TemplatesEditor.vue': 1,
     },
   },
   {
@@ -256,7 +253,7 @@ const KNOWN_SCALE_LITERAL_GROUPS: KnownGroup[] = [
 const KNOWN_SCALE_LITERALS = flatten(KNOWN_SCALE_LITERAL_GROUPS);
 
 // Only ever lower this. See KNOWN_SCALE_LITERAL_GROUPS.
-const MAX_KNOWN_SCALE_LITERALS = 49;
+const MAX_KNOWN_SCALE_LITERALS = 45;
 
 // ---------------------------------------------------------------------------
 // Rule 4b — icons share one line weight, a few grids and three sizes.

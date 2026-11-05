@@ -93,6 +93,18 @@ const undoOptions = computed(() => {
     label: value === 0 ? t('settings.notifications.undoOff') : t('settings.notifications.secondsShort', { n: value }),
   }));
 });
+/** Day counts as choices, not a number field with spinner arrows; a value
+ * set before (or elsewhere) stays selectable. 0 means "no limit". */
+const BODY_PRESETS = [0, 30, 90, 365];
+const TRASH_PRESETS = [0, 7, 30, 90];
+function dayOptions(current: number, presets: number[], zeroKey: string) {
+  const values = presets.includes(current) ? presets : [...presets, current].sort((a, b) => a - b);
+  return values.map((value) => ({
+    value: String(value),
+    label: value === 0 ? t(zeroKey) : t('settings.notifications.daysShort', { n: value }),
+  }));
+}
+
 const scopeOptions = computed(() => [
   { value: 'all', label: t('settings.notifications.scopeAllShort') },
   { value: 'inbox', label: t('settings.notifications.scopeInboxShort') },
@@ -217,26 +229,30 @@ async function save() {
     </div>
 
     <div v-else class="setting-group">
-      <label class="setting-row">
-        <span class="setting-info">
+      <div class="setting-row">
+        <div class="setting-info">
           <strong>{{ $t('settings.notifications.bodyWindowLabel') }}</strong>
           <span>{{ $t('settings.notifications.bodyWindowHint') }}</span>
-        </span>
-        <span class="number-control">
-          <input v-model.number="prefs.body_window_days" type="number" min="0" max="3650" step="1" />
-          <small>{{ $t('settings.notifications.days') }}</small>
-        </span>
-      </label>
-      <label class="setting-row">
-        <span class="setting-info">
+        </div>
+        <SegmentedControl
+          :model-value="String(prefs.body_window_days)"
+          :options="dayOptions(prefs.body_window_days, BODY_PRESETS, 'settings.notifications.keepAll')"
+          :aria-label="$t('settings.notifications.bodyWindowLabel')"
+          @update:model-value="prefs.body_window_days = Number($event)"
+        />
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
           <strong>{{ $t('settings.notifications.trashLabel') }}</strong>
           <span>{{ $t('settings.notifications.trashHint') }}</span>
-        </span>
-        <span class="number-control">
-          <input v-model.number="prefs.trash_auto_delete_days" type="number" min="0" max="3650" step="1" />
-          <small>{{ $t('settings.notifications.days') }}</small>
-        </span>
-      </label>
+        </div>
+        <SegmentedControl
+          :model-value="String(prefs.trash_auto_delete_days)"
+          :options="dayOptions(prefs.trash_auto_delete_days, TRASH_PRESETS, 'settings.notifications.never')"
+          :aria-label="$t('settings.notifications.trashLabel')"
+          @update:model-value="prefs.trash_auto_delete_days = Number($event)"
+        />
+      </div>
     </div>
 
     <p v-if="saveFailed" class="status error" role="alert">{{ status }}</p>
@@ -245,9 +261,6 @@ async function save() {
 
 <style scoped>
 .settings-section { display:grid; gap:20px; }
-.number-control { display:flex; align-items:center; gap:6px; border-radius: var(--radius-sm); background:var(--bg-overlay); padding:3px 9px; }
-.number-control input { width:58px; border:0; background:transparent; color:var(--text-primary); font:inherit; text-align:right; }
-.number-control small { color:var(--text-tertiary); }
 .status { margin:0; font-size: var(--font-size-sm); }
 .status.error { color:var(--accent-red); }
 

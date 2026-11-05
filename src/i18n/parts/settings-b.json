@@ -16,6 +16,7 @@
         "modeAllowlistHint": "Remote images load only after you allow them from the notice in the message.",
         "modeAllowlistTitle": "Remote images load only once you allow them in the message",
         "modeAria": "When remote images are loaded",
+        "modeLabel": "Load remote images",
         "sender": "sender",
         "title": "Remote images",
         "wholeDomain": "entire domain"
@@ -61,7 +62,7 @@
         "unknownTime": "Time unknown"
       },
       "notifications": {
-        "bodyWindowHint": "Older mail keeps sender, subject and date and reloads its content when opened. Its text leaves the search index, so full-text search only finds it by subject or sender. With 0 days everything stays stored.",
+        "bodyWindowHint": "Older mail keeps sender, subject and date and reloads its content when opened. Its text leaves the search index, so full-text search only finds it by subject or sender.",
         "bodyWindowLabel": "Keep mail content",
         "dataDescription": "Retention and local housekeeping.",
         "dataTitle": "Data & storage",
@@ -79,6 +80,9 @@
         "scopeLabel": "Scope",
         "seconds": "sec",
         "secondsShort": "{n} s",
+        "daysShort": "{n} days",
+        "keepAll": "All",
+        "never": "Never",
         "undoOff": "Off",
         "scopeAllShort": "All mail",
         "scopeInboxShort": "Inbox only",
@@ -87,7 +91,7 @@
         "soundHint": "Play a sound on a new notice.",
         "soundLabel": "Sound",
         "title": "Notifications",
-        "trashHint": "With 0 days the content is kept.",
+        "trashHint": "Deletes messages in the trash after this long.",
         "trashLabel": "Empty trash automatically",
         "undoHint": "Time to undo before a message really goes out.",
         "undoLabel": "Delay sending"
@@ -185,7 +189,6 @@
         "directionLeftHint": "The action appears to the right of the message.",
         "directionRight": "To the right",
         "directionRightHint": "The action appears to the left of the message.",
-        "eyebrow": "Touch controls",
         "long": "Far",
         "longHint": "from about two fifths",
         "previewPin": "Pin",
@@ -274,6 +277,7 @@
         "modeAllowlistHint": "Externe Bilder laden erst nach Freigabe über den Hinweis in der Nachricht.",
         "modeAllowlistTitle": "Externe Bilder laden erst, wenn du sie in der Nachricht freigibst",
         "modeAria": "Wann externe Bilder geladen werden",
+        "modeLabel": "Externe Bilder laden",
         "sender": "Absender",
         "title": "Externe Bilder",
         "wholeDomain": "ganze Domain"
@@ -319,7 +323,7 @@
         "unknownTime": "Zeitpunkt unbekannt"
       },
       "notifications": {
-        "bodyWindowHint": "Ältere Mail behält Absender, Betreff und Datum und lädt ihren Inhalt beim Öffnen nach. Ihr Text verlässt den Suchindex: Die Volltextsuche findet sie dann nur noch über Betreff oder Absender. Mit 0 Tagen bleibt alles gespeichert.",
+        "bodyWindowHint": "Ältere Mail behält Absender, Betreff und Datum und lädt ihren Inhalt beim Öffnen nach. Ihr Text verlässt den Suchindex: Die Volltextsuche findet sie dann nur noch über Betreff oder Absender.",
         "bodyWindowLabel": "Mail-Inhalte behalten",
         "dataDescription": "Aufbewahrung und lokale Datenpflege.",
         "dataTitle": "Daten & Speicher",
@@ -337,6 +341,9 @@
         "scopeLabel": "Umfang",
         "seconds": "Sek.",
         "secondsShort": "{n} s",
+        "daysShort": "{n} Tage",
+        "keepAll": "Alles",
+        "never": "Nie",
         "undoOff": "Aus",
         "scopeAllShort": "Alle Mails",
         "scopeInboxShort": "Nur Posteingang",
@@ -345,7 +352,7 @@
         "soundHint": "Bei einem neuen Hinweis einen Ton abspielen.",
         "soundLabel": "Ton",
         "title": "Benachrichtigungen",
-        "trashHint": "Mit 0 Tagen bleibt der Inhalt erhalten.",
+        "trashHint": "Löscht Nachrichten im Papierkorb nach dieser Zeit.",
         "trashLabel": "Papierkorb automatisch leeren",
         "undoHint": "Zeit zum Rückgängigmachen vor dem tatsächlichen Versand.",
         "undoLabel": "Versand verzögern"
@@ -443,7 +450,6 @@
         "directionLeftHint": "Die Aktion erscheint rechts hinter der Nachricht.",
         "directionRight": "Nach rechts",
         "directionRightHint": "Die Aktion erscheint links hinter der Nachricht.",
-        "eyebrow": "Touch-Steuerung",
         "long": "Weit",
         "longHint": "ab etwa zwei Fünfteln",
         "previewPin": "Anheften",

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import CollectionLoadState from '@/components/ui/CollectionLoadState.vue';
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
-import { onMounted, ref } from 'vue';
+import { nextTick, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useSmartFoldersStore } from '@/stores/smartFolders';
 import { useCrudActions } from '@/composables/useCrudActions';
@@ -11,6 +12,8 @@ const { t } = useI18n();
 const smart = useSmartFoldersStore();
 const crud = useCrudActions();
 const editingId = ref<string | null>(null);
+const editorOpen = ref(false);
+const editorRef = ref<HTMLElement | null>(null);
 const name = ref('');
 const query = ref('');
 const icon = ref('');
@@ -18,7 +21,14 @@ const status = ref('');
 
 onMounted(() => smart.load());
 
+function startNew() {
+  reset();
+  editorOpen.value = true;
+  void nextTick(() => editorRef.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+}
+
 function reset() {
+  editorOpen.value = false;
   editingId.value = null;
   name.value = '';
   query.value = '';
@@ -27,6 +37,7 @@ function reset() {
 }
 
 function edit(id: string) {
+  editorOpen.value = true;
   const f = smart.items.find((s) => s.id === id);
   if (!f) return;
   editingId.value = id;
@@ -88,21 +99,30 @@ async function remove(id: string) {
       :error-label="$t('settings.smartFolders.loadFailed')"
       @retry="smart.load()"
     />
-    <ul v-if="smart.items.length > 0" class="list" :aria-busy="smart.loading">
-      <li v-for="f in smart.items" :key="f.id">
-        <CardButton class="row" @click="edit(f.id)">
-          <span class="ico">{{ f.icon || '🔍' }}</span>
-          <span>
-            <strong>{{ f.name }}</strong>
-            <code class="q">{{ f.query }}</code>
-          </span>
-        </CardButton>
-        <AppButton class="delete" @click="remove(f.id)" variant="danger" size="sm">{{ $t('common.delete') }}</AppButton>
-      </li>
-    </ul>
-    <p v-else-if="!smart.loading && !smart.loadFailed" class="empty">{{ $t('settings.smartFolders.empty') }}</p>
+    <!-- A list with an Add row; the form opens on demand. -->
+    <div class="setting-group list" :aria-busy="smart.loading">
+      <div v-for="f in smart.items" :key="f.id" class="setting-row collection-row">
+          <CardButton class="row" @click="edit(f.id)">
+            <span class="ico">{{ f.icon || '🔍' }}</span>
+            <span>
+              <strong>{{ f.name }}</strong>
+              <code class="q">{{ f.query }}</code>
+            </span>
+          </CardButton>
+          <AppButton class="delete" @click="remove(f.id)" variant="ghost" size="sm">{{ $t('common.delete') }}</AppButton>
+      </div>
+      <div v-if="!(smart.items.length > 0) && !smart.loading && !smart.loadFailed" class="setting-row setting-row--single">
+        <span class="setting-hint">{{ $t('settings.smartFolders.empty') }}</span>
+      </div>
+      <div v-if="!editorOpen" class="setting-row setting-row--single">
+        <AppButton variant="secondary" size="sm" @click="startNew">
+          <template #icon><AppIcon><path d="M8 3v10M3 8h10" /></AppIcon></template>
+          {{ $t('settings.smartFolders.newTitle') }}
+        </AppButton>
+      </div>
+    </div>
 
-    <div class="editor">
+    <div v-if="editorOpen" ref="editorRef" class="editor">
       <h4>{{ editingId ? $t('settings.smartFolders.editTitle') : $t('settings.smartFolders.newTitle') }}</h4>
       <label class="field"><span>{{ $t('common.name') }}</span><input v-model="name" /></label>
       <label class="field"><span>{{ $t('settings.smartFolders.iconLabel') }}</span><input v-model="icon" maxlength="2" /></label>
@@ -111,29 +131,14 @@ async function remove(id: string) {
         <input v-model="query" :placeholder="$t('settings.smartFolders.queryPlaceholder')" />
       </label>
       <div class="actions">
-        <AppButton v-if="editingId" class="ghost" @click="reset" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
+        <AppButton class="ghost" @click="reset" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
         <AppButton class="primary" @click="save" variant="primary" size="sm">{{ $t('common.save') }}</AppButton>
       </div>
-      <p v-if="status" class="status">{{ status }}</p>
     </div>
+    <p v-if="status" class="status" role="status">{{ status }}</p>
   </section>
 </template>
 
-<style scoped>
-section { display: grid; gap: 14px; }
-h3, h4 { margin: 0; color: var(--text-primary); }
-.hint { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-sm); }
-code { background: var(--bg-raised); padding: 1px 6px; border-radius: var(--radius-xs); font-size: 0.9em; }
-.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.list li { display: flex; gap: 6px; }
-.row { flex: 1; display: flex; gap: 8px; align-items: center; background: var(--bg-raised); border: 1px solid var(--border-color-muted); border-radius: var(--radius-sm); padding: 8px 12px; cursor: pointer; text-align: left; color: var(--text-primary); }
-.row:hover { background: var(--bg-hover); }
-.ico { font-size: 18px; }
-.q { display: block; font-size: var(--font-size-xs); color: var(--text-tertiary); margin-top: 2px; }
-.empty { color: var(--text-tertiary); font-size: var(--font-size-sm); margin: 0; }
-.editor { display: grid; gap: 10px; border: 1px solid var(--border-color-muted); border-radius: var(--radius-md); padding: 14px; background: var(--bg-base); }
-.field { display: grid; gap: 4px; font-size: var(--font-size-sm); color: var(--text-secondary); }
-.field input { border: 1px solid var(--border-color); background: var(--bg-raised); border-radius: var(--radius-sm); padding: 8px 10px; color: var(--text-primary); font-family: inherit; }
-.actions { display: flex; justify-content: flex-end; gap: 8px; }
-.status { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-xs); }
-</style>
+<style scoped src="./settingsForms.css"></style>
+
+<style scoped src="./settingsRows.css"></style>

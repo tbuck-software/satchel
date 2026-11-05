@@ -51,12 +51,11 @@ function updateAction(slot: SwipeSlot, event: Event) {
   <section class="swipe-settings">
     <header class="swipe-settings__header">
       <div>
-        <p class="eyebrow">{{ $t('settings.swipes.eyebrow') }}</p>
         <h2 class="settings-page-title">{{ $t('settings.sections.swipes.label') }}</h2>
         <p class="description">{{ $t('settings.swipes.description') }}</p>
       </div>
       <AppButton variant="secondary" size="sm" :disabled="isDefault" @click="settings.resetSwipeActions()">
-        {{ $t('common.default') }}
+        {{ $t('common.reset') }}
       </AppButton>
     </header>
 
@@ -149,15 +148,6 @@ function updateAction(slot: SwipeSlot, event: Event) {
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-}
-
-.eyebrow {
-  margin: 0 0 6px;
-  color: var(--accent-primary);
-  font-size: var(--font-size-3xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: .11em;
-  text-transform: uppercase;
 }
 
 h2,

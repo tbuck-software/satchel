@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
 import { useAliasesStore } from '@/stores/aliases';
@@ -15,6 +16,8 @@ const crud = useCrudActions();
 
 const accountId = ref<string>('');
 const editingId = ref<string | null>(null);
+const editorOpen = ref(false);
+const editorRef = ref<HTMLElement | null>(null);
 const email = ref('');
 const displayName = ref('');
 const isDefault = ref(false);
@@ -29,7 +32,14 @@ const accountAliases = computed(() =>
   accountId.value ? aliasesStore.aliasesFor(accountId.value) : [],
 );
 
+function startNew() {
+  reset();
+  editorOpen.value = true;
+  void nextTick(() => editorRef.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+}
+
 function reset() {
+  editorOpen.value = false;
   editingId.value = null;
   email.value = '';
   displayName.value = '';
@@ -37,6 +47,7 @@ function reset() {
 }
 
 function edit(id: string) {
+  editorOpen.value = true;
   const alias = aliasesStore.items.find((a) => a.id === id);
   if (!alias) return;
   editingId.value = id;
@@ -83,30 +94,41 @@ async function remove(id: string) {
     <h3 class="settings-page-title">{{ $t('settings.sections.aliases.label') }}</h3>
     <p class="hint">{{ $t('settings.aliases.hint') }}</p>
 
-    <label class="field">
-      <span>{{ $t('settings.aliases.account') }}</span>
-      <select v-model="accountId">
-        <option v-for="acc in accountsStore.accounts" :key="acc.id" :value="acc.id">
-          {{ acc.displayName }} &lt;{{ acc.email }}&gt;
-        </option>
-      </select>
-    </label>
+    <div class="setting-group">
+      <label class="setting-row">
+        <span class="setting-label">{{ $t('settings.aliases.account') }}</span>
+        <select v-model="accountId">
+          <option v-for="acc in accountsStore.accounts" :key="acc.id" :value="acc.id">
+            {{ acc.displayName }} &lt;{{ acc.email }}&gt;
+          </option>
+        </select>
+      </label>
+    </div>
 
-    <ul v-if="accountAliases.length > 0" class="list">
-      <li v-for="alias in accountAliases" :key="alias.id">
-        <CardButton class="row" @click="edit(alias.id)">
-          <span>
-            <strong>{{ alias.email }}</strong>
-            <span v-if="alias.display_name"> · {{ alias.display_name }}</span>
-            <span v-if="alias.is_default === 1" class="badge">{{ $t('common.default') }}</span>
-          </span>
-        </CardButton>
-        <AppButton class="delete" @click="remove(alias.id)" variant="danger" size="sm">{{ $t('common.remove') }}</AppButton>
-      </li>
-    </ul>
-    <p v-else class="empty">{{ $t('settings.aliases.empty') }}</p>
+    <!-- A list with an Add row; the form opens on demand. -->
+    <div class="setting-group list">
+      <div v-for="alias in accountAliases" :key="alias.id" class="setting-row collection-row">
+          <CardButton class="row" @click="edit(alias.id)">
+            <span>
+              <strong>{{ alias.email }}</strong>
+              <span v-if="alias.display_name"> · {{ alias.display_name }}</span>
+              <span v-if="alias.is_default === 1" class="badge">{{ $t('common.default') }}</span>
+            </span>
+          </CardButton>
+          <AppButton class="delete" @click="remove(alias.id)" variant="ghost" size="sm">{{ $t('common.remove') }}</AppButton>
+      </div>
+      <div v-if="!(accountAliases.length > 0)" class="setting-row setting-row--single">
+        <span class="setting-hint">{{ $t('settings.aliases.empty') }}</span>
+      </div>
+      <div v-if="!editorOpen" class="setting-row setting-row--single">
+        <AppButton variant="secondary" size="sm" @click="startNew">
+          <template #icon><AppIcon><path d="M8 3v10M3 8h10" /></AppIcon></template>
+          {{ $t('settings.aliases.addTitle') }}
+        </AppButton>
+      </div>
+    </div>
 
-    <div class="editor">
+    <div v-if="editorOpen" ref="editorRef" class="editor">
       <h4>{{ editingId ? $t('settings.aliases.editTitle') : $t('settings.aliases.addTitle') }}</h4>
       <label class="field">
         <span>{{ $t('common.email') }}</span>
@@ -119,110 +141,14 @@ async function remove(id: string) {
       <ToggleSwitch v-model="isDefault">{{ $t('settings.aliases.useAsDefault') }}</ToggleSwitch>
 
       <div class="actions">
-        <AppButton v-if="editingId" class="ghost" @click="reset" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
+        <AppButton class="ghost" @click="reset" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
         <AppButton class="primary" @click="save" variant="primary" size="sm">{{ $t('common.save') }}</AppButton>
       </div>
-      <p v-if="status" class="status">{{ status }}</p>
     </div>
+    <p v-if="status" class="status" role="status">{{ status }}</p>
   </section>
 </template>
 
-<style scoped>
-section {
-  display: grid;
-  gap: 14px;
-}
+<style scoped src="./settingsForms.css"></style>
 
-h3,
-h4 {
-  margin: 0;
-  color: var(--text-primary);
-}
-
-.hint {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-}
-
-.field {
-  display: grid;
-  gap: 4px;
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-}
-
-.field input,
-.field select {
-  border: 1px solid var(--border-color);
-  background: var(--bg-raised);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  color: var(--text-primary);
-  font-family: inherit;
-}
-
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.list li {
-  display: flex;
-  gap: 6px;
-}
-
-.row {
-  flex: 1;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-color-muted);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  cursor: pointer;
-  text-align: left;
-  color: var(--text-primary);
-}
-.row:hover {
-  background: var(--bg-hover);
-}
-
-.badge {
-  background: color-mix(in srgb, var(--accent-primary) 22%, transparent);
-  color: var(--accent-primary);
-  font-size: var(--font-size-xs);
-  padding: 1px 8px;
-  border-radius: var(--radius-full);
-  margin-left: 8px;
-}
-
-.empty {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-  margin: 0;
-}
-
-.editor {
-  display: grid;
-  gap: 10px;
-  border: 1px solid var(--border-color-muted);
-  border-radius: var(--radius-md);
-  padding: 14px;
-  background: var(--bg-base);
-}
-
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.status {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-}
-</style>
+<style scoped src="./settingsRows.css"></style>

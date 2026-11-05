@@ -61,58 +61,53 @@ function add() {
     <h3 class="settings-page-title">{{ $t('settings.sections.images.label') }}</h3>
     <p class="hint">{{ $t('settings.images.hint') }}</p>
 
-    <SegmentedControl
-      :options="modeOptions"
-      :model-value="policy.state.mode"
-      :aria-label="$t('settings.images.modeAria')"
-      @update:model-value="setMode"
-    />
-    <p class="hint" :class="{ 'hint--warning': policy.state.mode === 'all' }">
-      {{ modeHint }}
-    </p>
-
-    <div class="add">
-      <input
-        v-model="newEntry"
-        :placeholder="$t('settings.images.entryPlaceholder')"
-        @keydown.enter="add"
-      />
-      <AppButton variant="primary" @click="add">{{ $t('settings.images.allow') }}</AppButton>
+    <div class="setting-group">
+      <div class="setting-row">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('settings.images.modeLabel') }}</span>
+          <span class="setting-hint" :class="{ 'hint--warning': policy.state.mode === 'all' }">{{ modeHint }}</span>
+        </div>
+        <SegmentedControl
+          :options="modeOptions"
+          :model-value="policy.state.mode"
+          :aria-label="$t('settings.images.modeAria')"
+          @update:model-value="setMode"
+        />
+      </div>
     </div>
 
-    <ul v-if="domains.length > 0 || senders.length > 0" class="list">
-      <li v-for="domain in domains" :key="`d:${domain}`">
-        <span>
-          <strong>@{{ domain }}</strong>
-          <small>· {{ $t('settings.images.wholeDomain') }}</small>
-        </span>
-        <AppButton variant="secondary" size="sm" @click="policy.revokeDomain(domain)">
-          {{ $t('common.remove') }}
-        </AppButton>
-      </li>
-      <li v-for="sender in senders" :key="`s:${sender}`">
-        <span>
-          <strong>{{ sender }}</strong>
-          <small>· {{ $t('settings.images.sender') }}</small>
-        </span>
-        <AppButton variant="secondary" size="sm" @click="policy.revoke(sender)">
-          {{ $t('common.remove') }}
-        </AppButton>
-      </li>
-    </ul>
-    <p v-else class="empty">{{ $t('settings.images.empty') }}</p>
+    <div class="setting-group list">
+      <form class="setting-row add-row" @submit.prevent="add">
+        <input v-model="newEntry" :placeholder="$t('settings.images.entryPlaceholder')" :aria-label="$t('settings.images.entryPlaceholder')" />
+        <AppButton type="submit" variant="secondary" size="sm" :disabled="!newEntry.trim()">{{ $t('settings.images.allow') }}</AppButton>
+      </form>
+      <div v-for="domain in domains" :key="`d:${domain}`" class="setting-row">
+        <div class="setting-info">
+          <span class="setting-label">@{{ domain }}</span>
+          <span class="setting-hint">{{ $t('settings.images.wholeDomain') }}</span>
+        </div>
+        <AppButton variant="ghost" size="sm" @click="policy.revokeDomain(domain)">{{ $t('common.remove') }}</AppButton>
+      </div>
+      <div v-for="sender in senders" :key="`s:${sender}`" class="setting-row">
+        <div class="setting-info">
+          <span class="setting-label">{{ sender }}</span>
+          <span class="setting-hint">{{ $t('settings.images.sender') }}</span>
+        </div>
+        <AppButton variant="ghost" size="sm" @click="policy.revoke(sender)">{{ $t('common.remove') }}</AppButton>
+      </div>
+      <div v-if="domains.length === 0 && senders.length === 0" class="setting-row setting-row--single">
+        <span class="setting-hint">{{ $t('settings.images.empty') }}</span>
+      </div>
+    </div>
   </section>
 </template>
 
 <style scoped>
-section { display: grid; gap: 12px; }
-h3 { margin: 0; color: var(--text-primary); }
-.hint { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-sm); }
-.hint--warning { color: var(--accent-amber); }
-.add { display: flex; gap: 8px; }
-.add input { flex: 1; border: 1px solid var(--border-color); background: var(--bg-raised); border-radius: var(--radius-sm); padding: 8px 10px; color: var(--text-primary); font-family: inherit; }
-.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.list li { display: flex; justify-content: space-between; align-items: center; background: var(--bg-raised); padding: 8px 12px; border-radius: var(--radius-sm); color: var(--text-primary); font-size: var(--font-size-sm); }
-.list small { color: var(--text-tertiary); margin-left: 6px; }
-.empty { color: var(--text-tertiary); font-size: var(--font-size-sm); margin: 0; }
+.setting-row.add-row { grid-template-columns: minmax(0, 1fr) auto; }
+.add-row input { width: 100%; max-width: none; }
+.hint--warning { color: var(--accent-amber-soft); }
 </style>
+
+<style scoped src="./settingsForms.css"></style>
+
+<style scoped src="./settingsRows.css"></style>

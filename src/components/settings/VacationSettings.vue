@@ -85,48 +85,53 @@ async function save() {
     <h3 class="settings-page-title">{{ $t('settings.sections.vacation.label') }}</h3>
     <p class="hint">{{ $t('settings.vacation.hint') }}</p>
 
-    <label class="field">
-      <span>{{ $t('settings.vacation.account') }}</span>
-      <select v-model="accountId">
-        <option v-for="a in accounts.emailAccounts" :key="a.id" :value="a.id">
-          {{ a.displayName }} &lt;{{ a.email }}&gt;
-        </option>
-      </select>
-    </label>
-
-    <p v-if="!isOauthAccount" class="warn">
-      ⚠ {{ $t('settings.vacation.imapWarning') }}
-    </p>
-
-    <ToggleSwitch v-model="enabled">{{ $t('settings.vacation.enable') }}</ToggleSwitch>
-
-    <label class="field">
-      <span>{{ $t('common.subject') }}</span>
-      <input v-model="subject" :disabled="!enabled" />
-    </label>
-
-    <label class="field">
-      <span>{{ $t('settings.vacation.bodyLabel') }}</span>
-      <textarea v-model="body" :disabled="!enabled" rows="6" />
-    </label>
-
-    <div class="row">
-      <label class="field">
-        <span>{{ $t('common.from') }}</span>
-        <input v-model="startsAt" type="datetime-local" step="60" :disabled="!enabled" />
+    <!-- Rows like every other section: the switch on the right, the reply
+         itself as one card that opens up while the switch is on. -->
+    <div class="setting-group">
+      <label class="setting-row">
+        <span class="setting-label">{{ $t('settings.vacation.account') }}</span>
+        <select v-model="accountId">
+          <option v-for="a in accounts.emailAccounts" :key="a.id" :value="a.id">
+            {{ a.displayName }} &lt;{{ a.email }}&gt;
+          </option>
+        </select>
       </label>
-      <label class="field">
-        <span>{{ $t('settings.vacation.until') }}</span>
-        <input v-model="endsAt" type="datetime-local" step="60" :disabled="!enabled" />
-      </label>
+      <div class="setting-row">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('settings.vacation.enable') }}</span>
+          <span v-if="!isOauthAccount" class="setting-hint warn">{{ $t('settings.vacation.imapWarning') }}</span>
+        </div>
+        <ToggleSwitch v-model="enabled" :label="$t('settings.vacation.enable')" />
+      </div>
     </div>
 
-    <ToggleSwitch v-model="onlyContacts" :disabled="!enabled">
-      {{ $t('settings.vacation.onlyContacts') }}
-    </ToggleSwitch>
+    <div v-if="enabled" class="editor">
+      <label class="field">
+        <span>{{ $t('common.subject') }}</span>
+        <input v-model="subject" />
+      </label>
+      <label class="field">
+        <span>{{ $t('settings.vacation.bodyLabel') }}</span>
+        <textarea v-model="body" rows="6" />
+      </label>
+      <div class="pair">
+        <label class="field">
+          <span>{{ $t('common.from') }}</span>
+          <input v-model="startsAt" type="datetime-local" step="60" />
+        </label>
+        <label class="field">
+          <span>{{ $t('settings.vacation.until') }}</span>
+          <input v-model="endsAt" type="datetime-local" step="60" />
+        </label>
+      </div>
+      <div class="setting-row setting-row--inline">
+        <span class="setting-label">{{ $t('settings.vacation.onlyContacts') }}</span>
+        <ToggleSwitch v-model="onlyContacts" :label="$t('settings.vacation.onlyContacts')" />
+      </div>
+    </div>
 
     <div class="actions">
-      <AppButton variant="primary" :disabled="saving" @click="save">
+      <AppButton variant="primary" size="sm" :disabled="saving" @click="save">
         {{ saving ? $t('common.saving') : $t('common.save') }}
       </AppButton>
     </div>
@@ -135,13 +140,16 @@ async function save() {
 </template>
 
 <style scoped>
-section { display: grid; gap: 14px; }
-h3 { margin: 0; color: var(--text-primary); }
-.hint { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-sm); }
-.warn { margin: 0; color: var(--accent-amber-soft); font-size: var(--font-size-sm); }
-.field { display: grid; gap: 4px; font-size: var(--font-size-sm); color: var(--text-secondary); }
-.field input, .field select, .field textarea { border: 1px solid var(--border-color); background: var(--bg-raised); border-radius: var(--radius-sm); padding: 8px 10px; color: var(--text-primary); font-family: inherit; }
-.row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.actions { display: flex; justify-content: flex-end; }
-.status { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-xs); }
+.warn { color: var(--accent-amber-soft); }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md); }
+/* A switch inside the form card: no row padding of its own. */
+.setting-row.setting-row--inline { padding: 0; }
+
+@media (max-width: 520px) {
+  .pair { grid-template-columns: minmax(0, 1fr); }
+}
 </style>
+
+<style scoped src="./settingsForms.css"></style>
+
+<style scoped src="./settingsRows.css"></style>

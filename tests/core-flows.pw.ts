@@ -405,10 +405,10 @@ test('filters Settings from the keyboard and leaves them with Escape', async ({ 
   await page.keyboard.press('/');
   await expect(filter).toBeFocused();
   await page.keyboard.type('undo');
-  await expect(nav.getByRole('button', { name: /^Sending/ })).toBeVisible();
+  await expect(nav.getByRole('button', { name: /^Composing/ })).toBeVisible();
   await expect(nav.getByRole('button', { name: /^Swipe gestures/ })).toHaveCount(0);
   await page.keyboard.press('Enter');
-  await expect(nav.getByRole('button', { name: /^Sending/ })).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('button', { name: /^Composing/ })).toHaveAttribute('aria-current', 'page');
 
   // The first Escape empties the filter, the second leaves Settings.
   await page.keyboard.press('Escape');

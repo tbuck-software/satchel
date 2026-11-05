@@ -635,9 +635,9 @@ onMounted(() => {
     </header>
 
     <p v-if="loadingPlugins" class="empty">{{ $t('settings.plugins.loading') }}</p>
-    <p v-else-if="plugins.length === 0" class="empty">{{ $t('settings.plugins.noneFound') }}</p>
-
+    <!-- Under Encryption the missing piece is the OpenPGP plugin, not "plugins". -->
     <p v-else-if="props.only === 'pgp' && !pgpPlugin" class="empty">{{ $t('settings.plugins.pgpPluginMissing') }}</p>
+    <p v-else-if="plugins.length === 0" class="empty">{{ $t('settings.plugins.noneFound') }}</p>
 
     <p v-if="showPgp && pgpPlugin && engineStatus && !engineStatus.available" class="pgp-engine-warning" role="alert">
       <strong>{{ $t('settings.pgp.engineUnavailableTitle') }}</strong>

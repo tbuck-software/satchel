@@ -5,7 +5,7 @@ import {
   backendInlineImageCacheStatus,
   backendStartInlineImageBackfill,
   backendStopInlineImageBackfill,
-  backendSupportsNativeCommands,
+  backendCommandsAvailable,
   translateBackendError,
   type BackendInlineCacheProgress,
   type BackendInlineCacheStatus,
@@ -21,7 +21,7 @@ const error = ref('');
 const busy = ref(false);
 let unlisten: (() => void) | null = null;
 
-const native = backendSupportsNativeCommands();
+const native = backendCommandsAvailable();
 
 onMounted(async () => {
   if (!native) return;

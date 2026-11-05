@@ -1,0 +1,129 @@
+/*
+ * The one way a settings section shows a collection and edits an entry.
+ *
+ * A collection is a grouped list (settingsRows.css) whose rows open the entry
+ * and whose last row adds one. The form opens on demand as a card with its
+ * fields in one style and Cancel beside Save; it never stands open below the
+ * list with its Save out of sight. Templates, aliases, smart folders,
+ * signatures, feeds and certificates all read alike.
+ */
+section {
+  display: grid;
+  gap: var(--space-md);
+}
+
+h4 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  font-weight: var(--weight-semibold);
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+code {
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-raised);
+  font-size: 0.9em;
+}
+
+.field {
+  display: grid;
+  gap: var(--space-xs);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-medium);
+}
+
+.field input,
+.field textarea,
+.field select,
+.setting-row select,
+.setting-row input:not([type='checkbox']) {
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--weight-regular);
+}
+
+.setting-row select {
+  max-width: 280px;
+}
+
+.field textarea {
+  resize: vertical;
+}
+
+/* Entry rows: the whole row opens the entry; Delete stays a quiet action. */
+.collection-row {
+  padding-block: var(--space-xs);
+}
+
+.row {
+  display: grid;
+  gap: 2px;
+  padding: 8px 4px;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--bg-hover);
+}
+
+.name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: var(--weight-medium);
+}
+
+.preview,
+.subject {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent-primary) 22%, transparent);
+  color: var(--accent-primary);
+  font-size: var(--font-size-xs);
+}
+
+.editor {
+  display: grid;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  border: 1px solid var(--border-color-muted);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+.status {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}

@@ -146,7 +146,7 @@ function displayStrokes(action: string): string[] {
             v-else-if="settings.keybindings[definition.action] !== DEFAULT_KEYBINDINGS[definition.action]"
             class="status status--custom"
           >{{ $t('settings.shortcuts.custom') }}</span>
-          <span v-else class="status">{{ $t('common.default') }}</span>
+          <!-- Default needs no label on 40 rows; only a change or a clash does. -->
         </span>
       </CardButton>
 
@@ -266,7 +266,7 @@ kbd {
 
 .binding-row {
   width: 100%;
-  min-height: 58px;
+  min-height: 44px;
   padding: 8px 16px;
   border: 0;
   border-top: 1px solid var(--border-color-muted);

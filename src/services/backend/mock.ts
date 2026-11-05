@@ -736,6 +736,12 @@ const handlers: Record<string, Handler> = {
     contacts_synced: 0,
     errors: [],
   }),
+  inline_image_cache_status: () => ({
+    missing: 0, missing_bytes: 0, cached: 0, estimated_seconds: 0,
+    progress: { total: 0, done: 0, failed: 0, running: false, eta_seconds: null, paused_seconds: null, last_error: null, finished_reason: null },
+  }),
+  start_inline_image_backfill: () => null,
+  stop_inline_image_backfill: () => null,
   get_notification_preferences: () => ({ ...notificationPreferences }),
   set_notification_preferences: ({ preferences }) => {
     notificationPreferences = { ...(preferences as typeof notificationPreferences) };

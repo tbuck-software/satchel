@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import CollectionLoadState from '@/components/ui/CollectionLoadState.vue';
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useTemplatesStore } from '@/stores/templates';
 import { useCrudActions } from '@/composables/useCrudActions';
@@ -14,6 +15,8 @@ const templatesStore = useTemplatesStore();
 const crud = useCrudActions();
 
 const editingId = ref<string | null>(null);
+const editorOpen = ref(false);
+const editorRef = ref<HTMLElement | null>(null);
 const name = ref('');
 const subject = ref('');
 const bodyText = ref('');
@@ -34,7 +37,14 @@ const placeholderHint = computed(() =>
   t('settings.templates.bodyPlaceholder', { recipient: recipientPlaceholder }),
 );
 
+function startNew() {
+  reset();
+  editorOpen.value = true;
+  void nextTick(() => editorRef.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+}
+
 function reset() {
+  editorOpen.value = false;
   editingId.value = null;
   name.value = '';
   subject.value = '';
@@ -47,6 +57,7 @@ function reset() {
 }
 
 function edit(id: string) {
+  editorOpen.value = true;
   const tpl = templatesStore.items.find((t) => t.id === id);
   if (!tpl) return;
   editingId.value = id;
@@ -142,20 +153,29 @@ function parseAttachmentsJson(value?: string | null): BackendOutgoingAttachment[
       :error-label="$t('settings.templates.loadFailed')"
       @retry="templatesStore.load()"
     />
-    <ul v-if="templatesStore.items.length > 0" class="list" :aria-busy="templatesStore.loading">
-      <li v-for="tpl in templatesStore.items" :key="tpl.id">
-        <CardButton class="row" @click="edit(tpl.id)">
-          <span class="name">{{ tpl.name }}</span>
-          <span v-if="tpl.shortcut" class="shortcut">{{ tpl.shortcut }}</span>
-          <span v-if="tpl.subject" class="subject">{{ tpl.subject }}</span>
-          <span class="preview">{{ tpl.body_text.slice(0, 80) }}</span>
-        </CardButton>
-        <AppButton class="delete" @click="remove(tpl.id)" variant="danger" size="sm">{{ $t('common.delete') }}</AppButton>
-      </li>
-    </ul>
-    <p v-else-if="!templatesStore.loading && !templatesStore.loadFailed" class="empty">{{ $t('settings.templates.empty') }}</p>
+    <!-- A list with an Add row; the form opens on demand. -->
+    <div class="setting-group list" :aria-busy="templatesStore.loading">
+      <div v-for="tpl in templatesStore.items" :key="tpl.id" class="setting-row collection-row">
+          <CardButton class="row" @click="edit(tpl.id)">
+            <span class="name">{{ tpl.name }}</span>
+            <span v-if="tpl.shortcut" class="shortcut">{{ tpl.shortcut }}</span>
+            <span v-if="tpl.subject" class="subject">{{ tpl.subject }}</span>
+            <span class="preview">{{ tpl.body_text.slice(0, 80) }}</span>
+          </CardButton>
+          <AppButton class="delete" @click="remove(tpl.id)" variant="ghost" size="sm">{{ $t('common.delete') }}</AppButton>
+      </div>
+      <div v-if="!(templatesStore.items.length > 0) && !templatesStore.loading && !templatesStore.loadFailed" class="setting-row setting-row--single">
+        <span class="setting-hint">{{ $t('settings.templates.empty') }}</span>
+      </div>
+      <div v-if="!editorOpen" class="setting-row setting-row--single">
+        <AppButton variant="secondary" size="sm" @click="startNew">
+          <template #icon><AppIcon><path d="M8 3v10M3 8h10" /></AppIcon></template>
+          {{ $t('settings.templates.createTitle') }}
+        </AppButton>
+      </div>
+    </div>
 
-    <div class="editor">
+    <div v-if="editorOpen" ref="editorRef" class="editor">
       <h4>{{ editingId ? $t('settings.templates.editTitle') : $t('settings.templates.createTitle') }}</h4>
       <label class="field"><span>{{ $t('common.name') }}</span><input v-model="name" /></label>
       <label class="field"><span>{{ $t('settings.templates.subjectOptional') }}</span><input v-model="subject" /></label>
@@ -178,114 +198,22 @@ function parseAttachmentsJson(value?: string | null): BackendOutgoingAttachment[
       <AttachmentDropZone v-model="attachments" />
 
       <div class="actions">
-        <AppButton v-if="editingId" class="ghost" @click="reset" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
+        <AppButton class="ghost" @click="reset" variant="ghost" size="sm">{{ $t('common.cancel') }}</AppButton>
         <AppButton class="primary" @click="save" variant="primary" size="sm">{{ $t('common.save') }}</AppButton>
       </div>
-      <p v-if="status" class="status">{{ status }}</p>
     </div>
+    <p v-if="status" class="status" role="status">{{ status }}</p>
   </section>
 </template>
 
 <style scoped>
-section {
-  display: grid;
-  gap: 14px;
-}
-h3,
-h4 {
-  margin: 0;
-  color: var(--text-primary);
-}
-.hint {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-}
-code {
-  background: var(--bg-raised);
-  padding: 1px 6px;
-  border-radius: var(--radius-xs);
-  font-size: 0.9em;
-}
-.field {
-  display: grid;
-  gap: 4px;
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-}
-.field input,
-.field textarea {
-  border: 1px solid var(--border-color);
-  background: var(--bg-raised);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-  color: var(--text-primary);
-  font-family: inherit;
-}
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.list li {
-  display: flex;
-  gap: 6px;
-}
-.row {
-  flex: 1;
-  text-align: left;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-color-muted);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  cursor: pointer;
-  display: grid;
-  gap: 2px;
-  color: var(--text-primary);
-}
-.row:hover {
-  background: var(--bg-hover);
-}
-.name {
-  font-weight: var(--weight-medium);
-}
 .shortcut {
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   color: var(--accent-primary);
 }
-.subject {
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-}
-.preview {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-}
-.empty {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-  margin: 0;
-}
-.editor {
-  display: grid;
-  gap: 10px;
-  border: 1px solid var(--border-color-muted);
-  border-radius: var(--radius-md);
-  padding: 14px;
-  background: var(--bg-base);
-}
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.status {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-}
 </style>
+
+<style scoped src="./settingsForms.css"></style>
+
+<style scoped src="./settingsRows.css"></style>
