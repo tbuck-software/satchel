@@ -80,7 +80,7 @@ async function remove(id: string) {
 
 <template>
   <section>
-    <h3 class="settings-page-title">{{ $t('settings.aliases.title') }}</h3>
+    <h3 class="settings-page-title">{{ $t('settings.sections.aliases.label') }}</h3>
     <p class="hint">{{ $t('settings.aliases.hint') }}</p>
 
     <label class="field">

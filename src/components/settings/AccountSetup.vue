@@ -537,6 +537,16 @@ async function removeAccount(accountId: string, email: string) {
           >
             {{ $t('settings.accounts.actions.renew') }}
           </AppButton>
+          <!-- Sync belongs to the account it syncs, not under the list. -->
+          <AppButton
+            v-if="account.provider === 'imap'"
+            variant="secondary"
+            size="sm"
+            :disabled="!oauthAvailable || syncBusy"
+            @click.stop.prevent="syncImapNow()"
+          >
+            {{ syncBusy ? $t('settings.accounts.sync.syncing') : $t('settings.accounts.actions.sync') }}
+          </AppButton>
           <AppButton
             variant="secondary"
             size="sm"
@@ -659,12 +669,6 @@ async function removeAccount(accountId: string, email: string) {
       <summary>{{ $t('errors.technicalDetails') }}</summary>
       <pre>{{ statusDetail }}</pre>
     </details>
-
-    <div class="form-actions">
-      <AppButton :disabled="!oauthAvailable || syncBusy" @click="syncImapNow()">
-        {{ syncBusy ? $t('settings.accounts.sync.syncing') : $t('settings.accounts.sync.syncImapNow') }}
-      </AppButton>
-    </div>
 
     <button type="button" class="add-account-button" @click="ui.openAccountSetup()">
       <span class="add-account-icon">

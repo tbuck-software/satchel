@@ -144,7 +144,7 @@ onMounted(() => { void loadBuild(); void updates.loadPreferences(); });
     <section class="about-pane__section">
       <SectionHeading :label="$t('settings.about.openSource')" />
       <div class="setting-group">
-        <div class="setting-row about-pane__note">
+        <div class="setting-row setting-row--single">
           <span class="setting-hint">{{ $t('settings.about.license') }}</span>
         </div>
         <CardButton class="setting-row about-pane__link" @click="openProject()">
@@ -221,14 +221,6 @@ onMounted(() => { void loadBuild(); void updates.loadPreferences(); });
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-sm);
-}
-
-.setting-row.about-pane__note {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.setting-row.about-pane__note > :last-child {
-  justify-self: start;
 }
 
 .about-pane__link:hover {

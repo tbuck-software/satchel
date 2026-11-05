@@ -25,6 +25,15 @@
   max-width: 100%;
 }
 
+/* A row with one thing in it (a note, an Add action) starts at the left. */
+.setting-row.setting-row--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.setting-row.setting-row--single > :last-child {
+  justify-self: start;
+}
+
 /* The full border step: --border-color-muted is barely a step off the
    raised card in the dark theme, and the rows ran together. */
 .setting-row + .setting-row {

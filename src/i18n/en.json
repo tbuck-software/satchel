@@ -2016,6 +2016,7 @@
       "actions": {
         "calendars": "Calendars & contacts",
         "renew": "Renew sign-in",
+        "sync": "Sync now",
         "test": "Test connection"
       },
       "addAccount": "Add email account",
@@ -2941,6 +2942,7 @@
       "adopt": "Adopt and edit",
       "checkAgain": "Check again",
       "checking": "Checking…",
+      "description": "Added to the messages you write, per sender address.",
       "discovering": "Checking sent messages…",
       "editTitle": "Edit signature",
       "emptyList": "No signature for this account yet.",

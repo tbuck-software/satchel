@@ -118,6 +118,7 @@
         "reservedConflict": "Taken by a fixed key: {keys}"
       },
       "signatures": {
+        "description": "Added to the messages you write, per sender address.",
         "account": "Account",
         "adopt": "Adopt and edit",
         "checkAgain": "Check again",
@@ -375,6 +376,7 @@
         "reservedConflict": "Von einer festen Taste belegt: {keys}"
       },
       "signatures": {
+        "description": "Hängt an deine Mails, je Absenderadresse.",
         "account": "Account",
         "adopt": "Übernehmen und anpassen",
         "checkAgain": "Erneut prüfen",

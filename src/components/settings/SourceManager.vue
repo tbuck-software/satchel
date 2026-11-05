@@ -132,7 +132,7 @@ onMounted(() => void load());
 <template>
   <section class="sources">
     <header>
-      <h3 class="settings-page-title">{{ $t("settings.sources.title") }}</h3>
+      <h3 class="settings-page-title">{{ $t('settings.sections.sources.label') }}</h3>
       <p>{{ $t("settings.sources.description") }}</p>
     </header>
 

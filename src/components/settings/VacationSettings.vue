@@ -82,7 +82,7 @@ async function save() {
 
 <template>
   <section>
-    <h3 class="settings-page-title">{{ $t('settings.vacation.title') }}</h3>
+    <h3 class="settings-page-title">{{ $t('settings.sections.vacation.label') }}</h3>
     <p class="hint">{{ $t('settings.vacation.hint') }}</p>
 
     <label class="field">

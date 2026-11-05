@@ -2016,6 +2016,7 @@
       "actions": {
         "calendars": "Kalender & Kontakte",
         "renew": "Anmeldung erneuern",
+        "sync": "Jetzt synchronisieren",
         "test": "Verbindung testen"
       },
       "addAccount": "E-Mail-Konto hinzufügen",
@@ -2941,6 +2942,7 @@
       "adopt": "Übernehmen und anpassen",
       "checkAgain": "Erneut prüfen",
       "checking": "Prüft…",
+      "description": "Hängt an deine Mails, je Absenderadresse.",
       "discovering": "Gesendete Nachrichten werden geprüft…",
       "editTitle": "Signatur bearbeiten",
       "emptyList": "Noch keine Signatur für diesen Account.",

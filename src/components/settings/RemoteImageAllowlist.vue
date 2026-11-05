@@ -58,7 +58,7 @@ function add() {
 
 <template>
   <section>
-    <h3 class="settings-page-title">{{ $t('settings.images.title') }}</h3>
+    <h3 class="settings-page-title">{{ $t('settings.sections.images.label') }}</h3>
     <p class="hint">{{ $t('settings.images.hint') }}</p>
 
     <SegmentedControl

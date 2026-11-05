@@ -52,7 +52,7 @@ function updateAction(slot: SwipeSlot, event: Event) {
     <header class="swipe-settings__header">
       <div>
         <p class="eyebrow">{{ $t('settings.swipes.eyebrow') }}</p>
-        <h2 class="settings-page-title">{{ $t('settings.swipes.title') }}</h2>
+        <h2 class="settings-page-title">{{ $t('settings.sections.swipes.label') }}</h2>
         <p class="description">{{ $t('settings.swipes.description') }}</p>
       </div>
       <AppButton variant="secondary" size="sm" :disabled="isDefault" @click="settings.resetSwipeActions()">

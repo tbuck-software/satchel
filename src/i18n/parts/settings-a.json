@@ -66,7 +66,7 @@
           "saved": "Password for {email} updated. Mail syncs again.",
           "failed": "Password not saved: {error}"
         },
-        "actions": { "calendars": "Calendars & contacts", "renew": "Renew sign-in", "test": "Test connection" },
+        "actions": { "calendars": "Calendars & contacts", "renew": "Renew sign-in", "sync": "Sync now", "test": "Test connection" },
         "checkOrRenew": "Check or renew sign-in",
         "connected": "connected",
         "disconnected": "disconnected",
@@ -560,7 +560,7 @@
           "saved": "Passwort für {email} geändert. Die Synchronisierung läuft wieder.",
           "failed": "Passwort nicht gespeichert: {error}"
         },
-        "actions": { "calendars": "Kalender & Kontakte", "renew": "Anmeldung erneuern", "test": "Verbindung testen" },
+        "actions": { "calendars": "Kalender & Kontakte", "renew": "Anmeldung erneuern", "sync": "Jetzt synchronisieren", "test": "Verbindung testen" },
         "checkOrRenew": "Anmeldung prüfen oder erneuern",
         "connected": "verbunden",
         "disconnected": "nicht verbunden",

@@ -57,7 +57,7 @@ async function toggleAutostart(value: boolean) {
 
 <template>
   <section>
-    <h3 class="settings-page-title">{{ $t('settings.tray.title') }}</h3>
+    <h3 class="settings-page-title">{{ $t('settings.sections.tray.label') }}</h3>
     <p class="hint">{{ $t('settings.tray.hint') }}</p>
 
     <ToggleSwitch :model-value="!prefs.quit_on_close" @update:model-value="toggleQuit(!$event)">

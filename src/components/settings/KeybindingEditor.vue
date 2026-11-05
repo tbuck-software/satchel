@@ -84,7 +84,7 @@ function displayStrokes(action: string): string[] {
   <section class="keybindings">
     <header class="keybindings__header">
       <div>
-        <h2 class="settings-page-title">{{ $t('settings.shortcuts.title') }}</h2>
+        <h2 class="settings-page-title">{{ $t('settings.sections.shortcuts.label') }}</h2>
         <p>{{ $t('settings.shortcuts.description') }}</p>
       </div>
       <div class="header-actions">
