@@ -19,7 +19,7 @@ test-support = []
 [dependencies]
 aes-gcm = "0.10"
 ammonia = "4.2.4"
-argon2 = "0.5"
+argon2 = "0.6"
 async-imap = { version = "0.11.2", default-features = false, features = ["runtime-tokio"] }
 async-trait = "0.1"
 base64 = "0.22"
