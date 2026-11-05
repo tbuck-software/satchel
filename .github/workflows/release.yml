@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
       - name: Prepare release version and source
@@ -56,7 +56,7 @@ jobs:
           RELEASE_CHANNEL: ${{ github.event.schedule == '14 6 * * 1' && 'stable' || inputs.channel || 'nightly' }}
           RELEASE_FORCE: ${{ inputs.force }}
         run: node scripts/prepare-release.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: steps.plan.outputs.build == 'true'
         with:
           name: release-plan
@@ -77,8 +77,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -146,8 +146,8 @@ jobs:
         with:
           name: release-plan
           path: output
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -318,7 +318,7 @@ jobs:
             "$verify_dir/dmg/$app_name/Contents/MacOS/satchel" --verify-plugin-packages "$verify_dir/dmg/$app_name/Contents/Resources/plugins"
           fi
       - run: node scripts/collect-release.mjs ${{ matrix.target }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.target }}
           path: output/release-artifacts/${{ matrix.target }}/
@@ -336,7 +336,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
       - uses: actions/download-artifact@v4
@@ -348,7 +348,7 @@ jobs:
           pattern: desktop-*
           merge-multiple: true
           path: output/release-assets
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - run: pnpm install --frozen-lockfile
       - run: node scripts/build-release-installer.mjs
       - name: Publish only the complete verified release
