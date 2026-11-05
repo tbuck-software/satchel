@@ -79,7 +79,7 @@ watch(
     v-if="!ui.isSinglePane"
     :label="$t('common.settings')"
     width="1180px"
-    height="860px"
+    height="940px"
     @dismiss="ui.closeSettings()"
   >
     <div class="settings-dialog">
@@ -132,8 +132,8 @@ watch(
   padding-top: calc(18px + var(--space-sm));
 }
 
-/* All twenty sections in view at once on a laptop screen: pointer-sized rows
-   and tighter group labels, so nothing hides under the list's foot. */
+/* Pointer-sized rows keep the list short; the groups keep a clear gap
+   between them, and a short window scrolls the list instead. */
 .settings-dialog__nav :deep(.settings-sidebar) {
   gap: 0;
   padding-bottom: var(--space-sm);
@@ -144,7 +144,12 @@ watch(
 }
 
 .settings-dialog__nav :deep(.settings-sidebar h3) {
-  margin: var(--space-1-5) 12px 2px;
+  margin: var(--space-xl) 12px var(--space-xs);
+}
+
+/* The first group sits right under the filter, not a gap below it. */
+.settings-dialog__nav :deep(.settings-sidebar__head + h3) {
+  margin-top: var(--space-sm);
 }
 
 .settings-dialog__nav :deep(.settings-sidebar ul) {
