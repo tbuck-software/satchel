@@ -8,6 +8,14 @@ updates:
       rust-dependencies:
         patterns: ['*']
         update-types: ['minor', 'patch']
+    ignore:
+      # The plugin runtime stays on the Wasmtime 36 LTS line, and
+      # vendor/wasmtime-internal-cache is patched against it. Patch releases
+      # within 36 still arrive; moving to the next LTS is a deliberate change.
+      - dependency-name: 'wasmtime'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'wasmtime-*'
+        update-types: ['version-update:semver-major']
     schedule:
       interval: weekly
   - package-ecosystem: npm
