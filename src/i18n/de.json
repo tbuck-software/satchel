@@ -852,6 +852,18 @@
       "paragraph": "Text",
       "placeholder": "Nachricht verfassen…",
       "strike": "Durchgestrichen",
+      "table": {
+        "addColumnAfter": "Spalte rechts einfügen",
+        "addColumnBefore": "Spalte links einfügen",
+        "addRowAfter": "Zeile darunter einfügen",
+        "addRowBefore": "Zeile darüber einfügen",
+        "deleteColumn": "Spalte löschen",
+        "deleteRow": "Zeile löschen",
+        "deleteTable": "Tabelle löschen",
+        "headerRow": "Überschriftenzeile",
+        "insert": "Tabelle einfügen",
+        "toolbar": "Tabelle"
+      },
       "textColor": "Textfarbe"
     },
     "emlDrop": {

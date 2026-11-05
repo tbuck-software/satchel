@@ -852,6 +852,18 @@
       "paragraph": "Text",
       "placeholder": "Write your message…",
       "strike": "Strikethrough",
+      "table": {
+        "addColumnAfter": "Insert column right",
+        "addColumnBefore": "Insert column left",
+        "addRowAfter": "Insert row below",
+        "addRowBefore": "Insert row above",
+        "deleteColumn": "Delete column",
+        "deleteRow": "Delete row",
+        "deleteTable": "Delete table",
+        "headerRow": "Header row",
+        "insert": "Insert table",
+        "toolbar": "Table"
+      },
       "textColor": "Text colour"
     },
     "emlDrop": {

@@ -412,3 +412,73 @@ test('requires a future send time even when it expires with the composer open', 
   await composer.locator('.schedule-info').getByRole('button').click();
   await expect(composer.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
 });
+
+test('a table is inserted, filled and reshaped from the keyboard alone', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New message', exact: true }).click();
+  const composer = page.getByRole('dialog', { name: 'Compose email' });
+  const editor = composer.locator('.ProseMirror').first();
+  await editor.click();
+  await page.keyboard.type('Figures:');
+  await page.keyboard.press('ControlOrMeta+Alt+t');
+
+  const table = editor.locator('table');
+  await expect(table.locator('tr')).toHaveCount(3);
+  await expect(table.locator('tr').first().locator('th')).toHaveCount(3);
+  await page.keyboard.type('Quarter');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('Revenue');
+  await expect(table.locator('th').nth(1)).toHaveText('Revenue');
+  await expect(editor.locator('p').first()).toHaveText('Figures:');
+
+  await page.keyboard.press('ControlOrMeta+Alt+ArrowDown');
+  await expect(table.locator('tr')).toHaveCount(4);
+
+  // The same keys inside a table move into its toolbar; arrows walk it.
+  const toolbar = composer.getByRole('toolbar', { name: 'Table' });
+  await expect(toolbar).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+Alt+t');
+  await expect(toolbar.getByRole('button', { name: 'Insert row above' })).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(toolbar.getByRole('button', { name: 'Insert column right' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(table.locator('tr').first().locator('th')).toHaveCount(4);
+  await expect(editor).toBeFocused();
+
+  // Escape leaves the toolbar for the cell, not the composer.
+  await page.keyboard.press('ControlOrMeta+Alt+t');
+  await expect(toolbar.getByRole('button', { name: 'Insert row above' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(editor).toBeFocused();
+  await expect(composer).toBeVisible();
+
+  await page.keyboard.press('ControlOrMeta+Alt+t');
+  await expect(toolbar.getByRole('button', { name: 'Insert row above' })).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(toolbar.getByRole('button', { name: 'Delete table' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(editor.locator('table')).toHaveCount(0);
+  await expect(toolbar).toBeHidden();
+});
+
+test('a wide table scrolls inside itself on a phone instead of widening the composer', async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 852 });
+  await page.goto('/?mockOutbox=0');
+  await page.locator('.fab').click();
+  const composer = page.getByRole('dialog', { name: 'Compose email' });
+  const editor = composer.locator('.ProseMirror').first();
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+Alt+t');
+  for (let column = 0; column < 5; column += 1) await page.keyboard.press('ControlOrMeta+Alt+ArrowRight');
+  await expect(editor.locator('tr').first().locator('th')).toHaveCount(8);
+  await page.keyboard.type('A heading long enough to need the room');
+
+  const wrapper = editor.locator('.tableWrapper');
+  const overflow = await wrapper.evaluate((element) => element.scrollWidth - element.clientWidth);
+  expect(overflow).toBeGreaterThan(0);
+  const column = composer.getByTestId('compose-scroll');
+  expect(await column.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+});

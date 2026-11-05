@@ -189,6 +189,18 @@
           "wrapRight": "Wrap text on the left",
           "asAttachment": "Use as attachment"
         },
+        "table": {
+          "insert": "Insert table",
+          "toolbar": "Table",
+          "addRowBefore": "Insert row above",
+          "addRowAfter": "Insert row below",
+          "addColumnBefore": "Insert column left",
+          "addColumnAfter": "Insert column right",
+          "deleteRow": "Delete row",
+          "deleteColumn": "Delete column",
+          "headerRow": "Header row",
+          "deleteTable": "Delete table"
+        },
         "linkDialog": {
           "title": "Insert link",
           "text": "Text (optional)",
@@ -560,6 +572,18 @@
           "wrapLeft": "Text rechts umfließen lassen",
           "wrapRight": "Text links umfließen lassen",
           "asAttachment": "Als Anhang verwenden"
+        },
+        "table": {
+          "insert": "Tabelle einfügen",
+          "toolbar": "Tabelle",
+          "addRowBefore": "Zeile darüber einfügen",
+          "addRowAfter": "Zeile darunter einfügen",
+          "addColumnBefore": "Spalte links einfügen",
+          "addColumnAfter": "Spalte rechts einfügen",
+          "deleteRow": "Zeile löschen",
+          "deleteColumn": "Spalte löschen",
+          "headerRow": "Überschriftenzeile",
+          "deleteTable": "Tabelle löschen"
         },
         "linkDialog": {
           "title": "Link einfügen",

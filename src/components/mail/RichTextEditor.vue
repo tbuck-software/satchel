@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
@@ -21,6 +22,15 @@ import { bytesToBase64 } from '@/utils/base64';
 import { useDismissable } from '@/composables/useDismissable';
 import ModalShell from '@/components/ui/ModalShell.vue';
 import { composerHtmlFromText, isComposerHistoryIntro } from '@/utils/composerHistory';
+import {
+  TABLE_SHORTCUTS,
+  composerTableExtensions,
+  insertMailTable,
+  mailTableHtml,
+  tableAtSelection,
+} from '@/utils/composerTable';
+import { ariaKeyshortcuts, bindingKeycaps, formatBinding } from '@/config/keybindings';
+import type { ShortcutHint } from '@/types/shortcuts';
 
 type ImageAlignment = 'left' | 'center' | 'right' | 'wrap-left' | 'wrap-right';
 
@@ -146,9 +156,13 @@ const showLinkDialog = ref(false);
 const linkUrl = ref('');
 const linkText = ref('');
 const colorPickerOpen = ref(false);
+const tableToolbarRef = ref<HTMLElement | null>(null);
+const tableToolbarFocused = ref(false);
 
 // Back and Escape close the link dialog before they close the composer.
 useDismissable(() => showLinkDialog.value, () => { showLinkDialog.value = false; });
+// …and leave the table toolbar for the cell they came from.
+useDismissable(() => tableToolbarFocused.value, () => focusEditor());
 
 editor.value = new Editor({
   content: props.html || htmlFromText(props.modelValue),
@@ -180,6 +194,7 @@ editor.value = new Editor({
     Placeholder.configure({
       placeholder: () => props.placeholder || t('compose.editor.placeholder'),
     }),
+    ...composerTableExtensions({ onToolbarRequest: focusTableToolbar }),
   ],
   editorProps: {
     handleKeyDown: (_view, event) => {
@@ -220,7 +235,7 @@ editor.value = new Editor({
   editable: !props.disabled,
   autofocus: props.autofocus ? props.focusPosition : false,
   onUpdate: ({ editor: ed }) => {
-    const html = ed.getHTML();
+    const html = mailTableHtml(ed.getHTML());
     const text = ed.getText();
     lastEmittedHtml = html;
     emit('update:modelValue', text);
@@ -245,7 +260,7 @@ watch(
     if (!editor.value) return;
     if (newHtml === oldHtml) return;
     if (newHtml !== null && newHtml === lastEmittedHtml) return;
-    const current = editor.value.getHTML();
+    const current = mailTableHtml(editor.value.getHTML());
     const candidate = newHtml || htmlFromText(props.modelValue);
     if (candidate !== current) {
       editor.value.commands.setContent(candidate, { emitUpdate: false });
@@ -483,6 +498,88 @@ function focusEditor() {
   editor.value?.commands.focus();
 }
 
+function shortcutHint(binding: string): ShortcutHint {
+  return { label: formatBinding(binding), keys: bindingKeycaps(binding), aria: ariaKeyshortcuts(binding) };
+}
+
+const tableHints = {
+  insert: shortcutHint(TABLE_SHORTCUTS.insertOrFocusToolbar.binding),
+  addRowBefore: shortcutHint(TABLE_SHORTCUTS.addRowBefore.binding),
+  addRowAfter: shortcutHint(TABLE_SHORTCUTS.addRowAfter.binding),
+  addColumnBefore: shortcutHint(TABLE_SHORTCUTS.addColumnBefore.binding),
+  addColumnAfter: shortcutHint(TABLE_SHORTCUTS.addColumnAfter.binding),
+};
+
+function insertTable() {
+  if (editor.value) insertMailTable(editor.value);
+}
+
+function runTableCommand(command: 'addRowBefore' | 'addRowAfter' | 'addColumnBefore' | 'addColumnAfter'
+  | 'deleteRow' | 'deleteColumn' | 'toggleHeaderRow' | 'deleteTable') {
+  editor.value?.chain().focus()[command]().run();
+}
+
+/** Whether the table under the caret opens with a header row. */
+function tableHasHeaderRow(): boolean {
+  const ed = editor.value;
+  const table = ed && tableAtSelection(ed);
+  if (!ed || !table) return false;
+  return ed.state.doc.nodeAt(table.pos)?.firstChild?.firstChild?.type.name === 'tableHeader';
+}
+
+function shouldShowTableMenu({
+  editor: menuEditor,
+  view,
+  element,
+}: {
+  editor: { isActive: (name: string) => boolean };
+  view: { hasFocus: () => boolean };
+  element: HTMLElement;
+}) {
+  return menuEditor.isActive('table') && (view.hasFocus() || element.contains(document.activeElement));
+}
+
+/** The menu hangs under the whole table, not under the caret it would cover. */
+function tableMenuReference() {
+  const ed = editor.value;
+  const table = ed && tableAtSelection(ed);
+  if (!ed || !table) return null;
+  const dom = ed.view.nodeDOM(table.pos);
+  if (!(dom instanceof HTMLElement)) return null;
+  return { getBoundingClientRect: () => dom.getBoundingClientRect(), contextElement: dom };
+}
+
+/** Mod-Alt-T in a table: from the cell into its toolbar, keyboard only. */
+function focusTableToolbar() {
+  // Tiptap's `focus` command lands a frame late. Queued behind it, the move
+  // into the toolbar is not undone by the focus of the command before it.
+  requestAnimationFrame(() => {
+    tableToolbarRef.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+  });
+}
+
+function onTableToolbarFocusOut(event: FocusEvent) {
+  const next = event.relatedTarget as Node | null;
+  if (!next || !tableToolbarRef.value?.contains(next)) tableToolbarFocused.value = false;
+}
+
+/** Arrows walk the toolbar, as in any `role="toolbar"`; Escape goes back to the cell. */
+function onTableToolbarKeydown(event: KeyboardEvent) {
+  const buttons = [...(tableToolbarRef.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])];
+  if (buttons.length === 0) return;
+  const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+  const last = buttons.length - 1;
+  const target = {
+    ArrowRight: index >= last ? 0 : index + 1,
+    ArrowLeft: index <= 0 ? last : index - 1,
+    Home: 0,
+    End: last,
+  }[event.key];
+  if (target === undefined) return;
+  event.preventDefault();
+  buttons[target]?.focus();
+}
+
 function removeQuotedHistory() {
   const ed = editor.value;
   if (!ed) return;
@@ -536,6 +633,15 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
       </IconButton>
       <IconButton :active="ed.isActive('link')" :title="$t('compose.editor.link')" :aria-label="$t('compose.editor.link')" @click="openLinkDialog">
         <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.9 9.1a2.7 2.7 0 004 .3l1.8-1.8a2.7 2.7 0 00-3.8-3.8l-1 1" /><path d="M9.1 6.9a2.7 2.7 0 00-4-.3L3.3 8.4a2.7 2.7 0 003.8 3.8l1-1" /></svg>
+      </IconButton>
+      <IconButton
+        v-if="!ed.isActive('table')"
+        :title="$t('compose.editor.table.insert')"
+        :shortcut="tableHints.insert"
+        data-testid="editor-insert-table"
+        @click="insertTable"
+      >
+        <AppIcon><rect x="2" y="3" width="12" height="10" rx="1.5" /><path d="M2 6.5h12M2 9.8h12M6 6.5V13M10 6.5V13" /></AppIcon>
       </IconButton>
       <span class="sep" />
       <div class="color-control">
@@ -627,6 +733,54 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
       <IconButton class="image-as-attachment" :title="$t('compose.editor.image.asAttachment')" :aria-label="$t('compose.editor.image.asAttachment')" @click="moveSelectedImageToAttachments">
         <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"><path d="M13.5 7.5l-6.2 6.2a3.5 3.5 0 01-5-5l6.5-6.5a2.5 2.5 0 013.5 3.5L5.8 12.2a1.5 1.5 0 01-2.1-2.1l6.1-6.1"/></svg>
       </IconButton>
+    </BubbleMenu>
+
+    <BubbleMenu
+      v-if="ed"
+      plugin-key="tableControls"
+      :editor="ed"
+      :options="{ placement: 'bottom-start', offset: 6, flip: true, shift: true }"
+      :should-show="shouldShowTableMenu"
+      :get-referenced-virtual-element="tableMenuReference"
+      class="table-toolbar"
+    >
+      <div
+        ref="tableToolbarRef"
+        class="table-toolbar-row"
+        role="toolbar"
+        :aria-label="$t('compose.editor.table.toolbar')"
+        data-testid="editor-table-toolbar"
+        @focusin="tableToolbarFocused = true"
+        @focusout="onTableToolbarFocusOut"
+        @keydown="onTableToolbarKeydown"
+      >
+        <IconButton size="sm" :title="$t('compose.editor.table.addRowBefore')" :shortcut="tableHints.addRowBefore" @click="runTableCommand('addRowBefore')">
+          <AppIcon><rect x="2.5" y="8" width="11" height="5.5" rx="1" /><path d="M8 2v4M6 4h4" /></AppIcon>
+        </IconButton>
+        <IconButton size="sm" :title="$t('compose.editor.table.addRowAfter')" :shortcut="tableHints.addRowAfter" @click="runTableCommand('addRowAfter')">
+          <AppIcon><rect x="2.5" y="2.5" width="11" height="5.5" rx="1" /><path d="M8 10v4M6 12h4" /></AppIcon>
+        </IconButton>
+        <IconButton size="sm" :title="$t('compose.editor.table.addColumnBefore')" :shortcut="tableHints.addColumnBefore" @click="runTableCommand('addColumnBefore')">
+          <AppIcon><rect x="8" y="2.5" width="5.5" height="11" rx="1" /><path d="M2 8h4M4 6v4" /></AppIcon>
+        </IconButton>
+        <IconButton size="sm" :title="$t('compose.editor.table.addColumnAfter')" :shortcut="tableHints.addColumnAfter" @click="runTableCommand('addColumnAfter')">
+          <AppIcon><rect x="2.5" y="2.5" width="5.5" height="11" rx="1" /><path d="M10 8h4M12 6v4" /></AppIcon>
+        </IconButton>
+        <span class="table-toolbar-separator" />
+        <IconButton size="sm" :title="$t('compose.editor.table.deleteRow')" @click="runTableCommand('deleteRow')">
+          <AppIcon><rect x="2.5" y="5" width="11" height="6" rx="1" /><path d="m6.5 6.8 3 2.4m0-2.4-3 2.4" /></AppIcon>
+        </IconButton>
+        <IconButton size="sm" :title="$t('compose.editor.table.deleteColumn')" @click="runTableCommand('deleteColumn')">
+          <AppIcon><rect x="5" y="2.5" width="6" height="11" rx="1" /><path d="m6.8 6.5 2.4 3m0-3-2.4 3" /></AppIcon>
+        </IconButton>
+        <span class="table-toolbar-separator" />
+        <IconButton size="sm" :active="tableHasHeaderRow()" :aria-pressed="tableHasHeaderRow()" :title="$t('compose.editor.table.headerRow')" @click="runTableCommand('toggleHeaderRow')">
+          <AppIcon><rect x="2.5" y="2.5" width="11" height="11" rx="1" /><path d="M2.5 6.5h11M2.5 10h11M8 6.5v7" /><rect x="2.5" y="2.5" width="11" height="4" rx="1" fill="currentColor" /></AppIcon>
+        </IconButton>
+        <IconButton size="sm" tone="danger" :title="$t('compose.editor.table.deleteTable')" @click="runTableCommand('deleteTable')">
+          <AppIcon><path d="M2.5 4.5h11M6 2.5h4M4 4.5l.6 9h6.8l.6-9" /></AppIcon>
+        </IconButton>
+      </div>
     </BubbleMenu>
 
     <EditorContent
@@ -954,6 +1108,50 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
 }
 .content :deep([data-resize-handle='left']) { left: 10px !important; }
 .content :deep([data-resize-handle='right']) { right: 10px !important; }
+.table-toolbar {
+  padding: var(--space-xs);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-lg);
+  z-index: 411;
+}
+.table-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.table-toolbar-separator {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: var(--border-color);
+}
+/* Tables scroll inside their own frame; the composer never grows sideways. */
+.content :deep(.tableWrapper) {
+  max-width: 100%;
+  margin: var(--space-sm) 0;
+  overflow-x: auto;
+}
+.content :deep(table) {
+  border-collapse: collapse;
+}
+.content :deep(td),
+.content :deep(th) {
+  position: relative;
+  min-width: 5em;
+}
+.content :deep(td p),
+.content :deep(th p) {
+  margin: 0;
+}
+.content :deep(.selectedCell)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+  pointer-events: none;
+}
 .link-panel {
   min-height: 0;
   padding: var(--space-lg);
