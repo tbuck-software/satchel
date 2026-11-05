@@ -1,3 +1,4 @@
+import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './mock-contract.fixture';
 
 test.use({ deviceScaleFactor: 2 });
@@ -413,32 +414,93 @@ test('requires a future send time even when it expires with the composer open', 
   await expect(composer.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
 });
 
+/** ⌘⌥ on macOS; Alt+Shift elsewhere, where Ctrl+Alt+T and Ctrl+Alt+arrows belong to the desktop. */
+async function tableChord(page: Page): Promise<string> {
+  const apple = await page.evaluate(() => /mac|iphone|ipad|ipod/i.test(navigator.platform));
+  return apple ? 'Meta+Alt' : 'Alt+Shift';
+}
+
+/**
+ * Keydowns dispatched in one task, as fast as no keyboard could: the second
+ * arrives before the editor has rendered anything for the first.
+ */
+/** What a dispatched keydown needs; plain data, so it crosses into the page. */
+interface KeyDown {
+  key: string;
+  code: string;
+  keyCode: number;
+  altKey?: boolean;
+  shiftKey?: boolean;
+  metaKey?: boolean;
+}
+
+async function pressAtOnce(editor: Locator, keys: KeyDown[]) {
+  await editor.evaluate((element, events) => {
+    for (const init of events) {
+      element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+    }
+  }, keys);
+}
+
+const ALT_F10: KeyDown = { key: 'F10', code: 'F10', keyCode: 121, altKey: true };
+
+function insertKeys(chord: string): KeyDown {
+  return chord === 'Meta+Alt'
+    ? { key: 't', code: 'KeyT', keyCode: 84, metaKey: true, altKey: true }
+    : { key: 'T', code: 'KeyT', keyCode: 84, altKey: true, shiftKey: true };
+}
+
 test('a table is inserted, filled and reshaped from the keyboard alone', async ({ page }) => {
   await page.goto('/');
+  const chord = await tableChord(page);
   await page.getByRole('button', { name: 'New message', exact: true }).click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   const editor = composer.locator('.ProseMirror').first();
+  const toolbar = composer.getByRole('toolbar', { name: 'Table' });
+  const firstTool = toolbar.getByRole('button', { name: 'Insert row above' });
   await editor.click();
   await page.keyboard.type('Figures:');
-  await page.keyboard.press('ControlOrMeta+Alt+t');
 
+  // Alt+F10 straight after the insert, before the menu has shown, still lands.
+  await pressAtOnce(editor, [insertKeys(chord), ALT_F10]);
+  await expect(firstTool).toBeFocused();
   const table = editor.locator('table');
   await expect(table.locator('tr')).toHaveCount(3);
   await expect(table.locator('tr').first().locator('th')).toHaveCount(3);
+
+  // Escape leaves the toolbar for the cell, not the composer.
+  await page.keyboard.press('Escape');
+  await expect(editor).toBeFocused();
+  await expect(composer).toBeVisible();
   await page.keyboard.type('Quarter');
-  await page.keyboard.press('Tab');
+  // …and so does the insert chord right after Tab, inside a table.
+  await pressAtOnce(editor, [{ key: 'Tab', code: 'Tab', keyCode: 9 }, insertKeys(chord)]);
+  await expect(firstTool).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(editor).toBeFocused();
   await page.keyboard.type('Revenue');
   await expect(table.locator('th').nth(1)).toHaveText('Revenue');
   await expect(editor.locator('p').first()).toHaveText('Figures:');
 
-  await page.keyboard.press('ControlOrMeta+Alt+ArrowDown');
+  // Back from another field with a cell's text selected, the menu shows only
+  // once the editor has looked at the selection again; Alt+F10 at once lands.
+  await page.keyboard.press('Shift+Tab');
+  await composer.getByRole('textbox', { name: 'Subject' }).focus();
+  await expect(toolbar).toBeHidden();
+  await editor.evaluate((element, init) => {
+    (element as HTMLElement).focus();
+    element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+  }, ALT_F10);
+  await expect(firstTool).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(editor).toBeFocused();
+
+  await page.keyboard.press(`${chord}+ArrowDown`);
   await expect(table.locator('tr')).toHaveCount(4);
 
-  // The same keys inside a table move into its toolbar; arrows walk it.
-  const toolbar = composer.getByRole('toolbar', { name: 'Table' });
-  await expect(toolbar).toBeVisible();
-  await page.keyboard.press('ControlOrMeta+Alt+t');
-  await expect(toolbar.getByRole('button', { name: 'Insert row above' })).toBeFocused();
+  // Arrows walk the toolbar; Enter runs a tool and hands the keys back.
+  await page.keyboard.press('Alt+F10');
+  await expect(firstTool).toBeFocused();
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('ArrowRight');
@@ -447,15 +509,8 @@ test('a table is inserted, filled and reshaped from the keyboard alone', async (
   await expect(table.locator('tr').first().locator('th')).toHaveCount(4);
   await expect(editor).toBeFocused();
 
-  // Escape leaves the toolbar for the cell, not the composer.
-  await page.keyboard.press('ControlOrMeta+Alt+t');
-  await expect(toolbar.getByRole('button', { name: 'Insert row above' })).toBeFocused();
-  await page.keyboard.press('Escape');
-  await expect(editor).toBeFocused();
-  await expect(composer).toBeVisible();
-
-  await page.keyboard.press('ControlOrMeta+Alt+t');
-  await expect(toolbar.getByRole('button', { name: 'Insert row above' })).toBeFocused();
+  await page.keyboard.press('Alt+F10');
+  await expect(firstTool).toBeFocused();
   await page.keyboard.press('End');
   await expect(toolbar.getByRole('button', { name: 'Delete table' })).toBeFocused();
   await page.keyboard.press('Enter');
@@ -466,12 +521,13 @@ test('a table is inserted, filled and reshaped from the keyboard alone', async (
 test('a wide table scrolls inside itself on a phone instead of widening the composer', async ({ page }) => {
   await page.setViewportSize({ width: 393, height: 852 });
   await page.goto('/?mockOutbox=0');
+  const chord = await tableChord(page);
   await page.locator('.fab').click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   const editor = composer.locator('.ProseMirror').first();
   await editor.click();
-  await page.keyboard.press('ControlOrMeta+Alt+t');
-  for (let column = 0; column < 5; column += 1) await page.keyboard.press('ControlOrMeta+Alt+ArrowRight');
+  await page.keyboard.press(`${chord}+T`);
+  for (let column = 0; column < 5; column += 1) await page.keyboard.press(`${chord}+ArrowRight`);
   await expect(editor.locator('tr').first().locator('th')).toHaveCount(8);
   await page.keyboard.type('A heading long enough to need the room');
 

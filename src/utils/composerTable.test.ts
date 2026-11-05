@@ -5,16 +5,24 @@ import StarterKit from '@tiptap/starter-kit';
 import {
   composerTableExtensions,
   insertMailTable,
+  displayWidth,
+  keymapNames,
   mailTableHtml,
   tableAtSelection,
+  tableShortcuts,
 } from './composerTable';
 
 const editors: Editor[] = [];
 
-function makeEditor(content: string, onToolbarRequest: (() => void) | null = null) {
+/** Keys as Windows and Linux press them; jsdom reports no Apple platform. */
+const INSERT = { key: 'T', code: 'KeyT', keyCode: 84, altKey: true, shiftKey: true };
+const TOOLBAR = { key: 'F10', code: 'F10', keyCode: 121, altKey: true };
+const chord = (key: string, keyCode: number) => ({ key, keyCode, altKey: true, shiftKey: true });
+
+function makeEditor(content: string, onToolbarRequest: (() => void) | null = null, apple = false) {
   const editor = new Editor({
     content,
-    extensions: [StarterKit.configure({ link: false }), ...composerTableExtensions({ onToolbarRequest })],
+    extensions: [StarterKit.configure({ link: false }), ...composerTableExtensions({ onToolbarRequest, apple })],
   });
   editors.push(editor);
   return editor;
@@ -90,18 +98,47 @@ describe('inserting a table', () => {
     expect(parse(mailHtml(editor)).querySelectorAll('table')).toHaveLength(1);
   });
 
-  it('inserts with Mod-Alt-T, and the same keys inside a table ask for the table toolbar', () => {
+  it('inserts with Alt+Shift+T, and the same keys inside a table ask for the table toolbar', () => {
     const onToolbarRequest = vi.fn();
     const editor = makeEditor('<p></p>', onToolbarRequest);
     editor.commands.setTextSelection(1);
 
-    expect(pressKey(editor, { key: 't', code: 'KeyT', keyCode: 84, ctrlKey: true, altKey: true })).toBe(true);
+    expect(pressKey(editor, INSERT)).toBe(true);
     expect(tableAtSelection(editor)).not.toBeNull();
     expect(onToolbarRequest).not.toHaveBeenCalled();
 
-    expect(pressKey(editor, { key: 't', code: 'KeyT', keyCode: 84, ctrlKey: true, altKey: true })).toBe(true);
+    expect(pressKey(editor, INSERT)).toBe(true);
     expect(onToolbarRequest).toHaveBeenCalledTimes(1);
     expect(parse(mailHtml(editor)).querySelectorAll('table')).toHaveLength(1);
+  });
+
+  it('asks for the toolbar with Alt+F10 inside a table and leaves the key alone outside one', () => {
+    const onToolbarRequest = vi.fn();
+    const editor = makeEditor('<p>Text</p>', onToolbarRequest);
+    editor.commands.setTextSelection(2);
+
+    expect(pressKey(editor, TOOLBAR)).toBe(false);
+    insertMailTable(editor);
+    expect(pressKey(editor, TOOLBAR)).toBe(true);
+    expect(onToolbarRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses ⌘⌥ on macOS and Alt+Shift elsewhere, and the labels name the same keys', () => {
+    expect(tableShortcuts(true)).toMatchObject({ insert: 'mod+alt+t', addRowAfter: 'mod+alt+arrowdown', focusToolbar: 'alt+f10' });
+    expect(tableShortcuts(false)).toMatchObject({ insert: 'alt+shift+t', addRowAfter: 'alt+shift+arrowdown', focusToolbar: 'alt+f10' });
+    expect(keymapNames('mod+alt+t', true)).toEqual(['Meta-Alt-t']);
+    expect(keymapNames('alt+shift+t', false)).toEqual(['Alt-Shift-t', 'Alt-Shift-T']);
+    expect(keymapNames('alt+shift+arrowleft', false)).toEqual(['Alt-Shift-ArrowLeft']);
+    expect(keymapNames('alt+f10', false)).toEqual(['Alt-F10']);
+
+    const mac = makeEditor('<p></p>', null, true);
+    expect(pressKey(mac, { key: 't', code: 'KeyT', keyCode: 84, ctrlKey: true, altKey: true })).toBe(false);
+    expect(pressKey(mac, { key: '†', code: 'KeyT', keyCode: 84, metaKey: true, altKey: true })).toBe(true);
+    expect(tableAtSelection(mac)).not.toBeNull();
+
+    // Ctrl+Alt+T is the terminal on Linux desktops; the table must not take it there.
+    const linux = makeEditor('<p></p>');
+    expect(pressKey(linux, { key: 't', code: 'KeyT', keyCode: 84, ctrlKey: true, altKey: true })).toBe(false);
   });
 });
 
@@ -125,7 +162,7 @@ describe('editing a table from the keyboard', () => {
     expect(parse(mailHtml(editor)).querySelectorAll('tr')).toHaveLength(4);
   });
 
-  it('adds rows and columns with Mod-Alt and the arrows', () => {
+  it('adds rows and columns with Alt+Shift and the arrows', () => {
     const editor = makeEditor('<p></p>');
     insertMailTable(editor);
     const counts = () => {
@@ -133,12 +170,12 @@ describe('editing a table from the keyboard', () => {
       return { rows: fragment.querySelectorAll('tr').length, cols: fragment.querySelector('tr')!.children.length };
     };
 
-    pressKey(editor, { key: 'ArrowDown', keyCode: 40, ctrlKey: true, altKey: true });
-    pressKey(editor, { key: 'ArrowUp', keyCode: 38, ctrlKey: true, altKey: true });
+    pressKey(editor, chord('ArrowDown', 40));
+    pressKey(editor, chord('ArrowUp', 38));
     expect(counts()).toEqual({ rows: 5, cols: 3 });
 
-    pressKey(editor, { key: 'ArrowRight', keyCode: 39, ctrlKey: true, altKey: true });
-    pressKey(editor, { key: 'ArrowLeft', keyCode: 37, ctrlKey: true, altKey: true });
+    pressKey(editor, chord('ArrowRight', 39));
+    pressKey(editor, chord('ArrowLeft', 37));
     expect(counts()).toEqual({ rows: 5, cols: 5 });
   });
 
@@ -201,6 +238,18 @@ describe('the HTML that leaves Satchel', () => {
     expect(cell.getAttribute('style')).not.toMatch(/text-align:\s*left/);
   });
 
+  it('never sends a pasted column width', () => {
+    const editor = makeEditor(
+      '<table><colgroup><col width="200"><col width="80"></colgroup>'
+      + '<tr><td colwidth="200">a</td><td width="80">b</td></tr></table>',
+    );
+    // Kept for the editor's own column layout, never sent.
+    expect(editor.state.doc.firstChild?.firstChild?.firstChild?.attrs.colwidth).toEqual([200]);
+
+    const html = mailHtml(editor);
+    expect(html).not.toMatch(/colwidth|width=|<col/);
+  });
+
   it('round-trips through a saved draft unchanged', () => {
     const editor = makeEditor('<p>Numbers:</p>');
     editor.commands.setTextSelection(3);
@@ -242,6 +291,33 @@ describe('the plain-text part', () => {
       '',
       'Thanks',
     ].join('\n'));
+  });
+
+  it('keeps a cell spanning down in its column on the rows below', () => {
+    const editor = makeEditor(
+      '<table><tr><td rowspan="2">R</td><td>a</td></tr><tr><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>',
+    );
+
+    expect(editor.getText()).toBe([
+      '| R   | a   |',
+      '|     | b   |',
+      '| c   | d   |',
+    ].join('\n'));
+  });
+
+  it('escapes pipes in cells and pads wide characters by the columns they take', () => {
+    const editor = makeEditor(
+      '<table><tr><th>Ort</th><th>a|b</th></tr><tr><td>東京</td><td>x</td></tr><tr><td>Zoë</td><td>👍</td></tr></table>',
+    );
+
+    expect(editor.getText()).toBe([
+      '| Ort  | a\\|b |',
+      '|------|------|',
+      '| 東京 | x    |',
+      '| Zoë  | 👍   |',
+    ].join('\n'));
+    expect(displayWidth('Zoe\u0308')).toBe(3);
+    expect(displayWidth('한국')).toBe(4);
   });
 
   it('has no rule without a header row and keeps spanned columns in place', () => {

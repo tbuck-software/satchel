@@ -23,11 +23,11 @@ import { useDismissable } from '@/composables/useDismissable';
 import ModalShell from '@/components/ui/ModalShell.vue';
 import { composerHtmlFromText, isComposerHistoryIntro } from '@/utils/composerHistory';
 import {
-  TABLE_SHORTCUTS,
   composerTableExtensions,
   insertMailTable,
   mailTableHtml,
   tableAtSelection,
+  tableShortcuts,
 } from '@/utils/composerTable';
 import { ariaKeyshortcuts, bindingKeycaps, formatBinding } from '@/config/keybindings';
 import type { ShortcutHint } from '@/types/shortcuts';
@@ -502,12 +502,15 @@ function shortcutHint(binding: string): ShortcutHint {
   return { label: formatBinding(binding), keys: bindingKeycaps(binding), aria: ariaKeyshortcuts(binding) };
 }
 
+// The keys of this platform, the same ones the table extension registers.
+const tableKeys = tableShortcuts();
 const tableHints = {
-  insert: shortcutHint(TABLE_SHORTCUTS.insertOrFocusToolbar.binding),
-  addRowBefore: shortcutHint(TABLE_SHORTCUTS.addRowBefore.binding),
-  addRowAfter: shortcutHint(TABLE_SHORTCUTS.addRowAfter.binding),
-  addColumnBefore: shortcutHint(TABLE_SHORTCUTS.addColumnBefore.binding),
-  addColumnAfter: shortcutHint(TABLE_SHORTCUTS.addColumnAfter.binding),
+  insert: shortcutHint(tableKeys.insert),
+  focusToolbar: shortcutHint(tableKeys.focusToolbar),
+  addRowBefore: shortcutHint(tableKeys.addRowBefore),
+  addRowAfter: shortcutHint(tableKeys.addRowAfter),
+  addColumnBefore: shortcutHint(tableKeys.addColumnBefore),
+  addColumnAfter: shortcutHint(tableKeys.addColumnAfter),
 };
 
 function insertTable() {
@@ -549,12 +552,22 @@ function tableMenuReference() {
   return { getBoundingClientRect: () => dom.getBoundingClientRect(), contextElement: dom };
 }
 
-/** Mod-Alt-T in a table: from the cell into its toolbar, keyboard only. */
-function focusTableToolbar() {
-  // Tiptap's `focus` command lands a frame late. Queued behind it, the move
-  // into the toolbar is not undone by the focus of the command before it.
+/** How long the toolbar shortcut waits for the menu to show, in frames. */
+const TOOLBAR_FOCUS_FRAMES = 20;
+
+/**
+ * Alt+F10, or the insert keys in a table: from the cell into its toolbar.
+ *
+ * The menu stays `visibility: hidden` until its BubbleMenu has shown it, and a
+ * hidden button refuses focus without a word. Right after an insert or a Tab
+ * the keys can arrive first, so the focus is tried once a frame until it lands.
+ */
+function focusTableToolbar(framesLeft = TOOLBAR_FOCUS_FRAMES) {
   requestAnimationFrame(() => {
-    tableToolbarRef.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    const button = tableToolbarRef.value?.querySelector<HTMLButtonElement>('button:not(:disabled)');
+    button?.focus();
+    if (button && document.activeElement === button) return;
+    if (framesLeft > 1) focusTableToolbar(framesLeft - 1);
   });
 }
 
@@ -635,7 +648,7 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
         <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.9 9.1a2.7 2.7 0 004 .3l1.8-1.8a2.7 2.7 0 00-3.8-3.8l-1 1" /><path d="M9.1 6.9a2.7 2.7 0 00-4-.3L3.3 8.4a2.7 2.7 0 003.8 3.8l1-1" /></svg>
       </IconButton>
       <IconButton
-        v-if="!ed.isActive('table')"
+        :disabled="ed.isActive('table')"
         :title="$t('compose.editor.table.insert')"
         :shortcut="tableHints.insert"
         data-testid="editor-insert-table"
@@ -739,6 +752,7 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
       v-if="ed"
       plugin-key="tableControls"
       :editor="ed"
+      :update-delay="0"
       :options="{ placement: 'bottom-start', offset: 6, flip: true, shift: true }"
       :should-show="shouldShowTableMenu"
       :get-referenced-virtual-element="tableMenuReference"
@@ -749,6 +763,7 @@ defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, remove
         class="table-toolbar-row"
         role="toolbar"
         :aria-label="$t('compose.editor.table.toolbar')"
+        :aria-keyshortcuts="tableHints.focusToolbar.aria"
         data-testid="editor-table-toolbar"
         @focusin="tableToolbarFocused = true"
         @focusout="onTableToolbarFocusOut"
