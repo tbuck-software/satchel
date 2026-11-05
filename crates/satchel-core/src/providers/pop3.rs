@@ -509,6 +509,7 @@ fn envelope_from_raw(uidl: &str, raw: &[u8], receiver: &str) -> MessageEnvelope 
         auth_spf: auth_results.as_ref().and_then(|results| results.0.clone()),
         auth_dkim: auth_results.as_ref().and_then(|results| results.1.clone()),
         auth_dmarc: auth_results.as_ref().and_then(|results| results.2.clone()),
+        spam_hint_headers: crate::spam::tokenizer::extract_hint_headers(&header),
         attachments: parsed_body.attachments,
     }
 }

@@ -170,6 +170,7 @@ pub mod reason {
     pub const FILTER_ALREADY_READ: &str = "filter_already_read";
     pub const FILTER_MUTED_THREAD: &str = "filter_muted_thread";
     pub const FILTER_MUTED_SENDER: &str = "filter_muted_sender";
+    pub const FILTER_LIKELY_SPAM: &str = "filter_likely_spam";
     /// Trigger-only (migration 0060); listed here so the pane's label set is
     /// complete.
     pub const FILTER_NO_DATE: &str = "filter_no_date";
@@ -571,6 +572,14 @@ const DISMISSAL_RULES: &[DismissalRule<'static>] = &[
                                            INSTR(TRIM(m.from_address), '@') + 1)))
                        )
                       WHERE m.id = notification_outbox.message_id)",
+    },
+    DismissalRule {
+        code: reason::FILTER_LIKELY_SPAM,
+        detail: "(SELECT printf('%.2f', v.score) FROM spam_verdicts v
+                  WHERE v.message_id = notification_outbox.message_id)",
+        predicate: "EXISTS (SELECT 1 FROM spam_verdicts v
+                            WHERE v.message_id = notification_outbox.message_id
+                              AND v.verdict = 'spam')",
     },
 ];
 
@@ -1656,10 +1665,18 @@ mod tests {
         )
         .await;
 
-        for id in ["read", "moved", "sent", "muted", "blocked", "gone", "kept"] {
+        for id in [
+            "read", "moved", "sent", "muted", "blocked", "spam", "gone", "kept",
+        ] {
             insert_message(&pool, id, &fresh()).await;
             assert_eq!(outbox(&pool, id).await.unwrap().0, "pending", "{id}");
         }
+        exec(
+            &pool,
+            "INSERT INTO spam_verdicts (message_id, score, verdict, classified_at)
+             VALUES ('spam', 0.97, 'spam', '')",
+        )
+        .await;
         exec(&pool, "UPDATE messages SET is_read = 1 WHERE id = 'read'").await;
         exec(
             &pool,
@@ -1702,6 +1719,7 @@ mod tests {
             reason_of(&pool, "blocked").await,
             reason::FILTER_MUTED_SENDER
         );
+        assert_eq!(reason_of(&pool, "spam").await, reason::FILTER_LIKELY_SPAM);
         assert_eq!(reason_of(&pool, "gone").await, reason::FILTER_MESSAGE_GONE);
     }
 

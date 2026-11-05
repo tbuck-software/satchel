@@ -29,12 +29,19 @@ struct MessageSnapshot {
 
 /// Accept Undo durably even if the provider has already claimed the delivery.
 /// The worker completes reconciliation before resolving the reverse refs.
+///
+/// A Spam receipt also carries what the spam filter learned from the action;
+/// accepting the Undo unlearns it.
 pub async fn undo_trash(
     pool: &SqlitePool,
     queue: &SyncQueue,
     receipt_id: &str,
 ) -> Result<(), String> {
-    apply(pool, queue, receipt_id, false).await
+    apply(pool, queue, receipt_id, false).await?;
+    if let Err(error) = crate::spam::untrain_receipt(pool, receipt_id).await {
+        tracing::warn!(%error, "spam filter untraining failed after Undo");
+    }
+    Ok(())
 }
 
 pub async fn execute_queued_undo(
@@ -250,6 +257,9 @@ pub async fn remap_message_in_transaction(
 ) -> Result<(), String> {
     sqlx::query("UPDATE mail_action_messages SET message_id = ? WHERE message_id = ? AND receipt_id IN (SELECT id FROM mail_action_receipts WHERE state IN ('available', 'requested'))")
         .bind(target_id).bind(source_id).execute(&mut **tx).await.map_err(|e| e.to_string())?;
+    crate::spam::store::remap_message(tx, source_id, target_id)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 

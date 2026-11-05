@@ -113,6 +113,31 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
 }
 const trashReceipts = new Map<string, Thread[]>();
 let nextTrashReceipt = 0;
+
+/*
+ * The local spam filter, as far as the UI can see it: a mode, how many
+ * messages of each class it learned, and which receipt taught what. Spam
+ * trains under its receipt and Undo untrains it, like `spam_training`.
+ */
+const SPAM_MIN_PER_CLASS = 10;
+let spamFilterMode: 'off' | 'mark' | 'move' = 'mark';
+const spamTraining = new Map<string, 'spam' | 'ham'>();
+const spamReceiptThreads = new Map<string, string[]>();
+const SPAM_FOLDER_NAME = /^(spam|junk|junk e-?mail|bulk mail)$/i;
+
+function spamFilterStatus() {
+  const labels = [...spamTraining.values()];
+  const spam = labels.filter((label) => label === 'spam').length;
+  const ham = labels.length - spam;
+  return {
+    mode: spamFilterMode,
+    spam_messages: spam,
+    ham_messages: ham,
+    tokens: 0,
+    ready: spam >= SPAM_MIN_PER_CLASS && ham >= SPAM_MIN_PER_CLASS,
+    min_per_class: SPAM_MIN_PER_CLASS,
+  };
+}
 const outbox: BackendOutboxItem[] = mockOutboxItems.map((item) => ({
   ...item,
   last_error: item.id === 'failed-move' ? 'backend.errors.queueFolderChanged'
@@ -527,6 +552,7 @@ function threadDto(thread: Thread) {
     has_invite: Boolean(thread.hasInvite),
     invite_status: thread.inviteStatus ?? null,
     invite_cancelled: Boolean(thread.inviteCancelled),
+    likely_spam: Boolean(thread.likelySpam),
   };
 }
 
@@ -968,6 +994,9 @@ const handlers: Record<string, Handler> = {
     const restored = trashReceipts.get(token) ?? [];
     for (const thread of restored) if (!findThread(thread.id)) threads.push(thread);
     trashReceipts.delete(token);
+    // Undoing Spam unlearns what it taught, as the backend's ledger does.
+    for (const id of spamReceiptThreads.get(token) ?? []) spamTraining.delete(id);
+    spamReceiptThreads.delete(token);
   },
   mark_threads_spam: (payload) => {
     const removed: Thread[] = [];
@@ -978,7 +1007,34 @@ const handlers: Record<string, Handler> = {
     // Same receipt shape and Undo path as the backend, which reuses trash receipts.
     const token = `spam-${++nextTrashReceipt}`;
     trashReceipts.set(token, removed);
+    const learned = removed.map((thread) => thread.id).filter((id) => spamTraining.get(id) !== 'spam');
+    for (const id of learned) spamTraining.set(id, 'spam');
+    spamReceiptThreads.set(token, learned);
     return { undo_token: token, undo_thread_ids: removed.map((thread) => thread.id), permanently_deleted: [] };
+  },
+  mark_threads_not_spam: (payload) => {
+    const threadIds = [...new Set(ids(payload).map((id) => id.trim()).filter(Boolean))];
+    const moved: string[] = [];
+    for (const id of threadIds) {
+      const thread = findThread(id);
+      if (!thread) continue;
+      spamTraining.set(id, 'ham');
+      thread.likelySpam = false;
+      const folders = thread.mailboxNames ?? [];
+      if (folders.some((name) => SPAM_FOLDER_NAME.test(name.split('/').at(-1)?.trim() ?? ''))) {
+        thread.mailboxNames = ['INBOX'];
+        thread.workflowState = 'inbox';
+        thread.workflowChangedAt = new Date().toISOString();
+        moved.push(id);
+      }
+    }
+    return { thread_ids: threadIds, moved_thread_ids: moved };
+  },
+  get_spam_filter_status: () => spamFilterStatus(),
+  set_spam_filter_mode: (payload) => {
+    const mode = input(payload).mode as string;
+    if (mode !== 'off' && mode !== 'mark' && mode !== 'move') throw new Error('backend.errors.spamFilterUnavailable');
+    spamFilterMode = mode;
   },
   move_threads_to_folder: () => undefined,
   dismiss_mobile_notifications: () => undefined,

@@ -256,7 +256,8 @@
         "tlsExceptionNoRejection": "Satchel could not reach the server to check its certificate again. Try again in a moment.",
         "tlsExceptionCertificateChanged": "The server now presents a different certificate. Look at the details again before trusting it.",
         "tlsExceptionNotAllowed": "This certificate has a problem beyond its expiry date, so Satchel offers no exception.",
-        "tlsExceptionPersistenceFailed": "The certificate exception could not be saved."
+        "tlsExceptionPersistenceFailed": "The certificate exception could not be saved.",
+        "spamFilterUnavailable": "The spam filter settings could not be read or saved."
       }
     }
   },
@@ -517,7 +518,8 @@
         "tlsExceptionNoRejection": "Satchel hat den Server nicht erreicht, um das Zertifikat erneut zu prüfen. Versuch es gleich noch einmal.",
         "tlsExceptionCertificateChanged": "Der Server zeigt inzwischen ein anderes Zertifikat. Sieh dir die Details erneut an, bevor du ihm vertraust.",
         "tlsExceptionNotAllowed": "Dieses Zertifikat hat ein Problem über das Ablaufdatum hinaus, deshalb bietet Satchel keine Ausnahme an.",
-        "tlsExceptionPersistenceFailed": "Die Zertifikatsausnahme ließ sich nicht speichern."
+        "tlsExceptionPersistenceFailed": "Die Zertifikatsausnahme ließ sich nicht speichern.",
+        "spamFilterUnavailable": "Die Einstellungen des Spamfilters ließen sich nicht lesen oder speichern."
       }
     }
   }

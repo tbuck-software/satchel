@@ -486,6 +486,13 @@ export function useKeyboard() {
       return true;
     }
 
+    if (matches(event, 'markNotSpam')) {
+      const ids = targetIds();
+      if (ids.length === 0) return false;
+      void actions.markNotSpam(ids);
+      return true;
+    }
+
     if (matches(event, 'print')) {
       const reader = activeThreadReaderCommands();
       if (!reader?.threadId) return false;

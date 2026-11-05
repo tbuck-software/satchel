@@ -103,6 +103,10 @@ pub struct ThreadRecord {
     pub has_invite: bool,
     pub invite_status: Option<String>,
     pub invite_cancelled: bool,
+    /// The local spam filter judged a message of this thread spam and nobody
+    /// has said Not spam since.
+    #[serde(default)]
+    pub likely_spam: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1572,6 +1576,7 @@ struct ThreadRow {
     has_invite: i64,
     invite_status: Option<String>,
     invite_cancelled: i64,
+    likely_spam: i64,
 }
 
 /// Default page size. Small enough that the first paint is fast on a large
@@ -6144,6 +6149,17 @@ const THREAD_RECORD_SQL: &str = "
             ) AS invite_cancelled,
             EXISTS (
               SELECT 1
+              FROM messages spam_messages
+              JOIN spam_verdicts ON spam_verdicts.message_id = spam_messages.id
+              WHERE spam_messages.thread_id = threads.id
+                AND spam_verdicts.verdict = 'spam'
+                AND NOT EXISTS (
+                  SELECT 1 FROM spam_training
+                  WHERE spam_training.message_id = spam_messages.id AND spam_training.label = 'ham'
+                )
+            ) AS likely_spam,
+            EXISTS (
+              SELECT 1
               FROM messages sent
               JOIN folders sent_folders ON sent_folders.id = COALESCE(sent.pending_folder_id, sent.folder_id)
               WHERE sent.thread_id = threads.id
@@ -6247,6 +6263,7 @@ fn thread_record_from_row(row: ThreadRow) -> ThreadRecord {
         has_invite: row.has_invite > 0,
         invite_status: row.invite_status,
         invite_cancelled: row.invite_cancelled > 0,
+        likely_spam: row.likely_spam > 0,
     }
 }
 
@@ -6728,6 +6745,17 @@ fn thread_list_query(
             ) AS invite_cancelled,
             EXISTS (
               SELECT 1
+              FROM messages spam_messages
+              JOIN spam_verdicts ON spam_verdicts.message_id = spam_messages.id
+              WHERE spam_messages.thread_id = threads.id
+                AND spam_verdicts.verdict = 'spam'
+                AND NOT EXISTS (
+                  SELECT 1 FROM spam_training
+                  WHERE spam_training.message_id = spam_messages.id AND spam_training.label = 'ham'
+                )
+            ) AS likely_spam,
+            EXISTS (
+              SELECT 1
               FROM messages sent
               JOIN folders sent_folders ON sent_folders.id = COALESCE(sent.pending_folder_id, sent.folder_id)
               WHERE sent.thread_id = threads.id
@@ -6860,6 +6888,7 @@ async fn list_threads_inner(
             has_invite: row.has_invite > 0,
             invite_status: row.invite_status,
             invite_cancelled: row.invite_cancelled > 0,
+            likely_spam: row.likely_spam > 0,
         })
         .collect();
 

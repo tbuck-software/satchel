@@ -1303,9 +1303,32 @@ export function toThreadModel(input: BackendThread, accounts: readonly Account[]
     hasInvite: Boolean(input.has_invite),
     inviteStatus: input.invite_status ?? undefined,
     inviteCancelled: Boolean(input.invite_cancelled),
+    likelySpam: Boolean(input.likely_spam),
   };
 }
 
+
+const SPAM_FOLDER_NAME = /^(spam|junk|junk e-?mail|bulk mail)$/i;
+
+/** Whether a mailbox list shows a Spam folder. */
+export function isSpamMailbox(filter: MailboxFilter | null | undefined): boolean {
+  if (!filter) return false;
+  if (filter.kind === 'section') return filter.value === 'spam';
+  if (filter.kind === 'folder' && filter.value) {
+    return SPAM_FOLDER_NAME.test(filter.value.split('/').at(-1)?.trim() ?? '');
+  }
+  return false;
+}
+
+/**
+ * Whether Not spam applies: the filter marked the thread, or it sits in a
+ * Spam folder — the user's, the provider's or the filter's own move.
+ */
+export function offersNotSpam(thread: Thread, filter: MailboxFilter | null | undefined): boolean {
+  return Boolean(thread.likelySpam)
+    || isSpamMailbox(filter)
+    || (thread.mailboxNames ?? []).some((name) => SPAM_FOLDER_NAME.test(name.split('/').at(-1)?.trim() ?? ''));
+}
 
 export function matchesMailboxFilter(thread: Thread, filter: MailboxFilter): boolean {
   if (filter.kind === 'all' || !filter.value) {

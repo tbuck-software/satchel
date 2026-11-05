@@ -798,6 +798,10 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "get_spam_filter_status": {
+            "kind": "object",
+            "fields": {}
+        },
         "get_thread": {
             "kind": "object",
             "fields": {
@@ -1306,6 +1310,18 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "app::commands::messages::LoadThreadMessagesInput"
+                    }
+                }
+            }
+        },
+        "mark_threads_not_spam": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::thread_actions::SpamThreadsInput"
                     }
                 }
             }
@@ -1979,6 +1995,18 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "set_spam_filter_mode": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::thread_actions::SetSpamFilterModeInput"
                     }
                 }
             }
@@ -4266,6 +4294,17 @@ export default {
                     }
                 },
                 "thread_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::thread_actions::SetSpamFilterModeInput": {
+            "kind": "object",
+            "fields": {
+                "mode": {
                     "required": true,
                     "shape": {
                         "kind": "value"

@@ -185,6 +185,10 @@
         "keywords": "done archive erledigt",
         "label": "Als erledigt markieren"
       },
+      "markNotSpam": {
+        "keywords": "kein spam erwünscht",
+        "label": "Kein Spam"
+      },
       "markSpam": {
         "keywords": "spam junk werbung",
         "label": "Als Spam markieren"

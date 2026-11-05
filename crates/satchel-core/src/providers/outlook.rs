@@ -1843,6 +1843,7 @@ fn map_graph_message(message: GraphMessage) -> MessageEnvelope {
         auth_spf,
         auth_dkim,
         auth_dmarc,
+        spam_hint_headers: None,
         attachments,
     }
 }

@@ -33,6 +33,20 @@ pub enum MoveTarget<'a> {
     Archive,
     Trash,
     Spam,
+    /// Back to the Inbox from Spam: only messages in a Spam folder move, and
+    /// the thread returns to the Inbox state.
+    Inbox,
+}
+
+/// What Not spam did.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ipc-types", ts(export, export_to = "core/mail_actions/"))]
+pub struct NotSpamReceipt {
+    /// Threads the action taught the filter about.
+    pub thread_ids: Vec<String>,
+    /// Threads that were in Spam and are on their way back to the Inbox.
+    pub moved_thread_ids: Vec<String>,
 }
 
 #[derive(FromRow)]
@@ -350,8 +364,33 @@ pub async fn trash_threads(
 }
 
 /// Spam reuses the trash receipt, so the same Undo moves every message back to
-/// the folder it came from and restores the workflow state.
+/// the folder it came from and restores the workflow state. The filter learns
+/// the messages as spam under that receipt; the Undo unlearns them.
 pub async fn mark_threads_spam(
+    pool: &SqlitePool,
+    queue: &SyncQueue,
+    ids: &[String],
+) -> Result<TrashReceipt, String> {
+    let receipt = move_spam_with_receipt(pool, queue, ids).await?;
+    if let Err(error) = crate::spam::train_threads(
+        pool,
+        ids,
+        crate::spam::Label::Spam,
+        crate::spam::Signal::Explicit,
+        receipt.undo_token.as_deref(),
+    )
+    .await
+    {
+        // The move is the user's action and stands; a model that missed one
+        // example is not worth failing it for.
+        tracing::warn!(%error, "spam filter training failed after Mark as spam");
+    }
+    Ok(receipt)
+}
+
+/// Move threads to Spam under an undo receipt, without training. The filter's
+/// own automatic move uses this: its verdict is not a new example.
+pub async fn move_spam_with_receipt(
     pool: &SqlitePool,
     queue: &SyncQueue,
     ids: &[String],
@@ -359,6 +398,85 @@ pub async fn mark_threads_spam(
     move_threads_with_receipt(pool, queue, ids, MoveTarget::Spam, true)
         .await
         .map(|(_, receipt)| receipt)
+}
+
+/// Not spam: teach the filter these threads are wanted, and bring any that
+/// sit in Spam back to the Inbox.
+///
+/// A thread the filter moved itself is restored through its move receipt —
+/// the ordinary Undo, exact folder and workflow state included. Anything else
+/// in Spam (moved by the user or by the provider) moves back to the Inbox.
+pub async fn mark_threads_not_spam(
+    pool: &SqlitePool,
+    queue: &SyncQueue,
+    ids: &[String],
+) -> Result<NotSpamReceipt, String> {
+    let mut seen = std::collections::HashSet::new();
+    let ids: Vec<String> = ids
+        .iter()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty() && seen.insert(id.clone()))
+        .collect();
+    let mut outcome = NotSpamReceipt::default();
+    if ids.is_empty() {
+        return Ok(outcome);
+    }
+    let mut remaining = Vec::new();
+    for id in &ids {
+        let receipt: Option<String> = sqlx::query_scalar(
+            "SELECT v.receipt_id FROM spam_verdicts v JOIN messages m ON m.id = v.message_id
+             WHERE m.thread_id = ? AND v.receipt_id IS NOT NULL LIMIT 1",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        let restored = match receipt {
+            Some(receipt) => undo::undo_trash(pool, queue, &receipt).await.is_ok(),
+            None => false,
+        };
+        sqlx::query(
+            "UPDATE spam_verdicts SET receipt_id = NULL
+             WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)",
+        )
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        if restored {
+            outcome.moved_thread_ids.push(id.clone());
+        } else {
+            remaining.push(id.clone());
+        }
+    }
+    let in_spam: Vec<String> = {
+        let mut in_spam = Vec::new();
+        for id in remaining {
+            if !crate::spam::spam_folder_messages(pool, std::slice::from_ref(&id))
+                .await
+                .map_err(|e| e.to_string())?
+                .is_empty()
+            {
+                in_spam.push(id);
+            }
+        }
+        in_spam
+    };
+    if !in_spam.is_empty() {
+        move_threads_with_receipt(pool, queue, &in_spam, MoveTarget::Inbox, false).await?;
+        outcome.moved_thread_ids.extend(in_spam);
+    }
+    crate::spam::train_threads(
+        pool,
+        &ids,
+        crate::spam::Label::Ham,
+        crate::spam::Signal::Explicit,
+        None,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    outcome.thread_ids = ids;
+    Ok(outcome)
 }
 
 pub async fn move_threads(
@@ -461,6 +579,7 @@ async fn move_threads_with_receipt(
         let rows = rows
             .into_iter()
             .filter(|m| m.source_folder != remote)
+            .filter(|m| !matches!(target, MoveTarget::Inbox) || m.folder_type == "spam")
             .filter(|m| {
                 !matches!(target, MoveTarget::Archive)
                     || !matches!(
@@ -514,6 +633,7 @@ async fn move_threads_with_receipt(
             queue.enqueue_in_transaction(&mut tx, &action).await?;
             queued.push(action.id);
         }
+        let moved_any = !rows.is_empty();
         for message in rows {
             if record_undo {
                 sqlx::query("INSERT INTO mail_action_messages (receipt_id, message_id, original_folder_id, target_folder_id) SELECT ?, id, folder_id, ? FROM messages WHERE id = ?")
@@ -534,7 +654,12 @@ async fn move_threads_with_receipt(
                     .bind(&folder_id).bind(&now).bind(&message.id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
             }
         }
-        if !matches!(target, MoveTarget::Folder(_)) {
+        if matches!(target, MoveTarget::Inbox) {
+            if moved_any {
+                sqlx::query("UPDATE threads SET workflow_state = 'inbox', board_column = 'inbox', snooze_until = NULL, workflow_changed_at = ?, updated_at = ? WHERE id = ?")
+                    .bind(&now).bind(&now).bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            }
+        } else if !matches!(target, MoveTarget::Folder(_)) {
             sqlx::query("UPDATE threads SET workflow_state = 'done', board_column = 'done', workflow_changed_at = ?, updated_at = ? WHERE id = ?")
                 .bind(&now).bind(&now).bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
         }
@@ -584,6 +709,7 @@ async fn resolve_target(
         MoveTarget::Archive => "archive",
         MoveTarget::Trash => "trash",
         MoveTarget::Spam => "spam",
+        MoveTarget::Inbox => "inbox",
         MoveTarget::Folder(_) => unreachable!(),
     };
     if let Some(row) = sqlx::query_as("SELECT id, COALESCE(remote_id, full_path), folder_type FROM folders WHERE account_id = ? AND folder_type = ? LIMIT 1")

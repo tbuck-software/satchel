@@ -40,4 +40,9 @@ export type ThreadRecord = {
     has_invite: boolean;
     invite_status: string | null;
     invite_cancelled: boolean;
+    /**
+     * The local spam filter judged a message of this thread spam and nobody
+     * has said Not spam since.
+     */
+    likely_spam: boolean;
 };

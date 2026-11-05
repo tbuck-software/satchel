@@ -32,4 +32,9 @@ export type ThreadDto = {
     has_invite: boolean;
     invite_status: string | null;
     invite_cancelled: boolean;
+    /**
+     * The local spam filter judged this thread spam; the list and the
+     * reader offer Not spam.
+     */
+    likely_spam: boolean;
 };

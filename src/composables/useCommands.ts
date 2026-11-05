@@ -422,6 +422,15 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         keywords: t('commands.keywords.spam'),
         run: () => void threadActions.markSpam(targetIds()),
       },
+      {
+        id: 'thread:not-spam',
+        icon: 'inbox' as const,
+        title: t('thread.actions.notSpam'),
+        context: 'mail' as const,
+        shortcut: hint('markNotSpam'),
+        keywords: t('commands.keywords.notSpam'),
+        run: () => void threadActions.markNotSpam(targetIds()),
+      },
       ...readerCommands(),
     ] : []),
     ...(undo.entries.value.length > 0 ? [{

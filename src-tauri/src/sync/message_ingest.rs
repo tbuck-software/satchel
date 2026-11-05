@@ -1166,6 +1166,36 @@ async fn finish_provider_message(
         }
     }
 
+    // The local spam filter judges new Inbox mail before its notification is
+    // published; a likely-spam message is dismissed there. With the filter on
+    // Move, the provider move is queued through the same durable queue as the
+    // blocked-sender move above.
+    if !was_pre_existing
+        && !sender_is_blocked
+        && folder_type == "inbox"
+        && !message_is_sent
+        && !message_is_draft
+    {
+        match satchel_core::spam::classify_incoming(
+            pool,
+            blocked_sender_queue.as_ref(),
+            satchel_core::spam::IncomingMessage {
+                provider: provider_kind,
+                message_id: &message_id,
+                thread_id: &thread_id,
+                from_address: &message.from_address,
+                hint_headers: message.spam_hint_headers.as_deref(),
+            },
+        )
+        .await
+        {
+            Ok(outcome) => tracing::debug!(?outcome, account_id, "spam filter classified new mail"),
+            Err(error) => {
+                tracing::warn!(%error, account_id, "spam filter classification deferred");
+            }
+        }
+    }
+
     // Detect calendar invitations: prefer the standalone text/calendar part if
     // the IMAP parser pulled one out, otherwise scan body text/html (Outlook/Gmail
     // often inline the invite).
@@ -1307,6 +1337,7 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
             attachments: Vec::new(),
         }
     }
@@ -2236,6 +2267,102 @@ mod tests {
             .unwrap();
         assert_eq!(ids.len(), 2, "{ids:?}");
         assert!(ids.contains(&decrypted), "{ids:?}");
+    }
+
+    /// New IMAP mail is judged by the local spam filter once it has learned
+    /// enough, and with the filter on Move it is filed in Spam through the
+    /// durable queue — the provider move first, the local copy waiting on it.
+    #[tokio::test]
+    async fn new_imap_mail_is_classified_and_moved_by_the_spam_filter() {
+        let pool = ingest_pool().await;
+        sqlx::query(
+            "INSERT INTO folders
+             (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES ('spam', 'account', 'Spam', 'Spam', 'spam', 'Spam', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .expect("spam folder");
+        let now = chrono::Utc::now();
+        for n in 0..10 {
+            let mut spam = envelope(&format!("s{n}"));
+            spam.from_address = format!("winner{n}@lottery.example");
+            spam.subject = "You won the lottery jackpot".into();
+            spam.body_text = Some("Claim your jackpot prize, wire the processing fee".into());
+            spam.date_rfc3339 = now.to_rfc3339();
+            ingest(&pool, "inbox", &spam).await.expect("spam example");
+            let mut ham = envelope(&format!("h{n}"));
+            ham.from_address = format!("colleague{n}@work.example");
+            ham.subject = "Agenda for the project meeting".into();
+            ham.body_text = Some("Please review the agenda and the minutes".into());
+            ham.date_rfc3339 = now.to_rfc3339();
+            ingest(&pool, "inbox", &ham).await.expect("ham example");
+        }
+        let examples: Vec<(String, String)> =
+            sqlx::query_as("SELECT id, from_address FROM messages")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        for (id, from) in examples {
+            let label = if from.contains("lottery") {
+                satchel_core::spam::Label::Spam
+            } else {
+                satchel_core::spam::Label::Ham
+            };
+            satchel_core::spam::train_messages(
+                &pool,
+                &[id],
+                label,
+                satchel_core::spam::Signal::Explicit,
+                None,
+            )
+            .await
+            .unwrap();
+        }
+        satchel_core::spam::set_mode(&pool, satchel_core::spam::SpamFilterMode::Move)
+            .await
+            .unwrap();
+
+        let mut incoming = envelope("new");
+        incoming.from_address = "boss@lottery.example".into();
+        incoming.subject = "Lottery jackpot winner".into();
+        incoming.body_text = Some("Claim your jackpot prize now".into());
+        incoming.spam_hint_headers = Some("X-Spam-Flag: YES".into());
+        incoming.date_rfc3339 = now.to_rfc3339();
+        ingest(&pool, "inbox", &incoming).await.expect("new mail");
+
+        let (verdict, hints, receipt): (String, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT v.verdict, v.hint_headers, v.receipt_id FROM spam_verdicts v
+             JOIN messages m ON m.id = v.message_id WHERE m.remote_id = 'new'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("verdict");
+        assert_eq!(verdict, "spam");
+        assert_eq!(hints.as_deref(), Some("X-Spam-Flag: YES"));
+        assert!(receipt.is_some(), "the move left an undo receipt");
+        let pending: Option<String> =
+            sqlx::query_scalar("SELECT pending_folder_id FROM messages WHERE remote_id = 'new'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pending.as_deref(), Some("spam"));
+        let moves: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_move'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(moves, 1);
+
+        // The examples arrived before training and stay unjudged; only the
+        // new message was scored.
+        let scored: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM spam_verdicts WHERE verdict <> 'none'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(scored, 1);
     }
 
     /// A `Date` far in the future used to win the `last_message_date >= …`
@@ -3463,6 +3590,7 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
             attachments: Vec::new(),
         };
         upsert_provider_message(
@@ -3652,6 +3780,7 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
             attachments: Vec::new(),
         };
         upsert_provider_message(
@@ -3745,6 +3874,7 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
             attachments: vec![RemoteAttachment {
                 remote_part_id: "mime-1".to_string(),
                 filename: Some("note.txt".to_string()),

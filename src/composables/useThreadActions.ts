@@ -463,6 +463,27 @@ export function useThreadActions() {
     });
   }
 
+  /**
+   * Not spam teaches the local filter and clears the mark at once. Threads
+   * that sit in Spam go back to the Inbox — one the filter moved itself
+   * through its own move receipt, so it lands exactly where it was.
+   */
+  async function markNotSpam(threadIds: string[]): Promise<void> {
+    const ids = Array.from(new Set(threadIds.map((id) => id.trim()).filter(Boolean)));
+    if (ids.length === 0) return;
+    return queue.run(ids, async () => {
+      try {
+        const receipt = await threads.markThreadsNotSpam(ids);
+        const moved = receipt.moved_thread_ids.length;
+        toast.success(moved > 0
+          ? tc('thread.result.notSpamMoved', moved)
+          : tc('thread.result.notSpam', ids.length));
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t('thread.result.notSpamFailed'));
+      }
+    });
+  }
+
   /** Link threads to a topic; only the database receipt authorizes Undo. */
   async function addToTopic(threadIds: string[], topicId: string): Promise<void> {
     threadIds = Array.from(new Set(threadIds));
@@ -643,6 +664,7 @@ export function useThreadActions() {
     setRead,
     setMuted,
     markSpam,
+    markNotSpam,
     archive,
     snooze,
     snoozeAt,

@@ -44,6 +44,7 @@ const SignaturesEditor = defineAsyncComponent(() => import('@/components/setting
 const SmartFoldersEditor = defineAsyncComponent(() => import('@/components/settings/SmartFoldersEditor.vue'));
 const SmimeManager = defineAsyncComponent(() => import('@/components/settings/SmimeManager.vue'));
 const SourceManager = defineAsyncComponent(() => import('@/components/settings/SourceManager.vue'));
+const SpamFilterSettings = defineAsyncComponent(() => import('@/components/settings/SpamFilterSettings.vue'));
 const TemplatesEditor = defineAsyncComponent(() => import('@/components/settings/TemplatesEditor.vue'));
 const SwipeSettings = defineAsyncComponent(() => import('@/components/settings/SwipeSettings.vue'));
 const TrayPreferences = defineAsyncComponent(() => import('@/components/settings/TrayPreferences.vue'));
@@ -226,6 +227,7 @@ onBeforeUnmount(() => unregisterFilter?.());
         <SmartFoldersEditor v-else-if="activeSection === 'smart-folders'" />
         <VacationSettings v-else-if="activeSection === 'vacation'" />
         <template v-else-if="activeSection === 'senders'">
+          <section class="settings-subsection"><SpamFilterSettings /></section>
           <section class="settings-subsection"><BlockedSendersEditor /></section>
           <section class="settings-subsection"><RemoteImageAllowlist /></section>
         </template>

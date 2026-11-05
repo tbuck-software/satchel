@@ -22,6 +22,7 @@ import { isOwnEmail, participantDisplayName } from '@/utils/mailIdentity';
 import { transportErrorLabel } from '@/utils/transportLabels';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 import { startThreadDrag } from '@/utils/threadDrag';
+import { offersNotSpam } from '@/utils/threadList';
 
 const SnoozePicker = defineAsyncComponent(() => import('@/components/navigation/SnoozePicker.vue'));
 // Both menus mount on first use (see `contextMenuMounted`), so neither is
@@ -317,6 +318,13 @@ async function markDone() {
   await threadActions.toggleDone(targetThreadIds());
 }
 
+const showNotSpam = computed(() => offersNotSpam(props.thread, threadsStore.mailboxFilter));
+
+async function markNotSpam() {
+  closeContextMenu();
+  await threadActions.markNotSpam(targetThreadIds());
+}
+
 async function toggleRead() {
   closeContextMenu();
   await threadActions.setRead(targetThreadIds(), isUnread.value);
@@ -562,6 +570,20 @@ function onDragStart(event: DragEvent) {
       </div>
 
       <div class="mt-0.5 flex min-w-0 items-center gap-2">
+        <!-- The filter's verdict reads as words, not a colour: it is the one
+             thing on the row the user may have to answer. -->
+        <span
+          v-if="props.thread.likelySpam"
+          class="spam-label"
+          :title="$t('thread.spam.rowHint')"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8 1.5l5 2.9v7.2L8 14.5l-5-2.9V4.4L8 1.5Z" />
+            <path d="M8 5.1v3.5" />
+            <path d="M8 11h.01" />
+          </svg>
+          {{ $t('thread.spam.likely') }}
+        </span>
         <span
           v-if="followUp || laterLabel"
           class="follow-up-label"
@@ -679,6 +701,7 @@ function onDragStart(event: DragEvent) {
         @select="followUpPickerOpen = true; closeContextMenu()"
       />
       <MenuItem v-if="followUp" icon="check" :label="$t('thread.followUp.done')" @select="cancelFollowUp" />
+      <MenuItem v-if="showNotSpam" icon="inbox" :label="$t('thread.actions.notSpam')" @select="markNotSpam" />
     </div>
 
     <div class="menu-group" @mouseenter="senderMenuAnchor = null">
@@ -722,6 +745,17 @@ function onDragStart(event: DragEvent) {
 </template>
 
 <style scoped>
+.spam-label {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-2xs);
+  color: var(--accent-red-soft);
+  font-size: var(--font-size-xs);
+  font-weight: var(--weight-strong);
+  white-space: nowrap;
+}
+
 .follow-up-label {
   display: inline-flex;
   flex: 0 0 auto;

@@ -13,6 +13,7 @@ import type { InboxSenderBucket } from '@/stores/settings';
 import type { ThreadCategory } from '@/types/mail';
 import { useShortcutHints } from '@/composables/useShortcutHints';
 import type { AnchorBox } from '@/utils/popoverPlacement';
+import { offersNotSpam } from '@/utils/threadList';
 
 const ContextMenu = defineAsyncComponent(() => import('@/components/ui/ContextMenu.vue'));
 const MenuItem = defineAsyncComponent(() => import('@/components/ui/MenuItem.vue'));
@@ -80,9 +81,15 @@ function openFile() {
   topics.openPicker({ itemType: 'thread', itemIds: ids() });
 }
 
-function run(action: 'pin' | 'aside' | 'waiting' | 'spam') {
+const anyNotSpam = computed(() => threads.selectedThreadIds.some((id) => {
+  const thread = threads.find(id);
+  return thread ? offersNotSpam(thread, threads.mailboxFilter) : false;
+}));
+
+function run(action: 'pin' | 'aside' | 'waiting' | 'spam' | 'notSpam') {
   menuOpen.value = false;
   const target = ids();
+  if (action === 'notSpam') void actions.markNotSpam(target);
   if (action === 'pin') void actions.setPinned(target, !allPinned.value);
   if (action === 'aside') void actions.setAside(target);
   if (action === 'waiting') void actions.waitForReply(target);
@@ -131,6 +138,7 @@ function run(action: 'pin' | 'aside' | 'waiting' | 'spam') {
       <MenuItem :icon="allPinned ? 'unpin' : 'pin'" :label="allPinned ? t('thread.actions.unpin') : t('thread.actions.pin')" @select="run('pin')" />
       <MenuItem icon="aside" :label="t('thread.actions.setAside')" @select="run('aside')" />
       <MenuItem icon="clock" :label="t('thread.state.waiting')" @select="run('waiting')" />
+      <MenuItem v-if="anyNotSpam" icon="inbox" :label="t('thread.actions.notSpam')" @select="run('notSpam')" />
       <MenuItem :label="t('thread.toolbar.markSpam')" tone="danger" @select="run('spam')">
         <template #icon><AppIcon><path d="M2 4h12v10H2V4ZM5 2h6M6 7l4 4m0-4-4 4" /></AppIcon></template>
       </MenuItem>

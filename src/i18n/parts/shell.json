@@ -119,7 +119,8 @@
         "mute": "mute silence notifications",
         "spam": "spam junk",
         "undo": "undo revert",
-        "openSettingsSection": "settings preferences options"
+        "openSettingsSection": "settings preferences options",
+        "notSpam": "not spam ham wanted inbox"
       },
       "markDone": "Mark as done",
       "markDoneMany": "Mark {count} emails as done",
@@ -390,6 +391,10 @@
         "fileTo": {
           "label": "File in a folder or topic",
           "keywords": "file move folder topic label"
+        },
+        "markNotSpam": {
+          "keywords": "not spam ham wanted",
+          "label": "Not spam"
         }
       },
       "close": "Close keyboard shortcuts",
@@ -561,7 +566,8 @@
         "mute": "stumm stummschalten mute",
         "spam": "spam junk werbung",
         "undo": "rückgängig undo",
-        "openSettingsSection": "settings einstellungen optionen"
+        "openSettingsSection": "settings einstellungen optionen",
+        "notSpam": "kein spam erwünscht posteingang"
       },
       "markDone": "Als erledigt markieren",
       "markDoneMany": "{count} E-Mails erledigen",
@@ -832,6 +838,10 @@
         "fileTo": {
           "label": "In Ordner oder Thema ablegen",
           "keywords": "ablegen verschieben ordner thema label file move"
+        },
+        "markNotSpam": {
+          "keywords": "kein spam erwünscht",
+          "label": "Kein Spam"
         }
       },
       "close": "Tastenkürzel schließen",

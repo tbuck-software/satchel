@@ -25,6 +25,8 @@ const props = withDefaults(
     /** Done already: the primary action turns into its inverse. */
     isDone?: boolean;
     isMuted?: boolean;
+    /** The filter marked it, or it sits in Spam: the menu offers Not spam. */
+    canMarkNotSpam?: boolean;
     showBack?: boolean;
     senderAddress?: string;
     canReply?: boolean;
@@ -48,6 +50,7 @@ const props = withDefaults(
     isAside: false,
     isDone: false,
     isMuted: false,
+    canMarkNotSpam: false,
     showBack: false,
     senderAddress: '',
     canReply: true,
@@ -72,6 +75,7 @@ const emit = defineEmits<{
   delete: [];
   toggleMuted: [];
   spam: [];
+  notSpam: [];
   block: [scope: 'address' | 'domain'];
   print: [scope: MessageScope];
   copyMarkdown: [scope: MessageScope];
@@ -144,7 +148,7 @@ function openSubmenu(submenu: Submenu, event: Event) {
   activeSubmenu.value = submenu;
 }
 
-function run(action: 'toggleRead' | 'togglePin' | 'setAside' | 'forward' | 'toggleMuted' | 'spam' | 'reply' | 'resend' | 'allActions' | 'copyLink' | 'fileTo') {
+function run(action: 'toggleRead' | 'togglePin' | 'setAside' | 'forward' | 'toggleMuted' | 'spam' | 'notSpam' | 'reply' | 'resend' | 'allActions' | 'copyLink' | 'fileTo') {
   closeMenu();
   if (action === 'toggleRead') emit('toggleRead');
   if (action === 'togglePin') emit('togglePin');
@@ -152,6 +156,7 @@ function run(action: 'toggleRead' | 'togglePin' | 'setAside' | 'forward' | 'togg
   if (action === 'forward') emit('forward');
   if (action === 'toggleMuted') emit('toggleMuted');
   if (action === 'spam') emit('spam');
+  if (action === 'notSpam') emit('notSpam');
   if (action === 'reply') emit('reply');
   if (action === 'resend') emit('resend');
   if (action === 'allActions') emit('allActions');
@@ -370,6 +375,16 @@ function runExport(format: ExportFormat) {
         @select="openSubmenu('organize', $event)"
       >
         <template #icon><AppIcon :grid="20"><circle cx="8" cy="7" r="3" /><path d="M2.5 16a5.5 5.5 0 0 1 11 0" /><path d="M14 8.5h4M16 6.5v4" /></AppIcon></template>
+      </MenuItem>
+      <MenuItem
+        v-if="canMarkNotSpam"
+        :label="targetLabel($t('thread.actions.notSpam'))"
+        :aria-keyshortcuts="hint('markNotSpam')?.aria"
+        @mouseenter="closeSubmenu"
+        @select="run('notSpam')"
+      >
+        <template #icon><AppIcon :grid="20"><path d="M3 7.5h14M4.5 7.5v7A1.5 1.5 0 0 0 6 16h8a1.5 1.5 0 0 0 1.5-1.5v-7M7.5 11h5" /></AppIcon></template>
+        <template v-if="hint('markNotSpam')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('markNotSpam')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
         :label="targetLabel($t('thread.toolbar.markSpam'))"

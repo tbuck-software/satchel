@@ -72,6 +72,7 @@ export const KEYBINDING_SPECS: readonly KeybindingSpec[] = [
   { action: 'copyLink', defaultBinding: 'y', context: 'mail' },
   { action: 'toggleMute', defaultBinding: 'm', context: 'mail' },
   { action: 'markSpam', defaultBinding: '!', context: 'mail' },
+  { action: 'markNotSpam', defaultBinding: 'I', context: 'mail' },
   { action: 'print', defaultBinding: 'mod+p', context: 'mail' },
   { action: 'goInbox', defaultBinding: 'g i', context: 'navigation', view: 'inbox' },
   { action: 'goLater', defaultBinding: 'g l', context: 'navigation', view: 'later' },

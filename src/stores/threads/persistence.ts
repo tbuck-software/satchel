@@ -9,6 +9,7 @@ import {
   backendListSmartInboxSummary,
   backendListThreads,
   backendMarkThreadsSpam,
+  backendMarkThreadsNotSpam,
   backendSetSenderPreference,
   backendSetThreadCategory,
   backendSetThreadMuted,
@@ -22,6 +23,7 @@ import {
   type BackendThreadCursor,
   type BackendThreadPage,
   type BackendTrashReceipt,
+  type BackendNotSpamReceipt,
 } from '@/services/backend';
 import type { Account, Thread } from '@/types/mail';
 import type { InboxSenderBucket } from '@/stores/settings';
@@ -131,6 +133,7 @@ export interface ThreadPersistenceSurface {
     bucket: InboxSenderBucket,
   ): Promise<void>;
   markThreadsSpam(threadIds: string[]): Promise<BackendTrashReceipt>;
+  markThreadsNotSpam(threadIds: string[]): Promise<BackendNotSpamReceipt>;
   setThreadsRead(threadIds: string[], isRead: boolean): Promise<void>;
   trashThreads(threadIds: string[]): Promise<BackendTrashReceipt>;
   setAssignee(threadId: string, assignee?: string): Promise<void>;
@@ -441,6 +444,22 @@ export function createThreadPersistence({
       }
     });
     // A refresh failure cannot roll back a committed action or lose its Undo receipt.
+    await Promise.allSettled([refreshHead(), reloadMailboxes()]);
+    return receipt;
+  }
+
+  /**
+   * Not spam clears the mark at once; threads that were in Spam leave a Spam
+   * list with the refresh, as they would after any move back to the Inbox.
+   */
+  async function markThreadsNotSpam(threadIds: string[]): Promise<BackendNotSpamReceipt> {
+    const normalized = Array.from(new Set(threadIds.map((id) => id.trim()).filter(Boolean)));
+    let receipt: BackendNotSpamReceipt = { thread_ids: [], moved_thread_ids: [] };
+    if (normalized.length === 0) return receipt;
+    await writeOptimistically(
+      normalized.map((id) => ({ id, values: { likelySpam: false } })),
+      async () => { receipt = await backendMarkThreadsNotSpam(normalized); },
+    );
     await Promise.allSettled([refreshHead(), reloadMailboxes()]);
     return receipt;
   }
@@ -1019,6 +1038,7 @@ export function createThreadPersistence({
       setSenderPriorityByEmail,
       setSenderCategory,
       markThreadsSpam,
+      markThreadsNotSpam,
       setThreadsRead,
       trashThreads,
       setAssignee,

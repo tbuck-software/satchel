@@ -146,6 +146,8 @@ export interface Thread {
   hasInvite?: boolean;
   inviteStatus?: string;
   inviteCancelled?: boolean;
+  /** The local spam filter judged it spam and nobody has said Not spam since. */
+  likelySpam?: boolean;
 }
 
 export interface Account {

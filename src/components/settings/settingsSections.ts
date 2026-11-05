@@ -39,6 +39,7 @@ const MOVED_SECTIONS: Record<string, SettingsSection> = {
   pgp: 'encryption',
   blocked: 'senders',
   images: 'senders',
+  spam: 'senders',
   data: 'storage',
   backup: 'storage',
   sources: 'accounts',

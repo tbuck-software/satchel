@@ -371,6 +371,7 @@
       "smimeUndecodedPart": "The decrypted S/MIME content contains a part that Satchel cannot show.",
       "smimeVerificationFailed": "The S/MIME signature could not be verified.",
       "snapshotMessagesHeld": "{count} messages in {folder} could not be updated from the server for {account} and stay where they are for now. Satchel tries again in a day.",
+      "spamFilterUnavailable": "The spam filter settings could not be read or saved.",
       "systemFolderImmutable": "\"{name}\" is a system folder and cannot be changed.",
       "templateNotFound": "The template was not found.",
       "templatePersistenceFailed": "Templates are currently unavailable. Please try again.",
@@ -620,6 +621,7 @@
       "moveToFolder": "move folder file",
       "moveToInbox": "move inbox",
       "mute": "mute silence notifications",
+      "notSpam": "not spam ham wanted inbox",
       "oauthGmail": "oauth google sign in login",
       "oauthOutlook": "oauth microsoft sign in login",
       "openSettingsSection": "settings preferences options",
@@ -2344,6 +2346,7 @@
           "filter_already_read": "Already read",
           "filter_before_session": "Arrived before the app was opened",
           "filter_coalesced": "Part of a burst, shown in one summary",
+          "filter_likely_spam": "Likely spam",
           "filter_message_gone": "Message was deleted",
           "filter_muted_sender": "Sender blocked",
           "filter_muted_thread": "Thread muted",
@@ -2911,7 +2914,7 @@
         "label": "Rules"
       },
       "senders": {
-        "description": "Blocked senders and who may load images",
+        "description": "Spam filter, blocked senders and who may load images",
         "label": "Senders & images"
       },
       "sending": {
@@ -3109,6 +3112,25 @@
       "typeScript": "Script",
       "typeWebhook": "Webhook"
     },
+    "spamFilter": {
+      "learning": "{spam} spam and {ham} wanted messages. It judges new mail once it knows {needed} of each.",
+      "modeAria": "What the spam filter does with likely spam",
+      "modeLabel": "New mail that looks like spam",
+      "modeMark": "Mark",
+      "modeMarkHint": "Likely spam stays in the Inbox with a mark, and Not spam is one key away.",
+      "modeMarkTitle": "Mark likely spam in the list and the reader",
+      "modeMove": "Move to Spam",
+      "modeMoveHint": "Likely spam goes to the Spam folder. Mail from people you have written to always stays.",
+      "modeMoveTitle": "Move likely spam to the Spam folder",
+      "modeOff": "Off",
+      "modeOffHint": "New mail is not judged. Spam and Not spam still teach the filter.",
+      "modeOffTitle": "Do not judge new mail",
+      "providers": "Gmail and Microsoft accounts are filtered by their provider. Satchel learns from them but leaves their mail where the provider put it.",
+      "purpose": "Satchel learns what you call spam and judges new mail on this device. Nothing is sent anywhere.",
+      "title": "Spam filter",
+      "trained": "{spam} spam and {ham} wanted messages.",
+      "trainingLabel": "Learned so far"
+    },
     "swipes": {
       "ariaLong": "{direction}: far swipe",
       "ariaShort": "{direction}: short swipe",
@@ -3237,6 +3259,10 @@
       "markDone": {
         "keywords": "done archive",
         "label": "Mark as done"
+      },
+      "markNotSpam": {
+        "keywords": "not spam ham wanted",
+        "label": "Not spam"
       },
       "markSpam": {
         "keywords": "spam junk",
@@ -3382,6 +3408,7 @@
       "moveToInbox": "Back to the inbox",
       "mute": "Mute conversation",
       "none": "No action",
+      "notSpam": "Not spam",
       "pin": "Pin",
       "priority": "Priority",
       "read": "Read",
@@ -3527,6 +3554,9 @@
       "inLater": "Waiting in Later",
       "inbox": "Email in the inbox | {count} emails in the inbox",
       "muteChanged": "Mute updated",
+      "notSpam": "Thread marked as not spam | {count} threads marked as not spam",
+      "notSpamFailed": "Marking as not spam failed.",
+      "notSpamMoved": "Thread moved back to the Inbox | {count} threads moved back to the Inbox",
       "permanentlyDeleted": "Thread permanently deleted | {count} threads permanently deleted",
       "pinChanged": "Pin updated",
       "pinFailed": "Pinning failed.",
@@ -3568,6 +3598,12 @@
       "summaryMore": "and {count} more",
       "summaryTitle": "{count} conversation selected | {count} conversations selected",
       "toInbox": "To inbox ({count})"
+    },
+    "spam": {
+      "bannerDetail": "The spam filter on this device flagged it. If it is wanted mail, say so and the filter learns from it.",
+      "bannerTitle": "This looks like spam",
+      "likely": "Likely spam",
+      "rowHint": "The spam filter on this device flagged this thread"
     },
     "state": {
       "aside": "Set aside",
