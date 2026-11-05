@@ -31,7 +31,7 @@ function makeItem(key: string, title: string, startHour: number, endHour: number
 }
 
 describe('CalendarWeekGrid overlapping events', () => {
-  it('lays overlapping events out side by side', () => {
+  it('cascades overlapping events from their column\'s left edge', () => {
     const wrapper = mount(CalendarWeekGrid, {
       props: {
         days: [new Date(2026, 7, 12)],
@@ -44,14 +44,17 @@ describe('CalendarWeekGrid overlapping events', () => {
     });
 
     const events = wrapper.findAll<HTMLElement>('.week__event');
-    // jsdom reorders and pads `min()`/`max()`; compare without the padding.
-    const style = (index: number) =>
-      (events[index]!.element.getAttribute('style') ?? '').replace(/[\s*]/g, '');
+    // jsdom reorders the arguments of `min()`/`max()`; match loosely.
     expect(events).toHaveLength(2);
     expect(events[0]!.text()).toContain('Langer Termin mit lesbarem Titel');
-    expect(style(0)).toContain('left:min(0%,calc(100%-56px))');
-    expect(style(0)).toContain('calc(50%-2px)');
-    expect(style(1)).toContain('left:min(50%,calc(100%-56px))');
+    expect(events[0]!.element.style.left).toBe('0%');
+    expect(events[1]!.element.style.left).toBe('50%');
+    // Two columns: the first reaches 1.7 columns (85%), the second ends at
+    // the edge; neither gets narrower than 56px nor wider than its room.
+    expect(events[0]!.element.style.width).toMatch(/85%.*56px|56px.*85%/);
+    expect(events[0]!.element.style.width).toContain('100%');
+    expect(events[1]!.element.style.width).toMatch(/50%.*56px|56px.*50%/);
+    expect(events[0]!.element.style.zIndex).toBe('1');
     expect(events[1]!.element.style.zIndex).toBe('2');
     expect(events.every((event) => event.classes().includes('week__event--shared'))).toBe(true);
 
@@ -69,6 +72,39 @@ describe('CalendarWeekGrid overlapping events', () => {
     expect(event.element.style.right).toBe('1px');
     expect(event.element.style.width).toBe('');
     expect(event.classes()).not.toContain('week__event--shared');
+
+    wrapper.unmount();
+  });
+
+  it('gives the title as many lines as the block has room for', () => {
+    const wrapper = mount(CalendarWeekGrid, {
+      props: {
+        days: [new Date(2026, 7, 12)],
+        items: [makeItem('two-hours', 'Kinderbetreuung Herbstferien', 14, 16), makeItem('hour', 'Kurz', 9, 10)],
+      },
+      global: { plugins: [i18n('en')] },
+    });
+
+    const [hour, twoHours] = wrapper.findAll<HTMLElement>('.week__event');
+    // 96px block, 6px padding, 15px lines → 6; 48px → 2.
+    expect(twoHours!.element.style.getPropertyValue('--title-lines')).toBe('6');
+    expect(hour!.element.style.getPropertyValue('--title-lines')).toBe('2');
+
+    wrapper.unmount();
+  });
+});
+
+describe('CalendarWeekGrid now line', () => {
+  it('runs under the events with a single dot on top', () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const wrapper = mount(CalendarWeekGrid, {
+      props: { days: [today], items: [] },
+      global: { plugins: [i18n('en')] },
+    });
+
+    expect(wrapper.findAll('.week__now')).toHaveLength(1);
+    expect(wrapper.findAll('.week__now-dot')).toHaveLength(1);
 
     wrapper.unmount();
   });

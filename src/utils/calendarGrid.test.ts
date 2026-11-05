@@ -11,6 +11,8 @@ import {
   sourceLabel,
   isMultiDay,
   itemsForDay,
+  CASCADE_WIDTH,
+  eventBox,
   layoutDay,
   minutesInDay,
   monthGridDays,
@@ -266,6 +268,68 @@ describe('layoutDay', () => {
     const short = makeItem({ start: new Date(2026, 6, 29, 9), end: new Date(2026, 6, 29, 9, 5) });
     const layout = layoutDay([short], day);
     expect(layout[0]!.endMin - layout[0]!.startMin).toBe(30);
+  });
+});
+
+describe('eventBox', () => {
+  const day = new Date(2026, 6, 29);
+  const at = (hour: number, minute = 0) => new Date(2026, 6, 29, hour, minute);
+  const event = (key: string, start: Date, end: Date) => makeItem({ key: `event:${key}`, start, end });
+  const boxes = (items: CalendarItem[]) =>
+    Object.fromEntries(
+      layoutDay(items, day).map((entry) => {
+        const box = eventBox(entry);
+        return [entry.item.key.replace('event:', ''), [round(box.left), round(box.width)]];
+      }),
+    );
+  const round = (value: number) => Math.round(value * 1000) / 1000;
+
+  it('gives a lone event the whole day', () => {
+    expect(boxes([event('a', at(9), at(10))])).toEqual({ a: [0, 1] });
+  });
+
+  it('cascades: each block reaches past its column, the last one ends at the edge', () => {
+    // The owner's afternoon, three columns of a third each.
+    const layout = boxes([
+      event('podiatry', at(13, 45), at(14, 30)),
+      event('childcare', at(14), at(16)),
+      event('coffee', at(14), at(14, 30)),
+    ]);
+    const third = 1 / 3;
+    expect(layout).toEqual({
+      podiatry: [0, round(CASCADE_WIDTH * third)],
+      childcare: [round(third), round(CASCADE_WIDTH * third)],
+      coffee: [round(2 * third), round(third)],
+    });
+  });
+
+  it('keeps every title start visible: the next block starts after the previous one', () => {
+    const layout = layoutDay(
+      [event('a', at(9), at(12)), event('b', at(9), at(11)), event('c', at(9), at(10)), event('d', at(9), at(10))],
+      day,
+    ).map(eventBox);
+    for (let index = 1; index < layout.length; index += 1) {
+      expect(layout[index]!.left).toBeGreaterThan(layout[index - 1]!.left);
+      expect(layout[index]!.left + layout[index]!.width).toBeLessThanOrEqual(1 + 1e-9);
+    }
+  });
+
+  it('never cascades past the right edge with two columns', () => {
+    expect(boxes([event('a', at(9), at(11)), event('b', at(10), at(12))])).toEqual({
+      a: [0, round(Math.min(CASCADE_WIDTH / 2, 1))],
+      b: [0.5, 0.5],
+    });
+  });
+
+  it('fills the free columns of an event nothing overlaps on the right', () => {
+    const layout = boxes([
+      event('a', at(9), at(12)),
+      event('b', at(9), at(10)),
+      event('c', at(9, 30), at(10)),
+      event('d', at(10, 30), at(11, 30)),
+    ]);
+    // d took column 1 and widened into column 2: it covers both, exactly.
+    expect(layout.d).toEqual([round(1 / 3), round(2 / 3)]);
   });
 });
 

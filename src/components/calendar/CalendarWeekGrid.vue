@@ -6,6 +6,7 @@ import {
   formatTime,
   formatWeekday,
   isSameDay,
+  eventBox,
   layoutDay,
   type CalendarItem,
   type PositionedItem,
@@ -27,12 +28,16 @@ const emit = defineEmits<{
 
 const HOUR_HEIGHT = 48;
 /**
- * The narrowest a block gets when overlapping events share a day: enough for
- * the source stripe and the start of a title. A group too wide for the column
- * lets its blocks overlap their right neighbour instead of shrinking further;
- * each still shows its own left edge and title start.
+ * The narrowest a cascading block gets where the day has room for it: enough
+ * for the source stripe and the start of a title. The next column's block
+ * covers the overhang; the block's own column stays in view.
  */
 const MIN_EVENT_WIDTH = 56;
+/** One title line. The title wraps at word boundaries into as many lines as
+ * the block has room for and ends the last one with an ellipsis. */
+const EVENT_LINE_PX = 15;
+/** Vertical padding of a block (3px top and bottom). */
+const EVENT_PADDING_PX = 6;
 /**
  * Below this a block cannot stack title over time (24px for half an hour), so
  * both go on one line. Stacked, the title shrank to nothing and a short event
@@ -68,18 +73,25 @@ const nowOffset = computed(() => {
 });
 
 function blockStyle(entry: PositionedItem) {
-  const top = `${(entry.startMin / 60) * HOUR_HEIGHT}px`;
-  const height = `${((entry.endMin - entry.startMin) / 60) * HOUR_HEIGHT}px`;
-  if (entry.columns === 1) return { top, height, left: '0px', right: '1px' };
-  const share = 100 / entry.columns;
-  return {
-    top,
-    height,
-    left: `min(${share * entry.column}%, calc(100% - ${MIN_EVENT_WIDTH}px))`,
-    width: `max(calc(${share * entry.span}% - 2px), ${MIN_EVENT_WIDTH - 2}px)`,
-    // Right-hand columns on top: when blocks hit the minimum width and
-    // overlap, each one's left edge, stripe and title start stay visible.
+  const heightPx = ((entry.endMin - entry.startMin) / 60) * HOUR_HEIGHT;
+  const vertical = {
+    top: `${(entry.startMin / 60) * HOUR_HEIGHT}px`,
+    height: `${heightPx}px`,
+    '--event-line': `${EVENT_LINE_PX}px`,
+    '--title-lines': String(Math.max(1, Math.floor((heightPx - EVENT_PADDING_PX) / EVENT_LINE_PX))),
+    // Right-hand columns on top: in the cascade each block's left edge,
+    // stripe and title start stay visible. Above the now line, too.
     zIndex: entry.column + 1,
+  };
+  if (entry.columns === 1) return { ...vertical, left: '0px', right: '1px' };
+  // Every block starts at its own column, so the start of every title stays
+  // in view; the minimum width only widens the overhang, never past the edge.
+  const box = eventBox(entry);
+  const room = (1 - box.left) * 100;
+  return {
+    ...vertical,
+    left: `${box.left * 100}%`,
+    width: `calc(min(max(${box.width * 100}%, ${MIN_EVENT_WIDTH}px), ${room}%) - 2px)`,
   };
 }
 
@@ -195,6 +207,12 @@ onBeforeUnmount(() => {
           <div
             v-if="col.isToday"
             class="week__now"
+            :style="{ top: `${nowOffset}px` }"
+            aria-hidden="true"
+          ></div>
+          <div
+            v-if="col.isToday"
+            class="week__now-dot"
             :style="{ top: `${nowOffset}px` }"
             aria-hidden="true"
           ></div>
@@ -379,18 +397,27 @@ onBeforeUnmount(() => {
   transition: background var(--duration-fast) var(--ease-out);
 }
 
-/* A hairline of the day's own surface keeps neighbouring blocks apart where
-   they touch or, at the minimum width, overlap. */
+/* A hairline of the day's own surface keeps cascading blocks apart where one
+   overlaps the next. */
 .week__event--shared {
   padding-inline: 8px 3px;
   box-shadow: 0 0 0 1px var(--bg-surface);
 }
 
-/* Narrow and tall: let the title wrap instead of cutting it to a few letters. */
-.week__event--shared:not(.week__event--compact) .week__event-title {
+/* Tall enough for lines: the title wraps between words only (hyphenated
+   where the document language allows), takes the lines the block has and
+   ends the last one with an ellipsis. The time follows and drops first. */
+.week__event:not(.week__event--compact) .week__event-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--title-lines);
+  line-clamp: var(--title-lines);
+  flex-shrink: 0;
   white-space: normal;
-  overflow-wrap: break-word;
+  overflow-wrap: normal;
+  word-break: normal;
   hyphens: auto;
+  line-height: var(--event-line);
 }
 
 .week__event:hover {
@@ -484,24 +511,27 @@ onBeforeUnmount(() => {
   text-decoration: line-through;
 }
 
+/* The line runs under the blocks, so it never cuts through a title; the
+   one dot on the day's left edge stays on top to mark the time. */
 .week__now {
   position: absolute;
   left: 0;
   right: 0;
-  z-index: 100;
+  z-index: 0;
   height: 2px;
   background: var(--accent-red);
   pointer-events: none;
 }
 
-.week__now::before {
-  content: '';
+.week__now-dot {
   position: absolute;
-  left: -3px;
-  top: -3px;
+  left: -5px;
+  z-index: 100;
   width: 8px;
   height: 8px;
+  margin-top: -3px;
   border-radius: var(--radius-full);
   background: var(--accent-red);
+  pointer-events: none;
 }
 </style>

@@ -467,6 +467,33 @@ export function layoutDay(items: CalendarItem[], day: Date): PositionedItem[] {
   return timed;
 }
 
+/**
+ * How far a block reaches past its own column, in columns. Google Calendar
+ * cascades the same way: the next column's block covers the overhang while
+ * both run, and the overhang is free width for the title the rest of the time.
+ */
+export const CASCADE_WIDTH = 1.7;
+
+/**
+ * Horizontal extent of a laid-out block, as fractions of the day's width.
+ *
+ * A block starts at its column's left edge. One that widened into free
+ * columns (`span` > 1) covers exactly those; otherwise it reaches
+ * `CASCADE_WIDTH` columns, never past the day's right edge — so the last
+ * column ends at the edge and a lone event fills the day.
+ */
+export function eventBox(entry: Pick<PositionedItem, 'column' | 'columns' | 'span'>): {
+  left: number;
+  width: number;
+} {
+  if (entry.columns <= 1) return { left: 0, width: 1 };
+  const share = 1 / entry.columns;
+  const left = entry.column * share;
+  const room = 1 - left;
+  const reach = entry.span > 1 ? entry.span * share : CASCADE_WIDTH * share;
+  return { left, width: Math.min(reach, room) };
+}
+
 // ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
