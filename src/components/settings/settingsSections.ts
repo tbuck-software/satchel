@@ -72,6 +72,9 @@ function sectionIsSupported(
   switch (section) {
     case 'shortcuts':
       return shell !== null && !shell.mobile;
+    // Plugins run in the desktop runtime only; a phone has none to list.
+    case 'plugins':
+      return shell !== null && shell.plugins;
     default:
       return true;
   }

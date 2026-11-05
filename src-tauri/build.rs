@@ -112,6 +112,7 @@ const COMMANDS: &[&str] = &[
     "poll_source",
     "import_opml",
     "list_plugins",
+    "open_plugins_folder",
     "set_plugin_permission",
     "set_plugin_enabled",
     "execute_plugin_command",

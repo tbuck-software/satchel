@@ -305,6 +305,7 @@
       "pluginDisabled": "Das Plugin \"{plugin}\" ist deaktiviert: {reason}",
       "pluginNotRegistered": "Das Plugin \"{plugin}\" ist nicht registriert.",
       "pluginPermissionPersistenceFailed": "Plugin-Berechtigungen sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "pluginsFolderUnavailable": "Der Plugin-Ordner konnte nicht geöffnet werden.",
       "pop3CredentialsRejected": "Keine POP3-Konfiguration hat diese Zugangsdaten akzeptiert. Prüfe den Benutzernamen oder trage den Server von Hand ein.",
       "pop3PlaintextRejected": "Dieses POP3-Konto steht auf Port 110 ohne Verschlüsselung. Satchel sendet das Passwort nicht im Klartext: stelle das Konto auf Port 995 mit TLS um.",
       "queueActionFailed": "Die vorgemerkte Aktion ist fehlgeschlagen: {message}",
@@ -2669,6 +2670,8 @@
       "verifyPassphrase": "Passphrase prüfen"
     },
     "plugins": {
+      "addHint": "Lege ein Plugin in den Plugin-Ordner deines Profils und starte Satchel neu.",
+      "addTitle": "Integrationen hinzufügen",
       "addWebhook": "Webhook hinzufügen",
       "auditTitle": "Plugin-Audit",
       "bearerToken": "Bearer {token}",
@@ -2690,6 +2693,7 @@
       "noContent": "Kein Inhalt.",
       "noneFound": "Noch keine Integrationen installiert",
       "noneFoundHint": "Integrationen erweitern Satchel um Funktionen, etwa OpenPGP-Verschlüsselung.",
+      "openFolder": "Plugin-Ordner öffnen",
       "openIntegrations": "Integrationen öffnen",
       "permissionUpdateFailed": "Plugin-Berechtigung konnte nicht aktualisiert werden: {error}",
       "pgpPluginDescription": "Erkennt und normalisiert OpenPGP-signierte und -verschlüsselte Nachrichteninhalte.",
@@ -3186,6 +3190,7 @@
       "hint": "Eine automatische Antwort, am Mail-Server gesetzt, damit sie auch bei geschlossenem Satchel greift.",
       "imapWarning": "Richte die automatische Antwort im Webmail deines Anbieters ein. Satchel kann sie nur bei Gmail- und Outlook-Konten selbst setzen.",
       "onlyContacts": "Nur an bekannte Kontakte antworten",
+      "openWebmail": "Webmail öffnen",
       "saved": "Gespeichert.",
       "title": "Out of Office / Abwesenheit",
       "until": "Bis"

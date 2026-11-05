@@ -1498,6 +1498,7 @@ const handlers: Record<string, Handler> = {
   record_frontend_diagnostic: () => undefined,
   app_build_info: () => ({ version: '0.1.0', commit: '44689dd', os: 'macos', arch: 'aarch64', debug: true }),
   open_logs_folder: () => undefined,
+  open_plugins_folder: () => undefined,
   diagnostics_overview: () => {
     const now = new Date().toISOString();
     const statuses = new Map<string, number>();

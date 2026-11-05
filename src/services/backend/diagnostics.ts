@@ -18,6 +18,11 @@ export async function backendAppBuildInfo(): Promise<BackendBuildInfo> {
   return invoke<BackendBuildInfo>('app_build_info');
 }
 
+/** Opens the profile's plugins folder, creating it first. Desktop only. */
+export async function backendOpenPluginsFolder(): Promise<void> {
+  return invoke<void>('open_plugins_folder');
+}
+
 export async function backendOpenLogsFolder(): Promise<void> {
   return invoke<void>('open_logs_folder');
 }

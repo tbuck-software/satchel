@@ -12,6 +12,7 @@ import {
   backendListPgpKeys,
   backendPgpEngineStatus,
   backendListPlugins,
+  backendOpenPluginsFolder,
   backendSetPluginEnabled,
   backendSetPluginPermission,
   backendUnlockPgpKeys,
@@ -194,6 +195,14 @@ async function setPluginEnabled(plugin: PluginView, enabled: boolean) {
     statusText.value = t('settings.plugins.enableFailed', {
       error: (error as Error).message ?? String(error),
     });
+  }
+}
+
+async function openPluginsFolder() {
+  try {
+    await backendOpenPluginsFolder();
+  } catch (error) {
+    toast.error(backendErrorLabel(error));
   }
 }
 
@@ -648,8 +657,21 @@ onMounted(() => {
         </AppButton>
       </div>
     </div>
+    <!-- Plugins install like editor or game add-ons: a folder in the profile.
+         The way there is a button, not a path to look up. -->
+    <div v-if="showPlugins && props.only !== 'all'" class="setting-group plugins-folder">
+      <div class="setting-row">
+        <div class="setting-info">
+          <span class="setting-label">{{ $t('settings.plugins.addTitle') }}</span>
+          <span class="setting-hint">{{ $t('settings.plugins.addHint') }}</span>
+        </div>
+        <AppButton variant="secondary" size="sm" @click="openPluginsFolder">
+          {{ $t('settings.plugins.openFolder') }}
+        </AppButton>
+      </div>
+    </div>
     <EmptyState
-      v-else-if="plugins.length === 0"
+      v-if="!loadingPlugins && props.only === 'plugins' && plugins.length === 0"
       class="plugins-empty"
       :title="$t('settings.plugins.noneFound')"
       :description="$t('settings.plugins.noneFoundHint')"

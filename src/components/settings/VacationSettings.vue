@@ -4,12 +4,14 @@ import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
 import {
   backendGetVacation,
+  backendOpenExternalUrl,
   backendSetVacation,
   backendSupportsNativeCommands,
 } from '@/services/backend';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
+import { webmailFor } from '@/utils/webmailLinks';
 
 const { t } = useI18n();
 const accounts = useAccountsStore();
@@ -22,6 +24,16 @@ const endsAt = ref<string>('');
 const onlyContacts = ref(false);
 const status = ref('');
 const saving = ref(false);
+
+/** Where an IMAP user sets the reply instead, when their provider is known. */
+const webmail = computed(() => {
+  const account = accounts.emailAccounts.find((acc) => acc.id === accountId.value);
+  return account ? webmailFor(account.email) : null;
+});
+
+function openWebmail() {
+  if (webmail.value) void backendOpenExternalUrl(webmail.value);
+}
 
 const isOauthAccount = computed(() => {
   const a = accounts.emailAccounts.find((acc) => acc.id === accountId.value);
@@ -103,6 +115,9 @@ async function save() {
         <p class="notice" role="note">
           <AppIcon class="notice__icon"><path d="M8 2.5 14 13H2Z" /><path d="M8 6.5v3M8 11.2h.01" /></AppIcon>
           <span>{{ $t('settings.vacation.imapWarning') }}</span>
+          <AppButton v-if="webmail" class="notice__action" variant="secondary" size="sm" @click="openWebmail">
+            {{ $t('settings.vacation.openWebmail') }}
+          </AppButton>
         </p>
       </div>
       <div v-else class="setting-row">
@@ -159,6 +174,11 @@ async function save() {
   font-size: var(--font-size-sm);
   line-height: 1.45;
 }
+.notice__action {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+}
+
 .notice__icon {
   flex-shrink: 0;
   margin-top: 2px;
