@@ -1,16 +1,15 @@
 <script setup lang="ts">
 /**
  * Stands where EmailRenderer draws its Original / Auto-dark / Text switch
- * (see bodyViewSwitch.ts). The desktop keeps the segmented control. The phone
- * moves the choice into the message's ⋯ sheet, which reads it from the state
- * reported here; above the body it leaves one muted line, and only while the
- * mail is not shown the way it opened: what it is shown as, and the way back.
+ * (see bodyViewSwitch.ts). The choice itself moves into the message's chrome,
+ * which reads it from the state reported here: a menu among the header's
+ * actions on the desktop, the ⋯ sheet on the phone. Above the body it leaves
+ * one muted line, and only while the mail is not shown the way it opened:
+ * what it is shown as, and the way back.
  */
 import { computed, inject, onBeforeUnmount, watchEffect } from 'vue';
 import { useI18n } from 'vue-i18n';
 import AppButton from '@/components/ui/AppButton.vue';
-import SegmentedControl from '@/components/ui/SegmentedControl.vue';
-import { useUiStore } from '@/stores/ui';
 import { BODY_VIEW_STATE, type BodyViewOption } from './bodyViewState';
 
 const props = defineProps<{
@@ -21,7 +20,6 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
 
-const ui = useUiStore();
 const { t } = useI18n();
 const state = inject(BODY_VIEW_STATE, null);
 
@@ -55,14 +53,7 @@ const defaultOption = computed(() => props.options.find((option) => option.value
 </script>
 
 <template>
-  <SegmentedControl
-    v-if="!ui.isMobile"
-    :options="props.options"
-    :model-value="props.modelValue"
-    :aria-label="props.ariaLabel"
-    @update:model-value="choose"
-  />
-  <p v-else-if="defaultOption && props.modelValue !== props.defaultValue" class="body-view-note">
+  <p v-if="defaultOption && props.modelValue !== props.defaultValue" class="body-view-note">
     <span>{{ shownAs }}</span>
     <span aria-hidden="true">·</span>
     <AppButton

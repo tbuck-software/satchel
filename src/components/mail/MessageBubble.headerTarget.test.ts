@@ -94,3 +94,37 @@ describe('the message header on the phone', () => {
     expect(wrapper.get('.message-sender-group').classes()).not.toContain('message-sender-group--target');
   });
 });
+
+describe('the message header on the desktop', () => {
+  it('splits the address so a narrow header keeps its domain', () => {
+    useUiStore().isMobile = false;
+    wrapper = render({
+      message: { ...message(), from: { name: 'Google', email: 'businessprofile-noreply@google.com' } },
+    });
+
+    const address = wrapper.get('.message-sender-email');
+    expect(address.get('.message-sender-email__local').text()).toBe('businessprofile-noreply');
+    expect(address.get('.message-sender-email__domain').text()).toBe('@google.com');
+    // Read as one address, and the whole of it is a hover away.
+    expect(address.text()).toBe('businessprofile-noreply@google.com');
+    expect(address.attributes('title')).toBe('businessprofile-noreply@google.com');
+  });
+
+  it('keeps the date, the actions and the fold control in one group', async () => {
+    useUiStore().isMobile = false;
+    wrapper = render();
+
+    const side = wrapper.get('.message-header-side');
+    expect(side.classes()).toContain('message-header-side--stacked');
+    expect(side.find('time').exists()).toBe(true);
+    const fold = side.get('.message-hover-actions .message-collapse-toggle');
+    expect(fold.attributes('aria-label')).toBe('Collapse message');
+
+    await fold.trigger('click');
+    expect(wrapper.emitted('toggleCollapsed')).toHaveLength(1);
+
+    await wrapper.setProps({ collapsed: true });
+    expect(wrapper.get('.message-header-side').classes()).not.toContain('message-header-side--stacked');
+    expect(wrapper.get('.message-collapse-toggle').attributes('aria-label')).toBe('Expand message');
+  });
+});

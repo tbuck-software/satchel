@@ -34,14 +34,17 @@ useToastClearance(barRef);
       <span class="reply-bar__placeholder">
         {{ $t('thread.reply.to', { name: recipient }) }}
       </span>
-      <span class="reply-bar__identity">
+      <!-- Which account answers, as a quiet chip against the button it
+           qualifies. The dot is the account's colour, the marker the
+           sidebar and the list draw for it. -->
+      <span v-if="identity" class="reply-bar__identity">
         <span
           v-if="identityColor"
           class="reply-bar__dot"
-          :style="{ background: identityColor }"
+          :style="{ '--reply-identity-color': identityColor }"
           aria-hidden="true"
         />
-        {{ $t('thread.reply.as', { identity }) }}
+        <span class="reply-bar__identity-text">{{ $t('thread.reply.as', { identity }) }}</span>
       </span>
     </CardButton>
     <AppButton variant="primary" size="sm" @click="$emit('reply')">
@@ -69,11 +72,12 @@ useToastClearance(barRef);
 
 .reply-bar__field {
   flex: 1 1 auto;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-md);
 }
 
 .reply-bar__placeholder {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -82,19 +86,42 @@ useToastClearance(barRef);
   font-size: var(--font-size-md);
 }
 
+/* At the end of the field, against the Reply button, rather than wherever
+   the placeholder happens to end. The placeholder gives way first; a long
+   account name stops at half the field and ends in an ellipsis. */
 .reply-bar__identity {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1-5);
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 50%;
+  height: 24px;
+  padding: 0 var(--space-sm) 0 var(--space-1-5);
+  border-radius: var(--radius-full);
+  background: var(--bg-raised);
   /* Which account answers is a fact to check, not a placeholder. */
   color: var(--text-secondary);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
+  font-weight: var(--weight-medium);
 }
 
+.reply-bar__identity-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The account's colour as a swatch, not a signal: a touch larger than the
+   old 7px dot and edged in the chip's fill, so a saturated red reads as a
+   marker beside the name rather than an alert in the middle of the bar. */
 .reply-bar__dot {
-  width: 7px;
-  height: 7px;
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
   border-radius: var(--radius-full);
+  background: var(--reply-identity-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--reply-identity-color) 22%, var(--bg-raised));
 }
 </style>

@@ -8,10 +8,10 @@ import { useUiStore } from '@/stores/ui';
 import MessageBubble from './MessageBubble.vue';
 
 /*
- * The body's Original / Auto-dark / Text switch. The desktop keeps the
- * segmented control above the body. On the phone it moved into the message's
- * ⋯ sheet as a "Show as" choice; above the body only a muted line remains,
- * and only while the mail is not shown the way it opened.
+ * The body's Original / Auto-dark / Text switch. It no longer stands above
+ * the body: on the desktop it is a menu among the header's actions, on the
+ * phone a "Show as" choice in the message's ⋯ sheet. Above the body only a
+ * muted line remains, and only while the mail is not shown the way it opened.
  */
 
 let wrapper: VueWrapper | null = null;
@@ -67,15 +67,53 @@ afterEach(() => {
 });
 
 describe('the render-mode switch', () => {
-  it('stays a segmented control above the body on the desktop', async () => {
+  it('is a menu among the header actions on the desktop, not a control above the body', async () => {
     useUiStore().isMobile = false;
     wrapper = render();
     await flushPromises();
 
-    const segmented = wrapper.get('.segmented');
-    expect(segmented.attributes('aria-label')).toBe('Message rendering');
-    expect(segmented.findAll('button').map((button) => button.text())).toEqual(['Original', 'Text']);
+    // Nothing stands between the sender and the mail while it shows as sent.
+    expect(wrapper.find('.segmented').exists()).toBe(false);
     expect(wrapper.find('.body-view-note').exists()).toBe(false);
+
+    const trigger = wrapper.get('.message-header .message-view-mode-trigger');
+    expect(trigger.attributes('aria-label')).toBe('Show as');
+    expect(trigger.attributes('aria-haspopup')).toBe('menu');
+    await trigger.trigger('click');
+    await flushPromises();
+
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"][aria-label="Show as"]');
+    expect(menu).not.toBeNull();
+    const choices = Array.from(menu!.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
+    expect(choices.map((choice) => choice.textContent?.trim())).toEqual(['Original', 'Text']);
+    expect(choices.map((choice) => choice.getAttribute('aria-checked'))).toEqual(['true', 'false']);
+
+    choices[1]!.click();
+    await flushPromises();
+
+    expect(document.body.querySelector('[role="menu"][aria-label="Show as"]')).toBeNull();
+    expect(wrapper.find('iframe.satchel-email-document').exists()).toBe(false);
+    expect(wrapper.get('.plain-document-group').text()).toContain('Wochenangebote für Büro');
+    const note = wrapper.get('.body-view-note');
+    expect(note.text()).toContain('Shown as text');
+
+    await note.get('button').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('iframe.satchel-email-document').exists()).toBe(true);
+    expect(wrapper.find('.body-view-note').exists()).toBe(false);
+  });
+
+  it('offers no menu on the desktop for a body with nothing to switch to', async () => {
+    useUiStore().isMobile = false;
+    wrapper = mount(MessageBubble, {
+      attachTo: document.body,
+      props: { message: { ...message(), bodyHtml: '', bodyText: 'Just text.' }, canReply: true },
+      global: { stubs: { SenderFilingMenu: true } },
+    });
+    await flushPromises();
+
+    expect(wrapper.find('.message-view-mode-trigger').exists()).toBe(false);
   });
 
   it('moves into the ⋯ sheet on the phone and leaves a way back above the body', async () => {
