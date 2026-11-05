@@ -67,6 +67,10 @@ gehosteten Dienst heute aus. Diese Tür soll trotzdem billig offen bleiben.
   Adresse des Hubs (EndpointId und Relay-URL). Ein Lookup-Dienst, von n0
   oder selbst betrieben (`iroh-dns-server`), ist wie ein Relay ein optionaler
   Eintrag.
+- Wechselt der Hub sein Relay, schreibt er die neue Relay-Liste zuerst ins
+  Ereignis-Log und bleibt eine Übergangszeit über das alte Relay erreichbar.
+  Jedes Gerät behält die zuletzt bekannte Liste als Rückfall und versucht
+  beim Verbindungsaufbau alle Einträge.
 
 ### Ereignis-Log Ende-zu-Ende verschlüsselt
 
@@ -88,7 +92,8 @@ gehosteten Dienst heute aus. Diese Tür soll trotzdem billig offen bleiben.
 - Ein **vertrauter Hub** gehört dem Nutzer und hält den Log-Schlüssel. Er
   darf Einmal-Aktionen selbst ausführen. Für geplantes Senden braucht er die
   Zugangsdaten des Kontos: Passwörter per Pairing (0010), für OAuth-Konten
-  eine eigene Autorisierung, weil Tokens nie übertragen werden (0009).
+  eine eigene Autorisierung, weil Tokens nie übertragen werden (0009). Ein
+  Hub ohne Bildschirm holt sie über den Browser eines gepaarten Geräts.
   Beispiele: `satchel --headless` auf eigenem VPS, NAS oder Mac mini, oder
   der Desktop-Client mit Lease (0008).
 - Ein **blinder Hub** hat den Schlüssel nicht. Er speichert Chiffretext,
@@ -128,6 +133,8 @@ ein gehosteter Dienst im Sinne von 0001 und braucht ein eigenes ADR, das
   darf iroh im Client nicht lange hinter der aktuellen Version liegen.
 - Das Bedrohungsmodell aus 0010 gilt weiter: Wer den QR-Code und den
   Einmal-Code abgreift, bekommt den Log-Schlüssel.
+- Vor der Umsetzung klärt ein Probe-Build, ob iroh für Android und iOS
+  baut (0006). Scheitert er, ist das ein eigenes ADR wert.
 - Nicht entschieden sind hier: Wire-Format, Verschlüsselungsverfahren und
   Schlüsselrotation im Detail, Kompaktierung des Logs, Push aufs Handy.
 
