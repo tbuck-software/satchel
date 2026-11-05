@@ -13,6 +13,8 @@ import IconButton from '@/components/ui/IconButton.vue';
 import { useCertificateTrustStore } from '@/stores/certificateTrust';
 import { certificateShort, formatCertificateMoment } from '@/utils/certificateLabels';
 import { useConnectionStore } from '@/stores/connection';
+import { useAccountQuotaStore } from '@/stores/accountQuota';
+import { formatQuotaPercent, fullestQuotaFigure } from '@/utils/mailboxQuota';
 import { backendErrorKey, backendErrorStringParam } from '@/utils/backendErrors';
 import { accountCertificateRejection } from '@/utils/certificateRejection';
 import { formatMoment } from '@/utils/listTime';
@@ -28,6 +30,7 @@ const router = useRouter();
 const ui = useUiStore();
 const certificates = useCertificateTrustStore();
 const connection = useConnectionStore();
+const quotas = useAccountQuotaStore();
 
 /** Since when each account's other sync failures have run, from the live run. */
 const failingSince = computed(() => {
@@ -41,11 +44,25 @@ const failingSince = computed(() => {
   return since;
 });
 
-type Marker = { kind: 'certificate' | 'exception' | 'outage'; label: string };
+type Marker = { kind: 'certificate' | 'exception' | 'outage' | 'quota-warning' | 'quota-critical'; label: string };
+
+/**
+ * A mailbox at 90 % or more, quiet below 98 % and red from there. Below 90 %
+ * the meter in the account settings says enough.
+ */
+function quotaMarker(accountId: string, name: string): Marker | null {
+  const level = quotas.levelFor(accountId);
+  if (level !== 'warning' && level !== 'critical') return null;
+  const percent = formatQuotaPercent(fullestQuotaFigure(quotas.quotaFor(accountId))!.ratio);
+  return level === 'critical'
+    ? { kind: 'quota-critical', label: t('accountQuota.sidebarCritical', { account: name, percent }) }
+    : { kind: 'quota-warning', label: t('accountQuota.sidebarWarning', { account: name, percent }) };
+}
 
 /**
  * The account row's marker and its tooltip, the short form of the banner. A
  * rejected certificate wins over the generic failure: it has its own dialog.
+ * An account that does not sync at all outranks one whose mailbox fills up.
  */
 function markerFor(accountId: string, name: string): Marker | null {
   const problem = certificates.problemFor(accountId);
@@ -56,6 +73,8 @@ function markerFor(accountId: string, name: string): Marker | null {
     const since = formatMoment(failingSince.value.get(accountId)) ?? t('common.unknown');
     return { kind: 'outage', label: t('errors.banner.outageShort', { account: name, since }) };
   }
+  const quota = quotaMarker(accountId, name);
+  if (quota) return quota;
   const exception = certificates.exceptionFor(accountId);
   if (exception) {
     return {
@@ -77,6 +96,10 @@ function openMarker(accountId: string, marker: Marker) {
   ui.closeMailboxSwitcher();
   if (marker.kind === 'outage') {
     void router.push({ name: 'settings', query: { section: 'accounts', account: accountId } });
+  } else if (marker.kind === 'quota-warning' || marker.kind === 'quota-critical') {
+    // The quota meter sits on the account's card. No `account`: that opens
+    // the password form, which is not what a full mailbox needs.
+    void router.push({ name: 'settings', query: { section: 'accounts' } });
   } else {
     certificates.openDetails(accountId);
   }
@@ -100,8 +123,10 @@ function open(accountId: string) {
 }
 
 // A lone account that is always visible has nothing to switch to or look
-// in on; the section only appears once there is a choice or a schedule.
+// in on; the section only appears once there is a choice or a schedule — or
+// a mailbox filling up, which has no other place in the sidebar.
 const shown = computed(() => accounts.emailAccounts.length > 1
+  || accounts.emailAccounts.some((account) => quotaMarker(account.id, account.displayName) !== null)
   || accounts.emailAccounts.some((account) => accounts.visibilityFor(account.id)?.policy.mode !== undefined
     && accounts.visibilityFor(account.id)?.policy.mode !== 'always'));
 
@@ -176,12 +201,23 @@ function openMenu(accountId: string, event: MouseEvent) {
       <IconButton
         v-if="markers.get(account.id)"
         class="sidebar-accounts__certificate"
-        :class="{ 'sidebar-accounts__certificate--problem': markers.get(account.id)!.kind !== 'exception' }"
+        :class="{
+          'sidebar-accounts__certificate--problem': markers.get(account.id)!.kind === 'certificate' || markers.get(account.id)!.kind === 'outage',
+          'sidebar-accounts__quota': markers.get(account.id)!.kind === 'quota-warning',
+          'sidebar-accounts__quota--critical': markers.get(account.id)!.kind === 'quota-critical',
+        }"
         :size="ui.isMobile ? 'lg' : 'sm'"
         :title="markers.get(account.id)!.label"
         @click="openMarker(account.id, markers.get(account.id)!)"
       >
-        <AppIcon v-if="markers.get(account.id)!.kind !== 'exception'">
+        <!-- Lucide `hard-drive`: the server's storage, not this device's. -->
+        <AppIcon v-if="markers.get(account.id)!.kind === 'quota-warning' || markers.get(account.id)!.kind === 'quota-critical'" :grid="24">
+          <path d="M22 12H2" />
+          <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+          <path d="M6 16h.01" />
+          <path d="M10 16h.01" />
+        </AppIcon>
+        <AppIcon v-else-if="markers.get(account.id)!.kind !== 'exception'">
           <path d="M8 2.4 14.2 13H1.8L8 2.4Z" />
           <path d="M8 6.6v3" />
           <path d="M8 11.6h.01" />
@@ -218,10 +254,20 @@ function openMenu(accountId: string, event: MouseEvent) {
 /* Prefixed with the row to outrank IconButton's own colours. */
 .sidebar-accounts__row .sidebar-accounts__certificate { color: var(--text-tertiary); }
 .sidebar-accounts__row .sidebar-accounts__certificate--problem { color: var(--accent-orange); }
+.sidebar-accounts__row .sidebar-accounts__quota { color: var(--accent-amber); }
+.sidebar-accounts__row .sidebar-accounts__quota--critical { color: var(--accent-red); }
 @media (hover: hover) {
   .sidebar-accounts__row .sidebar-accounts__certificate--problem:hover:not(:disabled) {
     color: var(--accent-orange);
     background: color-mix(in srgb, var(--accent-orange) 12%, transparent);
+  }
+  .sidebar-accounts__row .sidebar-accounts__quota:hover:not(:disabled) {
+    color: var(--accent-amber);
+    background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+  }
+  .sidebar-accounts__row .sidebar-accounts__quota--critical:hover:not(:disabled) {
+    color: var(--accent-red);
+    background: color-mix(in srgb, var(--accent-red) 12%, transparent);
   }
 }
 /* NavItem's own count, kept beside the clock that took its slot. */

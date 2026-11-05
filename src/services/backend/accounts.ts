@@ -270,3 +270,10 @@ export function backendGetAccountVisibility(): Promise<BackendAccountVisibilityS
 export function backendSetAccountVisibility(accountId: string, policy: BackendAccountVisibilityPolicy): Promise<void> {
   return invoke('set_account_visibility', { accountId, policy });
 }
+
+export type BackendAccountQuota = import('./generated/app/commands/accounts/AccountQuotaDto').AccountQuotaDto;
+
+/** The last quota each account's server reported; only accounts with a limit. */
+export function backendListAccountQuotas(): Promise<BackendAccountQuota[]> {
+  return invoke('list_account_quotas');
+}

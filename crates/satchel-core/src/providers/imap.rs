@@ -1423,9 +1423,13 @@ async fn envelopes_off_runtime(
     .map_err(|error| format!("imap message parsing failed: {error}"))
 }
 
-#[async_trait::async_trait]
-impl MailProvider for ImapProvider {
-    async fn sync_folders(&self) -> crate::sync::errors::SyncResult<Vec<RemoteFolder>> {
+impl ImapProvider {
+    /// LIST on a fresh session; with `read_quota`, the quota of INBOX is read
+    /// on the same session before it logs out.
+    async fn list_folders(
+        &self,
+        read_quota: bool,
+    ) -> SyncResult<(Vec<RemoteFolder>, super::quota::QuotaProbe)> {
         let mut session = self.login_session().await?;
         let names =
             collect_imap_response(Self::op_timeout(), session.list(None, Some("*")), "LIST")
@@ -1480,8 +1484,26 @@ impl MailProvider for ImapProvider {
             }
         }
 
+        let quota = if read_quota {
+            super::quota::read_imap_quota(&mut session, Self::op_timeout()).await
+        } else {
+            super::quota::QuotaProbe::Unsupported
+        };
         let _ = timeout(Self::op_timeout(), session.logout()).await;
-        Ok(folders)
+        Ok((folders, quota))
+    }
+}
+
+#[async_trait::async_trait]
+impl MailProvider for ImapProvider {
+    async fn sync_folders(&self) -> crate::sync::errors::SyncResult<Vec<RemoteFolder>> {
+        Ok(self.list_folders(false).await?.0)
+    }
+
+    async fn sync_folders_with_quota(
+        &self,
+    ) -> SyncResult<(Vec<RemoteFolder>, super::quota::QuotaProbe)> {
+        self.list_folders(true).await
     }
 
     async fn sync_messages(

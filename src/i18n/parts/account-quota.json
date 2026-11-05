@@ -1,0 +1,32 @@
+{
+  "en": {
+    "accountQuota": {
+      "title": "Mailbox storage",
+      "storageUsed": "{used} of {limit} used",
+      "messagesUsed": "{used} of {limit} messages",
+      "storageMeter": "Mailbox storage used",
+      "messagesMeter": "Messages in the mailbox",
+      "asOf": "As of {time}",
+      "warning": "Almost full. Once it is full, new mail bounces.",
+      "critical": "Full or nearly full. New mail may already bounce.",
+      "freeUp": "Deleting large messages and emptying Trash makes room.",
+      "sidebarWarning": "{account}: mailbox {percent} full. Open account settings.",
+      "sidebarCritical": "{account}: mailbox {percent} full, new mail may bounce. Open account settings."
+    }
+  },
+  "de": {
+    "accountQuota": {
+      "title": "Postfach-Speicher",
+      "storageUsed": "{used} von {limit} belegt",
+      "messagesUsed": "{used} von {limit} Nachrichten",
+      "storageMeter": "Belegter Postfach-Speicher",
+      "messagesMeter": "Nachrichten im Postfach",
+      "asOf": "Stand: {time}",
+      "warning": "Fast voll. Ist es voll, kommen neue Mails zurück.",
+      "critical": "Voll oder fast voll. Neue Mails kommen womöglich schon zurück.",
+      "freeUp": "Große Mails löschen und den Papierkorb leeren schafft Platz.",
+      "sidebarWarning": "{account}: Postfach zu {percent} voll. Kontoeinstellungen öffnen.",
+      "sidebarCritical": "{account}: Postfach zu {percent} voll, neue Mails kommen womöglich zurück. Kontoeinstellungen öffnen."
+    }
+  }
+}

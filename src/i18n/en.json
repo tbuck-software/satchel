@@ -22,6 +22,19 @@
     "settings": "Account settings…",
     "title": "Appearance"
   },
+  "accountQuota": {
+    "asOf": "As of {time}",
+    "critical": "Full or nearly full. New mail may already bounce.",
+    "freeUp": "Deleting large messages and emptying Trash makes room.",
+    "messagesMeter": "Messages in the mailbox",
+    "messagesUsed": "{used} of {limit} messages",
+    "sidebarCritical": "{account}: mailbox {percent} full, new mail may bounce. Open account settings.",
+    "sidebarWarning": "{account}: mailbox {percent} full. Open account settings.",
+    "storageMeter": "Mailbox storage used",
+    "storageUsed": "{used} of {limit} used",
+    "title": "Mailbox storage",
+    "warning": "Almost full. Once it is full, new mail bounces."
+  },
   "accountVisibility": {
     "accounts": "Accounts",
     "always": "Always",

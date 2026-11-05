@@ -383,6 +383,46 @@ mod tests {
     }
 }
 
+/// The last quota an account's server reported. Storage is in bytes; a pair
+/// is `None` when the server sets no such limit. Only accounts with at least
+/// one limit are listed.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/accounts/")
+)]
+pub struct AccountQuotaDto {
+    pub account_id: String,
+    pub storage_used_bytes: Option<i64>,
+    pub storage_limit_bytes: Option<i64>,
+    pub messages_used: Option<i64>,
+    pub messages_limit: Option<i64>,
+    /// RFC 3339; when the numbers were read.
+    pub fetched_at: Option<String>,
+}
+
+#[tauri::command]
+pub async fn list_account_quotas(
+    pool: tauri::State<'_, crate::db::ReadPool>,
+) -> CommandResult<Vec<AccountQuotaDto>> {
+    let rows = satchel_core::db::account_quota::AccountQuotaRepository::new(pool.inner().as_ref())
+        .list_known()
+        .await
+        .map_err(CommandError::unexpected)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| AccountQuotaDto {
+            account_id: row.account_id,
+            storage_used_bytes: row.storage_used_bytes,
+            storage_limit_bytes: row.storage_limit_bytes,
+            messages_used: row.messages_used,
+            messages_limit: row.messages_limit,
+            fetched_at: row.fetched_at,
+        })
+        .collect())
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
 #[cfg_attr(

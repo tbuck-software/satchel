@@ -687,6 +687,7 @@ pub fn run() {
             commands::app_update::acknowledge_app_update_flush,
             commands::accounts::list_accounts,
             commands::accounts::get_account_visibility,
+            commands::accounts::list_account_quotas,
             commands::accounts::set_account_visibility,
             commands::accounts::add_account,
             commands::accounts::deactivate_account,

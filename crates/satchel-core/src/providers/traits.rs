@@ -392,6 +392,19 @@ pub enum MailEvent {
 #[async_trait]
 pub trait MailProvider: Send + Sync {
     async fn sync_folders(&self) -> SyncResult<Vec<RemoteFolder>>;
+    /// `sync_folders`, plus the mailbox quota read on the same connection, so
+    /// the quota costs no login of its own. Only the folder list can fail the
+    /// call; a quota the server refuses comes back as `QuotaProbe::Failed`.
+    /// Providers whose quota needs a scope Satchel does not hold keep this
+    /// default.
+    async fn sync_folders_with_quota(
+        &self,
+    ) -> SyncResult<(Vec<RemoteFolder>, super::quota::QuotaProbe)> {
+        Ok((
+            self.sync_folders().await?,
+            super::quota::QuotaProbe::Unsupported,
+        ))
+    }
     async fn sync_messages(&self, folder: &str, since: SyncCheckpoint) -> SyncResult<SyncBatch>;
     /// Return the current lightweight message state for a folder when the
     /// provider can do so efficiently. This lets incremental sync reconcile

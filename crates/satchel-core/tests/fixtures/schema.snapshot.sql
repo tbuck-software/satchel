@@ -85,6 +85,7 @@ index idx_webhook_deliveries_due: CREATE INDEX idx_webhook_deliveries_due ON web
 index idx_workflow_events_created: CREATE INDEX idx_workflow_events_created ON workflow_events(created_at DESC)
 index idx_workflow_events_thread: CREATE INDEX idx_workflow_events_thread ON workflow_events(thread_id)
 table account_aliases (id TEXT PK1, account_id TEXT NOT NULL, email TEXT NOT NULL, display_name TEXT, is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)
+table account_quota (account_id TEXT PK1, storage_used_bytes INTEGER, storage_limit_bytes INTEGER, messages_used INTEGER, messages_limit INTEGER, fetched_at TEXT, checked_at TEXT NOT NULL)
 table account_sync_leases (account_id TEXT PK1, owner_token TEXT NOT NULL, lease_expires_at TEXT NOT NULL, updated_at TEXT NOT NULL)
 table accounts (id TEXT PK1, display_name TEXT NOT NULL, email TEXT NOT NULL, provider TEXT NOT NULL, config TEXT NOT NULL, credentials_ref TEXT NOT NULL, sync_state TEXT, color TEXT, is_active INTEGER DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_oauth_error TEXT, last_oauth_error_at TEXT, last_sync_at TEXT, sync_status TEXT NOT NULL DEFAULT 'idle', last_sync_error TEXT, last_sync_error_at TEXT, sync_progress_json TEXT, outlook_immutable_ids_migrated INTEGER NOT NULL DEFAULT 0, kind TEXT NOT NULL DEFAULT 'email', avatar TEXT, sync_failing_since TEXT)
 table app_settings (key TEXT PK1, value TEXT NOT NULL, updated_at TEXT NOT NULL)

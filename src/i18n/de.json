@@ -22,6 +22,19 @@
     "settings": "Kontoeinstellungen …",
     "title": "Darstellung"
   },
+  "accountQuota": {
+    "asOf": "Stand: {time}",
+    "critical": "Voll oder fast voll. Neue Mails kommen womöglich schon zurück.",
+    "freeUp": "Große Mails löschen und den Papierkorb leeren schafft Platz.",
+    "messagesMeter": "Nachrichten im Postfach",
+    "messagesUsed": "{used} von {limit} Nachrichten",
+    "sidebarCritical": "{account}: Postfach zu {percent} voll, neue Mails kommen womöglich zurück. Kontoeinstellungen öffnen.",
+    "sidebarWarning": "{account}: Postfach zu {percent} voll. Kontoeinstellungen öffnen.",
+    "storageMeter": "Belegter Postfach-Speicher",
+    "storageUsed": "{used} von {limit} belegt",
+    "title": "Postfach-Speicher",
+    "warning": "Fast voll. Ist es voll, kommen neue Mails zurück."
+  },
   "accountVisibility": {
     "accounts": "Konten",
     "always": "Immer",

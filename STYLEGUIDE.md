@@ -467,6 +467,7 @@ Reusable building blocks — use these instead of hand-rolled buttons/rows:
 | `FilterPill`        | One pill in a filter strip: pressed state, optional identity dot and count. `pressed`, not `active` — a strip is a set of toggles |
 | `SearchInput`       | Editable search/filter field with a search glyph, optional trailing control, and exposed focus/select methods. Uses `--input-height` at 38px desktop and 44px below 1020px |
 | `CountBadge`        | Rounded count badge, tones neutral/accent/danger               |
+| `UsageMeter`        | How much of a fixed capacity is used (a mailbox quota): a thin bar with `role="meter"`, tones neutral/warning/danger. Not for task progress — that moves, and is a `progressbar` |
 | `KeyCap`            | One key as the keyboard prints it (`⌘K`, `Ctrl+K`, `g`). Palette, shortcut help and hints share it; a sequence or a set of alternatives is several caps, laid out by the caller. Labels come from `bindingKeycaps` |
 | `SectionHeading`    | Group label ("Heute", "Ordner") with optional count/trailing slot |
 | `PaneHeader`        | Pane top bar: title, subtitle, count, actions slot, drag region |

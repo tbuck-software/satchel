@@ -998,6 +998,33 @@ async fn stamp_inbox_fetch(
     Ok(())
 }
 
+/// Lists the account's folders; when the quota is due, reads it on the same
+/// session and stores it. A quota that cannot be stored is logged, never a
+/// reason to fail the sync.
+async fn list_folders_and_pace_quota(
+    pool: &SqlitePool,
+    account_id: &str,
+    provider: &dyn satchel_core::providers::traits::MailProvider,
+) -> satchel_core::sync::errors::SyncResult<Vec<RemoteFolder>> {
+    let quotas = satchel_core::db::account_quota::AccountQuotaRepository::new(pool);
+    let now = chrono::Utc::now();
+    let due = quotas.due(account_id, now).await.unwrap_or_else(|error| {
+        tracing::warn!(%account_id, %error, "could not read when the quota was last checked");
+        false
+    });
+    if !due {
+        return provider.sync_folders().await;
+    }
+    let (folders, probe) = provider.sync_folders_with_quota().await?;
+    if let satchel_core::providers::quota::QuotaProbe::Failed(reason) = &probe {
+        tracing::info!(%account_id, %reason, "mailbox quota unavailable this time");
+    }
+    if let Err(error) = quotas.record(account_id, &probe, now).await {
+        tracing::warn!(%account_id, %error, "could not store the mailbox quota");
+    }
+    Ok(folders)
+}
+
 const ACCOUNT_SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 async fn account_run_with_deadline<T>(
@@ -1222,8 +1249,7 @@ pub(crate) async fn sync_mailboxes(
             };
             let mut folders = match cached_inbox {
                 Some(folder) => vec![folder],
-                None => provider
-                    .sync_folders()
+                None => list_folders_and_pace_quota(pool, &account.id, provider.as_ref())
                     .await
                     .map_err(|error| error.to_string())?,
             };
@@ -2653,6 +2679,133 @@ mod tests {
 
         assert!(summary.failures.is_empty(), "{:?}", summary.failures);
         assert_eq!(failing_since(&pool).await, None);
+    }
+}
+
+#[cfg(test)]
+mod quota_pacing_tests {
+    use super::list_folders_and_pace_quota;
+    use crate::providers::traits::{
+        FlagUpdate, MailProvider, MessageRef, OutgoingMessage, RemoteFolder, SyncBatch,
+        SyncCheckpoint,
+    };
+    use satchel_core::providers::quota::{MailboxQuota, QuotaProbe, QuotaUsage};
+    use satchel_core::sync::errors::SyncResult;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Counts which listing the sync asked for; the quota is always 95 % full.
+    #[derive(Default)]
+    struct CountingProvider {
+        plain: AtomicUsize,
+        with_quota: AtomicUsize,
+    }
+
+    fn inbox() -> Vec<RemoteFolder> {
+        vec![RemoteFolder {
+            id: "INBOX".into(),
+            name: "INBOX".into(),
+            kind: Some("inbox".into()),
+        }]
+    }
+
+    #[async_trait::async_trait]
+    impl MailProvider for CountingProvider {
+        async fn sync_folders(&self) -> SyncResult<Vec<RemoteFolder>> {
+            self.plain.fetch_add(1, Ordering::SeqCst);
+            Ok(inbox())
+        }
+        async fn sync_folders_with_quota(&self) -> SyncResult<(Vec<RemoteFolder>, QuotaProbe)> {
+            self.with_quota.fetch_add(1, Ordering::SeqCst);
+            Ok((
+                inbox(),
+                QuotaProbe::Read(MailboxQuota {
+                    storage: Some(QuotaUsage {
+                        used: 95,
+                        limit: 100,
+                    }),
+                    messages: None,
+                }),
+            ))
+        }
+        async fn sync_messages(&self, _: &str, _: SyncCheckpoint) -> SyncResult<SyncBatch> {
+            unreachable!()
+        }
+        async fn send(&self, _: OutgoingMessage) -> SyncResult<()> {
+            unreachable!()
+        }
+        async fn set_flags(&self, _: &[MessageRef], _: FlagUpdate) -> SyncResult<()> {
+            unreachable!()
+        }
+        async fn move_messages(&self, _: &[MessageRef], _: &str) -> SyncResult<()> {
+            unreachable!()
+        }
+        async fn delete_messages(&self, _: &[MessageRef]) -> SyncResult<()> {
+            unreachable!()
+        }
+    }
+
+    async fn pool() -> sqlx::SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref,
+                                   created_at, updated_at)
+             VALUES ('acc', 'Work', 'me@example.test', 'imap', '{}', '', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn the_quota_rides_on_one_full_sync_and_then_waits() {
+        let pool = pool().await;
+        let provider = CountingProvider::default();
+
+        for _ in 0..3 {
+            let folders = list_folders_and_pace_quota(&pool, "acc", &provider)
+                .await
+                .unwrap();
+            assert_eq!(folders.len(), 1);
+        }
+
+        assert_eq!(provider.with_quota.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.plain.load(Ordering::SeqCst), 2);
+        let used: Option<i64> = sqlx::query_scalar(
+            "SELECT storage_used_bytes FROM account_quota WHERE account_id = 'acc'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(used, Some(95));
+    }
+
+    #[tokio::test]
+    async fn a_stale_reading_is_refreshed_on_the_next_full_sync() {
+        let pool = pool().await;
+        let provider = CountingProvider::default();
+        list_folders_and_pace_quota(&pool, "acc", &provider)
+            .await
+            .unwrap();
+        let stale = (chrono::Utc::now()
+            - satchel_core::db::account_quota::QUOTA_REFRESH_INTERVAL
+            - chrono::Duration::minutes(1))
+        .to_rfc3339();
+        sqlx::query("UPDATE account_quota SET checked_at = ?")
+            .bind(stale)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        list_folders_and_pace_quota(&pool, "acc", &provider)
+            .await
+            .unwrap();
+        assert_eq!(provider.with_quota.load(Ordering::SeqCst), 2);
     }
 }
 
