@@ -1,7 +1,10 @@
 # 0015 Sync-Transport für den Hub
 
-Status: angenommen 2026-11-05. Ergänzt 0008 und 0009; ersetzt in 0010 den
-Punkt „Transport über HTTPS des Hubs“.
+Status: angenommen 2026-11-05. Ergänzt 0008 und 0009. Ersetzt in 0010 den
+Transport über HTTPS, das Pinning des Zertifikats und das Pairing „am Hub“
+(bei einem blinden Hub über ein gepaartes Gerät). Lockert in 0008 die
+Festlegung auf axum und die Rolle des Hubs als Autorität für
+Einmal-Aktionen (ein blinder Hub vergibt nur Leases).
 
 ## Kontext
 
@@ -26,8 +29,8 @@ gehosteten Dienst heute aus. Diese Tür soll trotzdem billig offen bleiben.
   QUIC-Verbindungen zwischen Endpunkten, die über ihren öffentlichen
   Schlüssel (EndpointId) adressiert werden. Es versucht zuerst eine direkte
   Verbindung per NAT-Traversal und leitet über ein Relay, wenn die scheitert.
-  Die Verbindung ist Ende-zu-Ende verschlüsselt, das Relay sieht nur
-  Chiffretext.
+  Die Verbindung ist Ende-zu-Ende verschlüsselt. Das Relay sieht nur
+  Chiffretext, dazu die EndpointIds der Gegenstellen und die Datenmenge.
 - Ein Transport für beide Fälle. Ein Hub auf einem öffentlichen Server ist
   direkt erreichbar, einer hinter NAT per Hole-Punching oder über ein Relay.
   Ein zweiter Weg über eigenes HTTPS entfällt; wo UDP gesperrt ist, trägt das
@@ -46,7 +49,8 @@ gehosteten Dienst heute aus. Diese Tür soll trotzdem billig offen bleiben.
 - Welche Relays ein Gerät benutzt, ist eine Liste in den Einstellungen
   (`RelayMode::Custom` mit `RelayMap`), kein Code. Einträge können sein:
   ein selbst betriebenes `iroh-relay`, die öffentlichen Relays von n0 und
-  später ein Relay des Projekts.
+  später ein Relay des Projekts (nur nach einem ADR, das 0001 ändert, siehe
+  unten).
 - Die Liste reist mit dem Pairing und danach als Einstellung im Ereignis-Log.
   Den Standard zu wechseln braucht deshalb keine neue Client-Version.
 - `iroh-relay` ist eine einzelne Binary oder das Docker-Image
@@ -67,10 +71,19 @@ gehosteten Dienst heute aus. Diese Tür soll trotzdem billig offen bleiben.
   Adresse des Hubs (EndpointId und Relay-URL). Ein Lookup-Dienst, von n0
   oder selbst betrieben (`iroh-dns-server`), ist wie ein Relay ein optionaler
   Eintrag.
-- Wechselt der Hub sein Relay, schreibt er die neue Relay-Liste zuerst ins
-  Ereignis-Log und bleibt eine Übergangszeit über das alte Relay erreichbar.
-  Jedes Gerät behält die zuletzt bekannte Liste als Rückfall und versucht
-  beim Verbindungsaufbau alle Einträge.
+- Die Voreinstellung von iroh veröffentlicht EndpointId und Adressen jedes
+  Geräts bei n0. Satchel nutzt sie nicht (kein `presets::N0`): Solange kein
+  Hub gepaart ist, startet kein Endpoint, und veröffentlicht wird nur, wenn
+  der Nutzer einen Lookup-Dienst einträgt. Eine App, die beim Start einen fremden Dienst
+  kontaktiert, widerspräche dem Local-first-Versprechen.
+- Maßgeblich ist die Relay-Liste im Ereignis-Log; ein Gerät darf lokal
+  Einträge ergänzen, aber keine entfernen. Wechselt das Relay des Hubs,
+  schreibt ein gepaartes Gerät die neue Liste zuerst ins Log, und der Hub
+  bleibt eine Übergangszeit über das alte Relay erreichbar. Jedes Gerät
+  behält die zuletzt bekannte Liste als Rückfall und versucht beim
+  Verbindungsaufbau alle Einträge. Wer länger offline war als die
+  Übergangszeit, findet den Hub über einen eingetragenen Lookup-Dienst oder
+  paart sich neu.
 
 ### Ereignis-Log Ende-zu-Ende verschlüsselt
 
@@ -81,11 +94,25 @@ gehosteten Dienst heute aus. Diese Tür soll trotzdem billig offen bleiben.
   das Log anlegt, erzeugt ihn.
 - Das Pairing überträgt den Log-Schlüssel. Anders als Kontodaten und private
   Schlüssel in 0010 ist er nicht abwählbar, denn ohne ihn liest ein Gerät das
-  Log nicht. Der QR-Code trägt Adresse und Einmal-Code, nicht den Schlüssel;
-  der geht danach über die iroh-Verbindung.
-- Wird ein Gerät entfernt, sperrt der Hub dessen EndpointId, und ein Gerät
-  mit Schlüssel rotiert den Log-Schlüssel. Neue Ereignisse sind für das
-  entfernte Gerät unlesbar. Was es schon hatte, behält es.
+  Log nicht. Der QR-Code trägt die Adresse der Gegenstelle (EndpointId und
+  Relay-URL) und den Einmal-Code, nicht den Schlüssel; der geht danach über
+  die iroh-Verbindung.
+- Beim Pairing mit einem Hub legt der Nutzer dessen Rolle fest. Nur bei
+  „vertrauter Hub“ sendet das Gerät den Log-Schlüssel an den Hub. Ein blinder
+  Hub bekommt ihn nie; dort koppelt ein neues Gerät über ein schon gepaartes
+  (siehe unten).
+- Wird ein Gerät entfernt, sperrt der Hub dessen EndpointId. Auslösen darf
+  das jedes gepaarte Gerät; der Hub prüft dafür dessen Signatur. Danach
+  rotiert ein Gerät mit Schlüssel den Log-Schlüssel: Der neue Schlüssel geht
+  als Eintrag ins Log, einzeln für die EndpointId jedes verbleibenden Geräts
+  verpackt, sodass auch Geräte, die gerade offline sind, ihn später abholen.
+  Frühere Schlüssel bleiben als Kette erhalten, damit neue Geräte alte
+  Ereignisse lesen. Neue Ereignisse sind für das entfernte Gerät unlesbar.
+  Was es schon hatte, behält es.
+- Das Rotieren widerruft keine Passwörter, die das entfernte Gerät beim
+  Pairing bekommen hat (0010). Wer ein Gerät verliert, ändert sie beim
+  Anbieter. OAuth-Konten trifft das nicht, weil jedes Gerät eigene Tokens hat
+  (0009).
 
 ### Zwei Hub-Rollen
 
@@ -93,7 +120,11 @@ gehosteten Dienst heute aus. Diese Tür soll trotzdem billig offen bleiben.
   darf Einmal-Aktionen selbst ausführen. Für geplantes Senden braucht er die
   Zugangsdaten des Kontos: Passwörter per Pairing (0010), für OAuth-Konten
   eine eigene Autorisierung, weil Tokens nie übertragen werden (0009). Ein
-  Hub ohne Bildschirm holt sie über den Browser eines gepaarten Geräts.
+  Hub ohne Bildschirm startet den Flow selbst und behält den PKCE-Verifier
+  (in `oauth_flow_sessions`, übersteht also einen Neustart). Der Nutzer
+  meldet sich im Browser eines gepaarten Geräts an, und nur der einmalige
+  Autorisierungscode reist zum Hub. Das Token entsteht auf dem Hub, verlässt
+  ihn nie und lässt sich beim Anbieter einzeln widerrufen.
   Beispiele: `satchel --headless` auf eigenem VPS, NAS oder Mac mini, oder
   der Desktop-Client mit Lease (0008).
 - Ein **blinder Hub** hat den Schlüssel nicht. Er speichert Chiffretext,
@@ -101,6 +132,11 @@ gehosteten Dienst heute aus. Diese Tür soll trotzdem billig offen bleiben.
   Einmal-Aktionen. Ausführen tut das nächste Gerät, das online ist und die
   Lease bekommt. Die Aktion kennt er nur als ID; Fälligkeit und Inhalt liegen
   im Chiffretext. Er sieht, welche Geräte wann wie viel schreiben.
+- Ereignisse sind authentifiziert: Jedes Gerät signiert seine Ereignisse,
+  Reihenfolge und Zähler stehen im Chiffretext. Ein blinder Hub kann
+  verzögern oder auslassen, aber nicht fälschen oder unbemerkt wiederholen.
+  Einmal-Aktionen sind idempotent (beim Senden über die Message-ID), damit
+  eine doppelt vergebene Lease nicht doppelt sendet.
 - Ein Gerät paart sich bei einem blinden Hub über ein schon gepaartes Gerät:
   Das zeigt den QR-Code, übergibt den Log-Schlüssel und meldet dem Hub die
   neue EndpointId. Bei einem vertrauten Hub geht beides.
@@ -128,11 +164,18 @@ ein gehosteter Dienst im Sinne von 0001 und braucht ein eigenes ADR, das
 - In 0009 heißt „Hub (Ereignis-Log)“ jetzt: Chiffretext auf dem Hub,
   Klartext nur auf Geräten und vertrauten Hubs.
 - Neue Abhängigkeit iroh (1.x, `MIT OR Apache-2.0`, verträglich mit der
-  MIT-Lizenz von Satchel). n0 empfiehlt eigene Relays für alle, die eine
-  bestimmte Relay-Version brauchen. Solange der Startwert n0s Relays enthält,
-  darf iroh im Client nicht lange hinter der aktuellen Version liegen.
-- Das Bedrohungsmodell aus 0010 gilt weiter: Wer den QR-Code und den
-  Einmal-Code abgreift, bekommt den Log-Schlüssel.
+  MIT-Lizenz von Satchel). `iroh-relay` enthält zusätzlich eine
+  `LICENSE-BSD3`; was sie abdeckt, prüfen wir, bevor wir das Relay selbst
+  ausliefern. n0 empfiehlt eigene Relays für alle, die eine bestimmte
+  Relay-Version brauchen. Solange der Startwert n0s Relays enthält, sollte
+  iroh im Client nicht weit hinter der aktuellen Version liegen.
+- Geräteschlüssel (EndpointId) und Log-Schlüssel werden wie Zugangsdaten
+  behandelt: verschlüsselt mit dem Master-Key und umschlossen im Backup
+  (siehe AGENTS.md, „Datenbank-Betrieb“). Sind alle Geräte und alle Backups
+  verloren, ist das Log unlesbar. Mail, Done und Snooze liegen auf dem
+  Mail-Server (0009) und bleiben; Topics, Regeln und geplante Sends sind weg.
+- Das Bedrohungsmodell aus 0010 gilt weiter: Wer den QR-Code fotografiert,
+  bekommt zusätzlich den Log-Schlüssel.
 - Vor der Umsetzung klärt ein Probe-Build, ob iroh für Android und iOS
   baut (0006). Scheitert er, ist das ein eigenes ADR wert.
 - Nicht entschieden sind hier: Wire-Format, Verschlüsselungsverfahren und
@@ -147,3 +190,4 @@ ein gehosteter Dienst im Sinne von 0001 und braucht ein eigenes ADR, das
 - `iroh-relay` (Binary, Zugriffsregeln): https://github.com/n0-computer/iroh/tree/main/iroh-relay
 - Docker-Image: https://hub.docker.com/r/n0computer/iroh-relay
 - Preise und Garantien von n0: https://www.iroh.computer/pricing
+- `iroh-dns-server` (selbst betriebener Lookup-Dienst): https://github.com/n0-computer/iroh/tree/main/iroh-dns-server
