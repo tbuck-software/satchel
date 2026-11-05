@@ -43,10 +43,7 @@ async function remove(id: string) {
 <template>
   <section>
     <h3 class="settings-page-title">{{ $t('settings.sections.blocked.label') }}</h3>
-    <p class="hint">
-      {{ $t('settings.blocked.hintBefore') }}
-      <code>{{ $t('settings.blocked.exampleDomain') }}</code>{{ $t('settings.blocked.hintAfter') }}
-    </p>
+    <p class="hint">{{ $t('settings.blocked.purpose') }}</p>
 
     <!-- One list: the add field is its first row, the entries follow. -->
     <div class="setting-group list">

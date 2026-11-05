@@ -205,6 +205,10 @@ function parseAttachmentsJson(value?: string | null): BackendOutgoingAttachment[
 </template>
 
 <style scoped>
+.hint code + code {
+  margin-left: var(--space-1-5);
+}
+
 .shortcut {
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);

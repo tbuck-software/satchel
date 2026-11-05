@@ -334,7 +334,7 @@ function escapeHtml(value: string) {
 
     <p class="lead">{{ $t('settings.signatures.description') }}</p>
 
-    <div class="setting-group">
+    <div class="setting-group list">
       <label class="setting-row">
         <span class="setting-label">{{ $t('settings.signatures.account') }}</span>
         <select v-model="accountId">
@@ -360,6 +360,27 @@ function escapeHtml(value: string) {
           size="sm"
         >
           {{ discovering ? $t('settings.signatures.checking') : $t('settings.signatures.checkAgain') }}
+        </AppButton>
+      </div>
+      <!-- The signatures follow in the same group as their account, with an
+           Add row; the form opens on demand. -->
+      <div v-for="sig in accountSignatures" :key="sig.id" class="setting-row signature-row">
+        <CardButton class="row" @click="edit(sig.id)">
+          <span class="name">
+            {{ sig.name }}
+            <span v-if="sig.is_default === 1" class="badge">{{ $t('common.default') }}</span>
+          </span>
+          <span class="preview">{{ sig.body_text.slice(0, 80) }}</span>
+        </CardButton>
+        <AppButton class="delete" @click="remove(sig.id)" variant="ghost" size="sm">{{ $t('common.delete') }}</AppButton>
+      </div>
+      <div v-if="accountSignatures.length === 0" class="setting-row setting-row--single">
+        <span class="setting-hint">{{ $t('settings.signatures.emptyList') }}</span>
+      </div>
+      <div v-if="!editorOpen" class="setting-row setting-row--single">
+        <AppButton variant="secondary" size="sm" @click="startNew">
+          <template #icon><AppIcon><path d="M8 3v10M3 8h10" /></AppIcon></template>
+          {{ $t('settings.signatures.newTitle') }}
         </AppButton>
       </div>
     </div>
@@ -400,30 +421,6 @@ function escapeHtml(value: string) {
           </AppButton>
         </div>
       </article>
-    </div>
-
-    <!-- The signatures as a list with an Add row; the form opens on demand
-         instead of standing open below the fold with its Save out of sight. -->
-    <div class="setting-group list">
-      <div v-for="sig in accountSignatures" :key="sig.id" class="setting-row signature-row">
-        <CardButton class="row" @click="edit(sig.id)">
-          <span class="name">
-            {{ sig.name }}
-            <span v-if="sig.is_default === 1" class="badge">{{ $t('common.default') }}</span>
-          </span>
-          <span class="preview">{{ sig.body_text.slice(0, 80) }}</span>
-        </CardButton>
-        <AppButton class="delete" @click="remove(sig.id)" variant="ghost" size="sm">{{ $t('common.delete') }}</AppButton>
-      </div>
-      <div v-if="accountSignatures.length === 0" class="setting-row setting-row--single">
-        <span class="setting-hint">{{ $t('settings.signatures.emptyList') }}</span>
-      </div>
-      <div v-if="!editorOpen" class="setting-row setting-row--single">
-        <AppButton variant="secondary" size="sm" @click="startNew">
-          <template #icon><AppIcon><path d="M8 3v10M3 8h10" /></AppIcon></template>
-          {{ $t('settings.signatures.newTitle') }}
-        </AppButton>
-      </div>
     </div>
 
     <div v-if="editorOpen" ref="editorRef" class="editor">

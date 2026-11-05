@@ -157,7 +157,7 @@
       },
       "aliases": {
         "title": "Sender addresses",
-        "hint": "Send mail from additional addresses that you own in your mail account (for example Gmail aliases configured under \"Send mail as\").",
+        "hint": "Other addresses you own and send from, like Gmail’s “Send mail as”.",
         "account": "Account",
         "empty": "No aliases yet.",
         "addTitle": "Add alias",
@@ -263,6 +263,7 @@
         "restore": "Restore…"
       },
       "blocked": {
+        "purpose": "Mail from these addresses or domains is archived on arrival.",
         "hintBefore": "Email address or domain pattern, for example",
         "exampleDomain": "spam.example.com",
         "hintAfter": ". Matches are archived automatically on arrival.",
@@ -659,7 +660,7 @@
       },
       "aliases": {
         "title": "Absenderadressen",
-        "hint": "Versende Mails über zusätzliche Adressen, die du in deinem Mail-Konto besitzt (z.B. Gmail-Aliasses, die unter \"Send mail as\" konfiguriert sind).",
+        "hint": "Weitere eigene Adressen zum Versenden, etwa Gmails „Senden als“.",
         "account": "Account",
         "empty": "Noch keine Aliases.",
         "addTitle": "Alias hinzufügen",
@@ -765,6 +766,7 @@
         "restore": "Wiederherstellen…"
       },
       "blocked": {
+        "purpose": "Mail von diesen Adressen oder Domains wird beim Eintreffen archiviert.",
         "hintBefore": "E-Mail-Adresse oder Domain-Pattern, zum Beispiel",
         "exampleDomain": "spam.example.com",
         "hintAfter": ". Treffer landen automatisch im Archiv beim Eingang.",

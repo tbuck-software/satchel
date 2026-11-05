@@ -2134,7 +2134,7 @@
       "editTitle": "Alias bearbeiten",
       "emailPlaceholder": "alias{'@'}example.com",
       "empty": "Noch keine Aliases.",
-      "hint": "Versende Mails über zusätzliche Adressen, die du in deinem Mail-Konto besitzt (z.B. Gmail-Aliasses, die unter \"Send mail as\" konfiguriert sind).",
+      "hint": "Weitere eigene Adressen zum Versenden, etwa Gmails „Senden als“.",
       "invalidEmail": "Bitte gültige E-Mail-Adresse angeben.",
       "saved": "Gespeichert.",
       "title": "Absenderadressen",
@@ -2241,6 +2241,7 @@
       "hintAfter": ". Treffer landen automatisch im Archiv beim Eingang.",
       "hintBefore": "E-Mail-Adresse oder Domain-Pattern, zum Beispiel",
       "placeholder": "Adresse oder Domain",
+      "purpose": "Mail von diesen Adressen oder Domains wird beim Eintreffen archiviert.",
       "unblock": "Entsperren"
     },
     "calendar": {
@@ -2452,7 +2453,7 @@
       "allowFrom": "Bilder immer laden von",
       "empty": "Keine Freigaben — externe Bilder bleiben überall blockiert.",
       "entryPlaceholder": "alice{'@'}example.com oder {'@'}example.com",
-      "hint": "Externe Bilder in Mails können Tracking-Pixel sein: Der Absender sieht beim Laden, ob und wann eine Mail geöffnet wurde.",
+      "hint": "Externe Bilder können dem Absender verraten, wann du eine Mail geöffnet hast.",
       "modeAccepted": "Bekannte",
       "modeAcceptedHint": "Bilder laden automatisch bei Absendern und Domains, die du beim Prüfen neuer Absender akzeptiert hast. Alle übrigen bleiben blockiert, bis du sie freigibst.",
       "modeAcceptedTitle": "Bilder laden automatisch bei Absendern, die du in der Inbox akzeptiert hast",

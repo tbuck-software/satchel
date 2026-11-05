@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, watch } from 'vue';
+import { defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import IconButton from '@/components/ui/IconButton.vue';
@@ -9,6 +9,23 @@ import { resolveSettingsSection } from './settingsSections';
 
 const SettingsSidebar = defineAsyncComponent(() => import('./SettingsSidebar.vue'));
 const SettingsView = defineAsyncComponent(() => import('@/views/SettingsView.vue'));
+
+/** The list fades its foot only while there is more of it below. */
+const nav = ref<HTMLElement | null>(null);
+const navOverflows = ref(false);
+let navObserver: ResizeObserver | null = null;
+function measureNav() {
+  const element = nav.value;
+  navOverflows.value = !!element && element.scrollHeight - element.scrollTop > element.clientHeight + 1;
+}
+watch(nav, (element) => {
+  navObserver?.disconnect();
+  if (!element || typeof ResizeObserver === 'undefined') return;
+  navObserver = new ResizeObserver(measureNav);
+  navObserver.observe(element);
+  if (element.firstElementChild) navObserver.observe(element.firstElementChild);
+});
+onBeforeUnmount(() => navObserver?.disconnect());
 
 const route = useRoute();
 const router = useRouter();
@@ -62,11 +79,16 @@ watch(
     v-if="!ui.isSinglePane"
     :label="$t('common.settings')"
     width="1180px"
-    height="820px"
+    height="860px"
     @dismiss="ui.closeSettings()"
   >
     <div class="settings-dialog">
-      <div class="settings-dialog__nav">
+      <div
+        ref="nav"
+        class="settings-dialog__nav"
+        :class="{ 'settings-dialog__nav--more': navOverflows }"
+        @scroll.passive="measureNav"
+      >
         <SettingsSidebar />
       </div>
       <div class="settings-dialog__main">
@@ -101,8 +123,6 @@ watch(
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  /* The list runs on below the fold: fade its foot rather than slice a row. */
-  mask-image: linear-gradient(to bottom, black calc(100% - var(--space-2xl)), transparent);
   border-right: 1px solid var(--border-color-muted);
   background: var(--bg-sidebar);
 }
@@ -110,6 +130,35 @@ watch(
 /* The pinned title lines up with the section title across the dialog. */
 .settings-dialog__nav :deep(.settings-sidebar__head) {
   padding-top: calc(18px + var(--space-sm));
+}
+
+/* All twenty sections in view at once on a laptop screen: pointer-sized rows
+   and tighter group labels, so nothing hides under the list's foot. */
+.settings-dialog__nav :deep(.settings-sidebar) {
+  gap: 0;
+  padding-bottom: var(--space-sm);
+}
+
+.settings-dialog__nav :deep(.settings-sidebar h2) {
+  margin-bottom: var(--space-1-5);
+}
+
+.settings-dialog__nav :deep(.settings-sidebar h3) {
+  margin: var(--space-1-5) 12px 2px;
+}
+
+.settings-dialog__nav :deep(.settings-sidebar ul) {
+  gap: 0;
+}
+
+.settings-dialog__nav :deep(.settings-sidebar .nav-item) {
+  min-height: 28px;
+  padding-block: var(--space-2xs);
+}
+
+/* The list runs on below the fold: fade its foot rather than slice a row. */
+.settings-dialog__nav--more {
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--space-2xl)), transparent);
 }
 
 .settings-dialog__main {

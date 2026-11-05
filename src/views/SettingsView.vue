@@ -126,7 +126,7 @@ onBeforeUnmount(() => unregisterFilter?.());
          itself; a bar saying "Settings" again would only push both down. -->
     <PaneHeader
       v-if="!inDialog"
-      :class="{ 'settings-view__header': !ui.isSinglePane }"
+      :class="{ 'settings-view__header': !ui.isSinglePane, 'settings-view__header--large': ui.isMobile && showOverview }"
       :title="showOverview ? $t('common.settings') : (ui.isSinglePane ? activeLabel : $t('common.settings'))"
       :subtitle="ui.isMobile ? undefined : showOverview ? $t('settings.overview.subtitle') : (ui.isSinglePane ? $t('common.settings') : undefined)"
     >
@@ -218,7 +218,7 @@ onBeforeUnmount(() => unregisterFilter?.());
             <NotificationSettings section="data" />
             <InlineImageBackfill class="settings-subsection__part" />
           </section>
-          <section class="settings-subsection"><BackupExport /></section>
+          <section class="settings-subsection settings-subsection--untitled"><BackupExport /></section>
         </template>
         <KeybindingEditor v-else-if="activeSection === 'shortcuts'" />
         <RuleBuilder v-else-if="activeSection === 'rules'" />
@@ -396,6 +396,14 @@ onBeforeUnmount(() => unregisterFilter?.());
   font-size: var(--font-size-sm);
 }
 
+/* The phone's Settings root is a root screen: a large title, as the mail
+   lists have, rather than a nav-bar title over nothing. */
+.settings-view__header--large :deep(.pane-header__title) {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.02em;
+}
+
 /* A section made of several editors: each keeps its own title, one step
    down, and the parts sit apart. */
 .settings-view__content > .settings-subsection,
@@ -413,6 +421,13 @@ onBeforeUnmount(() => unregisterFilter?.());
 
 .settings-subsection__part {
   margin-top: var(--space-2xl);
+}
+
+/* Its own groups (Export & import, Database backup) name it well enough under
+   the page title; a third heading level only stacked up. */
+.settings-view__content .settings-subsection.settings-subsection--untitled :deep(.settings-page-title),
+.settings-view__content .settings-subsection.settings-subsection--untitled :deep(.settings-page-title + p) {
+  display: none;
 }
 
 .settings-subsection :deep(.settings-page-title) {

@@ -231,12 +231,15 @@ li { scroll-margin-top: 120px; scroll-margin-bottom: calc(2 * var(--space-2xl));
 }
 
 .settings-sidebar__copy small {
+  display: -webkit-box;
   overflow: hidden;
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
   font-weight: var(--weight-regular);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Two lines break at words; one line cut the match's context mid-word. */
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .settings-filter {

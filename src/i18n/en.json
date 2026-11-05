@@ -2134,7 +2134,7 @@
       "editTitle": "Edit alias",
       "emailPlaceholder": "alias{'@'}example.com",
       "empty": "No aliases yet.",
-      "hint": "Send mail from additional addresses that you own in your mail account (for example Gmail aliases configured under \"Send mail as\").",
+      "hint": "Other addresses you own and send from, like Gmail’s “Send mail as”.",
       "invalidEmail": "Please enter a valid email address.",
       "saved": "Saved.",
       "title": "Sender addresses",
@@ -2241,6 +2241,7 @@
       "hintAfter": ". Matches are archived automatically on arrival.",
       "hintBefore": "Email address or domain pattern, for example",
       "placeholder": "Address or domain",
+      "purpose": "Mail from these addresses or domains is archived on arrival.",
       "unblock": "Unblock"
     },
     "calendar": {
@@ -2452,7 +2453,7 @@
       "allowFrom": "Always load images from",
       "empty": "Nothing allowed — remote images stay blocked everywhere.",
       "entryPlaceholder": "alice{'@'}example.com or {'@'}example.com",
-      "hint": "Remote images in mail can be tracking pixels: loading them tells the sender whether and when a mail was opened.",
+      "hint": "Remote images can tell a sender when you opened a mail.",
       "modeAccepted": "Known",
       "modeAcceptedHint": "Images load automatically for senders and domains you accepted while screening new senders. Everything else stays blocked until you allow it.",
       "modeAcceptedTitle": "Load images automatically for senders you accepted in the inbox",
