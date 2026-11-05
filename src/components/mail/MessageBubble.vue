@@ -32,6 +32,7 @@ import MessageSourceDialog from './MessageSourceDialog.vue';
 import MessageRecipientDetails from './MessageRecipientDetails.vue';
 import PassphraseDialog from './PassphraseDialog.vue';
 import ContextMenu from '@/components/ui/ContextMenu.vue';
+import MenuItem from '@/components/ui/MenuItem.vue';
 import SenderFilingMenu from './SenderFilingMenu.vue';
 import { useInvitesStore } from '@/stores/invites';
 import { useAccountsStore } from '@/stores/accounts';
@@ -159,6 +160,16 @@ const collapsedSnippet = computed(
 );
 
 const senderName = computed(() => participantDisplayName(accountsStore.accounts, props.message.from));
+
+/* The address in two parts: a narrow header shortens the local part and
+   keeps the domain, which is the part that says who sent it. */
+const senderAddress = computed(() => {
+  const email = props.message.from.email ?? '';
+  const at = email.lastIndexOf('@');
+  return at > 0
+    ? { local: email.slice(0, at), domain: email.slice(at) }
+    : { local: email, domain: '' };
+});
 const isOwn = computed(() => isOwnEmail(accountsStore.accounts, props.message.from.email));
 
 const spoofingWarning = computed(() =>
@@ -280,7 +291,10 @@ function toggleSenderMenu(event: MouseEvent) {
 /* A folded message is one line; a click on it (not on its buttons) opens it. */
 function openFoldedFromClick(event: MouseEvent) {
   if (!props.collapsed) return;
-  if ((event.target as Element | null)?.closest('button, a, [role="button"]')) return;
+  const target = event.target as Element | null;
+  // A target the click's own re-render replaced (a button's glyph) has
+  // left the document, and `closest` can no longer find its button.
+  if (!target?.isConnected || target.closest('button, a, [role="button"]')) return;
   emit('toggleCollapsed');
 }
 
@@ -305,6 +319,43 @@ const bodyViewChoices = computed(() => (
     ? bodyView.value
     : null
 ));
+
+/*
+ * The desktop offers the same choice from the header's actions, as a menu
+ * behind one quiet button whose glyph is the current mode. Above the body
+ * only the "Shown as text · Original" line remains, as on the phone, while
+ * the mail is not shown as it opened.
+ */
+const headerBodyView = computed(() => (
+  !ui.isMobile && !props.collapsed && bodyView.value && bodyView.value.options.length > 1
+    ? bodyView.value
+    : null
+));
+const viewMenuAnchor = ref<AnchorBox | null>(null);
+const viewMenuUsed = ref(false);
+watch(viewMenuAnchor, (anchor) => { if (anchor) viewMenuUsed.value = true; });
+watch(headerBodyView, (view) => { if (!view) viewMenuAnchor.value = null; });
+
+function toggleViewMenu(event: MouseEvent) {
+  if (viewMenuAnchor.value) {
+    viewMenuAnchor.value = null;
+    return;
+  }
+  // A zero-width box at the button's right edge: the menu hangs below it,
+  // right-aligned, since the button sits at the reader's right edge.
+  const trigger = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  viewMenuAnchor.value = {
+    left: trigger.right,
+    top: trigger.bottom + 4,
+    right: trigger.right,
+    bottom: trigger.top,
+  };
+}
+
+function chooseBodyView(mode: string) {
+  viewMenuAnchor.value = null;
+  headerBodyView.value?.set(mode);
+}
 
 /* The phone's blocked-images notice keeps only Show; its always-allow
    choices join this message's actions (ImageGuardPhoneActions reports them). */
@@ -508,15 +559,21 @@ function openSenderDetails() {
             />
           </div>
           <div class="message-address-line mt-0.5 text-xs text-secondary">
+            <!-- Two parts, so a narrow header gives up the local part and
+                 keeps the domain: "billing-no…@google.com". -->
             <AppButton
               v-if="props.message.from.email"
               class="message-sender-email sender-identity-trigger"
+              :title="props.message.from.email"
               :aria-label="$t('mail.recipients.showSenderDetails', { name: senderName })"
               @click.stop="openSenderDetails"
               variant="link"
               size="sm"
             >
-              {{ props.message.from.email }}
+              <span
+                class="message-sender-email__local"
+                :class="{ 'message-sender-email__local--long': senderAddress.local.length > 5 }"
+              >{{ senderAddress.local }}</span><span class="message-sender-email__domain">{{ senderAddress.domain }}</span>
             </AppButton>
             <span v-if="props.message.from.email && (props.message.to.length || props.message.cc?.length)" class="message-address-separator" aria-hidden="true">&middot;</span>
             <MessageRecipientDetails
@@ -537,34 +594,55 @@ function openSenderDetails() {
           </div>
         </div>
       </div>
-      <div class="flex items-start gap-1.5 shrink-0">
-        <!-- Desktop contextual actions, on hover beside the date: kept in the
-             header, a hidden row under every message would hold its height
-             open and push the rhythm apart. Mobile has the fixed thread bar. -->
+      <!--
+        The date and the message's actions are one group. Open, the date sits
+        on the name's line and the actions on the address line under it, the
+        fold control last among them. Folded, the header is one line: the
+        actions come in front of the date. Desktop shows the actions on hover
+        or focus; a hidden row under every message would hold its height open.
+        The phone has the ⋯ sheet and the fixed thread bar instead.
+      -->
+      <div
+        class="message-header-side"
+        :class="{ 'message-header-side--stacked': !ui.isMobile && !props.collapsed }"
+      >
+        <time
+          class="message-header-date text-xs text-secondary font-medium"
+          :datetime="props.message.timestamp"
+          :title="fullTimestamp"
+        >{{ headerTime }}</time>
         <div
           v-if="!ui.isMobile"
-          class="message-hover-actions opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          class="message-hover-actions"
+          :class="{ 'message-hover-actions--held': viewMenuAnchor !== null }"
         >
           <template v-if="!props.collapsed">
             <template v-if="props.canReply">
               <IconButton size="sm" :title="$t('common.reply')" @click="emit('reply')">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M6 3L1 8l5 5"/>
-                  <path d="M1 8h9a5 5 0 015 5"/>
-                </svg>
+                <AppIcon size="sm"><path d="M6 3L1 8l5 5" /><path d="M1 8h9a5 5 0 015 5" /></AppIcon>
               </IconButton>
               <IconButton size="sm" :title="$t('common.forward')" @click="emit('forward')">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M10 3l5 5-5 5"/>
-                  <path d="M15 8H6a5 5 0 00-5 5"/>
-                </svg>
+                <AppIcon size="sm"><path d="M10 3l5 5-5 5" /><path d="M15 8H6a5 5 0 00-5 5" /></AppIcon>
               </IconButton>
             </template>
+            <IconButton
+              v-if="headerBodyView"
+              class="message-view-mode-trigger"
+              size="sm"
+              :title="$t('mail.viewMode.showAs')"
+              aria-haspopup="menu"
+              :aria-expanded="viewMenuAnchor !== null"
+              :active="viewMenuAnchor !== null"
+              @click.stop="toggleViewMenu"
+            >
+              <AppIcon size="sm">
+                <path v-if="headerBodyView.mode === 'auto-dark'" d="M12.4 9.9A5 5 0 0 1 6.1 3.6a5 5 0 1 0 6.3 6.3z" />
+                <path v-else-if="headerBodyView.mode === 'text' || headerBodyView.mode === 'markdown'" d="M3 4h10M3 7.3h10M3 10.6h6.5" />
+                <template v-else><rect x="2.5" y="2.5" width="11" height="11" rx="1.8" /><path d="M2.5 6.5h11M6.5 6.5v7" /></template>
+              </AppIcon>
+            </IconButton>
             <IconButton size="sm" :title="$t('mail.message.showSource')" @click="sourceDialogOpen = true">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M6 4L2.5 8 6 12"/>
-                <path d="M10 4l3.5 4L10 12"/>
-              </svg>
+              <AppIcon size="sm"><path d="M6 4L2.5 8 6 12" /><path d="M10 4l3.5 4L10 12" /></AppIcon>
             </IconButton>
           </template>
           <IconButton
@@ -572,26 +650,24 @@ function openSenderDetails() {
             :title="$t('mail.message.addToTopicSingle')"
             @click="topicsStore.openPicker({ itemType: 'message', itemIds: [props.message.id] })"
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <AppIcon size="sm">
               <path d="M2.5 4.5C2.5 3.7 3.2 3 4 3H6.5L8 4.5H12C12.8 4.5 13.5 5.2 13.5 6V11.5C13.5 12.3 12.8 13 12 13H4C3.2 13 2.5 12.3 2.5 11.5V4.5Z" />
               <path d="M8 7V11M6 9H10" />
-            </svg>
+            </AppIcon>
+          </IconButton>
+          <IconButton
+            class="message-collapse-toggle"
+            size="sm"
+            :title="props.collapsed ? $t('mail.message.expand') : $t('mail.message.collapse')"
+            :aria-expanded="!props.collapsed"
+            @click.stop="emit('toggleCollapsed')"
+          >
+            <AppIcon size="sm">
+              <path v-if="props.collapsed" d="m4.5 6 3.5 3.5L11.5 6" />
+              <path v-else d="m4.5 10 3.5-3.5 3.5 3.5" />
+            </AppIcon>
           </IconButton>
         </div>
-        <div class="text-right">
-          <time class="block text-xs text-secondary font-medium" :datetime="props.message.timestamp" :title="fullTimestamp">{{ headerTime }}</time>
-        </div>
-        <IconButton
-          v-if="!ui.isMobile"
-          class="message-collapse-toggle"
-          :title="props.collapsed ? $t('mail.message.expand') : $t('mail.message.collapse')"
-          :aria-label="props.collapsed ? $t('mail.message.expand') : $t('mail.message.collapse')"
-          @click="emit('toggleCollapsed')"
-        >
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="m5 6 3 3 3-3" />
-          </svg>
-        </IconButton>
         <IconButton
           v-else-if="showMenuButton"
           size="lg"
@@ -783,6 +859,25 @@ function openSenderDetails() {
       />
     </ContextMenu>
 
+    <ContextMenu
+      v-if="viewMenuUsed"
+      :open="viewMenuAnchor !== null && headerBodyView !== null"
+      :anchor="viewMenuAnchor"
+      :label="$t('mail.viewMode.showAs')"
+      :width="208"
+      @close="viewMenuAnchor = null"
+    >
+      <MenuItem
+        v-for="option in headerBodyView?.options ?? []"
+        :key="option.value"
+        :label="option.label"
+        :title="option.title"
+        :checked="option.value === headerBodyView?.mode"
+        selection="radio"
+        @select="chooseBodyView(option.value)"
+      />
+    </ContextMenu>
+
     <PassphraseDialog
       v-if="passphraseRequest"
       :scheme="passphraseRequest"
@@ -969,11 +1064,48 @@ function openSenderDetails() {
   gap: var(--space-xs);
 }
 
+/*
+ * Who sent it, then to whom. Short of room, the line gives up the local part
+ * of the address first and keeps its domain; only then does "To: …" shrink.
+ * The address shrinks at a thousand times the recipients' rate, so it takes
+ * nearly all of the squeeze until it is down to its floor.
+ *
+ * The floor is the domain plus a few letters. The local part wraps anywhere
+ * and is clamped to one line, so its narrowest is a letter, not the whole
+ * name; a single unbreakable line would hold the button at full width. The
+ * kit's buttons centre their content, which cut a too-long address at both
+ * ends ("se-noreply@googl"); the address starts at its start instead.
+ */
 .message-sender-email {
+  flex: 0 1000 auto;
+  min-width: auto;
+  justify-content: flex-start;
+  gap: 0;
+  white-space: nowrap;
+}
+
+.message-sender-email__local {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-all;
+}
+
+/* Room for a letter or two and the ellipsis, so a shortened address never
+   passes for a real one ("b@google.com"). */
+.message-sender-email__local--long { min-width: 3ch; }
+
+.message-sender-email__domain {
+  flex: none;
+}
+
+.message-address-line :deep(.recipient-summary) {
+  flex: 0 1 auto;
+  justify-content: flex-start;
 }
 
 .message-address-separator {
@@ -987,24 +1119,58 @@ function openSenderDetails() {
   }
 }
 
+/* Folded, and on the phone: one line, the actions (or ⋯) after the date's
+   text, centred on it. */
+.message-header-side {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-1-5);
+}
+
+.message-header-date {
+  white-space: nowrap;
+}
+
+/* Folded on the desktop the actions come before the date, so the date keeps
+   its place at the right edge whether the pointer is over the line or not. */
+.message-surface--collapsed .message-header-side {
+  flex-direction: row-reverse;
+}
+
+/* Open on the desktop: the date on the name's line, the actions under it on
+   the address line, both flush right. The date's box matches the name's line
+   box so their text shares a baseline. */
+.message-header-side--stacked {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+}
+
+.message-header-side--stacked .message-header-date {
+  line-height: 1.5rem;
+}
+
 .message-hover-actions {
   display: flex;
   align-items: center;
   gap: var(--space-2xs);
-  /* Pulled up to the date's line: the icons are taller than its text. */
-  margin-top: calc(var(--space-xs) * -1);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
 }
 
-.message-collapse-toggle { width: 24px; flex: 0 0 auto; }
+/* Pulled toward the name: the 26px buttons are taller than the address
+   text they sit beside. Their last button's glyph meets the date's edge. */
+.message-header-side--stacked .message-hover-actions {
+  margin-top: calc(var(--space-2xs) * -1);
+  margin-right: calc(var(--space-1-5) * -1);
+}
 
-.message-collapse-toggle svg {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.6;
+.message-surface:hover .message-hover-actions,
+.message-surface:focus-within .message-hover-actions,
+.message-hover-actions--held {
+  opacity: 1;
 }
 
 .message-action-sheet {
