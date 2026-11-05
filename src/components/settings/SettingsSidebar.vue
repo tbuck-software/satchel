@@ -4,20 +4,19 @@ import AppIcon from '@/components/ui/AppIcon.vue';
 import SearchInput from '@/components/ui/SearchInput.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRoute, useRouter } from 'vue-router';
 import { registerSettingsFilterField } from '@/composables/settingsFilterFocus';
 import { useSettingsFilter } from '@/composables/useSettingsFilter';
+import { useSettingsLocation } from '@/composables/useSettingsLocation';
 import {
   resolveSettingsSection,
   settingsSectionIcons,
   type SettingsSection,
 } from './settingsSections';
 
-const route = useRoute();
-const router = useRouter();
 const { t } = useI18n();
 const { query, filtering, results, groups } = useSettingsFilter();
-const activeSection = computed(() => resolveSettingsSection(route.query.section));
+const location = useSettingsLocation();
+const activeSection = computed(() => resolveSettingsSection(location.section.value));
 const filterInput = ref<InstanceType<typeof SearchInput> | null>(null);
 const highlighted = ref(0);
 
@@ -46,7 +45,7 @@ onBeforeUnmount(() => {
 });
 
 function selectSection(section: SettingsSection) {
-  void router.replace({ name: 'settings', query: { section } });
+  location.show(section);
 }
 
 function onFilterKeydown(event: KeyboardEvent) {

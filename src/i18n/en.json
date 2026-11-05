@@ -31,12 +31,12 @@
     "hideAccount": "Hide {account}",
     "invalidTime": "The end must be later than the start, on the same day.",
     "localTime": "Local time · leave blank for all day",
-    "manual": "Only when I open it",
+    "manual": "On demand",
     "openAccount": "Open {account}, including resting mail",
     "resting": "Resting",
     "restingHint": "{account} is resting: no counts, no notifications. Click to look in; right-click to show it until midnight.",
     "saveFailed": "Could not save account visibility.",
-    "schedule": "On a schedule",
+    "schedule": "Scheduled",
     "scopeResting": "{accounts} resting | {accounts} resting",
     "showAccount": "Show {account} now",
     "showToday": "Show until midnight",
@@ -2013,6 +2013,11 @@
       "version": "Installed version"
     },
     "accounts": {
+      "actions": {
+        "calendars": "Calendars & contacts",
+        "renew": "Renew sign-in",
+        "test": "Test connection"
+      },
       "addAccount": "Add email account",
       "allAccounts": "All accounts",
       "checkOrRenew": "Check or renew sign-in",
@@ -2702,8 +2707,8 @@
       "addAction": "Add action",
       "addCondition": "Add condition",
       "appliedCount": "{count} rule action applied. | {count} rule actions applied.",
-      "applyToOpenMail": "Apply to the open mail",
-      "applyToVisibleMails": "Apply to visible mails",
+      "applyToOpenMail": "Apply to the open message",
+      "applyToVisibleMails": "Apply to visible messages",
       "applyVisibleConfirm": "Apply rules to {count} visible mail? | Apply rules to {count} visible mails?",
       "categories": {
         "personal": "Personal",
@@ -2718,7 +2723,7 @@
         "toContains": "Recipient contains"
       },
       "conditionsLegend": "Conditions",
-      "createFromOpenMail": "Create rule from the open mail",
+      "createFromOpenMail": "Create a rule from the open message",
       "createTitle": "Create rule",
       "deleteConfirm": "Delete rule “{name}”?",
       "description": "Sort incoming mail by sender, recipient, subject or content.",
@@ -2815,17 +2820,23 @@
         "label": "General"
       },
       "groups": {
-        "advanced": {
-          "title": "Advanced"
-        },
         "app": {
-          "title": "App"
+          "title": "App & data"
         },
-        "identity": {
-          "title": "Identity"
+        "essentials": {
+          "title": "Essentials"
         },
-        "mail": {
-          "title": "Mail"
+        "organising": {
+          "title": "Organising"
+        },
+        "people": {
+          "title": "Calendar & contacts"
+        },
+        "privacy": {
+          "title": "Privacy & security"
+        },
+        "writing": {
+          "title": "Writing"
         }
       },
       "images": {
@@ -2905,7 +2916,7 @@
       "conflict": "Conflict",
       "custom": "Custom",
       "description": "Every action stays the same across search, menus and keyboard.",
-      "eyebrow": "Tastatur zuerst",
+      "eyebrow": "Keyboard first",
       "footerRecord": "Click a row and press the new key combination",
       "noMatch": "No matching command.",
       "reservedConflict": "Taken by a fixed key: {keys}",

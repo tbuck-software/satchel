@@ -2013,6 +2013,11 @@
       "version": "Installierte Version"
     },
     "accounts": {
+      "actions": {
+        "calendars": "Kalender & Kontakte",
+        "renew": "Anmeldung erneuern",
+        "test": "Verbindung testen"
+      },
       "addAccount": "E-Mail-Konto hinzufügen",
       "allAccounts": "Alle Konten",
       "checkOrRenew": "Anmeldung prüfen oder erneuern",
@@ -2815,17 +2820,23 @@
         "label": "Allgemein"
       },
       "groups": {
-        "advanced": {
-          "title": "Erweitert"
-        },
         "app": {
-          "title": "App"
+          "title": "App & Daten"
         },
-        "identity": {
-          "title": "Identität"
+        "essentials": {
+          "title": "Grundlagen"
         },
-        "mail": {
-          "title": "Mail"
+        "organising": {
+          "title": "Ordnen"
+        },
+        "people": {
+          "title": "Kalender & Kontakte"
+        },
+        "privacy": {
+          "title": "Privatsphäre & Sicherheit"
+        },
+        "writing": {
+          "title": "Schreiben"
         }
       },
       "images": {
@@ -2905,7 +2916,7 @@
       "conflict": "Konflikt",
       "custom": "Eigene",
       "description": "Jede Aktion bleibt über Suche, Menüs und Tastatur dieselbe.",
-      "eyebrow": "Keyboard first",
+      "eyebrow": "Tastatur zuerst",
       "footerRecord": "Zeile anklicken und neue Tastenkombination drücken",
       "noMatch": "Kein passender Befehl.",
       "reservedConflict": "Von einer festen Taste belegt: {keys}",

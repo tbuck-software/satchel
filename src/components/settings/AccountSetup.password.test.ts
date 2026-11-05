@@ -7,12 +7,12 @@ const backend = vi.hoisted(() => ({ backendUpdateAccountPassword: vi.fn() }));
 vi.mock('@/services/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/backend')>()),
   backendCommandsAvailable: () => true,
-  backendSupportsNativeCommands: () => true,
+  backendCommandsAvailable: () => true,
   ...backend,
 }));
 
 const route = vi.hoisted(() => ({ query: {} as Record<string, string> }));
-vi.mock('vue-router', () => ({ useRoute: () => route }));
+vi.mock('vue-router', () => ({ useRoute: () => route, useRouter: () => ({}) }));
 
 const accounts = vi.hoisted(() => {
   const account = {
@@ -31,7 +31,7 @@ const connection = vi.hoisted(() => ({ applySyncSummary: vi.fn(), requestRetry: 
 vi.mock('@/stores/connection', () => ({ useConnectionStore: () => connection }));
 vi.mock('@/stores/mailboxes', () => ({ useMailboxesStore: () => ({ load: vi.fn() }) }));
 vi.mock('@/stores/threads', () => ({ useThreadsStore: () => ({ load: vi.fn(), threads: [] }) }));
-vi.mock('@/stores/ui', () => ({ useUiStore: () => ({ openAccountSetup: vi.fn() }) }));
+vi.mock('@/stores/ui', () => ({ useUiStore: () => ({ openAccountSetup: vi.fn(), settingsOpen: false, isSinglePane: true }) }));
 vi.mock('@/stores/certificateTrust', () => ({
   useCertificateTrustStore: () => ({ problemFor: () => null, exceptionFor: () => null, openDetails: vi.fn() }),
 }));
@@ -60,7 +60,7 @@ describe('replacing an account password', () => {
   it('stores the checked password and syncs again', async () => {
     backend.backendUpdateAccountPassword.mockResolvedValue(undefined);
     const wrapper = mount(AccountSetup);
-    await wrapper.get('button[title="Update password"]').trigger('click');
+    await wrapper.findAll('button').find((button) => button.text() === 'Update password')!.trigger('click');
 
     await wrapper.get('.password-form input').setValue('correct horse');
     await wrapper.get('.password-form').trigger('submit');
@@ -78,7 +78,7 @@ describe('replacing an account password', () => {
       params: { reason: 'imap login failed: No Response: [AUTHENTICATIONFAILED] Invalid credentials' },
     })));
     const wrapper = mount(AccountSetup);
-    await wrapper.get('button[title="Update password"]').trigger('click');
+    await wrapper.findAll('button').find((button) => button.text() === 'Update password')!.trigger('click');
     await wrapper.get('.password-form input').setValue('still wrong');
     await wrapper.get('.password-form').trigger('submit');
     await flushPromises();

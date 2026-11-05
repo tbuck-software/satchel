@@ -62,7 +62,7 @@ for (const theme of ['dark', 'light']) {
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByRole('button', { name: 'Accounts', exact: true }).click();
     const work = page.locator('.account-card').filter({ hasText: 'tom@satchel.dev' });
-    await expect(work.getByRole('button', { name: 'On a schedule', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(work.getByRole('button', { name: 'Scheduled', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(work.locator('input[type="time"]').first()).toHaveValue('09:00');
     await screenshot('account-schedule');
     await work.getByLabel('From, optional', { exact: true }).fill('10:00');
@@ -70,11 +70,11 @@ for (const theme of ['dark', 'light']) {
     await work.getByRole('button', { name: 'Wednesday', exact: true }).click();
     await work.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(work.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
-    await work.getByRole('button', { name: 'Only when I open it', exact: true }).click();
+    await work.getByRole('button', { name: 'On demand', exact: true }).click();
     await work.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(work.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
     // A new local day expires a peek; a schedule boundary updates without reload.
-    await work.getByRole('button', { name: 'On a schedule', exact: true }).click();
+    await work.getByRole('button', { name: 'Scheduled', exact: true }).click();
     await work.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(work.getByLabel('From, optional', { exact: true })).toHaveValue('10:00');
     await expect(work.getByRole('button', { name: 'Wednesday', exact: true })).toHaveAttribute('aria-pressed', 'true');

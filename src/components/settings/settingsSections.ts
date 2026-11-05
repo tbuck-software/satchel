@@ -1,8 +1,8 @@
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
+  backendCommandsAvailable,
   backendRuntimeCapabilities,
-  backendSupportsNativeCommands,
   type BackendRuntimeCapabilities,
 } from '@/services/backend';
 import { supportsDesktopBackgroundControls } from '@/utils/runtimeCapabilities';
@@ -69,58 +69,36 @@ function sectionIsSupported(
   }
 }
 
-type SettingsGroupId = 'app' | 'identity' | 'mail' | 'advanced';
+type SettingsGroupId = 'essentials' | 'writing' | 'organising' | 'privacy' | 'people' | 'app';
 
 interface SettingsSectionGroupDefinition {
   id: SettingsGroupId;
   items: SettingsSection[];
 }
 
+/**
+ * Grouped by what someone came to do, most visited first. Grouped by kind
+ * (App, Identity, Mail, Advanced) Accounts hid under "Identity" and Rules under
+ * "Advanced", and the list needed a scroll before Sending.
+ */
 const BASE_GROUPS: SettingsSectionGroupDefinition[] = [
+  { id: 'essentials', items: ['general', 'accounts', 'notifications', 'sending'] },
+  { id: 'writing', items: ['signatures', 'templates', 'aliases', 'vacation'] },
+  { id: 'organising', items: ['rules', 'smart-folders', 'swipes', 'blocked'] },
+  { id: 'privacy', items: ['images', 'smime', 'pgp'] },
+  { id: 'people', items: ['calendar', 'contacts'] },
   {
     id: 'app',
     items: [
-      'general',
-      'swipes',
-      'calendar',
-      'notifications',
-      'tray',
       'shortcuts',
-      'about',
-    ],
-  },
-  {
-    id: 'identity',
-    items: [
-      'accounts',
-      'contacts',
-      'signatures',
-      'aliases',
-      'smime',
-      'pgp',
-    ],
-  },
-  {
-    id: 'mail',
-    items: [
-      'sending',
-      'data',
-      'vacation',
-      'blocked',
-      'images',
-      'smart-folders',
-      'provider-features',
-      'backup',
-    ],
-  },
-  {
-    id: 'advanced',
-    items: [
-      'sources',
-      'templates',
-      'rules',
+      'tray',
       'plugins',
+      'sources',
+      'data',
+      'backup',
+      'provider-features',
       'diagnostics',
+      'about',
     ],
   },
 ];
@@ -164,7 +142,7 @@ export function resolveSettingsSection(value: unknown): SettingsSection {
 }
 
 async function loadShellCapabilities() {
-  if (capabilityLoaded || !backendSupportsNativeCommands()) return;
+  if (capabilityLoaded || !backendCommandsAvailable()) return;
   capabilityLoaded = true;
   try {
     const capabilities = await backendRuntimeCapabilities();
@@ -183,7 +161,7 @@ export function availableSettingsSections(): Array<{ id: SettingsGroupId; items:
   void loadShellCapabilities();
   return BASE_GROUPS.map((group) => {
     const items = [...group.items];
-    if (group.id === 'app' && mobileSyncPlatform.value) {
+    if (group.id === 'essentials' && mobileSyncPlatform.value) {
       items.splice(3, 0, 'mobile-sync');
     }
     // Unanswered means hidden: a section that flashes and disappears is

@@ -41,6 +41,8 @@ export const useUiStore = defineStore('ui', () => {
   const settingsOpen = ref(false);
   /** Section the settings modal should show when it opens; null = keep current. */
   const settingsSection = ref<string | null>(null);
+  /** Account a section was opened for (the banner's "Update password"). */
+  const settingsAccount = ref<string | null>(null);
   /**
    * Whether the settings detail is showing instead of the section list.
    *
@@ -133,8 +135,9 @@ export const useUiStore = defineStore('ui', () => {
     shortcutsOpen.value = !shortcutsOpen.value;
   }
 
-  function openSettings(section?: string) {
+  function openSettings(section?: string, account?: string) {
     settingsSection.value = section ?? null;
+    settingsAccount.value = account ?? null;
     // Jumping straight to a section — "Signatur bearbeiten" from a toast —
     // should land on that section, not on the list it lives in.
     settingsDetailOpen.value = section != null;
@@ -246,6 +249,13 @@ export const useUiStore = defineStore('ui', () => {
     overlayDepth.value > backNavigations.value.filter((entry) => entry.isOpen()).length,
   );
 
+  /** The settings dialog is up and nothing (a confirm, a picker) sits on it. */
+  const settingsDialogOnTop = computed(() =>
+    settingsOpen.value
+    && !isSinglePane.value
+    && overlayDepth.value - backNavigations.value.filter((entry) => entry.isOpen()).length === 1,
+  );
+
   function dismissTopmostOverlay(): boolean {
     // Registered surfaces sit above the built-in ones: a composer or a picker
     // is opened *from* whatever is underneath it.
@@ -325,6 +335,7 @@ export const useUiStore = defineStore('ui', () => {
     shortcutsOpen,
     settingsOpen,
     settingsSection,
+    settingsAccount,
     accountSetupOpen,
     sidebarWidth,
     threadListWidth,
@@ -346,6 +357,7 @@ export const useUiStore = defineStore('ui', () => {
     isTablet,
     dismissTopmostOverlay,
     overlayDepth,
+    settingsDialogOnTop,
     modalOpen,
     registerOverlay,
     registerBackNavigation,

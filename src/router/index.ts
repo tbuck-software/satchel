@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import InboxView from '@/views/InboxView.vue';
 import { MAIL_LIST_VIEWS, selectMailListView } from './mailViews';
+import { useUiStore } from '@/stores/ui';
 
 // Inbox is the default route and stays in the startup bundle. Every secondary
 // workspace is loaded on first navigation so settings, calendar and composer
@@ -43,4 +44,21 @@ export const router = createRouter({
     { path: '/search', name: 'search', component: SearchView },
     { path: '/settings', name: 'settings', component: SettingsView },
   ],
+});
+
+const firstQueryValue = (value: unknown): string | undefined => {
+  const first = Array.isArray(value) ? value[0] : value;
+  return typeof first === 'string' ? first : undefined;
+};
+
+// With room for both panes, Settings is a dialog over the mail the user came
+// from, not a page that replaces it: every `/settings` link opens the dialog
+// and stays where it is. A single pane keeps the route; there the settings
+// screen is the page, with Back.
+router.beforeEach((to, from) => {
+  if (to.name !== 'settings') return true;
+  const ui = useUiStore();
+  if (ui.isSinglePane) return true;
+  ui.openSettings(firstQueryValue(to.query.section), firstQueryValue(to.query.account));
+  return from.matched.length > 0 ? false : { name: 'inbox', replace: true };
 });

@@ -6,10 +6,12 @@
       },
       "sections": {
         "groups": {
-          "app": { "title": "App" },
-          "identity": { "title": "Identity" },
-          "mail": { "title": "Mail" },
-          "advanced": { "title": "Advanced" }
+          "essentials": { "title": "Essentials" },
+          "writing": { "title": "Writing" },
+          "organising": { "title": "Organising" },
+          "privacy": { "title": "Privacy & security" },
+          "people": { "title": "Calendar & contacts" },
+          "app": { "title": "App & data" }
         },
         "general": { "label": "General", "description": "Appearance, language and behaviour" },
         "about": { "label": "About Satchel", "description": "Version, updates and licenses" },
@@ -64,6 +66,7 @@
           "saved": "Password for {email} updated. Mail syncs again.",
           "failed": "Password not saved: {error}"
         },
+        "actions": { "calendars": "Calendars & contacts", "renew": "Renew sign-in", "test": "Test connection" },
         "checkOrRenew": "Check or renew sign-in",
         "connected": "connected",
         "disconnected": "disconnected",
@@ -488,10 +491,12 @@
       },
       "sections": {
         "groups": {
-          "app": { "title": "App" },
-          "identity": { "title": "Identität" },
-          "mail": { "title": "Mail" },
-          "advanced": { "title": "Erweitert" }
+          "essentials": { "title": "Grundlagen" },
+          "writing": { "title": "Schreiben" },
+          "organising": { "title": "Ordnen" },
+          "privacy": { "title": "Privatsphäre & Sicherheit" },
+          "people": { "title": "Kalender & Kontakte" },
+          "app": { "title": "App & Daten" }
         },
         "general": { "label": "Allgemein", "description": "Darstellung, Sprache und Verhalten" },
         "about": { "label": "Über Satchel", "description": "Version, Updates und Lizenzen" },
@@ -546,6 +551,7 @@
           "saved": "Passwort für {email} geändert. Die Synchronisierung läuft wieder.",
           "failed": "Passwort nicht gespeichert: {error}"
         },
+        "actions": { "calendars": "Kalender & Kontakte", "renew": "Anmeldung erneuern", "test": "Verbindung testen" },
         "checkOrRenew": "Anmeldung prüfen oder erneuern",
         "connected": "verbunden",
         "disconnected": "nicht verbunden",

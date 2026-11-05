@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import CardButton from '@/components/ui/CardButton.vue';
 import { computed, defineAsyncComponent, onBeforeUnmount, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 import PaneHeader from '@/components/ui/PaneHeader.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import SearchInput from '@/components/ui/SearchInput.vue';
@@ -17,6 +17,7 @@ import {
 import { useI18n } from 'vue-i18n';
 import { registerSettingsFilterField } from '@/composables/settingsFilterFocus';
 import { useSettingsFilter } from '@/composables/useSettingsFilter';
+import { useSettingsLocation } from '@/composables/useSettingsLocation';
 
 // Each section is its own chunk: opening Settings loads the section it shows,
 // not all of them — the signature and template editors bring the rich-text
@@ -47,7 +48,6 @@ const SwipeSettings = defineAsyncComponent(() => import('@/components/settings/S
 const TrayPreferences = defineAsyncComponent(() => import('@/components/settings/TrayPreferences.vue'));
 const VacationSettings = defineAsyncComponent(() => import('@/components/settings/VacationSettings.vue'));
 
-const route = useRoute();
 const router = useRouter();
 const { t } = useI18n();
 const ui = useUiStore();
@@ -63,9 +63,10 @@ const overviewGroups = computed(() => (
       items: group.items.map((item) => ({ ...item, hint: null as string | null })),
     }))
 ));
+const { inDialog, section: locationSection, show: showSection } = useSettingsLocation();
 const requestedSection = computed(() => {
-  const value = Array.isArray(route.query.section) ? route.query.section[0] : route.query.section;
-  return typeof value === 'string' && labels.value.has(value as SettingsSection)
+  const value = locationSection.value;
+  return value !== null && labels.value.has(value as SettingsSection)
     ? value as SettingsSection
     : null;
 });
@@ -93,12 +94,7 @@ const sectionTones: Record<SettingsSection, string> = {
 };
 
 function openSection(section: SettingsSection) {
-  const navigation = { name: 'settings' as const, query: { section } };
-  if (ui.isSinglePane) {
-    void router.push(navigation);
-  } else {
-    void router.replace(navigation);
-  }
+  showSection(section, ui.isSinglePane ? 'push' : 'replace');
 }
 
 function goBack() {
@@ -115,8 +111,14 @@ onBeforeUnmount(() => unregisterFilter?.());
 </script>
 
 <template>
-  <section class="settings-view" :class="{ 'settings-view--wide': activeSection === 'shortcuts' }">
+  <section
+    class="settings-view"
+    :class="{ 'settings-view--wide': activeSection === 'shortcuts', 'settings-view--dialog': inDialog }"
+  >
+    <!-- In the dialog the section list names Settings and the section names
+         itself; a bar saying "Settings" again would only push both down. -->
     <PaneHeader
+      v-if="!inDialog"
       :class="{ 'settings-view__header': !ui.isSinglePane }"
       :title="showOverview ? $t('common.settings') : (ui.isSinglePane ? activeLabel : $t('common.settings'))"
       :subtitle="ui.isMobile ? undefined : showOverview ? $t('settings.overview.subtitle') : (ui.isSinglePane ? $t('common.settings') : undefined)"
@@ -327,6 +329,14 @@ onBeforeUnmount(() => unregisterFilter?.());
 
 .settings-view--wide {
   --settings-column: 980px;
+}
+
+.settings-view--dialog {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.settings-view--dialog .settings-view__scroll {
+  border-top: 0;
 }
 
 /* The pane title starts where the section does. Left at the pane's edge it

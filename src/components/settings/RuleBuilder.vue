@@ -260,6 +260,8 @@ function ruleSummary(rule: BackendRule): string {
     : 'settings.rules.summaryAnd'));
 }
 
+const hasActiveRule = computed(() => rules.value.some((rule) => rule.is_active));
+
 onMounted(load);
 </script>
 
@@ -367,14 +369,15 @@ onMounted(load);
       </div>
     </form>
 
-    <div class="run-actions">
+    <!-- Applying needs a rule to apply; the empty list offered both anyway. -->
+    <div v-if="threads.activeThreadId || hasActiveRule" class="run-actions">
       <AppButton v-if="threads.activeThreadId" size="sm" @click="startFromActiveThread">
         {{ $t('settings.rules.createFromOpenMail') }}
       </AppButton>
-      <AppButton v-if="threads.activeThreadId" size="sm" @click="void runNow">
+      <AppButton v-if="threads.activeThreadId && hasActiveRule" size="sm" @click="void runNow">
         {{ $t('settings.rules.applyToOpenMail') }}
       </AppButton>
-      <AppButton size="sm" @click="void runVisible">{{ $t('settings.rules.applyToVisibleMails') }}</AppButton>
+      <AppButton v-if="hasActiveRule" size="sm" @click="void runVisible">{{ $t('settings.rules.applyToVisibleMails') }}</AppButton>
     </div>
   </section>
 </template>

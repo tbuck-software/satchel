@@ -277,13 +277,15 @@ test('reverts an archive through the undo affordance', async ({ page }) => {
  */
 test('leaves the active thread alone when e is pressed in Settings', async ({ page }) => {
   await page.getByRole('button', { name: 'Settings' }).click();
-  await expect(page).toHaveURL(/\/settings/);
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings).toBeVisible();
 
   await page.keyboard.press('e');
   await page.keyboard.press('#');
 
   await expect(page.getByRole('button', { name: /undo, \d+ seconds remaining/ })).toHaveCount(0);
-  await page.goBack();
+  await page.keyboard.press('Escape');
+  await expect(settings).toHaveCount(0);
   await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();
 });
 
@@ -357,17 +359,19 @@ test('opening a scheduled draft cancels sending before editing', async ({ page }
 
 
 test('requires an explicit opt-in for third-party contact pictures and remembers it', async ({ page }) => {
+  // Settings is a dialog over the mail: a reload lands in the mail, so each
+  // check opens the section again from its link.
   await page.goto('/settings?section=contacts');
   const consent = page.getByRole('switch', { name: 'Allow third-party contact pictures' });
   await expect(consent).not.toBeChecked();
   await expect(page.getByText(/share address hashes with Gravatar and sender domains with Google and Cloudflare/)).toBeVisible();
   await page.getByText("Allow third-party contact pictures", { exact: true }).click();
   await expect(consent).toBeChecked();
-  await page.reload();
+  await page.goto('/settings?section=contacts');
   await expect(consent).toBeChecked();
   await page.getByText("Allow third-party contact pictures", { exact: true }).click();
   await expect(consent).not.toBeChecked();
-  await page.reload();
+  await page.goto('/settings?section=contacts');
   await expect(consent).not.toBeChecked();
 });
 
@@ -391,8 +395,9 @@ test('normalizes localized reply chains for display while retaining reply spelli
 // #164: Settings had no filter, and Esc did nothing there on the desktop.
 test('filters Settings from the keyboard and leaves them with Escape', async ({ page }) => {
   await page.getByRole('button', { name: 'Settings' }).click();
-  await expect(page).toHaveURL(/\/settings/);
-  const nav = page.getByRole('navigation', { name: 'Settings' });
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings).toBeVisible();
+  const nav = settings.getByRole('navigation', { name: 'Settings' });
   // The URL changes before the lazy settings view mounts and claims `/`.
   const filter = nav.getByRole('searchbox', { name: 'Filter settings' });
   await expect(filter).toBeVisible();
@@ -403,13 +408,13 @@ test('filters Settings from the keyboard and leaves them with Escape', async ({ 
   await expect(nav.getByRole('button', { name: /^Sending/ })).toBeVisible();
   await expect(nav.getByRole('button', { name: /^Swipe gestures/ })).toHaveCount(0);
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/section=sending/);
+  await expect(nav.getByRole('button', { name: /^Sending/ })).toHaveAttribute('aria-current', 'page');
 
   // The first Escape empties the filter, the second leaves Settings.
   await page.keyboard.press('Escape');
   await expect(nav.getByRole('button', { name: /^Swipe gestures/ })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page).not.toHaveURL(/\/settings/);
+  await expect(settings).toHaveCount(0);
 });
 
 /** Whether the centre of `locator` is the element itself, not something on top of it. */

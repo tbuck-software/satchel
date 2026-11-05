@@ -727,6 +727,18 @@ const handlers: Record<string, Handler> = {
     contacts_synced: 0,
     errors: [],
   }),
+  // The shell answers for itself; the mock answers for the device it runs on,
+  // so a phone-sized run hides the tray and keyboard settings as a phone does.
+  runtime_capabilities: () => {
+    const agent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+    const platform = /Android/.test(agent) ? 'android' : /iPhone|iPad/.test(agent) ? 'ios' : 'macos';
+    const mobile = platform !== 'macos';
+    return {
+      platform, mobile, tray: !mobile, autostart: !mobile, single_instance: !mobile, plugins: !mobile,
+      native_crypto: !mobile, background_sync: mobile, contacts: true, file_associations: !mobile,
+      deep_links: mobile, push: mobile,
+    };
+  },
   get_app_update_preferences: () => ({ channel: appUpdateChannel, supported: true }),
   set_app_update_channel: (payload) => { appUpdateChannel = payload.channel as 'stable' | 'nightly'; },
   check_app_update: () => ({ channel: appUpdateChannel, version: null }),
