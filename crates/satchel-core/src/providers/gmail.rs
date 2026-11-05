@@ -1085,22 +1085,27 @@ impl GmailProvider {
                         "gmail response did not contain message source".to_string()
                     })?);
             }
-            // A source that fails validation is the message itself, not a cut
-            // response, and every retry gets the same bytes. Failing here
-            // failed the whole folder on every sync for as long as the
-            // message lived there (one spam mail in SPAM and Updates did).
-            // The full representation was validated above, so keep that.
-            if let Some(reason) = message
-                .raw
-                .as_deref()
-                .and_then(|raw| validate_gmail_raw_source(raw).err())
-            {
-                tracing::warn!(
-                    message_id = %item.id,
-                    reason = %reason,
-                    "gmail message source is malformed; using the parsed representation"
-                );
-                message.raw = None;
+            if let Some(raw) = message.raw.as_deref() {
+                if let Err(reason) = validate_gmail_raw_source(raw) {
+                    // Signed or encrypted mail is read from its source; without
+                    // a valid one there is nothing trustworthy to show, and the
+                    // caller keeps what it has cached.
+                    if gmail_message_needs_raw_crypto(&message) {
+                        return Err(reason.into());
+                    }
+                    // A legacy charset only asks the source for exact bytes.
+                    // A malformed one is the message itself, not a cut
+                    // response: every retry gets the same bytes, and failing
+                    // here failed its folders on every sync (one spam mail in
+                    // SPAM and Updates did). The full representation was
+                    // validated above, so keep that.
+                    tracing::warn!(
+                        message_id = %item.id,
+                        reason = %reason,
+                        "gmail message source is malformed; using the parsed representation"
+                    );
+                    message.raw = None;
+                }
             }
             Ok(Some(message))
         }))
