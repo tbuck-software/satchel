@@ -21,3 +21,4 @@ keine Statusquelle.
 | 0012 | Frontend-Schichtung für Mail-Zustand | angenommen |
 | 0013 | Doppelt geführte Spalten im Mail-Modell | angenommen |
 | 0014 | Ausnahmen für abgelaufene Server-Zertifikate | angenommen |
+| 0015 | Sync-Transport für den Hub: iroh, verschlüsseltes Ereignis-Log, vertrauter und blinder Hub | angenommen |
