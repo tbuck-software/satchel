@@ -1091,6 +1091,15 @@ mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
 
+    /// Queue ids are persisted, and a re-enqueue matches on them.
+    #[test]
+    fn stable_queue_id_digest_is_pinned() {
+        assert_eq!(
+            stable_queue_id("p", "move", "acct"),
+            "p:move:def0b17f603285ef"
+        );
+    }
+
     #[test]
     fn remote_move_thread_id_extractor_covers_workflow_and_blocked_moves() {
         let workflow = serde_json::to_string(&RemoteMutationPayload::WorkflowMove {

@@ -444,6 +444,15 @@ pub fn apply_pending_restore(
 mod tests {
     use super::*;
 
+    /// Backup manifests record this hash next to the key they carry.
+    #[test]
+    fn key_hash_is_pinned() {
+        assert_eq!(
+            key_hash(&[0; 32]),
+            "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"
+        );
+    }
+
     /// Every fixture row is `row-1`.
     fn test_context(column: &str) -> crypto::SecretContext<'static> {
         match column {

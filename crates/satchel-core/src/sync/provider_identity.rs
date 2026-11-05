@@ -48,6 +48,17 @@ pub fn provider_message_db_id(
 mod tests {
     use super::provider_local_id;
 
+    /// Stored as message and thread ids; a different digest would orphan
+    /// every synced row. Expected value computed independently with Python
+    /// `hashlib`.
+    #[test]
+    fn provider_identity_digest_is_pinned() {
+        assert_eq!(
+            provider_local_id("message", "Gmail", &["INBOX", ""]),
+            "message-gmail-v2-66b837f2dca1d9adacc4639b4754b30407450b8d393acef626dd3b61dacb812d"
+        );
+    }
+
     #[test]
     fn punctuation_and_component_boundaries_are_part_of_the_identity() {
         assert_ne!(
