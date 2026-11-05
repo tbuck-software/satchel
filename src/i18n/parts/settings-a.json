@@ -187,6 +187,15 @@
         "recentAccess": "Recent API access"
       },
       "backup": {
+        "description": "Take your mail and settings elsewhere, or keep a copy to restore.",
+        "transferTitle": "Export & import",
+        "backUpNow": "Back up now",
+        "needsPassphrase": "Set a passphrase above, or allow writing the key unprotected.",
+        "mailboxLabel": "Mailbox",
+        "platformLabel": "Settings & data",
+        "platformHint": "Accounts, signatures, templates, rules, contacts and calendar — everything but the mail.",
+        "importShort": "Import…",
+        "exportShort": "Export…",
         "hintBefore": "Exports all locally cached mail as a",
         "mboxExtension": ".mbox",
         "hintAfter": "file. Compatible with Apple Mail, Thunderbird, mutt, mu, etc.",
@@ -672,6 +681,15 @@
         "recentAccess": "Letzte API-Zugriffe"
       },
       "backup": {
+        "description": "Mails und Einstellungen mitnehmen oder eine Kopie zum Wiederherstellen anlegen.",
+        "transferTitle": "Export & Import",
+        "backUpNow": "Jetzt sichern",
+        "needsPassphrase": "Oben eine Passphrase setzen oder das ungeschützte Schreiben erlauben.",
+        "mailboxLabel": "Postfach",
+        "platformLabel": "Einstellungen & Daten",
+        "platformHint": "Konten, Signaturen, Vorlagen, Regeln, Kontakte und Kalender – alles außer den Mails.",
+        "importShort": "Importieren …",
+        "exportShort": "Exportieren …",
         "hintBefore": "Exportiert alle lokal gecachten Mails als",
         "mboxExtension": ".mbox",
         "hintAfter": "-Datei. Kompatibel mit Apple Mail, Thunderbird, mutt, mu, etc.",

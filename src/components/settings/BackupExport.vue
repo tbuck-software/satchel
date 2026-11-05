@@ -27,6 +27,7 @@ import { pickDirectory, pickFile } from '@/services/fileDialog';
 import { useToast } from '@/composables/useToast';
 import { formatBytes } from '@/utils/formatBytes';
 import AppButton from '@/components/ui/AppButton.vue';
+import SectionHeading from '@/components/ui/SectionHeading.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
 
 const { locale, t } = useI18n();
@@ -438,37 +439,55 @@ async function importPlatformNow() {
 <template>
   <section>
     <h3 class="settings-page-title">{{ $t('settings.sections.backup.label') }}</h3>
-    <p class="hint">
-      {{ $t('settings.backup.hintBefore') }}
-      <code>{{ $t('settings.backup.mboxExtension') }}</code>{{ $t('settings.backup.hintAfter') }}
-    </p>
+    <p class="hint">{{ $t('settings.backup.description') }}</p>
 
-    <label class="field">
-      <span>{{ $t('settings.backup.accountLabel') }}</span>
-      <select v-model="accountId">
-        <option value="">{{ $t('settings.backup.allAccounts') }}</option>
-        <option v-for="a in accounts.emailAccounts" :key="a.id" :value="a.id">
-          {{ a.displayName }} &lt;{{ a.email }}&gt;
-        </option>
-      </select>
-    </label>
-
-    <div class="actions">
-      <AppButton variant="primary" :disabled="busy" @click="exportNow">
-        {{ busy ? $t('settings.backup.exporting') : $t('settings.backup.exportMailbox') }}
-      </AppButton>
-      <AppButton variant="secondary" :disabled="busy" @click="importNow">
-        {{ $t('settings.backup.importMbox') }}
-      </AppButton>
-    </div>
-    <div class="actions">
-      <AppButton variant="secondary" :disabled="busy" @click="exportPlatformNow">
-        {{ $t('settings.backup.exportPlatform') }}
-      </AppButton>
-      <AppButton variant="secondary" :disabled="busy" @click="importPlatformNow">
-        {{ $t('settings.backup.importPlatform') }}
-      </AppButton>
-    </div>
+    <section class="backup-group">
+      <SectionHeading :label="$t('settings.backup.transferTitle')" />
+      <div class="setting-group">
+        <label class="setting-row">
+          <span class="setting-info">
+            <span class="setting-label">{{ $t('settings.backup.accountLabel') }}</span>
+          </span>
+          <select v-model="accountId">
+            <option value="">{{ $t('settings.backup.allAccounts') }}</option>
+            <option v-for="a in accounts.emailAccounts" :key="a.id" :value="a.id">
+              {{ a.displayName }} &lt;{{ a.email }}&gt;
+            </option>
+          </select>
+        </label>
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">{{ $t('settings.backup.mailboxLabel') }}</span>
+            <span class="setting-hint">
+              {{ $t('settings.backup.hintBefore') }}
+              <code>{{ $t('settings.backup.mboxExtension') }}</code>{{ $t('settings.backup.hintAfter') }}
+            </span>
+          </div>
+          <div class="actions">
+            <AppButton variant="secondary" size="sm" :disabled="busy" @click="importNow">
+              {{ $t('settings.backup.importMbox') }}
+            </AppButton>
+            <AppButton variant="secondary" size="sm" :disabled="busy" @click="exportNow">
+              {{ busy ? $t('settings.backup.exporting') : $t('settings.backup.exportMailbox') }}
+            </AppButton>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">{{ $t('settings.backup.platformLabel') }}</span>
+            <span class="setting-hint">{{ $t('settings.backup.platformHint') }}</span>
+          </div>
+          <div class="actions">
+            <AppButton variant="secondary" size="sm" :disabled="busy" @click="importPlatformNow">
+              {{ $t('settings.backup.importShort') }}
+            </AppButton>
+            <AppButton variant="secondary" size="sm" :disabled="busy" @click="exportPlatformNow">
+              {{ $t('settings.backup.exportShort') }}
+            </AppButton>
+          </div>
+        </div>
+      </div>
+    </section>
     <div v-if="importProgress" class="run">
       <div
         class="bar"
@@ -492,61 +511,80 @@ async function importPlatformNow() {
     <p v-if="status" class="status">{{ status }}</p>
     <p v-if="errorStatus" class="status error" role="alert">{{ errorStatus }}</p>
 
-    <h3 class="backup-title">{{ $t('settings.backup.databaseTitle') }}</h3>
-    <p class="hint">{{ $t('settings.backup.databaseDescription') }}</p>
-    <p v-if="credentials" class="hint" data-testid="credentials-status">
-      {{
-        $t('settings.backup.credentialsSummary', {
-          total: credentials.total_accounts,
-          encrypted: credentials.encrypted_accounts,
-          masterKey: credentials.master_key_present
-            ? $t('settings.backup.masterKeyPresent')
-            : $t('settings.backup.masterKeyMissing'),
-          database: formatBytes(credentials.database_bytes),
-        })
-      }}
-    </p>
-    <p v-if="credentials?.restore_pending" class="pending" role="status">
-      {{ $t('settings.backup.restorePending') }}
-      <AppButton size="sm" variant="ghost" :disabled="busy" @click="cancelRestore">
-        {{ $t('settings.backup.discardRestore') }}
-      </AppButton>
-    </p>
-
-    <label class="field">
-      <span>{{ $t('settings.backup.keyPassphrase') }}</span>
-      <input
-        v-model="backupPassphrase"
-        type="password"
-        autocomplete="new-password"
-        :aria-invalid="backupPassphraseTooShort"
-        aria-describedby="backup-passphrase-hint"
-        :placeholder="$t('settings.backup.keyPassphrasePlaceholder')"
-      />
-    </label>
-    <p id="backup-passphrase-hint" class="hint" :class="{ warn: backupPassphraseTooShort }">
-      {{ backupPassphraseTooShort
-        ? $t('backend.errors.backupPassphraseTooShort')
-        : $t('settings.backup.keyPassphraseHint') }}
-    </p>
-    <template v-if="!backupPassphrase">
-      <ToggleSwitch v-model="acknowledgeUnprotectedKey">
-        {{ $t('settings.backup.acknowledgeUnprotectedKey') }}
-      </ToggleSwitch>
-      <p class="hint warn">{{ $t('settings.backup.acknowledgeUnprotectedKeyHint') }}</p>
-    </template>
-
-    <div class="actions">
-      <AppButton variant="primary" :disabled="busy || !canCreateBackup" @click="createBackupNow">
-        {{ $t('settings.backup.createDatabaseBackup') }}
-      </AppButton>
-      <AppButton :disabled="busy" @click="showBackups">
-        {{ $t('settings.backup.showBackups') }}
-      </AppButton>
-      <AppButton v-if="backups.length > BACKUPS_TO_KEEP" variant="danger" :disabled="busy" @click="pruneOldBackups">
-        {{ $t('settings.backup.pruneBackups') }}
-      </AppButton>
-    </div>
+    <section class="backup-group">
+      <SectionHeading :label="$t('settings.backup.databaseTitle')" />
+      <p class="hint">{{ $t('settings.backup.databaseDescription') }}</p>
+      <p v-if="credentials" class="hint" data-testid="credentials-status">
+        {{
+          $t('settings.backup.credentialsSummary', {
+            total: credentials.total_accounts,
+            encrypted: credentials.encrypted_accounts,
+            masterKey: credentials.master_key_present
+              ? $t('settings.backup.masterKeyPresent')
+              : $t('settings.backup.masterKeyMissing'),
+            database: formatBytes(credentials.database_bytes),
+          })
+        }}
+      </p>
+      <p v-if="credentials?.restore_pending" class="pending" role="status">
+        {{ $t('settings.backup.restorePending') }}
+        <AppButton size="sm" variant="ghost" :disabled="busy" @click="cancelRestore">
+          {{ $t('settings.backup.discardRestore') }}
+        </AppButton>
+      </p>
+      <div class="setting-group">
+        <label class="setting-row setting-row--stacked">
+          <span class="setting-info">
+            <span class="setting-label">{{ $t('settings.backup.keyPassphrase') }}</span>
+            <span
+              id="backup-passphrase-hint"
+              class="setting-hint"
+              :class="{ warn: backupPassphraseTooShort }"
+            >
+              {{ backupPassphraseTooShort
+                ? $t('backend.errors.backupPassphraseTooShort')
+                : $t('settings.backup.keyPassphraseHint') }}
+            </span>
+          </span>
+          <input
+            v-model="backupPassphrase"
+            type="password"
+            autocomplete="new-password"
+            :aria-invalid="backupPassphraseTooShort"
+            aria-describedby="backup-passphrase-hint"
+            :placeholder="$t('settings.backup.keyPassphrasePlaceholder')"
+          />
+        </label>
+        <div v-if="!backupPassphrase" class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">{{ $t('settings.backup.acknowledgeUnprotectedKey') }}</span>
+            <span class="setting-hint warn">{{ $t('settings.backup.acknowledgeUnprotectedKeyHint') }}</span>
+          </div>
+          <ToggleSwitch
+            v-model="acknowledgeUnprotectedKey"
+            :label="$t('settings.backup.acknowledgeUnprotectedKey')"
+          />
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">{{ $t('settings.backup.backUpNow') }}</span>
+            <!-- A disabled primary button says nothing on its own. -->
+            <span v-if="!canCreateBackup" class="setting-hint">{{ $t('settings.backup.needsPassphrase') }}</span>
+          </div>
+          <div class="actions">
+            <AppButton variant="primary" size="sm" :disabled="busy || !canCreateBackup" @click="createBackupNow">
+              {{ $t('settings.backup.createDatabaseBackup') }}
+            </AppButton>
+            <AppButton variant="secondary" size="sm" :disabled="busy" @click="showBackups">
+              {{ $t('settings.backup.showBackups') }}
+            </AppButton>
+            <AppButton v-if="backups.length > BACKUPS_TO_KEEP" variant="danger" size="sm" :disabled="busy" @click="pruneOldBackups">
+              {{ $t('settings.backup.pruneBackups') }}
+            </AppButton>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <label v-if="anyBackupWrapped" class="field">
       <span>{{ $t('settings.backup.restorePassphrase') }}</span>
@@ -582,12 +620,19 @@ async function importPlatformNow() {
 
 <style scoped>
 section { display: grid; gap: 12px; }
+section > section + section,
+section > .backup-group { margin-top: var(--space-sm); }
+.backup-group { gap: var(--space-sm); }
+.setting-row select, .setting-row input { max-width: 260px; border: 1px solid var(--border-color); background: var(--bg-raised); border-radius: var(--radius-sm); padding: 7px 10px; color: var(--text-primary); font: inherit; font-size: var(--font-size-sm); }
+/* A wide field under its copy, not squeezed beside it. */
+.setting-row.setting-row--stacked { grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); }
+.setting-row.setting-row--stacked > input { max-width: none; justify-self: stretch; }
 h3 { margin: 0; color: var(--text-primary); }
 .hint { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-sm); }
 code { background: var(--bg-raised); padding: 1px 6px; border-radius: var(--radius-xs); font-size: 0.9em; }
 .field { display: grid; gap: 4px; font-size: var(--font-size-sm); color: var(--text-secondary); }
-.field select, .field input { border: 1px solid var(--border-color); background: var(--bg-raised); border-radius: var(--radius-sm); padding: 8px 10px; color: var(--text-primary); font-family: inherit; }
-.actions { display: flex; justify-content: flex-end; gap: 8px; }
+.field input { border: 1px solid var(--border-color); background: var(--bg-raised); border-radius: var(--radius-sm); padding: 8px 10px; color: var(--text-primary); font-family: inherit; }
+.actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .status { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-xs); }
 .status.error { color: var(--accent-red); }
 
@@ -619,7 +664,6 @@ code { background: var(--bg-raised); padding: 1px 6px; border-radius: var(--radi
   font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
 }
-.backup-title { margin-top: 12px; }
 .pending { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 8px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent-amber) 12%, transparent); color: var(--accent-amber); font-size: var(--font-size-sm); }
 .backups { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .backups li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 1px solid var(--border-color-muted); border-radius: var(--radius-sm); background: var(--bg-surface); }
@@ -628,3 +672,5 @@ code { background: var(--bg-raised); padding: 1px 6px; border-radius: var(--radi
 .backup-meta small { color: var(--text-tertiary); font-size: var(--font-size-xs); }
 .warn { color: var(--accent-amber); }
 </style>
+
+<style scoped src="./settingsRows.css"></style>

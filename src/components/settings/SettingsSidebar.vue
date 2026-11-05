@@ -43,7 +43,9 @@ function revealActive() {
   });
 }
 onMounted(revealActive);
-watch(activeSection, revealActive);
+// Sections the shell confirms late (Shortcuts, System tray) push the rest
+// down after the first scroll, so follow the list as well as the selection.
+watch([activeSection, () => shownGroups.value.length, () => groups.value.flatMap((group) => group.items).length], revealActive);
 
 const unregister = registerSettingsFilterField(() => {
   filterInput.value?.focus();
@@ -178,7 +180,7 @@ ul {
 .highlighted { background: var(--bg-hover); }
 
 /* Scrolled into view below the pinned head, not under it. */
-li { scroll-margin-top: 120px; }
+li { scroll-margin-top: 120px; scroll-margin-bottom: var(--space-2xl); }
 
 .settings-sidebar__copy {
   display: grid;

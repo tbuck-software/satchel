@@ -1490,7 +1490,7 @@ const handlers: Record<string, Handler> = {
     failed_remote_mutations: outbox.filter((item) => item.action_type !== 'send_message' && item.status === 'failed').length,
   }),
   record_frontend_diagnostic: () => undefined,
-  app_build_info: () => ({ version: '0.1.0', commit: 'mock', os: 'macos', arch: 'aarch64', debug: true }),
+  app_build_info: () => ({ version: '0.1.0', commit: '44689dd', os: 'macos', arch: 'aarch64', debug: true }),
   open_logs_folder: () => undefined,
   diagnostics_overview: () => {
     const now = new Date().toISOString();
@@ -1535,7 +1535,7 @@ const handlers: Record<string, Handler> = {
   diagnostics_report: () => [
     'Satchel diagnostics (redacted)',
     'version: 0.1.0',
-    'commit: mock',
+    'commit: 44689dd',
     `generated: ${new Date().toISOString()}`,
   ].join('\n'),
   take_pending_notification_thread: () => null,
