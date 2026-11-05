@@ -371,12 +371,25 @@ onBeforeUnmount(() => unregisterFilter?.());
 }
 
 /* A readable column, centred in the pane: about 700px of card at any window
-   width, so a row's copy and its control stay within one glance. */
+   width, so a row's copy and its control stay within one glance. Real data
+   (a long address, a sync error, a backup path) breaks inside the column
+   rather than pushing the page wider than the dialog. */
 .settings-view__content {
+  overflow-wrap: anywhere;
   container-type: inline-size;
   width: min(100%, var(--settings-column));
   margin-inline: auto;
   padding: var(--space-2xl) var(--space-2xl) calc(2 * var(--space-2xl));
+}
+
+/* Header rows (title beside its actions) wrap their actions under the title
+   when there is no room, instead of overflowing. */
+.settings-view__content :deep(header) {
+  flex-wrap: wrap;
+}
+
+.settings-view__content :deep(header > *) {
+  min-width: 0;
 }
 
 /* One title per section, whoever renders it: each editor brought its own
