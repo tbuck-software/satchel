@@ -16,6 +16,24 @@ describe('blockRemoteImages', () => {
     expect(html).toContain('data-blocked-src="https://t.example/p.gif"');
   });
 
+  it('keeps the shape a blocked picture was laid out with', () => {
+    const { html } = blockRemoteImages(
+      '<img src="https://img.example/k.jpg" width="268" height="160" alt="Coffee" style="display:block">'
+      + '<img src="https://img.example/p.jpg" width=300 height=200>',
+    );
+    expect(html).toContain('<img data-blocked-shape data-blocked-src="https://img.example/k.jpg"');
+    expect(html).toContain('style="aspect-ratio:268/160;display:block"');
+    expect(html).toContain('<img style="aspect-ratio:300/200;" data-blocked-shape');
+  });
+
+  it('leaves a tracking pixel and an unsized image as they are', () => {
+    const pixel = blockRemoteImages('<img src="https://t.example/p.gif" width="1" height="1">').html;
+    const unsized = blockRemoteImages('<img src="https://img.example/a.jpg" style="max-width:200px">').html;
+    expect(pixel).not.toContain('aspect-ratio');
+    expect(pixel).not.toContain('data-blocked-shape');
+    expect(unsized).not.toContain('aspect-ratio');
+  });
+
   it('keeps data:, cid: and blob: sources', () => {
     for (const url of ['data:image/png;base64,AAA', 'cid:logo@x', 'blob:abc']) {
       const { html, blockedCount } = blockRemoteImages(`<img src="${url}">`);

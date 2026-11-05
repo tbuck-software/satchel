@@ -938,7 +938,7 @@
       "draftSavedRemotePending": "Draft saved. Sync with the server is still pending: {error}",
       "offline": "You're offline. Send puts the message in the Outbox; it goes out when you're back online.",
       "queued": "Queued in the outbox in the background.",
-      "queuedOffline": "You're offline. The message is in the Outbox and will be sent when you're back online.",
+      "queuedOffline": "Offline: in the Outbox until you're back online.",
       "saveFailed": "Saving failed: {error}",
       "scheduledFor": "Scheduled for {time}.",
       "sendFailed": "Sending failed: {error}",
@@ -3077,7 +3077,7 @@
     },
     "theme": {
       "appearance": "Appearance",
-      "appearanceHint": "Switch between the dark and the light look.",
+      "appearanceHint": "Light, dark, or whatever your system shows.",
       "attachmentOpen": "Open attachments with",
       "attachmentOpenAria": "Default action for attachments",
       "attachmentOpenHint": "The space bar always opens Quick Look, whichever you choose.",
@@ -3097,6 +3097,7 @@
       "plainTextReadHint": "HTML is not rendered. You can switch this per message at any time.",
       "singleKeyShortcuts": "Single-key shortcuts",
       "singleKeyShortcutsHint": "Use single keys to navigate and act on mail without holding Cmd, Ctrl or Alt.",
+      "system": "System",
       "title": "General",
       "vim": "Vim navigation",
       "vimHint": "Navigate with j/k and work through messages from the keyboard."

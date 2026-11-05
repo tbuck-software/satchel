@@ -32,7 +32,7 @@ defineEmits<{
       variant="link"
       size="sm"
     >
-      {{ label }}
+      <span class="topic-chip__text">{{ label }}</span>
     </AppButton>
     <IconButton
       v-if="removable"
@@ -64,12 +64,19 @@ defineEmits<{
 }
 
 .topic-chip__label {
+  min-width: 0;
   border: 0;
   background: transparent;
   color: inherit;
   font: inherit;
   padding: 0;
   cursor: pointer;
+}
+
+/* The name truncates inside the button, not the button itself: clipping the
+   button would also clip the hit area AppButton reaches past it on touch. */
+.topic-chip__text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

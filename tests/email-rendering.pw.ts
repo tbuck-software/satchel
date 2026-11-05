@@ -348,9 +348,9 @@ test('drops the document frame and nested canvas background at phone width', asy
 test('pads all but fixed-width layouts inside the phone frame', async ({ page }) => {
   await page.setViewportSize({ width: 393, height: 852 });
   const cases: Array<[string, string, string]> = [
-    ['simple', '<p><strong>Hallo</strong></p>', '18px'],
-    ['data table', '<div><p>Numbers below.</p><table><tr><td>EU</td><td>12%</td></tr></table></div>', '18px'],
-    ['full-width table', '<table width="100%"><tr><td>Hallo</td></tr></table>', '18px'],
+    ['simple', '<p><strong>Hallo</strong></p>', '16px'],
+    ['data table', '<div><p>Numbers below.</p><table><tr><td>EU</td><td>12%</td></tr></table></div>', '16px'],
+    ['full-width table', '<table width="100%"><tr><td>Hallo</td></tr></table>', '16px'],
     ['layout', '<table width="600" style="width:600px"><tr><td style="padding:16px 24px">Angebote</td></tr></table>', '0px'],
   ];
   for (const [label, html, padding] of cases) {

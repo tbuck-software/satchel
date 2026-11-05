@@ -275,8 +275,15 @@ function openAdvancedSearch() {
   flex-shrink: 1;
 }
 
+/* The label truncates, not the option: clipping the option would clip the
+   touch target SegmentedControl reaches past it. */
 .list-search-results__bar :deep(.segmented__option) {
   max-width: 160px;
+  min-width: 0;
+}
+
+.list-search-results__bar :deep(.segmented__label) {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -180,17 +180,20 @@ const undoKey = computed(() =>
   /* Mirrors the compose FAB on the right: same lane, other side, and stops
      short of it (FAB 56px + its 20px margin + a gap). */
   left: calc(20px + var(--satchel-safe-area-left));
+  right: calc(20px + 56px + var(--space-md) + var(--satchel-safe-area-right));
   bottom: calc(20px + var(--satchel-tab-bar-inset, 0px) + var(--satchel-safe-area-bottom));
-  max-width: calc(100vw - 40px - 56px - var(--space-md) - var(--satchel-safe-area-left) - var(--satchel-safe-area-right));
 }
 
+/* The lane's full width and the FAB's height, like a toast in the same lane:
+   two kinds of feedback in one place should not have two shapes. */
 .undo-fab--floating .undo-fab__main {
   display: flex;
   gap: var(--space-2xs);
-  width: auto;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
-  min-height: 48px;
+  min-height: 56px;
+  border-radius: var(--radius-lg);
   padding: var(--space-2xs) var(--space-lg) var(--space-2xs) var(--space-2xs);
 }
 
