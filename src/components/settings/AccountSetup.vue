@@ -556,6 +556,11 @@ async function removeAccount(accountId: string, email: string) {
           >
             {{ $t('settings.accounts.actions.test') }}
           </AppButton>
+        </div>
+        <AccountAppearanceSettings :account-id="account.id" />
+        <AccountVisibilitySettings :account-id="account.id" />
+        <!-- Removal last and on its own, away from the everyday actions. -->
+        <div class="account-card__danger">
           <AppButton
             class="account-card__remove"
             variant="ghost"
@@ -566,8 +571,6 @@ async function removeAccount(accountId: string, email: string) {
             {{ $t('settings.accounts.removeTitle') }}
           </AppButton>
         </div>
-        <AccountAppearanceSettings :account-id="account.id" />
-        <AccountVisibilitySettings :account-id="account.id" />
       </article>
     </div>
 
@@ -734,26 +737,36 @@ async function removeAccount(accountId: string, email: string) {
 }
 
 /* Destructive, so it keeps its distance from the everyday actions. */
+.account-card__danger {
+  display: flex;
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-color-muted);
+}
+
 .account-card__remove {
-  margin-inline-start: auto;
   color: var(--accent-red-soft);
 }
 
 /* Phone: the actions as a two-column grid of full touch rows, with removal on
    its own line underneath instead of filling whatever slot was left. */
 @media (max-width: 767px) {
+  /* Phone: the actions as a list of tappable rows, not a block of pills. */
   .account-card__actions {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
+    margin-inline: calc(-1 * var(--space-lg));
   }
 
   .account-card__actions > * {
+    justify-content: flex-start;
     min-height: var(--touch-target);
-  }
-
-  .account-card__remove {
-    grid-column: 1 / -1;
-    margin-inline-start: 0;
+    padding-inline: var(--space-lg);
+    border: 0;
+    border-top: 1px solid var(--border-color-muted);
+    border-radius: 0;
+    background: transparent;
+    font-size: var(--font-size-md);
+    font-weight: var(--weight-regular);
   }
 }
 

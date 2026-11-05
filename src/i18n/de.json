@@ -2240,7 +2240,7 @@
       "exampleDomain": "spam.example.com",
       "hintAfter": ". Treffer landen automatisch im Archiv beim Eingang.",
       "hintBefore": "E-Mail-Adresse oder Domain-Pattern, zum Beispiel",
-      "placeholder": "alice{'@'}example.com oder spam.example.com",
+      "placeholder": "Adresse oder Domain",
       "unblock": "Entsperren"
     },
     "calendar": {
@@ -2278,7 +2278,7 @@
       "noAutoImportTitle": "Kein Import beim App-Start",
       "ofTotal": "von {count}",
       "pinned": "Fixiert",
-      "priorityHint": "Priorität: manuell, macOS Kontakte, Google/Microsoft Kontakte, BIMI, Gravatar, Favicon, Initialen.",
+      "priorityHint": "Deine eigene Wahl zuerst, dann Kontakte, Absender-Logos und Initialen.",
       "refreshImport": "Import aktualisieren",
       "searchPlaceholder": "Kontakt suchen",
       "set": "Setzen",
@@ -2449,10 +2449,11 @@
     },
     "images": {
       "allow": "Zulassen",
+      "allowFrom": "Bilder immer laden von",
       "empty": "Keine Freigaben — externe Bilder bleiben überall blockiert.",
       "entryPlaceholder": "alice{'@'}example.com oder {'@'}example.com",
       "hint": "Externe Bilder in Mails können Tracking-Pixel sein: Der Absender sieht beim Laden, ob und wann eine Mail geöffnet wurde.",
-      "modeAccepted": "Akzeptierte",
+      "modeAccepted": "Bekannte",
       "modeAcceptedHint": "Bilder laden automatisch bei Absendern und Domains, die du beim Prüfen neuer Absender akzeptiert hast. Alle übrigen bleiben blockiert, bis du sie freigibst.",
       "modeAcceptedTitle": "Bilder laden automatisch bei Absendern, die du in der Inbox akzeptiert hast",
       "modeAll": "Immer",
@@ -2471,7 +2472,7 @@
       "allPresent": "Alle eingebetteten Bilder liegen lokal vor.",
       "alreadyStored": "bereits gesichert",
       "cancelled": "Abgebrochen nach {count} Bildern{tail}.",
-      "description": "Logos und Grafiken aus Signaturen liegen normalerweise lokal vor. Fehlen sie, holt Satchel sie bei jedem Öffnen erneut beim Anbieter — das kostet Zeit und läuft offline ins Leere.",
+      "description": "Logos in Signaturen bleiben auf diesem Gerät, damit sie offline erscheinen und schnell laden.",
       "desktopOnly": "Nur in der Desktop-App verfügbar.",
       "duration": {
         "hours": "{count} Stunde | {count} Stunden",
@@ -2541,15 +2542,15 @@
       "unknownTime": "Zeitpunkt unbekannt"
     },
     "notifications": {
-      "bodyWindowHint": "Ältere Mail behält Absender, Betreff und Datum und lädt ihren Inhalt beim Öffnen nach. Ihr Text verlässt den Suchindex: Die Volltextsuche findet sie dann nur noch über Betreff oder Absender.",
+      "bodyWindowHint": "Ältere Mail behält Absender, Betreff und Datum; ihr Text lädt beim Öffnen nach und fällt aus der Volltextsuche.",
       "bodyWindowLabel": "Mail-Inhalte behalten",
       "dataDescription": "Aufbewahrung und lokale Datenpflege.",
       "dataTitle": "Daten & Speicher",
       "days": "Tage",
       "daysShort": "{n} Tage",
       "description": "Lege fest, wann Satchel dich über neue Nachrichten informiert.",
-      "enabledHint": "Native Hinweise über das System.",
-      "enabledLabel": "Benachrichtigungen",
+      "enabledHint": "Hinweise über die Mitteilungszentrale des Systems.",
+      "enabledLabel": "Benachrichtigungen zeigen",
       "keepAll": "Alles",
       "never": "Nie",
       "permissionDenied": "Das System erlaubt Satchel keine Benachrichtigungen. Du kannst das in den Systemeinstellungen für Satchel wieder freigeben.",
@@ -2687,7 +2688,7 @@
       "noCapabilities": "keine Funktionen",
       "noContent": "Kein Inhalt.",
       "noneFound": "Noch keine Integrationen installiert",
-      "noneFoundHint": "Integrationen sind Plugins, die Satchel um Funktionen erweitern, etwa OpenPGP-Verschlüsselung. Installierte Plugins erscheinen hier zum Ein- und Ausschalten.",
+      "noneFoundHint": "Integrationen erweitern Satchel um Funktionen, etwa OpenPGP-Verschlüsselung.",
       "openIntegrations": "Integrationen öffnen",
       "permissionUpdateFailed": "Plugin-Berechtigung konnte nicht aktualisiert werden: {error}",
       "pgpPluginDescription": "Erkennt und normalisiert OpenPGP-signierte und -verschlüsselte Nachrichteninhalte.",
@@ -2833,7 +2834,7 @@
         "label": "Kalender"
       },
       "composing": {
-        "description": "Nur-Text, verzögertes Senden und Lesebestätigungen",
+        "description": "Nur-Text, Verzögerung, Bestätigungen",
         "label": "Verfassen"
       },
       "contacts": {
@@ -3132,12 +3133,14 @@
       "empty": "Keine Vorlagen.",
       "loadFailed": "Vorlagen konnten nicht geladen werden. Bitte erneut versuchen.",
       "nameRequired": "Bitte Name angeben.",
+      "purpose": "Wiederverwendbare Texte zum Einfügen beim Schreiben.",
       "saved": "Gespeichert.",
       "shortcutOptional": "Shortcut (optional)",
       "shortcutPlaceholder": "z. B. /thx",
       "subjectOptional": "Betreff (optional)",
       "title": "Vorlagen",
-      "variablesHint": "Variablen {recipient}, {myName} und {date} werden beim Einfügen ersetzt."
+      "variablesHint": "Variablen {recipient}, {myName} und {date} werden beim Einfügen ersetzt.",
+      "variablesLead": "Beim Einfügen ersetzt:"
     },
     "theme": {
       "appearance": "Erscheinungsbild",
@@ -3180,7 +3183,7 @@
       "defaultSubject": "Out of Office",
       "enable": "Auto-Reply aktivieren",
       "hint": "Eine automatische Antwort, am Mail-Server gesetzt, damit sie auch bei geschlossenem Satchel greift.",
-      "imapWarning": "Für IMAP-Konten nicht verfügbar: Richte die automatische Antwort als Sieve-Regel im Webmail deines Anbieters ein. Gmail- und Outlook-Konten werden unterstützt.",
+      "imapWarning": "Richte die automatische Antwort im Webmail deines Anbieters ein. Satchel kann sie nur bei Gmail- und Outlook-Konten selbst setzen.",
       "onlyContacts": "Nur an bekannte Kontakte antworten",
       "saved": "Gespeichert.",
       "title": "Out of Office / Abwesenheit",

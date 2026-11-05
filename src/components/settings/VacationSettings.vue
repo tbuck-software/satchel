@@ -8,6 +8,7 @@ import {
   backendSupportsNativeCommands,
 } from '@/services/backend';
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
 
 const { t } = useI18n();
@@ -99,7 +100,10 @@ async function save() {
       <!-- IMAP has no server-side auto-reply to set: say so instead of
            offering a switch that would do nothing. -->
       <div v-if="!isOauthAccount" class="setting-row setting-row--single">
-        <p class="notice" role="note">{{ $t('settings.vacation.imapWarning') }}</p>
+        <p class="notice" role="note">
+          <AppIcon class="notice__icon"><path d="M8 2.5 14 13H2Z" /><path d="M8 6.5v3M8 11.2h.01" /></AppIcon>
+          <span>{{ $t('settings.vacation.imapWarning') }}</span>
+        </p>
       </div>
       <div v-else class="setting-row">
         <span class="setting-label">{{ $t('settings.vacation.enable') }}</span>
@@ -143,14 +147,24 @@ async function save() {
 
 <style scoped>
 .notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
   margin: 0;
   padding: var(--space-sm) var(--space-md);
+  border: 1px solid color-mix(in srgb, var(--accent-amber) 35%, transparent);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-amber) 8%, transparent);
   color: var(--text-primary);
   font-size: var(--font-size-sm);
   line-height: 1.45;
 }
+.notice__icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent-amber);
+}
+
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md); }
 /* A switch inside the form card: no row padding of its own. */
 .setting-row.setting-row--inline { padding: 0; }

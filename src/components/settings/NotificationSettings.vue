@@ -84,7 +84,7 @@ onBeforeUnmount(() => {
   void save();
 });
 
-const UNDO_PRESETS = [0, 5, 10, 20, 30];
+const UNDO_PRESETS = [0, 5, 10, 30];
 const undoOptions = computed(() => {
   const current = prefs.value.undo_send_seconds;
   const values = UNDO_PRESETS.includes(current) ? UNDO_PRESETS : [...UNDO_PRESETS, current].sort((a, b) => a - b);

@@ -623,6 +623,35 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* A healthy state is a one-line status, not a pane-sized illustration: the
+   empty-state blocks pushed the queue below the fold to say "all clear". */
+.diagnostics-pane :deep(.empty),
+section :deep(.empty) {
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--space-md);
+  row-gap: 2px;
+  align-items: center;
+  justify-items: start;
+  padding: var(--space-md) var(--space-lg);
+  border: 1px solid var(--border-color-muted);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  text-align: left;
+}
+
+section :deep(.empty .icon) {
+  grid-row: span 2;
+  margin: 0;
+}
+
+section :deep(.empty .icon .app-icon) {
+  padding: var(--space-sm);
+}
+
+section :deep(.empty h3) {
+  font-size: var(--font-size-md);
+}
+
 .diagnostics {
   display: grid;
   gap: 24px;

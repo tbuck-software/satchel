@@ -255,8 +255,8 @@ h2 {
 
 .direction-card__title p {
   margin-top: 3px;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
   line-height: 1.4;
 }
 
@@ -298,8 +298,8 @@ h2 {
 }
 
 .action-field small {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-3xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
 }
 
 .action-field select {
@@ -307,11 +307,11 @@ h2 {
   width: 100%;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  padding: 8px 28px 8px 9px;
-  background: var(--bg-raised);
+  padding: 8px 28px 8px 10px;
+  background: var(--bg-surface);
   color: var(--text-primary);
   font: inherit;
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-sm);
 }
 
 .action-field select:focus-visible {
@@ -319,8 +319,8 @@ h2 {
 }
 
 .device-note {
-  color: var(--text-tertiary);
-  font-size: var(--font-size-2xs);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
   line-height: 1.5;
 }
 

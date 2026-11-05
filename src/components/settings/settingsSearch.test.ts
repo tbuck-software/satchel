@@ -58,4 +58,13 @@ describe('settings search', () => {
     expect(terms.some((term) => term.startsWith('Delete failed'))).toBe(false);
     expect(terms).toContain('Test IMAP connection');
   });
+
+  it('matches a short word only where a word starts', () => {
+    const results = searchSettings('sign', items(), buildSettingsIndex(parts, 'en'));
+    const ids = results.map((result) => result.id);
+    expect(ids[0]).toBe('signatures');
+    // "designs" (General) and "assignment" (Swipe gestures) are not about signing.
+    expect(ids).not.toContain('general');
+    expect(ids).not.toContain('swipes');
+  });
 });

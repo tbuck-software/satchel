@@ -5,7 +5,6 @@ import { useAccountsStore } from '@/stores/accounts';
 import { useToast } from '@/composables/useToast';
 import { ACCOUNT_COLORS } from '@/config/accountColors';
 import { avatarDataUrl } from '@/utils/avatarImage';
-import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import ColorSwatchPicker from '@/components/ui/ColorSwatchPicker.vue';
 
@@ -43,7 +42,8 @@ async function onFile(event: Event) {
   <section v-if="account" class="appearance-settings" :aria-label="t('accountAppearance.title')">
     <span class="appearance-settings__title">{{ t('accountAppearance.title') }}</span>
     <div class="appearance-settings__body">
-      <AccountAvatar :name="account.displayName" :color="account.color" :avatar="account.avatar" :size="44" />
+      <!-- The account's own avatar in the card header previews the choice; a
+           second, larger one here only repeated it. -->
       <div class="appearance-settings__controls">
         <ColorSwatchPicker
           :model-value="account.color"
@@ -71,4 +71,5 @@ async function onFile(event: Event) {
 .appearance-settings__picture { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
 .appearance-settings__file { display: none; }
 .appearance-settings__help { margin: 0; color: var(--text-secondary); font-size: var(--font-size-xs); }
+
 </style>

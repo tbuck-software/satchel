@@ -120,7 +120,7 @@ onBeforeUnmount(() => unregisterFilter?.());
 <template>
   <section
     class="settings-view"
-    :class="{ 'settings-view--wide': activeSection === 'shortcuts', 'settings-view--dialog': inDialog }"
+    :class="{ 'settings-view--dialog': inDialog }"
   >
     <!-- In the dialog the section list names Settings and the section names
          itself; a bar saying "Settings" again would only push both down. -->
@@ -351,10 +351,6 @@ onBeforeUnmount(() => unregisterFilter?.());
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.settings-view--wide {
-  --settings-column: 980px;
 }
 
 .settings-view--dialog {

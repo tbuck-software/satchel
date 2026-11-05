@@ -77,6 +77,9 @@ function add() {
     </div>
 
     <div class="setting-group list">
+      <div class="setting-row setting-row--single">
+        <span class="setting-label">{{ $t('settings.images.allowFrom') }}</span>
+      </div>
       <form class="setting-row add-row" @submit.prevent="add">
         <input v-model="newEntry" :placeholder="$t('settings.images.entryPlaceholder')" :aria-label="$t('settings.images.entryPlaceholder')" />
         <AppButton type="submit" variant="secondary" size="sm" :disabled="!newEntry.trim()">{{ $t('settings.images.allow') }}</AppButton>

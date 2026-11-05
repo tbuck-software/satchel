@@ -28,7 +28,7 @@
         "smime": { "label": "S/MIME", "description": "Certificates and encrypted email" },
         "pgp": { "label": "OpenPGP", "description": "Keys and end-to-end encryption" },
         "sending": { "label": "Sending", "description": "Undo send and confirmations" },
-        "composing": { "label": "Composing", "description": "Plain text, delayed sending and read receipts" },
+        "composing": { "label": "Composing", "description": "Plain text, send delay, receipts" },
         "senders": { "label": "Senders & images", "description": "Blocked senders and who may load images" },
         "encryption": { "label": "Encryption", "description": "S/MIME certificates and OpenPGP keys" },
         "storage": { "label": "Storage & backup", "description": "What is kept, export and backups" },
@@ -266,7 +266,7 @@
         "hintBefore": "Email address or domain pattern, for example",
         "exampleDomain": "spam.example.com",
         "hintAfter": ". Matches are archived automatically on arrival.",
-        "placeholder": "alice{'@'}example.com or spam.example.com",
+        "placeholder": "Address or domain",
         "add": "Add",
         "unblock": "Unblock",
         "empty": "No blocked senders.",
@@ -286,7 +286,7 @@
         "syncFailed": "Sync failed: {error}"
       },
       "contacts": {
-        "priorityHint": "Priority: manual, macOS Contacts, Google/Microsoft contacts, BIMI, Gravatar, favicon, initials.",
+        "priorityHint": "Your own choice comes first, then contacts, sender logos and initials.",
         "individualTitle": "Pictures per contact",
         "individualHint": "Set, fetch or lock the picture of each of {count} contacts.",
         "showIndividual": "Show",
@@ -475,7 +475,7 @@
       },
       "inlineImages": {
         "title": "Embedded images",
-        "description": "Logos and graphics from signatures are normally stored locally. If they are missing, Satchel fetches them from the provider every time you open the message — that costs time and fails offline.",
+        "description": "Logos in signatures are kept on this device so they show offline and load quickly.",
         "desktopOnly": "Only available in the desktop app.",
         "missingLocally": "missing locally ({size})",
         "alreadyStored": "already stored",
@@ -530,7 +530,7 @@
         "smime": { "label": "S/MIME", "description": "Zertifikate und verschlüsselte E-Mails" },
         "pgp": { "label": "OpenPGP", "description": "Schlüssel und Ende-zu-Ende-Verschlüsselung" },
         "sending": { "label": "Senden", "description": "Versand, Rückruf und Bestätigungen" },
-        "composing": { "label": "Verfassen", "description": "Nur-Text, verzögertes Senden und Lesebestätigungen" },
+        "composing": { "label": "Verfassen", "description": "Nur-Text, Verzögerung, Bestätigungen" },
         "senders": { "label": "Absender & Bilder", "description": "Blockierte Absender und wer Bilder laden darf" },
         "encryption": { "label": "Verschlüsselung", "description": "S/MIME-Zertifikate und OpenPGP-Schlüssel" },
         "storage": { "label": "Speicher & Backup", "description": "Was aufbewahrt wird, Export und Sicherungen" },
@@ -768,7 +768,7 @@
         "hintBefore": "E-Mail-Adresse oder Domain-Pattern, zum Beispiel",
         "exampleDomain": "spam.example.com",
         "hintAfter": ". Treffer landen automatisch im Archiv beim Eingang.",
-        "placeholder": "alice{'@'}example.com oder spam.example.com",
+        "placeholder": "Adresse oder Domain",
         "add": "Hinzufügen",
         "unblock": "Entsperren",
         "empty": "Keine blockierten Absender.",
@@ -788,7 +788,7 @@
         "syncFailed": "Synchronisierung fehlgeschlagen: {error}"
       },
       "contacts": {
-        "priorityHint": "Priorität: manuell, macOS Kontakte, Google/Microsoft Kontakte, BIMI, Gravatar, Favicon, Initialen.",
+        "priorityHint": "Deine eigene Wahl zuerst, dann Kontakte, Absender-Logos und Initialen.",
         "individualTitle": "Bilder pro Kontakt",
         "individualHint": "Bild für jeden der {count} Kontakte setzen, abrufen oder sperren.",
         "showIndividual": "Anzeigen",
@@ -977,7 +977,7 @@
       },
       "inlineImages": {
         "title": "Eingebettete Bilder",
-        "description": "Logos und Grafiken aus Signaturen liegen normalerweise lokal vor. Fehlen sie, holt Satchel sie bei jedem Öffnen erneut beim Anbieter — das kostet Zeit und läuft offline ins Leere.",
+        "description": "Logos in Signaturen bleiben auf diesem Gerät, damit sie offline erscheinen und schnell laden.",
         "desktopOnly": "Nur in der Desktop-App verfügbar.",
         "missingLocally": "fehlen lokal ({size})",
         "alreadyStored": "bereits gesichert",

@@ -2240,7 +2240,7 @@
       "exampleDomain": "spam.example.com",
       "hintAfter": ". Matches are archived automatically on arrival.",
       "hintBefore": "Email address or domain pattern, for example",
-      "placeholder": "alice{'@'}example.com or spam.example.com",
+      "placeholder": "Address or domain",
       "unblock": "Unblock"
     },
     "calendar": {
@@ -2278,7 +2278,7 @@
       "noAutoImportTitle": "No import on app start",
       "ofTotal": "of {count}",
       "pinned": "Pinned",
-      "priorityHint": "Priority: manual, macOS Contacts, Google/Microsoft contacts, BIMI, Gravatar, favicon, initials.",
+      "priorityHint": "Your own choice comes first, then contacts, sender logos and initials.",
       "refreshImport": "Refresh import",
       "searchPlaceholder": "Search contact",
       "set": "Set",
@@ -2449,10 +2449,11 @@
     },
     "images": {
       "allow": "Allow",
+      "allowFrom": "Always load images from",
       "empty": "Nothing allowed — remote images stay blocked everywhere.",
       "entryPlaceholder": "alice{'@'}example.com or {'@'}example.com",
       "hint": "Remote images in mail can be tracking pixels: loading them tells the sender whether and when a mail was opened.",
-      "modeAccepted": "Accepted",
+      "modeAccepted": "Known",
       "modeAcceptedHint": "Images load automatically for senders and domains you accepted while screening new senders. Everything else stays blocked until you allow it.",
       "modeAcceptedTitle": "Load images automatically for senders you accepted in the inbox",
       "modeAll": "Always",
@@ -2471,7 +2472,7 @@
       "allPresent": "All embedded images are stored locally.",
       "alreadyStored": "already stored",
       "cancelled": "Cancelled after {count} images{tail}.",
-      "description": "Logos and graphics from signatures are normally stored locally. If they are missing, Satchel fetches them from the provider every time you open the message — that costs time and fails offline.",
+      "description": "Logos in signatures are kept on this device so they show offline and load quickly.",
       "desktopOnly": "Only available in the desktop app.",
       "duration": {
         "hours": "{count} hour | {count} hours",
@@ -2541,15 +2542,15 @@
       "unknownTime": "Time unknown"
     },
     "notifications": {
-      "bodyWindowHint": "Older mail keeps sender, subject and date and reloads its content when opened. Its text leaves the search index, so full-text search only finds it by subject or sender.",
+      "bodyWindowHint": "Older mail keeps sender, subject and date; its text reloads when opened and leaves full-text search.",
       "bodyWindowLabel": "Keep mail content",
       "dataDescription": "Retention and local housekeeping.",
       "dataTitle": "Data & storage",
       "days": "days",
       "daysShort": "{n} days",
       "description": "Decide when Satchel tells you about new messages.",
-      "enabledHint": "Native notices through the system.",
-      "enabledLabel": "Notifications",
+      "enabledHint": "Alerts through your system's notification centre.",
+      "enabledLabel": "Show notifications",
       "keepAll": "All",
       "never": "Never",
       "permissionDenied": "The system does not allow Satchel to show notifications. You can re-enable this in the system settings for Satchel.",
@@ -2687,7 +2688,7 @@
       "noCapabilities": "no capabilities",
       "noContent": "No content.",
       "noneFound": "No integrations installed yet",
-      "noneFoundHint": "Integrations are plugins that add features to Satchel, such as OpenPGP encryption. Installed plugins appear here to switch on and off.",
+      "noneFoundHint": "Integrations add features to Satchel, such as OpenPGP encryption.",
       "openIntegrations": "Open Integrations",
       "permissionUpdateFailed": "Could not update plugin permission: {error}",
       "pgpPluginDescription": "Detect and normalize OpenPGP signed/encrypted message content.",
@@ -2833,7 +2834,7 @@
         "label": "Calendar"
       },
       "composing": {
-        "description": "Plain text, delayed sending and read receipts",
+        "description": "Plain text, send delay, receipts",
         "label": "Composing"
       },
       "contacts": {
@@ -3132,12 +3133,14 @@
       "empty": "No templates.",
       "loadFailed": "Could not load templates. Try again.",
       "nameRequired": "Please enter a name.",
+      "purpose": "Reusable texts you insert while writing.",
       "saved": "Saved.",
       "shortcutOptional": "Shortcut (optional)",
       "shortcutPlaceholder": "e.g. /thx",
       "subjectOptional": "Subject (optional)",
       "title": "Templates",
-      "variablesHint": "Variables {recipient}, {myName} and {date} are replaced on insert."
+      "variablesHint": "Variables {recipient}, {myName} and {date} are replaced on insert.",
+      "variablesLead": "Filled in on insert:"
     },
     "theme": {
       "appearance": "Appearance",
@@ -3180,7 +3183,7 @@
       "defaultSubject": "Out of office",
       "enable": "Enable auto-reply",
       "hint": "An automatic reply, set at your mail server so it works while Satchel is closed.",
-      "imapWarning": "Not available for IMAP accounts: set the auto-reply as a Sieve rule in your provider's webmail. Gmail and Outlook accounts are supported.",
+      "imapWarning": "Set the automatic reply in your provider's webmail. Satchel can set it for you only on Gmail and Outlook accounts.",
       "onlyContacts": "Only reply to known contacts",
       "saved": "Saved.",
       "title": "Out of office",

@@ -178,7 +178,7 @@ async function clearAvatar(contact: BackendContact, locked: boolean) {
       </div>
     </header>
 
-    <div class="permission-note">
+    <div v-if="canImport" class="permission-note">
       <div class="note-icon" aria-hidden="true">
         <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="8" cy="5" r="2.5" />

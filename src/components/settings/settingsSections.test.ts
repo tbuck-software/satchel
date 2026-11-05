@@ -149,3 +149,18 @@ describe('settings section visibility', () => {
     resolveCapabilities(DESKTOP);
   });
 });
+
+describe('sections folded into others', () => {
+  it('open the section that holds them now', async () => {
+    vi.resetModules();
+    const { resolveSettingsSection } = await import('./settingsSections');
+    expect(resolveSettingsSection('smime')).toBe('encryption');
+    expect(resolveSettingsSection('pgp')).toBe('encryption');
+    expect(resolveSettingsSection('backup')).toBe('storage');
+    expect(resolveSettingsSection('images')).toBe('senders');
+    expect(resolveSettingsSection('sources')).toBe('accounts');
+    expect(resolveSettingsSection('sending')).toBe('composing');
+    expect(resolveSettingsSection('tray')).toBe('general');
+    expect(resolveSettingsSection('nonsense')).toBe('general');
+  });
+});

@@ -92,7 +92,11 @@ function onFilterKeydown(event: KeyboardEvent) {
  */
 function excerpt(hint: string): Array<{ text: string; match: boolean }> {
   const needle = query.value.trim().toLowerCase();
-  const at = needle ? hint.toLowerCase().indexOf(needle) : -1;
+  const lower = hint.toLowerCase();
+  // Prefer the match at a word start, the one that made this a result.
+  const wordStart = needle ? lower.search(new RegExp(`(?:^|[^\\p{L}\\p{N}])${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u')) : -1;
+  const at = wordStart < 0 ? (needle ? lower.indexOf(needle) : -1)
+    : lower.startsWith(needle, wordStart) ? wordStart : wordStart + 1;
   if (at < 0) return [{ text: hint, match: false }];
   const LEAD = 14;
   let start = Math.max(0, at - LEAD);
@@ -213,7 +217,7 @@ ul {
 .highlighted { background: var(--bg-hover); }
 
 /* Scrolled into view below the pinned head, not under it. */
-li { scroll-margin-top: 120px; scroll-margin-bottom: var(--space-2xl); }
+li { scroll-margin-top: 120px; scroll-margin-bottom: calc(2 * var(--space-2xl)); }
 
 .settings-sidebar__copy {
   display: grid;

@@ -82,16 +82,6 @@ async function remove(id: string) {
   <section>
     <h3 class="settings-page-title">{{ $t('settings.sections.smart-folders.label') }}</h3>
     <p>{{ $t('settings.smartFolders.purpose') }}</p>
-    <p class="hint">
-      {{ $t('settings.smartFolders.hintLead') }}
-      <code>{{ $t('settings.smartFolders.syntaxExample') }}</code>
-      {{ $t('settings.smartFolders.hintMiddle') }}
-      <code>{{ $t('settings.smartFolders.syntaxFrom') }}</code>,
-      <code>{{ $t('settings.smartFolders.syntaxIn') }}</code>,
-      <code>{{ $t('settings.smartFolders.syntaxTag') }}</code>,
-      <code>{{ $t('settings.smartFolders.syntaxHasAttachment') }}</code
-      >{{ $t('settings.smartFolders.hintTail') }}
-    </p>
 
     <CollectionLoadState
       :loading="smart.loading"
@@ -125,6 +115,16 @@ async function remove(id: string) {
 
     <div v-if="editorOpen" ref="editorRef" class="editor">
       <h4>{{ editingId ? $t('settings.smartFolders.editTitle') : $t('settings.smartFolders.newTitle') }}</h4>
+      <p class="hint">
+        {{ $t('settings.smartFolders.hintLead') }}
+        <code>{{ $t('settings.smartFolders.syntaxExample') }}</code>
+        {{ $t('settings.smartFolders.hintMiddle') }}
+        <code>{{ $t('settings.smartFolders.syntaxFrom') }}</code>,
+        <code>{{ $t('settings.smartFolders.syntaxIn') }}</code>,
+        <code>{{ $t('settings.smartFolders.syntaxTag') }}</code>,
+        <code>{{ $t('settings.smartFolders.syntaxHasAttachment') }}</code
+        >{{ $t('settings.smartFolders.hintTail') }}
+      </p>
       <label class="field"><span>{{ $t('common.name') }}</span><input v-model="name" /></label>
       <label class="field"><span>{{ $t('settings.smartFolders.iconLabel') }}</span><input v-model="icon" maxlength="2" /></label>
       <label class="field">

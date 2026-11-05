@@ -396,11 +396,15 @@ onMounted(load);
 
 <style scoped>
 .rules-section { display: grid; gap: 16px; }
+.rules-empty :deep(.empty) {
+  padding: var(--space-sm) var(--space-md) 0;
+}
+
 .rules-empty {
   display: grid;
   justify-items: center;
-  gap: var(--space-md);
-  padding: var(--space-xl) var(--space-lg) var(--space-2xl);
+  gap: var(--space-sm);
+  padding: var(--space-lg);
   border: 1px solid var(--border-color-muted);
   border-radius: var(--radius-md);
   background: var(--bg-surface);

@@ -37,6 +37,8 @@ function conflictTitle(action: string): string | undefined {
   return t('settings.shortcuts.reservedConflict', { keys: fixed.map((binding) => formatBinding(binding)).join(', ') });
 }
 
+/** No changed or clashing key: the status column would be empty, so it goes. */
+const hasStatus = computed(() => conflicts.value.size > 0 || modifiedCount.value > 0);
 const modifiedCount = computed(() => KEYBINDING_DEFINITIONS.filter(
   (definition) => settings.keybindings[definition.action] !== definition.defaultBinding,
 ).length);
@@ -101,7 +103,12 @@ function displayStrokes(action: string): string[] {
       <kbd>/</kbd>
     </label>
 
-    <div class="binding-table" role="table" :aria-label="$t('settings.shortcuts.title')">
+    <div
+      class="binding-table"
+      :class="{ 'binding-table--quiet': !hasStatus }"
+      role="table"
+      :aria-label="$t('settings.shortcuts.title')"
+    >
       <div class="table-head" role="row">
         <span role="columnheader">{{ $t('settings.shortcuts.colCommand') }}</span>
         <span role="columnheader">{{ $t('settings.shortcuts.colKeys') }}</span>
@@ -314,6 +321,16 @@ kbd {
 }
 
 .keybindings__footer span { display: inline-flex; align-items: center; gap: 8px; }
+
+.binding-table--quiet .table-head,
+.binding-table--quiet .binding-row {
+  grid-template-columns: minmax(200px, 1.6fr) minmax(150px, 1fr) minmax(120px, .9fr);
+}
+
+.binding-table--quiet .table-head > :nth-child(4),
+.binding-table--quiet .status-cell {
+  display: none;
+}
 
 @media (max-width: 800px) {
   .table-head,
