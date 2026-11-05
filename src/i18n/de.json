@@ -2744,6 +2744,8 @@
       "duplicateCondition": "Jedes Bedingungsfeld darf nur einmal verwendet werden.",
       "editTitle": "Regel bearbeiten",
       "empty": "Noch keine Regeln angelegt.",
+      "emptyHint": "Regeln bearbeiten neue Mails beim Eintreffen: Kategorie zuordnen, Tag setzen, Priorität festlegen oder als gelesen markieren.",
+      "emptyTitle": "Noch keine Regeln",
       "loadFailed": "Regeln konnten nicht geladen werden: {error}",
       "loading": "Regeln werden geladen …",
       "matchAll": "Alle erfüllen",

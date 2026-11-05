@@ -2744,6 +2744,8 @@
       "duplicateCondition": "Use each condition field only once.",
       "editTitle": "Edit rule",
       "empty": "No rules yet.",
+      "emptyHint": "Rules handle new mail as it arrives: sort it into a category, add a tag, set its priority or mark it read.",
+      "emptyTitle": "No rules yet",
       "loadFailed": "Could not load rules: {error}",
       "loading": "Loading rules…",
       "matchAll": "Match all",

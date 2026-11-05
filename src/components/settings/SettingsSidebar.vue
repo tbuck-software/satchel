@@ -85,6 +85,35 @@ function onFilterKeydown(event: KeyboardEvent) {
   }
 }
 
+/**
+ * The matching line, cut so the match shows: a little lead-in, the match
+ * marked, then the rest. Truncating from the start hid the very word that
+ * made the section a result.
+ */
+function excerpt(hint: string): Array<{ text: string; match: boolean }> {
+  const needle = query.value.trim().toLowerCase();
+  const at = needle ? hint.toLowerCase().indexOf(needle) : -1;
+  if (at < 0) return [{ text: hint, match: false }];
+  const LEAD = 14;
+  let start = Math.max(0, at - LEAD);
+  if (start > 0) {
+    const space = hint.indexOf(' ', start);
+    start = space >= 0 && space < at ? space + 1 : start;
+  }
+  return [
+    { text: `${start > 0 ? '…' : ''}${hint.slice(start, at)}`, match: false },
+    { text: hint.slice(at, at + needle.length), match: true },
+    { text: hint.slice(at + needle.length), match: false },
+  ];
+}
+
+// While filtering, the pane shows the highlighted result: one selection,
+// and the search leads straight to the setting instead of next to it.
+watch([filtering, highlighted, results], ([active]) => {
+  const result = results.value[highlighted.value];
+  if (active && result && result.id !== activeSection.value) location.show(result.id);
+});
+
 function isHighlighted(section: SettingsSection): boolean {
   return filtering.value && results.value[highlighted.value]?.id === section;
 }
@@ -120,7 +149,11 @@ function isHighlighted(section: SettingsSection): boolean {
             <template #icon><AppIcon :grid="24"><g v-html="settingsSectionIcons[section.id]" /></AppIcon></template>
             <span class="settings-sidebar__copy">
               <span>{{ section.label }}</span>
-              <small v-if="section.hint">{{ section.hint }}</small>
+              <small v-if="section.hint">
+                <template v-for="(part, index) in excerpt(section.hint)" :key="index">
+                  <mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template>
+                </template>
+              </small>
             </span>
           </NavItem>
         </li>
@@ -185,6 +218,12 @@ li { scroll-margin-top: 120px; scroll-margin-bottom: var(--space-2xl); }
 .settings-sidebar__copy {
   display: grid;
   min-width: 0;
+}
+
+.settings-sidebar__copy mark {
+  background: none;
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
 }
 
 .settings-sidebar__copy small {
