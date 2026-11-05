@@ -57,7 +57,8 @@ export function quotaLevel(quota: BackendAccountQuota | null | undefined): Quota
  * level has not reached: 97.9 % reads "97 %" while it is still a warning.
  */
 export function formatQuotaPercent(ratio: number, locale: string = currentLocale()): string {
-  const whole = Math.floor(Math.max(0, ratio) * 100) / 100;
+  // The epsilon absorbs float error: 0.29 * 100 is 28.999…, which would floor to 28.
+  const whole = Math.floor(Math.max(0, ratio) * 100 + 1e-9) / 100;
   return new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 0 }).format(whole);
 }
 

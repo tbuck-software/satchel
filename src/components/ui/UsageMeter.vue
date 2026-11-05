@@ -45,7 +45,9 @@ const percent = computed(() => {
   overflow: hidden;
   height: 6px;
   border-radius: var(--radius-full);
-  background: var(--bg-overlay);
+  /* --bg-inset, not --bg-overlay: in the light theme the overlay is as white as
+     the card the meter sits on, and the track would vanish. */
+  background: var(--bg-inset);
 }
 
 .usage-meter__fill {

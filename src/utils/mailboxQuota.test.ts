@@ -65,6 +65,14 @@ describe('mailbox quota thresholds', () => {
     expect(formatQuotaPercent(1.5, 'en')).toBe('150%');
   });
 
+  it('keeps whole percentages whole despite float error', () => {
+    expect(formatQuotaPercent(0.29, 'en')).toBe('29%');
+    expect(formatQuotaPercent(0.57, 'en')).toBe('57%');
+    expect(formatQuotaPercent(0.58, 'en')).toBe('58%');
+    expect(formatQuotaPercent(0.9, 'en')).toBe('90%');
+    expect(formatQuotaPercent(0.98, 'en')).toBe('98%');
+  });
+
   it('formats storage as bytes and messages as counts, per locale', () => {
     const storage = quotaFigures(quota({ storage_used_bytes: 1_250_000_000, storage_limit_bytes: 2_000_000_000 }))[0]!;
     expect(plainAmounts(formatQuotaAmounts(storage, 'en'))).toEqual({ used: '1.3 GB', limit: '2 GB' });
