@@ -1,6 +1,7 @@
 import type { BackendCalendarEvent, BackendCalendarInvite } from '@/services/backend';
 import { currentLocale, d, t } from '@/i18n/runtime';
 import { parseCalendarBoundary } from './calendarDates';
+import { inviteAcceptsResponse } from './inviteMethods';
 export { parseCalendarBoundary, toDateInput } from './calendarDates';
 
 /**
@@ -40,6 +41,8 @@ export interface CalendarItem {
   sourceKey: string;
   /** CSS color value for source tinting, e.g. `var(--accent-pink)`. */
   color: string | null;
+  /** Invites only: false when Accept/Maybe/Decline do not apply (PUBLISH, cancelled). */
+  respondable?: boolean;
 }
 
 /**
@@ -118,6 +121,7 @@ export function itemFromInvite(invite: BackendCalendarInvite): CalendarItem | nu
     allDay: invite.all_day === 1,
     status,
     source: null,
+    respondable: inviteAcceptsResponse(invite),
   };
 }
 
@@ -363,8 +367,12 @@ export interface PositionedItem {
   startMin: number;
   /** Display end; at least 30 minutes after `startMin`. */
   endMin: number;
-  /** Number of already visible events this item overlaps at its start. */
-  overlapLevel: number;
+  /** Zero-based column inside the item's overlap group. */
+  column: number;
+  /** Columns the overlap group needs; 1 when nothing overlaps the item. */
+  columns: number;
+  /** Columns the item covers from `column` on: it widens into free ones. */
+  span: number;
 }
 
 /** Minutes the item occupies within `day`, clamped to [0, 1440]. */
@@ -385,13 +393,25 @@ export function allDayItemsForDay(items: CalendarItem[], day: Date): CalendarIte
   return itemsForDay(items, day).filter((item) => item.allDay || isMultiDay(item));
 }
 
+/** Two layout entries share time on the grid (display extents, not the raw times). */
+function entriesOverlap(a: PositionedItem, b: PositionedItem): boolean {
+  return a.startMin < b.endMin && b.startMin < a.endMin;
+}
+
 /**
- * Lays out the timed items of `day` in chronological stacking order. An item
- * that starts during another item is rendered above it with a small inset,
- * keeping almost the full day-column width available for its title.
+ * Lays out the timed items of `day` side by side, the way Google Calendar
+ * does. Items whose display blocks touch in time form a group; each gets the
+ * first column that is free when it starts, and the group shares the day's
+ * width between its columns. An item then widens to the right across columns
+ * nothing overlapping occupies.
+ *
+ * No item is drawn over another one in its group, so a short appointment that
+ * starts just before a long one keeps its own column instead of disappearing
+ * under it. Overlap uses the display extent — a five-minute event takes the
+ * height of thirty, and that is the height that must not be covered.
  */
 export function layoutDay(items: CalendarItem[], day: Date): PositionedItem[] {
-  const timed = itemsForDay(items, day)
+  const timed: PositionedItem[] = itemsForDay(items, day)
     .filter((item) => !item.allDay && !isMultiDay(item))
     .map((item) => {
       const { startMin, endMin } = minutesInDay(item, day);
@@ -399,17 +419,51 @@ export function layoutDay(items: CalendarItem[], day: Date): PositionedItem[] {
         item,
         startMin,
         endMin: Math.max(endMin, startMin + 30),
-        overlapLevel: 0,
+        column: 0,
+        columns: 1,
+        span: 1,
       };
     })
+    // Earlier first; at the same start the longer one takes the left column.
     .sort((a, b) => a.startMin - b.startMin || b.endMin - a.endMin);
 
-  let activeEnds: number[] = [];
+  let group: PositionedItem[] = [];
+  let groupEnd = -Infinity;
+  let columnEnds: number[] = [];
+
+  const closeGroup = () => {
+    const columns = columnEnds.length;
+    for (const entry of group) {
+      entry.columns = columns;
+      let span = 1;
+      for (let next = entry.column + 1; next < columns; next += 1) {
+        const blocked = group.some((other) => other.column === next && entriesOverlap(entry, other));
+        if (blocked) break;
+        span += 1;
+      }
+      entry.span = span;
+    }
+  };
+
   for (const entry of timed) {
-    activeEnds = activeEnds.filter((endMin) => endMin > entry.startMin);
-    entry.overlapLevel = activeEnds.length;
-    activeEnds.push(entry.endMin);
+    if (group.length > 0 && entry.startMin >= groupEnd) {
+      closeGroup();
+      group = [];
+      columnEnds = [];
+      groupEnd = -Infinity;
+    }
+    let column = columnEnds.findIndex((end) => end <= entry.startMin);
+    if (column === -1) {
+      column = columnEnds.length;
+      columnEnds.push(entry.endMin);
+    } else {
+      columnEnds[column] = entry.endMin;
+    }
+    entry.column = column;
+    group.push(entry);
+    groupEnd = Math.max(groupEnd, entry.endMin);
   }
+  if (group.length > 0) closeGroup();
   return timed;
 }
 

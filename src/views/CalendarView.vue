@@ -7,6 +7,8 @@ import { useCalendarUiStore } from '@/stores/calendarUi';
 import { useUiStore } from '@/stores/ui';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
+import { backendErrorLabel } from '@/utils/backendErrorLabels';
+import { inviteAcceptsResponse } from '@/utils/inviteMethods';
 import {
   addDays,
   addMonths,
@@ -75,8 +77,9 @@ onMounted(() => {
   void invites
     .syncRemote()
     .then((errors) => {
-      const firstError = errors[0];
-      if (firstError) toast.error(firstError);
+      // Summary entries are message keys (with the failing account as a
+      // parameter), never sentences — the toast showed the raw key.
+      if (errors.length > 0) toast.error(backendErrorLabel(errors[0]));
     })
     .catch(() => {
       /* offline or backend busy — the cached mirror stays visible */
@@ -111,7 +114,11 @@ const items = computed(() =>
   allItems.value.filter((item) => !calendarUi.isSourceHidden(item.sourceKey)),
 );
 
-const undatedInvites = computed(() => invites.items.filter((invite) => !invite.starts_at));
+// Only what can be answered: an undated row has nothing else to offer than
+// Accept/Maybe/Decline.
+const undatedInvites = computed(() =>
+  invites.items.filter((invite) => !invite.starts_at && inviteAcceptsResponse(invite)),
+);
 
 const gridDays = computed(() =>
   viewMode.value === 'day' ? [startOfDay(anchor.value)] : weekDays(anchor.value),

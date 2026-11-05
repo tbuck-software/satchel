@@ -222,10 +222,10 @@
       "followUpPersistenceFailed": "Nachfassen ist momentan nicht verfügbar. Bitte versuche es erneut.",
       "followUpTimestampInvalid": "Gib eine gültige Zeit zum Nachfassen ein.",
       "googleCalendarSyncFailed": "Google Calendar für {account} konnte nicht synchronisiert werden.",
-      "groupwareCalendarSyncFailed": "Kalender konnten nicht synchronisiert werden.",
-      "groupwareContactSyncFailed": "Kontakte konnten nicht synchronisiert werden.",
+      "groupwareCalendarSyncFailed": "Kalender für {account} konnten nicht synchronisiert werden.",
+      "groupwareContactSyncFailed": "Kontakte für {account} konnten nicht synchronisiert werden.",
       "groupwareCredentialsRejected": "Kein CalDAV- oder CardDAV-Dienst hat die gespeicherten Zugangsdaten akzeptiert.",
-      "groupwareSyncFailed": "Groupware konnte nicht synchronisiert werden.",
+      "groupwareSyncFailed": "Groupware für {account} konnte nicht synchronisiert werden.",
       "imapConnectionFailed": "Es konnte keine sichere IMAP-Verbindung hergestellt werden. Letzter Versuch: {reason}. Du kannst den Server unter \"Erweitert\" von Hand eintragen.",
       "imapCredentialsRejected": "Keine sichere IMAP-Konfiguration hat diese Zugangsdaten akzeptiert. Prüfe den Benutzernamen oder trage den Server von Hand ein.",
       "imapDraftUidWithoutValidity": "Für diesen älteren Entwurf in \"{folder}\" fehlt eine bestätigte Serverkennung. Seine Serverkopie wurde nicht verändert.",
@@ -1608,7 +1608,9 @@
   },
   "nav": {
     "agenda": {
+      "allDayCount": "{count} Einträge",
       "more": "+{count} weitere",
+      "now": "Jetzt",
       "title": "Heute"
     },
     "calendar": "Kalender",

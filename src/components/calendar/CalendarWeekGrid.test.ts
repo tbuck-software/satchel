@@ -31,7 +31,7 @@ function makeItem(key: string, title: string, startHour: number, endHour: number
 }
 
 describe('CalendarWeekGrid overlapping events', () => {
-  it('keeps stacked events wide and insets the later one by 10px', () => {
+  it('lays overlapping events out side by side', () => {
     const wrapper = mount(CalendarWeekGrid, {
       props: {
         days: [new Date(2026, 7, 12)],
@@ -44,13 +44,31 @@ describe('CalendarWeekGrid overlapping events', () => {
     });
 
     const events = wrapper.findAll<HTMLElement>('.week__event');
+    // jsdom reorders and pads `min()`/`max()`; compare without the padding.
+    const style = (index: number) =>
+      (events[index]!.element.getAttribute('style') ?? '').replace(/[\s*]/g, '');
     expect(events).toHaveLength(2);
     expect(events[0]!.text()).toContain('Langer Termin mit lesbarem Titel');
-    expect(events[0]!.element.style.left).toBe('0px');
-    expect(events[0]!.element.style.right).toBe('1px');
-    expect(events[0]!.element.style.width).toBe('');
-    expect(events[1]!.element.style.left).toBe('10px');
-    expect(events[1]!.classes()).toContain('week__event--overlapping');
+    expect(style(0)).toContain('left:min(0%,calc(100%-56px))');
+    expect(style(0)).toContain('calc(50%-2px)');
+    expect(style(1)).toContain('left:min(50%,calc(100%-56px))');
+    expect(events[1]!.element.style.zIndex).toBe('2');
+    expect(events.every((event) => event.classes().includes('week__event--shared'))).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it('keeps a lone event on the full width', () => {
+    const wrapper = mount(CalendarWeekGrid, {
+      props: { days: [new Date(2026, 7, 12)], items: [makeItem('solo', 'Allein', 8, 9)] },
+      global: { plugins: [i18n('en')] },
+    });
+
+    const event = wrapper.get<HTMLElement>('.week__event');
+    expect(event.element.style.left).toBe('0px');
+    expect(event.element.style.right).toBe('1px');
+    expect(event.element.style.width).toBe('');
+    expect(event.classes()).not.toContain('week__event--shared');
 
     wrapper.unmount();
   });

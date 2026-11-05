@@ -5238,6 +5238,17 @@ mod tests {
         .execute(&pool)
         .await
         .expect("invite");
+        // An attendee's answer to the user's own meeting, stored before ingest
+        // skipped them: the newsletter stays a newsletter.
+        sqlx::query(
+            "INSERT INTO calendar_invites
+             (id, message_id, account_id, uid, raw_ics, method, created_at, updated_at)
+             VALUES ('calendar-reply', 'message-newsletter', 'acc', 'reply-uid',
+                     'BEGIN:VCALENDAR', 'REPLY', '2026-01-01', '2026-01-01')",
+        )
+        .execute(&pool)
+        .await
+        .expect("reply");
 
         let summary = ThreadRepository::new(&pool)
             .smart_inbox_summary(Some("acc"))
@@ -5298,6 +5309,38 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["machine", "social"]
         );
+
+        let newsletter = ThreadRepository::new(&pool)
+            .list(ThreadListRequest {
+                account_id: Some("acc".into()),
+                mailbox_kind: Some("section".into()),
+                mailbox_value: Some("inbox".into()),
+                workflow_state: Some("inbox".into()),
+                smart_bucket: Some("newsletter".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("newsletter page");
+        let [thread] = newsletter.threads.as_slice() else {
+            panic!("one newsletter thread, got {:?}", newsletter.threads);
+        };
+        assert_eq!(thread.id, "newsletter");
+        assert!(!thread.has_invite);
+        assert_eq!(thread.invite_status, None);
+
+        let record = ThreadRepository::new(&pool)
+            .get("newsletter")
+            .await
+            .expect("newsletter record");
+        assert!(!record.has_invite);
+        assert_eq!(record.invite_status, None);
+    }
+
+    #[test]
+    fn thread_queries_skip_invitation_answers() {
+        let invitation = crate::email::calendar::invitation_method_sql("calendar_invites.method");
+        assert_eq!(THREAD_RECORD_SQL.matches(&invitation).count(), 2);
+        assert_eq!(smart_bucket_case_sql().matches(&invitation).count(), 1);
     }
 
     #[tokio::test]
@@ -6083,12 +6126,14 @@ const THREAD_RECORD_SQL: &str = "
               SELECT 1 FROM calendar_invites
               JOIN messages invite_messages ON invite_messages.id = calendar_invites.message_id
               WHERE invite_messages.thread_id = threads.id
+                AND UPPER(TRIM(COALESCE(calendar_invites.method, ''))) NOT IN ('REPLY', 'COUNTER', 'REFRESH', 'DECLINECOUNTER')
             ) AS has_invite,
             (
               SELECT calendar_invites.rsvp_status
               FROM calendar_invites
               JOIN messages invite_messages ON invite_messages.id = calendar_invites.message_id
               WHERE invite_messages.thread_id = threads.id
+                AND UPPER(TRIM(COALESCE(calendar_invites.method, ''))) NOT IN ('REPLY', 'COUNTER', 'REFRESH', 'DECLINECOUNTER')
               ORDER BY invite_messages.date DESC, calendar_invites.updated_at DESC
               LIMIT 1
             ) AS invite_status,
@@ -6423,7 +6468,12 @@ const CODE_NOTIFICATION_SQL: &str = "(
   )
 )";
 
+/// An answer to an invitation (`METHOD:REPLY`, …) is not one: it neither
+/// files a thread under Invitations nor gives it an RSVP state. The thread
+/// queries spell the predicate out because they are string constants;
+/// `thread_queries_skip_invitation_answers` holds them to the shared rule.
 fn smart_bucket_case_sql() -> String {
+    let invitation = crate::email::calendar::invitation_method_sql("calendar_invites.method");
     format!(
         "CASE
        WHEN threads.priority >= 2 THEN 'priority'
@@ -6432,6 +6482,7 @@ fn smart_bucket_case_sql() -> String {
          SELECT 1 FROM calendar_invites
          JOIN messages bucket_invite_messages ON bucket_invite_messages.id = calendar_invites.message_id
          WHERE bucket_invite_messages.thread_id = threads.id
+           AND {invitation}
        ) THEN 'invitations'
        WHEN threads.category IN ('updates', 'social') OR {MACHINE_NOTIFICATION_SQL} OR {CODE_NOTIFICATION_SQL} THEN 'notifications'
        WHEN threads.category = 'promotions' THEN 'newsletter'
@@ -6659,12 +6710,14 @@ fn thread_list_query(
               SELECT 1 FROM calendar_invites
               JOIN messages invite_messages ON invite_messages.id = calendar_invites.message_id
               WHERE invite_messages.thread_id = threads.id
+                AND UPPER(TRIM(COALESCE(calendar_invites.method, ''))) NOT IN ('REPLY', 'COUNTER', 'REFRESH', 'DECLINECOUNTER')
             ) AS has_invite,
             (
               SELECT calendar_invites.rsvp_status
               FROM calendar_invites
               JOIN messages invite_messages ON invite_messages.id = calendar_invites.message_id
               WHERE invite_messages.thread_id = threads.id
+                AND UPPER(TRIM(COALESCE(calendar_invites.method, ''))) NOT IN ('REPLY', 'COUNTER', 'REFRESH', 'DECLINECOUNTER')
               ORDER BY invite_messages.date DESC, calendar_invites.updated_at DESC
               LIMIT 1
             ) AS invite_status,

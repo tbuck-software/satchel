@@ -15,9 +15,11 @@ import { joinComposerTextHistory, splitComposerTextHistory, splitComposerHtmlHis
  * The fixtures live in `@/data/mock`, which nothing else may import.
  */
 import { assertCommandPayload } from './commandContract';
+import { isInvitation } from '@/utils/inviteMethods';
 import {
   mockAccounts,
   mockCalendarEvents,
+  mockCalendarInvites,
   mockCalendarSources,
   mockDrafts,
   mockMessagesByThread,
@@ -30,7 +32,7 @@ import type { Account, Message, Thread } from '@/types/mail';
 import type { BackendContact } from '@/types/contacts';
 import type { BackendDraft, BackendSignature, BackendResolvedSignature } from '@/types/composer';
 import type { BackendMessage, BackendMessageBody } from '@/types/messages';
-import type { BackendCalendarEvent, BackendCalendarSource } from '@/types/calendar';
+import type { BackendCalendarEvent, BackendCalendarInvite, BackendCalendarSource } from '@/types/calendar';
 import type { BackendOutboxItem } from '@/types/outbox';
 import type { BackendTopic, BackendTopicTimelineItem } from '@/types/topics';
 import { matchesWorkflowFilter, type WorkflowFilter, type WorkflowState } from '@/types/workflow';
@@ -433,6 +435,7 @@ function takeQueuedDraft(id: string): BackendDraft {
 }
 
 const calendarEvents: BackendCalendarEvent[] = mockCalendarEvents.map((event) => ({ ...event }));
+const calendarInvites: BackendCalendarInvite[] = mockCalendarInvites.map((invite) => ({ ...invite }));
 const calendarSources: BackendCalendarSource[] = mockCalendarSources.map((source) => ({ ...source }));
 const senderPreferences = new Map<string, { category: string | null; isPriority: boolean }>();
 
@@ -1531,7 +1534,8 @@ const handlers: Record<string, Handler> = {
   }),
   list_smart_folders: () => [],
   list_follow_ups: () => [],
-  list_invites: () => [],
+  // The backend leaves answers to invitations (METHOD:REPLY, …) out of the list.
+  list_invites: () => calendarInvites.filter(isInvitation),
   list_calendar_events: () => calendarEvents,
   list_calendar_sources: () => calendarSources,
   list_contacts: () => sortedContacts().slice(0, 500),

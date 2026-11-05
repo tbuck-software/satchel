@@ -8,6 +8,7 @@ import {
   isSameDay,
   layoutDay,
   type CalendarItem,
+  type PositionedItem,
 } from '@/utils/calendarGrid';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 import CalendarEventChip from './CalendarEventChip.vue';
@@ -25,8 +26,13 @@ const emit = defineEmits<{
 }>();
 
 const HOUR_HEIGHT = 48;
-const OVERLAP_INSET = 10;
-const MAX_OVERLAP_INSET_LEVELS = 3;
+/**
+ * The narrowest a block gets when overlapping events share a day: enough for
+ * the source stripe and the start of a title. A group too wide for the column
+ * lets its blocks overlap their right neighbour instead of shrinking further;
+ * each still shows its own left edge and title start.
+ */
+const MIN_EVENT_WIDTH = 56;
 /**
  * Below this a block cannot stack title over time (24px for half an hour), so
  * both go on one line. Stacked, the title shrank to nothing and a short event
@@ -61,13 +67,19 @@ const nowOffset = computed(() => {
   return (minutes / 60) * HOUR_HEIGHT;
 });
 
-function blockStyle(entry: { startMin: number; endMin: number; overlapLevel: number }) {
-  const inset = Math.min(entry.overlapLevel, MAX_OVERLAP_INSET_LEVELS) * OVERLAP_INSET;
+function blockStyle(entry: PositionedItem) {
+  const top = `${(entry.startMin / 60) * HOUR_HEIGHT}px`;
+  const height = `${((entry.endMin - entry.startMin) / 60) * HOUR_HEIGHT}px`;
+  if (entry.columns === 1) return { top, height, left: '0px', right: '1px' };
+  const share = 100 / entry.columns;
   return {
-    top: `${(entry.startMin / 60) * HOUR_HEIGHT}px`,
-    height: `${((entry.endMin - entry.startMin) / 60) * HOUR_HEIGHT}px`,
-    left: `${inset}px`,
-    right: '1px',
+    top,
+    height,
+    left: `min(${share * entry.column}%, calc(100% - ${MIN_EVENT_WIDTH}px))`,
+    width: `max(calc(${share * entry.span}% - 2px), ${MIN_EVENT_WIDTH - 2}px)`,
+    // Right-hand columns on top: when blocks hit the minimum width and
+    // overlap, each one's left edge, stripe and title start stay visible.
+    zIndex: entry.column + 1,
   };
 }
 
@@ -164,7 +176,7 @@ onBeforeUnmount(() => {
             :class="[
               `week__event--${entry.item.status}`,
               {
-                'week__event--overlapping': entry.overlapLevel > 0,
+                'week__event--shared': entry.columns > 1,
                 'week__event--compact': entry.endMin - entry.startMin < COMPACT_EVENT_MINUTES,
               },
             ]"
@@ -325,6 +337,9 @@ onBeforeUnmount(() => {
 
 .week__col {
   position: relative;
+  /* Blocks carry a z-index per column; keep it, and the now line above it,
+     inside the day. */
+  isolation: isolate;
   min-width: 0;
   border-right: 1px solid var(--calendar-grid-line);
   cursor: pointer;
@@ -364,8 +379,18 @@ onBeforeUnmount(() => {
   transition: background var(--duration-fast) var(--ease-out);
 }
 
-.week__event--overlapping {
-  box-shadow: var(--shadow-sm);
+/* A hairline of the day's own surface keeps neighbouring blocks apart where
+   they touch or, at the minimum width, overlap. */
+.week__event--shared {
+  padding-inline: 8px 3px;
+  box-shadow: 0 0 0 1px var(--bg-surface);
+}
+
+/* Narrow and tall: let the title wrap instead of cutting it to a few letters. */
+.week__event--shared:not(.week__event--compact) .week__event-title {
+  white-space: normal;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 .week__event:hover {
@@ -390,12 +415,13 @@ onBeforeUnmount(() => {
   font-weight: var(--weight-semibold);
 }
 
+/* On one line the title comes first; the time gets what is left, if any. */
 .week__event--compact .week__event-title {
-  flex: 1;
+  flex: 0 1 auto;
 }
 
 .week__event--compact .week__event-time {
-  flex-shrink: 0;
+  flex: 0 100 auto;
 }
 
 .week__event-time {
@@ -462,7 +488,7 @@ onBeforeUnmount(() => {
   position: absolute;
   left: 0;
   right: 0;
-  z-index: 2;
+  z-index: 100;
   height: 2px;
   background: var(--accent-red);
   pointer-events: none;

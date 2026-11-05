@@ -43,21 +43,25 @@ export const useInvitesStore = defineStore('invites', () => {
    * table, then reload. Returns the collected error list so the caller can
    * surface it once — a missing scope should produce one toast, not a toast
    * per poll.
+   *
+   * The entries are backend errors, not text: summary entries are encoded
+   * `{ key, params }` strings, a rejected command is whatever it rejected
+   * with. Callers translate them (`backendErrorLabel`).
    */
-  async function syncRemote(): Promise<string[]> {
+  async function syncRemote(): Promise<unknown[]> {
     if (!backendCommandsAvailable()) return [];
     const [google, dav] = await Promise.allSettled([
       backendSyncGoogleCalendar(),
       backendSyncGroupware(),
     ]);
-    const errors: string[] = [];
+    const errors: unknown[] = [];
     let checked = 0;
     for (const result of [google, dav]) {
       if (result.status === 'fulfilled') {
         checked += result.value.accounts_checked;
         errors.push(...result.value.errors);
       } else {
-        errors.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+        errors.push(result.reason);
       }
     }
     if (checked > 0) await load();

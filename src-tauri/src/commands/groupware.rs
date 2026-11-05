@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use sqlx::{FromRow, SqlitePool};
 
-use crate::commands::error::CommandResult;
+use crate::commands::error::{CommandError, CommandResult};
 use crate::providers::dav::{self, GroupwareSyncSummary};
 
 const GROUPWARE_SYNC_ERROR_KEY: &str = "backend.errors.groupwareSyncFailed";
@@ -21,6 +21,7 @@ pub struct ConfigureGroupwareInput {
 #[derive(Debug, FromRow)]
 struct GroupwareAccountRow {
     id: String,
+    email: String,
     config: String,
 }
 
@@ -68,14 +69,14 @@ pub async fn sync_groupware(
 ) -> CommandResult<GroupwareSyncSummary> {
     let accounts = match account_id {
         Some(account_id) => sqlx::query_as::<_, GroupwareAccountRow>(
-            "SELECT id, config FROM accounts WHERE id = ? AND is_active = 1",
+            "SELECT id, email, config FROM accounts WHERE id = ? AND is_active = 1",
         )
         .bind(account_id)
         .fetch_all(pool.inner())
         .await
         .map_err(|err| err.to_string())?,
         None => sqlx::query_as::<_, GroupwareAccountRow>(
-            "SELECT id, config FROM accounts WHERE is_active = 1",
+            "SELECT id, email, config FROM accounts WHERE is_active = 1",
         )
         .fetch_all(pool.inner())
         .await
@@ -98,7 +99,11 @@ pub async fn sync_groupware(
                     account_id = %account.id,
                     "groupware synchronization failed"
                 );
-                total.errors.push(GROUPWARE_SYNC_ERROR_KEY.to_string());
+                total.errors.push(
+                    CommandError::new(GROUPWARE_SYNC_ERROR_KEY)
+                        .with_param("account", account.email.as_str())
+                        .encoded(),
+                );
             }
         }
     }

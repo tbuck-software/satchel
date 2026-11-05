@@ -342,6 +342,37 @@ describe('CalendarView', () => {
     expect(harness.toast.error).toHaveBeenCalledWith('Google calendar unavailable');
   });
 
+  it('translates a sync error key instead of toasting the raw key', async () => {
+    harness.invites!.syncRemote.mockResolvedValue([
+      JSON.stringify({
+        key: 'backend.errors.groupwareCalendarSyncFailed',
+        params: { account: 'me@uni.example' },
+      }),
+    ]);
+
+    render();
+    await flushPromises();
+
+    expect(harness.toast.error).toHaveBeenCalledWith(
+      'Calendars for me@uni.example could not be synchronized.',
+    );
+  });
+
+  it('offers only invitations that ask for an answer as undated rows', async () => {
+    harness.invites!.items = [
+      makeInvite({ id: 'request', summary: 'Undated request', starts_at: null, ends_at: null, method: 'REQUEST' }),
+      makeInvite({ id: 'publish', summary: 'Undated publish', starts_at: null, ends_at: null, method: 'PUBLISH' }),
+      makeInvite({ id: 'cancelled', summary: 'Undated cancel', starts_at: null, ends_at: null, cancelled: 1 }),
+    ];
+
+    const wrapper = render();
+    await flushPromises();
+
+    const rows = wrapper.findAll('.calendar__undated-row').map((row) => row.text());
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain('Undated request');
+  });
+
   it('navigates by month, week, and day and switches the selected date to day view', async () => {
     const wrapper = render();
 

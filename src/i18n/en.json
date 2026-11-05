@@ -222,10 +222,10 @@
       "followUpPersistenceFailed": "Follow-ups are currently unavailable. Please try again.",
       "followUpTimestampInvalid": "Enter a valid follow-up time.",
       "googleCalendarSyncFailed": "Google Calendar for {account} could not be synchronized.",
-      "groupwareCalendarSyncFailed": "Calendars could not be synchronized.",
-      "groupwareContactSyncFailed": "Contacts could not be synchronized.",
+      "groupwareCalendarSyncFailed": "Calendars for {account} could not be synchronized.",
+      "groupwareContactSyncFailed": "Contacts for {account} could not be synchronized.",
       "groupwareCredentialsRejected": "No CalDAV or CardDAV service accepted the saved credentials.",
-      "groupwareSyncFailed": "Groupware could not be synchronized.",
+      "groupwareSyncFailed": "Groupware for {account} could not be synchronized.",
       "imapConnectionFailed": "A secure IMAP connection could not be established. Last attempt: {reason}. You can enter the server manually under Advanced.",
       "imapCredentialsRejected": "No secure IMAP configuration accepted these credentials. Check the username or enter the server manually.",
       "imapDraftUidWithoutValidity": "This older draft in \"{folder}\" has no verified server identity. Its server copy was left untouched.",
@@ -1608,7 +1608,9 @@
   },
   "nav": {
     "agenda": {
+      "allDayCount": "{count} entries",
       "more": "+{count} more",
+      "now": "Now",
       "title": "Today"
     },
     "calendar": "Calendar",
