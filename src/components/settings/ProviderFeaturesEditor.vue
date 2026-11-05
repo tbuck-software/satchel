@@ -86,7 +86,7 @@ async function create() {
 
 <template>
   <section>
-    <h3>{{ $t('settings.providerFeatures.title') }}</h3>
+    <h3 class="settings-page-title">{{ $t('settings.providerFeatures.title') }}</h3>
     <p class="hint">{{ $t('settings.providerFeatures.hint') }}</p>
 
     <label class="field">

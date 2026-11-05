@@ -269,7 +269,7 @@ onMounted(load);
   <section class="rules-section">
     <header class="section-header">
       <div>
-        <h3>{{ $t('settings.rules.title') }}</h3>
+        <h3 class="settings-page-title">{{ $t('settings.rules.title') }}</h3>
         <p>{{ $t('settings.rules.description') }}</p>
       </div>
       <AppButton variant="primary" @click="startCreate">{{ $t('settings.rules.newRule') }}</AppButton>

@@ -2868,7 +2868,7 @@
         "label": "Rules"
       },
       "sending": {
-        "description": "Delivery, undo send and confirmations",
+        "description": "Undo send and confirmations",
         "label": "Sending"
       },
       "shortcuts": {
@@ -2916,7 +2916,6 @@
       "conflict": "Conflict",
       "custom": "Custom",
       "description": "Every action stays the same across search, menus and keyboard.",
-      "eyebrow": "Keyboard first",
       "footerRecord": "Click a row and press the new key combination",
       "noMatch": "No matching command.",
       "reservedConflict": "Taken by a fixed key: {keys}",

@@ -85,6 +85,11 @@ watch(
 </template>
 
 <style scoped>
+/* A dark dialog over a dimmed dark app needs a drawn edge to read as a sheet. */
+:global(.shell-panel:has(> .settings-dialog)) {
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--border-color);
+}
+
 .settings-dialog {
   display: grid;
   grid-template-columns: 252px minmax(0, 1fr);

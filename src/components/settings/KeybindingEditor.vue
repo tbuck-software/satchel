@@ -84,8 +84,7 @@ function displayStrokes(action: string): string[] {
   <section class="keybindings">
     <header class="keybindings__header">
       <div>
-        <span class="eyebrow">{{ $t('settings.shortcuts.eyebrow') }}</span>
-        <h2>{{ $t('settings.shortcuts.title') }}</h2>
+        <h2 class="settings-page-title">{{ $t('settings.shortcuts.title') }}</h2>
         <p>{{ $t('settings.shortcuts.description') }}</p>
       </div>
       <div class="header-actions">
@@ -126,7 +125,6 @@ function displayStrokes(action: string): string[] {
       >
         <span class="command-cell" role="cell">
           <strong>{{ definition.label }}</strong>
-          <small>{{ definition.action }}</small>
         </span>
         <span class="key-cell" role="cell">
           <template v-for="(stroke, strokeIndex) in displayStrokes(definition.action)" :key="`${stroke}-${strokeIndex}`">
@@ -174,14 +172,6 @@ function displayStrokes(action: string): string[] {
   align-items: end;
   justify-content: space-between;
   gap: 28px;
-}
-
-.eyebrow {
-  color: var(--accent-primary);
-  font-size: var(--font-size-3xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: .14em;
-  text-transform: uppercase;
 }
 
 h2 {
@@ -300,7 +290,6 @@ kbd {
 
 .command-cell { display: grid; gap: 3px; min-width: 0; }
 .command-cell strong { overflow: hidden; color: var(--text-primary); font-size: var(--font-size-sm); font-weight: var(--weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
-.command-cell small { color: var(--text-tertiary); font-family: var(--font-mono); font-size: var(--font-size-3xs); }
 
 .key-cell { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .key-chord { display: inline-flex; gap: 3px; }

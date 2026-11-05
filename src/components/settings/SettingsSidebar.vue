@@ -2,7 +2,7 @@
 import NavItem from '@/components/ui/NavItem.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import SearchInput from '@/components/ui/SearchInput.vue';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { registerSettingsFilterField } from '@/composables/settingsFilterFocus';
 import { useSettingsFilter } from '@/composables/useSettingsFilter';
@@ -33,6 +33,17 @@ const shownGroups = computed(() => (
 watch(results, () => {
   highlighted.value = 0;
 });
+
+// Opened on About or Diagnostics, the list starts scrolled to the top and the
+// current section sits out of sight; bring it in, without moving the page.
+const root = ref<HTMLElement | null>(null);
+function revealActive() {
+  void nextTick(() => {
+    root.value?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest' });
+  });
+}
+onMounted(revealActive);
+watch(activeSection, revealActive);
 
 const unregister = registerSettingsFilterField(() => {
   filterInput.value?.focus();
@@ -78,7 +89,7 @@ function isHighlighted(section: SettingsSection): boolean {
 </script>
 
 <template>
-  <nav class="settings-sidebar" :aria-label="$t('common.settings')">
+  <nav ref="root" class="settings-sidebar" :aria-label="$t('common.settings')">
     <h2>{{ $t('common.settings') }}</h2>
     <div class="settings-filter">
       <SearchInput

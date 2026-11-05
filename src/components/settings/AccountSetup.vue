@@ -469,7 +469,7 @@ async function removeAccount(accountId: string, email: string) {
 <template>
   <div class="section">
     <header class="section-header">
-      <h3>{{ $t('settings.sections.accounts.label') }}</h3>
+      <h3 class="settings-page-title">{{ $t('settings.sections.accounts.label') }}</h3>
       <p class="section-desc">{{ $t('settings.accounts.description') }}</p>
     </header>
 
@@ -738,6 +738,24 @@ async function removeAccount(accountId: string, email: string) {
 .account-card__remove {
   margin-inline-start: auto;
   color: var(--accent-red-soft);
+}
+
+/* Phone: the actions as a two-column grid of full touch rows, with removal on
+   its own line underneath instead of filling whatever slot was left. */
+@media (max-width: 767px) {
+  .account-card__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .account-card__actions > * {
+    min-height: var(--touch-target);
+  }
+
+  .account-card__remove {
+    grid-column: 1 / -1;
+    margin-inline-start: 0;
+  }
 }
 
 .account-info {

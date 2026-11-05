@@ -357,6 +357,23 @@ onBeforeUnmount(() => unregisterFilter?.());
   padding: var(--space-2xl) var(--space-2xl) calc(2 * var(--space-2xl));
 }
 
+/* One title per section, whoever renders it: each editor brought its own
+   size, and Rules, Backup and Signatures read as a form label instead. */
+.settings-view__content :deep(.settings-page-title) {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.settings-view__content :deep(.settings-page-title + p) {
+  margin: var(--space-2xs) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
 /* Native WebKit selects and number spinners paint in the document's scheme,
    not the app theme — a white menu in the dark theme otherwise. One rule for
    every section instead of one per editor. */
@@ -380,8 +397,13 @@ onBeforeUnmount(() => unregisterFilter?.());
    under it said "General" twice. The section's description stays. */
 @media (max-width: 767px) {
   .settings-view__content :deep(.section-header > h2),
-  .settings-view__content :deep(.section-header > h3) {
+  .settings-view__content :deep(.section-header > h3),
+  .settings-view__content :deep(.settings-page-title) {
     display: none;
+  }
+
+  .settings-view__content :deep(.settings-page-title + p) {
+    margin-top: 0;
   }
 
   .settings-view__content :deep(.section-header > p) {

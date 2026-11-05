@@ -8,7 +8,6 @@ const backend = vi.hoisted(() => ({
 vi.mock('@/services/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/backend')>()),
   backendCommandsAvailable: () => true,
-  backendCommandsAvailable: () => true,
   ...backend,
 }));
 

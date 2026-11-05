@@ -99,7 +99,7 @@ async function save() {
 <template>
   <section class="settings-section">
     <header>
-      <h3>{{ heading[0] }}</h3>
+      <h3 class="settings-page-title">{{ heading[0] }}</h3>
       <p>{{ heading[1] }}</p>
     </header>
 

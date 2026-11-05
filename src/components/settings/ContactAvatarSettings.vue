@@ -166,7 +166,7 @@ async function clearAvatar(contact: BackendContact, locked: boolean) {
   <section>
     <header class="section-header">
       <div>
-        <h3>{{ $t('settings.sections.contacts.label') }}</h3>
+        <h3 class="settings-page-title">{{ $t('settings.sections.contacts.label') }}</h3>
         <p class="hint">
           {{ $t('settings.contacts.priorityHint') }}
         </p>

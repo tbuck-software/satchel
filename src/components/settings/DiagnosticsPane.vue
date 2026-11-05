@@ -209,7 +209,7 @@ onMounted(() => {
   <section class="diagnostics">
     <header>
       <div>
-        <h3>{{ $t('settings.sections.diagnostics.label') }}</h3>
+        <h3 class="settings-page-title">{{ $t('settings.sections.diagnostics.label') }}</h3>
         <p class="hint">
           {{ $t('settings.diagnostics.intro') }}
           <template v-if="overview">

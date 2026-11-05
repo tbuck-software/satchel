@@ -437,7 +437,7 @@ async function importPlatformNow() {
 
 <template>
   <section>
-    <h3>{{ $t('settings.sections.backup.label') }}</h3>
+    <h3 class="settings-page-title">{{ $t('settings.sections.backup.label') }}</h3>
     <p class="hint">
       {{ $t('settings.backup.hintBefore') }}
       <code>{{ $t('settings.backup.mboxExtension') }}</code>{{ $t('settings.backup.hintAfter') }}

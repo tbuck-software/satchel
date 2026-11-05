@@ -57,7 +57,7 @@ async function syncNow() {
 <template>
   <section class="calendar-settings">
     <header>
-      <h3>{{ $t('settings.sections.calendar.label') }}</h3>
+      <h3 class="settings-page-title">{{ $t('settings.sections.calendar.label') }}</h3>
       <p>{{ $t('settings.calendar.description') }}</p>
     </header>
 

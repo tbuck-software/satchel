@@ -7,7 +7,6 @@ const backend = vi.hoisted(() => ({ backendUpdateAccountPassword: vi.fn() }));
 vi.mock('@/services/backend', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/backend')>()),
   backendCommandsAvailable: () => true,
-  backendCommandsAvailable: () => true,
   ...backend,
 }));
 

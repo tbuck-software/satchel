@@ -124,7 +124,7 @@ function parseAttachmentsJson(value?: string | null): BackendOutgoingAttachment[
 
 <template>
   <section>
-    <h3>{{ $t('settings.templates.title') }}</h3>
+    <h3 class="settings-page-title">{{ $t('settings.templates.title') }}</h3>
     <p class="hint">
       {{
         $t('settings.templates.variablesHint', {

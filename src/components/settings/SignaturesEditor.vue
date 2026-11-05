@@ -314,7 +314,7 @@ function escapeHtml(value: string) {
 
 <template>
   <section>
-    <h3>{{ $t('settings.signatures.title') }}</h3>
+    <h3 class="settings-page-title">{{ $t('settings.signatures.title') }}</h3>
 
     <label class="field">
       <span>{{ $t('settings.signatures.account') }}</span>
@@ -468,6 +468,9 @@ function escapeHtml(value: string) {
 <style scoped>
 section {
   display: grid;
+  /* A long account address in the select must not widen the column past the
+     phone's right margin. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 

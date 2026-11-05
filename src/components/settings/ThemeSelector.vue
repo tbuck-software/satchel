@@ -21,7 +21,7 @@ function setAttachmentOpenBehavior(value: string) {
 <template>
   <div class="section">
     <header class="section-header">
-      <h3>{{ $t('settings.theme.title') }}</h3>
+      <h3 class="settings-page-title">{{ $t('settings.theme.title') }}</h3>
       <p class="section-desc">{{ $t('settings.theme.description') }}</p>
     </header>
 

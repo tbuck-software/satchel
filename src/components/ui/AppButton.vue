@@ -175,15 +175,19 @@ defineEmits<{
 /* Touch: the small pill is 30px; its hit area reaches 44px without the pill
    growing, so rows and headers keep their rhythm. A pill narrower than a
    fingertip (an icon with a short word) gets the width too, centred on it. */
+/* Touch: every size reaches the touch target with an invisible hit area, so a
+   36px Save or a compact account action keeps its drawn size in the row. */
 @media (pointer: coarse) {
-  .app-button--sm {
+  .app-button {
     position: relative;
   }
 
-  .app-button--sm::after {
+  .app-button::after {
+    --hit-overhang: min(0px, calc((100% - var(--touch-target)) / 2));
     content: '';
     position: absolute;
-    inset: -7px auto;
+    top: var(--hit-overhang);
+    bottom: var(--hit-overhang);
     left: 50%;
     width: max(100%, var(--touch-target));
     transform: translateX(-50%);

@@ -137,7 +137,7 @@ async function remove(cert: BackendSmimeCert) {
   <section class="smime-settings">
     <header>
       <div>
-        <h2>{{ $t('settings.smime.title') }}</h2>
+        <h2 class="settings-page-title">{{ $t('settings.smime.title') }}</h2>
       </div>
       <AppButton variant="secondary" @click="store.load">{{ $t('common.refresh') }}</AppButton>
     </header>

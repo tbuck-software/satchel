@@ -27,7 +27,7 @@
         "aliases": { "label": "Aliases", "description": "Manage additional sender addresses" },
         "smime": { "label": "S/MIME", "description": "Certificates and encrypted email" },
         "pgp": { "label": "OpenPGP", "description": "Keys and end-to-end encryption" },
-        "sending": { "label": "Sending", "description": "Delivery, undo send and confirmations" },
+        "sending": { "label": "Sending", "description": "Undo send and confirmations" },
         "data": { "label": "Data & storage", "description": "Local data, cache and attachments" },
         "vacation": { "label": "Out of office", "description": "Automatic out-of-office replies" },
         "blocked": { "label": "Blocked senders", "description": "Manage blocked email addresses" },

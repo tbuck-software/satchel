@@ -705,7 +705,7 @@ onMounted(() => {
 <template>
   <div class="section">
     <header class="section-header">
-      <h3>{{ props.only === 'pgp' ? $t('settings.pgp.title') : $t('settings.plugins.title') }}</h3>
+      <h3 class="settings-page-title">{{ props.only === 'pgp' ? $t('settings.pgp.title') : $t('settings.plugins.title') }}</h3>
       <p class="section-desc">
         {{ props.only === 'pgp'
           ? $t('settings.pgp.description')
