@@ -1530,7 +1530,7 @@
     },
     "unsubscribe": {
       "action": "Abmelden",
-      "banner": "📭 Newsletter — schnell abmelden mit einem Klick",
+      "banner": "Newsletter — mit einem Klick abmelden",
       "failed": "Abmelden fehlgeschlagen: {error}",
       "sending": "Sende…",
       "success": "Abgemeldet via {method}"

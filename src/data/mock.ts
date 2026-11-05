@@ -732,6 +732,10 @@ baseMessages.push(
     subject: 'METRO Wochenangebote',
     bodyText: 'Neue Angebote für Büro, Küche und Vorrat sind verfügbar.',
     bodyHtml: NEWSLETTER_HTML,
+    // A real newsletter carries the header, so the reader offers the one-click
+    // unsubscribe here as it does in the app.
+    listUnsubscribe: '<https://www.metro.de/abmelden>',
+    listUnsubscribePost: 'List-Unsubscribe=One-Click',
     timestamp: new Date(Date.now() - 3 * 60 * 60_000).toISOString(),
     isRead: false, attachments: [],
   },

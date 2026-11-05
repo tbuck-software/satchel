@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppButton from '@/components/ui/AppButton.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useToast } from '@/composables/useToast';
@@ -34,13 +35,16 @@ async function unsubscribe() {
 </script>
 
 <template>
+  <!-- An offer, not a warning: a quiet row in the reader's own greys. The
+       amber and red notices beside it mean "be careful"; this one does not. -->
   <aside v-if="!dismissed" class="unsub">
-    <span>{{ $t('mail.unsubscribe.banner') }}</span>
-    <div class="actions">
-      <AppButton class="primary" :disabled="busy" @click="unsubscribe" variant="primary" size="sm">
+    <AppIcon class="unsub__icon"><rect x="2" y="3.5" width="12" height="9" rx="1.5" /><path d="m2.5 4.5 5.5 4 5.5-4" /></AppIcon>
+    <span class="unsub__text">{{ $t('mail.unsubscribe.banner') }}</span>
+    <div class="unsub__actions">
+      <AppButton :disabled="busy" @click="unsubscribe" variant="secondary" size="sm">
         {{ busy ? $t('mail.unsubscribe.sending') : $t('mail.unsubscribe.action') }}
       </AppButton>
-      <AppButton class="ghost" @click="dismissed = true" variant="ghost" size="sm">{{ $t('common.close') }}</AppButton>
+      <AppButton @click="dismissed = true" variant="ghost" size="sm">{{ $t('common.close') }}</AppButton>
     </div>
   </aside>
 </template>
@@ -49,16 +53,31 @@ async function unsubscribe() {
 .unsub {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 12px;
-  margin: 8px 0;
+  gap: var(--space-xs) var(--space-sm);
+  margin: var(--space-sm) 0;
+  padding: var(--space-1-5) var(--space-1-5) var(--space-1-5) var(--space-md);
   border: 1px solid var(--border-color-muted);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--accent-yellow) 8%, var(--bg-raised));
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
 }
-.actions { display: flex; gap: 6px; }
+
+.unsub__icon {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.unsub__text {
+  /* Below about this width the buttons take a line of their own rather than
+     squeezing the sentence into a narrow column. */
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.unsub__actions {
+  display: flex;
+  gap: var(--space-xs);
+  margin-left: auto;
+}
 </style>
