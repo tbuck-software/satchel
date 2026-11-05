@@ -190,10 +190,6 @@ export function useKeyboard() {
     }
   }
 
-  function settingsOnTop(): boolean {
-    return ui.settingsDialogOnTop;
-  }
-
   function leaveCurrentLevel(): boolean {
     if (leaveListKeyboardLevel()) return true;
     // Settings is a page with no other way out on the desktop than the sidebar.
@@ -215,19 +211,15 @@ export function useKeyboard() {
   function handleEscape(target: EventTarget | null) {
     clearSequence();
     // A field in Settings may hold unsaved text: the first Escape only leaves
-    // the field, on the page and in the dialog alike.
-    const settingsField = isEditableTarget(target)
+    // the field, on the page and in the dialog alike, when nothing covers it.
+    if (
+      isEditableTarget(target)
       && !(target as HTMLElement).hasAttribute('data-settings-filter')
-      && (router.currentRoute.value.name === 'settings'
-        || (target as HTMLElement).closest('.settings-dialog') !== null);
-    if (settingsField && settingsOnTop()) {
+      && ((router.currentRoute.value.name === 'settings' && !ui.modalOpen) || ui.settingsDialogOnTop)
+    ) {
       (target as HTMLElement).blur();
     } else if (!ui.dismissTopmostOverlay()) {
-      if (settingsField) {
-        (target as HTMLElement).blur();
-      } else {
-        leaveCurrentLevel();
-      }
+      leaveCurrentLevel();
     }
     ui.inputMode = ui.omniOpen ? 'insert' : 'normal';
   }
@@ -259,7 +251,7 @@ export function useKeyboard() {
     // In Settings, `/` filters the sections instead.
     if (
       event.key === '/'
-      && ((scope.route === 'settings' && !scope.covered) || settingsOnTop())
+      && ((scope.route === 'settings' && !scope.covered) || ui.settingsDialogOnTop)
       && focusSettingsFilter()
     ) {
       return true;

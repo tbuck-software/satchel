@@ -66,6 +66,17 @@
    full width. Side by side, the copy wrapped to five lines in a third of
    the row while the control took the rest. Switches stay inline. */
 @media (max-width: 767px) {
+  /* A status with its action: the copy takes the width, the action goes
+     under it, instead of the copy wrapping into a narrow column. */
+  .setting-row.setting-row--stack-phone {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-sm);
+  }
+
+  .setting-row.setting-row--stack-phone > :last-child {
+    justify-self: start;
+  }
+
   .setting-row:has(> .segmented) {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-sm);

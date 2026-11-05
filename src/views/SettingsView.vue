@@ -205,7 +205,7 @@ onBeforeUnmount(() => unregisterFilter?.());
         <ContactAvatarSettings v-else-if="activeSection === 'contacts'" />
         <template v-else-if="activeSection === 'encryption'">
           <section class="settings-subsection"><SmimeManager /></section>
-          <section class="settings-subsection"><PluginManager only="pgp" /></section>
+          <section class="settings-subsection"><PluginManager only="pgp" @open-integrations="openSection('plugins')" /></section>
         </template>
         <TemplatesEditor v-else-if="activeSection === 'templates'" />
         <template v-else-if="activeSection === 'notifications'">
@@ -216,7 +216,7 @@ onBeforeUnmount(() => unregisterFilter?.());
         <template v-else-if="activeSection === 'storage'">
           <section class="settings-subsection">
             <NotificationSettings section="data" />
-            <InlineImageBackfill />
+            <InlineImageBackfill class="settings-subsection__part" />
           </section>
           <section class="settings-subsection"><BackupExport /></section>
         </template>
@@ -412,6 +412,10 @@ onBeforeUnmount(() => unregisterFilter?.());
 }
 
 .settings-view__content > :not(.settings-subsection) + .settings-subsection {
+  margin-top: var(--space-2xl);
+}
+
+.settings-subsection__part {
   margin-top: var(--space-2xl);
 }
 

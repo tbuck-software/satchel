@@ -96,16 +96,18 @@ async function save() {
           </option>
         </select>
       </label>
-      <div class="setting-row">
-        <div class="setting-info">
-          <span class="setting-label">{{ $t('settings.vacation.enable') }}</span>
-          <span v-if="!isOauthAccount" class="setting-hint warn">{{ $t('settings.vacation.imapWarning') }}</span>
-        </div>
+      <!-- IMAP has no server-side auto-reply to set: say so instead of
+           offering a switch that would do nothing. -->
+      <div v-if="!isOauthAccount" class="setting-row setting-row--single">
+        <p class="notice" role="note">{{ $t('settings.vacation.imapWarning') }}</p>
+      </div>
+      <div v-else class="setting-row">
+        <span class="setting-label">{{ $t('settings.vacation.enable') }}</span>
         <ToggleSwitch v-model="enabled" :label="$t('settings.vacation.enable')" />
       </div>
     </div>
 
-    <div v-if="enabled" class="editor">
+    <div v-if="enabled && isOauthAccount" class="editor">
       <label class="field">
         <span>{{ $t('common.subject') }}</span>
         <input v-model="subject" />
@@ -130,7 +132,7 @@ async function save() {
       </div>
     </div>
 
-    <div class="actions">
+    <div v-if="isOauthAccount" class="actions">
       <AppButton variant="primary" size="sm" :disabled="saving" @click="save">
         {{ saving ? $t('common.saving') : $t('common.save') }}
       </AppButton>
@@ -140,7 +142,15 @@ async function save() {
 </template>
 
 <style scoped>
-.warn { color: var(--accent-amber-soft); }
+.notice {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md); }
 /* A switch inside the form card: no row padding of its own. */
 .setting-row.setting-row--inline { padding: 0; }

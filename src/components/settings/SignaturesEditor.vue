@@ -344,7 +344,7 @@ function escapeHtml(value: string) {
         </select>
       </label>
       <!-- Discovery is a row, not a card: it reports, and offers one action. -->
-      <div class="setting-row">
+      <div class="setting-row setting-row--stack-phone">
         <div class="setting-info">
           <span class="setting-label">
             {{ accountSuggestions.length ? $t('settings.signatures.suggestionsFound') : $t('settings.signatures.suggestionsTitle') }}

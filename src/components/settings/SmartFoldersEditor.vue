@@ -81,6 +81,7 @@ async function remove(id: string) {
 <template>
   <section>
     <h3 class="settings-page-title">{{ $t('settings.sections.smart-folders.label') }}</h3>
+    <p>{{ $t('settings.smartFolders.purpose') }}</p>
     <p class="hint">
       {{ $t('settings.smartFolders.hintLead') }}
       <code>{{ $t('settings.smartFolders.syntaxExample') }}</code>
