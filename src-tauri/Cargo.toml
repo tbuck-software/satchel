@@ -49,7 +49,7 @@ tracing-appender = "0.2"
 tempfile = "3"
 tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time", "net", "io-util"] }
 ts-rs = { version = "=12.0.1", optional = true, features = ["serde-json-impl", "chrono-impl"] }
-toml = "0.8"
+toml = "1.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 webbrowser = "1.2.2"
 scraper = "0.27.0"
