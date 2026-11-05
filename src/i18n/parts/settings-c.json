@@ -211,7 +211,17 @@
           "promotions": "Promotions",
           "social": "Social"
         },
-        "duplicateCondition": "Use each condition field only once."
+        "duplicateCondition": "Use each condition field only once.",
+        "placement": {
+          "server": "Runs on server",
+          "local": "Local only",
+          "serverOn": "Runs on the server for {accounts}",
+          "pending": "Not on the server yet: it is sent with the next push.",
+          "reasonAction": "“{action}” exists only in Satchel.",
+          "reasonExtension": "The server lacks the Sieve extension “{extension}”.",
+          "reasonCondition": "This condition has no server equivalent.",
+          "reasonOther": "This rule cannot run on the server."
+        }
       },
       "smime": {
         "title": "S/MIME certificates",
@@ -308,6 +318,45 @@
         "nameRequired": "Please enter a name.",
         "saved": "Saved.",
         "loadFailed": "Could not load templates. Try again."
+      },
+      "serverRules": {
+        "title": "Server rules",
+        "hint": "Runs your rules and the out-of-office reply on the mail server, so they work while Satchel is closed. Rules that only Satchel can carry out keep running here.",
+        "status": {
+          "active": "Active on server",
+          "waiting": "Needs your choice",
+          "available": "Available",
+          "unavailable": "Not available",
+          "unknown": "Not checked"
+        },
+        "endpoint": "{host}:{port} · {tls}",
+        "tlsStarttls": "STARTTLS",
+        "tlsImplicit": "TLS",
+        "pushed": "No rule runs on the server | 1 rule runs on the server | {count} rules run on the server",
+        "vacationOnServer": "out-of-office reply included",
+        "alongside": "alongside your script “{script}”",
+        "lastPush": "Last sent {time}",
+        "check": "Check server",
+        "turnOn": "Turn on",
+        "pushNow": "Send again",
+        "turnOff": "Turn off",
+        "consentTitle": "Your script “{script}” is active on the server",
+        "consentDetailInclude": "Satchel changed nothing. It can run both scripts side by side, or use its own instead. Until you choose, your rules run in Satchel.",
+        "consentDetailNoInclude": "Satchel changed nothing. This server runs one script at a time. Until you choose, your rules run in Satchel.",
+        "runBoth": "Run both",
+        "replace": "Use Satchel's instead",
+        "keepLocal": "Keep rules in Satchel",
+        "wrapperConfirmTitle": "Run both scripts?",
+        "wrapperConfirmBody": "Satchel adds a small script “satchel-main” that runs Satchel's rules and then “{script}”, and makes it the active one. “{script}” itself stays unchanged; turning server rules off makes it active again.",
+        "replaceConfirmTitle": "Stop running “{script}”?",
+        "replaceConfirmBody": "“{script}” stays on the server but no longer runs. Turning server rules off makes it active again.",
+        "host": "Server",
+        "hostPlaceholder": "sieve.example.com",
+        "port": "Port",
+        "portPlaceholder": "4190",
+        "security": "Connection security",
+        "editServer": "Enter server manually",
+        "useDetected": "Use detected server"
       }
     }
   },
@@ -523,7 +572,17 @@
           "promotions": "Werbung",
           "social": "Social"
         },
-        "duplicateCondition": "Jedes Bedingungsfeld darf nur einmal verwendet werden."
+        "duplicateCondition": "Jedes Bedingungsfeld darf nur einmal verwendet werden.",
+        "placement": {
+          "server": "Läuft auf dem Server",
+          "local": "Nur lokal",
+          "serverOn": "Läuft auf dem Server für {accounts}",
+          "pending": "Noch nicht auf dem Server: wird beim nächsten Senden übertragen.",
+          "reasonAction": "„{action}“ gibt es nur in Satchel.",
+          "reasonExtension": "Dem Server fehlt die Sieve-Erweiterung „{extension}“.",
+          "reasonCondition": "Für diese Bedingung gibt es auf dem Server keine Entsprechung.",
+          "reasonOther": "Diese Regel kann nicht auf dem Server laufen."
+        }
       },
       "smime": {
         "title": "S/MIME-Zertifikate",
@@ -620,6 +679,45 @@
         "nameRequired": "Bitte Name angeben.",
         "saved": "Gespeichert.",
         "loadFailed": "Vorlagen konnten nicht geladen werden. Bitte erneut versuchen."
+      },
+      "serverRules": {
+        "title": "Server-Regeln",
+        "hint": "Führt deine Regeln und die Abwesenheitsnotiz auf dem Mail-Server aus, damit sie auch bei geschlossenem Satchel greifen. Regeln, die nur Satchel ausführen kann, laufen weiter hier.",
+        "status": {
+          "active": "Auf dem Server aktiv",
+          "waiting": "Wartet auf deine Wahl",
+          "available": "Verfügbar",
+          "unavailable": "Nicht verfügbar",
+          "unknown": "Nicht geprüft"
+        },
+        "endpoint": "{host}:{port} · {tls}",
+        "tlsStarttls": "STARTTLS",
+        "tlsImplicit": "TLS",
+        "pushed": "Keine Regel läuft auf dem Server | 1 Regel läuft auf dem Server | {count} Regeln laufen auf dem Server",
+        "vacationOnServer": "mit Abwesenheitsnotiz",
+        "alongside": "neben deinem Skript „{script}“",
+        "lastPush": "Zuletzt gesendet {time}",
+        "check": "Server prüfen",
+        "turnOn": "Einschalten",
+        "pushNow": "Erneut senden",
+        "turnOff": "Ausschalten",
+        "consentTitle": "Dein Skript „{script}“ ist auf dem Server aktiv",
+        "consentDetailInclude": "Satchel hat nichts verändert. Es kann beide Skripte nebeneinander ausführen oder stattdessen sein eigenes verwenden. Bis du wählst, laufen deine Regeln in Satchel.",
+        "consentDetailNoInclude": "Satchel hat nichts verändert. Dieser Server führt nur ein Skript gleichzeitig aus. Bis du wählst, laufen deine Regeln in Satchel.",
+        "runBoth": "Beide ausführen",
+        "replace": "Stattdessen Satchels verwenden",
+        "keepLocal": "Regeln in Satchel lassen",
+        "wrapperConfirmTitle": "Beide Skripte ausführen?",
+        "wrapperConfirmBody": "Satchel legt ein kleines Skript „satchel-main“ an, das Satchels Regeln und danach „{script}“ ausführt, und macht es zum aktiven. „{script}“ selbst bleibt unverändert; schaltest du die Server-Regeln aus, wird es wieder aktiv.",
+        "replaceConfirmTitle": "„{script}“ nicht mehr ausführen?",
+        "replaceConfirmBody": "„{script}“ bleibt auf dem Server, läuft aber nicht mehr. Schaltest du die Server-Regeln aus, wird es wieder aktiv.",
+        "host": "Server",
+        "hostPlaceholder": "sieve.example.com",
+        "port": "Port",
+        "portPlaceholder": "4190",
+        "security": "Verbindungssicherheit",
+        "editServer": "Server manuell eintragen",
+        "useDetected": "Erkannten Server verwenden"
       }
     }
   }

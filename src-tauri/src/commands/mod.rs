@@ -41,6 +41,7 @@ pub mod provider_features;
 pub mod reveal;
 pub mod rules;
 pub mod runtime;
+pub mod server_rules;
 pub mod write_grants;
 // Kept as a sibling file, unlike the crate's inline `mod tests`: it spans
 // `server_search` and `providers::traits`, while `messages.rs` is already

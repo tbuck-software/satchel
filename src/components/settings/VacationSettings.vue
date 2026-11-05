@@ -3,10 +3,13 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
 import {
+  backendCommandsAvailable,
+  backendGetServerRulesOverview,
   backendGetVacation,
   backendOpenExternalUrl,
   backendSetVacation,
   backendSupportsNativeCommands,
+  type BackendServerRulesAccount,
 } from '@/services/backend';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
@@ -35,13 +38,36 @@ function openWebmail() {
   if (webmail.value) void backendOpenExternalUrl(webmail.value);
 }
 
-const isOauthAccount = computed(() => {
-  const a = accounts.emailAccounts.find((acc) => acc.id === accountId.value);
-  return a?.provider === 'gmail' || a?.provider === 'outlook';
-});
+const selectedAccount = computed(() => accounts.emailAccounts.find((acc) => acc.id === accountId.value));
+
+const isOauthAccount = computed(() =>
+  selectedAccount.value?.provider === 'gmail' || selectedAccount.value?.provider === 'outlook');
+
+/** Server rules (ManageSieve) of each IMAP account; the reply rides in that script. */
+const sieveStates = ref<BackendServerRulesAccount[]>([]);
+const sieve = computed(() => sieveStates.value.find((state) => state.account_id === accountId.value) ?? null);
+const isImapAccount = computed(() => selectedAccount.value?.provider === 'imap');
+/** An IMAP account whose server runs Satchel's script and knows `vacation`. */
+const serverVacation = computed(() =>
+  isImapAccount.value && sieve.value !== null && sieve.value.server_active && sieve.value.vacation_available);
+/** Where the reply can be set from here at all. */
+const canSetReply = computed(() => isOauthAccount.value || serverVacation.value);
+/** A Sieve server without `date`/`relational` cannot honour a start or end. */
+const showWindow = computed(() => !serverVacation.value || sieve.value?.vacation_window_available === true);
+
+async function loadServerRules() {
+  if (!backendCommandsAvailable()) return;
+  try {
+    sieveStates.value = (await backendGetServerRulesOverview()).accounts;
+  } catch {
+    // Without the overview IMAP accounts show the webmail hint, as before.
+    sieveStates.value = [];
+  }
+}
 
 onMounted(async () => {
   await accounts.load();
+  await loadServerRules();
   accountId.value = accounts.emailAccounts.find((account) => account.id === accounts.activeAccountId)?.id
     || accounts.emailAccounts[0]?.id
     || '';
@@ -80,9 +106,10 @@ async function save() {
       enabled: enabled.value,
       subject: subject.value || null,
       body: body.value,
-      startsAt: startsAt.value ? new Date(startsAt.value).toISOString() : null,
-      endsAt: endsAt.value ? new Date(endsAt.value).toISOString() : null,
-      onlyContacts: onlyContacts.value,
+      startsAt: showWindow.value && startsAt.value ? new Date(startsAt.value).toISOString() : null,
+      endsAt: showWindow.value && endsAt.value ? new Date(endsAt.value).toISOString() : null,
+      // Sieve cannot know who a contact is; only Gmail honours this.
+      onlyContacts: isOauthAccount.value && onlyContacts.value,
     });
     status.value = t('settings.vacation.saved');
   } catch (err) {
@@ -109,12 +136,15 @@ async function save() {
           </option>
         </select>
       </label>
-      <!-- IMAP has no server-side auto-reply to set: say so instead of
-           offering a switch that would do nothing. -->
-      <div v-if="!isOauthAccount" class="setting-row setting-row--single">
+      <!-- An account without a server-side reply to set: say so instead of
+           offering a switch that would do nothing. IMAP gets one through
+           its server rules (Sieve). -->
+      <div v-if="!canSetReply" class="setting-row setting-row--single">
         <p class="notice" role="note">
           <AppIcon class="notice__icon"><path d="M8 2.5 14 13H2Z" /><path d="M8 6.5v3M8 11.2h.01" /></AppIcon>
-          <span>{{ $t('settings.vacation.imapWarning') }}</span>
+          <span v-if="isImapAccount && sieve?.server_active">{{ $t('settings.vacation.imapNoVacation') }}</span>
+          <span v-else-if="isImapAccount">{{ $t('settings.vacation.imapServerRulesHint') }}</span>
+          <span v-else>{{ $t('settings.vacation.imapWarning') }}</span>
           <AppButton v-if="webmail" class="notice__action" variant="secondary" size="sm" @click="openWebmail">
             {{ $t('settings.vacation.openWebmail') }}
           </AppButton>
@@ -126,7 +156,7 @@ async function save() {
       </div>
     </div>
 
-    <div v-if="enabled && isOauthAccount" class="editor">
+    <div v-if="enabled && canSetReply" class="editor">
       <label class="field">
         <span>{{ $t('common.subject') }}</span>
         <input v-model="subject" />
@@ -135,7 +165,8 @@ async function save() {
         <span>{{ $t('settings.vacation.bodyLabel') }}</span>
         <textarea v-model="body" rows="6" />
       </label>
-      <div class="pair">
+      <p v-if="!showWindow" class="hint">{{ $t('settings.vacation.imapNoWindow') }}</p>
+      <div v-if="showWindow" class="pair">
         <label class="field">
           <span>{{ $t('common.from') }}</span>
           <input v-model="startsAt" type="datetime-local" step="60" />
@@ -145,13 +176,13 @@ async function save() {
           <input v-model="endsAt" type="datetime-local" step="60" />
         </label>
       </div>
-      <div class="setting-row setting-row--inline">
+      <div v-if="isOauthAccount" class="setting-row setting-row--inline">
         <span class="setting-label">{{ $t('settings.vacation.onlyContacts') }}</span>
         <ToggleSwitch v-model="onlyContacts" :label="$t('settings.vacation.onlyContacts')" />
       </div>
     </div>
 
-    <div v-if="isOauthAccount" class="actions">
+    <div v-if="canSetReply" class="actions">
       <AppButton variant="primary" size="sm" :disabled="saving" @click="save">
         {{ saving ? $t('common.saving') : $t('common.save') }}
       </AppButton>

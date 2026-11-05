@@ -40,6 +40,7 @@ const PluginManager = defineAsyncComponent(() => import('@/components/settings/P
 const ProviderFeaturesEditor = defineAsyncComponent(() => import('@/components/settings/ProviderFeaturesEditor.vue'));
 const RemoteImageAllowlist = defineAsyncComponent(() => import('@/components/settings/RemoteImageAllowlist.vue'));
 const RuleBuilder = defineAsyncComponent(() => import('@/components/settings/RuleBuilder.vue'));
+const ServerRulesSettings = defineAsyncComponent(() => import('@/components/settings/ServerRulesSettings.vue'));
 const SignaturesEditor = defineAsyncComponent(() => import('@/components/settings/SignaturesEditor.vue'));
 const SmartFoldersEditor = defineAsyncComponent(() => import('@/components/settings/SmartFoldersEditor.vue'));
 const SmimeManager = defineAsyncComponent(() => import('@/components/settings/SmimeManager.vue'));
@@ -100,6 +101,8 @@ const sectionTones: Record<SettingsSection, string> = {
 const COMPOSITE: ReadonlySet<SettingsSection> = new Set(['senders', 'encryption', 'storage']);
 const providerAccounts = computed(() =>
   accounts.emailAccounts.some((account) => account.provider === 'gmail' || account.provider === 'outlook'));
+/** Server rules (ManageSieve) are an IMAP matter; Gmail and Outlook have their own. */
+const imapAccounts = computed(() => accounts.emailAccounts.some((account) => account.provider === 'imap'));
 
 function openSection(section: SettingsSection) {
   showSection(section, ui.isSinglePane ? 'push' : 'replace');
@@ -200,6 +203,7 @@ onBeforeUnmount(() => unregisterFilter?.());
           <section class="settings-subsection"><SourceManager /></section>
           <section class="settings-subsection"><WebhooksEditor /></section>
           <section v-if="providerAccounts" class="settings-subsection"><ProviderFeaturesEditor /></section>
+          <section v-if="imapAccounts" class="settings-subsection"><ServerRulesSettings /></section>
         </template>
         <SignaturesEditor v-else-if="activeSection === 'signatures'" />
         <AliasEditor v-else-if="activeSection === 'aliases'" />

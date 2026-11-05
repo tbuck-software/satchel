@@ -4,11 +4,13 @@ import { useI18n } from 'vue-i18n';
 import { useConfirm } from '@/composables/useConfirm';
 import {
   backendDeleteRule,
+  backendGetServerRulesOverview,
   backendListRules,
   backendRunRulesForThread,
   backendRunRulesForThreads,
   backendUpsertRule,
   type BackendRule,
+  type BackendServerRulesOverview,
 } from '@/services/backend';
 import { useThreadsStore } from '@/stores/threads';
 import AppButton from '@/components/ui/AppButton.vue';
@@ -57,6 +59,8 @@ const actionLabels = computed<Record<ActionKind, string>>(() => ({
 
 const threads = useThreadsStore();
 const rules = ref<BackendRule[]>([]);
+/** Where each rule runs, once an account has server rules (Sieve) on. */
+const serverRules = ref<BackendServerRulesOverview | null>(null);
 const loading = ref(false);
 const saving = ref(false);
 const error = ref('');
@@ -92,6 +96,59 @@ async function load() {
   } finally {
     loading.value = false;
   }
+  await loadPlacements();
+}
+
+async function loadPlacements() {
+  try {
+    serverRules.value = await backendGetServerRulesOverview();
+  } catch {
+    // The badges are extra information; the rule list works without them.
+    serverRules.value = null;
+  }
+}
+
+/** A saved rule reaches the server in the background; look again shortly. */
+function refreshPlacementsSoon() {
+  if (!serverRulesOn.value) return;
+  window.setTimeout(() => void loadPlacements(), 3000);
+}
+
+const serverRulesOn = computed(() => serverRules.value?.accounts.some((account) => account.enabled) ?? false);
+
+interface RuleBadge { server: boolean; label: string; title: string }
+
+function placementBadge(rule: BackendRule): RuleBadge | null {
+  if (!serverRulesOn.value || !rule.is_active) return null;
+  const placement = serverRules.value?.rules.find((entry) => entry.rule_id === rule.id);
+  if (placement && placement.server_account_ids.length > 0) {
+    const names = placement.server_account_ids
+      .map((id) => serverRules.value?.accounts.find((account) => account.account_id === id)?.display_name ?? id)
+      .join(', ');
+    return {
+      server: true,
+      label: t('settings.rules.placement.server'),
+      title: t('settings.rules.placement.serverOn', { accounts: names }),
+    };
+  }
+  return { server: false, label: t('settings.rules.placement.local'), title: localReason(placement) };
+}
+
+function localReason(placement: BackendServerRulesOverview['rules'][number] | undefined): string {
+  const reason = placement?.local_reason;
+  if (!reason) {
+    return placement?.pending ? t('settings.rules.placement.pending') : t('settings.rules.placement.reasonOther');
+  }
+  if (reason.kind === 'action') {
+    const kind = reason.detail as ActionKind | null;
+    const action = kind && kind in actionLabels.value ? actionLabels.value[kind] : reason.detail ?? '';
+    return t('settings.rules.placement.reasonAction', { action });
+  }
+  if (reason.kind === 'extension') {
+    return t('settings.rules.placement.reasonExtension', { extension: reason.detail ?? '' });
+  }
+  if (reason.kind === 'condition') return t('settings.rules.placement.reasonCondition');
+  return t('settings.rules.placement.reasonOther');
 }
 
 function resetEditor() {
@@ -197,6 +254,7 @@ async function save() {
     editorOpen.value = false;
     notice.value = t('settings.rules.saved');
     await load();
+    refreshPlacementsSoon();
   } catch (err) {
     error.value = t('settings.rules.saveFailed', { error: String(err) });
   } finally {
@@ -207,6 +265,7 @@ async function save() {
 async function toggleRule(rule: BackendRule) {
   await backendUpsertRule({ ...rule, id: rule.id, is_active: !rule.is_active });
   await load();
+  refreshPlacementsSoon();
 }
 
 async function removeRule(rule: BackendRule) {
@@ -218,6 +277,7 @@ async function removeRule(rule: BackendRule) {
   if (!confirmed) return;
   await backendDeleteRule(rule.id);
   await load();
+  refreshPlacementsSoon();
 }
 
 async function runNow() {
@@ -298,6 +358,12 @@ onMounted(load);
           <div class="rule-title">
             <span :class="['status', { active: rule.is_active }]">{{ rule.is_active ? $t('common.enabled') : $t('settings.rules.paused') }}</span>
             <strong>{{ rule.name }}</strong>
+            <span
+              v-if="placementBadge(rule)"
+              :class="['status', 'placement', { server: placementBadge(rule)!.server }]"
+              :title="placementBadge(rule)!.title"
+              data-testid="rule-placement"
+            >{{ placementBadge(rule)!.label }}</span>
           </div>
           <div class="rule-flow-preview">
             <span class="flow-kicker condition">{{ $t('settings.rules.when') }}</span>
@@ -424,6 +490,8 @@ input, select { border: 1px solid var(--border-color-muted); border-radius: var(
 .rule-title, .rule-actions, .editor-actions { gap: 8px; }
 .status { padding: 2px 7px; border-radius: var(--radius-full); background: var(--bg-overlay); color: var(--text-tertiary); font-size: var(--font-size-2xs); text-transform: uppercase; }
 .status.active { color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 14%, transparent); }
+.status.placement { text-transform: none; }
+.status.placement.server { color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 14%, transparent); }
 .rule-flow-preview { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto minmax(0, 1fr); align-items: center; gap: 8px; margin-top: 3px; }
 .flow-kicker { padding: 3px 7px; border-radius: var(--radius-full); font-size: var(--font-size-2xs); font-weight: var(--weight-bold); letter-spacing: .035em; text-transform: uppercase; }
 .flow-kicker.condition { color: var(--accent-amber); background: color-mix(in srgb, var(--accent-amber) 12%, transparent); }

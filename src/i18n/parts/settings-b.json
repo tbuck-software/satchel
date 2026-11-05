@@ -245,7 +245,10 @@
         "onlyContacts": "Only reply to known contacts",
         "saved": "Saved.",
         "title": "Out of office",
-        "until": "Until"
+        "until": "Until",
+        "imapServerRulesHint": "Turn on server rules for this account under Settings → Accounts, and Satchel sets the reply on your mail server. Until then, set it in your provider's webmail.",
+        "imapNoVacation": "This mail server cannot send automatic replies. Set it in your provider's webmail.",
+        "imapNoWindow": "This server sends the reply until you turn it off; it cannot start or stop on a date."
       },
       "search": {
         "placeholder": "Filter settings",
@@ -509,7 +512,10 @@
         "onlyContacts": "Nur an bekannte Kontakte antworten",
         "saved": "Gespeichert.",
         "title": "Out of Office / Abwesenheit",
-        "until": "Bis"
+        "until": "Bis",
+        "imapServerRulesHint": "Schalte unter Einstellungen → Konten die Server-Regeln für dieses Konto ein, dann setzt Satchel die Antwort auf deinem Mail-Server. Bis dahin richte sie im Webmail deines Anbieters ein.",
+        "imapNoVacation": "Dieser Mail-Server kann keine automatischen Antworten senden. Richte sie im Webmail deines Anbieters ein.",
+        "imapNoWindow": "Dieser Server sendet die Antwort, bis du sie ausschaltest; er kann sie nicht zu einem Datum starten oder beenden."
       },
       "search": {
         "placeholder": "Einstellungen filtern",

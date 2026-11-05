@@ -555,6 +555,17 @@ export default {
                 }
             }
         },
+        "detect_server_rules": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "diagnostics_overview": {
             "kind": "object",
             "fields": {}
@@ -562,6 +573,17 @@ export default {
         "diagnostics_report": {
             "kind": "object",
             "fields": {}
+        },
+        "disable_server_rules": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
         },
         "discard_failed_sync_action": {
             "kind": "object",
@@ -640,6 +662,18 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "enable_server_rules": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::server_rules::EnableServerRulesInput"
                     }
                 }
             }
@@ -793,6 +827,10 @@ export default {
                     }
                 }
             }
+        },
+        "get_server_rules_overview": {
+            "kind": "object",
+            "fields": {}
         },
         "get_source_capabilities": {
             "kind": "object",
@@ -1982,6 +2020,18 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "app::commands::categories::SetSenderPreferenceInput"
+                    }
+                }
+            }
+        },
+        "set_server_rules_endpoint": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::server_rules::ServerRulesEndpointInput"
                     }
                 }
             }
@@ -3741,6 +3791,61 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::server_rules::EnableServerRulesInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "choice": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::server_rules::ServerRulesEndpointInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "host": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "port": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "tls": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
                     }
                 }
             }

@@ -1839,6 +1839,30 @@ const handlers: Record<string, Handler> = {
   sync_local_contact_avatars: () => 0,
   list_blocked_senders: () => [],
   list_rules: () => [],
+  get_server_rules_overview: () => mockServerRulesOverview(),
+  detect_server_rules: ({ accountId }) => {
+    const sieve = mockSieve(String(accountId));
+    sieve.availability = 'available';
+    sieve.detected = true;
+    return mockServerRulesOverview();
+  },
+  set_server_rules_endpoint: ({ input: raw }) => {
+    const input = raw as { account_id: string; host?: string | null; port?: number | null; tls?: string | null };
+    const sieve = mockSieve(input.account_id);
+    const host = input.host?.trim().toLowerCase() || null;
+    Object.assign(sieve, {
+      hostOverride: host,
+      portOverride: host ? input.port ?? null : null,
+      tlsOverride: host ? input.tls ?? null : null,
+      availability: 'unknown',
+    });
+    return mockServerRulesOverview();
+  },
+  enable_server_rules: ({ input: raw }) => {
+    const input = raw as { account_id: string; choice: string };
+    return mockEnableServerRules(input.account_id, input.choice);
+  },
+  disable_server_rules: ({ accountId }) => mockDisableServerRules(String(accountId)),
   list_certificate_exceptions: () => certificateExceptions.filter((exception) => Date.parse(exception.expires_at) > Date.now()),
   trust_expired_certificate: ({ input: raw }) => {
     const input = raw as { account_id: string; host: string; fingerprint: string };
@@ -1862,6 +1886,139 @@ const handlers: Record<string, Handler> = {
     return true;
   },
 };
+
+/* -------------------------------------------------------------------------- */
+/* Server rules (ManageSieve)                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One pretend Sieve server per IMAP account. It starts with a script of the
+ * person's own active, so the consent question the real push asks shows up in
+ * the mock too.
+ */
+interface MockSieveAccount {
+  server: { scripts: Record<string, string>; active: string | null; extensions: string[] };
+  availability: 'unknown' | 'available' | 'unavailable';
+  hostOverride: string | null;
+  portOverride: number | null;
+  tlsOverride: string | null;
+  detected: boolean;
+  enabled: boolean;
+  serverActive: boolean;
+  mode: 'direct' | 'wrapper' | null;
+  previous: string | null;
+  consent: string | null;
+  lastPushAt: string | null;
+}
+
+const mockSieveAccounts: Record<string, MockSieveAccount> = {};
+
+function mockSieve(accountId: string): MockSieveAccount {
+  const account = accounts.find((entry) => entry.id === accountId && entry.provider === 'imap');
+  if (!account) throw new Error('backend.errors.accountNotImap');
+  mockSieveAccounts[accountId] ??= {
+    server: {
+      scripts: { roundcube: 'keep;' },
+      active: 'roundcube',
+      extensions: ['fileinto', 'imap4flags', 'vacation', 'body', 'include', 'date', 'relational'],
+    },
+    availability: 'unknown',
+    hostOverride: null,
+    portOverride: null,
+    tlsOverride: null,
+    detected: false,
+    enabled: false,
+    serverActive: false,
+    mode: null,
+    previous: null,
+    consent: null,
+    lastPushAt: null,
+  };
+  return mockSieveAccounts[accountId]!;
+}
+
+function mockServerRulesOverview() {
+  const imapAccounts = accounts.filter((account) => account.provider === 'imap');
+  return {
+    accounts: imapAccounts.map((account) => {
+      const sieve = mockSieve(account.id);
+      const known = sieve.detected || sieve.hostOverride !== null;
+      const extensions = sieve.availability === 'available' ? sieve.server.extensions : [];
+      return {
+        account_id: account.id,
+        display_name: account.displayName,
+        email: account.email,
+        availability: sieve.availability,
+        host: sieve.hostOverride ?? (sieve.detected ? `imap.${account.email.split('@')[1]}` : null),
+        port: known ? sieve.portOverride ?? 4190 : null,
+        tls: known ? sieve.tlsOverride ?? 'starttls' : null,
+        source: sieve.hostOverride ? 'override' : sieve.detected ? 'imap_host' : null,
+        host_override: sieve.hostOverride,
+        port_override: sieve.portOverride,
+        tls_override: sieve.tlsOverride,
+        implementation: sieve.availability === 'available' ? 'Mock Sieve' : null,
+        extensions,
+        checked_at: sieve.availability === 'unknown' ? null : new Date().toISOString(),
+        enabled: sieve.enabled,
+        server_active: sieve.serverActive,
+        activation_mode: sieve.mode,
+        previous_active_script: sieve.previous,
+        consent_script: sieve.consent,
+        include_available: extensions.includes('include'),
+        vacation_available: extensions.includes('vacation'),
+        vacation_window_available: extensions.includes('date') && extensions.includes('relational'),
+        pushed_vacation: false,
+        pushed_rule_count: 0,
+        last_push_at: sieve.lastPushAt,
+        last_error: null,
+      };
+    }),
+    // The mock keeps no rules (`list_rules` is empty), so none has a placement.
+    rules: [],
+  };
+}
+
+function mockEnableServerRules(accountId: string, choice: string) {
+  const sieve = mockSieve(accountId);
+  if (sieve.availability !== 'available') throw new Error('backend.errors.serverRules.notConfigured');
+  const { server } = sieve;
+  sieve.enabled = true;
+  let mode: 'direct' | 'wrapper';
+  let previous = sieve.previous;
+  if (server.active === null || server.active === 'satchel') {
+    mode = 'direct';
+  } else if (server.active === 'satchel-main') {
+    mode = 'wrapper';
+  } else if (choice === 'wrapper') {
+    if (!server.extensions.includes('include')) throw new Error('backend.errors.serverRules.includeUnavailable');
+    previous = server.active;
+    server.scripts['satchel-main'] = `include :personal "satchel";\ninclude :personal "${server.active}";`;
+    mode = 'wrapper';
+  } else if (choice === 'replace') {
+    previous = server.active;
+    mode = 'direct';
+  } else {
+    sieve.serverActive = false;
+    sieve.consent = server.active;
+    return mockServerRulesOverview();
+  }
+  server.scripts.satchel = '# Satchel-managed script';
+  server.active = mode === 'wrapper' ? 'satchel-main' : 'satchel';
+  Object.assign(sieve, { serverActive: true, mode, previous, consent: null, lastPushAt: new Date().toISOString() });
+  return mockServerRulesOverview();
+}
+
+function mockDisableServerRules(accountId: string) {
+  const sieve = mockSieve(accountId);
+  const { server } = sieve;
+  if (server.active === 'satchel' || server.active === 'satchel-main') {
+    server.active = sieve.previous && server.scripts[sieve.previous] ? sieve.previous : null;
+  }
+  delete server.scripts['satchel-main'];
+  delete server.scripts.satchel;
+  Object.assign(sieve, { enabled: false, serverActive: false, mode: null, previous: null, consent: null });
+  return mockServerRulesOverview();
+}
 
 /* -------------------------------------------------------------------------- */
 /* Transport                                                                  */

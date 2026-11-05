@@ -6,6 +6,7 @@ import RuleBuilder from './RuleBuilder.vue';
 const backend = vi.hoisted(() => ({
   backendListRules: vi.fn(), backendUpsertRule: vi.fn(), backendDeleteRule: vi.fn(),
   backendRunRulesForThread: vi.fn(), backendRunRulesForThreads: vi.fn(),
+  backendGetServerRulesOverview: vi.fn(),
 }));
 vi.mock('@/services/backend', () => backend);
 vi.mock('@/stores/threads', () => ({ useThreadsStore: () => ({ visibleThreads: [], activeThreadId: '' }) }));
@@ -59,4 +60,35 @@ it('round-trips supported fields from an existing or imported rule', async () =>
   await wrapper.get('form').trigger('submit');
   await flushPromises();
   expect(backend.backendUpsertRule).toHaveBeenCalledWith(expect.objectContaining({ id: 'r', trigger_config: config }));
+});
+
+it('marks each active rule as running on the server or staying local, with the reason', async () => {
+  backend.backendListRules.mockResolvedValue([
+    { id: 'r-server', name: 'Newsletters', priority: 0, is_active: true, trigger_config: { from_contains: 'news@' }, actions: ['mark_read'] },
+    { id: 'r-local', name: 'Invoices', priority: 0, is_active: true, trigger_config: { subject_contains: 'invoice' }, actions: ['set_state:done'] },
+    { id: 'r-paused', name: 'Paused', priority: 0, is_active: false, trigger_config: { from_contains: 'x' }, actions: ['mark_read'] },
+  ]);
+  backend.backendGetServerRulesOverview.mockResolvedValue({
+    accounts: [{ account_id: 'acc', display_name: 'Work', email: 'me@example.com', enabled: true, server_active: true }],
+    rules: [
+      { rule_id: 'r-server', server_account_ids: ['acc'], local_reason: null, pending: false },
+      { rule_id: 'r-local', server_account_ids: [], local_reason: { kind: 'action', detail: 'set_state' }, pending: false },
+    ],
+  });
+  const wrapper = mount(RuleBuilder);
+  await flushPromises();
+  const badges = wrapper.findAll('[data-testid="rule-placement"]');
+  expect(badges.map((badge) => badge.text())).toEqual(['Runs on server', 'Local only']);
+  expect(badges[0]!.attributes('title')).toBe('Runs on the server for Work');
+  expect(badges[1]!.attributes('title')).toBe('“Set status” exists only in Satchel.');
+});
+
+it('shows no placement badges while no account has server rules on', async () => {
+  backend.backendListRules.mockResolvedValue([
+    { id: 'r', name: 'Any', priority: 0, is_active: true, trigger_config: { from_contains: 'x' }, actions: ['mark_read'] },
+  ]);
+  backend.backendGetServerRulesOverview.mockResolvedValue({ accounts: [{ account_id: 'acc', enabled: false }], rules: [] });
+  const wrapper = mount(RuleBuilder);
+  await flushPromises();
+  expect(wrapper.find('[data-testid="rule-placement"]').exists()).toBe(false);
 });

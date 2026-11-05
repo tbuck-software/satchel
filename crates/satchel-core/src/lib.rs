@@ -27,6 +27,7 @@ pub mod mail_actions;
 pub mod providers;
 pub mod runtime_capabilities;
 pub mod spam;
+pub mod server_rules;
 pub mod sync;
 pub mod utils;
 pub mod workflow;

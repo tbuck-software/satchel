@@ -96,7 +96,19 @@ pub async fn set_vacation(
         .load_provider_config(&input.account_id)
         .await
         .map_err(CommandError::from)?;
-    if let Some(mut account) = account {
+    if account
+        .as_ref()
+        .is_some_and(|account| account.provider == "imap")
+    {
+        // IMAP has no vacation API; the reply rides in the account's Sieve
+        // script when server rules are on.
+        crate::commands::server_rules::push_vacation(
+            pool.inner(),
+            &input.account_id,
+            input.enabled,
+        )
+        .await?;
+    } else if let Some(mut account) = account {
         account.config = crate::utils::oauth::fresh_account_config(pool.inner(), &input.account_id)
             .await
             .map_err(map_remote_update_error)?;
@@ -121,8 +133,8 @@ async fn push_vacation_to_remote(
     match account.provider.as_str() {
         "gmail" => push_gmail_vacation(&account.config, input).await,
         "outlook" => push_outlook_vacation(&account.config, input).await,
-        // IMAP-only accounts: no native vacation API. Rely on server-side Sieve
-        // or document for the user that they need to set it via webmail.
+        // IMAP goes through ManageSieve, see `set_vacation`; POP3 has no
+        // server-side reply at all.
         _ => Ok(()),
     }
 }

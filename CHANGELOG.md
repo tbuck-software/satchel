@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Run rules and the out-of-office reply on IMAP servers that offer ManageSieve, so they work while Satchel is closed (Settings → Accounts → Server rules). A filter script of your own stays as it is unless you choose to run both or replace it; rules only Satchel can carry out keep running in the app and say so with "Local only".
 - On a phone, keep Send, Add and the other docked actions above the on-screen keyboard; the compose button stays behind it.
 - Give the phone a calendar that fits: the month title with Import and + in the app bar, a month of dots, and the picked day's events listed below. New and edited events have Cancel and Add in their bar and show times as "Tue, Oct 27 · 11:00".
 - Run the phone drawer edge to edge with Mail, Calendar, Contacts and Settings named at its foot, an "All folders" row, and no keyboard-only controls.
