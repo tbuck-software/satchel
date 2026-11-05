@@ -407,7 +407,7 @@ pub async fn enqueue_thread_flags_with_stable_ids(
 }
 
 pub fn stable_queue_id(prefix: &str, purpose: &str, account_id: &str) -> String {
-    let account_hash = format!("{:x}", Sha256::digest(account_id.as_bytes()));
+    let account_hash = crate::utils::hex::lower_hex(&Sha256::digest(account_id.as_bytes()));
     format!("{prefix}:{purpose}:{}", &account_hash[..16])
 }
 
@@ -435,7 +435,7 @@ pub fn stable_blocked_move_id(
         "{thread_id}\0{account_id}\0{source_folder}\0{remote_id}\0{}\0{generation}",
         target_remote_folder_id.trim()
     );
-    let operation_hash = format!("{:x}", Sha256::digest(operation_key.as_bytes()));
+    let operation_hash = crate::utils::hex::lower_hex(&Sha256::digest(operation_key.as_bytes()));
     stable_queue_id(
         &format!("blocked-sender-move:{operation_hash}"),
         "move",

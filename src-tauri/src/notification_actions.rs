@@ -386,7 +386,7 @@ pub(crate) async fn execute_notification_action_inner(
     let state = AppState::default();
 
     let identity = format!("{event_id}\u{0}{action_id}\u{0}{thread_id}");
-    let digest = format!("{:x}", Sha256::digest(identity.as_bytes()));
+    let digest = satchel_core::utils::hex::lower_hex(&Sha256::digest(identity.as_bytes()));
     let queue_prefix = format!("notification:{digest}");
     let action_key = format!("notification_action:{digest}");
     let queued_ids = if let Some(stored) = load_action_record(&pool, &action_key).await? {

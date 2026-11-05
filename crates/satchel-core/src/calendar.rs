@@ -303,10 +303,9 @@ pub async fn delete_event(pool: &SqlitePool, id: &str) -> Result<(), SaveError> 
 fn build_invitation(invitation: Invitation) -> Result<QueuedAction, String> {
     use base64::Engine as _;
     use sha2::{Digest, Sha256};
-    let digest = format!(
-        "{:x}",
-        Sha256::digest(format!("{}\0{}", invitation.account_id, invitation.ics).as_bytes())
-    );
+    let digest = crate::utils::hex::lower_hex(&Sha256::digest(
+        format!("{}\0{}", invitation.account_id, invitation.ics).as_bytes(),
+    ));
     let outgoing = OutgoingMessageInput {
         to: invitation.attendees,
         subject: invitation.title.clone(),

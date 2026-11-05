@@ -63,7 +63,7 @@ struct RestoreManifest {
 }
 
 fn key_hash(key: &[u8; 32]) -> String {
-    format!("{:x}", Sha256::digest(key))
+    crate::utils::hex::lower_hex(&Sha256::digest(key))
 }
 
 fn file_hash(path: &Path) -> Result<String, String> {
@@ -77,7 +77,7 @@ fn file_hash(path: &Path) -> Result<String, String> {
         }
         digest.update(&buffer[..read]);
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(crate::utils::hex::lower_hex(&digest.finalize()))
 }
 
 fn sync_directory(path: &Path) -> Result<(), String> {

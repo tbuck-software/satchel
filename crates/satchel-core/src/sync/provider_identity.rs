@@ -22,7 +22,10 @@ pub fn provider_local_id(kind: &str, provider: &str, fields: &[&str]) -> String 
         .chars()
         .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
         .collect::<String>();
-    format!("{kind}-{prefix}-v2-{:x}", hash.finalize())
+    format!(
+        "{kind}-{prefix}-v2-{}",
+        crate::utils::hex::lower_hex(&hash.finalize())
+    )
 }
 
 pub fn provider_message_db_id(
