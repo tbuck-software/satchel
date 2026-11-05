@@ -302,6 +302,27 @@ describe('useThreadActions', () => {
     );
   });
 
+  // Owner report: in Done, every surface offered Done again.
+  it('sends done mail back to the inbox where it would otherwise check it off again', async () => {
+    threadState.threads = [
+      seedThread({ id: 'done-1', workflowState: 'done' }),
+      seedThread({ id: 'done-2', workflowState: 'done' }),
+      seedThread({ id: 'open-1', workflowState: 'inbox' }),
+    ];
+    const actions = useThreadActions();
+
+    expect(actions.allDone(['done-1', 'done-2'])).toBe(true);
+    expect(actions.allDone(['done-1', 'open-1'])).toBe(false);
+    expect(actions.allDone([])).toBe(false);
+
+    await actions.toggleDone(['done-1', 'done-2']);
+    expect(transitionManyMock).toHaveBeenLastCalledWith(['done-1', 'done-2'], 'inbox', 'manual', undefined, { refresh: false });
+
+    // A mixed set still has something to check off.
+    await actions.toggleDone(['done-1', 'open-1']);
+    expect(transitionManyMock).toHaveBeenLastCalledWith(['done-1', 'open-1'], 'done', 'manual', undefined, { refresh: false });
+  });
+
   it('gives an unread thread its unread mark back when Done is undone', async () => {
     threadState.threads = [seedThread({ workflowState: 'inbox', unreadCount: 2 }), seedThread({ id: 'thread-2', unreadCount: 0 })];
     readMock.mockReset();

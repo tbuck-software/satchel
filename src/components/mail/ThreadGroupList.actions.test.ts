@@ -62,6 +62,28 @@ describe('thread group list action context', () => {
     ]]);
   });
 
+  // Owner report: Done offered to check off mail that is checked off already.
+  it('offers no "check all" for a section of done mail', () => {
+    const wrapper = shallowMount(ThreadGroupList, {
+      props: {
+        items: [
+          { kind: 'date-header', id: 'date-today', label: 'Today', count: 1, threadIds: ['done-1'] },
+          { kind: 'date-header', id: 'date-august', label: 'August', count: 1, threadIds: ['open-1'] },
+        ],
+        selectedThreadIds: [],
+        senderReviewSetupComplete: true,
+        bulkBusy: false,
+        allDone: (ids: readonly string[]) => ids.every((id) => id.startsWith('done-')),
+      },
+      global: {
+        stubs: { SectionHeading: false },
+      },
+    });
+
+    expect(wrapper.find('[aria-label="Check off every email in “Today”"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="Check off every email in “August”"]').exists()).toBe(true);
+  });
+
   it('renders the priority card rows and opens the bucket from its footer', async () => {
     const prioThread = (id: string) => ({
       id,

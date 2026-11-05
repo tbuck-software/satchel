@@ -311,44 +311,49 @@ onBeforeUnmount(() => {
               <span v-if="row.node.unreadCount > 0" class="folder-count">{{ row.node.unreadCount }}</span>
             </CardButton>
 
-            <template v-if="canManageFolders && row.node.folderId && !isProtected(row.node)">
-              <AppButton
-                class="row-action"
-                :title="$t('common.rename')"
-                :disabled="busy"
-                @click="startRename(row.id, row.node.label)"
-                variant="ghost"
-                size="sm"
-              >
-                {{ $t('common.rename') }}
-              </AppButton>
-              <AppButton
-                class="row-action danger"
-                :title="$t('common.delete')"
-                :disabled="busy"
-                @click="void removeFolder(row.node.folderId!, row.node.label)"
-                variant="danger"
-                size="sm"
-              >
-                {{ $t('common.delete') }}
-              </AppButton>
-            </template>
+            <!-- One cell for every action, so a third or fourth button stays in
+                 the row instead of wrapping onto the next one. -->
+            <div class="row-actions">
+              <template v-if="canManageFolders && row.node.folderId && !isProtected(row.node)">
+                <IconButton
+                  class="row-action"
+                  size="sm"
+                  :title="$t('common.rename')"
+                  :disabled="busy"
+                  @click="startRename(row.id, row.node.label)"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11.2 2.6l2.2 2.2-7.6 7.6H3.6v-2.2l7.6-7.6Z" />
+                  </svg>
+                </IconButton>
+                <IconButton
+                  class="row-action"
+                  size="sm"
+                  tone="danger"
+                  :title="$t('common.delete')"
+                  :disabled="busy"
+                  @click="void removeFolder(row.node.folderId!, row.node.label)"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M2 4h12M6 4V2h4v2M4 4l1 10h6l1-10" />
+                  </svg>
+                </IconButton>
+              </template>
 
-            <IconButton
-              class="favorite-btn"
-              :class="{ active: mailboxes.isFavoriteFolder(row.accountId, row.node.path) }"
-              :title="mailboxes.isFavoriteFolder(row.accountId, row.node.path)
-                ? $t('nav.folderBrowser.removeFavorite')
-                : $t('nav.folderBrowser.addFavorite')"
-              :aria-label="mailboxes.isFavoriteFolder(row.accountId, row.node.path)
-                ? $t('nav.folderBrowser.removeFavorite')
-                : $t('nav.folderBrowser.addFavorite')"
-              @click="mailboxes.toggleFavoriteFolder(row.accountId, row.node.path)"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M8 2.1l1.8 3.6 4 .6-2.9 2.8.7 4L8 11.2 4.4 13l.7-4L2.2 6.3l4-.6L8 2.1Z" />
-              </svg>
-            </IconButton>
+              <IconButton
+                class="favorite-btn"
+                size="sm"
+                :class="{ active: mailboxes.isFavoriteFolder(row.accountId, row.node.path) }"
+                :title="mailboxes.isFavoriteFolder(row.accountId, row.node.path)
+                  ? $t('nav.folderBrowser.removeFavorite')
+                  : $t('nav.folderBrowser.addFavorite')"
+                @click="mailboxes.toggleFavoriteFolder(row.accountId, row.node.path)"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M8 2.1l1.8 3.6 4 .6-2.9 2.8.7 4L8 11.2 4.4 13l.7-4L2.2 6.3l4-.6L8 2.1Z" />
+                </svg>
+              </IconButton>
+            </div>
           </div>
 
           <form
@@ -477,24 +482,36 @@ h3 {
   align-content: start;
 }
 
+/* The count belongs to the address, the button to the edge: spread evenly,
+   the count floated in the middle of the line, and a long address pushed
+   the button out of the panel. */
 .account-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   padding-top: 4px;
 }
 
 .account-email {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--font-size-sm);
   font-weight: var(--weight-semibold);
   color: var(--text-primary);
 }
 
 .account-count {
+  flex-shrink: 0;
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
+}
+
+.account-header .manage-btn {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .tree-list {
@@ -503,14 +520,37 @@ h3 {
   align-content: start;
 }
 
+/* Three cells and never more: the chevron, the folder, and one cell holding
+   every action. With a fixed 28px third column, Rename and Delete wrapped
+   onto an implicit second row and drew over the folder below. */
 .tree-row {
   --depth-step: 18px;
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) 28px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding-left: calc(var(--depth) * var(--depth-step));
   border-radius: var(--radius-md);
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* With a pointer the folder actions wait for the row; a finger has no hover,
+   so on touch they stay. The space is held either way, so nothing shifts. */
+@media (hover: hover) and (pointer: fine) {
+  .row-action {
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-out);
+  }
+
+  .tree-row:hover .row-action,
+  .tree-row:focus-within .row-action {
+    opacity: 1;
+  }
 }
 
 .tree-row.active {
@@ -527,13 +567,22 @@ h3 {
 }
 
 .chevron-btn,
-.chevron-spacer,
-.favorite-btn {
+.chevron-spacer {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 16px;
   height: 16px;
+}
+
+/* A touch screen grows the chevron to a thumb's width; the spacer of a leaf
+   row follows, so labels at one depth stay in one column. */
+@media (pointer: coarse) {
+  .chevron-btn,
+  .chevron-spacer {
+    width: var(--touch-target);
+    height: var(--touch-target);
+  }
 }
 
 .chevron {
@@ -582,9 +631,6 @@ h3 {
 }
 
 .favorite-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
   color: var(--text-tertiary);
 }
 

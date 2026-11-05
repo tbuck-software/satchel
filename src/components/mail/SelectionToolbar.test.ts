@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const harness = vi.hoisted(() => ({
   ids: ['one', 'two', 'three'],
-  archive: vi.fn(), trash: vi.fn(), setRead: vi.fn(), openPicker: vi.fn(), openReminder: vi.fn(),
+  archive: vi.fn(), toggleDone: vi.fn(), allDone: vi.fn(() => false), trash: vi.fn(), setRead: vi.fn(), openPicker: vi.fn(), openReminder: vi.fn(),
 }));
 vi.mock('@/stores/threads', () => ({ useThreadsStore: () => ({
   selectedThreadIds: harness.ids,
@@ -31,11 +31,22 @@ describe('selection toolbar', () => {
     await buttons[3]!.trigger('click');
     await buttons[4]!.trigger('click');
     await flushPromises();
-    expect(harness.archive).toHaveBeenCalledWith(harness.ids);
+    expect(harness.toggleDone).toHaveBeenCalledWith(harness.ids);
     expect(harness.openReminder).toHaveBeenCalledWith(harness.ids);
     expect(harness.trash).toHaveBeenCalledWith(harness.ids);
     expect(harness.setRead).toHaveBeenCalledWith(harness.ids, true, { undo: true });
     expect(harness.openPicker).toHaveBeenCalledWith({ itemType: 'thread', itemIds: harness.ids });
+    wrapper.unmount();
+  });
+
+  it('sends a selection of done mail back to the inbox instead of offering Done', async () => {
+    harness.allDone.mockReturnValue(true);
+    const wrapper = mount(SelectionToolbar, { props: { busy: false } });
+    const primary = wrapper.findAll('.selection-actions button')[0]!;
+    expect(primary.text()).toBe('To inbox (3)');
+    await primary.trigger('click');
+    expect(harness.toggleDone).toHaveBeenCalledWith(harness.ids);
+    harness.allDone.mockReturnValue(false);
     wrapper.unmount();
   });
 });

@@ -8,7 +8,8 @@
         "summaryTitle": "{count} conversation selected | {count} conversations selected",
         "summaryHint": "The actions above apply to all of them.",
         "summaryMore": "and {count} more",
-        "clear": "Clear selection"
+        "clear": "Clear selection",
+        "toInbox": "To inbox ({count})"
       },
       "actions": {
         "aside": "Aside",
@@ -266,7 +267,8 @@
         "summaryTitle": "{count} Unterhaltung ausgewählt | {count} Unterhaltungen ausgewählt",
         "summaryHint": "Die Aktionen oben gelten für alle.",
         "summaryMore": "und {count} weitere",
-        "clear": "Auswahl aufheben"
+        "clear": "Auswahl aufheben",
+        "toInbox": "In die Inbox ({count})"
       },
       "actions": {
         "aside": "Beiseite",

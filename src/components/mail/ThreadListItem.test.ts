@@ -12,8 +12,9 @@ async function contextMenusOpen(count = 1) {
   await vi.waitFor(() => expect(document.body.querySelectorAll('.context-menu')).toHaveLength(count));
 }
 
-const { archiveMock, setAsideMock, moveToInboxMock, setPinnedMock, trashMock } = vi.hoisted(() => ({
+const { archiveMock, toggleDoneMock, setAsideMock, moveToInboxMock, setPinnedMock, trashMock } = vi.hoisted(() => ({
   archiveMock: vi.fn(),
+  toggleDoneMock: vi.fn(),
   setAsideMock: vi.fn(),
   moveToInboxMock: vi.fn(),
   setPinnedMock: vi.fn(),
@@ -23,6 +24,9 @@ const { archiveMock, setAsideMock, moveToInboxMock, setPinnedMock, trashMock } =
 vi.mock('@/composables/useThreadActions', () => ({
   useThreadActions: () => ({
     archive: archiveMock,
+    toggleDone: toggleDoneMock,
+    allDone: (ids: readonly string[]) =>
+      ids.length > 0 && ids.every((id) => useThreadsStore().find(id)?.workflowState === 'done'),
     setAside: setAsideMock,
     moveToInbox: moveToInboxMock,
     snooze: vi.fn(),
@@ -35,6 +39,7 @@ vi.mock('@/composables/useThreadActions', () => ({
 beforeEach(() => {
   setActivePinia(createPinia());
   archiveMock.mockReset();
+  toggleDoneMock.mockReset();
   setAsideMock.mockReset();
   moveToInboxMock.mockReset();
   setPinnedMock.mockReset();
@@ -302,7 +307,7 @@ describe('thread row layout', () => {
     await row.trigger('pointerup', {
       pointerId: 3, pointerType: 'touch', clientX: 24, clientY: 80,
     });
-    expect(archiveMock).not.toHaveBeenCalled();
+    expect(toggleDoneMock).not.toHaveBeenCalled();
     expect(wrapper.get('[data-swipe-surface]').attributes('style')).toContain('translate3d(0px');
 
     await row.trigger('pointerdown', {
@@ -315,7 +320,7 @@ describe('thread row layout', () => {
       pointerId: 4, pointerType: 'touch', clientX: 190, clientY: 42,
     });
     await vi.advanceTimersByTimeAsync(120);
-    expect(archiveMock).toHaveBeenCalledWith(['thread']);
+    expect(toggleDoneMock).toHaveBeenCalledWith(['thread']);
     expect(setAsideMock).not.toHaveBeenCalled();
   });
 
@@ -481,7 +486,7 @@ describe('thread row layout', () => {
       .find(button => button.textContent?.trim() === 'Done');
     done!.click();
     await nextTick();
-    expect(archiveMock).toHaveBeenLastCalledWith(['thread', 'another-thread']);
+    expect(toggleDoneMock).toHaveBeenLastCalledWith(['thread', 'another-thread']);
 
     wrapper.unmount();
   });
@@ -530,6 +535,53 @@ describe('thread row layout', () => {
     const priorityRows = actions.filter((label) => label.startsWith('Priority'));
     expect(priorityRows).toEqual(['Priority']);
     expect(menu?.querySelector('[aria-checked="true"]')?.textContent?.trim()).toBe('Priority');
+
+    wrapper.unmount();
+  });
+
+  // Owner report: in Done, the row offered Done again.
+  it('offers the way back to the inbox instead of Done on a done thread', async () => {
+    const thread = {
+      id: 'thread',
+      accountId: 'account',
+      subject: 'Betreff',
+      participants: [{ name: 'Absender', email: 'sender@example.com' }],
+      snippet: 'Vorschau',
+      lastMessageAt: '2026-08-06T12:00:00Z',
+      lastMessageAtMs: Date.parse('2026-08-06T12:00:00Z'),
+      messageCount: 1,
+      unreadCount: 0,
+      hasAttachments: false,
+      workflowState: 'done' as const,
+      priority: 1 as const,
+      mailboxNames: ['INBOX'],
+      tags: [],
+    };
+    useThreadsStore().threads = [thread];
+    vi.useFakeTimers();
+    const wrapper = mount(ThreadListItem, {
+      attachTo: document.body,
+      props: { thread, active: false, selected: false, selectionMode: false },
+    });
+
+    const quick = wrapper.get('.thread-quick-action--done');
+    expect(quick.attributes('aria-label')).toBe('Back to the inbox');
+
+    const row = wrapper.get('article');
+    await row.trigger('pointerdown', { pointerId: 1, pointerType: 'touch', clientX: 20, clientY: 40 });
+    await row.trigger('pointermove', { pointerId: 1, pointerType: 'touch', clientX: 190, clientY: 42 });
+    expect(wrapper.get('[data-swipe-action="done"]').text()).toContain('Inbox');
+    await row.trigger('pointerup', { pointerId: 1, pointerType: 'touch', clientX: 190, clientY: 42 });
+    await vi.advanceTimersByTimeAsync(120);
+    expect(toggleDoneMock).toHaveBeenCalledWith(['thread']);
+    vi.useRealTimers();
+
+    await row.trigger('contextmenu', { clientX: 20, clientY: 30 });
+    await contextMenusOpen();
+    const labels = Array.from(document.body.querySelectorAll('.context-menu button'))
+      .map((button) => button.textContent?.trim() ?? '');
+    expect(labels).toContain('Back to the inbox');
+    expect(labels).not.toContain('Done');
 
     wrapper.unmount();
   });

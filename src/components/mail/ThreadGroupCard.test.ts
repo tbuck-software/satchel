@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { mount } from '@vue/test-utils';
 
-const { archiveMock, setAsideMock, setPinnedMock, trashMock, setThreadsReadMock } = vi.hoisted(() => ({
+const { archiveMock, toggleDoneMock, setAsideMock, setPinnedMock, trashMock, setThreadsReadMock } = vi.hoisted(() => ({
   archiveMock: vi.fn(),
+  toggleDoneMock: vi.fn(),
   setAsideMock: vi.fn(),
   setPinnedMock: vi.fn(),
   trashMock: vi.fn(),
@@ -14,6 +15,7 @@ const { archiveMock, setAsideMock, setPinnedMock, trashMock, setThreadsReadMock 
 vi.mock('@/composables/useThreadActions', () => ({
   useThreadActions: () => ({
     archive: archiveMock,
+    toggleDone: toggleDoneMock,
     setAside: setAsideMock,
     setPinned: setPinnedMock,
     trash: trashMock,
@@ -63,6 +65,7 @@ function render() {
 beforeEach(() => {
   setActivePinia(createPinia());
   archiveMock.mockReset();
+  toggleDoneMock.mockReset();
   setAsideMock.mockReset();
   setPinnedMock.mockReset();
   trashMock.mockReset();
@@ -139,8 +142,8 @@ describe('group card actions', () => {
     });
     await vi.advanceTimersByTimeAsync(120);
 
-    expect(archiveMock).toHaveBeenCalledTimes(1);
-    expect(archiveMock).toHaveBeenCalledWith(['t-1', 't-2']);
+    expect(toggleDoneMock).toHaveBeenCalledTimes(1);
+    expect(toggleDoneMock).toHaveBeenCalledWith(['t-1', 't-2']);
   });
 
   it('marks the whole stack read with the default short right swipe', async () => {

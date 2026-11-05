@@ -58,6 +58,12 @@ const props = defineProps<{
    * and the priority header and its "more" row are thumb-sized.
    */
   phoneLayout?: boolean;
+  /**
+   * Whether every one of these threads is done already. A date section or
+   * folder of done mail has nothing to check off, so it offers no "check
+   * all"; sending a whole day back to the Inbox is a selection's job.
+   */
+  allDone?: (threadIds: readonly string[]) => boolean;
 }>();
 
 const emit = defineEmits<{
@@ -785,7 +791,7 @@ onBeforeUnmount(() => {
           <SectionHeading :label="stickyHeader.item.label" :count="stickyHeader.item.count > 0 ? stickyHeader.item.count : undefined" class="w-full">
             <template #trailing>
               <AppButton
-                v-if="stickyHeader.item.threadIds.length > 0"
+                v-if="stickyHeader.item.threadIds.length > 0 && !props.allDone?.(stickyHeader.item.threadIds)"
                 tabindex="-1"
                 class="section-done-button"
                 :class="{ 'section-done-button--visible': hoveredSectionId === stickyHeader.item.id }"
@@ -954,7 +960,7 @@ onBeforeUnmount(() => {
               <SectionHeading :label="item.label" :count="item.count > 0 ? item.count : undefined" class="w-full">
                 <template #trailing>
                   <AppButton
-                    v-if="item.threadIds.length > 0"
+                    v-if="item.threadIds.length > 0 && !props.allDone?.(item.threadIds)"
                     class="section-done-button"
                     :class="{ 'section-done-button--visible': hoveredSectionId === item.id }"
                     :title="$t('thread.list.checkAllInSection', { label: item.label })"
@@ -1162,7 +1168,7 @@ onBeforeUnmount(() => {
                   </AppIcon>
                 </IconButton>
                 <IconButton
-
+                  v-if="!props.allDone?.(item.bucket.threadIds)"
                   :title="$t('thread.list.checkAll')"
                   :aria-label="$t('thread.list.checkAll')"
                   @click.stop="emit('bucketAction', { threadIds: item.bucket.threadIds, action: 'done' })"

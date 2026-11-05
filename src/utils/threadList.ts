@@ -558,6 +558,22 @@ export function isNewSenderThread(
 }
 
 /**
+ * Screening new senders belongs to the Inbox. Spam is full of unknown senders
+ * by nature, and Sent, Trash, Done and the folders hold mail that is already
+ * filed: offering to allow or block its senders there makes no sense.
+ */
+export function senderReviewInScope(scope: {
+  workflow: WorkflowFilter;
+  mailbox: MailboxFilter;
+  contactEmail: string;
+}): boolean {
+  return !scope.contactEmail
+    && scope.workflow === 'all'
+    && scope.mailbox.kind === 'section'
+    && scope.mailbox.value === 'inbox';
+}
+
+/**
  * Ids of the threads that belong in the new-sender review.
  *
  * Both the review stack and the smart buckets need this split; computing it

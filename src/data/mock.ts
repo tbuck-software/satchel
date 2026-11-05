@@ -575,6 +575,79 @@ const mockThreadSeeds: Omit<Thread, 'lastMessageAtMs'>[] = [
     tags: ['personal'],
     category: 'personal',
   },
+  /*
+   * Spam from people nobody has written to: the unknown-sender review must
+   * stay in the Inbox and not offer to allow them here.
+   */
+  ...[
+    { id: 'th-spam-1', subject: 'You have won a voucher', name: 'Prize Desk', email: 'claims@prize-desk.example', hours: 3 },
+    { id: 'th-spam-2', subject: 'Invoice overdue — act now', name: 'Billing Center', email: 'billing@invoice-center.example', hours: 9 },
+    { id: 'th-spam-3', subject: 'Exclusive investment opportunity', name: 'Mr. Adebayo', email: 'adebayo@capital-trust.example', hours: 30 },
+  ].map(({ id, subject, name, email, hours }): Omit<Thread, 'lastMessageAtMs'> => ({
+    id,
+    accountId: 'acc-work',
+    subject,
+    participants: [{ name, email }],
+    snippet: 'Click the link below to confirm your details within 24 hours.',
+    lastMessageAt: new Date(Date.now() - hours * 60 * 60_000).toISOString(),
+    messageCount: 1,
+    unreadCount: 1,
+    hasAttachments: false,
+    workflowState: 'inbox',
+    priority: 0,
+    mailboxNames: ['Spam'],
+    tags: [],
+    category: 'personal',
+  })),
+  /*
+   * Mail already checked off: in Done the primary action sends it back to the
+   * Inbox instead of offering Done again.
+   */
+  ...[
+    { id: 'th-done-1', subject: 'Signed contract is in the shared drive', name: 'Jonas Weber', email: 'jonas.weber@app.io', hours: 4 },
+    { id: 'th-done-2', subject: 'Thanks for the quick review', name: 'Lena Vogel', email: 'lena.vogel@app.io', hours: 27 },
+  ].map(({ id, subject, name, email, hours }): Omit<Thread, 'lastMessageAtMs'> => ({
+    id,
+    accountId: 'acc-work',
+    subject,
+    participants: [{ name, email }, { name: 'Tom', email: 'tom@satchel.dev' }],
+    snippet: 'All set from my side, nothing more to do here.',
+    lastMessageAt: new Date(Date.now() - hours * 60 * 60_000).toISOString(),
+    messageCount: 1,
+    unreadCount: 0,
+    hasAttachments: false,
+    workflowState: 'done',
+    priority: 0,
+    mailboxNames: ['INBOX'],
+    tags: [],
+    category: 'personal',
+    senderKnown: true,
+  })),
+  /*
+   * Custom folders with names as long as real ones get: the folder browser
+   * has to keep its row actions inside each row at every width.
+   */
+  ...[
+    { id: 'th-folder-1', folder: 'Abuse - Meldungen und Beschwerden aus dem Kundenportal', hours: 50 },
+    { id: 'th-folder-2', folder: 'Projekte/Kunden/Müller & Söhne Werkzeugmaschinen GmbH & Co. KG – Wartungsvertrag', hours: 70 },
+    { id: 'th-folder-3', folder: 'Archiv/2025', hours: 90 },
+  ].map(({ id, folder, hours }): Omit<Thread, 'lastMessageAtMs'> => ({
+    id,
+    accountId: 'acc-work',
+    subject: 'Ticket update',
+    participants: [{ name: 'Support', email: 'support@portal.example' }],
+    snippet: 'The ticket was updated.',
+    lastMessageAt: new Date(Date.now() - hours * 60 * 60_000).toISOString(),
+    messageCount: 1,
+    unreadCount: 0,
+    hasAttachments: false,
+    workflowState: 'inbox',
+    priority: 0,
+    mailboxNames: [folder],
+    tags: [],
+    category: 'updates',
+    senderKnown: true,
+  })),
   ...knownCorrespondents.map(({ id, subject, sender, snippet, at, unread }): Omit<Thread, 'lastMessageAtMs'> => ({
     id,
     accountId: 'acc-work',

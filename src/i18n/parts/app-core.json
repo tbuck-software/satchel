@@ -10,7 +10,10 @@
         "serverResponse": "Server response",
         "accountOutage": "{account} has not synced since {since}",
         "outageShort": "{account}: no sync since {since}",
-        "openAccount": "Account settings"
+        "openAccount": "Account settings",
+        "syncAgain": "Sync again",
+        "signInAgain": "Sign in again",
+        "signingIn": "Signing in…"
       },
       "inlineImageUnavailable": "Image unavailable",
       "messageLoadFailed": "The message could not be loaded.",
@@ -134,7 +137,9 @@
           "title": "Nothing for later",
           "description": "Snoozed mail comes back at the time you picked, mail waiting for a reply when the reply arrives."
         }
-      }
+      },
+      "bundleToInbox": "All to inbox",
+      "bundleToInboxTitle": "Move every message back to the inbox and go back"
     },
     "newSenders": {
       "allow": "Allow sender",
@@ -334,7 +339,10 @@
         "serverResponse": "Antwort des Servers",
         "accountOutage": "{account} gleicht seit {since} nicht ab",
         "outageShort": "{account}: kein Abgleich seit {since}",
-        "openAccount": "Kontoeinstellungen"
+        "openAccount": "Kontoeinstellungen",
+        "syncAgain": "Erneut abgleichen",
+        "signInAgain": "Erneut anmelden",
+        "signingIn": "Anmeldung läuft …"
       },
       "inlineImageUnavailable": "Bild nicht verfügbar",
       "messageLoadFailed": "Die Nachricht konnte nicht geladen werden.",
@@ -458,7 +466,9 @@
           "title": "Nichts für später",
           "description": "Mails auf Wiedervorlage kommen zur gewählten Zeit zurück, wartende Mails, sobald die Antwort da ist."
         }
-      }
+      },
+      "bundleToInbox": "Alle in die Inbox",
+      "bundleToInboxTitle": "Alle Mails zurück in die Inbox legen und zurückgehen"
     },
     "newSenders": {
       "allow": "Absender zulassen",

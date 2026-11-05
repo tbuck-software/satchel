@@ -27,6 +27,7 @@ const harness = vi.hoisted(() => ({
   },
   actions: {
     archive: vi.fn(),
+    toggleDone: vi.fn(),
     trash: vi.fn(),
     setRead: vi.fn(),
     setAside: vi.fn(),
@@ -123,7 +124,7 @@ describe('single-key shortcut switch', () => {
     press('u');
 
     expect(harness.threads.nextThread).not.toHaveBeenCalled();
-    expect(harness.actions.archive).not.toHaveBeenCalled();
+    expect(harness.actions.toggleDone).not.toHaveBeenCalled();
     expect(harness.actions.trash).not.toHaveBeenCalled();
     expect(harness.actions.setRead).not.toHaveBeenCalled();
   });
@@ -135,7 +136,7 @@ describe('single-key shortcut switch', () => {
     press('e');
 
     expect(harness.threads.nextThread).toHaveBeenCalledTimes(1);
-    expect(harness.actions.archive).toHaveBeenCalledWith(['thread-1']);
+    expect(harness.actions.toggleDone).toHaveBeenCalledWith(['thread-1']);
   });
 
   /** `e` is the second Done key; a binding saved for it keeps its id. */
@@ -147,8 +148,8 @@ describe('single-key shortcut switch', () => {
     press('y');
     press('e');
 
-    expect(harness.actions.archive).toHaveBeenCalledTimes(2);
-    expect(harness.actions.archive).toHaveBeenCalledWith(['thread-1']);
+    expect(harness.actions.toggleDone).toHaveBeenCalledTimes(2);
+    expect(harness.actions.toggleDone).toHaveBeenCalledWith(['thread-1']);
     harness.settings.keybindings = {};
   });
 

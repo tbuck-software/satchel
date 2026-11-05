@@ -417,11 +417,12 @@ export function useKeyboard() {
     }
 
     // `e` is the second key for Done (`aliasOf` in the registry), not a
-    // separate archive action.
+    // separate archive action. On mail that is done already it sends it back
+    // to the Inbox, as the Done button there does.
     if (matches(event, 'markDone') || matches(event, 'archive')) {
       const ids = targetIds();
       if (ids.length === 0) return false;
-      void actions.archive(ids);
+      void actions.toggleDone(ids);
       return true;
     }
 

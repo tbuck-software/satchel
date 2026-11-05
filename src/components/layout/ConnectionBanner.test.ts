@@ -104,12 +104,18 @@ describe('ConnectionBanner', () => {
       });
     });
 
-    it('offers no password for an account that signs in through OAuth', () => {
+    it('signs an OAuth account in again instead of asking for a password', async () => {
+      const accounts = useAccountsStore();
+      const startReauth = vi.spyOn(accounts, 'startReauth').mockResolvedValue(undefined);
       useConnectionStore().reportSyncFailures([syncFailure('acc-gmail', 'tom@gmail.example', '401 Unauthorized')]);
       const wrapper = mount(ConnectionBanner);
 
       expect(wrapper.text()).not.toContain('Update password');
-      expect(wrapper.text()).toContain('Try again');
+      expect(wrapper.text()).toContain('Sync again');
+      const signIn = wrapper.findAll('button').find((button) => button.text() === 'Sign in again');
+      expect(signIn).toBeDefined();
+      await signIn!.trigger('click');
+      expect(startReauth).toHaveBeenCalledWith('acc-gmail');
     });
 
     it('keeps other sync failures as they were', () => {
@@ -119,6 +125,39 @@ describe('ConnectionBanner', () => {
       expect(wrapper.get('.banner__detail').text()).toContain('Sync for tom@example.test failed');
       expect(wrapper.find('details').exists()).toBe(false);
       expect(wrapper.text()).not.toContain('Update password');
+    });
+
+    // Owner report: "Der Ordner X … konnte nicht synchronisiert werden" offered a bare "Try again".
+    it('syncs a failed folder again and says so', async () => {
+      const connection = useConnectionStore();
+      connection.reportSyncFailures([JSON.stringify({
+        key: 'backend.errors.folderSyncFailed',
+        params: { account: 'tom@example.test', folder: 'Abuse', message: 'NO [SERVERBUG] internal error' },
+      })]);
+      const wrapper = mount(ConnectionBanner);
+
+      const buttons = wrapper.findAll('button').map((button) => button.text());
+      expect(buttons).toEqual(['Sync again']);
+      await wrapper.get('button').trigger('click');
+      expect(connection.retryToken).toBe(1);
+    });
+
+    it('opens the account settings when the server name does not resolve', async () => {
+      useConnectionStore().reportSyncFailures([syncFailure(
+        'acc-work',
+        'tom@example.test',
+        'failed to lookup address information: nodename nor servname provided',
+      )]);
+      const wrapper = mount(ConnectionBanner);
+
+      const settings = wrapper.findAll('button').find((button) => button.text() === 'Account settings');
+      expect(settings).toBeDefined();
+      await settings!.trigger('click');
+      expect(router.push).toHaveBeenCalledWith({
+        name: 'settings',
+        query: { section: 'accounts', account: 'acc-work' },
+      });
+      expect(wrapper.text()).toContain('Sync again');
     });
 
     it('goes away when the next run comes back clean', async () => {

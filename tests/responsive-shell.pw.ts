@@ -146,6 +146,58 @@ test('the phone reaches its areas by tab bar and its lists by the mailbox sheet'
   await expect(tabs).toHaveCount(0);
 });
 
+/**
+ * Every control of a folder row stays inside that row. Rename and Delete once
+ * wrapped onto an implicit second grid row and drew "…öschen" over the next
+ * folder, at every width.
+ */
+async function expectFolderRowsContained(rows: import('@playwright/test').Locator) {
+  await expect(rows.first()).toBeVisible();
+  const boxes = await rows.evaluateAll((elements) => elements.map((row) => {
+    const rect = row.getBoundingClientRect();
+    const label = row.querySelector('.folder-btn')!.getBoundingClientRect();
+    return {
+      row: { left: rect.left, right: rect.right },
+      label: { top: label.top, bottom: label.bottom },
+      parts: Array.from(row.querySelectorAll('button')).map((button) => {
+        const box = button.getBoundingClientRect();
+        return {
+          name: button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '',
+          middle: box.top + box.height / 2,
+          left: box.left,
+          right: box.right,
+          clipped: button.scrollWidth > button.clientWidth + 1,
+        };
+      }),
+    };
+  }));
+  expect(boxes.some((entry) => entry.parts.length >= 4), 'a row with rename and delete').toBe(true);
+  for (const { row, label, parts } of boxes) {
+    for (const part of parts) {
+      // One line per folder: every control sits beside the label, not under it.
+      expect(part.middle, part.name).toBeGreaterThan(label.top);
+      expect(part.middle, part.name).toBeLessThan(label.bottom);
+      expect(part.left, part.name).toBeGreaterThanOrEqual(row.left - 0.5);
+      expect(part.right, part.name).toBeLessThanOrEqual(row.right + 0.5);
+      expect(part.clipped, part.name).toBe(false);
+    }
+  }
+}
+
+test('the folder browser keeps every row action inside its row, on the desktop and the phone', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 820 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'All folders', exact: true }).first().click();
+  await expectFolderRowsContained(page.locator('.panel .tree-row'));
+
+  await page.setViewportSize({ width: 393, height: 852 });
+  await page.goto('/');
+  await page.locator('.list-pane').getByRole('button', { name: /switch mailbox/i }).click();
+  const sheet = page.getByRole('dialog', { name: 'Mailboxes', exact: true });
+  await sheet.getByRole('button', { name: 'All folders', exact: true }).click();
+  await expectFolderRowsContained(sheet.locator('.tree-row'));
+});
+
 test('saved wide panes switch to a reachable single-pane layout and back', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('satchel.ui.sidebarWidth', '420');

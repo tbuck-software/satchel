@@ -1521,7 +1521,7 @@ const handlers: Record<string, Handler> = {
     return folders.map(name => {
       const type = /^inbox$/i.test(name) ? 'inbox' : /^sent$/i.test(name) ? 'sent'
         : /^drafts?$/i.test(name) ? 'drafts' : /^trash$/i.test(name) ? 'trash'
-          : /^archive$/i.test(name) ? 'archive' : 'custom';
+          : /^archive$/i.test(name) ? 'archive' : /^(spam|junk)$/i.test(name) ? 'spam' : 'custom';
       const included = rows.filter(thread => thread.mailboxNames?.includes(name)
         && !(type === 'inbox' && ['aside', 'done', 'snoozed'].includes(thread.workflowState)));
       return { id: `${account.id}:${name}`, account_id: account.id, account_email: account.email,

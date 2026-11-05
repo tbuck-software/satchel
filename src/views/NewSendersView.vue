@@ -9,6 +9,8 @@ import { useNewSenderActions } from '@/composables/useNewSenderActions';
 import { useSettingsStore } from '@/stores/settings';
 import { useThreadsStore, type NewSenderGroup } from '@/stores/threads';
 import { isPersonalMailboxDomain, senderDomain } from '@/utils/senderDomains';
+import { senderReviewInScope } from '@/utils/threadList';
+import { selectMailListView } from '@/router/mailViews';
 import Avatar from '@/components/common/Avatar.vue';
 import { useI18n } from 'vue-i18n';
 
@@ -17,6 +19,14 @@ const { t } = useI18n();
 const settings = useSettingsStore();
 const threads = useThreadsStore();
 const newSenderActions = useNewSenderActions();
+
+// The review is the Inbox's. Reached with `g n` from Spam or a folder, it
+// shows the Inbox's senders rather than an empty page.
+if (!senderReviewInScope({
+  workflow: threads.workflowFilter,
+  mailbox: threads.mailboxFilter,
+  contactEmail: threads.activeContactEmail,
+})) selectMailListView('inbox');
 
 function accept(sender: NewSenderGroup) {
   newSenderActions.acceptSender(sender);

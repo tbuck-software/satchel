@@ -92,6 +92,8 @@ vi.mock('@/composables/useThreadActions', () => ({
     setMuted: vi.fn().mockResolvedValue(true),
     markSpam: vi.fn().mockResolvedValue(true),
     archive: harness.archive,
+    allDone: (ids: readonly string[]) =>
+      ids.length > 0 && ids.every((id) => id === harness.thread.id && harness.thread.workflowState === 'done'),
     trash: vi.fn(),
     removeFromTopic: vi.fn(),
     snoozeAt: vi.fn(),

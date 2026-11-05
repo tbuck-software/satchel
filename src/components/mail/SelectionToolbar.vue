@@ -31,6 +31,8 @@ const busy = computed(() => props.busy || classificationBusy.value);
 const ids = () => [...threads.selectedThreadIds];
 const anyUnread = computed(() => threads.selectedThreads.some(thread => thread.unreadCount > 0));
 const allPinned = computed(() => threads.selectedThreads.every(thread => thread.isStarred));
+/** A selection of done mail goes back to the Inbox; Done would not change it. */
+const allDone = computed(() => actions.allDone(threads.selectedThreadIds));
 const menuOpen = ref(false);
 const menuAnchor = ref<AnchorBox | null>(null);
 
@@ -94,9 +96,19 @@ function run(action: 'pin' | 'aside' | 'waiting' | 'spam') {
     <!-- Done and Snooze carry words; the rest are the toolbar's icons, so the
          row fits the list column at every width instead of wrapping. -->
     <div class="selection-actions">
-      <AppButton variant="primary" size="sm" :disabled="busy" :title="t('thread.selection.done', { count: threads.selectedThreadIds.length })" :shortcut="hint('markDone')" @click="void actions.archive(ids())">
-        <template #icon><AppIcon><path d="M3 8.5 6.2 11.7 13 5" /></AppIcon></template>
-        {{ t('thread.selection.done', { count: threads.selectedThreadIds.length }) }}
+      <AppButton
+        variant="primary"
+        size="sm"
+        :disabled="busy"
+        :title="allDone ? t('thread.selection.toInbox', { count: threads.selectedThreadIds.length }) : t('thread.selection.done', { count: threads.selectedThreadIds.length })"
+        :shortcut="hint('markDone')"
+        @click="void actions.toggleDone(ids())"
+      >
+        <template #icon>
+          <AppIcon v-if="allDone"><path d="M8 11V3.4M5.4 8.4 8 11l2.6-2.6" /><path d="M2.8 11.2v1.2a1 1 0 0 0 1 1h8.4a1 1 0 0 0 1-1v-1.2" /></AppIcon>
+          <AppIcon v-else><path d="M3 8.5 6.2 11.7 13 5" /></AppIcon>
+        </template>
+        {{ allDone ? t('thread.selection.toInbox', { count: threads.selectedThreadIds.length }) : t('thread.selection.done', { count: threads.selectedThreadIds.length }) }}
       </AppButton>
       <AppButton variant="ghost" size="sm" :disabled="busy" :title="t('thread.actions.snooze')" :shortcut="hint('moveSnoozed')" @click="ui.openReminder(ids())">
         <template #icon><AppIcon><circle cx="8" cy="8" r="6" /><path d="M8 4v4l2.5 1.5" /></AppIcon></template>
