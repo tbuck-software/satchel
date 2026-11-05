@@ -11,9 +11,10 @@ fassen kurze Mails zusammen, die man schneller selbst liest, und schreiben
 Antworten, die nicht nach dem Absender klingen.
 
 Zwei Fragen müssen vor der ersten Zeile Code beantwortet sein. Wer bezahlt die
-Anfragen, und wohin gehen dabei die Mails? Ein Abo-Login (claude.ai, ChatGPT)
-wirkt billig, kann aber gegen die Bedingungen des Anbieters verstoßen und das
-Konto des Nutzers kosten. Ein eigener Proxy oder ein Projekt-Abo wäre ein
+Anfragen, und wohin gehen dabei die Mails? Ein Abo-Login wirkt billig, kann
+aber gegen die Bedingungen des Anbieters verstoßen und das Konto des Nutzers
+kosten. Bei claude.ai ist das so, bei ChatGPT gibt es inzwischen einen
+offiziellen Weg. Ein eigener Proxy oder ein Projekt-Abo wäre ein
 gehosteter Dienst mit Abrechnung, und Mail-Inhalte liefen über unsere Server.
 Damit wären wir Auftragsverarbeiter nach DSGVO. Beides schließt 0001 aus.
 
@@ -30,7 +31,7 @@ Ein lokales Modell kostet nichts außer Strom.
 ### Anbieter
 
 - Die Anbieter-Schicht lebt in `satchel-core` (0003) und läuft damit auch auf
-  Mobile (0006). Sie spricht zwei Protokolle:
+  Mobile (0006). Sie spricht drei Protokolle:
   1. **OpenAI-kompatible Chat Completions**, konfiguriert über Basis-URL und
      Schlüssel. Voreinstellungen gibt es für OpenAI, OpenRouter, Mistral,
      Ollama (`http://localhost:11434/v1`) und LM Studio
@@ -39,6 +40,17 @@ Ein lokales Modell kostet nichts außer Strom.
   2. **Anthropic Messages API**, nativ. Den OpenAI-Kompatibilitätsmodus von
      Anthropic nutzen wir nicht, weil Anthropic ihn selbst nicht für den
      Produktivbetrieb empfiehlt.
+  3. **Sign in with ChatGPT** über die Responses API. Damit bezahlt ein
+     ChatGPT-Plus- oder Pro-Abo die Anfragen, ohne API-Schlüssel. OpenAI
+     bietet das offiziell für Open-Source- und lokal betriebene Apps an
+     (PKCE, Loopback-Redirect, kein Client-Secret). Zuerst auf dem Desktop;
+     auf Mobile erst, wenn geklärt ist, dass der Login-Flow dort trägt. Ob
+     Satchel dafür als "open-source partner" einen Antrag braucht, klären wir
+     vor dem Bau bei OpenAI.
+- Eine Voreinstellung wird erst ausgeliefert, wenn ein Test gegen die echte
+  Schnittstelle Chat Completions und JSON nach Schema bestätigt. Für Mistral
+  und für Ollamas Schema-Unterstützung steht das noch aus; was den Test nicht
+  besteht, fällt als Voreinstellung weg.
 - OpenRouter ist die Antwort auf "ein Konto, alle Modelle". Einen eigenen
   Sammeldienst bauen wir nicht.
 - Schlüssel liegen wie Konto-Zugangsdaten verschlüsselt mit dem Master-Key des
@@ -59,14 +71,6 @@ Ein lokales Modell kostet nichts außer Strom.
 - **Kein claude.ai-Login.** Anthropic erlaubt Drittentwicklern nicht, ohne
   vorherige Freigabe claude.ai-Login oder claude.ai-Kontingente anzubieten,
   auch nicht für Agenten auf dem Agent SDK.
-- **Kein ChatGPT-Login in diesem Schritt.** OpenAI bietet seit 2026 mit "Sign
-  in with ChatGPT" einen offiziellen Weg, das Plus- oder Pro-Kontingent in
-  Open-Source- und lokal betriebenen Apps zu nutzen (PKCE, Loopback-Redirect,
-  kein Client-Secret). Ein Bann-Risiko ist das nach heutiger Doku nicht. Der Weg
-  läuft aber über die Responses API, also ein drittes Protokoll, verlangt einen
-  Login-Flow mit lokalem Listener, der auf Mobile ungeklärt ist, und bindet an
-  einen Anbieter. Ob Satchel als "open-source partner" ohne Antrag zählt, lässt
-  die Doku offen. Wer das anbieten will, schreibt ein eigenes ADR.
 - **Keine Agent-CLIs als Standardweg.** Satchel startet nicht `claude`,
   `codex`, `opencode` oder `pi` als Unterprozess, um deren Login
   mitzubenutzen. Wer seine Mail mit einem eigenen Agenten auswerten will, liest
@@ -86,8 +90,10 @@ Ein lokales Modell kostet nichts außer Strom.
 - Der Nutzer sieht, was das Gerät verlässt. Vor einer Anfrage auf Abruf zeigt
   Satchel, welche Teile der Mail mitgehen. Ein lokales Protokoll hält je
   Anfrage Funktion, Anbieter, Modell, Tokens und auf Wunsch den gesendeten
-  Text fest.
-- Ein Monatsdeckel begrenzt Tokens oder Kosten, sichtbar mit Zähler.
+  Text fest. Einträge bleiben 30 Tage; den gesendeten Text speichert es nur,
+  wenn der Nutzer das einschaltet.
+- Ein Monatsdeckel begrenzt Tokens und, wo bekannt, Kosten, sichtbar mit
+  Zähler.
   Tokens zählt Satchel aus dem `usage`-Feld der Antwort. Kosten kennt es nur,
   wo der Anbieter sie meldet oder der Nutzer einen Preis je Modell einträgt. Ist
   der Deckel erreicht, pausieren die Hintergrundfunktionen, und Anfragen auf
@@ -131,7 +137,7 @@ Neue Tabellen für Anbieter, Zustimmungen und das Anfrage-Protokoll entstehen
 per additiver Migration. Das Protokoll braucht eine Aufbewahrungsgrenze, sonst
 liegt nach einem Jahr jede gesendete Mail ein zweites Mal in der Datenbank.
 
-Wer einen Abo-Login, automatisches Senden oder einen gehosteten Dienst will,
+Wer einen weiteren Abo-Login, automatisches Senden oder einen gehosteten Dienst will,
 schreibt ein neues ADR.
 
 ## Quellen
