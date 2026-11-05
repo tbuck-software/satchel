@@ -10,6 +10,7 @@ import SyncButton from './SyncButton.vue';
 
 vi.mock('@/services/backend', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/services/backend')>(),
+  backendCommandsAvailable: () => true,
   backendRunImapSync: vi.fn(),
 }));
 
@@ -66,6 +67,27 @@ describe('SyncButton', () => {
     expect(wrapper.get('button').attributes('aria-busy')).toBe('false');
     expect(wrapper.get('button').attributes('disabled')).toBeUndefined();
     expect(useToast().state.toasts.at(-1)?.message).toBe('Sync finished.');
+  });
+
+  it('clears a failure the last automatic run left standing once a manual sync runs clean', async () => {
+    const connection = useConnectionStore();
+    connection.reportSyncFailures(['{"key":"backend.errors.folderSyncFailed","params":{"account":"me@example.com","folder":"SPAM","message":"gone"}}']);
+    expect(connection.backendErrorFor('sync')).not.toBeNull();
+
+    await useMailSync().syncMail();
+
+    expect(connection.backendErrorFor('sync')).toBeNull();
+    expect(connection.syncFailures).toEqual([]);
+  });
+
+  it('shows a manual run\'s failures in the banner instead of a "done" toast', async () => {
+    const failure = '{"key":"backend.errors.folderSyncFailed","params":{"account":"me@example.com","folder":"SPAM","message":"gone"}}';
+    vi.mocked(backendRunImapSync).mockResolvedValueOnce({ ...summary, accounts_failed: 1, failures: [failure] });
+
+    await useMailSync().syncMail();
+
+    expect(useConnectionStore().syncFailures).toEqual([failure]);
+    expect(useToast().state.toasts.some((toast) => toast.message === 'Sync finished.')).toBe(false);
   });
 
   it('releases the button after a failed sync and allows retrying', async () => {

@@ -18,8 +18,13 @@ export function useMailSync() {
     if (syncing.value || !connection.online) return;
     pending.value = true;
     try {
-      connection.applySyncSummary(await backendRunImapSync());
-      toast.success(t('commands.syncDone'));
+      const summary = await backendRunImapSync();
+      connection.applySyncSummary(summary);
+      // The run's own verdict replaces the banner's: a clean run clears a
+      // failure the last automatic run left standing, a failing one is shown
+      // there, where it names the account — not as a "done" toast.
+      connection.reportSyncFailures(summary.failures);
+      if (summary.failures.length === 0) toast.success(t('commands.syncDone'));
     } catch (error) {
       const cause = transportErrorCause(error);
       toast.error(cause ? t('commands.syncFailedCause', { cause }) : t('commands.syncFailed'));
