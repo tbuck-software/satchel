@@ -7,6 +7,7 @@ import AppIcon from '@/components/ui/AppIcon.vue';
 import SearchInput from '@/components/ui/SearchInput.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import { useUiStore } from '@/stores/ui';
+import { useAccountsStore } from '@/stores/accounts';
 import ThemeSelector from '@/components/settings/ThemeSelector.vue';
 import {
   resolveSettingsSection,
@@ -47,11 +48,13 @@ const TemplatesEditor = defineAsyncComponent(() => import('@/components/settings
 const SwipeSettings = defineAsyncComponent(() => import('@/components/settings/SwipeSettings.vue'));
 const TrayPreferences = defineAsyncComponent(() => import('@/components/settings/TrayPreferences.vue'));
 const VacationSettings = defineAsyncComponent(() => import('@/components/settings/VacationSettings.vue'));
+const WebhooksEditor = defineAsyncComponent(() => import('@/components/settings/WebhooksEditor.vue'));
 
 const router = useRouter();
 const { t } = useI18n();
 const ui = useUiStore();
-const { groups, labels, mobileSyncPlatform } = useSettingsSections();
+const accounts = useAccountsStore();
+const { groups, labels, mobileSyncPlatform, trayAvailable } = useSettingsSections();
 const { query: filterQuery, filtering, results: filterResults } = useSettingsFilter();
 const filterInput = ref<InstanceType<typeof SearchInput> | null>(null);
 /** The phone overview filters like the desktop sidebar: one ranked list while typing. */
@@ -66,9 +69,10 @@ const overviewGroups = computed(() => (
 const { inDialog, section: locationSection, show: showSection } = useSettingsLocation();
 const requestedSection = computed(() => {
   const value = locationSection.value;
-  return value !== null && labels.value.has(value as SettingsSection)
-    ? value as SettingsSection
-    : null;
+  if (value === null) return null;
+  // Folded sections (`smime`, `backup`, …) open the section that holds them now.
+  const section = resolveSettingsSection(value);
+  return labels.value.has(section) ? section : null;
 });
 const showOverview = computed(() => ui.isSinglePane && requestedSection.value === null);
 const activeSection = computed(() => requestedSection.value ?? resolveSettingsSection(undefined));
@@ -83,15 +87,18 @@ function sectionDescription(section: SettingsSection): string {
 }
 
 const sectionTones: Record<SettingsSection, string> = {
-  about: 'blue',
-  general: 'blue', swipes: 'purple', calendar: 'green', notifications: 'orange',
-  'mobile-sync': 'cyan', tray: 'blue', shortcuts: 'purple', accounts: 'blue',
-  contacts: 'pink', signatures: 'orange', aliases: 'cyan', smime: 'green', pgp: 'purple',
-  sending: 'blue', data: 'cyan', vacation: 'amber', blocked: 'red', images: 'green',
-  'smart-folders': 'purple', 'provider-features': 'cyan', backup: 'orange', sources: 'orange',
-  templates: 'blue', rules: 'purple', plugins: 'pink',
-  diagnostics: 'amber',
+  general: 'blue', accounts: 'blue', notifications: 'orange',
+  composing: 'blue', signatures: 'orange', templates: 'blue', aliases: 'cyan', vacation: 'amber',
+  rules: 'purple', 'smart-folders': 'purple', swipes: 'purple',
+  senders: 'red', encryption: 'green',
+  calendar: 'green', contacts: 'pink',
+  shortcuts: 'purple', plugins: 'pink', storage: 'cyan', diagnostics: 'amber', about: 'blue',
 };
+
+/** Sections made of several editors get one page header of their own. */
+const COMPOSITE: ReadonlySet<SettingsSection> = new Set(['senders', 'encryption', 'storage']);
+const providerAccounts = computed(() =>
+  accounts.emailAccounts.some((account) => account.provider === 'gmail' || account.provider === 'outlook'));
 
 function openSection(section: SettingsSection) {
   showSection(section, ui.isSinglePane ? 'push' : 'replace');
@@ -171,38 +178,57 @@ onBeforeUnmount(() => unregisterFilter?.());
 
     <div v-else class="settings-view__scroll">
       <div class="settings-view__content">
-        <ThemeSelector v-if="activeSection === 'general'" />
+        <header v-if="COMPOSITE.has(activeSection)" class="section-header">
+          <h3 class="settings-page-title">{{ activeLabel }}</h3>
+          <p>{{ sectionDescription(activeSection) }}</p>
+        </header>
+        <template v-if="activeSection === 'general'">
+          <ThemeSelector />
+          <section v-if="trayAvailable" class="settings-subsection"><TrayPreferences /></section>
+        </template>
         <AboutPane v-else-if="activeSection === 'about'" />
         <SwipeSettings v-else-if="activeSection === 'swipes'" />
         <CalendarSettings
           v-else-if="activeSection === 'calendar'"
           @manage-accounts="openSection('accounts')"
         />
-        <AccountSetup v-else-if="activeSection === 'accounts'" />
+        <!-- What comes in and goes out: mail accounts, feeds, webhooks, and the
+             labels Gmail and Outlook keep for an account. -->
+        <template v-else-if="activeSection === 'accounts'">
+          <AccountSetup />
+          <section class="settings-subsection"><SourceManager /></section>
+          <section class="settings-subsection"><WebhooksEditor /></section>
+          <section v-if="providerAccounts" class="settings-subsection"><ProviderFeaturesEditor /></section>
+        </template>
         <SignaturesEditor v-else-if="activeSection === 'signatures'" />
         <AliasEditor v-else-if="activeSection === 'aliases'" />
         <ContactAvatarSettings v-else-if="activeSection === 'contacts'" />
-        <SmimeManager v-else-if="activeSection === 'smime'" />
-        <PluginManager v-else-if="activeSection === 'pgp'" only="pgp" />
-        <TemplatesEditor v-else-if="activeSection === 'templates'" />
-        <NotificationSettings v-else-if="activeSection === 'notifications'" />
-        <MobileSyncSettings v-else-if="activeSection === 'mobile-sync' && mobileSyncPlatform" />
-        <NotificationSettings v-else-if="activeSection === 'sending'" section="sending" />
-        <template v-else-if="activeSection === 'data'">
-          <NotificationSettings section="data" />
-          <InlineImageBackfill />
+        <template v-else-if="activeSection === 'encryption'">
+          <section class="settings-subsection"><SmimeManager /></section>
+          <section class="settings-subsection"><PluginManager only="pgp" /></section>
         </template>
-        <TrayPreferences v-else-if="activeSection === 'tray'" />
+        <TemplatesEditor v-else-if="activeSection === 'templates'" />
+        <template v-else-if="activeSection === 'notifications'">
+          <NotificationSettings />
+          <section v-if="mobileSyncPlatform" class="settings-subsection"><MobileSyncSettings /></section>
+        </template>
+        <NotificationSettings v-else-if="activeSection === 'composing'" section="sending" />
+        <template v-else-if="activeSection === 'storage'">
+          <section class="settings-subsection">
+            <NotificationSettings section="data" />
+            <InlineImageBackfill />
+          </section>
+          <section class="settings-subsection"><BackupExport /></section>
+        </template>
         <KeybindingEditor v-else-if="activeSection === 'shortcuts'" />
         <RuleBuilder v-else-if="activeSection === 'rules'" />
-        <SourceManager v-else-if="activeSection === 'sources'" />
         <PluginManager v-else-if="activeSection === 'plugins'" only="plugins" />
         <SmartFoldersEditor v-else-if="activeSection === 'smart-folders'" />
-        <ProviderFeaturesEditor v-else-if="activeSection === 'provider-features'" />
         <VacationSettings v-else-if="activeSection === 'vacation'" />
-        <BlockedSendersEditor v-else-if="activeSection === 'blocked'" />
-        <RemoteImageAllowlist v-else-if="activeSection === 'images'" />
-        <BackupExport v-else-if="activeSection === 'backup'" />
+        <template v-else-if="activeSection === 'senders'">
+          <section class="settings-subsection"><BlockedSendersEditor /></section>
+          <section class="settings-subsection"><RemoteImageAllowlist /></section>
+        </template>
         <DiagnosticsPane v-else-if="activeSection === 'diagnostics'" />
       </div>
     </div>
@@ -374,6 +400,27 @@ onBeforeUnmount(() => unregisterFilter?.());
   font-size: var(--font-size-sm);
 }
 
+/* A section made of several editors: each keeps its own title, one step
+   down, and the parts sit apart. */
+.settings-view__content > .settings-subsection,
+.settings-view__content > .section-header {
+  margin-bottom: var(--space-2xl);
+}
+
+.settings-view__content > .settings-subsection:last-child {
+  margin-bottom: 0;
+}
+
+.settings-view__content > :not(.settings-subsection) + .settings-subsection {
+  margin-top: var(--space-2xl);
+}
+
+.settings-subsection :deep(.settings-page-title) {
+  font-size: var(--font-size-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0;
+}
+
 /* Native WebKit selects and number spinners paint in the document's scheme,
    not the app theme — a white menu in the dark theme otherwise. One rule for
    every section instead of one per editor. */
@@ -414,6 +461,12 @@ onBeforeUnmount(() => unregisterFilter?.());
   .settings-view__content :deep(.section-header > h3),
   .settings-view__content :deep(.settings-page-title) {
     display: none;
+  }
+
+  /* A part of a combined section names itself, also on the phone. */
+  .settings-view__content .settings-subsection :deep(.settings-page-title),
+  .settings-view__content .settings-subsection :deep(.section-header > h3) {
+    display: block;
   }
 
   .settings-view__content :deep(.settings-page-title + p) {

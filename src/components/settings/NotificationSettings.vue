@@ -11,11 +11,13 @@ import {
 import { ensureNotificationPermission } from '@/composables/useNotifications';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
+import { useSettingsStore } from '@/stores/settings';
 
 const props = withDefaults(defineProps<{ section?: 'notifications' | 'sending' | 'data' }>(), {
   section: 'notifications',
 });
 const { t } = useI18n();
+const appSettings = useSettingsStore();
 
 const prefs = ref<BackendNotificationPreferences>({
   enabled: true,
@@ -100,7 +102,7 @@ const scopeOptions = computed(() => [
 const heading = computed(() => ({
   notifications: [t('settings.notifications.title'), t('settings.notifications.description')],
   sending: [
-    t('settings.notifications.sendingTitle'),
+    t('settings.sections.composing.label'),
     t('settings.notifications.sendingDescription'),
   ],
   data: [t('settings.notifications.dataTitle'), t('settings.notifications.dataDescription')],
@@ -182,6 +184,14 @@ async function save() {
     </div>
 
     <div v-else-if="props.section === 'sending'" class="setting-group">
+      <!-- Writing in plain text is a composing choice; it sat under General. -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <strong>{{ $t('settings.theme.plainTextCompose') }}</strong>
+          <span>{{ $t('settings.theme.plainTextComposeHint') }}</span>
+        </div>
+        <ToggleSwitch v-model="appSettings.composePlainText" :label="$t('settings.theme.plainTextCompose')" />
+      </div>
       <div class="setting-row">
         <div class="setting-info">
           <strong>{{ $t('settings.notifications.undoLabel') }}</strong>

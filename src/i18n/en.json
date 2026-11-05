@@ -2556,7 +2556,7 @@
       "scopeLabel": "Scope",
       "seconds": "sec",
       "secondsShort": "{n} s",
-      "sendingDescription": "Safety net and confirmations for outgoing messages.",
+      "sendingDescription": "How new messages are written and sent.",
       "sendingTitle": "Sending",
       "soundHint": "Play a sound on a new notice.",
       "soundLabel": "Sound",
@@ -2675,6 +2675,7 @@
       "loading": "Loading plugins…",
       "localApiTitle": "Local API / MCP",
       "metrics": "Calls: {calls}, denied: {denied}, errors: {errors}",
+      "newWebhook": "New webhook",
       "noCapabilities": "no capabilities",
       "noContent": "No content.",
       "noneFound": "No plugins found in `/plugins`.",
@@ -2696,6 +2697,8 @@
       "webhookToggleFailed": "Could not switch webhook: {error}",
       "webhookUrl": "URL",
       "webhookUrlPlaceholder": "https://example.com/satchel",
+      "webhooksDescription": "Satchel calls these addresses when mail arrives or a thread changes.",
+      "webhooksEmpty": "No webhooks yet.",
       "webhooksTitle": "Webhooks"
     },
     "providerFeatures": {
@@ -2819,6 +2822,10 @@
         "description": "Calendars, working hours and invitations",
         "label": "Calendar"
       },
+      "composing": {
+        "description": "Plain text, delayed sending and read receipts",
+        "label": "Composing"
+      },
       "contacts": {
         "description": "Sources and display of contact pictures",
         "label": "Profile pictures"
@@ -2830,6 +2837,10 @@
       "diagnostics": {
         "description": "Sync errors, queue and rate limits",
         "label": "Diagnostics"
+      },
+      "encryption": {
+        "description": "S/MIME certificates and OpenPGP keys",
+        "label": "Encryption"
       },
       "general": {
         "description": "Appearance, language and behaviour",
@@ -2883,6 +2894,10 @@
         "description": "Process email automatically",
         "label": "Rules"
       },
+      "senders": {
+        "description": "Blocked senders and who may load images",
+        "label": "Senders & images"
+      },
       "sending": {
         "description": "Undo send and confirmations",
         "label": "Sending"
@@ -2906,6 +2921,10 @@
       "sources": {
         "description": "Additional feeds and message sources",
         "label": "Feeds & sources"
+      },
+      "storage": {
+        "description": "What is kept, export and backups",
+        "label": "Storage & backup"
       },
       "swipes": {
         "description": "Actions for swiping left and right",

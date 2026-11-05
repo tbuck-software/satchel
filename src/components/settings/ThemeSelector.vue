@@ -100,14 +100,6 @@ function setAttachmentOpenBehavior(value: string) {
 
           <div class="setting-row">
             <div class="setting-info">
-              <span class="setting-label">{{ $t('settings.theme.plainTextCompose') }}</span>
-              <span class="setting-hint">{{ $t('settings.theme.plainTextComposeHint') }}</span>
-            </div>
-            <ToggleSwitch v-model="settings.composePlainText" :label="$t('settings.theme.plainTextCompose')" />
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-info">
               <span class="setting-label">{{ $t('settings.theme.collapseQuoted') }}</span>
               <span class="setting-hint">{{ $t('settings.theme.collapseQuotedHint') }}</span>
             </div>

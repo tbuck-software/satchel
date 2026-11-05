@@ -56,9 +56,15 @@ async function sectionsFor(capabilities: BackendRuntimeCapabilities): Promise<st
   let sections: string[] = [];
   const host = defineComponent({
     setup() {
-      const { groups } = useSettingsSections();
+      const { groups, trayAvailable, mobileSyncPlatform } = useSettingsSections();
       return () => {
-        sections = groups.value.flatMap((group) => group.items.map((item) => item.id));
+        // Tray and background sync are parts of General and Notifications now;
+        // what matters is still whether the shell offers them.
+        sections = [
+          ...groups.value.flatMap((group) => group.items.map((item) => item.id)),
+          ...(trayAvailable.value ? ['tray'] : []),
+          ...(mobileSyncPlatform.value ? ['mobile-sync'] : []),
+        ];
         return null;
       };
     },
@@ -125,9 +131,12 @@ describe('settings section visibility', () => {
     let sections: string[] = [];
     const host = defineComponent({
       setup() {
-        const { groups } = useSettingsSections();
+        const { groups, trayAvailable } = useSettingsSections();
         return () => {
-          sections = groups.value.flatMap((group) => group.items.map((item) => item.id));
+          sections = [
+            ...groups.value.flatMap((group) => group.items.map((item) => item.id)),
+            ...(trayAvailable.value ? ['tray'] : []),
+          ];
           return null;
         };
       },

@@ -6,7 +6,7 @@ import {
   searchSettings,
   type SettingsSearchItem,
 } from './settingsSearch';
-import type { SettingsSection } from './settingsSections';
+import { resolveSettingsSection, type SettingsSection } from './settingsSections';
 
 type Catalogue = Awaited<ReturnType<typeof loadSettingsCatalogue>>;
 let parts: Catalogue;
@@ -15,6 +15,8 @@ function items(): SettingsSearchItem[] {
   const sections = en.settings.sections as unknown as Record<string, { label?: string; description?: string }>;
   return Object.entries(sections)
     .filter(([, entry]) => typeof entry.label === 'string')
+    // Folded sections keep their labels for the parts that carry them.
+    .filter(([id]) => resolveSettingsSection(id) === id)
     .map(([id, entry]) => ({ id: id as SettingsSection, label: entry.label!, description: entry.description ?? '' }));
 }
 
@@ -30,7 +32,7 @@ describe('settings search', () => {
   });
   it('finds a section by a setting inside it, and says which one', () => {
     const [first] = searchSettings('undo', items(), buildSettingsIndex(parts, 'en'));
-    expect(first?.id).toBe('sending');
+    expect(first?.id).toBe('composing');
     expect(first?.hint).toMatch(/undo/i);
   });
 
@@ -42,7 +44,7 @@ describe('settings search', () => {
 
   it('needs every word, in any order', () => {
     const results = searchSettings('sending delay', items(), buildSettingsIndex(parts, 'en'));
-    expect(results.map((result) => result.id)).toContain('sending');
+    expect(results.map((result) => result.id)).toContain('composing');
     expect(searchSettings('undo zzzz', items(), buildSettingsIndex(parts, 'en'))).toEqual([]);
   });
 

@@ -2556,7 +2556,7 @@
       "scopeLabel": "Umfang",
       "seconds": "Sek.",
       "secondsShort": "{n} s",
-      "sendingDescription": "Sicherheitsnetz und Bestätigungen für ausgehende Nachrichten.",
+      "sendingDescription": "Wie neue Nachrichten geschrieben und versendet werden.",
       "sendingTitle": "Senden",
       "soundHint": "Bei einem neuen Hinweis einen Ton abspielen.",
       "soundLabel": "Ton",
@@ -2675,6 +2675,7 @@
       "loading": "Plugins werden geladen …",
       "localApiTitle": "Local API / MCP",
       "metrics": "Aufrufe: {calls}, abgelehnt: {denied}, Fehler: {errors}",
+      "newWebhook": "Neuer Webhook",
       "noCapabilities": "keine Funktionen",
       "noContent": "Kein Inhalt.",
       "noneFound": "Keine Plugins in `/plugins` gefunden.",
@@ -2696,6 +2697,8 @@
       "webhookToggleFailed": "Webhook konnte nicht umgeschaltet werden: {error}",
       "webhookUrl": "URL",
       "webhookUrlPlaceholder": "https://example.com/satchel",
+      "webhooksDescription": "Satchel ruft diese Adressen auf, wenn Mail eintrifft oder sich ein Thread ändert.",
+      "webhooksEmpty": "Noch keine Webhooks.",
       "webhooksTitle": "Webhooks"
     },
     "providerFeatures": {
@@ -2819,6 +2822,10 @@
         "description": "Kalender, Arbeitszeiten und Einladungen",
         "label": "Kalender"
       },
+      "composing": {
+        "description": "Nur-Text, verzögertes Senden und Lesebestätigungen",
+        "label": "Verfassen"
+      },
       "contacts": {
         "description": "Quellen und Anzeige von Kontaktbildern",
         "label": "Profilbilder"
@@ -2830,6 +2837,10 @@
       "diagnostics": {
         "description": "Sync-Fehler, Warteschlange und Rate-Limits",
         "label": "Diagnose"
+      },
+      "encryption": {
+        "description": "S/MIME-Zertifikate und OpenPGP-Schlüssel",
+        "label": "Verschlüsselung"
       },
       "general": {
         "description": "Darstellung, Sprache und Verhalten",
@@ -2883,6 +2894,10 @@
         "description": "E-Mails automatisch verarbeiten",
         "label": "Regeln"
       },
+      "senders": {
+        "description": "Blockierte Absender und wer Bilder laden darf",
+        "label": "Absender & Bilder"
+      },
       "sending": {
         "description": "Versand, Rückruf und Bestätigungen",
         "label": "Senden"
@@ -2906,6 +2921,10 @@
       "sources": {
         "description": "Zusätzliche Feeds und Nachrichtenquellen",
         "label": "Feeds & Quellen"
+      },
+      "storage": {
+        "description": "Was aufbewahrt wird, Export und Sicherungen",
+        "label": "Speicher & Backup"
       },
       "swipes": {
         "description": "Aktionen für Wischen nach links und rechts",

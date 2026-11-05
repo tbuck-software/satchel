@@ -37,19 +37,22 @@ vi.mock('@/components/settings/settingsSections', () => ({
     general: '',
     about: '',
     accounts: '',
-    backup: '',
+    storage: '',
     diagnostics: '',
   },
   resolveSettingsSection: (value: unknown): SettingsSection => {
     const requested = Array.isArray(value) ? value[0] : value;
-    return requested === 'accounts' || requested === 'backup' || requested === 'diagnostics'
-      ? requested
+    // Backup was folded into Storage & backup; old links still open it.
+    if (requested === 'backup') return 'storage';
+    return ['about', 'accounts', 'storage', 'diagnostics'].includes(requested as string)
+      ? requested as SettingsSection
       : 'general';
   },
   useSettingsSections: () => ({
     groups: harness.groups,
     labels: harness.labels,
     mobileSyncPlatform: harness.mobileSyncPlatform,
+    trayAvailable: { value: false },
   }),
 }));
 
@@ -145,7 +148,7 @@ beforeEach(() => {
         { id: 'general', label: 'General' },
         { id: 'about', label: 'About Satchel' },
         { id: 'accounts', label: 'Accounts' },
-        { id: 'backup', label: 'Backup' },
+        { id: 'storage', label: 'Storage & backup' },
         { id: 'diagnostics', label: 'Diagnostics' },
       ],
     },
@@ -195,8 +198,9 @@ describe('SettingsView', () => {
     const wrapper = mountView({ section: ['backup', 'general'] });
 
     expect(wrapper.find('.settings-overview').exists()).toBe(false);
-    expect(wrapper.get('[data-test="settings-pane"]').attributes('data-pane')).toBe('backup');
-    expect(wrapper.get('[data-test="pane-header"]').attributes('data-title')).toBe('Backup & export');
+    expect(wrapper.findAll('[data-test="settings-pane"]').map((pane) => pane.attributes('data-pane')))
+      .toContain('backup');
+    expect(wrapper.get('[data-test="pane-header"]').attributes('data-title')).toBe('Storage & backup');
 
     harness.route!.query = { section: 'diagnostics' };
     await wrapper.vm.$nextTick();
