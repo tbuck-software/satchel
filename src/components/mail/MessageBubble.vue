@@ -857,6 +857,15 @@ function openSenderDetails() {
   background: var(--bg-hover);
 }
 
+/* They open the same sheet, but as buttons on top of the block they took the
+   tap as their own 24–34pt targets. The finger reaches the block through
+   them; keyboard and VoiceOver still find each one. */
+.message-sender-group--target .message-sender-email,
+.message-sender-group--target :deep(.recipient-summary),
+.message-sender-group--target :deep(.security-badge) {
+  pointer-events: none;
+}
+
 /* Phone: the message spans the screen and pads its parts back to the reader's
    inset, so EmailRenderer can let designed HTML mail out of it. The box has
    to be the wide one: `content-visibility` contains paint, and a child

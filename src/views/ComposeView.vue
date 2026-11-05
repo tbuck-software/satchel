@@ -2385,7 +2385,12 @@ textarea:focus {
   .compose .row :deep(.suggestions) {
     box-shadow: 0 0 0 100vmax var(--bg-surface);
     clip-path: inset(0 -100vmax -100vmax -100vmax);
+    /* A list in the column, not a card on it: with the column covered, its
+       frame and the chosen row's outline drew two boxes around one name. */
+    padding-inline: 0;
+    border-color: transparent;
   }
+  .compose .row :deep(.suggestions button.active) { box-shadow: none; }
   /* A phone has no width to spare for an empty label column. */
   .compose .body { padding-left: 0; }
   .compose .compose-attachments { margin-left: 0; }

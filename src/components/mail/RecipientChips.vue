@@ -378,6 +378,15 @@ input {
   font-family: inherit;
   box-shadow: none !important;
 }
+/* Touch: the field is the row's line, 28px, and a thumb's 44px reaches past
+   it into the row's padding, as the chips' remove buttons do. */
+@media (pointer: coarse) {
+  input {
+    height: var(--touch-target);
+    margin-block: calc((28px - var(--touch-target)) / 2);
+  }
+}
+
 /* A hint, not a value: in the secondary ink "Name or email" read like a
    recipient already entered. */
 input::placeholder {
