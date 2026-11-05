@@ -1530,7 +1530,7 @@
     },
     "unsubscribe": {
       "action": "Unsubscribe",
-      "banner": "📭 Newsletter — unsubscribe in one click",
+      "banner": "Newsletter — unsubscribe in one click",
       "failed": "Unsubscribe failed: {error}",
       "sending": "Sending…",
       "success": "Unsubscribed via {method}"

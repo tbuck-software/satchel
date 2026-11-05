@@ -16,6 +16,9 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ error: toastError, success: toastSuccess }),
 }));
 
+const unsubscribeButton = (wrapper: ReturnType<typeof mount>) =>
+  wrapper.findAll('button').find((button) => button.text() === 'Unsubscribe')!;
+
 describe('unsubscribe banner', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -28,7 +31,7 @@ describe('unsubscribe banner', () => {
     );
     const wrapper = mount(UnsubscribeBanner, { props: { messageId: 'msg-1' } });
 
-    await wrapper.get('button.primary').trigger('click');
+    await unsubscribeButton(wrapper).trigger('click');
     await Promise.resolve();
 
     expect(toastError).toHaveBeenCalledTimes(1);
@@ -41,7 +44,7 @@ describe('unsubscribe banner', () => {
     unsubscribe.mockResolvedValue({ method: 'mailto', target: 'leave@list.example' });
     const wrapper = mount(UnsubscribeBanner, { props: { messageId: 'msg-1' } });
 
-    await wrapper.get('button.primary').trigger('click');
+    await unsubscribeButton(wrapper).trigger('click');
     await Promise.resolve();
 
     expect(toastSuccess).toHaveBeenCalledWith('Unsubscribed via mailto');

@@ -369,6 +369,16 @@ export function useAppBootstrap(): void {
     return imapSyncInFlight;
   }
 
+  async function retrySync() {
+    try {
+      const summary = await runImapSyncOnce();
+      connectionStore.applySyncSummary(summary);
+      connectionStore.reportSyncFailures(summary.failures);
+    } catch (err) {
+      connectionStore.reportBackendError('sync', err);
+    }
+  }
+
   // Backend-side changes (notification actions and moves discovered during mail
   // sync) emit `thread:updated`; refresh the exact cached row before merging the
   // head page so threads that left the Inbox do not survive in Smart Folders.
@@ -422,6 +432,9 @@ export function useAppBootstrap(): void {
         connectionStore.backendErrorFor('drafts') ? draftsStore.load() : undefined,
         connectionStore.backendErrorFor('templates') ? templatesStore.load() : undefined,
         connectionStore.backendErrorFor('smartFolders') ? smartFoldersStore.load() : undefined,
+        // A failed mail sync is retried by syncing: reloading the lists alone
+        // left the banner standing until the next automatic run, minutes away.
+        connectionStore.backendErrorFor('sync') ? retrySync() : undefined,
         connectionStore.backendErrorFor('notifications') && backendSupportsNativeCommands()
           ? (iosNotifications ? iosNotifications.redeliver() : connectNotificationRoutes())
           : undefined,

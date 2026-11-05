@@ -606,7 +606,7 @@ function openSenderDetails() {
     <!-- A folded message is its header line; nothing below it is built. -->
     <template v-if="!props.collapsed">
     <!-- Sender spoofing / authentication warning -->
-    <aside v-if="spoofingWarning" class="spoofing-notice" role="alert">
+    <aside v-if="spoofingWarning" class="spoofing-notice message-notice" role="alert">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M8 2.2 14.4 13H1.6L8 2.2Z" />
         <path d="M8 6.4v3.2" />
@@ -651,10 +651,11 @@ function openSenderDetails() {
     <!-- Newsletter / List-Unsubscribe -->
     <UnsubscribeBanner
       v-if="props.message.listUnsubscribe"
+      class="message-notice"
       :message-id="props.message.id"
     />
 
-    <aside v-if="inlineImagesFailed" class="inline-images-notice">
+    <aside v-if="inlineImagesFailed" class="inline-images-notice message-notice">
       <span>
         {{ $t('mail.message.inlineImagesFailed') }}
         <span class="detail">{{ inlineImagesDetail }}</span>
@@ -891,10 +892,24 @@ function openSenderDetails() {
   padding-inline: var(--reader-inline-inset, 0px);
 }
 
+/* The same on the phone: the frame keeps the reader's inset instead of
+   running to the screen's edge. */
+.message-surface--phone > .message-notice {
+  margin-inline: var(--reader-inline-inset, 0px);
+  padding-inline: var(--space-md);
+}
+
 /* The body, attachments and banners line up under the sender's name; the
    header keeps the avatar in the margin. 52px = the 40px avatar plus its gap. */
 .message-surface--indented > :not(.message-header) {
   padding-left: 52px;
+}
+
+/* A boxed notice moves its box there, not only its text: padded instead, the
+   frame began at the avatar and the words sat 52px inside it. */
+.message-surface--indented > .message-notice {
+  margin-left: 52px;
+  padding-left: var(--space-md);
 }
 
 .message-surface {

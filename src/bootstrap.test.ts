@@ -307,6 +307,28 @@ describe('bootstrap entries', () => {
     wrapper.unmount();
   });
 
+  it('retries a failed mail sync from the connection banner by syncing', async () => {
+    const folderFailure = '{"key":"backend.errors.folderSyncFailed","params":{"account":"me@example.com","folder":"SPAM","message":"gone"}}';
+    const clean = await backendRunImapSync();
+    vi.mocked(backendRunImapSync).mockResolvedValueOnce({ ...clean, accounts_failed: 1, failures: [folderFailure] });
+    const wrapper = boot(useAppBootstrap);
+    const connection = useConnectionStore();
+    await vi.waitFor(() => expect(connection.syncFailures).toEqual([folderFailure]));
+    const runs = vi.mocked(backendRunImapSync).mock.calls.length;
+
+    connection.requestRetry();
+
+    // The banner's retry reaches the sync itself; the clean run clears it at
+    // once instead of at the next automatic run, minutes later.
+    await vi.waitFor(() => {
+      expect(vi.mocked(backendRunImapSync).mock.calls.length).toBe(runs + 1);
+      expect(connection.backendErrorFor('sync')).toBeNull();
+      expect(connection.syncFailures).toEqual([]);
+      expect(connection.retrying).toBe(false);
+    });
+    wrapper.unmount();
+  });
+
   it('retries failed templates and smart folders from the connection banner', async () => {
     vi.mocked(backendListTemplates).mockRejectedValueOnce(new Error('template list offline'));
     vi.mocked(backendListSmartFolders).mockRejectedValueOnce(new Error('folder list offline'));
