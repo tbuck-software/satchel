@@ -38,6 +38,23 @@ describe("mobile build configuration", () => {
     );
   });
 
+  // The setup hook builds `main` itself from windows[0]. A platform file
+  // replaces the whole `windows` array (JSON merge patch), so one without
+  // `create: false` lets Tauri build `main` first and the hook aborts the app
+  // on every launch: "a webview with label `main` already exists".
+  it.each(["tauri.conf.json", "tauri.android.conf.json", "tauri.ios.conf.json"])(
+    "leaves the main window to the setup hook in %s",
+    (file) => {
+      const config = JSON.parse(
+        readFileSync(new URL(`../../src-tauri/${file}`, import.meta.url), "utf8"),
+      ) as { app?: { windows?: { label?: string; create?: boolean }[] } };
+      const main = config.app?.windows?.[0];
+
+      expect(main?.label ?? "main").toBe("main");
+      expect(main?.create).toBe(false);
+    },
+  );
+
   it("exposes the Tauri CLI script required by generated mobile build tasks", () => {
     const packageJson = JSON.parse(
       readFileSync(new URL("../../package.json", import.meta.url), "utf8"),

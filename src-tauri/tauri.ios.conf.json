@@ -4,6 +4,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Satchel",
         "decorations": false,
         "fullscreen": false
