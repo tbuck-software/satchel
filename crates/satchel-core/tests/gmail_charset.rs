@@ -59,6 +59,14 @@ async fn gmail_legacy_charset_uses_original_mime_bytes() {
                     ("200 OK", json!({"id": "missing-source"}))
                 } else if line.contains("/deleted-source?") {
                     ("404 Not Found", json!({}))
+                } else if line.contains("/malformed-source?") {
+                    // Spam with a header line that has no colon: the same
+                    // bytes on every retry.
+                    let raw = b"From: sender@example.test\r\nnot a header\r\n\r\nbody";
+                    (
+                        "200 OK",
+                        json!({"id": "legacy-charset", "raw": base64url(raw)}),
+                    )
                 } else {
                     ("200 OK", raw_message())
                 }
@@ -104,6 +112,20 @@ async fn gmail_legacy_charset_uses_original_mime_bytes() {
     for id in ["missing-source", "deleted-source"] {
         assert!(provider.fetch_message_by_id(id).await.is_err(), "{id}");
     }
+    // A malformed source must not fail the folder: the message arrives from
+    // the full representation Gmail already parsed.
+    let message = provider
+        .fetch_message_by_id("malformed-source")
+        .await
+        .unwrap();
+    assert!(message
+        .body_text
+        .as_deref()
+        .is_some_and(|text| text.contains("Telefon")));
+    assert!(message
+        .body_html
+        .as_deref()
+        .is_some_and(|html| html.contains("Telefon")));
     std::env::remove_var("SATCHEL_GMAIL_API_BASE");
     server.abort();
 

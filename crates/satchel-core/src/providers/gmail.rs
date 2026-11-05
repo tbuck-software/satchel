@@ -1085,8 +1085,22 @@ impl GmailProvider {
                         "gmail response did not contain message source".to_string()
                     })?);
             }
-            if let Some(raw) = message.raw.as_deref() {
-                validate_gmail_raw_source(raw)?;
+            // A source that fails validation is the message itself, not a cut
+            // response, and every retry gets the same bytes. Failing here
+            // failed the whole folder on every sync for as long as the
+            // message lived there (one spam mail in SPAM and Updates did).
+            // The full representation was validated above, so keep that.
+            if let Some(reason) = message
+                .raw
+                .as_deref()
+                .and_then(|raw| validate_gmail_raw_source(raw).err())
+            {
+                tracing::warn!(
+                    message_id = %item.id,
+                    reason = %reason,
+                    "gmail message source is malformed; using the parsed representation"
+                );
+                message.raw = None;
             }
             Ok(Some(message))
         }))
