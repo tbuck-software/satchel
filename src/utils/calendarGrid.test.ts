@@ -437,6 +437,21 @@ describe('calendar sources', () => {
     expect(sources[0]!.count).toBe(2);
   });
 
+  it('gives every Outlook calendar its own bucket, color and declared name', () => {
+    expect(calendarSourceKey('outlook', 'AAMkAGI2')).toBe('outlook:AAMkAGI2');
+    expect(sourceLabel('outlook:AAMkAGI2')).toBe('Outlook calendar');
+    const map = sourceColorMap(['outlook:b', 'google:a@x', 'outlook:a']);
+    expect(new Set([map.get('outlook:a'), map.get('outlook:b'), map.get('google:a@x')]).size).toBe(3);
+    const sources = collectSources(
+      [makeItem({ key: 'e:1', sourceKey: 'local' }), makeItem({ key: 'e:2', sourceKey: 'outlook:a' })],
+      [{ key: calendarSourceKey('outlook', 'a'), label: 'Team' }],
+    );
+    expect(sources.map((source) => [source.key, source.label])).toEqual([
+      ['outlook:a', 'Team'],
+      ['local', 'Local'],
+    ]);
+  });
+
   it('keeps empty declared calendars and uses their display names', () => {
     const sources = collectSources([], [
       {

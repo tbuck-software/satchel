@@ -728,12 +728,56 @@ function byDateDesc(a: Thread, b: Thread): number {
 /* -------------------------------------------------------------------------- */
 
 const googleMailScope = 'https://www.googleapis.com/auth/gmail.modify';
+const outlookMailScopes = ['openid', 'email', 'profile', 'offline_access',
+  'https://graph.microsoft.com/Contacts.Read', 'https://graph.microsoft.com/Mail.ReadWrite',
+  'https://graph.microsoft.com/Mail.Send'];
+const outlookCalendarScope = 'https://graph.microsoft.com/Calendars.ReadWrite';
 const oauthScopes = new Map<string, string[]>();
 const oauthFlows = new Map<string, { accountId: string; scopes: string[] }>();
+function defaultScopes(accountId: string): string[] {
+  const account = accounts.find((item) => item.id === accountId);
+  return account?.provider === 'outlook' ? outlookMailScopes : [googleMailScope];
+}
 function oauthStatus(accountId: string) {
   const account = accounts.find((item) => item.id === accountId);
   return { account_id: accountId, provider: account?.provider ?? 'gmail', connected: true,
-    has_refresh_token: true, expires_at: null, granted_scopes: oauthScopes.get(accountId) ?? [googleMailScope] };
+    has_refresh_token: true, expires_at: null, granted_scopes: oauthScopes.get(accountId) ?? defaultScopes(accountId) };
+}
+
+/*
+ * `?mockOutlookCalendar` adds an Outlook account that signed in for mail
+ * only. Its calendar is mirrored once calendar access is connected, the way
+ * `sync_outlook_calendar` skips accounts without the grant.
+ */
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockOutlookCalendar')) {
+  accounts.push({ ...accounts[0]!, id: 'acc-outlook', displayName: 'Outlook', email: 'tom@outlook.example',
+    provider: 'outlook' });
+}
+
+function mirrorOutlookCalendar(accountId: string): number {
+  const calendarId = `outlook-calendar-${accountId}`;
+  if (!calendarSources.some((source) => source.source === 'outlook' && source.remote_id === calendarId)) {
+    calendarSources.push({ account_id: accountId, source: 'outlook', remote_id: calendarId, name: 'Calendar' });
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const at = (hours: number) => new Date(today.getTime() + hours * 3_600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const fixtures = [
+    { id: 'standup-1', title: 'Team standup', start: 9, end: 9.25 },
+    { id: 'standup-2', title: 'Team standup', start: 33, end: 33.25 },
+    { id: 'planning', title: 'Quarterly planning', start: 15, end: 16 },
+  ];
+  for (const fixture of fixtures) {
+    const id = `outlook-event-${accountId}-${fixture.id}`;
+    if (calendarEvents.some((event) => event.id === id)) continue;
+    calendarEvents.push({
+      id, account_id: accountId, uid: fixture.id.startsWith('standup') ? 'standup-series@outlook.example' : `${fixture.id}@outlook.example`,
+      title: fixture.title, description: null, location: null, starts_at: at(fixture.start), ends_at: at(fixture.end),
+      all_day: 0, attendees_json: '[]', source: 'outlook', collection_href: calendarId,
+      created_at: today.toISOString(), updated_at: today.toISOString(),
+    });
+  }
+  return calendarEvents.filter((event) => event.account_id === accountId && event.source === 'outlook').length;
 }
 
 let appUpdateChannel: 'stable' | 'nightly' = 'stable';
@@ -754,8 +798,12 @@ const handlers: Record<string, Handler> = {
   oauth_status: (payload) => oauthStatus(String(payload.accountId)),
   start_oauth_flow: (payload) => {
     const input = payload.input as { account_id: string; purpose?: string | null };
-    const scopes = [...(oauthScopes.get(input.account_id) ?? [googleMailScope])];
-    const optional = input.purpose === 'calendar' ? 'https://www.googleapis.com/auth/calendar.readonly'
+    const scopes = [...(oauthScopes.get(input.account_id) ?? defaultScopes(input.account_id))];
+    const outlook = accounts.find((account) => account.id === input.account_id)?.provider === 'outlook';
+    // Outlook's sign-in already covers contacts; the real command refuses it.
+    if (outlook && input.purpose === 'contacts') throw new Error('backend.errors.oauthConfigurationInvalid');
+    const optional = input.purpose === 'calendar'
+      ? (outlook ? outlookCalendarScope : 'https://www.googleapis.com/auth/calendar.readonly')
       : input.purpose === 'contacts' ? 'https://www.googleapis.com/auth/contacts.readonly' : null;
     if (optional && !scopes.includes(optional)) scopes.push(optional);
     const state = `flow-${oauthFlows.size + 1}`;
@@ -772,6 +820,17 @@ const handlers: Record<string, Handler> = {
   },
   sync_google_calendar: () => ({ accounts_checked: accounts.filter((account) => account.provider === 'gmail').length,
     events_synced: 0, errors: [] }),
+  sync_outlook_calendar: (payload) => {
+    const outlook = accounts.filter((account) => account.provider === 'outlook'
+      && (payload.accountId == null || account.id === payload.accountId));
+    let synced = 0;
+    for (const account of outlook) {
+      if ((oauthScopes.get(account.id) ?? defaultScopes(account.id)).includes(outlookCalendarScope)) {
+        synced += mirrorOutlookCalendar(account.id);
+      }
+    }
+    return { accounts_checked: outlook.length, events_synced: synced, errors: [] };
+  },
   // No mock account carries a CalDAV/CardDAV service, so the real command
   // would skip every one of them and report an empty pass.
   sync_groupware: () => ({

@@ -8,6 +8,7 @@ import { useCalendarUiStore } from '@/stores/calendarUi';
 import { useInvitesStore } from '@/stores/invites';
 import { translateBackendError } from '@/services/backend';
 import {
+  calendarSourceKey,
   collectSources,
   itemFromEvent,
   itemFromInvite,
@@ -30,7 +31,12 @@ const sources = computed(() => {
     ...invites.events.map(itemFromEvent),
     ...invites.items.map(itemFromInvite).filter((item): item is CalendarItem => item !== null),
   ];
-  return collectSources(items);
+  // Declared names: Outlook calendar ids are opaque, Google's often too.
+  const definitions = invites.sources.map((source) => ({
+    key: calendarSourceKey(source.source, source.remote_id),
+    label: source.name,
+  }));
+  return collectSources(items, definitions);
 });
 
 onMounted(() => void invites.load());
@@ -62,6 +68,7 @@ async function syncNow() {
     </header>
 
     <GoogleConnections purpose="calendar" @connected="syncNow" />
+    <GoogleConnections provider="outlook" purpose="calendar" @connected="syncNow" />
 
     <div class="source-panel">
       <div class="source-panel__heading">

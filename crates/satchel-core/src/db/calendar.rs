@@ -133,6 +133,43 @@ pub struct GoogleCalendarEvent<'a> {
     pub calendar_id: &'a str,
 }
 
+/// One event of an Outlook calendar as Graph reported it.
+#[derive(Debug, Clone)]
+pub struct OutlookCalendarEvent<'a> {
+    pub id: &'a str,
+    /// The Graph event id; edits and deletions address the event by it.
+    pub remote_id: &'a str,
+    pub etag: Option<&'a str>,
+    pub uid: &'a str,
+    pub title: &'a str,
+    pub description: Option<&'a str>,
+    pub location: Option<&'a str>,
+    pub starts_at: &'a str,
+    pub ends_at: &'a str,
+    pub all_day: bool,
+    pub attendees_json: &'a str,
+}
+
+/// What one delta pass of an Outlook calendar changed.
+#[derive(Debug, Clone)]
+pub struct OutlookCalendarDelta<'a> {
+    pub calendar_id: &'a str,
+    pub calendar_name: &'a str,
+    pub changed: &'a [OutlookCalendarEvent<'a>],
+    /// Graph event ids the pass reported deleted or cancelled.
+    pub removed: &'a [&'a str],
+    /// A pass from scratch lists every event; anything else is gone.
+    pub complete: bool,
+    /// Where the next pass resumes; `None` starts it from scratch.
+    pub cursor: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+pub struct CalendarSourceCursor {
+    pub remote_id: String,
+    pub sync_cursor: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct UpcomingCalendarRecord {
     pub title: String,
@@ -628,6 +665,150 @@ impl<'a> CalendarRepository<'a> {
         Ok(())
     }
 
+    /// Resume points of the account's mirrored Outlook calendars.
+    pub async fn outlook_cursors(
+        &self,
+        account_id: &str,
+    ) -> Result<Vec<CalendarSourceCursor>, CalendarError> {
+        sqlx::query_as::<_, CalendarSourceCursor>(
+            "SELECT remote_id, sync_cursor FROM calendar_sources
+             WHERE account_id = ? AND source = 'outlook'",
+        )
+        .bind(account_id)
+        .fetch_all(self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Apply one delta pass of one Outlook calendar together with its new
+    /// cursor, so a pass is either recorded whole or resumed whole.
+    pub async fn apply_outlook_delta(
+        &self,
+        account_id: &str,
+        delta: OutlookCalendarDelta<'_>,
+    ) -> Result<(), CalendarError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO calendar_sources (account_id, source, remote_id, name, updated_at, sync_cursor)
+             VALUES (?, 'outlook', ?, ?, ?, ?)
+             ON CONFLICT(account_id, source, remote_id) DO UPDATE SET
+                name = excluded.name,
+                updated_at = excluded.updated_at,
+                sync_cursor = excluded.sync_cursor",
+        )
+        .bind(account_id)
+        .bind(delta.calendar_id)
+        .bind(delta.calendar_name)
+        .bind(&now)
+        .bind(delta.cursor)
+        .execute(&mut *transaction)
+        .await?;
+        for removed in delta.removed {
+            sqlx::query(
+                "DELETE FROM calendar_events
+                 WHERE account_id = ? AND source = 'outlook' AND collection_href = ? AND remote_href = ?",
+            )
+            .bind(account_id)
+            .bind(delta.calendar_id)
+            .bind(removed)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        if delta.complete {
+            let mirrored: Vec<String> = sqlx::query_scalar(
+                "SELECT remote_href FROM calendar_events
+                 WHERE account_id = ? AND source = 'outlook' AND collection_href = ?",
+            )
+            .bind(account_id)
+            .bind(delta.calendar_id)
+            .fetch_all(&mut *transaction)
+            .await?;
+            let listed = delta
+                .changed
+                .iter()
+                .map(|event| event.remote_id)
+                .collect::<std::collections::HashSet<_>>();
+            for stale in mirrored.iter().filter(|id| !listed.contains(id.as_str())) {
+                sqlx::query(
+                    "DELETE FROM calendar_events
+                     WHERE account_id = ? AND source = 'outlook' AND collection_href = ? AND remote_href = ?",
+                )
+                .bind(account_id)
+                .bind(delta.calendar_id)
+                .bind(stale)
+                .execute(&mut *transaction)
+                .await?;
+            }
+        }
+        for event in delta.changed {
+            Self::write_event(
+                &mut transaction,
+                outlook_event_write(account_id, delta.calendar_id, event),
+            )
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Store an event Graph just returned for a write, outside any sync pass.
+    pub async fn upsert_outlook_event(
+        &self,
+        account_id: &str,
+        calendar_id: &str,
+        event: &OutlookCalendarEvent<'_>,
+    ) -> Result<CalendarEventRecord, CalendarError> {
+        self.upsert_event(outlook_event_write(account_id, calendar_id, event))
+            .await
+    }
+
+    /// Drop Outlook calendars the account no longer lists, with their events.
+    pub async fn retain_outlook_calendars(
+        &self,
+        account_id: &str,
+        listed: &[&str],
+    ) -> Result<(), CalendarError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mirrored: Vec<String> = sqlx::query_scalar(
+            "SELECT remote_id FROM calendar_sources WHERE account_id = ? AND source = 'outlook'",
+        )
+        .bind(account_id)
+        .fetch_all(&mut *transaction)
+        .await?;
+        for gone in mirrored.iter().filter(|id| !listed.contains(&id.as_str())) {
+            sqlx::query(
+                "DELETE FROM calendar_events
+                 WHERE account_id = ? AND source = 'outlook' AND collection_href = ?",
+            )
+            .bind(account_id)
+            .bind(gone)
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                "DELETE FROM calendar_sources
+                 WHERE account_id = ? AND source = 'outlook' AND remote_id = ?",
+            )
+            .bind(account_id)
+            .bind(gone)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    pub async fn count_events(&self, account_id: &str, source: &str) -> Result<i64, CalendarError> {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM calendar_events WHERE account_id = ? AND source = ?",
+        )
+        .bind(account_id)
+        .bind(source)
+        .fetch_one(self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
     pub async fn upsert_caldav_event(
         &self,
         account_id: &str,
@@ -712,6 +893,31 @@ fn invite_id(account_id: &str, uid: &str, recurrence_id: &str) -> String {
         "calendar",
         &[account_id, uid, recurrence_id],
     )
+}
+
+/// The generic write of an Outlook event in `calendar_id`.
+pub fn outlook_event_write<'a>(
+    account_id: &'a str,
+    calendar_id: &'a str,
+    event: &OutlookCalendarEvent<'a>,
+) -> CalendarEventWrite<'a> {
+    CalendarEventWrite {
+        id: event.id,
+        account_id,
+        uid: event.uid,
+        title: event.title,
+        description: event.description,
+        location: event.location,
+        starts_at: event.starts_at,
+        ends_at: event.ends_at,
+        all_day: event.all_day,
+        attendees_json: event.attendees_json,
+        source: "outlook",
+        remote_href: Some(event.remote_id),
+        remote_etag: event.etag,
+        collection_href: Some(calendar_id),
+        raw_ics: None,
+    }
 }
 
 fn stable_id(prefix: &str, value: &str) -> String {

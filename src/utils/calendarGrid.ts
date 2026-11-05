@@ -37,7 +37,7 @@ export interface CalendarItem {
   allDay: boolean;
   status: CalendarItemStatus;
   source: string | null;
-  /** Sidebar filter bucket: 'local' | 'caldav' | 'invites' | 'google:<id>'. */
+  /** Sidebar filter bucket: 'local' | 'caldav' | 'invites' | 'google:<id>' | 'outlook:<id>'. */
   sourceKey: string;
   /** CSS color value for source tinting, e.g. `var(--accent-pink)`. */
   color: string | null;
@@ -187,10 +187,18 @@ export interface CalendarSourceDefinition {
 
 /** Declared calendars and their events must share the same filter/color key. */
 export function calendarSourceKey(source: string, remoteId?: string | null): string {
-  return source === 'google' ? `google:${remoteId ?? 'primary'}` : source;
+  if (source === 'google') return `google:${remoteId ?? 'primary'}`;
+  // Outlook calendar ids are opaque; the declared source carries the name.
+  if (source === 'outlook') return `outlook:${remoteId ?? 'default'}`;
+  return source;
 }
 
-/** Google calendars cycle through these; local/caldav/invites have fixed colors. */
+/** Keys of provider calendars that each get their own color and row. */
+function isProviderCalendarKey(key: string): boolean {
+  return key.startsWith('google:') || key.startsWith('outlook:');
+}
+
+/** Provider calendars cycle through these; local/caldav/invites have fixed colors. */
 const GOOGLE_PALETTE = [
   'var(--accent-pink)',
   'var(--accent-orange)',
@@ -208,7 +216,7 @@ export function sourceColorMap(keys: Iterable<string>): Map<string, string> {
     ['caldav', 'var(--accent-cyan)'],
     ['invites', 'var(--accent-purple)'],
   ]);
-  const googleKeys = [...new Set([...keys].filter((key) => key.startsWith('google:')))].sort();
+  const googleKeys = [...new Set([...keys].filter(isProviderCalendarKey))].sort();
   googleKeys.forEach((key, index) => {
     map.set(key, GOOGLE_PALETTE[index % GOOGLE_PALETTE.length] ?? '');
   });
@@ -219,6 +227,7 @@ export function sourceLabel(key: string): string {
   if (key === 'local') return t('calendar.source.local');
   if (key === 'caldav') return t('calendar.source.caldav');
   if (key === 'invites') return t('calendar.source.invites');
+  if (key.startsWith('outlook:')) return t('calendar.source.outlook');
   return prettifyGoogleCalendarId(key.slice('google:'.length));
 }
 
@@ -239,7 +248,7 @@ function prettifyGoogleCalendarId(id: string): string {
   return cleaned || id;
 }
 
-/** Distinct declared/event sources — Google calendars first, then the rest. */
+/** Distinct declared/event sources — provider calendars first, then the rest. */
 export function collectSources(
   items: CalendarItem[],
   definitions: Iterable<CalendarSourceDefinition> = [],
@@ -255,7 +264,7 @@ export function collectSources(
   }
   const colors = sourceColorMap(counts.keys());
   const order = (key: string) => {
-    if (key.startsWith('google:')) return 0;
+    if (isProviderCalendarKey(key)) return 0;
     if (key === 'caldav') return 1;
     if (key === 'local') return 2;
     return 3;

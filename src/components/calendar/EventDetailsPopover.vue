@@ -33,6 +33,7 @@ const statusLabel = computed(() => {
     default:
       if (props.item.source === 'caldav') return t('calendar.source.caldav');
       if (props.item.source === 'google') return t('calendar.status.googleCalendar');
+      if (props.item.source === 'outlook') return t('calendar.status.outlookCalendar');
       return t('calendar.status.ownEvent');
   }
 });
@@ -43,6 +44,7 @@ const canRespond = computed(
 
 // The Google mirror is one-way read-only: an edit would be overwritten by the
 // next sync and a delete would resurrect. Manage those events in Google.
+// Outlook events are written to Graph first, so they stay editable.
 const canModify = computed(() => props.item.kind === 'event' && props.item.source !== 'google');
 
 const rangeLabel = computed(() => {

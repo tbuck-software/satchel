@@ -17,6 +17,7 @@ use crate::{
 };
 
 mod batch;
+pub mod calendar;
 
 const GRAPH_BASE_DEFAULT: &str = "https://graph.microsoft.com/v1.0";
 

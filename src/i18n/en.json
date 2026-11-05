@@ -273,6 +273,8 @@
       "oauthReloadRequired": "The account's sign-in changed while this was in progress. Please try again.",
       "oauthUrlRejected": "Satchel refused an unexpected sign-in address.",
       "outboxActionCannotBeDiscarded": "This outbox action cannot be discarded safely.",
+      "outlookCalendarAccessMissing": "Calendar access for this Outlook account is not connected. Connect it under Settings → Calendar.",
+      "outlookCalendarSyncFailed": "Outlook Calendar for {account} could not be synchronized.",
       "passwordCheckFailed": "Signing in with the new password failed: {reason}",
       "pgpDecodeFailed": "The decrypted OpenPGP content could not be read.",
       "pgpDecryptFailed": "The OpenPGP message could not be decrypted with the unlocked keys.",
@@ -499,6 +501,7 @@
       "hide": "Hide",
       "invites": "Invitations",
       "local": "Local",
+      "outlook": "Outlook calendar",
       "show": "Show"
     },
     "status": {
@@ -507,6 +510,7 @@
       "declined": "Declined",
       "googleCalendar": "Google Calendar",
       "needsAction": "Awaiting reply",
+      "outlookCalendar": "Outlook Calendar",
       "ownEvent": "Own event",
       "tentative": "Maybe"
     },
@@ -2450,7 +2454,9 @@
       "connect": "Connect",
       "connected": "Connected",
       "contactsHint": "Connect Google Contacts to use contact photos. Mail works without contact access.",
-      "contactsTitle": "Google Contacts"
+      "contactsTitle": "Google Contacts",
+      "outlookCalendarHint": "Connect an Outlook account to read and edit its calendars. Mail works without calendar access.",
+      "outlookCalendarTitle": "Outlook Calendar"
     },
     "images": {
       "allow": "Allow",

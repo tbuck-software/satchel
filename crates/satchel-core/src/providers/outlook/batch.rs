@@ -164,6 +164,24 @@ pub(super) async fn send_throttled<F>(build: F, label: &str) -> SyncResult<reqwe
 where
     F: Fn() -> reqwest::RequestBuilder,
 {
+    let response = send_waiting_out_throttling(build, label).await?;
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+    let body = response.text().await.unwrap_or_default();
+    Err(http_failure("outlook", label, status.as_u16(), &body))
+}
+
+/// [`send_throttled`] that hands back any answer other than a 429/503, so a
+/// caller can act on a status it expects (a 410 for an expired delta link).
+pub(super) async fn send_waiting_out_throttling<F>(
+    build: F,
+    label: &str,
+) -> SyncResult<reqwest::Response>
+where
+    F: Fn() -> reqwest::RequestBuilder,
+{
     let mut attempt = 1u32;
     loop {
         let response = build()
@@ -171,7 +189,7 @@ where
             .await
             .map_err(|err| format!("outlook {label} failed: {err}"))?;
         let status = response.status();
-        if status.is_success() {
+        if !matches!(status.as_u16(), 429 | 503) {
             return Ok(response);
         }
         let retry_after = response
@@ -180,9 +198,6 @@ where
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
         let body = response.text().await.unwrap_or_default();
-        if !matches!(status.as_u16(), 429 | 503) {
-            return Err(http_failure("outlook", label, status.as_u16(), &body));
-        }
         let delay = match retry_after.as_deref() {
             Some(value) => rate_limit_delay(Some(value), &body, 0),
             None => backoff(attempt),

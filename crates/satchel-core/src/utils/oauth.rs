@@ -17,6 +17,20 @@ pub const GOOGLE_CONTACTS_SCOPE: &str = "https://www.googleapis.com/auth/contact
 pub const GOOGLE_OTHER_CONTACTS_SCOPE: &str =
     "https://www.googleapis.com/auth/contacts.other.readonly";
 pub const GOOGLE_CALENDAR_SCOPE: &str = "https://www.googleapis.com/auth/calendar.readonly";
+/// Read and write the signed-in user's Outlook calendars. Requested only when
+/// someone connects the calendar, so a mail-only sign-in never asks for it.
+pub const OUTLOOK_CALENDAR_SCOPE: &str = "https://graph.microsoft.com/Calendars.ReadWrite";
+
+/// Scopes every Outlook sign-in asks for: identity, refresh, mail and contacts.
+const OUTLOOK_BASE_SCOPES: [&str; 7] = [
+    "openid",
+    "email",
+    "profile",
+    "offline_access",
+    "https://graph.microsoft.com/Contacts.Read",
+    "https://graph.microsoft.com/Mail.ReadWrite",
+    "https://graph.microsoft.com/Mail.Send",
+];
 
 /// Message key for credentials that changed under the caller. Reloading the
 /// account resolves it; nothing about the server or the sign-in is wrong.
@@ -82,6 +96,67 @@ pub fn configure_google_grants(
             config.scopes.push(scope);
         }
     }
+}
+
+/// The Outlook counterpart of [`configure_google_grants`]. Microsoft could add
+/// a permission incrementally, but a reconnect for mail that left out a granted
+/// calendar would hand back a token without it, so granted extras are repeated.
+pub fn configure_outlook_grants(
+    config: &mut OAuthClientConfig,
+    purpose: OAuthPurpose,
+    previous: Option<&StoredOAuthConfig>,
+) {
+    config.scopes = OUTLOOK_BASE_SCOPES.to_vec();
+    let previously_granted = previous
+        .filter(|stored| stored.client_id.as_deref() == Some(&config.client_id))
+        .and_then(|stored| outlook_scope_in(stored.scope.as_deref(), OUTLOOK_CALENDAR_SCOPE))
+        .unwrap_or(false);
+    if purpose == OAuthPurpose::Calendar || previously_granted {
+        config.scopes.push(OUTLOOK_CALENDAR_SCOPE);
+    }
+}
+
+/// Microsoft reports Graph permissions with or without their resource prefix
+/// (`Calendars.ReadWrite` or `https://graph.microsoft.com/Calendars.ReadWrite`)
+/// and in whatever case the app registration spells them.
+fn outlook_scope_in(scopes: Option<&str>, required: &str) -> Option<bool> {
+    let bare = |scope: &str| {
+        scope
+            .rsplit_once('/')
+            .map_or(scope, |(_, name)| name)
+            .to_ascii_lowercase()
+    };
+    let required = bare(required);
+    scopes.map(|scopes| {
+        scopes
+            .split_whitespace()
+            .any(|scope| bare(scope) == required)
+    })
+}
+
+/// Whether the stored Outlook token carries `required`. Unlike Google, a token
+/// that recorded no scopes counts as a denial: Outlook calendar access was
+/// never requested before it was introduced, so no such token can hold it.
+pub fn outlook_scope_granted(config_json: &str, required: &str) -> bool {
+    load_stored_oauth(config_json)
+        .ok()
+        .and_then(|stored| outlook_scope_in(stored.scope.as_deref(), required))
+        .unwrap_or(false)
+}
+
+/// A calendar connection that came back without calendar access did not do
+/// what it was started for. Mail sign-ins are not checked here: their scopes
+/// have always been taken as Microsoft returned them.
+pub fn validate_outlook_grant(
+    token: &OAuthTokenPayload,
+    request: &OAuthGrantRequest,
+) -> Result<(), &'static str> {
+    if request.purpose == OAuthPurpose::Calendar
+        && outlook_scope_in(token.scope.as_deref(), OUTLOOK_CALENDAR_SCOPE) == Some(false)
+    {
+        return Err("backend.errors.oauthCalendarPermissionRequired");
+    }
+    Ok(())
 }
 
 pub fn granted_scopes(scope: Option<&str>) -> Option<Vec<String>> {
@@ -313,15 +388,7 @@ impl OAuthProvider {
                     self,
                     "https://login.microsoftonline.com/common/oauth2/v2.0/token",
                 ),
-                scopes: vec![
-                    "openid",
-                    "email",
-                    "profile",
-                    "offline_access",
-                    "https://graph.microsoft.com/Contacts.Read",
-                    "https://graph.microsoft.com/Mail.ReadWrite",
-                    "https://graph.microsoft.com/Mail.Send",
-                ],
+                scopes: OUTLOOK_BASE_SCOPES.to_vec(),
             },
         }
     }
@@ -929,6 +996,88 @@ mod tests {
         };
         token.scope = Some(GOOGLE_MAIL_SCOPE.into());
         assert_eq!(validate_google_grant(&mut token, &mail), Ok(()));
+    }
+
+    #[test]
+    fn outlook_calendar_access_is_requested_only_when_connected_or_already_granted() {
+        let mut client =
+            OAuthProvider::Outlook.build_config("desktop".into(), None, loopback_redirect_uri(1));
+        assert!(!client.scopes.contains(&OUTLOOK_CALENDAR_SCOPE));
+        configure_outlook_grants(&mut client, OAuthPurpose::Mail, None);
+        assert!(!client.scopes.contains(&OUTLOOK_CALENDAR_SCOPE));
+        configure_outlook_grants(&mut client, OAuthPurpose::Calendar, None);
+        assert_eq!(client.scopes.last(), Some(&OUTLOOK_CALENDAR_SCOPE));
+        assert!(client
+            .scopes
+            .contains(&"https://graph.microsoft.com/Mail.ReadWrite"));
+
+        // A mail reconnect keeps a calendar the same client was granted.
+        let granted = load_stored_oauth(
+            &serde_json::json!({"oauth": {
+                "client_id": "desktop",
+                "scope": "openid Mail.ReadWrite Calendars.ReadWrite"
+            }})
+            .to_string(),
+        )
+        .unwrap();
+        configure_outlook_grants(&mut client, OAuthPurpose::Mail, Some(&granted));
+        assert!(client.scopes.contains(&OUTLOOK_CALENDAR_SCOPE));
+        client.client_id = "replacement".into();
+        configure_outlook_grants(&mut client, OAuthPurpose::Mail, Some(&granted));
+        assert!(!client.scopes.contains(&OUTLOOK_CALENDAR_SCOPE));
+    }
+
+    #[test]
+    fn outlook_grants_match_prefixed_and_bare_scope_names() {
+        let config = |scope: Option<&str>| {
+            serde_json::json!({"oauth": {"provider": "outlook", "scope": scope}}).to_string()
+        };
+        assert!(outlook_scope_granted(
+            &config(Some(
+                "openid https://graph.microsoft.com/calendars.readwrite"
+            )),
+            OUTLOOK_CALENDAR_SCOPE
+        ));
+        assert!(outlook_scope_granted(
+            &config(Some("Mail.ReadWrite Calendars.ReadWrite")),
+            OUTLOOK_CALENDAR_SCOPE
+        ));
+        assert!(!outlook_scope_granted(
+            &config(Some("Mail.ReadWrite Calendars.Read")),
+            OUTLOOK_CALENDAR_SCOPE
+        ));
+        // Accounts from before the calendar existed recorded no grant for it.
+        assert!(!outlook_scope_granted(
+            &config(None),
+            OUTLOOK_CALENDAR_SCOPE
+        ));
+    }
+
+    #[test]
+    fn an_outlook_calendar_connection_must_return_calendar_access() {
+        let calendar = OAuthGrantRequest {
+            purpose: OAuthPurpose::Calendar,
+            scopes: vec![OUTLOOK_CALENDAR_SCOPE.into()],
+        };
+        let mut token = OAuthTokenPayload {
+            access_token: "access".into(),
+            refresh_token: None,
+            token_type: None,
+            scope: Some("Mail.ReadWrite Mail.Send".into()),
+            expires_at: None,
+        };
+        assert_eq!(
+            validate_outlook_grant(&token, &calendar),
+            Err("backend.errors.oauthCalendarPermissionRequired")
+        );
+        token.scope = Some("Mail.ReadWrite Calendars.ReadWrite".into());
+        assert_eq!(validate_outlook_grant(&token, &calendar), Ok(()));
+        let mail = OAuthGrantRequest {
+            purpose: OAuthPurpose::Mail,
+            ..calendar
+        };
+        token.scope = Some("Mail.ReadWrite".into());
+        assert_eq!(validate_outlook_grant(&token, &mail), Ok(()));
     }
 
     #[test]

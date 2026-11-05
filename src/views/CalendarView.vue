@@ -247,7 +247,7 @@ async function removeItem(item: CalendarItem) {
   selected.value = null;
   const confirmed = await ask({
     title: t('calendar.event.deleteConfirmTitle'),
-    body: item.source === 'caldav'
+    body: item.source === 'caldav' || item.source === 'outlook'
       ? t('calendar.event.deleteConfirmRemote')
       : t('calendar.event.deleteConfirmBody'),
     detail: item.title,
@@ -270,7 +270,12 @@ async function removeItem(item: CalendarItem) {
 async function saveEvent(payload: EventEditorPayload): Promise<boolean> {
   if (saving.value) return false;
   const draft = editorDraft.value;
-  const accountId =
+  // An edit belongs to the event's account — its calendar is where the change
+  // goes; only a new event lands in the active account.
+  const editedAccountId = payload.id
+    ? invites.events.find((event) => event.id === payload.id)?.account_id
+    : undefined;
+  const accountId = editedAccountId ||
     accounts.emailAccounts.find((account) => account.id === accounts.activeAccountId)?.id ||
     accounts.emailAccounts[0]?.id;
   if (!accountId) {

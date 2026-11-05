@@ -55,7 +55,8 @@
         "needsAction": "Awaiting reply",
         "cancelled": "Cancelled by organizer",
         "ownEvent": "Own event",
-        "googleCalendar": "Google Calendar"
+        "googleCalendar": "Google Calendar",
+        "outlookCalendar": "Outlook Calendar"
       },
       "source": {
         "heading": "Calendars",
@@ -63,6 +64,7 @@
         "caldav": "CalDAV",
         "invites": "Invitations",
         "googlePrimary": "Main calendar",
+        "outlook": "Outlook calendar",
         "show": "Show",
         "hide": "Hide"
       },
@@ -469,7 +471,8 @@
         "needsAction": "Antwort offen",
         "cancelled": "Vom Organisator abgesagt",
         "ownEvent": "Eigener Termin",
-        "googleCalendar": "Google Kalender"
+        "googleCalendar": "Google Kalender",
+        "outlookCalendar": "Outlook-Kalender"
       },
       "source": {
         "heading": "Kalender",
@@ -477,6 +480,7 @@
         "caldav": "CalDAV",
         "invites": "Einladungen",
         "googlePrimary": "Hauptkalender",
+        "outlook": "Outlook-Kalender",
         "show": "Einblenden",
         "hide": "Ausblenden"
       },

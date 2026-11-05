@@ -273,6 +273,8 @@
       "oauthReloadRequired": "Die Anmeldung des Kontos hat sich währenddessen geändert. Bitte versuche es erneut.",
       "oauthUrlRejected": "Satchel hat eine unerwartete Anmeldeadresse abgelehnt.",
       "outboxActionCannotBeDiscarded": "Dieser Eintrag im Postausgang kann nicht sicher verworfen werden.",
+      "outlookCalendarAccessMissing": "Der Kalender-Zugriff für dieses Outlook-Konto ist nicht verbunden. Verbinde ihn unter Einstellungen → Kalender.",
+      "outlookCalendarSyncFailed": "Der Outlook-Kalender für {account} konnte nicht synchronisiert werden.",
       "passwordCheckFailed": "Die Anmeldung mit dem neuen Passwort ist fehlgeschlagen: {reason}",
       "pgpDecodeFailed": "Der entschlüsselte OpenPGP-Inhalt konnte nicht gelesen werden.",
       "pgpDecryptFailed": "Die OpenPGP-Nachricht konnte mit den entsperrten Schlüsseln nicht entschlüsselt werden.",
@@ -499,6 +501,7 @@
       "hide": "Ausblenden",
       "invites": "Einladungen",
       "local": "Lokal",
+      "outlook": "Outlook-Kalender",
       "show": "Einblenden"
     },
     "status": {
@@ -507,6 +510,7 @@
       "declined": "Abgesagt",
       "googleCalendar": "Google Kalender",
       "needsAction": "Antwort offen",
+      "outlookCalendar": "Outlook-Kalender",
       "ownEvent": "Eigener Termin",
       "tentative": "Vielleicht"
     },
@@ -2450,7 +2454,9 @@
       "connect": "Verbinden",
       "connected": "Verbunden",
       "contactsHint": "Verbinde Google Kontakte, um Profilbilder zu verwenden. Mail funktioniert auch ohne Kontakte-Zugriff.",
-      "contactsTitle": "Google Kontakte"
+      "contactsTitle": "Google Kontakte",
+      "outlookCalendarHint": "Verbinde ein Outlook-Konto, um seine Kalender zu lesen und zu bearbeiten. Mail funktioniert auch ohne Kalender-Zugriff.",
+      "outlookCalendarTitle": "Outlook-Kalender"
     },
     "images": {
       "allow": "Zulassen",
