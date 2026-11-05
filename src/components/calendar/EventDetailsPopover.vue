@@ -37,7 +37,9 @@ const statusLabel = computed(() => {
   }
 });
 
-const canRespond = computed(() => props.item.kind === 'invite' && props.item.status !== 'cancelled');
+const canRespond = computed(
+  () => props.item.kind === 'invite' && props.item.respondable !== false && props.item.status !== 'cancelled',
+);
 
 // The Google mirror is one-way read-only: an edit would be overwritten by the
 // next sync and a delete would resurrect. Manage those events in Google.

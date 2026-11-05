@@ -1,5 +1,6 @@
 import type {
   BackendCalendarEvent,
+  BackendCalendarInvite,
   BackendCalendarSource,
   BackendDraft,
   BackendOutboxItem,
@@ -1065,14 +1066,23 @@ export const mockTopicTimeline: Record<string, BackendTopicTimelineItem[]> = {
 
 /*
  * A day with something in it, so the sidebar's Today card and the calendar
- * have anything to draw. One all-day entry with a long title, because that is
- * the row that has no time to print and the one whose label has to give way.
+ * have anything to draw. All-day entries, one with a long title, because those
+ * are the rows that have no time to print and whose label has to give way —
+ * and three of them, because that is what crowded the timed events out of
+ * the Today card. Around 14:00 a short appointment starts just before a long
+ * one with a half-hour meeting inside it: the overlap the week grid has to
+ * lay out side by side.
  */
 const startOfToday = () => {
   const day = new Date();
   day.setHours(0, 0, 0, 0);
   return day;
 };
+
+function localDate(at: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+}
 
 function mockEventAt(
   id: string,
@@ -1085,6 +1095,9 @@ function mockEventAt(
   const end = startHour === null
     ? new Date(base.getTime() + 24 * 3_600_000)
     : new Date(start.getTime() + durationMinutes * 60_000);
+  // An all-day event is a calendar date, as Google and CalDAV store it. The
+  // UTC instant of local midnight is the day before east of Greenwich.
+  const boundary = (at: Date) => startHour === null ? localDate(at) : at.toISOString();
   return {
     id,
     account_id: 'acc-work',
@@ -1092,8 +1105,8 @@ function mockEventAt(
     title,
     description: null,
     location: null,
-    starts_at: start.toISOString(),
-    ends_at: end.toISOString(),
+    starts_at: boundary(start),
+    ends_at: boundary(end),
     all_day: startHour === null ? 1 : 0,
     attendees_json: '[]',
     source: 'local',
@@ -1105,10 +1118,62 @@ function mockEventAt(
 
 export const mockCalendarEvents: BackendCalendarEvent[] = [
   mockEventAt('ev-all-day', 'Weltkindertag (Thüringen) — landesweiter Feiertag', null, 0),
+  mockEventAt('ev-cure', 'Ole in Kur', null, 0),
+  mockEventAt('ev-cooking', 'Kochtag', null, 0),
+  mockEventAt('ev-podiatry', 'Podologie', 13.75, 45),
+  mockEventAt('ev-childcare', '🎈🎈 Kinderbetreuung Herbstferien', 14, 120),
   mockEventAt('ev-coffee', 'code.example coffee', 14, 30),
   mockEventAt('ev-client', 'Client call · Mike', 16.5, 45),
   mockEventAt('ev-review', 'Sprint review', 11, 60),
   mockEventAt('ev-retro', 'Retro', 17.5, 45),
+];
+
+function mockInvite(
+  id: string,
+  fields: Partial<BackendCalendarInvite> & Pick<BackendCalendarInvite, 'method'>,
+): BackendCalendarInvite {
+  const created = startOfToday().toISOString();
+  return {
+    id,
+    message_id: null,
+    account_id: 'acc-work',
+    uid: `${id}@satchel.dev`,
+    organizer_email: 'lena@example.com',
+    organizer_name: 'Lena Hoffmann',
+    summary: null,
+    description: null,
+    location: null,
+    starts_at: null,
+    ends_at: null,
+    all_day: 0,
+    rsvp_status: 'needs-action',
+    raw_ics: 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n',
+    sequence: 0,
+    cancelled: 0,
+    recurrence_id: null,
+    recurring: 0,
+    recurrence_unbounded: 0,
+    created_at: created,
+    updated_at: created,
+    ...fields,
+  };
+}
+
+const tomorrowAt = (hour: number) => new Date(startOfToday().getTime() + (24 + hour) * 3_600_000).toISOString();
+
+/*
+ * One invitation to answer, and one answer to an invitation: the METHOD:REPLY
+ * another account sent back after accepting. It has no title and no time,
+ * and the list must not offer it as something to accept.
+ */
+export const mockCalendarInvites: BackendCalendarInvite[] = [
+  mockInvite('inv-architecture', {
+    method: 'REQUEST',
+    summary: 'Architecture review',
+    starts_at: tomorrowAt(10),
+    ends_at: tomorrowAt(11),
+  }),
+  mockInvite('inv-reply', { method: 'REPLY', organizer_email: 'me@satchel.dev', organizer_name: null }),
 ];
 
 export const mockCalendarSources: BackendCalendarSource[] = [

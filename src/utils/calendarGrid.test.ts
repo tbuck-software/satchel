@@ -11,6 +11,8 @@ import {
   sourceLabel,
   isMultiDay,
   itemsForDay,
+  CASCADE_WIDTH,
+  eventBox,
   layoutDay,
   minutesInDay,
   monthGridDays,
@@ -156,60 +158,101 @@ describe('minutesInDay', () => {
 
 describe('layoutDay', () => {
   const day = new Date(2026, 6, 29);
+  const at = (hour: number, minute = 0) => new Date(2026, 6, 29, hour, minute);
+  const event = (key: string, start: Date, end: Date) => makeItem({ key: `event:${key}`, start, end });
+  const placement = (layout: ReturnType<typeof layoutDay>) =>
+    Object.fromEntries(
+      layout.map((entry) => [entry.item.key.replace('event:', ''), [entry.column, entry.span, entry.columns]]),
+    );
 
   it('gives non-overlapping events the full width', () => {
-    const a = makeItem({ key: 'event:a', start: new Date(2026, 6, 29, 9), end: new Date(2026, 6, 29, 10) });
-    const b = makeItem({ key: 'event:b', start: new Date(2026, 6, 29, 10), end: new Date(2026, 6, 29, 11) });
-    const layout = layoutDay([a, b], day);
-    expect(layout.every((entry) => entry.overlapLevel === 0)).toBe(true);
+    const layout = layoutDay([event('a', at(9), at(10)), event('b', at(10), at(11))], day);
+    expect(placement(layout)).toEqual({ a: [0, 1, 1], b: [0, 1, 1] });
   });
 
-  it('stacks a later overlapping event above the earlier one', () => {
-    const a = makeItem({ key: 'event:a', start: new Date(2026, 6, 29, 9), end: new Date(2026, 6, 29, 11) });
-    const b = makeItem({ key: 'event:b', start: new Date(2026, 6, 29, 10), end: new Date(2026, 6, 29, 12) });
-    const layout = layoutDay([a, b], day);
-    expect(layout.map((entry) => [entry.item.key, entry.overlapLevel])).toEqual([
-      ['event:a', 0],
-      ['event:b', 1],
+  it('puts two overlapping events side by side', () => {
+    const layout = layoutDay([event('a', at(9), at(11)), event('b', at(10), at(12))], day);
+    expect(placement(layout)).toEqual({ a: [0, 1, 2], b: [1, 1, 2] });
+  });
+
+  it('keeps a short event that starts just before a long one out from under it', () => {
+    // The owner's afternoon: podiatry from 13:45, childcare 14:00–16:00 and a
+    // half-hour coffee inside it.
+    const layout = layoutDay(
+      [
+        event('childcare', at(14), at(16)),
+        event('coffee', at(14), at(14, 30)),
+        event('podiatry', at(13, 45), at(14, 30)),
+      ],
+      day,
+    );
+    expect(layout.map((entry) => entry.item.key)).toEqual([
+      'event:podiatry',
+      'event:childcare',
+      'event:coffee',
     ]);
+    expect(placement(layout)).toEqual({
+      podiatry: [0, 1, 3],
+      childcare: [1, 1, 3],
+      coffee: [2, 1, 3],
+    });
+    // No two entries share a column while they share time.
+    for (const a of layout) {
+      for (const b of layout) {
+        if (a === b || a.column !== b.column) continue;
+        expect(a.startMin >= b.endMin || b.startMin >= a.endMin).toBe(true);
+      }
+    }
   });
 
-  it('only counts events that are still visible when the next one starts', () => {
-    const a = makeItem({ key: 'event:a', start: new Date(2026, 6, 29, 9), end: new Date(2026, 6, 29, 12) });
-    const b = makeItem({ key: 'event:b', start: new Date(2026, 6, 29, 9, 30), end: new Date(2026, 6, 29, 10) });
-    const c = makeItem({ key: 'event:c', start: new Date(2026, 6, 29, 10, 30), end: new Date(2026, 6, 29, 11) });
-    const layout = layoutDay([a, b, c], day);
-    const byKey = Object.fromEntries(layout.map((entry) => [entry.item.key, entry]));
-    expect(byKey['event:a']!.overlapLevel).toBe(0);
-    expect(byKey['event:b']!.overlapLevel).toBe(1);
-    expect(byKey['event:c']!.overlapLevel).toBe(1);
+  it('reuses a column once its event has ended', () => {
+    const layout = layoutDay(
+      [event('a', at(9), at(12)), event('b', at(9, 30), at(10)), event('c', at(10, 30), at(11))],
+      day,
+    );
+    expect(placement(layout)).toEqual({ a: [0, 1, 2], b: [1, 1, 2], c: [1, 1, 2] });
   });
 
-  it('adds another stack level for simultaneous overlaps', () => {
-    const a = makeItem({ key: 'event:a', start: new Date(2026, 6, 29, 9), end: new Date(2026, 6, 29, 12) });
-    const b = makeItem({ key: 'event:b', start: new Date(2026, 6, 29, 9, 30), end: new Date(2026, 6, 29, 11) });
-    const c = makeItem({ key: 'event:c', start: new Date(2026, 6, 29, 10), end: new Date(2026, 6, 29, 10, 30) });
-    expect(layoutDay([a, b, c], day).map((entry) => entry.overlapLevel)).toEqual([0, 1, 2]);
+  it('widens an event into columns that are free for its whole duration', () => {
+    // a and b need three columns with c; d comes after b and c and may take
+    // both of their columns.
+    const layout = layoutDay(
+      [
+        event('a', at(9), at(12)),
+        event('b', at(9), at(10)),
+        event('c', at(9, 30), at(10)),
+        event('d', at(10, 30), at(11, 30)),
+      ],
+      day,
+    );
+    expect(placement(layout)).toEqual({
+      a: [0, 1, 3],
+      b: [1, 1, 3],
+      c: [2, 1, 3],
+      d: [1, 2, 3],
+    });
   });
 
-  it('does not accumulate indentation across a chain of five-minute overlaps', () => {
-    const a = makeItem({
-      key: 'event:a',
-      start: new Date(2026, 6, 29, 9),
-      end: new Date(2026, 6, 29, 10),
-    });
-    const b = makeItem({
-      key: 'event:b',
-      start: new Date(2026, 6, 29, 9, 55),
-      end: new Date(2026, 6, 29, 11),
-    });
-    const c = makeItem({
-      key: 'event:c',
-      start: new Date(2026, 6, 29, 10, 55),
-      end: new Date(2026, 6, 29, 12),
-    });
+  it('starts a new group once everything before has ended', () => {
+    const layout = layoutDay(
+      [event('a', at(9), at(10)), event('b', at(9, 30), at(10)), event('c', at(10), at(11))],
+      day,
+    );
+    expect(placement(layout)).toEqual({ a: [0, 1, 2], b: [1, 1, 2], c: [0, 1, 1] });
+  });
 
-    expect(layoutDay([a, b, c], day).map((entry) => entry.overlapLevel)).toEqual([0, 1, 1]);
+  it('chains five-minute overlaps into two columns, not a staircase', () => {
+    const layout = layoutDay(
+      [event('a', at(9), at(10)), event('b', at(9, 55), at(11)), event('c', at(10, 55), at(12))],
+      day,
+    );
+    expect(placement(layout)).toEqual({ a: [0, 1, 2], b: [1, 1, 2], c: [0, 1, 2] });
+  });
+
+  it('treats a stretched short event as the height it is drawn with', () => {
+    // 9:00–9:05 is drawn half an hour tall, so 9:15 must not land on top of it.
+    const layout = layoutDay([event('a', at(9), at(9, 5)), event('b', at(9, 15), at(10))], day);
+    expect(placement(layout)).toEqual({ a: [0, 1, 2], b: [1, 1, 2] });
   });
 
   it('keeps all-day items out of the timed grid', () => {
@@ -225,6 +268,68 @@ describe('layoutDay', () => {
     const short = makeItem({ start: new Date(2026, 6, 29, 9), end: new Date(2026, 6, 29, 9, 5) });
     const layout = layoutDay([short], day);
     expect(layout[0]!.endMin - layout[0]!.startMin).toBe(30);
+  });
+});
+
+describe('eventBox', () => {
+  const day = new Date(2026, 6, 29);
+  const at = (hour: number, minute = 0) => new Date(2026, 6, 29, hour, minute);
+  const event = (key: string, start: Date, end: Date) => makeItem({ key: `event:${key}`, start, end });
+  const boxes = (items: CalendarItem[]) =>
+    Object.fromEntries(
+      layoutDay(items, day).map((entry) => {
+        const box = eventBox(entry);
+        return [entry.item.key.replace('event:', ''), [round(box.left), round(box.width)]];
+      }),
+    );
+  const round = (value: number) => Math.round(value * 1000) / 1000;
+
+  it('gives a lone event the whole day', () => {
+    expect(boxes([event('a', at(9), at(10))])).toEqual({ a: [0, 1] });
+  });
+
+  it('cascades: each block reaches past its column, the last one ends at the edge', () => {
+    // The owner's afternoon, three columns of a third each.
+    const layout = boxes([
+      event('podiatry', at(13, 45), at(14, 30)),
+      event('childcare', at(14), at(16)),
+      event('coffee', at(14), at(14, 30)),
+    ]);
+    const third = 1 / 3;
+    expect(layout).toEqual({
+      podiatry: [0, round(CASCADE_WIDTH * third)],
+      childcare: [round(third), round(CASCADE_WIDTH * third)],
+      coffee: [round(2 * third), round(third)],
+    });
+  });
+
+  it('keeps every title start visible: the next block starts after the previous one', () => {
+    const layout = layoutDay(
+      [event('a', at(9), at(12)), event('b', at(9), at(11)), event('c', at(9), at(10)), event('d', at(9), at(10))],
+      day,
+    ).map(eventBox);
+    for (let index = 1; index < layout.length; index += 1) {
+      expect(layout[index]!.left).toBeGreaterThan(layout[index - 1]!.left);
+      expect(layout[index]!.left + layout[index]!.width).toBeLessThanOrEqual(1 + 1e-9);
+    }
+  });
+
+  it('never cascades past the right edge with two columns', () => {
+    expect(boxes([event('a', at(9), at(11)), event('b', at(10), at(12))])).toEqual({
+      a: [0, round(Math.min(CASCADE_WIDTH / 2, 1))],
+      b: [0.5, 0.5],
+    });
+  });
+
+  it('fills the free columns of an event nothing overlaps on the right', () => {
+    const layout = boxes([
+      event('a', at(9), at(12)),
+      event('b', at(9), at(10)),
+      event('c', at(9, 30), at(10)),
+      event('d', at(10, 30), at(11, 30)),
+    ]);
+    // d took column 1 and widened into column 2: it covers both, exactly.
+    expect(layout.d).toEqual([round(1 / 3), round(2 / 3)]);
   });
 });
 

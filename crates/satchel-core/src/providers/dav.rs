@@ -70,6 +70,24 @@ const fn groupware_sync_error_key(kind: DavKind) -> &'static str {
     }
 }
 
+/// The summary entry for one failed service, naming the account so a person
+/// with two groupware accounts can tell which one stopped syncing. The
+/// account id stands in when its address cannot be read.
+fn groupware_sync_error(kind: DavKind, account: &str) -> String {
+    serde_json::json!({
+        "key": groupware_sync_error_key(kind),
+        "params": { "account": account },
+    })
+    .to_string()
+}
+
+async fn account_label(pool: &SqlitePool, account_id: &str) -> String {
+    crate::db::accounts::AccountRepository::new(pool)
+        .identity(account_id)
+        .await
+        .map_or_else(|_| account_id.to_string(), |identity| identity.email)
+}
+
 pub async fn probe_dav_server(
     server: &str,
     username: &str,
@@ -141,9 +159,10 @@ pub async fn sync_groupware_account(
             }
             Err(error) => {
                 tracing::warn!(error = %error, account_id, "CalDAV synchronization failed");
+                let account = account_label(pool, account_id).await;
                 summary
                     .errors
-                    .push(groupware_sync_error_key(DavKind::Calendar).to_string());
+                    .push(groupware_sync_error(DavKind::Calendar, &account));
             }
         }
     }
@@ -155,9 +174,10 @@ pub async fn sync_groupware_account(
             }
             Err(error) => {
                 tracing::warn!(error = %error, account_id, "CardDAV synchronization failed");
+                let account = account_label(pool, account_id).await;
                 summary
                     .errors
-                    .push(groupware_sync_error_key(DavKind::AddressBook).to_string());
+                    .push(groupware_sync_error(DavKind::AddressBook, &account));
             }
         }
     }
@@ -900,6 +920,18 @@ mod tests {
             groupware_sync_error_key(DavKind::AddressBook),
             "backend.errors.groupwareContactSyncFailed"
         );
+    }
+
+    #[test]
+    fn groupware_summary_errors_name_the_account() {
+        let encoded = groupware_sync_error(DavKind::Calendar, "me@th-koeln.example");
+        let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(value["key"], "backend.errors.groupwareCalendarSyncFailed");
+        assert_eq!(value["params"]["account"], "me@th-koeln.example");
+
+        let encoded = groupware_sync_error(DavKind::AddressBook, "me@th-koeln.example");
+        let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(value["key"], "backend.errors.groupwareContactSyncFailed");
     }
 
     #[test]

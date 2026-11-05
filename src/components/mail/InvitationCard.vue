@@ -6,6 +6,7 @@ import type { BackendCalendarInvite } from '@/types/calendar';
 import { useInvitesStore } from '@/stores/invites';
 import { icsDescriptionToText } from '@/utils/inviteText';
 import { parseCalendarBoundary } from '@/utils/calendarDates';
+import { inviteAcceptsResponse } from '@/utils/inviteMethods';
 import { useLinkOpener } from '@/composables/useLinkOpener';
 import AppButton from '@/components/ui/AppButton.vue';
 import ExternalLinkDialog from './ExternalLinkDialog.vue';
@@ -25,6 +26,8 @@ const linkOpener = useLinkOpener();
 const status = computed(() => props.invite.rsvp_status);
 // A cancelled meeting is not something you can still reply to.
 const cancelled = computed(() => (props.invite.cancelled ?? 0) === 1);
+// A PUBLISH announces an event and asks for no answer.
+const answerable = computed(() => inviteAcceptsResponse(props.invite));
 const recurring = computed(() => Boolean(props.invite.recurring));
 const occurrence = computed(() => Boolean(props.invite.recurrence_id));
 const wholeSeries = computed(() => recurring.value && !occurrence.value);
@@ -209,7 +212,7 @@ function actionLabel(response: 'accepted' | 'declined' | 'tentative') {
 
       <p v-if="responseError" class="response-error" role="alert">{{ responseError }}</p>
 
-      <div v-if="!cancelled" class="actions">
+      <div v-if="answerable" class="actions">
         <AppButton
           size="sm"
           :variant="state === 'open' ? 'primary' : 'ghost'"

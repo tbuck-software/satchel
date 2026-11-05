@@ -10,7 +10,9 @@ pub use crate::db::calendar::{
     CalendarEventRecord as CalendarEventDto, CalendarInviteRecord as CalendarInviteDto,
     CalendarSourceRecord as CalendarSourceDto,
 };
-use crate::email::calendar::{build_invite_reply_ics, extract_ics_block, parse_invite};
+use crate::email::calendar::{
+    build_invite_reply_ics, extract_ics_block, is_invitation_method, parse_invite,
+};
 use crate::sync::outbox::build_idempotent_send_action;
 use crate::AppState;
 
@@ -109,6 +111,10 @@ pub async fn import_ics(
         .ok_or_else(|| CommandError::new("backend.errors.calendarPayloadInvalid"))?;
     let parsed = parse_invite(&block)
         .ok_or_else(|| CommandError::new("backend.errors.calendarPayloadInvalid"))?;
+    // An answer to an invitation holds no event of its own to import.
+    if !parsed.is_invitation() {
+        return Err(CommandError::new("backend.errors.calendarInviteNotFound"));
+    }
 
     let account_id = match input.account_id.as_deref() {
         Some(id) if !id.is_empty() => id.to_string(),
@@ -262,6 +268,11 @@ pub async fn queue_invite_response(
 
     if invite.cancelled == 1 {
         return Err(CommandError::new("backend.errors.calendarInviteCancelled"));
+    }
+    // Answers to invitations are no longer listed; a stale view still holding
+    // one finds no invitation to answer.
+    if !is_invitation_method(invite.method.as_deref()) {
+        return Err(CommandError::new("backend.errors.calendarInviteNotFound"));
     }
 
     let rsvp_string = match normalized {

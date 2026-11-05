@@ -157,7 +157,9 @@
     },
     "nav": {
       "agenda": {
+        "allDayCount": "{count} entries",
         "more": "+{count} more",
+        "now": "Now",
         "title": "Today"
       },
       "calendar": "Calendar",
@@ -597,7 +599,9 @@
     },
     "nav": {
       "agenda": {
+        "allDayCount": "{count} Einträge",
         "more": "+{count} weitere",
+        "now": "Jetzt",
         "title": "Heute"
       },
       "calendar": "Kalender",

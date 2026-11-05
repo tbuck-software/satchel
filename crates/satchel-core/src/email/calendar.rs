@@ -59,6 +59,42 @@ pub struct ParsedInvite {
     pub raw_ics: String,
 }
 
+/// iTIP methods that answer an invitation instead of extending one (RFC 5546
+/// §3.2): an attendee's REPLY, COUNTER or REFRESH to the organizer, and the
+/// organizer's DECLINECOUNTER. Such a message reports somebody's answer, so
+/// it is nothing to accept or decline, and it usually carries no title and
+/// no time. Satchel sends REPLYs itself; one of them reached the organizer's
+/// other account and stood in the calendar as an untitled invitation.
+pub const NON_INVITATION_METHODS: [&str; 4] = ["REPLY", "COUNTER", "REFRESH", "DECLINECOUNTER"];
+
+/// Whether a calendar message with this `METHOD` is an invitation. A missing
+/// method (a plain `.ics` file) counts as one.
+pub fn is_invitation_method(method: Option<&str>) -> bool {
+    method.is_none_or(|method| {
+        !NON_INVITATION_METHODS
+            .iter()
+            .any(|other| method.trim().eq_ignore_ascii_case(other))
+    })
+}
+
+/// The same rule as [`is_invitation_method`] as an SQL predicate over
+/// `column`, for rows stored before ingest learned to skip them.
+pub fn invitation_method_sql(column: &str) -> String {
+    let methods = NON_INVITATION_METHODS
+        .iter()
+        .map(|method| format!("'{method}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("UPPER(TRIM(COALESCE({column}, ''))) NOT IN ({methods})")
+}
+
+impl ParsedInvite {
+    /// See [`is_invitation_method`].
+    pub fn is_invitation(&self) -> bool {
+        is_invitation_method(self.method.as_deref())
+    }
+}
+
 pub fn parse_invite(raw_ics: &str) -> Option<ParsedInvite> {
     let calendar = raw_ics.parse::<Calendar>().ok()?;
 
@@ -731,6 +767,29 @@ mod tests {
     const TZ_ICS: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:tz-1@example.com\r\nSUMMARY:Standup\r\nDTSTART;TZID=Europe/Berlin:20260315T143000\r\nDTEND;TZID=Europe/Berlin:20260315T150000\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
 
     const CANCEL_ICS: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:CANCEL\r\nBEGIN:VEVENT\r\nUID:abc-123@example.com\r\nSUMMARY:Wochenplanung\r\nDTSTART:20260315T143000Z\r\nSEQUENCE:1\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    #[test]
+    fn a_reply_is_not_an_invitation() {
+        // What Satchel itself sends when one account accepts: no SUMMARY, no
+        // DTSTART, just the attendee's answer.
+        let reply = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Satchel//Calendar//EN\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\nUID:7c671mi9@google.com\r\nDTSTAMP:20261104T120000Z\r\nATTENDEE;PARTSTAT=ACCEPTED:mailto:me@uni.example\r\nORGANIZER:mailto:me@gmail.example\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let parsed = parse_invite(reply).expect("parses");
+        assert!(!parsed.is_invitation());
+        assert!(parse_invite(SAMPLE_ICS).expect("parses").is_invitation());
+        assert!(parse_invite(CANCEL_ICS).expect("parses").is_invitation());
+
+        assert!(is_invitation_method(None));
+        assert!(is_invitation_method(Some("REQUEST")));
+        assert!(is_invitation_method(Some("PUBLISH")));
+        assert!(!is_invitation_method(Some("reply")));
+        assert!(!is_invitation_method(Some(" COUNTER ")));
+        assert!(!is_invitation_method(Some("REFRESH")));
+        assert!(!is_invitation_method(Some("DECLINECOUNTER")));
+        assert_eq!(
+            invitation_method_sql("invites.method"),
+            "UPPER(TRIM(COALESCE(invites.method, ''))) NOT IN ('REPLY', 'COUNTER', 'REFRESH', 'DECLINECOUNTER')"
+        );
+    }
 
     #[test]
     fn honours_tzid_instead_of_pretending_local_time_is_utc() {

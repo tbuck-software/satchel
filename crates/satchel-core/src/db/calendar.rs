@@ -4,7 +4,7 @@ use serde::Serialize;
 use sqlx::{FromRow, SqlitePool};
 use thiserror::Error;
 
-use crate::email::calendar::ParsedInvite;
+use crate::email::calendar::{invitation_method_sql, ParsedInvite};
 
 const INVITE_SELECT: &str =
     "SELECT id, message_id, account_id, uid, organizer_email, organizer_name, summary,
@@ -178,16 +178,18 @@ impl<'a> CalendarRepository<'a> {
         &self,
         account_id: Option<&str>,
     ) -> Result<Vec<CalendarInviteRecord>, CalendarError> {
+        // Rows stored before ingest skipped answers stay out of every list.
+        let invitation = invitation_method_sql("method");
         match account_id {
             Some(account_id) => sqlx::query_as::<_, CalendarInviteRecord>(&format!(
-                "{INVITE_SELECT} WHERE account_id = ? ORDER BY starts_at ASC"
+                "{INVITE_SELECT} WHERE account_id = ? AND {invitation} ORDER BY starts_at ASC"
             ))
             .bind(account_id)
             .fetch_all(self.pool)
             .await
             .map_err(Into::into),
             None => sqlx::query_as::<_, CalendarInviteRecord>(&format!(
-                "{INVITE_SELECT} ORDER BY starts_at ASC"
+                "{INVITE_SELECT} WHERE {invitation} ORDER BY starts_at ASC"
             ))
             .fetch_all(self.pool)
             .await
@@ -278,12 +280,19 @@ impl<'a> CalendarRepository<'a> {
     }
 
     /// Publish a parsed mail attachment inside the caller's identity guard.
+    ///
+    /// Every ingest path ends here, so this is where an answer to an
+    /// invitation (`METHOD:REPLY` and its kin) is dropped: it is not an
+    /// invitation, and under the same UID it would overwrite the real one.
     pub async fn upsert_invite_on_connection(
         connection: &mut sqlx::SqliteConnection,
         account_id: &str,
         message_id: Option<&str>,
         invite: &ParsedInvite,
     ) -> Result<(), CalendarError> {
+        if !invite.is_invitation() {
+            return Ok(());
+        }
         let now = chrono::Utc::now().to_rfc3339();
         let recurrence_id = invite.recurrence_id.as_deref().unwrap_or("");
         let id = invite_id(account_id, &invite.uid, recurrence_id);
@@ -661,7 +670,8 @@ impl<'a> CalendarRepository<'a> {
     /// Include a one-day margin for DATE ends. The caller interprets those
     /// calendar dates in the viewer's timezone and filters the exact boundary.
     pub async fn upcoming(&self, now: &str) -> Result<Vec<UpcomingCalendarRecord>, CalendarError> {
-        sqlx::query_as::<_, UpcomingCalendarRecord>(
+        let invitation = invitation_method_sql("invites.method");
+        sqlx::query_as::<_, UpcomingCalendarRecord>(&format!(
             "SELECT title, starts_at, ends_at, all_day, location, raw_ics
              FROM (
                  SELECT title, starts_at, ends_at, all_day, location, raw_ics
@@ -681,12 +691,13 @@ impl<'a> CalendarRepository<'a> {
                    AND CASE WHEN invites.all_day = 1 THEN datetime(substr(invites.ends_at, 1, 10), '+1 day') ELSE datetime(invites.ends_at) END >= datetime(?)
                    AND COALESCE(invites.cancelled, 0) = 0
                    AND invites.rsvp_status != 'declined'
+                   AND {invitation}
                    AND NOT EXISTS (
                        SELECT 1 FROM calendar_events events
                        WHERE events.account_id = invites.account_id AND events.uid = invites.uid
                    )
              ) upcoming",
-        )
+        ))
         .bind(now)
         .bind(now)
         .fetch_all(self.pool)
@@ -915,6 +926,68 @@ mod tests {
                 .unwrap()
                 .len(),
             2
+        );
+    }
+
+    #[tokio::test]
+    async fn answers_to_invitations_are_neither_stored_nor_listed() {
+        let pool = pool().await;
+        account(&pool, "account", "2026-01-01").await;
+        let repository = CalendarRepository::new(&pool);
+        let request = crate::email::calendar::parse_invite(REQUEST).unwrap();
+        let stored = repository
+            .upsert_invite("account", None, &request)
+            .await
+            .unwrap();
+
+        // An attendee's REPLY under the same UID must not overwrite the
+        // invitation with its empty title and time.
+        let reply = REQUEST
+            .replace("METHOD:REQUEST", "METHOD:REPLY")
+            .replace("SUMMARY:Planning\r\n", "");
+        let reply = crate::email::calendar::parse_invite(&reply).unwrap();
+        repository
+            .upsert_invite("account", None, &reply)
+            .await
+            .unwrap();
+        let kept = repository.get_invite(&stored.id).await.unwrap();
+        assert_eq!(kept.method.as_deref(), Some("REQUEST"));
+        assert_eq!(kept.summary.as_deref(), Some("Planning"));
+
+        // A row stored before ingest skipped answers stays out of the lists.
+        sqlx::query(
+            "INSERT INTO calendar_invites
+             (id, account_id, uid, starts_at, ends_at, raw_ics, method, created_at, updated_at)
+             VALUES ('legacy-reply', 'account', 'reply@example.test',
+                     '2026-09-10T12:00:00Z', '2026-09-10T13:00:00Z',
+                     'BEGIN:VCALENDAR', 'REPLY', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let listed = repository.list_invites(None).await.unwrap();
+        assert_eq!(
+            listed
+                .iter()
+                .map(|invite| invite.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![stored.id.as_str()]
+        );
+        assert_eq!(
+            repository
+                .list_invites(Some("account"))
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let upcoming = repository.upcoming("2026-09-01T00:00:00Z").await.unwrap();
+        assert_eq!(
+            upcoming
+                .iter()
+                .map(|row| row.title.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Planning"]
         );
     }
 

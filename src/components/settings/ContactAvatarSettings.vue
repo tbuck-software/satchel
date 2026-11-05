@@ -86,7 +86,7 @@ async function importAvatars() {
   const updatedTotal = result.avatars_updated + result.fallback_avatars_updated;
 
   if (result.errors.length > 0 && updatedTotal === 0) {
-    status.value = result.errors.map((key) => t(key)).join(' ');
+    status.value = result.errors.map((error) => backendErrorLabel(error)).join(' ');
     return;
   }
 
