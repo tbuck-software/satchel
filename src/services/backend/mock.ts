@@ -691,6 +691,15 @@ function oauthStatus(accountId: string) {
 }
 
 let appUpdateChannel: 'stable' | 'nightly' = 'stable';
+let notificationPreferences = {
+  enabled: true,
+  scope: 'inbox' as 'all' | 'inbox' | 'off',
+  sound: true,
+  undo_send_seconds: 5,
+  trash_auto_delete_days: 30,
+  send_read_receipts: false,
+  body_window_days: 0,
+};
 
 /** Expired-certificate exceptions granted in this session. */
 const certificateExceptions: Array<{ account_id: string; host: string; fingerprint: string; expires_at: string; created_at: string }> = [];
@@ -727,6 +736,12 @@ const handlers: Record<string, Handler> = {
     contacts_synced: 0,
     errors: [],
   }),
+  get_notification_preferences: () => ({ ...notificationPreferences }),
+  set_notification_preferences: ({ preferences }) => {
+    notificationPreferences = { ...(preferences as typeof notificationPreferences) };
+    return { ...notificationPreferences };
+  },
+  set_background_sync: () => null,
   // The shell answers for itself; the mock answers for the device it runs on,
   // so a phone-sized run hides the tray and keyboard settings as a phone does.
   runtime_capabilities: () => {

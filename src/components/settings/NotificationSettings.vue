@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   backendGetNotificationPreferences,
   backendSetBackgroundSync,
+  backendCommandsAvailable,
   backendSetNotificationPreferences,
-  backendSupportsNativeCommands,
   type BackendNotificationPreferences,
 } from '@/services/backend';
 import { ensureNotificationPermission } from '@/composables/useNotifications';
-import AppButton from '@/components/ui/AppButton.vue';
+import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
 
 const props = withDefaults(defineProps<{ section?: 'notifications' | 'sending' | 'data' }>(), {
@@ -26,7 +26,6 @@ const prefs = ref<BackendNotificationPreferences>({
   send_read_receipts: false,
   body_window_days: 0,
 });
-const saving = ref(false);
 const status = ref('');
 const saveFailed = ref(false);
 const permissionDenied = ref(false);
@@ -52,15 +51,51 @@ async function confirmEnabled(next: boolean): Promise<boolean> {
 
 async function applyEnabled(next: boolean) {
   prefs.value.enabled = next;
-  // Persist straight away rather than waiting for the Speichern button.
-  //
-  // A switch that has visibly moved reads as applied, and every platform
-  // outside this form treats one that way. Leaving it unsaved meant a user
-  // could turn notifications on, watch the switch slide over, walk away, and
-  // get nothing — with no clue that a button elsewhere on the page still had
-  // to be pressed.
+  // The main switch takes the background connection with it: no wait.
+  if (pending) clearTimeout(pending);
+  pending = null;
   await save();
 }
+
+/**
+ * Every change applies as it is made, like General's.
+ *
+ * A switch that has visibly moved reads as applied, and every platform treats
+ * one that way. A Save button at the foot of the page meant a user could turn
+ * notifications on, watch the switch slide over, walk away, and get nothing.
+ * Typed numbers wait a moment so each keystroke is not its own write.
+ */
+let loaded = false;
+let lastSaved = '';
+let pending: ReturnType<typeof setTimeout> | null = null;
+watch(prefs, (value) => {
+  if (!loaded || JSON.stringify(value) === lastSaved) return;
+  if (pending) clearTimeout(pending);
+  pending = setTimeout(() => {
+    pending = null;
+    if (JSON.stringify(prefs.value) !== lastSaved) void save();
+  }, 400);
+}, { deep: true });
+onBeforeUnmount(() => {
+  if (!pending) return;
+  clearTimeout(pending);
+  void save();
+});
+
+const UNDO_PRESETS = [0, 5, 10, 20, 30];
+const undoOptions = computed(() => {
+  const current = prefs.value.undo_send_seconds;
+  const values = UNDO_PRESETS.includes(current) ? UNDO_PRESETS : [...UNDO_PRESETS, current].sort((a, b) => a - b);
+  return values.map((value) => ({
+    value: String(value),
+    label: value === 0 ? t('settings.notifications.undoOff') : t('settings.notifications.secondsShort', { n: value }),
+  }));
+});
+const scopeOptions = computed(() => [
+  { value: 'all', label: t('settings.notifications.scopeAllShort') },
+  { value: 'inbox', label: t('settings.notifications.scopeInboxShort') },
+  { value: 'off', label: t('common.none') },
+]);
 
 const heading = computed(() => ({
   notifications: [t('settings.notifications.title'), t('settings.notifications.description')],
@@ -72,16 +107,19 @@ const heading = computed(() => ({
 }[props.section]));
 
 onMounted(async () => {
-  if (!backendSupportsNativeCommands()) return;
+  if (!backendCommandsAvailable()) return;
   prefs.value = await backendGetNotificationPreferences();
+  lastSaved = JSON.stringify(prefs.value);
+  loaded = true;
 });
 
 async function save() {
-  saving.value = true;
   status.value = '';
   saveFailed.value = false;
   try {
-    prefs.value = await backendSetNotificationPreferences(prefs.value);
+    const saved = await backendSetNotificationPreferences(prefs.value);
+    lastSaved = JSON.stringify(saved);
+    prefs.value = saved;
     // Follows the switch: with notifications off there is nothing for the
     // background connection to announce, and holding the process open would
     // cost battery for silence.
@@ -90,8 +128,6 @@ async function save() {
   } catch (err) {
     saveFailed.value = true;
     status.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    saving.value = false;
   }
 }
 </script>
@@ -121,17 +157,17 @@ async function save() {
       <p v-if="permissionDenied" class="permission-note">
         {{ $t('settings.notifications.permissionDenied') }}
       </p>
-      <label class="setting-row">
-        <span class="setting-info">
+      <div class="setting-row">
+        <div class="setting-info">
           <strong>{{ $t('settings.notifications.scopeLabel') }}</strong>
           <span>{{ $t('settings.notifications.scopeHint') }}</span>
-        </span>
-        <select v-model="prefs.scope" :disabled="!prefs.enabled">
-          <option value="all">{{ $t('settings.notifications.scopeAll') }}</option>
-          <option value="inbox">{{ $t('settings.notifications.scopeInbox') }}</option>
-          <option value="off">{{ $t('common.none') }}</option>
-        </select>
-      </label>
+        </div>
+        <SegmentedControl
+          v-model="prefs.scope"
+          :options="scopeOptions.map((option) => ({ ...option, disabled: !prefs.enabled }))"
+          :aria-label="$t('settings.notifications.scopeLabel')"
+        />
+      </div>
       <div class="setting-row">
         <div class="setting-info">
           <strong>{{ $t('settings.notifications.soundLabel') }}</strong>
@@ -146,16 +182,18 @@ async function save() {
     </div>
 
     <div v-else-if="props.section === 'sending'" class="setting-group">
-      <label class="setting-row">
-        <span class="setting-info">
+      <div class="setting-row">
+        <div class="setting-info">
           <strong>{{ $t('settings.notifications.undoLabel') }}</strong>
           <span>{{ $t('settings.notifications.undoHint') }}</span>
-        </span>
-        <span class="number-control">
-          <input v-model.number="prefs.undo_send_seconds" type="number" min="0" max="60" step="1" />
-          <small>{{ $t('settings.notifications.seconds') }}</small>
-        </span>
-      </label>
+        </div>
+        <SegmentedControl
+          :model-value="String(prefs.undo_send_seconds)"
+          :options="undoOptions"
+          :aria-label="$t('settings.notifications.undoLabel')"
+          @update:model-value="prefs.undo_send_seconds = Number($event)"
+        />
+      </div>
       <div class="setting-row">
         <div class="setting-info">
           <strong>{{ $t('settings.notifications.receiptsLabel') }}</strong>
@@ -191,25 +229,16 @@ async function save() {
       </label>
     </div>
 
-    <div class="save-row">
-      <span :class="['status', { error: saveFailed }]">{{ status }}</span>
-      <AppButton variant="primary" :disabled="saving" @click="save">
-        {{ saving ? $t('common.saving') : $t('common.save') }}
-      </AppButton>
-    </div>
+    <p v-if="saveFailed" class="status error" role="alert">{{ status }}</p>
   </section>
 </template>
 
 <style scoped>
 .settings-section { display:grid; gap:20px; }
-header h3 { margin:0; color:var(--text-primary); font-size:var(--font-size-2xl); font-weight:var(--weight-bold); letter-spacing:-.02em; }
-header p { margin:5px 0 0; color:var(--text-tertiary); font-size:var(--font-size-sm); }
-select { max-width:230px; border:0; border-radius: var(--radius-sm); background:var(--bg-overlay); color:var(--text-primary); padding:8px 10px; font:inherit; font-size: var(--font-size-sm); }
 .number-control { display:flex; align-items:center; gap:6px; border-radius: var(--radius-sm); background:var(--bg-overlay); padding:3px 9px; }
 .number-control input { width:58px; border:0; background:transparent; color:var(--text-primary); font:inherit; text-align:right; }
 .number-control small { color:var(--text-tertiary); }
-.save-row { display:flex; align-items:center; justify-content:flex-end; gap:12px; }
-.status { margin-right:auto; color:var(--accent-green); font-size: var(--font-size-xs); }
+.status { margin:0; font-size: var(--font-size-sm); }
 .status.error { color:var(--accent-red); }
 
 .permission-note {

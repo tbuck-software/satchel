@@ -709,16 +709,11 @@ async function removeAccount(accountId: string, email: string) {
 .account-card {
   display: grid;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-color-muted);
   border-radius: var(--radius-md);
-  background: var(--bg-raised);
-  --swatch-ring: var(--bg-raised);
-  transition: background var(--duration-fast) var(--ease-out);
-}
-
-.account-card:hover {
-  background: var(--bg-overlay);
-  --swatch-ring: var(--bg-overlay);
+  background: var(--bg-surface);
+  --swatch-ring: var(--bg-surface);
 }
 
 .account-card__head {

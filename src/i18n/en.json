@@ -2539,10 +2539,13 @@
       "receiptsLabel": "Request read receipt",
       "saved": "Saved.",
       "scopeAll": "All new mail",
+      "scopeAllShort": "All mail",
       "scopeHint": "Which new mail triggers a notice.",
       "scopeInbox": "Personal inbox only",
+      "scopeInboxShort": "Inbox only",
       "scopeLabel": "Scope",
       "seconds": "sec",
+      "secondsShort": "{n} s",
       "sendingDescription": "Safety net and confirmations for outgoing messages.",
       "sendingTitle": "Sending",
       "soundHint": "Play a sound on a new notice.",
@@ -2551,7 +2554,8 @@
       "trashHint": "With 0 days the content is kept.",
       "trashLabel": "Empty trash automatically",
       "undoHint": "Time to undo before a message really goes out.",
-      "undoLabel": "Delay sending"
+      "undoLabel": "Delay sending",
+      "undoOff": "Off"
     },
     "overview": {
       "subtitle": "What would you like to change?"

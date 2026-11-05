@@ -101,9 +101,15 @@ watch(
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  padding-top: var(--space-sm);
+  /* The list runs on below the fold: fade its foot rather than slice a row. */
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--space-2xl)), transparent);
   border-right: 1px solid var(--border-color-muted);
   background: var(--bg-sidebar);
+}
+
+/* The pinned title lines up with the section title across the dialog. */
+.settings-dialog__nav :deep(.settings-sidebar__head) {
+  padding-top: calc(18px + var(--space-sm));
 }
 
 .settings-dialog__main {

@@ -90,19 +90,21 @@ function isHighlighted(section: SettingsSection): boolean {
 
 <template>
   <nav ref="root" class="settings-sidebar" :aria-label="$t('common.settings')">
-    <h2>{{ $t('common.settings') }}</h2>
-    <div class="settings-filter">
-      <SearchInput
-        ref="filterInput"
-        v-model="query"
-        data-settings-filter
-        :placeholder="$t('settings.search.placeholder')"
-        :label="$t('settings.search.label')"
-        aria-keyshortcuts="/"
-        @keydown="onFilterKeydown"
-      >
-        <template #trailing><kbd v-if="!query" aria-hidden="true">/</kbd></template>
-      </SearchInput>
+    <div class="settings-sidebar__head">
+      <h2>{{ $t('common.settings') }}</h2>
+      <div class="settings-filter">
+        <SearchInput
+          ref="filterInput"
+          v-model="query"
+          data-settings-filter
+          :placeholder="$t('settings.search.placeholder')"
+          :label="$t('settings.search.label')"
+          aria-keyshortcuts="/"
+          @keydown="onFilterKeydown"
+        >
+          <template #trailing><kbd v-if="!query" aria-hidden="true">/</kbd></template>
+        </SearchInput>
+      </div>
     </div>
     <template v-for="group in shownGroups" :key="group.title">
       <h3>{{ group.title }}</h3>
@@ -129,6 +131,17 @@ function isHighlighted(section: SettingsSection): boolean {
 </template>
 
 <style scoped>
+/* Title and filter stay put while the list scrolls: opened on About, the
+   list scrolled them away to show the current row. */
+.settings-sidebar__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -18px -10px 0;
+  padding: 18px 10px 6px;
+  background: var(--bg-sidebar);
+}
+
 .settings-sidebar {
   display: flex;
   flex-direction: column;
@@ -163,6 +176,9 @@ ul {
 }
 
 .highlighted { background: var(--bg-hover); }
+
+/* Scrolled into view below the pinned head, not under it. */
+li { scroll-margin-top: 120px; }
 
 .settings-sidebar__copy {
   display: grid;

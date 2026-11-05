@@ -387,6 +387,20 @@ onBeforeUnmount(() => unregisterFilter?.());
   color-scheme: light;
 }
 
+/* Phones scroll with overlay indicators. A classic bar (or the gutter kept
+   for one) pushed scrolling pages further in than short ones, and only on
+   the right. */
+@media (max-width: 767px) and (pointer: coarse) {
+  .settings-view__scroll {
+    scrollbar-gutter: auto;
+    scrollbar-width: none;
+  }
+
+  .settings-view__scroll::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @media (max-width: 700px) {
   .settings-view__content {
     padding: var(--space-xl) var(--space-lg) var(--space-2xl);

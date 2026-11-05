@@ -1,8 +1,12 @@
+/* One grouped-list surface for every section: a sheet on the pane with a
+   hairline, as General had alone. Grey slabs on some pages and white sheets
+   on others made each section look like a different app. */
 .setting-group {
   display: grid;
   overflow: hidden;
+  border: 1px solid var(--border-color-muted);
   border-radius: var(--radius-md);
-  background: var(--bg-raised);
+  background: var(--bg-surface);
 }
 
 .setting-row {

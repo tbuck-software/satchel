@@ -30,7 +30,7 @@ function setAttachmentOpenBehavior(value: string) {
     <div class="setting-groups">
       <section class="setting-cluster">
         <SectionHeading :label="$t('settings.theme.groupInterface')" />
-        <div class="setting-group setting-group--general">
+        <div class="setting-group">
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">{{ $t('settings.theme.appearance') }}</span>
@@ -64,7 +64,7 @@ function setAttachmentOpenBehavior(value: string) {
 
       <section class="setting-cluster">
         <SectionHeading :label="$t('settings.theme.groupMail')" />
-        <div class="setting-group setting-group--general">
+        <div class="setting-group">
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">{{ $t('settings.theme.attachmentOpen') }}</span>
@@ -149,14 +149,6 @@ function setAttachmentOpenBehavior(value: string) {
   gap: var(--space-sm);
 }
 
-/* General's cards are sheets on the pane rather than grey slabs. Scoped to
-   this editor, so the other settings sections keep the shared raised card;
-   the doubled class outranks settingsRows.css, which loads after this block. */
-.setting-group.setting-group--general {
-  border: 1px solid var(--border-color-muted);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-}
 </style>
 
 <style scoped src="./settingsRows.css"></style>

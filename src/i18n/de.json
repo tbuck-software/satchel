@@ -2539,10 +2539,13 @@
       "receiptsLabel": "Lesebestätigung anfordern",
       "saved": "Gespeichert.",
       "scopeAll": "Alle neuen Mails",
+      "scopeAllShort": "Alle Mails",
       "scopeHint": "Welche neuen Mails einen Hinweis auslösen.",
       "scopeInbox": "Nur persönliche Inbox",
+      "scopeInboxShort": "Nur Posteingang",
       "scopeLabel": "Umfang",
       "seconds": "Sek.",
+      "secondsShort": "{n} s",
       "sendingDescription": "Sicherheitsnetz und Bestätigungen für ausgehende Nachrichten.",
       "sendingTitle": "Senden",
       "soundHint": "Bei einem neuen Hinweis einen Ton abspielen.",
@@ -2551,7 +2554,8 @@
       "trashHint": "Mit 0 Tagen bleibt der Inhalt erhalten.",
       "trashLabel": "Papierkorb automatisch leeren",
       "undoHint": "Zeit zum Rückgängigmachen vor dem tatsächlichen Versand.",
-      "undoLabel": "Versand verzögern"
+      "undoLabel": "Versand verzögern",
+      "undoOff": "Aus"
     },
     "overview": {
       "subtitle": "Was möchtest du anpassen?"
