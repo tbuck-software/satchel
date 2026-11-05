@@ -46,10 +46,6 @@ export const router = createRouter({
   ],
 });
 
-const firstQueryValue = (value: unknown): string | undefined => {
-  const first = Array.isArray(value) ? value[0] : value;
-  return typeof first === 'string' ? first : undefined;
-};
 
 // With room for both panes, Settings is a dialog over the mail the user came
 // from, not a page that replaces it: every `/settings` link opens the dialog
@@ -59,6 +55,8 @@ router.beforeEach((to, from) => {
   if (to.name !== 'settings') return true;
   const ui = useUiStore();
   if (ui.isSinglePane) return true;
-  ui.openSettings(firstQueryValue(to.query.section), firstQueryValue(to.query.account));
+  const { section, account } = to.query;
+  // The settings view resolves the section (and ignores an account) that is not a plain string.
+  ui.openSettings(section as string | undefined, account as string | undefined);
   return from.matched.length > 0 ? false : { name: 'inbox', replace: true };
 });
