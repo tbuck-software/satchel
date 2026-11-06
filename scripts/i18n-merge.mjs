@@ -40,6 +40,7 @@ const NATIVE_UI_FIELDS = {
   notification_send_failed: 'nativeUi.notifications.sendFailed',
   notification_sync_failed: 'nativeUi.notifications.syncFailed',
   notification_follow_up_due: 'nativeUi.notifications.followUpDue',
+  notification_task_due: 'nativeUi.notifications.taskDue',
   notification_no_subject: 'nativeUi.notifications.noSubject',
   notification_channel_name: 'nativeUi.notifications.channelName',
   notification_channel_description: 'nativeUi.notifications.channelDescription',

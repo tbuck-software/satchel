@@ -110,6 +110,7 @@ function useNativeUiStrings(): void {
       notification_send_failed: t('nativeUi.notifications.sendFailed'),
       notification_sync_failed: t('nativeUi.notifications.syncFailed'),
       notification_follow_up_due: t('nativeUi.notifications.followUpDue'),
+      notification_task_due: t('nativeUi.notifications.taskDue'),
       notification_no_subject: t('nativeUi.notifications.noSubject'),
       notification_channel_name: t('nativeUi.notifications.channelName'),
       notification_channel_description: t('nativeUi.notifications.channelDescription'),

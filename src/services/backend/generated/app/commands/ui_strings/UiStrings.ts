@@ -22,6 +22,7 @@ export type UiStrings = {
     notification_send_failed: string;
     notification_sync_failed: string;
     notification_follow_up_due: string;
+    notification_task_due: string;
     notification_no_subject: string;
     notification_channel_name: string;
     notification_channel_description: string;

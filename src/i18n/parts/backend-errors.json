@@ -293,7 +293,19 @@
         "senderSweepRuleNotFound": "This rule no longer exists.",
         "senderSweepPersistenceFailed": "The cleanup rule could not be saved.",
         "senderSweepOwnAddress": "You cannot clean up your own address.",
-        "senderSweepTrashNeedsAge": "A rule that moves mail to Trash needs an age of at least one day."
+        "senderSweepTrashNeedsAge": "A rule that moves mail to Trash needs an age of at least one day.",
+        "groupwareTaskSyncFailed": "Tasks for {account} could not be synchronized.",
+        "taskTitleRequired": "A task needs a title.",
+        "taskDueInvalid": "The due date could not be read.",
+        "taskReminderInvalid": "The reminder time could not be read.",
+        "taskPriorityInvalid": "The priority is not one Satchel knows.",
+        "taskNotFound": "This task no longer exists.",
+        "taskListNotFound": "This task list no longer exists.",
+        "taskListReadOnly": "This task list is read-only.",
+        "taskListNotLocal": "Lists from an account are renamed and deleted on its server.",
+        "taskListNameRequired": "A list needs a name.",
+        "taskChanged": "This task changed in the meantime. Open it again to see the current version.",
+        "taskPersistenceFailed": "The task could not be saved."
       }
     }
   },
@@ -591,7 +603,19 @@
         "senderSweepRuleNotFound": "Diese Regel gibt es nicht mehr.",
         "senderSweepPersistenceFailed": "Die Aufräum-Regel konnte nicht gespeichert werden.",
         "senderSweepOwnAddress": "Die eigene Adresse lässt sich nicht aufräumen.",
-        "senderSweepTrashNeedsAge": "Eine Regel, die Mails in den Papierkorb verschiebt, braucht ein Alter von mindestens einem Tag."
+        "senderSweepTrashNeedsAge": "Eine Regel, die Mails in den Papierkorb verschiebt, braucht ein Alter von mindestens einem Tag.",
+        "groupwareTaskSyncFailed": "Aufgaben für {account} konnten nicht synchronisiert werden.",
+        "taskTitleRequired": "Eine Aufgabe braucht einen Titel.",
+        "taskDueInvalid": "Das Fälligkeitsdatum ist nicht lesbar.",
+        "taskReminderInvalid": "Die Erinnerungszeit ist nicht lesbar.",
+        "taskPriorityInvalid": "Diese Priorität kennt Satchel nicht.",
+        "taskNotFound": "Diese Aufgabe gibt es nicht mehr.",
+        "taskListNotFound": "Diese Aufgabenliste gibt es nicht mehr.",
+        "taskListReadOnly": "Diese Aufgabenliste ist schreibgeschützt.",
+        "taskListNotLocal": "Listen eines Kontos werden auf dessen Server umbenannt und gelöscht.",
+        "taskListNameRequired": "Eine Liste braucht einen Namen.",
+        "taskChanged": "Diese Aufgabe wurde inzwischen geändert. Öffne sie erneut, um den aktuellen Stand zu sehen.",
+        "taskPersistenceFailed": "Die Aufgabe konnte nicht gespeichert werden."
       }
     }
   }

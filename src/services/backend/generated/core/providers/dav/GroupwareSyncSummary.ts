@@ -5,5 +5,7 @@ export type GroupwareSyncSummary = {
     events_synced: number;
     address_books_found: number;
     contacts_synced: number;
+    task_lists_found: number;
+    tasks_synced: number;
     errors: Array<string>;
 };

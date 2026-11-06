@@ -8,22 +8,23 @@ import { scrollListToTop } from '@/composables/listScrollTop';
 import { useUiStore } from '@/stores/ui';
 
 /**
- * The phone's four areas, always under the thumb.
+ * The phone's five areas, always under the thumb.
  *
  * They used to sit at the foot of the drawer, which put the app switcher one
  * level below the mailbox it was switching away from. Mail is every screen
- * that is not one of the other three, as the drawer had it.
+ * that is not one of the other four, as the drawer had it.
  */
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const ui = useUiStore();
 
-const AREAS = ['calendar', 'contacts', 'settings'] as const;
+const AREAS = ['calendar', 'tasks', 'contacts', 'settings'] as const;
 
 const items = computed(() => [
   { id: 'mail', label: t('nav.mail') },
   { id: 'calendar', label: t('nav.calendar') },
+  { id: 'tasks', label: t('nav.tasks') },
   { id: 'contacts', label: t('nav.contacts') },
   { id: 'settings', label: t('common.settings') },
 ]);
@@ -65,6 +66,7 @@ function reselect(id: string) {
     <template #icon="{ item }">
       <AppIcon v-if="item.id === 'mail'" size="lg"><rect x="2" y="3.5" width="12" height="9" rx="1.5" /><path d="m2.5 4.5 5.5 4 5.5-4" /></AppIcon>
       <AppIcon v-else-if="item.id === 'calendar'" size="lg"><rect x="2" y="3" width="12" height="11" rx="2" /><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" /></AppIcon>
+      <AppIcon v-else-if="item.id === 'tasks'" size="lg"><path d="M8 2.5a5.5 5.5 0 1 1 0 11a5.5 5.5 0 1 1 0-11Z" /><path d="M5.5 8.2l1.8 1.8L10.7 6.4" /></AppIcon>
       <AppIcon v-else-if="item.id === 'contacts'" size="lg"><circle cx="6" cy="5.5" r="2.5" /><path d="M1.5 13.5c0-2.2 2-4 4.5-4s4.5 1.8 4.5 4M10.5 3.2a2.5 2.5 0 0 1 0 4.6M11.5 9.7c1.7.5 3 2 3 3.8" /></AppIcon>
       <!-- The cog the desktop sidebar uses (Lucide `settings`); the rayed
            circle it replaced read as a sun. -->

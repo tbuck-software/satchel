@@ -12,6 +12,7 @@ import { useMessageLinks } from './useMessageLinks';
 import { useUndo } from './useUndo';
 import { activeThreadReaderCommands } from './useThreadReaderCommands';
 import { useSenderSweep } from './useSenderSweep';
+import { useTaskEditor } from './useTaskEditor';
 import { focusSettingsFilter } from './settingsFilterFocus';
 import { focusListSearch } from './listSearchFocus';
 import { t } from '@/i18n/runtime';
@@ -81,6 +82,7 @@ export function useKeyboard() {
   const messageLinks = useMessageLinks();
   const undo = useUndo();
   const senderSweep = useSenderSweep();
+  const taskEditor = useTaskEditor();
   let pendingSequence = '';
   let sequenceTimer: number | null = null;
   // Read once per keystroke; every binding below is judged against it.
@@ -509,6 +511,12 @@ export function useKeyboard() {
 
     if (matches(event, 'translateMessage')) {
       return activeThreadReaderCommands()?.toggleTranslation() ?? false;
+    }
+
+    if (matches(event, 'createTask')) {
+      const id = currentThreadId();
+      if (!id) return false;
+      return taskEditor.openForThread(id, threads.find(id)?.subject);
     }
 
     if (matches(event, 'print')) {

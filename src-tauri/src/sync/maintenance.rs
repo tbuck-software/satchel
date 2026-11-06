@@ -279,6 +279,34 @@ pub fn spawn_followup_worker(pool: SqlitePool, app: AppHandle) {
     });
 }
 
+/// Task reminders, through the same notification path as follow-ups.
+pub fn spawn_task_reminder_worker(pool: SqlitePool, app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+            match satchel_core::tasks::TaskRepository::new(&pool)
+                .claim_due_reminders(&now)
+                .await
+            {
+                Ok(items) if !items.is_empty() => {
+                    let strings = crate::commands::ui_strings::current();
+                    for item in items {
+                        crate::commands::notifications::show_notification(
+                            &app,
+                            &strings.notification_task_due,
+                            &item.title,
+                        );
+                    }
+                }
+                Ok(_) => {}
+                Err(err) => warn!(target: "satchel::maintenance", "task reminders failed: {err}"),
+            }
+        }
+    });
+}
+
 pub fn spawn_webhook_worker(pool: SqlitePool) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(15));

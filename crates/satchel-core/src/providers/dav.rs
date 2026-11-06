@@ -29,6 +29,9 @@ const CARDDAV_LISTING_PROPFIND: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 const MAX_MULTIGET_HREFS: usize = 150;
 const GROUPWARE_CALENDAR_SYNC_ERROR_KEY: &str = "backend.errors.groupwareCalendarSyncFailed";
 const GROUPWARE_CONTACT_SYNC_ERROR_KEY: &str = "backend.errors.groupwareContactSyncFailed";
+const GROUPWARE_TASK_SYNC_ERROR_KEY: &str = "backend.errors.groupwareTaskSyncFailed";
+
+pub mod tasks;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
@@ -54,6 +57,8 @@ pub struct GroupwareSyncSummary {
     pub events_synced: usize,
     pub address_books_found: usize,
     pub contacts_synced: usize,
+    pub task_lists_found: usize,
+    pub tasks_synced: usize,
     pub errors: Vec<String>,
 }
 
@@ -130,6 +135,27 @@ impl DavKind {
 #[derive(Debug, Clone)]
 struct DavCollection {
     href: Url,
+    name: Option<String>,
+    color: Option<String>,
+    /// `supported-calendar-component-set`; None when the server does not say,
+    /// which RFC 4791 §5.2.3 reads as "any component".
+    components: Option<Vec<String>>,
+}
+
+impl DavCollection {
+    fn supports(&self, component: &str) -> bool {
+        self.components
+            .as_ref()
+            .is_none_or(|components| components.iter().any(|value| value == component))
+    }
+
+    /// VTODO only when the server says so: a server that does not advertise
+    /// components would otherwise turn every calendar into a task list.
+    fn advertises(&self, component: &str) -> bool {
+        self.components
+            .as_ref()
+            .is_some_and(|components| components.iter().any(|value| value == component))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -152,7 +178,15 @@ pub async fn sync_groupware_account(
     };
 
     if let Some(config) = snapshot.caldav.as_ref() {
-        match sync_caldav(pool, &client, account_id, config).await {
+        // One discovery serves events and tasks.
+        let discovered = discover_collections(&client, config, DavKind::Calendar).await;
+        let events = match &discovered {
+            Ok(collections) => {
+                sync_caldav_events(pool, &client, account_id, config, collections).await
+            }
+            Err(error) => Err(error.clone()),
+        };
+        match events {
             Ok((collections, events)) => {
                 summary.calendars_found += collections;
                 summary.events_synced += events;
@@ -163,6 +197,31 @@ pub async fn sync_groupware_account(
                 summary
                     .errors
                     .push(groupware_sync_error(DavKind::Calendar, &account));
+            }
+        }
+        // A failed discovery was reported once, as the calendar's.
+        if let Ok(collections) = discovered {
+            let remote = tasks::CalDavTaskRemote::with_collections(
+                client.clone(),
+                config.clone(),
+                collections,
+            );
+            match crate::tasks::sync::sync_account(pool, account_id, &remote).await {
+                Ok(tasks) => {
+                    summary.task_lists_found += tasks.lists;
+                    summary.tasks_synced += tasks.pulled + tasks.pushed;
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, account_id, "CalDAV task synchronization failed");
+                    let account = account_label(pool, account_id).await;
+                    summary.errors.push(
+                        serde_json::json!({
+                            "key": GROUPWARE_TASK_SYNC_ERROR_KEY,
+                            "params": { "account": account },
+                        })
+                        .to_string(),
+                    );
+                }
             }
         }
     }
@@ -190,6 +249,8 @@ impl GroupwareSyncSummary {
         self.events_synced += other.events_synced;
         self.address_books_found += other.address_books_found;
         self.contacts_synced += other.contacts_synced;
+        self.task_lists_found += other.task_lists_found;
+        self.tasks_synced += other.tasks_synced;
         self.errors.extend(other.errors);
     }
 }
@@ -291,8 +352,8 @@ async fn discover_collections(
     };
 
     let list_body = r#"<?xml version="1.0" encoding="utf-8"?>
-<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="urn:ietf:params:xml:ns:carddav">
-  <d:prop><d:resourcetype/><d:displayname/></d:prop>
+<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="urn:ietf:params:xml:ns:carddav" xmlns:x="http://apple.com/ns/ical/">
+  <d:prop><d:resourcetype/><d:displayname/><c:supported-calendar-component-set/><x:calendar-color/></d:prop>
 </d:propfind>"#;
     let xml = dav_xml_request(
         client,
@@ -316,7 +377,22 @@ async fn discover_collections(
             continue;
         };
         let href = resolve_dav_href(&server, &href)?;
-        collections.push(DavCollection { href });
+        let components = xml_elements(&response, "supported-calendar-component-set")
+            .into_iter()
+            .next()
+            .map(|set| {
+                xml_attribute_values(&set, "comp", "name")
+                    .into_iter()
+                    .map(|name| name.to_ascii_uppercase())
+                    .collect::<Vec<_>>()
+            })
+            .filter(|components| !components.is_empty());
+        collections.push(DavCollection {
+            href,
+            name: xml_text(&response, "displayname").filter(|name| !name.trim().is_empty()),
+            color: xml_text(&response, "calendar-color").and_then(|color| normalize_color(&color)),
+            components,
+        });
     }
 
     if collections.is_empty() {
@@ -329,18 +405,22 @@ async fn discover_collections(
     Ok(collections)
 }
 
-async fn sync_caldav(
+async fn sync_caldav_events(
     pool: &SqlitePool,
     client: &reqwest::Client,
     account_id: &str,
     config: &DavConfig,
+    collections: &[DavCollection],
 ) -> Result<(usize, usize), String> {
-    let collections = discover_collections(client, config, DavKind::Calendar).await?;
+    let collections = collections
+        .iter()
+        .filter(|collection| collection.supports("VEVENT"))
+        .collect::<Vec<_>>();
     let mut synced = 0;
     let start = (chrono::Utc::now() - chrono::Duration::days(365)).format("%Y%m%dT%H%M%SZ");
     let end = (chrono::Utc::now() + chrono::Duration::days(730)).format("%Y%m%dT%H%M%SZ");
 
-    for collection in &collections {
+    for collection in collections.iter().copied() {
         let body = format!(
             r#"<?xml version="1.0" encoding="utf-8"?>
 <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
@@ -566,9 +646,11 @@ pub async fn put_calendar_event(
         (url, collection.to_string())
     } else {
         let collections = discover_collections(&client, &config, DavKind::Calendar).await?;
+        // A VTODO-only collection (iCloud Reminders, a Nextcloud task list)
+        // refuses events.
         let collection = collections
             .into_iter()
-            .next()
+            .find(|collection| collection.supports("VEVENT"))
             .ok_or_else(|| "no writable CalDAV calendar found".to_string())?;
         let filename = format!("{}.ics", sanitize_path_component(uid));
         let url = collection
@@ -578,14 +660,63 @@ pub async fn put_calendar_event(
         (url, collection.href.to_string())
     };
 
+    let etag = dav_put(
+        &client,
+        &config,
+        &url,
+        raw_ics,
+        existing_href.is_none(),
+        existing_etag,
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    Ok(Some(RemoteCalendarWrite {
+        href: url.to_string(),
+        etag,
+        collection_href,
+    }))
+}
+
+/// Why a DAV write was refused, as far as the caller can act on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DavWriteError {
+    /// 412: the ETag (or `If-None-Match: *`) precondition failed.
+    PreconditionFailed,
+    /// 404/410: the resource is gone.
+    NotFound,
+    Other(String),
+}
+
+impl std::fmt::Display for DavWriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PreconditionFailed => f.write_str("DAV precondition failed"),
+            Self::NotFound => f.write_str("DAV resource not found"),
+            Self::Other(detail) => f.write_str(detail),
+        }
+    }
+}
+
+/// PUT one iCalendar resource. A creation sends `If-None-Match: *`, a
+/// replacement `If-Match` with the ETag it was edited against.
+async fn dav_put(
+    client: &reqwest::Client,
+    config: &DavConfig,
+    url: &Url,
+    raw_ics: &str,
+    create: bool,
+    etag: Option<&str>,
+) -> Result<Option<String>, DavWriteError> {
+    let server = Url::parse(&config.server).map_err(|err| DavWriteError::Other(err.to_string()))?;
+    ensure_same_origin(&server, url).map_err(DavWriteError::Other)?;
     let mut request = client
         .request(Method::PUT, url.clone())
         .basic_auth(&config.username, Some(&config.password))
         .header(header::CONTENT_TYPE, "text/calendar; charset=utf-8")
         .body(as_caldav_resource(raw_ics));
-    request = if let Some(etag) = existing_etag.filter(|value| !value.trim().is_empty()) {
+    request = if let Some(etag) = etag.filter(|value| !value.trim().is_empty()) {
         request.header(header::IF_MATCH, etag)
-    } else if existing_href.is_none() {
+    } else if create {
         request.header(header::IF_NONE_MATCH, "*")
     } else {
         request
@@ -593,20 +724,51 @@ pub async fn put_calendar_event(
     let response = request
         .send()
         .await
-        .map_err(|err| format!("CalDAV write failed: {err}"))?;
-    if !response.status().is_success() {
-        return Err(dav_status_error("CalDAV write", response).await);
+        .map_err(|err| DavWriteError::Other(format!("CalDAV write failed: {err}")))?;
+    match response.status() {
+        StatusCode::PRECONDITION_FAILED => return Err(DavWriteError::PreconditionFailed),
+        StatusCode::NOT_FOUND | StatusCode::GONE if !create => return Err(DavWriteError::NotFound),
+        status if !status.is_success() => {
+            return Err(DavWriteError::Other(
+                dav_status_error("CalDAV write", response).await,
+            ))
+        }
+        _ => {}
     }
-    let etag = response
+    Ok(response
         .headers()
         .get(header::ETAG)
         .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    Ok(Some(RemoteCalendarWrite {
-        href: url.to_string(),
-        etag,
-        collection_href,
-    }))
+        .map(str::to_string))
+}
+
+/// DELETE one resource with its ETag as precondition. Gone counts as done.
+async fn dav_delete(
+    client: &reqwest::Client,
+    config: &DavConfig,
+    url: &Url,
+    etag: Option<&str>,
+) -> Result<(), DavWriteError> {
+    let server = Url::parse(&config.server).map_err(|err| DavWriteError::Other(err.to_string()))?;
+    ensure_same_origin(&server, url).map_err(DavWriteError::Other)?;
+    let mut request = client
+        .request(Method::DELETE, url.clone())
+        .basic_auth(&config.username, Some(&config.password));
+    if let Some(etag) = etag.filter(|value| !value.trim().is_empty()) {
+        request = request.header(header::IF_MATCH, etag);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|err| DavWriteError::Other(format!("CalDAV delete failed: {err}")))?;
+    match response.status() {
+        StatusCode::PRECONDITION_FAILED => Err(DavWriteError::PreconditionFailed),
+        StatusCode::NOT_FOUND | StatusCode::GONE => Ok(()),
+        status if status.is_success() => Ok(()),
+        _ => Err(DavWriteError::Other(
+            dav_status_error("CalDAV delete", response).await,
+        )),
+    }
 }
 
 pub async fn delete_calendar_event_remote(
@@ -717,6 +879,53 @@ fn xml_text(xml: &str, local_name: &str) -> Option<String> {
 
 fn xml_has_element(xml: &str, local_name: &str) -> bool {
     !xml_elements(xml, local_name).is_empty()
+}
+
+/// The values of `attribute` on every `local_name` tag, e.g. the `name` of
+/// each `<c:comp name="VTODO"/>`.
+fn xml_attribute_values(xml: &str, local_name: &str, attribute: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut offset = 0;
+    while let Some(open_rel) = xml[offset..].find('<') {
+        let open = offset + open_rel;
+        let Some(end_rel) = xml[open..].find('>') else {
+            break;
+        };
+        let end = open + end_rel;
+        offset = end + 1;
+        let raw = xml[open + 1..end].trim().trim_end_matches('/');
+        let mut parts = raw.splitn(2, char::is_whitespace);
+        let qualified = parts.next().unwrap_or("");
+        if qualified.rsplit(':').next() != Some(local_name) {
+            continue;
+        }
+        let rest = parts.next().unwrap_or("");
+        let mut cursor = rest;
+        while let Some(eq) = cursor.find('=') {
+            let name = cursor[..eq].trim();
+            let after = cursor[eq + 1..].trim_start();
+            let Some(quote) = after.chars().next().filter(|ch| *ch == '"' || *ch == '\'') else {
+                break;
+            };
+            let Some(close) = after[1..].find(quote) else {
+                break;
+            };
+            if name.rsplit(':').next() == Some(attribute) {
+                out.push(xml_unescape(&after[1..1 + close]));
+            }
+            cursor = &after[close + 2..];
+        }
+    }
+    out
+}
+
+/// `#RRGGBB` from Apple's `calendar-color`, which may carry an alpha byte.
+fn normalize_color(value: &str) -> Option<String> {
+    let hex = value.trim().strip_prefix('#')?;
+    if !(hex.len() == 6 || hex.len() == 8) || !hex.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("#{}", hex[..6].to_ascii_lowercase()))
 }
 
 fn xml_elements(xml: &str, local_name: &str) -> Vec<String> {
@@ -961,6 +1170,23 @@ mod tests {
         assert!(body.contains("<d:href>/book/a%20b.vcf</d:href>"));
         assert!(body.contains("&amp;"));
         assert!(!body.contains("c&d"));
+    }
+
+    #[test]
+    fn reads_component_sets_and_colors() {
+        let xml = r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+          <d:response><d:href>/cal/todo/</d:href><d:propstat><d:prop>
+            <c:supported-calendar-component-set><c:comp name="VTODO"/><c:comp name='vevent' /></c:supported-calendar-component-set>
+          </d:prop></d:propstat><d:propstat><d:prop><c:supported-calendar-component-set/></d:prop>
+          <d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response>
+        </d:multistatus>"#;
+        let set = xml_elements(xml, "supported-calendar-component-set").remove(0);
+        assert_eq!(
+            xml_attribute_values(&set, "comp", "name"),
+            ["VTODO", "vevent"]
+        );
+        assert_eq!(normalize_color("#FF8800CC").as_deref(), Some("#ff8800"));
+        assert_eq!(normalize_color("blue"), None);
     }
 
     #[test]

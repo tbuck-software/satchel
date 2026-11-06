@@ -352,6 +352,29 @@ export default {
                 }
             }
         },
+        "create_task": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::tasks::CreateTaskInput"
+                    }
+                }
+            }
+        },
+        "create_task_list": {
+            "kind": "object",
+            "fields": {
+                "name": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "credentials_status": {
             "kind": "object",
             "fields": {}
@@ -508,6 +531,28 @@ export default {
             "kind": "object",
             "fields": {
                 "ruleId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "delete_task": {
+            "kind": "object",
+            "fields": {
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "delete_task_list": {
+            "kind": "object",
+            "fields": {
+                "id": {
                     "required": true,
                     "shape": {
                         "kind": "value"
@@ -1336,6 +1381,24 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "list_task_lists": {
+            "kind": "object",
+            "fields": {}
+        },
+        "list_tasks": {
+            "kind": "object",
+            "fields": {
+                "includeCompleted": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
         "list_templates": {
             "kind": "object",
             "fields": {
@@ -1776,6 +1839,23 @@ export default {
                 }
             }
         },
+        "rename_task_list": {
+            "kind": "object",
+            "fields": {
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "name": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "render_template": {
             "kind": "object",
             "fields": {
@@ -1836,6 +1916,17 @@ export default {
                     }
                 },
                 "path": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "restore_task": {
+            "kind": "object",
+            "fields": {
+                "id": {
                     "required": true,
                     "shape": {
                         "kind": "value"
@@ -2215,6 +2306,23 @@ export default {
                 }
             }
         },
+        "set_task_completed": {
+            "kind": "object",
+            "fields": {
+                "completed": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "set_thread_category": {
             "kind": "object",
             "fields": {
@@ -2421,6 +2529,20 @@ export default {
             "fields": {}
         },
         "sync_outlook_calendar": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "sync_tasks": {
             "kind": "object",
             "fields": {
                 "accountId": {
@@ -2664,6 +2786,18 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "update_task": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::tasks::UpdateTaskInput"
                     }
                 }
             }
@@ -4631,6 +4765,113 @@ export default {
                 }
             }
         },
+        "app::commands::tasks::CreateTaskInput": {
+            "kind": "object",
+            "fields": {
+                "fields": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::tasks::TaskFieldsInput"
+                    }
+                },
+                "list_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "thread_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "app::commands::tasks::TaskFieldsInput": {
+            "kind": "object",
+            "fields": {
+                "completed_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "due_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "notes": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "priority": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "reminder_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "title": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::tasks::UpdateTaskInput": {
+            "kind": "object",
+            "fields": {
+                "expected_updated_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "fields": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::tasks::TaskFieldsInput"
+                    }
+                },
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "app::commands::templates::RenderTemplateInput": {
             "kind": "object",
             "fields": {
@@ -5525,6 +5766,12 @@ export default {
                     }
                 },
                 "notification_syncing": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "notification_task_due": {
                     "required": false,
                     "shape": {
                         "kind": "value"

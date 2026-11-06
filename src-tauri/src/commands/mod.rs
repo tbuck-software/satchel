@@ -56,6 +56,7 @@ pub mod smime;
 pub mod sources;
 pub mod star;
 pub mod sync;
+pub mod tasks;
 pub mod templates;
 pub mod thread_actions;
 pub mod threads;

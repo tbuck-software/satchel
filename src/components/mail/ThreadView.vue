@@ -17,6 +17,7 @@ import { useThreadReply } from '@/composables/useThreadReply';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { useSenderSweep } from '@/composables/useSenderSweep';
 import { messageCanTranslate, toggleMessageTranslation } from '@/composables/useMessageTranslation';
+import { useTaskEditor } from '@/composables/useTaskEditor';
 import { useMessageLinks } from '@/composables/useMessageLinks';
 import { useAttachmentActions } from '@/composables/useAttachmentActions';
 import { perfStart } from '@/utils/perf';
@@ -806,6 +807,11 @@ async function blockSender(scope: 'address' | 'domain' = 'address') {
 }
 
 const senderSweep = useSenderSweep();
+const taskEditor = useTaskEditor();
+
+function addTask() {
+  if (thread.value) taskEditor.openForThread(thread.value.id, thread.value.subject);
+}
 
 /**
  * A sweep files whole threads, so it is about whoever started this one: the
@@ -1057,6 +1063,7 @@ function showEntireThread() {
         @not-spam="markNotSpam"
         @block="blockSender"
         @sweep="sweepSender"
+        @add-task="addTask"
         @print="printThread"
         :attachment-count="downloadableAttachments.length"
         :reader-zoom="settings.readerZoom"

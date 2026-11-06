@@ -410,7 +410,7 @@ fn parse_event_times(raw_ics: &str) -> (Option<String>, Option<String>, bool) {
 ///
 /// Ignoring TZID shifted appointments by the zone's offset (one or two hours
 /// for most European senders), which is worse than showing nothing.
-fn normalize_ics_dt(value: &str, tzid: Option<&str>, all_day: bool) -> Option<String> {
+pub(crate) fn normalize_ics_dt(value: &str, tzid: Option<&str>, all_day: bool) -> Option<String> {
     use chrono::{NaiveDate, TimeZone};
 
     if all_day && value.len() == 8 {
@@ -512,7 +512,7 @@ fn normalize_tzid(tzid: &str) -> String {
     }
 }
 
-fn local_to_utc(naive: chrono::NaiveDateTime) -> Option<chrono::DateTime<chrono::Utc>> {
+pub(crate) fn local_to_utc(naive: chrono::NaiveDateTime) -> Option<chrono::DateTime<chrono::Utc>> {
     use chrono::TimeZone;
     chrono::Local
         .from_local_datetime(&naive)

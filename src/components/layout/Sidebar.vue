@@ -23,6 +23,7 @@ import SyncButton from './SyncButton.vue';
 // settings navigation into the Inbox bundle even though their v-if was false.
 const CalendarSidebar = defineAsyncComponent(() => import('@/components/calendar/CalendarSidebar.vue'));
 const ContactsSidebar = defineAsyncComponent(() => import('@/components/contacts/ContactsSidebar.vue'));
+const TasksSidebar = defineAsyncComponent(() => import('@/components/tasks/TasksSidebar.vue'));
 const SettingsSidebar = defineAsyncComponent(() => import('@/components/settings/SettingsSidebar.vue'));
 const FolderBrowserPanel = defineAsyncComponent(() => import('./FolderBrowserPanel.vue'));
 // Async so the calendar utilities stay out of the inbox bundle: the card is a
@@ -112,9 +113,11 @@ const updateLabel = computed(() => {
 
 const calendarModuleActive = computed(() => route.name === 'calendar');
 const contactsModuleActive = computed(() => route.name === 'contacts');
+const tasksModuleActive = computed(() => route.name === 'tasks');
 const settingsModuleActive = computed(() => route.name === 'settings');
 const contextualSidebarActive = computed(
-  () => calendarModuleActive.value || contactsModuleActive.value || settingsModuleActive.value,
+  () => calendarModuleActive.value || contactsModuleActive.value || tasksModuleActive.value
+    || settingsModuleActive.value,
 );
 
 // Reading the contact projection unguarded would rebuild it on every thread
@@ -185,6 +188,7 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
       <SettingsSidebar v-if="settingsModuleActive" />
       <CalendarSidebar v-else-if="calendarModuleActive" />
       <ContactsSidebar v-else-if="contactsModuleActive" />
+      <TasksSidebar v-else-if="tasksModuleActive" />
       <template v-else>
       <SidebarMailNav @open-folders-panel="foldersPanelOpen = true" />
       <!-- Frequent contacts -->
@@ -270,6 +274,14 @@ function isHighlightedContact(contact: ContactThreadSummary): boolean {
             @click="goTo('contacts')"
           >
             <AppIcon><circle cx="6" cy="5.5" r="2.5" /><path d="M1.5 13.5c0-2.2 2-4 4.5-4s4.5 1.8 4.5 4M10.5 3.2a2.5 2.5 0 0 1 0 4.6M11.5 9.7c1.7.5 3 2 3 3.8" /></AppIcon>
+          </IconButton>
+          <IconButton
+            :title="$t('nav.tasks')"
+            :active="tasksModuleActive"
+            :aria-current="tasksModuleActive ? 'page' : undefined"
+            @click="goTo('tasks')"
+          >
+            <AppIcon><path d="M8 2.5a5.5 5.5 0 1 1 0 11a5.5 5.5 0 1 1 0-11Z" /><path d="M5.5 8.2l1.8 1.8L10.7 6.4" /></AppIcon>
           </IconButton>
         </nav>
         <IconButton

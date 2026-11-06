@@ -241,6 +241,7 @@
       "groupwareContactSyncFailed": "Contacts for {account} could not be synchronized.",
       "groupwareCredentialsRejected": "No CalDAV or CardDAV service accepted the saved credentials.",
       "groupwareSyncFailed": "Groupware for {account} could not be synchronized.",
+      "groupwareTaskSyncFailed": "Tasks for {account} could not be synchronized.",
       "imapConnectionFailed": "A secure IMAP connection could not be established. Last attempt: {reason}. You can enter the server manually under Advanced.",
       "imapCredentialsRejected": "No secure IMAP configuration accepted these credentials. Check the username or enter the server manually.",
       "imapDraftUidWithoutValidity": "This older draft in \"{folder}\" has no verified server identity. Its server copy was left untouched.",
@@ -422,6 +423,17 @@
       "snapshotMessagesHeld": "{count} messages in {folder} could not be updated from the server for {account} and stay where they are for now. Satchel tries again in a day.",
       "spamFilterUnavailable": "The spam filter settings could not be read or saved.",
       "systemFolderImmutable": "\"{name}\" is a system folder and cannot be changed.",
+      "taskChanged": "This task changed in the meantime. Open it again to see the current version.",
+      "taskDueInvalid": "The due date could not be read.",
+      "taskListNameRequired": "A list needs a name.",
+      "taskListNotFound": "This task list no longer exists.",
+      "taskListNotLocal": "Lists from an account are renamed and deleted on its server.",
+      "taskListReadOnly": "This task list is read-only.",
+      "taskNotFound": "This task no longer exists.",
+      "taskPersistenceFailed": "The task could not be saved.",
+      "taskPriorityInvalid": "The priority is not one Satchel knows.",
+      "taskReminderInvalid": "The reminder time could not be read.",
+      "taskTitleRequired": "A task needs a title.",
       "templateNotFound": "The template was not found.",
       "templatePersistenceFailed": "Templates are currently unavailable. Please try again.",
       "threadMetadataInvalid": "The thread organization details are invalid.",
@@ -715,6 +727,7 @@
     "unsubscribed": "Unsubscribed"
   },
   "commands": {
+    "addTask": "Add as task",
     "blockAddress": "Block this sender",
     "blockDomain": "Block the sender's whole domain",
     "compose": "Compose new email",
@@ -735,6 +748,7 @@
       "moveToFolder": "move folder file",
       "moveToInbox": "move inbox",
       "mute": "mute silence notifications",
+      "newTask": "task todo to-do add create",
       "notSpam": "not spam ham wanted inbox",
       "oauthGmail": "oauth google sign in login",
       "oauthOutlook": "oauth microsoft sign in login",
@@ -760,6 +774,7 @@
     "markUnread": "Mark as unread",
     "moveToFolder": "Move to {folder}",
     "moveToInbox": "Move to inbox",
+    "newTask": "New task",
     "noEmailAccount": "No email account set up.",
     "oauthFailed": "{provider} sign-in could not be started.",
     "oauthFailedCause": "{provider} sign-in could not be started: {cause}",
@@ -1720,6 +1735,7 @@
       "summary": "{count} new emails",
       "syncFailed": "Remote sync failed",
       "syncing": "Syncing content",
+      "taskDue": "Task due",
       "trash": "Delete"
     },
     "oauth": {
@@ -1748,6 +1764,7 @@
       "allDayCount": "{count} entries",
       "more": "+{count} more",
       "now": "Now",
+      "tasksDue": "{count} task due | {count} tasks due",
       "title": "Today"
     },
     "calendar": "Calendar",
@@ -1845,6 +1862,7 @@
       "tomorrow14": "Tomorrow 14:00",
       "tomorrow8": "Tomorrow 08:00"
     },
+    "tasks": "Tasks",
     "toggleSection": "Toggle {name}",
     "unpinContact": "Unpin contact",
     "unpinContactNamed": "Unpin {name}"
@@ -3513,6 +3531,10 @@
         "keywords": "link url share",
         "label": "Copy link to this email"
       },
+      "createTask": {
+        "keywords": "task todo to-do follow up remember reminder",
+        "label": "Add mail as task"
+      },
       "fileTo": {
         "keywords": "file move folder topic label",
         "label": "File in a folder or topic"
@@ -3738,8 +3760,97 @@
     "toggleRead": "Read / unread",
     "trash": "Delete"
   },
+  "tasks": {
+    "due": {
+      "today": "Today",
+      "tomorrow": "Tomorrow",
+      "yesterday": "Yesterday"
+    },
+    "editor": {
+      "completed": "Done",
+      "dueDate": "Due date",
+      "dueTime": "Time (optional)",
+      "editTitle": "Edit task",
+      "fromMail": "Made from a mail.",
+      "list": "List",
+      "newTitle": "New task",
+      "notes": "Notes",
+      "notesPlaceholder": "Details, links, next steps",
+      "priority": "Priority",
+      "remind": "Remind me",
+      "reminderAt": "Reminder",
+      "syncedHint": "This list syncs with your account's server. Changes made here reach it in the background.",
+      "title": "Title",
+      "titlePlaceholder": "What needs doing?"
+    },
+    "empty": {
+      "description": "Add a task above, or press T on a mail to turn it into one.",
+      "title": "Nothing to do"
+    },
+    "groups": {
+      "completed": "Completed",
+      "overdue": "Overdue",
+      "someday": "No date",
+      "today": "Today",
+      "upcoming": "Upcoming"
+    },
+    "hasReminder": "Reminder set",
+    "hideCompleted": "Hide completed tasks",
+    "keys": {
+      "add": "Add",
+      "complete": "Done / not done",
+      "delete": "Delete",
+      "edit": "Edit",
+      "move": "Move",
+      "title": "Keyboard"
+    },
+    "lists": {
+      "account": "Account",
+      "all": "All tasks",
+      "create": "Create list",
+      "defaultName": "My tasks",
+      "delete": "Delete list",
+      "deleteBody": "Its {count} task is deleted with it. | Its {count} tasks are deleted with it.",
+      "deleteTitle": "Delete “{list}”?",
+      "name": "Name",
+      "new": "New list…",
+      "newTitle": "New task list",
+      "onThisDevice": "On this device",
+      "rename": "Rename list",
+      "renameTitle": "Rename task list",
+      "title": "Task lists",
+      "withAccount": "{list} · {account}"
+    },
+    "loadFailed": "Could not load your tasks.",
+    "markDone": "Mark as done",
+    "markOpen": "Mark as not done",
+    "new": "New task",
+    "openMail": "Open mail",
+    "pending": "Not synced yet",
+    "priority": {
+      "high": "High",
+      "low": "Low",
+      "medium": "Medium",
+      "none": "None"
+    },
+    "quickAdd": {
+      "label": "Add a task",
+      "placeholder": "Add a task, e.g. “Call Anna tomorrow 15:00”",
+      "preview": "“{title}”, due {due}"
+    },
+    "showCompleted": "Show {count} completed task | Show {count} completed tasks",
+    "sync": "Sync tasks",
+    "title": "Tasks",
+    "toast": {
+      "completed": "Done: {title}",
+      "created": "Task added",
+      "createdFromMail": "Task added, linked to the mail",
+      "deleted": "Task deleted"
+    }
+  },
   "thread": {
     "actions": {
+      "addTask": "Add as task",
       "aside": "Aside",
       "blockSender": "Block sender",
       "fileTo": "File…",

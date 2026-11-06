@@ -191,6 +191,18 @@ const PORTABLE_TABLES: &[PortableTable] = &[
         primary_key: &["id"],
         redacted_columns: &[],
     },
+    // Local task lists exist nowhere else; remote ones carry their pending
+    // changes. Lists before tasks, for the foreign key.
+    PortableTable {
+        name: "task_lists",
+        primary_key: &["id"],
+        redacted_columns: &[],
+    },
+    PortableTable {
+        name: "tasks",
+        primary_key: &["id"],
+        redacted_columns: &[],
+    },
     PortableTable {
         name: "provider_labels",
         primary_key: &["id"],
@@ -2462,6 +2474,39 @@ mod tests {
                 .expect("read account");
         assert_eq!(kind, "calendar", "an omitted column keeps its local value");
         assert_eq!(name, "Renamed");
+    }
+
+    #[tokio::test]
+    async fn local_tasks_travel_with_the_portable_export() {
+        let source = migrated_pool().await;
+        for statement in [
+            "INSERT INTO task_lists (id, account_id, provider, remote_id, name, created_at, updated_at)
+             VALUES ('tasks-local-default', NULL, 'local', NULL, '', '', '')",
+            "INSERT INTO tasks (id, list_id, uid, title, due_at, priority, thread_id, message_id,
+                created_at, updated_at)
+             VALUES ('task', 'tasks-local-default', 'uid', 'Renew passport', '2026-12-01', 1,
+                'thread', '<m@example.test>', '', '')",
+        ] {
+            sqlx::query(statement)
+                .execute(&source)
+                .await
+                .expect("seed a local task");
+        }
+        let (export, _) = collect_platform_export(&source, false)
+            .await
+            .expect("export platform data");
+        let target = migrated_pool().await;
+        apply_platform_export(None, &target, &export)
+            .await
+            .expect("import platform data");
+        let (title, due, message_id): (String, Option<String>, Option<String>) =
+            sqlx::query_as("SELECT title, due_at, message_id FROM tasks WHERE id = 'task'")
+                .fetch_one(&target)
+                .await
+                .expect("read the task back");
+        assert_eq!(title, "Renew passport");
+        assert_eq!(due.as_deref(), Some("2026-12-01"));
+        assert_eq!(message_id.as_deref(), Some("<m@example.test>"));
     }
 
     #[tokio::test]

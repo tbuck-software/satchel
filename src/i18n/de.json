@@ -241,6 +241,7 @@
       "groupwareContactSyncFailed": "Kontakte für {account} konnten nicht synchronisiert werden.",
       "groupwareCredentialsRejected": "Kein CalDAV- oder CardDAV-Dienst hat die gespeicherten Zugangsdaten akzeptiert.",
       "groupwareSyncFailed": "Groupware für {account} konnte nicht synchronisiert werden.",
+      "groupwareTaskSyncFailed": "Aufgaben für {account} konnten nicht synchronisiert werden.",
       "imapConnectionFailed": "Es konnte keine sichere IMAP-Verbindung hergestellt werden. Letzter Versuch: {reason}. Du kannst den Server unter \"Erweitert\" von Hand eintragen.",
       "imapCredentialsRejected": "Keine sichere IMAP-Konfiguration hat diese Zugangsdaten akzeptiert. Prüfe den Benutzernamen oder trage den Server von Hand ein.",
       "imapDraftUidWithoutValidity": "Für diesen älteren Entwurf in \"{folder}\" fehlt eine bestätigte Serverkennung. Seine Serverkopie wurde nicht verändert.",
@@ -422,6 +423,17 @@
       "snapshotMessagesHeld": "{count} Nachrichten in {folder} konnten für {account} nicht vom Server aktualisiert werden und bleiben vorerst, wo sie sind. Satchel versucht es in einem Tag erneut.",
       "spamFilterUnavailable": "Die Einstellungen des Spamfilters ließen sich nicht lesen oder speichern.",
       "systemFolderImmutable": "\"{name}\" ist ein Systemordner und kann nicht geändert werden.",
+      "taskChanged": "Diese Aufgabe wurde inzwischen geändert. Öffne sie erneut, um den aktuellen Stand zu sehen.",
+      "taskDueInvalid": "Das Fälligkeitsdatum ist nicht lesbar.",
+      "taskListNameRequired": "Eine Liste braucht einen Namen.",
+      "taskListNotFound": "Diese Aufgabenliste gibt es nicht mehr.",
+      "taskListNotLocal": "Listen eines Kontos werden auf dessen Server umbenannt und gelöscht.",
+      "taskListReadOnly": "Diese Aufgabenliste ist schreibgeschützt.",
+      "taskNotFound": "Diese Aufgabe gibt es nicht mehr.",
+      "taskPersistenceFailed": "Die Aufgabe konnte nicht gespeichert werden.",
+      "taskPriorityInvalid": "Diese Priorität kennt Satchel nicht.",
+      "taskReminderInvalid": "Die Erinnerungszeit ist nicht lesbar.",
+      "taskTitleRequired": "Eine Aufgabe braucht einen Titel.",
       "templateNotFound": "Die Vorlage wurde nicht gefunden.",
       "templatePersistenceFailed": "Vorlagen sind momentan nicht verfügbar. Bitte versuche es erneut.",
       "threadMetadataInvalid": "Die Organisationsangaben der Unterhaltung sind ungültig.",
@@ -715,6 +727,7 @@
     "unsubscribed": "Abgemeldet"
   },
   "commands": {
+    "addTask": "Als Aufgabe anlegen",
     "blockAddress": "Diesen Absender blockieren",
     "blockDomain": "Ganze Domain des Absenders blockieren",
     "compose": "Neue E-Mail verfassen",
@@ -735,6 +748,7 @@
       "moveToFolder": "bewegen verschieben ordner move folder",
       "moveToInbox": "move inbox postfach",
       "mute": "stumm stummschalten mute",
+      "newTask": "aufgabe todo anlegen neu",
       "notSpam": "kein spam erwünscht posteingang",
       "oauthGmail": "oauth google anmelden login",
       "oauthOutlook": "oauth microsoft anmelden login",
@@ -760,6 +774,7 @@
     "markUnread": "Als ungelesen markieren",
     "moveToFolder": "Nach {folder} verschieben",
     "moveToInbox": "In die Inbox verschieben",
+    "newTask": "Neue Aufgabe",
     "noEmailAccount": "Kein E-Mail-Konto vorhanden.",
     "oauthFailed": "{provider}-Anmeldung konnte nicht gestartet werden.",
     "oauthFailedCause": "{provider}-Anmeldung konnte nicht gestartet werden: {cause}",
@@ -1720,6 +1735,7 @@
       "summary": "{count} neue E-Mails",
       "syncFailed": "Remote-Abgleich fehlgeschlagen",
       "syncing": "Inhalte werden synchronisiert",
+      "taskDue": "Aufgabe fällig",
       "trash": "Löschen"
     },
     "oauth": {
@@ -1748,6 +1764,7 @@
       "allDayCount": "{count} Einträge",
       "more": "+{count} weitere",
       "now": "Jetzt",
+      "tasksDue": "{count} Aufgabe fällig | {count} Aufgaben fällig",
       "title": "Heute"
     },
     "calendar": "Kalender",
@@ -1845,6 +1862,7 @@
       "tomorrow14": "Morgen 14:00",
       "tomorrow8": "Morgen 08:00"
     },
+    "tasks": "Aufgaben",
     "toggleSection": "{name} auf- oder zuklappen",
     "unpinContact": "Kontakt loslösen",
     "unpinContactNamed": "{name} loslösen"
@@ -3513,6 +3531,10 @@
         "keywords": "link url teilen",
         "label": "Link zu dieser E-Mail kopieren"
       },
+      "createTask": {
+        "keywords": "aufgabe todo erledigen erinnern nachfassen",
+        "label": "E-Mail als Aufgabe anlegen"
+      },
       "fileTo": {
         "keywords": "ablegen verschieben ordner thema label file move",
         "label": "In Ordner oder Thema ablegen"
@@ -3738,8 +3760,97 @@
     "toggleRead": "Gelesen / ungelesen",
     "trash": "Löschen"
   },
+  "tasks": {
+    "due": {
+      "today": "Heute",
+      "tomorrow": "Morgen",
+      "yesterday": "Gestern"
+    },
+    "editor": {
+      "completed": "Erledigt",
+      "dueDate": "Fällig am",
+      "dueTime": "Uhrzeit (optional)",
+      "editTitle": "Aufgabe bearbeiten",
+      "fromMail": "Aus einer E-Mail erstellt.",
+      "list": "Liste",
+      "newTitle": "Neue Aufgabe",
+      "notes": "Notizen",
+      "notesPlaceholder": "Details, Links, nächste Schritte",
+      "priority": "Priorität",
+      "remind": "Erinnern",
+      "reminderAt": "Erinnerung",
+      "syncedHint": "Diese Liste wird mit dem Server deines Kontos synchronisiert. Änderungen hier erreichen ihn im Hintergrund.",
+      "title": "Titel",
+      "titlePlaceholder": "Was ist zu tun?"
+    },
+    "empty": {
+      "description": "Lege oben eine Aufgabe an oder drücke T in einer E-Mail, um daraus eine zu machen.",
+      "title": "Nichts zu tun"
+    },
+    "groups": {
+      "completed": "Erledigt",
+      "overdue": "Überfällig",
+      "someday": "Ohne Datum",
+      "today": "Heute",
+      "upcoming": "Demnächst"
+    },
+    "hasReminder": "Erinnerung gesetzt",
+    "hideCompleted": "Erledigte Aufgaben ausblenden",
+    "keys": {
+      "add": "Hinzufügen",
+      "complete": "Erledigt / offen",
+      "delete": "Löschen",
+      "edit": "Bearbeiten",
+      "move": "Bewegen",
+      "title": "Tastatur"
+    },
+    "lists": {
+      "account": "Konto",
+      "all": "Alle Aufgaben",
+      "create": "Liste anlegen",
+      "defaultName": "Meine Aufgaben",
+      "delete": "Liste löschen",
+      "deleteBody": "Die {count} Aufgabe darin wird mitgelöscht. | Die {count} Aufgaben darin werden mitgelöscht.",
+      "deleteTitle": "„{list}“ löschen?",
+      "name": "Name",
+      "new": "Neue Liste …",
+      "newTitle": "Neue Aufgabenliste",
+      "onThisDevice": "Auf diesem Gerät",
+      "rename": "Liste umbenennen",
+      "renameTitle": "Aufgabenliste umbenennen",
+      "title": "Aufgabenlisten",
+      "withAccount": "{list} · {account}"
+    },
+    "loadFailed": "Die Aufgaben konnten nicht geladen werden.",
+    "markDone": "Als erledigt markieren",
+    "markOpen": "Als offen markieren",
+    "new": "Neue Aufgabe",
+    "openMail": "E-Mail öffnen",
+    "pending": "Noch nicht synchronisiert",
+    "priority": {
+      "high": "Hoch",
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "none": "Keine"
+    },
+    "quickAdd": {
+      "label": "Aufgabe hinzufügen",
+      "placeholder": "Aufgabe hinzufügen, z. B. „Anna anrufen morgen 15:00“",
+      "preview": "„{title}“, fällig {due}"
+    },
+    "showCompleted": "{count} erledigte Aufgabe anzeigen | {count} erledigte Aufgaben anzeigen",
+    "sync": "Aufgaben synchronisieren",
+    "title": "Aufgaben",
+    "toast": {
+      "completed": "Erledigt: {title}",
+      "created": "Aufgabe angelegt",
+      "createdFromMail": "Aufgabe angelegt, mit der E-Mail verknüpft",
+      "deleted": "Aufgabe gelöscht"
+    }
+  },
   "thread": {
     "actions": {
+      "addTask": "Als Aufgabe anlegen",
       "aside": "Beiseite",
       "blockSender": "Absender blockieren",
       "fileTo": "Ablegen …",
