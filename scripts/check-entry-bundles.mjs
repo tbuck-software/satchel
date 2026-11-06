@@ -52,9 +52,13 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * made at startup like the Google one) and 492 B of Outlook copy to the
  * German catalogue, which loads whole before the first frame. The
  * calendar's own code loads with the calendar view (together 102.7 /
- * 241.8 KiB). */
+ * 241.8 KiB). Main 104 KiB entry since then: the mailbox quota marker in
+ * the sidebar needs its store and level helper at startup (the account row
+ * is painted in the first frame) and adds 0.5 KiB to the entry and 1.0 KiB
+ * with its copy (together 103.2 / 242.8 KiB). The settings card and its
+ * meter load with the settings. */
 const budgets = {
-  'index.html': { entryGzip: 103 * 1024, initialGzip: 242 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
+  'index.html': { entryGzip: 104 * 1024, initialGzip: 243 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 128 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };

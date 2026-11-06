@@ -1,5 +1,5 @@
 import { createPersistedSlot, persistence } from '@/persistence';
-import type { BackendAccountVisibilityPolicy } from './accounts';
+import type { BackendAccountQuota, BackendAccountVisibilityPolicy } from './accounts';
 import { splitSubjectPrefixes } from '@/utils/composerText';
 import { bytesToBase64 } from '@/utils/base64';
 import { joinComposerTextHistory, splitComposerTextHistory, splitComposerHtmlHistory } from '@/utils/composerHistory';
@@ -111,6 +111,20 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
   }
   visibilityPolicies['acc-work'] ??= { ...defaultVisibilityPolicy(), mode: 'schedule', weekdays: [1, 2, 4, 5], from: '09:00', to: '17:00' };
 }
+// Mailbox quotas as `account_quota` holds them: storage in bytes, only
+// accounts whose server sets a limit. `?mockQuota=warning|critical` fills the
+// work mailbox far enough to show the sidebar marker.
+const MOCK_QUOTA_LIMIT = 2 * 1024 ** 3;
+const mockQuotaFill: Record<string, number> = { warning: 0.93, critical: 0.99 };
+const quotaParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('mockQuota') : null;
+const quotas = new Map<string, BackendAccountQuota>([['acc-work', {
+  account_id: 'acc-work',
+  storage_used_bytes: Math.round(MOCK_QUOTA_LIMIT * (mockQuotaFill[quotaParam ?? ''] ?? 0.62)),
+  storage_limit_bytes: MOCK_QUOTA_LIMIT,
+  messages_used: null,
+  messages_limit: null,
+  fetched_at: new Date(Date.now() - 2 * 3600_000).toISOString(),
+}]]);
 const trashReceipts = new Map<string, Thread[]>();
 let nextTrashReceipt = 0;
 
@@ -882,6 +896,11 @@ const handlers: Record<string, Handler> = {
   acknowledge_app_update_flush: () => null,
   /* --- accounts ------------------------------------------------------- */
   list_accounts: () => accounts.map(accountDto),
+  // Like the Rust query: removed accounts take their quota with them.
+  list_account_quotas: () => accounts.flatMap(account => {
+    const quota = quotas.get(account.id);
+    return quota ? [{ ...quota }] : [];
+  }),
   get_account_visibility: () => accounts.map(account => ({
     account_id: account.id, policy: visibilityPolicies[account.id] ?? defaultVisibilityPolicy(),
     visible: accountVisible(account.id), local_date: localDate(new Date()),

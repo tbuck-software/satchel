@@ -35,6 +35,7 @@ import {
 } from '@/utils/notificationNavigation';
 import type { IosNotificationResponses, NotificationActionOutcome } from '@/mobile/iosNotificationResponses';
 import { useAccountsStore } from '@/stores/accounts';
+import { useAccountQuotaStore } from '@/stores/accountQuota';
 import { useAliasesStore } from '@/stores/aliases';
 import { useConnectionStore } from '@/stores/connection';
 import { useContactsStore } from '@/stores/contacts';
@@ -249,6 +250,7 @@ export function useAppBootstrap(): void {
   const { t } = useI18n();
   const router = useRouter();
   const accountsStore = useAccountsStore();
+  const accountQuotaStore = useAccountQuotaStore();
   const mailboxesStore = useMailboxesStore();
   const threadsStore = useThreadsStore();
   const messagesStore = useMessagesStore();
@@ -311,6 +313,7 @@ export function useAppBootstrap(): void {
   async function loadCoreStores() {
     await Promise.all([
       accountsStore.load(),
+      accountQuotaStore.load(),
       mailboxesStore.load(),
       threadsStore.load(),
       workflowStore.load(),
@@ -1148,6 +1151,8 @@ export function useAppBootstrap(): void {
           const summary = await runImapSyncOnce();
           if (bootstrapDisposed) return;
           connectionStore.applySyncSummary(summary);
+          // A full sync may have read a new quota; the stored row is cheap.
+          void accountQuotaStore.load();
           if (summary.messages_synced > 0) {
             await Promise.all([threadsStore.refreshHead({ revalidateCachedRows: true }), mailboxesStore.load()]);
           }

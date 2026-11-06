@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAccountsStore } from '@/stores/accounts';
 import { useConnectionStore } from '@/stores/connection';
@@ -8,6 +8,7 @@ import { useThreadsStore } from '@/stores/threads';
 import { useUiStore } from '@/stores/ui';
 import { useSettingsLocation } from '@/composables/useSettingsLocation';
 import { useCertificateTrustStore } from '@/stores/certificateTrust';
+import { useAccountQuotaStore } from '@/stores/accountQuota';
 import { certificateShort, formatCertificateMoment } from '@/utils/certificateLabels';
 import {
   backendAutoconfigureGroupware,
@@ -25,6 +26,7 @@ import { useConfirm } from '@/composables/useConfirm';
 import { transportErrorLabel, transportErrorText } from '@/utils/transportLabels';
 import AccountVisibilitySettings from './AccountVisibilitySettings.vue';
 import AccountAppearanceSettings from './AccountAppearanceSettings.vue';
+import AccountQuotaSettings from './AccountQuotaSettings.vue';
 import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 
@@ -35,6 +37,9 @@ const mailboxes = useMailboxesStore();
 const threads = useThreadsStore();
 const ui = useUiStore();
 const certificates = useCertificateTrustStore();
+const quotas = useAccountQuotaStore();
+// The numbers change at most every few hours; one read per visit is plenty.
+onMounted(() => void quotas.load());
 
 /** A rejected certificate or a running exception, as one line that opens the details. */
 function certificateLine(accountId: string): string | null {
@@ -557,6 +562,7 @@ async function removeAccount(accountId: string, email: string) {
             {{ $t('settings.accounts.actions.test') }}
           </AppButton>
         </div>
+        <AccountQuotaSettings :account-id="account.id" />
         <AccountAppearanceSettings :account-id="account.id" />
         <AccountVisibilitySettings :account-id="account.id" />
         <!-- Removal last and on its own, away from the everyday actions. -->

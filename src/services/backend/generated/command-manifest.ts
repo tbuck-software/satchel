@@ -944,6 +944,10 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "list_account_quotas": {
+            "kind": "object",
+            "fields": {}
+        },
         "list_accounts": {
             "kind": "object",
             "fields": {}

@@ -7,6 +7,7 @@ pub mod imap;
 pub mod imap_sessions;
 pub mod outlook;
 pub mod pop3;
+pub mod quota;
 pub mod smtp;
 pub mod tls_trust;
 pub mod traits;
