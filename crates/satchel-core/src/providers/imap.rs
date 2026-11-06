@@ -4483,7 +4483,7 @@ fn decode_part_bytes(raw: &[u8], transfer_encoding: &str) -> Vec<u8> {
 fn decode_base64_prefix(compact: &[u8], error: &base64::DecodeError) -> Vec<u8> {
     let reported = match *error {
         base64::DecodeError::InvalidByte(offset, _)
-        | base64::DecodeError::InvalidLastSymbol(offset, _)
+        | base64::DecodeError::InvalidLastSymbol { offset, .. }
         | base64::DecodeError::InvalidLength(offset) => offset,
         base64::DecodeError::InvalidPadding => compact.len(),
     };

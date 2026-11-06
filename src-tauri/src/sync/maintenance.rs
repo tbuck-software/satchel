@@ -383,7 +383,7 @@ fn webhook_client(timeout: Duration) -> Result<reqwest::Client, String> {
 /// replayed against a receiver that checks its age. Signed over the exact bytes
 /// that go on the wire, so signature and body cannot drift apart.
 fn webhook_signature(secret: &str, timestamp: i64, body: &str) -> String {
-    use hmac::Mac;
+    use hmac::{KeyInit, Mac};
     let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes())
         .expect("HMAC accepts a key of any length");
     mac.update(format!("{timestamp}.").as_bytes());
@@ -1255,7 +1255,11 @@ mod webhook_tests {
     #[test]
     fn the_signature_covers_the_timestamp_and_the_body() {
         let first = super::webhook_signature("shhh", 1_700_000_000, "{\"a\":1}");
-        assert_eq!(first.len(), 64, "hex-encoded SHA-256");
+        // Receivers verify this exact text; the value comes from Python's hmac.
+        assert_eq!(
+            first,
+            "7b2ecedda8a16dee0c580efc4c8b36bda693b90ed68c32f346789c16faacf7bc"
+        );
         assert_eq!(
             first,
             super::webhook_signature("shhh", 1_700_000_000, "{\"a\":1}")

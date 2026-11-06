@@ -63,7 +63,7 @@ struct RestoreManifest {
 }
 
 fn key_hash(key: &[u8; 32]) -> String {
-    format!("{:x}", Sha256::digest(key))
+    crate::utils::hex::lower_hex(&Sha256::digest(key))
 }
 
 fn file_hash(path: &Path) -> Result<String, String> {
@@ -77,7 +77,7 @@ fn file_hash(path: &Path) -> Result<String, String> {
         }
         digest.update(&buffer[..read]);
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(crate::utils::hex::lower_hex(&digest.finalize()))
 }
 
 fn sync_directory(path: &Path) -> Result<(), String> {
@@ -443,6 +443,15 @@ pub fn apply_pending_restore(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Backup manifests record this hash next to the key they carry.
+    #[test]
+    fn key_hash_is_pinned() {
+        assert_eq!(
+            key_hash(&[0; 32]),
+            "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"
+        );
+    }
 
     /// Every fixture row is `row-1`.
     fn test_context(column: &str) -> crypto::SecretContext<'static> {

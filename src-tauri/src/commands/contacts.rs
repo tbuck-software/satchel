@@ -1039,8 +1039,9 @@ async fn fetch_bimi_avatar(domain: &str) -> Option<String> {
 
 async fn fetch_gravatar_avatar(email: &str) -> Option<String> {
     let normalized = email.trim().to_ascii_lowercase();
-    let md5_hash = format!("{:x}", Md5::digest(normalized.as_bytes()));
-    let sha256_hash = format!("{:x}", sha2::Sha256::digest(normalized.as_bytes()));
+    let md5_hash = satchel_core::utils::hex::lower_hex(&Md5::digest(normalized.as_bytes()));
+    let sha256_hash =
+        satchel_core::utils::hex::lower_hex(&sha2::Sha256::digest(normalized.as_bytes()));
     for hash in [md5_hash, sha256_hash] {
         let url = format!("https://www.gravatar.com/avatar/{hash}?d=404&s=192");
         if let Some(data_url) = download_avatar_data_url(&url, None).await {

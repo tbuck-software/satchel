@@ -218,7 +218,8 @@ pub fn retention_eligible(path: &Path) -> bool {
         if chrono::DateTime::parse_from_rfc3339(&manifest.created_at).is_err()
             || {
                 use sha2::Digest;
-                format!("{:x}", sha2::Sha256::digest(&manifest_bytes)) != completion.manifest_hash
+                crate::utils::hex::lower_hex(&sha2::Sha256::digest(&manifest_bytes))
+                    != completion.manifest_hash
             }
             || !completion.files.contains_key("satchel.db")
             || !completion.files.contains_key(MASTER_KEY_FILES[0])
