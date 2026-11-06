@@ -78,7 +78,6 @@ const senderMenuAnchor = ref<AnchorBox | null>(null);
  */
 const contextMenuMounted = ref(false);
 const senderMenuMounted = ref(false);
-const rowRef = ref<HTMLElement | null>(null);
 
 const primaryParticipantName = computed(() => {
   const participant = props.thread.participants[0];
@@ -387,7 +386,6 @@ function onDragStart(event: DragEvent) {
 <template>
   <article
     v-bind="$attrs"
-    ref="rowRef"
     class="thread-row group relative h-[var(--thread-row-h,72px)] cursor-pointer select-none overflow-hidden rounded-xl text-left"
     :class="[
       isLeaving ? 'thread-row--leaving' : '',

@@ -6,6 +6,7 @@ import { mount, shallowMount } from '@vue/test-utils';
 import { useSettingsStore } from '@/stores/settings';
 import { useThreadsStore } from '@/stores/threads';
 import ThreadListItem from './ThreadListItem.vue';
+import { pointer } from '@/test/pointer';
 
 /** The row's menus are async components: wait until `count` of them are in the DOM. */
 async function contextMenusOpen(count = 1) {
@@ -217,13 +218,13 @@ describe('thread row layout', () => {
     const surface = wrapper.get('[data-swipe-surface]');
     expect(wrapper.find('[data-swipe-action]').exists()).toBe(false);
 
-    await row.trigger('pointerdown', {
+    await pointer(row, 'pointerdown', {
       pointerId: 1,
       pointerType: 'touch',
       clientX: 20,
       clientY: 40,
     });
-    await row.trigger('pointermove', {
+    await pointer(row, 'pointermove', {
       pointerId: 1,
       pointerType: 'touch',
       clientX: 58,
@@ -233,7 +234,7 @@ describe('thread row layout', () => {
     expect(wrapper.get('[data-swipe-action="toggle-read"]').text()).toContain('Unread');
     expect(wrapper.get('[data-swipe-action="toggle-read"]').classes()).not.toContain('is-armed');
 
-    await row.trigger('pointermove', {
+    await pointer(row, 'pointermove', {
       pointerId: 1,
       pointerType: 'touch',
       clientX: 112,
@@ -241,7 +242,7 @@ describe('thread row layout', () => {
     });
     expect(wrapper.get('[data-swipe-action="toggle-read"]').classes()).toContain('is-armed');
 
-    await row.trigger('pointermove', {
+    await pointer(row, 'pointermove', {
       pointerId: 1,
       pointerType: 'touch',
       clientX: 188,
@@ -251,16 +252,16 @@ describe('thread row layout', () => {
     expect(wrapper.get('[data-swipe-action="done"]').attributes('data-swipe-slot')).toBe('rightLong');
     expect(wrapper.get('[data-swipe-action="done"]').classes()).toContain('is-armed');
 
-    await row.trigger('pointercancel', { pointerId: 1, pointerType: 'touch' });
+    await pointer(row, 'pointercancel', { pointerId: 1, pointerType: 'touch' });
     expect(surface.attributes('style')).toContain('translate3d(0px');
 
-    await row.trigger('pointerdown', {
+    await pointer(row, 'pointerdown', {
       pointerId: 2,
       pointerType: 'touch',
       clientX: 120,
       clientY: 40,
     });
-    await row.trigger('pointermove', {
+    await pointer(row, 'pointermove', {
       pointerId: 2,
       pointerType: 'touch',
       clientX: 40,
@@ -270,7 +271,7 @@ describe('thread row layout', () => {
     expect(wrapper.get('[data-swipe-action="pin"]').text()).toContain('Pin');
     expect(wrapper.get('[data-swipe-action="pin"]').classes()).toContain('is-armed');
 
-    await row.trigger('pointermove', {
+    await pointer(row, 'pointermove', {
       pointerId: 2,
       pointerType: 'touch',
       clientX: -48,
@@ -298,25 +299,25 @@ describe('thread row layout', () => {
     });
     const row = wrapper.get('article');
 
-    await row.trigger('pointerdown', {
+    await pointer(row, 'pointerdown', {
       pointerId: 3, pointerType: 'touch', clientX: 20, clientY: 40,
     });
-    await row.trigger('pointermove', {
+    await pointer(row, 'pointermove', {
       pointerId: 3, pointerType: 'touch', clientX: 24, clientY: 80,
     });
-    await row.trigger('pointerup', {
+    await pointer(row, 'pointerup', {
       pointerId: 3, pointerType: 'touch', clientX: 24, clientY: 80,
     });
     expect(toggleDoneMock).not.toHaveBeenCalled();
     expect(wrapper.get('[data-swipe-surface]').attributes('style')).toContain('translate3d(0px');
 
-    await row.trigger('pointerdown', {
+    await pointer(row, 'pointerdown', {
       pointerId: 4, pointerType: 'touch', clientX: 20, clientY: 40,
     });
-    await row.trigger('pointermove', {
+    await pointer(row, 'pointermove', {
       pointerId: 4, pointerType: 'touch', clientX: 190, clientY: 42,
     });
-    await row.trigger('pointerup', {
+    await pointer(row, 'pointerup', {
       pointerId: 4, pointerType: 'touch', clientX: 190, clientY: 42,
     });
     await vi.advanceTimersByTimeAsync(120);
@@ -343,14 +344,14 @@ describe('thread row layout', () => {
     });
     const row = wrapper.get('article');
 
-    await row.trigger('pointerdown', {
+    await pointer(row, 'pointerdown', {
       pointerId: 5, pointerType: 'touch', clientX: 20, clientY: 40,
     });
-    await row.trigger('pointermove', {
+    await pointer(row, 'pointermove', {
       pointerId: 5, pointerType: 'touch', clientX: 108, clientY: 42,
     });
     expect(wrapper.get('[data-swipe-action="aside"]').text()).toContain('Aside');
-    await row.trigger('pointerup', {
+    await pointer(row, 'pointerup', {
       pointerId: 5, pointerType: 'touch', clientX: 108, clientY: 42,
     });
     await vi.advanceTimersByTimeAsync(120);
@@ -378,13 +379,13 @@ describe('thread row layout', () => {
     });
     const row = wrapper.get('article');
 
-    await row.trigger('pointerdown', {
+    await pointer(row, 'pointerdown', {
       pointerId: 6, pointerType: 'touch', clientX: 20, clientY: 40,
     });
-    await row.trigger('pointermove', {
+    await pointer(row, 'pointermove', {
       pointerId: 6, pointerType: 'touch', clientX: 108, clientY: 42,
     });
-    await row.trigger('pointerup', {
+    await pointer(row, 'pointerup', {
       pointerId: 6, pointerType: 'touch', clientX: 108, clientY: 42,
     });
     await vi.advanceTimersByTimeAsync(120);
@@ -410,25 +411,25 @@ describe('thread row layout', () => {
     });
     const row = wrapper.get('article');
 
-    await row.trigger('pointerdown', {
+    await pointer(row, 'pointerdown', {
       pointerId: 7, pointerType: 'touch', clientX: 200, clientY: 40,
     });
-    await row.trigger('pointermove', {
+    await pointer(row, 'pointermove', {
       pointerId: 7, pointerType: 'touch', clientX: 112, clientY: 42,
     });
-    await row.trigger('pointerup', {
+    await pointer(row, 'pointerup', {
       pointerId: 7, pointerType: 'touch', clientX: 112, clientY: 42,
     });
     await vi.advanceTimersByTimeAsync(120);
     expect(setPinnedMock).toHaveBeenCalledWith(['thread'], true);
 
-    await row.trigger('pointerdown', {
+    await pointer(row, 'pointerdown', {
       pointerId: 8, pointerType: 'touch', clientX: 200, clientY: 40,
     });
-    await row.trigger('pointermove', {
+    await pointer(row, 'pointermove', {
       pointerId: 8, pointerType: 'touch', clientX: 30, clientY: 42,
     });
-    await row.trigger('pointerup', {
+    await pointer(row, 'pointerup', {
       pointerId: 8, pointerType: 'touch', clientX: 30, clientY: 42,
     });
     await vi.advanceTimersByTimeAsync(120);
@@ -568,10 +569,10 @@ describe('thread row layout', () => {
     expect(quick.attributes('aria-label')).toBe('Back to the inbox');
 
     const row = wrapper.get('article');
-    await row.trigger('pointerdown', { pointerId: 1, pointerType: 'touch', clientX: 20, clientY: 40 });
-    await row.trigger('pointermove', { pointerId: 1, pointerType: 'touch', clientX: 190, clientY: 42 });
+    await pointer(row, 'pointerdown', { pointerId: 1, pointerType: 'touch', clientX: 20, clientY: 40 });
+    await pointer(row, 'pointermove', { pointerId: 1, pointerType: 'touch', clientX: 190, clientY: 42 });
     expect(wrapper.get('[data-swipe-action="done"]').text()).toContain('Inbox');
-    await row.trigger('pointerup', { pointerId: 1, pointerType: 'touch', clientX: 190, clientY: 42 });
+    await pointer(row, 'pointerup', { pointerId: 1, pointerType: 'touch', clientX: 190, clientY: 42 });
     await vi.advanceTimersByTimeAsync(120);
     expect(toggleDoneMock).toHaveBeenCalledWith(['thread']);
     vi.useRealTimers();

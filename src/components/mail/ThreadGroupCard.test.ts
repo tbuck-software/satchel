@@ -39,6 +39,7 @@ vi.mock('@/stores/threads', () => ({
 }));
 
 import ThreadGroupCard from './ThreadGroupCard.vue';
+import { pointer } from '@/test/pointer';
 
 const group = {
   id: 'group-1',
@@ -129,15 +130,15 @@ describe('group card actions', () => {
     const wrapper = render();
     const card = wrapper.get('.bundle-card');
 
-    await card.trigger('pointerdown', {
+    await pointer(card, 'pointerdown', {
       pointerId: 1, pointerType: 'touch', clientX: 20, clientY: 40,
     });
-    await card.trigger('pointermove', {
+    await pointer(card, 'pointermove', {
       pointerId: 1, pointerType: 'touch', clientX: 190, clientY: 42,
     });
     expect(wrapper.get('[data-swipe-action="done"]').text()).toContain('Done');
 
-    await card.trigger('pointerup', {
+    await pointer(card, 'pointerup', {
       pointerId: 1, pointerType: 'touch', clientX: 190, clientY: 42,
     });
     await vi.advanceTimersByTimeAsync(120);
@@ -151,13 +152,13 @@ describe('group card actions', () => {
     const wrapper = render();
     const card = wrapper.get('.bundle-card');
 
-    await card.trigger('pointerdown', {
+    await pointer(card, 'pointerdown', {
       pointerId: 2, pointerType: 'touch', clientX: 20, clientY: 40,
     });
-    await card.trigger('pointermove', {
+    await pointer(card, 'pointermove', {
       pointerId: 2, pointerType: 'touch', clientX: 108, clientY: 42,
     });
-    await card.trigger('pointerup', {
+    await pointer(card, 'pointerup', {
       pointerId: 2, pointerType: 'touch', clientX: 108, clientY: 42,
     });
     await vi.advanceTimersByTimeAsync(120);
@@ -170,16 +171,16 @@ describe('group card actions', () => {
     const wrapper = render();
     const card = wrapper.get('.bundle-card');
 
-    await card.trigger('pointerdown', {
+    await pointer(card, 'pointerdown', {
       pointerId: 3, pointerType: 'touch', clientX: 200, clientY: 40,
     });
-    await card.trigger('pointermove', {
+    await pointer(card, 'pointermove', {
       pointerId: 3, pointerType: 'touch', clientX: 30, clientY: 42,
     });
     await card.get('button:not(.bundle-card__done)').trigger('click');
     expect(wrapper.emitted('open')).toBeUndefined();
 
-    await card.trigger('pointerup', {
+    await pointer(card, 'pointerup', {
       pointerId: 3, pointerType: 'touch', clientX: 30, clientY: 42,
     });
     await vi.advanceTimersByTimeAsync(120);
