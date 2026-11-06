@@ -281,9 +281,13 @@ test('drag, resize, maximize and reopen keep the composer inside the window', as
   expect(moved.x).toBeLessThan(initial.x);
   expect(moved.y).toBeLessThan(initial.y);
   const resize = (await composer.locator('.composer-resize-zone--nw').boundingBox())!;
-  await page.mouse.move(resize.x + 2, resize.y + 2);
+  // Grab the zone at its centre: its outer pixels lie outside the window's
+  // rounded corner, and Chromium 156 clips hit-testing to that corner.
+  const grabX = resize.x + resize.width / 2;
+  const grabY = resize.y + resize.height / 2;
+  await page.mouse.move(grabX, grabY);
   await page.mouse.down();
-  await page.mouse.move(resize.x + 102, resize.y + 92, { steps: 4 });
+  await page.mouse.move(grabX + 100, grabY + 90, { steps: 4 });
   await page.mouse.up();
   const resized = (await composer.boundingBox())!;
   expect(Math.round(resized.width)).toBe(520);
