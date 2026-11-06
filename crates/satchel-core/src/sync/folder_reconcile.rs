@@ -174,8 +174,12 @@ where
                 add_refs(&mut paths, &refs);
                 paths.insert(normalized_remote_folder(&target_remote_folder_id));
             }
-            RemoteMutationPayload::Delete { refs }
-            | RemoteMutationPayload::WorkflowMarker { refs, .. } => add_refs(&mut paths, &refs),
+            RemoteMutationPayload::Delete { refs } => add_refs(&mut paths, &refs),
+            RemoteMutationPayload::WorkflowMarker { threads, .. } => {
+                for thread in &threads {
+                    add_refs(&mut paths, &thread.refs);
+                }
+            }
             RemoteMutationPayload::Flags {
                 refs,
                 read,
@@ -519,11 +523,14 @@ pub async fn reconcile_imap_folder_snapshot(
         if let Some(remote) = remote_by_id.get(remote_id.as_str()) {
             // An observation, not a decision: the thread-level rule (and its
             // guard for unsent local changes) runs on the caller's side.
+            // `NULL` is no marker: a mailbox without markers writes nothing.
             if let Some(marker) = remote.workflow_marker.as_ref() {
-                let marker = marker.as_db_value();
-                if stored_marker.as_deref() != Some(marker.as_str()) {
+                let stored = crate::workflow::remote_marker::WorkflowMarker::from_column(
+                    stored_marker.as_deref(),
+                );
+                if stored != *marker {
                     sqlx::query("UPDATE messages SET remote_workflow_marker = ? WHERE id = ?")
-                        .bind(&marker)
+                        .bind(marker.as_column())
                         .bind(&message_id)
                         .execute(&mut *tx)
                         .await

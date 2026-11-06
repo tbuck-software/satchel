@@ -552,15 +552,11 @@ async fn wake_due_snoozes(pool: &SqlitePool, queue: &SyncQueue) -> Result<Vec<St
         .execute(&mut *tx)
         .await
         .map_err(|err| err.to_string())?;
-        // Woken here, woken everywhere: the snooze keyword or label goes, so
-        // other clients stop showing it. Every device that wakes the thread
-        // queues the same removal; it is idempotent.
-        satchel_core::sync::workflow_markers::enqueue_workflow_marker_in_transaction(
-            &mut tx,
-            queue,
-            thread_id,
-            &satchel_core::workflow::remote_marker::WorkflowMarker::None,
-            None,
+        // Compare-and-clear: only this device's own snooze, and only while
+        // no other device replaced it. Every device already reads a passed
+        // wake time as Inbox, so the clear is for other clients' sake.
+        satchel_core::sync::workflow_markers::enqueue_wake_clear_in_transaction(
+            &mut tx, queue, thread_id,
         )
         .await?;
     }

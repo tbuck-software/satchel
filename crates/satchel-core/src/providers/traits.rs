@@ -392,13 +392,41 @@ pub struct FlagUpdate {
     pub starred: Option<bool>,
 }
 
-/// What became of a workflow marker write.
+/// One thread's copies in a workflow marker write.
+#[derive(Debug, Clone)]
+pub struct MarkerTarget {
+    pub refs: Vec<MessageRef>,
+    /// Compare-and-clear: only go ahead while the copies still carry this.
+    pub expected: Option<WorkflowMarker>,
+}
+
+/// What became of one target of a workflow marker write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkflowMarkerWrite {
     Applied,
-    /// The server cannot store Satchel's markers (no custom keywords). Not
-    /// an error: the account keeps Done and Snooze on this device.
-    Unsupported,
+    /// Every folder of the target refused the keywords, or the server
+    /// cannot store markers at all. Never an error: best effort.
+    Refused,
+    /// Compare-and-clear found another marker than the expected one.
+    Skipped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowMarkerReport {
+    /// One entry per target, in order.
+    pub targets: Vec<WorkflowMarkerWrite>,
+    /// INBOX refused Satchel's keywords: the account keeps Done and Snooze
+    /// on the device.
+    pub refused_in_inbox: bool,
+}
+
+impl WorkflowMarkerReport {
+    pub fn refused(targets: usize) -> Self {
+        Self {
+            targets: vec![WorkflowMarkerWrite::Refused; targets],
+            refused_in_inbox: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -482,15 +510,17 @@ pub trait MailProvider: Send + Sync {
     }
 
     async fn set_flags(&self, messages: &[MessageRef], flags: FlagUpdate) -> SyncResult<()>;
-    /// Replace Satchel's Done/Snooze marker on these copies with `marker`,
-    /// leaving every other keyword or label alone. Providers without a place
-    /// for it keep this default.
+    /// Replace Satchel's Done/Snooze marker on these threads' copies with
+    /// `marker`, leaving every other keyword or label alone, in one session.
+    /// A server that refuses is reported, not returned as an error: marker
+    /// writes must never hold up the account's queue. Providers without a
+    /// place for markers keep this default.
     async fn set_workflow_marker(
         &self,
-        _messages: &[MessageRef],
+        targets: &[MarkerTarget],
         _marker: &WorkflowMarker,
-    ) -> SyncResult<WorkflowMarkerWrite> {
-        Ok(WorkflowMarkerWrite::Unsupported)
+    ) -> SyncResult<WorkflowMarkerReport> {
+        Ok(WorkflowMarkerReport::refused(targets.len()))
     }
     async fn move_messages(&self, messages: &[MessageRef], target: &str) -> SyncResult<()>;
     async fn delete_messages(&self, messages: &[MessageRef]) -> SyncResult<()>;

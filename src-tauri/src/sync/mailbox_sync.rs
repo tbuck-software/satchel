@@ -397,15 +397,10 @@ async fn reconcile_folder_snapshot(
                 .custom_keywords
                 .filter(|_| remote_folder_id.eq_ignore_ascii_case("INBOX"))
             {
-                use satchel_core::sync::workflow_markers::{
-                    record_workflow_sync_mode, MODE_LOCAL_ONLY, MODE_SERVER,
-                };
-                let mode = if allowed {
-                    MODE_SERVER
-                } else {
-                    MODE_LOCAL_ONLY
-                };
-                record_workflow_sync_mode(pool, account_id, mode).await?;
+                satchel_core::sync::workflow_markers::record_inbox_keyword_support(
+                    pool, account_id, allowed,
+                )
+                .await?;
             }
             let changes = reconcile_imap_folder_snapshot(
                 pool,

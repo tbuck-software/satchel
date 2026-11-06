@@ -97,6 +97,9 @@ struct StoredMessage {
     message_is_draft: bool,
     message_is_sent: bool,
     attachment_ids: Vec<String>,
+    /// The server reported another workflow marker for this copy than the
+    /// stored one.
+    workflow_marker_changed: bool,
 }
 
 pub(crate) const INGEST_BATCH_SIZE: usize = 100;
@@ -499,13 +502,20 @@ async fn persist_provider_message(
     } else {
         provider_message_id
     };
-    let prior_message = sqlx::query_as::<_, (Option<String>, Option<String>)>(
-        "SELECT thread_id, message_id_header FROM messages WHERE id = ?",
+    let prior_message = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
+        "SELECT thread_id, message_id_header, remote_workflow_marker FROM messages WHERE id = ?",
     )
     .bind(&message_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(|error| error.to_string())?;
+    // Only a marker that changed on this copy is worth the thread's
+    // reconciliation; a mailbox without markers costs nothing extra.
+    let workflow_marker_changed = message.workflow_marker.is_some_and(|marker| {
+        satchel_core::workflow::remote_marker::WorkflowMarker::from_column(
+            prior_message.as_ref().and_then(|row| row.2.as_deref()),
+        ) != marker
+    });
     let prior_thread_id = prior_message
         .as_ref()
         .and_then(|row| row.0.as_deref())
@@ -791,7 +801,7 @@ async fn persist_provider_message(
             pgp_signed = excluded.pgp_signed,
             trust_metadata = excluded.trust_metadata,
             remote_draft_id = COALESCE(excluded.remote_draft_id, messages.remote_draft_id),
-            remote_workflow_marker = COALESCE(excluded.remote_workflow_marker, messages.remote_workflow_marker),
+            remote_workflow_marker = CASE WHEN ? THEN excluded.remote_workflow_marker ELSE messages.remote_workflow_marker END,
             draft_attachments_json = CASE
                 WHEN excluded.is_draft = 1 THEN NULL
                 ELSE messages.draft_attachments_json
@@ -846,16 +856,14 @@ async fn persist_provider_message(
     .bind(&now)
     .bind(&now)
     .bind(message.received_at_rfc3339.as_deref())
-    .bind(
-        message
-            .workflow_marker
-            .as_ref()
-            .map(|marker| marker.as_db_value()),
-    )
-    // The two guards of the conflict clause; its placeholders come after every
-    // one of the inserted values.
+    // `NULL` is no marker.
+    .bind(message.workflow_marker.and_then(|marker| marker.as_column()))
+    // The guards of the conflict clause; their placeholders come after every
+    // one of the inserted values. A provider that does not report markers
+    // keeps the stored one.
     .bind(flags_locked)
     .bind(flags_locked)
+    .bind(message.workflow_marker.is_some())
     .execute(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
@@ -997,6 +1005,7 @@ async fn persist_provider_message(
         message_is_draft,
         message_is_sent,
         attachment_ids,
+        workflow_marker_changed,
     })
 }
 
@@ -1022,6 +1031,7 @@ async fn finish_provider_message(
         message_is_draft,
         message_is_sent,
         attachment_ids,
+        workflow_marker_changed,
     } = stored;
     // Provider downloads and event publishing follow the committed rows.
     if folder_type == "archive" || folder_type == "aside" || is_snooze_folder(folder_remote_id) {
@@ -1029,7 +1039,7 @@ async fn finish_provider_message(
     }
     // Done or Snooze set on another device or client travels as a keyword
     // or label on the copy just stored.
-    if message.workflow_marker.is_some() {
+    if workflow_marker_changed {
         let changed = satchel_core::sync::workflow_markers::reconcile_remote_workflow_markers(
             pool,
             &HashSet::from([thread_id.clone()]),
@@ -2099,27 +2109,20 @@ mod tests {
             .expect("is_read")
     }
 
-    /// The user marked the thread read; the mutation is queued and has not
-    /// reached the server. The next provider batch must not undo it.
-    /// Snoozed on another device: the copy arrives with the keywords, and
-    /// this device snoozes the thread until the same time, so its own snooze
-    /// worker wakes it. A later sync that reports no marker at all (a
-    /// provider that does not say) leaves it alone.
+    /// Snoozed on another device: the copy arrives with the IMAP keyword,
+    /// and this device snoozes the thread for the fallback day (the wake
+    /// time does not travel on IMAP), so its own snooze worker wakes it. A
+    /// later sync from a provider that does not report markers leaves it.
     #[tokio::test]
     async fn a_snooze_keyword_from_another_device_snoozes_the_thread_here() {
-        use satchel_core::workflow::remote_marker::WorkflowMarker;
+        use satchel_core::workflow::remote_marker::{Snooze, WorkflowMarker};
         let pool = ingest_pool().await;
-        sqlx::query("UPDATE folders SET uidvalidity = 7")
-            .execute(&pool)
-            .await
-            .unwrap();
-        let wake = chrono::DateTime::from_timestamp(
-            (chrono::Utc::now() + chrono::Duration::hours(3)).timestamp(),
-            0,
-        )
-        .unwrap();
+        let snoozed = WorkflowMarker::Snoozed(Snooze {
+            wake: None,
+            generation: 1,
+        });
         let mut message = envelope("41");
-        message.workflow_marker = Some(WorkflowMarker::Snoozed(wake));
+        message.workflow_marker = Some(snoozed);
         ingest(&pool, "inbox", &message).await.expect("ingest");
         let (state, until): (String, Option<String>) =
             sqlx::query_as("SELECT workflow_state, snooze_until FROM threads")
@@ -2127,7 +2130,10 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(state, "snoozed");
-        assert_eq!(until, Some(wake.to_rfc3339()));
+        let until = chrono::DateTime::parse_from_rfc3339(&until.unwrap()).unwrap();
+        assert!(
+            until.with_timezone(&chrono::Utc) > chrono::Utc::now() + chrono::Duration::hours(23)
+        );
 
         message.workflow_marker = None;
         ingest(&pool, "inbox", &message).await.expect("re-ingest");
@@ -2138,9 +2144,30 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(state, "snoozed");
-        assert_eq!(marker, Some(WorkflowMarker::Snoozed(wake).as_db_value()));
+        assert_eq!(marker, snoozed.as_column());
     }
 
+    /// The first sync after the upgrade: every copy reports "no marker".
+    /// Nothing is written for it, on the message or on the thread.
+    #[tokio::test]
+    async fn a_mailbox_without_markers_writes_no_marker_columns() {
+        use satchel_core::workflow::remote_marker::WorkflowMarker;
+        let pool = ingest_pool().await;
+        let mut message = envelope("43");
+        message.workflow_marker = Some(WorkflowMarker::None);
+        ingest(&pool, "inbox", &message).await.expect("ingest");
+        ingest(&pool, "inbox", &message).await.expect("re-ingest");
+        let (message_marker, thread_marker): (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT m.remote_workflow_marker, t.remote_workflow_marker FROM messages m JOIN threads t ON t.id = m.thread_id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((message_marker, thread_marker), (None, None));
+    }
+
+    /// The user marked the thread read; the mutation is queued and has not
+    /// reached the server. The next provider batch must not undo it.
     #[tokio::test]
     async fn an_open_flag_mutation_protects_the_local_read_state() {
         for status in ["pending", "sending", "scheduled", "failed"] {

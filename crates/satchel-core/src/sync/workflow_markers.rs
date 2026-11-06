@@ -1,33 +1,72 @@
 //! Push and pull of Done/Snooze markers (see `workflow::remote_marker`).
 //!
-//! Push: a workflow transition queues one `workflow_marker` mutation per
-//! thread, inside the transition's transaction and before its moves, so the
-//! keyword is on the source copy when MOVE carries it along. A newer marker
-//! for the same thread replaces one that has not been sent yet; Done and its
-//! Undo within the Undo window never reach the server.
+//! Push: a workflow transition queues the thread's copies under one
+//! `workflow_marker` mutation, inside the transition's transaction and before
+//! its moves, so the keyword is on the source copy when MOVE carries it
+//! along. Threads with the same marker share one unsent row, so archiving 300
+//! threads is one provider session, not 300. A newer marker for a thread
+//! takes it out of the unsent row it was in; Done plus its Undo inside the
+//! Undo window never reaches the server.
+//!
+//! Marker writes are best effort. A server that refuses them never blocks
+//! the account's queue: the folder counts as refused and the row settles.
+//! `threads.remote_workflow_marker` records only what the server accepted.
 //!
 //! Pull: sync stores what the server reports per copy
-//! (`messages.remote_workflow_marker`) and then calls
-//! [`reconcile_remote_workflow_markers`] for the threads it touched.
+//! (`messages.remote_workflow_marker`, `NULL` = no marker) and calls
+//! [`reconcile_remote_workflow_markers`] for threads whose copies changed.
 
 use std::collections::HashSet;
 
+use serde::{Deserialize, Serialize};
 use sqlx::{Executor, Sqlite, SqlitePool, Transaction};
 
-use crate::providers::traits::MessageRef;
+use crate::providers::traits::{
+    MarkerTarget, MessageRef, WorkflowMarkerReport, WorkflowMarkerWrite,
+};
 use crate::sync::queue::{QueuedAction, SyncQueue};
 use crate::sync::remote_mutations::{
     remote_move_thread_id_from_json, stable_queue_id, RemoteMutationPayload, ACTION_REMOTE_MUTATION,
 };
 use crate::workflow::remote_marker::{
-    pull_decision, thread_marker, MarkerCopy, PullDecision, WorkflowMarker,
+    pull_decision, same_on_server, thread_marker, MarkerCopy, PullDecision, Snooze, WorkflowMarker,
 };
 use crate::workflow::states::WorkflowState;
 
-/// `account_workflow_sync.mode` once a mailbox accepted Satchel's keywords.
+/// `account_workflow_sync.mode` once INBOX accepted Satchel's keywords.
 pub const MODE_SERVER: &str = "server";
 /// `account_workflow_sync.mode` when the server cannot store them.
 pub const MODE_LOCAL_ONLY: &str = "local_only";
+/// INBOX's PERMANENTFLAGS lack `\*` (or the host is Gmail's IMAP). A later
+/// snapshot that shows `\*` turns the account back to `server`.
+pub const REASON_NO_CUSTOM_KEYWORDS: &str = "no_custom_keywords";
+/// INBOX refused a keyword STORE although it lists `\*` (a full keyword
+/// table, for example). Sticky: the snapshot would only say `\*` again.
+pub const REASON_STORE_REFUSED: &str = "store_refused";
+
+/// Threads per unsent marker row; keeps one payload and one STORE bounded.
+const THREADS_PER_ROW: usize = 200;
+
+/// One thread's share of a `workflow_marker` mutation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarkedThread {
+    pub thread_id: String,
+    pub refs: Vec<MessageRef>,
+    /// Compare-and-clear: the marker this device last saw. The write only
+    /// goes ahead while the thread's recorded marker and its copies on the
+    /// server still show exactly this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected: Option<WorkflowMarker>,
+}
+
+impl MarkedThread {
+    fn target(&self) -> MarkerTarget {
+        MarkerTarget {
+            refs: self.refs.clone(),
+            expected: self.expected,
+        }
+    }
+}
 
 /// Providers whose server can hold the markers. Outlook would need
 /// categories and is not wired yet; POP3 has no server state at all.
@@ -38,28 +77,62 @@ pub fn provider_carries_markers(provider: &str) -> bool {
     )
 }
 
-/// Record what the server said about keywords. Only a change is written, so
-/// a sync that reports the same answer every five minutes costs one read.
+/// Record a push or snapshot verdict. Only a change is written.
 pub async fn record_workflow_sync_mode<'e, E>(
     executor: E,
     account_id: &str,
     mode: &str,
+    reason: Option<&str>,
 ) -> Result<(), String>
 where
     E: Executor<'e, Database = Sqlite>,
 {
     sqlx::query(
-        "INSERT INTO account_workflow_sync (account_id, mode, checked_at) VALUES (?, ?, ?)
-         ON CONFLICT(account_id) DO UPDATE SET mode = excluded.mode, checked_at = excluded.checked_at
-         WHERE account_workflow_sync.mode IS NOT excluded.mode",
+        "INSERT INTO account_workflow_sync (account_id, mode, reason, checked_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(account_id) DO UPDATE SET
+             mode = excluded.mode, reason = excluded.reason, checked_at = excluded.checked_at
+         WHERE account_workflow_sync.mode IS NOT excluded.mode
+            OR account_workflow_sync.reason IS NOT excluded.reason",
     )
     .bind(account_id)
     .bind(mode)
+    .bind(reason)
     .bind(chrono::Utc::now().to_rfc3339())
     .execute(executor)
     .await
     .map_err(|err| err.to_string())?;
     Ok(())
+}
+
+/// What INBOX's PERMANENTFLAGS say. Without `\*` the account is local-only;
+/// with it, back to `server` unless a refused STORE made it local-only, which
+/// the flags cannot disprove.
+pub async fn record_inbox_keyword_support(
+    pool: &SqlitePool,
+    account_id: &str,
+    allowed: bool,
+) -> Result<(), String> {
+    if !allowed {
+        return record_workflow_sync_mode(
+            pool,
+            account_id,
+            MODE_LOCAL_ONLY,
+            Some(REASON_NO_CUSTOM_KEYWORDS),
+        )
+        .await;
+    }
+    let sticky: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM account_workflow_sync WHERE account_id = ? AND reason = ?)",
+    )
+    .bind(account_id)
+    .bind(REASON_STORE_REFUSED)
+    .fetch_one(pool)
+    .await
+    .map_err(|err| err.to_string())?;
+    if sticky {
+        return Ok(());
+    }
+    record_workflow_sync_mode(pool, account_id, MODE_SERVER, None).await
 }
 
 /// Accounts whose server cannot store Done and Snooze, for the settings note.
@@ -96,18 +169,18 @@ struct CopyRow {
     source_uidvalidity: Option<i64>,
 }
 
-/// Queue the server form of `marker` for a thread. Returns the queued ids;
-/// none when the provider or server cannot carry markers, the thread has no
-/// server copies, or the server already holds this marker as far as this
-/// device knows.
-pub async fn enqueue_workflow_marker_in_transaction(
+struct MarkerThreadRow {
+    account_id: String,
+    provider: String,
+    recorded: WorkflowMarker,
+}
+
+/// The thread's account if it can carry markers at all.
+async fn marker_thread(
     tx: &mut Transaction<'_, Sqlite>,
-    queue: &SyncQueue,
     thread_id: &str,
-    marker: &WorkflowMarker,
-    queue_prefix: Option<&str>,
-) -> Result<Vec<String>, String> {
-    let Some((account_id, provider, kind, last_pushed)) =
+) -> Result<Option<MarkerThreadRow>, String> {
+    let Some((account_id, provider, kind, recorded)) =
         sqlx::query_as::<_, (String, String, String, Option<String>)>(
             "SELECT t.account_id, a.provider, a.kind, t.remote_workflow_marker
              FROM threads t JOIN accounts a ON a.id = t.account_id WHERE t.id = ?",
@@ -117,39 +190,156 @@ pub async fn enqueue_workflow_marker_in_transaction(
         .await
         .map_err(|err| err.to_string())?
     else {
-        return Ok(Vec::new());
+        return Ok(None);
     };
     if kind != "email"
         || !provider_carries_markers(&provider)
         || account_is_local_only(&mut **tx, &account_id).await?
     {
-        return Ok(Vec::new());
+        return Ok(None);
     }
+    Ok(Some(MarkerThreadRow {
+        account_id,
+        provider,
+        recorded: WorkflowMarker::from_column(recorded.as_deref()),
+    }))
+}
 
-    // A marker not sent yet is replaced, whatever it said: the new one
-    // describes the whole target state. One already in flight stays; the new
-    // row runs after it.
-    let replaced = sqlx::query(
-        "DELETE FROM sync_queue
-         WHERE action_type = ? AND status IN ('pending', 'scheduled')
+type UnsentRow = (String, String, i64, Option<String>, RemoteMutationPayload);
+
+async fn unsent_marker_rows(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+) -> Result<Vec<UnsentRow>, String> {
+    let rows = sqlx::query_as::<_, (String, String, i64, Option<String>, String)>(
+        "SELECT id, status, retry_count, next_retry_at, payload FROM sync_queue
+         WHERE account_id = ? AND action_type = ? AND status IN ('pending', 'scheduled')
            AND CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END = 'workflow_marker'
-           AND json_extract(payload, '$.thread_id') = ?",
+         ORDER BY rowid",
+    )
+    .bind(account_id)
+    .bind(ACTION_REMOTE_MUTATION)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|err| err.to_string())?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(id, status, retries, next_retry_at, payload)| {
+            serde_json::from_str(&payload)
+                .ok()
+                .map(|payload| (id, status, retries, next_retry_at, payload))
+        })
+        .collect())
+}
+
+async fn store_payload(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: &str,
+    payload: &RemoteMutationPayload,
+) -> Result<(), String> {
+    sqlx::query("UPDATE sync_queue SET payload = ? WHERE id = ?")
+        .bind(serde_json::to_string(payload).map_err(|err| err.to_string())?)
+        .bind(id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+/// Take a thread out of every marker row not sent yet. Returns whether it
+/// was in one.
+async fn withdraw_unsent(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    thread_id: &str,
+) -> Result<bool, String> {
+    let mut withdrawn = false;
+    for (id, _, _, _, mut payload) in unsent_marker_rows(tx, account_id).await? {
+        let RemoteMutationPayload::WorkflowMarker { threads, .. } = &mut payload else {
+            continue;
+        };
+        let before = threads.len();
+        threads.retain(|thread| thread.thread_id != thread_id);
+        if threads.len() == before {
+            continue;
+        }
+        withdrawn = true;
+        if threads.is_empty() {
+            sqlx::query("DELETE FROM sync_queue WHERE id = ?")
+                .bind(&id)
+                .execute(&mut **tx)
+                .await
+                .map_err(|err| err.to_string())?;
+        } else {
+            store_payload(tx, &id, &payload).await?;
+        }
+    }
+    Ok(withdrawn)
+}
+
+async fn marker_in_flight(
+    tx: &mut Transaction<'_, Sqlite>,
+    thread_id: &str,
+) -> Result<bool, String> {
+    let payloads = sqlx::query_scalar::<_, String>(
+        "SELECT payload FROM sync_queue
+         WHERE action_type = ? AND status = 'sending'
+           AND CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END = 'workflow_marker'",
     )
     .bind(ACTION_REMOTE_MUTATION)
-    .bind(thread_id)
-    .execute(&mut **tx)
+    .fetch_all(&mut **tx)
     .await
-    .map_err(|err| err.to_string())?
-    .rows_affected();
-    let last_pushed = last_pushed
-        .as_deref()
-        .and_then(WorkflowMarker::from_db_value)
-        .unwrap_or(WorkflowMarker::None);
-    if replaced == 0 && &last_pushed == marker {
-        return Ok(Vec::new());
-    }
+    .map_err(|err| err.to_string())?;
+    Ok(payloads.iter().any(|payload| {
+        matches!(
+            serde_json::from_str::<RemoteMutationPayload>(payload),
+            Ok(RemoteMutationPayload::WorkflowMarker { threads, .. })
+                if threads.iter().any(|queued| queued.thread_id == thread_id)
+        )
+    }))
+}
 
-    let refs = sqlx::query_as::<_, CopyRow>(
+/// Join a waiting row with the same marker instead of opening another. Only
+/// a fresh `pending` row qualifies: one waiting for a retry would hold the
+/// new thread back, and notification rows have their own lease.
+async fn join_unsent(
+    tx: &mut Transaction<'_, Sqlite>,
+    account_id: &str,
+    marker: &WorkflowMarker,
+    entry: &MarkedThread,
+) -> Result<Option<String>, String> {
+    for (id, status, retries, next_retry_at, mut payload) in
+        unsent_marker_rows(tx, account_id).await?
+    {
+        if status != "pending"
+            || retries != 0
+            || next_retry_at.is_some()
+            || id.starts_with("notification:")
+        {
+            continue;
+        }
+        let RemoteMutationPayload::WorkflowMarker {
+            threads,
+            marker: queued,
+        } = &mut payload
+        else {
+            continue;
+        };
+        if queued != marker || threads.len() >= THREADS_PER_ROW {
+            continue;
+        }
+        threads.push(entry.clone());
+        store_payload(tx, &id, &payload).await?;
+        return Ok(Some(id));
+    }
+    Ok(None)
+}
+
+async fn thread_refs(
+    tx: &mut Transaction<'_, Sqlite>,
+    thread_id: &str,
+) -> Result<Vec<MessageRef>, String> {
+    Ok(sqlx::query_as::<_, CopyRow>(
         "SELECT m.remote_id, COALESCE(f.remote_id, f.full_path) AS source_folder,
                 f.uidvalidity AS source_uidvalidity
          FROM messages m JOIN folders f ON f.id = m.folder_id
@@ -169,43 +359,194 @@ pub async fn enqueue_workflow_marker_in_transaction(
             source_uidvalidity: row.source_uidvalidity.and_then(|n| u32::try_from(n).ok()),
         })
     })
-    .collect::<Vec<_>>();
+    .collect())
+}
+
+async fn enqueue_marker(
+    tx: &mut Transaction<'_, Sqlite>,
+    queue: &SyncQueue,
+    thread_id: &str,
+    account_id: &str,
+    marker: WorkflowMarker,
+    expected: Option<WorkflowMarker>,
+    queue_prefix: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let refs = thread_refs(tx, thread_id).await?;
     if refs.is_empty() {
         return Ok(Vec::new());
     }
-
+    let entry = MarkedThread {
+        thread_id: thread_id.to_string(),
+        refs,
+        expected,
+    };
+    if queue_prefix.is_none() {
+        if let Some(id) = join_unsent(tx, account_id, &marker, &entry).await? {
+            return Ok(vec![id]);
+        }
+    }
     let mut action = QueuedAction::new(
-        account_id.clone(),
+        account_id.to_string(),
         ACTION_REMOTE_MUTATION,
         serde_json::to_value(RemoteMutationPayload::WorkflowMarker {
-            thread_id: thread_id.to_string(),
-            refs,
-            marker: marker.clone(),
+            threads: vec![entry],
+            marker,
         })
         .map_err(|err| err.to_string())?,
     );
     if let Some(prefix) = queue_prefix {
-        action.id = stable_queue_id(prefix, "workflow-marker", &account_id);
+        action.id = stable_queue_id(prefix, "workflow-marker", account_id);
     }
     queue.enqueue_in_transaction(tx, &action).await?;
-    sqlx::query("UPDATE threads SET remote_workflow_marker = ? WHERE id = ?")
-        .bind(marker.as_db_value())
-        .bind(thread_id)
-        .execute(&mut **tx)
-        .await
-        .map_err(|err| err.to_string())?;
     Ok(vec![action.id])
 }
 
-/// After a push the server refused for lack of keyword support: forget what
-/// was pushed, so the server's silence is not read as someone removing it
-/// once the server learns keywords.
-pub async fn forget_unsupported_push(pool: &SqlitePool, thread_id: &str) -> Result<(), String> {
-    sqlx::query("UPDATE threads SET remote_workflow_marker = NULL WHERE id = ?")
-        .bind(thread_id)
-        .execute(pool)
-        .await
-        .map_err(|err| err.to_string())?;
+/// Queue the server form of `marker` for a thread. Returns the queued ids;
+/// none when the provider or server cannot carry markers, the thread has no
+/// server copies, or the server already holds this marker.
+pub async fn enqueue_workflow_marker_in_transaction(
+    tx: &mut Transaction<'_, Sqlite>,
+    queue: &SyncQueue,
+    thread_id: &str,
+    marker: &WorkflowMarker,
+    queue_prefix: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let Some(thread) = marker_thread(tx, thread_id).await? else {
+        return Ok(Vec::new());
+    };
+    let marker = if thread.provider.eq_ignore_ascii_case("imap") {
+        marker.after(&thread.recorded)
+    } else {
+        *marker
+    };
+    withdraw_unsent(tx, &thread.account_id, thread_id).await?;
+    // The server holds what was recorded, unless a row is on its way there
+    // right now; then the new marker has to follow it.
+    if thread.recorded == marker && !marker_in_flight(tx, thread_id).await? {
+        return Ok(Vec::new());
+    }
+    enqueue_marker(
+        tx,
+        queue,
+        thread_id,
+        &thread.account_id,
+        marker,
+        None,
+        queue_prefix,
+    )
+    .await
+}
+
+/// The snooze worker woke this thread. Cancel a snooze that never left, and
+/// clear the one on the server only if it is the snooze this device set
+/// (it knows its time) and nobody replaced it since: compare-and-clear, so a
+/// newer snooze from another device survives a device that woke late.
+///
+/// IMAP only. Gmail labels carry the time, every device resolves a passed
+/// wake label to Inbox by itself, and expired labels are cleaned up with
+/// their messages (`GmailProvider::delete_expired_wake_labels`).
+pub async fn enqueue_wake_clear_in_transaction(
+    tx: &mut Transaction<'_, Sqlite>,
+    queue: &SyncQueue,
+    thread_id: &str,
+) -> Result<Vec<String>, String> {
+    let Some(thread) = marker_thread(tx, thread_id).await? else {
+        return Ok(Vec::new());
+    };
+    withdraw_unsent(tx, &thread.account_id, thread_id).await?;
+    let own_snooze = matches!(
+        thread.recorded,
+        WorkflowMarker::Snoozed(Snooze { wake: Some(_), .. })
+    );
+    if !thread.provider.eq_ignore_ascii_case("imap") || !own_snooze {
+        return Ok(Vec::new());
+    }
+    enqueue_marker(
+        tx,
+        queue,
+        thread_id,
+        &thread.account_id,
+        WorkflowMarker::None,
+        Some(thread.recorded),
+        None,
+    )
+    .await
+}
+
+/// Drop compare-and-clear entries whose thread moved on after they were
+/// queued: its recorded marker is no longer the one the clear expects.
+pub async fn retain_current_entries(
+    pool: &SqlitePool,
+    threads: Vec<MarkedThread>,
+) -> Result<Vec<MarkedThread>, String> {
+    let mut current = Vec::with_capacity(threads.len());
+    for thread in threads {
+        if let Some(expected) = thread.expected {
+            let recorded: Option<Option<String>> =
+                sqlx::query_scalar("SELECT remote_workflow_marker FROM threads WHERE id = ?")
+                    .bind(&thread.thread_id)
+                    .fetch_optional(pool)
+                    .await
+                    .map_err(|err| err.to_string())?;
+            let Some(recorded) = recorded else {
+                continue;
+            };
+            if WorkflowMarker::from_column(recorded.as_deref()) != expected {
+                continue;
+            }
+        }
+        current.push(thread);
+    }
+    Ok(current)
+}
+
+/// The provider call of a `workflow_marker` row, and its bookkeeping.
+pub async fn execute_marker_write(
+    pool: &SqlitePool,
+    account_id: &str,
+    provider: &dyn crate::providers::traits::MailProvider,
+    threads: &[MarkedThread],
+    marker: &WorkflowMarker,
+) -> crate::sync::errors::SyncResult<()> {
+    let targets = threads.iter().map(MarkedThread::target).collect::<Vec<_>>();
+    let report = provider.set_workflow_marker(&targets, marker).await?;
+    apply_marker_report(pool, account_id, threads, marker, &report).await?;
+    Ok(())
+}
+
+/// Record what the server accepted. A refused or skipped thread keeps its
+/// last recorded marker, so the server's silence later reads as no change.
+pub async fn apply_marker_report(
+    pool: &SqlitePool,
+    account_id: &str,
+    threads: &[MarkedThread],
+    marker: &WorkflowMarker,
+    report: &WorkflowMarkerReport,
+) -> Result<(), String> {
+    let mut applied = false;
+    for (thread, outcome) in threads.iter().zip(&report.targets) {
+        if *outcome != WorkflowMarkerWrite::Applied {
+            continue;
+        }
+        applied = true;
+        sqlx::query("UPDATE threads SET remote_workflow_marker = ? WHERE id = ?")
+            .bind(marker.as_column())
+            .bind(&thread.thread_id)
+            .execute(pool)
+            .await
+            .map_err(|err| err.to_string())?;
+    }
+    if report.refused_in_inbox {
+        record_workflow_sync_mode(
+            pool,
+            account_id,
+            MODE_LOCAL_ONLY,
+            Some(REASON_STORE_REFUSED),
+        )
+        .await?;
+    } else if applied {
+        record_inbox_keyword_support(pool, account_id, true).await?;
+    }
     Ok(())
 }
 
@@ -227,7 +568,8 @@ async fn local_change_pending(
         remote_move_thread_id_from_json(payload).as_deref() == Some(thread_id)
             || matches!(
                 serde_json::from_str::<RemoteMutationPayload>(payload),
-                Ok(RemoteMutationPayload::WorkflowMarker { thread_id: queued, .. }) if queued == thread_id
+                Ok(RemoteMutationPayload::WorkflowMarker { threads, .. })
+                    if threads.iter().any(|queued| queued.thread_id == thread_id)
             )
     }))
 }
@@ -247,10 +589,7 @@ pub async fn reconcile_remote_workflow_markers(
     Ok(changed)
 }
 
-async fn server_marker<'e, E>(
-    executor: E,
-    thread_id: &str,
-) -> Result<Option<WorkflowMarker>, String>
+async fn server_marker<'e, E>(executor: E, thread_id: &str) -> Result<WorkflowMarker, String>
 where
     E: Executor<'e, Database = Sqlite>,
 {
@@ -266,7 +605,7 @@ where
     .into_iter()
     .map(|(in_inbox, marker)| MarkerCopy {
         in_inbox: in_inbox != 0,
-        marker: marker.as_deref().and_then(WorkflowMarker::from_db_value),
+        marker: WorkflowMarker::from_column(marker.as_deref()),
     })
     .collect::<Vec<_>>();
     Ok(thread_marker(&copies))
@@ -283,31 +622,17 @@ struct ThreadRow {
 
 async fn reconcile_thread(pool: &SqlitePool, thread_id: &str) -> Result<bool, String> {
     // Read first without the write lock: almost every call finds nothing new.
-    let Some(server) = server_marker(pool, thread_id).await? else {
-        return Ok(false);
-    };
-    let seen: Option<Option<String>> =
+    let server = server_marker(pool, thread_id).await?;
+    let recorded: Option<Option<String>> =
         sqlx::query_scalar("SELECT remote_workflow_marker FROM threads WHERE id = ?")
             .bind(thread_id)
             .fetch_optional(pool)
             .await
             .map_err(|err| err.to_string())?;
-    let Some(seen) = seen else {
+    let Some(recorded) = recorded else {
         return Ok(false);
     };
-    let seen = seen.as_deref().and_then(WorkflowMarker::from_db_value);
-    if seen.as_ref().unwrap_or(&WorkflowMarker::None) == &server {
-        if seen.is_none() {
-            // First reading of a thread the server says nothing about.
-            sqlx::query(
-                "UPDATE threads SET remote_workflow_marker = ? WHERE id = ? AND remote_workflow_marker IS NULL",
-            )
-            .bind(server.as_db_value())
-            .bind(thread_id)
-            .execute(pool)
-            .await
-            .map_err(|err| err.to_string())?;
-        }
+    if same_on_server(&WorkflowMarker::from_column(recorded.as_deref()), &server) {
         return Ok(false);
     }
 
@@ -315,9 +640,7 @@ async fn reconcile_thread(pool: &SqlitePool, thread_id: &str) -> Result<bool, St
         .begin_with("BEGIN IMMEDIATE")
         .await
         .map_err(|err| err.to_string())?;
-    let Some(server) = server_marker(&mut *tx, thread_id).await? else {
-        return Ok(false);
-    };
+    let server = server_marker(&mut *tx, thread_id).await?;
     let Some(row) = sqlx::query_as::<_, ThreadRow>(
         "SELECT t.account_id, a.provider, t.workflow_state, t.snooze_until, t.remote_workflow_marker
          FROM threads t JOIN accounts a ON a.id = t.account_id WHERE t.id = ?",
@@ -341,10 +664,7 @@ async fn reconcile_thread(pool: &SqlitePool, thread_id: &str) -> Result<bool, St
     if local_change_pending(&mut tx, thread_id).await? {
         return Ok(false);
     }
-    let seen = row
-        .remote_workflow_marker
-        .as_deref()
-        .and_then(WorkflowMarker::from_db_value);
+    let seen = WorkflowMarker::from_column(row.remote_workflow_marker.as_deref());
     let local_state = row
         .workflow_state
         .as_deref()
@@ -352,7 +672,7 @@ async fn reconcile_thread(pool: &SqlitePool, thread_id: &str) -> Result<bool, St
         .unwrap_or(WorkflowState::Inbox);
     let now = chrono::Utc::now();
     let decision = pull_decision(
-        seen.as_ref(),
+        &seen,
         &server,
         local_state,
         row.snooze_until.as_deref(),
@@ -395,7 +715,7 @@ async fn reconcile_thread(pool: &SqlitePool, thread_id: &str) -> Result<bool, St
         applied = true;
     }
     sqlx::query("UPDATE threads SET remote_workflow_marker = ? WHERE id = ?")
-        .bind(server.as_db_value())
+        .bind(server.as_column())
         .bind(thread_id)
         .execute(&mut *tx)
         .await
@@ -405,340 +725,4 @@ async fn reconcile_thread(pool: &SqlitePool, thread_id: &str) -> Result<bool, St
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::{Duration, Utc};
-    use sqlx::sqlite::SqlitePoolOptions;
-
-    async fn pool(provider: &str) -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .expect("pool");
-        sqlx::migrate!("./src/db/migrations")
-            .run(&pool)
-            .await
-            .expect("migrations");
-        let now = Utc::now().to_rfc3339();
-        sqlx::query(
-            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
-             VALUES ('acc', 'Me', 'me@example.com', ?, '{}', '', ?, ?)",
-        )
-        .bind(provider)
-        .bind(&now)
-        .bind(&now)
-        .execute(&pool)
-        .await
-        .expect("account");
-        for (id, kind) in [("INBOX", "inbox"), ("Archive", "archive")] {
-            sqlx::query(
-                "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, created_at, updated_at)
-                 VALUES (?, 'acc', ?, ?, ?, ?, 7, ?, ?)",
-            )
-            .bind(id)
-            .bind(id)
-            .bind(id)
-            .bind(kind)
-            .bind(id)
-            .bind(&now)
-            .bind(&now)
-            .execute(&pool)
-            .await
-            .expect("folder");
-        }
-        sqlx::query(
-            "INSERT INTO threads (id, account_id, subject, last_message_date, workflow_state, board_column, created_at, updated_at)
-             VALUES ('t', 'acc', 'Subject', ?, 'inbox', 'inbox', ?, ?)",
-        )
-        .bind(&now)
-        .bind(&now)
-        .bind(&now)
-        .execute(&pool)
-        .await
-        .expect("thread");
-        message(&pool, "m1", "INBOX", "41", None).await;
-        pool
-    }
-
-    async fn message(pool: &SqlitePool, id: &str, folder: &str, uid: &str, marker: Option<&str>) {
-        let now = Utc::now().to_rfc3339();
-        sqlx::query(
-            "INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, date, remote_id, remote_workflow_marker, created_at, updated_at)
-             VALUES (?, 'acc', ?, 't', 'a@example.com', '[]', ?, ?, ?, ?, ?)",
-        )
-        .bind(id)
-        .bind(folder)
-        .bind(&now)
-        .bind(uid)
-        .bind(marker)
-        .bind(&now)
-        .bind(&now)
-        .execute(pool)
-        .await
-        .expect("message");
-    }
-
-    async fn queued_markers(pool: &SqlitePool) -> Vec<(String, WorkflowMarker)> {
-        sqlx::query_scalar::<_, String>(
-            "SELECT payload FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_marker' ORDER BY rowid",
-        )
-        .fetch_all(pool)
-        .await
-        .expect("queue")
-        .into_iter()
-        .map(|payload| match serde_json::from_str(&payload).expect("payload") {
-            RemoteMutationPayload::WorkflowMarker { thread_id, marker, .. } => (thread_id, marker),
-            other => panic!("unexpected payload {other:?}"),
-        })
-        .collect()
-    }
-
-    async fn push(pool: &SqlitePool, marker: WorkflowMarker) -> Vec<String> {
-        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.expect("tx");
-        let ids =
-            enqueue_workflow_marker_in_transaction(&mut tx, &SyncQueue::new(), "t", &marker, None)
-                .await
-                .expect("enqueue");
-        tx.commit().await.expect("commit");
-        ids
-    }
-
-    async fn state(pool: &SqlitePool) -> (String, Option<String>, Option<String>) {
-        sqlx::query_as(
-            "SELECT workflow_state, snooze_until, remote_workflow_marker FROM threads WHERE id = 't'",
-        )
-        .fetch_one(pool)
-        .await
-        .expect("thread")
-    }
-
-    async fn set_server(pool: &SqlitePool, marker: &WorkflowMarker) {
-        sqlx::query("UPDATE messages SET remote_workflow_marker = ? WHERE thread_id = 't'")
-            .bind(marker.as_db_value())
-            .execute(pool)
-            .await
-            .expect("server marker");
-    }
-
-    async fn pull(pool: &SqlitePool) -> bool {
-        !reconcile_remote_workflow_markers(pool, &HashSet::from(["t".to_string()]))
-            .await
-            .expect("reconcile")
-            .is_empty()
-    }
-
-    #[tokio::test]
-    async fn a_marker_push_carries_every_server_copy_of_the_thread() {
-        let pool = pool("imap").await;
-        message(&pool, "m2", "Archive", "9", None).await;
-        let ids = push(&pool, WorkflowMarker::Done).await;
-        assert_eq!(ids.len(), 1);
-        let payload: String = sqlx::query_scalar("SELECT payload FROM sync_queue")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        let RemoteMutationPayload::WorkflowMarker { refs, .. } =
-            serde_json::from_str(&payload).unwrap()
-        else {
-            panic!("marker payload");
-        };
-        let refs = refs
-            .iter()
-            .map(|r| {
-                (
-                    r.source_folder.clone().unwrap(),
-                    r.remote_id.clone(),
-                    r.source_uidvalidity,
-                )
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            refs,
-            vec![
-                ("INBOX".into(), "41".into(), Some(7)),
-                ("Archive".into(), "9".into(), Some(7))
-            ]
-        );
-        assert_eq!(state(&pool).await.2.as_deref(), Some("done"));
-    }
-
-    #[tokio::test]
-    async fn a_rapid_toggle_leaves_only_the_last_marker() {
-        let pool = pool("gmail").await;
-        let wake = Utc::now() + Duration::hours(3);
-        push(&pool, WorkflowMarker::Done).await;
-        push(&pool, WorkflowMarker::Snoozed(wake)).await;
-        push(&pool, WorkflowMarker::None).await;
-        assert_eq!(
-            queued_markers(&pool).await,
-            vec![("t".into(), WorkflowMarker::None)]
-        );
-        // Nothing new to say: the server was last told None.
-        sqlx::query("DELETE FROM sync_queue")
-            .execute(&pool)
-            .await
-            .unwrap();
-        assert!(push(&pool, WorkflowMarker::None).await.is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_marker_in_flight_is_kept_and_the_new_one_follows() {
-        let pool = pool("imap").await;
-        push(&pool, WorkflowMarker::Done).await;
-        sqlx::query("UPDATE sync_queue SET status = 'sending'")
-            .execute(&pool)
-            .await
-            .unwrap();
-        push(&pool, WorkflowMarker::None).await;
-        assert_eq!(
-            queued_markers(&pool).await,
-            vec![
-                ("t".into(), WorkflowMarker::Done),
-                ("t".into(), WorkflowMarker::None)
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn local_only_accounts_and_other_providers_queue_nothing() {
-        let pool = pool("imap").await;
-        record_workflow_sync_mode(&pool, "acc", MODE_LOCAL_ONLY)
-            .await
-            .unwrap();
-        assert!(push(&pool, WorkflowMarker::Done).await.is_empty());
-        assert_eq!(
-            list_local_only_accounts(&pool).await.unwrap(),
-            vec!["acc".to_string()]
-        );
-        record_workflow_sync_mode(&pool, "acc", MODE_SERVER)
-            .await
-            .unwrap();
-        assert!(list_local_only_accounts(&pool).await.unwrap().is_empty());
-
-        let outlook = pool_with_provider("outlook").await;
-        assert!(push(&outlook, WorkflowMarker::Done).await.is_empty());
-    }
-
-    async fn pool_with_provider(provider: &str) -> SqlitePool {
-        pool(provider).await
-    }
-
-    #[tokio::test]
-    async fn a_snooze_set_on_another_device_is_adopted_and_wakes_here() {
-        let pool = pool("imap").await;
-        let wake =
-            chrono::DateTime::from_timestamp((Utc::now() + Duration::hours(2)).timestamp(), 0)
-                .unwrap();
-        set_server(&pool, &WorkflowMarker::Snoozed(wake)).await;
-        assert!(pull(&pool).await);
-        let (state_now, until, seen) = state(&pool).await;
-        assert_eq!(state_now, "snoozed");
-        assert_eq!(until, Some(wake.to_rfc3339()));
-        assert_eq!(seen, Some(WorkflowMarker::Snoozed(wake).as_db_value()));
-        // The local snooze worker compares this column as text against
-        // `Utc::now().to_rfc3339()`; the stored form must sort the same way.
-        assert!(until.unwrap() > Utc::now().to_rfc3339());
-        // Seen once, nothing more to do.
-        assert!(!pull(&pool).await);
-
-        // Woken elsewhere: the keywords are gone.
-        set_server(&pool, &WorkflowMarker::None).await;
-        assert!(pull(&pool).await);
-        assert_eq!(state(&pool).await.0, "inbox");
-    }
-
-    #[tokio::test]
-    async fn the_servers_silence_does_not_reset_a_local_state() {
-        let pool = pool("imap").await;
-        sqlx::query("UPDATE threads SET workflow_state = 'todo'")
-            .execute(&pool)
-            .await
-            .unwrap();
-        set_server(&pool, &WorkflowMarker::None).await;
-        assert!(!pull(&pool).await);
-        assert_eq!(
-            state(&pool).await,
-            ("todo".into(), None, Some(String::new()))
-        );
-    }
-
-    #[tokio::test]
-    async fn an_unsent_local_change_wins_over_the_server() {
-        let pool = pool("imap").await;
-        // As the UI sends it, with milliseconds; the marker keeps seconds.
-        let wake = Utc::now() + Duration::hours(2);
-        let marker = WorkflowMarker::for_state(WorkflowState::Snoozed, Some(&wake.to_rfc3339()));
-        // Snoozed here, not pushed yet; the server still shows nothing.
-        sqlx::query("UPDATE threads SET workflow_state = 'snoozed', snooze_until = ?")
-            .bind(wake.to_rfc3339())
-            .execute(&pool)
-            .await
-            .unwrap();
-        push(&pool, marker.clone()).await;
-        set_server(&pool, &WorkflowMarker::None).await;
-        assert!(!pull(&pool).await);
-        assert_eq!(state(&pool).await.0, "snoozed");
-
-        // Pushed and echoed back: still nothing to do.
-        sqlx::query("DELETE FROM sync_queue")
-            .execute(&pool)
-            .await
-            .unwrap();
-        set_server(&pool, &marker).await;
-        assert!(!pull(&pool).await);
-        assert_eq!(state(&pool).await.0, "snoozed");
-    }
-
-    #[tokio::test]
-    async fn a_refused_push_does_not_read_as_a_wake_later() {
-        let pool = pool("imap").await;
-        let wake = Utc::now() + Duration::hours(2);
-        sqlx::query("UPDATE threads SET workflow_state = 'snoozed', snooze_until = ?")
-            .bind(wake.to_rfc3339())
-            .execute(&pool)
-            .await
-            .unwrap();
-        push(&pool, WorkflowMarker::Snoozed(wake)).await;
-        sqlx::query("DELETE FROM sync_queue")
-            .execute(&pool)
-            .await
-            .unwrap();
-        forget_unsupported_push(&pool, "t").await.unwrap();
-        set_server(&pool, &WorkflowMarker::None).await;
-        assert!(!pull(&pool).await);
-        assert_eq!(state(&pool).await.0, "snoozed");
-    }
-
-    #[tokio::test]
-    async fn local_only_accounts_ignore_the_server() {
-        let pool = pool("imap").await;
-        record_workflow_sync_mode(&pool, "acc", MODE_LOCAL_ONLY)
-            .await
-            .unwrap();
-        set_server(
-            &pool,
-            &WorkflowMarker::Snoozed(Utc::now() + Duration::hours(2)),
-        )
-        .await;
-        assert!(!pull(&pool).await);
-        assert_eq!(state(&pool).await.0, "inbox");
-    }
-
-    #[tokio::test]
-    async fn done_elsewhere_is_applied_once_the_mail_left_the_inbox() {
-        let pool = pool("imap").await;
-        sqlx::query("UPDATE messages SET folder_id = 'Archive', remote_workflow_marker = 'done'")
-            .execute(&pool)
-            .await
-            .unwrap();
-        assert!(pull(&pool).await);
-        assert_eq!(state(&pool).await.0, "done");
-        let reason: String =
-            sqlx::query_scalar("SELECT reason FROM workflow_events WHERE thread_id = 't'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(reason, "server");
-    }
-}
+mod tests;

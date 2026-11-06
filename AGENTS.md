@@ -187,20 +187,29 @@ im App-Crate lautet der Pfad `"../crates/satchel-core/src/db/migrations"`.
 
 ### Erledigt und Wiedervorlage auf dem Server
 
-Done und Snooze reisen als IMAP-Keyword (`$Satchel-Done`, `$Satchel-Snoozed`
-plus `$Satchel-Wake-<UTC>`) bzw. Gmail-Label (`Satchel/…`) mit (ADR 0009,
-`workflow::remote_marker`). Drei Dinge brechen einzeln lautlos:
+Done und Snooze reisen als IMAP-Keyword bzw. Gmail-Label mit (ADR 0009,
+`workflow::remote_marker`). Was einzeln lautlos bricht:
 
+- IMAP hat ein **festes Vokabular aus drei Keywords** (`$Satchel-Done`,
+  `$Satchel-Snoozed`, `$Satchel-Snooze2`). Nie einen Zeitpunkt in einen
+  Keyword-Namen schreiben: Cyrus vergibt höchstens 128 User-Flags pro
+  Postfach und gibt sie nie frei, Dovecot-Maildir kodiert nur 26 im
+  Dateinamen. Die Weckzeit reist nur über Gmail-Labels (löschbar).
 - Die `workflow_marker`-Mutation wird **vor** dem Archiv-Move eingereiht:
   MOVE nimmt Keywords mit, die Quell-UID existiert danach nicht mehr.
-- Gmail-Labels unter `Satchel/` sind Markierungen, keine Ordner. Der Provider
-  nimmt sie aus `mailbox_ids` heraus; landen sie dort, legt die Sync für jede
-  Label-ID einen Ordner an.
+- Marker sind best effort: `NO`/`BAD` auf STORE ist ein Ergebnis, kein
+  Fehler, sonst blockiert die Zeile die Queue des Kontos. async-imaps
+  `uid_store`-Stream verwirft den Status der getaggten Antwort — für STORE
+  `run_command_and_check_ok` nehmen.
+- Gmail-Labels `Satchel/Done`, `Satchel/Snoozed`, `Satchel/Wake/<Zeit>` sind
+  Markierungen, keine Ordner (nur exakt diese Namen; `Satchel/Invoices` gehört
+  dem Nutzer). Der Provider nimmt sie aus `mailbox_ids` heraus; landen sie
+  dort, legt die Sync für jede Label-ID einen Ordner an.
 - Pull wendet nur **Flanken** an: `threads.remote_workflow_marker` hält, was
-  dieses Gerät zuletzt gesendet oder gesehen hat. Ein Server, der nichts sagt,
-  setzt Todo/Waiting nie zurück; eine noch nicht gesendete lokale Änderung
-  gewinnt. Konten ohne `\*` in PERMANENTFLAGS sind `local_only`
-  (`account_workflow_sync`) und werden weder beschrieben noch gelesen.
+  der Server zuletzt angenommen oder gezeigt hat (`NULL` = kein Marker, ein
+  Postfach ohne Marker wird nie beschrieben). Eine noch nicht gesendete lokale
+  Änderung gewinnt. Konten mit `local_only` (`account_workflow_sync`) werden
+  weder beschrieben noch gelesen.
 
 ### Mobile (Android/iOS)
 

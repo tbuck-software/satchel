@@ -6,6 +6,7 @@
  */
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import AppBanner from '@/components/ui/AppBanner.vue';
 import { useWorkflowSyncStore } from '@/stores/workflowSync';
 
 const props = defineProps<{ accountId: string }>();
@@ -16,14 +17,17 @@ const localOnly = computed(() => workflowSync.isLocalOnly(props.accountId));
 </script>
 
 <template>
-  <section v-if="localOnly" class="workflow-sync-note" :aria-label="t('workflowSync.localOnlyTitle')" data-testid="workflow-sync-local-only">
-    <span class="workflow-sync-note__title">{{ t('workflowSync.localOnlyTitle') }}</span>
-    <p class="workflow-sync-note__body">{{ t('workflowSync.localOnlyBody') }}</p>
-  </section>
+  <AppBanner
+    v-if="localOnly"
+    class="workflow-sync-note"
+    tone="info"
+    :title="t('workflowSync.localOnlyTitle')"
+    :detail="t('workflowSync.localOnlyBody')"
+    data-testid="workflow-sync-local-only"
+  />
 </template>
 
 <style scoped>
-.workflow-sync-note { display: grid; gap: var(--space-xs); flex-basis: 100%; padding-top: var(--space-md); border-top: 1px solid var(--border-color-muted); }
-.workflow-sync-note__title { color: var(--text-primary); font-size: var(--font-size-sm); font-weight: var(--weight-semibold); }
-.workflow-sync-note__body { margin: 0; color: var(--text-secondary); font-size: var(--font-size-xs); }
+/* Full row in the account card's wrapping layout. */
+.workflow-sync-note { flex-basis: 100%; }
 </style>

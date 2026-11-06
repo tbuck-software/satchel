@@ -681,6 +681,21 @@ async fn move_threads_with_receipt(
                     .map_err(|e| e.to_string())?;
             }
         }
+        // Rules, sender sweeps and the notification's Done archive here; the
+        // server learns Done as it does from a workflow transition, before
+        // the move carries the keyword along.
+        if matches!(target, MoveTarget::Archive) && !refs.is_empty() {
+            queued.extend(
+                crate::sync::workflow_markers::enqueue_workflow_marker_in_transaction(
+                    &mut tx,
+                    queue,
+                    id,
+                    &crate::workflow::remote_marker::WorkflowMarker::Done,
+                    None,
+                )
+                .await?,
+            );
+        }
         if !provider.eq_ignore_ascii_case("pop3") && !refs.is_empty() {
             // Reuse the existing crash recovery and exact IMAP target reconciliation.
             let mut action = PreparedWorkflowMove {

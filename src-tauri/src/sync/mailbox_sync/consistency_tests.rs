@@ -515,6 +515,20 @@ async fn gmail_multiple_labels_and_synthetic_archive_remain_exclusive() {
     assert_organization(&pool, &thread, &["INBOX", "Label_one"]).await;
 }
 
+/// Label-list requests per fixture server, by its base URL.
+static LABEL_LIST_CALLS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, usize>>,
+> = std::sync::LazyLock::new(Default::default);
+
+fn label_list_calls(base: &str) -> usize {
+    LABEL_LIST_CALLS
+        .lock()
+        .unwrap()
+        .get(base)
+        .copied()
+        .unwrap_or_default()
+}
+
 async fn server(
     route: impl Fn(&str, &str) -> (&'static str, String) + Send + Sync + 'static,
 ) -> (
@@ -567,8 +581,14 @@ async fn server_async<F: std::future::Future<Output = (&'static str, String)> + 
             };
             // Message fetches with user labels read the label list to find
             // Satchel's workflow labels. Every fixture has the same neutral
-            // list, so it is answered here and kept out of the recording.
+            // list, so it is answered here and counted apart from the
+            // recording (`label_list_calls`), which the routes assert on.
             if line.starts_with("GET ") && line.contains("/labels ") {
+                *LABEL_LIST_CALLS
+                    .lock()
+                    .unwrap()
+                    .entry(origin.clone())
+                    .or_default() += 1;
                 let (status, body) = quiet_gmail(&line).expect("label list");
                 let _ = socket.write_all(format!(
                     "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -1118,6 +1138,15 @@ async fn gmail_expired_history_snapshots_preserve_moves_and_retry_unresolved_ids
                 | "pending"
                 | "pending-deleted"
         );
+        // A copy with a user label needs the label names once, to recognise
+        // Satchel's workflow labels; within the token they come from the
+        // cache, so a scenario never lists them more than once.
+        if !matches!(scenario, "still-inbox" | "archive") && !listing_failed {
+            assert!(
+                label_list_calls(&base) <= 1,
+                "{scenario}: label list repeated"
+            );
+        }
         // The queue or the quarantine owns these; the others failed.
         let held = matches!(scenario, "quarantine" | "pending" | "pending-deleted");
         let should_fail = listing_failed || deferred;
@@ -2745,5 +2774,35 @@ async fn gmail_rearmed_retry_is_owed_and_reported_in_its_own_folder() {
     assert!(!state.snapshot_resolutions.contains_key("DRAFT"));
     assert_eq!(locations(&pool).await, [("A".into(), "INBOX".into())]);
     std::env::remove_var("SATCHEL_GMAIL_API_BASE");
+    task.abort();
+}
+
+/// Reading a message with a user label lists the label names once, to keep
+/// Satchel's workflow labels out of the folder list; the next read within
+/// the token uses the cache.
+#[tokio::test]
+async fn gmail_label_names_are_listed_once_per_token() {
+    let _guard = PROVIDER_HTTP_FIXTURES.lock().await;
+    let (base, requests, task) = server(|line, _| {
+        if line.contains("/messages/L1") {
+            return ("200 OK", json!({"id":"L1","threadId":"L1","historyId":"300","labelIds":["Label_one"],
+                "internalDate":"1767225600000","payload":{"mimeType":"text/plain",
+                "headers":[{"name":"Message-ID","value":"<l1@example.test>"}],"body":{"data":"Rml4dHVyZQ=="}}}).to_string());
+        }
+        panic!("unexpected request {line}");
+    })
+    .await;
+    std::env::set_var("SATCHEL_GMAIL_API_BASE", &base);
+    let provider = crate::providers::gmail::GmailProvider::from_account_config(&config());
+    for _ in 0..2 {
+        let message = provider.fetch_message_by_id("L1").await.expect("message");
+        assert_eq!(message.mailbox_ids, vec!["Label_one"]);
+        assert_eq!(
+            message.workflow_marker,
+            Some(satchel_core::workflow::remote_marker::WorkflowMarker::None)
+        );
+    }
+    assert_eq!(label_list_calls(&base), 1);
+    assert_eq!(requests.lock().unwrap().len(), 2);
     task.abort();
 }

@@ -643,8 +643,8 @@ mod tests {
             ]
         );
 
-        // Undo inside the window: the move is cancelled, and the marker that
-        // never left is replaced by the one that says Inbox.
+        // Undo inside the window: the move is cancelled and the marker that
+        // never left is withdrawn; the server is never told.
         transition_thread_inner(
             &pool,
             &queue,
@@ -658,22 +658,8 @@ mod tests {
         .await
         .expect("undo");
         let kinds = queued_kinds(&pool).await;
-        assert_eq!(
-            kinds
-                .iter()
-                .filter(|(kind, _)| kind == "workflow_marker")
-                .count(),
-            1
-        );
         assert!(!kinds.iter().any(|(kind, _)| kind == "workflow_move"));
-        let marker: String = sqlx::query_scalar(
-            "SELECT json_extract(payload, '$.marker') FROM sync_queue
-             WHERE json_extract(payload, '$.kind') = 'workflow_marker'",
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("marker");
-        assert_eq!(marker, "");
+        assert!(!kinds.iter().any(|(kind, _)| kind == "workflow_marker"));
     }
 
     #[tokio::test]
@@ -693,21 +679,44 @@ mod tests {
         .await
         .expect("snooze");
         let (marker, refs): (String, i64) = sqlx::query_as(
-            "SELECT json_extract(payload, '$.marker'), json_array_length(json_extract(payload, '$.refs'))
+            "SELECT json_extract(payload, '$.marker'), json_array_length(json_extract(payload, '$.threads[0].refs'))
              FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_marker'",
         )
         .fetch_one(&pool)
         .await
         .expect("marker");
-        assert_eq!(marker, "snoozed:2030-01-02T08:00:00+00:00");
+        // IMAP carries the snooze, its first generation; the time stays in
+        // the row for this device's own wake.
+        assert_eq!(marker, "snoozed:1:2030-01-02T08:00:00+00:00");
         // Inbox, Sent and Drafts copies: every copy another client may show.
         assert_eq!(refs, 3);
-        let seen: String =
+        // Recorded once the server accepts it, not when queued.
+        let seen: Option<String> =
             sqlx::query_scalar("SELECT remote_workflow_marker FROM threads WHERE id = 'thread'")
                 .fetch_one(&pool)
                 .await
                 .expect("thread");
-        assert_eq!(seen, marker);
+        assert_eq!(seen, None);
+    }
+
+    #[tokio::test]
+    async fn archiving_from_a_rule_or_sweep_marks_the_thread_done_on_the_server() {
+        let pool = seeded_pool().await;
+        let queue = SyncQueue::new();
+        crate::mail_actions::move_threads(
+            &pool,
+            &queue,
+            &["thread".to_string()],
+            crate::mail_actions::MoveTarget::Archive,
+        )
+        .await
+        .expect("archive");
+        let kinds = queued_kinds(&pool)
+            .await
+            .into_iter()
+            .map(|(kind, _)| kind)
+            .collect::<Vec<_>>();
+        assert_eq!(kinds, vec!["flags", "workflow_marker", "workflow_move"]);
     }
 
     #[tokio::test]

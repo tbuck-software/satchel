@@ -9,8 +9,10 @@ use std::sync::{Arc, Mutex};
 use chrono::TimeZone;
 use satchel_core::providers::gmail::GmailProvider;
 use satchel_core::providers::traits::{
-    MailProvider, MessageRef, WorkflowMarker, WorkflowMarkerWrite,
+    MailProvider, MarkerTarget, MessageRef, WorkflowMarker, WorkflowMarkerReport,
+    WorkflowMarkerWrite,
 };
+use satchel_core::workflow::remote_marker::Snooze;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
@@ -27,7 +29,8 @@ fn labels() -> Value {
         {"id":"Label_1","name":"Projects","type":"user"},
         {"id":"Label_7","name":"Satchel/Done","type":"user"},
         {"id":"Label_8","name":"Satchel/Wake/20200101T080000Z","type":"user"},
-        {"id":"Label_9","name":"Satchel/Snoozed","type":"user"}
+        {"id":"Label_9","name":"Satchel/Snoozed","type":"user"},
+        {"id":"Label_10","name":"Satchel/Invoices","type":"user"}
     ]})
 }
 
@@ -45,6 +48,10 @@ fn route(request: &Request) -> (&'static str, Value) {
             "200 OK",
             json!({"id": "Label_new", "name": name, "type": "user"}),
         );
+    }
+    // The messages still carrying the expired wake label.
+    if line.contains("/messages?") && line.contains("labelIds=Label_8") {
+        return ("200 OK", json!({"messages": [{"id": "old"}]}));
     }
     if line.starts_with("DELETE") && line.contains("/labels/") {
         return ("204 No Content", Value::Null);
@@ -142,6 +149,13 @@ fn reference(id: &str) -> MessageRef {
     }
 }
 
+fn target(ids: &[&str]) -> MarkerTarget {
+    MarkerTarget {
+        refs: ids.iter().map(|id| reference(id)).collect(),
+        expected: None,
+    }
+}
+
 fn batch_modifies(requests: &Arc<Mutex<Vec<Request>>>) -> Vec<Value> {
     requests
         .lock()
@@ -167,12 +181,22 @@ async fn done_and_snooze_travel_as_satchel_labels() {
     let wake = chrono::Utc.with_ymd_and_hms(2026, 11, 7, 8, 0, 0).unwrap();
     let outcome = provider
         .set_workflow_marker(
-            &[reference("m1"), reference("m2"), reference("m1")],
-            &WorkflowMarker::Snoozed(wake),
+            // Two threads in one row; a message listed twice is sent once.
+            &[target(&["m1", "m2"]), target(&["m1"])],
+            &WorkflowMarker::Snoozed(Snooze {
+                wake: Some(wake),
+                generation: 1,
+            }),
         )
         .await
         .expect("snooze labels");
-    assert_eq!(outcome, WorkflowMarkerWrite::Applied);
+    assert_eq!(
+        outcome,
+        WorkflowMarkerReport {
+            targets: vec![WorkflowMarkerWrite::Applied; 2],
+            refused_in_inbox: false,
+        }
+    );
     let created = requests
         .lock()
         .unwrap()
@@ -189,15 +213,25 @@ async fn done_and_snooze_travel_as_satchel_labels() {
         created,
         vec![(json!("Satchel/Wake/20261107T080000Z"), json!("labelHide"))]
     );
+    // `Satchel/Invoices` is the person's label and is never touched.
     assert_eq!(
         batch_modifies(&requests),
-        vec![json!({
-            "ids": ["m1", "m2"],
-            "addLabelIds": ["Label_9", "Label_new"],
-            "removeLabelIds": ["Label_7", "Label_8"],
-        })]
+        vec![
+            json!({
+                "ids": ["m1", "m2"],
+                "addLabelIds": ["Label_9", "Label_new"],
+                "removeLabelIds": ["Label_7", "Label_8"],
+            }),
+            // The snooze that ran out with the expired wake label is cleared
+            // on exactly the messages that still carry that label.
+            json!({
+                "ids": ["old"],
+                "addLabelIds": [],
+                "removeLabelIds": ["Label_9", "Label_8"],
+            }),
+        ]
     );
-    // The wake label of a snooze long past is cleaned up afterwards.
+    // Then the expired label itself goes.
     assert!(requests
         .lock()
         .unwrap()
@@ -208,16 +242,16 @@ async fn done_and_snooze_travel_as_satchel_labels() {
     // Back to the Inbox: only removals.
     requests.lock().unwrap().clear();
     provider
-        .set_workflow_marker(&[reference("m1")], &WorkflowMarker::None)
+        .set_workflow_marker(&[target(&["m1"])], &WorkflowMarker::None)
         .await
         .expect("clear labels");
     assert_eq!(
-        batch_modifies(&requests),
-        vec![json!({
+        batch_modifies(&requests)[0],
+        json!({
             "ids": ["m1"],
             "addLabelIds": [],
             "removeLabelIds": ["Label_7", "Label_8", "Label_9"],
-        })]
+        })
     );
 
     // Reading: the Done label becomes the envelope's marker and leaves the
@@ -233,5 +267,26 @@ async fn done_and_snooze_travel_as_satchel_labels() {
         .map(|folder| folder.name.as_str())
         .collect::<Vec<_>>();
     assert!(names.contains(&"Projects"));
-    assert!(!names.iter().any(|name| name.starts_with("Satchel/")));
+    assert!(names.contains(&"Satchel/Invoices"));
+    assert!(!names
+        .iter()
+        .any(|name| ["Satchel/Done", "Satchel/Snoozed"].contains(name)
+            || name.starts_with("Satchel/Wake/")));
+
+    // The label list was read once for the message above and is reused
+    // while the token lasts; a second fetch asks for no list.
+    let lists = |requests: &Arc<Mutex<Vec<Request>>>| {
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request.line.starts_with("GET") && request.line.contains("/labels "))
+            .count()
+    };
+    let before = lists(&requests);
+    provider
+        .fetch_message_by_id("m1")
+        .await
+        .expect("message again");
+    assert_eq!(lists(&requests), before);
 }
