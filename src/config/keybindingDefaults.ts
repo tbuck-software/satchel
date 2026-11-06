@@ -75,7 +75,7 @@ export const KEYBINDING_SPECS: readonly KeybindingSpec[] = [
   { action: 'markSpam', defaultBinding: '!', context: 'mail' },
   { action: 'markNotSpam', defaultBinding: 'I', context: 'mail' },
   { action: 'sweepSender', defaultBinding: 'E', context: 'mail' },
-  { action: 'translateMessage', defaultBinding: 'T', context: 'mail' },
+  { action: 'translateMessage', defaultBinding: 'L', context: 'mail' },
   { action: 'cleanupKeepLatest', defaultBinding: 'p', context: 'cleanup' },
   { action: 'cleanupUnsubscribe', defaultBinding: 'U', context: 'cleanup' },
   { action: 'cleanupRule', defaultBinding: 'R', context: 'cleanup' },

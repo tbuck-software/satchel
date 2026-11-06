@@ -17,7 +17,7 @@ test('asks once, translates in the protected frame and leads back to the origina
   const frame = page.frameLocator('iframe.satchel-email-document');
   await expect(frame.getByText('Quota resets at midnight UTC').first()).toBeVisible();
 
-  await page.keyboard.press('T');
+  await page.keyboard.press('L');
   const dialog = page.getByRole('dialog', { name: 'Send this message to DeepL?' });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Allow and translate' }).click();
@@ -39,7 +39,7 @@ test('asks once, translates in the protected frame and leads back to the origina
   await expect(frame.getByText('Quota resets at midnight UTC').first()).toBeVisible();
 
   // Allowed now: the second time goes without a question.
-  await page.keyboard.press('T');
+  await page.keyboard.press('L');
   await expect(frame.getByText(/\[DE\] .*Quota resets at midnight UTC/).first()).toBeVisible();
   await expect(dialog).toHaveCount(0);
 });

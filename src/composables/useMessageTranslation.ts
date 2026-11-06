@@ -23,7 +23,7 @@ const SETTINGS_ERRORS = new Set([
 
 /**
  * The messages on screen that can be translated, by id, with the toggle each
- * one runs. The palette and the `T` key reach a message through this, the
+ * one runs. The palette and the `L` key reach a message through this, the
  * way the reader's other commands reach the mounted thread.
  */
 const togglers = shallowReactive(new Map<string, () => void>());
@@ -58,7 +58,7 @@ export interface MessageTranslationSource {
  *
  * Two levels. `available` is everything that has to hold for Translate to
  * work at all: an engine with a key, a loaded body, not encrypted, not
- * folded. That is when `T`, the palette and the phone sheet offer it. The
+ * folded. That is when `L`, the palette and the phone sheet offer it. The
  * local language guess only decides `offered`, the header button: mail that
  * already looks like the target language gets no button, but can still be
  * translated on request, because the guess can be wrong.
