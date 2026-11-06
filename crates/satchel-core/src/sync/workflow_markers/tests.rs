@@ -35,9 +35,10 @@ async fn pool(provider: &str) -> SqlitePool {
     let now = Utc::now().to_rfc3339();
     sqlx::query(
         "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
-         VALUES ('acc', 'Me', 'me@example.com', ?, '{}', '', ?, ?)",
+         VALUES ('acc', 'Me', 'me@example.com', ?, ?, '', ?, ?)",
     )
     .bind(provider)
+    .bind(crate::accounts::encrypt_account_config("acc", "{}").unwrap())
     .bind(&now)
     .bind(&now)
     .execute(&pool)
