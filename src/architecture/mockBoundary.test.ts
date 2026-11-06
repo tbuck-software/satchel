@@ -101,6 +101,8 @@ const NATIVE_FACILITIES = new Map([
   ['src/stores/outbox.ts', 'start'],
   ['src/composables/useComposeWindow.ts', 'supportsNative'],
   ['src/composables/useMailEvents.ts', 'useMailEvents'],
+  // Subscribes to `tasks:changed`, a Rust event; the mock emits none.
+  ['src/composables/taskEvents.ts', 'followTaskSyncs'],
 ]);
 
 function nativeCommandGates(path: string, source: string): string[] {

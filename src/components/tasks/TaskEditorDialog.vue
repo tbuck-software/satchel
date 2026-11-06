@@ -20,10 +20,11 @@ import { useTaskEditor } from '@/composables/useTaskEditor';
 import { useToast } from '@/composables/useToast';
 import { useTasksStore, fieldsOf, type Task } from '@/stores/tasks';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
+import { backendErrorKey } from '@/utils/backendErrors';
 import { splitSubjectPrefixes } from '@/utils/composerText';
 import { isDateOnly, localDateKey, priorityLevel, PRIORITY_VALUES, type TaskPriorityLevel } from '@/utils/tasks';
 import { listLabel } from './taskLabels';
-import { useTaskActions } from './taskActions';
+import { confirmSeriesEnd, dueReceipt, useTaskActions } from './taskActions';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -52,12 +53,14 @@ const titleField = ref<HTMLInputElement | null>(null);
 const threadId = computed(() => existing.value?.thread_id ?? request.value?.threadId ?? null);
 const writableLists = computed(() => tasks.lists.filter((list) => !list.read_only));
 const currentList = computed(() => tasks.lists.find((list) => list.id === listId.value) ?? null);
+/** A read-only list (or one the server dropped) shows its tasks without edits. */
+const locked = computed(() => isEdit.value && Boolean(currentList.value?.read_only));
 
 const priorityOptions = computed(() => [
-  { value: 'none', label: t('tasks.priority.none') },
-  { value: 'high', label: t('tasks.priority.high') },
-  { value: 'medium', label: t('tasks.priority.medium') },
-  { value: 'low', label: t('tasks.priority.low') },
+  { value: 'none', label: t('tasks.priority.none'), disabled: locked.value },
+  { value: 'high', label: t('tasks.priority.high'), disabled: locked.value },
+  { value: 'medium', label: t('tasks.priority.medium'), disabled: locked.value },
+  { value: 'low', label: t('tasks.priority.low'), disabled: locked.value },
 ]);
 
 function pad(value: number): string {
@@ -155,7 +158,7 @@ function close() {
 useDismissableOnTop(() => request.value !== null, close);
 
 async function submit() {
-  if (saving.value) return;
+  if (saving.value || locked.value) return;
   if (!title.value.trim()) {
     error.value = t('backend.errors.taskTitleRequired');
     titleField.value?.focus();
@@ -163,17 +166,29 @@ async function submit() {
   }
   saving.value = true;
   error.value = '';
+  const original = existing.value;
+  const completing = completed.value && !original?.completed_at;
+  if (original && completing && !(await confirmSeriesEnd(original))) {
+    saving.value = false;
+    return;
+  }
+  // Another client's priority (2, 3, 7, …) stays as it is unless the level
+  // was actually changed here; the control only knows three steps.
+  const keepsPriority = original && priorityLevel(original.priority) === priority.value;
   const fields = {
     title: title.value,
     notes: notes.value || null,
     due_at: dueValue(),
     reminder_at: reminderValue(),
-    priority: PRIORITY_VALUES[priority.value],
-    completed_at: completed.value ? (existing.value?.completed_at ?? new Date().toISOString()) : null,
+    priority: keepsPriority ? original.priority : PRIORITY_VALUES[priority.value],
+    completed_at: completed.value ? (original?.completed_at ?? new Date().toISOString()) : null,
   };
   try {
-    if (existing.value) {
-      await tasks.update(existing.value, fields);
+    if (original) {
+      const saved = await tasks.update(original, fields);
+      if (completing && !saved.completed_at && saved.due_at) {
+        toast.info(t('tasks.toast.nextOccurrence', { title: saved.title, due: dueReceipt(saved.due_at) }));
+      }
     } else {
       await tasks.create(fields, { listId: listId.value, threadId: threadId.value });
       toast.success(threadId.value ? t('tasks.toast.createdFromMail') : t('tasks.toast.created'));
@@ -181,6 +196,17 @@ async function submit() {
     close();
   } catch (failure) {
     error.value = backendErrorLabel(failure);
+    // A sync changed the task meanwhile: take its new revision, keep what
+    // was typed, and let Save try again against it.
+    if (original && backendErrorKey(failure) === 'backend.errors.taskChanged') {
+      try {
+        await tasks.load();
+        existing.value = tasks.find(original.id) ?? null;
+        if (existing.value) error.value = t('tasks.editor.changedRetry');
+      } catch {
+        // The first message stands.
+      }
+    }
   } finally {
     saving.value = false;
   }
@@ -225,7 +251,7 @@ function onKeydown(event: KeyboardEvent) {
         <header class="task-editor__head">
           <AppButton class="task-editor__bar-action" variant="ghost" size="sm" @click="close">{{ $t('common.cancel') }}</AppButton>
           <h2 class="task-editor__title">{{ isEdit ? $t('tasks.editor.editTitle') : $t('tasks.editor.newTitle') }}</h2>
-          <AppButton class="task-editor__bar-action" variant="primary" size="sm" type="submit" :disabled="saving">
+          <AppButton class="task-editor__bar-action" variant="primary" size="sm" type="submit" :disabled="saving || locked">
             {{ $t('common.save') }}
           </AppButton>
         </header>
@@ -235,7 +261,7 @@ function onKeydown(event: KeyboardEvent) {
           <input
             ref="titleField"
             v-model="title"
-            :disabled="saving"
+            :disabled="saving || locked"
             :placeholder="$t('tasks.editor.titlePlaceholder')"
             data-testid="task-title"
           />
@@ -258,18 +284,18 @@ function onKeydown(event: KeyboardEvent) {
         <div class="field-row">
           <label class="field">
             <span>{{ $t('tasks.editor.dueDate') }}</span>
-            <input v-model="dueDate" type="date" :disabled="saving" data-testid="task-due-date" />
+            <input v-model="dueDate" type="date" :disabled="saving || locked" data-testid="task-due-date" />
           </label>
           <label class="field">
             <span>{{ $t('tasks.editor.dueTime') }}</span>
-            <input v-model="dueTime" type="time" step="60" :disabled="saving || !dueDate" />
+            <input v-model="dueTime" type="time" step="60" :disabled="saving || locked || !dueDate" />
           </label>
         </div>
 
-        <ToggleSwitch v-model="remind" :disabled="saving">{{ $t('tasks.editor.remind') }}</ToggleSwitch>
+        <ToggleSwitch v-model="remind" :disabled="saving || locked">{{ $t('tasks.editor.remind') }}</ToggleSwitch>
         <label v-if="remind" class="field">
           <span>{{ $t('tasks.editor.reminderAt') }}</span>
-          <input v-model="reminder" type="datetime-local" step="60" :disabled="saving" />
+          <input v-model="reminder" type="datetime-local" step="60" :disabled="saving || locked" />
         </label>
 
         <div class="field">
@@ -279,21 +305,22 @@ function onKeydown(event: KeyboardEvent) {
 
         <label class="field">
           <span>{{ $t('tasks.editor.notes') }}</span>
-          <textarea v-model="notes" rows="4" :disabled="saving" :placeholder="$t('tasks.editor.notesPlaceholder')" />
+          <textarea v-model="notes" rows="4" :disabled="saving || locked" :placeholder="$t('tasks.editor.notesPlaceholder')" />
         </label>
 
-        <ToggleSwitch v-if="isEdit" v-model="completed" :disabled="saving">{{ $t('tasks.editor.completed') }}</ToggleSwitch>
+        <ToggleSwitch v-if="isEdit" v-model="completed" :disabled="saving || locked">{{ $t('tasks.editor.completed') }}</ToggleSwitch>
 
-        <p v-if="currentList && currentList.provider !== 'local'" class="task-editor__hint">
+        <p v-if="locked" class="task-editor__hint" role="note">{{ $t('tasks.editor.readOnlyHint') }}</p>
+        <p v-else-if="currentList && currentList.provider !== 'local'" class="task-editor__hint">
           {{ $t('tasks.editor.syncedHint') }}
         </p>
         <p v-if="error" class="task-editor__error" role="alert">{{ error }}</p>
 
         <footer class="task-editor__actions">
-          <AppButton v-if="isEdit" variant="danger" :disabled="saving" @click="remove">{{ $t('common.delete') }}</AppButton>
+          <AppButton v-if="isEdit" variant="danger" :disabled="saving || (locked && !currentList?.gone)" @click="remove">{{ $t('common.delete') }}</AppButton>
           <span class="task-editor__spacer" />
           <AppButton variant="ghost" @click="close">{{ $t('common.cancel') }}</AppButton>
-          <AppButton variant="primary" type="submit" :disabled="saving" data-testid="task-save">
+          <AppButton variant="primary" type="submit" :disabled="saving || locked" data-testid="task-save">
             {{ saving ? $t('common.saving') : $t('common.save') }}
           </AppButton>
         </footer>

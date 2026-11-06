@@ -3,7 +3,6 @@
     "tasks": {
       "title": "Tasks",
       "new": "New task",
-      "sync": "Sync tasks",
       "loadFailed": "Could not load your tasks.",
       "empty": {
         "title": "Nothing to do",
@@ -62,7 +61,9 @@
         "defaultName": "My tasks",
         "withAccount": "{list} · {account}",
         "onThisDevice": "On this device",
-        "account": "Account"
+        "account": "Account",
+        "goneHint": "This list was removed on the server. Its tasks stay here, read-only, until you delete the list.",
+        "readOnlyHint": "This list is read-only on the server."
       },
       "editor": {
         "newTitle": "New task",
@@ -79,21 +80,37 @@
         "notes": "Notes",
         "notesPlaceholder": "Details, links, next steps",
         "completed": "Done",
-        "syncedHint": "This list syncs with your account's server. Changes made here reach it in the background."
+        "syncedHint": "This list syncs with your account's server. Changes made here reach it in the background.",
+        "readOnlyHint": "This list is read-only on the server, so the task cannot be changed here.",
+        "changedRetry": "This task changed on another device in the meantime. Save again to keep your version."
       },
       "toast": {
         "created": "Task added",
         "createdFromMail": "Task added, linked to the mail",
         "completed": "Done: {title}",
-        "deleted": "Task deleted"
-      }
+        "deleted": "Task deleted",
+        "nextOccurrence": "Next: “{title}”, due {due}"
+      },
+      "repeats": "Repeats",
+      "recurring": {
+        "confirmTitle": "Complete the whole series?",
+        "confirmBody": "This task repeats. Completing it here ends the series for all your devices.",
+        "completeSeries": "Complete series"
+      },
+      "notices": {
+        "conflicts": "{count} task was updated on the server; its version replaced your change. | {count} tasks were updated on the server; their versions replaced your changes.",
+        "restored": "A task you deleted came back: it had been changed on the server. | {count} tasks you deleted came back: they had been changed on the server.",
+        "readOnlyDropped": "A change was not saved: the list is read-only on the server. | {count} changes were not saved: the list is read-only on the server.",
+        "keptLocal": "A task deleted on the server kept your change and is now in My tasks. | {count} tasks deleted on the server kept your changes and are now in My tasks.",
+        "listsGone": "A task list was removed on the server. It stays here, read-only, until you delete it. | {count} task lists were removed on the server. They stay here, read-only, until you delete them."
+      },
+      "sync": "Sync tasks"
     }
   },
   "de": {
     "tasks": {
       "title": "Aufgaben",
       "new": "Neue Aufgabe",
-      "sync": "Aufgaben synchronisieren",
       "loadFailed": "Die Aufgaben konnten nicht geladen werden.",
       "empty": {
         "title": "Nichts zu tun",
@@ -152,7 +169,9 @@
         "defaultName": "Meine Aufgaben",
         "withAccount": "{list} · {account}",
         "onThisDevice": "Auf diesem Gerät",
-        "account": "Konto"
+        "account": "Konto",
+        "goneHint": "Diese Liste wurde auf dem Server entfernt. Die Aufgaben darin bleiben hier schreibgeschützt, bis du die Liste löschst.",
+        "readOnlyHint": "Diese Liste ist auf dem Server schreibgeschützt."
       },
       "editor": {
         "newTitle": "Neue Aufgabe",
@@ -169,14 +188,31 @@
         "notes": "Notizen",
         "notesPlaceholder": "Details, Links, nächste Schritte",
         "completed": "Erledigt",
-        "syncedHint": "Diese Liste wird mit dem Server deines Kontos synchronisiert. Änderungen hier erreichen ihn im Hintergrund."
+        "syncedHint": "Diese Liste wird mit dem Server deines Kontos synchronisiert. Änderungen hier erreichen ihn im Hintergrund.",
+        "readOnlyHint": "Diese Liste ist auf dem Server schreibgeschützt; die Aufgabe lässt sich hier nicht ändern.",
+        "changedRetry": "Diese Aufgabe wurde inzwischen auf einem anderen Gerät geändert. Speichere erneut, um deine Fassung zu behalten."
       },
       "toast": {
         "created": "Aufgabe angelegt",
         "createdFromMail": "Aufgabe angelegt, mit der E-Mail verknüpft",
         "completed": "Erledigt: {title}",
-        "deleted": "Aufgabe gelöscht"
-      }
+        "deleted": "Aufgabe gelöscht",
+        "nextOccurrence": "Als Nächstes: „{title}“, fällig {due}"
+      },
+      "repeats": "Wiederholt sich",
+      "recurring": {
+        "confirmTitle": "Ganze Serie erledigen?",
+        "confirmBody": "Diese Aufgabe wiederholt sich. Erledigst du sie hier, endet die Serie auf allen deinen Geräten.",
+        "completeSeries": "Serie erledigen"
+      },
+      "notices": {
+        "conflicts": "{count} Aufgabe wurde auf dem Server geändert; deren Fassung hat deine Änderung ersetzt. | {count} Aufgaben wurden auf dem Server geändert; deren Fassungen haben deine Änderungen ersetzt.",
+        "restored": "Eine gelöschte Aufgabe ist zurück, weil jemand sie auf dem Server geändert hatte. | {count} gelöschte Aufgaben sind zurück, weil jemand sie auf dem Server geändert hatte.",
+        "readOnlyDropped": "Eine Änderung wurde nicht gespeichert: Die Liste ist auf dem Server schreibgeschützt. | {count} Änderungen wurden nicht gespeichert: Die Liste ist auf dem Server schreibgeschützt.",
+        "keptLocal": "Eine auf dem Server gelöschte Aufgabe behält deine Änderung und liegt jetzt in „Meine Aufgaben“. | {count} auf dem Server gelöschte Aufgaben behalten deine Änderungen und liegen jetzt in „Meine Aufgaben“.",
+        "listsGone": "Eine Aufgabenliste wurde auf dem Server entfernt. Bis du die Liste löschst, bleibt sie hier schreibgeschützt. | {count} Aufgabenlisten wurden auf dem Server entfernt. Bis du die Listen löschst, bleiben sie hier schreibgeschützt."
+      },
+      "sync": "Aufgaben synchronisieren"
     }
   }
 }

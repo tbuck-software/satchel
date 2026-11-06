@@ -41,7 +41,7 @@ import * as tasksBackend from '@/services/backend/tasks';
 function task(id: string, extra: Partial<BackendTask> = {}): BackendTask {
   return {
     id, list_id: 'local', title: id, notes: null, due_at: null, reminder_at: null, priority: 0,
-    completed_at: null, thread_id: null, message_id: null, pending: false,
+    completed_at: null, recurrence: null, thread_id: null, message_id: null, pending: false,
     created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-01T00:00:00Z', ...extra,
   };
 }
@@ -64,9 +64,9 @@ describe('task editor', () => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     harness.lists = [
-      { id: 'local', account_id: null, provider: 'local', name: '', color: null, read_only: false, last_synced_at: null, open_count: 0 },
+      { id: 'local', account_id: null, provider: 'local', name: '', color: null, read_only: false, gone: false, last_synced_at: null, open_count: 0 },
     ];
-    harness.tasks = [task('existing', { title: 'Old title', due_at: '2026-11-10', thread_id: 'th-9' })];
+    harness.tasks = [task('existing', { title: 'Old title', due_at: '2026-11-10', thread_id: 'th-9', priority: 3 })];
   });
 
   afterEach(() => {
@@ -103,7 +103,8 @@ describe('task editor', () => {
     expect(tasksBackend.backendUpdateTask).toHaveBeenCalledWith({
       id: 'existing',
       expectedUpdatedAt: '2026-11-01T00:00:00Z',
-      fields: expect.objectContaining({ title: 'New title', due_at: '2026-11-10' }),
+      // Another client's 3 is "high" here; unchanged, it is sent back as 3.
+      fields: expect.objectContaining({ title: 'New title', due_at: '2026-11-10', priority: 3 }),
     });
 
     useTaskEditor().openTask('existing');
@@ -111,6 +112,26 @@ describe('task editor', () => {
     const openMail = [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('Open mail'));
     openMail!.click();
     expect(harness.push).toHaveBeenCalledWith({ name: 'thread', params: { id: 'th-9' } });
+  });
+
+  it('keeps the typed edit after a sync changed the task, and saves it on retry', async () => {
+    useTaskEditor().openTask('existing');
+    await mountDialog();
+    vi.mocked(tasksBackend.backendUpdateTask).mockRejectedValueOnce(new Error('backend.errors.taskChanged'));
+    harness.tasks = [task('existing', { title: 'Server title', updated_at: '2026-11-02T00:00:00Z', thread_id: 'th-9' })];
+    const title = field('task-title');
+    title.value = 'Mine';
+    title.dispatchEvent(new Event('input'));
+    (document.querySelector('[data-testid="task-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(document.body.textContent).toContain('Save again to keep your version.');
+    expect(field('task-title').value).toBe('Mine');
+    (document.querySelector('[data-testid="task-save"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(tasksBackend.backendUpdateTask).toHaveBeenLastCalledWith(expect.objectContaining({
+      expectedUpdatedAt: '2026-11-02T00:00:00Z',
+      fields: expect.objectContaining({ title: 'Mine' }),
+    }));
   });
 
   it('refuses an empty title without calling the backend', async () => {

@@ -29,16 +29,17 @@ import SectionHeading from '@/components/ui/SectionHeading.vue';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePrompt } from '@/composables/usePrompt';
 import { useShortcutHints } from '@/composables/useShortcutHints';
+import { pageKeyBlocked } from '@/composables/pageKeys';
 import { useTaskEditor } from '@/composables/useTaskEditor';
 import { useToast } from '@/composables/useToast';
 import { effectiveBindings, matchesKeybinding } from '@/config/keybindings';
-import { useComposerStore } from '@/stores/composer';
 import { useSettingsStore } from '@/stores/settings';
 import { ALL_LISTS, useTasksStore, type Task } from '@/stores/tasks';
 import { useUiStore } from '@/stores/ui';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { dueState, formatDue, groupTasks, parseQuickAdd, priorityLevel, type TaskGroup } from '@/utils/tasks';
 import { useTaskActions } from '@/components/tasks/taskActions';
+import { followTaskSyncs } from '@/composables/taskEvents';
 import { listLabel, listName } from '@/components/tasks/taskLabels';
 
 const { t, locale } = useI18n();
@@ -50,7 +51,6 @@ const toast = useToast();
 const prompt = usePrompt();
 const confirm = useConfirm();
 const settings = useSettingsStore();
-const composer = useComposerStore();
 const ui = useUiStore();
 const { hint } = useShortcutHints();
 
@@ -107,6 +107,17 @@ function isOverdue(task: Task): boolean {
   return !task.completed_at && dueState(task, now.value) === 'overdue';
 }
 
+/** A read-only list (no write privilege, or refused a write) takes no edits. */
+function editable(task: Task): boolean {
+  return !tasks.list(task.list_id)?.read_only;
+}
+
+/** A list the server dropped still lets its leftovers be removed here. */
+function deletable(task: Task): boolean {
+  const list = tasks.list(task.list_id);
+  return !list?.read_only || Boolean(list?.gone);
+}
+
 function listOf(task: Task): string {
   const list = tasks.list(task.list_id);
   return list ? listLabel(list) : '';
@@ -120,9 +131,9 @@ async function refresh() {
   }
 }
 
-async function syncNow() {
+async function syncNow(force = true) {
   try {
-    const errors = await tasks.sync();
+    const errors = force ? await tasks.sync() : await tasks.syncIfStale();
     if (errors.length > 0) toast.error(backendErrorLabel(errors[0]));
   } catch (error) {
     toast.error(backendErrorLabel(error));
@@ -131,9 +142,11 @@ async function syncNow() {
 
 onMounted(async () => {
   clock = setInterval(() => { now.value = new Date(); }, 60_000);
+  followTaskSyncs();
   await refresh();
-  // Remote lists catch up in the background; the local state is already on screen.
-  if (tasks.lists.some((list) => list.provider !== 'local')) void syncNow();
+  // Remote lists catch up in the background, at most every few minutes on
+  // open (discovery is a PROPFIND per calendar); Sync tasks forces it.
+  if (tasks.lists.some((list) => list.provider !== 'local')) void syncNow(false);
 });
 
 onBeforeUnmount(() => {
@@ -243,24 +256,21 @@ function bound(event: KeyboardEvent, action: string): boolean {
   return effectiveBindings(action, settings).some((binding) => matchesKeybinding(event, binding));
 }
 
-function isEditable(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  return Boolean(el?.closest?.('input, textarea, select, [contenteditable="true"]'));
-}
-
 function onKeydown(event: KeyboardEvent) {
-  if (event.defaultPrevented || ui.modalOpen || composer.isOpen || isEditable(event.target)) return;
-  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  // Includes an armed `g` sequence: its second key navigates, it is no task key.
+  if (pageKeyBlocked(event)) return;
   const task = focused();
   let handled = true;
   if (event.key === 'ArrowDown' || bound(event, 'nextThread')) focusRow(focusIndex.value + 1);
   else if (event.key === 'ArrowUp' || bound(event, 'prevThread')) focusRow(focusIndex.value - 1);
   else if (bound(event, 'compose')) quickAddField.value?.focus();
   else if (!task) handled = false;
-  else if (bound(event, 'toggleSelection') || bound(event, 'markDone') || bound(event, 'archive')) void actions.toggleCompleted(task);
-  else if (bound(event, 'openItem') || (event.key === 'Enter' && !isButton(event.target))) editor.openTask(task.id);
-  else if (bound(event, 'trash') || event.key === 'Delete' || event.key === 'Backspace') void actions.remove(task);
-  else handled = false;
+  else if (bound(event, 'toggleSelection') || bound(event, 'markDone') || bound(event, 'archive')) {
+    if (editable(task)) void actions.toggleCompleted(task);
+  } else if (bound(event, 'openItem') || (event.key === 'Enter' && !isButton(event.target))) editor.openTask(task.id);
+  else if (bound(event, 'trash') || event.key === 'Delete' || event.key === 'Backspace') {
+    if (deletable(task)) void actions.remove(task);
+  } else handled = false;
   if (handled) {
     event.preventDefault();
     event.stopPropagation();
@@ -303,7 +313,7 @@ const legend = computed(() => [
           <AppIcon><path d="M10.5 3.5l2 2L6 12H4v-2l6.5-6.5Z" /></AppIcon>
         </IconButton>
         <IconButton
-          v-if="activeList && activeList.provider === 'local'"
+          v-if="activeList && (activeList.provider === 'local' || activeList.gone)"
           :title="$t('tasks.lists.delete')"
           @click="deleteList"
         >
@@ -313,7 +323,7 @@ const legend = computed(() => [
           v-if="tasks.lists.some((list) => list.provider !== 'local')"
           :title="$t('tasks.sync')"
           :disabled="tasks.syncing"
-          @click="syncNow"
+          @click="syncNow()"
         >
           <AppIcon><path d="M13 8a5 5 0 0 1-8.6 3.5M3 8a5 5 0 0 1 8.6-3.5M11.5 2v2.5H14M4.5 14v-2.5H2" /></AppIcon>
         </IconButton>
@@ -341,6 +351,9 @@ const legend = computed(() => [
         />
         <FilterPill :label="$t('tasks.lists.new')" @click="newList" />
       </nav>
+
+      <p v-if="activeList?.gone" class="tasks-view__notice" role="note">{{ $t('tasks.lists.goneHint') }}</p>
+      <p v-else-if="activeList?.read_only" class="tasks-view__notice" role="note">{{ $t('tasks.lists.readOnlyHint') }}</p>
 
       <form class="quick-add" @submit.prevent="submitQuickAdd">
         <input
@@ -395,6 +408,7 @@ const legend = computed(() => [
                 :title="task.completed_at ? $t('tasks.markOpen') : $t('tasks.markDone')"
                 :active="Boolean(task.completed_at)"
                 :aria-pressed="Boolean(task.completed_at)"
+                :disabled="!editable(task)"
                 data-testid="task-check"
                 @click="actions.toggleCompleted(task)"
               >
@@ -410,6 +424,10 @@ const legend = computed(() => [
                 <span class="task-row__meta">
                   <span v-if="task.due_at" class="task-row__due" :class="{ 'task-row__due--overdue': isOverdue(task) }">
                     {{ dueLabel(task.due_at) }}
+                  </span>
+                  <span v-if="task.recurrence" class="task-row__icon task-row__repeat" :title="$t('tasks.repeats')" data-testid="task-repeats">
+                    <AppIcon size="sm"><path d="M3 7a5 5 0 0 1 8.6-3.4L13 5M13 2v3h-3M13 9a5 5 0 0 1-8.6 3.4L3 11M3 14v-3h3" /></AppIcon>
+                    <span class="task-row__repeat-label">{{ $t('tasks.repeats') }}</span>
                   </span>
                   <span v-if="priorityLabel(task)" class="task-row__priority">{{ priorityLabel(task) }}</span>
                   <span v-if="task.reminder_at && !task.completed_at" class="task-row__icon" :title="$t('tasks.hasReminder')">
@@ -479,6 +497,20 @@ const legend = computed(() => [
   overflow-x: auto;
   padding-bottom: var(--space-sm);
   scrollbar-width: none;
+}
+
+.tasks-view__notice {
+  margin: 0 0 var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.task-row__repeat {
+  gap: var(--space-2xs);
+  align-items: center;
 }
 
 .quick-add {

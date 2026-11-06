@@ -28,6 +28,9 @@ const VTODO_DATA_QUERY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
   <c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VTODO"/></c:comp-filter></c:filter>
 </c:calendar-query>"#;
 
+const ETAG_PROPFIND: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>"#;
+
 pub struct CalDavTaskRemote {
     client: reqwest::Client,
     config: DavConfig,
@@ -80,6 +83,21 @@ impl CalDavTaskRemote {
         .map_err(other)
     }
 
+    /// The current ETag of one resource (PROPFIND, depth 0).
+    async fn etag_of(&self, url: &Url) -> Option<String> {
+        let xml = dav_xml_request(
+            &self.client,
+            &self.config,
+            Method::from_bytes(b"PROPFIND").expect("valid method"),
+            url,
+            Some("0"),
+            ETAG_PROPFIND,
+        )
+        .await
+        .ok()?;
+        xml_text(&xml, "getetag").filter(|etag| !etag.is_empty())
+    }
+
     fn items(&self, collection: &Url, xml: &str) -> Result<Vec<RemoteItem>, RemoteError> {
         let mut items = Vec::new();
         for response in xml_elements(xml, "response") {
@@ -108,6 +126,7 @@ fn remote_error(error: DavWriteError) -> RemoteError {
     match error {
         DavWriteError::PreconditionFailed => RemoteError::Conflict,
         DavWriteError::NotFound => RemoteError::Gone,
+        DavWriteError::Forbidden => RemoteError::Forbidden,
         DavWriteError::Other(detail) => RemoteError::Other(detail),
     }
 }
@@ -136,7 +155,8 @@ fn task_lists(collections: &[DavCollection]) -> Vec<RemoteList> {
             remote_id: collection.href.to_string(),
             name: collection.name.clone().unwrap_or_default(),
             color: collection.color.clone(),
-            read_only: false,
+            read_only: collection.writable.map(|writable| !writable),
+            mixed: collection.supports("VEVENT"),
         })
         .collect()
 }
@@ -221,20 +241,42 @@ impl TaskRemote for CalDavTaskRemote {
                 .map_err(|err| other(err.to_string()))?,
         };
         let create = remote_id.is_none();
-        let result = dav_put(&self.client, &self.config, &url, payload, create, version).await;
-        let etag = match result {
-            // Our own earlier PUT that landed before the app could record
-            // it: the name comes from the task's UID, so it is ours to replace.
+        match dav_put(&self.client, &self.config, &url, payload, create, version).await {
+            Ok(Some(etag)) => Ok(Written {
+                remote_id: url.to_string(),
+                version: Some(etag),
+                adopted: false,
+            }),
+            // Some servers answer a PUT without an ETag (they rewrote the
+            // resource). Ask for it now, so the next edit has a precondition.
+            Ok(None) => Ok(Written {
+                remote_id: url.to_string(),
+                version: self.etag_of(&url).await,
+                adopted: false,
+            }),
+            // The name comes from the task's UID: if the resource there is
+            // this task, an earlier PUT landed before the app recorded it, and
+            // it is taken over with its ETag. Anything else is not ours.
             Err(DavWriteError::PreconditionFailed) if create => {
-                dav_put(&self.client, &self.config, &url, payload, false, None).await
+                let collection = self.url(list)?;
+                let existing = self
+                    .fetch(collection.as_str(), &[url.to_string()])
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or(RemoteError::Conflict)?;
+                if vtodo::parse(&existing.payload).is_some_and(|fields| fields.uid == uid) {
+                    Ok(Written {
+                        remote_id: url.to_string(),
+                        version: existing.version,
+                        adopted: true,
+                    })
+                } else {
+                    Err(other(format!("{url} already holds another resource")))
+                }
             }
-            other => other,
+            Err(error) => Err(remote_error(error)),
         }
-        .map_err(remote_error)?;
-        Ok(Written {
-            remote_id: url.to_string(),
-            version: etag,
-        })
     }
 
     async fn delete(&self, remote_id: &str, version: Option<&str>) -> Result<(), RemoteError> {
@@ -266,6 +308,7 @@ mod tests {
             name: Some("List".into()),
             color: Some("#00aaff".into()),
             components: components.map(|list| list.iter().map(|value| value.to_string()).collect()),
+            writable: None,
         }
     }
 

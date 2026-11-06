@@ -20,6 +20,12 @@ CREATE TABLE task_lists (
     name TEXT NOT NULL DEFAULT '',
     color TEXT,
     read_only INTEGER NOT NULL DEFAULT 0 CHECK (read_only IN (0, 1)),
+    -- The collection also holds events (a Nextcloud or Fastmail calendar).
+    -- Such a list stays out of sight until it holds a task.
+    mixed INTEGER NOT NULL DEFAULT 0 CHECK (mixed IN (0, 1)),
+    -- The server no longer lists the collection, but tasks with unsent
+    -- changes keep the list (read-only) until they are dealt with.
+    gone INTEGER NOT NULL DEFAULT 0 CHECK (gone IN (0, 1)),
     sync_cursor TEXT,
     last_synced_at TEXT,
     created_at TEXT NOT NULL,
@@ -39,6 +45,12 @@ CREATE TABLE tasks (
     notes TEXT,
     -- 'YYYY-MM-DD' for a due date, RFC 3339 UTC for a due date-time.
     due_at TEXT,
+    -- DTSTART, in the same two forms.
+    start_at TEXT,
+    -- RRULE verbatim, and whether Satchel can step it ('simple': completing
+    -- moves the due date on) or has to ask before ending the series.
+    rrule TEXT,
+    recurrence TEXT CHECK (recurrence IS NULL OR recurrence IN ('simple', 'complex')),
     -- RFC 3339 UTC.
     reminder_at TEXT,
     -- When the reminder was shown; cleared whenever `reminder_at` changes.
@@ -54,6 +66,10 @@ CREATE TABLE tasks (
     remote_version TEXT,
     remote_payload TEXT,
     pending_op TEXT CHECK (pending_op IS NULL OR pending_op IN ('create', 'update', 'delete')),
+    -- A push that failed for this task alone backs off on its own, so one
+    -- refused task does not hold up the rest of its list.
+    push_failures INTEGER NOT NULL DEFAULT 0,
+    push_retry_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

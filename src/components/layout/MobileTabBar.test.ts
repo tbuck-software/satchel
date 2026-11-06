@@ -13,7 +13,7 @@ const blank = { template: '<div />' };
 async function mountAt(location: string) {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: ['inbox', 'outbox', 'calendar', 'tasks', 'contacts', 'settings'].map((name) => ({
+    routes: ['inbox', 'outbox', 'calendar', 'contacts', 'settings'].map((name) => ({
       path: `/${name}`,
       name,
       component: blank,
@@ -40,17 +40,17 @@ describe('MobileTabBar', () => {
     const { wrapper } = await mountAt('/inbox');
     useUiStore().drawerAttention = true;
     await wrapper.vm.$nextTick();
-    for (const id of ['mail', 'calendar', 'tasks', 'contacts', 'settings']) {
+    for (const id of ['mail', 'calendar', 'contacts', 'settings']) {
       expect(tab(wrapper, id).findAll('svg')).toHaveLength(1);
     }
     expect(tab(wrapper, 'mail').find('.mobile-tab-bar__dot').exists()).toBe(true);
     expect(wrapper.findAll('.mobile-tab-bar__dot')).toHaveLength(1);
   });
 
-  it('names the five areas and marks the one on screen', async () => {
+  it('names the four areas and marks the one on screen', async () => {
     const { wrapper } = await mountAt('/contacts');
 
-    expect(wrapper.findAll('button').map((button) => button.text())).toEqual(['Mail', 'Calendar', 'Tasks', 'Contacts', 'Settings']);
+    expect(wrapper.findAll('button').map((button) => button.text())).toEqual(['Mail', 'Calendar', 'Contacts', 'Settings']);
     expect(tab(wrapper, 'contacts').attributes('aria-current')).toBe('page');
     expect(tab(wrapper, 'mail').attributes('aria-current')).toBeUndefined();
   });

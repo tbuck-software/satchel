@@ -160,6 +160,17 @@ describe('cleanup view', () => {
     unregister();
   });
 
+  it('leaves the second key of g d / g e to the navigation', async () => {
+    await mountView();
+    const ui = useUiStore();
+    ui.showKeySequenceHint('D Drafts · E Done');
+    press('d');
+    press('e');
+    await flushPromises();
+    expect(harness.sweepSender).not.toHaveBeenCalled();
+    ui.clearKeySequenceHint();
+  });
+
   it('runs the row buttons through the same sweep', async () => {
     const wrapper = await mountView();
     const buttons = wrapper.findAll('.cleanup-row')[0]!.findAll('.cleanup-row__actions button');

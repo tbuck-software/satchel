@@ -423,7 +423,8 @@
       "snapshotMessagesHeld": "{count} messages in {folder} could not be updated from the server for {account} and stay where they are for now. Satchel tries again in a day.",
       "spamFilterUnavailable": "The spam filter settings could not be read or saved.",
       "systemFolderImmutable": "\"{name}\" is a system folder and cannot be changed.",
-      "taskChanged": "This task changed in the meantime. Open it again to see the current version.",
+      "taskChanged": "This task changed in the meantime.",
+      "taskCompletedInvalid": "The completion time could not be read.",
       "taskDueInvalid": "The due date could not be read.",
       "taskListNameRequired": "A list needs a name.",
       "taskListNotFound": "This task list no longer exists.",
@@ -3767,6 +3768,7 @@
       "yesterday": "Yesterday"
     },
     "editor": {
+      "changedRetry": "This task changed on another device in the meantime. Save again to keep your version.",
       "completed": "Done",
       "dueDate": "Due date",
       "dueTime": "Time (optional)",
@@ -3777,6 +3779,7 @@
       "notes": "Notes",
       "notesPlaceholder": "Details, links, next steps",
       "priority": "Priority",
+      "readOnlyHint": "This list is read-only on the server, so the task cannot be changed here.",
       "remind": "Remind me",
       "reminderAt": "Reminder",
       "syncedHint": "This list syncs with your account's server. Changes made here reach it in the background.",
@@ -3812,10 +3815,12 @@
       "delete": "Delete list",
       "deleteBody": "Its {count} task is deleted with it. | Its {count} tasks are deleted with it.",
       "deleteTitle": "Delete “{list}”?",
+      "goneHint": "This list was removed on the server. Its tasks stay here, read-only, until you delete the list.",
       "name": "Name",
       "new": "New list…",
       "newTitle": "New task list",
       "onThisDevice": "On this device",
+      "readOnlyHint": "This list is read-only on the server.",
       "rename": "Rename list",
       "renameTitle": "Rename task list",
       "title": "Task lists",
@@ -3825,6 +3830,13 @@
     "markDone": "Mark as done",
     "markOpen": "Mark as not done",
     "new": "New task",
+    "notices": {
+      "conflicts": "{count} task was updated on the server; its version replaced your change. | {count} tasks were updated on the server; their versions replaced your changes.",
+      "keptLocal": "A task deleted on the server kept your change and is now in My tasks. | {count} tasks deleted on the server kept your changes and are now in My tasks.",
+      "listsGone": "A task list was removed on the server. It stays here, read-only, until you delete it. | {count} task lists were removed on the server. They stay here, read-only, until you delete them.",
+      "readOnlyDropped": "A change was not saved: the list is read-only on the server. | {count} changes were not saved: the list is read-only on the server.",
+      "restored": "A task you deleted came back: it had been changed on the server. | {count} tasks you deleted came back: they had been changed on the server."
+    },
     "openMail": "Open mail",
     "pending": "Not synced yet",
     "priority": {
@@ -3838,6 +3850,12 @@
       "placeholder": "Add a task, e.g. “Call Anna tomorrow 15:00”",
       "preview": "“{title}”, due {due}"
     },
+    "recurring": {
+      "completeSeries": "Complete series",
+      "confirmBody": "This task repeats. Completing it here ends the series for all your devices.",
+      "confirmTitle": "Complete the whole series?"
+    },
+    "repeats": "Repeats",
     "showCompleted": "Show {count} completed task | Show {count} completed tasks",
     "sync": "Sync tasks",
     "title": "Tasks",
@@ -3845,7 +3863,8 @@
       "completed": "Done: {title}",
       "created": "Task added",
       "createdFromMail": "Task added, linked to the mail",
-      "deleted": "Task deleted"
+      "deleted": "Task deleted",
+      "nextOccurrence": "Next: “{title}”, due {due}"
     }
   },
   "thread": {

@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router';
 import ListRowButton from '@/components/ui/ListRowButton.vue';
 import { useInvitesStore } from '@/stores/invites';
 import { useTasksStore } from '@/stores/tasks';
+import { followTaskSyncs } from '@/composables/taskEvents';
 import { dueState } from '@/utils/tasks';
 import {
   filterInvitesWithoutMirroredEvents,
@@ -35,6 +36,9 @@ let clock: ReturnType<typeof setInterval> | null = null;
 // calls standing between the app starting and the first thread row.
 onMounted(() => {
   void invites.load();
+  // A sync that changed tasks reloads them at once; the interval below is
+  // only the fallback for a missed event.
+  followTaskSyncs();
   void tasks.load().catch(() => undefined);
   // What is "now" and what is over moves with the clock.
   clock = setInterval(() => {

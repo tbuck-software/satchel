@@ -18,6 +18,11 @@ export type TaskRecord = {
     priority: number;
     completed_at: string | null;
     /**
+     * `simple`: completing moves the due date to the next occurrence;
+     * `complex`: completing ends the series, so the UI asks first.
+     */
+    recurrence: string | null;
+    /**
      * The thread the task was made from, re-found by Message-ID when the
      * stored id no longer exists.
      */

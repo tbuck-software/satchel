@@ -2,6 +2,8 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { orderedLoad } from './internal/orderedLoad';
 import { backendCommandsAvailable } from '@/services/backend/core';
+import { tc } from '@/i18n/runtime';
+import type { TaskSyncSummary } from '@/services/backend/generated/core/tasks/sync/TaskSyncSummary';
 import {
   backendCreateTask,
   backendCreateTaskList,
@@ -26,6 +28,27 @@ export type TaskFields = BackendTaskFields;
 /** Which lists the view shows: one list, or every list at once. */
 export const ALL_LISTS = 'all';
 
+/** Opening the view syncs at most this often; Sync tasks always does. */
+export const SYNC_ON_OPEN_MS = 5 * 60_000;
+
+/**
+ * What a sync changed behind the person's back, as one sentence each: the
+ * server's version replacing an edit, a deleted task coming back, a list
+ * that turned out read-only. Silence here would make tasks change unexplained.
+ */
+export function syncNotices(summary: TaskSyncSummary): string[] {
+  const notices: string[] = [];
+  const add = (count: number, key: string) => {
+    if (count > 0) notices.push(tc(key, count, { count }));
+  };
+  add(summary.conflicts, 'tasks.notices.conflicts');
+  add(summary.restored, 'tasks.notices.restored');
+  add(summary.read_only_dropped, 'tasks.notices.readOnlyDropped');
+  add(summary.kept_local, 'tasks.notices.keptLocal');
+  add(summary.lists_gone, 'tasks.notices.listsGone');
+  return notices;
+}
+
 /**
  * Tasks and their lists. Loaded with the Tasks view, the editor and the
  * sidebar's Today card — never at startup.
@@ -42,6 +65,7 @@ export const useTasksStore = defineStore('tasks', () => {
   const syncing = ref(false);
   /** The list new tasks go to and the view shows; persisted per session only. */
   const activeListId = ref<string>(ALL_LISTS);
+  let lastSyncAt = 0;
 
   const defaultListId = computed(() =>
     lists.value.find((list) => list.provider === 'local' && list.name === '')?.id
@@ -73,6 +97,7 @@ export const useTasksStore = defineStore('tasks', () => {
   async function sync(): Promise<string[]> {
     if (!backendCommandsAvailable() || syncing.value) return [];
     syncing.value = true;
+    lastSyncAt = Date.now();
     try {
       const result = await backendSyncTasks();
       await load();
@@ -80,6 +105,12 @@ export const useTasksStore = defineStore('tasks', () => {
     } finally {
       syncing.value = false;
     }
+  }
+
+  /** Sync unless one ran in the last few minutes. */
+  async function syncIfStale(): Promise<string[]> {
+    if (Date.now() - lastSyncAt < SYNC_ON_OPEN_MS) return [];
+    return sync();
   }
 
   function put(task: Task) {
@@ -111,7 +142,11 @@ export const useTasksStore = defineStore('tasks', () => {
 
   async function setCompleted(task: Task, completed: boolean) {
     const before = { ...task };
-    put({ ...task, completed_at: completed ? new Date().toISOString() : null });
+    // A simple repeating task moves to its next date instead; showing it
+    // completed first would make the row jump out and back.
+    if (task.recurrence !== 'simple' || !completed) {
+      put({ ...task, completed_at: completed ? new Date().toISOString() : null });
+    }
     try {
       const saved = await loader.mutate(() => backendSetTaskCompleted(task.id, completed));
       put(saved);
@@ -196,6 +231,7 @@ export const useTasksStore = defineStore('tasks', () => {
     targetListId,
     load,
     sync,
+    syncIfStale,
     create,
     update,
     setCompleted,

@@ -59,6 +59,8 @@ pub struct GroupwareSyncSummary {
     pub contacts_synced: usize,
     pub task_lists_found: usize,
     pub tasks_synced: usize,
+    /// What the task sync did, for the frontend's notices.
+    pub task_summary: crate::tasks::sync::TaskSyncSummary,
     pub errors: Vec<String>,
 }
 
@@ -140,6 +142,8 @@ struct DavCollection {
     /// `supported-calendar-component-set`; None when the server does not say,
     /// which RFC 4791 §5.2.3 reads as "any component".
     components: Option<Vec<String>>,
+    /// From `current-user-privilege-set`; None when the server does not say.
+    writable: Option<bool>,
 }
 
 impl DavCollection {
@@ -210,6 +214,7 @@ pub async fn sync_groupware_account(
                 Ok(tasks) => {
                     summary.task_lists_found += tasks.lists;
                     summary.tasks_synced += tasks.pulled + tasks.pushed;
+                    summary.task_summary.merge(&tasks);
                 }
                 Err(error) => {
                     tracing::warn!(error = %error, account_id, "CalDAV task synchronization failed");
@@ -251,6 +256,7 @@ impl GroupwareSyncSummary {
         self.contacts_synced += other.contacts_synced;
         self.task_lists_found += other.task_lists_found;
         self.tasks_synced += other.tasks_synced;
+        self.task_summary.merge(&other.task_summary);
         self.errors.extend(other.errors);
     }
 }
@@ -353,7 +359,7 @@ async fn discover_collections(
 
     let list_body = r#"<?xml version="1.0" encoding="utf-8"?>
 <d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="urn:ietf:params:xml:ns:carddav" xmlns:x="http://apple.com/ns/ical/">
-  <d:prop><d:resourcetype/><d:displayname/><c:supported-calendar-component-set/><x:calendar-color/></d:prop>
+  <d:prop><d:resourcetype/><d:displayname/><c:supported-calendar-component-set/><x:calendar-color/><d:current-user-privilege-set/></d:prop>
 </d:propfind>"#;
     let xml = dav_xml_request(
         client,
@@ -392,6 +398,7 @@ async fn discover_collections(
             name: xml_text(&response, "displayname").filter(|name| !name.trim().is_empty()),
             color: xml_text(&response, "calendar-color").and_then(|color| normalize_color(&color)),
             components,
+            writable: privileges_writable(&response),
         });
     }
 
@@ -684,6 +691,8 @@ enum DavWriteError {
     PreconditionFailed,
     /// 404/410: the resource is gone.
     NotFound,
+    /// 403: no right to write here.
+    Forbidden,
     Other(String),
 }
 
@@ -692,6 +701,7 @@ impl std::fmt::Display for DavWriteError {
         match self {
             Self::PreconditionFailed => f.write_str("DAV precondition failed"),
             Self::NotFound => f.write_str("DAV resource not found"),
+            Self::Forbidden => f.write_str("DAV write forbidden"),
             Self::Other(detail) => f.write_str(detail),
         }
     }
@@ -727,6 +737,7 @@ async fn dav_put(
         .map_err(|err| DavWriteError::Other(format!("CalDAV write failed: {err}")))?;
     match response.status() {
         StatusCode::PRECONDITION_FAILED => return Err(DavWriteError::PreconditionFailed),
+        StatusCode::FORBIDDEN => return Err(DavWriteError::Forbidden),
         StatusCode::NOT_FOUND | StatusCode::GONE if !create => return Err(DavWriteError::NotFound),
         status if !status.is_success() => {
             return Err(DavWriteError::Other(
@@ -763,6 +774,7 @@ async fn dav_delete(
         .map_err(|err| DavWriteError::Other(format!("CalDAV delete failed: {err}")))?;
     match response.status() {
         StatusCode::PRECONDITION_FAILED => Err(DavWriteError::PreconditionFailed),
+        StatusCode::FORBIDDEN => Err(DavWriteError::Forbidden),
         StatusCode::NOT_FOUND | StatusCode::GONE => Ok(()),
         status if status.is_success() => Ok(()),
         _ => Err(DavWriteError::Other(
@@ -917,6 +929,19 @@ fn xml_attribute_values(xml: &str, local_name: &str, attribute: &str) -> Vec<Str
         }
     }
     out
+}
+
+/// Whether `current-user-privilege-set` (RFC 3744 §5.4) lets us change
+/// resources: `write`, `write-content` or `all`. None when it is not there.
+fn privileges_writable(response: &str) -> Option<bool> {
+    let set = xml_elements(response, "current-user-privilege-set")
+        .into_iter()
+        .find(|set| xml_has_element(set, "privilege"))?;
+    Some(
+        ["write", "write-content", "all"]
+            .iter()
+            .any(|privilege| xml_has_element(&set, privilege)),
+    )
 }
 
 /// `#RRGGBB` from Apple's `calendar-color`, which may carry an alpha byte.
@@ -1187,6 +1212,21 @@ mod tests {
         );
         assert_eq!(normalize_color("#FF8800CC").as_deref(), Some("#ff8800"));
         assert_eq!(normalize_color("blue"), None);
+    }
+
+    #[test]
+    fn reads_whether_the_collection_takes_writes() {
+        let read_only = r#"<d:response><d:propstat><d:prop><d:current-user-privilege-set>
+            <d:privilege><d:read/></d:privilege><d:privilege><d:read-current-user-privilege-set/></d:privilege>
+          </d:current-user-privilege-set></d:prop></d:propstat></d:response>"#;
+        let writable = r#"<d:response><d:propstat><d:prop><d:current-user-privilege-set>
+            <d:privilege><d:read/></d:privilege><d:privilege><d:write-content/></d:privilege>
+          </d:current-user-privilege-set></d:prop></d:propstat></d:response>"#;
+        let unknown = r#"<d:response><d:propstat><d:prop><d:current-user-privilege-set/></d:prop>
+          <d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response>"#;
+        assert_eq!(privileges_writable(read_only), Some(false));
+        assert_eq!(privileges_writable(writable), Some(true));
+        assert_eq!(privileges_writable(unknown), None);
     }
 
     #[test]

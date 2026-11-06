@@ -30,8 +30,8 @@ import { useSenderSweep } from '@/composables/useSenderSweep';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { useShortcutHints } from '@/composables/useShortcutHints';
+import { pageKeyBlocked } from '@/composables/pageKeys';
 import { useAccountsStore } from '@/stores/accounts';
-import { useComposerStore } from '@/stores/composer';
 import { useMessagesStore } from '@/stores/messages';
 import { useSettingsStore } from '@/stores/settings';
 import { useSweepRulesStore } from '@/stores/sweepRules';
@@ -53,7 +53,6 @@ const toast = useToast();
 const confirm = useConfirm();
 const { hint } = useShortcutHints();
 const accounts = useAccountsStore();
-const composer = useComposerStore();
 const messages = useMessagesStore();
 const settings = useSettingsStore();
 const rules = useSweepRulesStore();
@@ -199,14 +198,9 @@ function bound(event: KeyboardEvent, action: string): boolean {
     .some((binding) => matchesKeybinding(event, binding));
 }
 
-function isEditable(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  return Boolean(el?.closest?.('input, textarea, select, [contenteditable="true"]'));
-}
-
 function onKeydown(event: KeyboardEvent) {
-  if (event.defaultPrevented || ui.modalOpen || composer.isOpen || isEditable(event.target)) return;
-  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  // Includes an armed `g` sequence: `g d`/`g e` navigate, they do not archive.
+  if (pageKeyBlocked(event)) return;
   const sender = focused();
   let handled = true;
   if (event.key === 'ArrowDown' || bound(event, 'nextThread')) focusRow(focusIndex.value + 1);

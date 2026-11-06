@@ -15,6 +15,10 @@ export type TaskListRecord = {
     name: string;
     color: string | null;
     read_only: boolean;
+    /**
+     * The server no longer lists it; it stays while it holds unsent work.
+     */
+    gone: boolean;
     last_synced_at: string | null;
     open_count: number;
 };

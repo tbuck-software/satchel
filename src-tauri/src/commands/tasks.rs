@@ -123,9 +123,19 @@ async fn account_remote(
     remote_for(&connection.config).map_err(CommandError::unexpected)
 }
 
+/// Tell the open views what a sync did: they reload, and the tasks store
+/// says what the person should know (server wins, restored tasks, a list
+/// that turned out read-only).
+pub(crate) fn announce(app: &tauri::AppHandle, summary: &TaskSyncSummary) {
+    use tauri::Emitter;
+    if summary.changed_tasks() {
+        let _ = app.emit("tasks:changed", summary);
+    }
+}
+
 /// Push a remote list's pending changes in the background. A failure leaves
 /// them pending for the next sync; the edit itself already succeeded.
-async fn push_soon(pool: &SqlitePool, list_id: &str) {
+async fn push_soon(app: &tauri::AppHandle, pool: &SqlitePool, list_id: &str) {
     let Ok(Some(account_id)) = TaskRepository::new(pool)
         .remote_account_of_list(list_id)
         .await
@@ -133,11 +143,15 @@ async fn push_soon(pool: &SqlitePool, list_id: &str) {
         return;
     };
     let pool = pool.clone();
+    let app = app.clone();
     tauri::async_runtime::spawn(async move {
         match account_remote(&pool, &account_id).await {
             Ok(Some(remote)) => {
-                if let Err(error) = sync::push_account(&pool, &account_id, remote.as_ref()).await {
-                    tracing::info!(%error, %account_id, "task push deferred to the next sync");
+                match sync::push_account(&pool, &account_id, remote.as_ref()).await {
+                    Ok(summary) => announce(&app, &summary),
+                    Err(error) => {
+                        tracing::info!(%error, %account_id, "task push deferred to the next sync")
+                    }
                 }
             }
             Ok(None) => {}
@@ -168,6 +182,7 @@ pub async fn list_tasks(
 
 #[tauri::command]
 pub async fn create_task(
+    app: tauri::AppHandle,
     pool: tauri::State<'_, SqlitePool>,
     input: CreateTaskInput,
 ) -> CommandResult<TaskRecord> {
@@ -193,12 +208,13 @@ pub async fn create_task(
             message_id.as_deref(),
         )
         .await?;
-    push_soon(pool.inner(), &task.list_id).await;
+    push_soon(&app, pool.inner(), &task.list_id).await;
     Ok(task)
 }
 
 #[tauri::command]
 pub async fn update_task(
+    app: tauri::AppHandle,
     pool: tauri::State<'_, SqlitePool>,
     input: UpdateTaskInput,
 ) -> CommandResult<TaskRecord> {
@@ -206,12 +222,13 @@ pub async fn update_task(
     let task = TaskRepository::new(pool.inner())
         .update(&input.id, &fields, input.expected_updated_at.as_deref())
         .await?;
-    push_soon(pool.inner(), &task.list_id).await;
+    push_soon(&app, pool.inner(), &task.list_id).await;
     Ok(task)
 }
 
 #[tauri::command]
 pub async fn set_task_completed(
+    app: tauri::AppHandle,
     pool: tauri::State<'_, SqlitePool>,
     id: String,
     completed: bool,
@@ -221,16 +238,20 @@ pub async fn set_task_completed(
     let task = TaskRepository::new(pool.inner())
         .set_completed(&id, completed_at.as_deref())
         .await?;
-    push_soon(pool.inner(), &task.list_id).await;
+    push_soon(&app, pool.inner(), &task.list_id).await;
     Ok(task)
 }
 
 #[tauri::command]
-pub async fn delete_task(pool: tauri::State<'_, SqlitePool>, id: String) -> CommandResult<()> {
+pub async fn delete_task(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, SqlitePool>,
+    id: String,
+) -> CommandResult<()> {
     let repository = TaskRepository::new(pool.inner());
     let list_id = repository.get(&id).await?.list_id;
     repository.delete(&id).await?;
-    push_soon(pool.inner(), &list_id).await;
+    push_soon(&app, pool.inner(), &list_id).await;
     Ok(())
 }
 
@@ -288,6 +309,7 @@ pub async fn delete_task_list(pool: tauri::State<'_, SqlitePool>, id: String) ->
 /// Push and pull every account with a task provider (or just one).
 #[tauri::command]
 pub async fn sync_tasks(
+    app: tauri::AppHandle,
     pool: tauri::State<'_, SqlitePool>,
     account_id: Option<String>,
 ) -> CommandResult<TasksSyncResult> {
@@ -326,5 +348,6 @@ pub async fn sync_tasks(
             }
         }
     }
+    announce(&app, &result.summary);
     Ok(result)
 }

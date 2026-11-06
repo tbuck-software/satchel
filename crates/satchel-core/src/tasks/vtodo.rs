@@ -3,8 +3,9 @@
 //!
 //! A patch replaces a property only when its value changed. An untouched due
 //! date keeps its `TZID`, an untouched alarm keeps its relative trigger, and
-//! properties Satchel has no field for (RRULE, CATEGORIES, RELATED-TO, …)
-//! pass through unchanged.
+//! properties Satchel has no field for (CATEGORIES, RELATED-TO, EMAIL alarms,
+//! …) pass through unchanged. RRULE is read so a repeating task can advance
+//! instead of ending its series (`super::recurrence`).
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::email::calendar::{local_to_utc, normalize_ics_dt};
@@ -25,6 +26,13 @@ pub struct TaskFields {
     pub completed_at: Option<String>,
     /// RFC 5322 Message-ID of the mail the task was made from.
     pub message_id: Option<String>,
+    /// DTSTART, in the same two forms as `due_at`.
+    pub start_at: Option<String>,
+    /// The RRULE value, verbatim.
+    pub rrule: Option<String>,
+    /// EXDATE, RDATE or overridden instances next to the RRULE: a series
+    /// Satchel does not step itself.
+    pub rrule_extras: bool,
 }
 
 const MESSAGE_ID_PROPERTY: &str = "X-SATCHEL-MESSAGE-ID";
@@ -163,6 +171,49 @@ fn due_instant(due: &str) -> Option<DateTime<Utc>> {
         .map(|value| value.with_timezone(&Utc))
 }
 
+fn is_date(value: &str) -> bool {
+    value.len() == 10
+}
+
+/// DTSTART only stands next to DUE in the same form and not after it
+/// (RFC 5545 §3.8.2.3); otherwise it is dropped rather than made invalid.
+fn consistent_start(start: Option<&str>, due: Option<&str>) -> Option<String> {
+    let start = start?;
+    if let Some(due) = due {
+        if is_date(start) != is_date(due) {
+            return None;
+        }
+        if due_instant(start)
+            .zip(due_instant(due))
+            .is_some_and(|(start, due)| start > due)
+        {
+            return None;
+        }
+    }
+    Some(start.to_string())
+}
+
+/// `NAME;VALUE=DATE:…`, or a date-time in `zone` when the property had one
+/// (so an untouched TZID survives a moved due date), else in UTC.
+fn date_line(name: &str, value: &str, zone: Option<&str>) -> Option<String> {
+    if is_date(value) {
+        let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
+        return Some(format!("{name};VALUE=DATE:{}", date.format("%Y%m%d")));
+    }
+    let instant = DateTime::parse_from_rfc3339(value)
+        .ok()?
+        .with_timezone(&Utc);
+    if let Some((tzid, tz)) =
+        zone.and_then(|tzid| tzid.parse::<chrono_tz::Tz>().ok().map(|tz| (tzid, tz)))
+    {
+        return Some(format!(
+            "{name};TZID={tzid}:{}",
+            instant.with_timezone(&tz).format("%Y%m%dT%H%M%S")
+        ));
+    }
+    Some(format!("{name}:{}", instant.format("%Y%m%dT%H%M%SZ")))
+}
+
 /// `[+-]P[nW][nD][T[nH][nM][nS]]` (RFC 5545 §3.3.6).
 fn parse_duration(value: &str) -> Option<Duration> {
     let value = value.trim();
@@ -252,9 +303,25 @@ fn property(lines: &[String], todo: &Todo, name: &str) -> Option<Line> {
         .find(|line| line.name == name)
 }
 
+/// The alarms that stand for "remind me": DISPLAY, or no ACTION at all. AUDIO
+/// and EMAIL alarms belong to other clients and are left as they are.
+fn display_alarms(lines: &[String], todo: &Todo) -> Vec<(usize, usize)> {
+    todo.alarms
+        .iter()
+        .copied()
+        .filter(|&(begin, end)| {
+            lines[begin + 1..end]
+                .iter()
+                .filter_map(|line| Line::parse(line))
+                .find(|line| line.name == "ACTION")
+                .is_none_or(|line| line.value.trim().eq_ignore_ascii_case("DISPLAY"))
+        })
+        .collect()
+}
+
 fn reminder_from_alarms(lines: &[String], todo: &Todo, due: Option<&str>) -> Option<String> {
     let start = property(lines, todo, "DTSTART").and_then(|line| date_value(&line));
-    for &(begin, end) in &todo.alarms {
+    for (begin, end) in display_alarms(lines, todo) {
         let Some(trigger) = lines[begin + 1..end]
             .iter()
             .filter_map(|line| Line::parse(line))
@@ -318,15 +385,32 @@ pub fn parse(raw: &str) -> Option<TaskFields> {
                         property(&lines, &todo, name)
                             .and_then(|line| normalize_ics_dt(line.value.trim(), None, false))
                     })
-                    .unwrap_or_else(|| format_utc(Utc::now()))
+                    // A fixed stand-in: `now` would make the task look changed
+                    // on every read.
+                    .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string())
             })
         });
     let priority = text("PRIORITY")
         .and_then(|value| value.trim().parse::<u8>().ok())
         .filter(|value| *value <= 9)
         .unwrap_or(0);
+    let overridden = lines
+        .iter()
+        .filter(|line| line.eq_ignore_ascii_case("BEGIN:VTODO"))
+        .count()
+        > 1;
+    let rrule_extras = overridden
+        || todo.properties.iter().any(|&index| {
+            Line::parse(&lines[index])
+                .is_some_and(|line| matches!(line.name.as_str(), "EXDATE" | "RDATE"))
+        });
     Some(TaskFields {
         reminder_at: reminder_from_alarms(&lines, &todo, due_at.as_deref()),
+        start_at: property(&lines, &todo, "DTSTART").and_then(|line| date_value(&line)),
+        rrule: property(&lines, &todo, "RRULE")
+            .map(|line| line.value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+        rrule_extras,
         uid,
         title: text("SUMMARY").unwrap_or_default(),
         notes: text("DESCRIPTION"),
@@ -335,14 +419,6 @@ pub fn parse(raw: &str) -> Option<TaskFields> {
         completed_at,
         message_id: text(MESSAGE_ID_PROPERTY),
     })
-}
-
-fn due_line(due: &str) -> Option<String> {
-    if due.len() == 10 {
-        let date = NaiveDate::parse_from_str(due, "%Y-%m-%d").ok()?;
-        return Some(format!("DUE;VALUE=DATE:{}", date.format("%Y%m%d")));
-    }
-    Some(format!("DUE:{}", ics_utc(due)?))
 }
 
 fn alarm_lines(reminder: &str, title: &str) -> Vec<String> {
@@ -390,8 +466,20 @@ pub fn build(fields: &TaskFields) -> String {
     if let Some(notes) = fields.notes.as_deref().filter(|value| !value.is_empty()) {
         lines.push(format!("DESCRIPTION:{}", escape_text(notes)));
     }
-    if let Some(due) = fields.due_at.as_deref().and_then(due_line) {
+    if let Some(start) = consistent_start(fields.start_at.as_deref(), fields.due_at.as_deref())
+        .and_then(|start| date_line("DTSTART", &start, None))
+    {
+        lines.push(start);
+    }
+    if let Some(due) = fields
+        .due_at
+        .as_deref()
+        .and_then(|due| date_line("DUE", due, None))
+    {
         lines.push(due);
+    }
+    if let Some(rrule) = fields.rrule.as_deref() {
+        lines.push(format!("RRULE:{rrule}"));
     }
     if fields.priority > 0 {
         lines.push(format!("PRIORITY:{}", fields.priority));
@@ -462,30 +550,50 @@ pub fn patch(original: &str, fields: &TaskFields) -> String {
             line.into_iter().collect(),
         );
     }
+    let zone_of = |name: &str| {
+        property(&lines, &todo, name).and_then(|line| line.param("TZID").map(str::to_string))
+    };
     if fields.due_at != before.due_at {
-        // DUE and DURATION are exclusive; a start after the new due date
-        // would make the resource invalid, so it goes with the old due date.
-        let mut names = vec!["DUE", "DURATION"];
-        let start = property(&lines, &todo, "DTSTART").and_then(|line| date_value(&line));
-        let start_after_due = match (start.as_deref(), fields.due_at.as_deref()) {
-            (Some(start), Some(due)) => due_instant(start)
-                .zip(due_instant(due))
-                .is_some_and(|(s, d)| s > d),
-            _ => false,
-        };
-        if start_after_due {
-            names.push("DTSTART");
-        }
+        // DUE and DURATION are exclusive.
+        let zone = zone_of("DUE");
         replace(
             &mut drop,
             &mut added,
-            &names,
+            &["DUE", "DURATION"],
             fields
                 .due_at
                 .as_deref()
-                .and_then(due_line)
+                .and_then(|due| date_line("DUE", due, zone.as_deref()))
                 .into_iter()
                 .collect(),
+        );
+    }
+    if fields.due_at != before.due_at || fields.start_at != before.start_at {
+        let start = consistent_start(fields.start_at.as_deref(), fields.due_at.as_deref());
+        if start != before.start_at {
+            let zone = zone_of("DTSTART");
+            replace(
+                &mut drop,
+                &mut added,
+                &["DTSTART"],
+                start
+                    .as_deref()
+                    .and_then(|start| date_line("DTSTART", start, zone.as_deref()))
+                    .into_iter()
+                    .collect(),
+            );
+        }
+    }
+    if fields.rrule != before.rrule {
+        let line = fields
+            .rrule
+            .as_deref()
+            .map(|rrule| format!("RRULE:{rrule}"));
+        replace(
+            &mut drop,
+            &mut added,
+            &["RRULE"],
+            line.into_iter().collect(),
         );
     }
     if fields.priority != before.priority {
@@ -532,7 +640,7 @@ pub fn patch(original: &str, fields: &TaskFields) -> String {
         ],
     );
     if reminder_changed {
-        for &(begin, end) in &todo.alarms {
+        for (begin, end) in display_alarms(&lines, &todo) {
             for flag in &mut drop[begin..=end] {
                 *flag = true;
             }
@@ -610,6 +718,9 @@ mod tests {
             priority: 5,
             completed_at: None,
             message_id: Some("<m1@example.test>".into()),
+            start_at: None,
+            rrule: Some("FREQ=WEEKLY;COUNT=3".into()),
+            rrule_extras: false,
         };
         let raw = build(&fields);
         assert!(raw.contains("DUE:20261112T093000Z\r\n"));
@@ -674,6 +785,77 @@ mod tests {
         let fields = parse(NEXTCLOUD).unwrap();
         let patched = patch(NEXTCLOUD, &fields);
         assert_eq!(patched, NEXTCLOUD);
+    }
+
+    #[test]
+    fn reads_the_rule_and_notices_what_makes_it_complex() {
+        let task = parse(NEXTCLOUD).unwrap();
+        assert_eq!(task.rrule.as_deref(), Some("FREQ=WEEKLY"));
+        assert!(!task.rrule_extras);
+        let with_exdate = NEXTCLOUD.replace(
+            "RRULE:FREQ=WEEKLY\r\n",
+            "RRULE:FREQ=WEEKLY\r\nEXDATE;TZID=Europe/Berlin:20261117T170000\r\n",
+        );
+        assert!(parse(&with_exdate).unwrap().rrule_extras);
+        let overridden = NEXTCLOUD.replace(
+            "END:VCALENDAR",
+            "BEGIN:VTODO\r\nUID:abc-123\r\nRECURRENCE-ID;TZID=Europe/Berlin:20261117T170000\r\nSUMMARY:Moved\r\nEND:VTODO\r\nEND:VCALENDAR",
+        );
+        assert!(parse(&overridden).unwrap().rrule_extras);
+    }
+
+    #[test]
+    fn advancing_keeps_the_zone_and_lowers_the_count() {
+        let raw = "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:r\r\nSUMMARY:Bins out\r\nDTSTART;TZID=Europe/Berlin:20261110T070000\r\nDUE;TZID=Europe/Berlin:20261110T080000\r\nRRULE:FREQ=WEEKLY;COUNT=4\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+        let mut fields = parse(raw).unwrap();
+        assert_eq!(fields.start_at.as_deref(), Some("2026-11-10T06:00:00Z"));
+        fields.due_at = Some("2026-11-17T07:00:00Z".into());
+        fields.start_at = Some("2026-11-17T06:00:00Z".into());
+        fields.rrule = Some("FREQ=WEEKLY;COUNT=3".into());
+        let patched = patch(raw, &fields);
+        assert!(
+            patched.contains("DUE;TZID=Europe/Berlin:20261117T080000\r\n"),
+            "{patched}"
+        );
+        assert!(patched.contains("DTSTART;TZID=Europe/Berlin:20261117T070000\r\n"));
+        assert!(patched.contains("RRULE:FREQ=WEEKLY;COUNT=3\r\n"));
+        assert!(!patched.contains("STATUS:COMPLETED"));
+    }
+
+    #[test]
+    fn drops_a_start_that_would_disagree_with_the_due_date() {
+        // A date-time start next to a date due is not allowed (RFC 5545 §3.8.2.3).
+        let raw = "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:s\r\nSUMMARY:x\r\nDTSTART:20261101T090000Z\r\nDUE:20261125T090000Z\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+        let mut fields = parse(raw).unwrap();
+        fields.due_at = Some("2026-11-26".into());
+        let patched = patch(raw, &fields);
+        assert!(!patched.contains("DTSTART"), "{patched}");
+        assert!(patched.contains("DUE;VALUE=DATE:20261126\r\n"));
+
+        let same_form = "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:s\r\nSUMMARY:x\r\nDTSTART;VALUE=DATE:20261101\r\nDUE;VALUE=DATE:20261125\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+        let mut fields = parse(same_form).unwrap();
+        fields.due_at = Some("2026-11-28".into());
+        assert!(patch(same_form, &fields).contains("DTSTART;VALUE=DATE:20261101\r\n"));
+    }
+
+    #[test]
+    fn a_new_reminder_leaves_other_clients_alarms_alone() {
+        let raw = "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:a\r\nSUMMARY:x\r\nDUE:20261110T100000Z\r\nBEGIN:VALARM\r\nACTION:EMAIL\r\nATTENDEE:mailto:me@example.test\r\nSUMMARY:x\r\nDESCRIPTION:x\r\nTRIGGER:-P1D\r\nEND:VALARM\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:x\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+        let mut fields = parse(raw).unwrap();
+        assert_eq!(fields.reminder_at.as_deref(), Some("2026-11-10T09:45:00Z"));
+        fields.reminder_at = Some("2026-11-10T08:00:00Z".into());
+        let patched = patch(raw, &fields);
+        assert!(patched.contains("ACTION:EMAIL\r\n"));
+        assert!(!patched.contains("TRIGGER:-PT15M"));
+        assert!(patched.contains("TRIGGER;VALUE=DATE-TIME:20261110T080000Z\r\n"));
+    }
+
+    #[test]
+    fn a_cancelled_task_without_timestamps_reads_the_same_every_time() {
+        let raw = "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:c\r\nSUMMARY:x\r\nSTATUS:CANCELLED\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+        let first = parse(raw).unwrap();
+        assert_eq!(first.completed_at.as_deref(), Some("1970-01-01T00:00:00Z"));
+        assert_eq!(parse(raw).unwrap(), first);
     }
 
     #[test]

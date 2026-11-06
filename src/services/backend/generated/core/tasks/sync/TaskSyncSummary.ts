@@ -5,7 +5,28 @@ export type TaskSyncSummary = {
     pushed: number;
     removed: number;
     /**
-     * Local changes the server refused because its copy had moved on.
+     * Local edits the server refused because its copy had moved on; the
+     * server's version replaced them.
      */
     conflicts: number;
+    /**
+     * Tasks deleted here that the server still had changed: they came back.
+     */
+    restored: number;
+    /**
+     * Pushes that failed and wait for a retry.
+     */
+    failed: number;
+    /**
+     * Local changes to lists the server refused as read-only; dropped.
+     */
+    read_only_dropped: number;
+    /**
+     * Unsent edits of tasks the server deleted, kept as local tasks.
+     */
+    kept_local: number;
+    /**
+     * Lists the server dropped that stay, read-only, for their unsent work.
+     */
+    lists_gone: number;
 };

@@ -6,6 +6,7 @@
 //! [`sync`], and the iCalendar mapping is [`vtodo`].
 use crate::db::tasks::TaskWrite;
 
+pub mod recurrence;
 pub mod sync;
 pub mod vtodo;
 
@@ -32,6 +33,8 @@ pub enum TaskInputError {
     ReminderInvalid,
     #[error("task priority is out of range")]
     PriorityInvalid,
+    #[error("task completion time is invalid")]
+    CompletedInvalid,
 }
 
 impl TaskInputError {
@@ -41,6 +44,7 @@ impl TaskInputError {
             Self::DueInvalid => "backend.errors.taskDueInvalid",
             Self::ReminderInvalid => "backend.errors.taskReminderInvalid",
             Self::PriorityInvalid => "backend.errors.taskPriorityInvalid",
+            Self::CompletedInvalid => "backend.errors.taskCompletedInvalid",
         }
     }
 }
@@ -83,7 +87,10 @@ pub fn validate(input: TaskInput) -> Result<TaskWrite, TaskInputError> {
         None => None,
         Some(value) => Some(utc_instant(&value).ok_or(TaskInputError::ReminderInvalid)?),
     };
-    let completed_at = non_empty(input.completed_at).and_then(|value| utc_instant(&value));
+    let completed_at = match non_empty(input.completed_at) {
+        None => None,
+        Some(value) => Some(utc_instant(&value).ok_or(TaskInputError::CompletedInvalid)?),
+    };
     if input.priority > 9 {
         return Err(TaskInputError::PriorityInvalid);
     }
@@ -155,6 +162,14 @@ mod tests {
             })
             .unwrap_err(),
             TaskInputError::ReminderInvalid
+        );
+        assert_eq!(
+            validate(TaskInput {
+                completed_at: Some("yesterday".into()),
+                ..base.clone()
+            })
+            .unwrap_err(),
+            TaskInputError::CompletedInvalid
         );
         assert_eq!(
             validate(TaskInput {

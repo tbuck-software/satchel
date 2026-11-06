@@ -6,6 +6,8 @@ import type { BackendTask, BackendTaskList } from '@/services/backend/tasks';
 import { useTaskEditor } from '@/composables/useTaskEditor';
 import { useToast } from '@/composables/useToast';
 import { localDateKey } from '@/utils/tasks';
+import { useUiStore } from '@/stores/ui';
+import { answerConfirms } from '@/test/dialogs';
 import TasksView from './TasksView.vue';
 
 const harness = vi.hoisted(() => ({
@@ -31,8 +33,12 @@ vi.mock('@/services/backend/tasks', () => ({
   backendCreateTask: vi.fn(async (input: { listId: string; fields: { title: string; due_at: string | null } }) =>
     task(`created-${input.fields.title}`, { list_id: input.listId, title: input.fields.title, due_at: input.fields.due_at })),
   backendUpdateTask: vi.fn(),
-  backendSetTaskCompleted: vi.fn(async (id: string, completed: boolean) =>
-    ({ ...harness.tasks.find((item) => item.id === id)!, completed_at: completed ? '2026-11-06T10:00:00Z' : null })),
+  backendSetTaskCompleted: vi.fn(async (id: string, completed: boolean) => {
+    const found = harness.tasks.find((item) => item.id === id)!;
+    // As the backend does for a simple series: the next occurrence, still open.
+    if (completed && found.recurrence === 'simple') return { ...found, due_at: '2030-01-08' };
+    return { ...found, completed_at: completed ? '2026-11-06T10:00:00Z' : null };
+  }),
   backendDeleteTask: vi.fn(async () => undefined),
   backendRestoreTask: vi.fn(),
   backendCreateTaskList: vi.fn(),
@@ -43,13 +49,13 @@ vi.mock('@/services/backend/tasks', () => ({
 import * as tasksBackend from '@/services/backend/tasks';
 
 function list(id: string, extra: Partial<BackendTaskList> = {}): BackendTaskList {
-  return { id, account_id: null, provider: 'local', name: '', color: null, read_only: false, last_synced_at: null, open_count: 0, ...extra };
+  return { id, account_id: null, provider: 'local', name: '', color: null, read_only: false, gone: false, last_synced_at: null, open_count: 0, ...extra };
 }
 
 function task(id: string, extra: Partial<BackendTask> = {}): BackendTask {
   return {
     id, list_id: 'local', title: id, notes: null, due_at: null, reminder_at: null, priority: 0,
-    completed_at: null, thread_id: null, message_id: null, pending: false,
+    completed_at: null, recurrence: null, thread_id: null, message_id: null, pending: false,
     created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-01T00:00:00Z', ...extra,
   };
 }
@@ -112,6 +118,59 @@ describe('tasks view', () => {
     press('#');
     await flushPromises();
     expect(tasksBackend.backendDeleteTask).toHaveBeenCalledWith('someday');
+  });
+
+  it('leaves the second key of a g sequence to the navigation', async () => {
+    await mountView();
+    useUiStore().showKeySequenceHint('D Drafts');
+    for (const key of ['d', 'e', 'x', '#']) press(key);
+    await flushPromises();
+    expect(tasksBackend.backendSetTaskCompleted).not.toHaveBeenCalled();
+    expect(tasksBackend.backendDeleteTask).not.toHaveBeenCalled();
+    useUiStore().clearKeySequenceHint();
+  });
+
+  it('moves a simple repeating task on and asks before ending a complex series', async () => {
+    harness.tasks = [
+      task('weekly', { due_at: '2030-01-01', recurrence: 'simple' }),
+      task('monthly', { due_at: '2030-01-02', recurrence: 'complex' }),
+    ];
+    const confirms = answerConfirms(false);
+    const wrapper = await mountView();
+    expect(wrapper.findAll('[data-testid="task-repeats"]')).toHaveLength(2);
+
+    press('x');
+    await flushPromises();
+    expect(tasksBackend.backendSetTaskCompleted).toHaveBeenCalledWith('weekly', true);
+    expect(confirms.asked).not.toHaveBeenCalled();
+    expect(useToast().state.toasts.at(-1)?.message).toContain('Next: “weekly”');
+
+    // The weekly task moved to 8 January, so the monthly one is first now.
+    press('x');
+    await flushPromises();
+    expect(confirms.asked).toHaveBeenCalledWith(expect.objectContaining({
+      body: 'This task repeats. Completing it here ends the series for all your devices.',
+      confirmLabel: 'Complete series',
+    }));
+    expect(tasksBackend.backendSetTaskCompleted).not.toHaveBeenCalledWith('monthly', true);
+
+    confirms.reply(true);
+    press('x');
+    await flushPromises();
+    expect(tasksBackend.backendSetTaskCompleted).toHaveBeenCalledWith('monthly', true);
+    confirms.stop();
+  });
+
+  it('takes no edits in a read-only list', async () => {
+    harness.lists = [list('shared', { provider: 'caldav', account_id: 'acc', read_only: true })];
+    harness.tasks = [task('theirs', { list_id: 'shared' })];
+    const wrapper = await mountView();
+    expect(wrapper.get('[data-testid="task-check"]').attributes('disabled')).toBeDefined();
+    press('x');
+    press('#');
+    await flushPromises();
+    expect(tasksBackend.backendSetTaskCompleted).not.toHaveBeenCalled();
+    expect(tasksBackend.backendDeleteTask).not.toHaveBeenCalled();
   });
 
   it('links back to the mail a task came from', async () => {

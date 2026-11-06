@@ -49,7 +49,8 @@ test('tasks: work at phone width with lists as pills and the tab bar', async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/tasks');
   await expect(page.locator('.task-row').first()).toBeVisible();
-  await expect(page.locator('.mobile-tab-bar [data-tab="tasks"]')).toHaveAttribute('aria-current', 'page');
+  // No fifth tab (pending owner decision); the drawer's area row leads here.
+  await expect(page.locator('.mobile-tab-bar [data-tab="tasks"]')).toHaveCount(0);
 
   const pills = page.getByRole('navigation', { name: 'Task lists' });
   await pills.getByRole('button', { name: /Work/ }).click();
@@ -64,3 +65,22 @@ test('tasks: work at phone width with lists as pills and the tab bar', async ({ 
   expect(check!.width).toBeGreaterThanOrEqual(44);
   expect(check!.height).toBeGreaterThanOrEqual(44);
 });
+
+for (const start of ['/tasks', '/cleanup']) {
+  test(`g d from ${start} opens Drafts and changes nothing there`, async ({ page }) => {
+    await page.goto(start);
+    const rows = start === '/tasks' ? page.locator('.task-row') : page.locator('.cleanup-row');
+    await expect(rows.first()).toBeVisible();
+    const before = await rows.allTextContents();
+    // `d` alone would mark the focused task done, or archive a sender's mail.
+    await expect(async () => {
+      await page.keyboard.press('g');
+      await page.keyboard.press('d');
+      await expect(page).toHaveURL(/\/drafts$/, { timeout: 1_000 });
+    }).toPass({ timeout: 15_000 });
+    await page.goBack();
+    await expect(rows.first()).toBeVisible();
+    expect(await rows.allTextContents()).toEqual(before);
+    await expect(page.getByText(/^Done: |Archived/)).toHaveCount(0);
+  });
+}
