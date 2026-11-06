@@ -11,6 +11,7 @@ pub mod content_eviction;
 pub mod data_repairs;
 pub mod folders;
 pub mod followups;
+pub mod known_senders;
 pub mod mailboxes;
 pub mod maintenance;
 pub mod message_links;

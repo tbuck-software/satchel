@@ -167,7 +167,7 @@ pub async fn sync_groupware_account(
         }
     }
     if let Some(config) = snapshot.carddav.as_ref() {
-        match sync_carddav(pool, &client, config).await {
+        match sync_carddav(pool, &client, account_id, config).await {
             Ok((collections, contacts)) => {
                 summary.address_books_found += collections;
                 summary.contacts_synced += contacts;
@@ -387,14 +387,17 @@ async fn sync_caldav(
 async fn sync_carddav(
     pool: &SqlitePool,
     client: &reqwest::Client,
+    account_id: &str,
     config: &DavConfig,
 ) -> Result<(usize, usize), String> {
     let collections = discover_collections(client, config, DavKind::AddressBook).await?;
     let mut synced = 0;
+    let mut address_book = Vec::new();
     for collection in &collections {
         let vcards = fetch_addressbook_vcards(client, config, collection).await?;
         for vcard in &vcards {
             let parsed = parse_vcard(vcard);
+            address_book.extend(parsed.emails.iter().cloned());
             for email in parsed.emails {
                 if upsert_carddav_contact(
                     pool,
@@ -409,6 +412,18 @@ async fn sync_carddav(
             }
         }
     }
+    // Every collection was read: the list replaces the previous one, so a
+    // contact deleted on the server stops making its sender known.
+    let book = crate::db::known_senders::AddressBook::Account {
+        kind: "carddav",
+        account_id,
+    };
+    crate::db::known_senders::replace_address_book(pool, book, address_book)
+        .await
+        .map_err(|error| {
+            tracing::warn!(error = ?error, "CardDAV address book persistence failed");
+            groupware_sync_error_key(DavKind::AddressBook).to_string()
+        })?;
     Ok((collections.len(), synced))
 }
 
