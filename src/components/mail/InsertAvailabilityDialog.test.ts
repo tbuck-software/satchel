@@ -31,7 +31,7 @@ describe('InsertAvailabilityDialog', () => {
     const preview = view.get('[data-testid="insert-availability-preview"]').text();
     expect(preview).toContain("I'm free for 30 minutes at these times (");
     expect(preview).toContain('UTC');
-    expect(preview).toMatch(/\n- Mon, Nov 9: 9:00\s*AM\s*[–-]\s*12:00\s*PM/);
+    expect(preview).toMatch(/\n- Mon, Nov 9: 09:00\s*[–-]\s*12:00$/);
 
     await view.get('[data-testid="insert-availability-submit"]').trigger('click');
     const [content] = view.emitted('insert')![0] as [{ text: string; html: string }];

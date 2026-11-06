@@ -1037,17 +1037,17 @@ function utcText(time: number): string {
   return new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
-function mockOwnBusy(from: number, to: number, excluded: string[]): BackendBusyBlock[] {
+function mockOwnBusy(from: number, to: number, excluded: string[], editingId?: string | null): BackendBusyBlock[] {
   return calendarEvents
-    .filter((event) => !excluded.includes(mockSourceKey(event)))
+    .filter((event) => !excluded.includes(mockSourceKey(event)) && event.id !== editingId)
     .map((event) => {
       const allDay = event.all_day === 1;
       const start = allDay ? new Date(`${event.starts_at.slice(0, 10)}T00:00`).getTime() : Date.parse(event.starts_at);
       const end = allDay ? new Date(`${event.ends_at.slice(0, 10)}T00:00`).getTime() : Date.parse(event.ends_at);
       return { start, end, allDay };
     })
-    // A whole-day event without TRANSP is free, as the backend reads it.
-    .filter((event) => !event.allDay && event.end > from && event.start < to)
+    // Without TRANSP an event is busy, whole-day ones too (RFC 5545 OPAQUE).
+    .filter((event) => event.end > from && event.start < to)
     .map((event) => ({ starts_at: utcText(event.start), ends_at: utcText(event.end), tentative: false }))
     .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
 }
@@ -1081,10 +1081,26 @@ function mockPersonBusy(address: string, from: number, to: number): BackendBusyB
   return blocks.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
 }
 
+/** `a@b.c` or `Name <a@b.c>`; anything else is not asked about, as in `free_busy::parse_address`. */
+function mockAddress(value: string): string | null {
+  const trimmed = value.trim();
+  const open = trimmed.lastIndexOf('<');
+  const address = open >= 0 && trimmed.endsWith('>') ? trimmed.slice(open + 1, -1).trim() : trimmed;
+  return /^[^\s<>@",;:\\()[\]]+@[^\s<>@",;:\\()[\]]+\.[^\s<>@",;:\\()[\]]+$/.test(address) ? address.toLowerCase() : null;
+}
+
 function mockAttendees(input: { attendees: string[] }): string[] {
   const own = accounts.map((account) => account.email.toLowerCase());
-  return [...new Set(input.attendees.map((value) => value.trim().replace(/^<|>$/g, '').toLowerCase()))]
-    .filter((address) => address.includes('@') && !own.includes(address));
+  return [...new Set(input.attendees.map(mockAddress).filter((address): address is string => address !== null))]
+    .filter((address) => !own.includes(address));
+}
+
+/** Busy time that is exactly the edited event's saved slot is that event. */
+function withoutEditedSlot(blocks: BackendBusyBlock[], editing: BackendFreeBusyInput['editing']): BackendBusyBlock[] {
+  if (!editing?.starts_at || !editing.ends_at) return blocks;
+  const start = Date.parse(editing.starts_at);
+  const end = Date.parse(editing.ends_at);
+  return blocks.filter((block) => Date.parse(block.starts_at) !== start || Date.parse(block.ends_at) !== end);
 }
 
 function mockFreeSlots(input: BackendFreeSlotsInput) {
@@ -1097,10 +1113,12 @@ function mockFreeSlots(input: BackendFreeSlotsInput) {
   const from = Date.parse(input.from);
   const to = from + (Math.ceil(input.working_days / 5) * 7 + 3) * 86_400_000;
   const unknown: string[] = [];
-  const busy = mockOwnBusy(from, to, input.excluded_calendars).map((block) => [Date.parse(block.starts_at), Date.parse(block.ends_at)]);
+  const busy = mockOwnBusy(from, to, input.excluded_calendars, input.editing?.event_id)
+    .map((block) => [Date.parse(block.starts_at), Date.parse(block.ends_at)]);
   for (const address of mockAttendees(input)) {
     if (!mockKnowsFreeBusy(address)) unknown.push(address);
-    else busy.push(...mockPersonBusy(address, from, to).map((block) => [Date.parse(block.starts_at), Date.parse(block.ends_at)]));
+    else busy.push(...withoutEditedSlot(mockPersonBusy(address, from, to), input.editing)
+      .map((block) => [Date.parse(block.starts_at), Date.parse(block.ends_at)]));
   }
   busy.sort((a, b) => a[0]! - b[0]!);
   const grid = 15 * 60_000;
@@ -2209,10 +2227,11 @@ const handlers: Record<string, Handler> = {
     const from = Date.parse(input.starts_at);
     const to = Date.parse(input.ends_at);
     if (!(to > from) || to - from > 62 * 86_400_000) throw new Error('backend.errors.availabilityRangeInvalid');
+    if (to - from > 60 * 86_400_000) throw new Error('backend.errors.availabilityRangeInvalid');
     return {
-      own: mockOwnBusy(from, to, input.excluded_calendars),
+      own: mockOwnBusy(from, to, input.excluded_calendars, input.editing?.event_id),
       attendees: mockAttendees(input).map((address) => mockKnowsFreeBusy(address)
-        ? { address, known: true, busy: mockPersonBusy(address, from, to) }
+        ? { address, known: true, busy: withoutEditedSlot(mockPersonBusy(address, from, to), input.editing) }
         : { address, known: false, busy: [] }),
     };
   },

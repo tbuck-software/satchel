@@ -1201,7 +1201,8 @@ function onTemplateApply(rendered: {
 function onAvailabilityInsert(content: { text: string; html: string }) {
   showAvailability.value = false;
   if (!plainTextCompose.value) {
-    richEditorRef.value?.insertHtml(content.html);
+    // An editor that is gone (closed mid-dialog) must not swallow the text silently.
+    if (!richEditorRef.value?.insertHtml(content.html)) toast.error(t('availability.insert.insertFailed'));
     return;
   }
   const area = writingTextarea.value;

@@ -3117,6 +3117,35 @@ export default {
                 }
             }
         },
+        "app::commands::availability::EditingEventInput": {
+            "kind": "object",
+            "fields": {
+                "ends_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "event_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "starts_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
         "app::commands::availability::FreeBusyInput": {
             "kind": "object",
             "fields": {
@@ -3135,6 +3164,16 @@ export default {
                         "kind": "array",
                         "item": {
                             "kind": "value"
+                        }
+                    }
+                },
+                "editing": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "ref",
+                            "name": "app::commands::availability::EditingEventInput"
                         }
                     }
                 },
@@ -3192,6 +3231,16 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                },
+                "editing": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "ref",
+                            "name": "app::commands::availability::EditingEventInput"
+                        }
                     }
                 },
                 "excluded_calendars": {

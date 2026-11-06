@@ -87,6 +87,12 @@ const proposal = computed(() => {
   return { start, end };
 });
 
+/** A saved timed event being edited: its own slot is not a conflict with itself. */
+const editingEvent = computed(() => {
+  const draft = props.draft;
+  return draft?.id && !draft.allDay ? { id: draft.id, start: draft.start, end: draft.end } : null;
+});
+
 function moveSlot(start: Date, end: Date) {
   startInput.value = toDateTimeLocalInput(start);
   endInput.value = toDateTimeLocalInput(end);
@@ -298,6 +304,7 @@ useDismissable(() => props.draft !== null, () => emit('close'));
               :attendees="attendeeList"
               :start="proposal.start"
               :end="proposal.end"
+              :editing="editingEvent"
               :disabled="saving"
               @move="moveSlot"
             />

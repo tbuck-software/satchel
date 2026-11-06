@@ -120,3 +120,83 @@ describe('AvailabilityStrip overlaps', () => {
     expect(own.text()).toMatch(/Busy 14:00–17:00$/);
   });
 });
+
+describe('AvailabilityStrip while a new report is on its way', () => {
+  it('does not show the previous day as if it were the new one', async () => {
+    const view = await mountStrip();
+    expect(view.findAll('.strip__busy').length).toBeGreaterThan(0);
+    let resolve!: (value: unknown) => void;
+    backend.query.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+
+    await view.setProps({ start: new Date(2026, 10, 10, 10), end: new Date(2026, 10, 10, 11) });
+    // Before the debounce and while the request runs: no busy time, no verdict.
+    expect(view.find('.strip__status').text()).toBe('Loading availability…');
+    expect(view.findAll('.strip__busy')).toHaveLength(0);
+    expect(view.find('.strip').classes()).toContain('strip--stale');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(view.find('.strip__status').text()).toBe('Loading availability…');
+
+    resolve({ own: [], attendees: [
+      { address: 'lena@example.com', known: true, busy: [] },
+      { address: 'outside@elsewhere.test', known: false, busy: [] },
+    ] });
+    await flushPromises();
+    expect(view.find('.strip__status').text()).toBe('Everyone known is free at 10:00–11:00.');
+    expect(view.find('.strip').classes()).not.toContain('strip--stale');
+  });
+
+  it('forgets a search answer when the day or the people change', async () => {
+    backend.find.mockResolvedValue({ time_zone: 'UTC', unknown: ['outside@elsewhere.test'], days: [] });
+    const view = await mountStrip();
+    await view.get('[data-testid="availability-next-free"]').trigger('click');
+    await flushPromises();
+    expect(view.text()).toContain('No time when everyone is free');
+
+    await view.setProps({ start: new Date(2026, 10, 10, 10), end: new Date(2026, 10, 10, 11) });
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    expect(view.text()).not.toContain('No time when everyone is free');
+    // Who could not be counted is still true on another day…
+    expect(view.text()).toContain('Not counted, their availability is unknown');
+    // …until the people change.
+    await view.setProps({ attendees: ['lena@example.com'] });
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    expect(view.text()).not.toContain('Not counted');
+  });
+
+  it('asks without the edited event and its saved slot', async () => {
+    const editing = { id: 'event-1', start: new Date(2026, 10, 9, 10), end: new Date(2026, 10, 9, 11) };
+    mount(AvailabilityStrip, {
+      props: { accountId: 'acc', attendees: ['lena@example.com'], start: editing.start, end: editing.end, editing },
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    expect(backend.query.mock.calls[0]![0].editing).toEqual({
+      event_id: 'event-1', starts_at: editing.start.toISOString(), ends_at: editing.end.toISOString(),
+    });
+  });
+});
+
+describe('AvailabilityStrip on a DST day', () => {
+  const zone = process.env.TZ;
+  afterEach(() => {
+    if (zone === undefined) delete process.env.TZ;
+    else process.env.TZ = zone;
+  });
+
+  it('moves the slot to the time under the pointer, not an hour away', async () => {
+    process.env.TZ = 'Europe/Berlin';
+    // 29 March 2026: clocks go from 02:00 to 03:00 in Berlin.
+    const view = await mountStrip(new Date(2026, 2, 29, 10), new Date(2026, 2, 29, 11));
+    const track = view.findAll('.strip__track')[0]!;
+    track.element.getBoundingClientRect = () => ({ left: 0, width: 200, top: 0, height: 20, right: 200, bottom: 20, x: 0, y: 0, toJSON: () => ({}) });
+    // The timeline runs 09:00–19:00 (an hour either side of 10:00–18:00 work and slot).
+    expect(view.findAll('.strip__tick').map((tick) => tick.text())[0]).toBe('09:00');
+    const press = new MouseEvent('pointerdown', { clientX: 100, bubbles: true });
+    track.element.dispatchEvent(press);
+    const [start, end] = view.emitted('move')![0] as [Date, Date];
+    expect(start.getTime()).toBe(new Date(2026, 2, 29, 14).getTime());
+    expect(end.getTime() - start.getTime()).toBe(60 * 60_000);
+  });
+});

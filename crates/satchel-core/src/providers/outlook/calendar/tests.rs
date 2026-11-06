@@ -1816,3 +1816,23 @@ fn show_as_free_leaves_an_event_out_of_free_busy() {
     assert!(!event(Some("tentative")));
     assert!(!event(None));
 }
+
+#[test]
+fn a_declined_meeting_leaves_the_time_free() {
+    let event = |response: &str| {
+        let event: GraphEvent = serde_json::from_value(json!({
+            "id": "e2",
+            "subject": "Review",
+            "start": { "dateTime": "2026-11-09T09:00:00.0000000", "timeZone": "UTC" },
+            "end": { "dateTime": "2026-11-09T10:00:00.0000000", "timeZone": "UTC" },
+            "showAs": "busy",
+            "responseStatus": { "response": response, "time": "2026-11-01T00:00:00Z" }
+        }))
+        .unwrap();
+        map_event("acc", true, event).unwrap().flags.transparent
+    };
+    assert!(event("declined"));
+    assert!(!event("accepted"));
+    assert!(!event("tentativelyAccepted"));
+    assert!(!event("organizer"));
+}

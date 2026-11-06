@@ -1,4 +1,5 @@
 // Generated from Rust. Run pnpm ipc:generate.
+import type { EditingEventInput } from "./EditingEventInput";
 export type FreeBusyInput = {
     /**
      * The account the event belongs to; it is asked about the attendees.
@@ -18,4 +19,5 @@ export type FreeBusyInput = {
      * Calendar keys that do not count towards the owner's availability.
      */
     excluded_calendars: Array<string>;
+    editing?: EditingEventInput | null;
 };

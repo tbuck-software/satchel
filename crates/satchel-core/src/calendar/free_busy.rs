@@ -30,8 +30,14 @@ use super::availability::{self, AvailabilityError, Busy, WorkingHours};
 const ANSWER_TTL: StdDuration = StdDuration::from_secs(5 * 60);
 /// A failed request is retried sooner than an answer is refreshed.
 const FAILURE_TTL: StdDuration = StdDuration::from_secs(60);
-/// The editor shows a day, "next free" looks two weeks ahead; nothing needs more.
-const MAX_RANGE_DAYS: i64 = 62;
+/// A provider that refuses outright (a 4xx: personal Microsoft accounts have
+/// no `getSchedule`) is not asked again for an hour.
+const REFUSED_TTL: StdDuration = StdDuration::from_secs(60 * 60);
+/// The editor shows a day, "next free" looks two weeks ahead; nothing needs
+/// more. Widened to whole UTC days it stays within Graph's 62-day limit.
+const MAX_RANGE_DAYS: i64 = 60;
+/// The longest range a provider is asked about.
+const MAX_PROVIDER_DAYS: i64 = 62;
 /// More people than this in one request is not a meeting the strip can show.
 const MAX_ATTENDEES: usize = 50;
 
@@ -122,6 +128,29 @@ pub struct Participants<'a> {
     /// Calendar keys ([`availability::calendar_key`]) that do not count
     /// towards the owner's availability.
     pub excluded_calendars: &'a [String],
+    /// The event being edited, so its own time does not count against it.
+    pub editing: Option<Editing<'a>>,
+}
+
+/// An existing event open in the editor.
+#[derive(Debug, Clone, Copy)]
+pub struct Editing<'a> {
+    pub event_id: &'a str,
+    /// Its saved slot. Attendee busy time that is exactly this slot is the
+    /// event itself, already on their calendars.
+    pub starts_at: Option<DateTime<Utc>>,
+    pub ends_at: Option<DateTime<Utc>>,
+}
+
+/// What a provider said about a set of addresses. An address in none of the
+/// three lists is unknown: the provider did not answer for it.
+#[derive(Debug, Default)]
+pub struct ProviderAnswers {
+    pub known: HashMap<String, Vec<Busy>>,
+    /// Their request failed in a way worth retrying soon.
+    pub failed: Vec<String>,
+    /// The provider refused their request outright.
+    pub refused: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -141,8 +170,15 @@ pub async fn query(
 ) -> Result<FreeBusyReport, FreeBusyError> {
     check_range(start, end)?;
     let zone = availability::parse_zone(zone)?;
-    let own =
-        availability::own_busy(pool, start, end, zone, participants.excluded_calendars).await?;
+    let own = availability::own_busy(
+        pool,
+        start,
+        end,
+        zone,
+        participants.excluded_calendars,
+        participants.editing.map(|editing| editing.event_id),
+    )
+    .await?;
     let attendees = attendee_busy(pool, participants, start, end).await?;
     Ok(FreeBusyReport {
         own: own.iter().map(block_record).collect(),
@@ -179,8 +215,15 @@ pub async fn free_slots(
     // working days, plus slack, always covers them.
     let span = Duration::days(i64::from(working_days.div_ceil(5)) * 7 + 3);
     let end = from + span;
-    let mut busy =
-        availability::own_busy(pool, from, end, zone, participants.excluded_calendars).await?;
+    let mut busy = availability::own_busy(
+        pool,
+        from,
+        end,
+        zone,
+        participants.excluded_calendars,
+        participants.editing.map(|editing| editing.event_id),
+    )
+    .await?;
     let mut unknown = Vec::new();
     for (address, answer) in attendee_busy(pool, participants, from, end).await? {
         match answer {
@@ -235,16 +278,41 @@ fn block_record(block: &Busy) -> BusyBlock {
     }
 }
 
+/// One attendee as typed: `a@b.c` or `Name <a@b.c>`, lower-cased. `None` for
+/// anything that is not a single plain address: no whitespace or control
+/// characters (they would end up in a VFREEBUSY line), no second `@`, nothing
+/// outside the angle brackets' address.
+pub fn parse_address(value: &str) -> Option<String> {
+    let value = value.trim();
+    let address = match (value.rfind('<'), value.ends_with('>')) {
+        (Some(open), true) => &value[open + 1..value.len() - 1],
+        (None, false) => value,
+        _ => return None,
+    };
+    let address = address.trim();
+    let (local, domain) = address.split_once('@')?;
+    let plain = |part: &str| {
+        !part.is_empty()
+            && part.chars().all(|ch| {
+                !ch.is_whitespace()
+                    && !ch.is_control()
+                    && !matches!(
+                        ch,
+                        '<' | '>' | '@' | '"' | ',' | ';' | ':' | '\\' | '(' | ')' | '[' | ']'
+                    )
+            })
+    };
+    (plain(local) && plain(domain) && domain.contains('.')).then(|| address.to_ascii_lowercase())
+}
+
 /// Lower-cased, de-duplicated addresses in the order given, without the
 /// owner's own (they are the "you" row) and without anything that is not one.
 pub fn normalize_addresses(input: &[String], own: &[String]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     input
         .iter()
-        .map(|value| value.trim().trim_matches(['<', '>']).to_ascii_lowercase())
-        .filter(|value| {
-            value.contains('@') && !own.iter().any(|mine| mine.eq_ignore_ascii_case(value))
-        })
+        .filter_map(|value| parse_address(value))
+        .filter(|value| !own.iter().any(|mine| mine.eq_ignore_ascii_case(value)))
         .filter(|value| seen.insert(value.clone()))
         .take(MAX_ATTENDEES)
         .collect()
@@ -282,7 +350,8 @@ pub fn clear_cache() {
 fn day_range(start: DateTime<Utc>, end: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
     let day = 86_400;
     let from = start.timestamp().div_euclid(day) * day;
-    let to = (end.timestamp() + day - 1).div_euclid(day) * day;
+    let to =
+        ((end.timestamp() + day - 1).div_euclid(day) * day).min(from + MAX_PROVIDER_DAYS * day);
     (
         DateTime::from_timestamp(from, 0).unwrap_or(start),
         DateTime::from_timestamp(to, 0).unwrap_or(end),
@@ -295,9 +364,10 @@ async fn attendee_busy(
     start: DateTime<Utc>,
     end: DateTime<Utc>,
 ) -> Result<Vec<(String, Option<Vec<Busy>>)>, sqlx::Error> {
-    let own: Vec<String> = sqlx::query_scalar("SELECT email FROM accounts")
-        .fetch_all(pool)
-        .await?;
+    let own: Vec<String> =
+        sqlx::query_scalar("SELECT email FROM accounts UNION SELECT email FROM account_aliases")
+            .fetch_all(pool)
+            .await?;
     let addresses = normalize_addresses(participants.attendees, &own);
     if addresses.is_empty() {
         return Ok(Vec::new());
@@ -333,16 +403,26 @@ async fn attendee_busy(
         .cloned()
         .collect::<Vec<_>>();
     if !missing.is_empty() {
-        let (fetched, ttl) = match ask_provider(pool, account_id, &missing, from, to).await {
-            Ok(known) => (known, ANSWER_TTL),
+        let answers_from_provider = match ask_provider(pool, account_id, &missing, from, to).await {
+            Ok(answers) => answers,
             Err(error) => {
                 tracing::warn!(account_id, %error, "free/busy lookup failed; attendees shown as unknown");
-                (HashMap::new(), FAILURE_TTL)
+                ProviderAnswers {
+                    failed: missing.clone(),
+                    ..ProviderAnswers::default()
+                }
             }
         };
         let mut cache = CACHE.lock().ok();
         for address in missing {
-            let busy = fetched.get(&address).cloned();
+            let busy = answers_from_provider.known.get(&address).cloned();
+            let ttl = if answers_from_provider.failed.contains(&address) {
+                FAILURE_TTL
+            } else if answers_from_provider.refused.contains(&address) {
+                REFUSED_TTL
+            } else {
+                ANSWER_TTL
+            };
             if let Some(cache) = cache.as_mut() {
                 cache.insert(
                     key(&address),
@@ -356,6 +436,10 @@ async fn attendee_busy(
             answers.insert(address, busy);
         }
     }
+    // Busy time that is exactly the edited event's saved slot is that event.
+    let own_slot = participants
+        .editing
+        .and_then(|editing| Some((editing.starts_at?, editing.ends_at?)));
     Ok(addresses
         .into_iter()
         .map(|address| {
@@ -363,6 +447,7 @@ async fn attendee_busy(
                 blocks
                     .into_iter()
                     .filter(|block| block.end > start && block.start < end)
+                    .filter(|block| own_slot != Some((block.start, block.end)))
                     .collect()
             });
             (address, busy)
@@ -404,7 +489,7 @@ async fn ask_provider(
     addresses: &[String],
     start: DateTime<Utc>,
     end: DateTime<Utc>,
-) -> Result<HashMap<String, Vec<Busy>>, String> {
+) -> Result<ProviderAnswers, String> {
     match source_of(pool, account_id).await? {
         Source::Google => {
             crate::providers::google_calendar::free_busy(pool, account_id, addresses, start, end)
@@ -428,7 +513,7 @@ async fn ask_provider(
             )
             .await
         }
-        Source::None => Ok(HashMap::new()),
+        Source::None => Ok(ProviderAnswers::default()),
     }
 }
 

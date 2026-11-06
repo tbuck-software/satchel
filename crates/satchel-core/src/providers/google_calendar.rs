@@ -219,10 +219,10 @@ pub async fn free_busy(
     addresses: &[String],
     start: chrono::DateTime<chrono::Utc>,
     end: chrono::DateTime<chrono::Utc>,
-) -> Result<std::collections::HashMap<String, Vec<crate::calendar::availability::Busy>>, String> {
-    let mut known = std::collections::HashMap::new();
+) -> Result<crate::calendar::free_busy::ProviderAnswers, String> {
+    let mut answers = crate::calendar::free_busy::ProviderAnswers::default();
     if stored_calendar_grant(pool, account_id).await? == Some(false) {
-        return Ok(known);
+        return Ok(answers);
     }
     let config = crate::utils::oauth::fresh_account_config_for_provider(
         pool,
@@ -236,37 +236,56 @@ pub async fn free_busy(
         crate::utils::oauth::GOOGLE_CALENDAR_SCOPE,
     ) == Some(false)
     {
-        return Ok(known);
+        return Ok(answers);
     }
     let token = access_token_from_account_config(OAuthProvider::Gmail, &config)
         .await
         .map_err(|err| err.encoded())?;
     let client = crate::utils::http::client();
+    // One chunk failing keeps what the others answered.
     for chunk in addresses.chunks(FREE_BUSY_BATCH) {
         let body = serde_json::json!({
             "timeMin": start.to_rfc3339(),
             "timeMax": end.to_rfc3339(),
             "items": chunk.iter().map(|id| serde_json::json!({ "id": id })).collect::<Vec<_>>(),
         });
-        let response = client
+        let response = match client
             .post(format!("{API_BASE}/freeBusy"))
             .bearer_auth(&token)
             .json(&body)
             .send()
             .await
-            .map_err(|err| format!("google free/busy request failed: {err}"))?;
+        {
+            Ok(response) => response,
+            Err(error) => {
+                tracing::warn!(account_id, %error, "google free/busy request failed");
+                answers.failed.extend_from_slice(chunk);
+                continue;
+            }
+        };
         let status = response.status();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(explain_api_error(status, &body));
+            tracing::warn!(
+                account_id,
+                status = status.as_u16(),
+                "google free/busy refused"
+            );
+            if status.is_client_error() && status.as_u16() != 429 {
+                answers.refused.extend_from_slice(chunk);
+            } else {
+                answers.failed.extend_from_slice(chunk);
+            }
+            continue;
         }
-        let parsed: FreeBusyResponse = response
-            .json()
-            .await
-            .map_err(|err| format!("google free/busy response parse failed: {err}"))?;
-        known.extend(map_free_busy(parsed, chunk));
+        match response.json::<FreeBusyResponse>().await {
+            Ok(parsed) => answers.known.extend(map_free_busy(parsed, chunk)),
+            Err(error) => {
+                tracing::warn!(account_id, %error, "google free/busy response unreadable");
+                answers.failed.extend_from_slice(chunk);
+            }
+        }
     }
-    Ok(known)
+    Ok(answers)
 }
 
 /// The answered addresses of one `freeBusy` response. Google keys calendars

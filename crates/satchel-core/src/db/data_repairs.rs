@@ -210,6 +210,7 @@ pub fn registered_repairs() -> &'static [DataRepair] {
         super::signed_attachments::SIGNED_ENTITY_ATTACHMENTS,
         crate::spam::bootstrap::SPAM_BOOTSTRAP,
         super::known_senders::KNOWN_SENDERS_SENT,
+        OUTLOOK_CALENDAR_RESYNC,
     ]
 }
 
@@ -517,6 +518,29 @@ fn thread_folders_block<'c>(
     })
 }
 
+/// Forgets the delta links of mirrored Outlook calendars once (migration
+/// 0145), so the next sync lists every event again and records whether it
+/// leaves the time free. One table of a few rows: a single block.
+pub const OUTLOOK_CALENDAR_RESYNC: DataRepair = DataRepair {
+    name: "outlook_calendar_resync",
+    block: outlook_calendar_resync_block,
+    prepare: None,
+};
+
+fn outlook_calendar_resync_block<'c>(
+    connection: &'c mut SqliteConnection,
+    _cursor: &'c str,
+    _limit: i64,
+    _prepared: Option<Prepared>,
+) -> BoxFuture<'c, Result<Option<String>, sqlx::Error>> {
+    Box::pin(async move {
+        sqlx::query("UPDATE calendar_sources SET sync_cursor = NULL WHERE source = 'outlook'")
+            .execute(&mut *connection)
+            .await?;
+        Ok(None)
+    })
+}
+
 pub const FTS_PREFIX: DataRepair = DataRepair {
     name: "fts_prefix",
     block: fts_prefix_block,
@@ -584,6 +608,66 @@ fn message_addresses_block<'c>(
 mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn the_outlook_resync_forgets_outlook_cursors_once_and_nothing_else() {
+        crate::utils::crypto::seed_master_key_for_tests();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("pool");
+        crate::db::init(&pool).await.expect("migrations");
+        // Migration 0145 planted the marker.
+        assert!(is_pending(&pool, &OUTLOOK_CALENDAR_RESYNC).await.unwrap());
+        sqlx::query(
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, sync_state, color, is_active, created_at, updated_at)
+             VALUES ('a', 'Me', 'me@example.com', 'outlook', '{}', '', '{}', '', 1, 'now', 'now')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (source, remote_id) in [
+            ("outlook", "cal-1"),
+            ("outlook", "cal-2"),
+            ("google", "primary"),
+        ] {
+            sqlx::query(
+                "INSERT INTO calendar_sources (account_id, source, remote_id, name, updated_at, sync_cursor)
+                 VALUES ('a', ?, ?, 'x', 'now', 'cursor')",
+            )
+            .bind(source)
+            .bind(remote_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let run = run_repair(
+            &pool,
+            &OUTLOOK_CALENDAR_RESYNC,
+            DEFAULT_BLOCK_SIZE,
+            None,
+            |_| {},
+        )
+        .await
+        .unwrap();
+        assert!(matches!(run, RepairRun::Completed { .. }));
+        let cursors: Vec<(String, Option<String>)> =
+            sqlx::query_as("SELECT source, sync_cursor FROM calendar_sources ORDER BY remote_id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            cursors,
+            vec![
+                ("outlook".to_string(), None),
+                ("outlook".to_string(), None),
+                ("google".to_string(), Some("cursor".to_string())),
+            ]
+        );
+        assert!(!is_pending(&pool, &OUTLOOK_CALENDAR_RESYNC).await.unwrap());
+    }
 
     async fn pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()

@@ -157,6 +157,7 @@
       "hoursHint": "Working hours: {hours}. Change them under Settings → Calendar.",
       "hoursShort": "{count} h",
       "insert": "Insert",
+      "insertFailed": "The availability could not be inserted. Click into the message and try again.",
       "loading": "Finding free time…",
       "minutesShort": "{count} min",
       "none": "No free time within working hours in the next working day. | No free time within working hours in the next {count} working days.",

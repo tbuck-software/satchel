@@ -45,7 +45,7 @@ const PAGE_SIZE: u32 = 100;
 /// The fields a listing asks for. `body` stays: the mirror shows the
 /// description and must know whether it is formatted.
 const LISTING_SELECT: &str = "id,iCalUId,changeKey,subject,body,location,start,end,isAllDay,\
-isCancelled,attendees,isOrganizer,type,showAs";
+isCancelled,attendees,isOrganizer,type,showAs,responseStatus";
 /// Same ids as mail: an event moved between calendars keeps its id.
 const PREFER_IMMUTABLE_IDS: &str = "IdType=\"ImmutableId\"";
 /// Times come back as UTC, whatever zone the event was created in.
@@ -123,6 +123,15 @@ struct GraphEvent {
     /// Absent counts as busy, Graph's default.
     #[serde(rename = "showAs")]
     show_as: Option<String>,
+    /// The account's own answer to a meeting it attends.
+    #[serde(rename = "responseStatus")]
+    response_status: Option<GraphResponseStatus>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphResponseStatus {
+    /// `none`, `organizer`, `tentativelyAccepted`, `accepted`, `declined`, …
+    response: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -789,7 +798,13 @@ fn map_event(
             Some("occurrence" | "exception")
         ),
         rich_description,
-        transparent: show_as_free(event.show_as.as_deref()),
+        // A meeting the account declined stays on its calendar but takes no time.
+        transparent: show_as_free(event.show_as.as_deref())
+            || event
+                .response_status
+                .as_ref()
+                .and_then(|status| status.response.as_deref())
+                .is_some_and(|response| response.eq_ignore_ascii_case("declined")),
     };
     let attendees = event
         .attendees
@@ -855,21 +870,22 @@ pub async fn schedules(
     addresses: &[String],
     start: chrono::DateTime<chrono::Utc>,
     end: chrono::DateTime<chrono::Utc>,
-) -> Result<std::collections::HashMap<String, Vec<crate::calendar::availability::Busy>>, String> {
-    let mut known = std::collections::HashMap::new();
+) -> Result<crate::calendar::free_busy::ProviderAnswers, String> {
+    let mut answers = crate::calendar::free_busy::ProviderAnswers::default();
     if !stored_calendar_grant(pool, account_id).await? {
-        return Ok(known);
+        return Ok(answers);
     }
     let Some(graph) = Graph::connect(pool, account_id)
         .await
         .map_err(|err| err.encoded())?
     else {
-        return Ok(known);
+        return Ok(answers);
     };
     let url = graph
         .url(&["me", "calendar", "getSchedule"])
         .map_err(|err| err.encoded())?;
     let at = |time: chrono::DateTime<chrono::Utc>| json!({ "dateTime": time.format("%Y-%m-%dT%H:%M:%S").to_string(), "timeZone": "UTC" });
+    // One chunk failing keeps what the others answered.
     for chunk in addresses.chunks(SCHEDULE_BATCH) {
         let body = json!({
             "schedules": chunk,
@@ -877,7 +893,7 @@ pub async fn schedules(
             "endTime": at(end),
             "availabilityViewInterval": 30,
         });
-        let response = send_throttled(
+        let response = match send_waiting_out_throttling(
             || {
                 graph
                     .request(reqwest::Method::POST, url.clone())
@@ -886,13 +902,39 @@ pub async fn schedules(
             "schedule",
         )
         .await
-        .map_err(|err| err.encoded())?;
-        let page: Page<ScheduleInformation> = parse(response, "schedule")
-            .await
-            .map_err(|err| err.encoded())?;
-        known.extend(map_schedules(page.value, chunk));
+        {
+            Ok(response) => response,
+            Err(error) => {
+                tracing::warn!(account_id, %error, "outlook schedule request failed");
+                answers.failed.extend_from_slice(chunk);
+                continue;
+            }
+        };
+        let status = response.status();
+        if !status.is_success() {
+            // Personal Microsoft accounts have no getSchedule; asking again
+            // every minute would not change that.
+            tracing::warn!(
+                account_id,
+                status = status.as_u16(),
+                "outlook schedule refused"
+            );
+            if status.is_client_error() {
+                answers.refused.extend_from_slice(chunk);
+            } else {
+                answers.failed.extend_from_slice(chunk);
+            }
+            continue;
+        }
+        match parse::<Page<ScheduleInformation>>(response, "schedule").await {
+            Ok(page) => answers.known.extend(map_schedules(page.value, chunk)),
+            Err(error) => {
+                tracing::warn!(account_id, %error, "outlook schedule unreadable");
+                answers.failed.extend_from_slice(chunk);
+            }
+        }
     }
-    Ok(known)
+    Ok(answers)
 }
 
 fn map_schedules(

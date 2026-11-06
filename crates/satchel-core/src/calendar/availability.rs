@@ -254,11 +254,9 @@ fn gaps(
     windows
 }
 
-/// Whether an iCalendar event leaves its time free. TRANSP decides when it is
-/// there; without it a whole-day event is free (birthdays, holidays, "remote
-/// today"), a timed one busy, as RFC 5545 and every common client have it. A
-/// cancelled event takes no time either.
-pub fn ics_transparent(raw: &str, all_day: bool) -> bool {
+/// The top-level property lines of the first VEVENT in `raw`, unfolded, with
+/// nested components (VALARM, …) left out.
+fn event_lines(raw: &str) -> Vec<String> {
     let mut unfolded: Vec<String> = Vec::new();
     for line in raw.lines() {
         let line = line.trim_end_matches('\r');
@@ -270,8 +268,8 @@ pub fn ics_transparent(raw: &str, all_day: bool) -> bool {
     }
     let mut in_event = false;
     let mut nested = 0_usize;
-    let mut transp = None;
-    for line in &unfolded {
+    let mut lines = Vec::new();
+    for line in unfolded {
         let upper = line.trim().to_ascii_uppercase();
         if upper == "BEGIN:VEVENT" {
             in_event = true;
@@ -283,7 +281,6 @@ pub fn ics_transparent(raw: &str, all_day: bool) -> bool {
         if upper == "END:VEVENT" {
             break;
         }
-        // VALARM and friends carry no TRANSP of the event's own.
         if upper.starts_with("BEGIN:") {
             nested += 1;
             continue;
@@ -292,20 +289,79 @@ pub fn ics_transparent(raw: &str, all_day: bool) -> bool {
             nested = nested.saturating_sub(1);
             continue;
         }
-        if nested > 0 {
-            continue;
-        }
-        let (name, value) = match upper.split_once(':') {
-            Some((name, value)) => (name.split(';').next().unwrap_or(name), value.trim()),
-            None => continue,
-        };
-        match name {
-            "STATUS" if value == "CANCELLED" => return true,
-            "TRANSP" => transp = Some(value == "TRANSPARENT"),
-            _ => {}
+        if nested == 0 {
+            lines.push(line.trim().to_string());
         }
     }
-    transp.unwrap_or(all_day)
+    lines
+}
+
+/// Whether an iCalendar event leaves its time free: TRANSP:TRANSPARENT, or
+/// STATUS:CANCELLED. Without TRANSP an event is busy, whole-day ones too
+/// (RFC 5545 §3.8.2.7, default OPAQUE): a "Vacation" without it blocks the
+/// days. Calendars of birthdays or holidays are switched off as a whole.
+pub fn ics_transparent(raw: &str) -> bool {
+    event_lines(raw).iter().any(|line| {
+        let upper = line.to_ascii_uppercase();
+        let Some((name, value)) = upper.split_once(':') else {
+            return false;
+        };
+        let name = name.split(';').next().unwrap_or(name);
+        matches!(
+            (name, value.trim()),
+            ("STATUS", "CANCELLED") | ("TRANSP", "TRANSPARENT")
+        )
+    })
+}
+
+/// Whether one of `addresses` is an ATTENDEE of the event with
+/// PARTSTAT=DECLINED: a meeting the owner said no to takes none of their time.
+pub fn ics_declined_by(raw: &str, addresses: &[String]) -> bool {
+    event_lines(raw).iter().any(|line| {
+        let Some((header, value)) = line.split_once(':') else {
+            return false;
+        };
+        let mut params = header.split(';');
+        if !params
+            .next()
+            .is_some_and(|name| name.trim().eq_ignore_ascii_case("ATTENDEE"))
+        {
+            return false;
+        }
+        let declined = params.any(|param| {
+            param.split_once('=').is_some_and(|(key, value)| {
+                key.trim().eq_ignore_ascii_case("PARTSTAT")
+                    && value
+                        .trim()
+                        .trim_matches('"')
+                        .eq_ignore_ascii_case("DECLINED")
+            })
+        });
+        let address = value.trim();
+        let address = address
+            .get(..7)
+            .filter(|scheme| scheme.eq_ignore_ascii_case("mailto:"))
+            .map_or(address, |_| &address[7..]);
+        declined
+            && addresses
+                .iter()
+                .any(|own| own.eq_ignore_ascii_case(address.trim()))
+    })
+}
+
+/// Every address the account answers to: its own and its aliases.
+pub async fn account_addresses(
+    pool: &SqlitePool,
+    account_id: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT email FROM accounts WHERE id = ?
+         UNION SELECT email FROM account_aliases WHERE account_id = ?",
+    )
+    .bind(account_id)
+    .bind(account_id)
+    .fetch_all(pool)
+    .await
 }
 
 /// The calendar key the frontend's source list and its availability switches
@@ -321,6 +377,8 @@ pub fn calendar_key(source: &str, collection: Option<&str>) -> String {
 
 #[derive(Debug, FromRow)]
 struct OwnEventRow {
+    id: String,
+    uid: String,
     source: String,
     collection_href: Option<String>,
     starts_at: String,
@@ -341,19 +399,37 @@ struct OwnInviteRow {
 /// accounts' calendars except the `excluded` calendar keys. Whole-day events
 /// cover their dates in `zone`. Invitations answered yes or maybe that no
 /// calendar mirrors yet count too; a maybe is tentative.
+///
+/// `editing` names the event being edited: it, and the same meeting mirrored
+/// into another calendar (same UID and start), do not make the owner busy at
+/// its own time.
 pub async fn own_busy(
     pool: &SqlitePool,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
     zone: Tz,
     excluded: &[String],
+    editing: Option<&str>,
 ) -> Result<Vec<Busy>, sqlx::Error> {
+    let edited: Option<(String, String)> = match editing {
+        Some(id) => {
+            sqlx::query_as("SELECT uid, starts_at FROM calendar_events WHERE id = ?")
+                .bind(id)
+                .fetch_optional(pool)
+                .await?
+        }
+        None => None,
+    };
+    let own: Vec<String> =
+        sqlx::query_scalar("SELECT email FROM accounts UNION SELECT email FROM account_aliases")
+            .fetch_all(pool)
+            .await?;
     // Whole-day rows are dates; a day of margin keeps every zone's midnight
     // in the candidate set, and the exact cut happens below.
     let from = (start - Duration::days(1)).to_rfc3339();
     let to = (end + Duration::days(1)).to_rfc3339();
     let rows = sqlx::query_as::<_, OwnEventRow>(
-        "SELECT source, collection_href, starts_at, ends_at, all_day, raw_ics
+        "SELECT id, uid, source, collection_href, starts_at, ends_at, all_day, raw_ics
          FROM calendar_events
          WHERE transparent = 0
            AND ((datetime(ends_at) >= datetime(?) AND datetime(starts_at) <= datetime(?))
@@ -395,6 +471,13 @@ pub async fn own_busy(
         if excluded.contains(&calendar_key(&row.source, row.collection_href.as_deref())) {
             continue;
         }
+        let is_edited = editing == Some(row.id.as_str())
+            || edited
+                .as_ref()
+                .is_some_and(|(uid, starts_at)| *uid == row.uid && *starts_at == row.starts_at);
+        if is_edited {
+            continue;
+        }
         let occurrences = row
             .raw_ics
             .as_deref()
@@ -416,6 +499,14 @@ pub async fn own_busy(
             ));
         } else {
             for occurrence in occurrences {
+                // A moved occurrence carries its own TRANSP, STATUS and answer.
+                if occurrence
+                    .override_event
+                    .as_deref()
+                    .is_some_and(|event| ics_transparent(event) || ics_declined_by(event, &own))
+                {
+                    continue;
+                }
                 keep(block(
                     &occurrence.starts_at,
                     &occurrence.ends_at,

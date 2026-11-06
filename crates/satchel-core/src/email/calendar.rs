@@ -524,12 +524,146 @@ pub(crate) fn local_to_utc(naive: chrono::NaiveDateTime) -> Option<chrono::DateT
 pub struct RecurrenceOccurrence {
     pub starts_at: String,
     pub ends_at: String,
+    /// The VEVENT of a RECURRENCE-ID override that replaced this occurrence,
+    /// from `BEGIN:VEVENT` on, for callers that read its TRANSP or PARTSTAT.
+    pub override_event: Option<String>,
+}
+
+/// Every VEVENT block of the unfolded ICS, each from `BEGIN:VEVENT` up to
+/// (not including) its `END:VEVENT`.
+fn event_blocks(unfolded: &str) -> Vec<&str> {
+    let mut blocks = Vec::new();
+    let mut rest = unfolded;
+    while let Some(begin) = rest.find("BEGIN:VEVENT") {
+        let from = &rest[begin..];
+        match from.find("END:VEVENT") {
+            Some(end) => {
+                blocks.push(&from[..end]);
+                rest = &from[end + "END:VEVENT".len()..];
+            }
+            None => {
+                blocks.push(from);
+                break;
+            }
+        }
+    }
+    blocks
+}
+
+/// The span of a VEVENT without DTEND: its DURATION, else RFC 5545's default
+/// (one day for a date, nothing for a date-time — shown as one hour, as before).
+fn event_span(event: &str, start: chrono::NaiveDateTime, all_day: bool) -> chrono::Duration {
+    if let Some(end) =
+        find_dt_property(event, "DTEND").and_then(|value| parse_ics_naive(value.value, all_day))
+    {
+        return end - start;
+    }
+    if let Some(span) =
+        find_dt_property(event, "DURATION").and_then(|value| parse_ics_duration(value.value))
+    {
+        return span;
+    }
+    if all_day {
+        chrono::Duration::days(1)
+    } else {
+        chrono::Duration::hours(1)
+    }
+}
+
+/// Dates and instants a series leaves out (EXDATE) or replaces (RECURRENCE-ID).
+#[derive(Default)]
+struct Excluded {
+    dates: std::collections::HashSet<chrono::NaiveDate>,
+    instants: std::collections::HashSet<String>,
+}
+
+impl Excluded {
+    fn add(&mut self, value: &str, tzid: Option<&str>) {
+        let value = value.trim();
+        if value.len() == 8 {
+            if let Ok(date) = chrono::NaiveDate::parse_from_str(value, "%Y%m%d") {
+                self.dates.insert(date);
+            }
+        } else if let Some(instant) = normalize_ics_dt(value, tzid, false) {
+            self.instants.insert(instant);
+        }
+    }
+
+    fn contains(&self, date: chrono::NaiveDate, start: &str) -> bool {
+        self.dates.contains(&date) || self.instants.contains(start)
+    }
+}
+
+/// All EXDATE values of a VEVENT, whatever the line count or list length.
+fn exdates(event: &str) -> Excluded {
+    let mut excluded = Excluded::default();
+    for line in event.lines() {
+        let trimmed = line.trim();
+        let upper = trimmed.to_ascii_uppercase();
+        if !upper.starts_with("EXDATE") || !matches!(upper.as_bytes().get(6), Some(b';' | b':')) {
+            continue;
+        }
+        let Some((header, values)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let tzid = header.split(';').skip(1).find_map(|param| {
+            let (key, value) = param.trim().split_once('=')?;
+            key.eq_ignore_ascii_case("TZID")
+                .then(|| value.trim_matches('"'))
+        });
+        for value in values.split(',') {
+            excluded.add(value, tzid);
+        }
+    }
+    excluded
+}
+
+/// An RFC 5545 DURATION (`PT1H30M`, `P1D`, `P1W`, `-PT15M`).
+pub(crate) fn parse_ics_duration(value: &str) -> Option<chrono::Duration> {
+    let value = value.trim();
+    let (negative, value) = match value.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, value.strip_prefix('+').unwrap_or(value)),
+    };
+    let rest = value.strip_prefix('P')?;
+    let mut total = chrono::Duration::zero();
+    let mut number = String::new();
+    let mut in_time = false;
+    for ch in rest.chars() {
+        match ch {
+            'T' => in_time = true,
+            '0'..='9' => number.push(ch),
+            unit => {
+                let amount: i64 = number.parse().ok()?;
+                number.clear();
+                total += match (unit, in_time) {
+                    ('W', false) => chrono::Duration::weeks(amount),
+                    ('D', false) => chrono::Duration::days(amount),
+                    ('H', true) => chrono::Duration::hours(amount),
+                    ('M', true) => chrono::Duration::minutes(amount),
+                    ('S', true) => chrono::Duration::seconds(amount),
+                    _ => return None,
+                };
+            }
+        }
+    }
+    number
+        .is_empty()
+        .then_some(if negative { -total } else { total })
 }
 
 /// Expand the common RFC 5545 recurrence forms used by CalDAV into upcoming
 /// concrete instances. CalDAV returns a recurring resource once, with the
 /// original DTSTART in the past; without this step a current series silently
 /// disappears from compact views that only query future timestamps.
+///
+/// DAILY, WEEKLY and MONTHLY with INTERVAL, COUNT, UNTIL, BYDAY and
+/// BYMONTHDAY are expanded; anything else (YEARLY, BYSETPOS, BYMONTH, …)
+/// yields nothing, and callers fall back to the first occurrence. EXDATE
+/// removes occurrences (still counted towards COUNT, as RFC 5545 has it). A
+/// RECURRENCE-ID override in the same resource replaces its occurrence: it
+/// comes back at the override's own time with the override's VEVENT
+/// attached, or not at all when the override is cancelled.
 pub fn upcoming_recurrence_occurrences(
     raw_ics: &str,
     after: chrono::DateTime<chrono::Utc>,
@@ -541,7 +675,13 @@ pub fn upcoming_recurrence_occurrences(
         return Vec::new();
     }
     let unfolded = unfold_ics(raw_ics);
-    let event = first_event_block(&unfolded);
+    let blocks = event_blocks(&unfolded);
+    // The master is the VEVENT without a RECURRENCE-ID; overrides may come first.
+    let event = blocks
+        .iter()
+        .copied()
+        .find(|block| find_dt_property(block, "RECURRENCE-ID").is_none())
+        .unwrap_or_else(|| first_event_block(&unfolded));
     let Some(rrule) = event.lines().find_map(|line| {
         line.trim()
             .strip_prefix("RRULE:")
@@ -556,17 +696,48 @@ pub fn upcoming_recurrence_occurrences(
     let Some(anchor) = parse_ics_naive(start_prop.value, all_day) else {
         return Vec::new();
     };
-    let end_naive = find_dt_property(event, "DTEND")
-        .and_then(|value| parse_ics_naive(value.value, all_day))
-        .unwrap_or_else(|| {
-            anchor
-                + if all_day {
-                    Duration::days(1)
-                } else {
-                    Duration::hours(1)
-                }
-        });
-    let duration = end_naive - anchor;
+    let duration = event_span(event, anchor, all_day);
+    let excluded = exdates(event);
+    let mut replaced = Excluded::default();
+    let mut overrides = Vec::new();
+    for block in blocks.iter().filter(|block| !std::ptr::eq(**block, event)) {
+        let Some(recurrence_id) = find_dt_property(block, "RECURRENCE-ID") else {
+            continue;
+        };
+        replaced.add(recurrence_id.value, recurrence_id.tzid);
+        let cancelled = block
+            .lines()
+            .any(|line| line.trim().eq_ignore_ascii_case("STATUS:CANCELLED"));
+        if cancelled {
+            continue;
+        }
+        let Some(start) = find_dt_property(block, "DTSTART") else {
+            continue;
+        };
+        let block_all_day = start.value.len() == 8;
+        let Some(naive) = parse_ics_naive(start.value, block_all_day) else {
+            continue;
+        };
+        let span = if find_dt_property(block, "DTEND").is_some()
+            || find_dt_property(block, "DURATION").is_some()
+        {
+            event_span(block, naive, block_all_day)
+        } else {
+            duration
+        };
+        let Some(start_utc) = recurrence_to_utc(naive, &start, block_all_day) else {
+            continue;
+        };
+        let end_utc =
+            recurrence_to_utc(naive + span, &start, block_all_day).unwrap_or(start_utc + span);
+        if end_utc >= after {
+            overrides.push(RecurrenceOccurrence {
+                starts_at: format_utc(start_utc),
+                ends_at: format_utc(end_utc),
+                override_event: Some((*block).to_string()),
+            });
+        }
+    }
 
     let mut freq = "";
     let mut interval = 1_i64;
@@ -653,13 +824,22 @@ pub fn upcoming_recurrence_occurrences(
                 if until.is_some_and(|until| start > until) {
                     break;
                 }
+                let start_text = format_utc(start);
+                if excluded.contains(date, &start_text) || replaced.contains(date, &start_text) {
+                    let Some(next) = date.succ_opt() else {
+                        break;
+                    };
+                    date = next;
+                    continue;
+                }
                 let end_candidate = candidate + duration;
                 let end = recurrence_to_utc(end_candidate, &start_prop, all_day)
                     .unwrap_or(start + duration);
                 if end >= after {
                     occurrences.push(RecurrenceOccurrence {
-                        starts_at: format_utc(start),
+                        starts_at: start_text,
                         ends_at: format_utc(end),
+                        override_event: None,
                     });
                     if occurrences.len() == limit {
                         break;
@@ -672,6 +852,9 @@ pub fn upcoming_recurrence_occurrences(
         };
         date = next;
     }
+    occurrences.extend(overrides);
+    occurrences.sort_by(|a, b| a.starts_at.cmp(&b.starts_at));
+    occurrences.truncate(limit);
     occurrences
 }
 
@@ -939,5 +1122,116 @@ mod tests {
             .with_timezone(&chrono::Utc);
 
         assert!(upcoming_recurrence_occurrences(recurring, after, 3).is_empty());
+    }
+
+    fn after(text: &str) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339(text)
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    }
+
+    #[test]
+    fn exdate_removes_occurrences_and_still_counts_towards_count() {
+        let recurring = concat!(
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:daily@example.com\r\n",
+            "DTSTART;TZID=Europe/Berlin:20261109T090000\r\n",
+            "DTEND;TZID=Europe/Berlin:20261109T093000\r\n",
+            "RRULE:FREQ=DAILY;COUNT=4\r\n",
+            "EXDATE;TZID=Europe/Berlin:20261110T090000,20261111T090000\r\n",
+            "END:VEVENT\r\nEND:VCALENDAR\r\n",
+        );
+        let starts = upcoming_recurrence_occurrences(recurring, after("2026-11-01T00:00:00Z"), 10)
+            .into_iter()
+            .map(|occurrence| occurrence.starts_at)
+            .collect::<Vec<_>>();
+        assert_eq!(starts, vec!["2026-11-09T08:00:00Z", "2026-11-12T08:00:00Z"]);
+
+        let whole_days = concat!(
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:days@example.com\r\n",
+            "DTSTART;VALUE=DATE:20261109\r\nDTEND;VALUE=DATE:20261110\r\n",
+            "RRULE:FREQ=DAILY;COUNT=3\r\nEXDATE;VALUE=DATE:20261110\r\n",
+            "END:VEVENT\r\nEND:VCALENDAR\r\n",
+        );
+        assert_eq!(
+            upcoming_recurrence_occurrences(whole_days, after("2026-11-01T00:00:00Z"), 10).len(),
+            2
+        );
+    }
+
+    #[test]
+    fn a_moved_occurrence_comes_back_at_its_new_time_and_a_cancelled_one_not_at_all() {
+        // The overrides come first in the resource, as some servers write them.
+        let recurring = concat!(
+            "BEGIN:VCALENDAR\r\n",
+            "BEGIN:VEVENT\r\nUID:weekly@example.com\r\n",
+            "RECURRENCE-ID;TZID=Europe/Berlin:20261116T100000\r\n",
+            "DTSTART;TZID=Europe/Berlin:20261117T150000\r\n",
+            "DTEND;TZID=Europe/Berlin:20261117T160000\r\n",
+            "TRANSP:OPAQUE\r\nEND:VEVENT\r\n",
+            "BEGIN:VEVENT\r\nUID:weekly@example.com\r\n",
+            "RECURRENCE-ID;TZID=Europe/Berlin:20261123T100000\r\n",
+            "DTSTART;TZID=Europe/Berlin:20261123T100000\r\n",
+            "STATUS:CANCELLED\r\nEND:VEVENT\r\n",
+            "BEGIN:VEVENT\r\nUID:weekly@example.com\r\n",
+            "DTSTART;TZID=Europe/Berlin:20261109T100000\r\n",
+            "DURATION:PT45M\r\n",
+            "RRULE:FREQ=WEEKLY;COUNT=4\r\n",
+            "END:VEVENT\r\nEND:VCALENDAR\r\n",
+        );
+        let occurrences =
+            upcoming_recurrence_occurrences(recurring, after("2026-11-01T00:00:00Z"), 10);
+        let spans = occurrences
+            .iter()
+            .map(|occurrence| {
+                (
+                    occurrence.starts_at.as_str(),
+                    occurrence.ends_at.as_str(),
+                    occurrence.override_event.is_some(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            spans,
+            vec![
+                // DURATION, not an assumed hour.
+                ("2026-11-09T09:00:00Z", "2026-11-09T09:45:00Z", false),
+                ("2026-11-17T14:00:00Z", "2026-11-17T15:00:00Z", true),
+                ("2026-11-30T09:00:00Z", "2026-11-30T09:45:00Z", false),
+            ]
+        );
+        assert!(occurrences[1]
+            .override_event
+            .as_deref()
+            .unwrap()
+            .contains("TRANSP:OPAQUE"));
+    }
+
+    #[test]
+    fn unsupported_rules_expand_to_nothing() {
+        let yearly = concat!(
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:y@example.com\r\n",
+            "DTSTART:20261109T090000Z\r\nDTEND:20261109T100000Z\r\n",
+            "RRULE:FREQ=YEARLY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+        );
+        assert!(
+            upcoming_recurrence_occurrences(yearly, after("2026-11-01T00:00:00Z"), 3).is_empty()
+        );
+    }
+
+    #[test]
+    fn durations_cover_weeks_days_times_and_signs() {
+        assert_eq!(
+            parse_ics_duration("PT1H30M"),
+            Some(chrono::Duration::minutes(90))
+        );
+        assert_eq!(
+            parse_ics_duration("P1DT2H"),
+            Some(chrono::Duration::hours(26))
+        );
+        assert_eq!(
+            parse_ics_duration("-PT15M"),
+            Some(chrono::Duration::minutes(-15))
+        );
+        assert_eq!(parse_ics_duration("PT5"), None);
     }
 }

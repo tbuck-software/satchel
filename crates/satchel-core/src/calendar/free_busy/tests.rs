@@ -49,6 +49,33 @@ fn addresses_are_normalized_deduplicated_and_never_the_owner() {
 }
 
 #[test]
+fn only_plain_addresses_are_asked_about() {
+    assert_eq!(
+        parse_address("Lena Vogel <Lena@Example.com>").as_deref(),
+        Some("lena@example.com")
+    );
+    assert_eq!(
+        parse_address(" bo@example.org ").as_deref(),
+        Some("bo@example.org")
+    );
+    for hostile in [
+        "a@example.com\r\nATTENDEE:mailto:x@evil.test",
+        "a@example.com\nX-INJECT:1",
+        "a b@example.com",
+        "a@exa mple.com",
+        "<a@example.com",
+        "Name <a@example.com> trailing",
+        "a@b@example.com",
+        "a;x=y@example.com",
+        "a@localhost",
+        "@example.com",
+        "a@",
+    ] {
+        assert_eq!(parse_address(hostile), None, "{hostile:?}");
+    }
+}
+
+#[test]
 fn provider_ranges_cover_whole_utc_days() {
     let (from, to) = day_range(at("2026-11-09T13:20:00Z"), at("2026-11-10T00:00:00Z"));
     assert_eq!(from, at("2026-11-09T00:00:00Z"));
@@ -56,6 +83,78 @@ fn provider_ranges_cover_whole_utc_days() {
     let (from, to) = day_range(at("2026-11-09T00:00:00Z"), at("2026-11-11T00:00:01Z"));
     assert_eq!(from, at("2026-11-09T00:00:00Z"));
     assert_eq!(to, at("2026-11-12T00:00:00Z"));
+    // Never more than Graph's 62 days.
+    let (from, to) = day_range(at("2026-11-09T12:00:00Z"), at("2027-01-10T12:00:00Z"));
+    assert_eq!(to - from, Duration::days(62));
+}
+
+#[tokio::test]
+async fn the_edited_event_does_not_make_its_attendees_busy_at_its_own_slot() {
+    clear_cache();
+    let pool = pool().await;
+    let (from, to) = day_range(at("2026-11-09T00:00:00Z"), at("2026-11-10T00:00:00Z"));
+    let block = |start: &str, end: &str| Busy {
+        start: at(start),
+        end: at(end),
+        tentative: false,
+    };
+    CACHE.lock().unwrap().insert(
+        (
+            "imap".into(),
+            "lena@example.com".into(),
+            from.timestamp(),
+            to.timestamp(),
+        ),
+        CacheEntry {
+            at: Instant::now(),
+            ttl: ANSWER_TTL,
+            busy: Some(vec![
+                block("2026-11-09T09:00:00Z", "2026-11-09T11:00:00Z"),
+                block("2026-11-09T13:00:00Z", "2026-11-09T14:00:00Z"),
+            ]),
+        },
+    );
+    let attendees = ["lena@example.com".to_string()];
+    let ask = |editing| {
+        let attendees = &attendees;
+        let pool = &pool;
+        async move {
+            query(
+                pool,
+                &Participants {
+                    account_id: Some("imap"),
+                    attendees,
+                    excluded_calendars: &[],
+                    editing,
+                },
+                at("2026-11-09T00:00:00Z"),
+                at("2026-11-10T00:00:00Z"),
+                "UTC",
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let plain = ask(None).await;
+    assert_eq!(plain.own.len(), 1);
+    assert_eq!(plain.attendees[0].busy.len(), 2);
+
+    // Editing event 'e' (09:00–11:00): neither the owner nor Lena is busy with it.
+    let editing = ask(Some(Editing {
+        event_id: "e",
+        starts_at: Some(at("2026-11-09T09:00:00Z")),
+        ends_at: Some(at("2026-11-09T11:00:00Z")),
+    }))
+    .await;
+    assert!(editing.own.is_empty());
+    assert_eq!(
+        editing.attendees[0].busy,
+        vec![BusyBlock {
+            starts_at: "2026-11-09T13:00:00Z".into(),
+            ends_at: "2026-11-09T14:00:00Z".into(),
+            tentative: false,
+        }]
+    );
 }
 
 #[tokio::test]
@@ -69,6 +168,7 @@ async fn an_account_without_free_busy_reports_attendees_as_unknown_not_as_an_err
             account_id: Some("imap"),
             attendees: &attendees,
             excluded_calendars: &[],
+            editing: None,
         },
         at("2026-11-09T00:00:00Z"),
         at("2026-11-10T00:00:00Z"),
@@ -106,6 +206,7 @@ async fn free_slots_leave_out_the_owner_busy_time_and_name_unknown_people() {
             account_id: Some("imap"),
             attendees: &attendees,
             excluded_calendars: &[],
+            editing: None,
         },
         // Sunday evening in London.
         at("2026-11-08T20:00:00Z"),
@@ -136,6 +237,7 @@ async fn free_slots_leave_out_the_owner_busy_time_and_name_unknown_people() {
             account_id: None,
             attendees: &[],
             excluded_calendars: &["local".to_string()],
+            editing: None,
         },
         at("2026-11-08T20:00:00Z"),
         1,
@@ -155,6 +257,7 @@ async fn invalid_ranges_durations_and_zones_are_refused_with_keys() {
         account_id: None,
         attendees: &[],
         excluded_calendars: &[],
+        editing: None,
     };
     let error = query(
         &pool,

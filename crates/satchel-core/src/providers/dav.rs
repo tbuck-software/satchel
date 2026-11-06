@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::db::contacts::ContactRepository;
+use crate::email::calendar::parse_ics_duration;
 
 const MAX_DAV_RESPONSE_BYTES: usize = 50 * 1024 * 1024;
 const CARDDAV_ADDRESSBOOK_QUERY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -842,9 +843,10 @@ pub async fn free_busy(
     addresses: &[String],
     start: chrono::DateTime<chrono::Utc>,
     end: chrono::DateTime<chrono::Utc>,
-) -> Result<std::collections::HashMap<String, Vec<crate::calendar::availability::Busy>>, String> {
+) -> Result<crate::calendar::free_busy::ProviderAnswers, String> {
+    use crate::calendar::free_busy::ProviderAnswers;
     let Some(config) = parse_groupware_config(config_json).caldav else {
-        return Ok(Default::default());
+        return Ok(ProviderAnswers::default());
     };
     let client = dav_client()?;
     let cache_key = format!("{}\u{0}{}", config.server, config.username);
@@ -865,7 +867,7 @@ pub async fn free_busy(
         }
     };
     let Some(outbox) = outbox else {
-        return Ok(Default::default());
+        return Ok(ProviderAnswers::default());
     };
     let organizer = outbox.organizer.as_deref().unwrap_or(account_email);
     let body = free_busy_request(
@@ -883,12 +885,20 @@ pub async fn free_busy(
             header::CONTENT_TYPE,
             "text/calendar; charset=utf-8; method=REQUEST",
         )
-        .header("Originator", format!("mailto:{organizer}"))
         .body(body)
         .send()
         .await
         .map_err(|err| format!("CalDAV free/busy request failed: {err}"))?;
-    if !response.status().is_success() {
+    let status = response.status();
+    if status.is_client_error() && status.as_u16() != 429 {
+        // The server will not schedule for this user; asking every minute won't change it.
+        tracing::warn!(status = status.as_u16(), "CalDAV free/busy refused");
+        return Ok(ProviderAnswers {
+            refused: addresses.to_vec(),
+            ..ProviderAnswers::default()
+        });
+    }
+    if !status.is_success() {
         return Err(dav_status_error("CalDAV free/busy", response).await);
     }
     let bytes = response
@@ -900,7 +910,10 @@ pub async fn free_busy(
     }
     let xml = String::from_utf8(bytes.to_vec())
         .map_err(|_| "DAV response is not valid UTF-8".to_string())?;
-    Ok(parse_schedule_response(&xml, addresses))
+    Ok(ProviderAnswers {
+        known: parse_schedule_response(&xml, addresses),
+        ..ProviderAnswers::default()
+    })
 }
 
 async fn discover_schedule_outbox(
@@ -990,9 +1003,16 @@ fn free_busy_request(
         format!("DTEND:{}", stamp(end)),
         format!("ORGANIZER:mailto:{organizer}"),
     ];
+    // Callers pass parsed addresses; a line break here would still smuggle a
+    // property into the request, so anything with one is left out.
     lines.extend(
         addresses
             .iter()
+            .filter(|address| {
+                !address
+                    .chars()
+                    .any(|ch| ch.is_control() || ch.is_whitespace())
+            })
             .map(|address| format!("ATTENDEE:mailto:{address}")),
     );
     lines.push("END:VFREEBUSY".to_string());
@@ -1089,34 +1109,6 @@ fn parse_free_busy_periods(ics: &str) -> Vec<crate::calendar::availability::Busy
     busy
 }
 
-/// An RFC 5545 DURATION (`PT1H30M`, `P1D`, `P1W`).
-fn parse_ics_duration(value: &str) -> Option<chrono::Duration> {
-    let value = value.trim().strip_prefix('+').unwrap_or(value.trim());
-    let rest = value.strip_prefix('P')?;
-    let mut total = chrono::Duration::zero();
-    let mut number = String::new();
-    let mut in_time = false;
-    for ch in rest.chars() {
-        match ch {
-            'T' => in_time = true,
-            '0'..='9' => number.push(ch),
-            unit => {
-                let amount: i64 = number.parse().ok()?;
-                number.clear();
-                total += match (unit, in_time) {
-                    ('W', false) => chrono::Duration::weeks(amount),
-                    ('D', false) => chrono::Duration::days(amount),
-                    ('H', true) => chrono::Duration::hours(amount),
-                    ('M', true) => chrono::Duration::minutes(amount),
-                    ('S', true) => chrono::Duration::seconds(amount),
-                    _ => return None,
-                };
-            }
-        }
-    }
-    number.is_empty().then_some(total)
-}
-
 async fn dav_xml_request(
     client: &reqwest::Client,
     config: &DavConfig,
@@ -1154,15 +1146,12 @@ async fn dav_xml_request(
     String::from_utf8(bytes.to_vec()).map_err(|_| "DAV response is not valid UTF-8".to_string())
 }
 
+/// The status and the size of the answer, never its text: these errors are
+/// logged, and a server's error page can echo attendees, paths or tokens.
 async fn dav_status_error(context: &str, response: reqwest::Response) -> String {
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    let detail = body.chars().take(500).collect::<String>();
-    if detail.trim().is_empty() {
-        format!("{context} failed with status {status}")
-    } else {
-        format!("{context} failed with status {status}: {detail}")
-    }
+    let length = response.bytes().await.map_or(0, |body| body.len());
+    format!("{context} failed with status {status} ({length} bytes of response)")
 }
 
 fn resolve_dav_href(base: &Url, href: &str) -> Result<Url, String> {

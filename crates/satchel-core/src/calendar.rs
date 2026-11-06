@@ -244,7 +244,7 @@ pub async fn save_event(
                     collection_href: remote.as_ref().map(|value| value.collection_href.as_str()),
                     raw_ics: Some(&ics),
                     flags: crate::db::calendar::EventFlags {
-                        transparent: availability::ics_transparent(&ics, input.all_day),
+                        transparent: availability::ics_transparent(&ics),
                         ..Default::default()
                     },
                 },

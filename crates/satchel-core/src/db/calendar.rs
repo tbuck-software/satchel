@@ -867,6 +867,10 @@ impl<'a> CalendarRepository<'a> {
         let id = stable_id("dav-event", &format!("{account_id}|{remote_href}"));
         let attendees_json = serde_json::to_string(&parse_ics_attendees(raw_ics))
             .unwrap_or_else(|_| "[]".to_string());
+        // A meeting this account declined stays on the calendar but takes no time.
+        let own = crate::calendar::availability::account_addresses(self.pool, account_id).await?;
+        let transparent = crate::calendar::availability::ics_transparent(raw_ics)
+            || crate::calendar::availability::ics_declined_by(raw_ics, &own);
         self.upsert_event(CalendarEventWrite {
             id: &id,
             account_id,
@@ -885,7 +889,7 @@ impl<'a> CalendarRepository<'a> {
             collection_href: Some(collection_href),
             raw_ics: Some(raw_ics),
             flags: EventFlags {
-                transparent: crate::calendar::availability::ics_transparent(raw_ics, event.all_day),
+                transparent,
                 ..EventFlags::default()
             },
         })

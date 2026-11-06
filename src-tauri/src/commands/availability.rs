@@ -8,7 +8,7 @@ use sqlx::SqlitePool;
 use crate::commands::error::{CommandError, CommandResult};
 use satchel_core::calendar::availability::{AvailabilityError, WorkingHours};
 use satchel_core::calendar::free_busy::{
-    self, FreeBusyError, FreeBusyReport, FreeSlotsReport, Participants,
+    self, Editing, FreeBusyError, FreeBusyReport, FreeSlotsReport, Participants,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -28,6 +28,21 @@ pub struct FreeBusyInput {
     /// Calendar keys that do not count towards the owner's availability.
     #[serde(default)]
     pub excluded_calendars: Vec<String>,
+    #[serde(default)]
+    pub editing: Option<EditingEventInput>,
+}
+
+/// An existing event open in the editor: its own time does not count against it.
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/availability/", optional_fields = nullable))]
+pub struct EditingEventInput {
+    pub event_id: String,
+    /// The saved slot, RFC 3339. Attendee busy time exactly this slot is the event.
+    #[serde(default)]
+    pub starts_at: Option<String>,
+    #[serde(default)]
+    pub ends_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -61,6 +76,8 @@ pub struct FreeSlotsInput {
     pub time_zone: String,
     #[serde(default)]
     pub excluded_calendars: Vec<String>,
+    #[serde(default)]
+    pub editing: Option<EditingEventInput>,
 }
 
 impl From<AvailabilityError> for CommandError {
@@ -81,6 +98,17 @@ impl From<FreeBusyError> for CommandError {
     }
 }
 
+fn editing(input: Option<&EditingEventInput>) -> CommandResult<Option<Editing<'_>>> {
+    let Some(input) = input else {
+        return Ok(None);
+    };
+    Ok(Some(Editing {
+        event_id: &input.event_id,
+        starts_at: input.starts_at.as_deref().map(instant).transpose()?,
+        ends_at: input.ends_at.as_deref().map(instant).transpose()?,
+    }))
+}
+
 fn instant(raw: &str) -> CommandResult<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(raw)
         .map(|time| time.with_timezone(&chrono::Utc))
@@ -97,6 +125,7 @@ pub async fn query_free_busy(
         account_id: input.account_id.as_deref(),
         attendees: &input.attendees,
         excluded_calendars: &input.excluded_calendars,
+        editing: editing(input.editing.as_ref())?,
     };
     free_busy::query(
         pool.inner(),
@@ -124,6 +153,7 @@ pub async fn find_free_slots(
         account_id: input.account_id.as_deref(),
         attendees: &input.attendees,
         excluded_calendars: &input.excluded_calendars,
+        editing: editing(input.editing.as_ref())?,
     };
     free_busy::free_slots(
         pool.inner(),

@@ -157,6 +157,7 @@
       "hoursHint": "Arbeitszeiten: {hours}. Änderbar unter Einstellungen → Kalender.",
       "hoursShort": "{count} Std.",
       "insert": "Einfügen",
+      "insertFailed": "Die Verfügbarkeit konnte nicht eingefügt werden. Klicke in die Nachricht und versuche es erneut.",
       "loading": "Freie Zeit wird gesucht …",
       "minutesShort": "{count} Min.",
       "none": "Am nächsten Arbeitstag gibt es in der Arbeitszeit keine freie Zeit. | In den nächsten {count} Arbeitstagen gibt es in der Arbeitszeit keine freie Zeit.",

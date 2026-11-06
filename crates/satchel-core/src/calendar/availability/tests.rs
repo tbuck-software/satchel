@@ -313,32 +313,57 @@ fn free_days_reject_impossible_requests() {
 }
 
 #[test]
-fn transparency_follows_transp_status_and_the_whole_day_default() {
+fn an_event_without_transp_is_busy_whole_day_or_not() {
     let event = |props: &str| {
         format!(
             "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:x\r\n{props}END:VEVENT\r\nEND:VCALENDAR\r\n"
         )
     };
-    assert!(!ics_transparent(
-        &event("DTSTART:20261109T090000Z\r\n"),
-        false
-    ));
-    assert!(ics_transparent(
-        &event("DTSTART;VALUE=DATE:20261109\r\n"),
-        true
-    ));
-    assert!(ics_transparent(&event("TRANSP:TRANSPARENT\r\n"), false));
-    assert!(!ics_transparent(&event("TRANSP:OPAQUE\r\n"), true));
-    assert!(ics_transparent(&event("STATUS:CANCELLED\r\n"), false));
+    // RFC 5545 §3.8.2.7: OPAQUE unless said otherwise. A whole-day
+    // "Vacation" without TRANSP blocks its days.
+    assert!(!ics_transparent(&event("DTSTART:20261109T090000Z\r\n")));
+    assert!(!ics_transparent(&event(
+        "SUMMARY:Vacation\r\nDTSTART;VALUE=DATE:20261109\r\n"
+    )));
+    assert!(ics_transparent(&event("TRANSP:TRANSPARENT\r\n")));
+    assert!(!ics_transparent(&event("TRANSP:OPAQUE\r\n")));
+    assert!(ics_transparent(&event("STATUS:CANCELLED\r\n")));
     // An alarm's properties are not the event's.
-    assert!(!ics_transparent(
-        &event("BEGIN:VALARM\r\nTRANSP:TRANSPARENT\r\nEND:VALARM\r\n"),
-        false
-    ));
+    assert!(!ics_transparent(&event(
+        "BEGIN:VALARM\r\nTRANSP:TRANSPARENT\r\nEND:VALARM\r\n"
+    )));
     // Folded and lower-case input.
-    assert!(ics_transparent(
-        &event("transp:TRANS\r\n PARENT\r\n"),
-        false
+    assert!(ics_transparent(&event("transp:TRANS\r\n PARENT\r\n")));
+}
+
+#[test]
+fn a_meeting_the_owner_declined_is_recognised_by_any_of_their_addresses() {
+    let event = |attendee: &str| {
+        format!(
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:x\r\nORGANIZER:mailto:boss@example.com\r\n\
+             ATTENDEE;PARTSTAT=ACCEPTED:mailto:other@example.com\r\n{attendee}END:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+    };
+    let own = [
+        "me@example.com".to_string(),
+        "alias@example.org".to_string(),
+    ];
+    assert!(ics_declined_by(
+        &event("ATTENDEE;CN=Me;PARTSTAT=DECLINED:mailto:Me@Example.com\r\n"),
+        &own
+    ));
+    assert!(ics_declined_by(
+        &event("ATTENDEE;PARTSTAT=\"DECLINED\";RSVP=TRUE:MAILTO:alias@example.org\r\n"),
+        &own
+    ));
+    assert!(!ics_declined_by(
+        &event("ATTENDEE;PARTSTAT=ACCEPTED:mailto:me@example.com\r\n"),
+        &own
+    ));
+    // Someone else declining changes nothing for the owner.
+    assert!(!ics_declined_by(
+        &event("ATTENDEE;PARTSTAT=DECLINED:mailto:other2@example.com\r\n"),
+        &own
     ));
 }
 
@@ -525,6 +550,7 @@ async fn own_busy_reads_every_counting_calendar_and_skips_free_time() {
         at("2026-11-11T00:00:00Z"),
         zone,
         &["google:family@group.calendar.google.com".to_string()],
+        None,
     )
     .await
     .unwrap();
@@ -568,4 +594,117 @@ fn calendar_keys_match_the_frontend_source_keys() {
         "caldav"
     );
     assert_eq!(calendar_key("local", None), "local");
+}
+
+#[tokio::test]
+async fn the_edited_event_and_its_mirror_do_not_make_the_owner_busy() {
+    let pool = pool().await;
+    event(
+        &pool,
+        "edited",
+        "local",
+        None,
+        "2026-11-09T09:00:00Z",
+        "2026-11-09T10:00:00Z",
+        false,
+        false,
+        None,
+    )
+    .await;
+    // The same meeting mirrored from another calendar: same UID, same start.
+    sqlx::query(
+        "INSERT INTO calendar_events (id, account_id, uid, title, starts_at, ends_at, source, collection_href, created_at, updated_at)
+         VALUES ('mirror', 'a', 'edited', 'x', '2026-11-09T09:00:00Z', '2026-11-09T10:00:00Z', 'google', 'work@example.com', 'now', 'now')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    event(
+        &pool,
+        "other",
+        "local",
+        None,
+        "2026-11-09T11:00:00Z",
+        "2026-11-09T12:00:00Z",
+        false,
+        false,
+        None,
+    )
+    .await;
+
+    let range = (at("2026-11-09T00:00:00Z"), at("2026-11-10T00:00:00Z"));
+    let all = own_busy(&pool, range.0, range.1, berlin(), &[], None)
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 3);
+    let editing = own_busy(&pool, range.0, range.1, berlin(), &[], Some("edited"))
+        .await
+        .unwrap();
+    assert_eq!(
+        editing.iter().map(|block| block.start).collect::<Vec<_>>(),
+        vec![at("2026-11-09T11:00:00Z")]
+    );
+}
+
+#[tokio::test]
+async fn moved_skipped_and_declined_occurrences_count_where_they_now_are() {
+    let pool = pool().await;
+    let series = concat!(
+        "BEGIN:VCALENDAR\r\n",
+        "BEGIN:VEVENT\r\nUID:weekly\r\n",
+        "DTSTART:20261102T090000Z\r\nDURATION:PT30M\r\n",
+        "RRULE:FREQ=WEEKLY;COUNT=10\r\n",
+        "EXDATE:20261116T090000Z\r\n",
+        "END:VEVENT\r\n",
+        // 9 November moved to the afternoon.
+        "BEGIN:VEVENT\r\nUID:weekly\r\nRECURRENCE-ID:20261109T090000Z\r\n",
+        "DTSTART:20261109T140000Z\r\nDTEND:20261109T150000Z\r\nEND:VEVENT\r\n",
+        // 23 November: still on, but the owner declined this one.
+        "BEGIN:VEVENT\r\nUID:weekly\r\nRECURRENCE-ID:20261123T090000Z\r\n",
+        "DTSTART:20261123T090000Z\r\nDTEND:20261123T093000Z\r\n",
+        "ATTENDEE;PARTSTAT=DECLINED:mailto:me@example.com\r\nEND:VEVENT\r\n",
+        // 30 November: marked free.
+        "BEGIN:VEVENT\r\nUID:weekly\r\nRECURRENCE-ID:20261130T090000Z\r\n",
+        "DTSTART:20261130T090000Z\r\nDTEND:20261130T093000Z\r\nTRANSP:TRANSPARENT\r\nEND:VEVENT\r\n",
+        "END:VCALENDAR\r\n",
+    );
+    event(
+        &pool,
+        "weekly",
+        "caldav",
+        Some("https://dav.example/cal/"),
+        "2026-11-02T09:00:00Z",
+        "2026-11-02T09:30:00Z",
+        false,
+        false,
+        Some(series),
+    )
+    .await;
+
+    let blocks = own_busy(
+        &pool,
+        at("2026-11-08T00:00:00Z"),
+        at("2026-12-08T00:00:00Z"),
+        berlin(),
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        blocks
+            .iter()
+            .map(|block| (block.start.to_rfc3339(), block.end.to_rfc3339()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "2026-11-09T14:00:00+00:00".to_string(),
+                "2026-11-09T15:00:00+00:00".to_string()
+            ),
+            (
+                "2026-12-07T09:00:00+00:00".to_string(),
+                "2026-12-07T09:30:00+00:00".to_string()
+            ),
+        ]
+    );
 }

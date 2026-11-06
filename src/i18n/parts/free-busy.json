@@ -34,7 +34,8 @@
         "loading": "Finding free time…",
         "none": "No free time within working hours in the next working day. | No free time within working hours in the next {count} working days.",
         "failed": "Free time could not be found: {error}",
-        "insert": "Insert"
+        "insert": "Insert",
+        "insertFailed": "The availability could not be inserted. Click into the message and try again."
       },
       "text": {
         "intro": "I'm free for {duration} at these times ({zone}):",
@@ -88,7 +89,8 @@
         "loading": "Freie Zeit wird gesucht …",
         "none": "Am nächsten Arbeitstag gibt es in der Arbeitszeit keine freie Zeit. | In den nächsten {count} Arbeitstagen gibt es in der Arbeitszeit keine freie Zeit.",
         "failed": "Freie Zeit konnte nicht gefunden werden: {error}",
-        "insert": "Einfügen"
+        "insert": "Einfügen",
+        "insertFailed": "Die Verfügbarkeit konnte nicht eingefügt werden. Klicke in die Nachricht und versuche es erneut."
       },
       "text": {
         "intro": "Ich habe zu diesen Zeiten {duration} Zeit ({zone}):",

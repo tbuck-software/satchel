@@ -1,4 +1,5 @@
 import type { BackendFreeSlotsReport } from '@/services/backend/availability';
+import { datetimeFormats } from '@/i18n/formats';
 
 type Translate = (key: string, named?: Record<string, unknown>, plural?: number) => string;
 
@@ -30,8 +31,14 @@ export function zoneLabel(zone: string, locale: string, at: Date): string {
   return zone;
 }
 
+/** The app's own time format (the one the calendar shows), read in `zone`. */
+function timeFormat(locale: string, zone: string): Intl.DateTimeFormat {
+  const app = datetimeFormats[locale]?.time ?? datetimeFormats.en?.time ?? { hour: '2-digit', minute: '2-digit' };
+  return new Intl.DateTimeFormat(locale, { ...(app as Intl.DateTimeFormatOptions), timeZone: zone });
+}
+
 function timeRange(locale: string, zone: string, start: Date, end: Date): string {
-  const format = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit', timeZone: zone });
+  const format = timeFormat(locale, zone);
   return typeof format.formatRange === 'function'
     ? format.formatRange(start, end)
     : `${format.format(start)} – ${format.format(end)}`;

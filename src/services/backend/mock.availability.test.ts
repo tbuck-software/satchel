@@ -71,3 +71,32 @@ it('refuses working hours that end before they start', async () => {
     working_hours: { start_minute: 600, end_minute: 540, weekdays: [1] }, time_zone: 'UTC', excluded_calendars: [],
   } })).rejects.toThrow(/availabilityWorkingHoursInvalid|working hours/i);
 });
+
+it('counts a whole-day event without TRANSP as busy and leaves the edited event out', async () => {
+  const day = monday();
+  day.setDate(day.getDate() + 1);
+  const next = new Date(day);
+  next.setDate(next.getDate() + 1);
+  const ymd = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const create = (input: Record<string, unknown>) => sendCommand<{ id: string }>('create_calendar_event', { input: {
+    id: null, expected_updated_at: null, account_id: 'acc-work', description: null, location: null,
+    attendees: [], send_invites: false, ...input,
+  } });
+  await create({ title: 'Vacation', starts_at: ymd(day), ends_at: ymd(next), all_day: true });
+  const meetingStart = new Date(next);
+  meetingStart.setHours(10);
+  const meetingEnd = new Date(next);
+  meetingEnd.setHours(11);
+  const meeting = await create({ title: 'Review', starts_at: meetingStart.toISOString(), ends_at: meetingEnd.toISOString(), all_day: false });
+
+  const ask = (editing: unknown) => sendCommand<BackendFreeBusyReport>('query_free_busy', { input: {
+    account_id: 'acc-work', attendees: [], starts_at: day.toISOString(),
+    ends_at: new Date(next.getTime() + 86_400_000).toISOString(), time_zone: 'Europe/Berlin', excluded_calendars: [], editing,
+  } });
+  const plain = await ask(null);
+  expect(plain.own.some((block) => Date.parse(block.starts_at) === day.getTime() && Date.parse(block.ends_at) === next.getTime())).toBe(true);
+  expect(plain.own.some((block) => Date.parse(block.starts_at) === meetingStart.getTime())).toBe(true);
+
+  const editing = await ask({ event_id: meeting.id, starts_at: meetingStart.toISOString(), ends_at: meetingEnd.toISOString() });
+  expect(editing.own.some((block) => Date.parse(block.starts_at) === meetingStart.getTime())).toBe(false);
+});

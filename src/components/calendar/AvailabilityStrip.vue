@@ -29,6 +29,8 @@ const props = defineProps<{
   start: Date;
   end: Date;
   disabled?: boolean;
+  /** The saved event being edited: its own time is not a conflict. */
+  editing?: { id: string; start: Date; end: Date } | null;
 }>();
 
 const emit = defineEmits<{ move: [start: Date, end: Date] }>();
@@ -52,17 +54,36 @@ const durationMinutes = computed(() => Math.round(durationMs.value / 60_000));
 let generation = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
 
+const scope = computed(() => ({
+  account_id: props.accountId,
+  attendees: props.attendees,
+  editing: props.editing ?? null,
+}));
+
+/** What the shown report must have been asked for to still be true. */
+const requestKey = computed(() => JSON.stringify([
+  day.value.getTime(),
+  props.accountId,
+  props.attendees,
+  calendarUi.availabilityExcluded,
+  props.editing?.id ?? null,
+]));
+const reportKey = ref<string | null>(null);
+/** The report is for another day or other people, or a newer one is on its way. */
+const stale = computed(() => loading.value || reportKey.value !== requestKey.value);
+
 async function load() {
   if (!availability.commandsAvailable()) return;
   const current = ++generation;
+  const key = requestKey.value;
   loading.value = true;
   failed.value = false;
   try {
-    const result = await availability.freeBusy(
-      { account_id: props.accountId, attendees: props.attendees },
-      { start: day.value, end: addDays(day.value, 1) },
-    );
-    if (current === generation) report.value = result;
+    const result = await availability.freeBusy(scope.value, { start: day.value, end: addDays(day.value, 1) });
+    if (current === generation) {
+      report.value = result;
+      reportKey.value = key;
+    }
   } catch {
     if (current === generation) failed.value = true;
   } finally {
@@ -72,13 +93,21 @@ async function load() {
 
 // Typing an address or stepping through days asks once it settles.
 watch(
-  () => [day.value.getTime(), props.accountId, props.attendees.join(','), calendarUi.availabilityExcluded.join('|')],
+  requestKey,
   () => {
     clearTimeout(timer);
     timer = setTimeout(() => void load(), 250);
   },
   { immediate: true },
 );
+// A search answer belongs to the slot and people it was asked for. Who was
+// left uncounted stays true across days; it changes only with the people.
+watch(() => [day.value.getTime(), props.attendees.join(',')], () => {
+  searchMessage.value = '';
+});
+watch(() => [props.accountId, props.attendees.join(',')], () => {
+  notCounted.value = [];
+});
 onBeforeUnmount(() => clearTimeout(timer));
 
 /** The hours shown: the working day, stretched to hold the slot, an hour either side. */
@@ -181,6 +210,17 @@ function row(key: string, label: string, known: boolean, blocks: BackendBusyBloc
 }
 
 const rows = computed<Row[]>(() => {
+  // While a report is stale its people and busy time are not drawn as if they were today's.
+  if (stale.value) {
+    return [t('availability.strip.you'), ...props.attendees].map((label, index) => ({
+      key: index === 0 ? 'you' : label,
+      label,
+      known: true,
+      blocks: [],
+      conflict: false,
+      summary: t('availability.strip.loading'),
+    }));
+  }
   const data = report.value;
   const own = row('you', t('availability.strip.you'), true, data?.own ?? []);
   const others = data?.attendees.map((entry) => row(entry.address, entry.address, entry.known, entry.busy)) ?? [];
@@ -199,17 +239,20 @@ function stepDay(offset: number) {
   emit('move', start, new Date(start.getTime() + durationMs.value));
 }
 
-/** A click on the timeline moves the slot to start there, on the quarter hour. */
+/**
+ * A click on the timeline moves the slot to start there, on the quarter hour.
+ * The timeline is linear in real time, so the click is too: on a DST day a
+ * wall-clock `setHours` would land an hour away from where the user clicked.
+ */
 function moveToPointer(event: PointerEvent) {
   if (props.disabled) return;
   const track = event.currentTarget as HTMLElement;
   const box = track.getBoundingClientRect();
   if (box.width <= 0) return;
   const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
-  const minute = view.value.fromMinute + ratio * (view.value.toMinute - view.value.fromMinute);
-  const snapped = Math.round(minute / SNAP_MINUTES) * SNAP_MINUTES;
-  const start = new Date(day.value);
-  start.setHours(0, snapped, 0, 0);
+  const time = view.value.start + ratio * (view.value.end - view.value.start);
+  const snap = SNAP_MINUTES * 60_000;
+  const start = new Date(Math.round(time / snap) * snap);
   emit('move', start, new Date(start.getTime() + durationMs.value));
 }
 
@@ -219,7 +262,7 @@ async function findNextFree() {
   searchMessage.value = '';
   try {
     const result = await availability.freeSlots(
-      { account_id: props.accountId, attendees: props.attendees },
+      scope.value,
       {
         // Strictly after the current proposal, so a free slot steps on.
         from: new Date(props.start.getTime() + 60_000),
@@ -246,7 +289,7 @@ const canSearch = computed(() => durationMinutes.value >= 5 && durationMinutes.v
 </script>
 
 <template>
-  <section class="strip" :class="{ 'strip--compact': ui.isMobile }" :aria-label="$t('availability.strip.title')" data-testid="availability-strip">
+  <section class="strip" :class="{ 'strip--compact': ui.isMobile, 'strip--stale': stale && !failed }" :aria-busy="stale && !failed" :aria-label="$t('availability.strip.title')" data-testid="availability-strip">
     <header class="strip__head">
       <span class="strip__title">{{ $t('availability.strip.title') }}</span>
       <span class="strip__day">
@@ -262,7 +305,7 @@ const canSearch = computed(() => durationMinutes.value >= 5 && durationMinutes.v
 
     <p class="strip__status" role="status">
       <template v-if="failed">{{ $t('availability.strip.loadFailed') }}</template>
-      <template v-else-if="loading && !report">{{ $t('availability.strip.loading') }}</template>
+      <template v-else-if="stale">{{ $t('availability.strip.loading') }}</template>
       <template v-else-if="conflicts > 0">{{ $t('availability.strip.conflicts', { count: conflicts, time: slotLabel }, conflicts) }}</template>
       <template v-else>{{ $t('availability.strip.allFreeAt', { time: slotLabel }) }}</template>
     </p>
@@ -315,8 +358,8 @@ const canSearch = computed(() => durationMinutes.value >= 5 && durationMinutes.v
       </AppButton>
       <span v-if="searchMessage" class="strip__note" role="status">{{ searchMessage }}</span>
     </footer>
-    <p v-if="notCounted.length" class="strip__note">{{ $t('availability.strip.notCounted', { people: notCounted.join(', ') }) }}</p>
-    <p v-else-if="anyUnknown" class="strip__note">{{ $t('availability.strip.unknownHint') }}</p>
+    <p v-if="notCounted.length && !stale" class="strip__note">{{ $t('availability.strip.notCounted', { people: notCounted.join(', ') }) }}</p>
+    <p v-else-if="anyUnknown && !stale" class="strip__note">{{ $t('availability.strip.unknownHint') }}</p>
   </section>
 </template>
 
@@ -327,6 +370,11 @@ const canSearch = computed(() => durationMinutes.value >= 5 && durationMinutes.v
   border: var(--border-muted);
   border-radius: var(--radius-md);
   padding: var(--space-sm);
+}
+
+.strip--stale .strip__grid,
+.strip--stale .strip__list {
+  opacity: 0.45;
 }
 
 .strip__head {
