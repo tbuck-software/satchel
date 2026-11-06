@@ -1,0 +1,201 @@
+# 0016 KI-Anbieter und KI-Funktionen
+
+Status: angenommen 2026-11-05
+
+## Kontext
+
+Satchel hat heute keine KI-Funktion. Vorbereitet ist nur die Enum-Variante
+`TopicAddedBy::Llm` in `crates/satchel-core/src/db/topics.rs`, die niemand
+setzt. Die KI-Funktionen in Spark und Outlook taugen nach Erfahrung des
+Maintainers in der Praxis wenig. Sie fassen kurze Mails zusammen, die man
+schneller selbst liest, und schreiben Antworten, die nicht nach dem Absender
+klingen.
+
+Zwei Fragen müssen vor der ersten Zeile Code beantwortet sein. Wer bezahlt die
+Anfragen, und wohin gehen dabei die Mails? Ein Abo-Login wirkt billig, kann
+aber gegen die Bedingungen des Anbieters verstoßen und das Konto des Nutzers
+gefährden. Bei claude.ai ist das so, bei ChatGPT gibt es inzwischen einen
+offiziellen Weg. Ein eigener Proxy oder ein Projekt-Abo wäre ein
+gehosteter Dienst mit Abrechnung, und Mail-Inhalte liefen über unsere Server.
+Damit wären wir Auftragsverarbeiter nach DSGVO. Beides schließt 0001 aus.
+
+Mit API-Schlüssel kosten Mail-Aufgaben wenig. Nach den Listenpreisen von
+Anthropic kostet Claude Haiku 5.5 $0,10 je Million Eingabe-Tokens und $0,50 je
+Million Ausgabe-Tokens, Claude Sonnet 5.5 $2 bzw. $10. Bei 100 klassifizierten
+Mails am Tag mit rund 1.500 Tokens hinein und 50 heraus fallen mit Haiku etwa
+$0,50 im Monat an. Zehn Entwürfe oder Zusammenfassungen am Tag mit Sonnet
+(4.000 bis 5.000 Tokens hinein, 500 heraus) kosten etwa $4 im Monat.
+Ein lokales Modell kostet nichts außer Strom.
+
+## Entscheidung
+
+### Anbieter
+
+- Die Anbieter-Schicht lebt in `satchel-core` (0003) und läuft damit auch auf
+  Mobile (0006). Sie spricht drei Protokolle:
+  1. **OpenAI-kompatible Chat Completions**, konfiguriert über Basis-URL und
+     Schlüssel. Voreinstellungen gibt es für OpenAI, OpenRouter, Mistral,
+     Ollama (`http://localhost:11434/v1`) und LM Studio
+     (`http://localhost:1234/v1`). Die beiden letzten laufen lokal und
+     brauchen keinen Schlüssel.
+  2. **Anthropic Messages API**, nativ. Den OpenAI-Kompatibilitätsmodus von
+     Anthropic nutzen wir nicht, weil Anthropic ihn selbst nicht für den
+     Produktivbetrieb empfiehlt.
+  3. **Sign in with ChatGPT** über die Responses API. Damit bezahlt ein
+     ChatGPT-Plus- oder Pro-Abo die Anfragen, ohne API-Schlüssel. OpenAI
+     bietet das offiziell für Open-Source- und lokal betriebene Apps an
+     (PKCE S256, Redirect auf `http://127.0.0.1:<port>/auth/callback`, kein
+     Client-Secret). Die Dokumentation nennt das Angebot eine begrenzte
+     Testphase. Voraussetzungen: Plus- oder Pro-Plan, Responses API mit
+     `store:false` und `stream:true`, eine eigene Client-ID von OpenAI.
+     Satchel implementiert den dokumentierten HTTP-Flow selbst in Rust und
+     bündelt nicht das DevKit, das unter einer nichtkommerziellen Lizenz
+     steht. Zuerst auf dem Desktop; auf Mobile erst, wenn der Login-Flow dort
+     trägt. Vor dem Bau klären wir bei OpenAI die Client-ID und ob Satchel als
+     „open-source partner“ gilt, und prüfen, ob die Testphase JSON nach
+     Schema (`text.format`) zulässt. Ohne das bleibt der Weg auf Funktionen
+     beschränkt, die keine Struktur brauchen.
+- Eine Voreinstellung wird erst ausgeliefert, wenn ein Test gegen die echte
+  Schnittstelle Chat Completions und JSON nach Schema bestätigt. Für Mistral
+  und für Ollamas Schema-Unterstützung steht das noch aus; was den Test nicht
+  besteht, fällt als Voreinstellung weg.
+- OpenRouter ist die Antwort auf „ein Konto, alle Modelle“. Einen eigenen
+  Sammeldienst bauen wir nicht. Eine Zustimmung zu OpenRouter gilt nicht als
+  Zustimmung zum Modellanbieter dahinter; die Einstellungen nennen beide.
+- Schlüssel liegen wie Konto-Zugangsdaten verschlüsselt mit dem Master-Key des
+  Profils (`enc:v2:`, siehe README „Where the password ends up“) und gehen mit
+  ins Backup. Über unverschlüsseltes `http://` schickt Satchel einen Schlüssel
+  nur an Loopback-Adressen. Ohne Schlüssel ist `http://` auch im privaten Netz
+  erlaubt.
+- Antworten, die das Programm weiterverarbeitet, fordert Satchel als JSON nach
+  Schema an: `response_format` mit `json_schema` bei Chat Completions,
+  `output_config.format` bei Anthropic. Kann ein Anbieter oder Modell das
+  nicht, fällt Satchel auf den JSON-Modus zurück. Core prüft jede Antwort
+  gegen das Schema und verwirft, was nicht passt. Höchstens ein zweiter
+  Versuch, keine Schleife.
+- Fällt ein Anbieter aus, springt Satchel nicht auf einen anderen um. Die
+  Zustimmung gilt einem Anbieter, nicht dem nächstbesten.
+
+### Was wir nicht bauen
+
+- **Kein claude.ai-Login.** Anthropic erlaubt Drittentwicklern nicht, ohne
+  vorherige Freigabe claude.ai-Login oder claude.ai-Kontingente anzubieten,
+  auch nicht für Agenten auf dem Agent SDK.
+- **Keine Agent-CLIs als Standardweg.** Satchel startet nicht `claude`,
+  `codex`, `opencode` oder `pi` als Unterprozess, um deren Login
+  mitzubenutzen. Das ist unsere Entscheidung, keine Vorgabe der Anbieter. Wer
+  seine Mail mit einem eigenen Agenten auswerten will, liest die read-only
+  Views aus 0005 (`docs/DB_READ_ACCESS.md`). Dafür gibt es sie.
+- **Kein Proxy, kein Projekt-Abo, keine Abrechnung** (0001).
+
+### Datenschutz
+
+- KI ist ab Werk aus. Der Nutzer schaltet sie je Konto und je Funktion ein.
+  Ein Dienstkonto kann aus bleiben, während das private Konto mitmacht.
+- **Lokal** ist ein Anbieter, dessen aufgelöste Adresse beim
+  Verbindungsaufbau Loopback ist oder in einem privaten Bereich liegt
+  (RFC 1918, ULA, Link-Local), für jede Verbindung neu geprüft. Redirects
+  folgt Satchel nicht. Der Name der Voreinstellung entscheidet nichts. Ein
+  Host im privaten Netz gilt erst als lokal, wenn der Nutzer das bestätigt;
+  ein Rechner im Büro- oder Familiennetz ist nicht automatisch privat.
+- Ein Schalter „Nur lokale Modelle“ lässt nur lokale Anbieter zu.
+- Funktionen, die im Hintergrund über neue Mails laufen, brauchen einen
+  lokalen Anbieter oder eine eigene Zustimmung für genau diese Funktion mit
+  genau diesem Anbieter. Beim Einschalten und bei neu hinzugefügten Konten
+  arbeiten sie nur die letzten 30 Tage nach (das Body-Fenster aus 0006),
+  nicht das ganze Archiv.
+- Der Nutzer sieht, was das Gerät verlässt. Die erste Zustimmung je Funktion
+  zeigt, welche Teile einer Mail mitgehen, und eine Ansicht „Was wird
+  gesendet?“ bleibt danach erreichbar. Ein lokales Protokoll hält je
+  Anfrage Funktion, Anbieter, Modell, Tokens und auf Wunsch den gesendeten
+  Text fest. Einträge bleiben 30 Tage; den gesendeten Text speichert es nur,
+  wenn der Nutzer das einschaltet.
+- Ein Monatsdeckel begrenzt Tokens und, wo bekannt, Kosten, sichtbar mit
+  Zähler. Tokens zählt Satchel aus dem `usage`-Feld der Antwort. Kosten kennt es nur,
+  wo der Anbieter sie meldet oder der Nutzer einen Preis je Modell einträgt. Ist
+  der Deckel erreicht, pausieren die Hintergrundfunktionen, und Anfragen auf
+  Abruf fragen nach.
+- Schlüssel, Zustimmungen, Deckel und Anfrage-Protokoll gelten je Gerät und
+  gehen nicht ins Hub-Log (0015). Eine Zustimmung am Desktop schaltet das
+  Handy nicht frei. Das Stilprofil darf als Einstellung über den Hub reisen.
+- Mail-Inhalt ist für das Modell nicht vertrauenswürdig: Eine Mail kann
+  Anweisungen enthalten. Satchel schickt Mails als reinen Text, nicht als
+  HTML, und zeigt Antworten des Modells als Text, nie als gerendertes HTML.
+  Eine Antwort des Modells löst nie selbst eine Aktion aus; sie wird gegen
+  das Schema geprüft und als Vorschlag gezeigt.
+
+### Funktionen, in dieser Reihenfolge
+
+1. **Suche in natürlicher Sprache.** Das Modell übersetzt die Frage in die
+   Operator-Syntax der Suche (`from:`, `subject:`, `after:`, `is:unread`, …).
+   Satchel schreibt die Abfrage sichtbar und editierbar ins Suchfeld und führt
+   sie lokal über FTS5 aus. Das Gerät verlässt nur die Frage, die Grammatik und
+   die Namen von Ordnern und Tags, kein Mail-Inhalt. Die Namen kommen nur aus
+   Konten mit Zustimmung; ein Schalter schickt auf Wunsch nur die Frage.
+2. **„Braucht eine Antwort?“** erkennt Mails, auf die der Nutzer antworten
+   sollte, und speist Follow-ups und Smart Buckets. Läuft im Hintergrund, also
+   mit den Regeln oben.
+3. **Termine und Aufgaben herauslesen.** Daraus wird ein Vorschlag für einen
+   Kalendertermin oder eine Aufgabe. Anlegen tut der Nutzer, nie Satchel.
+   Läuft nur auf Abruf, beim Öffnen einer Mail.
+4. **Themen zuordnen** mit `TopicAddedBy::Llm`. Läuft im Hintergrund, also
+   mit den Regeln oben. Das Modell wählt nur aus den festen IDs vorhandener
+   Themen; das ist die einzige Schreibaktion ohne Klick. Eine Zuordnung des
+   Nutzers schlägt die des Modells, und was der Nutzer entfernt, setzt das
+   Modell nicht wieder.
+5. **Antwortentwürfe im eigenen Stil.** Aus gesendeten Mails entsteht einmalig
+   ein Stilprofil als Text, den der Nutzer lesen und ändern kann. Dafür geht
+   eine Auswahl gesendeter Mails mit eigener Zustimmung an den Anbieter,
+   vorher ohne Zitate und Signaturen, damit kein fremder Text mitgeht. Danach
+   reisen nur Thread und Profil. Entwürfe landen im Composer und werden nie
+   automatisch gesendet.
+6. **Zusammenfassung auf Abruf**, nur für lange Threads. Für eine Mail, die in
+   zehn Sekunden gelesen ist, gibt es keinen Knopf.
+7. **Übersetzung** als zweite Engine hinter einer Übersetzungs-Schnittstelle,
+   die zusammen mit DeepL getrennt gebaut wird. Für jede Übersetzungs-Engine
+   gelten dieselben Zustimmungsregeln. DeepL ist nie lokal; „Nur lokale
+   Modelle“ schaltet es ab.
+
+## Konsequenzen
+
+Die KI-Funktionen sind Core-Funktionen, keine Plugins. Ob Plugins die
+Anbieter-Schicht über die Plugin-API (0011) nutzen dürfen, entscheidet ein
+späteres ADR.
+
+Prompts stehen auf Englisch in Rust. Entwürfe und Zusammenfassungen kommen in
+der Sprache des Threads zurück. Was die Funktionen dem Nutzer sagen, geht wie
+jede Meldung als Message-Key an das Frontend (0004).
+
+Neue Tabellen für Anbieter, Zustimmungen und das Anfrage-Protokoll entstehen
+per additiver Migration. Die Aufbewahrung des Protokolls (30 Tage) räumt der
+Maintenance-Worker auf. Die Tabelle des Protokolls gehört nicht in die
+`v_*`-Views aus 0005.
+
+Wer einen weiteren Abo-Login, automatisches Senden oder einen gehosteten
+Dienst will, schreibt ein neues ADR.
+
+## Quellen
+
+Abgerufen am 2026-11-05.
+
+- Anthropic, Agent SDK overview, Hinweis zu claude.ai-Login für Drittprodukte:
+  <https://code.claude.com/docs/en/agent-sdk/overview>
+- Anthropic, Preise: <https://platform.claude.com/docs/en/about-claude/pricing>
+- Anthropic, Structured outputs:
+  <https://platform.claude.com/docs/en/build-with-claude/structured-outputs>
+- Anthropic, OpenAI SDK compatibility („not considered a long-term or
+  production-ready solution for most use cases“):
+  <https://platform.claude.com/docs/en/api/openai-sdk>
+- OpenAI, Sign in with ChatGPT:
+  <https://developers.openai.com/siwc/quickstart>,
+  <https://developers.openai.com/siwc/token-sharing-open-source>,
+  <https://developers.openai.com/siwc/token-sharing-open-source/sign-in>
+- Mistral, Chat-Endpoint mit `response_format`:
+  <https://docs.mistral.ai/api/endpoint/chat>
+- Ollama, OpenAI compatibility:
+  <https://docs.ollama.com/api/openai-compatibility>
+- LM Studio, OpenAI compatibility und Structured output:
+  <https://lmstudio.ai/docs/developer/openai-compat>,
+  <https://lmstudio.ai/docs/developer/openai-compat/structured-output>
+- OpenRouter, Structured outputs:
+  <https://openrouter.ai/docs/guides/features/structured-outputs>
