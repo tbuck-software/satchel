@@ -39,7 +39,8 @@ pub(crate) async fn move_threads_to_folder_inner(
     )
     .await?;
     if !rescued.is_empty() {
-        if let Err(error) = satchel_core::spam::train_messages(
+        // One example per sender and thread, like every other training path.
+        if let Err(error) = satchel_core::spam::train_threads(
             pool,
             &rescued,
             satchel_core::spam::Label::Ham,
@@ -54,8 +55,8 @@ pub(crate) async fn move_threads_to_folder_inner(
     Ok(())
 }
 
-/// The messages this move takes out of Spam, if its target is a folder where
-/// wanted mail lives.
+/// The threads this move takes mail out of Spam for, if its target is a
+/// folder where wanted mail lives.
 async fn rescued_from_spam(pool: &SqlitePool, input: &MoveThreadsInput) -> Vec<String> {
     let target: Option<String> =
         sqlx::query_scalar("SELECT LOWER(COALESCE(folder_type, '')) FROM folders WHERE id = ?")
@@ -70,7 +71,96 @@ async fn rescued_from_spam(pool: &SqlitePool, input: &MoveThreadsInput) -> Vec<S
     {
         return Vec::new();
     }
-    satchel_core::spam::spam_folder_messages(pool, &input.thread_ids)
+    let mut rescued = Vec::new();
+    for thread_id in &input.thread_ids {
+        let in_spam =
+            satchel_core::spam::spam_folder_messages(pool, std::slice::from_ref(thread_id))
+                .await
+                .map(|messages| !messages.is_empty())
+                .unwrap_or(false);
+        if in_spam && !rescued.contains(thread_id) {
+            rescued.push(thread_id.clone());
+        }
+    }
+    rescued
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    /// A thread of three messages from one sender and one from another,
+    /// moved out of Spam: two examples, not four.
+    #[tokio::test]
+    async fn moving_out_of_spam_trains_one_example_per_sender() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("pool");
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .expect("migrations");
+        sqlx::query(
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('acc', 'Me', 'me@example.test', 'pop3', '{}', '', '', '')",
+        )
+        .execute(&pool)
         .await
-        .unwrap_or_default()
+        .unwrap();
+        for (id, kind) in [("spam", "spam"), ("work", "custom")] {
+            sqlx::query(
+                "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+                 VALUES (?, 'acc', ?, ?, ?, ?, '', '')",
+            )
+            .bind(id)
+            .bind(id)
+            .bind(id)
+            .bind(kind)
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO threads (id, account_id, subject, last_message_date, created_at, updated_at)
+             VALUES ('thread', 'acc', 'Order', '', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (id, from) in [
+            ("m1", "shop@store.example"),
+            ("m2", "shop@store.example"),
+            ("m3", "shop@store.example"),
+            ("m4", "help@store.example"),
+        ] {
+            sqlx::query(
+                "INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, body_text, date, created_at, updated_at)
+                 VALUES (?, 'acc', 'spam', 'thread', ?, '[]', 'Your order', 'Your order has shipped', ?, '', '')",
+            )
+            .bind(id)
+            .bind(from)
+            .bind(format!("2026-01-0{}", &id[1..]))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        move_threads_to_folder_inner(
+            &pool,
+            &AppState::default(),
+            MoveThreadsInput {
+                thread_ids: vec!["thread".into()],
+                target_folder_id: "work".into(),
+            },
+        )
+        .await
+        .expect("move");
+
+        let status = satchel_core::spam::status(&pool).await.unwrap();
+        assert_eq!((status.spam_messages, status.ham_messages), (0, 2));
+    }
 }

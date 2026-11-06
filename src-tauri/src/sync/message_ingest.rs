@@ -2281,10 +2281,20 @@ mod tests {
 
     /// New, unread IMAP mail is judged by the local spam filter once it has
     /// learned enough. A backlog replayed by a first sync, a re-sync or a
-    /// UIDVALIDITY reset is not judged, and neither is mail already read.
+    /// UIDVALIDITY reset is not judged, and neither is mail already read —
+    /// in Move mode least of all: old mail must not land in a Spam folder
+    /// the server purges.
     #[tokio::test]
     async fn the_spam_filter_judges_new_unread_mail_and_never_a_backlog() {
         let pool = ingest_pool().await;
+        sqlx::query(
+            "INSERT INTO folders
+             (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES ('spam', 'account', 'Spam', 'Spam', 'spam', 'Spam', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .expect("spam folder");
         let cutoff = (chrono::Utc::now() - chrono::TimeDelta::hours(1)).to_rfc3339();
         sqlx::query("UPDATE accounts SET last_sync_at = ?")
             .bind(&cutoff)
@@ -2293,7 +2303,7 @@ mod tests {
             .unwrap();
         let now = chrono::Utc::now().to_rfc3339();
         let mut examples = Vec::new();
-        for n in 0..60 {
+        for n in 0..200 {
             let mut spam = envelope(&format!("s{n}"));
             spam.from_address = format!("winner{n}@lottery{}.example", n % 7);
             spam.subject = format!("You won the lottery jackpot {n}");
@@ -2338,8 +2348,8 @@ mod tests {
 
         let incoming = |id: &str, date: &str, read: bool| {
             let mut message = envelope(id);
-            message.from_address = "boss@lottery3.example".into();
-            message.subject = "Lottery jackpot winner".into();
+            message.from_address = format!("boss-{id}@lottery3.example");
+            message.subject = format!("Lottery jackpot winner {id}");
             message.body_text = Some("Claim your jackpot prize, wire the processing fee".into());
             message.spam_hint_headers = Some("X-Spam-Flag: YES".into());
             message.date_rfc3339 = date.to_string();
@@ -2387,6 +2397,40 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(pending, None);
+
+        // Move: new unread mail goes to Spam, a backlog and read mail stay.
+        satchel_core::spam::set_mode(&pool, satchel_core::spam::SpamFilterMode::Move)
+            .await
+            .unwrap();
+        ingest(&pool, "inbox", &incoming("new-move", &now, false))
+            .await
+            .expect("new mail in Move mode");
+        ingest(
+            &pool,
+            "inbox",
+            &incoming("old-move", "2025-06-01T08:00:00Z", false),
+        )
+        .await
+        .expect("backlog in Move mode");
+        ingest(&pool, "inbox", &incoming("read-move", &now, true))
+            .await
+            .expect("read mail in Move mode");
+        let pending = |remote: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT pending_folder_id FROM messages WHERE remote_id = ?",
+                )
+                .bind(remote)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(pending("new-move").await.as_deref(), Some("spam"));
+        assert_eq!(pending("old-move").await, None, "a backlog is never moved");
+        assert_eq!(pending("read-move").await, None, "read mail is never moved");
+        assert_eq!(verdict("old-move").await, None);
     }
 
     /// A `Date` far in the future used to win the `last_message_date >= …`

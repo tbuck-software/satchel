@@ -25,6 +25,7 @@ import { viewKeywords } from '@/config/keybindings';
 import { MAILBOX_SECTIONS } from '@/config/mailboxSections';
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { openView, showMailList } from '@/router/mailViews';
+import { offersNotSpam } from '@/utils/threadList';
 
 
 /** The glyph each view wears in the sidebar, by route or section id. */
@@ -94,6 +95,14 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
 
   function currentId(): string {
     return listKeyboardTargets()?.[0] ?? threads.activeThreadId;
+  }
+
+  /** The targets Not spam applies to: marked by the filter, or in Spam. */
+  function notSpamTargets(): string[] {
+    return targetIds().filter((id) => {
+      const thread = threads.find(id);
+      return thread ? offersNotSpam(thread, threads.mailboxFilter) : false;
+    });
   }
 
   /** Reader-only actions, offered while the reader shows the thread the palette acts on. */
@@ -422,15 +431,15 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         keywords: t('commands.keywords.spam'),
         run: () => void threadActions.markSpam(targetIds()),
       },
-      {
+      ...(notSpamTargets().length > 0 ? [{
         id: 'thread:not-spam',
         icon: 'inbox' as const,
         title: t('thread.actions.notSpam'),
         context: 'mail' as const,
         shortcut: hint('markNotSpam'),
         keywords: t('commands.keywords.notSpam'),
-        run: () => void threadActions.markNotSpam(targetIds()),
-      },
+        run: () => void threadActions.markNotSpam(notSpamTargets()),
+      }] : []),
       ...readerCommands(),
     ] : []),
     ...(undo.entries.value.length > 0 ? [{

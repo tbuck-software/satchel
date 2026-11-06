@@ -194,6 +194,8 @@ enum Kind {
     Personal,
     Newsletter,
     Receipt,
+    /// Legitimate promotional mail: sales, codes, "limited time".
+    Promotion,
 }
 
 /// Deterministic, so a failure is reproducible.
@@ -240,6 +242,8 @@ fn sample(rng: &mut Rng, kind: Kind, n: usize, tag: &str) -> Mail {
                 "Cheap medication without prescription",
                 "Double your crypto in 24 hours",
                 "Urgent business proposal",
+                "Problem with your order",
+                "Invoice overdue: action required",
             ])
             .to_string(),
             rng.sentences(
@@ -254,6 +258,8 @@ fn sample(rng: &mut Rng, kind: Kind, n: usize, tag: &str) -> Mail {
                     "You are the lucky winner of our international lottery.",
                     "Limited time: earn thousands of dollars weekly.",
                     "Confidential: kindly reply with your full name and phone number.",
+                    "Your order could not be delivered, confirm your shipping address here.",
+                    "Your account invoice is overdue, pay now to avoid suspension.",
                 ],
                 5,
             ),
@@ -363,14 +369,42 @@ fn sample(rng: &mut Rng, kind: Kind, n: usize, tag: &str) -> Mail {
             ),
             false,
         ),
+        Kind::Promotion => (
+            format!(
+                "{}@{}",
+                rng.pick(&["offers", "deals", "newsletter"]),
+                rng.pick(&["shop.example", "books.example", "travel.example"])
+            ),
+            rng.pick(&[
+                "Summer sale: 20% off everything",
+                "Members get early access",
+                "New arrivals this week",
+                "Last chance: free shipping ends tonight",
+                "A special offer for your next trip",
+            ])
+            .to_string(),
+            rng.sentences(
+                &[
+                    "Our summer sale starts today with 20% off.",
+                    "Members get free shipping on all orders.",
+                    "Shop the new arrivals before they sell out.",
+                    "Use code SUMMER20 at checkout, limited time only.",
+                    "You are receiving this because you have an account with us.",
+                    "Unsubscribe from these offers at any time.",
+                    "Book now and save on your next trip.",
+                ],
+                4,
+            ),
+            true,
+        ),
     };
     let mut mail = Mail::new(&id, "inbox", &from, &subject, &body);
     mail.unsubscribe = unsubscribe;
     mail
 }
 
-/// Train `spam` spams and `ham` hams — a third of the hams newsletters, a
-/// third receipts — each its own thread.
+/// Train `spam` spams and `ham` hams — a quarter each personal mail,
+/// newsletters, receipts and promotions — each its own thread.
 async fn train_corpus(pool: &SqlitePool, seed: u64, spam: usize, ham: usize) {
     let mut rng = Rng(seed);
     let mut spam_ids = Vec::new();
@@ -381,7 +415,12 @@ async fn train_corpus(pool: &SqlitePool, seed: u64, spam: usize, ham: usize) {
         spam_ids.push(mail.id);
     }
     for n in 0..ham {
-        let kind = [Kind::Personal, Kind::Newsletter, Kind::Receipt][n % 3];
+        let kind = [
+            Kind::Personal,
+            Kind::Newsletter,
+            Kind::Receipt,
+            Kind::Promotion,
+        ][n % 4];
         let mail = sample(&mut rng, kind, n, &format!("train{seed}"));
         insert(pool, &mail).await;
         ham_ids.push(mail.id);
@@ -716,9 +755,14 @@ async fn a_lopsided_model_never_calls_wanted_mail_spam() {
     assert_eq!(status.ham_needed, 220);
 
     let mut rng = Rng(96);
-    for (n, kind) in [Kind::Personal, Kind::Newsletter, Kind::Receipt]
-        .into_iter()
-        .enumerate()
+    for (n, kind) in [
+        Kind::Personal,
+        Kind::Newsletter,
+        Kind::Receipt,
+        Kind::Promotion,
+    ]
+    .into_iter()
+    .enumerate()
     {
         let mail = sample(&mut rng, kind, n, "wanted");
         insert(&pool, &mail).await;
@@ -734,16 +778,18 @@ async fn a_realistic_corpus_stays_under_the_false_positive_ceiling() {
     train_corpus(&pool, 4, 60, 60).await;
     finish_bootstrap(&pool).await;
 
-    // 48 unseen messages: 16 spam, 16 personal, 16 newsletters and receipts.
+    // 48 unseen messages: 16 spam (some about orders and accounts), 12
+    // personal, and 20 newsletters, receipts and promotions.
     let mut rng = Rng(2026);
     let mut false_positives = Vec::new();
     let mut caught = 0;
     for n in 0..48 {
-        let kind = match n % 6 {
-            0 | 1 => Kind::Spam,
-            2 | 3 => Kind::Personal,
-            4 => Kind::Newsletter,
-            _ => Kind::Receipt,
+        let kind = match n % 12 {
+            0..=3 => Kind::Spam,
+            4..=6 => Kind::Personal,
+            7 => Kind::Newsletter,
+            8 | 9 => Kind::Receipt,
+            _ => Kind::Promotion,
         };
         let mail = sample(&mut rng, kind, n, "held-out");
         insert(&pool, &mail).await;
@@ -1156,6 +1202,77 @@ async fn not_spam_brings_mail_back_from_spam_and_its_undo_returns_it() {
     assert_eq!(state, "done");
     assert_eq!(totals(&pool).await, (0, 0));
     assert_eq!(ledger(&pool, "m-1").await, None);
+}
+
+#[tokio::test]
+async fn not_spam_clears_the_mark_of_a_whole_thread_from_one_sender() {
+    let pool = pool("imap").await;
+    let queue = SyncQueue::new();
+    for id in ["a", "b"] {
+        let mail =
+            Mail::new(id, "inbox", "promo@deal.example", "Offer", "Buy now").in_thread("t-two");
+        insert(&pool, &mail).await;
+        sqlx::query(
+            "INSERT INTO spam_verdicts (message_id, score, verdict, classified_at)
+             VALUES (?, 0.95, 'spam', '')",
+        )
+        .bind(&mail.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let threads = satchel_core::db::threads::ThreadRepository::new(&pool);
+    assert!(threads.get("t-two").await.unwrap().likely_spam);
+
+    let receipt = mail_actions::mark_threads_not_spam(&pool, &queue, &["t-two".into()])
+        .await
+        .unwrap();
+    assert_eq!(
+        totals(&pool).await,
+        (0, 1),
+        "one example for the one sender"
+    );
+    assert!(
+        !threads.get("t-two").await.unwrap().likely_spam,
+        "the example clears every message of that sender in the thread"
+    );
+
+    mail_actions::undo_not_spam(&pool, &queue, &receipt)
+        .await
+        .unwrap();
+    assert!(
+        threads.get("t-two").await.unwrap().likely_spam,
+        "Undo brings the mark back"
+    );
+}
+
+#[tokio::test]
+async fn undo_of_not_spam_forgets_nothing_when_a_move_cannot_be_replayed() {
+    let pool = pool("pop3").await;
+    let queue = SyncQueue::new();
+    message(
+        &pool,
+        "1",
+        "inbox",
+        "news@shop.example",
+        "Your order",
+        "Order shipped",
+    )
+    .await;
+    let mut receipt = mail_actions::mark_threads_not_spam(&pool, &queue, &["t-1".into()])
+        .await
+        .unwrap();
+    receipt.move_receipts.push("no-such-receipt".into());
+
+    assert!(mail_actions::undo_not_spam(&pool, &queue, &receipt)
+        .await
+        .is_err());
+    assert_eq!(
+        ledger(&pool, "m-1").await.as_deref(),
+        Some("ham"),
+        "still learned"
+    );
+    assert_eq!(totals(&pool).await, (0, 1));
 }
 
 #[tokio::test]

@@ -113,6 +113,23 @@ describe('reader actions in the palette', () => {
   });
 });
 
+describe('Not spam in the palette', () => {
+  it('is offered only for mail the filter marked or that sits in Spam', () => {
+    const threads = useThreadsStore();
+    const thread = { id: 'thread-1', mailboxNames: ['INBOX'], likelySpam: false };
+    vi.spyOn(threads, 'find').mockImplementation(() => thread as never);
+
+    expect(command('thread:not-spam')).toBeUndefined();
+
+    thread.likelySpam = true;
+    expect(command('thread:not-spam')).toBeTruthy();
+
+    thread.likelySpam = false;
+    thread.mailboxNames = ['Junk'];
+    expect(command('thread:not-spam')).toBeTruthy();
+  });
+});
+
 describe('views in the palette', () => {
   /** Typing a view's name found nothing for Drafts, Snoozed or Done. */
   it('offers every view with a g key, under its sidebar name and its key', () => {

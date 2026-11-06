@@ -42,9 +42,14 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * dependency refresh measured main 238.9 / viewer 124.6 KiB before and
  * 239.6 / 127.3 KiB after. Vue 3.5.44 adds 0.6 KiB to vendor-vue; marked
  * 18.1.2 (CommonMark fixes, backtracking fixes) adds 2.0 KiB to
- * vendor-markdown, which only the viewer loads at startup. No app code grew. */
+ * vendor-markdown, which only the viewer loads at startup. No app code grew.
+ * Main 103 / 242 KiB since 2026-11-06: main measured 102.0 / 239.7 KiB; the
+ * local spam filter adds 0.7 KiB to the entry (Not spam in the thread store,
+ * thread actions, keyboard and palette, and the list row's mark, all of
+ * which load at startup) and 1.0 KiB of filter copy to the catalogues
+ * (102.7 / 241.4 KiB). Its settings page loads with Settings. */
 const budgets = {
-  'index.html': { entryGzip: 102 * 1024, initialGzip: 240 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
+  'index.html': { entryGzip: 103 * 1024, initialGzip: 242 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 128 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };

@@ -498,18 +498,15 @@ pub async fn mark_threads_not_spam(
     Ok(outcome)
 }
 
-/// Undo a Not spam: unlearn it, return the threads it moved to Spam, and file
-/// the ones the filter had moved there again.
+/// Undo a Not spam: return the threads it moved to Spam, file the ones the
+/// filter had moved there again, and only then unlearn it. A replay that
+/// fails stops before the filter forgets anything, so a retry finds the
+/// lesson and the receipts where they were.
 pub async fn undo_not_spam(
     pool: &SqlitePool,
     queue: &SyncQueue,
     receipt: &NotSpamReceipt,
 ) -> Result<(), String> {
-    if let Some(token) = receipt.undo_token.as_deref() {
-        crate::spam::untrain_receipt(pool, token)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
     for move_receipt in &receipt.move_receipts {
         undo::undo_trash(pool, queue, move_receipt).await?;
     }
@@ -534,6 +531,11 @@ pub async fn undo_not_spam(
             .await
             .map_err(|e| e.to_string())?;
         }
+    }
+    if let Some(token) = receipt.undo_token.as_deref() {
+        crate::spam::untrain_receipt(pool, token)
+            .await
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }

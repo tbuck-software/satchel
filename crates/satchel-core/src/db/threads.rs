@@ -6157,9 +6157,14 @@ const THREAD_RECORD_SQL: &str = "
               JOIN spam_verdicts ON spam_verdicts.message_id = spam_messages.id
               WHERE spam_messages.thread_id = threads.id
                 AND spam_verdicts.verdict = 'spam'
+                -- Not spam trains one example per sender and thread: a ham
+                -- example from the same sender in the thread clears them all.
                 AND NOT EXISTS (
                   SELECT 1 FROM spam_training
-                  WHERE spam_training.message_id = spam_messages.id AND spam_training.label = 'ham'
+                  WHERE spam_training.label = 'ham'
+                    AND (spam_training.message_id = spam_messages.id
+                         OR (spam_training.thread_id = threads.id
+                             AND spam_training.sender = LOWER(TRIM(COALESCE(spam_messages.from_address, '')))))
                 )
             ) AS likely_spam,
             EXISTS (
@@ -6760,9 +6765,14 @@ fn thread_list_query(
               JOIN spam_verdicts ON spam_verdicts.message_id = spam_messages.id
               WHERE spam_messages.thread_id = threads.id
                 AND spam_verdicts.verdict = 'spam'
+                -- Not spam trains one example per sender and thread: a ham
+                -- example from the same sender in the thread clears them all.
                 AND NOT EXISTS (
                   SELECT 1 FROM spam_training
-                  WHERE spam_training.message_id = spam_messages.id AND spam_training.label = 'ham'
+                  WHERE spam_training.label = 'ham'
+                    AND (spam_training.message_id = spam_messages.id
+                         OR (spam_training.thread_id = threads.id
+                             AND spam_training.sender = LOWER(TRIM(COALESCE(spam_messages.from_address, '')))))
                 )
             ) AS likely_spam,
             EXISTS (
