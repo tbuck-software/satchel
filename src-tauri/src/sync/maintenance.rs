@@ -18,6 +18,9 @@ const RUN_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VACUUM_INTERVAL_HOURS: i64 = 24 * 7;
 const CLEANUP_INTERVAL_HOURS: i64 = 24;
+/// Google and Outlook contacts behind `known_senders`. Their avatar sync only
+/// runs when asked; a daily read keeps a new contact from waiting for that.
+const ADDRESS_BOOK_INTERVAL_HOURS: i64 = 24;
 
 pub fn spawn_maintenance_worker(pool: SqlitePool, checkpoint_pool: SqlitePool, app: AppHandle) {
     tauri::async_runtime::spawn(async move {
@@ -341,6 +344,28 @@ async fn run_once(
             );
         }
         record_setting(pool, "maintenance.last_cleanup_at").await;
+    }
+
+    if should_run(
+        "maintenance.last_address_book_sync_at",
+        ADDRESS_BOOK_INTERVAL_HOURS,
+        pool,
+    )
+    .await
+    {
+        // Recorded either way: an account without network or permission waits
+        // a day instead of being asked on every pass.
+        record_setting(pool, "maintenance.last_address_book_sync_at").await;
+        match crate::commands::contacts::sync_provider_address_books(pool).await {
+            Ok(refreshed) => info!(
+                target: "satchel::maintenance",
+                refreshed, "refreshed provider address books"
+            ),
+            Err(err) => info!(
+                target: "satchel::maintenance",
+                error = %err, "address book refresh skipped"
+            ),
+        }
     }
 
     // A full SQLite VACUUM builds a second copy of the database. On Android a
