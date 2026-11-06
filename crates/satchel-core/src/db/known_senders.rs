@@ -63,7 +63,7 @@ where
         .into_iter()
         .collect::<Vec<_>>();
     let now = chrono::Utc::now().to_rfc3339();
-    let mut transaction = pool.begin().await?;
+    let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query("DELETE FROM known_senders WHERE source = ?")
         .bind(&source)
         .execute(&mut *transaction)
