@@ -47,6 +47,7 @@ const SmartFoldersEditor = defineAsyncComponent(() => import('@/components/setti
 const SmimeManager = defineAsyncComponent(() => import('@/components/settings/SmimeManager.vue'));
 const SourceManager = defineAsyncComponent(() => import('@/components/settings/SourceManager.vue'));
 const SpamFilterSettings = defineAsyncComponent(() => import('@/components/settings/SpamFilterSettings.vue'));
+const TranslationSettings = defineAsyncComponent(() => import('@/components/settings/TranslationSettings.vue'));
 const TemplatesEditor = defineAsyncComponent(() => import('@/components/settings/TemplatesEditor.vue'));
 const SwipeSettings = defineAsyncComponent(() => import('@/components/settings/SwipeSettings.vue'));
 const TrayPreferences = defineAsyncComponent(() => import('@/components/settings/TrayPreferences.vue'));
@@ -93,7 +94,7 @@ const sectionTones: Record<SettingsSection, string> = {
   general: 'blue', accounts: 'blue', notifications: 'orange',
   composing: 'blue', signatures: 'orange', templates: 'blue', aliases: 'cyan', vacation: 'amber',
   rules: 'purple', 'smart-folders': 'purple', swipes: 'purple',
-  senders: 'red', encryption: 'green',
+  senders: 'red', encryption: 'green', translation: 'cyan',
   calendar: 'green', contacts: 'pink',
   shortcuts: 'purple', plugins: 'pink', storage: 'cyan', diagnostics: 'amber', about: 'blue',
 };
@@ -239,6 +240,7 @@ onBeforeUnmount(() => unregisterFilter?.());
           <section class="settings-subsection"><BlockedSendersEditor /></section>
           <section class="settings-subsection"><RemoteImageAllowlist /></section>
         </template>
+        <TranslationSettings v-else-if="activeSection === 'translation'" />
         <DiagnosticsPane v-else-if="activeSection === 'diagnostics'" />
       </div>
     </div>

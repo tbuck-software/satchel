@@ -93,6 +93,8 @@ describe('reader actions in the palette', () => {
       markSpam: vi.fn(),
       blockSender: vi.fn(),
       sweepSender: vi.fn(),
+      toggleTranslation: vi.fn(() => true),
+      translationOffered: false,
       print: vi.fn(),
       exportThread: vi.fn(),
     };
@@ -111,6 +113,33 @@ describe('reader actions in the palette', () => {
     expect(reader.move).toHaveBeenCalledWith('folder-1');
     unregister();
     expect(command('thread:print-conversation')).toBeUndefined();
+  });
+
+  it('offers Translate only while the focused message can be translated', () => {
+    const reader = {
+      threadId: 'thread-1',
+      moveTargets: [],
+      isMuted: false,
+      move: vi.fn(),
+      toggleMuted: vi.fn(),
+      markSpam: vi.fn(),
+      blockSender: vi.fn(),
+      sweepSender: vi.fn(),
+      toggleTranslation: vi.fn(() => true),
+      translationOffered: false,
+      print: vi.fn(),
+      exportThread: vi.fn(),
+    };
+    const unregister = registerThreadReaderCommands(reader);
+    expect(command('thread:translate')).toBeUndefined();
+    unregister();
+
+    const offering = registerThreadReaderCommands({ ...reader, translationOffered: true });
+    const translate = command('thread:translate');
+    expect(translate?.title).toBe('Translate message or show the original');
+    void translate?.run();
+    expect(reader.toggleTranslation).toHaveBeenCalledTimes(1);
+    offering();
   });
 });
 

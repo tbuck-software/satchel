@@ -34,6 +34,7 @@ pub mod templates;
 pub mod threads;
 pub mod tls_exceptions;
 pub mod topics;
+pub mod translation;
 pub mod trash;
 pub mod vacation;
 pub mod webhooks;

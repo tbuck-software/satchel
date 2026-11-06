@@ -285,6 +285,10 @@
         "keywords": "select toggle",
         "label": "Toggle selection"
       },
+      "translateMessage": {
+        "keywords": "translate translation deepl language original",
+        "label": "Translate message"
+      },
       "trash": {
         "keywords": "delete trash",
         "label": "Delete"

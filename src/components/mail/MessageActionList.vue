@@ -50,6 +50,10 @@ function run(command: MessageMenuCommand) {
     <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5-4 5 4 5M12 5l4 5-4 5" /></svg></template>
     {{ $t('mail.message.showSource') }}
   </MenuItem>
+  <MenuItem label="" v-if="props.menu.translation" @select="run('translate')">
+    <template #icon><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5h7.5M6.75 2.5v2M5 4.5c.5 2.9 2.4 5.2 5 6.5M9.5 4.5c-.6 3.2-3 6-6.25 7.25" /><path d="m10.5 17.5 3.5-8 3.5 8M11.6 15h4.8" /></svg></template>
+    {{ props.menu.translation.shown ? $t('translation.reader.showOriginal') : $t('translation.reader.translate') }}
+  </MenuItem>
   <template v-if="props.menu.bodyView">
     <h3 class="message-actions__section" aria-hidden="true">{{ $t('mail.viewMode.showAs') }}</h3>
     <div role="group" :aria-label="$t('mail.viewMode.showAs')" class="message-actions__group">

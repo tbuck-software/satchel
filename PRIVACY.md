@@ -1,6 +1,6 @@
 # Satchel privacy and data handling
 
-Updated: 18 October 2026
+Updated: 6 November 2026
 
 Satchel is an open-source mail client maintained by tbuck-software. This notice
 describes the app distributed from [the Satchel repository](https://github.com/tbuck-software/satchel).
@@ -45,6 +45,13 @@ Remote mail content, external links, feeds, integrations and plugins can contact
 their respective services when enabled or used. Plugin permissions and the
 service's own privacy practices apply. Update checks and downloads contact
 GitHub, whose servers receive normal request metadata such as your IP address.
+
+Translation is off until you add a DeepL API key and allow an account. When
+you translate a message from an allowed account, its body (text and formatting,
+including link and image addresses) is sent to DeepL with your key; sender,
+recipients, subject, attachments and encrypted mail are not sent. DeepL's terms
+for your plan govern how DeepL handles the text. Translations are stored
+locally, and a local log keeps each request for 30 days.
 
 The distributed app does not upload your mailbox to a tbuck-software server.
 tbuck-software does not sell Google user data, use it for advertising, or use it

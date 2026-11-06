@@ -15,6 +15,13 @@ export interface ThreadReaderCommands {
   blockSender: (scope: 'address' | 'domain') => unknown;
   /** Opens the sender sweep dialog for the latest message's sender. */
   sweepSender: () => unknown;
+  /**
+   * Translate / Show original for the focused message; false when that
+   * message offers neither (translation off, already in the target language).
+   */
+  toggleTranslation: () => boolean;
+  /** Whether the focused message offers Translate right now. Read reactively. */
+  readonly translationOffered: boolean;
   print: (scope: ReaderMessageScope) => unknown;
   exportThread: (format: ReaderExportFormat) => unknown;
 }

@@ -170,6 +170,17 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "check_translation_engine": {
+            "kind": "object",
+            "fields": {
+                "engine": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "choose_directory": {
             "kind": "object",
             "fields": {
@@ -231,6 +242,10 @@ export default {
                     }
                 }
             }
+        },
+        "clear_outbound_requests": {
+            "kind": "object",
+            "fields": {}
         },
         "complete_oauth_flow": {
             "kind": "object",
@@ -896,6 +911,10 @@ export default {
                 }
             }
         },
+        "get_translation_settings": {
+            "kind": "object",
+            "fields": {}
+        },
         "get_vacation": {
             "kind": "object",
             "fields": {
@@ -1187,6 +1206,10 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "list_outbound_requests": {
+            "kind": "object",
+            "fields": {}
+        },
         "list_outbox": {
             "kind": "object",
             "fields": {}
@@ -1369,6 +1392,17 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "list_translation_languages": {
+            "kind": "object",
+            "fields": {
+                "engine": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "list_webhooks": {
             "kind": "object",
             "fields": {}
@@ -1439,6 +1473,18 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "message_translation_offer": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::translation::MessageTranslationInput"
                     }
                 }
             }
@@ -1855,6 +1901,18 @@ export default {
                 }
             }
         },
+        "save_translation_settings": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::translation::SaveTranslationSettingsInput"
+                    }
+                }
+            }
+        },
         "search_contacts": {
             "kind": "object",
             "fields": {
@@ -2220,6 +2278,30 @@ export default {
                 }
             }
         },
+        "set_translation_api_key": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::translation::SetTranslationApiKeyInput"
+                    }
+                }
+            }
+        },
+        "set_translation_consent": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::translation::SetTranslationConsentInput"
+                    }
+                }
+            }
+        },
         "set_ui_strings": {
             "kind": "object",
             "fields": {
@@ -2411,6 +2493,18 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "core::workflow::transitions::BatchTransitionInput"
+                    }
+                }
+            }
+        },
+        "translate_message": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::translation::MessageTranslationInput"
                     }
                 }
             }
@@ -5147,6 +5241,95 @@ export default {
                     }
                 },
                 "topic_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::translation::MessageTranslationInput": {
+            "kind": "object",
+            "fields": {
+                "message_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "target_language": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::translation::SaveTranslationSettingsInput": {
+            "kind": "object",
+            "fields": {
+                "engine": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "log_sent_text": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "target_language": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "app::commands::translation::SetTranslationApiKeyInput": {
+            "kind": "object",
+            "fields": {
+                "api_key": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "engine": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::translation::SetTranslationConsentInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "engine": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "granted": {
                     "required": true,
                     "shape": {
                         "kind": "value"

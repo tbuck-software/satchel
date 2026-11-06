@@ -20,7 +20,7 @@ export interface ImageGuardChoices {
  */
 export const IMAGE_GUARD_CHOICES: InjectionKey<ShallowRef<ImageGuardChoices | null>> = Symbol('imageGuardChoices');
 
-export type MessageMenuCommand = 'reply' | 'replyAll' | 'forward' | 'topic' | 'source' | 'toggleCollapsed';
+export type MessageMenuCommand = 'reply' | 'replyAll' | 'forward' | 'topic' | 'source' | 'toggleCollapsed' | 'translate';
 
 /**
  * What one message offers on the phone: its own ⋯ sheet and, for the newest
@@ -34,6 +34,8 @@ export interface MessageMenu {
   collapsed: boolean;
   bodyView: BodyViewState | null;
   images: ImageGuardChoices | null;
+  /** Offered when the message can be translated; `shown` while it is. */
+  translation: { shown: boolean } | null;
   run(command: MessageMenuCommand): void;
 }
 

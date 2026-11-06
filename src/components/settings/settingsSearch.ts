@@ -27,6 +27,7 @@ const SECTION_KEYS: Record<SettingsSection, readonly string[]> = {
   signatures: ['settings.signatures'],
   aliases: ['settings.aliases'],
   encryption: ['settings.smime', 'settings.pgp'],
+  translation: ['settings.translation'],
   composing: [
     'settings.notifications.sending',
     'settings.notifications.undo',
@@ -63,6 +64,7 @@ export function loadSettingsCatalogue(): Promise<CataloguePart[]> {
     import('@/i18n/parts/settings-b.json'),
     import('@/i18n/parts/settings-c.json'),
     import('@/i18n/parts/language.json'),
+    import('@/i18n/parts/translation.json'),
   ]).then((modules) => modules.map((module) => module.default as CataloguePart));
   return catalogue;
 }

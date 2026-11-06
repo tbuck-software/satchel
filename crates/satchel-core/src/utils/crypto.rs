@@ -54,6 +54,13 @@ impl<'a> SecretContext<'a> {
             row: state,
         }
     }
+    /// A translation engine's API key, bound to the engine it was saved for.
+    pub fn translation_api_key(engine: &'a str) -> Self {
+        Self {
+            column: "translation_engine_keys.encrypted_api_key",
+            row: engine,
+        }
+    }
     /// A master key wrapped for a backup; one per file, so no row.
     pub fn wrapped_master_key() -> Self {
         Self {

@@ -21,6 +21,7 @@ export type SettingsSection =
   | 'swipes'
   | 'senders'
   | 'encryption'
+  | 'translation'
   | 'calendar'
   | 'contacts'
   | 'shortcuts'
@@ -97,7 +98,7 @@ const BASE_GROUPS: SettingsSectionGroupDefinition[] = [
   { id: 'essentials', items: ['general', 'accounts', 'notifications'] },
   { id: 'writing', items: ['composing', 'signatures', 'templates', 'aliases', 'vacation'] },
   { id: 'organising', items: ['rules', 'smart-folders', 'swipes'] },
-  { id: 'privacy', items: ['senders', 'encryption'] },
+  { id: 'privacy', items: ['senders', 'encryption', 'translation'] },
   { id: 'people', items: ['calendar', 'contacts'] },
   { id: 'app', items: ['shortcuts', 'plugins', 'storage', 'diagnostics', 'about'] },
 ];
@@ -122,6 +123,7 @@ export const settingsSectionIcons: Record<SettingsSection, string> = {
   composing: '<path d="M22 2 11 13M22 2 15 22l-4-9-9-4Z"/>',
   senders: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
   encryption: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1zM9 12l2 2 4-4"/>',
+  translation: '<path d="m5 8 6 6M4 14l6-6 2-3M2 5h12M7 2h1M22 22l-5-10-5 10M14 18h6"/>',
   storage: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5M3 12a9 3 0 0 0 18 0"/>',
 };
 

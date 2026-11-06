@@ -127,6 +127,15 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     const reader = activeThreadReaderCommands();
     if (!reader?.threadId || reader.threadId !== currentId()) return [];
     return [
+      ...(reader.translationOffered ? [{
+        id: 'thread:translate',
+        icon: 'translate' as const,
+        title: t('commands.translateMessage'),
+        context: 'mail' as const,
+        shortcut: hint('translateMessage'),
+        keywords: t('shortcuts.actions.translateMessage.keywords'),
+        run: () => reader.toggleTranslation(),
+      }] : []),
       {
         id: 'thread:block-address',
         icon: 'block',

@@ -323,6 +323,21 @@ async fn run_once(
                 error = %err, "reply-thread merge skipped"
             ),
         }
+        // What left the device is kept for 30 days (ADR 0016).
+        match satchel_core::db::translation::TranslationRepository::new(pool)
+            .prune_request_log(chrono::Utc::now())
+            .await
+        {
+            Ok(removed) if removed > 0 => info!(
+                target: "satchel::maintenance",
+                removed, "pruned outbound request log"
+            ),
+            Ok(_) => {}
+            Err(err) => warn!(
+                target: "satchel::maintenance",
+                error = %err, "outbound request log pruning skipped"
+            ),
+        }
         match TopicRepository::new(pool).cleanup_orphaned_items().await {
             Ok(removed) if removed > 0 => info!(
                 target: "satchel::maintenance",

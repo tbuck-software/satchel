@@ -61,6 +61,7 @@ pub mod thread_actions;
 pub mod threads;
 pub mod tls_exceptions;
 pub mod topics;
+pub mod translation;
 #[cfg(desktop)]
 pub mod tray;
 #[cfg(mobile)]

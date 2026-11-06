@@ -62,6 +62,9 @@ ts-rs = { version = "=12.0.1", optional = true, features = ["serde-json-impl", "
 tokio-rustls = "0.26"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
+# Guesses a message's language locally, so Translate is offered only where it
+# helps. Trigram tables, no dictionaries, no network.
+whatlang = "0.18"
 
 # Desktop trusts a bundled root list; the app crate owns the platform plugins.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
