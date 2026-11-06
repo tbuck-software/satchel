@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::sync::errors::SyncResult;
+pub use crate::workflow::remote_marker::WorkflowMarker;
 
 pub use postroom::SourceCheckpoint as SyncCheckpoint;
 
@@ -26,6 +27,10 @@ pub struct RemoteMessageState {
     /// locally known flag state.
     pub is_read: Option<bool>,
     pub is_starred: Option<bool>,
+    /// Satchel's Done/Snooze marker on this copy (IMAP keywords). `None`:
+    /// the snapshot does not say, and the stored marker stays.
+    #[serde(default)]
+    pub workflow_marker: Option<WorkflowMarker>,
 }
 
 /// A presence/flag snapshot plus the identity generation in which its remote
@@ -35,6 +40,10 @@ pub struct RemoteMessageState {
 pub struct RemoteMessageStateSnapshot {
     pub states: Vec<RemoteMessageState>,
     pub remote_uidvalidity: Option<u32>,
+    /// Whether the folder lets Satchel create its own keywords
+    /// (`PERMANENTFLAGS` with `\*`). `None` for providers without keywords.
+    #[serde(default)]
+    pub custom_keywords: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -88,6 +97,11 @@ pub struct MessageEnvelope {
     pub is_read: bool,
     #[serde(default)]
     pub is_starred: bool,
+    /// Satchel's Done/Snooze marker as the server holds it for this copy
+    /// (IMAP keywords, Gmail labels). `None`: the provider does not say, and
+    /// the stored marker stays.
+    #[serde(default)]
+    pub workflow_marker: Option<WorkflowMarker>,
     /// Raw VCALENDAR text extracted from a `text/calendar` MIME part. Used by the
     /// ingest pipeline to populate `calendar_invites` even when the calendar is
     /// not embedded in the visible body. Defaults to None for providers that don't
@@ -378,6 +392,15 @@ pub struct FlagUpdate {
     pub starred: Option<bool>,
 }
 
+/// What became of a workflow marker write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkflowMarkerWrite {
+    Applied,
+    /// The server cannot store Satchel's markers (no custom keywords). Not
+    /// an error: the account keeps Done and Snooze on this device.
+    Unsupported,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MailEvent {
     // Boxed: the envelope is ~580 bytes while every other variant is under 30,
@@ -459,6 +482,16 @@ pub trait MailProvider: Send + Sync {
     }
 
     async fn set_flags(&self, messages: &[MessageRef], flags: FlagUpdate) -> SyncResult<()>;
+    /// Replace Satchel's Done/Snooze marker on these copies with `marker`,
+    /// leaving every other keyword or label alone. Providers without a place
+    /// for it keep this default.
+    async fn set_workflow_marker(
+        &self,
+        _messages: &[MessageRef],
+        _marker: &WorkflowMarker,
+    ) -> SyncResult<WorkflowMarkerWrite> {
+        Ok(WorkflowMarkerWrite::Unsupported)
+    }
     async fn move_messages(&self, messages: &[MessageRef], target: &str) -> SyncResult<()>;
     async fn delete_messages(&self, messages: &[MessageRef]) -> SyncResult<()>;
 

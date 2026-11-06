@@ -51,6 +51,7 @@ const QUOTA_BURST_UNITS: f64 = 100.0;
 mod cost {
     pub const LABELS_LIST: f64 = 1.0;
     pub const LABELS_CREATE: f64 = 5.0;
+    pub const LABELS_DELETE: f64 = 5.0;
     pub const GET_PROFILE: f64 = 1.0;
     pub const HISTORY_LIST: f64 = 2.0;
     pub const MESSAGES_LIST: f64 = 5.0;
@@ -1128,8 +1129,160 @@ impl GmailProvider {
                 Self::newest_history_id(latest_history_id, detail.history_id.clone());
             messages.push(map_gmail_message(detail));
         }
+        Self::attach_workflow_markers(client, token, &mut messages).await?;
 
         Ok((messages, latest_ts, latest_history_id))
+    }
+
+    async fn list_labels(
+        client: &reqwest::Client,
+        token: &str,
+    ) -> crate::sync::errors::SyncResult<Vec<GmailLabel>> {
+        let response = send_with_rate_limit_retry(
+            || {
+                client
+                    .get(format!("{}/labels", gmail_api_base()))
+                    .bearer_auth(token)
+            },
+            "labels request",
+            cost::LABELS_LIST,
+        )
+        .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(crate::sync::errors::http_failure(
+                "gmail",
+                "labels request",
+                status.as_u16(),
+                &body,
+            ));
+        }
+
+        let payload: GmailLabelsResponse = response
+            .json()
+            .await
+            .map_err(|err| format!("gmail labels parse failed: {err}"))?;
+        Ok(payload.labels.unwrap_or_default())
+    }
+
+    /// Turn Satchel's workflow labels into the envelope's marker and take them
+    /// out of `mailbox_ids`, where sync would otherwise make folders of them.
+    /// The label list is asked for only when some message carries a user
+    /// label at all; system labels are never Satchel's.
+    async fn attach_workflow_markers(
+        client: &reqwest::Client,
+        token: &str,
+        messages: &mut [MessageEnvelope],
+    ) -> crate::sync::errors::SyncResult<()> {
+        let needs_names = messages.iter().any(|message| {
+            message
+                .mailbox_ids
+                .iter()
+                .any(|id| gmail_label_is_user_label(id))
+        });
+        let satchel = if needs_names {
+            satchel_label_names(&Self::list_labels(client, token).await?)
+        } else {
+            std::collections::HashMap::new()
+        };
+        for message in messages {
+            apply_gmail_workflow_labels(message, &satchel);
+        }
+        Ok(())
+    }
+
+    /// The id of the label called `name`, created when it does not exist yet.
+    async fn ensure_label(
+        client: &reqwest::Client,
+        token: &str,
+        labels: &[GmailLabel],
+        name: &str,
+    ) -> crate::sync::errors::SyncResult<String> {
+        if let Some(label) = labels
+            .iter()
+            .find(|label| label.name.eq_ignore_ascii_case(name))
+        {
+            return Ok(label.id.clone());
+        }
+        // Done and Snoozed are for people to see in Gmail; the wake labels
+        // are bookkeeping and stay out of the label list.
+        let visibility =
+            if name.starts_with(crate::workflow::remote_marker::GMAIL_LABEL_WAKE_PREFIX) {
+                "labelHide"
+            } else {
+                "labelShow"
+            };
+        let payload = serde_json::json!({
+            "name": name,
+            "labelListVisibility": visibility,
+            "messageListVisibility": "show",
+        });
+        let response = send_with_rate_limit_retry(
+            || {
+                client
+                    .post(format!("{}/labels", gmail_api_base()))
+                    .bearer_auth(token)
+                    .json(&payload)
+            },
+            "label create",
+            cost::LABELS_CREATE,
+        )
+        .await?;
+        if response.status() == reqwest::StatusCode::CONFLICT {
+            // Another device created it between our list and this call.
+            let labels = Self::list_labels(client, token).await?;
+            return labels
+                .into_iter()
+                .find(|label| label.name.eq_ignore_ascii_case(name))
+                .map(|label| label.id)
+                .ok_or_else(|| format!("gmail label {name} exists but is not listed").into());
+        }
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(crate::sync::errors::http_failure(
+                "gmail",
+                "label create",
+                status.as_u16(),
+                &body,
+            ));
+        }
+        let label: GmailLabel = response
+            .json()
+            .await
+            .map_err(|err| format!("gmail label create parse failed: {err}"))?;
+        Ok(label.id)
+    }
+
+    /// Wake labels pile up, one per snooze time. Once a time is long past,
+    /// every device has woken its threads and the label only clutters.
+    async fn delete_expired_wake_labels(
+        client: &reqwest::Client,
+        token: &str,
+        labels: &[GmailLabel],
+        now: chrono::DateTime<chrono::Utc>,
+    ) {
+        for label in labels
+            .iter()
+            .filter(|label| wake_label_expired(&label.name, now))
+        {
+            let result = send_with_rate_limit_retry(
+                || {
+                    client
+                        .delete(format!("{}/labels/{}", gmail_api_base(), label.id))
+                        .bearer_auth(token)
+                },
+                "label delete",
+                cost::LABELS_DELETE,
+            )
+            .await;
+            // Cleanup only; the marker write does not depend on it.
+            if let Err(error) = result {
+                tracing::debug!(label = %label.name, %error, "expired Gmail wake label kept");
+            }
+        }
     }
 
     /// Gmail's JSON drops an empty `labelIds`, and the API reference does not
@@ -1412,36 +1565,9 @@ impl MailProvider for GmailProvider {
     async fn sync_folders(&self) -> crate::sync::errors::SyncResult<Vec<RemoteFolder>> {
         let token = self.access_token().await?;
         let client = crate::utils::http::client();
-        let response = send_with_rate_limit_retry(
-            || {
-                client
-                    .get(format!("{}/labels", gmail_api_base()))
-                    .bearer_auth(&token)
-            },
-            "labels request",
-            cost::LABELS_LIST,
-        )
-        .await?;
+        let labels = Self::list_labels(&client, &token).await?;
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(crate::sync::errors::http_failure(
-                "gmail",
-                "labels request",
-                status.as_u16(),
-                &body,
-            ));
-        }
-
-        let payload: GmailLabelsResponse = response
-            .json()
-            .await
-            .map_err(|err| format!("gmail labels parse failed: {err}"))?;
-
-        let mut folders = payload
-            .labels
-            .unwrap_or_default()
+        let mut folders = labels
             .into_iter()
             .filter(|label| {
                 label
@@ -1453,6 +1579,8 @@ impl MailProvider for GmailProvider {
                     .unwrap_or(true)
             })
             .filter(|label| !gmail_label_is_state_view(&label.id))
+            // Satchel's workflow labels are markers, not folders.
+            .filter(|label| !is_satchel_gmail_label(&label.name))
             .map(|label| RemoteFolder {
                 kind: gmail_system_folder_kind(&label.id).map(str::to_string),
                 id: label.id,
@@ -1757,6 +1885,7 @@ impl MailProvider for GmailProvider {
                         remote_id: message.id,
                         is_read: None,
                         is_starred: None,
+                        workflow_marker: None,
                     }),
             );
 
@@ -1773,6 +1902,7 @@ impl MailProvider for GmailProvider {
             states,
             // Gmail message ids are account-wide and never renumber.
             remote_uidvalidity: None,
+            custom_keywords: None,
         }))
     }
 
@@ -1941,6 +2071,75 @@ impl MailProvider for GmailProvider {
         }
 
         Ok(())
+    }
+
+    async fn set_workflow_marker(
+        &self,
+        messages: &[MessageRef],
+        marker: &crate::providers::traits::WorkflowMarker,
+    ) -> crate::sync::errors::SyncResult<crate::providers::traits::WorkflowMarkerWrite> {
+        use crate::providers::traits::WorkflowMarkerWrite;
+        if messages.is_empty() {
+            return Ok(WorkflowMarkerWrite::Applied);
+        }
+        let token = self.access_token().await?;
+        let client = crate::utils::http::client();
+        let labels = Self::list_labels(&client, &token).await?;
+        let wanted = marker.gmail_labels();
+        let mut add_labels = Vec::new();
+        for name in &wanted {
+            add_labels.push(Self::ensure_label(&client, &token, &labels, name).await?);
+        }
+        let remove_labels = labels
+            .iter()
+            .filter(|label| {
+                is_satchel_gmail_label(&label.name)
+                    && !wanted
+                        .iter()
+                        .any(|kept| kept.eq_ignore_ascii_case(&label.name))
+            })
+            .map(|label| label.id.clone())
+            .collect::<Vec<_>>();
+        if add_labels.is_empty() && remove_labels.is_empty() {
+            return Ok(WorkflowMarkerWrite::Applied);
+        }
+
+        let ids = messages
+            .iter()
+            .map(|message| message.remote_id.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        for chunk in ids.chunks(1000) {
+            let payload = serde_json::json!({
+                "ids": chunk,
+                "addLabelIds": add_labels,
+                "removeLabelIds": remove_labels,
+            });
+            let response = send_with_rate_limit_retry(
+                || {
+                    client
+                        .post(format!("{}/messages/batchModify", gmail_api_base()))
+                        .bearer_auth(&token)
+                        .json(&payload)
+                },
+                "set_workflow_marker",
+                cost::BATCH_MODIFY,
+            )
+            .await?;
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                return Err(crate::sync::errors::http_failure(
+                    "gmail",
+                    "set_workflow_marker",
+                    status.as_u16(),
+                    &body,
+                ));
+            }
+        }
+        Self::delete_expired_wake_labels(&client, &token, &labels, chrono::Utc::now()).await;
+        Ok(WorkflowMarkerWrite::Applied)
     }
 
     async fn create_folder(&self, path: &str) -> crate::sync::errors::SyncResult<()> {
@@ -2384,6 +2583,7 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         body_html: body.html,
         is_read,
         is_starred,
+        workflow_marker: None,
         body_calendar: body.calendar,
         smime_encrypted,
         smime_signed,
@@ -2618,6 +2818,55 @@ pub fn gmail_label_is_state_view(id: &str) -> bool {
         id.trim().to_ascii_uppercase().as_str(),
         "UNREAD" | "STARRED" | "IMPORTANT" | "CHAT"
     )
+}
+
+use crate::workflow::remote_marker::is_satchel_gmail_label;
+
+/// Gmail names user labels `Label_<n>`; system labels are upper-case words.
+fn gmail_label_is_user_label(id: &str) -> bool {
+    id.starts_with("Label_")
+}
+
+/// Satchel's workflow labels among all labels, by id.
+fn satchel_label_names(labels: &[GmailLabel]) -> std::collections::HashMap<String, String> {
+    labels
+        .iter()
+        .filter(|label| is_satchel_gmail_label(&label.name))
+        .map(|label| (label.id.clone(), label.name.clone()))
+        .collect()
+}
+
+fn apply_gmail_workflow_labels(
+    message: &mut MessageEnvelope,
+    satchel: &std::collections::HashMap<String, String>,
+) {
+    let names = message
+        .mailbox_ids
+        .iter()
+        .filter_map(|id| satchel.get(id))
+        .cloned()
+        .collect::<Vec<_>>();
+    message.mailbox_ids.retain(|id| !satchel.contains_key(id));
+    message.workflow_marker = Some(crate::workflow::remote_marker::marker_from_gmail_labels(
+        names.iter().map(String::as_str),
+    ));
+}
+
+/// Kept for two days past their time: a device that was off over a weekend
+/// still reads the snooze, sees it has passed and wakes the thread.
+const WAKE_LABEL_GRACE: chrono::Duration = chrono::Duration::days(2);
+
+fn wake_label_expired(name: &str, now: chrono::DateTime<chrono::Utc>) -> bool {
+    use crate::workflow::remote_marker::{
+        marker_from_gmail_labels, WorkflowMarker, GMAIL_LABEL_SNOOZED,
+    };
+    if !name.starts_with(crate::workflow::remote_marker::GMAIL_LABEL_WAKE_PREFIX) {
+        return false;
+    }
+    match marker_from_gmail_labels([GMAIL_LABEL_SNOOZED, name]) {
+        WorkflowMarker::Snoozed(wake) => wake + WAKE_LABEL_GRACE < now,
+        _ => false,
+    }
 }
 
 fn gmail_system_folder_kind(id: &str) -> Option<&'static str> {
@@ -3346,6 +3595,85 @@ mod tests {
             .decode(attachments[0].content_base64.as_deref().unwrap())
             .unwrap();
         assert_eq!(decoded, raw);
+    }
+
+    #[test]
+    fn satchel_labels_become_the_marker_and_leave_the_mailbox_list() {
+        use crate::workflow::remote_marker::WorkflowMarker;
+        let labels = vec![
+            super::GmailLabel {
+                id: "Label_1".into(),
+                name: "Projects".into(),
+                kind: Some("user".into()),
+            },
+            super::GmailLabel {
+                id: "Label_2".into(),
+                name: "Satchel/Snoozed".into(),
+                kind: Some("user".into()),
+            },
+            super::GmailLabel {
+                id: "Label_3".into(),
+                name: "Satchel/Wake/20261107T080000Z".into(),
+                kind: Some("user".into()),
+            },
+        ];
+        let satchel = super::satchel_label_names(&labels);
+        let mut envelope = map_gmail_message(GmailMessageResponse {
+            id: "m".into(),
+            thread_id: None,
+            history_id: None,
+            snippet: None,
+            label_ids: Some(vec![
+                "INBOX".into(),
+                "Label_1".into(),
+                "Label_2".into(),
+                "Label_3".into(),
+            ]),
+            internal_date: None,
+            payload: None,
+            raw: None,
+        });
+        super::apply_gmail_workflow_labels(&mut envelope, &satchel);
+        assert_eq!(envelope.mailbox_ids, vec!["INBOX", "Label_1"]);
+        assert!(matches!(
+            envelope.workflow_marker,
+            Some(WorkflowMarker::Snoozed(_))
+        ));
+
+        // Without any Satchel label the server says: no marker.
+        let mut plain = map_gmail_message(GmailMessageResponse {
+            id: "n".into(),
+            thread_id: None,
+            history_id: None,
+            snippet: None,
+            label_ids: Some(vec!["INBOX".into()]),
+            internal_date: None,
+            payload: None,
+            raw: None,
+        });
+        super::apply_gmail_workflow_labels(&mut plain, &std::collections::HashMap::new());
+        assert_eq!(plain.workflow_marker, Some(WorkflowMarker::None));
+        assert!(super::gmail_label_is_user_label("Label_12"));
+        assert!(!super::gmail_label_is_user_label("CATEGORY_UPDATES"));
+    }
+
+    #[test]
+    fn only_wake_labels_long_past_are_expired() {
+        use chrono::TimeZone;
+        let now = chrono::Utc
+            .with_ymd_and_hms(2026, 11, 10, 12, 0, 0)
+            .unwrap();
+        assert!(super::wake_label_expired(
+            "Satchel/Wake/20261107T080000Z",
+            now
+        ));
+        assert!(!super::wake_label_expired(
+            "Satchel/Wake/20261109T080000Z",
+            now
+        ));
+        assert!(!super::wake_label_expired("Satchel/Snoozed", now));
+        assert!(!super::wake_label_expired("Satchel/Wake/soon", now));
+        assert!(!super::wake_label_expired("Projects", now));
     }
 
     #[test]

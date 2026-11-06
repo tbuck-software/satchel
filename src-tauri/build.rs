@@ -29,6 +29,7 @@ const COMMANDS: &[&str] = &[
     "list_accounts",
     "get_account_visibility",
     "list_account_quotas",
+    "list_local_only_workflow_accounts",
     "set_account_visibility",
     "add_account",
     "deactivate_account",

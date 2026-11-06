@@ -494,6 +494,7 @@ fn envelope_from_raw(uidl: &str, raw: &[u8], receiver: &str) -> MessageEnvelope 
         // state lives only in the local database from then on.
         is_read: false,
         is_starred: false,
+        workflow_marker: None,
         body_calendar: parsed_body.calendar,
         smime_encrypted: parsed_body.smime_encrypted,
         smime_signed: parsed_body.smime_signed,

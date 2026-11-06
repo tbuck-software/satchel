@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use satchel_core::db::followups::FollowUpRepository;
+use satchel_core::sync::queue::SyncQueue;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{info, warn};
@@ -192,7 +193,8 @@ pub fn spawn_snooze_worker(pool: SqlitePool, app: AppHandle) {
         let mut tick: u64 = 0;
         loop {
             interval.tick().await;
-            match wake_due_snoozes(&pool).await {
+            let queue = app.state::<crate::AppState>().queue.clone();
+            match wake_due_snoozes(&pool, &queue).await {
                 Ok(thread_ids) if !thread_ids.is_empty() => {
                     let _ = app.emit(
                         "snooze:released",
@@ -516,7 +518,7 @@ async fn deliver_due_webhooks_with(pool: &SqlitePool, timeout: Duration) -> Resu
     Ok(())
 }
 
-async fn wake_due_snoozes(pool: &SqlitePool) -> Result<Vec<String>, String> {
+async fn wake_due_snoozes(pool: &SqlitePool, queue: &SyncQueue) -> Result<Vec<String>, String> {
     let now = chrono::Utc::now().to_rfc3339();
     let mut tx = pool
         .begin_with("BEGIN IMMEDIATE")
@@ -550,9 +552,23 @@ async fn wake_due_snoozes(pool: &SqlitePool) -> Result<Vec<String>, String> {
         .execute(&mut *tx)
         .await
         .map_err(|err| err.to_string())?;
+        // Woken here, woken everywhere: the snooze keyword or label goes, so
+        // other clients stop showing it. Every device that wakes the thread
+        // queues the same removal; it is idempotent.
+        satchel_core::sync::workflow_markers::enqueue_workflow_marker_in_transaction(
+            &mut tx,
+            queue,
+            thread_id,
+            &satchel_core::workflow::remote_marker::WorkflowMarker::None,
+            None,
+        )
+        .await?;
     }
 
     tx.commit().await.map_err(|err| err.to_string())?;
+    if !thread_ids.is_empty() {
+        queue.wake_worker();
+    }
     Ok(thread_ids)
 }
 

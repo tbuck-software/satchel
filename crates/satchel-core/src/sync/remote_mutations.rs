@@ -108,6 +108,15 @@ pub enum RemoteMutationPayload {
     DeleteFolder {
         path: String,
     },
+    /// Satchel's Done/Snooze marker for one thread (ADR 0009). Absolute: the
+    /// provider replaces whatever Satchel marker the copies carry with this
+    /// one, so a newer row for the same thread makes an unsent older one
+    /// redundant (`workflow_markers::enqueue_workflow_marker_in_transaction`).
+    WorkflowMarker {
+        thread_id: String,
+        refs: Vec<MessageRef>,
+        marker: crate::workflow::remote_marker::WorkflowMarker,
+    },
     /// File the copy of a mail that has already been delivered.
     ///
     /// Only ever appends: the message left over SMTP before this row existed,
@@ -719,6 +728,29 @@ pub async fn execute_remote_mutation(
             provider.rename_folder(&from_path, &to_path).await
         }
         RemoteMutationPayload::DeleteFolder { path } => provider.delete_folder(&path).await,
+        RemoteMutationPayload::WorkflowMarker {
+            thread_id,
+            refs,
+            marker,
+        } => {
+            use crate::providers::traits::WorkflowMarkerWrite;
+            use crate::sync::workflow_markers::{
+                forget_unsupported_push, record_workflow_sync_mode, MODE_LOCAL_ONLY, MODE_SERVER,
+            };
+            // A server without keyword support is a state, not an error:
+            // the account turns local-only, visibly in its settings, and
+            // the row settles instead of retrying forever.
+            match provider.set_workflow_marker(&refs, &marker).await? {
+                WorkflowMarkerWrite::Applied => {
+                    record_workflow_sync_mode(pool, account_id, MODE_SERVER).await?
+                }
+                WorkflowMarkerWrite::Unsupported => {
+                    record_workflow_sync_mode(pool, account_id, MODE_LOCAL_ONLY).await?;
+                    forget_unsupported_push(pool, &thread_id).await?;
+                }
+            }
+            Ok(())
+        }
         RemoteMutationPayload::AppendSent {
             raw_base64,
             folder_hint,

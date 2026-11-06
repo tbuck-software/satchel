@@ -356,6 +356,10 @@ impl ImapSyncState {
 #[derive(Debug, Default)]
 struct SnapshotProgress {
     changed: HashSet<String>,
+    /// Threads whose workflow followed a server marker. Kept apart from
+    /// `changed`: folder reconciliation would put a snoozed Inbox thread
+    /// straight back into the Inbox.
+    markers_applied: HashSet<String>,
     deferred: BTreeMap<String, SnapshotDeferral>,
 }
 
@@ -388,6 +392,21 @@ async fn reconcile_folder_snapshot(
                 false,
             )
         } else {
+            // INBOX speaks for the account: every Done and Snooze starts there.
+            if let Some(allowed) = snapshot
+                .custom_keywords
+                .filter(|_| remote_folder_id.eq_ignore_ascii_case("INBOX"))
+            {
+                use satchel_core::sync::workflow_markers::{
+                    record_workflow_sync_mode, MODE_LOCAL_ONLY, MODE_SERVER,
+                };
+                let mode = if allowed {
+                    MODE_SERVER
+                } else {
+                    MODE_LOCAL_ONLY
+                };
+                record_workflow_sync_mode(pool, account_id, mode).await?;
+            }
             let changes = reconcile_imap_folder_snapshot(
                 pool,
                 account_id,
@@ -397,9 +416,16 @@ async fn reconcile_folder_snapshot(
                 snapshot.remote_uidvalidity,
             )
             .await?;
+            let markers_applied =
+                satchel_core::sync::workflow_markers::reconcile_remote_workflow_markers(
+                    pool,
+                    &changes.marker_threads,
+                )
+                .await?;
             (
                 SnapshotProgress {
                     changed: changes.relocated_threads,
+                    markers_applied,
                     ..SnapshotProgress::default()
                 },
                 changes.skipped_stale_generation,
@@ -1334,6 +1360,7 @@ pub(crate) async fn sync_mailboxes(
             let mut owed_folders = Vec::<(String, String, String)>::new();
             let mut snapshot_sync_complete = true;
             let mut externally_changed_threads = HashSet::new();
+            let mut marker_changed_threads = HashSet::<String>::new();
             let mut folder_fetch_failures = Vec::<String>::new();
             let mut blocked_folders = Vec::<String>::new();
             let mut blocked_messages = 0usize;
@@ -1616,7 +1643,10 @@ pub(crate) async fn sync_mailboxes(
                     match result {
                         // Deferred IDs stay owed; the folder itself synced.
                         // Their holds wait in the state for a full sync.
-                        Ok(progress) => externally_changed_threads.extend(progress.changed),
+                        Ok(progress) => {
+                            externally_changed_threads.extend(progress.changed);
+                            marker_changed_threads.extend(progress.markers_applied);
+                        }
                         Err(err) => summary.failures.push(encoded_folder_sync_failure(
                             &account.email, &folder_name, err,
                         )),
@@ -1657,8 +1687,12 @@ pub(crate) async fn sync_mailboxes(
                 repair_stale_done_threads_in_inbox(pool, &account.id).await?;
             }
             if let Some(events) = events {
-                if !externally_changed_threads.is_empty() {
-                    events.publish(AppEvent::ThreadsUpdated(externally_changed_threads.iter().cloned().collect()));
+                let updated = externally_changed_threads
+                    .union(&marker_changed_threads)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !updated.is_empty() {
+                    events.publish(AppEvent::ThreadsUpdated(updated));
                 }
             }
 

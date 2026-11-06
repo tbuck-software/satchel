@@ -1884,6 +1884,7 @@ impl MailProvider for ImapProvider {
             return Ok(Some(crate::providers::traits::RemoteMessageStateSnapshot {
                 states: Vec::new(),
                 remote_uidvalidity: Some(remote_uidvalidity),
+                custom_keywords: Some(allows_custom_keywords(&mailbox.permanent_flags)),
             }));
         }
 
@@ -1910,6 +1911,7 @@ impl MailProvider for ImapProvider {
                             .flags()
                             .any(|flag| matches!(flag, async_imap::types::Flag::Flagged)),
                     ),
+                    workflow_marker: Some(workflow_marker_from_flags(entry.flags())),
                 })
             })
             .collect();
@@ -1918,6 +1920,7 @@ impl MailProvider for ImapProvider {
         Ok(Some(crate::providers::traits::RemoteMessageStateSnapshot {
             states,
             remote_uidvalidity: Some(remote_uidvalidity),
+            custom_keywords: Some(allows_custom_keywords(&mailbox.permanent_flags)),
         }))
     }
 
@@ -1994,6 +1997,44 @@ impl MailProvider for ImapProvider {
 
         let _ = timeout(Self::op_timeout(), session.logout()).await;
         Ok(())
+    }
+
+    async fn set_workflow_marker(
+        &self,
+        messages: &[MessageRef],
+        marker: &crate::providers::traits::WorkflowMarker,
+    ) -> crate::sync::errors::SyncResult<crate::providers::traits::WorkflowMarkerWrite> {
+        use crate::providers::traits::WorkflowMarkerWrite;
+        let grouped = Self::message_refs_by_folder(messages)?;
+        if grouped.is_empty() {
+            return Ok(WorkflowMarkerWrite::Applied);
+        }
+        let wanted = marker.imap_keywords();
+
+        let mut session = self.login_session().await?;
+        // A folder that refuses keywords (some servers treat Drafts or Sent
+        // apart) is skipped; the account is local-only only when none of the
+        // thread's folders took the marker.
+        let mut applied = false;
+        for (folder, group) in grouped {
+            match store_workflow_marker(&mut session, &folder, &group, &wanted, Self::op_timeout())
+                .await
+            {
+                Ok(WorkflowMarkerWrite::Applied) => applied = true,
+                Ok(WorkflowMarkerWrite::Unsupported) => {}
+                Err(error) => {
+                    let _ = timeout(Self::op_timeout(), session.logout()).await;
+                    return Err(error);
+                }
+            }
+        }
+
+        let _ = timeout(Self::op_timeout(), session.logout()).await;
+        Ok(if applied {
+            WorkflowMarkerWrite::Applied
+        } else {
+            WorkflowMarkerWrite::Unsupported
+        })
     }
 
     async fn create_folder(&self, path: &str) -> crate::sync::errors::SyncResult<()> {
@@ -4658,6 +4699,125 @@ fn extracted_fallback_could_help(parsed: &ParsedBody) -> bool {
         || (!parsed.trust.root_crypto && (parsed.text.is_none() || parsed.html.is_none()))
 }
 
+/// Write a workflow marker onto one mailbox's copies: drop the Satchel
+/// keywords the marker does not keep, then add its own. Other keywords stay.
+async fn store_workflow_marker<T>(
+    session: &mut async_imap::Session<T>,
+    folder: &str,
+    group: &UidMutationGroup,
+    wanted: &[String],
+    op_timeout: Duration,
+) -> crate::sync::errors::SyncResult<crate::providers::traits::WorkflowMarkerWrite>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    use crate::providers::traits::WorkflowMarkerWrite;
+    let uid_set = ImapProvider::uid_set(&group.uids);
+    let mailbox = timeout(op_timeout, session.select(folder))
+        .await
+        .map_err(|_| format!("imap SELECT {folder} timed out"))?
+        .map_err(|err| format!("imap SELECT {folder} failed: {err}"))?;
+    group.validate_generation(folder, mailbox.uid_validity)?;
+    // Removing needs no permission; adding a keyword the server will not
+    // keep succeeds silently on some servers and fails on others. Ask
+    // PERMANENTFLAGS instead of finding out.
+    if !wanted.is_empty() && !allows_custom_keywords(&mailbox.permanent_flags) {
+        return Ok(WorkflowMarkerWrite::Unsupported);
+    }
+
+    // The wake keyword carries a time, so a stale one is only known by
+    // reading the copies' current keywords.
+    let current = collect_imap_response(
+        op_timeout,
+        session.uid_fetch(&uid_set, "(UID FLAGS)"),
+        "UID FETCH workflow keywords",
+    )
+    .await?;
+    let present = current
+        .iter()
+        .flat_map(|entry| {
+            entry
+                .flags()
+                .filter_map(|flag| match flag {
+                    async_imap::types::Flag::Custom(name) => Some(name.into_owned()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let stale = stale_satchel_keywords(present, wanted);
+    for (sign, keywords) in [("-", &stale), ("+", &wanted.to_vec())] {
+        if keywords.is_empty() {
+            continue;
+        }
+        collect_imap_response(
+            op_timeout,
+            session.uid_store(
+                &uid_set,
+                format!("{sign}FLAGS.SILENT ({})", keywords.join(" ")),
+            ),
+            "UID STORE",
+        )
+        .await?;
+    }
+    Ok(WorkflowMarkerWrite::Applied)
+}
+
+/// Satchel's workflow marker among a message's IMAP flags.
+fn workflow_marker_from_flags<'a>(
+    flags: impl Iterator<Item = async_imap::types::Flag<'a>>,
+) -> crate::providers::traits::WorkflowMarker {
+    let keywords = flags
+        .filter_map(|flag| match flag {
+            async_imap::types::Flag::Custom(name) => Some(name.into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    crate::workflow::remote_marker::marker_from_imap_keywords(keywords.iter().map(String::as_str))
+}
+
+/// Whether a mailbox lets a client create keywords of its own: `\*` in
+/// PERMANENTFLAGS (RFC 3501 7.1). A server that omits PERMANENTFLAGS, or lists
+/// only system flags (Exchange does), keeps Done and Snooze local.
+pub(crate) fn allows_custom_keywords(permanent_flags: &[async_imap::types::Flag<'_>]) -> bool {
+    permanent_flags
+        .iter()
+        .any(|flag| matches!(flag, async_imap::types::Flag::MayCreate))
+}
+
+/// Satchel keywords present on the copies that the new marker does not keep,
+/// deduplicated without case. Foreign keywords are never returned.
+fn stale_satchel_keywords(
+    present: impl IntoIterator<Item = String>,
+    wanted: &[String],
+) -> Vec<String> {
+    let mut stale = Vec::<String>::new();
+    for keyword in present {
+        if !crate::workflow::remote_marker::is_satchel_imap_keyword(&keyword)
+            || wanted
+                .iter()
+                .any(|kept| kept.eq_ignore_ascii_case(&keyword))
+            || stale.iter().any(|seen| seen.eq_ignore_ascii_case(&keyword))
+        {
+            continue;
+        }
+        stale.push(keyword);
+    }
+    // Done and Snoozed are removed even when no copy showed them: a FETCH
+    // racing another client's STORE must not leave one behind.
+    for fixed in [
+        crate::workflow::remote_marker::IMAP_KEYWORD_DONE,
+        crate::workflow::remote_marker::IMAP_KEYWORD_SNOOZED,
+    ] {
+        if !wanted.iter().any(|kept| kept.eq_ignore_ascii_case(fixed))
+            && !stale.iter().any(|seen| seen.eq_ignore_ascii_case(fixed))
+        {
+            stale.push(fixed.to_string());
+        }
+    }
+    stale
+}
+
 /// One `UID FETCH (UID FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT])`
 /// entry as an envelope. `body` is the entry's `BODY[TEXT]` or, for a backfill
 /// that fetched bodies separately, what that fetch returned.
@@ -4721,6 +4881,7 @@ fn envelope_from_fetch(
     let is_starred = entry
         .flags()
         .any(|flag| matches!(flag, async_imap::types::Flag::Flagged));
+    let workflow_marker = Some(workflow_marker_from_flags(entry.flags()));
 
     let list_unsubscribe = parse_header_value(&header, "List-Unsubscribe");
     let list_unsubscribe_post = parse_header_value(&header, "List-Unsubscribe-Post");
@@ -4751,6 +4912,7 @@ fn envelope_from_fetch(
         body_html: parsed_body.html,
         is_read,
         is_starred,
+        workflow_marker,
         body_calendar: parsed_body.calendar,
         smime_encrypted: parsed_body.smime_encrypted,
         smime_signed: parsed_body.smime_signed,
@@ -6650,5 +6812,188 @@ Content-Type: text/html\r\n\r\n\
             "UID FETCH 1,2,3 (UID FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT])"
         ));
         assert!(commands[1].contains("UID FETCH 4,5 "));
+    }
+
+    /// A scripted IMAP server for workflow keywords: SELECT reports the given
+    /// PERMANENTFLAGS, `UID FETCH` the given flags on UID 41, and every other
+    /// command succeeds. Returns the commands it saw.
+    async fn keyword_server(
+        permanent_flags: &'static str,
+        flags: &'static str,
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<Vec<String>>) {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (reader, mut writer) = socket.into_split();
+            let mut reader = tokio::io::BufReader::new(reader);
+            writer.write_all(b"* OK ready\r\n").await.unwrap();
+            let mut commands = Vec::new();
+            let mut line = String::new();
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).await.unwrap() == 0 {
+                    break;
+                }
+                let command = line.trim_end().to_string();
+                let tag = command.split_whitespace().next().unwrap().to_string();
+                let verb = command
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_ascii_uppercase();
+                let reply = match verb.as_str() {
+                    "SELECT" => format!(
+                        "* FLAGS (\\Seen \\Flagged)\r\n* OK [PERMANENTFLAGS ({permanent_flags})] ok\r\n* 1 EXISTS\r\n* OK [UIDVALIDITY 7] ok\r\n{tag} OK [READ-WRITE] selected\r\n"
+                    ),
+                    "UID" if command.contains(" FETCH ") => format!(
+                        "* 1 FETCH (UID 41 FLAGS ({flags}))\r\n{tag} OK fetched\r\n"
+                    ),
+                    "LOGOUT" => format!("* BYE\r\n{tag} OK bye\r\n"),
+                    _ => format!("{tag} OK done\r\n"),
+                };
+                commands.push(command);
+                writer.write_all(reply.as_bytes()).await.unwrap();
+                if verb == "LOGOUT" {
+                    break;
+                }
+            }
+            commands
+        });
+        (address, server)
+    }
+
+    fn inbox_group() -> super::UidMutationGroup {
+        super::UidMutationGroup {
+            expected_uidvalidity: 7,
+            uids: vec![41],
+        }
+    }
+
+    fn stores(commands: &[String]) -> Vec<String> {
+        commands
+            .iter()
+            .filter(|command| command.contains("STORE"))
+            .map(|command| command.split_once(' ').unwrap().1.to_string())
+            .collect()
+    }
+
+    async fn write_marker(
+        permanent_flags: &'static str,
+        flags: &'static str,
+        marker: crate::workflow::remote_marker::WorkflowMarker,
+    ) -> (crate::providers::traits::WorkflowMarkerWrite, Vec<String>) {
+        let (address, server) = keyword_server(permanent_flags, flags).await;
+        let mut session = chunk_session(address).await;
+        let outcome = super::store_workflow_marker(
+            &mut session,
+            "INBOX",
+            &inbox_group(),
+            &marker.imap_keywords(),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("marker write");
+        session.logout().await.unwrap();
+        (outcome, server.await.unwrap())
+    }
+
+    #[tokio::test]
+    async fn a_new_snooze_replaces_the_old_wake_keyword_and_keeps_foreign_ones() {
+        use chrono::TimeZone;
+        let wake = chrono::Utc.with_ymd_and_hms(2026, 11, 7, 8, 0, 0).unwrap();
+        let (outcome, commands) = write_marker(
+            "\\Seen \\Flagged \\*",
+            "\\Seen $label1 $Satchel-Snoozed $Satchel-Wake-20261106T080000Z",
+            crate::workflow::remote_marker::WorkflowMarker::Snoozed(wake),
+        )
+        .await;
+        assert_eq!(
+            outcome,
+            crate::providers::traits::WorkflowMarkerWrite::Applied
+        );
+        assert_eq!(
+            stores(&commands),
+            vec![
+                "UID STORE 41 -FLAGS.SILENT ($Satchel-Wake-20261106T080000Z $Satchel-Done)",
+                "UID STORE 41 +FLAGS.SILENT ($Satchel-Snoozed $Satchel-Wake-20261107T080000Z)",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_server_without_custom_keywords_is_reported_not_written() {
+        let (outcome, commands) = write_marker(
+            "\\Seen \\Flagged \\Deleted",
+            "\\Seen",
+            crate::workflow::remote_marker::WorkflowMarker::Done,
+        )
+        .await;
+        assert_eq!(
+            outcome,
+            crate::providers::traits::WorkflowMarkerWrite::Unsupported
+        );
+        assert!(stores(&commands).is_empty());
+        assert!(!commands.iter().any(|command| command.contains("FETCH")));
+    }
+
+    #[tokio::test]
+    async fn clearing_the_marker_needs_no_keyword_permission() {
+        let (outcome, commands) = write_marker(
+            "\\Seen",
+            "\\Seen $Satchel-Done",
+            crate::workflow::remote_marker::WorkflowMarker::None,
+        )
+        .await;
+        assert_eq!(
+            outcome,
+            crate::providers::traits::WorkflowMarkerWrite::Applied
+        );
+        assert_eq!(
+            stores(&commands),
+            vec!["UID STORE 41 -FLAGS.SILENT ($Satchel-Done $Satchel-Snoozed)"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_changed_uidvalidity_refuses_the_write() {
+        let (address, server) = keyword_server("\\*", "").await;
+        let mut session = chunk_session(address).await;
+        let group = super::UidMutationGroup {
+            expected_uidvalidity: 8,
+            uids: vec![41],
+        };
+        let result = super::store_workflow_marker(
+            &mut session,
+            "INBOX",
+            &group,
+            &crate::workflow::remote_marker::WorkflowMarker::Done.imap_keywords(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(result.is_err());
+        session.logout().await.unwrap();
+        assert!(stores(&server.await.unwrap()).is_empty());
+    }
+
+    #[test]
+    fn keywords_on_a_fetched_copy_become_its_marker() {
+        use async_imap::types::Flag;
+        let flags = vec![
+            Flag::Seen,
+            Flag::Custom("$Satchel-Done".into()),
+            Flag::Custom("$Forwarded".into()),
+        ];
+        assert_eq!(
+            super::workflow_marker_from_flags(flags.into_iter()),
+            crate::workflow::remote_marker::WorkflowMarker::Done
+        );
+        assert!(super::allows_custom_keywords(&[
+            Flag::Seen,
+            Flag::MayCreate
+        ]));
+        assert!(!super::allows_custom_keywords(&[Flag::Seen, Flag::Flagged]));
+        assert!(!super::allows_custom_keywords(&[]));
     }
 }

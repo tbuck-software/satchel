@@ -185,6 +185,23 @@ im App-Crate lautet der Pfad `"../crates/satchel-core/src/db/migrations"`.
   arbeitet und seinen Cursor mit jedem Block speichert. Die sechs bereits
   ausgelieferten Daten-Migrationen bleiben, wie sie sind.
 
+### Erledigt und Wiedervorlage auf dem Server
+
+Done und Snooze reisen als IMAP-Keyword (`$Satchel-Done`, `$Satchel-Snoozed`
+plus `$Satchel-Wake-<UTC>`) bzw. Gmail-Label (`Satchel/…`) mit (ADR 0009,
+`workflow::remote_marker`). Drei Dinge brechen einzeln lautlos:
+
+- Die `workflow_marker`-Mutation wird **vor** dem Archiv-Move eingereiht:
+  MOVE nimmt Keywords mit, die Quell-UID existiert danach nicht mehr.
+- Gmail-Labels unter `Satchel/` sind Markierungen, keine Ordner. Der Provider
+  nimmt sie aus `mailbox_ids` heraus; landen sie dort, legt die Sync für jede
+  Label-ID einen Ordner an.
+- Pull wendet nur **Flanken** an: `threads.remote_workflow_marker` hält, was
+  dieses Gerät zuletzt gesendet oder gesehen hat. Ein Server, der nichts sagt,
+  setzt Todo/Waiting nie zurück; eine noch nicht gesendete lokale Änderung
+  gewinnt. Konten ohne `\*` in PERMANENTFLAGS sind `local_only`
+  (`account_workflow_sync`) und werden weder beschrieben noch gelesen.
+
 ### Mobile (Android/iOS)
 
 Ein Bundle, drei Plattformen. Was der Shell kann, wird **erfragt**, nicht geraten:

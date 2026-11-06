@@ -1135,6 +1135,7 @@ impl MailProvider for OutlookProvider {
                             flag.flag_status
                                 .map(|status| status.eq_ignore_ascii_case("flagged"))
                         }),
+                        workflow_marker: None,
                     }),
             );
             next = page.next_link.filter(|value| !value.trim().is_empty());
@@ -1143,6 +1144,7 @@ impl MailProvider for OutlookProvider {
             states,
             // Graph immutable ids are account-wide and never renumber.
             remote_uidvalidity: None,
+            custom_keywords: None,
         }))
     }
 
@@ -1834,6 +1836,7 @@ fn map_graph_message(message: GraphMessage) -> MessageEnvelope {
             .and_then(|flag| flag.flag_status.as_deref())
             .map(|status| status.eq_ignore_ascii_case("flagged"))
             .unwrap_or(false),
+        workflow_marker: None,
         body_calendar: None,
         smime_encrypted,
         smime_signed,

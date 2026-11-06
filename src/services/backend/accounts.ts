@@ -277,3 +277,11 @@ export type BackendAccountQuota = import('./generated/app/commands/accounts/Acco
 export function backendListAccountQuotas(): Promise<BackendAccountQuota[]> {
   return invoke('list_account_quotas');
 }
+
+/**
+ * Accounts whose mail server cannot store Done and Snooze (no custom IMAP
+ * keywords), so those states stay on this device.
+ */
+export function backendListLocalOnlyWorkflowAccounts(): Promise<string[]> {
+  return invoke('list_local_only_workflow_accounts');
+}

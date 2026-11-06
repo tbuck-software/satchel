@@ -565,6 +565,17 @@ async fn server_async<F: std::future::Future<Output = (&'static str, String)> + 
                     .await;
                 continue;
             };
+            // Message fetches with user labels read the label list to find
+            // Satchel's workflow labels. Every fixture has the same neutral
+            // list, so it is answered here and kept out of the recording.
+            if line.starts_with("GET ") && line.contains("/labels ") {
+                let (status, body) = quiet_gmail(&line).expect("label list");
+                let _ = socket.write_all(format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                ).as_bytes()).await;
+                continue;
+            }
             recorded.lock().unwrap().push(line.clone());
             let (status, body) = route(line, origin.clone()).await;
             // The client may already have given up (deadline tests).

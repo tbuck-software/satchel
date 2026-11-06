@@ -1,0 +1,14 @@
+{
+  "en": {
+    "workflowSync": {
+      "localOnlyTitle": "Done and Snooze stay on this device",
+      "localOnlyBody": "This mail server does not store custom keywords, so other devices and mail apps do not see what you marked Done or snoozed. Done mail is still moved to Archive."
+    }
+  },
+  "de": {
+    "workflowSync": {
+      "localOnlyTitle": "Erledigt und Wiedervorlage bleiben auf diesem Gerät",
+      "localOnlyBody": "Dieser Mailserver speichert keine eigenen Schlüsselwörter. Andere Geräte und Mail-Apps sehen deshalb nicht, was du als erledigt markiert oder auf Wiedervorlage gelegt hast. Erledigte Mails landen weiterhin im Archiv."
+    }
+  }
+}

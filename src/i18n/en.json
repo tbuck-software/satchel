@@ -4112,5 +4112,9 @@
     "noPath": "No file path was passed.",
     "openFailed": "The message could not be read.",
     "untitled": "Message"
+  },
+  "workflowSync": {
+    "localOnlyBody": "This mail server does not store custom keywords, so other devices and mail apps do not see what you marked Done or snoozed. Done mail is still moved to Archive.",
+    "localOnlyTitle": "Done and Snooze stay on this device"
   }
 }

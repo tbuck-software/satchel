@@ -4112,5 +4112,9 @@
     "noPath": "Kein Dateipfad übergeben.",
     "openFailed": "Nachricht konnte nicht gelesen werden",
     "untitled": "Nachricht"
+  },
+  "workflowSync": {
+    "localOnlyBody": "Dieser Mailserver speichert keine eigenen Schlüsselwörter. Andere Geräte und Mail-Apps sehen deshalb nicht, was du als erledigt markiert oder auf Wiedervorlage gelegt hast. Erledigte Mails landen weiterhin im Archiv.",
+    "localOnlyTitle": "Erledigt und Wiedervorlage bleiben auf diesem Gerät"
   }
 }

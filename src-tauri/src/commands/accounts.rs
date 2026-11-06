@@ -402,6 +402,18 @@ pub struct AccountQuotaDto {
     pub fetched_at: Option<String>,
 }
 
+/// Accounts whose mail server cannot store Done and Snooze (no custom IMAP
+/// keywords), so they stay on this device. Shown as a note in the account's
+/// settings; every other account syncs them through the server.
+#[tauri::command]
+pub async fn list_local_only_workflow_accounts(
+    pool: tauri::State<'_, crate::db::ReadPool>,
+) -> CommandResult<Vec<String>> {
+    satchel_core::sync::workflow_markers::list_local_only_accounts(pool.inner().as_ref())
+        .await
+        .map_err(CommandError::unexpected)
+}
+
 #[tauri::command]
 pub async fn list_account_quotas(
     pool: tauri::State<'_, crate::db::ReadPool>,

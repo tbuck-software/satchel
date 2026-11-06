@@ -750,8 +750,8 @@ async fn persist_provider_message(
     // without its parts is missing information, not reporting a message that
     // lost its attachments — mail is immutable on the server.
     sqlx::query(
-        "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, in_reply_to, references_header, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, date, body_text, body_html, original_body_html, original_source, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, remote_uid, remote_id, raw_size, raw_headers, remote_draft_id, category, provider_labels, list_unsubscribe, list_unsubscribe_post, auth_spf, auth_dkim, auth_dmarc, smime_encrypted, smime_signed, pgp_signed, trust_metadata, created_at, updated_at, received_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, in_reply_to, references_header, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, date, body_text, body_html, original_body_html, original_source, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, remote_uid, remote_id, raw_size, raw_headers, remote_draft_id, category, provider_labels, list_unsubscribe, list_unsubscribe_post, auth_spf, auth_dkim, auth_dmarc, smime_encrypted, smime_signed, pgp_signed, trust_metadata, created_at, updated_at, received_at, remote_workflow_marker)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             folder_id = excluded.folder_id,
             thread_id = excluded.thread_id,
@@ -791,6 +791,7 @@ async fn persist_provider_message(
             pgp_signed = excluded.pgp_signed,
             trust_metadata = excluded.trust_metadata,
             remote_draft_id = COALESCE(excluded.remote_draft_id, messages.remote_draft_id),
+            remote_workflow_marker = COALESCE(excluded.remote_workflow_marker, messages.remote_workflow_marker),
             draft_attachments_json = CASE
                 WHEN excluded.is_draft = 1 THEN NULL
                 ELSE messages.draft_attachments_json
@@ -845,6 +846,12 @@ async fn persist_provider_message(
     .bind(&now)
     .bind(&now)
     .bind(message.received_at_rfc3339.as_deref())
+    .bind(
+        message
+            .workflow_marker
+            .as_ref()
+            .map(|marker| marker.as_db_value()),
+    )
     // The two guards of the conflict clause; its placeholders come after every
     // one of the inserted values.
     .bind(flags_locked)
@@ -1019,6 +1026,20 @@ async fn finish_provider_message(
     // Provider downloads and event publishing follow the committed rows.
     if folder_type == "archive" || folder_type == "aside" || is_snooze_folder(folder_remote_id) {
         reconcile_external_workflow_states(pool, &HashSet::from([thread_id.clone()])).await?;
+    }
+    // Done or Snooze set on another device or client travels as a keyword
+    // or label on the copy just stored.
+    if message.workflow_marker.is_some() {
+        let changed = satchel_core::sync::workflow_markers::reconcile_remote_workflow_markers(
+            pool,
+            &HashSet::from([thread_id.clone()]),
+        )
+        .await?;
+        if let Some(events) = events.filter(|_| !changed.is_empty()) {
+            events.publish(crate::events::bus::AppEvent::ThreadsUpdated(
+                changed.into_iter().collect(),
+            ));
+        }
     }
 
     // Calendar parts and inline images are downloaded from the provider, so
@@ -1337,6 +1358,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,
@@ -2079,6 +2101,46 @@ mod tests {
 
     /// The user marked the thread read; the mutation is queued and has not
     /// reached the server. The next provider batch must not undo it.
+    /// Snoozed on another device: the copy arrives with the keywords, and
+    /// this device snoozes the thread until the same time, so its own snooze
+    /// worker wakes it. A later sync that reports no marker at all (a
+    /// provider that does not say) leaves it alone.
+    #[tokio::test]
+    async fn a_snooze_keyword_from_another_device_snoozes_the_thread_here() {
+        use satchel_core::workflow::remote_marker::WorkflowMarker;
+        let pool = ingest_pool().await;
+        sqlx::query("UPDATE folders SET uidvalidity = 7")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let wake = chrono::DateTime::from_timestamp(
+            (chrono::Utc::now() + chrono::Duration::hours(3)).timestamp(),
+            0,
+        )
+        .unwrap();
+        let mut message = envelope("41");
+        message.workflow_marker = Some(WorkflowMarker::Snoozed(wake));
+        ingest(&pool, "inbox", &message).await.expect("ingest");
+        let (state, until): (String, Option<String>) =
+            sqlx::query_as("SELECT workflow_state, snooze_until FROM threads")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(state, "snoozed");
+        assert_eq!(until, Some(wake.to_rfc3339()));
+
+        message.workflow_marker = None;
+        ingest(&pool, "inbox", &message).await.expect("re-ingest");
+        let (state, marker): (String, Option<String>) = sqlx::query_as(
+            "SELECT t.workflow_state, m.remote_workflow_marker FROM threads t JOIN messages m ON m.thread_id = t.id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(state, "snoozed");
+        assert_eq!(marker, Some(WorkflowMarker::Snoozed(wake).as_db_value()));
+    }
+
     #[tokio::test]
     async fn an_open_flag_mutation_protects_the_local_read_state() {
         for status in ["pending", "sending", "scheduled", "failed"] {
@@ -3648,6 +3710,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,
@@ -3838,6 +3901,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,
@@ -3932,6 +3996,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,
@@ -4014,6 +4079,7 @@ mod tests {
                 remote_id: "replacement-message".to_string(),
                 is_read: None,
                 is_starred: None,
+                workflow_marker: None,
             }],
             // Gmail: neither side names a generation.
             None,

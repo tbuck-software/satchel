@@ -18,6 +18,9 @@ use super::thread_resolution::refresh_provider_thread_projection;
 #[derive(Debug, Default)]
 pub struct ImapSnapshotChanges {
     pub relocated_threads: HashSet<String>,
+    /// Threads with a copy whose Satchel workflow marker changed on the
+    /// server; `workflow_markers::reconcile_remote_workflow_markers` next.
+    pub marker_threads: HashSet<String>,
     /// The snapshot named a different identity generation than the folder, so
     /// nothing was removed. Visible to the caller because a folder that keeps
     /// skipping its reconciliation is a fault worth seeing.
@@ -101,7 +104,9 @@ where
             | RemoteMutationPayload::RenameFolder { .. }
             | RemoteMutationPayload::DeleteFolder { .. }
             | RemoteMutationPayload::AppendSent { .. }
-            | RemoteMutationPayload::UndoTrash { .. } => continue,
+            | RemoteMutationPayload::UndoTrash { .. }
+            // A marker changes keywords, never where a message lies.
+            | RemoteMutationPayload::WorkflowMarker { .. } => continue,
         };
         for message_ref in message_refs {
             if let Some(folder) = message_ref.source_folder {
@@ -169,7 +174,8 @@ where
                 add_refs(&mut paths, &refs);
                 paths.insert(normalized_remote_folder(&target_remote_folder_id));
             }
-            RemoteMutationPayload::Delete { refs } => add_refs(&mut paths, &refs),
+            RemoteMutationPayload::Delete { refs }
+            | RemoteMutationPayload::WorkflowMarker { refs, .. } => add_refs(&mut paths, &refs),
             RemoteMutationPayload::Flags {
                 refs,
                 read,
@@ -482,16 +488,17 @@ pub async fn reconcile_imap_folder_snapshot(
 
     let pending_refs =
         pending_remote_message_refs(&mut *tx, account_id, PendingMutations::All).await?;
-    let local_rows = sqlx::query_as::<_, (String, String, Option<String>, i64, i64)>(
-        "SELECT id, thread_id, remote_id, is_read, is_starred
+    let local_rows =
+        sqlx::query_as::<_, (String, String, Option<String>, i64, i64, Option<String>)>(
+            "SELECT id, thread_id, remote_id, is_read, is_starred, remote_workflow_marker
          FROM messages
          WHERE account_id = ? AND folder_id = ?",
-    )
-    .bind(account_id)
-    .bind(folder_id)
-    .fetch_all(&mut *tx)
-    .await
-    .map_err(|err| err.to_string())?;
+        )
+        .bind(account_id)
+        .bind(folder_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|err| err.to_string())?;
 
     let now = chrono::Utc::now().to_rfc3339();
     let normalized_folder = remote_folder_id.to_ascii_lowercase();
@@ -501,7 +508,7 @@ pub async fn reconcile_imap_folder_snapshot(
         ..ImapSnapshotChanges::default()
     };
 
-    for (message_id, thread_id, remote_id, is_read, is_starred) in local_rows {
+    for (message_id, thread_id, remote_id, is_read, is_starred, stored_marker) in local_rows {
         let Some(remote_id) = remote_id else {
             continue;
         };
@@ -510,6 +517,20 @@ pub async fn reconcile_imap_folder_snapshot(
         }
 
         if let Some(remote) = remote_by_id.get(remote_id.as_str()) {
+            // An observation, not a decision: the thread-level rule (and its
+            // guard for unsent local changes) runs on the caller's side.
+            if let Some(marker) = remote.workflow_marker.as_ref() {
+                let marker = marker.as_db_value();
+                if stored_marker.as_deref() != Some(marker.as_str()) {
+                    sqlx::query("UPDATE messages SET remote_workflow_marker = ? WHERE id = ?")
+                        .bind(&marker)
+                        .bind(&message_id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|err| err.to_string())?;
+                    changes.marker_threads.insert(thread_id.clone());
+                }
+            }
             let next_read = remote
                 .is_read
                 .map(|value| if value { 1 } else { 0 })
@@ -1433,6 +1454,7 @@ mod tests {
                 remote_id: (*remote_id).to_string(),
                 is_read: Some(false),
                 is_starred: Some(false),
+                workflow_marker: None,
             })
             .collect()
     }
@@ -1547,6 +1569,7 @@ mod tests {
                remote_id TEXT,
                is_read INTEGER,
                is_starred INTEGER,
+               remote_workflow_marker TEXT,
                is_draft INTEGER DEFAULT 0,
                has_attachments INTEGER DEFAULT 0,
                subject TEXT,
@@ -1692,11 +1715,13 @@ mod tests {
                     remote_id: "1".to_string(),
                     is_read: Some(true),
                     is_starred: Some(true),
+                    workflow_marker: None,
                 },
                 RemoteMessageState {
                     remote_id: "5".to_string(),
                     is_read: Some(true),
                     is_starred: Some(false),
+                    workflow_marker: None,
                 },
             ],
             Some(111),
