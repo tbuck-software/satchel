@@ -186,3 +186,46 @@ it('replaces only the script that was shown', async () => {
   await flushPromises();
   expect(backend.backendEnableServerRules).toHaveBeenCalledWith('acc', 'replace', 'main');
 });
+
+it('offers a turn-off without the server only after a failed one, and asks first', async () => {
+  backend.backendGetServerRulesOverview.mockResolvedValue({
+    accounts: [account({ enabled: true, server_active: true, last_error: 'backend.errors.serverRules.unreachable' })],
+    rules: [],
+  });
+  backend.backendDisableServerRules
+    .mockRejectedValueOnce(new Error('unreachable'))
+    .mockResolvedValueOnce({ accounts: [account()], rules: [] });
+  const wrapper = mount(ServerRulesSettings);
+  await flushPromises();
+  const force = 'Turn off without contacting the server';
+  expect(wrapper.findAll('button').some((b) => b.text() === force)).toBe(false);
+
+  await button(wrapper, 'Turn off').trigger('click');
+  await flushPromises();
+  expect(backend.backendDisableServerRules).toHaveBeenLastCalledWith('acc');
+
+  confirm.ask.mockResolvedValueOnce(false);
+  await button(wrapper, force).trigger('click');
+  await flushPromises();
+  expect(backend.backendDisableServerRules).toHaveBeenCalledTimes(1);
+  expect(confirm.ask).toHaveBeenLastCalledWith(expect.objectContaining({ tone: 'danger' }));
+
+  confirm.ask.mockResolvedValueOnce(true);
+  await button(wrapper, force).trigger('click');
+  await flushPromises();
+  expect(backend.backendDisableServerRules).toHaveBeenLastCalledWith('acc', true);
+  expect(wrapper.findAll('button').some((b) => b.text() === force)).toBe(false);
+});
+
+it('offers the forced turn-off when keeping rules local fails too', async () => {
+  backend.backendGetServerRulesOverview.mockResolvedValue({
+    accounts: [account({ enabled: true, consent_script: 'main' })],
+    rules: [],
+  });
+  backend.backendDisableServerRules.mockRejectedValueOnce(new Error('unreachable'));
+  const wrapper = mount(ServerRulesSettings);
+  await flushPromises();
+  await button(wrapper, 'Keep rules in Satchel').trigger('click');
+  await flushPromises();
+  expect(wrapper.findAll('button').some((b) => b.text() === 'Turn off without contacting the server')).toBe(true);
+});

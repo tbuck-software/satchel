@@ -48,6 +48,10 @@ export async function backendEnableServerRules(
   });
 }
 
-export async function backendDisableServerRules(accountId: string): Promise<BackendServerRulesOverview> {
-  return invoke<BackendServerRulesOverview>('disable_server_rules', { accountId });
+/**
+ * `force` skips the server (gone, or refusing the account): the record is
+ * cleared, and whatever Satchel wrote stays on that server.
+ */
+export async function backendDisableServerRules(accountId: string, force = false): Promise<BackendServerRulesOverview> {
+  return invoke<BackendServerRulesOverview>('disable_server_rules', { accountId, force });
 }

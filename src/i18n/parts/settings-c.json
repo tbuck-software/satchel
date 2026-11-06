@@ -359,7 +359,10 @@
         "portPlaceholder": "4190",
         "security": "Connection security",
         "editServer": "Enter server manually",
-        "useDetected": "Use detected server"
+        "useDetected": "Use detected server",
+        "forceTurnOff": "Turn off without contacting the server",
+        "forceConfirmTitle": "Turn off without the server?",
+        "forceConfirmBody": "Satchel's scripts stay on the server and may keep running there; remove them in your provider's webmail. Satchel stops sending to this server."
       }
     }
   },
@@ -715,7 +718,7 @@
         "replaceConfirmTitle": "„{script}“ nicht mehr ausführen?",
         "replaceConfirmBody": "„{script}“ bleibt auf dem Server, läuft aber erst wieder, wenn du die Server-Regeln ausschaltest.",
         "suggestedTitle": "Autoconfig nennt {host}:{port}",
-        "suggestedDetail": "Er liegt nicht auf der Domain deines Mail-Servers. Satchel meldet sich dort nur an, wenn du zustimmst.",
+        "suggestedDetail": "Der Server liegt nicht auf der Domain deines Mail-Servers. Satchel meldet sich dort nur an, wenn du zustimmst.",
         "useSuggested": "Diesen Server verwenden",
         "host": "Server",
         "hostPlaceholder": "sieve.example.com",
@@ -723,7 +726,10 @@
         "portPlaceholder": "4190",
         "security": "Verbindungssicherheit",
         "editServer": "Server manuell eintragen",
-        "useDetected": "Erkannten Server verwenden"
+        "useDetected": "Erkannten Server verwenden",
+        "forceTurnOff": "Ausschalten, ohne den Server zu kontaktieren",
+        "forceConfirmTitle": "Ohne den Server ausschalten?",
+        "forceConfirmBody": "Satchels Skripte bleiben auf dem Server und laufen dort womöglich weiter; entferne sie im Webmail deines Anbieters. Satchel sendet nichts mehr an diesen Server."
       }
     }
   }

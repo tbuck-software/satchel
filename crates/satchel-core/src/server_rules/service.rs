@@ -133,8 +133,8 @@ async fn open(
 /// Second-level labels under which a country code hands out names, so that
 /// `example.co.uk` counts as the site and not `co.uk`. Without a public
 /// suffix list this errs towards "different site", which only means asking.
-const SECOND_LEVEL_SUFFIXES: [&str; 11] = [
-    "co", "com", "net", "org", "ac", "gov", "edu", "gv", "or", "ne", "go",
+const SECOND_LEVEL_SUFFIXES: [&str; 13] = [
+    "co", "com", "net", "org", "ac", "gov", "edu", "gv", "or", "ne", "go", "me", "ltd",
 ];
 
 fn site(host: &str) -> String {
@@ -147,9 +147,15 @@ fn site(host: &str) -> String {
     labels[labels.len().saturating_sub(take)..].join(".")
 }
 
-/// Whether two hosts belong to the same registrable domain.
+fn is_ip_literal(host: &str) -> bool {
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    host.parse::<std::net::IpAddr>().is_ok()
+}
+
+/// Whether two hosts belong to the same registrable domain. An IP address
+/// belongs to no domain: it is never the same site as anything.
 pub fn same_site(a: &str, b: &str) -> bool {
-    site(a) == site(b)
+    !is_ip_literal(a) && !is_ip_literal(b) && site(a) == site(b)
 }
 
 /// Where to look, in order: the person's override alone if there is one;
@@ -397,9 +403,7 @@ pub async fn push_account(
             state.pushed_vacation = matches!(compiled.vacation, VacationCompilation::Server { .. });
             state.last_push_at = Some(chrono::Utc::now().to_rfc3339());
             state.last_error = match &compiled.vacation {
-                VacationCompilation::Unsupported(_) => {
-                    Some("backend.errors.serverRules.vacationUnsupported".to_string())
-                }
+                VacationCompilation::Unsupported(_) => Some(VACATION_UNSUPPORTED.to_string()),
                 _ => None,
             };
             repo.save(&state).await?;
@@ -430,15 +434,21 @@ async fn fail(
 /// scripts. Runs against the server whenever server rules were on, even if no
 /// push ever finished: removal touches only scripts carrying Satchel's marker
 /// and is safe to repeat.
+///
+/// `force` skips the server, for one that is gone or refuses the account:
+/// the record is cleared and retries stop, while whatever Satchel wrote stays
+/// on that server. The person confirms that in the UI.
 pub async fn disable(
     pool: &SqlitePool,
     account_id: &str,
+    force: bool,
 ) -> Result<ServerRulesState, ServiceError> {
     let _guard = LOCK.lock().await;
     let repo = ServerRulesRepository::new(pool);
     let mut state = repo.get_or_empty(account_id).await?;
     let endpoint = state.override_endpoint().or_else(|| state.detected.clone());
-    if let (true, Some(endpoint)) = (state.enabled || state.activation_mode.is_some(), endpoint) {
+    let was_on = state.enabled || state.activation_mode.is_some();
+    if let (true, false, Some(endpoint)) = (was_on, force, endpoint) {
         let creds = credentials(pool, account_id).await?;
         let outcome = async {
             let mut client = open(&endpoint, &creds).await?;
@@ -488,13 +498,25 @@ pub async fn push_enabled_accounts(pool: &SqlitePool) {
     push_where(pool, |state| state.enabled).await;
 }
 
-/// Retry accounts whose last push did not land (server down, app quit
-/// mid-push). Accounts waiting for the person's choice are left waiting.
+/// Whether an account's server may run something other than what Satchel
+/// has now: its script was never verified active, or the last push failed
+/// (an unreachable server keeps the old script, e.g. a vacation reply that was
+/// switched off since). A clean push clears `last_error`. Accounts waiting
+/// for the person's choice stay waiting; a reply the server cannot express
+/// is not retried, since a retry would fail the same way.
+pub fn needs_retry(state: &ServerRulesState) -> bool {
+    let failed = state
+        .last_error
+        .as_deref()
+        .is_some_and(|key| key != VACATION_UNSUPPORTED);
+    state.enabled && state.consent_script.is_none() && (!state.server_active || failed)
+}
+
+const VACATION_UNSUPPORTED: &str = "backend.errors.serverRules.vacationUnsupported";
+
+/// Retry accounts whose last push did not land; see [`needs_retry`].
 pub async fn push_pending_accounts(pool: &SqlitePool) {
-    push_where(pool, |state| {
-        state.enabled && !state.server_active && state.consent_script.is_none()
-    })
-    .await;
+    push_where(pool, needs_retry).await;
 }
 
 /// Where a rule runs, for the badge next to it.
@@ -567,6 +589,66 @@ mod tests {
         assert!(!same_site("sieve.other.co.uk", "imap.example.co.uk"));
         assert!(!same_site("sieve.example.net", "imap.example.com"));
         assert!(same_site("sieve.gmx.de", "imap.gmx.de"));
+        assert!(same_site("sieve.example.org.uk", "imap.example.org.uk"));
+        assert!(!same_site("sieve.alice.me.uk", "imap.bob.me.uk"));
+        assert!(!same_site("sieve.a.ltd.uk", "imap.b.ltd.uk"));
+        assert!(!same_site("192.0.2.10", "192.0.2.10"));
+        assert!(!same_site("[2001:db8::1]", "imap.example.com"));
+    }
+
+    #[tokio::test]
+    async fn a_forced_turn_off_clears_the_record_without_the_server() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('acc', 'Me', 'me@example.com', 'imap', '{}', '', '2026-01-01', '2026-01-01')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let repo = ServerRulesRepository::new(&pool);
+        let mut state = ServerRulesState::empty("acc");
+        // A server that no longer exists; the forced path must not look it up.
+        state.detected = Some(endpoint("gone.invalid"));
+        state.enabled = true;
+        state.activation_mode = Some("direct".into());
+        state.previous_active_script = Some("roundcube".into());
+        state.last_error = Some("backend.errors.serverRules.unreachable".into());
+        repo.save(&state).await.unwrap();
+
+        let after = disable(&pool, "acc", true).await.unwrap();
+        assert!(!after.enabled && !after.server_active);
+        assert!(after.activation_mode.is_none() && after.previous_active_script.is_none());
+        assert!(after.last_error.is_none());
+        assert!(!needs_retry(&after), "retries stop");
+        assert_eq!(
+            after.detected,
+            Some(endpoint("gone.invalid")),
+            "detection stays"
+        );
+    }
+
+    #[test]
+    fn retries_cover_unverified_and_failed_pushes() {
+        let mut state = ServerRulesState::empty("acc");
+        assert!(!needs_retry(&state), "off");
+        state.enabled = true;
+        assert!(needs_retry(&state), "never verified");
+        state.server_active = true;
+        assert!(!needs_retry(&state), "clean");
+        // Unreachable on the last push: the server still runs the old script.
+        state.last_error = Some("backend.errors.serverRules.unreachable".into());
+        assert!(needs_retry(&state));
+        state.last_error = Some(VACATION_UNSUPPORTED.into());
+        assert!(!needs_retry(&state), "would fail the same way");
+        state.last_error = Some("backend.errors.serverRules.unreachable".into());
+        state.consent_script = Some("roundcube".into());
+        assert!(!needs_retry(&state), "waits for the person");
     }
 
     #[test]

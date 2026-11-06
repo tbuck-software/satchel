@@ -582,6 +582,15 @@ export default {
                     "shape": {
                         "kind": "value"
                     }
+                },
+                "force": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
                 }
             }
         },

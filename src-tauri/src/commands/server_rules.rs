@@ -345,12 +345,16 @@ pub async fn enable_server_rules(
     overview(pool.inner()).await
 }
 
+/// Turn server rules off. With `force`, the server is not contacted (it is
+/// gone, or refuses the account): the record is cleared and retries stop,
+/// while Satchel's scripts stay on that server. The UI asks first.
 #[tauri::command]
 pub async fn disable_server_rules(
     pool: tauri::State<'_, SqlitePool>,
     account_id: String,
+    force: Option<bool>,
 ) -> CommandResult<ServerRulesOverviewDto> {
-    service::disable(pool.inner(), &account_id)
+    service::disable(pool.inner(), &account_id, force.unwrap_or(false))
         .await
         .map_err(service_error)?;
     overview(pool.inner()).await

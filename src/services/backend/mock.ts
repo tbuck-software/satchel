@@ -1844,6 +1844,8 @@ const handlers: Record<string, Handler> = {
     const sieve = mockSieve(String(accountId));
     sieve.availability = 'available';
     sieve.detected = true;
+    // Found on the mail domain itself, as the real detection clears it then.
+    sieve.suggested = null;
     return mockServerRulesOverview();
   },
   set_server_rules_endpoint: ({ input: raw }) => {
@@ -1858,6 +1860,7 @@ const handlers: Record<string, Handler> = {
       tlsOverride: host ? input.tls ?? null : null,
       availability: 'unknown',
       detected: false,
+      suggested: null,
     });
     return mockServerRulesOverview();
   },
@@ -1865,7 +1868,7 @@ const handlers: Record<string, Handler> = {
     const input = raw as { account_id: string; choice: string; expected_active?: string | null };
     return mockEnableServerRules(input.account_id, input.choice, input.expected_active ?? null);
   },
-  disable_server_rules: ({ accountId }) => mockDisableServerRules(String(accountId)),
+  disable_server_rules: ({ accountId, force }) => mockDisableServerRules(String(accountId), force === true),
   list_certificate_exceptions: () => certificateExceptions.filter((exception) => Date.parse(exception.expires_at) > Date.now()),
   trust_expired_certificate: ({ input: raw }) => {
     const input = raw as { account_id: string; host: string; fingerprint: string };
@@ -1912,6 +1915,8 @@ interface MockSieveAccount {
   previous: string | null;
   consent: string | null;
   lastPushAt: string | null;
+  /** A server autoconfig named on another domain, waiting for a yes. */
+  suggested: string | null;
 }
 
 const mockSieveAccounts: Record<string, MockSieveAccount> = {};
@@ -1936,6 +1941,7 @@ function mockSieve(accountId: string): MockSieveAccount {
     previous: null,
     consent: null,
     lastPushAt: null,
+    suggested: `sieve.${account.email.split('@')[1]}-hosting.net`,
   };
   return mockSieveAccounts[accountId]!;
 }
@@ -1959,9 +1965,9 @@ function mockServerRulesOverview() {
         host_override: sieve.hostOverride,
         port_override: sieve.portOverride,
         tls_override: sieve.tlsOverride,
-        suggested_host: null,
-        suggested_port: null,
-        suggested_tls: null,
+        suggested_host: sieve.suggested,
+        suggested_port: sieve.suggested ? 4190 : null,
+        suggested_tls: sieve.suggested ? 'starttls' : null,
         implementation: sieve.availability === 'available' ? 'Mock Sieve' : null,
         extensions,
         checked_at: sieve.availability === 'unknown' ? null : new Date().toISOString(),
@@ -2015,14 +2021,17 @@ function mockEnableServerRules(accountId: string, choice: string, expectedActive
   return mockServerRulesOverview();
 }
 
-function mockDisableServerRules(accountId: string) {
+function mockDisableServerRules(accountId: string, force: boolean) {
   const sieve = mockSieve(accountId);
   const { server } = sieve;
-  if (server.active === 'satchel' || server.active === 'satchel-main') {
-    server.active = sieve.previous && server.scripts[sieve.previous] ? sieve.previous : null;
+  // Forced: the server is not contacted, so Satchel's scripts stay on it.
+  if (!force) {
+    if (server.active === 'satchel' || server.active === 'satchel-main') {
+      server.active = sieve.previous && server.scripts[sieve.previous] ? sieve.previous : null;
+    }
+    delete server.scripts['satchel-main'];
+    delete server.scripts.satchel;
   }
-  delete server.scripts['satchel-main'];
-  delete server.scripts.satchel;
   Object.assign(sieve, { enabled: false, serverActive: false, mode: null, previous: null, consent: null });
   return mockServerRulesOverview();
 }

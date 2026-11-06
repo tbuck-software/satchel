@@ -45,14 +45,19 @@ async function load() {
   }
 }
 
-async function run(accountId: string, action: () => Promise<BackendServerRulesOverview>) {
+/** Accounts whose last turn-off could not reach the server. */
+const turnOffFailed = reactive(new Set<string>());
+
+async function run(accountId: string, action: () => Promise<BackendServerRulesOverview>): Promise<boolean> {
   busy.value = accountId;
   delete errors[accountId];
   try {
     overview.value = await action();
+    return true;
   } catch (error) {
     errors[accountId] = errorText(error);
     await load();
+    return false;
   } finally {
     busy.value = null;
   }
@@ -115,8 +120,24 @@ async function replaceScript(state: BackendServerRulesAccount) {
   if (decision) enable(state, 'replace');
 }
 
-function disable(state: BackendServerRulesAccount) {
-  void run(state.account_id, () => backendDisableServerRules(state.account_id));
+async function disable(state: BackendServerRulesAccount) {
+  const done = await run(state.account_id, () => backendDisableServerRules(state.account_id));
+  if (done) turnOffFailed.delete(state.account_id);
+  else turnOffFailed.add(state.account_id);
+}
+
+/** The server is gone or refuses the account: let go of it, knowingly. */
+async function forceDisable(state: BackendServerRulesAccount) {
+  const confirmed = await ask({
+    title: t('settings.serverRules.forceConfirmTitle'),
+    body: t('settings.serverRules.forceConfirmBody'),
+    confirmLabel: t('settings.serverRules.forceTurnOff'),
+    tone: 'danger',
+  });
+  if (!confirmed) return;
+  if (await run(state.account_id, () => backendDisableServerRules(state.account_id, true))) {
+    turnOffFailed.delete(state.account_id);
+  }
 }
 
 function detect(state: BackendServerRulesAccount) {
@@ -186,6 +207,11 @@ defineExpose({ load });
           </span>
           <span v-if="storedError(state)" class="error">{{ storedError(state) }}</span>
           <span v-if="errors[state.account_id]" role="alert" class="error">{{ errors[state.account_id] }}</span>
+          <span v-if="state.enabled && turnOffFailed.has(state.account_id)">
+            <AppButton size="sm" variant="link" :disabled="busy === state.account_id" @click="void forceDisable(state)">
+              {{ $t('settings.serverRules.forceTurnOff') }}
+            </AppButton>
+          </span>
         </div>
         <div class="actions">
           <AppButton
@@ -217,7 +243,7 @@ defineExpose({ load });
             v-if="state.enabled"
             size="sm"
             :disabled="busy === state.account_id"
-            @click="disable(state)"
+            @click="void disable(state)"
           >
             {{ $t('settings.serverRules.turnOff') }}
           </AppButton>
@@ -255,7 +281,7 @@ defineExpose({ load });
             <AppButton size="sm" variant="danger" :disabled="busy === state.account_id" @click="void replaceScript(state)">
               {{ $t('settings.serverRules.replace') }}
             </AppButton>
-            <AppButton size="sm" :disabled="busy === state.account_id" @click="disable(state)">
+            <AppButton size="sm" :disabled="busy === state.account_id" @click="void disable(state)">
               {{ $t('settings.serverRules.keepLocal') }}
             </AppButton>
           </template>

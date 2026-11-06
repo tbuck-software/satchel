@@ -3043,6 +3043,9 @@
       "consentTitle": "Dein Skript „{script}“ ist aktiv",
       "editServer": "Server manuell eintragen",
       "endpoint": "{host}:{port} · {tls}",
+      "forceConfirmBody": "Satchels Skripte bleiben auf dem Server und laufen dort womöglich weiter; entferne sie im Webmail deines Anbieters. Satchel sendet nichts mehr an diesen Server.",
+      "forceConfirmTitle": "Ohne den Server ausschalten?",
+      "forceTurnOff": "Ausschalten, ohne den Server zu kontaktieren",
       "hint": "Deine Regeln und die Abwesenheitsnotiz laufen zusätzlich auf dem Mail-Server, also auch bei geschlossenem Satchel.",
       "host": "Server",
       "hostPlaceholder": "sieve.example.com",
@@ -3064,7 +3067,7 @@
         "unknown": "Nicht geprüft",
         "waiting": "Wartet auf deine Wahl"
       },
-      "suggestedDetail": "Er liegt nicht auf der Domain deines Mail-Servers. Satchel meldet sich dort nur an, wenn du zustimmst.",
+      "suggestedDetail": "Der Server liegt nicht auf der Domain deines Mail-Servers. Satchel meldet sich dort nur an, wenn du zustimmst.",
       "suggestedTitle": "Autoconfig nennt {host}:{port}",
       "title": "Server-Regeln",
       "tlsImplicit": "TLS",
