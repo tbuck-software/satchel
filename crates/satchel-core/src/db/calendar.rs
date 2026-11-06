@@ -15,7 +15,8 @@ const INVITE_SELECT: &str =
 
 const EVENT_SELECT: &str =
     "SELECT id, account_id, uid, title, description, location, starts_at, ends_at,
-            all_day, attendees_json, source, collection_href, created_at, updated_at
+            all_day, attendees_json, source, collection_href, read_only, recurrence_instance,
+            rich_description, created_at, updated_at
      FROM calendar_events";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, FromRow)]
@@ -62,6 +63,12 @@ pub struct CalendarEventRecord {
     pub attendees_json: String,
     pub source: String,
     pub collection_href: Option<String>,
+    /// 1 when the provider does not let this account change the event.
+    pub read_only: i64,
+    /// 1 for one occurrence of a recurring series.
+    pub recurrence_instance: i64,
+    /// 1 when the description is formatted text the editor cannot keep.
+    pub rich_description: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -83,6 +90,7 @@ pub struct CalendarEventSyncState {
     pub source: String,
     pub remote_href: Option<String>,
     pub remote_etag: Option<String>,
+    pub read_only: i64,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -111,6 +119,16 @@ pub struct CalendarEventWrite<'a> {
     pub remote_etag: Option<&'a str>,
     pub collection_href: Option<&'a str>,
     pub raw_ics: Option<&'a str>,
+    pub flags: EventFlags,
+}
+
+/// What a provider says about an event beyond its fields. Local, CalDAV and
+/// Google rows keep the defaults.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EventFlags {
+    pub read_only: bool,
+    pub recurrence_instance: bool,
+    pub rich_description: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +149,45 @@ pub struct GoogleCalendarEvent<'a> {
     pub all_day: bool,
     pub attendees_json: &'a str,
     pub calendar_id: &'a str,
+}
+
+/// One event of an Outlook calendar as Graph reported it.
+#[derive(Debug, Clone)]
+pub struct OutlookCalendarEvent<'a> {
+    pub id: &'a str,
+    /// The Graph event id; edits and deletions address the event by it.
+    pub remote_id: &'a str,
+    /// Graph's `changeKey`, compared before every write.
+    pub change_key: Option<&'a str>,
+    pub flags: EventFlags,
+    pub uid: &'a str,
+    pub title: &'a str,
+    pub description: Option<&'a str>,
+    pub location: Option<&'a str>,
+    pub starts_at: &'a str,
+    pub ends_at: &'a str,
+    pub all_day: bool,
+    pub attendees_json: &'a str,
+}
+
+/// What one delta pass of an Outlook calendar changed.
+#[derive(Debug, Clone)]
+pub struct OutlookCalendarDelta<'a> {
+    pub calendar_id: &'a str,
+    pub calendar_name: &'a str,
+    pub changed: &'a [OutlookCalendarEvent<'a>],
+    /// Graph event ids the pass reported deleted or cancelled.
+    pub removed: &'a [&'a str],
+    /// A pass from scratch lists every event; anything else is gone.
+    pub complete: bool,
+    /// Where the next pass resumes; `None` starts it from scratch.
+    pub cursor: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+pub struct CalendarSourceCursor {
+    pub remote_id: String,
+    pub sync_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
@@ -401,7 +458,7 @@ impl<'a> CalendarRepository<'a> {
         id: &str,
     ) -> Result<Option<CalendarEventSyncState>, CalendarError> {
         let state = sqlx::query_as::<_, CalendarEventSyncState>(
-            "SELECT account_id, uid, source, remote_href, remote_etag
+            "SELECT account_id, uid, source, remote_href, remote_etag, read_only
              FROM calendar_events WHERE id = ? LIMIT 1",
         )
         .bind(id)
@@ -418,7 +475,7 @@ impl<'a> CalendarRepository<'a> {
         id: &str,
     ) -> Result<Option<CalendarEventSyncState>, CalendarError> {
         sqlx::query_as::<_, CalendarEventSyncState>(
-            "SELECT account_id, uid, source, remote_href, remote_etag
+            "SELECT account_id, uid, source, remote_href, remote_etag, read_only
              FROM calendar_events WHERE id = ? LIMIT 1",
         )
         .bind(id)
@@ -465,8 +522,8 @@ impl<'a> CalendarRepository<'a> {
             "INSERT INTO calendar_events
                 (id, account_id, uid, title, description, location, starts_at, ends_at, all_day,
                  attendees_json, source, remote_href, remote_etag, collection_href, raw_ics,
-                 created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 read_only, recurrence_instance, rich_description, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                 uid = excluded.uid,
                 title = excluded.title,
@@ -481,16 +538,23 @@ impl<'a> CalendarRepository<'a> {
                 remote_etag = excluded.remote_etag,
                 collection_href = excluded.collection_href,
                 raw_ics = excluded.raw_ics,
+                read_only = excluded.read_only,
+                recurrence_instance = excluded.recurrence_instance,
+                rich_description = excluded.rich_description,
                 updated_at = CASE WHEN
                     (calendar_events.uid, calendar_events.title, calendar_events.description,
                      calendar_events.location, calendar_events.starts_at, calendar_events.ends_at,
                      calendar_events.all_day, calendar_events.attendees_json, calendar_events.source,
                      calendar_events.remote_href, calendar_events.remote_etag,
-                     calendar_events.collection_href, calendar_events.raw_ics)
+                     calendar_events.collection_href, calendar_events.raw_ics,
+                     calendar_events.read_only, calendar_events.recurrence_instance,
+                     calendar_events.rich_description)
                     IS (excluded.uid, excluded.title, excluded.description, excluded.location,
                         excluded.starts_at, excluded.ends_at, excluded.all_day,
                         excluded.attendees_json, excluded.source, excluded.remote_href,
-                        excluded.remote_etag, excluded.collection_href, excluded.raw_ics)
+                        excluded.remote_etag, excluded.collection_href, excluded.raw_ics,
+                        excluded.read_only, excluded.recurrence_instance,
+                        excluded.rich_description)
                     THEN calendar_events.updated_at ELSE excluded.updated_at END
              WHERE calendar_events.account_id = excluded.account_id",
         )
@@ -509,6 +573,9 @@ impl<'a> CalendarRepository<'a> {
         .bind(event.remote_etag)
         .bind(event.collection_href)
         .bind(event.raw_ics)
+        .bind(i64::from(event.flags.read_only))
+        .bind(i64::from(event.flags.recurrence_instance))
+        .bind(i64::from(event.flags.rich_description))
         .bind(&now)
         .bind(&now)
         .execute(&mut *connection)
@@ -628,6 +695,150 @@ impl<'a> CalendarRepository<'a> {
         Ok(())
     }
 
+    /// Resume points of the account's mirrored Outlook calendars.
+    pub async fn outlook_cursors(
+        &self,
+        account_id: &str,
+    ) -> Result<Vec<CalendarSourceCursor>, CalendarError> {
+        sqlx::query_as::<_, CalendarSourceCursor>(
+            "SELECT remote_id, sync_cursor FROM calendar_sources
+             WHERE account_id = ? AND source = 'outlook'",
+        )
+        .bind(account_id)
+        .fetch_all(self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    /// Apply one delta pass of one Outlook calendar together with its new
+    /// cursor, so a pass is either recorded whole or resumed whole.
+    pub async fn apply_outlook_delta(
+        &self,
+        account_id: &str,
+        delta: OutlookCalendarDelta<'_>,
+    ) -> Result<(), CalendarError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO calendar_sources (account_id, source, remote_id, name, updated_at, sync_cursor)
+             VALUES (?, 'outlook', ?, ?, ?, ?)
+             ON CONFLICT(account_id, source, remote_id) DO UPDATE SET
+                name = excluded.name,
+                updated_at = excluded.updated_at,
+                sync_cursor = excluded.sync_cursor",
+        )
+        .bind(account_id)
+        .bind(delta.calendar_id)
+        .bind(delta.calendar_name)
+        .bind(&now)
+        .bind(delta.cursor)
+        .execute(&mut *transaction)
+        .await?;
+        for removed in delta.removed {
+            sqlx::query(
+                "DELETE FROM calendar_events
+                 WHERE account_id = ? AND source = 'outlook' AND collection_href = ? AND remote_href = ?",
+            )
+            .bind(account_id)
+            .bind(delta.calendar_id)
+            .bind(removed)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        if delta.complete {
+            let mirrored: Vec<String> = sqlx::query_scalar(
+                "SELECT remote_href FROM calendar_events
+                 WHERE account_id = ? AND source = 'outlook' AND collection_href = ?",
+            )
+            .bind(account_id)
+            .bind(delta.calendar_id)
+            .fetch_all(&mut *transaction)
+            .await?;
+            let listed = delta
+                .changed
+                .iter()
+                .map(|event| event.remote_id)
+                .collect::<std::collections::HashSet<_>>();
+            for stale in mirrored.iter().filter(|id| !listed.contains(id.as_str())) {
+                sqlx::query(
+                    "DELETE FROM calendar_events
+                     WHERE account_id = ? AND source = 'outlook' AND collection_href = ? AND remote_href = ?",
+                )
+                .bind(account_id)
+                .bind(delta.calendar_id)
+                .bind(stale)
+                .execute(&mut *transaction)
+                .await?;
+            }
+        }
+        for event in delta.changed {
+            Self::write_event(
+                &mut transaction,
+                outlook_event_write(account_id, delta.calendar_id, event),
+            )
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Store an event Graph just returned for a write, outside any sync pass.
+    pub async fn upsert_outlook_event(
+        &self,
+        account_id: &str,
+        calendar_id: &str,
+        event: &OutlookCalendarEvent<'_>,
+    ) -> Result<CalendarEventRecord, CalendarError> {
+        self.upsert_event(outlook_event_write(account_id, calendar_id, event))
+            .await
+    }
+
+    /// Drop Outlook calendars the account no longer lists, with their events.
+    pub async fn retain_outlook_calendars(
+        &self,
+        account_id: &str,
+        listed: &[&str],
+    ) -> Result<(), CalendarError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mirrored: Vec<String> = sqlx::query_scalar(
+            "SELECT remote_id FROM calendar_sources WHERE account_id = ? AND source = 'outlook'",
+        )
+        .bind(account_id)
+        .fetch_all(&mut *transaction)
+        .await?;
+        for gone in mirrored.iter().filter(|id| !listed.contains(&id.as_str())) {
+            sqlx::query(
+                "DELETE FROM calendar_events
+                 WHERE account_id = ? AND source = 'outlook' AND collection_href = ?",
+            )
+            .bind(account_id)
+            .bind(gone)
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                "DELETE FROM calendar_sources
+                 WHERE account_id = ? AND source = 'outlook' AND remote_id = ?",
+            )
+            .bind(account_id)
+            .bind(gone)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    pub async fn count_events(&self, account_id: &str, source: &str) -> Result<i64, CalendarError> {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) FROM calendar_events WHERE account_id = ? AND source = ?",
+        )
+        .bind(account_id)
+        .bind(source)
+        .fetch_one(self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
     pub async fn upsert_caldav_event(
         &self,
         account_id: &str,
@@ -650,7 +861,8 @@ impl<'a> CalendarRepository<'a> {
             id: &id,
             account_id,
             uid: &event.uid,
-            title: event.summary.as_deref().unwrap_or("(ohne Titel)"),
+            // An empty title is the frontend's to name in the viewer's language.
+            title: event.summary.as_deref().unwrap_or_default(),
             description: event.description.as_deref(),
             location: event.location.as_deref(),
             starts_at,
@@ -662,6 +874,7 @@ impl<'a> CalendarRepository<'a> {
             remote_etag: etag,
             collection_href: Some(collection_href),
             raw_ics: Some(raw_ics),
+            flags: EventFlags::default(),
         })
         .await?;
         Ok(true)
@@ -712,6 +925,32 @@ fn invite_id(account_id: &str, uid: &str, recurrence_id: &str) -> String {
         "calendar",
         &[account_id, uid, recurrence_id],
     )
+}
+
+/// The generic write of an Outlook event in `calendar_id`.
+pub fn outlook_event_write<'a>(
+    account_id: &'a str,
+    calendar_id: &'a str,
+    event: &OutlookCalendarEvent<'a>,
+) -> CalendarEventWrite<'a> {
+    CalendarEventWrite {
+        id: event.id,
+        account_id,
+        uid: event.uid,
+        title: event.title,
+        description: event.description,
+        location: event.location,
+        starts_at: event.starts_at,
+        ends_at: event.ends_at,
+        all_day: event.all_day,
+        attendees_json: event.attendees_json,
+        source: "outlook",
+        remote_href: Some(event.remote_id),
+        remote_etag: event.change_key,
+        collection_href: Some(calendar_id),
+        raw_ics: None,
+        flags: event.flags,
+    }
 }
 
 fn stable_id(prefix: &str, value: &str) -> String {
@@ -807,6 +1046,7 @@ mod tests {
             remote_etag: None,
             collection_href: None,
             raw_ics: None,
+            flags: EventFlags::default(),
         }
     }
 

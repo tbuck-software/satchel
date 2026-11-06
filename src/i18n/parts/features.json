@@ -39,6 +39,10 @@
         "edit": "Edit event",
         "delete": "Delete event",
         "deleteConfirmRemote": "The event is also deleted from the calendar on the server. This cannot be undone.",
+        "deleteConfirmAttendees": "The event is deleted from the calendar on the server, and its attendees will be notified. This cannot be undone.",
+        "deleteConfirmOccurrence": "Only this occurrence is deleted from the calendar on the server; the rest of the series stays. This cannot be undone.",
+        "deleteConfirmOccurrenceAttendees": "Only this occurrence is deleted from the calendar on the server, and its attendees will be notified; the rest of the series stays. This cannot be undone.",
+        "readOnlyOutlook": "Change this event in Outlook: it is a meeting you attend, or its calendar is read-only.",
         "deleteConfirmBody": "The event is removed from your calendar. This cannot be undone.",
         "deleteConfirmTitle": "Delete this event?",
         "details": "Event details"
@@ -55,7 +59,8 @@
         "needsAction": "Awaiting reply",
         "cancelled": "Cancelled by organizer",
         "ownEvent": "Own event",
-        "googleCalendar": "Google Calendar"
+        "googleCalendar": "Google Calendar",
+        "outlookCalendar": "Outlook Calendar"
       },
       "source": {
         "heading": "Calendars",
@@ -63,6 +68,7 @@
         "caldav": "CalDAV",
         "invites": "Invitations",
         "googlePrimary": "Main calendar",
+        "outlook": "Outlook calendar",
         "show": "Show",
         "hide": "Hide"
       },
@@ -77,7 +83,11 @@
         "descriptionPlaceholder": "Notes, agenda, …",
         "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
         "sendInvites": "Send ICS invitations by mail",
-        "serverNotifications": "CalDAV servers may notify guests even when mail invitations are turned off.",
+        "serverNotifications": "Calendar servers may notify guests even when mail invitations are turned off.",
+        "guestsNeedInvites": "Guests are only saved with invitations on.",
+        "descriptionLocked": "This description is formatted in Outlook (links, tables). Edit it there; everything else can be changed here.",
+        "occurrenceOnly": "Changes apply to this occurrence only.",
+        "attendeesNotified": "Attendees will be notified of your changes.",
         "submit": "Create event",
         "add": "Add",
         "errors": {
@@ -453,6 +463,10 @@
         "edit": "Termin bearbeiten",
         "delete": "Termin löschen",
         "deleteConfirmRemote": "Der Termin wird auch im Kalender auf dem Server gelöscht. Das lässt sich nicht rückgängig machen.",
+        "deleteConfirmAttendees": "Der Termin wird im Kalender auf dem Server gelöscht, und die Teilnehmenden werden benachrichtigt. Das lässt sich nicht rückgängig machen.",
+        "deleteConfirmOccurrence": "Nur dieser Termin der Serie wird im Kalender auf dem Server gelöscht; die übrigen bleiben. Das lässt sich nicht rückgängig machen.",
+        "deleteConfirmOccurrenceAttendees": "Nur dieser Termin der Serie wird im Kalender auf dem Server gelöscht, und die Teilnehmenden werden benachrichtigt; die übrigen bleiben. Das lässt sich nicht rückgängig machen.",
+        "readOnlyOutlook": "Ändere diesen Termin in Outlook: Du nimmst nur teil, oder der Kalender ist schreibgeschützt.",
         "deleteConfirmBody": "Der Termin wird aus deinem Kalender entfernt. Das lässt sich nicht rückgängig machen.",
         "deleteConfirmTitle": "Diesen Termin löschen?",
         "details": "Termindetails"
@@ -469,7 +483,8 @@
         "needsAction": "Antwort offen",
         "cancelled": "Vom Organisator abgesagt",
         "ownEvent": "Eigener Termin",
-        "googleCalendar": "Google Kalender"
+        "googleCalendar": "Google Kalender",
+        "outlookCalendar": "Outlook-Kalender"
       },
       "source": {
         "heading": "Kalender",
@@ -477,6 +492,7 @@
         "caldav": "CalDAV",
         "invites": "Einladungen",
         "googlePrimary": "Hauptkalender",
+        "outlook": "Outlook-Kalender",
         "show": "Einblenden",
         "hide": "Ausblenden"
       },
@@ -491,7 +507,11 @@
         "descriptionPlaceholder": "Notizen, Agenda, …",
         "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
         "sendInvites": "ICS-Einladungen per Mail senden",
-        "serverNotifications": "CalDAV-Server können Gäste auch dann benachrichtigen, wenn Einladungen per E-Mail ausgeschaltet sind.",
+        "serverNotifications": "Kalenderserver können Gäste auch dann benachrichtigen, wenn Einladungen per E-Mail ausgeschaltet sind.",
+        "guestsNeedInvites": "Gäste werden nur mit eingeschalteten Einladungen gespeichert.",
+        "descriptionLocked": "Diese Beschreibung ist in Outlook formatiert (Links, Tabellen). Bearbeite sie dort; alles andere lässt sich hier ändern.",
+        "occurrenceOnly": "Änderungen gelten nur für diesen Termin der Serie.",
+        "attendeesNotified": "Die Teilnehmenden werden über deine Änderungen benachrichtigt.",
         "submit": "Termin erstellen",
         "add": "Hinzufügen",
         "errors": {

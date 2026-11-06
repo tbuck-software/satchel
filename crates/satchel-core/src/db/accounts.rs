@@ -355,20 +355,39 @@ impl<'a> AccountRepository<'a> {
         &self,
         account_id: Option<&str>,
     ) -> Result<Vec<CalendarAccountRef>, AccountError> {
+        self.list_active_provider_accounts("gmail", account_id)
+            .await
+    }
+
+    pub async fn list_active_outlook_calendar_accounts(
+        &self,
+        account_id: Option<&str>,
+    ) -> Result<Vec<CalendarAccountRef>, AccountError> {
+        self.list_active_provider_accounts("outlook", account_id)
+            .await
+    }
+
+    async fn list_active_provider_accounts(
+        &self,
+        provider: &str,
+        account_id: Option<&str>,
+    ) -> Result<Vec<CalendarAccountRef>, AccountError> {
         match account_id {
             Some(account_id) => sqlx::query_as::<_, CalendarAccountRef>(
                 "SELECT id, email FROM accounts
-                 WHERE id = ? AND provider = 'gmail' AND is_active = 1",
+                 WHERE id = ? AND provider = ? AND is_active = 1",
             )
             .bind(account_id)
+            .bind(provider)
             .fetch_all(self.pool)
             .await
             .map_err(Into::into),
             None => sqlx::query_as::<_, CalendarAccountRef>(
                 "SELECT id, email FROM accounts
-                 WHERE provider = 'gmail' AND is_active = 1
+                 WHERE provider = ? AND is_active = 1
                  ORDER BY created_at ASC",
             )
+            .bind(provider)
             .fetch_all(self.pool)
             .await
             .map_err(Into::into),

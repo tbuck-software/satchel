@@ -47,7 +47,12 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * local spam filter adds 0.7 KiB to the entry (Not spam in the thread store,
  * thread actions, keyboard and palette, and the list row's mark, all of
  * which load at startup) and 1.0 KiB of filter copy to the catalogues
- * (102.7 / 241.4 KiB). Its settings page loads with Settings. */
+ * (102.7 / 241.4 KiB). Its settings page loads with Settings. The Outlook
+ * calendar adds 21 B to the entry (the invites store's Outlook sync call,
+ * made at startup like the Google one) and 492 B of Outlook copy to the
+ * German catalogue, which loads whole before the first frame. The
+ * calendar's own code loads with the calendar view (together 102.7 /
+ * 241.8 KiB). */
 const budgets = {
   'index.html': { entryGzip: 103 * 1024, initialGzip: 242 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },

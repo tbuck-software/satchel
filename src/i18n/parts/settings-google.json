@@ -9,7 +9,9 @@
         "checking": "Checking…",
         "authorizing": "Complete sign-in in your browser…",
         "connected": "Connected",
-        "connect": "Connect"
+        "connect": "Connect",
+        "outlookCalendarTitle": "Outlook Calendar",
+        "outlookCalendarHint": "Connect an Outlook account to read and edit its calendars. Mail works without calendar access."
       }
     }
   },
@@ -23,7 +25,9 @@
         "checking": "Wird geprüft…",
         "authorizing": "Anmeldung im Browser abschließen…",
         "connected": "Verbunden",
-        "connect": "Verbinden"
+        "connect": "Verbinden",
+        "outlookCalendarTitle": "Outlook-Kalender",
+        "outlookCalendarHint": "Verbinde ein Outlook-Konto, um seine Kalender zu lesen und zu bearbeiten. Mail funktioniert auch ohne Kalender-Zugriff."
       }
     }
   }

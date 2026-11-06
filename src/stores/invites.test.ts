@@ -5,6 +5,9 @@ import {
   backendListCalendarEvents,
   backendListCalendarSources,
   backendListInvites,
+  backendSyncGoogleCalendar,
+  backendSyncGroupware,
+  backendSyncOutlookCalendar,
 } from '@/services/backend';
 import { useInvitesStore } from './invites';
 
@@ -15,6 +18,9 @@ vi.mock('@/services/backend', () => ({
   backendListInvites: vi.fn(),
   backendListCalendarEvents: vi.fn(),
   backendListCalendarSources: vi.fn(),
+  backendSyncGoogleCalendar: vi.fn(),
+  backendSyncOutlookCalendar: vi.fn(),
+  backendSyncGroupware: vi.fn(),
 }));
 
 const importMock = vi.mocked(backendImportIcs);
@@ -55,5 +61,23 @@ describe('invites store', () => {
     expect(listEventsMock).toHaveBeenCalledOnce();
     expect(listSourcesMock).toHaveBeenCalledOnce();
     expect(invites.items).toEqual([invite]);
+  });
+
+  it('syncs Outlook calendars beside Google and CalDAV and reports each failure once', async () => {
+    vi.mocked(backendSyncGoogleCalendar).mockResolvedValue({ accounts_checked: 0, events_synced: 0, errors: [] });
+    vi.mocked(backendSyncOutlookCalendar).mockResolvedValue({
+      accounts_checked: 1,
+      events_synced: 3,
+      errors: ['{"key":"backend.errors.outlookCalendarSyncFailed","params":{"account":"a@example.test"}}'],
+    });
+    vi.mocked(backendSyncGroupware).mockRejectedValue(new Error('offline'));
+
+    const errors = await useInvitesStore().syncRemote();
+
+    expect(backendSyncOutlookCalendar).toHaveBeenCalledOnce();
+    expect(errors).toHaveLength(2);
+    expect(String(errors[0])).toContain('outlookCalendarSyncFailed');
+    // An account was checked, so the mirror is read again.
+    expect(listEventsMock).toHaveBeenCalledOnce();
   });
 });

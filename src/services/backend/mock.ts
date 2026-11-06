@@ -728,12 +728,64 @@ function byDateDesc(a: Thread, b: Thread): number {
 /* -------------------------------------------------------------------------- */
 
 const googleMailScope = 'https://www.googleapis.com/auth/gmail.modify';
+const outlookMailScopes = ['openid', 'email', 'profile', 'offline_access',
+  'https://graph.microsoft.com/Contacts.Read', 'https://graph.microsoft.com/Mail.ReadWrite',
+  'https://graph.microsoft.com/Mail.Send'];
+const outlookCalendarScope = 'https://graph.microsoft.com/Calendars.ReadWrite';
 const oauthScopes = new Map<string, string[]>();
 const oauthFlows = new Map<string, { accountId: string; scopes: string[] }>();
+function defaultScopes(accountId: string): string[] {
+  const account = accounts.find((item) => item.id === accountId);
+  return account?.provider === 'outlook' ? outlookMailScopes : [googleMailScope];
+}
 function oauthStatus(accountId: string) {
   const account = accounts.find((item) => item.id === accountId);
   return { account_id: accountId, provider: account?.provider ?? 'gmail', connected: true,
-    has_refresh_token: true, expires_at: null, granted_scopes: oauthScopes.get(accountId) ?? [googleMailScope] };
+    has_refresh_token: true, expires_at: null, granted_scopes: oauthScopes.get(accountId) ?? defaultScopes(accountId) };
+}
+
+/*
+ * `?mockOutlookCalendar` adds an Outlook account that signed in for mail
+ * only. Its calendar is mirrored once calendar access is connected, the way
+ * `sync_outlook_calendar` skips accounts without the grant.
+ */
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockOutlookCalendar')) {
+  accounts.push({ ...accounts[0]!, id: 'acc-outlook', displayName: 'Outlook', email: 'tom@outlook.example',
+    provider: 'outlook' });
+}
+
+function mirrorOutlookCalendar(accountId: string): number {
+  const calendarId = `outlook-calendar-${accountId}`;
+  if (!calendarSources.some((source) => source.source === 'outlook' && source.remote_id === calendarId)) {
+    calendarSources.push({ account_id: accountId, source: 'outlook', remote_id: calendarId, name: 'Calendar' });
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const at = (hours: number) => new Date(today.getTime() + hours * 3_600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  // As Graph reports them: a series arrives as occurrences, a meeting the
+  // account only attends is read-only, a Teams invite has a formatted body.
+  const fixtures = [
+    { id: 'standup-1', title: 'Team standup', start: 9, end: 9.25, occurrence: true, readOnly: false, rich: false,
+      attendees: ['lena@example.com'] },
+    { id: 'standup-2', title: 'Team standup', start: 33, end: 33.25, occurrence: true, readOnly: false, rich: false,
+      attendees: ['lena@example.com'] },
+    { id: 'planning', title: 'Quarterly planning', start: 15, end: 16, occurrence: false, readOnly: true, rich: true,
+      attendees: [] as string[] },
+  ];
+  for (const fixture of fixtures) {
+    const id = `outlook-event-${accountId}-${fixture.id}`;
+    if (calendarEvents.some((event) => event.id === id)) continue;
+    calendarEvents.push({
+      id, account_id: accountId, uid: fixture.id.startsWith('standup') ? 'standup-series@outlook.example' : `${fixture.id}@outlook.example`,
+      title: fixture.title, description: fixture.rich ? 'Join: Microsoft Teams meeting' : null, location: null,
+      starts_at: at(fixture.start), ends_at: at(fixture.end),
+      all_day: 0, attendees_json: JSON.stringify(fixture.attendees), source: 'outlook', collection_href: calendarId,
+      read_only: fixture.readOnly ? 1 : 0, recurrence_instance: fixture.occurrence ? 1 : 0,
+      rich_description: fixture.rich ? 1 : 0,
+      created_at: today.toISOString(), updated_at: today.toISOString(),
+    });
+  }
+  return calendarEvents.filter((event) => event.account_id === accountId && event.source === 'outlook').length;
 }
 
 let appUpdateChannel: 'stable' | 'nightly' = 'stable';
@@ -754,8 +806,12 @@ const handlers: Record<string, Handler> = {
   oauth_status: (payload) => oauthStatus(String(payload.accountId)),
   start_oauth_flow: (payload) => {
     const input = payload.input as { account_id: string; purpose?: string | null };
-    const scopes = [...(oauthScopes.get(input.account_id) ?? [googleMailScope])];
-    const optional = input.purpose === 'calendar' ? 'https://www.googleapis.com/auth/calendar.readonly'
+    const scopes = [...(oauthScopes.get(input.account_id) ?? defaultScopes(input.account_id))];
+    const outlook = accounts.find((account) => account.id === input.account_id)?.provider === 'outlook';
+    // Outlook's sign-in already covers contacts; the real command refuses it.
+    if (outlook && input.purpose === 'contacts') throw new Error('backend.errors.oauthConfigurationInvalid');
+    const optional = input.purpose === 'calendar'
+      ? (outlook ? outlookCalendarScope : 'https://www.googleapis.com/auth/calendar.readonly')
       : input.purpose === 'contacts' ? 'https://www.googleapis.com/auth/contacts.readonly' : null;
     if (optional && !scopes.includes(optional)) scopes.push(optional);
     const state = `flow-${oauthFlows.size + 1}`;
@@ -772,6 +828,17 @@ const handlers: Record<string, Handler> = {
   },
   sync_google_calendar: () => ({ accounts_checked: accounts.filter((account) => account.provider === 'gmail').length,
     events_synced: 0, errors: [] }),
+  sync_outlook_calendar: (payload) => {
+    const outlook = accounts.filter((account) => account.provider === 'outlook'
+      && (payload.accountId == null || account.id === payload.accountId));
+    let synced = 0;
+    for (const account of outlook) {
+      if ((oauthScopes.get(account.id) ?? defaultScopes(account.id)).includes(outlookCalendarScope)) {
+        synced += mirrorOutlookCalendar(account.id);
+      }
+    }
+    return { accounts_checked: outlook.length, events_synced: synced, errors: [] };
+  },
   // No mock account carries a CalDAV/CardDAV service, so the real command
   // would skip every one of them and report an empty pass.
   sync_groupware: () => ({
@@ -1677,6 +1744,45 @@ const handlers: Record<string, Handler> = {
   list_invites: () => calendarInvites.filter(isInvitation),
   list_calendar_events: () => calendarEvents,
   list_calendar_sources: () => calendarSources,
+  // Like `calendar::save_event`: an edit of an event the provider marked
+  // read-only is refused before anything changes; a new event of a connected
+  // Outlook account goes to its calendar, every other one stays local.
+  create_calendar_event: ({ input: raw }) => {
+    const input = raw as { id: string | null; account_id: string; title: string; description: string | null;
+      location: string | null; starts_at: string; ends_at: string; all_day: boolean; attendees: string[];
+      send_invites: boolean };
+    const title = input.title.trim();
+    if (!title) throw new Error('backend.errors.calendarTitleRequired');
+    const now = new Date().toISOString();
+    const fields = { title, description: input.description, location: input.location, starts_at: input.starts_at,
+      ends_at: input.ends_at, all_day: input.all_day ? 1 : 0, updated_at: now };
+    if (input.id) {
+      const existing = calendarEvents.find((event) => event.id === input.id);
+      if (!existing) throw new Error('backend.errors.calendarEventNotFound');
+      if (existing.account_id !== input.account_id) throw new Error('backend.errors.calendarEventOwnership');
+      if (existing.read_only === 1) throw new Error('backend.errors.calendarEventReadOnly');
+      Object.assign(existing, fields);
+      return { ...existing };
+    }
+    const outlookCalendar = calendarSources.find((source) => source.source === 'outlook'
+      && source.account_id === input.account_id);
+    // Exchange keeps guests only on an event that invites them.
+    const attendees = outlookCalendar && !input.send_invites ? [] : input.attendees;
+    const event: BackendCalendarEvent = {
+      id: `${outlookCalendar ? 'outlook-event' : 'cal'}-${calendarEvents.length + 1}`, account_id: input.account_id,
+      uid: `mock-${calendarEvents.length + 1}@satchel.dev`, ...fields, attendees_json: JSON.stringify(attendees),
+      source: outlookCalendar ? 'outlook' : 'local', collection_href: outlookCalendar?.remote_id ?? null,
+      read_only: 0, recurrence_instance: 0, rich_description: 0, created_at: now,
+    };
+    calendarEvents.push(event);
+    return { ...event };
+  },
+  delete_calendar_event: ({ id }) => {
+    const index = calendarEvents.findIndex((event) => event.id === id);
+    if (index < 0) throw new Error('backend.errors.calendarEventNotFound');
+    if (calendarEvents[index]!.read_only === 1) throw new Error('backend.errors.calendarEventReadOnly');
+    calendarEvents.splice(index, 1);
+  },
   list_contacts: () => sortedContacts().slice(0, 500),
   search_contacts: ({ query, limit }) => {
     const term = String(query ?? '').trim().toLowerCase();

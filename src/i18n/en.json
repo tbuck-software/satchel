@@ -175,6 +175,7 @@
       "calendarEventEndInvalid": "The event must end after it starts.",
       "calendarEventNotFound": "The calendar event was not found.",
       "calendarEventOwnership": "This calendar event belongs to another account.",
+      "calendarEventReadOnly": "Outlook does not let this account change the event: it is a meeting you attend, or its calendar is read-only.",
       "calendarFileReadFailed": "The calendar file could not be read.",
       "calendarInviteCancelled": "A cancelled invitation cannot be answered.",
       "calendarInviteInvalid": "The saved invitation is invalid.",
@@ -186,6 +187,7 @@
       "calendarRemoteUnavailable": "Sync this calendar before changing the event. Its remote version is unavailable.",
       "calendarRemoteWriteFailed": "The calendar server could not confirm the change. Sync the calendar before trying again.",
       "calendarResponseInvalid": "Choose a valid invitation response.",
+      "calendarRichDescriptionReadOnly": "This description is formatted in Outlook and would lose its links and layout here. Edit it in Outlook.",
       "calendarTimeInvalid": "Enter a valid event time.",
       "calendarTitleRequired": "Enter an event title.",
       "composeWindowUnsupported": "A separate compose window is only available on the desktop.",
@@ -273,6 +275,9 @@
       "oauthReloadRequired": "The account's sign-in changed while this was in progress. Please try again.",
       "oauthUrlRejected": "Satchel refused an unexpected sign-in address.",
       "outboxActionCannotBeDiscarded": "This outbox action cannot be discarded safely.",
+      "outlookCalendarAccessMissing": "Calendar access for this Outlook account is not connected. Connect it under Settings → Calendar.",
+      "outlookCalendarSyncFailed": "Outlook Calendar for {account} could not be synchronized.",
+      "outlookEventChangedRemotely": "This event changed in Outlook. The calendar has been refreshed; open the event again and retry.",
       "passwordCheckFailed": "Signing in with the new password failed: {reason}",
       "pgpDecodeFailed": "The decrypted OpenPGP content could not be read.",
       "pgpDecryptFailed": "The OpenPGP message could not be decrypted with the unlocked keys.",
@@ -424,7 +429,9 @@
     "createHint": "Click an empty day or time slot to create an event.",
     "editor": {
       "add": "Add",
+      "attendeesNotified": "Attendees will be notified of your changes.",
       "attendeesPlaceholder": "person{'@'}example.com, team{'@'}example.com",
+      "descriptionLocked": "This description is formatted in Outlook (links, tables). Edit it there; everything else can be changed here.",
       "descriptionPlaceholder": "Notes, agenda, …",
       "editTitle": "Edit event",
       "errors": {
@@ -432,10 +439,12 @@
         "invalidDates": "Start and end do not contain a valid date.",
         "titleRequired": "Please enter a title."
       },
+      "guestsNeedInvites": "Guests are only saved with invitations on.",
       "locationPlaceholder": "Location or video link",
       "newTitle": "New event",
+      "occurrenceOnly": "Changes apply to this occurrence only.",
       "sendInvites": "Send ICS invitations by mail",
-      "serverNotifications": "CalDAV servers may notify guests even when mail invitations are turned off.",
+      "serverNotifications": "Calendar servers may notify guests even when mail invitations are turned off.",
       "submit": "Create event",
       "titlePlaceholder": "Event title"
     },
@@ -443,7 +452,10 @@
       "allDay": "All day",
       "attendees": "Attendees",
       "delete": "Delete event",
+      "deleteConfirmAttendees": "The event is deleted from the calendar on the server, and its attendees will be notified. This cannot be undone.",
       "deleteConfirmBody": "The event is removed from your calendar. This cannot be undone.",
+      "deleteConfirmOccurrence": "Only this occurrence is deleted from the calendar on the server; the rest of the series stays. This cannot be undone.",
+      "deleteConfirmOccurrenceAttendees": "Only this occurrence is deleted from the calendar on the server, and its attendees will be notified; the rest of the series stays. This cannot be undone.",
       "deleteConfirmRemote": "The event is also deleted from the calendar on the server. This cannot be undone.",
       "deleteConfirmTitle": "Delete this event?",
       "details": "Event details",
@@ -451,6 +463,7 @@
       "end": "End",
       "location": "Location",
       "organizer": "Organizer",
+      "readOnlyOutlook": "Change this event in Outlook: it is a meeting you attend, or its calendar is read-only.",
       "start": "Start",
       "title": "Title",
       "untitled": "(No title)"
@@ -499,6 +512,7 @@
       "hide": "Hide",
       "invites": "Invitations",
       "local": "Local",
+      "outlook": "Outlook calendar",
       "show": "Show"
     },
     "status": {
@@ -507,6 +521,7 @@
       "declined": "Declined",
       "googleCalendar": "Google Calendar",
       "needsAction": "Awaiting reply",
+      "outlookCalendar": "Outlook Calendar",
       "ownEvent": "Own event",
       "tentative": "Maybe"
     },
@@ -2450,7 +2465,9 @@
       "connect": "Connect",
       "connected": "Connected",
       "contactsHint": "Connect Google Contacts to use contact photos. Mail works without contact access.",
-      "contactsTitle": "Google Contacts"
+      "contactsTitle": "Google Contacts",
+      "outlookCalendarHint": "Connect an Outlook account to read and edit its calendars. Mail works without calendar access.",
+      "outlookCalendarTitle": "Outlook Calendar"
     },
     "images": {
       "allow": "Allow",

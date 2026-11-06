@@ -5,7 +5,8 @@ import { createPinia, setActivePinia } from 'pinia';
 
 const invites = vi.hoisted(() => ({
   items: [],
-  events: [],
+  events: [] as Array<Record<string, unknown>>,
+  sources: [] as Array<Record<string, unknown>>,
   load: vi.fn(),
   syncRemote: vi.fn(),
 }));
@@ -24,6 +25,8 @@ beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
   invites.syncRemote.mockResolvedValue([]);
+  invites.events = [];
+  invites.sources = [];
 });
 
 describe('calendar sync errors', () => {
@@ -45,5 +48,27 @@ describe('calendar sync errors', () => {
       ),
     );
     expect(wrapper.get('[role="status"]').text()).not.toContain('{"key"');
+  });
+});
+
+describe('calendar list', () => {
+  it('names Outlook calendars as Outlook declares them, events or not', () => {
+    invites.sources = [
+      { account_id: 'outlook', source: 'outlook', remote_id: 'AAMkAGI2-main', name: 'Calendar' },
+      { account_id: 'outlook', source: 'outlook', remote_id: 'AAMkAGI2-team', name: 'Team' },
+    ];
+    invites.events = [{
+      id: 'outlook-event-1', account_id: 'outlook', uid: 'uid-1', title: 'Standup',
+      starts_at: '2026-07-14T08:00:00Z', ends_at: '2026-07-14T08:15:00Z', all_day: 0,
+      attendees_json: '[]', source: 'outlook', collection_href: 'AAMkAGI2-main',
+      created_at: '2026-07-01T00:00:00Z', updated_at: '2026-07-01T00:00:00Z',
+    }];
+    const wrapper = mount(CalendarSettings);
+
+    const rows = wrapper.findAll('.source-row').map((row) => row.text());
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain('Calendar');
+    expect(rows[0]).toContain('one event');
+    expect(rows[1]).toContain('Team');
   });
 });

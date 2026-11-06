@@ -33,6 +33,11 @@ export interface EventEditorPayload {
 const props = defineProps<{
   draft: CalendarEventDraft | null;
   saving: boolean;
+  /**
+   * A new event goes to a connected Outlook calendar, where guests are kept
+   * only with invitations on (Exchange mails everyone on the list).
+   */
+  guestsNeedInvites?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -56,6 +61,9 @@ const titleField = ref<HTMLInputElement | null>(null);
 const dialogRef = ref<HTMLElement | null>(null);
 
 const isEdit = computed(() => props.draft?.id != null);
+const descriptionLocked = computed(() => isEdit.value && props.draft?.descriptionLocked === true);
+const guestsDropped = computed(() =>
+  !isEdit.value && props.guestsNeedInvites === true && !sendInvites.value && attendees.value.trim() !== '');
 
 // The title field takes the focus itself, so the trap only keeps Tab off the
 // calendar behind the dialog and returns the focus to the day that opened it.
@@ -159,7 +167,10 @@ function submit() {
     expectedUpdatedAt: props.draft?.expectedUpdatedAt ?? null,
     title: title.value.trim(),
     location: (location.value === props.draft?.location ? location.value : location.value.trim()) || null,
-    description: (description.value === props.draft?.description ? description.value : description.value.trim()) || null,
+    // A locked description goes back exactly as it came, so nothing changes.
+    description: descriptionLocked.value
+      ? props.draft?.description || null
+      : (description.value === props.draft?.description ? description.value : description.value.trim()) || null,
     allDay: allDay.value,
     startsAt: allDay.value ? toDateInput(start) : start.toISOString(),
     endsAt: allDay.value ? toDateInput(end) : end.toISOString(),
@@ -248,8 +259,9 @@ useDismissable(() => props.draft !== null, () => emit('close'));
 
             <label class="field">
               <span>{{ $t('common.description') }}</span>
-              <textarea :disabled="saving" v-model="description" rows="3" :placeholder="$t('calendar.editor.descriptionPlaceholder')"></textarea>
+              <textarea :disabled="saving || descriptionLocked" v-model="description" rows="3" :placeholder="$t('calendar.editor.descriptionPlaceholder')"></textarea>
             </label>
+            <p v-if="descriptionLocked" class="event-editor__hint">{{ $t('calendar.editor.descriptionLocked') }}</p>
 
             <label class="field">
               <span>{{ $t('calendar.event.attendees') }}</span>
@@ -257,7 +269,10 @@ useDismissable(() => props.draft !== null, () => emit('close'));
             </label>
 
             <ToggleSwitch :disabled="saving" v-model="sendInvites">{{ $t('calendar.editor.sendInvites') }}</ToggleSwitch>
+            <p v-if="guestsDropped" class="event-editor__hint" role="status">{{ $t('calendar.editor.guestsNeedInvites') }}</p>
             <p class="event-editor__hint">{{ $t('calendar.editor.serverNotifications') }}</p>
+            <p v-if="isEdit && draft.occurrence" class="event-editor__hint">{{ $t('calendar.editor.occurrenceOnly') }}</p>
+            <p v-if="isEdit && draft.notifiesAttendees" class="event-editor__hint">{{ $t('calendar.editor.attendeesNotified') }}</p>
 
             <p v-if="error" class="event-editor__error" role="alert">{{ error }}</p>
           </div>

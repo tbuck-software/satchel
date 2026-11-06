@@ -335,7 +335,8 @@ fn map_event(account_id: &str, calendar_id: &str, event: GoogleEvent) -> Option<
             .summary
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "(ohne Titel)".to_string()),
+            // An empty title is the frontend's to name in the viewer's language.
+            .unwrap_or_default(),
         description: event.description.filter(|value| !value.trim().is_empty()),
         location: event.location.filter(|value| !value.trim().is_empty()),
         starts_at,

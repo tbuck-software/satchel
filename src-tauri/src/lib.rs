@@ -811,6 +811,7 @@ pub fn run() {
             commands::calendar::create_calendar_event,
             commands::calendar::delete_calendar_event,
             commands::calendar::sync_google_calendar,
+            commands::calendar::sync_outlook_calendar,
             commands::calendar::import_ics,
             commands::calendar::import_ics_path,
             commands::groupware::configure_groupware,

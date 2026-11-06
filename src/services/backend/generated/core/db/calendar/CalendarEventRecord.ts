@@ -12,6 +12,18 @@ export type CalendarEventRecord = {
     attendees_json: string;
     source: string;
     collection_href: string | null;
+    /**
+     * 1 when the provider does not let this account change the event.
+     */
+    read_only: number;
+    /**
+     * 1 for one occurrence of a recurring series.
+     */
+    recurrence_instance: number;
+    /**
+     * 1 when the description is formatted text the editor cannot keep.
+     */
+    rich_description: number;
     created_at: string;
     updated_at: string;
 };

@@ -152,6 +152,7 @@ const COMMANDS: &[&str] = &[
     "create_calendar_event",
     "delete_calendar_event",
     "sync_google_calendar",
+    "sync_outlook_calendar",
     "import_ics",
     "import_ics_path",
     "configure_groupware",

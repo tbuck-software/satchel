@@ -33,6 +33,7 @@ const statusLabel = computed(() => {
     default:
       if (props.item.source === 'caldav') return t('calendar.source.caldav');
       if (props.item.source === 'google') return t('calendar.status.googleCalendar');
+      if (props.item.source === 'outlook') return t('calendar.status.outlookCalendar');
       return t('calendar.status.ownEvent');
   }
 });
@@ -43,7 +44,13 @@ const canRespond = computed(
 
 // The Google mirror is one-way read-only: an edit would be overwritten by the
 // next sync and a delete would resurrect. Manage those events in Google.
-const canModify = computed(() => props.item.kind === 'event' && props.item.source !== 'google');
+// Outlook events are written to Graph first, so they stay editable — unless
+// Outlook says this account may not change them (a meeting it only attends,
+// a read-only calendar).
+const canModify = computed(() =>
+  props.item.kind === 'event' && props.item.source !== 'google' && props.item.readOnly !== true);
+const readOnlyInOutlook = computed(() =>
+  props.item.kind === 'event' && props.item.source === 'outlook' && props.item.readOnly === true);
 
 const rangeLabel = computed(() => {
   const item = props.item;
@@ -114,6 +121,7 @@ const rangeLabel = computed(() => {
     </dl>
 
     <p v-if="item.description" class="event-card__description">{{ item.description }}</p>
+    <p v-if="readOnlyInOutlook" class="event-card__note">{{ $t('calendar.event.readOnlyOutlook') }}</p>
 
     <footer v-if="canRespond" class="event-card__actions">
       <AppButton variant="primary" size="sm" @click="emit('respond', item, 'accepted')">
@@ -233,6 +241,12 @@ const rangeLabel = computed(() => {
   font-size: var(--font-size-sm);
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.event-card__note {
+  margin: 10px 0 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
 }
 
 .event-card__actions {

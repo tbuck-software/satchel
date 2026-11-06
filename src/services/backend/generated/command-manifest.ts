@@ -2203,6 +2203,20 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "sync_outlook_calendar": {
+            "kind": "object",
+            "fields": {
+                "accountId": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
         "take_pending_notification_thread": {
             "kind": "object",
             "fields": {}
