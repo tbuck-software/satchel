@@ -32,7 +32,8 @@ export type RequestLogEntry = {
      */
     outcome: string;
     /**
-     * Only when the person asked to keep it.
+     * The sent text was kept (the person asked for that). It is loaded one
+     * entry at a time with [`TranslationRepository::sent_text`].
      */
-    sent_text: string | null;
+    has_sent_text: boolean;
 };

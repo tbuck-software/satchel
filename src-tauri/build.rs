@@ -203,6 +203,7 @@ const COMMANDS: &[&str] = &[
     "translate_message",
     "list_outbound_requests",
     "clear_outbound_requests",
+    "outbound_request_text",
     "list_certificate_exceptions",
     "trust_expired_certificate",
     "revoke_certificate_exception",

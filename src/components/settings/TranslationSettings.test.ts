@@ -14,6 +14,7 @@ const backend = vi.hoisted(() => ({
   consent: vi.fn(),
   languages: vi.fn(),
   log: vi.fn(),
+  logText: vi.fn(),
 }));
 vi.mock('@/services/backend/translation', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/services/backend/translation')>(),
@@ -23,6 +24,7 @@ vi.mock('@/services/backend/translation', async (importOriginal) => ({
   backendSetTranslationConsent: backend.consent,
   backendListTranslationLanguages: backend.languages,
   backendListOutboundRequests: backend.log,
+  backendOutboundRequestText: backend.logText,
 }));
 
 function settings(patch: Partial<BackendTranslationSettings> = {}): BackendTranslationSettings {
@@ -56,6 +58,61 @@ afterEach(() => {
 });
 
 describe('Translation settings', () => {
+  it('opens without asking DeepL anything', async () => {
+    useTranslationStore().apply(settings({ engine: 'deepl', engines: [{ id: 'deepl', has_key: true, plan: 'pro', local: false }] }));
+    wrapper = mount(TranslationSettings);
+    await flushPromises();
+    expect(backend.languages).toHaveBeenCalledWith('deepl', false);
+    expect(backend.check).not.toHaveBeenCalled();
+
+    await wrapper.get('[data-testid="translation-target"]').trigger('focus');
+    await flushPromises();
+    expect(backend.languages).toHaveBeenLastCalledWith('deepl', true);
+    // The Pro plan's terms, not the free one's.
+    expect(wrapper.find('[data-testid="translation-terms-pro"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="translation-terms-free"]').exists()).toBe(false);
+  });
+
+  it('withdrawing consent never switches translation on', async () => {
+    useTranslationStore().apply(settings({
+      consents: [{ engine: 'deepl', account_id: 'acc-1', granted_at: '2026-11-06T00:00:00Z' }],
+    }));
+    backend.consent.mockResolvedValue(settings());
+    wrapper = mount(TranslationSettings);
+    await flushPromises();
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="translation-consent-acc-1"] input[role="switch"]');
+    await toggle.setValue(false);
+    await flushPromises();
+    expect(backend.save).not.toHaveBeenCalled();
+  });
+
+  it('loads a log entry\'s sent text only when it is opened', async () => {
+    backend.log.mockResolvedValue([{
+      id: 7, created_at: '2026-11-06T10:00:00Z', feature: 'translation', provider: 'deepl', model: null,
+      account_id: 'acc-1', message_id: 'm-1', units: 12, unit: 'characters', outcome: 'ok', has_sent_text: true,
+    }]);
+    backend.logText.mockResolvedValue('Hola a todos');
+    wrapper = mount(TranslationSettings);
+    await flushPromises();
+    expect(backend.logText).not.toHaveBeenCalled();
+    await wrapper.get('[data-testid="translation-log-entry"] button').trigger('click');
+    await flushPromises();
+    expect(backend.logText).toHaveBeenCalledWith(7);
+    expect(wrapper.get('[data-testid="translation-log-text"]').text()).toBe('Hola a todos');
+  });
+
+  it('keeps Gmail accounts off with a free key and says why', async () => {
+    useTranslationStore().apply(settings({ engine: 'deepl', engines: [{ id: 'deepl', has_key: true, plan: 'free', local: false }] }));
+    useAccountsStore().accounts = [
+      { id: 'acc-g', displayName: '', email: 'me@gmail.test', provider: 'gmail', kind: 'email', color: '#000000' },
+    ] as never;
+    wrapper = mount(TranslationSettings);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="translation-gmail-acc-g"]').text()).toContain('DeepL Pro key');
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="translation-consent-acc-g"] input[role="switch"]');
+    expect(toggle.element.disabled).toBe(true);
+  });
+
   it('sends the key once, forgets it and switches DeepL on', async () => {
     backend.setKey.mockResolvedValue(settings({ engines: [{ id: 'deepl', has_key: true, plan: 'free', local: false }] }));
     wrapper = mount(TranslationSettings);
@@ -83,6 +140,7 @@ describe('Translation settings', () => {
     await wrapper.get('[data-testid="translation-test"]').trigger('click');
     await flushPromises();
     expect(wrapper.get('[data-testid="translation-usage"]').text()).toContain('1,200 of 500,000 characters used');
+    expect(backend.languages).toHaveBeenLastCalledWith('deepl', true);
   });
 
   it('keeps every account off until it is switched on', async () => {

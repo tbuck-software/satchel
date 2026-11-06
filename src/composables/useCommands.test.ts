@@ -94,7 +94,7 @@ describe('reader actions in the palette', () => {
       blockSender: vi.fn(),
       sweepSender: vi.fn(),
       toggleTranslation: vi.fn(() => true),
-      translationOffered: false,
+      translationAvailable: false,
       print: vi.fn(),
       exportThread: vi.fn(),
     };
@@ -115,7 +115,7 @@ describe('reader actions in the palette', () => {
     expect(command('thread:print-conversation')).toBeUndefined();
   });
 
-  it('offers Translate only while the focused message can be translated', () => {
+  it('offers Translate whenever the focused message can be translated', () => {
     const reader = {
       threadId: 'thread-1',
       moveTargets: [],
@@ -126,7 +126,7 @@ describe('reader actions in the palette', () => {
       blockSender: vi.fn(),
       sweepSender: vi.fn(),
       toggleTranslation: vi.fn(() => true),
-      translationOffered: false,
+      translationAvailable: false,
       print: vi.fn(),
       exportThread: vi.fn(),
     };
@@ -134,7 +134,7 @@ describe('reader actions in the palette', () => {
     expect(command('thread:translate')).toBeUndefined();
     unregister();
 
-    const offering = registerThreadReaderCommands({ ...reader, translationOffered: true });
+    const offering = registerThreadReaderCommands({ ...reader, translationAvailable: true });
     const translate = command('thread:translate');
     expect(translate?.title).toBe('Translate message or show the original');
     void translate?.run();

@@ -377,10 +377,14 @@ const translationStore = useTranslationStore();
 async function requestTranslationConsent(accountId: string): Promise<boolean> {
   const account = accountsStore.accounts.find((entry) => entry.id === accountId);
   const name = account?.email || account?.displayName || accountId;
+  const free = translationStore.plan === 'free';
   const allowed = await confirm.ask({
     title: t('translation.consent.title'),
-    body: t('translation.consent.body', { account: name }),
-    detail: t('translation.consent.detail'),
+    body: t('translation.consent.body', {
+      account: name,
+      plan: free ? t('settings.translation.planFree') : t('settings.translation.planPro'),
+    }),
+    detail: `${free ? t('settings.translation.termsFree') : t('settings.translation.termsPro')} ${t('translation.consent.detail')}`,
     confirmLabel: t('translation.consent.confirm'),
   });
   if (!allowed) return false;
@@ -398,6 +402,7 @@ const messageTranslation = useMessageTranslation(
     accountId: senderAccountId.value,
     bodyLoaded: bodyLoaded.value && !props.message.bodyLoadError && !props.message.sourcePayload,
     encrypted: props.message.pgp?.state === 'decrypted' || props.message.smime?.state === 'decrypted',
+    collapsed: props.collapsed,
   }),
   requestTranslationConsent,
 );
@@ -442,7 +447,9 @@ const messageMenu = computed<MessageMenu>(() => ({
   collapsed: props.collapsed,
   bodyView: bodyViewChoices.value,
   images: ui.isMobile && !props.collapsed ? imageGuard.value : null,
-  translation: !props.collapsed && messageTranslation.offered.value
+  // The sheet offers it whenever it can work; the language guess only
+  // decides the desktop header button.
+  translation: messageTranslation.available.value || messageTranslation.shown.value !== null
     ? { shown: messageTranslation.shown.value !== null }
     : null,
   run: runCommand,

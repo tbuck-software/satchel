@@ -60,7 +60,8 @@ describe('mock translation', () => {
 
     const log = await send<BackendOutboundRequest[]>('list_outbound_requests');
     expect(log).toHaveLength(1);
-    expect(log[0]).toMatchObject({ feature: 'translation', provider: 'deepl', outcome: 'ok', sent_text: null });
+    expect(log[0]).toMatchObject({ feature: 'translation', provider: 'deepl', outcome: 'ok', has_sent_text: false });
+    expect(log[0]).not.toHaveProperty('sent_text');
     await send('clear_outbound_requests');
     expect(await send<BackendOutboundRequest[]>('list_outbound_requests')).toEqual([]);
   });

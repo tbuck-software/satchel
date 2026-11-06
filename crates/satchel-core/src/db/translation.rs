@@ -62,8 +62,9 @@ pub struct RequestLogEntry {
     pub unit: String,
     /// `ok`, or the message key the request ended in.
     pub outcome: String,
-    /// Only when the person asked to keep it.
-    pub sent_text: Option<String>,
+    /// The sent text was kept (the person asked for that). It is loaded one
+    /// entry at a time with [`TranslationRepository::sent_text`].
+    pub has_sent_text: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,9 +85,12 @@ pub struct NewRequestLogEntry<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct MessageSourceRecord {
     pub account_id: String,
+    /// The account's provider; `gmail` is mail read through Google's API.
+    pub provider: String,
     pub body_text: Option<String>,
     pub body_html: Option<String>,
-    pub smime_encrypted: bool,
+    /// S/MIME enveloped, or a PGP/MIME `multipart/encrypted` container.
+    pub encrypted_container: bool,
 }
 
 pub struct TranslationRepository<'a> {
@@ -155,6 +159,17 @@ impl<'a> TranslationRepository<'a> {
         .await
     }
 
+    /// The plan stored with the key, without decrypting it.
+    pub async fn plan(&self, engine: &str) -> Result<Option<String>, sqlx::Error> {
+        Ok(sqlx::query_scalar::<_, Option<String>>(
+            "SELECT plan FROM translation_engine_keys WHERE engine = ? AND encrypted_api_key <> ''",
+        )
+        .bind(engine)
+        .fetch_optional(self.pool)
+        .await?
+        .flatten())
+    }
+
     /// The stored key in clear, for the engine's own requests only.
     pub async fn key(&self, engine: &str) -> Result<Option<String>, KeyError> {
         let stored: Option<String> = sqlx::query_scalar(
@@ -176,11 +191,12 @@ impl<'a> TranslationRepository<'a> {
             .map_err(KeyError::Crypto)
     }
 
-    /// Stores `key` encrypted, or removes the engine's key for `None`.
+    /// Stores `key` encrypted with its `plan`, or removes the engine's key for `None`.
     pub async fn set_key(
         &self,
         engine: &str,
         key: Option<&str>,
+        plan: Option<&str>,
         now: &str,
     ) -> Result<(), KeyError> {
         let Some(key) = key else {
@@ -197,14 +213,16 @@ impl<'a> TranslationRepository<'a> {
         let encrypted = crypto::encrypt_secret(key, SecretContext::translation_api_key(engine))
             .map_err(KeyError::Crypto)?;
         sqlx::query(
-            "INSERT INTO translation_engine_keys (engine, encrypted_api_key, updated_at)
-             VALUES (?, ?, ?)
+            "INSERT INTO translation_engine_keys (engine, encrypted_api_key, plan, updated_at)
+             VALUES (?, ?, ?, ?)
              ON CONFLICT(engine) DO UPDATE SET
                 encrypted_api_key = excluded.encrypted_api_key,
+                plan = excluded.plan,
                 updated_at = excluded.updated_at",
         )
         .bind(engine)
         .bind(encrypted)
+        .bind(plan)
         .bind(now)
         .execute(self.pool)
         .await
@@ -270,8 +288,12 @@ impl<'a> TranslationRepository<'a> {
         message_id: &str,
     ) -> Result<Option<MessageSourceRecord>, sqlx::Error> {
         sqlx::query_as(
-            "SELECT account_id, body_text, body_html, smime_encrypted IS NOT NULL AS smime_encrypted
-             FROM messages WHERE id = ?",
+            "SELECT m.account_id, a.provider, m.body_text, m.body_html,
+                    (m.smime_encrypted IS NOT NULL
+                     OR LOWER(COALESCE(m.raw_headers, '')) LIKE '%multipart/encrypted%')
+                        AS encrypted_container
+             FROM messages m JOIN accounts a ON a.id = m.account_id
+             WHERE m.id = ?",
         )
         .bind(message_id)
         .fetch_optional(self.pool)
@@ -347,12 +369,39 @@ impl<'a> TranslationRepository<'a> {
     pub async fn request_log(&self, limit: i64) -> Result<Vec<RequestLogEntry>, sqlx::Error> {
         sqlx::query_as(
             "SELECT id, created_at, feature, provider, model, account_id, message_id, units, unit,
-                    outcome, sent_text
+                    outcome, sent_text IS NOT NULL AS has_sent_text
              FROM outbound_request_log ORDER BY created_at DESC, id DESC LIMIT ?",
         )
         .bind(limit.clamp(1, 1000))
         .fetch_all(self.pool)
         .await
+    }
+
+    /// The text one log entry kept, if it kept any.
+    pub async fn sent_text(&self, id: i64) -> Result<Option<String>, sqlx::Error> {
+        Ok(sqlx::query_scalar::<_, Option<String>>(
+            "SELECT sent_text FROM outbound_request_log WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(self.pool)
+        .await?
+        .flatten())
+    }
+
+    /// Drops translations no body backs any more: the message is gone, or
+    /// its body was released (the body window, the storage budget).
+    pub async fn prune_unreachable_translations(&self) -> Result<u64, sqlx::Error> {
+        Ok(sqlx::query(
+            "DELETE FROM message_translations
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM messages m
+                 WHERE m.id = message_translations.message_id
+                   AND (NULLIF(m.body_text, '') IS NOT NULL OR NULLIF(m.body_html, '') IS NOT NULL)
+             )",
+        )
+        .execute(self.pool)
+        .await?
+        .rows_affected())
     }
 
     pub async fn clear_request_log(&self) -> Result<u64, sqlx::Error> {
@@ -416,7 +465,7 @@ mod tests {
         let pool = pool().await;
         let repo = TranslationRepository::new(&pool);
         assert!(!repo.has_key("deepl").await.unwrap());
-        repo.set_key("deepl", Some("secret-key:fx"), NOW)
+        repo.set_key("deepl", Some("secret-key:fx"), Some("free"), NOW)
             .await
             .unwrap();
         let stored: String =
@@ -430,9 +479,10 @@ mod tests {
             repo.key("deepl").await.unwrap().as_deref(),
             Some("secret-key:fx")
         );
+        assert_eq!(repo.plan("deepl").await.unwrap().as_deref(), Some("free"));
 
         // Copied onto another engine's row, the ciphertext does not decrypt.
-        sqlx::query("INSERT INTO translation_engine_keys VALUES ('other', ?, ?)")
+        sqlx::query("INSERT INTO translation_engine_keys VALUES ('other', ?, 'free', ?)")
             .bind(&stored)
             .bind(NOW)
             .execute(&pool)
@@ -440,7 +490,7 @@ mod tests {
             .unwrap();
         assert!(matches!(repo.key("other").await, Err(KeyError::Crypto(_))));
 
-        repo.set_key("deepl", None, NOW).await.unwrap();
+        repo.set_key("deepl", None, None, NOW).await.unwrap();
         assert!(!repo.has_key("deepl").await.unwrap());
         assert_eq!(repo.key("deepl").await.unwrap(), None);
     }
@@ -473,6 +523,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_removed_account_takes_its_log_entries_along() {
+        let pool = pool().await;
+        insert_account(&pool, "gone").await;
+        let repo = TranslationRepository::new(&pool);
+        repo.log(&NewRequestLogEntry {
+            created_at: NOW,
+            feature: "translation",
+            provider: "deepl",
+            model: None,
+            account_id: Some("gone"),
+            message_id: None,
+            units: 1,
+            unit: "characters",
+            outcome: "ok",
+            sent_text: None,
+        })
+        .await
+        .unwrap();
+        for statement in [
+            "DELETE FROM folders WHERE account_id = 'gone'",
+            "DELETE FROM accounts WHERE id = 'gone'",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+        assert!(repo.request_log(REQUEST_LOG_PAGE).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn translations_without_a_body_are_pruned() {
+        let pool = pool().await;
+        insert_account(&pool, "acc").await;
+        for (thread, body) in [("kept", Some("Text")), ("released", None)] {
+            crate::db::sender_sweep::tests::insert_thread(
+                &pool,
+                "acc",
+                thread,
+                "a@example.test",
+                1,
+                "inbox",
+                "inbox",
+                true,
+            )
+            .await;
+            sqlx::query("UPDATE messages SET body_text = ? WHERE id = ?")
+                .bind(body)
+                .bind(format!("{thread}-m"))
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query(
+                "INSERT INTO message_translations
+                    (message_id, target_language, engine, source_hash, body_text, created_at)
+                 VALUES (?, 'DE', 'deepl', 'h', 'Text', ?)",
+            )
+            .bind(format!("{thread}-m"))
+            .bind(NOW)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let repo = TranslationRepository::new(&pool);
+        assert_eq!(repo.prune_unreachable_translations().await.unwrap(), 1);
+        let left: Vec<String> = sqlx::query_scalar("SELECT message_id FROM message_translations")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, ["kept-m"]);
+    }
+
+    #[tokio::test]
     async fn the_log_keeps_thirty_days_and_forgets_text_on_request() {
         let pool = pool().await;
         let repo = TranslationRepository::new(&pool);
@@ -497,15 +617,17 @@ mod tests {
         assert_eq!(repo.prune_request_log(now).await.unwrap(), 1);
         let entries = repo.request_log(REQUEST_LOG_PAGE).await.unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].sent_text.as_deref(), Some("recent"));
+        assert!(entries[0].has_sent_text);
+        assert_eq!(
+            repo.sent_text(entries[0].id).await.unwrap().as_deref(),
+            Some("recent")
+        );
 
         repo.save_settings(&TranslationSettingsRecord::default(), NOW)
             .await
             .unwrap();
-        assert_eq!(
-            repo.request_log(REQUEST_LOG_PAGE).await.unwrap()[0].sent_text,
-            None
-        );
+        assert!(!repo.request_log(REQUEST_LOG_PAGE).await.unwrap()[0].has_sent_text);
+        assert_eq!(repo.sent_text(entries[0].id).await.unwrap(), None);
         assert_eq!(repo.clear_request_log().await.unwrap(), 1);
     }
 }

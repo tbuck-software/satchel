@@ -11,7 +11,8 @@ export type MessageTranslation = {
      */
     source_language: string | null;
     /**
-     * Sanitized again on every read. `None` when only text was translated.
+     * Sanitized again on every read. `None` when only text was translated
+     * (an engine without markup, or HTML too large for one request).
      */
     body_html: string | null;
     body_text: string | null;

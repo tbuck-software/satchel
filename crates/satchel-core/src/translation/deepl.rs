@@ -61,6 +61,22 @@ impl DeepLPlan {
         }
     }
 
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "free" => Some(DeepLPlan::Free),
+            "pro" => Some(DeepLPlan::Pro),
+            _ => None,
+        }
+    }
+
+    /// DeepL's Pro T&C (https://www.deepl.com/en/pro-license, 3.3.2) reserve
+    /// the right to store everything sent to the free API perpetually. Pro
+    /// texts are kept only as long as the translation needs (3.1.2) and not
+    /// used to improve the service (https://www.deepl.com/en/privacy, 4).
+    pub fn may_retain_text(self) -> bool {
+        matches!(self, DeepLPlan::Free)
+    }
+
     fn endpoint(self) -> &'static str {
         match self {
             DeepLPlan::Free => FREE_ENDPOINT,
@@ -86,6 +102,7 @@ pub fn validate_key(key: &str) -> Result<&str, TranslationError> {
 pub struct DeepL {
     client: reqwest::Client,
     endpoint: &'static str,
+    plan: DeepLPlan,
     key: String,
 }
 
@@ -97,9 +114,11 @@ impl DeepL {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| TranslationError::Network)?;
+        let plan = DeepLPlan::for_key(key);
         Ok(Self {
             client,
-            endpoint: DeepLPlan::for_key(key).endpoint(),
+            endpoint: plan.endpoint(),
+            plan,
             key: key.to_owned(),
         })
     }
@@ -341,6 +360,14 @@ impl TranslationEngine for DeepL {
 
     fn billing_unit(&self) -> UsageUnit {
         UsageUnit::Characters
+    }
+
+    fn fits(&self, request: &TranslationRequest) -> bool {
+        !matches!(translate_body(request), Err(TranslationError::TooLarge))
+    }
+
+    fn may_retain_text(&self) -> bool {
+        self.plan.may_retain_text()
     }
 
     async fn translate(

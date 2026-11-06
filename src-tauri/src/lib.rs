@@ -865,6 +865,7 @@ pub fn run() {
             commands::translation::translate_message,
             commands::translation::list_outbound_requests,
             commands::translation::clear_outbound_requests,
+            commands::translation::outbound_request_text,
             commands::tls_exceptions::list_certificate_exceptions,
             commands::tls_exceptions::trust_expired_certificate,
             commands::tls_exceptions::revoke_certificate_exception,

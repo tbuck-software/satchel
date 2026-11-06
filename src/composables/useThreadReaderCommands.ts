@@ -16,12 +16,12 @@ export interface ThreadReaderCommands {
   /** Opens the sender sweep dialog for the latest message's sender. */
   sweepSender: () => unknown;
   /**
-   * Translate / Show original for the focused message; false when that
-   * message offers neither (translation off, already in the target language).
+   * Translate / Show original for the focused message; false when it cannot
+   * be translated (translation off, body not loaded, encrypted, folded).
    */
   toggleTranslation: () => boolean;
-  /** Whether the focused message offers Translate right now. Read reactively. */
-  readonly translationOffered: boolean;
+  /** Whether the focused message can be translated right now. Read reactively. */
+  readonly translationAvailable: boolean;
   print: (scope: ReaderMessageScope) => unknown;
   exportThread: (format: ReaderExportFormat) => unknown;
 }

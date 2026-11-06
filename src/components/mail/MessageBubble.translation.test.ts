@@ -9,6 +9,7 @@ import { useUiStore } from '@/stores/ui';
 import { useThreadsStore } from '@/stores/threads';
 import { useTranslationStore } from '@/stores/translation';
 import { toggleMessageTranslation } from '@/composables/useMessageTranslation';
+import { useToast } from '@/composables/useToast';
 import MessageBubble from './MessageBubble.vue';
 import EmailRenderer from './EmailRenderer.vue';
 
@@ -39,7 +40,7 @@ function message(): Message {
   return {
     id: 'm-1',
     threadId: 'thread-1',
-    from: { name: 'Ana', email: 'ana@example.es' },
+    from: { name: 'Ana', email: 'ana@example.test' },
     to: [{ name: 'Tom', email: 'tom@example.com' }],
     subject: 'Reunión',
     bodyText: 'Hola a todos, os envío los documentos para la reunión del lunes.',
@@ -72,12 +73,12 @@ const TRANSLATION = {
   created_at: '2026-11-06T10:00:00Z',
 };
 
-async function render(consented = true) {
+async function render(consented = true, collapsed = false) {
   useTranslationStore().apply(settings(consented));
   vi.spyOn(useThreadsStore(), 'find').mockReturnValue({ id: 'thread-1', accountId: 'acc-1' } as never);
   wrapper = mount(MessageBubble, {
     attachTo: document.body,
-    props: { message: message(), canReply: true },
+    props: { message: message(), canReply: true, collapsed },
     global: { stubs: { SenderFilingMenu: true } },
   });
   await flushPromises();
@@ -91,7 +92,7 @@ beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
   backend.offer.mockResolvedValue({
-    detected_language: 'ES', offered: true, cached: false, cached_source_language: null, consented: true,
+    detected_language: 'ES', offered: true, cached: false, cached_source_language: null, consented: true, refusal: null,
   });
   backend.translate.mockResolvedValue(TRANSLATION);
   backend.consent.mockImplementation(async () => settings(true));
@@ -152,13 +153,52 @@ describe('translating a message', () => {
     expect(backend.translate).toHaveBeenCalledTimes(1);
   });
 
-  it('offers nothing for mail already in the target language', async () => {
+  it('names the plan when it asks', async () => {
+    ask.mockResolvedValueOnce(false);
+    const view = await render(false);
+    await view.get('.message-translate-trigger').trigger('click');
+    await flushPromises();
+    const question = ask.mock.calls[0]![0] as { body: string; detail: string };
+    expect(question.body).toContain('DeepL API Free');
+    expect(question.detail).toContain('permanently');
+  });
+
+  it('says why instead of asking when the message is refused', async () => {
     backend.offer.mockResolvedValue({
-      detected_language: 'DE', offered: false, cached: false, cached_source_language: null, consented: true,
+      detected_language: 'ES', offered: false, cached: false, cached_source_language: null, consented: false,
+      refusal: 'backend.errors.translation.gmailNeedsPro',
+    });
+    const view = await render(false);
+    expect(view.find('.message-translate-trigger').exists()).toBe(false);
+    expect(toggleMessageTranslation('m-1')).toBe(true);
+    await flushPromises();
+    expect(ask).not.toHaveBeenCalled();
+    expect(backend.translate).not.toHaveBeenCalled();
+    expect(useToast().state.toasts.at(-1)?.message).toBe('Gmail mail can only be translated with a DeepL Pro key.');
+  });
+
+  it('asks nothing for a folded message and leaves it to T only when open', async () => {
+    const view = await render(true, true);
+    expect(backend.offer).not.toHaveBeenCalled();
+    expect(toggleMessageTranslation('m-1')).toBe(false);
+
+    await view.setProps({ collapsed: false });
+    await flushPromises();
+    expect(backend.offer).toHaveBeenCalledWith('m-1', 'DE');
+    expect(toggleMessageTranslation('m-1')).toBe(true);
+  });
+
+  it('keeps T for mail that looks like the target language, without a header button', async () => {
+    backend.offer.mockResolvedValue({
+      detected_language: 'DE', offered: false, cached: false, cached_source_language: null, consented: true, refusal: null,
     });
     const view = await render();
     expect(view.find('.message-translate-trigger').exists()).toBe(false);
-    expect(toggleMessageTranslation('m-1')).toBe(false);
+    // The guess can be wrong; asked for, it translates anyway.
+    expect(toggleMessageTranslation('m-1')).toBe(true);
+    await flushPromises();
+    expect(backend.translate).toHaveBeenCalledWith('m-1', 'DE');
+    expect(view.getComponent(EmailRenderer).props('html')).toBe(TRANSLATION.body_html);
   });
 
   it('offers nothing while no engine is set up', async () => {

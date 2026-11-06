@@ -1011,6 +1011,15 @@ function mockTranslate(content: string, html: boolean, target: string): string {
   return content.replace(/>([^<]*\S[^<]*)</g, (_match, text: string) => `>${marker} ${text.trim()}<`);
 }
 
+/** The same refusals as `service::refusal`, in the same order. */
+function mockTranslationRefusal(source: ReturnType<typeof mockTranslationSource>): string | null {
+  if (source.encrypted) return 'backend.errors.translation.encrypted';
+  if (!source.html && !source.text) return 'backend.errors.translation.nothingToTranslate';
+  const provider = accounts.find((account) => account.id === source.accountId)?.provider;
+  if (provider === 'gmail' && translationState.key?.endsWith(':fx')) return 'backend.errors.translation.gmailNeedsPro';
+  return null;
+}
+
 function mockTranslationSource(messageId: string) {
   const found = mockFindMessage(messageId);
   if (!found) throw new Error('backend.errors.translation.messageNotFound');
@@ -2188,6 +2197,7 @@ const handlers: Record<string, Handler> = {
   },
   list_translation_languages: (payload) => {
     translationEngine(payload.engine);
+    // `refresh` would ask DeepL; the mock's list is the same either way.
     return MOCK_TRANSLATION_LANGUAGES.map((code) => ({ code, name: null }));
   },
   set_translation_consent: (payload) => {
@@ -2208,9 +2218,11 @@ const handlers: Record<string, Handler> = {
     const detected = source.text ? mockDetectLanguage(source.text) : null;
     const cached = translationState.cache.get(`${source.message.id}:${target}`) ?? null;
     const engine = translationState.engine;
+    const refusal = mockTranslationRefusal(source);
     return {
       detected_language: detected,
-      offered: !source.encrypted && Boolean(source.html || source.text) && detected !== target.split('-')[0],
+      offered: refusal === null && detected !== target.split('-')[0],
+      refusal,
       cached: cached !== null,
       cached_source_language: cached?.source_language ?? null,
       consented: engine !== null && translationState.consents.some(
@@ -2228,12 +2240,12 @@ const handlers: Record<string, Handler> = {
     const engine = translationState.engine;
     if (!engine) throw new Error('backend.errors.translation.notConfigured');
     if (!translationState.key) throw new Error('backend.errors.translation.keyMissing');
+    const refusal = mockTranslationRefusal(source);
+    if (refusal) throw new Error(refusal);
     if (!translationState.consents.some((consent) => consent.engine === engine && consent.account_id === source.accountId)) {
       throw new Error('backend.errors.translation.consentRequired');
     }
-    if (source.encrypted) throw new Error('backend.errors.translation.encrypted');
-    const content = source.html ?? source.text;
-    if (!content) throw new Error('backend.errors.translation.nothingToTranslate');
+    const content = (source.html ?? source.text)!;
     const now = new Date().toISOString();
     translationState.log.unshift({
       id: ++nextTranslationLog, created_at: now, feature: 'translation', provider: engine, model: null,
@@ -2249,7 +2261,10 @@ const handlers: Record<string, Handler> = {
     translationState.cache.set(cacheKey, translation);
     return { message_id: source.message.id, target_language: target, engine, ...translation, cached: false };
   },
-  list_outbound_requests: () => translationState.log.map((entry) => ({ ...entry })),
+  list_outbound_requests: () => translationState.log.map(({ sent_text: text, ...entry }) => ({
+    ...entry, has_sent_text: text !== null,
+  })),
+  outbound_request_text: (payload) => translationState.log.find((entry) => entry.id === payload.id)?.sent_text ?? null,
   clear_outbound_requests: () => { translationState.log = []; },
   unsubscribe: (payload) => {
     const messageId = String(input(payload).message_id ?? '');

@@ -49,7 +49,9 @@ pub struct TranslationEngineDto {
     pub has_key: bool,
     /// DeepL: `free` or `pro`, read from the stored key's suffix.
     pub plan: Option<String>,
-    /// False for every engine that sends text off the device.
+    /// False for every engine that sends text off the device. Shown only;
+    /// no setting depends on it yet (ADR 0016's "local models only" switch
+    /// does not exist).
     pub local: bool,
 }
 
@@ -127,15 +129,8 @@ pub(crate) async fn settings_dto(pool: &SqlitePool) -> CommandResult<Translation
     let mut engines = Vec::new();
     for kind in EngineKind::ALL {
         let has_key = repo.has_key(kind.as_str()).await.map_err(persistence)?;
-        let plan = match (kind, has_key) {
-            (EngineKind::DeepL, true) => repo
-                .key(kind.as_str())
-                .await
-                .ok()
-                .flatten()
-                .map(|key| DeepLPlan::for_key(&key).as_str().to_owned()),
-            _ => None,
-        };
+        // Stored with the key when it was saved: listing never decrypts it.
+        let plan = repo.plan(kind.as_str()).await.map_err(persistence)?;
         let local = match kind {
             EngineKind::DeepL => Locality::Remote,
         } == Locality::Local;
@@ -205,8 +200,11 @@ pub(crate) async fn set_translation_api_key_inner(
         None | Some("") => None,
         Some(key) => Some(validate_key(key)?),
     };
+    let plan = match kind {
+        EngineKind::DeepL => key.map(|key| DeepLPlan::for_key(key).as_str()),
+    };
     TranslationRepository::new(pool)
-        .set_key(kind.as_str(), key, &chrono::Utc::now().to_rfc3339())
+        .set_key(kind.as_str(), key, plan, &chrono::Utc::now().to_rfc3339())
         .await
         .map_err(|error| {
             tracing::warn!(%error, "translation key not saved");
@@ -234,17 +232,22 @@ pub async fn check_translation_engine(
     Ok(engine.usage().await?)
 }
 
-/// The languages the engine translates into. Without a key, or offline, the
-/// list the engine is known to support.
+/// The languages the engine translates into: the list it is known to support,
+/// or, with `refresh`, the engine's own (one request; the known list again
+/// without a key or when offline). Opening Settings never asks the engine.
 #[tauri::command]
 pub async fn list_translation_languages(
     pool: tauri::State<'_, crate::db::ReadPool>,
     engine: String,
+    refresh: bool,
 ) -> CommandResult<Vec<TranslationLanguage>> {
     let kind = engine_kind(&engine)?;
     let fallback = || match kind {
         EngineKind::DeepL => satchel_core::translation::languages::deepl_fallback_languages(),
     };
+    if !refresh {
+        return Ok(fallback());
+    }
     match service::engine_for(pool.inner().as_ref(), kind).await {
         Ok(engine) => match engine.languages().await {
             Ok(languages) => Ok(languages),
@@ -301,22 +304,14 @@ pub(crate) async fn translate_message_inner(
     pool: &SqlitePool,
     input: MessageTranslationInput,
 ) -> CommandResult<MessageTranslation> {
-    let message_id = input.message_id.trim();
     // A stored translation needs no engine, no key and no network.
-    if let Some(cached) =
-        service::cached_translation(pool, message_id, &input.target_language).await?
-    {
-        return Ok(cached);
-    }
+    let pending =
+        match service::prepare(pool, input.message_id.trim(), &input.target_language).await? {
+            service::Prepared::Cached(cached) => return Ok(cached),
+            service::Prepared::Pending(pending) => pending,
+        };
     let engine = service::engine_for(pool, service::active_engine(pool).await?).await?;
-    Ok(service::translate_message(
-        pool,
-        engine.as_ref(),
-        message_id,
-        &input.target_language,
-        chrono::Utc::now(),
-    )
-    .await?)
+    Ok(service::send(pool, engine.as_ref(), pending, chrono::Utc::now()).await?)
 }
 
 #[tauri::command]
@@ -334,6 +329,18 @@ pub async fn list_outbound_requests(
 ) -> CommandResult<Vec<RequestLogEntry>> {
     TranslationRepository::new(pool.inner().as_ref())
         .request_log(REQUEST_LOG_PAGE)
+        .await
+        .map_err(persistence)
+}
+
+/// The text one log entry kept, loaded when the person opens that entry.
+#[tauri::command]
+pub async fn outbound_request_text(
+    pool: tauri::State<'_, crate::db::ReadPool>,
+    id: i64,
+) -> CommandResult<Option<String>> {
+    TranslationRepository::new(pool.inner().as_ref())
+        .sent_text(id)
         .await
         .map_err(persistence)
 }
@@ -436,7 +443,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn translating_without_an_engine_says_so() {
+    async fn translating_a_message_that_is_not_stored_says_so() {
         let pool = pool().await;
         let error = translate_message_inner(
             &pool,
@@ -447,6 +454,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(error.key, "backend.errors.translation.notConfigured");
+        // The cache is asked first, and it needs the message.
+        assert_eq!(error.key, "backend.errors.translation.messageNotFound");
     }
 }

@@ -173,7 +173,18 @@ fn sanitize_style_blocks(document: &mut scraper::Html) {
     }
 }
 
+/// A second look at an attribute the email rules kept: `(element, attribute,
+/// kept value)` → the value to write instead, or `None` to keep it.
+type AttributeRewrite = Box<dyn Fn(&str, &str, &str) -> Option<String> + Send + Sync>;
+
 fn build_email_html_sanitizer<'a>(allow_source_body_marker: bool) -> ammonia::Builder<'a> {
+    build_email_html_sanitizer_rewriting(allow_source_body_marker, None)
+}
+
+fn build_email_html_sanitizer_rewriting<'a>(
+    allow_source_body_marker: bool,
+    rewrite: Option<AttributeRewrite>,
+) -> ammonia::Builder<'a> {
     let mut builder = ammonia::Builder::default();
     builder
         // ammonia's defaults carry every table tag but `tfoot`; without it the
@@ -221,10 +232,18 @@ fn build_email_html_sanitizer<'a>(allow_source_body_marker: bool) -> ammonia::Bu
             if !keep {
                 return None;
             }
-            if attribute == "style" {
-                return Some(sanitize_css(value).into());
+            let kept: std::borrow::Cow<'_, str> = if attribute == "style" {
+                sanitize_css(value).into()
+            } else {
+                value.into()
+            };
+            match rewrite
+                .as_ref()
+                .and_then(|rewrite| rewrite(element, attribute, &kept))
+            {
+                Some(replaced) => Some(replaced.into()),
+                None => Some(kept),
             }
-            Some(value.into())
         })
         .link_rel(Some("noopener noreferrer"));
     builder
@@ -268,6 +287,113 @@ fn sanitized_source_body_marker(input: &str) -> Option<String> {
     marker.push_str("></div>");
 
     Some(build_email_html_sanitizer(true).clean(&marker).to_string())
+}
+
+/// Attributes that carry a URL. A translation engine needs none of them, and
+/// in mail they are where per-recipient tracking tokens live (ADR 0018).
+const WITHHELD_ATTRIBUTES: &[&str] = &["src", "srcset", "href", "background", "poster", "cite"];
+
+const ATTRIBUTE_TOKEN: &str = "#satchel-a";
+const CSS_TOKEN: &str = "#satchel-c";
+const TOKEN_END: &str = "-end";
+
+/// The URLs [`withhold_references`] took out, in placeholder order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WithheldReferences {
+    attributes: Vec<String>,
+    css: Vec<String>,
+}
+
+impl WithheldReferences {
+    pub fn len(&self) -> usize {
+        self.attributes.len() + self.css.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Stored mail HTML with every URL replaced by a placeholder (`#satchel-a3-end`
+/// in attributes, `url(#satchel-c1-end)` in CSS), for sending to an engine
+/// that translates markup. In-page anchors (`#…`) stay. The result is the
+/// email sanitizer's output, so nothing the sanitizer drops goes out either.
+pub fn withhold_references(input: &str) -> (String, WithheldReferences) {
+    use std::sync::{Arc, Mutex};
+    let attributes = Arc::new(Mutex::new(Vec::<String>::new()));
+    let collected = Arc::clone(&attributes);
+    let rewrite: AttributeRewrite = Box::new(move |_element, attribute, value| {
+        if !WITHHELD_ATTRIBUTES.contains(&attribute) {
+            return None;
+        }
+        let trimmed = value.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            return None;
+        }
+        let mut values = collected
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        values.push(value.to_owned());
+        Some(format!("{ATTRIBUTE_TOKEN}{}{TOKEN_END}", values.len() - 1))
+    });
+    let cleaned = build_email_html_sanitizer_rewriting(true, Some(rewrite))
+        .clean(input)
+        .to_string();
+    let attributes = std::mem::take(
+        &mut *attributes
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+    );
+    let mut css = Vec::new();
+    let html = withhold_css_urls(&cleaned, &mut css);
+    (html, WithheldReferences { attributes, css })
+}
+
+/// Every `url(…)` in style attributes and style blocks. The serialized text
+/// inside the parentheses is kept as it is, quotes and escaping included, so
+/// putting it back restores the exact bytes.
+fn withhold_css_urls(html: &str, withheld: &mut Vec<String>) -> String {
+    let lower = html.to_ascii_lowercase();
+    let mut out = String::with_capacity(html.len());
+    let mut cursor = 0;
+    while let Some(found) = lower[cursor..].find("url(") {
+        let open = cursor + found + "url(".len();
+        let Some(close) = html[open..].find(')').map(|offset| open + offset) else {
+            break;
+        };
+        let inner = &html[open..close];
+        let bare = inner
+            .trim()
+            .trim_matches(|c| c == '"' || c == '\'')
+            .trim_start_matches("&quot;");
+        out.push_str(&html[cursor..open]);
+        if bare.is_empty() || bare.starts_with('#') {
+            out.push_str(inner);
+        } else {
+            out.push_str(&format!("{CSS_TOKEN}{}{TOKEN_END}", withheld.len()));
+            withheld.push(inner.to_owned());
+        }
+        cursor = close;
+    }
+    out.push_str(&html[cursor..]);
+    out
+}
+
+/// Puts the withheld URLs back into a translation of [`withhold_references`]'
+/// output. Placeholders the engine dropped stay dropped. Run the email
+/// sanitizer over the result before anything renders it.
+pub fn restore_references(html: &str, withheld: &WithheldReferences) -> String {
+    let mut restored = html.to_owned();
+    for (index, value) in withheld.css.iter().enumerate() {
+        restored = restored.replace(&format!("{CSS_TOKEN}{index}{TOKEN_END}"), value);
+    }
+    for (index, value) in withheld.attributes.iter().enumerate() {
+        restored = restored.replace(
+            &format!("{ATTRIBUTE_TOKEN}{index}{TOKEN_END}"),
+            &escape_html_attribute(value),
+        );
+    }
+    restored
 }
 
 pub fn sanitize_html(input: &str) -> String {
@@ -666,5 +792,79 @@ mod tests {
                 "{forbidden} survived sanitizing of {raw}: {sanitized}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod withheld_reference_tests {
+    use super::*;
+
+    const MAIL: &str = r##"<div data-satchel-source-body="on"></div><style>.hero { background: url("https://t.example/bg.png?u=42"); }</style><p style="background-image: url('https://t.example/p.png?u=42')">Hello <a href="https://click.example/r?u=42&amp;l=7">offer</a> <a href="#top">top</a> <a href="mailto:me@example.test">mail</a></p><img src="https://t.example/open.gif?u=42" srcset="https://t.example/a.png 1x" alt="Logo"><img src="cid:logo@x"><table background="https://t.example/t.png"><tr><td>x</td></tr></table>"##;
+
+    #[test]
+    fn no_url_leaves_with_the_html() {
+        let (sent, withheld) = withhold_references(&sanitize_stored_email_html(MAIL));
+        for leak in ["t.example", "click.example", "u=42", "mailto:", "cid:logo"] {
+            assert!(!sent.contains(leak), "{leak} left in {sent}");
+        }
+        assert!(
+            sent.contains("href=\"#top\""),
+            "in-page anchors stay: {sent}"
+        );
+        assert!(sent.contains("alt=\"Logo\""));
+        assert!(sent.contains("Hello"));
+        assert!(sent.contains("data-satchel-source-body"));
+        // Two links, image, srcset, inline image, table background. Remote
+        // `url()` in CSS never gets this far: the stored sanitizer drops it.
+        assert_eq!(withheld.len(), 6);
+    }
+
+    #[test]
+    fn css_urls_that_survive_the_sanitizer_are_withheld_too() {
+        let mut withheld = Vec::new();
+        let html = withhold_css_urls(
+            r#"<p style="background: url(&quot;cid:bg@x&quot;)">a</p><style>.a{background:URL( 'data:image/png;base64,AA' )}.b{background:url(#local)}</style>"#,
+            &mut withheld,
+        );
+        assert_eq!(
+            withheld,
+            ["&quot;cid:bg@x&quot;", " 'data:image/png;base64,AA' "]
+        );
+        assert!(html.contains("url(#satchel-c0-end)"));
+        assert!(html.contains("URL(#satchel-c1-end)"));
+        assert!(html.contains("url(#local)"));
+        let restored = restore_references(
+            &html,
+            &WithheldReferences {
+                attributes: Vec::new(),
+                css: withheld,
+            },
+        );
+        assert!(restored.contains("url(&quot;cid:bg@x&quot;)"));
+    }
+
+    #[test]
+    fn restoring_puts_every_url_back_where_it_was() {
+        let stored = sanitize_stored_email_html(MAIL);
+        let (sent, withheld) = withhold_references(&stored);
+        let translated = sent
+            .replace("Hello", "Hallo")
+            .replace(">offer<", ">Angebot<");
+        let restored = sanitize_stored_email_html(&restore_references(&translated, &withheld));
+        assert_eq!(
+            restored,
+            stored
+                .replace("Hello", "Hallo")
+                .replace(">offer<", ">Angebot<")
+        );
+    }
+
+    #[test]
+    fn a_dropped_placeholder_stays_dropped_and_a_forged_one_is_sanitized() {
+        let (_, withheld) = withhold_references(r#"<img src="https://t.example/x.gif">"#);
+        let forged = r##"<a href="#satchel-a0-end">x</a><img src="javascript:alert(1)">"##;
+        let restored = sanitize_stored_email_html(&restore_references(forged, &withheld));
+        assert!(!restored.contains("javascript"));
+        assert!(restored.contains("https://t.example/x.gif"));
     }
 }

@@ -21,6 +21,9 @@ CREATE TABLE translation_settings (
 CREATE TABLE translation_engine_keys (
     engine TEXT PRIMARY KEY NOT NULL,
     encrypted_api_key TEXT NOT NULL,
+    -- What the key buys, read from it when saved (DeepL: `free` or `pro`),
+    -- so listing the settings never has to decrypt the key.
+    plan TEXT,
     updated_at TEXT NOT NULL
 );
 
@@ -58,7 +61,8 @@ CREATE TABLE outbound_request_log (
     feature TEXT NOT NULL,
     provider TEXT NOT NULL,
     model TEXT,
-    account_id TEXT,
+    -- A removed account takes its entries along.
+    account_id TEXT REFERENCES accounts(id) ON DELETE CASCADE,
     message_id TEXT,
     units INTEGER NOT NULL DEFAULT 0,
     unit TEXT NOT NULL,
@@ -68,3 +72,4 @@ CREATE TABLE outbound_request_log (
 );
 
 CREATE INDEX idx_outbound_request_log_created_at ON outbound_request_log(created_at);
+CREATE INDEX idx_outbound_request_log_account ON outbound_request_log(account_id);

@@ -18,6 +18,7 @@ import {
   backendClearOutboundRequests,
   backendListOutboundRequests,
   backendListTranslationLanguages,
+  backendOutboundRequestText,
   backendSaveTranslationSettings,
   backendSetTranslationApiKey,
   type BackendOutboundRequest,
@@ -49,18 +50,32 @@ const testBusy = ref(false);
 const usage = shallowRef<BackendTranslationUsage | null>(null);
 const languages = shallowRef<BackendTranslationLanguage[]>([]);
 const log = shallowRef<BackendOutboundRequest[]>([]);
-const openEntries = ref(new Set<number>());
+/** Sent text of the entries the person opened, loaded one at a time. */
+const openEntries = ref(new Map<number, string>());
+/** The engine's own language list was asked for in this visit. */
+let languagesRefreshed = false;
 
 function fail(error: unknown) {
   toast.error(error instanceof Error ? error.message : String(error));
 }
 
-async function loadLanguages() {
+/**
+ * The known list unless `refresh`: opening the page sends nothing to DeepL.
+ * The engine's own list is asked for on Test and when the picker opens.
+ */
+async function loadLanguages(refresh = false) {
   try {
-    languages.value = await backendListTranslationLanguages(ENGINE);
+    languages.value = await backendListTranslationLanguages(ENGINE, refresh);
+    if (refresh) languagesRefreshed = true;
   } catch (error) {
     fail(error);
   }
+}
+
+function refreshLanguagesOnce() {
+  if (languagesRefreshed || !deepl.value?.has_key) return;
+  languagesRefreshed = true;
+  void loadLanguages(true);
 }
 
 async function loadLog() {
@@ -114,7 +129,7 @@ async function saveKey() {
     toast.success(t('settings.translation.keySavedToast'));
     // A key usually means "switch it on"; the person can still pick Off.
     if (!settings.value?.engine) await save({ engine: ENGINE });
-    await loadLanguages();
+    languagesRefreshed = false;
   } catch (error) {
     fail(error);
   } finally {
@@ -139,6 +154,7 @@ async function test() {
   testBusy.value = true;
   try {
     usage.value = await backendCheckTranslationEngine(ENGINE);
+    await loadLanguages(true);
   } catch (error) {
     usage.value = null;
     fail(error);
@@ -182,13 +198,19 @@ function setTarget(event: Event) {
 
 const mailAccounts = computed(() => accounts.emailAccounts);
 
+/** Google's Limited Use rules: no Gmail mail to a plan that may keep it. */
+function refusedForPlan(provider: string): boolean {
+  return provider === 'gmail' && deepl.value?.plan === 'free';
+}
+
 function consented(accountId: string): boolean {
   return Boolean(settings.value?.consents.some((consent) => consent.engine === ENGINE && consent.account_id === accountId));
 }
 
 async function setConsent(accountId: string, granted: boolean) {
   try {
-    if (!settings.value?.engine) await save({ engine: ENGINE });
+    // Allowing an account means "use it"; withdrawing never switches on.
+    if (granted && !settings.value?.engine) await save({ engine: ENGINE });
     await store.setConsent(accountId, granted);
   } catch (error) {
     fail(error);
@@ -234,11 +256,19 @@ function entryOutcome(entry: BackendOutboundRequest): string {
   return entry.outcome === 'ok' ? t('settings.translation.logOk') : t(entry.outcome);
 }
 
-function toggleEntry(id: number) {
-  const next = new Set(openEntries.value);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  openEntries.value = next;
+async function toggleEntry(id: number) {
+  const next = new Map(openEntries.value);
+  if (next.has(id)) {
+    next.delete(id);
+    openEntries.value = next;
+    return;
+  }
+  try {
+    next.set(id, await backendOutboundRequestText(id) ?? '');
+    openEntries.value = next;
+  } catch (error) {
+    fail(error);
+  }
 }
 </script>
 
@@ -327,6 +357,7 @@ function toggleEntry(id: number) {
           :value="settings?.target_language ?? FOLLOW_UI"
           :aria-label="$t('settings.translation.targetLabel')"
           data-testid="translation-target"
+          @focus="refreshLanguagesOnce"
           @change="setTarget"
         >
           <option v-for="option in targetOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
@@ -338,6 +369,12 @@ function toggleEntry(id: number) {
       <h4>{{ $t('settings.translation.sentTitle') }}</h4>
       <p class="hint">{{ $t('settings.translation.sentBody') }}</p>
       <p class="hint">{{ $t('settings.translation.sentCache') }}</p>
+      <p v-if="deepl?.plan !== 'pro'" class="hint" data-testid="translation-terms-free">
+        <strong>{{ $t('settings.translation.planFree') }}:</strong> {{ $t('settings.translation.termsFree') }}
+      </p>
+      <p v-if="deepl?.plan !== 'free'" class="hint" data-testid="translation-terms-pro">
+        <strong>{{ $t('settings.translation.planPro') }}:</strong> {{ $t('settings.translation.termsPro') }}
+      </p>
       <p class="hint">{{ $t('settings.translation.sentTerms') }}</p>
     </section>
 
@@ -349,9 +386,13 @@ function toggleEntry(id: number) {
           <div class="setting-info">
             <span class="setting-label">{{ account.displayName || account.email }}</span>
             <span v-if="account.displayName" class="setting-hint">{{ account.email }}</span>
+            <span v-if="refusedForPlan(account.provider)" class="setting-hint" :data-testid="`translation-gmail-${account.id}`">
+              {{ $t('backend.errors.translation.gmailNeedsPro') }}
+            </span>
           </div>
           <ToggleSwitch
-            :model-value="consented(account.id)"
+            :model-value="consented(account.id) && !refusedForPlan(account.provider)"
+            :disabled="refusedForPlan(account.provider)"
             :label="$t('settings.translation.consentAria', { account: account.email })"
             :data-testid="`translation-consent-${account.id}`"
             @update:model-value="setConsent(account.id, $event)"
@@ -385,11 +426,11 @@ function toggleEntry(id: number) {
               {{ formatMoment(entry.created_at) }}<template v-if="accountLabel(entry.account_id)"> · {{ accountLabel(entry.account_id) }}</template> · {{ entryOutcome(entry) }}
             </span>
           </div>
-          <template v-if="entry.sent_text">
+          <template v-if="entry.has_sent_text">
             <AppButton variant="link" size="sm" @click="toggleEntry(entry.id)">
               {{ openEntries.has(entry.id) ? $t('settings.translation.logHideText') : $t('settings.translation.logShowText') }}
             </AppButton>
-            <pre v-if="openEntries.has(entry.id)" class="translation-log__text">{{ entry.sent_text }}</pre>
+            <pre v-if="openEntries.has(entry.id)" class="translation-log__text" data-testid="translation-log-text">{{ openEntries.get(entry.id) }}</pre>
           </template>
         </div>
         <div v-if="log.length === 0" class="setting-row setting-row--single">

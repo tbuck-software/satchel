@@ -56,6 +56,12 @@ export const useTranslationStore = defineStore('translation', () => {
     return id !== null && Boolean(settings.value?.engines.find((entry) => entry.id === id)?.has_key);
   });
 
+  /** The stored key's plan (DeepL `free` / `pro`), or null without one. */
+  const plan = computed(() => {
+    const id = engine.value;
+    return settings.value?.engines.find((entry) => entry.id === id)?.plan ?? null;
+  });
+
   const targetLanguage = computed(() => settings.value?.target_language ?? uiTargetLanguage(currentLocale()));
 
   function consented(accountId: string): boolean {
@@ -71,5 +77,5 @@ export const useTranslationStore = defineStore('translation', () => {
     settings.value = await backendSetTranslationConsent(id, accountId, granted);
   }
 
-  return { settings, engine, ready, targetLanguage, ensureLoaded, reload, apply, consented, setConsent };
+  return { settings, engine, ready, plan, targetLanguage, ensureLoaded, reload, apply, consented, setConsent };
 });

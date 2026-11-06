@@ -1400,6 +1400,12 @@ export default {
                     "shape": {
                         "kind": "value"
                     }
+                },
+                "refresh": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
                 }
             }
         },
@@ -1629,6 +1635,17 @@ export default {
             "kind": "object",
             "fields": {
                 "threadId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "outbound_request_text": {
+            "kind": "object",
+            "fields": {
+                "id": {
                     "required": true,
                     "shape": {
                         "kind": "value"

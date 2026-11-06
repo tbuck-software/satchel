@@ -21,7 +21,7 @@ export type BackendTranslationLanguage = WireTranslationLanguage;
 export type BackendMessageTranslation = WireMessageTranslation;
 /** Whether Translate is worth offering for a message, decided on this device. */
 export type BackendMessageTranslationOffer = WireMessageTranslationOffer;
-/** One request that left the device, kept for 30 days. */
+/** One request that left the device, kept for 30 days; its sent text loads on demand. */
 export type BackendOutboundRequest = WireRequestLogEntry;
 
 export async function backendGetTranslationSettings(): Promise<BackendTranslationSettings> {
@@ -49,10 +49,15 @@ export async function backendCheckTranslationEngine(
   return invoke<BackendTranslationUsage>('check_translation_engine', { engine });
 }
 
+/**
+ * The languages the engine translates into. Without `refresh` the list the
+ * engine is known to support, with no request; with it, the engine's own.
+ */
 export async function backendListTranslationLanguages(
   engine: BackendTranslationEngineId,
+  refresh = false,
 ): Promise<BackendTranslationLanguage[]> {
-  return invoke<BackendTranslationLanguage[]>('list_translation_languages', { engine });
+  return invoke<BackendTranslationLanguage[]>('list_translation_languages', { engine, refresh });
 }
 
 export async function backendSetTranslationConsent(
@@ -86,6 +91,11 @@ export async function backendTranslateMessage(
 
 export async function backendListOutboundRequests(): Promise<BackendOutboundRequest[]> {
   return invoke<BackendOutboundRequest[]>('list_outbound_requests');
+}
+
+/** The text one log entry kept, loaded when that entry is opened. */
+export async function backendOutboundRequestText(id: number): Promise<string | null> {
+  return invoke<string | null>('outbound_request_text', { id });
 }
 
 export async function backendClearOutboundRequests(): Promise<void> {

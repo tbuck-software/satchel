@@ -16,7 +16,7 @@ import { useDraftActions } from '@/composables/useDraftActions';
 import { useThreadReply } from '@/composables/useThreadReply';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { useSenderSweep } from '@/composables/useSenderSweep';
-import { messageOffersTranslation, toggleMessageTranslation } from '@/composables/useMessageTranslation';
+import { messageCanTranslate, toggleMessageTranslation } from '@/composables/useMessageTranslation';
 import { useMessageLinks } from '@/composables/useMessageLinks';
 import { useAttachmentActions } from '@/composables/useAttachmentActions';
 import { perfStart } from '@/utils/perf';
@@ -845,11 +845,11 @@ onBeforeUnmount(registerThreadReaderCommands({
   blockSender,
   sweepSender,
   toggleTranslation: () => toggleMessageTranslation(ensureFocusedMessage()),
-  get translationOffered() {
+  get translationAvailable() {
     const id = messageTargets.value.some((message) => message.id === focusedMessageId.value)
       ? focusedMessageId.value
       : defaultFocusedMessageId();
-    return messageOffersTranslation(id);
+    return messageCanTranslate(id);
   },
   print: printThread,
   exportThread,

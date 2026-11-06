@@ -47,11 +47,19 @@ service's own privacy practices apply. Update checks and downloads contact
 GitHub, whose servers receive normal request metadata such as your IP address.
 
 Translation is off until you add a DeepL API key and allow an account. When
-you translate a message from an allowed account, its body (text and formatting,
-including link and image addresses) is sent to DeepL with your key; sender,
-recipients, subject, attachments and encrypted mail are not sent. DeepL's terms
-for your plan govern how DeepL handles the text. Translations are stored
-locally, and a local log keeps each request for 30 days.
+you translate a message from an allowed account, its body (text and
+formatting) is sent to DeepL with your key. Link and image addresses are
+replaced by placeholders before sending and restored on your device; sender,
+recipients, subject, attachments and encrypted mail are not sent. With a
+DeepL API Pro key, DeepL keeps the text only as long as the translation takes
+(up to 72 hours when an error occurs) and does not use it to improve its
+service. With a DeepL API Free key, DeepL's terms reserve the right to store
+the text permanently and ask that no personal data be sent, so mail from
+Gmail accounts is never sent with a Free key (sources:
+[DeepL Pro terms](https://www.deepl.com/en/pro-license), sections 3.1.2,
+3.1.4, 3.3.2 and 8.3.11; [DeepL privacy policy](https://www.deepl.com/en/privacy),
+section 4; read 6 November 2026). Translations are stored locally, and a local
+log keeps each request for 30 days.
 
 The distributed app does not upload your mailbox to a tbuck-software server.
 tbuck-software does not sell Google user data, use it for advertising, or use it

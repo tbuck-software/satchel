@@ -8,12 +8,13 @@ export type MessageTranslationOffer = {
      */
     detected_language: string | null;
     /**
-     * False when the guess says the body already is in the target language,
-     * or there is nothing that could be sent.
+     * The guess says the body is not in the target language and nothing
+     * refuses it: worth a button of its own.
      */
     offered: boolean;
     /**
-     * A translation into the target language is stored on this device.
+     * A translation of the body as it is now, into the target language, is
+     * stored on this device.
      */
     cached: boolean;
     /**
@@ -24,4 +25,9 @@ export type MessageTranslationOffer = {
      * The message's account may send mail to the active engine.
      */
     consented: boolean;
+    /**
+     * Why the active engine would not get this message, as a message key:
+     * encrypted, no text, or Gmail mail with an engine that keeps text.
+     */
+    refusal: string | null;
 };

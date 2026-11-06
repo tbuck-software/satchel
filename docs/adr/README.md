@@ -24,3 +24,4 @@ keine Statusquelle.
 | 0015 | Sync-Transport für den Hub: iroh, verschlüsseltes Ereignis-Log, vertrauter und blinder Hub | angenommen |
 | 0016 | KI-Anbieter und KI-Funktionen | angenommen |
 | 0017 | Der Katalog des Hauptfensters wird nach Ladezeitpunkt geteilt | angenommen |
+| 0018 | Bereinigtes HTML an Übersetzungs-Engines ohne Sprachmodell | angenommen |

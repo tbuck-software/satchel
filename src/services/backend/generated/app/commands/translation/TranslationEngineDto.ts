@@ -10,7 +10,9 @@ export type TranslationEngineDto = {
      */
     plan: string | null;
     /**
-     * False for every engine that sends text off the device.
+     * False for every engine that sends text off the device. Shown only;
+     * no setting depends on it yet (ADR 0016's "local models only" switch
+     * does not exist).
      */
     local: boolean;
 };
