@@ -86,7 +86,31 @@ pub async fn upsert_rule(
     pool: tauri::State<'_, SqlitePool>,
     input: UpsertRuleInput,
 ) -> CommandResult<RuleDto> {
-    Ok(upsert_rule_inner(pool.inner(), input).await?)
+    let rule = upsert_rule_inner(pool.inner(), input).await?;
+    spawn_server_rules_push(pool.inner().clone());
+    Ok(rule)
+}
+
+/// How long rule edits settle before the rule set goes to the servers.
+const SERVER_PUSH_SETTLE: std::time::Duration = std::time::Duration::from_secs(3);
+static SERVER_PUSH_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A changed rule set goes to every account with server rules on. In the
+/// background, so the save never waits on a mail server, and coalesced: a
+/// burst of edits (toggling several rules) becomes one push per account
+/// after the last of them, instead of one push each queued behind the lock.
+///
+/// Local rules run regardless; the server copy only adds runs while
+/// Satchel is closed.
+fn spawn_server_rules_push(pool: SqlitePool) {
+    use std::sync::atomic::Ordering;
+    let generation = SERVER_PUSH_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(SERVER_PUSH_SETTLE).await;
+        if SERVER_PUSH_GENERATION.load(Ordering::SeqCst) == generation {
+            satchel_core::server_rules::service::push_enabled_accounts(&pool).await;
+        }
+    });
 }
 
 pub async fn upsert_rule_inner(
@@ -153,6 +177,7 @@ pub async fn delete_rule(pool: tauri::State<'_, SqlitePool>, rule_id: String) ->
     if changed == 0 {
         return Err("rule not found".into());
     }
+    spawn_server_rules_push(pool.inner().clone());
     Ok(())
 }
 
@@ -280,6 +305,10 @@ async fn run_rules_for_thread_tx(
     .await
     .map_err(|err| err.to_string())?;
 
+    // Every rule runs here, also those the account's server runs too: the
+    // only server action today (`mark_read`) is idempotent. A future
+    // non-idempotent one (fileinto, redirect) needs an exact gate first; see
+    // `satchel_core::server_rules`.
     let mut applied = Vec::new();
     for row in rows {
         let trigger_config =
@@ -577,6 +606,77 @@ async fn apply_action(
 #[cfg(test)]
 mod tests {
     use super::{matches_rule, validate_action, ThreadRuleContext};
+    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::SqlitePool;
+
+    const CONFIG: &str = r#"{"from_contains":"billing@"}"#;
+    const ACTIONS: &str = r#"["add_tag:billing"]"#;
+
+    /// One IMAP account, one rule, one newly received inbox message waiting
+    /// for the ingest rules, and the account's server running that rule.
+    async fn seeded_with_server_rule() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .unwrap();
+        for statement in [
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('acc', 'Me', 'me@example.com', 'imap', '{}', '', '2026-01-01', '2026-01-01')",
+            "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES ('inbox', 'acc', 'INBOX', 'INBOX', 'inbox', 'INBOX', '2026-01-01', '2026-01-01')",
+            "INSERT INTO threads (id, account_id, subject, last_message_date, workflow_state, board_column, created_at, updated_at)
+             VALUES ('th', 'acc', 'Invoice', '2026-06-01T10:00:00Z', 'inbox', 'inbox', '2026-01-01', '2026-01-01')",
+            "INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, date, received_at, created_at, updated_at)
+             VALUES ('msg', 'acc', 'inbox', 'th', 'billing@example.com', '[]', 'Invoice', '2026-06-01T10:00:00Z', '2026-06-01T10:00:05Z', '2026-01-01', '2026-01-01')",
+            "INSERT INTO ingest_effects (message_id, thread_id, account_id, run_rules, created_at)
+             VALUES ('msg', 'th', 'acc', 1, '2026-06-01')",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO rules (id, name, is_active, priority, trigger_type, trigger_config, actions, trigger_count, created_at, updated_at)
+             VALUES ('rule-1', 'Billing', 1, 0, 'on_receive', ?, ?, 0, '2026-01-01', '2026-01-01')",
+        )
+        .bind(CONFIG)
+        .bind(ACTIONS)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let fingerprint =
+            satchel_core::server_rules::compiler::rule_fingerprint("on_receive", CONFIG, ACTIONS);
+        sqlx::query(
+            "INSERT INTO managesieve_accounts (account_id, enabled, server_active, pushed_rules, updated_at)
+             VALUES ('acc', 1, 1, ?, '2026-01-01')",
+        )
+        .bind(serde_json::json!({ "rule-1": fingerprint }).to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn a_rule_the_server_also_runs_still_runs_locally() {
+        let pool = seeded_with_server_rule().await;
+        super::run_pending_ingest_rules(&pool, &[("msg".into(), "th".into())])
+            .await
+            .unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT trigger_count FROM rules WHERE id = 'rule-1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+        let tagged: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM thread_tags")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(tagged, 1);
+    }
 
     fn context() -> ThreadRuleContext {
         ThreadRuleContext {

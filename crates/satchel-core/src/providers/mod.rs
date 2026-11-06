@@ -5,6 +5,9 @@ pub mod gmail;
 pub mod google_calendar;
 pub mod imap;
 pub mod imap_sessions;
+pub mod managesieve;
+#[cfg(test)]
+pub(crate) mod managesieve_fake;
 pub mod outlook;
 pub mod pop3;
 pub mod quota;

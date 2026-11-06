@@ -56,9 +56,13 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * the sidebar needs its store and level helper at startup (the account row
  * is painted in the first frame) and adds 0.5 KiB to the entry and 1.0 KiB
  * with its copy (together 103.2 / 242.8 KiB). The settings card and its
- * meter load with the settings. */
+ * meter load with the settings. The server rules (ManageSieve) add 1.6 KiB
+ * to the German catalogue and nothing to the entry; their panel, rule
+ * badges and backend calls load with the Accounts, Rules and Out-of-office
+ * sections, while the strings cannot, because the one per-locale catalogue
+ * loads at startup (together 103.2 / 244.4 KiB). */
 const budgets = {
-  'index.html': { entryGzip: 104 * 1024, initialGzip: 243 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
+  'index.html': { entryGzip: 104 * 1024, initialGzip: 245 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 128 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };

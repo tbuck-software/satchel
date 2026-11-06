@@ -8,6 +8,7 @@ use crate::commands::error::{CommandError, CommandResult};
 use crate::providers::{
     dav::{self, DavConfig, GroupwareSyncSummary},
     imap::ImapProvider,
+    managesieve::{SieveEndpoint, SieveTls},
     traits::MailProvider,
 };
 
@@ -93,6 +94,9 @@ struct MailCandidate {
 struct Autoconfig {
     imap: Vec<MailCandidate>,
     smtp: Vec<MailCandidate>,
+    /// ManageSieve servers. Not part of the Thunderbird format; some
+    /// providers publish them as `incomingServer type="managesieve"`.
+    managesieve: Vec<SieveEndpoint>,
     prefer_initial_last_username: bool,
 }
 
@@ -894,17 +898,31 @@ async fn fetch_autoconfig(domain: &str, email: &str) -> Autoconfig {
 }
 
 fn trusted_http_autoconfig(config: &Autoconfig) -> bool {
+    let trusted = |host: &str| {
+        TRUSTED_HTTP_AUTOCONFIG_SUFFIXES
+            .iter()
+            .any(|suffix| host_matches_suffix(host, suffix))
+    };
     !config.imap.is_empty()
         && !config.smtp.is_empty()
         && config
             .imap
             .iter()
             .chain(config.smtp.iter())
-            .all(|candidate| {
-                TRUSTED_HTTP_AUTOCONFIG_SUFFIXES
-                    .iter()
-                    .any(|suffix| host_matches_suffix(&candidate.host, suffix))
-            })
+            .all(|candidate| trusted(&candidate.host))
+        && config
+            .managesieve
+            .iter()
+            .all(|endpoint| trusted(&endpoint.host))
+}
+
+/// ManageSieve servers the account's domain advertises through autoconfig.
+/// The same sources and trust rules as account setup; usually empty.
+pub(crate) async fn managesieve_autoconfig(email: &str) -> Vec<SieveEndpoint> {
+    let Ok((_, domain)) = split_email(email) else {
+        return Vec::new();
+    };
+    fetch_autoconfig(domain, email).await.managesieve
 }
 
 fn host_matches_suffix(host: &str, suffix: &str) -> bool {
@@ -948,6 +966,42 @@ fn parse_autoconfig_xml(xml: &str) -> Autoconfig {
                 host: host.trim().trim_end_matches('.').to_ascii_lowercase(),
                 port,
             });
+        }
+    }
+    for block in xml_blocks(xml, "incomingServer") {
+        let opening = block.opening.to_ascii_lowercase();
+        let sieve = ["managesieve", "sieve"].iter().any(|kind| {
+            opening.contains(&format!("type=\"{kind}\""))
+                || opening.contains(&format!("type='{kind}'"))
+        });
+        if !sieve {
+            continue;
+        }
+        let Some(host) = xml_tag_text(block.body, "hostname") else {
+            continue;
+        };
+        let Some(port) =
+            xml_tag_text(block.body, "port").and_then(|value| value.parse::<u16>().ok())
+        else {
+            continue;
+        };
+        // Never plaintext: credentials go over this connection.
+        let tls = match xml_tag_text(block.body, "socketType")
+            .unwrap_or_default()
+            .to_ascii_uppercase()
+            .as_str()
+        {
+            "STARTTLS" => SieveTls::Starttls,
+            "SSL" | "SSL/TLS" => SieveTls::Implicit,
+            _ => continue,
+        };
+        let endpoint = SieveEndpoint {
+            host: host.trim().trim_end_matches('.').to_ascii_lowercase(),
+            port,
+            tls,
+        };
+        if !endpoint.host.is_empty() && !parsed.managesieve.contains(&endpoint) {
+            parsed.managesieve.push(endpoint);
         }
     }
     parsed.imap = unique_mail_candidates(parsed.imap);
@@ -1238,6 +1292,47 @@ mod tests {
                 port: 587
             }]
         );
+    }
+
+    #[test]
+    fn reads_managesieve_servers_from_autoconfig() {
+        let xml = r#"
+          <clientConfig><emailProvider>
+            <incomingServer type="imap"><hostname>imap.example.org</hostname><port>993</port><socketType>SSL</socketType></incomingServer>
+            <incomingServer type="managesieve"><hostname>Sieve.Example.org.</hostname><port>4190</port><socketType>STARTTLS</socketType></incomingServer>
+            <incomingServer type="sieve"><hostname>plain.example.org</hostname><port>2000</port><socketType>plain</socketType></incomingServer>
+          </emailProvider></clientConfig>"#;
+        let parsed = parse_autoconfig_xml(xml);
+        assert_eq!(
+            parsed.managesieve,
+            vec![SieveEndpoint {
+                host: "sieve.example.org".into(),
+                port: 4190,
+                tls: SieveTls::Starttls,
+            }]
+        );
+        assert_eq!(parsed.imap.len(), 1, "a sieve entry is not an IMAP server");
+    }
+
+    #[test]
+    fn plain_http_autoconfig_cannot_point_sieve_elsewhere() {
+        let config = Autoconfig {
+            imap: vec![MailCandidate {
+                host: "fixture-mail.dogado.net".into(),
+                port: 993,
+            }],
+            smtp: vec![MailCandidate {
+                host: "fixture-mail.dogado.net".into(),
+                port: 465,
+            }],
+            managesieve: vec![SieveEndpoint {
+                host: "sieve.attacker.example".into(),
+                port: 4190,
+                tls: SieveTls::Starttls,
+            }],
+            ..Default::default()
+        };
+        assert!(!trusted_http_autoconfig(&config));
     }
 
     #[test]

@@ -355,6 +355,7 @@ pub fn run() {
             sync::maintenance::spawn_checkpoint_worker(checkpoint_pool.clone());
             sync::maintenance::spawn_maintenance_worker(pool.clone(), checkpoint_pool, app_handle.clone());
             sync::maintenance::spawn_snooze_worker(pool.clone(), app_handle.clone());
+            commands::server_rules::spawn_retry_worker(pool.clone());
             sync::maintenance::spawn_followup_worker(pool.clone(), app_handle.clone());
             sync::maintenance::spawn_webhook_worker(pool.clone());
 
@@ -881,6 +882,11 @@ pub fn run() {
             commands::provider_features::create_provider_label,
             commands::vacation::get_vacation,
             commands::vacation::set_vacation,
+            commands::server_rules::get_server_rules_overview,
+            commands::server_rules::detect_server_rules,
+            commands::server_rules::set_server_rules_endpoint,
+            commands::server_rules::enable_server_rules,
+            commands::server_rules::disable_server_rules,
             commands::webhooks::list_webhooks,
             commands::webhooks::upsert_webhook,
             commands::webhooks::delete_webhook,
