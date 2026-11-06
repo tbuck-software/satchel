@@ -37,11 +37,16 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * Main initial 239 KiB since 2026-11-05: main measured 101.9 / 237.9 KiB; the
  * System appearance has to live in the settings store, which loads at
  * startup to paint the first frame in the right look, and adds 0.1 KiB
- * (238.03 KiB, 29 B over). Its selector and copy load with the settings. */
+ * (238.03 KiB, 29 B over). Its selector and copy load with the settings.
+ * Main initial 240 KiB and viewer initial 128 KiB since 2026-11-05: the
+ * dependency refresh measured main 238.9 / viewer 124.6 KiB before and
+ * 239.6 / 127.3 KiB after. Vue 3.5.44 adds 0.6 KiB to vendor-vue; marked
+ * 18.1.2 (CommonMark fixes, backtracking fixes) adds 2.0 KiB to
+ * vendor-markdown, which only the viewer loads at startup. No app code grew. */
 const budgets = {
-  'index.html': { entryGzip: 102 * 1024, initialGzip: 239 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
+  'index.html': { entryGzip: 102 * 1024, initialGzip: 240 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
-  'viewer.html': { entryGzip: 5 * 1024, initialGzip: 125 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
+  'viewer.html': { entryGzip: 5 * 1024, initialGzip: 128 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };
 
 /**

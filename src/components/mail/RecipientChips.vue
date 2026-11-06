@@ -247,7 +247,6 @@ defineExpose({ focus: () => inputRef.value?.focus() });
       :class="{ active: index === activeSuggestionIndex }"
       @mouseenter="activeSuggestionIndex = index"
       tabindex="-1"
-      @pointerdown.prevent
       @mousedown.prevent
       @click="pickSuggestion(contact)"
     >
