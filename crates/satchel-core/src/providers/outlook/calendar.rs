@@ -695,34 +695,59 @@ pub fn row_id(account_id: &str, remote_id: &str) -> String {
     format!("outlook-event-{suffix}")
 }
 
-/// Formatting the plain-text editor would lose: links (Teams and Zoom join
-/// blocks), images, tables, lists, emphasis, headings. Outlook wraps even a
-/// typed plain note in `<div>`/`<p>`/`<span>`, which text keeps well enough.
+/// Whether a body holds formatting the plain-text editor would lose. Fails
+/// closed: a body is plain only if every tag is one of the structural few
+/// below and no `div`, `p` or `span` carries a `style` — everything else
+/// (links, images, tables, lists, fonts, emphasis, headings, code, `<style>`
+/// blocks) keeps the description as Outlook has it.
 fn is_rich_html(content: &str) -> bool {
+    const STRUCTURAL: [&str; 8] = ["html", "head", "body", "meta", "div", "p", "span", "br"];
     let lower = content.to_ascii_lowercase();
-    [
-        "<a ",
-        "<img",
-        "<table",
-        "<ul",
-        "<ol",
-        "<b>",
-        "<b ",
-        "<strong",
-        "<i>",
-        "<i ",
-        "<em",
-        "<u>",
-        "<h1",
-        "<h2",
-        "<h3",
-        "<h4",
-        "<hr",
-        "<blockquote",
-        "<pre",
-    ]
-    .iter()
-    .any(|tag| lower.contains(tag))
+    let mut rest = lower.as_str();
+    while let Some(open) = rest.find('<') {
+        rest = &rest[open + 1..];
+        if let Some(comment) = rest.strip_prefix("!--") {
+            let Some(end) = comment.find("-->") else {
+                return true;
+            };
+            rest = &comment[end + 3..];
+            continue;
+        }
+        let Some(close) = rest.find('>') else {
+            return true;
+        };
+        let tag = &rest[..close];
+        rest = &rest[close + 1..];
+        if tag.starts_with("!doctype") {
+            continue;
+        }
+        let tag = tag.strip_prefix('/').unwrap_or(tag);
+        let name_end = tag
+            .find(|c: char| c.is_ascii_whitespace() || c == '/')
+            .unwrap_or(tag.len());
+        let (name, attributes) = tag.split_at(name_end);
+        if !STRUCTURAL.contains(&name) {
+            return true;
+        }
+        if matches!(name, "div" | "p" | "span") && has_style_attribute(attributes) {
+            return true;
+        }
+    }
+    false
+}
+
+/// `style=`, allowing whitespace around the `=`, as a whole attribute name.
+fn has_style_attribute(attributes: &str) -> bool {
+    let mut rest = attributes;
+    while let Some(at) = rest.find("style") {
+        let before = rest[..at].chars().next_back();
+        let after = rest[at + "style".len()..].trim_start();
+        if before.is_none_or(|c| c.is_ascii_whitespace()) && after.starts_with('=') {
+            return true;
+        }
+        rest = &rest[at + "style".len()..];
+    }
+    false
 }
 
 fn map_event(

@@ -444,7 +444,7 @@
       "newTitle": "Neuer Termin",
       "occurrenceOnly": "Änderungen gelten nur für diesen Termin der Serie.",
       "sendInvites": "ICS-Einladungen per Mail senden",
-      "serverNotifications": "CalDAV-Server können Gäste auch dann benachrichtigen, wenn Einladungen per E-Mail ausgeschaltet sind.",
+      "serverNotifications": "Kalenderserver können Gäste auch dann benachrichtigen, wenn Einladungen per E-Mail ausgeschaltet sind.",
       "submit": "Termin erstellen",
       "titlePlaceholder": "Titel des Termins"
     },

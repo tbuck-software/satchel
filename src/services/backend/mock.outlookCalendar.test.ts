@@ -44,3 +44,43 @@ it('refuses an Outlook contacts grant like the backend does', async () => {
     input: { account_id: 'acc-outlook', provider: 'outlook', purpose: 'contacts' },
   })).rejects.toThrow('oauthConfigurationInvalid');
 });
+
+it('refuses to change or delete an event Outlook marks read-only, like the backend', async () => {
+  const flow = await sendCommand<{ state: string }>('start_oauth_flow', {
+    input: { account_id: 'acc-outlook', provider: 'outlook', purpose: 'calendar' },
+  });
+  await sendCommand('poll_oauth_flow', { input: { state: flow.state } });
+  await sync();
+  const events = await outlookEvents();
+  const attended = events.find((event) => event.read_only === 1)!;
+  const editable = events.find((event) => event.read_only === 0)!;
+  const edit = (event: BackendCalendarEvent, title: string) => sendCommand<BackendCalendarEvent>('create_calendar_event', {
+    input: { id: event.id, expected_updated_at: null, account_id: event.account_id, title, description: null,
+      location: null, starts_at: event.starts_at, ends_at: event.ends_at, all_day: false, attendees: [], send_invites: false },
+  });
+
+  await expect(edit(attended, 'Renamed')).rejects.toThrow('calendarEventReadOnly');
+  await expect(sendCommand('delete_calendar_event', { id: attended.id })).rejects.toThrow('calendarEventReadOnly');
+  expect((await outlookEvents()).find((event) => event.id === attended.id)?.title).toBe(attended.title);
+
+  expect((await edit(editable, 'Renamed')).title).toBe('Renamed');
+  await sendCommand('delete_calendar_event', { id: editable.id });
+  expect((await outlookEvents()).some((event) => event.id === editable.id)).toBe(false);
+});
+
+it('puts new events of a connected Outlook account in its calendar, guests only with invitations', async () => {
+  const flow = await sendCommand<{ state: string }>('start_oauth_flow', {
+    input: { account_id: 'acc-outlook', provider: 'outlook', purpose: 'calendar' },
+  });
+  await sendCommand('poll_oauth_flow', { input: { state: flow.state } });
+  await sync();
+  const create = (account_id: string, send_invites: boolean) => sendCommand<BackendCalendarEvent>('create_calendar_event', {
+    input: { id: null, expected_updated_at: null, account_id, title: 'Lunch', description: null, location: null,
+      starts_at: '2026-07-14T11:00:00Z', ends_at: '2026-07-14T12:00:00Z', all_day: false,
+      attendees: ['bob@example.test'], send_invites },
+  });
+
+  expect(await create('acc-outlook', false)).toMatchObject({ source: 'outlook', attendees_json: '[]' });
+  expect(await create('acc-outlook', true)).toMatchObject({ attendees_json: '["bob@example.test"]' });
+  expect(await create('acc-work', false)).toMatchObject({ source: 'local', attendees_json: '["bob@example.test"]' });
+});

@@ -116,3 +116,23 @@ describe('Outlook events', () => {
     expect(view.text()).not.toContain('Guests are only saved with invitations on.');
   });
 });
+
+describe('untitled events', () => {
+  for (const source of ['outlook', 'caldav']) {
+    it(`open ${source} events with an empty title, not the placeholder`, async () => {
+      const item = itemFromEvent({ id: 'event', uid: 'uid', account_id: 'a', title: '',
+        starts_at: '2026-07-14T14:00:00Z', ends_at: '2026-07-14T15:00:00Z', all_day: 0,
+        attendees_json: '[]', source, collection_href: null, description: null, location: null,
+        created_at: '', updated_at: 'revision-1' });
+      expect(item.title).toBe('(No title)');
+      const draft = draftFromItem(item);
+      expect(draft.title).toBe('');
+      const view = mount(EventEditorDialog, { props: { draft, saving: false }, global: { stubs: { Teleport: true } } });
+      expect((view.find('input').element as HTMLInputElement).value).toBe('');
+      // Only the time changes: the title is required, never "(No title)".
+      await view.find('.event-editor__actions .app-button--primary').trigger('click');
+      expect(view.emitted('save')).toBeUndefined();
+      expect(view.get('[role="alert"]').text()).toBeTruthy();
+    });
+  }
+});

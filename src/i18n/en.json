@@ -444,7 +444,7 @@
       "newTitle": "New event",
       "occurrenceOnly": "Changes apply to this occurrence only.",
       "sendInvites": "Send ICS invitations by mail",
-      "serverNotifications": "CalDAV servers may notify guests even when mail invitations are turned off.",
+      "serverNotifications": "Calendar servers may notify guests even when mail invitations are turned off.",
       "submit": "Create event",
       "titlePlaceholder": "Event title"
     },

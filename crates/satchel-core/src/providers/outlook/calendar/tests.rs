@@ -874,24 +874,34 @@ fn shared_read_only_calendars_and_meetings_one_attends_are_read_only() {
 
 #[test]
 fn formatted_bodies_are_marked_and_plain_ones_are_not() {
-    for (content, rich) in [
-        (
-            "<html><body><div>Bring snacks<br></div></body></html>",
-            false,
-        ),
-        (
-            "<p>Agenda</p><p><span style=\"color:red\">Points</span></p>",
-            false,
-        ),
-        (
-            "<p>Join: <a href=\"https://teams.example/l/meetup\">Click here</a></p>",
-            true,
-        ),
-        ("<table><tr><td>Agenda</td></tr></table>", true),
-        ("<ul><li>One</li></ul>", true),
-        ("<p><b>Important</b></p>", true),
+    for content in [
+        "<html><head><meta charset=\"utf-8\"></head><body dir=\"ltr\"><div>Bring snacks<br></div></body></html>",
+        "<p class=\"x\">Agenda</p><p><span>Points</span></p>",
+        "<!-- converted from text --><div>Notes</div>",
+        "Plain words, no tags",
     ] {
-        assert_eq!(is_rich_html(content), rich, "{content}");
+        assert!(!is_rich_html(content), "plain: {content}");
+    }
+    for content in [
+        "<p>Join: <a href=\"https://teams.example/l/meetup\">Click here</a></p>",
+        // A link whose attributes start on the next line.
+        "<p><a\nhref=\"https://teams.example\">Join</a></p>",
+        "<p><span style=\"color:red\">Points</span></p>",
+        "<div style = \"font-family: Aptos\">Text</div>",
+        "<p STYLE=\"margin:0\">Text</p>",
+        "<table><tr><td>Agenda</td></tr></table>",
+        "<ul><li>One</li></ul>",
+        "<p><b>Important</b></p>",
+        "<font face=\"Arial\">Old</font>",
+        "<p><s>gone</s> <strike>gone</strike> H<sub>2</sub>O x<sup>2</sup></p>",
+        "<p><code>cargo test</code></p>",
+        "<h5>Heading</h5>",
+        "<dl><dt>Term</dt></dl>",
+        "<img src=\"cid:logo\">",
+        "<head><style>p{margin:0}</style></head><body><div>Text</div></body>",
+        "<div>Unclosed <",
+    ] {
+        assert!(is_rich_html(content), "rich: {content}");
     }
     let mut value = event("a", "Mine", "2026-07-14T14:00:00", "2026-07-14T15:00:00");
     value["body"] = json!({ "contentType": "text", "content": "<a href> as typed" });

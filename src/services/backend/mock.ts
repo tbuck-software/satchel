@@ -1744,6 +1744,45 @@ const handlers: Record<string, Handler> = {
   list_invites: () => calendarInvites.filter(isInvitation),
   list_calendar_events: () => calendarEvents,
   list_calendar_sources: () => calendarSources,
+  // Like `calendar::save_event`: an edit of an event the provider marked
+  // read-only is refused before anything changes; a new event of a connected
+  // Outlook account goes to its calendar, every other one stays local.
+  create_calendar_event: ({ input: raw }) => {
+    const input = raw as { id: string | null; account_id: string; title: string; description: string | null;
+      location: string | null; starts_at: string; ends_at: string; all_day: boolean; attendees: string[];
+      send_invites: boolean };
+    const title = input.title.trim();
+    if (!title) throw new Error('backend.errors.calendarTitleRequired');
+    const now = new Date().toISOString();
+    const fields = { title, description: input.description, location: input.location, starts_at: input.starts_at,
+      ends_at: input.ends_at, all_day: input.all_day ? 1 : 0, updated_at: now };
+    if (input.id) {
+      const existing = calendarEvents.find((event) => event.id === input.id);
+      if (!existing) throw new Error('backend.errors.calendarEventNotFound');
+      if (existing.account_id !== input.account_id) throw new Error('backend.errors.calendarEventOwnership');
+      if (existing.read_only === 1) throw new Error('backend.errors.calendarEventReadOnly');
+      Object.assign(existing, fields);
+      return { ...existing };
+    }
+    const outlookCalendar = calendarSources.find((source) => source.source === 'outlook'
+      && source.account_id === input.account_id);
+    // Exchange keeps guests only on an event that invites them.
+    const attendees = outlookCalendar && !input.send_invites ? [] : input.attendees;
+    const event: BackendCalendarEvent = {
+      id: `${outlookCalendar ? 'outlook-event' : 'cal'}-${calendarEvents.length + 1}`, account_id: input.account_id,
+      uid: `mock-${calendarEvents.length + 1}@satchel.dev`, ...fields, attendees_json: JSON.stringify(attendees),
+      source: outlookCalendar ? 'outlook' : 'local', collection_href: outlookCalendar?.remote_id ?? null,
+      read_only: 0, recurrence_instance: 0, rich_description: 0, created_at: now,
+    };
+    calendarEvents.push(event);
+    return { ...event };
+  },
+  delete_calendar_event: ({ id }) => {
+    const index = calendarEvents.findIndex((event) => event.id === id);
+    if (index < 0) throw new Error('backend.errors.calendarEventNotFound');
+    if (calendarEvents[index]!.read_only === 1) throw new Error('backend.errors.calendarEventReadOnly');
+    calendarEvents.splice(index, 1);
+  },
   list_contacts: () => sortedContacts().slice(0, 500),
   search_contacts: ({ query, limit }) => {
     const term = String(query ?? '').trim().toLowerCase();

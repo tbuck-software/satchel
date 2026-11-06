@@ -145,8 +145,9 @@ pub fn outlook_scope_granted(config_json: &str, required: &str) -> bool {
 }
 
 /// A calendar connection that came back without calendar access — or without
-/// saying which scopes it holds — did not do what it was started for. Mail sign-ins are not checked here: their scopes
-/// have always been taken as Microsoft returned them.
+/// saying which scopes it holds — did not do what it was started for. Mail
+/// sign-ins are not checked here: their scopes have always been taken as
+/// Microsoft returned them.
 pub fn validate_outlook_grant(
     token: &OAuthTokenPayload,
     request: &OAuthGrantRequest,

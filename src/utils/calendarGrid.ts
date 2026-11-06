@@ -25,7 +25,10 @@ export interface CalendarItem {
   id: string;
   uid: string;
   updatedAt?: string;
+  /** What the grid shows: the stored title, or "(No title)" when it is empty. */
   title: string;
+  /** The stored title the editor opens with — empty stays empty. */
+  editorTitle?: string;
   location: string | null;
   description: string | null;
   /** Stored content used when opening the editor, before display conversion. */
@@ -83,6 +86,7 @@ export function itemFromEvent(event: BackendCalendarEvent): CalendarItem {
     uid: event.uid,
     updatedAt: event.updated_at,
     title: event.title.trim() || t('calendar.event.untitled'),
+    editorTitle: event.title,
     location: event.location ?? null,
     description: descriptionToText(event.description),
     editorDescription: event.description ?? null,
@@ -121,6 +125,7 @@ export function itemFromInvite(invite: BackendCalendarInvite): CalendarItem | nu
     id: invite.id,
     uid: invite.uid,
     title: invite.summary?.trim() || t('calendar.event.untitled'),
+    editorTitle: invite.summary ?? '',
     location: invite.location ?? null,
     description: descriptionToText(invite.description),
     organizer: invite.organizer_name || invite.organizer_email || null,
@@ -648,7 +653,8 @@ export function draftFromItem(item: CalendarItem): CalendarEventDraft {
   return {
     id: item.kind === 'event' ? item.id : null,
     expectedUpdatedAt: item.kind === 'event' ? item.updatedAt ?? null : null,
-    title: item.title,
+    // The placeholder is display only: saved back, it would become the title.
+    title: item.editorTitle ?? item.title,
     location: item.location ?? '',
     description: item.editorDescription ?? item.description ?? '',
     allDay: item.allDay,
