@@ -8,11 +8,13 @@ import { useUiStore } from '@/stores/ui';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
+import { backendErrorKey } from '@/utils/backendErrors';
 import { inviteAcceptsResponse } from '@/utils/inviteMethods';
 import {
   addDays,
   addMonths,
   calendarSourceKey,
+  deleteConfirmKey,
   draftFromItem,
   emptyDraft,
   filterInvitesWithoutMirroredEvents,
@@ -247,9 +249,7 @@ async function removeItem(item: CalendarItem) {
   selected.value = null;
   const confirmed = await ask({
     title: t('calendar.event.deleteConfirmTitle'),
-    body: item.source === 'caldav' || item.source === 'outlook'
-      ? t('calendar.event.deleteConfirmRemote')
-      : t('calendar.event.deleteConfirmBody'),
+    body: t(deleteConfirmKey(item)),
     detail: item.title,
     confirmLabel: t('calendar.event.delete'),
     tone: 'danger',
@@ -263,9 +263,38 @@ async function removeItem(item: CalendarItem) {
     selected.value = null;
     toast.success(t('calendar.toast.eventDeleted'));
   } catch (err) {
+    await reloadAfterRemoteConflict(err);
     toast.error(t('calendar.toast.deleteFailed', { error: err instanceof Error ? err.message : err }));
   }
 }
+
+/**
+ * The backend refreshed the account's Outlook calendar before it refused the
+ * write; show that version, so reopening the event retries against it.
+ */
+async function reloadAfterRemoteConflict(err: unknown) {
+  if (backendErrorKey(err) !== 'backend.errors.outlookEventChangedRemotely') return;
+  try {
+    await invites.load();
+  } catch {
+    // The toast below still says what happened; the next poll reloads.
+  }
+}
+
+/** The account a new event goes to: the active one, else the first. */
+const newEventAccountId = computed(() =>
+  accounts.emailAccounts.find((account) => account.id === accounts.activeAccountId)?.id ||
+  accounts.emailAccounts[0]?.id);
+
+/**
+ * New events of a connected Outlook calendar keep their guests only with
+ * invitations on: Exchange mails everyone on an event's list.
+ */
+const guestsNeedInvites = computed(() => {
+  const accountId = newEventAccountId.value;
+  return Boolean(accountId) && invites.sources.some(
+    (source) => source.source === 'outlook' && source.account_id === accountId);
+});
 
 async function saveEvent(payload: EventEditorPayload): Promise<boolean> {
   if (saving.value) return false;
@@ -275,9 +304,7 @@ async function saveEvent(payload: EventEditorPayload): Promise<boolean> {
   const editedAccountId = payload.id
     ? invites.events.find((event) => event.id === payload.id)?.account_id
     : undefined;
-  const accountId = editedAccountId ||
-    accounts.emailAccounts.find((account) => account.id === accounts.activeAccountId)?.id ||
-    accounts.emailAccounts[0]?.id;
+  const accountId = editedAccountId || newEventAccountId.value;
   if (!accountId) {
     toast.error(t('calendar.toast.noAccount'));
     return false;
@@ -301,6 +328,7 @@ async function saveEvent(payload: EventEditorPayload): Promise<boolean> {
     toast.success(t(payload.id ? 'calendar.toast.eventUpdated' : 'calendar.toast.eventCreated'));
     return true;
   } catch (err) {
+    await reloadAfterRemoteConflict(err);
     toast.error(t('calendar.toast.saveFailed', { error: err instanceof Error ? err.message : err }));
     return false;
   } finally {
@@ -470,6 +498,7 @@ function onKeydown(event: KeyboardEvent) {
     <EventEditorDialog
       :draft="editorDraft"
       :saving="saving"
+      :guests-need-invites="guestsNeedInvites"
       @close="editorDraft = null"
       @save="saveEvent"
     />

@@ -762,18 +762,26 @@ function mirrorOutlookCalendar(accountId: string): number {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const at = (hours: number) => new Date(today.getTime() + hours * 3_600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  // As Graph reports them: a series arrives as occurrences, a meeting the
+  // account only attends is read-only, a Teams invite has a formatted body.
   const fixtures = [
-    { id: 'standup-1', title: 'Team standup', start: 9, end: 9.25 },
-    { id: 'standup-2', title: 'Team standup', start: 33, end: 33.25 },
-    { id: 'planning', title: 'Quarterly planning', start: 15, end: 16 },
+    { id: 'standup-1', title: 'Team standup', start: 9, end: 9.25, occurrence: true, readOnly: false, rich: false,
+      attendees: ['lena@example.com'] },
+    { id: 'standup-2', title: 'Team standup', start: 33, end: 33.25, occurrence: true, readOnly: false, rich: false,
+      attendees: ['lena@example.com'] },
+    { id: 'planning', title: 'Quarterly planning', start: 15, end: 16, occurrence: false, readOnly: true, rich: true,
+      attendees: [] as string[] },
   ];
   for (const fixture of fixtures) {
     const id = `outlook-event-${accountId}-${fixture.id}`;
     if (calendarEvents.some((event) => event.id === id)) continue;
     calendarEvents.push({
       id, account_id: accountId, uid: fixture.id.startsWith('standup') ? 'standup-series@outlook.example' : `${fixture.id}@outlook.example`,
-      title: fixture.title, description: null, location: null, starts_at: at(fixture.start), ends_at: at(fixture.end),
-      all_day: 0, attendees_json: '[]', source: 'outlook', collection_href: calendarId,
+      title: fixture.title, description: fixture.rich ? 'Join: Microsoft Teams meeting' : null, location: null,
+      starts_at: at(fixture.start), ends_at: at(fixture.end),
+      all_day: 0, attendees_json: JSON.stringify(fixture.attendees), source: 'outlook', collection_href: calendarId,
+      read_only: fixture.readOnly ? 1 : 0, recurrence_instance: fixture.occurrence ? 1 : 0,
+      rich_description: fixture.rich ? 1 : 0,
       created_at: today.toISOString(), updated_at: today.toISOString(),
     });
   }

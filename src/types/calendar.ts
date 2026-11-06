@@ -8,7 +8,8 @@ export type CalendarViewMode = 'month' | 'week' | 'day';
 
 export type BackendCalendarInvite = OptionalWireFields<WireCalendarInviteRecord, 'message_id' | 'organizer_email' | 'organizer_name' | 'summary' | 'description' | 'location' | 'starts_at' | 'ends_at' | 'method' | 'cancelled' | 'recurrence_id' | 'recurring' | 'recurrence_unbounded' | 'sequence'>;
 
-export type BackendCalendarEvent = OptionalWireFields<WireCalendarEventRecord, 'description' | 'location' | 'collection_href'>;
+/** The provider flags are 0 for every non-Outlook row; fixtures may leave them out. */
+export type BackendCalendarEvent = OptionalWireFields<WireCalendarEventRecord, 'description' | 'location' | 'collection_href' | 'read_only' | 'recurrence_instance' | 'rich_description'>;
 
 export type BackendCalendarSource = WireCalendarSourceRecord;
 

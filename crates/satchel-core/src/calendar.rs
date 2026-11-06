@@ -241,6 +241,7 @@ pub async fn save_event(
                     remote_etag: remote.as_ref().and_then(|value| value.etag.as_deref()),
                     collection_href: remote.as_ref().map(|value| value.collection_href.as_str()),
                     raw_ics: Some(&ics),
+                    flags: Default::default(),
                 },
             )
             .await?;

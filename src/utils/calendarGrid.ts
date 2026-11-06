@@ -43,6 +43,12 @@ export interface CalendarItem {
   color: string | null;
   /** Invites only: false when Accept/Maybe/Decline do not apply (PUBLISH, cancelled). */
   respondable?: boolean;
+  /** The provider does not let this account change the event. */
+  readOnly?: boolean;
+  /** One occurrence of a recurring series: changes apply to it alone. */
+  occurrence?: boolean;
+  /** A formatted description the plain-text editor would flatten. */
+  richDescription?: boolean;
 }
 
 /**
@@ -87,6 +93,9 @@ export function itemFromEvent(event: BackendCalendarEvent): CalendarItem {
     allDay: event.all_day === 1,
     status: 'own',
     source: event.source,
+    readOnly: event.read_only === 1,
+    occurrence: event.recurrence_instance === 1,
+    richDescription: event.rich_description === 1,
   };
 }
 
@@ -612,6 +621,12 @@ export interface CalendarEventDraft {
   /** Comma/semicolon separated e-mail addresses. */
   attendees: string;
   sendInvites: boolean;
+  /** The description is formatted text the editor shows but cannot keep. */
+  descriptionLocked?: boolean;
+  /** The edit applies to one occurrence of a series. */
+  occurrence?: boolean;
+  /** The provider mails the event's attendees about a change. */
+  notifiesAttendees?: boolean;
 }
 
 /** A fresh one-hour draft starting at `at`. */
@@ -641,7 +656,27 @@ export function draftFromItem(item: CalendarItem): CalendarEventDraft {
     end: new Date(item.end),
     attendees: item.attendees.join(', '),
     sendInvites: false,
+    descriptionLocked: item.richDescription === true,
+    occurrence: item.occurrence === true,
+    notifiesAttendees: providerNotifiesAttendees(item),
   };
+}
+
+/** Exchange mails a meeting's attendees when its organizer changes or deletes it. */
+export function providerNotifiesAttendees(item: Pick<CalendarItem, 'source' | 'attendees'>): boolean {
+  return item.source === 'outlook' && item.attendees.length > 0;
+}
+
+/** The delete question's body for `item`: what else the deletion reaches. */
+export function deleteConfirmKey(item: Pick<CalendarItem, 'source' | 'attendees' | 'occurrence'>): string {
+  if (item.source === 'outlook') {
+    const notifies = providerNotifiesAttendees(item);
+    if (item.occurrence) {
+      return notifies ? 'calendar.event.deleteConfirmOccurrenceAttendees' : 'calendar.event.deleteConfirmOccurrence';
+    }
+    return notifies ? 'calendar.event.deleteConfirmAttendees' : 'calendar.event.deleteConfirmRemote';
+  }
+  return item.source === 'caldav' ? 'calendar.event.deleteConfirmRemote' : 'calendar.event.deleteConfirmBody';
 }
 
 /** Value for an `<input type="datetime-local">`, in local time. */

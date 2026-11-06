@@ -31,7 +31,10 @@ it('mirrors the Outlook calendar only after calendar access is connected', async
   const events = await outlookEvents();
   expect(events.map((event) => event.collection_href)).toEqual(Array(3).fill('outlook-calendar-acc-outlook'));
   // A series arrives as one row per occurrence, sharing its UID.
-  expect(events.filter((event) => event.uid === 'standup-series@outlook.example')).toHaveLength(2);
+  const series = events.filter((event) => event.uid === 'standup-series@outlook.example');
+  expect(series.map((event) => event.recurrence_instance)).toEqual([1, 1]);
+  // A meeting the account only attends cannot be changed from here.
+  expect(events.find((event) => event.title === 'Quarterly planning')).toMatchObject({ read_only: 1, rich_description: 1 });
   const sources = await sendCommand<BackendCalendarSource[]>('list_calendar_sources', { accountId: null });
   expect(sources).toContainEqual({ account_id: 'acc-outlook', source: 'outlook', remote_id: 'outlook-calendar-acc-outlook', name: 'Calendar' });
 });

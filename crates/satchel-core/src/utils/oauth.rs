@@ -144,15 +144,16 @@ pub fn outlook_scope_granted(config_json: &str, required: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// A calendar connection that came back without calendar access did not do
-/// what it was started for. Mail sign-ins are not checked here: their scopes
+/// A calendar connection that came back without calendar access — or without
+/// saying which scopes it holds — did not do what it was started for. Mail sign-ins are not checked here: their scopes
 /// have always been taken as Microsoft returned them.
 pub fn validate_outlook_grant(
     token: &OAuthTokenPayload,
     request: &OAuthGrantRequest,
 ) -> Result<(), &'static str> {
+    // A response that names no scopes proves no calendar access either.
     if request.purpose == OAuthPurpose::Calendar
-        && outlook_scope_in(token.scope.as_deref(), OUTLOOK_CALENDAR_SCOPE) == Some(false)
+        && outlook_scope_in(token.scope.as_deref(), OUTLOOK_CALENDAR_SCOPE) != Some(true)
     {
         return Err("backend.errors.oauthCalendarPermissionRequired");
     }
@@ -1066,6 +1067,11 @@ mod tests {
             scope: Some("Mail.ReadWrite Mail.Send".into()),
             expires_at: None,
         };
+        assert_eq!(
+            validate_outlook_grant(&token, &calendar),
+            Err("backend.errors.oauthCalendarPermissionRequired")
+        );
+        token.scope = None;
         assert_eq!(
             validate_outlook_grant(&token, &calendar),
             Err("backend.errors.oauthCalendarPermissionRequired")

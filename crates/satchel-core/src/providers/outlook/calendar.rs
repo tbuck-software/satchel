@@ -6,22 +6,29 @@
 //! the mirror reads each calendar's `calendarView` — the same shape Google's
 //! `singleEvents=true` gives.
 //!
-//! Unlike Google's, this mirror is incremental: each calendar keeps the Graph
-//! delta link of its last pass in `calendar_sources.sync_cursor`, and a pass
-//! only applies what changed since. A calendar Graph offers no delta for is
-//! listed whole on every pass instead. A delta link is bound to the window it was
-//! started with, so the mirror starts over once that window has drifted a week,
-//! and whenever Graph declares the link expired.
+//! The default calendar is mirrored incrementally through the one delta Graph
+//! v1.0 documents, `/me/calendarView/delta`: its delta link is kept in
+//! `calendar_sources.sync_cursor`, and a pass only applies what changed since.
+//! A delta link is bound to the window it was started with, so the mirror
+//! starts over once that window has drifted a week, and whenever Graph
+//! declares the link expired. Every other calendar — and the default one, if
+//! Graph refuses its delta — is listed whole on every pass, as Google's is. A
+//! calendar Graph will not show (403/404: birthdays, revoked shares) is
+//! skipped, not reported as the account failing.
 //!
 //! Writes go to Graph first and are mirrored from Graph's answer: an edit the
-//! server refused never shows up locally as if it had worked.
+//! server refused never shows up locally as if it had worked. Graph v1.0 does
+//! not document `If-Match` for events, so a write first reads the event's
+//! `changeKey` and goes ahead only if it is the one the mirror last saw.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sqlx::SqlitePool;
 
 use super::batch::{send_throttled, send_waiting_out_throttling};
-use crate::db::calendar::{CalendarRepository, OutlookCalendarDelta, OutlookCalendarEvent};
+use crate::db::calendar::{
+    CalendarRepository, EventFlags, OutlookCalendarDelta, OutlookCalendarEvent,
+};
 use crate::sync::errors::{http_failure, SyncError, SyncResult};
 use crate::utils::oauth::{
     access_token_from_account_config, outlook_scope_granted, OAuthProvider, OUTLOOK_CALENDAR_SCOPE,
@@ -33,8 +40,12 @@ const WINDOW_FUTURE_DAYS: i64 = 365;
 /// A delta link keeps the window it started with. Past this drift the mirror
 /// starts over, so the far end keeps reaching a year ahead.
 const WINDOW_DRIFT_DAYS: i64 = 7;
-/// Graph's page size for calendar deltas is set by header, not `$top`.
+/// Page size: a header for the delta, which ignores `$top`; `$top` for a listing.
 const PAGE_SIZE: u32 = 100;
+/// The fields a listing asks for. `body` stays: the mirror shows the
+/// description and must know whether it is formatted.
+const LISTING_SELECT: &str = "id,iCalUId,changeKey,subject,body,location,start,end,isAllDay,\
+isCancelled,attendees,isOrganizer,type";
 /// Same ids as mail: an event moved between calendars keeps its id.
 const PREFER_IMMUTABLE_IDS: &str = "IdType=\"ImmutableId\"";
 /// Times come back as UTC, whatever zone the event was created in.
@@ -69,6 +80,15 @@ struct GraphCalendar {
     name: Option<String>,
     #[serde(rename = "isDefaultCalendar", default)]
     is_default: bool,
+    /// False for read-only shares and subscribed calendars.
+    #[serde(rename = "canEdit")]
+    can_edit: Option<bool>,
+}
+
+impl GraphCalendar {
+    fn can_edit(&self) -> bool {
+        self.can_edit.unwrap_or(true)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,8 +97,8 @@ struct GraphEvent {
     /// Delta tombstone: `{"id": …, "@removed": {"reason": "deleted"}}`.
     #[serde(rename = "@removed")]
     removed: Option<Value>,
-    #[serde(rename = "@odata.etag")]
-    etag: Option<String>,
+    #[serde(rename = "changeKey")]
+    change_key: Option<String>,
     #[serde(rename = "iCalUId")]
     ical_uid: Option<String>,
     subject: Option<String>,
@@ -92,6 +112,13 @@ struct GraphEvent {
     is_cancelled: bool,
     #[serde(default)]
     attendees: Vec<GraphAttendee>,
+    /// Only the organizer may change a meeting; an attendee's copy is theirs
+    /// to answer, not to edit. Absent counts as not organizing.
+    #[serde(rename = "isOrganizer")]
+    is_organizer: Option<bool>,
+    /// `singleInstance`, `occurrence`, `exception` or `seriesMaster`.
+    #[serde(rename = "type")]
+    event_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -131,7 +158,8 @@ struct GraphEmailAddress {
 pub struct MirroredEvent {
     pub id: String,
     pub remote_id: String,
-    pub etag: Option<String>,
+    pub change_key: Option<String>,
+    pub flags: EventFlags,
     pub uid: String,
     pub title: String,
     pub description: Option<String>,
@@ -148,7 +176,8 @@ impl MirroredEvent {
         OutlookCalendarEvent {
             id: &self.id,
             remote_id: &self.remote_id,
-            etag: self.etag.as_deref(),
+            change_key: self.change_key.as_deref(),
+            flags: self.flags,
             uid: &self.uid,
             title: &self.title,
             description: self.description.as_deref(),
@@ -234,15 +263,26 @@ impl Graph {
         Ok(url)
     }
 
-    /// Graph's paging links are absolute. The bearer token goes nowhere else.
+    /// Graph's paging links are absolute. The bearer token goes nowhere but
+    /// the Graph origin, under the API's own path.
     fn follow(&self, link: &str) -> SyncResult<reqwest::Url> {
-        if !link.starts_with(&self.base) {
-            return Err(SyncError::Permanent(format!(
+        let leaves = || {
+            SyncError::Permanent(format!(
                 "outlook calendar link leaves the Graph API: {link}"
-            )));
+            ))
+        };
+        let base = reqwest::Url::parse(&self.base)
+            .map_err(|err| SyncError::Permanent(format!("invalid Graph base: {err}")))?;
+        let url = reqwest::Url::parse(link).map_err(|_| leaves())?;
+        if url.origin() != base.origin() {
+            return Err(leaves());
         }
-        reqwest::Url::parse(link)
-            .map_err(|err| SyncError::Permanent(format!("invalid Graph link: {err}")))
+        let root = base.path().trim_end_matches('/');
+        let path = url.path();
+        if !(path == root || path.starts_with(&format!("{root}/"))) {
+            return Err(leaves());
+        }
+        Ok(url)
     }
 
     fn request(&self, method: reqwest::Method, url: reqwest::Url) -> reqwest::RequestBuilder {
@@ -270,7 +310,7 @@ impl Graph {
     async fn calendars(&self) -> SyncResult<Vec<GraphCalendar>> {
         let mut url = self.url(&["me", "calendars"])?;
         url.query_pairs_mut()
-            .append_pair("$select", "id,name,isDefaultCalendar");
+            .append_pair("$select", "id,name,isDefaultCalendar,canEdit");
         let mut calendars = Vec::new();
         loop {
             let response = send_throttled(
@@ -399,9 +439,10 @@ enum PassOutcome {
     Done(Pass),
     /// Graph no longer knows the delta link; only a pass from scratch helps.
     Expired,
-    /// Graph refused the first request of a fresh delta outright: this
-    /// endpoint offers no delta for that calendar.
+    /// Graph refused the first request of a fresh delta: no delta here.
     Unsupported,
+    /// Graph will not show this calendar to the account (403/404).
+    Inaccessible(u16),
 }
 
 /// How a pass reads its pages.
@@ -409,7 +450,7 @@ enum PassOutcome {
 enum PassKind {
     /// Following a stored delta link.
     Resume,
-    /// Opening a new delta enumeration.
+    /// Opening a new delta enumeration of the default calendar.
     FreshDelta,
     /// A plain `calendarView` listing: everything, no delta link.
     Listing,
@@ -423,35 +464,29 @@ async fn sync_calendar(
     cursor: Option<DeltaCursor>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> SyncResult<()> {
-    let incremental = match &cursor {
-        Some(cursor) => {
-            match run_pass(
-                account_id,
-                graph,
-                graph.follow(&cursor.delta_link)?,
-                PassKind::Resume,
-            )
-            .await?
-            {
-                PassOutcome::Done(pass) => Some((pass, cursor.window_start.clone())),
-                PassOutcome::Expired | PassOutcome::Unsupported => {
-                    tracing::info!(
-                        account_id,
-                        "outlook calendar delta link expired; resyncing from scratch"
-                    );
-                    None
-                }
+    let mut incremental = None;
+    if let Some(cursor) = &cursor {
+        let link = graph.follow(&cursor.delta_link)?;
+        match run_pass(account_id, graph, calendar, link, PassKind::Resume).await? {
+            PassOutcome::Done(pass) => incremental = Some((pass, cursor.window_start.clone())),
+            PassOutcome::Inaccessible(status) => return skip_inaccessible(account_id, status),
+            PassOutcome::Expired | PassOutcome::Unsupported => {
+                tracing::info!(
+                    account_id,
+                    "outlook calendar delta link expired; resyncing from scratch"
+                );
             }
         }
-        None => None,
-    };
+    }
     let (pass, window_start, complete) = match incremental {
         Some((pass, window_start)) => (pass, window_start, false),
-        None => {
-            let start = now - chrono::Duration::days(WINDOW_PAST_DAYS);
-            let pass = fresh_pass(account_id, graph, calendar, now).await?;
-            (pass, start.to_rfc3339(), true)
-        }
+        None => match fresh_pass(account_id, graph, calendar, now).await? {
+            Ok(pass) => {
+                let start = now - chrono::Duration::days(WINDOW_PAST_DAYS);
+                (pass, start.to_rfc3339(), true)
+            }
+            Err(status) => return skip_inaccessible(account_id, status),
+        },
     };
     let cursor = pass
         .delta_link
@@ -486,16 +521,26 @@ async fn sync_calendar(
         .map_err(persistence)
 }
 
-/// Enumerate a calendar from scratch. Graph v1.0 documents the delta of the
-/// default calendar's view (`/me/calendarView/delta`); the per-calendar form
-/// is tried first, and a calendar that offers no delta is listed whole on
-/// every pass, the way the Google mirror works.
+/// Birthdays, holiday subscriptions and withdrawn shares answer 403/404 on
+/// every pass. Such a calendar keeps what it had; it does not fail the account.
+fn skip_inaccessible(account_id: &str, status: u16) -> SyncResult<()> {
+    tracing::info!(
+        account_id,
+        status,
+        "outlook calendar is not readable for this account; skipped"
+    );
+    Ok(())
+}
+
+/// Enumerate a calendar from scratch: the default calendar through its
+/// delta, every other one (and a default one whose delta Graph refuses) as a
+/// listing. `Err` carries the status of a calendar Graph will not show.
 async fn fresh_pass(
     account_id: &str,
     graph: &Graph,
     calendar: &GraphCalendar,
     now: chrono::DateTime<chrono::Utc>,
-) -> SyncResult<Pass> {
+) -> SyncResult<Result<Pass, u16>> {
     let start = graph_time(now - chrono::Duration::days(WINDOW_PAST_DAYS));
     let end = graph_time(now + chrono::Duration::days(WINDOW_FUTURE_DAYS));
     let windowed = |segments: &[&str]| -> SyncResult<reqwest::Url> {
@@ -505,35 +550,29 @@ async fn fresh_pass(
             .append_pair("endDateTime", &end);
         Ok(url)
     };
-    let mut attempts = vec![(
-        windowed(&["me", "calendars", &calendar.id, "calendarView", "delta"])?,
-        PassKind::FreshDelta,
-    )];
     if calendar.is_default {
-        attempts.push((
-            windowed(&["me", "calendarView", "delta"])?,
-            PassKind::FreshDelta,
-        ));
-    }
-    attempts.push((
-        windowed(&["me", "calendars", &calendar.id, "calendarView"])?,
-        PassKind::Listing,
-    ));
-    for (url, kind) in attempts {
-        match run_pass(account_id, graph, url, kind).await? {
-            PassOutcome::Done(pass) => return Ok(pass),
-            PassOutcome::Unsupported => {
-                tracing::info!(
-                    account_id,
-                    "outlook calendar delta unavailable; trying the next form"
-                );
-            }
-            PassOutcome::Expired => break,
+        let delta = windowed(&["me", "calendarView", "delta"])?;
+        match run_pass(account_id, graph, calendar, delta, PassKind::FreshDelta).await? {
+            PassOutcome::Done(pass) => return Ok(Ok(pass)),
+            PassOutcome::Inaccessible(status) => return Ok(Err(status)),
+            PassOutcome::Unsupported | PassOutcome::Expired => tracing::info!(
+                account_id,
+                "outlook calendar delta unavailable; listing the calendar"
+            ),
         }
     }
-    Err(SyncError::Transient(
-        "outlook calendar refused a fresh enumeration".into(),
-    ))
+    let mut listing = windowed(&["me", "calendars", &calendar.id, "calendarView"])?;
+    listing
+        .query_pairs_mut()
+        .append_pair("$top", &PAGE_SIZE.to_string())
+        .append_pair("$select", LISTING_SELECT);
+    match run_pass(account_id, graph, calendar, listing, PassKind::Listing).await? {
+        PassOutcome::Done(pass) => Ok(Ok(pass)),
+        PassOutcome::Inaccessible(status) => Ok(Err(status)),
+        PassOutcome::Unsupported | PassOutcome::Expired => Err(SyncError::Transient(
+            "outlook calendar listing ended without an answer".into(),
+        )),
+    }
 }
 
 fn calendar_name(calendar: &GraphCalendar) -> &str {
@@ -551,6 +590,7 @@ fn graph_time(time: chrono::DateTime<chrono::Utc>) -> String {
 async fn run_pass(
     account_id: &str,
     graph: &Graph,
+    calendar: &GraphCalendar,
     first: reqwest::Url,
     kind: PassKind,
 ) -> SyncResult<PassOutcome> {
@@ -560,42 +600,32 @@ async fn run_pass(
     // the last word counts.
     let mut changed: std::collections::HashMap<String, MirroredEvent> = Default::default();
     let mut removed: std::collections::HashSet<String> = Default::default();
+    let page_size = format!("odata.maxpagesize={PAGE_SIZE}");
     loop {
         let response = send_waiting_out_throttling(
             || {
-                graph.request_preferring(
-                    reqwest::Method::GET,
-                    url.clone(),
-                    Some(&format!("odata.maxpagesize={PAGE_SIZE}")),
-                )
+                let extra = (kind != PassKind::Listing).then_some(page_size.as_str());
+                graph.request_preferring(reqwest::Method::GET, url.clone(), extra)
             },
-            "calendar delta",
+            "calendar pass",
         )
         .await?;
-        let status = response.status();
-        if !status.is_success() {
+        let status = response.status().as_u16();
+        if !(200..300).contains(&status) {
             let body = response.text().await.unwrap_or_default();
-            if kind == PassKind::Resume && delta_link_expired(status.as_u16(), &body) {
-                return Ok(PassOutcome::Expired);
+            if let Some(outcome) = refusal(kind, first_page, status, &body) {
+                return Ok(outcome);
             }
-            if kind == PassKind::FreshDelta && first_page && matches!(status.as_u16(), 400 | 404) {
-                return Ok(PassOutcome::Unsupported);
-            }
-            return Err(http_failure(
-                "outlook",
-                "calendar delta",
-                status.as_u16(),
-                &body,
-            ));
+            return Err(http_failure("outlook", "calendar pass", status, &body));
         }
-        let page: Page<GraphEvent> = parse(response, "calendar delta").await?;
+        let page: Page<GraphEvent> = parse(response, "calendar pass").await?;
         for event in page.value {
             if event.removed.is_some() || event.is_cancelled {
                 changed.remove(&event.id);
                 removed.insert(event.id);
                 continue;
             }
-            if let Some(mapped) = map_event(account_id, event) {
+            if let Some(mapped) = map_event(account_id, calendar.can_edit(), event) {
                 removed.remove(&mapped.remote_id);
                 changed.insert(mapped.remote_id.clone(), mapped);
             }
@@ -616,6 +646,30 @@ async fn run_pass(
             removed: removed.into_iter().collect(),
             delta_link,
         }));
+    }
+}
+
+/// What an error status means for a pass, if it means more than a failure.
+fn refusal(kind: PassKind, first_page: bool, status: u16, body: &str) -> Option<PassOutcome> {
+    match kind {
+        PassKind::Resume if delta_link_expired(status, body) => Some(PassOutcome::Expired),
+        PassKind::Resume if status == 403 => Some(PassOutcome::Inaccessible(status)),
+        // A resumed link Graph no longer finds is a link to start over.
+        PassKind::Resume if status == 404 => Some(PassOutcome::Expired),
+        PassKind::FreshDelta if first_page && status == 403 => {
+            Some(PassOutcome::Inaccessible(status))
+        }
+        // Not documented for this calendar, or not implemented: list instead.
+        // 401 and 429 are the token's and the throttle's to answer.
+        PassKind::FreshDelta
+            if first_page
+                && ((400..500).contains(&status) && status != 401 && status != 429
+                    || status == 501) =>
+        {
+            Some(PassOutcome::Unsupported)
+        }
+        PassKind::Listing if matches!(status, 403 | 404) => Some(PassOutcome::Inaccessible(status)),
+        _ => None,
     }
 }
 
@@ -641,7 +695,41 @@ pub fn row_id(account_id: &str, remote_id: &str) -> String {
     format!("outlook-event-{suffix}")
 }
 
-fn map_event(account_id: &str, event: GraphEvent) -> Option<MirroredEvent> {
+/// Formatting the plain-text editor would lose: links (Teams and Zoom join
+/// blocks), images, tables, lists, emphasis, headings. Outlook wraps even a
+/// typed plain note in `<div>`/`<p>`/`<span>`, which text keeps well enough.
+fn is_rich_html(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    [
+        "<a ",
+        "<img",
+        "<table",
+        "<ul",
+        "<ol",
+        "<b>",
+        "<b ",
+        "<strong",
+        "<i>",
+        "<i ",
+        "<em",
+        "<u>",
+        "<h1",
+        "<h2",
+        "<h3",
+        "<h4",
+        "<hr",
+        "<blockquote",
+        "<pre",
+    ]
+    .iter()
+    .any(|tag| lower.contains(tag))
+}
+
+fn map_event(
+    account_id: &str,
+    calendar_can_edit: bool,
+    event: GraphEvent,
+) -> Option<MirroredEvent> {
     let start = event.start.as_ref()?;
     let all_day = event.is_all_day;
     let starts_at = normalize_time(start, all_day)?;
@@ -650,6 +738,7 @@ fn map_event(account_id: &str, event: GraphEvent) -> Option<MirroredEvent> {
         .as_ref()
         .and_then(|end| normalize_time(end, all_day))
         .unwrap_or_else(|| starts_at.clone());
+    let mut rich_description = false;
     let description = event.body.and_then(|body| {
         let content = body.content?;
         let text = if body
@@ -657,12 +746,21 @@ fn map_event(account_id: &str, event: GraphEvent) -> Option<MirroredEvent> {
             .as_deref()
             .is_some_and(|kind| kind.eq_ignore_ascii_case("html"))
         {
+            rich_description = is_rich_html(&content);
             super::graph_html_body_to_text(&content)
         } else {
             content.trim().to_string()
         };
         Some(text).filter(|text| !text.is_empty())
     });
+    let flags = EventFlags {
+        read_only: !calendar_can_edit || event.is_organizer != Some(true),
+        recurrence_instance: matches!(
+            event.event_type.as_deref(),
+            Some("occurrence" | "exception")
+        ),
+        rich_description,
+    };
     let attendees = event
         .attendees
         .into_iter()
@@ -677,12 +775,13 @@ fn map_event(account_id: &str, event: GraphEvent) -> Option<MirroredEvent> {
             .filter(|uid| !uid.trim().is_empty())
             .unwrap_or_else(|| event.id.clone()),
         remote_id: event.id,
-        etag: event.etag,
+        change_key: event.change_key,
+        flags,
+        // An empty title is the frontend's to name in the viewer's language.
         title: event
             .subject
             .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| "(ohne Titel)".to_string()),
+            .unwrap_or_default(),
         description,
         location: event
             .location
@@ -747,8 +846,16 @@ pub struct WrittenEvent {
 pub enum WriteError {
     #[error("outlook calendar access was not granted")]
     NotGranted,
+    /// The event's `changeKey` is no longer the one the mirror saw.
     #[error("the event changed on the server")]
     Changed,
+    /// The event no longer exists on the server.
+    #[error("the event is gone on the server")]
+    Gone,
+    /// Graph refused the write: a meeting the account only attends, a
+    /// read-only calendar.
+    #[error("the server does not let this account change the event")]
+    Forbidden,
     #[error(transparent)]
     Remote(#[from] SyncError),
 }
@@ -771,9 +878,12 @@ fn location_json(location: Option<&str>) -> Value {
 }
 
 /// The POST body of a new event. Attendees are listed only when invitations
-/// are wanted: Exchange mails an invitation to everyone on the list.
-fn create_body(fields: &EventFields<'_>, invite: &[String]) -> Value {
+/// are wanted: Exchange mails an invitation to everyone on the list. The
+/// `transactionId` makes Graph answer a repeated POST — a throttling retry, a
+/// response lost on the way back — with the event it already created.
+fn create_body(fields: &EventFields<'_>, invite: &[String], transaction_id: &str) -> Value {
     let mut body = json!({
+        "transactionId": transaction_id,
         "subject": fields.title,
         "body": text_body(fields.description),
         "start": time_json(fields.starts_at, fields.all_day),
@@ -805,14 +915,14 @@ fn blank(value: Option<&str>) -> Option<&str> {
 }
 
 /// The PATCH body: only what the editor changed. The stored description is a
-/// text rendering of what may be an HTML body; resending it unchanged would
-/// flatten the original's formatting.
+/// text rendering of the body; it is sent back only when the editor changed
+/// it, and never for a formatted body, which text would flatten.
 pub fn patch_body(previous: &MirroredEventView<'_>, fields: &EventFields<'_>) -> Value {
     let mut patch = Map::new();
     if fields.title != previous.title {
         patch.insert("subject".into(), json!(fields.title));
     }
-    if blank(fields.description) != blank(previous.description) {
+    if !previous.rich_description && blank(fields.description) != blank(previous.description) {
         patch.insert("body".into(), text_body(fields.description));
     }
     if blank(fields.location) != blank(previous.location) {
@@ -840,6 +950,15 @@ pub struct MirroredEventView<'a> {
     pub starts_at: &'a str,
     pub ends_at: &'a str,
     pub all_day: bool,
+    pub rich_description: bool,
+}
+
+/// Whether the editor changed a formatted description it cannot write back.
+pub fn changes_rich_description(
+    previous: &MirroredEventView<'_>,
+    fields: &EventFields<'_>,
+) -> bool {
+    previous.rich_description && blank(fields.description) != blank(previous.description)
 }
 
 /// The stored representation of a time, as `write_event` keeps it.
@@ -867,8 +986,8 @@ pub async fn create_event(
     let graph = connect_for_write(pool, account_id).await?;
     let calendar_id = graph.default_calendar_id().await?;
     let url = graph.url(&["me", "calendars", &calendar_id, "events"])?;
-    let body = create_body(fields, invite);
-    let response = send_throttled(
+    let body = create_body(fields, invite, &uuid::Uuid::new_v4().to_string());
+    let response = send_waiting_out_throttling(
         || {
             graph
                 .request(reqwest::Method::POST, url.clone())
@@ -877,41 +996,81 @@ pub async fn create_event(
         "calendar create",
     )
     .await?;
+    let response = accepted(response, "calendar create").await?;
     written(account_id, calendar_id, response, "calendar create").await
 }
 
-/// Apply `patch` to one event, guarded by the etag the mirror last saw.
+/// The `changeKey` on the server, before a write. `Ok(false)`: the event is gone.
+async fn require_change_key(
+    graph: &Graph,
+    remote_id: &str,
+    expected: Option<&str>,
+) -> Result<bool, WriteError> {
+    #[derive(Deserialize)]
+    struct Current {
+        #[serde(rename = "changeKey")]
+        change_key: Option<String>,
+    }
+    let mut url = graph.url(&["me", "events", remote_id])?;
+    url.query_pairs_mut().append_pair("$select", "changeKey");
+    let response = send_waiting_out_throttling(
+        || graph.request(reqwest::Method::GET, url.clone()),
+        "calendar change key",
+    )
+    .await?;
+    if response.status().as_u16() == 404 {
+        return Ok(false);
+    }
+    let response = accepted(response, "calendar change key").await?;
+    let current: Current = parse(response, "calendar change key").await?;
+    // A mirror row without a change key cannot prove it is current.
+    match (expected, current.change_key.as_deref()) {
+        (Some(expected), Some(current)) if expected == current => Ok(true),
+        _ => Err(WriteError::Changed),
+    }
+}
+
+/// A 2xx answer, or the reason for anything else.
+async fn accepted(
+    response: reqwest::Response,
+    label: &str,
+) -> Result<reqwest::Response, WriteError> {
+    let status = response.status().as_u16();
+    match status {
+        200..=299 => Ok(response),
+        403 => Err(WriteError::Forbidden),
+        404 => Err(WriteError::Gone),
+        _ => {
+            let body = response.text().await.unwrap_or_default();
+            Err(http_failure("outlook", label, status, &body).into())
+        }
+    }
+}
+
+/// Apply `patch` to one event, if it is still the version the mirror saw.
 pub async fn update_event(
     pool: &SqlitePool,
     account_id: &str,
     calendar_id: &str,
     remote_id: &str,
-    etag: Option<&str>,
+    change_key: Option<&str>,
     patch: &Value,
 ) -> Result<WrittenEvent, WriteError> {
     let graph = connect_for_write(pool, account_id).await?;
+    if !require_change_key(&graph, remote_id, change_key).await? {
+        return Err(WriteError::Gone);
+    }
     let url = graph.url(&["me", "events", remote_id])?;
     let response = send_waiting_out_throttling(
         || {
-            let request = graph
+            graph
                 .request(reqwest::Method::PATCH, url.clone())
-                .json(patch);
-            match etag {
-                Some(etag) => request.header(reqwest::header::IF_MATCH, etag),
-                None => request,
-            }
+                .json(patch)
         },
         "calendar update",
     )
     .await?;
-    let status = response.status();
-    if status.as_u16() == 412 {
-        return Err(WriteError::Changed);
-    }
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(http_failure("outlook", "calendar update", status.as_u16(), &body).into());
-    }
+    let response = accepted(response, "calendar update").await?;
     written(
         account_id,
         calendar_id.to_string(),
@@ -921,35 +1080,27 @@ pub async fn update_event(
     .await
 }
 
-/// Delete one event (one occurrence, for a recurring series). An event that
-/// is already gone counts as deleted.
+/// Delete one event (one occurrence, for a recurring series), if it is still
+/// the version the mirror saw. An event that is already gone counts as deleted.
 pub async fn delete_event(
     pool: &SqlitePool,
     account_id: &str,
     remote_id: &str,
-    etag: Option<&str>,
+    change_key: Option<&str>,
 ) -> Result<(), WriteError> {
     let graph = connect_for_write(pool, account_id).await?;
+    if !require_change_key(&graph, remote_id, change_key).await? {
+        return Ok(());
+    }
     let url = graph.url(&["me", "events", remote_id])?;
     let response = send_waiting_out_throttling(
-        || {
-            let request = graph.request(reqwest::Method::DELETE, url.clone());
-            match etag {
-                Some(etag) => request.header(reqwest::header::IF_MATCH, etag),
-                None => request,
-            }
-        },
+        || graph.request(reqwest::Method::DELETE, url.clone()),
         "calendar delete",
     )
     .await?;
-    let status = response.status();
-    match status.as_u16() {
-        200..=299 | 404 => Ok(()),
-        412 => Err(WriteError::Changed),
-        code => {
-            let body = response.text().await.unwrap_or_default();
-            Err(http_failure("outlook", "calendar delete", code, &body).into())
-        }
+    match accepted(response, "calendar delete").await {
+        Ok(_) | Err(WriteError::Gone) => Ok(()),
+        Err(error) => Err(error),
     }
 }
 
@@ -960,7 +1111,8 @@ async fn written(
     label: &str,
 ) -> Result<WrittenEvent, WriteError> {
     let event: GraphEvent = parse(response, label).await?;
-    let event = map_event(account_id, event).ok_or_else(|| {
+    // Graph just accepted this account's write to the calendar.
+    let event = map_event(account_id, true, event).ok_or_else(|| {
         SyncError::Transient(format!("outlook {label} returned an event without a start"))
     })?;
     Ok(WrittenEvent { calendar_id, event })

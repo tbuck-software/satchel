@@ -385,7 +385,7 @@ onBeforeUnmount(() => {
             :key="`${event.starts_at}-${event.title}`"
             type="button"
             class="event-card"
-            :aria-label="`${event.title}, ${eventDay(event)}, ${eventTime(event)}, ${eventStatus(event)}`"
+            :aria-label="`${event.title.trim() || t('calendar.event.untitled')}, ${eventDay(event)}, ${eventTime(event)}, ${eventStatus(event)}`"
             @click="openDestination('calendar')"
           >
             <span class="event-time">
@@ -393,7 +393,7 @@ onBeforeUnmount(() => {
               <small>{{ eventTime(event) }}</small>
             </span>
             <span class="event-copy">
-              <strong>{{ event.title }}</strong>
+              <strong>{{ event.title.trim() || t('calendar.event.untitled') }}</strong>
               <small>
                 {{ eventStatus(event) }}<template v-if="event.location"> · {{ eventLocation(event.location) }}</template>
               </small>
