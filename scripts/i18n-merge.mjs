@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Builds the message catalogues from `src/i18n/parts/*.json`.
  *
@@ -9,11 +8,17 @@
  * Those are derived from the entries' module graphs, so they hold exactly the
  * keys those windows can reach and not one string more — the separate bundles
  * are the reason the viewer still starts in a few kilobytes.
+ *
+ * The main window loads `startup.<locale>.json` before its first frame; the
+ * rest of its keys load as chunks with the lazy code that uses them
+ * (`scripts/i18n-split.mjs`, `scripts/vite-i18n-chunks.mjs`). The full
+ * catalogues stay for tests and as the source the chunks are cut from.
  */
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { messageKeys, moduleGraph } from './i18n-graph.mjs';
+import { computeSplit, unanchoredKeyCalls } from './i18n-split.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const partsDir = path.join(root, 'src', 'i18n', 'parts');
@@ -121,17 +126,17 @@ function merge(target, source, trail, conflicts) {
   }
 }
 
-function sortDeep(value) {
+export function sortDeep(value) {
   if (!isPlainObject(value)) return value;
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortDeep(value[key])]));
 }
 
-function keyPaths(value, trail = []) {
+export function keyPaths(value, trail = []) {
   if (!isPlainObject(value)) return [trail.join('.')];
   return Object.entries(value).flatMap(([key, child]) => keyPaths(child, [...trail, key]));
 }
 
-function pick(bundle, keys) {
+export function pick(bundle, keys) {
   const result = {};
   for (const key of keys) {
     const segments = key.split('.');
@@ -307,6 +312,27 @@ function main() {
       );
     }
     process.stdout.write(`subset ${name}: ${keys.length} keys\n`);
+  }
+
+  const split = computeSplit(enKeys);
+  for (const locale of ['en', 'de']) {
+    emit(
+      `startup.${locale}.json`,
+      `${JSON.stringify(sortDeep(pick(bundles[locale], split.startupKeys)), null, 2)}\n`,
+    );
+  }
+  const lazyKeys = new Set([...split.chunks.values()].flatMap((chunk) => chunk.keys));
+  process.stdout.write(
+    `startup: ${split.startupKeys.length} keys, lazy chunks: ${lazyKeys.size} keys\n`,
+  );
+  const unanchored = unanchoredKeyCalls(split.modules);
+  if (unanchored.length) {
+    process.stderr.write(
+      `t()-Aufrufe ohne festen Schlüsselanfang (${unanchored.length}); der Split kann ihre Schlüssel `
+        + `nicht zuordnen. Schlüssel mit einem Literal beginnen lassen oder in UNANCHORED_KEYS `
+        + `(scripts/i18n-split.mjs) eintragen:\n${unanchored.join('\n')}\n`,
+    );
+    process.exitCode = 1;
   }
 
   if (stale.length) {

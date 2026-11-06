@@ -19,14 +19,67 @@ import {
 type AnyComposer = Composer<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>, string, string, string>;
 
 let active: AnyComposer | null = null;
-let loadActiveLocale: ((locale: AppLocale) => Promise<void>) | undefined;
+let loadActiveCatalogue: ((locale: AppLocale) => Promise<void>) | undefined;
 let preferenceGeneration = 0;
 
-export function setActiveI18n(composer: AnyComposer, loadLocale?: (locale: AppLocale) => Promise<void>) {
+/*
+ * More than the base catalogue can belong to a locale: the main window adds
+ * the chunks of lazy code loaded so far (`./messageChunks`). Those register
+ * here, so a locale switch waits for them too.
+ */
+const extraLoaders = new Set<(locale: AppLocale) => Promise<unknown>>();
+let localeLoads = new Map<AppLocale, Promise<void>>();
+/** Locales whose catalogue was requested; later chunks load in each of them. */
+let wanted = new Set<AppLocale>();
+/** Locales whose catalogue and every registered extra are merged. */
+let ready = new Set<AppLocale>();
+
+/**
+ * Makes `composer` the instance stores and utilities translate with.
+ * `loadCatalogue` merges a locale's base catalogue into it; without one the
+ * instance is expected to carry its messages already.
+ */
+export function setActiveI18n(composer: AnyComposer, loadCatalogue?: (locale: AppLocale) => Promise<void>) {
   ++preferenceGeneration;
-  loadActiveLocale = loadLocale;
+  loadActiveCatalogue = loadCatalogue;
   active = composer;
+  localeLoads = new Map();
+  wanted = new Set();
+  ready = new Set();
   applyDocumentLocale(composer.locale.value as AppLocale);
+}
+
+/** Registers more messages that every locale load has to include. */
+export function addLocaleLoader(load: (locale: AppLocale) => Promise<unknown>) {
+  extraLoaders.add(load);
+}
+
+/** The locales a newly registered extra has to load in. */
+export function wantedLocales(): AppLocale[] {
+  return wanted.size ? [...wanted] : [currentLocale()];
+}
+
+/**
+ * Loads a locale's catalogue and every registered extra. Cached: a second
+ * call for the same locale returns the first promise.
+ */
+export function loadLocaleMessages(locale: AppLocale): Promise<void> {
+  const cached = localeLoads.get(locale);
+  if (cached) return cached;
+  const loads = localeLoads;
+  const done = ready;
+  wanted.add(locale);
+  const loading = Promise.all([
+    loadActiveCatalogue?.(locale),
+    ...[...extraLoaders].map((load) => load(locale)),
+  ]).then(() => {
+    done.add(locale);
+  }).catch((error) => {
+    if (loads.get(locale) === loading) loads.delete(locale);
+    throw error;
+  });
+  loads.set(locale, loading);
+  return loading;
 }
 
 export function activeI18n(): AnyComposer | null {
@@ -55,8 +108,8 @@ export function applyLocalePreference(preference: LocalePreference, persist = tr
     applyDocumentLocale(locale);
   };
   if (persist) writeStoredLocalePreference(preference);
-  if (composer && !composer.availableLocales.includes(locale) && loadActiveLocale) {
-    return loadActiveLocale(locale).then(apply).catch(error => console.warn('Locale catalogue could not be loaded', error));
+  if (composer && !ready.has(locale) && (loadActiveCatalogue || extraLoaders.size)) {
+    return loadLocaleMessages(locale).then(apply).catch(error => console.warn('Locale catalogue could not be loaded', error));
   }
   apply();
   return Promise.resolve();

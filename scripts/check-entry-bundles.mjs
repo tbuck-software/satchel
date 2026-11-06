@@ -14,6 +14,8 @@ if (!existsSync(manifestPath)) {
 /** @type {import("vite").Manifest} */
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 /* Startup includes the chosen catalogue, even though it is a dynamic import.
+ * For the main window that is the startup catalogue; view chunks are not
+ * counted, since they load with their views.
  * The inactive locale is excluded; measure the larger of the two active paths.
  * Measured 2026-10-13 after the review integration: main initial 227.6 KiB,
  * viewer 120.1 KiB, tray 70.2 KiB gzip (was 238.1 / 118.1 / 73.0 before).
@@ -65,9 +67,17 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * its store, the dialog and the cleanup view load on first use) and 2.7 KiB
  * of copy to the catalogues (together 103.8 / 247.2 KiB, with the composer
  * tables). Nearly all of this wave's growth is copy; splitting the
- * catalogue so that view strings load with their views is the way back. */
+ * catalogue so that view strings load with their views is the way back.
+ * Main 105 / 209 KiB since 2026-11-06 (ADR 0017): startup loads only
+ * src/i18n/startup.<locale>.json, the keys of the static graph of main.ts;
+ * the rest load as chunks with the lazy code. Main measured 104.5 / 208.2 KiB
+ * (was 103.8 / 247.2). The entry grows 0.7 KiB: the chunk loader
+ * (i18n/messageChunks) and the wrapped dynamic imports of startup modules,
+ * which name their chunk id; the table of chunk files loads on first use.
+ * Viewer 127.5 and tray 72.0 KiB (were 127.4 / 71.8): the locale-loader
+ * hook in i18n/runtime, which they share. */
 const budgets = {
-  'index.html': { entryGzip: 104 * 1024, initialGzip: 248 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
+  'index.html': { entryGzip: 105 * 1024, initialGzip: 209 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 128 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };

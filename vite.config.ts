@@ -3,6 +3,7 @@ import tailwindcss from '@tailwindcss/vite';
 import vue from '@vitejs/plugin-vue';
 import VueI18nPlugin from '@intlify/unplugin-vue-i18n/vite';
 import { fileURLToPath, URL } from 'node:url';
+import { i18nChunks } from './scripts/vite-i18n-chunks.mjs';
 
 const tauriDevHost = process.env.TAURI_DEV_HOST;
 
@@ -17,8 +18,13 @@ export default defineConfig(({ mode, command }) => {
   const mockBackend = env.VITE_SATCHEL_MOCK === '1' || env.VITE_SATCHEL_MOCK === 'true';
 
   return {
-    plugins: [tailwindcss(), vue(), ...(command === 'build' ? [VueI18nPlugin({
-      include: [fileURLToPath(new URL('./src/i18n/*.json', import.meta.url))],
+    plugins: [tailwindcss(), vue(), ...(process.env.VITEST ? [] : i18nChunks({ mock: mockBackend })), ...(command === 'build' ? [VueI18nPlugin({
+      // `chunks/` is not on disk: `i18nChunks` answers those paths with the
+      // keys lazy code needs (ADR 0017).
+      include: [
+        fileURLToPath(new URL('./src/i18n/*.json', import.meta.url)),
+        fileURLToPath(new URL('./src/i18n/chunks/*.json', import.meta.url)),
+      ],
       runtimeOnly: true,
       strictMessage: false,
       dropMessageCompiler: true,
