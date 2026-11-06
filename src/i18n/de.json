@@ -1831,6 +1831,7 @@
         "cancelled": "Abgebrochen",
         "completed": "Fertig",
         "paused": "Angehalten",
+        "pausedAccountFailures": "Angehalten: eine andere Serienmail dieses Kontos ist wiederholt gescheitert",
         "pausedFailures": "Nach wiederholten Fehlern angehalten",
         "pausedRestart": "Beim Neustart von Satchel angehalten",
         "running": "Wird gesendet"

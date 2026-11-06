@@ -1831,6 +1831,7 @@
         "cancelled": "Cancelled",
         "completed": "Finished",
         "paused": "Paused",
+        "pausedAccountFailures": "Paused: another mail merge on this account kept failing",
         "pausedFailures": "Paused after repeated failures",
         "pausedRestart": "Paused when Satchel restarted",
         "running": "Sending"

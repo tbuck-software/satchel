@@ -95,6 +95,7 @@
           "paused": "Paused",
           "pausedFailures": "Paused after repeated failures",
           "pausedRestart": "Paused when Satchel restarted",
+          "pausedAccountFailures": "Paused: another mail merge on this account kept failing",
           "cancelled": "Cancelled",
           "completed": "Finished"
         },
@@ -222,6 +223,7 @@
           "paused": "Angehalten",
           "pausedFailures": "Nach wiederholten Fehlern angehalten",
           "pausedRestart": "Beim Neustart von Satchel angehalten",
+          "pausedAccountFailures": "Angehalten: eine andere Serienmail dieses Kontos ist wiederholt gescheitert",
           "cancelled": "Abgebrochen",
           "completed": "Fertig"
         },
