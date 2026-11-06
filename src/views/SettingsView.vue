@@ -41,6 +41,7 @@ const ProviderFeaturesEditor = defineAsyncComponent(() => import('@/components/s
 const RemoteImageAllowlist = defineAsyncComponent(() => import('@/components/settings/RemoteImageAllowlist.vue'));
 const RuleBuilder = defineAsyncComponent(() => import('@/components/settings/RuleBuilder.vue'));
 const ServerRulesSettings = defineAsyncComponent(() => import('@/components/settings/ServerRulesSettings.vue'));
+const SweepRulesEditor = defineAsyncComponent(() => import('@/components/settings/SweepRulesEditor.vue'));
 const SignaturesEditor = defineAsyncComponent(() => import('@/components/settings/SignaturesEditor.vue'));
 const SmartFoldersEditor = defineAsyncComponent(() => import('@/components/settings/SmartFoldersEditor.vue'));
 const SmimeManager = defineAsyncComponent(() => import('@/components/settings/SmimeManager.vue'));
@@ -226,7 +227,10 @@ onBeforeUnmount(() => unregisterFilter?.());
           <section class="settings-subsection settings-subsection--untitled"><BackupExport /></section>
         </template>
         <KeybindingEditor v-else-if="activeSection === 'shortcuts'" />
-        <RuleBuilder v-else-if="activeSection === 'rules'" />
+        <template v-else-if="activeSection === 'rules'">
+          <section class="settings-subsection"><RuleBuilder /></section>
+          <section class="settings-subsection"><SweepRulesEditor /></section>
+        </template>
         <PluginManager v-else-if="activeSection === 'plugins'" only="plugins" />
         <SmartFoldersEditor v-else-if="activeSection === 'smart-folders'" />
         <VacationSettings v-else-if="activeSection === 'vacation'" />

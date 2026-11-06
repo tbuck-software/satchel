@@ -77,6 +77,7 @@ const emit = defineEmits<{
   spam: [];
   notSpam: [];
   block: [scope: 'address' | 'domain'];
+  sweep: [];
   print: [scope: MessageScope];
   copyMarkdown: [scope: MessageScope];
   copyLink: [];
@@ -162,6 +163,11 @@ function run(action: 'toggleRead' | 'togglePin' | 'setAside' | 'forward' | 'togg
   if (action === 'allActions') emit('allActions');
   if (action === 'copyLink') emit('copyLink');
   if (action === 'fileTo') emit('fileTo');
+}
+
+function runSweep() {
+  closeMenu();
+  emit('sweep');
 }
 
 function runBlock(scope: 'address' | 'domain') {
@@ -358,6 +364,15 @@ function runExport(format: ExportFormat) {
     </div>
 
     <div class="menu-group">
+      <MenuItem
+        :label="$t('sweep.menuItem')"
+        :aria-keyshortcuts="hint('sweepSender')?.aria"
+        @mouseenter="closeSubmenu"
+        @select="runSweep"
+      >
+        <template #icon><AppIcon :grid="20"><path d="M13.5 3 9 10" /><path d="M5 10h7l1.5 7h-10z" /><path d="M7.5 13.5v3M10.5 13.5v3" /></AppIcon></template>
+        <template v-if="hint('sweepSender')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('sweepSender')?.label }}</kbd></template>
+      </MenuItem>
       <MenuItem
         :label="$t('common.block')"
         submenu

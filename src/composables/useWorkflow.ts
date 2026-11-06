@@ -135,6 +135,12 @@ export function useWorkflow() {
       refresh?: boolean;
       /** Undo supplies the confirmed state from its receipt, independent of loaded rows. */
       restoreFrom?: Record<string, WorkflowState>;
+      /**
+       * The state the backend reported for threads the list has not loaded —
+       * a sender sweep files Inbox mail far below the loaded page. A loaded
+       * row's own state still wins.
+       */
+      knownFrom?: Record<string, WorkflowState>;
     } = {},
   ): Promise<string[]> {
     const rowsById = new Map(threadsStore.threads.map((thread) => [thread.id, thread]));
@@ -147,7 +153,7 @@ export function useWorkflow() {
       const thread = rowsById.get(threadId);
       // Still animating out from a previous check-off — a second trigger
       // during that short interval would file it twice.
-      const from = options.restoreFrom?.[threadId] ?? thread?.workflowState;
+      const from = options.restoreFrom?.[threadId] ?? thread?.workflowState ?? options.knownFrom?.[threadId];
       if (!from || (!options.restoreFrom && (from === to || leaving.has(threadId)))) continue;
       targets.push({
         threadId,

@@ -56,6 +56,12 @@ async function setShown(shown: boolean) {
   }
 }
 
+/** The cleanup assistant, scoped to this mailbox. */
+function openCleanup() {
+  emit('close');
+  void router.push({ name: 'cleanup', query: { account: props.accountId } });
+}
+
 function openSettings() {
   emit('close');
   void router.push({ name: 'settings', query: { section: 'accounts' } });
@@ -85,6 +91,9 @@ function openSettings() {
         @update:model-value="recolor"
       />
     </div>
+    <MenuItem v-if="account?.kind === 'email'" :label="t('cleanup.openForAccount')" @select="openCleanup">
+      <template #icon><AppIcon><path d="M11 2.5 7.5 8" /><path d="M4 8h6l1 5.5H3z" /></AppIcon></template>
+    </MenuItem>
     <MenuItem :label="t('accountAppearance.settings')" @select="openSettings" />
   </ContextMenu>
 </template>

@@ -153,6 +153,18 @@
         "keywords": "archive done",
         "label": "Mark as done (second key)"
       },
+      "cleanupKeepLatest": {
+        "keywords": "cleanup keep latest archive rest",
+        "label": "Keep the latest, archive the rest"
+      },
+      "cleanupRule": {
+        "keywords": "cleanup rule from now on",
+        "label": "Set a rule for the sender"
+      },
+      "cleanupUnsubscribe": {
+        "keywords": "cleanup unsubscribe newsletter",
+        "label": "Unsubscribe from the sender"
+      },
       "clearSelection": {
         "keywords": "clear selection",
         "label": "Clear selection"
@@ -249,6 +261,10 @@
         "keywords": "aside later",
         "label": "Set aside"
       },
+      "sweepSender": {
+        "keywords": "sweep clean up sender archive delete older",
+        "label": "Clean up mail from sender"
+      },
       "toggleAllMessages": {
         "keywords": "all messages collapse expand",
         "label": "Expand / collapse all messages"
@@ -279,6 +295,7 @@
       }
     },
     "contexts": {
+      "cleanup": "Cleanup",
       "global": "Always",
       "mail": "Email focused",
       "mailbox": "Mailbox focused",

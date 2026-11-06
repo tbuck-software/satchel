@@ -15,6 +15,7 @@ import { useComposerStore } from '@/stores/composer';
 import { useDraftActions } from '@/composables/useDraftActions';
 import { useThreadReply } from '@/composables/useThreadReply';
 import { useThreadActions } from '@/composables/useThreadActions';
+import { useSenderSweep } from '@/composables/useSenderSweep';
 import { useMessageLinks } from '@/composables/useMessageLinks';
 import { useAttachmentActions } from '@/composables/useAttachmentActions';
 import { perfStart } from '@/utils/perf';
@@ -803,6 +804,24 @@ async function blockSender(scope: 'address' | 'domain' = 'address') {
   }
 }
 
+const senderSweep = useSenderSweep();
+
+/**
+ * A sweep files whole threads, so it is about whoever started this one: the
+ * first message that is neither a draft nor the user's own.
+ */
+function sweepSender() {
+  if (!thread.value) return;
+  const original = messages.value.find((message) => !message.isDraft
+    && message.from.email?.trim()
+    && !isOwnEmail(accountsStore.accounts, message.from.email));
+  if (!original) {
+    void senderSweep.openForThread(thread.value.id);
+    return;
+  }
+  senderSweep.open({ accountId: thread.value.accountId, email: original.from.email.trim(), name: original.from.name });
+}
+
 async function moveThread(targetFolderId: string) {
   if (!thread.value) return;
   const target = moveTargets.value.find((item) => item.id === targetFolderId);
@@ -823,6 +842,7 @@ onBeforeUnmount(registerThreadReaderCommands({
   toggleMuted,
   markSpam,
   blockSender,
+  sweepSender,
   print: printThread,
   exportThread,
 }));
@@ -1028,6 +1048,7 @@ function showEntireThread() {
         @spam="markSpam"
         @not-spam="markNotSpam"
         @block="blockSender"
+        @sweep="sweepSender"
         @print="printThread"
         :attachment-count="downloadableAttachments.length"
         :reader-zoom="settings.readerZoom"

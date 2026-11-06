@@ -738,6 +738,113 @@ function byDateDesc(a: Thread, b: Thread): number {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Sender sweep                                                               */
+/* -------------------------------------------------------------------------- */
+
+interface MockSweepRule {
+  id: string;
+  account_id: string;
+  sender_email: string;
+  action: 'archive' | 'trash' | 'move';
+  older_than_days: number | null;
+  keep_latest: boolean;
+  target_folder_id: string | null;
+  target_folder_name: string | null;
+  last_run_at: string | null;
+  last_swept_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+const sweepRules: MockSweepRule[] = [];
+let nextSweepRule = 0;
+
+/** The Inbox list's own test, as `sender_sweep.rs` reuses the list predicate. */
+function inInboxList(thread: Thread): boolean {
+  return inThreadList(thread, { mailbox_kind: 'section', mailbox_value: 'inbox' });
+}
+
+function threadMessagesOf(thread: Thread): Array<{ email: string; isDraft: boolean }> {
+  const list = messages[thread.id] ?? [];
+  if (list.length > 0) return list.map((message) => ({ email: message.from.email.trim().toLowerCase(), isDraft: Boolean(message.isDraft) }));
+  // A fixture thread without loaded messages stands for one from its first participant.
+  const first = thread.participants[0]?.email.trim().toLowerCase();
+  return first ? [{ email: first, isDraft: false }] : [];
+}
+
+function ownAddress(accountId: string, email: string): boolean {
+  return accounts.find((account) => account.id === accountId)?.email.toLowerCase() === email.trim().toLowerCase();
+}
+
+/**
+ * Like `SenderSweepRepository::plan`: Inbox threads the sender wrote alone
+ * (no other sender, no own reply, no draft), not pinned, newest first;
+ * keep-latest before the age cutoff.
+ */
+function sweepPlan(accountId: string, senderEmail: string, keepLatest: boolean, olderThanDays: number | null) {
+  const email = senderEmail.trim().toLowerCase();
+  if (ownAddress(accountId, email)) throw new Error('backend.errors.senderSweepOwnAddress');
+  const cutoff = olderThanDays && olderThanDays > 0 ? Date.now() - olderThanDays * 86_400_000 : null;
+  let skippedShared = 0;
+  let skippedStarred = 0;
+  const eligible = threads
+    .filter((thread) => thread.accountId === accountId && thread.workflowState === 'inbox' && inInboxList(thread))
+    .filter((thread) => threadMessagesOf(thread).some((message) => message.email === email))
+    .sort(byDateDesc)
+    .filter((thread) => {
+      if (!threadMessagesOf(thread).every((message) => message.email === email && !message.isDraft)) {
+        skippedShared += 1;
+        return false;
+      }
+      if (thread.isStarred) {
+        skippedStarred += 1;
+        return false;
+      }
+      return true;
+    });
+  const targets = eligible
+    .slice(keepLatest ? 1 : 0)
+    .filter((thread) => cutoff === null || new Date(thread.lastMessageAt).getTime() < cutoff)
+    .map((thread) => ({
+      thread_id: thread.id,
+      workflow_state: thread.workflowState,
+      last_message_date: thread.lastMessageAt,
+      unread_count: thread.unreadCount,
+    }));
+  return { targets, skipped_shared: skippedShared, skipped_starred: skippedStarred };
+}
+
+function sweepTargets(accountId: string, senderEmail: string, keepLatest: boolean, olderThanDays: number | null) {
+  return sweepPlan(accountId, senderEmail, keepLatest, olderThanDays).targets;
+}
+
+function mockFolderName(folderId: string): string | null {
+  const [, name] = folderId.split(/:(.*)/s);
+  return name || null;
+}
+
+function runMockSweepRule(rule: MockSweepRule): string[] {
+  if (rule.action === 'move' && !rule.target_folder_id) return [];
+  const targets = sweepTargets(rule.account_id, rule.sender_email, rule.keep_latest, rule.older_than_days);
+  for (const target of targets) {
+    const thread = findThread(target.thread_id);
+    if (!thread) continue;
+    if (rule.action === 'move') {
+      thread.mailboxNames = [rule.target_folder_name ?? 'INBOX'];
+    } else if (rule.action === 'trash') {
+      thread.workflowState = 'done';
+      thread.mailboxNames = ['Trash'];
+    } else {
+      thread.workflowState = 'done';
+      thread.unreadCount = 0;
+    }
+  }
+  rule.last_run_at = new Date().toISOString();
+  rule.last_swept_count = targets.length;
+  return targets.map((target) => target.thread_id);
+}
+
+/* -------------------------------------------------------------------------- */
 /* Command table                                                              */
 /* -------------------------------------------------------------------------- */
 
@@ -1837,6 +1944,126 @@ const handlers: Record<string, Handler> = {
     if (index >= 0) contacts.splice(index, 1);
   },
   sync_local_contact_avatars: () => 0,
+  list_cleanup_senders: (payload) => {
+    const scope = input(payload);
+    const days = Math.min(Math.max(Number(scope.days ?? 90), 1), 3650);
+    const since = Date.now() - days * 86_400_000;
+    const limit = Math.min(Math.max(Number(scope.limit ?? 50), 1), 200);
+    const accountId = String(scope.account_id ?? '');
+    const groups = new Map<string, {
+      account_id: string; sender_email: string; sender_name: string | null; message_count: number;
+      unread_count: number; newest: number; unsubscribe: { id: string; at: number } | null; threads: Set<string>;
+    }>();
+    for (const thread of threads) {
+      if (!inInboxList(thread) || thread.workflowState !== 'inbox' || (accountId && thread.accountId !== accountId)) continue;
+      const own = accounts.find((account) => account.id === thread.accountId)?.email.toLowerCase() ?? '';
+      for (const message of messages[thread.id] ?? []) {
+        const email = message.from.email.trim().toLowerCase();
+        const at = new Date(message.timestamp).getTime();
+        if (!email.includes('@') || email === own || message.isDraft || at < since) continue;
+        const key = `${thread.accountId}\u0000${email}`;
+        const group = groups.get(key) ?? {
+          account_id: thread.accountId, sender_email: email, sender_name: null, message_count: 0,
+          unread_count: 0, newest: 0, unsubscribe: null, threads: new Set<string>(),
+        };
+        group.message_count += 1;
+        group.threads.add(thread.id);
+        if (!message.isRead) group.unread_count += 1;
+        if (at >= group.newest) {
+          group.newest = at;
+          group.sender_name = message.from.name?.trim() || null;
+        }
+        if (message.listUnsubscribe?.trim() && (!group.unsubscribe || at > group.unsubscribe.at)) {
+          group.unsubscribe = { id: message.id, at };
+        }
+        groups.set(key, group);
+      }
+    }
+    return [...groups.values()]
+      .sort((a, b) => b.message_count - a.message_count || b.newest - a.newest || a.sender_email.localeCompare(b.sender_email))
+      .slice(0, limit)
+      .map((group) => ({
+        account_id: group.account_id,
+        sender_email: group.sender_email,
+        sender_name: group.sender_name,
+        message_count: group.message_count,
+        unread_count: group.unread_count,
+        thread_count: group.threads.size,
+        newest_date: new Date(group.newest).toISOString(),
+        unsubscribe_message_id: group.unsubscribe?.id ?? null,
+        rule_id: sweepRules.find((rule) => rule.account_id === group.account_id && rule.sender_email === group.sender_email)?.id ?? null,
+      }));
+  },
+  list_sender_sweep_targets: (payload) => {
+    const scope = input(payload);
+    return sweepTargets(
+      String(scope.account_id ?? ''),
+      String(scope.sender_email ?? ''),
+      Boolean(scope.keep_latest),
+      (scope.older_than_days as number | null | undefined) ?? null,
+    );
+  },
+  sender_sweep_summary: (payload) => {
+    const scope = input(payload);
+    const plan = sweepPlan(
+      String(scope.account_id ?? ''),
+      String(scope.sender_email ?? ''),
+      Boolean(scope.keep_latest),
+      (scope.older_than_days as number | null | undefined) ?? null,
+    );
+    return { count: plan.targets.length, skipped_shared: plan.skipped_shared, skipped_starred: plan.skipped_starred };
+  },
+  thread_sweep_sender: (payload) => {
+    const thread = findThread(String(payload.threadId ?? ''));
+    if (!thread) return null;
+    const list = [...(messages[thread.id] ?? [])]
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    const first = list.find((message) => !message.isDraft && !ownAddress(thread.accountId, message.from.email))?.from
+      ?? (list.length === 0 ? thread.participants.find((person) => !ownAddress(thread.accountId, person.email)) : undefined);
+    return first ? { account_id: thread.accountId, email: first.email.trim().toLowerCase(), name: first.name?.trim() || null } : null;
+  },
+  list_sweep_rules: () => sweepRules.map((rule) => ({ ...rule })),
+  upsert_sweep_rule: (payload) => {
+    const scope = input(payload);
+    const action = scope.action as MockSweepRule['action'];
+    if (!['archive', 'trash', 'move'].includes(action)) throw new Error('backend.errors.senderSweepActionInvalid');
+    const email = String(scope.sender_email ?? '').trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw new Error('backend.errors.senderSweepSenderInvalid');
+    const days = (scope.older_than_days as number | null | undefined) ?? null;
+    if (days !== null && (days < 0 || days > 3650)) throw new Error('backend.errors.senderSweepDaysInvalid');
+    if (action === 'trash' && (days ?? 0) < 1) throw new Error('backend.errors.senderSweepTrashNeedsAge');
+    if (ownAddress(String(scope.account_id), email)) throw new Error('backend.errors.senderSweepOwnAddress');
+    const folder = action === 'move' ? String(scope.target_folder_id ?? '') : '';
+    if (action === 'move' && !folder.startsWith(`${String(scope.account_id)}:`)) throw new Error('backend.errors.senderSweepFolderInvalid');
+    const now = new Date().toISOString();
+    const existing = sweepRules.find((rule) => rule.account_id === scope.account_id && rule.sender_email === email);
+    const rule: MockSweepRule = existing ?? {
+      id: `sweep-${++nextSweepRule}`, account_id: String(scope.account_id), sender_email: email, action,
+      older_than_days: null, keep_latest: false, target_folder_id: null, target_folder_name: null,
+      last_run_at: null, last_swept_count: 0, created_at: now, updated_at: now,
+    };
+    Object.assign(rule, {
+      action, older_than_days: days, keep_latest: Boolean(scope.keep_latest),
+      target_folder_id: folder || null, target_folder_name: folder ? mockFolderName(folder) : null, updated_at: now,
+    });
+    if (!existing) sweepRules.push(rule);
+    // The backend runs a new rule once right away, too.
+    runMockSweepRule(rule);
+    return { ...rule };
+  },
+  delete_sweep_rule: (payload) => {
+    const index = sweepRules.findIndex((rule) => rule.id === payload.ruleId);
+    if (index < 0) throw new Error('backend.errors.senderSweepRuleNotFound');
+    sweepRules.splice(index, 1);
+  },
+  unsubscribe: (payload) => {
+    const messageId = String(input(payload).message_id ?? '');
+    const message = Object.values(messages).flat().find((entry) => entry.id === messageId);
+    if (!message) throw new Error('backend.errors.unsubscribeMessageNotFound');
+    if (!message.listUnsubscribe?.trim()) throw new Error('backend.errors.unsubscribeHeaderMissing');
+    const target = /<(https?:[^>]+)>/.exec(message.listUnsubscribe)?.[1] ?? message.listUnsubscribe;
+    return { method: target.startsWith('mailto:') ? 'mailto' : 'http-one-click', target };
+  },
   list_blocked_senders: () => [],
   list_rules: () => [],
   get_server_rules_overview: () => mockServerRulesOverview(),

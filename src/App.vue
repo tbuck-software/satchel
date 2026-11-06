@@ -8,6 +8,7 @@ import { useComposerStore } from '@/stores/composer';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePrompt } from '@/composables/usePrompt';
+import { useSenderSweep } from '@/composables/useSenderSweep';
 import { useTopicsStore } from '@/stores/topics';
 import { useSettingsStore } from '@/stores/settings';
 import { SIDEBAR_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
@@ -37,6 +38,7 @@ const toastMounted = ref(false);
 watch(() => toast.state.toasts.length, (count) => { if (count > 0) toastMounted.value = true; }, { immediate: true });
 const { state: confirmState } = useConfirm();
 const { state: promptState } = usePrompt();
+const { state: senderSweepState } = useSenderSweep();
 const standaloneCompose = computed(() =>
   route.name === 'compose' && route.query.standalone === '1',
 );
@@ -85,6 +87,7 @@ const SettingsModal = defineAsyncComponent(() => import('@/components/settings/S
 // `usePrompt`, so the frame (ModalShell, focus trap) loads with the first question.
 const ConfirmDialog = defineAsyncComponent(() => import('@/components/ui/ConfirmDialog.vue'));
 const PromptDialog = defineAsyncComponent(() => import('@/components/ui/PromptDialog.vue'));
+const SenderSweepDialog = defineAsyncComponent(() => import('@/components/mail/SenderSweepDialog.vue'));
 
 watch(() => route.fullPath, () => {
   if (ui.mailboxSwitcherOpen) {
@@ -171,6 +174,7 @@ if (standaloneCompose.value) {
     </Transition>
     <ToastStack v-if="toastMounted" />
     <ConfirmDialog v-if="confirmState.pending" />
+    <SenderSweepDialog v-if="senderSweepState.request" />
     <PromptDialog v-if="promptState.pending" />
     <UndoFab v-if="toastMounted" :variant="ui.isSinglePane ? 'floating' : 'docked'" />
   </div>

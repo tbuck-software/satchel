@@ -195,6 +195,8 @@ pub fn run() {
             let plugin_runtime = PluginRuntime::default();
             let state = AppState::with_plugin_runtime(plugin_runtime);
             app.manage(state.clone());
+            // One sender sweep at a time: the scheduler's pass and a new rule's first run.
+            app.manage(satchel_core::mail_actions::sweep::SweepGate::default());
             // Name the directories plugins may be loaded from before anything
             // asks the runtime for one. Bundled resources come first so a copy
             // dropped into the writable profile cannot take over their id, and
@@ -845,6 +847,13 @@ pub fn run() {
             commands::blocked_senders::list_blocked_senders,
             commands::blocked_senders::block_sender,
             commands::blocked_senders::unblock_sender,
+            commands::sender_sweep::list_cleanup_senders,
+            commands::sender_sweep::list_sender_sweep_targets,
+            commands::sender_sweep::sender_sweep_summary,
+            commands::sender_sweep::thread_sweep_sender,
+            commands::sender_sweep::list_sweep_rules,
+            commands::sender_sweep::upsert_sweep_rule,
+            commands::sender_sweep::delete_sweep_rule,
             commands::tls_exceptions::list_certificate_exceptions,
             commands::tls_exceptions::trust_expired_certificate,
             commands::tls_exceptions::revoke_certificate_exception,

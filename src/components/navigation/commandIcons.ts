@@ -38,6 +38,7 @@ export const COMMAND_ICONS = {
   trash: { grid: 16, paths: ['M2.5 4h11', 'M6 2.5h4', 'M4 4l.6 9a1 1 0 001 1h4.8a1 1 0 001-1L12 4'] },
   spam: { grid: 16, paths: ['M8 1.5l5 2.9v7.2L8 14.5l-5-2.9V4.4L8 1.5Z', 'M8 5.1v3.5', 'M8 11h.01'] },
   block: { grid: 16, paths: [circle(8, 8, 5.5), 'M4.5 11.5l7-7'] },
+  sweep: { grid: 16, paths: ['M11 2.5 7.5 8', 'M4 8h6l1 5.5H3z'] },
   folder: { grid: 16, paths: ['M2 4.5h4l1.2 1.5H14v6.5a1 1 0 01-1 1H3a1 1 0 01-1-1z'] },
   topic: {
     grid: 16,

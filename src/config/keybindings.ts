@@ -62,6 +62,9 @@ export const KEYBINDING_CONTEXT_LABELS: Record<KeybindingContext, string> = {
   get mail() {
     return t('shortcuts.contexts.mail');
   },
+  get cleanup() {
+    return t('shortcuts.contexts.cleanup');
+  },
 };
 
 function normalizedKeyName(key: string): string {
@@ -145,6 +148,7 @@ export interface ShortcutScope {
 export function keybindingContextActive(context: KeybindingContext, scope: ShortcutScope): boolean {
   if (scope.covered) return false;
   if (context === 'global' || context === 'navigation') return true;
+  if (context === 'cleanup') return scope.route === 'cleanup';
   return scope.route != null && MAIL_ROUTES.has(scope.route);
 }
 

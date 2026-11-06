@@ -353,6 +353,15 @@
       "senderPreferenceCategoryInvalid": "Wähle eine gültige Absenderkategorie.",
       "senderPreferenceEmailInvalid": "Gib eine gültige Absender-E-Mail-Adresse ein.",
       "senderPreferencePersistenceFailed": "Absenderpräferenzen sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "senderSweepAccountInvalid": "Dieses Konto lässt sich nicht aufräumen.",
+      "senderSweepActionInvalid": "Unbekannte Aufräum-Aktion.",
+      "senderSweepDaysInvalid": "Wähle zwischen 0 und 3650 Tagen.",
+      "senderSweepFolderInvalid": "Wähle einen Ordner dieses Kontos.",
+      "senderSweepOwnAddress": "Die eigene Adresse lässt sich nicht aufräumen.",
+      "senderSweepPersistenceFailed": "Die Aufräum-Regel konnte nicht gespeichert werden.",
+      "senderSweepRuleNotFound": "Diese Regel gibt es nicht mehr.",
+      "senderSweepSenderInvalid": "Das ist keine Absenderadresse.",
+      "senderSweepTrashNeedsAge": "Eine Regel, die Mails in den Papierkorb verschiebt, braucht ein Alter von mindestens einem Tag.",
       "sentMessagePersistenceFailed": "Die Nachricht wurde gesendet, aber der lokale Gesendet-Eintrag konnte nicht gespeichert werden. Sende sie nicht erneut.",
       "sentMessagePostProcessingFailed": "Die Nachricht wurde gesendet, aber die lokale Nachbereitung konnte nicht abgeschlossen werden. Sende sie nicht erneut.",
       "serverHostAndPortRequired": "Gib Serveradresse und Port ein.",
@@ -650,6 +659,38 @@
       "problem": "{account}: {problem}"
     }
   },
+  "cleanup": {
+    "actions": {
+      "archiveAll": "Alle archivieren",
+      "keepLatest": "Neueste behalten",
+      "rule": "Ab jetzt …",
+      "trashAll": "Alle in den Papierkorb"
+    },
+    "allAccounts": "Alle Konten",
+    "canUnsubscribe": "Abmelden möglich",
+    "empty": {
+      "description": "Kein Absender hat Mails aus den letzten {days} Tagen im Posteingang.",
+      "title": "Nichts aufzuräumen"
+    },
+    "keys": {
+      "move": "Bewegen",
+      "title": "Tastatur"
+    },
+    "loadFailed": "Die Absender konnten nicht geladen werden.",
+    "messages": "{count} Nachricht | {count} Nachrichten",
+    "newest": "neueste {date}",
+    "openForAccount": "Postfach aufräumen …",
+    "subtitle": "Häufigste Absender im Posteingang, letzte {days} Tage",
+    "subtitleAccount": "Häufigste Absender in {account}, letzte {days} Tage",
+    "threads": "{count} Unterhaltung | {count} Unterhaltungen",
+    "title": "Aufräumen",
+    "trashConfirm": {
+      "body": "Unterhaltungen mit anderen Beteiligten, deinen Antworten oder einer Anheftung bleiben. Für ein paar Sekunden lässt es sich rückgängig machen.",
+      "title": "Eine Unterhaltung von {sender} in den Papierkorb verschieben? | {count} Unterhaltungen von {sender} in den Papierkorb verschieben?"
+    },
+    "unreadShare": "{percent} % ungelesen",
+    "unsubscribed": "Abgemeldet"
+  },
   "commands": {
     "blockAddress": "Diesen Absender blockieren",
     "blockDomain": "Ganze Domain des Absenders blockieren",
@@ -661,6 +702,7 @@
     "exportText": "Unterhaltung als Text exportieren",
     "keywords": {
       "block": "blockieren block absender domain",
+      "cleanup": "aufräumen absender newsletter abmelden sweep",
       "compose": "compose new mail schreiben",
       "copyLink": "link url teilen satchel",
       "editShortcuts": "keybindings shortcuts customize anpassen belegen",
@@ -702,6 +744,7 @@
     "oauthOpened": "{provider}-Anmeldung im Browser geöffnet.",
     "oauthOutlook": "OAuth starten (Outlook)",
     "oauthStarted": "{provider}-Anmeldung gestartet: {url}",
+    "openCleanup": "Aufräum-Assistent öffnen",
     "openSettingsSection": "Einstellungen: {section}",
     "pin": "Anheften oder lösen",
     "printConversation": "Unterhaltung drucken",
@@ -709,6 +752,7 @@
     "setAside": "Beiseitelegen",
     "showShortcuts": "Tastenkürzel anzeigen",
     "snooze": "Auf Wiedervorlage legen …",
+    "sweepSender": "E-Mails dieses Absenders aufräumen …",
     "syncDone": "Synchronisierung abgeschlossen.",
     "syncFailed": "Synchronisierung fehlgeschlagen.",
     "syncFailedCause": "Synchronisierung fehlgeschlagen: {cause}",
@@ -3252,6 +3296,17 @@
       "trained": "{spam} Spam- und {ham} erwünschte Nachrichten.",
       "trainingLabel": "Bisher gelernt"
     },
+    "sweep": {
+      "empty": "Noch keine Absender-Regeln. Leg eine im Menü eines Absenders oder im Aufräum-Assistenten fest.",
+      "lastRun": "Zuletzt {when}, nichts abgelegt | Zuletzt {when}, eine Unterhaltung abgelegt | Zuletzt {when}, {count} Unterhaltungen abgelegt",
+      "loadFailed": "Die Absender-Regeln konnten nicht geladen werden.",
+      "neverRun": "Noch nicht gelaufen",
+      "purpose": "Regeln, die du am Absender einer Mail oder im Aufräum-Assistenten festgelegt hast. Jede läuft alle 15 Minuten über die Unterhaltungen im Posteingang, die nur ihr Absender geschrieben hat; Unterhaltungen mit anderen, deinen Antworten oder einer Anheftung bleiben.",
+      "remove": "Entfernen",
+      "removeBody": "Bereits abgelegte Mails bleiben, wo sie sind.",
+      "removeTitle": "Regel für {sender} entfernen?",
+      "title": "Absender aufräumen"
+    },
     "swipes": {
       "ariaLong": "{direction}: weite Wischgeste",
       "ariaShort": "{direction}: kurze Wischgeste",
@@ -3353,6 +3408,18 @@
         "keywords": "archive archivieren erledigt done",
         "label": "Als erledigt markieren (Zweittaste)"
       },
+      "cleanupKeepLatest": {
+        "keywords": "aufräumen neueste behalten rest archivieren",
+        "label": "Neueste behalten, Rest archivieren"
+      },
+      "cleanupRule": {
+        "keywords": "aufräumen regel ab jetzt",
+        "label": "Regel für den Absender festlegen"
+      },
+      "cleanupUnsubscribe": {
+        "keywords": "aufräumen abmelden newsletter",
+        "label": "Beim Absender abmelden"
+      },
       "clearSelection": {
         "keywords": "clear selection leeren",
         "label": "Auswahl aufheben"
@@ -3449,6 +3516,10 @@
         "keywords": "aside beiseite",
         "label": "Beiseitelegen"
       },
+      "sweepSender": {
+        "keywords": "aufräumen absender archivieren löschen älter sweep",
+        "label": "E-Mails vom Absender aufräumen"
+      },
       "toggleAllMessages": {
         "keywords": "all messages collapse expand alle nachrichten klappen",
         "label": "Alle Nachrichten ein- / ausklappen"
@@ -3480,6 +3551,7 @@
     },
     "close": "Tastenkürzel schließen",
     "contexts": {
+      "cleanup": "Aufräumen",
       "global": "Immer",
       "mail": "E-Mail fokussiert",
       "mailbox": "Mailbox fokussiert",
@@ -3512,6 +3584,66 @@
     },
     "subtitle": "Alles Wichtige bleibt direkt unter den Fingern.",
     "title": "Tastenkürzel"
+  },
+  "sweep": {
+    "from": "Von {email}",
+    "inboxCount": "Keine Unterhaltung im Posteingang | Eine Unterhaltung im Posteingang | {count} Unterhaltungen im Posteingang",
+    "menuItem": "E-Mails vom Absender aufräumen …",
+    "noSender": "In dieser Unterhaltung schreibst nur du; es gibt keinen Absender zum Aufräumen.",
+    "now": {
+      "archiveAll": "Alle archivieren",
+      "heading": "Jetzt",
+      "keepLatestArchive": "Neueste behalten, Rest archivieren",
+      "keepLatestTrash": "Neueste behalten, Rest in den Papierkorb",
+      "trashAll": "Alle in den Papierkorb"
+    },
+    "result": {
+      "archivedOf": "{count} von {total} Unterhaltungen erledigt",
+      "failed": "Die Mails dieses Absenders konnten nicht aufgeräumt werden.",
+      "nothing": "Im Posteingang gibt es nichts von {sender} aufzuräumen.",
+      "trashed": "Eine Unterhaltung in den Papierkorb verschoben | {count} Unterhaltungen in den Papierkorb verschoben",
+      "trashedOf": "{count} von {total} Unterhaltungen in den Papierkorb verschoben"
+    },
+    "rule": {
+      "actionLabel": "Was mit den Mails passiert",
+      "archive": "Archivieren",
+      "customDays": "Eigene …",
+      "customInvalid": "Gib eine Zahl von Tagen zwischen 1 und 3650 ein.",
+      "customLabel": "Tage (1–3650)",
+      "customTitle": "Älter als wie viele Tage?",
+      "days": "{count} Tag | {count} Tage",
+      "folder": "Ordner",
+      "heading": "Ab jetzt",
+      "hint": "Läuft über die Mails dieses Absenders im Posteingang einmal sofort, danach alle 15 Minuten.",
+      "keepLatest": "Neueste immer behalten",
+      "matchesNow": "Noch passt nichts. | Eine Unterhaltung passt schon jetzt. | {count} Unterhaltungen passen schon jetzt.",
+      "move": "In Ordner verschieben",
+      "needsFolder": "Der Ordner existiert nicht mehr. Wähle einen anderen; bis dahin tut die Regel nichts.",
+      "olderThan": "Sobald sie älter sind als",
+      "remove": "Regel entfernen",
+      "removeFailed": "Die Regel konnte nicht entfernt werden: {error}",
+      "removed": "Regel für {sender} entfernt.",
+      "save": "Regel speichern",
+      "saveFailed": "Die Regel konnte nicht gespeichert werden: {error}",
+      "saved": "Regel für {sender} gespeichert.",
+      "trash": "In den Papierkorb",
+      "trashConfirmBody": "Ab dann wandern Mails von {sender} alle 15 Minuten in den Papierkorb, sobald sie einen Tag alt sind. Was eine Regel verschiebt, lässt sich nicht rückgängig machen. | Ab dann wandern Mails von {sender} alle 15 Minuten in den Papierkorb, sobald sie {count} Tage alt sind. Was eine Regel verschiebt, lässt sich nicht rückgängig machen.",
+      "trashConfirmTitle": "Regel speichern? Noch geht nichts in den Papierkorb. | Regel speichern und eine Unterhaltung jetzt in den Papierkorb verschieben? | Regel speichern und {count} Unterhaltungen jetzt in den Papierkorb verschieben?",
+      "update": "Regel ändern"
+    },
+    "skipped": {
+      "shared": "Eine Unterhaltung mit anderen Beteiligten, deinen Antworten oder einem Entwurf bleibt unberührt. | {count} Unterhaltungen mit anderen Beteiligten, deinen Antworten oder Entwürfen bleiben unberührt.",
+      "starred": "Eine angeheftete Unterhaltung bleibt. | {count} angeheftete Unterhaltungen bleiben."
+    },
+    "summary": {
+      "archive": "Alles archivieren",
+      "archiveAfter": "Nach {count} Tag archivieren | Nach {count} Tagen archivieren",
+      "keepingLatest": "{rule}, Neueste bleibt",
+      "move": "Nach {folder} verschieben",
+      "moveNeedsFolder": "In einen Ordner verschieben: Ordner fehlt",
+      "trashAfter": "Nach {count} Tag in den Papierkorb | Nach {count} Tagen in den Papierkorb"
+    },
+    "title": "E-Mails von {sender} aufräumen"
   },
   "swipe": {
     "aside": "Beiseitelegen",

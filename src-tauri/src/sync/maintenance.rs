@@ -181,9 +181,12 @@ async fn run_data_repairs_at(
     }
 }
 
+/// The workflow scheduler: wakes due snoozes every minute and runs the
+/// recurring sender sweeps every [`SWEEP_EVERY_TICKS`] minutes.
 pub fn spawn_snooze_worker(pool: SqlitePool, app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
+        let mut tick: u64 = 0;
         loop {
             interval.tick().await;
             match wake_due_snoozes(&pool).await {
@@ -196,8 +199,45 @@ pub fn spawn_snooze_worker(pool: SqlitePool, app: AppHandle) {
                 Ok(_) => {}
                 Err(err) => warn!(target: "satchel::maintenance", "snooze wake failed: {err}"),
             }
+            // Off this loop: a long pass must not make snoozes wake late.
+            if sweep_due(tick) {
+                let (pool, app) = (pool.clone(), app.clone());
+                tauri::async_runtime::spawn(async move { run_sender_sweeps(&pool, &app).await });
+            }
+            tick = tick.wrapping_add(1);
         }
     });
+}
+
+/// Sweep rules run every quarter of an hour. The first run waits two minutes,
+/// so it does not compete with the startup sync for the write lock.
+const SWEEP_EVERY_TICKS: u64 = 15;
+const SWEEP_FIRST_TICK: u64 = 2;
+
+fn sweep_due(tick: u64) -> bool {
+    tick % SWEEP_EVERY_TICKS == SWEEP_FIRST_TICK
+}
+
+async fn run_sender_sweeps(pool: &SqlitePool, app: &AppHandle) {
+    let state = app.state::<crate::AppState>();
+    let gate = app.state::<satchel_core::mail_actions::sweep::SweepGate>();
+    // `None`: a rule's first run holds the gate; this pass comes again soon.
+    let Some(result) = gate.run_pass(pool, &state.queue, chrono::Utc::now()).await else {
+        return;
+    };
+    match result {
+        Ok(outcomes) => {
+            let swept: Vec<String> = outcomes
+                .into_iter()
+                .flat_map(|outcome| outcome.swept)
+                .collect();
+            if !swept.is_empty() {
+                info!(target: "satchel::maintenance", swept = swept.len(), "sender sweeps filed threads");
+            }
+            crate::commands::sender_sweep::emit_swept(app, swept);
+        }
+        Err(err) => warn!(target: "satchel::maintenance", "sender sweeps failed: {err}"),
+    }
 }
 
 pub fn spawn_followup_worker(pool: SqlitePool, app: AppHandle) {
@@ -727,6 +767,12 @@ fn free_disk_bytes(_path: &std::path::Path) -> Option<u64> {
 #[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
 mod vacuum_tests {
     use super::vacuum_fits;
+
+    #[test]
+    fn sender_sweeps_run_every_quarter_hour_after_a_short_delay() {
+        let due: Vec<u64> = (0..40).filter(|tick| super::sweep_due(*tick)).collect();
+        assert_eq!(due, [2, 17, 32]);
+    }
 
     #[test]
     fn vacuum_needs_room_for_a_second_copy() {

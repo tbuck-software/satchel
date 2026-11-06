@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Run rules and the out-of-office reply on IMAP servers that offer ManageSieve, so they work while Satchel is closed (Settings → Accounts → Server rules). A filter script of your own stays as it is unless you choose to run both or replace it; rules only Satchel can carry out keep running in the app and say so with "Local only".
+- Clean up a sender from a mail, its sender menu, the palette or `E`: archive or move to Trash all of their Inbox mail, or all but the latest, with one Undo; or set a rule that from now on archives their mail, moves it to Trash after 1 to 3650 days, or moves it to a folder. Only conversations the sender wrote alone are touched: anything with another participant, your reply, a draft or a pin stays, and the dialog says how many. A cleanup assistant (palette, or an account's sidebar menu) lists the senders who filled the Inbox in the last 90 days with unread share and unsubscribe, one key per action. Rules are listed and removable under Settings → Rules.
+
 - On a phone, keep Send, Add and the other docked actions above the on-screen keyboard; the compose button stays behind it.
 - Give the phone a calendar that fits: the month title with Import and + in the app bar, a month of dots, and the picked day's events listed below. New and edited events have Cancel and Add in their bar and show times as "Tue, Oct 27 · 11:00".
 - Run the phone drawer edge to edge with Mail, Calendar, Contacts and Settings named at its foot, an "All folders" row, and no keyboard-only controls.

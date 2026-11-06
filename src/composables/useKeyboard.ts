@@ -11,6 +11,7 @@ import { useThreadReply } from './useThreadReply';
 import { useMessageLinks } from './useMessageLinks';
 import { useUndo } from './useUndo';
 import { activeThreadReaderCommands } from './useThreadReaderCommands';
+import { useSenderSweep } from './useSenderSweep';
 import { focusSettingsFilter } from './settingsFilterFocus';
 import { focusListSearch } from './listSearchFocus';
 import { t } from '@/i18n/runtime';
@@ -79,6 +80,7 @@ export function useKeyboard() {
   const actions = useThreadActions();
   const messageLinks = useMessageLinks();
   const undo = useUndo();
+  const senderSweep = useSenderSweep();
   let pendingSequence = '';
   let sequenceTimer: number | null = null;
   // Read once per keystroke; every binding below is judged against it.
@@ -495,6 +497,13 @@ export function useKeyboard() {
       });
       if (ids.length === 0) return false;
       void actions.markNotSpam(ids);
+      return true;
+    }
+
+    if (matches(event, 'sweepSender')) {
+      const id = currentThreadId();
+      if (!id) return false;
+      void senderSweep.openForThread(id);
       return true;
     }
 

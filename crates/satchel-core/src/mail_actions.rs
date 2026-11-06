@@ -3,6 +3,7 @@
 //! Queue intent and local presentation commit together. Confirmed provider
 //! identities never change before the queued move has been reconciled.
 
+pub mod sweep;
 pub mod undo;
 
 use std::collections::HashMap;
@@ -28,6 +29,7 @@ pub struct TrashReceipt {
     pub permanently_deleted: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum MoveTarget<'a> {
     Folder(&'a str),
     Archive,

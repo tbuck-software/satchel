@@ -283,7 +283,16 @@
           "turnOffFirst": "Turn server rules off before changing the server.",
           "consentNeeded": "Another filter script is active. Choose under Settings → Accounts → Server rules.",
           "vacationUnsupported": "This server cannot send the reply as set up."
-        }
+        },
+        "senderSweepAccountInvalid": "This account cannot be cleaned up.",
+        "senderSweepSenderInvalid": "That is not a sender address.",
+        "senderSweepDaysInvalid": "Choose between 0 and 3650 days.",
+        "senderSweepActionInvalid": "Unknown cleanup action.",
+        "senderSweepFolderInvalid": "Choose a folder of this account.",
+        "senderSweepRuleNotFound": "This rule no longer exists.",
+        "senderSweepPersistenceFailed": "The cleanup rule could not be saved.",
+        "senderSweepOwnAddress": "You cannot clean up your own address.",
+        "senderSweepTrashNeedsAge": "A rule that moves mail to Trash needs an age of at least one day."
       }
     }
   },
@@ -571,7 +580,16 @@
           "turnOffFirst": "Schalte die Server-Regeln aus, bevor du den Server änderst.",
           "consentNeeded": "Ein anderes Filterskript ist aktiv. Entscheide unter Einstellungen → Konten → Server-Regeln.",
           "vacationUnsupported": "Dieser Server kann die Antwort so nicht senden."
-        }
+        },
+        "senderSweepAccountInvalid": "Dieses Konto lässt sich nicht aufräumen.",
+        "senderSweepSenderInvalid": "Das ist keine Absenderadresse.",
+        "senderSweepDaysInvalid": "Wähle zwischen 0 und 3650 Tagen.",
+        "senderSweepActionInvalid": "Unbekannte Aufräum-Aktion.",
+        "senderSweepFolderInvalid": "Wähle einen Ordner dieses Kontos.",
+        "senderSweepRuleNotFound": "Diese Regel gibt es nicht mehr.",
+        "senderSweepPersistenceFailed": "Die Aufräum-Regel konnte nicht gespeichert werden.",
+        "senderSweepOwnAddress": "Die eigene Adresse lässt sich nicht aufräumen.",
+        "senderSweepTrashNeedsAge": "Eine Regel, die Mails in den Papierkorb verschiebt, braucht ein Alter von mindestens einem Tag."
       }
     }
   }

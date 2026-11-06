@@ -10,6 +10,7 @@ import { useThreadActions } from '@/composables/useThreadActions';
 import { useMessageLinks } from '@/composables/useMessageLinks';
 import { useShortcutHints, type ShortcutHint } from '@/composables/useShortcutHints';
 import { activeThreadReaderCommands } from '@/composables/useThreadReaderCommands';
+import { useSenderSweep } from '@/composables/useSenderSweep';
 import { listKeyboardTargets } from '@/composables/useListKeyboardNavigation';
 import { useUndo } from '@/composables/useUndo';
 import { useToast } from '@/composables/useToast';
@@ -80,6 +81,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
   const ui = useUiStore();
   const { hint } = useShortcutHints();
   const undo = useUndo();
+  const senderSweep = useSenderSweep();
 
   // A list with its own targets (search page, topic, sender review) is what
   // the palette acts on, like the keys; otherwise the store's selection.
@@ -103,6 +105,21 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       const thread = threads.find(id);
       return thread ? offersNotSpam(thread, threads.mailboxFilter) : false;
     });
+  }
+
+  /** Clean up mail from the sender who started the current thread. */
+  function sweepCommand(): OmniCommand[] {
+    const id = currentId();
+    if (!id) return [];
+    return [{
+      id: 'thread:sweep-sender',
+      icon: 'sweep',
+      title: t('commands.sweepSender'),
+      context: 'mail',
+      shortcut: hint('sweepSender'),
+      keywords: t('shortcuts.actions.sweepSender.keywords'),
+      run: () => senderSweep.openForThread(id),
+    }];
   }
 
   /** Reader-only actions, offered while the reader shows the thread the palette acts on. */
@@ -440,8 +457,17 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         keywords: t('commands.keywords.notSpam'),
         run: () => void threadActions.markNotSpam(notSpamTargets()),
       }] : []),
+      ...sweepCommand(),
       ...readerCommands(),
     ] : []),
+    {
+      id: 'view:cleanup',
+      icon: 'sweep',
+      title: t('commands.openCleanup'),
+      context: 'navigation',
+      keywords: t('commands.keywords.cleanup'),
+      run: () => router.push({ name: 'cleanup' }),
+    },
     ...(undo.entries.value.length > 0 ? [{
       id: 'undo:latest',
       icon: 'undo' as const,

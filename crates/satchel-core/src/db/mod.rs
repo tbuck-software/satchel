@@ -21,6 +21,7 @@ pub mod profile_lock;
 pub mod queries;
 pub mod remote_content;
 pub mod sender_preferences;
+pub mod sender_sweep;
 pub mod server_rules;
 pub mod signatures;
 pub mod signed_attachments;

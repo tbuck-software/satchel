@@ -353,6 +353,15 @@
       "senderPreferenceCategoryInvalid": "Choose a valid sender category.",
       "senderPreferenceEmailInvalid": "Enter a valid sender email address.",
       "senderPreferencePersistenceFailed": "Sender preferences are currently unavailable. Please try again.",
+      "senderSweepAccountInvalid": "This account cannot be cleaned up.",
+      "senderSweepActionInvalid": "Unknown cleanup action.",
+      "senderSweepDaysInvalid": "Choose between 0 and 3650 days.",
+      "senderSweepFolderInvalid": "Choose a folder of this account.",
+      "senderSweepOwnAddress": "You cannot clean up your own address.",
+      "senderSweepPersistenceFailed": "The cleanup rule could not be saved.",
+      "senderSweepRuleNotFound": "This rule no longer exists.",
+      "senderSweepSenderInvalid": "That is not a sender address.",
+      "senderSweepTrashNeedsAge": "A rule that moves mail to Trash needs an age of at least one day.",
       "sentMessagePersistenceFailed": "The message was sent, but its local Sent record could not be saved. Do not send it again.",
       "sentMessagePostProcessingFailed": "The message was sent, but its local follow-up could not be completed. Do not send it again.",
       "serverHostAndPortRequired": "Enter both a server host and port.",
@@ -650,6 +659,38 @@
       "problem": "{account}: {problem}"
     }
   },
+  "cleanup": {
+    "actions": {
+      "archiveAll": "Archive all",
+      "keepLatest": "Keep latest",
+      "rule": "From now on…",
+      "trashAll": "Move all to Trash"
+    },
+    "allAccounts": "All accounts",
+    "canUnsubscribe": "Unsubscribe available",
+    "empty": {
+      "description": "No sender has mail from the last {days} days in the Inbox.",
+      "title": "Nothing to clean up"
+    },
+    "keys": {
+      "move": "Move",
+      "title": "Keyboard"
+    },
+    "loadFailed": "Could not load the senders.",
+    "messages": "{count} message | {count} messages",
+    "newest": "newest {date}",
+    "openForAccount": "Clean up mailbox…",
+    "subtitle": "Top senders in the Inbox, last {days} days",
+    "subtitleAccount": "Top senders in {account}, last {days} days",
+    "threads": "{count} conversation | {count} conversations",
+    "title": "Clean up",
+    "trashConfirm": {
+      "body": "Conversations with other participants, your replies or a pin stay. Undo is offered for a few seconds.",
+      "title": "Move one conversation from {sender} to Trash? | Move {count} conversations from {sender} to Trash?"
+    },
+    "unreadShare": "{percent}% unread",
+    "unsubscribed": "Unsubscribed"
+  },
   "commands": {
     "blockAddress": "Block this sender",
     "blockDomain": "Block the sender's whole domain",
@@ -661,6 +702,7 @@
     "exportText": "Export conversation as text",
     "keywords": {
       "block": "block sender domain",
+      "cleanup": "clean up sweep senders newsletters unsubscribe",
       "compose": "compose new mail write",
       "copyLink": "link url share satchel",
       "editShortcuts": "keybindings shortcuts customize",
@@ -702,6 +744,7 @@
     "oauthOpened": "{provider} sign-in opened in the browser.",
     "oauthOutlook": "Start OAuth (Outlook)",
     "oauthStarted": "{provider} sign-in started: {url}",
+    "openCleanup": "Open cleanup assistant",
     "openSettingsSection": "Settings: {section}",
     "pin": "Pin or unpin",
     "printConversation": "Print conversation",
@@ -709,6 +752,7 @@
     "setAside": "Set aside",
     "showShortcuts": "Show keyboard shortcuts",
     "snooze": "Snooze…",
+    "sweepSender": "Clean up mail from this sender…",
     "syncDone": "Sync finished.",
     "syncFailed": "Sync failed.",
     "syncFailedCause": "Sync failed: {cause}",
@@ -3252,6 +3296,17 @@
       "trained": "{spam} spam and {ham} wanted messages.",
       "trainingLabel": "Learned so far"
     },
+    "sweep": {
+      "empty": "No sender rules yet. Set one from a sender's menu or in the cleanup assistant.",
+      "lastRun": "Last run {when}, nothing filed | Last run {when}, one conversation filed | Last run {when}, {count} conversations filed",
+      "loadFailed": "Could not load the sender rules.",
+      "neverRun": "Has not run yet",
+      "purpose": "Rules set from a mail's sender or the cleanup assistant. Each runs every 15 minutes on Inbox conversations its sender wrote alone; conversations with others, your replies or a pin stay.",
+      "remove": "Remove",
+      "removeBody": "Mail it already filed stays where it is.",
+      "removeTitle": "Remove the rule for {sender}?",
+      "title": "Sender cleanup"
+    },
     "swipes": {
       "ariaLong": "{direction}: far swipe",
       "ariaShort": "{direction}: short swipe",
@@ -3353,6 +3408,18 @@
         "keywords": "archive done",
         "label": "Mark as done (second key)"
       },
+      "cleanupKeepLatest": {
+        "keywords": "cleanup keep latest archive rest",
+        "label": "Keep the latest, archive the rest"
+      },
+      "cleanupRule": {
+        "keywords": "cleanup rule from now on",
+        "label": "Set a rule for the sender"
+      },
+      "cleanupUnsubscribe": {
+        "keywords": "cleanup unsubscribe newsletter",
+        "label": "Unsubscribe from the sender"
+      },
       "clearSelection": {
         "keywords": "clear selection",
         "label": "Clear selection"
@@ -3449,6 +3516,10 @@
         "keywords": "aside later",
         "label": "Set aside"
       },
+      "sweepSender": {
+        "keywords": "sweep clean up sender archive delete older",
+        "label": "Clean up mail from sender"
+      },
       "toggleAllMessages": {
         "keywords": "all messages collapse expand",
         "label": "Expand / collapse all messages"
@@ -3480,6 +3551,7 @@
     },
     "close": "Close keyboard shortcuts",
     "contexts": {
+      "cleanup": "Cleanup",
       "global": "Always",
       "mail": "Email focused",
       "mailbox": "Mailbox focused",
@@ -3512,6 +3584,66 @@
     },
     "subtitle": "Everything that matters stays under your fingers.",
     "title": "Keyboard shortcuts"
+  },
+  "sweep": {
+    "from": "From {email}",
+    "inboxCount": "No conversations in the Inbox | One conversation in the Inbox | {count} conversations in the Inbox",
+    "menuItem": "Clean up mail from sender…",
+    "noSender": "Only you write in this conversation; there is no sender to clean up.",
+    "now": {
+      "archiveAll": "Archive all",
+      "heading": "Now",
+      "keepLatestArchive": "Keep the latest, archive the rest",
+      "keepLatestTrash": "Keep the latest, move the rest to Trash",
+      "trashAll": "Move all to Trash"
+    },
+    "result": {
+      "archivedOf": "{count} of {total} conversations done",
+      "failed": "Could not clean up this sender's mail.",
+      "nothing": "Nothing from {sender} to clean up in the Inbox.",
+      "trashed": "One conversation moved to Trash | {count} conversations moved to Trash",
+      "trashedOf": "{count} of {total} conversations moved to Trash"
+    },
+    "rule": {
+      "actionLabel": "What happens to the mail",
+      "archive": "Archive",
+      "customDays": "Custom…",
+      "customInvalid": "Enter a number of days between 1 and 3650.",
+      "customLabel": "Days (1–3650)",
+      "customTitle": "Older than how many days?",
+      "days": "{count} day | {count} days",
+      "folder": "Folder",
+      "heading": "From now on",
+      "hint": "Runs on this sender's mail in the Inbox once right away, then every 15 minutes.",
+      "keepLatest": "Always keep the latest",
+      "matchesNow": "Nothing qualifies yet. | One conversation qualifies now. | {count} conversations qualify now.",
+      "move": "Move to folder",
+      "needsFolder": "Its folder is gone. Pick another one; until then the rule does nothing.",
+      "olderThan": "Once it is older than",
+      "remove": "Remove rule",
+      "removeFailed": "Could not remove the rule: {error}",
+      "removed": "Rule for {sender} removed.",
+      "save": "Save rule",
+      "saveFailed": "Could not save the rule: {error}",
+      "saved": "Rule saved for {sender}.",
+      "trash": "Move to Trash",
+      "trashConfirmBody": "From then on, mail from {sender} goes to Trash every 15 minutes once it is a day old. A rule's moves have no Undo. | From then on, mail from {sender} goes to Trash every 15 minutes once it is {count} days old. A rule's moves have no Undo.",
+      "trashConfirmTitle": "Save the rule? Nothing goes to Trash yet. | Save the rule and move one conversation to Trash now? | Save the rule and move {count} conversations to Trash now?",
+      "update": "Update rule"
+    },
+    "skipped": {
+      "shared": "One conversation with other participants, your replies or a draft is left alone. | {count} conversations with other participants, your replies or drafts are left alone.",
+      "starred": "One pinned conversation stays. | {count} pinned conversations stay."
+    },
+    "summary": {
+      "archive": "Archive everything",
+      "archiveAfter": "Archive after {count} day | Archive after {count} days",
+      "keepingLatest": "{rule}, keeping the latest",
+      "move": "Move to {folder}",
+      "moveNeedsFolder": "Move to a folder: needs a folder",
+      "trashAfter": "Move to Trash after {count} day | Move to Trash after {count} days"
+    },
+    "title": "Clean up mail from {sender}"
   },
   "swipe": {
     "aside": "Set aside",
