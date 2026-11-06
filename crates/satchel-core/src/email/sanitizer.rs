@@ -176,7 +176,9 @@ fn sanitize_style_blocks(document: &mut scraper::Html) {
 fn build_email_html_sanitizer<'a>(allow_source_body_marker: bool) -> ammonia::Builder<'a> {
     let mut builder = ammonia::Builder::default();
     builder
-        .add_tags(&["body", "font", "head", "html", "style"])
+        // ammonia's defaults carry every table tag but `tfoot`; without it the
+        // footer rows of a forwarded table lose their place.
+        .add_tags(&["body", "font", "head", "html", "style", "tfoot"])
         .add_clean_content_tags(&["title"])
         .rm_clean_content_tags(&["style"])
         .add_generic_attributes(&[
@@ -398,6 +400,33 @@ mod tests {
         assert!(sanitized.contains("<strong>team</strong>"));
         assert!(sanitized.contains("https://example.com"));
         assert!(sanitized.contains("rel=\"noopener noreferrer\""));
+    }
+
+    #[test]
+    fn preserves_table_markup_and_its_inline_presentation() {
+        // The composer's own tables, and what other clients send: structure,
+        // spans, and borders and padding carried inline or as attributes.
+        let raw = r#"<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;border:1px solid #c3c7cc"><thead><tr><th style="border:1px solid #c3c7cc;padding:6px 10px;text-align:left" scope="col">Item</th><th>Qty</th></tr></thead><tbody><tr><td colspan="2" rowspan="1" align="right" valign="top" width="120"><p style="margin:0">Apples</p></td></tr></tbody><tfoot><tr><td>Total</td><td>12</td></tr></tfoot></table>"#;
+
+        let sanitized = sanitize_email_html(raw);
+
+        for kept in [
+            r#"border="1""#,
+            r#"cellpadding="6""#,
+            r#"cellspacing="0""#,
+            "border-collapse:collapse",
+            "padding:6px 10px",
+            r#"scope="col""#,
+            r#"colspan="2""#,
+            r#"align="right""#,
+            r#"valign="top""#,
+            r#"width="120""#,
+            r#"<p style="margin:0">"#,
+            "<thead>",
+            "<tfoot>",
+        ] {
+            assert!(sanitized.contains(kept), "{kept} missing from {sanitized}");
+        }
     }
 
     #[test]
