@@ -729,6 +729,19 @@ impl GmailProvider {
         Self { credentials }
     }
 
+    /// The label cache's key: the stored account, or the token of a
+    /// detached provider. Scoped to the API base so test fakes stay apart.
+    fn label_cache_key(&self, token: &str) -> String {
+        match self.credentials.account_id() {
+            Some(account_id) => format!("{}|account:{account_id}", gmail_api_base()),
+            None => {
+                use sha2::Digest;
+                let digest = crate::utils::hex::lower_hex(&sha2::Sha256::digest(token.as_bytes()));
+                format!("{}|token:{}", gmail_api_base(), &digest[..16])
+            }
+        }
+    }
+
     async fn access_token(&self) -> crate::sync::errors::SyncResult<String> {
         self.credentials.access_token(OAuthProvider::Gmail).await
     }
@@ -744,6 +757,7 @@ impl GmailProvider {
         let (mut messages, _, _) = Self::fetch_message_details(
             &client,
             &token,
+            &self.label_cache_key(&token),
             vec![GmailMessageListItem {
                 id: remote_id.to_string(),
             }],
@@ -882,6 +896,7 @@ impl GmailProvider {
     async fn backfill_one_page(
         client: &reqwest::Client,
         token: &str,
+        labels: &str,
         folder: &str,
         page_token: Option<&str>,
         cursor_state: &mut GmailCursorState,
@@ -894,7 +909,7 @@ impl GmailProvider {
             .and_then(|value| usize::try_from(value).ok())
             .unwrap_or(cursor_state.backfill_total_messages.max(fetched_count));
         let (page_messages, page_latest_ts, _page_history_id) =
-            Self::fetch_message_details(client, token, items).await?;
+            Self::fetch_message_details(client, token, labels, items).await?;
 
         if let Some(next_page_token) = payload
             .next_page_token
@@ -998,6 +1013,7 @@ impl GmailProvider {
     async fn fetch_message_details(
         client: &reqwest::Client,
         token: &str,
+        labels: &str,
         item_ids: Vec<GmailMessageListItem>,
     ) -> crate::sync::errors::SyncResult<(Vec<MessageEnvelope>, u64, Option<String>)> {
         use futures::StreamExt;
@@ -1129,7 +1145,7 @@ impl GmailProvider {
                 Self::newest_history_id(latest_history_id, detail.history_id.clone());
             messages.push(map_gmail_message(detail));
         }
-        Self::attach_workflow_markers(client, token, &mut messages).await?;
+        Self::attach_workflow_markers(client, token, labels, &mut messages).await?;
 
         Ok((messages, latest_ts, latest_history_id))
     }
@@ -1174,6 +1190,7 @@ impl GmailProvider {
     async fn attach_workflow_markers(
         client: &reqwest::Client,
         token: &str,
+        key: &str,
         messages: &mut [MessageEnvelope],
     ) -> crate::sync::errors::SyncResult<()> {
         let needed = messages
@@ -1185,25 +1202,19 @@ impl GmailProvider {
         let satchel = if needed.is_empty() {
             std::collections::HashMap::new()
         } else {
-            let key = label_cache_key(token);
-            let cached = cached_label_names(&key);
-            match cached.filter(|names| needed.iter().all(|id| names.contains_key(id))) {
+            // The cache answers only when it knows every label id of the
+            // page: an id it lacks may be a Satchel label made elsewhere,
+            // and taken for an ordinary one it would become a folder
+            // (`ensure_gmail_label_folder`). Then the list is read, and if
+            // that fails the page fails and is retried.
+            match cached_label_names(key)
+                .filter(|names| needed.iter().all(|id| names.contains_key(id)))
+            {
                 Some(names) => satchel_names_by_id(&names),
-                None => match Self::list_labels(client, token).await {
-                    Ok(labels) => satchel_names_by_id(&remember_label_names(&key, &labels)),
-                    // The last list still knows Satchel's labels; a page is
-                    // not worth failing for a list call that broke off.
-                    Err(error) => match cached_label_names(&key) {
-                        Some(names) => {
-                            tracing::warn!(%error, "gmail label list failed; using the last one");
-                            satchel_names_by_id(&names)
-                        }
-                        // Without any names, a Satchel label id would become
-                        // a folder (`ensure_gmail_label_folder`); the page is
-                        // retried instead.
-                        None => return Err(error),
-                    },
-                },
+                None => {
+                    let labels = Self::list_labels(client, token).await?;
+                    satchel_names_by_id(&remember_label_names(key, &labels))
+                }
             }
         };
         for message in messages {
@@ -1216,6 +1227,7 @@ impl GmailProvider {
     async fn ensure_label(
         client: &reqwest::Client,
         token: &str,
+        key: &str,
         labels: &[GmailLabel],
         name: &str,
     ) -> crate::sync::errors::SyncResult<String> {
@@ -1272,6 +1284,9 @@ impl GmailProvider {
             .json()
             .await
             .map_err(|err| format!("gmail label create parse failed: {err}"))?;
+        // Known at once, so this device's next read of a message carrying it
+        // needs no list and cannot mistake it for an ordinary label.
+        remember_label_name(key, &label);
         Ok(label.id)
     }
 
@@ -1420,6 +1435,7 @@ impl GmailProvider {
     async fn fetch_current_drafts(
         client: &reqwest::Client,
         token: &str,
+        labels: &str,
     ) -> crate::sync::errors::SyncResult<Vec<MessageEnvelope>> {
         let mut page_token = None::<String>;
         let mut messages = Vec::new();
@@ -1455,7 +1471,7 @@ impl GmailProvider {
                 .map_err(|err| format!("gmail drafts list parse failed: {err}"))?;
             for draft in payload.drafts.unwrap_or_default() {
                 let (mut fetched, _, _) =
-                    Self::fetch_message_details(client, token, vec![draft.message]).await?;
+                    Self::fetch_message_details(client, token, labels, vec![draft.message]).await?;
                 if let Some(message) = fetched.first_mut() {
                     message.remote_draft_id = Some(draft.id);
                 }
@@ -1688,7 +1704,12 @@ impl MailProvider for GmailProvider {
         let client = crate::utils::http::client();
         if folder.eq_ignore_ascii_case("DRAFT") || folder.eq_ignore_ascii_case("DRAFTS") {
             return Ok(SyncBatch {
-                messages: Self::fetch_current_drafts(&client, &token).await?,
+                messages: Self::fetch_current_drafts(
+                    &client,
+                    &token,
+                    &self.label_cache_key(&token),
+                )
+                .await?,
                 removals: Vec::new(),
                 remote_uidvalidity: None,
                 reset_folder: false,
@@ -1759,7 +1780,13 @@ impl MailProvider for GmailProvider {
                         }
                     }
                     let (page_messages, page_latest_ts, _detail_history_id) =
-                        Self::fetch_message_details(&client, &token, items).await?;
+                        Self::fetch_message_details(
+                            &client,
+                            &token,
+                            &self.label_cache_key(&token),
+                            items,
+                        )
+                        .await?;
                     latest_ts = latest_ts.max(page_latest_ts);
                     // Details may already reflect changes beyond this history
                     // response. Only the completed feed authorizes progress.
@@ -1804,7 +1831,13 @@ impl MailProvider for GmailProvider {
                         let items = payload.messages.unwrap_or_default();
                         let next_page_token = payload.next_page_token;
                         let (page_messages, page_latest_ts, page_history_id) =
-                            Self::fetch_message_details(&client, &token, items).await?;
+                            Self::fetch_message_details(
+                                &client,
+                                &token,
+                                &self.label_cache_key(&token),
+                                items,
+                            )
+                            .await?;
                         latest_ts = latest_ts.max(page_latest_ts);
                         cursor_state.history_id = Self::newest_history_id(
                             cursor_state.history_id.take(),
@@ -1860,6 +1893,7 @@ impl MailProvider for GmailProvider {
                 match Self::backfill_one_page(
                     &client,
                     &token,
+                    &self.label_cache_key(&token),
                     folder,
                     page_token,
                     &mut cursor_state,
@@ -1924,6 +1958,7 @@ impl MailProvider for GmailProvider {
         let (mut messages, _, _) = Self::fetch_message_details(
             &crate::utils::http::client(),
             &token,
+            &self.label_cache_key(&token),
             vec![GmailMessageListItem {
                 id: remote_id.to_string(),
             }],
@@ -2167,6 +2202,7 @@ impl MailProvider for GmailProvider {
         let applied = WorkflowMarkerReport {
             targets: vec![WorkflowMarkerWrite::Applied; targets.len()],
             refused_in_inbox: false,
+            applied_in_inbox: false,
         };
         let ids = targets
             .iter()
@@ -2181,11 +2217,12 @@ impl MailProvider for GmailProvider {
         let token = self.access_token().await?;
         let client = crate::utils::http::client();
         let labels = Self::list_labels(&client, &token).await?;
-        remember_label_names(&label_cache_key(&token), &labels);
+        let key = self.label_cache_key(&token);
+        remember_label_names(&key, &labels);
         let wanted = marker.gmail_labels();
         let mut add_labels = Vec::new();
         for name in &wanted {
-            add_labels.push(Self::ensure_label(&client, &token, &labels, name).await?);
+            add_labels.push(Self::ensure_label(&client, &token, &key, &labels, name).await?);
         }
         let remove_labels = labels
             .iter()
@@ -2331,11 +2368,15 @@ impl MailProvider for GmailProvider {
                 .as_deref()
                 .filter(|value| !value.trim().is_empty())
             {
-                Self::fetch_current_drafts(&crate::utils::http::client(), &token)
-                    .await?
-                    .into_iter()
-                    .find(|draft| draft.message_id_header.as_deref() == Some(message_id))
-                    .and_then(|draft| draft.remote_draft_id)
+                Self::fetch_current_drafts(
+                    &crate::utils::http::client(),
+                    &token,
+                    &self.label_cache_key(&token),
+                )
+                .await?
+                .into_iter()
+                .find(|draft| draft.message_id_header.as_deref() == Some(message_id))
+                .and_then(|draft| draft.remote_draft_id)
             } else {
                 None
             }
@@ -2394,11 +2435,13 @@ impl MailProvider for GmailProvider {
     ) -> crate::sync::errors::SyncResult<Option<String>> {
         let token = self.access_token().await?;
         let client = crate::utils::http::client();
-        Ok(Self::fetch_current_drafts(&client, &token)
-            .await?
-            .into_iter()
-            .find(|message| message.remote_id == message_remote_id)
-            .and_then(|message| message.remote_draft_id))
+        Ok(
+            Self::fetch_current_drafts(&client, &token, &self.label_cache_key(&token))
+                .await?
+                .into_iter()
+                .find(|message| message.remote_id == message_remote_id)
+                .and_then(|message| message.remote_draft_id),
+        )
     }
 
     async fn delete_draft(&self, remote_draft_id: &str) -> crate::sync::errors::SyncResult<()> {
@@ -2917,20 +2960,45 @@ fn gmail_label_is_user_label(id: &str) -> bool {
     id.starts_with("Label_")
 }
 
-/// The last label list per account, as id -> name. Keyed by API base and a
-/// digest of the access token: per account, and gone with the token.
-static LABEL_NAMES: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<String, std::collections::HashMap<String, String>>>,
-> = std::sync::LazyLock::new(Default::default);
+/// The last label list per account, as id -> name. Bounded: an account
+/// without a stored id (a detached provider) is keyed by its token, which
+/// changes; the least recently used entries make room.
+type LabelCache =
+    std::collections::BTreeMap<String, (u64, std::collections::HashMap<String, String>)>;
+static LABEL_NAMES: std::sync::LazyLock<std::sync::Mutex<LabelCache>> =
+    std::sync::LazyLock::new(Default::default);
+const LABEL_CACHE_ACCOUNTS: usize = 64;
 
-fn label_cache_key(token: &str) -> String {
-    use sha2::Digest;
-    let digest = crate::utils::hex::lower_hex(&sha2::Sha256::digest(token.as_bytes()));
-    format!("{}|{}", gmail_api_base(), &digest[..16])
+fn remember_in_cache(
+    key: &str,
+    update: impl FnOnce(&mut std::collections::HashMap<String, String>),
+) {
+    static CLOCK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let Ok(mut cache) = LABEL_NAMES.lock() else {
+        return;
+    };
+    let now = CLOCK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let entry = cache.entry(key.to_string()).or_default();
+    entry.0 = now;
+    update(&mut entry.1);
+    while cache.len() > LABEL_CACHE_ACCOUNTS {
+        let Some(oldest) = cache
+            .iter()
+            .min_by_key(|(_, (used, _))| *used)
+            .map(|(key, _)| key.clone())
+        else {
+            break;
+        };
+        cache.remove(&oldest);
+    }
 }
 
 fn cached_label_names(key: &str) -> Option<std::collections::HashMap<String, String>> {
-    LABEL_NAMES.lock().ok()?.get(key).cloned()
+    LABEL_NAMES
+        .lock()
+        .ok()?
+        .get(key)
+        .map(|(_, names)| names.clone())
 }
 
 fn remember_label_names(
@@ -2941,10 +3009,14 @@ fn remember_label_names(
         .iter()
         .map(|label| (label.id.clone(), label.name.clone()))
         .collect::<std::collections::HashMap<_, _>>();
-    if let Ok(mut cache) = LABEL_NAMES.lock() {
-        cache.insert(key.to_string(), names.clone());
-    }
+    remember_in_cache(key, |cached| *cached = names.clone());
     names
+}
+
+fn remember_label_name(key: &str, label: &GmailLabel) {
+    remember_in_cache(key, |cached| {
+        cached.insert(label.id.clone(), label.name.clone());
+    });
 }
 
 /// Satchel's workflow labels among all labels, by id.

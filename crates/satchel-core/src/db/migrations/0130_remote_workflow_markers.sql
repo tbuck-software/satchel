@@ -13,12 +13,16 @@ ALTER TABLE threads ADD COLUMN remote_workflow_marker TEXT;
 
 -- Whether the account's server takes Satchel's keywords, decided by INBOX.
 -- 'server', or 'local_only' with a `reason`: 'no_custom_keywords' (INBOX
--- PERMANENTFLAGS without `\*`, or Gmail's IMAP host; a later snapshot with `\*`
--- lifts it) or 'store_refused' (INBOX refused a keyword STORE; sticky). No
--- row: not known yet.
+-- PERMANENTFLAGS without `\*`; a later snapshot with `\*` lifts it),
+-- 'gmail_imap' (Gmail's IMAP host) or 'store_refused' (INBOX answered a
+-- keyword STORE with a definite NO/BAD; holds for some hours and until the
+-- app restarts, an accepted INBOX store lifts it). `baseline_at`: the first
+-- completed INBOX snapshot on this device; before it, IMAP snoozes set
+-- elsewhere are recorded but not adopted. No row: not known yet.
 CREATE TABLE IF NOT EXISTS account_workflow_sync (
     account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
     mode TEXT NOT NULL,
     reason TEXT,
-    checked_at TEXT NOT NULL
+    checked_at TEXT NOT NULL,
+    baseline_at TEXT
 );

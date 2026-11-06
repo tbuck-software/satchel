@@ -989,8 +989,23 @@ async fn persist_provider_message(
             sqlx::query("UPDATE follow_up_reminders SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE thread_id = ? AND status = 'pending'")
                 .bind(&now).bind(&now).bind(&thread_id).execute(&mut **tx).await.map_err(|error| error.to_string())?;
             if folder_type == "inbox" {
-                sqlx::query("UPDATE threads SET workflow_state = 'inbox', board_column = 'inbox', snooze_until = NULL, workflow_changed_at = ?, updated_at = ? WHERE id = ? AND workflow_state IN ('snoozed', 'aside', 'done', 'waiting')")
-                    .bind(&now).bind(&now).bind(&thread_id).execute(&mut **tx).await.map_err(|error| error.to_string())?;
+                let resurfaced = sqlx::query("UPDATE threads SET workflow_state = 'inbox', board_column = 'inbox', snooze_until = NULL, workflow_changed_at = ?, updated_at = ? WHERE id = ? AND workflow_state IN ('snoozed', 'aside', 'done', 'waiting')")
+                    .bind(&now).bind(&now).bind(&thread_id).execute(&mut **tx).await.map_err(|error| error.to_string())?
+                    .rows_affected() > 0;
+                // The reply brought the thread back: its old Done or Snooze
+                // keyword comes off, so other clients stop showing it. Nothing
+                // is queued when the server holds no marker for it. The worker
+                // picks the row up on its next pass.
+                if resurfaced {
+                    satchel_core::sync::workflow_markers::enqueue_workflow_marker_in_transaction(
+                        tx,
+                        &SyncQueue::new(),
+                        &thread_id,
+                        &satchel_core::workflow::remote_marker::WorkflowMarker::None,
+                        None,
+                    )
+                    .await?;
+                }
                 sqlx::query("INSERT OR IGNORE INTO ingest_effects (message_id, thread_id, account_id, run_rules, created_at) VALUES (?, ?, ?, 1, ?)")
                     .bind(&message_id).bind(&thread_id).bind(account_id).bind(&now)
                     .execute(&mut **tx).await.map_err(|error| error.to_string())?;
@@ -2117,6 +2132,10 @@ mod tests {
     async fn a_snooze_keyword_from_another_device_snoozes_the_thread_here() {
         use satchel_core::workflow::remote_marker::{Snooze, WorkflowMarker};
         let pool = ingest_pool().await;
+        // After the first INBOX snapshot; before it a found snooze is only seen.
+        satchel_core::sync::workflow_markers::mark_snapshot_baseline(&pool, "account")
+            .await
+            .unwrap();
         let snoozed = WorkflowMarker::Snoozed(Snooze {
             wake: None,
             generation: 1,
@@ -2145,6 +2164,51 @@ mod tests {
         .unwrap();
         assert_eq!(state, "snoozed");
         assert_eq!(marker, snoozed.as_column());
+    }
+
+    /// A reply brings a snoozed thread back; its keyword comes off on the
+    /// server too, so other clients stop showing it as snoozed.
+    #[tokio::test]
+    async fn a_reply_to_a_snoozed_thread_queues_the_keyword_off() {
+        use satchel_core::workflow::remote_marker::{Snooze, WorkflowMarker};
+        let pool = ingest_pool().await;
+        sqlx::query("UPDATE folders SET uidvalidity = 7")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut parent = envelope("parent");
+        parent.message_id_header = Some("<parent@example.test>".into());
+        parent.date_rfc3339 = "2026-01-01T08:00:00Z".into();
+        ingest(&pool, "inbox", &parent).await.unwrap();
+        let snoozed = WorkflowMarker::Snoozed(Snooze {
+            wake: Some(chrono::Utc::now() + chrono::Duration::hours(4)),
+            generation: 1,
+        });
+        sqlx::query(
+            "UPDATE threads SET workflow_state = 'snoozed', snooze_until = '2026-12-01T00:00:00Z', remote_workflow_marker = ?",
+        )
+        .bind(snoozed.as_column())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE accounts SET last_sync_at = '2026-01-01T12:00:00Z'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut reply = envelope("overnight");
+        reply.in_reply_to = parent.message_id_header.clone();
+        reply.from_address = "external@example.test".into();
+        reply.date_rfc3339 = "2026-01-02T03:00:00Z".into();
+        ingest(&pool, "inbox", &reply).await.unwrap();
+        let (state, markers): (String, i64) = sqlx::query_as(
+            "SELECT (SELECT workflow_state FROM threads LIMIT 1),
+                    (SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_marker' AND json_extract(payload, '$.marker') = '')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(state, "inbox");
+        assert_eq!(markers, 1);
     }
 
     /// The first sync after the upgrade: every copy reports "no marker".

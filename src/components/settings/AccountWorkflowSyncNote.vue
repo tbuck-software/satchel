@@ -13,16 +13,22 @@ const props = defineProps<{ accountId: string }>();
 
 const { t } = useI18n();
 const workflowSync = useWorkflowSyncStore();
-const localOnly = computed(() => workflowSync.isLocalOnly(props.accountId));
+const reason = computed(() => workflowSync.reasonFor(props.accountId));
+// Static keys, so the catalogue check sees every one.
+const body = computed(() => {
+  if (reason.value === 'store_refused') return t('workflowSync.storeRefusedBody');
+  if (reason.value === 'gmail_imap') return t('workflowSync.gmailImapBody');
+  return t('workflowSync.localOnlyBody');
+});
 </script>
 
 <template>
   <AppBanner
-    v-if="localOnly"
+    v-if="reason"
     class="workflow-sync-note"
     tone="info"
     :title="t('workflowSync.localOnlyTitle')"
-    :detail="t('workflowSync.localOnlyBody')"
+    :detail="body"
     data-testid="workflow-sync-local-only"
   />
 </template>

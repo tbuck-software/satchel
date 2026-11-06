@@ -716,7 +716,8 @@ mod tests {
             .into_iter()
             .map(|(kind, _)| kind)
             .collect::<Vec<_>>();
-        assert_eq!(kinds, vec!["flags", "workflow_marker", "workflow_move"]);
+        // Done for the whole batch first, then each thread's read and move.
+        assert_eq!(kinds, vec!["workflow_marker", "flags", "workflow_move"]);
     }
 
     #[tokio::test]

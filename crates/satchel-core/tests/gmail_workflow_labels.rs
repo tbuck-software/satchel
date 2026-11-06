@@ -4,6 +4,7 @@
 //! and parallel tests in this binary would point each other's providers at
 //! the wrong fake.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::TimeZone;
@@ -22,8 +23,13 @@ struct Request {
     body: Value,
 }
 
+/// The label list request fails while set.
+static LABELS_DOWN: AtomicBool = AtomicBool::new(false);
+/// Another device has created `Satchel/Done` as `Label_77` while set.
+static LABEL_77_EXISTS: AtomicBool = AtomicBool::new(false);
+
 fn labels() -> Value {
-    json!({"labels":[
+    let mut listed = json!({"labels":[
         {"id":"INBOX","name":"INBOX","type":"system"},
         {"id":"UNREAD","name":"UNREAD","type":"system"},
         {"id":"Label_1","name":"Projects","type":"user"},
@@ -31,13 +37,45 @@ fn labels() -> Value {
         {"id":"Label_8","name":"Satchel/Wake/20200101T080000Z","type":"user"},
         {"id":"Label_9","name":"Satchel/Snoozed","type":"user"},
         {"id":"Label_10","name":"Satchel/Invoices","type":"user"}
-    ]})
+    ]});
+    if LABEL_77_EXISTS.load(Ordering::SeqCst) {
+        listed["labels"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id":"Label_77","name":"Satchel/Done","type":"user"}));
+    }
+    listed
+}
+
+fn message(id: &str, labels: &[&str]) -> Value {
+    json!({
+        "id": id, "threadId": id, "historyId": "5",
+        "labelIds": labels,
+        "internalDate": "1780000000000",
+        "payload": {
+            "mimeType": "text/plain",
+            "headers": [
+                {"name": "Subject", "value": "Angebot"},
+                {"name": "From", "value": "kunde@example.test"}
+            ],
+            "body": {"size": 0}
+        }
+    })
 }
 
 fn route(request: &Request) -> (&'static str, Value) {
     let line = &request.line;
     if line.starts_with("GET") && line.contains("/labels") {
+        if LABELS_DOWN.load(Ordering::SeqCst) {
+            return ("503 Service Unavailable", json!({}));
+        }
         return ("200 OK", labels());
+    }
+    if line.contains("/messages/m77") {
+        return ("200 OK", message("m77", &["Label_77"]));
+    }
+    if line.contains("/messages/mnew") {
+        return ("200 OK", message("mnew", &["Label_new"]));
     }
     if line.starts_with("POST") && line.contains("/labels") {
         let name = request.body["name"]
@@ -195,6 +233,7 @@ async fn done_and_snooze_travel_as_satchel_labels() {
         WorkflowMarkerReport {
             targets: vec![WorkflowMarkerWrite::Applied; 2],
             refused_in_inbox: false,
+            applied_in_inbox: false,
         }
     );
     let created = requests
@@ -231,6 +270,24 @@ async fn done_and_snooze_travel_as_satchel_labels() {
             }),
         ]
     );
+    let lists = |requests: &Arc<Mutex<Vec<Request>>>| {
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request.line.starts_with("GET") && request.line.contains("/labels "))
+            .count()
+    };
+    let lists_after_snooze = lists(&requests);
+    // The wake label this device created above is in the cache already: a
+    // message carrying it needs no list and is not mistaken for a folder.
+    let created = provider
+        .fetch_message_by_id("mnew")
+        .await
+        .expect("created label");
+    assert!(created.mailbox_ids.is_empty());
+    assert_eq!(lists(&requests), lists_after_snooze);
+
     // Then the expired label itself goes.
     assert!(requests
         .lock()
@@ -275,18 +332,23 @@ async fn done_and_snooze_travel_as_satchel_labels() {
 
     // The label list was read once for the message above and is reused
     // while the token lasts; a second fetch asks for no list.
-    let lists = |requests: &Arc<Mutex<Vec<Request>>>| {
-        requests
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|request| request.line.starts_with("GET") && request.line.contains("/labels "))
-            .count()
-    };
     let before = lists(&requests);
     provider
         .fetch_message_by_id("m1")
         .await
         .expect("message again");
     assert_eq!(lists(&requests), before);
+
+    // A label id the cache has never seen (made on another device) is not
+    // guessed at: without the list, the page fails and is retried.
+    LABEL_77_EXISTS.store(true, Ordering::SeqCst);
+    LABELS_DOWN.store(true, Ordering::SeqCst);
+    assert!(provider.fetch_message_by_id("m77").await.is_err());
+    LABELS_DOWN.store(false, Ordering::SeqCst);
+    let retried = provider
+        .fetch_message_by_id("m77")
+        .await
+        .expect("retried page");
+    assert_eq!(retried.workflow_marker, Some(WorkflowMarker::Done));
+    assert!(retried.mailbox_ids.is_empty());
 }

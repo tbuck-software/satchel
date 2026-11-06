@@ -51,6 +51,11 @@ impl OAuthCredentials {
         }))
     }
 
+    /// The stored account these credentials renew from, if any.
+    pub fn account_id(&self) -> Option<&str> {
+        self.0.account.as_ref().map(|(_, id)| id.as_str())
+    }
+
     /// Start from `config` and renew from the stored account once it expires.
     pub fn stored(pool: &SqlitePool, account_id: &str, config: &AccountConfig) -> Self {
         Self(Arc::new(Inner {

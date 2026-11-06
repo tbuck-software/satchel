@@ -393,12 +393,10 @@ async fn reconcile_folder_snapshot(
             )
         } else {
             // INBOX speaks for the account: every Done and Snooze starts there.
-            if let Some(allowed) = snapshot
-                .custom_keywords
-                .filter(|_| remote_folder_id.eq_ignore_ascii_case("INBOX"))
-            {
+            let inbox = remote_folder_id.eq_ignore_ascii_case("INBOX");
+            if let Some(support) = snapshot.custom_keywords.filter(|_| inbox) {
                 satchel_core::sync::workflow_markers::record_inbox_keyword_support(
-                    pool, account_id, allowed,
+                    pool, account_id, support,
                 )
                 .await?;
             }
@@ -417,6 +415,12 @@ async fn reconcile_folder_snapshot(
                     &changes.marker_threads,
                 )
                 .await?;
+            // From the first complete INBOX snapshot on, IMAP snoozes set on
+            // other devices are adopted; the ones it found were only seen.
+            if inbox && !changes.skipped_stale_generation {
+                satchel_core::sync::workflow_markers::mark_snapshot_baseline(pool, account_id)
+                    .await?;
+            }
             (
                 SnapshotProgress {
                     changed: changes.relocated_threads,

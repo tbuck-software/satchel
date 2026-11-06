@@ -200,7 +200,11 @@ Done und Snooze reisen als IMAP-Keyword bzw. Gmail-Label mit (ADR 0009,
 - Marker sind best effort: `NO`/`BAD` auf STORE ist ein Ergebnis, kein
   Fehler, sonst blockiert die Zeile die Queue des Kontos. async-imaps
   `uid_store`-Stream verwirft den Status der getaggten Antwort — für STORE
-  `run_command_and_check_ok` nehmen.
+  `run_command_and_check_ok` nehmen. Nur ein **eindeutiges** `NO`/`BAD` auf
+  den INBOX-STORE macht das Konto `local_only` (`store_refused`), und auch
+  das nur für einige Stunden und bis zum Neustart; `[UNAVAILABLE]`/`[INUSE]`,
+  ein abgelehntes SELECT oder eine neue UIDVALIDITY überspringen nur die
+  Zeile. Über `\*` entscheidet allein der INBOX-Snapshot.
 - Gmail-Labels `Satchel/Done`, `Satchel/Snoozed`, `Satchel/Wake/<Zeit>` sind
   Markierungen, keine Ordner (nur exakt diese Namen; `Satchel/Invoices` gehört
   dem Nutzer). Der Provider nimmt sie aus `mailbox_ids` heraus; landen sie
@@ -209,7 +213,13 @@ Done und Snooze reisen als IMAP-Keyword bzw. Gmail-Label mit (ADR 0009,
   der Server zuletzt angenommen oder gezeigt hat (`NULL` = kein Marker, ein
   Postfach ohne Marker wird nie beschrieben). Eine noch nicht gesendete lokale
   Änderung gewinnt. Konten mit `local_only` (`account_workflow_sync`) werden
-  weder beschrieben noch gelesen.
+  weder beschrieben noch gelesen. Vor dem ersten vollständigen
+  INBOX-Snapshot eines Geräts (`baseline_at`) werden fremde IMAP-Snoozes
+  nur notiert, nicht übernommen.
+- Markierungen werden pro Thread eingereiht, Lookups macht SQLite über die
+  Payload (`instr` + `json_each`): Kein Pfad darf je Thread alle wartenden
+  Zeilen parsen. Viele Threads in einer Transaktion gehen über
+  `enqueue_workflow_markers_in_transaction`.
 
 ### Mobile (Android/iOS)
 

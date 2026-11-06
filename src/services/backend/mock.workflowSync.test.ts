@@ -10,9 +10,12 @@ describe('mock local-only workflow accounts', () => {
     await expect(sendCommand<string[]>('list_local_only_workflow_accounts')).resolves.toEqual([]);
   });
 
-  it('lists the work account with ?mockWorkflowSync=local', async () => {
-    window.history.replaceState({}, '', '/?mockWorkflowSync=local');
-    const { sendCommand } = await import('./mock');
-    await expect(sendCommand<string[]>('list_local_only_workflow_accounts')).resolves.toEqual(['acc-work']);
+  it('lists the work account with its reason for ?mockWorkflowSync=…', async () => {
+    for (const [param, reason] of [['local', 'no_custom_keywords'], ['store_refused', 'store_refused'], ['gmail_imap', 'gmail_imap']]) {
+      vi.resetModules();
+      window.history.replaceState({}, '', `/?mockWorkflowSync=${param}`);
+      const { sendCommand } = await import('./mock');
+      await expect(sendCommand('list_local_only_workflow_accounts')).resolves.toEqual([{ account_id: 'acc-work', reason }]);
+    }
   });
 });

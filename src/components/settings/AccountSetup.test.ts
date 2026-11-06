@@ -45,7 +45,7 @@ vi.mock('@/stores/certificateTrust', () => ({
 
 vi.mock('./AccountVisibilitySettings.vue', () => ({ default: { template: '<div />' } }));
 vi.mock('@/stores/accountQuota', () => ({ useAccountQuotaStore: () => ({ load: vi.fn(), quotaFor: () => null, levelFor: () => null }) }));
-vi.mock('@/stores/workflowSync', () => ({ useWorkflowSyncStore: () => ({ load: vi.fn(), isLocalOnly: () => false }) }));
+vi.mock('@/stores/workflowSync', () => ({ useWorkflowSyncStore: () => ({ load: vi.fn(), isLocalOnly: () => false, reasonFor: () => null }) }));
 vi.mock('./AccountQuotaSettings.vue', () => ({ default: { template: '<div />' } }));
 
 import AccountSetup from './AccountSetup.vue';

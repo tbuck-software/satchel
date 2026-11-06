@@ -125,12 +125,13 @@ const quotas = new Map<string, BackendAccountQuota>([['acc-work', {
   messages_limit: null,
   fetched_at: new Date(Date.now() - 2 * 3600_000).toISOString(),
 }]]);
-// Accounts whose server keeps no custom keywords, as `account_workflow_sync`
-// lists them. `?mockWorkflowSync=local` shows the note on the work account.
-const localOnlyWorkflowAccounts = new Set<string>(
-  typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mockWorkflowSync') === 'local'
-    ? ['acc-work']
-    : [],
+// Accounts that keep Done and Snooze on the device, as `account_workflow_sync`
+// lists them. `?mockWorkflowSync=local|store_refused|gmail_imap` shows the
+// note on the work account (`local`: a server without custom keywords).
+const workflowSyncParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('mockWorkflowSync') : null;
+const workflowSyncReasons: Record<string, string> = { local: 'no_custom_keywords', store_refused: 'store_refused', gmail_imap: 'gmail_imap' };
+const localOnlyWorkflowAccounts = new Map<string, string>(
+  workflowSyncParam && workflowSyncReasons[workflowSyncParam] ? [['acc-work', workflowSyncReasons[workflowSyncParam]]] : [],
 );
 const trashReceipts = new Map<string, Thread[]>();
 let nextTrashReceipt = 0;
@@ -1016,7 +1017,10 @@ const handlers: Record<string, Handler> = {
     return quota ? [{ ...quota }] : [];
   }),
   // Like the Rust query: only accounts that still exist.
-  list_local_only_workflow_accounts: () => accounts.filter(account => localOnlyWorkflowAccounts.has(account.id)).map(account => account.id),
+  list_local_only_workflow_accounts: () => accounts.flatMap(account => {
+    const reason = localOnlyWorkflowAccounts.get(account.id);
+    return reason ? [{ account_id: account.id, reason }] : [];
+  }),
   get_account_visibility: () => accounts.map(account => ({
     account_id: account.id, policy: visibilityPolicies[account.id] ?? defaultVisibilityPolicy(),
     visible: accountVisible(account.id), local_date: localDate(new Date()),

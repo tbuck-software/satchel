@@ -1,4 +1,23 @@
 use super::*;
+use crate::providers::traits::KeywordSupport;
+
+async fn local_only(pool: &SqlitePool) -> Vec<String> {
+    list_local_only_accounts(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|account| account.account_id)
+        .collect()
+}
+
+async fn reasons(pool: &SqlitePool) -> Vec<String> {
+    list_local_only_accounts(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|account| account.reason)
+        .collect()
+}
 use crate::providers::traits::{FlagUpdate, MailProvider, RemoteFolder, SyncBatch, SyncCheckpoint};
 use chrono::{Duration, Utc};
 use sqlx::sqlite::SqlitePoolOptions;
@@ -299,18 +318,15 @@ async fn each_imap_snooze_takes_the_other_generation() {
 #[tokio::test]
 async fn local_only_accounts_and_other_providers_queue_nothing() {
     let pool = pool("imap").await;
-    record_inbox_keyword_support(&pool, "acc", false)
+    record_inbox_keyword_support(&pool, "acc", KeywordSupport::NotAllowed)
         .await
         .unwrap();
     assert!(push(&pool, WorkflowMarker::Done).await.is_empty());
-    assert_eq!(
-        list_local_only_accounts(&pool).await.unwrap(),
-        vec!["acc".to_string()]
-    );
-    record_inbox_keyword_support(&pool, "acc", true)
+    assert_eq!(local_only(&pool).await, vec!["acc".to_string()]);
+    record_inbox_keyword_support(&pool, "acc", KeywordSupport::Allowed)
         .await
         .unwrap();
-    assert!(list_local_only_accounts(&pool).await.unwrap().is_empty());
+    assert!(local_only(&pool).await.is_empty());
 
     let outlook = self::pool("outlook").await;
     assert!(push(&outlook, WorkflowMarker::Done).await.is_empty());
@@ -332,6 +348,7 @@ async fn a_refused_inbox_store_stays_local_only_whatever_the_flags_say() {
         &WorkflowMarkerReport {
             targets: vec![WorkflowMarkerWrite::Refused],
             refused_in_inbox: true,
+            applied_in_inbox: false,
         },
     )
     .await
@@ -342,13 +359,10 @@ async fn a_refused_inbox_store_stays_local_only_whatever_the_flags_say() {
         "a refused write is not recorded"
     );
     // INBOX still lists `\*`; that does not undo a refused STORE.
-    record_inbox_keyword_support(&pool, "acc", true)
+    record_inbox_keyword_support(&pool, "acc", KeywordSupport::Allowed)
         .await
         .unwrap();
-    assert_eq!(
-        list_local_only_accounts(&pool).await.unwrap(),
-        vec!["acc".to_string()]
-    );
+    assert_eq!(local_only(&pool).await, vec!["acc".to_string()]);
 }
 
 #[tokio::test]
@@ -370,6 +384,7 @@ async fn an_accepted_write_is_recorded_per_thread() {
         &WorkflowMarkerReport {
             targets: vec![WorkflowMarkerWrite::Applied, WorkflowMarkerWrite::Skipped],
             refused_in_inbox: false,
+            applied_in_inbox: true,
         },
     )
     .await
@@ -381,7 +396,7 @@ async fn an_accepted_write_is_recorded_per_thread() {
             .unwrap();
     assert_eq!(recorded, vec![Some("done".to_string()), None]);
     // An accepted write is proof the server takes keywords.
-    assert!(list_local_only_accounts(&pool).await.unwrap().is_empty());
+    assert!(local_only(&pool).await.is_empty());
 }
 
 /// A provider that refuses every write the way a full keyword table does.
@@ -430,6 +445,7 @@ impl MailProvider for RefusingProvider {
         Ok(WorkflowMarkerReport {
             targets: vec![WorkflowMarkerWrite::Refused; targets.len()],
             refused_in_inbox: true,
+            applied_in_inbox: false,
         })
     }
 }
@@ -452,10 +468,7 @@ async fn a_refused_write_settles_and_leaves_the_queue_free() {
     .await
     .expect("a refusal is not a failure");
     assert_eq!(state(&pool).await.2, None);
-    assert_eq!(
-        list_local_only_accounts(&pool).await.unwrap(),
-        vec!["acc".to_string()]
-    );
+    assert_eq!(local_only(&pool).await, vec!["acc".to_string()]);
     // And nothing more is queued for this account.
     sqlx::query("DELETE FROM sync_queue")
         .execute(&pool)
@@ -556,6 +569,7 @@ async fn a_gmail_snooze_from_another_device_is_adopted_and_wakes_here() {
 #[tokio::test]
 async fn an_imap_snooze_from_another_device_is_adopted_for_a_day() {
     let pool = pool("imap").await;
+    mark_snapshot_baseline(&pool, "acc").await.unwrap();
     set_server(&pool, &imap_snooze(1)).await;
     assert!(pull(&pool).await);
     let (state_now, until, _) = state(&pool).await;
@@ -614,7 +628,7 @@ async fn an_unsent_local_change_wins_over_the_server() {
 #[tokio::test]
 async fn local_only_accounts_ignore_the_server() {
     let pool = pool("imap").await;
-    record_inbox_keyword_support(&pool, "acc", false)
+    record_inbox_keyword_support(&pool, "acc", KeywordSupport::NotAllowed)
         .await
         .unwrap();
     set_server(&pool, &snooze_at(Utc::now() + Duration::hours(2), 1)).await;
@@ -637,4 +651,279 @@ async fn done_elsewhere_is_applied_once_the_mail_left_the_inbox() {
             .await
             .unwrap();
     assert_eq!(reason, "server");
+}
+
+#[tokio::test]
+async fn the_first_snapshot_records_foreign_imap_snoozes_without_adopting_them() {
+    let pool = pool("imap").await;
+    // A lost device left the keyword years ago; this device sees it first.
+    set_server(&pool, &imap_snooze(1)).await;
+    assert!(!pull(&pool).await);
+    assert_eq!(state(&pool).await.0, "inbox");
+    assert_eq!(state(&pool).await.2, imap_snooze(1).as_column());
+
+    // From the baseline on, a new snooze elsewhere is adopted.
+    mark_snapshot_baseline(&pool, "acc").await.unwrap();
+    set_server(&pool, &imap_snooze(2)).await;
+    assert!(pull(&pool).await);
+    assert_eq!(state(&pool).await.0, "snoozed");
+}
+
+#[tokio::test]
+async fn each_snapshot_verdict_has_its_own_reason() {
+    let pool = pool("imap").await;
+    record_inbox_keyword_support(&pool, "acc", KeywordSupport::GmailHost)
+        .await
+        .unwrap();
+    assert_eq!(reasons(&pool).await, vec![REASON_GMAIL_IMAP]);
+    record_inbox_keyword_support(&pool, "acc", KeywordSupport::NotAllowed)
+        .await
+        .unwrap();
+    assert_eq!(reasons(&pool).await, vec![REASON_NO_CUSTOM_KEYWORDS]);
+    record_inbox_keyword_support(&pool, "acc", KeywordSupport::Allowed)
+        .await
+        .unwrap();
+    assert!(reasons(&pool).await.is_empty());
+}
+
+fn report(
+    target: WorkflowMarkerWrite,
+    refused_in_inbox: bool,
+    applied_in_inbox: bool,
+) -> WorkflowMarkerReport {
+    WorkflowMarkerReport {
+        targets: vec![target],
+        refused_in_inbox,
+        applied_in_inbox,
+    }
+}
+
+fn one_thread() -> Vec<MarkedThread> {
+    vec![MarkedThread {
+        thread_id: "t".into(),
+        refs: Vec::new(),
+        expected: None,
+    }]
+}
+
+#[tokio::test]
+async fn a_skipped_write_says_nothing_about_the_account() {
+    let pool = pool("imap").await;
+    // A busy INBOX, a refused SELECT, a changed UIDVALIDITY: skipped.
+    apply_marker_report(
+        &pool,
+        "acc",
+        &one_thread(),
+        &WorkflowMarker::Done,
+        &report(WorkflowMarkerWrite::Skipped, false, false),
+    )
+    .await
+    .unwrap();
+    assert!(local_only(&pool).await.is_empty());
+    assert_eq!(state(&pool).await.2, None);
+}
+
+#[tokio::test]
+async fn a_refused_store_is_retried_after_some_hours_or_a_restart() {
+    let pool = pool("imap").await;
+    let refused = report(WorkflowMarkerWrite::Refused, true, false);
+    apply_marker_report(&pool, "acc", &one_thread(), &WorkflowMarker::Done, &refused)
+        .await
+        .unwrap();
+    assert_eq!(reasons(&pool).await, vec![REASON_STORE_REFUSED]);
+
+    // Seven hours on: no longer local-only, the next push tries again.
+    sqlx::query("UPDATE account_workflow_sync SET checked_at = ?")
+        .bind((Utc::now() - Duration::hours(7)).to_rfc3339())
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(local_only(&pool).await.is_empty());
+    assert_eq!(push(&pool, WorkflowMarker::Done).await.len(), 1);
+
+    // Refused again in this run: holds again.
+    apply_marker_report(&pool, "acc", &one_thread(), &WorkflowMarker::Done, &refused)
+        .await
+        .unwrap();
+    assert_eq!(local_only(&pool).await, vec!["acc".to_string()]);
+    // A verdict from before this process started does not hold.
+    sqlx::query("UPDATE account_workflow_sync SET checked_at = '2000-01-01T00:00:00+00:00'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(local_only(&pool).await.is_empty());
+
+    // An accepted INBOX store lifts it for good.
+    apply_marker_report(&pool, "acc", &one_thread(), &WorkflowMarker::Done, &refused)
+        .await
+        .unwrap();
+    apply_marker_report(
+        &pool,
+        "acc",
+        &one_thread(),
+        &WorkflowMarker::Done,
+        &report(WorkflowMarkerWrite::Applied, false, true),
+    )
+    .await
+    .unwrap();
+    assert!(local_only(&pool).await.is_empty());
+    let mode: String = sqlx::query_scalar("SELECT mode FROM account_workflow_sync")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(mode, MODE_SERVER);
+}
+
+#[tokio::test]
+async fn a_wake_while_the_snooze_push_is_in_flight_clears_that_snooze() {
+    let pool = pool("imap").await;
+    let snooze = snooze_at(Utc::now() + Duration::minutes(1), 1);
+    push(&pool, snooze).await;
+    sqlx::query("UPDATE sync_queue SET status = 'sending'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(wake(&pool).await.len(), 1);
+    let rows = queued(&pool).await;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1].1, WorkflowMarker::None);
+    assert_eq!(rows[1].3, vec![Some(snooze)]);
+    // Once the push lands and is recorded, the clear goes ahead.
+    record(&pool, &snooze).await;
+    let threads = queued_threads_at(&pool, &rows[1].0).await;
+    assert_eq!(
+        retain_current_entries(&pool, threads).await.unwrap().len(),
+        1
+    );
+}
+
+async fn queued_threads_at(pool: &SqlitePool, id: &str) -> Vec<MarkedThread> {
+    let payload: String = sqlx::query_scalar("SELECT payload FROM sync_queue WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    match serde_json::from_str(&payload).unwrap() {
+        RemoteMutationPayload::WorkflowMarker { threads, .. } => threads,
+        other => panic!("unexpected payload {other:?}"),
+    }
+}
+
+async fn many_threads(pool: &SqlitePool, count: usize) -> Vec<String> {
+    let now = Utc::now().to_rfc3339();
+    let mut tx = pool.begin().await.unwrap();
+    let mut ids = Vec::with_capacity(count);
+    for index in 0..count {
+        let id = format!("bulk-{index}");
+        sqlx::query(
+            "INSERT INTO threads (id, account_id, subject, last_message_date, workflow_state, board_column, created_at, updated_at)
+             VALUES (?, 'acc', 'Subject', ?, 'inbox', 'inbox', ?, ?)",
+        )
+        .bind(&id)
+        .bind(&now)
+        .bind(&now)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, date, remote_id, created_at, updated_at)
+             VALUES (?, 'acc', 'INBOX', ?, 'a@example.com', '[]', ?, ?, ?, ?)",
+        )
+        .bind(format!("m-{id}"))
+        .bind(&id)
+        .bind(&now)
+        .bind((1000 + index).to_string())
+        .bind(&now)
+        .bind(&now)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        ids.push(id);
+    }
+    tx.commit().await.unwrap();
+    ids
+}
+
+/// Queueing Done for 2000 threads in one transaction (a rule archiving a
+/// backlog) once re-read and rewrote every waiting row per thread while
+/// holding the write lock; one pass writes each row once.
+#[tokio::test]
+async fn queueing_two_thousand_threads_at_once_is_one_pass() {
+    let pool = pool("imap").await;
+    let ids = many_threads(&pool, 2000).await;
+    let started = std::time::Instant::now();
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+    enqueue_workflow_markers_in_transaction(
+        &mut tx,
+        &SyncQueue::new(),
+        &ids,
+        &WorkflowMarker::Done,
+        None,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    let elapsed = started.elapsed();
+    let rows = queued(&pool).await;
+    assert_eq!(rows.len(), 2000 / THREADS_PER_ROW);
+    assert_eq!(rows.iter().map(|row| row.2.len()).sum::<usize>(), 2000);
+    assert!(
+        elapsed < std::time::Duration::from_secs(3),
+        "took {elapsed:?}"
+    );
+}
+
+/// A rule's archive queues every thread's Done in shared rows, all of them
+/// ahead of the first move, so MOVE carries the keyword along.
+#[tokio::test]
+async fn archiving_many_threads_queues_shared_markers_before_any_move() {
+    let pool = pool("imap").await;
+    let ids = many_threads(&pool, 2 * THREADS_PER_ROW).await;
+    crate::mail_actions::move_threads(
+        &pool,
+        &SyncQueue::new(),
+        &ids,
+        crate::mail_actions::MoveTarget::Archive,
+    )
+    .await
+    .expect("archive");
+    let kinds: Vec<String> =
+        sqlx::query_scalar("SELECT json_extract(payload, '$.kind') FROM sync_queue ORDER BY rowid")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let last_marker = kinds
+        .iter()
+        .rposition(|kind| kind == "workflow_marker")
+        .unwrap();
+    let first_move = kinds
+        .iter()
+        .position(|kind| kind == "workflow_move")
+        .unwrap();
+    assert!(last_marker < first_move);
+    assert_eq!(queued(&pool).await.len(), 2);
+}
+
+/// Multi-select transitions queue one thread per transaction. Each lookup
+/// is a byte search per waiting row instead of parsing every waiting thread
+/// per call: measured 1.5 s for the first 1000 and 1.9 s for the next 1000
+/// threads, against 3.2 s and 5.9 s before. Wall time per transaction is too
+/// load-sensitive for CI, so this runs on request:
+/// `cargo test -p satchel-core --lib -- --ignored three_thousand_single`.
+#[tokio::test]
+#[ignore = "measurement: 3000 single-thread enqueues, about 6 s in a debug build"]
+async fn three_thousand_single_enqueues_stay_cheap() {
+    let pool = pool("gmail").await;
+    let ids = many_threads(&pool, 3000).await;
+    let started = std::time::Instant::now();
+    for id in &ids {
+        push_for(&pool, id, WorkflowMarker::Done).await;
+    }
+    let elapsed = started.elapsed();
+    assert_eq!(queued(&pool).await.len(), 3000 / THREADS_PER_ROW);
+    assert!(
+        elapsed < std::time::Duration::from_secs(12),
+        "took {elapsed:?}"
+    );
 }

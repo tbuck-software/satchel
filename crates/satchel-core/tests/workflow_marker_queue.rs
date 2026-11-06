@@ -47,7 +47,11 @@ impl MailProvider for RefusingServer {
         targets: &[MarkerTarget],
         _: &WorkflowMarker,
     ) -> SyncResult<WorkflowMarkerReport> {
-        Ok(WorkflowMarkerReport::refused(targets.len()))
+        // A definite `NO` on the INBOX STORE.
+        Ok(WorkflowMarkerReport {
+            refused_in_inbox: true,
+            ..WorkflowMarkerReport::refused(targets.len())
+        })
     }
 }
 
@@ -149,7 +153,12 @@ async fn a_refused_marker_settles_and_the_move_behind_it_runs() {
         .unwrap();
     assert_eq!(left, 0, "neither row waits for a retry");
     assert_eq!(
-        list_local_only_accounts(&pool).await.unwrap(),
-        vec!["acc".to_string()]
+        list_local_only_accounts(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|account| (account.account_id, account.reason))
+            .collect::<Vec<_>>(),
+        vec![("acc".to_string(), "store_refused".to_string())]
     );
 }

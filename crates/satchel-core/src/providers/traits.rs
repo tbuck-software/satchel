@@ -43,7 +43,7 @@ pub struct RemoteMessageStateSnapshot {
     /// Whether the folder lets Satchel create its own keywords
     /// (`PERMANENTFLAGS` with `\*`). `None` for providers without keywords.
     #[serde(default)]
-    pub custom_keywords: Option<bool>,
+    pub custom_keywords: Option<KeywordSupport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -392,6 +392,18 @@ pub struct FlagUpdate {
     pub starred: Option<bool>,
 }
 
+/// What a mailbox says about Satchel's keywords.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KeywordSupport {
+    /// `\*` in PERMANENTFLAGS.
+    Allowed,
+    /// No `\*`: the server keeps only the flags it lists.
+    NotAllowed,
+    /// Gmail's IMAP host, where keywords become Gmail labels.
+    GmailHost,
+}
+
 /// One thread's copies in a workflow marker write.
 #[derive(Debug, Clone)]
 pub struct MarkerTarget {
@@ -404,10 +416,11 @@ pub struct MarkerTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkflowMarkerWrite {
     Applied,
-    /// Every folder of the target refused the keywords, or the server
-    /// cannot store markers at all. Never an error: best effort.
+    /// No folder of the target took the keywords: a definite refusal, or
+    /// the server cannot store markers at all. Never an error.
     Refused,
-    /// Compare-and-clear found another marker than the expected one.
+    /// Compare-and-clear found another marker, or a folder could not be
+    /// written this time (a busy or changed mailbox). Nothing recorded.
     Skipped,
 }
 
@@ -415,16 +428,21 @@ pub enum WorkflowMarkerWrite {
 pub struct WorkflowMarkerReport {
     /// One entry per target, in order.
     pub targets: Vec<WorkflowMarkerWrite>,
-    /// INBOX refused Satchel's keywords: the account keeps Done and Snooze
-    /// on the device.
+    /// INBOX answered a keyword STORE with a definite refusal: the account
+    /// keeps Done and Snooze on the device for a while.
     pub refused_in_inbox: bool,
+    /// INBOX accepted a keyword write; lifts an earlier refusal.
+    pub applied_in_inbox: bool,
 }
 
 impl WorkflowMarkerReport {
+    /// Nothing written, and no verdict on the account (that comes from the
+    /// snapshot, or from a definite STORE refusal).
     pub fn refused(targets: usize) -> Self {
         Self {
             targets: vec![WorkflowMarkerWrite::Refused; targets],
-            refused_in_inbox: true,
+            refused_in_inbox: false,
+            applied_in_inbox: false,
         }
     }
 }
