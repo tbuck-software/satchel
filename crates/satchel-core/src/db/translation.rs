@@ -376,11 +376,15 @@ impl<'a> TranslationRepository<'a> {
     }
 
     /// The text one log entry kept, if it kept any.
-    pub async fn sent_text(&self, id: i64) -> Result<Option<String>, sqlx::Error> {
+    ///
+    /// Scoped to `feature`: a caller reads only what its own feature sent,
+    /// so a later feature cannot read translation text by guessing ids.
+    pub async fn sent_text(&self, feature: &str, id: i64) -> Result<Option<String>, sqlx::Error> {
         Ok(sqlx::query_scalar::<_, Option<String>>(
-            "SELECT sent_text FROM outbound_request_log WHERE id = ?",
+            "SELECT sent_text FROM outbound_request_log WHERE id = ? AND feature = ?",
         )
         .bind(id)
+        .bind(feature)
         .fetch_optional(self.pool)
         .await?
         .flatten())
@@ -617,15 +621,28 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert!(entries[0].has_sent_text);
         assert_eq!(
-            repo.sent_text(entries[0].id).await.unwrap().as_deref(),
+            repo.sent_text("translation", entries[0].id)
+                .await
+                .unwrap()
+                .as_deref(),
             Some("recent")
+        );
+        assert_eq!(
+            repo.sent_text("other-feature", entries[0].id)
+                .await
+                .unwrap(),
+            None,
+            "another feature reads nothing"
         );
 
         repo.save_settings(&TranslationSettingsRecord::default(), NOW)
             .await
             .unwrap();
         assert!(!repo.request_log(REQUEST_LOG_PAGE).await.unwrap()[0].has_sent_text);
-        assert_eq!(repo.sent_text(entries[0].id).await.unwrap(), None);
+        assert_eq!(
+            repo.sent_text("translation", entries[0].id).await.unwrap(),
+            None
+        );
         assert_eq!(repo.clear_request_log().await.unwrap(), 1);
     }
 }

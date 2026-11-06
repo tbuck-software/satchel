@@ -48,9 +48,11 @@ GitHub, whose servers receive normal request metadata such as your IP address.
 
 Translation is off until you add a DeepL API key and allow an account. When
 you translate a message from an allowed account, its body (text and
-formatting) is sent to DeepL with your key. Link and image addresses are
-replaced by placeholders before sending and restored on your device; sender,
-recipients, subject, attachments and encrypted mail are not sent. Translation
+formatting) is sent to DeepL with your key. Every web address and link in it
+(in links, images, styles, other attributes and the text itself) is replaced
+by a placeholder before sending and restored on your device; e-mail addresses
+written out in the text are sent as part of the text. Sender, recipients,
+subject, attachments and encrypted mail are not sent. Translation
 needs a DeepL API Pro key: DeepL then keeps the text only as long as the
 translation takes (up to 72 hours when an error occurs) and does not use it to
 improve its service. A DeepL API Free key can be saved and tested, but no mail

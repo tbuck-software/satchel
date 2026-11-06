@@ -432,8 +432,8 @@ pub async fn offer(
         refusal(&source, accepts_personal_data).map(|error| error.message_key().to_owned());
     let target_for_guess = target.clone();
     let (detected_language, cached) = blocking(move || {
-        let hashes = BodyHashes::of(&source);
-        let cached = cached.filter(|record| hashes.matches(&record.source_hash));
+        // Hashing a whole body only pays when there is a stored row to match.
+        let cached = cached.filter(|record| BodyHashes::of(&source).matches(&record.source_hash));
         let detected = non_empty(source.body_text.as_deref())
             .and_then(detect_language)
             .map(str::to_owned);

@@ -431,6 +431,12 @@ mod tests {
     }
 
     #[test]
+    fn the_free_api_takes_no_personal_data_and_pro_does() {
+        assert!(!DeepL::new("k:fx").unwrap().accepts_personal_data());
+        assert!(DeepL::new("k").unwrap().accepts_personal_data());
+    }
+
+    #[test]
     fn free_keys_go_to_the_free_endpoint() {
         assert_eq!(DeepLPlan::for_key("abc-123:fx"), DeepLPlan::Free);
         assert_eq!(DeepLPlan::for_key(" abc-123:fx\n"), DeepLPlan::Free);

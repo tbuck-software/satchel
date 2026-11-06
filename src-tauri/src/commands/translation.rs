@@ -340,7 +340,7 @@ pub async fn outbound_request_text(
     id: i64,
 ) -> CommandResult<Option<String>> {
     TranslationRepository::new(pool.inner().as_ref())
-        .sent_text(id)
+        .sent_text(service::FEATURE, id)
         .await
         .map_err(persistence)
 }

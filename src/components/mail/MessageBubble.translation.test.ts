@@ -177,7 +177,7 @@ describe('translating a message', () => {
     expect(useToast().state.toasts.at(-1)?.message).toBe('Encrypted mail is not sent for translation.');
   });
 
-  it('asks nothing for a folded message and leaves it to T only when open', async () => {
+  it('asks nothing for a folded message and leaves it to the key only when open', async () => {
     const view = await render(true, true);
     expect(backend.offer).not.toHaveBeenCalled();
     expect(toggleMessageTranslation('m-1')).toBe(false);
@@ -188,7 +188,7 @@ describe('translating a message', () => {
     expect(toggleMessageTranslation('m-1')).toBe(true);
   });
 
-  it('keeps T for mail that looks like the target language, without a header button', async () => {
+  it('keeps the key (L) for mail that looks like the target language, without a header button', async () => {
     backend.offer.mockResolvedValue({
       detected_language: 'DE', offered: false, cached: false, cached_source_language: null, consented: true, refusal: null,
     });

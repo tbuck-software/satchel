@@ -40,15 +40,26 @@ am 2026-11-06.
   HTML. Eine KI-Engine nach 0016 sagt `false` und bekommt den Text-Body.
   Ihre Antwort wird als Text gezeigt. Für Sprachmodelle ändert dieses ADR
   nichts.
-- **URLs gehen nicht mit.** Vor dem Senden ersetzt Satchel jede URL in
-  `src`, `srcset`, `href`, `background`, `poster` und `cite` durch einen
-  Platzhalter (`#satchel-a3-end`), ebenso jedes `url(…)` in Styles
-  (`#satchel-c1-end`). Seiteninterne Anker (`#…`) bleiben stehen. Nach der
-  Übersetzung setzt Satchel die URLs auf dem Gerät wieder ein. Das gilt
-  auch für Links, nicht nur für Bilder: Ein Klick-Link trägt dasselbe Token
-  wie ein Pixel, und eine Übersetzung braucht keine einzige URL. Entfernt
-  die Engine einen Platzhalter, bleibt die Stelle ohne URL. Erfindet sie
-  einen, läuft er durch den Sanitizer wie jede andere Adresse.
+- **URLs gehen nicht mit.** Vor dem Senden ersetzt Satchel durch Platzhalter
+  der Form `#satchel-<Nonce>-a3-end`:
+  - den ganzen Wert von `src`, `srcset`, `href`, `background`, `poster` und
+    `cite`, was immer er enthält (auch `cid:`, `data:` und relative Pfade);
+  - den Inhalt jedes `url(…)` in Style-Attributen und `<style>`-Blöcken;
+  - jede Web- oder Mail-Adresse an jeder anderen Stelle: in weiteren
+    Attributen (`data-*`, `alt`, `title`), in CSS-Strings wie
+    `image-set('…')` und im Text selbst, Linktext eingeschlossen. Als Adresse
+    gilt `schema://…`, `//host.tld…`, `www.…` und `mailto:…`.
+
+  Seiteninterne Anker (`#…`) bleiben stehen, ebenso E-Mail-Adressen, die im
+  Text ausgeschrieben sind: Sie sind Inhalt der Mail, kein Tracker. Nach der
+  Übersetzung setzt Satchel die Adressen auf dem Gerät byte-genau wieder ein.
+  Das gilt für Links wie für Bilder: Ein Klick-Link trägt dasselbe Token wie
+  ein Pixel, und eine Übersetzung braucht keine einzige URL.
+
+  Die Nonce wird je Anfrage neu gezogen. Ein Platzhalter, den die Mail selbst
+  enthält oder den die Engine erfindet, passt deshalb auf keine gespeicherte
+  Adresse und wird nie zu einer echten URL. Entfernt die Engine einen
+  Platzhalter, bleibt die Stelle ohne Adresse.
 - Was die Engine zurückgibt, läuft erneut durch den E-Mail-Sanitizer
   (`sanitize_stored_email_html`), wird gespeichert und beim Lesen noch
   einmal bereinigt. Es rendert im selben `iframe` wie das Original: gleiche
@@ -76,8 +87,9 @@ am 2026-11-06.
 ## Konsequenzen
 
 Der Platzhalter-Weg hängt davon ab, dass die Engine Attributwerte nicht
-anfasst. Für DeepL ist das die Grundlage von `tag_handling=html`. Ob es im
-Betrieb hält, prüft der erste Test mit einem echten Schlüssel. Fehlt danach
+anfasst und Platzhalter im Text als nicht übersetzbares Wort stehen lässt.
+Für Attribute ist das die Grundlage von `tag_handling=html`. Ob es auch im
+Text hält, prüft der erste Test mit einem echten Schlüssel. Fehlt danach
 etwas, fehlt eine URL, kein Text.
 
 Die Platzhalter machen das gesendete HTML kleiner. Mehr Newsletter passen so
