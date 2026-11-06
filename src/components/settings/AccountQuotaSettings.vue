@@ -7,8 +7,11 @@
  */
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
+import AppButton from '@/components/ui/AppButton.vue';
 import UsageMeter from '@/components/ui/UsageMeter.vue';
 import { useAccountQuotaStore } from '@/stores/accountQuota';
+import { useUiStore } from '@/stores/ui';
 import {
   formatQuotaAmounts,
   formatQuotaPercent,
@@ -24,6 +27,8 @@ const props = defineProps<{ accountId: string }>();
 
 const { t, locale } = useI18n();
 const quotaStore = useAccountQuotaStore();
+const router = useRouter();
+const ui = useUiStore();
 
 const quota = computed(() => quotaStore.quotaFor(props.accountId));
 const level = computed(() => quotaLevel(quota.value));
@@ -42,6 +47,12 @@ const rows = computed(() => quotaFigures(quota.value).map((entry: QuotaFigure) =
     text: entry.kind === 'storage' ? t('accountQuota.storageUsed', amounts) : t('accountQuota.messagesUsed', amounts),
   };
 }));
+
+/** The cleanup assistant, scoped to this account: the quickest way to make room. */
+function openCleanup() {
+  ui.closeSettings();
+  void router.push({ name: 'cleanup', query: { account: props.accountId } });
+}
 
 const asOf = computed(() => {
   const moment = formatMoment(quota.value?.fetched_at);
@@ -66,6 +77,11 @@ const asOf = computed(() => {
       {{ level === 'critical' ? t('accountQuota.critical') : t('accountQuota.warning') }}
       {{ t('accountQuota.freeUp') }}
     </p>
+    <div v-if="level === 'warning' || level === 'critical'">
+      <AppButton class="quota-settings__cleanup" variant="secondary" size="sm" @click="openCleanup">
+        {{ t('cleanup.openForAccount') }}
+      </AppButton>
+    </div>
   </section>
 </template>
 

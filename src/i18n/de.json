@@ -25,7 +25,7 @@
   "accountQuota": {
     "asOf": "Stand: {time}",
     "critical": "Voll oder fast voll. Neue Mails kommen womöglich schon zurück.",
-    "freeUp": "Große Mails löschen und den Papierkorb leeren schafft Platz.",
+    "freeUp": "Große Mails löschen, den Papierkorb leeren oder die Mails eines Absenders aufräumen schafft Platz.",
     "messagesMeter": "Nachrichten im Postfach",
     "messagesUsed": "{used} von {limit} Nachrichten",
     "sidebarCritical": "{account}: Postfach zu {percent} voll, neue Mails kommen womöglich zurück. Kontoeinstellungen öffnen.",
