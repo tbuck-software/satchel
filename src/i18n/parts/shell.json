@@ -120,7 +120,8 @@
         "spam": "spam junk",
         "undo": "undo revert",
         "openSettingsSection": "settings preferences options",
-        "notSpam": "not spam ham wanted inbox"
+        "notSpam": "not spam ham wanted inbox",
+        "cleanup": "clean up sweep senders newsletters unsubscribe"
       },
       "markDone": "Mark as done",
       "markDoneMany": "Mark {count} emails as done",
@@ -154,7 +155,9 @@
       "exportText": "Export conversation as text",
       "moveToFolder": "Move to {folder}",
       "undo": "Undo: {label}",
-      "openSettingsSection": "Settings: {section}"
+      "openSettingsSection": "Settings: {section}",
+      "sweepSender": "Clean up mail from this sender…",
+      "openCleanup": "Open cleanup assistant"
     },
     "nav": {
       "agenda": {
@@ -395,6 +398,22 @@
         "markNotSpam": {
           "keywords": "not spam ham wanted",
           "label": "Not spam"
+        },
+        "sweepSender": {
+          "keywords": "sweep clean up sender archive delete older",
+          "label": "Clean up mail from sender"
+        },
+        "cleanupKeepLatest": {
+          "keywords": "cleanup keep latest archive rest",
+          "label": "Keep the latest, archive the rest"
+        },
+        "cleanupUnsubscribe": {
+          "keywords": "cleanup unsubscribe newsletter",
+          "label": "Unsubscribe from the sender"
+        },
+        "cleanupRule": {
+          "keywords": "cleanup rule from now on",
+          "label": "Set a rule for the sender"
         }
       },
       "close": "Close keyboard shortcuts",
@@ -402,7 +421,8 @@
         "global": "Always",
         "mail": "Email focused",
         "mailbox": "Mailbox focused",
-        "navigation": "Navigation"
+        "navigation": "Navigation",
+        "cleanup": "Cleanup"
       },
       "editBindings": "Edit shortcuts",
       "footerHint": "shows actions for the focused email right in the command palette.",
@@ -567,7 +587,8 @@
         "spam": "spam junk werbung",
         "undo": "rückgängig undo",
         "openSettingsSection": "settings einstellungen optionen",
-        "notSpam": "kein spam erwünscht posteingang"
+        "notSpam": "kein spam erwünscht posteingang",
+        "cleanup": "aufräumen absender newsletter abmelden sweep"
       },
       "markDone": "Als erledigt markieren",
       "markDoneMany": "{count} E-Mails erledigen",
@@ -601,7 +622,9 @@
       "exportText": "Unterhaltung als Text exportieren",
       "moveToFolder": "Nach {folder} verschieben",
       "undo": "Rückgängig: {label}",
-      "openSettingsSection": "Einstellungen: {section}"
+      "openSettingsSection": "Einstellungen: {section}",
+      "sweepSender": "E-Mails dieses Absenders aufräumen …",
+      "openCleanup": "Aufräum-Assistent öffnen"
     },
     "nav": {
       "agenda": {
@@ -842,6 +865,22 @@
         "markNotSpam": {
           "keywords": "kein spam erwünscht",
           "label": "Kein Spam"
+        },
+        "sweepSender": {
+          "keywords": "aufräumen absender archivieren löschen älter sweep",
+          "label": "E-Mails vom Absender aufräumen"
+        },
+        "cleanupKeepLatest": {
+          "keywords": "aufräumen neueste behalten rest archivieren",
+          "label": "Neueste behalten, Rest archivieren"
+        },
+        "cleanupUnsubscribe": {
+          "keywords": "aufräumen abmelden newsletter",
+          "label": "Beim Absender abmelden"
+        },
+        "cleanupRule": {
+          "keywords": "aufräumen regel ab jetzt",
+          "label": "Regel für den Absender festlegen"
         }
       },
       "close": "Tastenkürzel schließen",
@@ -849,7 +888,8 @@
         "global": "Immer",
         "mail": "E-Mail fokussiert",
         "mailbox": "Mailbox fokussiert",
-        "navigation": "Navigation"
+        "navigation": "Navigation",
+        "cleanup": "Aufräumen"
       },
       "editBindings": "Kürzel bearbeiten",
       "footerHint": "zeigt Aktionen für die fokussierte E-Mail direkt in der Befehlspalette.",

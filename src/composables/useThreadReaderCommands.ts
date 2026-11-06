@@ -13,6 +13,8 @@ export interface ThreadReaderCommands {
   toggleMuted: () => unknown;
   markSpam: () => unknown;
   blockSender: (scope: 'address' | 'domain') => unknown;
+  /** Opens the sender sweep dialog for the latest message's sender. */
+  sweepSender: () => unknown;
   print: (scope: ReaderMessageScope) => unknown;
   exportThread: (format: ReaderExportFormat) => unknown;
 }

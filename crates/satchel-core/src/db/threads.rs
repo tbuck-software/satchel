@@ -7009,7 +7009,7 @@ fn push_contact_filter(
     );
 }
 
-fn mailbox_section_predicate(section: &str) -> Option<&'static str> {
+pub(crate) fn mailbox_section_predicate(section: &str) -> Option<&'static str> {
     match section {
         "archive" => Some(
             "(LOWER(mailbox_folders.folder_type) = 'archive'

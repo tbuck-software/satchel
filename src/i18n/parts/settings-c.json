@@ -363,6 +363,17 @@
         "forceTurnOff": "Turn off without contacting the server",
         "forceConfirmTitle": "Turn off without the server?",
         "forceConfirmBody": "Satchel's scripts stay on the server and may keep running there; remove them in your provider's webmail. Satchel stops sending to this server."
+      },
+      "sweep": {
+        "title": "Sender cleanup",
+        "purpose": "Rules set from a mail's sender or the cleanup assistant. Each runs every 15 minutes on Inbox conversations its sender wrote alone; conversations with others, your replies or a pin stay.",
+        "empty": "No sender rules yet. Set one from a sender's menu or in the cleanup assistant.",
+        "loadFailed": "Could not load the sender rules.",
+        "neverRun": "Has not run yet",
+        "lastRun": "Last run {when}, nothing filed | Last run {when}, one conversation filed | Last run {when}, {count} conversations filed",
+        "remove": "Remove",
+        "removeTitle": "Remove the rule for {sender}?",
+        "removeBody": "Mail it already filed stays where it is."
       }
     }
   },
@@ -730,6 +741,17 @@
         "forceTurnOff": "Ausschalten, ohne den Server zu kontaktieren",
         "forceConfirmTitle": "Ohne den Server ausschalten?",
         "forceConfirmBody": "Satchels Skripte bleiben auf dem Server und laufen dort womöglich weiter; entferne sie im Webmail deines Anbieters. Satchel sendet nichts mehr an diesen Server."
+      },
+      "sweep": {
+        "title": "Absender aufräumen",
+        "purpose": "Regeln, die du am Absender einer Mail oder im Aufräum-Assistenten festgelegt hast. Jede läuft alle 15 Minuten über die Unterhaltungen im Posteingang, die nur ihr Absender geschrieben hat; Unterhaltungen mit anderen, deinen Antworten oder einer Anheftung bleiben.",
+        "empty": "Noch keine Absender-Regeln. Leg eine im Menü eines Absenders oder im Aufräum-Assistenten fest.",
+        "loadFailed": "Die Absender-Regeln konnten nicht geladen werden.",
+        "neverRun": "Noch nicht gelaufen",
+        "lastRun": "Zuletzt {when}, nichts abgelegt | Zuletzt {when}, eine Unterhaltung abgelegt | Zuletzt {when}, {count} Unterhaltungen abgelegt",
+        "remove": "Entfernen",
+        "removeTitle": "Regel für {sender} entfernen?",
+        "removeBody": "Bereits abgelegte Mails bleiben, wo sie sind."
       }
     }
   }

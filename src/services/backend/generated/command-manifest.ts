@@ -489,6 +489,17 @@ export default {
                 }
             }
         },
+        "delete_sweep_rule": {
+            "kind": "object",
+            "fields": {
+                "ruleId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "delete_template": {
             "kind": "object",
             "fields": {
@@ -1089,6 +1100,18 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "list_cleanup_senders": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::sender_sweep::ListCleanupSendersInput"
+                    }
+                }
+            }
+        },
         "list_contacts": {
             "kind": "object",
             "fields": {}
@@ -1202,6 +1225,18 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "list_sender_sweep_targets": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::sender_sweep::SenderSweepTargetsInput"
+                    }
+                }
+            }
+        },
         "list_signature_assignments": {
             "kind": "object",
             "fields": {
@@ -1267,6 +1302,10 @@ export default {
             "fields": {}
         },
         "list_sources": {
+            "kind": "object",
+            "fields": {}
+        },
+        "list_sweep_rules": {
             "kind": "object",
             "fields": {}
         },
@@ -1862,6 +1901,18 @@ export default {
                 }
             }
         },
+        "sender_sweep_summary": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::sender_sweep::SenderSweepTargetsInput"
+                    }
+                }
+            }
+        },
         "server_search": {
             "kind": "object",
             "fields": {
@@ -2325,6 +2376,17 @@ export default {
                 }
             }
         },
+        "thread_sweep_sender": {
+            "kind": "object",
+            "fields": {
+                "threadId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "toggle_attachment_quick_look": {
             "kind": "object",
             "fields": {
@@ -2583,6 +2645,18 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "app::commands::smart_folders::SmartFolderInput"
+                    }
+                }
+            }
+        },
+        "upsert_sweep_rule": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::sender_sweep::UpsertSweepRuleInput"
                     }
                 }
             }
@@ -3800,6 +3874,117 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::sender_sweep::ListCleanupSendersInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "days": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "limit": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "app::commands::sender_sweep::SenderSweepTargetsInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "keep_latest": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "older_than_days": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "sender_email": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::sender_sweep::UpsertSweepRuleInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "action": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "keep_latest": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "older_than_days": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "sender_email": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "target_folder_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
                     }
                 }
             }

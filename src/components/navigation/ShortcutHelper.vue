@@ -65,6 +65,7 @@ const CONTEXT_ORDER: readonly KeybindingContext[] = [
   'navigation',
   'mailbox',
   'mail',
+  'cleanup',
 ];
 
 /**

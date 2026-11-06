@@ -2,9 +2,10 @@
  * Where a binding applies. This is the runtime rule, not a label: `global` and
  * `navigation` work on every page, `mailbox` and `mail` only where a mail list
  * or reader is on screen, and none of them while a dialog, menu or the palette
- * covers the page.
+ * covers the page. `cleanup` is the cleanup assistant's own page, which
+ * handles its keys itself.
  */
-export type KeybindingContext = 'global' | 'navigation' | 'mailbox' | 'mail';
+export type KeybindingContext = 'global' | 'navigation' | 'mailbox' | 'mail' | 'cleanup';
 
 export interface KeybindingSpec {
   action: string;
@@ -73,6 +74,10 @@ export const KEYBINDING_SPECS: readonly KeybindingSpec[] = [
   { action: 'toggleMute', defaultBinding: 'm', context: 'mail' },
   { action: 'markSpam', defaultBinding: '!', context: 'mail' },
   { action: 'markNotSpam', defaultBinding: 'I', context: 'mail' },
+  { action: 'sweepSender', defaultBinding: 'E', context: 'mail' },
+  { action: 'cleanupKeepLatest', defaultBinding: 'p', context: 'cleanup' },
+  { action: 'cleanupUnsubscribe', defaultBinding: 'U', context: 'cleanup' },
+  { action: 'cleanupRule', defaultBinding: 'R', context: 'cleanup' },
   { action: 'print', defaultBinding: 'mod+p', context: 'mail' },
   { action: 'goInbox', defaultBinding: 'g i', context: 'navigation', view: 'inbox' },
   { action: 'goLater', defaultBinding: 'g l', context: 'navigation', view: 'later' },

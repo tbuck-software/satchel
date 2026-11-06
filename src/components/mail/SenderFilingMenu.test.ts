@@ -54,6 +54,7 @@ describe('sender filing menu', () => {
       { label: 'Notifications', checked: true },
       { label: 'Newsletter', checked: false },
       { label: 'Show all mail', checked: false },
+      { label: 'Clean up mail from sender…', checked: false },
     ]);
     expect(wrapper.text()).not.toContain('remove');
   });
@@ -107,6 +108,7 @@ describe('sender filing menu', () => {
       { label: 'Notifications', checked: false },
       { label: 'Newsletter', checked: false },
       { label: 'Show all mail', checked: false },
+      { label: 'Clean up mail from sender…', checked: false },
     ]);
   });
 
@@ -137,6 +139,7 @@ describe('sender filing menu', () => {
       { label: 'Notifications', checked: false },
       { label: 'Newsletter', checked: false },
       { label: 'Show all mail', checked: false },
+      { label: 'Clean up mail from sender…', checked: false },
     ]);
   });
 
@@ -175,6 +178,7 @@ describe('sender filing menu', () => {
       { label: 'Notifications', checked: false },
       { label: 'Newsletter', checked: false },
       { label: 'Show all mail', checked: false },
+      { label: 'Clean up mail from sender…', checked: false },
     ]);
   });
 
@@ -183,7 +187,7 @@ describe('sender filing menu', () => {
     const wrapper = mountMenu();
     await flushPromises();
 
-    await wrapper.findAll('button').at(-1)!.trigger('click');
+    await wrapper.findAll('button').find((button) => button.text() === 'Show all mail')!.trigger('click');
 
     const { useListSearchStore } = await import('@/stores/listSearch');
     const listSearch = useListSearchStore();

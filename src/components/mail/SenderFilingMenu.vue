@@ -18,7 +18,9 @@ import { useSettingsStore } from '@/stores/settings';
 import { useThreadsStore } from '@/stores/threads';
 import { type InboxSenderBucket } from '@/stores/settings';
 import { useThreadActions } from '@/composables/useThreadActions';
+import { useSenderSweep } from '@/composables/useSenderSweep';
 import MenuItem from '@/components/ui/MenuItem.vue';
+import AppIcon from '@/components/ui/AppIcon.vue';
 
 const props = defineProps<{
   accountId: string;
@@ -95,6 +97,14 @@ async function choose(entry: (typeof BUCKETS)['value'][number]) {
   }
 }
 
+const senderSweep = useSenderSweep();
+
+/** Archive, delete or file the sender's Inbox mail, now or from now on. */
+function cleanUp() {
+  emit('close');
+  senderSweep.open({ accountId: props.accountId, email: normalizedEmail.value });
+}
+
 /** The sender's mail in every mailbox, as the list search — like a sidebar contact. */
 function showAll() {
   emit('close');
@@ -126,5 +136,8 @@ function showAll() {
 
   <div class="menu-group">
     <MenuItem icon="search" :label="$t('mail.senderFiling.showAllMail')" @select="showAll" />
+    <MenuItem :label="$t('sweep.menuItem')" @select="cleanUp">
+      <template #icon><AppIcon><path d="M11 2.5 7.5 8" /><path d="M4 8h6l1 5.5H3z" /></AppIcon></template>
+    </MenuItem>
   </div>
 </template>

@@ -44,7 +44,7 @@ const SECTION_KEYS: Record<SettingsSection, readonly string[]> = {
   senders: ['settings.spamFilter', 'settings.blocked', 'settings.images'],
   'smart-folders': ['settings.smartFolders'],
   templates: ['settings.templates'],
-  rules: ['settings.rules'],
+  rules: ['settings.rules', 'settings.sweep'],
   plugins: ['settings.plugins', 'settings.api'],
   diagnostics: ['settings.diagnostics'],
 };

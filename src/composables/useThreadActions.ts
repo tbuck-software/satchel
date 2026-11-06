@@ -19,7 +19,7 @@ import { createThreadActionQueue } from './threadActionQueue';
 import { t, tc } from '@/i18n/runtime';
 import { openView } from '@/router/mailViews';
 
-interface StateSnapshot {
+export interface StateSnapshot {
   threadId: string;
   previousState: WorkflowState;
   snoozeUntil?: string;
@@ -32,6 +32,9 @@ interface StateSnapshot {
 const actionQueues = new WeakMap<ReturnType<typeof useThreadsStore>, ReturnType<typeof createThreadActionQueue>>();
 
 const UNDO_TIMEOUT_MS = 9000;
+
+export type { SenderSweepAction, SenderSweepInput } from './senderSweepActions';
+import type { SenderSweepInput } from './senderSweepActions';
 
 function workflowResultMessage(count: number, state: WorkflowState, fallback: string): string {
   switch (state) {
@@ -107,7 +110,7 @@ export function useThreadActions() {
     }
   }
 
-  async function restoreStatesNow(snapshot: StateSnapshot[]) {
+  async function restoreStatesNow(snapshot: StateSnapshot[], reveal = true) {
     if (snapshot.length === 0) return false;
     // Batch only threads whose previous state and wake time both match.
     const groups = new Map<string, { snapshot: StateSnapshot; threadIds: string[]; restoreFrom: Record<string, WorkflowState> }>();
@@ -150,33 +153,40 @@ export function useThreadActions() {
       }
     }
     await refreshLists();
-    await restorePlace(snapshot.filter(entry => restoredIds.has(entry.threadId)).map(entry => entry.threadId));
+    // A sweep restores threads far below the loaded page; loading each one to
+    // put the cursor on it would be one request per thread.
+    if (reveal) {
+      await restorePlace(snapshot.filter(entry => restoredIds.has(entry.threadId)).map(entry => entry.threadId));
+    }
     return true;
   }
 
-  function restoreStates(snapshot: StateSnapshot[]) {
-    return queue.run(snapshot.map((entry) => entry.threadId), () => restoreStatesNow(snapshot));
+  function restoreStates(snapshot: StateSnapshot[], reveal = true) {
+    return queue.run(snapshot.map((entry) => entry.threadId), () => restoreStatesNow(snapshot, reveal));
   }
 
   function showWorkflowUndo(
     snapshot: StateSnapshot[],
     nextState: WorkflowState,
     label: string,
+    options: { reveal?: boolean; message?: (count: number) => string } = {},
   ) {
+    const reveal = options.reveal ?? true;
+    const message = options.message ?? ((count: number) => workflowResultMessage(count, nextState, label));
     snapshot = snapshot.map((entry) => ({ ...entry, expectedState: nextState }));
-    toast.success(workflowResultMessage(snapshot.length, nextState, label), {
+    toast.success(message(snapshot.length), {
       timeout: UNDO_TIMEOUT_MS,
-      groupKey: `workflow:${nextState}`,
+      groupKey: reveal ? `workflow:${nextState}` : `sweep:${nextState}`,
       count: snapshot.length,
-      groupMessage: (count) => workflowResultMessage(count, nextState, label),
+      groupMessage: message,
       action: {
         label: t('thread.actions.undo'),
         present: 'fab',
-        handler: () => restoreStates(snapshot),
+        handler: () => restoreStates(snapshot, reveal),
         batch: {
-          key: 'workflow:restore',
+          key: reveal ? 'workflow:restore' : 'sweep:restore',
           items: snapshot,
-          handler: (items) => restoreStates(items as StateSnapshot[]),
+          handler: (items) => restoreStates(items as StateSnapshot[], reveal),
         },
       },
     });
@@ -509,6 +519,26 @@ export function useThreadActions() {
     });
   }
 
+  /**
+   * File a sender's Inbox mail: all of it, or everything but the newest
+   * thread. Resolves to how many threads were filed. The sweep itself loads
+   * on first use; it is not part of the startup bundle.
+   */
+  async function sweepSender(input: SenderSweepInput): Promise<number> {
+    const { runSenderSweep } = await import('./senderSweepActions');
+    return runSenderSweep({
+      queue,
+      threads,
+      workflow,
+      toast,
+      undoTimeoutMs: UNDO_TIMEOUT_MS,
+      showWorkflowUndo,
+      workflowResultMessage,
+      continueTriageAfterFiling,
+      refreshLists,
+    }, input);
+  }
+
   /** Link threads to a topic; only the database receipt authorizes Undo. */
   async function addToTopic(threadIds: string[], topicId: string): Promise<void> {
     threadIds = Array.from(new Set(threadIds));
@@ -699,6 +729,7 @@ export function useThreadActions() {
     allDone,
     toggleDone,
     blockSender,
+    sweepSender,
     moveToFolder,
     trash,
     setPinned,

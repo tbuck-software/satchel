@@ -60,9 +60,14 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * to the German catalogue and nothing to the entry; their panel, rule
  * badges and backend calls load with the Accounts, Rules and Out-of-office
  * sections, while the strings cannot, because the one per-locale catalogue
- * loads at startup (together 103.2 / 244.4 KiB). */
+ * loads at startup (together 103.2 / 244.4 KiB). The sender cleanup adds
+ * 0.6 KiB to the entry (its dialog state, key handler and route; the sweep,
+ * its store, the dialog and the cleanup view load on first use) and 2.7 KiB
+ * of copy to the catalogues (together 103.8 / 247.2 KiB, with the composer
+ * tables). Nearly all of this wave's growth is copy; splitting the
+ * catalogue so that view strings load with their views is the way back. */
 const budgets = {
-  'index.html': { entryGzip: 104 * 1024, initialGzip: 245 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
+  'index.html': { entryGzip: 104 * 1024, initialGzip: 248 * 1024, locales: ['src/i18n/en.json', 'src/i18n/de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 128 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };

@@ -92,6 +92,7 @@ describe('reader actions in the palette', () => {
       toggleMuted: vi.fn(),
       markSpam: vi.fn(),
       blockSender: vi.fn(),
+      sweepSender: vi.fn(),
       print: vi.fn(),
       exportThread: vi.fn(),
     };
