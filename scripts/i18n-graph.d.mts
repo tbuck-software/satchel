@@ -15,3 +15,4 @@ export function clearGraphCache(): void;
 export function keyIndex(keys: Iterable<string>): KeyIndex;
 export function keyMentions(file: string, index: KeyIndex): Set<string>;
 export function mentionsInSource(source: string, index: KeyIndex): Set<string>;
+export function splitFingerprint(file: string): string;

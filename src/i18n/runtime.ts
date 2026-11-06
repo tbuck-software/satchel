@@ -68,14 +68,19 @@ export function loadLocaleMessages(locale: AppLocale): Promise<void> {
   if (cached) return cached;
   const loads = localeLoads;
   const done = ready;
-  wanted.add(locale);
+  const wantedNow = wanted;
+  wantedNow.add(locale);
   const loading = Promise.all([
     loadActiveCatalogue?.(locale),
     ...[...extraLoaders].map((load) => load(locale)),
   ]).then(() => {
     done.add(locale);
   }).catch((error) => {
-    if (loads.get(locale) === loading) loads.delete(locale);
+    if (loads.get(locale) === loading) {
+      loads.delete(locale);
+      // A locale that failed to load is not in use; later chunks skip it.
+      wantedNow.delete(locale);
+    }
     throw error;
   });
   loads.set(locale, loading);

@@ -48,7 +48,7 @@ export default defineConfig({
      */
     {
       name: 'webkit-mail',
-      testMatch: ['account-visibility.pw.ts', 'composer.pw.ts', 'email-rendering.pw.ts', 'mail-keyboard.pw.ts', 'sheet-interactions.pw.ts', 'failure-visibility.pw.ts', 'topic-memberships.pw.ts'],
+      testMatch: ['account-visibility.pw.ts', 'composer.pw.ts', 'email-rendering.pw.ts', 'mail-keyboard.pw.ts', 'sheet-interactions.pw.ts', 'failure-visibility.pw.ts', 'topic-memberships.pw.ts', 'i18n-chunks.pw.ts'],
       use: { browserName: 'webkit' },
     },
   ],

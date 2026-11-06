@@ -116,9 +116,10 @@ jobs:
             try {
               servers.push(await reserve());
               servers.push(await reserve());
-              const [smoke, csp] = servers.map((server) => server.address().port);
+              servers.push(await reserve());
+              const [smoke, csp, i18n] = servers.map((server) => server.address().port);
               fs.appendFileSync(process.env.GITHUB_ENV,
-                `SATCHEL_SMOKE_PORT=${smoke}\nSATCHEL_CSP_PORT=${csp}\n`);
+                `SATCHEL_SMOKE_PORT=${smoke}\nSATCHEL_CSP_PORT=${csp}\nSATCHEL_I18N_PORT=${i18n}\n`);
             } finally {
               await Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))));
             }
@@ -135,6 +136,12 @@ jobs:
       # blocks the app's own assets otherwise only shows up in the desktop app.
       - name: CSP tests
         run: pnpm run test:csp
+
+      # The independent check of the split catalogue (ADR 0017): a mock
+      # production build, chunks precompiled and hashed as they ship, crawled
+      # in en and de for raw keys and missing-key warnings.
+      - name: Raw-key crawl over the mock production build
+        run: pnpm run test:i18n
 
       - name: Upload Playwright artifacts on failure
         if: failure()

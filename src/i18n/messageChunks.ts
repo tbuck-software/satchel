@@ -26,7 +26,10 @@ const merged = new WeakMap<object, Map<string, Promise<void>>>();
 function loadChunk(id: string, locale: AppLocale): Promise<void> {
   const composer = activeI18n();
   const loaders = chunkLoaders.get(id);
-  if (!composer || !loaders) return Promise.resolve();
+  if (!loaders) return Promise.resolve();
+  // Lazy code runs after an entry created its instance. Without one there is
+  // nothing to merge into, and resolving would let the module render raw keys.
+  if (!composer) return Promise.reject(new Error(`no i18n instance for message chunk ${id}`));
   let loads = merged.get(composer);
   if (!loads) merged.set(composer, loads = new Map());
   const cacheKey = `${locale}\u0000${id}`;

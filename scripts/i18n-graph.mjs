@@ -196,6 +196,24 @@ export function keyMentions(file, index) {
 }
 
 /**
+ * What the split reads from a file: its import specifiers and its key-shaped
+ * literals. An edit that leaves this unchanged cannot move a key, so a dev
+ * server can skip recomputing the split for it.
+ *
+ * @param {string} file absolute path
+ * @returns {string}
+ */
+export function splitFingerprint(file) {
+  const source = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const parts = [];
+  for (const match of source.matchAll(STATIC_IMPORT_RE)) parts.push(`s:${match[1]}`);
+  for (const match of source.matchAll(DYNAMIC_IMPORT_RE)) parts.push(`d:${match[2]}`);
+  for (const match of source.matchAll(KEY_LITERAL_RE)) parts.push(`k:${match[2]}${match[3] ?? ''}`);
+  for (const match of source.matchAll(KEY_RE)) parts.push(`t:${match[2]}`);
+  return parts.join('\n');
+}
+
+/**
  * @param {string} source
  * @param {ReturnType<typeof keyIndex>} index
  * @returns {Set<string>}

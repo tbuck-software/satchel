@@ -41,5 +41,13 @@ export function createLazyAppI18n(loaders: Record<AppLocale, () => Promise<{ def
   const instance = createAppI18n({}, locale, (next) => loaders[next]().then((module) => {
     instance.global.mergeLocaleMessage(next, module.default);
   }));
+  /*
+   * Every key exists in both locales, so a miss means a key reached the
+   * screen before its catalogue or chunk did. Production vue-i18n stays silent
+   * about that; say it, so the raw-key crawl over the built app can see it.
+   */
+  instance.global.setMissingHandler((missingLocale, key) => {
+    console.warn(`[i18n] missing key ${key} (${missingLocale})`);
+  });
   return { instance, ready: loadLocaleMessages(locale) };
 }

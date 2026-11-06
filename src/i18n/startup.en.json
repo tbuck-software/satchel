@@ -2,9 +2,18 @@
   "accountAppearance": {
     "saveFailed": "Could not save the account's appearance."
   },
+  "accountQuota": {
+    "sidebarCritical": "{account}: mailbox {percent} full, new mail may bounce. Open account settings.",
+    "sidebarWarning": "{account}: mailbox {percent} full. Open account settings."
+  },
   "accountVisibility": {
+    "accounts": "Accounts",
+    "openAccount": "Open {account}, including resting mail",
+    "resting": "Resting",
+    "restingHint": "{account} is resting: no counts, no notifications. Click to look in; right-click to show it until midnight.",
     "saveFailed": "Could not save account visibility.",
-    "scopeResting": "{accounts} resting | {accounts} resting"
+    "scopeResting": "{accounts} resting | {accounts} resting",
+    "statePeek": "Shown until midnight"
   },
   "app": {
     "crash": {
@@ -59,7 +68,8 @@
     },
     "sync": {
       "failures": {
-        "label": "{count} item needs attention | {count} items need attention"
+        "label": "{count} item needs attention | {count} items need attention",
+        "review": "Review issues"
       },
       "mutationsFailed": "{count} change didn't reach the server. | {count} changes didn't reach the server.",
       "retryFailed": "Re-sync failed: {error}",
@@ -397,7 +407,67 @@
     }
   },
   "calendar": {
-    "hint": "Clicking an empty day or time slot creates an event. Events from mails with an {ics} attachment are detected automatically."
+    "event": {
+      "allDay": "All day",
+      "deleteConfirmAttendees": "The event is deleted from the calendar on the server, and its attendees will be notified. This cannot be undone.",
+      "deleteConfirmBody": "The event is removed from your calendar. This cannot be undone.",
+      "deleteConfirmOccurrence": "Only this occurrence is deleted from the calendar on the server; the rest of the series stays. This cannot be undone.",
+      "deleteConfirmOccurrenceAttendees": "Only this occurrence is deleted from the calendar on the server, and its attendees will be notified; the rest of the series stays. This cannot be undone.",
+      "deleteConfirmRemote": "The event is also deleted from the calendar on the server. This cannot be undone.",
+      "untitled": "(No title)"
+    },
+    "hint": "Clicking an empty day or time slot creates an event. Events from mails with an {ics} attachment are detected automatically.",
+    "range": {
+      "allDayMulti": "{start} – {end}, all day",
+      "allDaySingle": "{day}, all day",
+      "dayTime": "{day}, {time}",
+      "sameDay": "{day}, {start}–{end}",
+      "span": "{start} – {end}",
+      "weekSameMonth": "{first}–{last} {monthYear}"
+    },
+    "source": {
+      "caldav": "CalDAV",
+      "googlePrimary": "Main calendar",
+      "invites": "Invitations",
+      "local": "Local",
+      "outlook": "Outlook calendar"
+    }
+  },
+  "certificates": {
+    "banner": {
+      "detail": {
+        "expired": "{host} has presented an expired certificate since {since}. The people who run your mail server have to fix this. Your mail stays readable, and Satchel keeps trying.",
+        "nameMismatch": "The certificate {host} presented was issued for a different name. Satchel does not connect, because someone else could be answering.",
+        "notYetValid": "{host} presents a certificate that only becomes valid on {from}. Check this device's date and time first.",
+        "other": "Satchel did not accept the certificate {host} presented.",
+        "unknownIssuer": "{host} presents a certificate from an issuer Satchel does not trust. Ask the people who run your mail server which certificate it should present."
+      },
+      "details": "Details",
+      "hide": "Hide",
+      "title": {
+        "expired": "{account}: The mail server's certificate has expired",
+        "nameMismatch": "{account}: The certificate belongs to a different server",
+        "notYetValid": "{account}: The mail server's certificate is not valid yet",
+        "other": "{account}: The mail server's certificate was rejected",
+        "unknownIssuer": "{account}: The mail server's certificate is not trusted"
+      }
+    },
+    "dialog": {
+      "noteBody": "Hello,\n\nmy mail client cannot connect to {host}:{port} ({protocol}): {problem}.\n\nCertificate: {subject}\nValid from: {notBefore}\nValid until: {notAfter}\nIssuer: {issuer}\nSHA-256: {fingerprint}\n\nCould you take a look?",
+      "unknown": "Unknown"
+    },
+    "exceptionShort": "Exception until {until}, certificate expired",
+    "short": {
+      "expired": "Certificate expired since {since}",
+      "nameMismatch": "Certificate for another server",
+      "notYetValid": "Certificate not valid yet",
+      "other": "Certificate rejected",
+      "unknownIssuer": "Certificate not trusted"
+    },
+    "sidebar": {
+      "exception": "{account}: {problem}",
+      "problem": "{account}: {problem}"
+    }
   },
   "commands": {
     "syncDone": "Sync finished.",
@@ -456,6 +526,18 @@
   "errors": {
     "attachmentEmpty": "The attachment came back without any data.",
     "backendUnknown": "Unknown backend error",
+    "banner": {
+      "accountOutage": "{account} has not synced since {since}",
+      "openAccount": "Account settings",
+      "outageShort": "{account}: no sync since {since}",
+      "passwordRejected": "{account} did not accept the password.",
+      "retrying": "Trying again…",
+      "serverResponse": "Server response",
+      "signInAgain": "Sign in again",
+      "signingIn": "Signing in…",
+      "syncAgain": "Sync again",
+      "updatePassword": "Update password"
+    },
     "inlineImageUnavailable": "Image unavailable",
     "messageLoadFailed": "The message could not be loaded.",
     "messageLoadTimeout": "Loading the message took too long.",
@@ -656,8 +738,15 @@
     }
   },
   "nav": {
+    "agenda": {
+      "allDayCount": "{count} entries",
+      "more": "+{count} more",
+      "now": "Now",
+      "title": "Today"
+    },
     "calendar": "Calendar",
     "commandPalette": "Search & commands",
+    "composeMessage": "Write a new message",
     "composeNewWindow": "New email (Shift-click for a separate window)",
     "contactLabel": "{name}, {count} conversations",
     "contactPinned": "Pinned",

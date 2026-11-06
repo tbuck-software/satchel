@@ -3,7 +3,15 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { keyIndex, mentionsInSource, messageKeys, repoRoot } from '../../scripts/i18n-graph.mjs';
 import { SUBSETS } from '../../scripts/i18n-merge.mjs';
-import { OTHER_ENTRIES, computeSplit, moduleKeys, unanchoredKeyCalls } from '../../scripts/i18n-split.mjs';
+import {
+  FIRST_PAINT,
+  IDLE_PREFETCH,
+  OTHER_ENTRIES,
+  computeSplit,
+  moduleKeys,
+  unanchoredKeyCalls,
+  unanchoredReason,
+} from '../../scripts/i18n-split.mjs';
 import en from './en.json';
 import startupDe from './startup.de.json';
 import startupEn from './startup.en.json';
@@ -24,12 +32,29 @@ const rel = (file: string) => path.relative(repoRoot, file);
  * The main window loads `startup.<locale>.json` before its first frame and
  * every other key as a chunk with the lazy code that needs it (ADR 0017). A
  * key in the wrong place shows up raw on screen, so these re-derive the
- * placement from the graph instead of trusting the generated files.
+ * placement from the graph instead of trusting the generated files. They share
+ * the split's own graph reading; the independent check is the raw-key crawl
+ * over a mock production build (`tests/i18n-chunks.pw.ts`).
  */
 describe('startup catalogue split', () => {
+  /*
+   * Two PRs that each pass can leave this stale on main together: one adds a
+   * key to startup code, the other moves code. The fix is always the same.
+   */
   it('ships the generated startup catalogue for the current code', () => {
-    expect(keyPaths(startupEn).sort()).toEqual(split.startupKeys);
-    expect(keyPaths(startupDe).sort()).toEqual(split.startupKeys);
+    for (const [locale, catalogue] of [['en', startupEn], ['de', startupDe]] as const) {
+      const shipped = new Set(keyPaths(catalogue));
+      const missing = split.startupKeys.filter((key) => !shipped.has(key));
+      const extra = [...shipped].filter((key) => !startup.has(key));
+      if (missing.length || extra.length) {
+        const list = (keys: string[]) => keys.slice(0, 8).join(', ') + (keys.length > 8 ? `, … (${keys.length})` : '');
+        throw new Error(
+          `src/i18n/startup.${locale}.json is stale; run \`pnpm i18n:build\`.`
+            + (missing.length ? `\n  missing: ${list(missing)}` : '')
+            + (extra.length ? `\n  extra: ${list(extra)}` : ''),
+        );
+      }
+    }
   });
 
   it('carries every key code in the startup graph uses', () => {
@@ -42,22 +67,19 @@ describe('startup catalogue split', () => {
     const missing: string[] = [];
     for (const [boundary, chunk] of split.chunks) {
       const own = new Set(chunk.keys);
-      const loaded = split.availableAt.get(boundary) ?? new Set<string>();
       for (const file of split.closures.get(boundary) ?? []) {
         for (const key of moduleKeys(file, index)) {
-          if (!startup.has(key) && !own.has(key) && !loaded.has(key)) missing.push(`${rel(boundary)} > ${rel(file)}: ${key}`);
+          if (!startup.has(key) && !own.has(key)) missing.push(`${rel(boundary)} > ${rel(file)}: ${key}`);
         }
       }
     }
     expect(missing).toEqual([]);
   });
 
-  it('counts a parent chunk as loaded only where every import path loads it', () => {
-    const byId = new Map([...split.chunks.values()].map((chunk) => [chunk.id, chunk]));
-    // Opened from the inbox and from bootstrap: nothing lazy is loaded yet.
-    expect(byId.get('components.mail.ThreadView')?.available).toBe(0);
-    // Only Settings opens this pane, so the Settings chunk is already in.
-    expect(byId.get('components.settings.SpamFilterSettings')?.available).toBeGreaterThan(0);
+  it('ships the strings of components that mount on every start with startup', () => {
+    const byFile = new Map([...split.chunks.values()].map((chunk) => [rel(chunk.file), chunk]));
+    for (const file of FIRST_PAINT) expect(byFile.get(file)?.keys, file).toEqual([]);
+    for (const file of IDLE_PREFETCH) expect(byFile.get(file)?.keys.length, file).toBeGreaterThan(0);
   });
 
   it('places every key some window can use', () => {
@@ -76,15 +98,30 @@ describe('startup catalogue split', () => {
     expect(allKeys.filter((key) => key.startsWith('backend.') && !startup.has(key))).toEqual([]);
   });
 
-  it('moves the strings of lazy views out of startup', () => {
-    for (const key of ['settings.spamFilter.title', 'settings.serverRules.title', 'calendar.views.week']) {
-      if (index.has(key)) expect(startup.has(key), key).toBe(false);
-    }
-    expect(split.startupKeys.length).toBeLessThan(allKeys.length / 2);
+  it('keeps startup well under half of the catalogue', () => {
+    expect(
+      split.startupKeys.length,
+      'Startup holds most keys again: some import pulls lazy views into the static graph of main.ts. '
+        + 'Find it with `node scripts/i18n-graph.mjs src/main.ts`.',
+    ).toBeLessThan(allKeys.length / 2);
   });
 
-  it('rejects t() calls whose key starts with an interpolation', () => {
+  it('rejects t() calls whose key text the analysis cannot see', () => {
     expect(unanchoredKeyCalls(split.modules)).toEqual([]);
+  });
+
+  it.each([
+    ["'mail.reply'", null],
+    ['`thread.state.${state}`', null],
+    ['labelKey', null],
+    ['SECTION_KEYS[section]', null],
+    ["wide ? 'a.b' : 'a.c'", null],
+    ['`${prefix}.title`', 'template without a literal key head'],
+    ["prefix + '.title'", 'key built with + (write a template with a literal head instead)'],
+    ["'outbox.status.' + status", 'key built with + (write a template with a literal head instead)'],
+    ['ok ? `${p}.a` : "x.y"', 'template without a literal key head'],
+  ])('judges the key argument %s', (argument, reason) => {
+    expect(unanchoredReason(argument)).toBe(reason);
   });
 
   it('knows the same other windows as the subsets', () => {

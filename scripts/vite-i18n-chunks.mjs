@@ -17,9 +17,17 @@
  *   module Rollup put into the startup graph is one the split thought lazy.
  */
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { DYNAMIC_IMPORT_RE, clearGraphCache, keyIndex, repoRoot, resolveImport } from './i18n-graph.mjs';
-import { buildBundles, keyPaths, pick, sortDeep } from './i18n-merge.mjs';
+import {
+  DYNAMIC_IMPORT_RE,
+  clearGraphCache,
+  keyIndex,
+  repoRoot,
+  resolveImport,
+  splitFingerprint,
+} from './i18n-graph.mjs';
+import { buildBundles, keyPaths, pick, sortDeep } from './i18n-catalogue.mjs';
 import { computeSplit, moduleKeys } from './i18n-split.mjs';
 
 const LOCALES = ['en', 'de'];
@@ -55,7 +63,6 @@ export function i18nChunks(options = {}) {
   const startupRoots = options.mock ? ['src/services/backend/mock.ts'] : [];
   /** @type {State | null} */
   let state = null;
-  let signature = '';
   /** @type {'build' | 'serve'} */
   let command = 'build';
 
@@ -68,11 +75,30 @@ export function i18nChunks(options = {}) {
     return { bundles, split, byId };
   };
   const current = () => (state ??= compute());
-  /** @param {State} next */
-  const signatureOf = (next) => JSON.stringify([
+  /** Which keys go where; a change re-cuts which imports are wrapped. */
+  const layoutOf = (/** @type {State} */ next) => JSON.stringify([
     next.split.startupKeys,
     [...next.byId.values()].map((chunk) => [chunk.id, chunk.keys]),
   ]);
+  /** The text every served catalogue holds; a copy edit changes only this. */
+  const contentOf = (/** @type {State} */ next) => {
+    const hash = createHash('sha1');
+    for (const locale of LOCALES) {
+      hash.update(JSON.stringify(pick(next.bundles[locale], next.split.startupKeys)));
+      for (const chunk of next.byId.values()) hash.update(JSON.stringify(pick(next.bundles[locale], chunk.keys)));
+    }
+    return hash.digest('hex');
+  };
+  let layout = '';
+  let content = '';
+  /** @type {Map<string, string>} */
+  const fingerprints = new Map();
+  const remember = (/** @type {State} */ next) => {
+    layout = layoutOf(next);
+    content = contentOf(next);
+    fingerprints.clear();
+    for (const file of next.split.modules) fingerprints.set(file, splitFingerprint(file));
+  };
 
   /** @param {Split} split */
   const staleStartup = (split) => {
@@ -93,7 +119,7 @@ export function i18nChunks(options = {}) {
     },
     buildStart() {
       state = compute();
-      signature = signatureOf(state);
+      if (command === 'serve') remember(state);
       if (options.mock || !staleStartup(state.split)) return;
       const message = 'src/i18n/startup.*.json is stale for the current code; run `pnpm i18n:build`.';
       if (command === 'build') this.error(message);
@@ -130,21 +156,57 @@ export function i18nChunks(options = {}) {
       return null;
     },
     configureServer(server) {
-      // A dev edit can move keys between startup and a chunk. Reload rather
-      // than leave the open page with chunks cut for the old code.
-      const refresh = (/** @type {string} */ file) => {
-        if (!file.startsWith(SRC) || !/\.(ts|vue|json)$/.test(file) || file.startsWith(CHUNK_DIR)) return;
-        if (/[/\\]i18n[/\\][^/\\]+\.json$/.test(file)) return;
+      /*
+       * A dev edit can move keys between startup and a chunk (code) or change
+       * what a chunk says (parts). Either way the open page holds catalogues
+       * cut from the old state, so reload it. Saves come in bursts; wait for
+       * a quiet moment, and skip code saves that change neither imports nor
+       * key literals, since those cannot move a key.
+       */
+      const PARTS = path.join(SRC, 'i18n', 'parts') + path.sep;
+      /** @type {ReturnType<typeof setTimeout> | undefined} */
+      let timer;
+      let dirty = false;
+      const recompute = () => {
+        timer = undefined;
+        if (!dirty) return;
+        dirty = false;
         const next = compute();
-        const nextSignature = signatureOf(next);
+        const nextLayout = layoutOf(next);
+        const nextContent = contentOf(next);
         state = next;
-        if (nextSignature === signature) return;
-        signature = nextSignature;
-        if (!options.mock && staleStartup(next.split)) {
+        const moved = nextLayout !== layout;
+        const edited = nextContent !== content;
+        remember(next);
+        if (!moved && !edited) return;
+        if (moved && !options.mock && staleStartup(next.split)) {
           server.config.logger.warn('src/i18n/startup.*.json is stale; run `pnpm i18n:build`.');
         }
-        server.moduleGraph.invalidateAll();
+        if (moved) {
+          server.moduleGraph.invalidateAll();
+        } else {
+          for (const module of server.moduleGraph.idToModuleMap.values()) {
+            const id = module.id ?? '';
+            if (id.startsWith(CHUNK_DIR) || (options.mock && id.startsWith(path.join(SRC, 'i18n', 'startup.')))) {
+              server.moduleGraph.invalidateModule(module);
+            }
+          }
+        }
         server.ws.send({ type: 'full-reload' });
+      };
+      const refresh = (/** @type {string} */ file) => {
+        if (file.startsWith(PARTS) && file.endsWith('.json')) {
+          dirty = true;
+        } else if (/\.(ts|vue)$/.test(file) && file.startsWith(SRC)) {
+          const before = fingerprints.get(file);
+          // Not in the graph: only an importer's edit can bring it in.
+          if (before === undefined || before === splitFingerprint(file)) return;
+          dirty = true;
+        } else {
+          return;
+        }
+        clearTimeout(timer);
+        timer = setTimeout(recompute, 150);
       };
       server.watcher.on('change', refresh);
       server.watcher.on('add', refresh);

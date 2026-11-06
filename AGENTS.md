@@ -63,10 +63,14 @@ Lokale Checks und CI verwenden dieselben Profile, ohne zusätzliche Cargo-Config
   sie braucht (ADR 0017, `scripts/i18n-split.mjs`). Die Zuordnung folgt aus
   dem Modul, das den Schlüssel **als Literal** hält — auch in Tabellen oder
   als fester Kopf (`` t(`thread.state.${s}`) ``). Ein Schlüssel ohne festen
-  Kopf (`` t(`${x}.label`) ``) lässt `pnpm i18n:check` scheitern. Wer Code in
+  Kopf (`` t(`${x}.label`) ``, `t(p + '.label')`) lässt `pnpm i18n:check`
+  scheitern. Wer Code in
   den Startgraphen zieht oder einen Schlüssel aus Daten rendert, die kein
   Modul als Literal hält, läuft `pnpm i18n:build` bzw. trägt den Präfix in
-  `STARTUP.prefixes` ein.
+  `STARTUP.prefixes` ein. **Nach jedem Rebase `pnpm i18n:build`**: zwei für
+  sich grüne PRs können `startup.*.json` gemeinsam veralten lassen. Eine lazy
+  Komponente, die bei jedem Start montiert wird, gehört in `FIRST_PAINT`
+  (`pnpm run test:i18n` meldet sie).
 
 ## Frontend
 

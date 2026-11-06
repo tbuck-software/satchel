@@ -142,4 +142,20 @@ describe('message chunks', () => {
     expect(load).toHaveBeenCalledTimes(1);
     expect(t.t('cleanup.title')).toBe('Clean up');
   });
+
+  it('stops loading chunks in a locale whose catalogue failed', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    createLazyAppI18n({
+      en: async () => ({ default: { greeting: 'Hello' } }),
+      de: async () => { throw new Error('missing'); },
+    });
+    await applyLocalePreference('en', false);
+    await applyLocalePreference('de', false);
+    const drafts = chunk({ drafts: { title: 'Drafts' } }, { drafts: { title: 'Entwürfe' } });
+    await withMessages('views.DraftsView', table(drafts), async () => ({}));
+
+    expect(drafts.en).toHaveBeenCalledTimes(1);
+    expect(drafts.de).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
 });

@@ -2,9 +2,18 @@
   "accountAppearance": {
     "saveFailed": "Die Darstellung des Kontos konnte nicht gespeichert werden."
   },
+  "accountQuota": {
+    "sidebarCritical": "{account}: Postfach zu {percent} voll, neue Mails kommen womöglich zurück. Kontoeinstellungen öffnen.",
+    "sidebarWarning": "{account}: Postfach zu {percent} voll. Kontoeinstellungen öffnen."
+  },
   "accountVisibility": {
+    "accounts": "Konten",
+    "openAccount": "{account} öffnen, auch ruhende Mails",
+    "resting": "Ruht",
+    "restingHint": "{account} ruht: keine Zähler, keine Mitteilungen. Klick schaut hinein, Rechtsklick blendet es bis Mitternacht ein.",
     "saveFailed": "Die Sichtbarkeit des Kontos konnte nicht gespeichert werden.",
-    "scopeResting": "{accounts} ruht | {accounts} ruhen"
+    "scopeResting": "{accounts} ruht | {accounts} ruhen",
+    "statePeek": "Bis Mitternacht eingeblendet"
   },
   "app": {
     "crash": {
@@ -59,7 +68,8 @@
     },
     "sync": {
       "failures": {
-        "label": "{count} Eintrag benötigt Aufmerksamkeit | {count} Einträge benötigen Aufmerksamkeit"
+        "label": "{count} Eintrag benötigt Aufmerksamkeit | {count} Einträge benötigen Aufmerksamkeit",
+        "review": "Probleme prüfen"
       },
       "mutationsFailed": "{count} Änderung ist nicht beim Server angekommen. | {count} Änderungen sind nicht beim Server angekommen.",
       "retryFailed": "Erneuter Abgleich fehlgeschlagen: {error}",
@@ -397,7 +407,67 @@
     }
   },
   "calendar": {
-    "hint": "Klick auf einen freien Tag oder eine freie Uhrzeit legt einen Termin an. Auto-erkannt werden Termine aus Mails mit {ics}-Anhang."
+    "event": {
+      "allDay": "Ganztägig",
+      "deleteConfirmAttendees": "Der Termin wird im Kalender auf dem Server gelöscht, und die Teilnehmenden werden benachrichtigt. Das lässt sich nicht rückgängig machen.",
+      "deleteConfirmBody": "Der Termin wird aus deinem Kalender entfernt. Das lässt sich nicht rückgängig machen.",
+      "deleteConfirmOccurrence": "Nur dieser Termin der Serie wird im Kalender auf dem Server gelöscht; die übrigen bleiben. Das lässt sich nicht rückgängig machen.",
+      "deleteConfirmOccurrenceAttendees": "Nur dieser Termin der Serie wird im Kalender auf dem Server gelöscht, und die Teilnehmenden werden benachrichtigt; die übrigen bleiben. Das lässt sich nicht rückgängig machen.",
+      "deleteConfirmRemote": "Der Termin wird auch im Kalender auf dem Server gelöscht. Das lässt sich nicht rückgängig machen.",
+      "untitled": "(ohne Titel)"
+    },
+    "hint": "Klick auf einen freien Tag oder eine freie Uhrzeit legt einen Termin an. Auto-erkannt werden Termine aus Mails mit {ics}-Anhang.",
+    "range": {
+      "allDayMulti": "{start} – {end}, ganztägig",
+      "allDaySingle": "{day}, ganztägig",
+      "dayTime": "{day}, {time} Uhr",
+      "sameDay": "{day}, {start}–{end} Uhr",
+      "span": "{start} – {end}",
+      "weekSameMonth": "{first}.–{last}. {monthYear}"
+    },
+    "source": {
+      "caldav": "CalDAV",
+      "googlePrimary": "Hauptkalender",
+      "invites": "Einladungen",
+      "local": "Lokal",
+      "outlook": "Outlook-Kalender"
+    }
+  },
+  "certificates": {
+    "banner": {
+      "detail": {
+        "expired": "{host} zeigt seit {since} ein abgelaufenes Zertifikat. Das muss die IT deines Mailservers beheben. Deine Mails bleiben lesbar, Satchel versucht es weiter.",
+        "nameMismatch": "Das Zertifikat, das {host} zeigt, ist für einen anderen Namen ausgestellt. Satchel verbindet sich nicht, weil jemand anderes antworten könnte.",
+        "notYetValid": "{host} zeigt ein Zertifikat, das erst ab {from} gilt. Prüfe zuerst Datum und Uhrzeit dieses Geräts.",
+        "other": "Satchel hat das Zertifikat von {host} nicht akzeptiert.",
+        "unknownIssuer": "{host} zeigt ein Zertifikat eines Ausstellers, dem Satchel nicht vertraut. Frag die IT deines Mailservers, welches Zertifikat er zeigen sollte."
+      },
+      "details": "Details",
+      "hide": "Ausblenden",
+      "title": {
+        "expired": "{account}: Das Zertifikat des Mailservers ist abgelaufen",
+        "nameMismatch": "{account}: Das Zertifikat gehört zu einem anderen Server",
+        "notYetValid": "{account}: Das Zertifikat des Mailservers ist noch nicht gültig",
+        "other": "{account}: Das Zertifikat des Mailservers wurde abgelehnt",
+        "unknownIssuer": "{account}: Dem Zertifikat des Mailservers wird nicht vertraut"
+      }
+    },
+    "dialog": {
+      "noteBody": "Hallo,\n\nmein Mailprogramm kann sich nicht mit {host}:{port} ({protocol}) verbinden: {problem}.\n\nZertifikat: {subject}\nGültig ab: {notBefore}\nGültig bis: {notAfter}\nAussteller: {issuer}\nSHA-256: {fingerprint}\n\nKönnt ihr euch das ansehen?",
+      "unknown": "Unbekannt"
+    },
+    "exceptionShort": "Ausnahme bis {until}, Zertifikat abgelaufen",
+    "short": {
+      "expired": "Zertifikat abgelaufen seit {since}",
+      "nameMismatch": "Zertifikat für einen anderen Server",
+      "notYetValid": "Zertifikat noch nicht gültig",
+      "other": "Zertifikat abgelehnt",
+      "unknownIssuer": "Zertifikat nicht vertrauenswürdig"
+    },
+    "sidebar": {
+      "exception": "{account}: {problem}",
+      "problem": "{account}: {problem}"
+    }
   },
   "commands": {
     "syncDone": "Synchronisierung abgeschlossen.",
@@ -456,6 +526,18 @@
   "errors": {
     "attachmentEmpty": "Der Anhang kam ohne Daten zurück.",
     "backendUnknown": "Unbekannter Backend-Fehler",
+    "banner": {
+      "accountOutage": "{account} gleicht seit {since} nicht ab",
+      "openAccount": "Kontoeinstellungen",
+      "outageShort": "{account}: kein Abgleich seit {since}",
+      "passwordRejected": "{account} hat das Passwort nicht angenommen.",
+      "retrying": "Wird wiederholt …",
+      "serverResponse": "Antwort des Servers",
+      "signInAgain": "Erneut anmelden",
+      "signingIn": "Anmeldung läuft …",
+      "syncAgain": "Erneut abgleichen",
+      "updatePassword": "Passwort ändern"
+    },
     "inlineImageUnavailable": "Bild nicht verfügbar",
     "messageLoadFailed": "Die Nachricht konnte nicht geladen werden.",
     "messageLoadTimeout": "Das Nachladen der Nachricht hat zu lange gedauert.",
@@ -656,8 +738,15 @@
     }
   },
   "nav": {
+    "agenda": {
+      "allDayCount": "{count} Einträge",
+      "more": "+{count} weitere",
+      "now": "Jetzt",
+      "title": "Heute"
+    },
     "calendar": "Kalender",
     "commandPalette": "Suche & Befehle",
+    "composeMessage": "Neue Nachricht schreiben",
     "composeNewWindow": "Neue E-Mail (Shift+Klick für eigenes Fenster)",
     "contactLabel": "{name}, {count} Konversationen",
     "contactPinned": "Angepinnt",

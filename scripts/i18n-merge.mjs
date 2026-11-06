@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * Builds the message catalogues from `src/i18n/parts/*.json`.
  *
@@ -14,14 +15,14 @@
  * (`scripts/i18n-split.mjs`, `scripts/vite-i18n-chunks.mjs`). The full
  * catalogues stay for tests and as the source the chunks are cut from.
  */
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { buildBundles, keyPaths, pick, sortDeep } from './i18n-catalogue.mjs';
 import { messageKeys, moduleGraph } from './i18n-graph.mjs';
 import { computeSplit, unanchoredKeyCalls } from './i18n-split.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const partsDir = path.join(root, 'src', 'i18n', 'parts');
 
 const NATIVE_UI_FIELDS = {
   tray_show: 'nativeUi.tray.show',
@@ -109,56 +110,6 @@ function backendErrorKeys(files) {
   return keys;
 }
 
-function isPlainObject(value) {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function merge(target, source, trail, conflicts) {
-  for (const [key, value] of Object.entries(source)) {
-    const next = [...trail, key];
-    if (isPlainObject(value)) {
-      if (!isPlainObject(target[key])) target[key] = {};
-      merge(target[key], value, next, conflicts);
-      continue;
-    }
-    if (key in target && target[key] !== value) conflicts.push(next.join('.'));
-    target[key] = value;
-  }
-}
-
-export function sortDeep(value) {
-  if (!isPlainObject(value)) return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortDeep(value[key])]));
-}
-
-export function keyPaths(value, trail = []) {
-  if (!isPlainObject(value)) return [trail.join('.')];
-  return Object.entries(value).flatMap(([key, child]) => keyPaths(child, [...trail, key]));
-}
-
-export function pick(bundle, keys) {
-  const result = {};
-  for (const key of keys) {
-    const segments = key.split('.');
-    let source = bundle;
-    for (const segment of segments) {
-      if (!isPlainObject(source) || !(segment in source)) {
-        source = undefined;
-        break;
-      }
-      source = source[segment];
-    }
-    if (source === undefined) continue;
-    let target = result;
-    for (const segment of segments.slice(0, -1)) {
-      if (!isPlainObject(target[segment])) target[segment] = {};
-      target = target[segment];
-    }
-    target[segments.at(-1)] = source;
-  }
-  return result;
-}
-
 function valueAt(bundle, key) {
   const value = key.split('.').reduce((current, segment) => current?.[segment], bundle);
   if (typeof value !== 'string') throw new Error(`native UI key is not a string: ${key}`);
@@ -224,18 +175,7 @@ object NativeUiDefaults {\n\
 }\n`;
 }
 
-export function buildBundles() {
-  const bundles = { en: {}, de: {} };
-  const conflicts = [];
-  for (const file of readdirSync(partsDir).filter((name) => name.endsWith('.json')).sort()) {
-    const part = JSON.parse(readFileSync(path.join(partsDir, file), 'utf8'));
-    for (const locale of ['en', 'de']) {
-      if (!part[locale]) throw new Error(`${file}: missing "${locale}"`);
-      merge(bundles[locale], part[locale], [file], conflicts);
-    }
-  }
-  return { bundles, conflicts };
-}
+export { buildBundles, keyPaths, pick, sortDeep };
 
 export function subsetKeys(name, allKeys) {
   const spec = SUBSETS[name];
