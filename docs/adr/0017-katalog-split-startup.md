@@ -5,7 +5,7 @@ Status: angenommen 2026-11-06, ergänzt 0004
 ## Kontext
 
 0004 hat einen Katalog pro Sprache festgelegt. Das Hauptfenster lud ihn
-vollständig vor dem ersten Frame (~3.300 Schlüssel, 58 KiB gzip auf Deutsch),
+vollständig vor dem ersten Frame (~3.300 Schlüssel, 60 KiB gzip auf Deutsch),
 obwohl der Code von Einstellungen, Regeln, Kalender, Aufräumen, Spamfilter
 oder Server-Regeln längst erst bei Bedarf lädt. Die letzte Feature-Welle ließ
 den Start von 239,7 auf 247,2 KiB gzip wachsen, fast nur durch Texte. Viewer
@@ -69,7 +69,7 @@ Modulgraphen ihres Einstiegs abgeleitet.
 ## Konsequenzen
 
 - Gemessen 2026-11-06: erster Frame 247,2 → 209,5 KiB gzip; Start-Katalog
-  1.027 von 3.340 Schlüsseln (Deutsch 21,5 statt 58 KiB gzip), kein Chunk
+  1.027 von 3.340 Schlüsseln (Deutsch 21,5 statt 60,0 KiB gzip), kein Chunk
   vor dem ersten Frame. Sobald die Inbox benutzbar ist, wärmt `bootstrap.ts`
   Leser und Palette vor; mit deren Chunks sind es 31,8 KiB Katalog. Das
   Einstiegs-Chunk wächst um 0,7 KiB (Lader und umgeschriebene Importe in
