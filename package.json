@@ -12,6 +12,7 @@
     "dev:mock": "VITE_SATCHEL_MOCK=1 vite",
     "build": "vue-tsc -b && vite build",
     "bundle:check": "node ./scripts/check-entry-bundles.mjs",
+    "icons": "node ./scripts/render-icons.mjs",
     "plugin": "node ./scripts/plugin.mjs",
     "plugin:create": "node ./scripts/create-plugin.mjs",
     "plugin:sign": "node ./scripts/sign-plugin.mjs",
