@@ -85,6 +85,7 @@ pub struct PendingTask {
     pub priority: i64,
     pub completed_at: Option<String>,
     pub message_id: Option<String>,
+    pub due_tz: Option<String>,
     pub start_at: Option<String>,
     pub rrule: Option<String>,
     pub remote_id: Option<String>,
@@ -106,6 +107,8 @@ pub struct RemoteListWrite<'a> {
     pub read_only: Option<bool>,
     /// The collection also holds events.
     pub mixed: bool,
+    /// A manual sync: a list a refused write made read-only is tried again.
+    pub reprobe: bool,
 }
 
 /// A remote task as the server holds it now.
@@ -118,6 +121,7 @@ pub struct RemoteTaskWrite<'a> {
     pub fields: &'a TaskWrite,
     pub message_id: Option<&'a str>,
     pub start_at: Option<&'a str>,
+    pub due_tz: Option<&'a str>,
     pub rrule: Option<&'a str>,
     /// `recurrence::Recurrence::stored()` of the resource.
     pub recurrence: Option<&'a str>,
@@ -166,7 +170,7 @@ const TASK_SELECT: &str = "SELECT t.id, t.list_id, t.title, t.notes, t.due_at, t
      FROM tasks t";
 
 const PENDING_SELECT: &str = "SELECT id, uid, title, notes, due_at, reminder_at, priority,
-        completed_at, message_id, start_at, rrule, remote_id, remote_version, remote_payload,
+        completed_at, message_id, due_tz, start_at, rrule, remote_id, remote_version, remote_payload,
         pending_op, updated_at
      FROM tasks";
 
@@ -212,12 +216,22 @@ struct TaskState {
     pending_op: Option<String>,
     remote_id: Option<String>,
     due_at: Option<String>,
+    due_tz: Option<String>,
     start_at: Option<String>,
     reminder_at: Option<String>,
     completed_at: Option<String>,
     rrule: Option<String>,
     recurrence: Option<String>,
     updated_at: String,
+}
+
+/// The occurrence a repeating task left, for Undo (`tasks.advanced_from`).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+struct Occurrence {
+    due_at: Option<String>,
+    start_at: Option<String>,
+    reminder_at: Option<String>,
+    rrule: Option<String>,
 }
 
 /// The stored fields a completion writes: for a simple repeating task the
@@ -228,6 +242,8 @@ struct Completion {
     reminder_at: Option<String>,
     rrule: Option<String>,
     completed_at: Option<String>,
+    /// Set when the task moved on: the occurrence it left, as JSON.
+    advanced_from: Option<String>,
 }
 
 fn plan_completion(
@@ -242,6 +258,7 @@ fn plan_completion(
         reminder_at: reminder_at.map(str::to_string),
         rrule: state.rrule.clone(),
         completed_at: completed_at.map(str::to_string),
+        advanced_from: None,
     };
     let completing = completed_at.is_some() && state.completed_at.is_none();
     if !completing || state.recurrence.as_deref() != Some(recurrence::SIMPLE) {
@@ -253,13 +270,28 @@ fn plan_completion(
     let Recurrence::Simple(rule) = recurrence::classify(Some(rrule), false, Some(due)) else {
         return unchanged;
     };
-    match recurrence::advance(&rule, rrule, due, state.start_at.as_deref(), reminder_at) {
+    let zone = recurrence::Zone::from_stored(state.due_tz.as_deref());
+    match recurrence::advance(
+        &rule,
+        rrule,
+        due,
+        state.start_at.as_deref(),
+        reminder_at,
+        zone,
+    ) {
         Some(next) => Completion {
             due_at: Some(next.due_at),
             start_at: next.start_at,
             reminder_at: next.reminder_at,
             rrule: Some(next.rrule),
             completed_at: None,
+            advanced_from: serde_json::to_string(&Occurrence {
+                due_at: Some(due.to_string()),
+                start_at: state.start_at.clone(),
+                reminder_at: reminder_at.map(str::to_string),
+                rrule: Some(rrule.to_string()),
+            })
+            .ok(),
         },
         // The last occurrence: the series ends with it.
         None => unchanged,
@@ -461,8 +493,8 @@ impl<'a> TaskRepository<'a> {
 
     async fn task_state(&self, id: &str) -> Result<TaskState, TaskError> {
         sqlx::query_as::<_, TaskState>(
-            "SELECT list_id, pending_op, remote_id, due_at, start_at, reminder_at, completed_at,
-                    rrule, recurrence, updated_at
+            "SELECT list_id, pending_op, remote_id, due_at, due_tz, start_at, reminder_at,
+                    completed_at, rrule, recurrence, updated_at
              FROM tasks WHERE id = ? AND COALESCE(pending_op, '') <> 'delete'",
         )
         .bind(id)
@@ -508,7 +540,7 @@ impl<'a> TaskRepository<'a> {
         let result = sqlx::query(
             "UPDATE tasks SET title = ?, notes = ?, due_at = ?, start_at = ?, reminder_at = ?,
                     priority = ?, completed_at = ?, rrule = ?, recurrence = ?, pending_op = ?,
-                    push_failures = 0, push_retry_at = NULL,
+                    push_failures = 0, push_retry_at = NULL, advanced_from = ?,
                     reminded_at = CASE WHEN ? THEN NULL ELSE reminded_at END,
                     updated_at = ?
              WHERE id = ? AND updated_at = ?",
@@ -523,6 +555,7 @@ impl<'a> TaskRepository<'a> {
         .bind(completion.rrule.as_deref())
         .bind(recurrence)
         .bind(pending)
+        .bind(completion.advanced_from.as_deref())
         .bind(reminder_changed)
         .bind(now())
         .bind(id)
@@ -555,6 +588,7 @@ impl<'a> TaskRepository<'a> {
         sqlx::query(
             "UPDATE tasks SET completed_at = ?, due_at = ?, start_at = ?, reminder_at = ?,
                     rrule = ?, pending_op = ?, push_failures = 0, push_retry_at = NULL,
+                    advanced_from = ?,
                     reminded_at = CASE WHEN reminder_at IS ? THEN reminded_at ELSE NULL END,
                     updated_at = ?
              WHERE id = ?",
@@ -565,7 +599,42 @@ impl<'a> TaskRepository<'a> {
         .bind(completion.reminder_at.as_deref())
         .bind(completion.rrule.as_deref())
         .bind(pending)
+        .bind(completion.advanced_from.as_deref())
         .bind(completion.reminder_at.as_deref())
+        .bind(now())
+        .bind(id)
+        .execute(self.pool)
+        .await?;
+        self.get(id).await
+    }
+
+    /// Undo of completing a repeating task: put back the occurrence it left
+    /// (due date, start, reminder and COUNT). The change goes to the server
+    /// like any edit. A task changed since has nothing to undo.
+    pub async fn undo_advance(&self, id: &str) -> Result<TaskRecord, TaskError> {
+        let state = self.task_state(id).await?;
+        let list = self.list_state(&state.list_id).await?;
+        let snapshot =
+            sqlx::query_scalar::<_, Option<String>>("SELECT advanced_from FROM tasks WHERE id = ?")
+                .bind(id)
+                .fetch_one(self.pool)
+                .await?
+                .and_then(|value| serde_json::from_str::<Occurrence>(&value).ok())
+                .ok_or(TaskError::TaskChanged)?;
+        let pending = next_pending(&list.provider, state.pending_op.as_deref());
+        sqlx::query(
+            "UPDATE tasks SET due_at = ?, start_at = ?, reminder_at = ?, rrule = ?,
+                    pending_op = ?, advanced_from = NULL, push_failures = 0, push_retry_at = NULL,
+                    reminded_at = CASE WHEN reminder_at IS ? THEN reminded_at ELSE NULL END,
+                    updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(snapshot.due_at.as_deref())
+        .bind(snapshot.start_at.as_deref())
+        .bind(snapshot.reminder_at.as_deref())
+        .bind(snapshot.rrule.as_deref())
+        .bind(pending)
+        .bind(snapshot.reminder_at.as_deref())
         .bind(now())
         .bind(id)
         .execute(self.pool)
@@ -673,18 +742,25 @@ impl<'a> TaskRepository<'a> {
     ) -> Result<String, TaskError> {
         let id = remote_list_id(list.account_id, list.provider, list.remote_id);
         let at = now();
+        let existing = sqlx::query_as::<_, (bool, Option<String>, Option<String>)>(
+            "SELECT read_only, read_only_reason, read_only_since FROM task_lists WHERE id = ?",
+        )
+        .bind(&id)
+        .fetch_optional(self.pool)
+        .await?;
+        let (read_only, reason, since) = read_only_after_discovery(list, existing, &at);
         sqlx::query(
             "INSERT INTO task_lists
-                (id, account_id, provider, remote_id, name, color, read_only, mixed, gone,
-                 created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, 0, ?, ?)
+                (id, account_id, provider, remote_id, name, color, read_only, read_only_reason,
+                 read_only_since, mixed, gone, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name, color = excluded.color, mixed = excluded.mixed, gone = 0,
-                -- Unknown privileges keep what a refused write taught the list.
-                read_only = CASE WHEN ? IS NULL THEN task_lists.read_only
-                    ELSE excluded.read_only END,
-                updated_at = CASE WHEN (task_lists.name, task_lists.color, task_lists.mixed)
-                    IS (excluded.name, excluded.color, excluded.mixed)
+                read_only = excluded.read_only, read_only_reason = excluded.read_only_reason,
+                read_only_since = excluded.read_only_since,
+                updated_at = CASE WHEN (task_lists.name, task_lists.color, task_lists.mixed,
+                        task_lists.read_only)
+                    IS (excluded.name, excluded.color, excluded.mixed, excluded.read_only)
                     THEN task_lists.updated_at ELSE excluded.updated_at END",
         )
         .bind(&id)
@@ -693,11 +769,12 @@ impl<'a> TaskRepository<'a> {
         .bind(list.remote_id)
         .bind(list.name)
         .bind(list.color)
-        .bind(list.read_only)
+        .bind(read_only)
+        .bind(reason)
+        .bind(since)
         .bind(list.mixed)
         .bind(&at)
         .bind(&at)
-        .bind(list.read_only)
         .execute(self.pool)
         .await?;
         Ok(id)
@@ -730,9 +807,13 @@ impl<'a> TaskRepository<'a> {
             .await?;
             if pending {
                 kept += sqlx::query(
-                    "UPDATE task_lists SET gone = 1, read_only = 1, updated_at = ?
+                    "UPDATE task_lists SET gone = 1, read_only = 1,
+                            read_only_reason = CASE WHEN read_only = 1 THEN read_only_reason
+                                ELSE 'gone' END,
+                            read_only_since = COALESCE(read_only_since, ?), updated_at = ?
                      WHERE id = ? AND gone = 0",
                 )
+                .bind(now())
                 .bind(now())
                 .bind(&id)
                 .execute(self.pool)
@@ -751,11 +832,16 @@ impl<'a> TaskRepository<'a> {
 
     /// A refused write (403) taught us the list is read-only.
     pub async fn mark_list_read_only(&self, list_id: &str) -> Result<(), TaskError> {
-        sqlx::query("UPDATE task_lists SET read_only = 1, updated_at = ? WHERE id = ?")
-            .bind(now())
-            .bind(list_id)
-            .execute(self.pool)
-            .await?;
+        sqlx::query(
+            "UPDATE task_lists SET read_only = 1, read_only_reason = 'refused',
+                    read_only_since = ?, updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(now())
+        .bind(now())
+        .bind(list_id)
+        .execute(self.pool)
+        .await?;
         Ok(())
     }
 
@@ -770,12 +856,22 @@ impl<'a> TaskRepository<'a> {
 
     /// Pending changes whose backoff, if any, has run out.
     pub async fn pending(&self, list_id: &str) -> Result<Vec<PendingTask>, TaskError> {
+        self.pending_due(list_id, false).await
+    }
+
+    /// Pending changes; `ignore_backoff` for a manual sync, which tries all.
+    pub async fn pending_due(
+        &self,
+        list_id: &str,
+        ignore_backoff: bool,
+    ) -> Result<Vec<PendingTask>, TaskError> {
         sqlx::query_as::<_, PendingTask>(&format!(
             "{PENDING_SELECT} WHERE list_id = ? AND pending_op IS NOT NULL
-               AND (push_retry_at IS NULL OR push_retry_at <= ?)
+               AND (? OR push_retry_at IS NULL OR push_retry_at <= ?)
              ORDER BY updated_at"
         ))
         .bind(list_id)
+        .bind(ignore_backoff)
         .bind(now())
         .fetch_all(self.pool)
         .await
@@ -836,10 +932,17 @@ impl<'a> TaskRepository<'a> {
         .bind(id)
         .execute(self.pool)
         .await?;
-        sqlx::query("DELETE FROM tasks WHERE id = ? AND remote_id IS NULL")
-            .bind(id)
-            .execute(self.pool)
-            .await?;
+        // A creation the server never took is not thrown away: it stays on
+        // this device.
+        let unsent: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ? AND remote_id IS NULL)",
+        )
+        .bind(id)
+        .fetch_one(self.pool)
+        .await?;
+        if unsent {
+            self.keep_as_local(id).await?;
+        }
         Ok(())
     }
 
@@ -955,18 +1058,19 @@ impl<'a> TaskRepository<'a> {
         let at = now();
         let result = sqlx::query(
             "INSERT INTO tasks
-                (id, list_id, uid, title, notes, due_at, start_at, rrule, recurrence,
+                (id, list_id, uid, title, notes, due_at, due_tz, start_at, rrule, recurrence,
                  reminder_at, priority, completed_at,
                  thread_id, message_id, remote_id, remote_version, remote_payload, pending_op,
                  created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                      (SELECT thread_id FROM messages WHERE ? IS NOT NULL
                         AND account_id IN (SELECT id FROM accounts) AND message_id_header = ?
                         AND thread_id IS NOT NULL LIMIT 1),
                      ?, ?, ?, ?, NULL, ?, ?)
              ON CONFLICT(list_id, remote_id) WHERE remote_id IS NOT NULL DO UPDATE SET
                 uid = excluded.uid, title = excluded.title, notes = excluded.notes,
-                due_at = excluded.due_at, start_at = excluded.start_at,
+                due_at = excluded.due_at, due_tz = excluded.due_tz,
+                start_at = excluded.start_at, advanced_from = NULL,
                 rrule = excluded.rrule, recurrence = excluded.recurrence,
                 reminder_at = excluded.reminder_at,
                 reminded_at = CASE WHEN tasks.reminder_at IS excluded.reminder_at
@@ -985,6 +1089,7 @@ impl<'a> TaskRepository<'a> {
         .bind(&fields.title)
         .bind(fields.notes.as_deref())
         .bind(fields.due_at.as_deref())
+        .bind(task.due_tz)
         .bind(task.start_at)
         .bind(task.rrule)
         .bind(task.recurrence)
@@ -1032,6 +1137,52 @@ impl<'a> TaskRepository<'a> {
             }
         }
         Ok(removal)
+    }
+}
+
+/// How long a list stays read-only after a refused write before a sync tries
+/// writing to it again (a manual "Sync tasks" tries at once).
+const REFUSED_RETRY_HOURS: i64 = 24;
+
+/// A list's read-only state after the server described it again.
+///
+/// The privilege set, when the server sends one, decides. Without it: a list
+/// that was read-only only because it had gone is writable again now that it
+/// is back, and one a refused write made read-only is given another try after
+/// a day or when the person syncs by hand.
+fn read_only_after_discovery(
+    list: &RemoteListWrite<'_>,
+    existing: Option<(bool, Option<String>, Option<String>)>,
+    now: &str,
+) -> (bool, Option<&'static str>, Option<String>) {
+    if let Some(read_only) = list.read_only {
+        return if read_only {
+            (true, Some("server"), Some(now.to_string()))
+        } else {
+            (false, None, None)
+        };
+    }
+    let Some((read_only, reason, since)) = existing else {
+        return (false, None, None);
+    };
+    match reason.as_deref() {
+        Some("gone") => (false, None, None),
+        Some("refused") => {
+            let expired = since
+                .as_deref()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .is_none_or(|since| {
+                    chrono::Utc::now() - since.with_timezone(&chrono::Utc)
+                        >= chrono::Duration::hours(REFUSED_RETRY_HOURS)
+                });
+            if list.reprobe || expired {
+                (false, None, None)
+            } else {
+                (true, Some("refused"), since)
+            }
+        }
+        Some("server") => (read_only, Some("server"), since),
+        _ => (read_only, None, since),
     }
 }
 
@@ -1125,6 +1276,7 @@ mod tests {
                 color: None,
                 read_only: None,
                 mixed: false,
+                reprobe: false,
             })
             .await
             .unwrap();
@@ -1177,6 +1329,7 @@ mod tests {
                 color: None,
                 read_only: None,
                 mixed: false,
+                reprobe: false,
             })
             .await
             .unwrap();
@@ -1412,6 +1565,7 @@ mod tests {
                 color: None,
                 read_only: None,
                 mixed: true,
+                reprobe: false,
             })
             .await
             .unwrap();
@@ -1445,6 +1599,7 @@ mod tests {
             color: None,
             read_only,
             mixed: false,
+            reprobe: false,
         };
         let list = repo.upsert_remote_list(&write_list(None)).await.unwrap();
         repo.mark_list_read_only(&list).await.unwrap();
@@ -1473,6 +1628,7 @@ mod tests {
                 color: None,
                 read_only: None,
                 mixed: false,
+                reprobe: false,
             })
             .await
             .unwrap();
@@ -1494,6 +1650,132 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(repo.pending(&list).await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_list_that_comes_back_is_writable_again() {
+        let pool = pool().await;
+        account(&pool, "acc").await;
+        let repo = TaskRepository::new(&pool);
+        let write_list = RemoteListWrite {
+            account_id: "acc",
+            provider: "caldav",
+            remote_id: "/tasks/",
+            name: "Tasks",
+            color: None,
+            read_only: None,
+            mixed: false,
+            reprobe: false,
+        };
+        let list = repo.upsert_remote_list(&write_list).await.unwrap();
+        repo.create(&list, &write("Unsent"), None, None)
+            .await
+            .unwrap();
+        repo.retain_remote_lists("acc", "caldav", &[])
+            .await
+            .unwrap();
+        assert!(repo
+            .list_lists()
+            .await
+            .unwrap()
+            .iter()
+            .any(|item| item.id == list && item.gone && item.read_only));
+        // The server lists it again (a hiccup, a restored backup).
+        repo.upsert_remote_list(&write_list).await.unwrap();
+        let back = repo
+            .list_lists()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|item| item.id == list)
+            .unwrap();
+        assert!(!back.gone && !back.read_only);
+    }
+
+    #[tokio::test]
+    async fn a_refused_list_is_tried_again_after_a_day() {
+        let pool = pool().await;
+        account(&pool, "acc").await;
+        let repo = TaskRepository::new(&pool);
+        let write_list = RemoteListWrite {
+            account_id: "acc",
+            provider: "caldav",
+            remote_id: "/shared/",
+            name: "Shared",
+            color: None,
+            read_only: None,
+            mixed: false,
+            reprobe: false,
+        };
+        let list = repo.upsert_remote_list(&write_list).await.unwrap();
+        repo.mark_list_read_only(&list).await.unwrap();
+        repo.upsert_remote_list(&write_list).await.unwrap();
+        let read_only = |lists: Vec<TaskListRecord>| {
+            lists
+                .into_iter()
+                .find(|item| item.id == list)
+                .unwrap()
+                .read_only
+        };
+        assert!(read_only(repo.list_lists().await.unwrap()));
+        sqlx::query("UPDATE task_lists SET read_only_since = '2026-01-01T00:00:00Z'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        repo.upsert_remote_list(&write_list).await.unwrap();
+        assert!(!read_only(repo.list_lists().await.unwrap()));
+        // Read-only by the server's own privilege set stays until it says otherwise.
+        repo.upsert_remote_list(&RemoteListWrite {
+            read_only: Some(true),
+            ..write_list.clone()
+        })
+        .await
+        .unwrap();
+        repo.upsert_remote_list(&RemoteListWrite {
+            reprobe: true,
+            ..write_list.clone()
+        })
+        .await
+        .unwrap();
+        assert!(read_only(repo.list_lists().await.unwrap()));
+    }
+
+    #[tokio::test]
+    async fn undo_puts_a_repeating_task_back_on_the_occurrence_it_left() {
+        let pool = pool().await;
+        let repo = TaskRepository::new(&pool);
+        repo.ensure_default_list().await.unwrap();
+        let mut fields = write("Bins out");
+        fields.due_at = Some("2026-11-10".into());
+        let task = repo
+            .create(DEFAULT_LOCAL_LIST_ID, &fields, None, None)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE tasks SET rrule = 'FREQ=WEEKLY;COUNT=5', recurrence = 'simple', start_at = '2026-11-09' WHERE id = ?")
+            .bind(&task.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let next = repo
+            .set_completed(&task.id, Some("2026-11-10T08:00:00Z"))
+            .await
+            .unwrap();
+        assert_eq!(next.due_at.as_deref(), Some("2026-11-17"));
+        let back = repo.undo_advance(&task.id).await.unwrap();
+        assert_eq!(back.due_at.as_deref(), Some("2026-11-10"));
+        let (start, rrule): (Option<String>, Option<String>) =
+            sqlx::query_as("SELECT start_at, rrule FROM tasks WHERE id = ?")
+                .bind(&task.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(start.as_deref(), Some("2026-11-09"));
+        assert_eq!(rrule.as_deref(), Some("FREQ=WEEKLY;COUNT=5"));
+        // Nothing left to undo.
+        assert!(matches!(
+            repo.undo_advance(&task.id).await,
+            Err(TaskError::TaskChanged)
+        ));
     }
 
     #[tokio::test]
@@ -1531,6 +1813,7 @@ mod tests {
                 color: None,
                 read_only: None,
                 mixed: false,
+                reprobe: false,
             })
             .await
             .unwrap();
@@ -1547,6 +1830,7 @@ mod tests {
                         fields: &fields,
                         message_id: None,
                         start_at: None,
+                        due_tz: None,
                         rrule: None,
                         recurrence: None,
                     },
@@ -1573,6 +1857,7 @@ mod tests {
                     fields: &write("Newer server title"),
                     message_id: None,
                     start_at: None,
+                    due_tz: None,
                     rrule: None,
                     recurrence: None,
                 },

@@ -42,7 +42,9 @@ export function useTaskActions() {
       const saved = await tasks.setCompleted(task, completing);
       if (completing && !saved.completed_at && saved.due_at) {
         // A repeating task moved on to its next occurrence.
-        toast.info(t('tasks.toast.nextOccurrence', { title: task.title, due: dueReceipt(saved.due_at) }));
+        toast.info(t('tasks.toast.nextOccurrence', { title: task.title, due: dueReceipt(saved.due_at) }), {
+          action: { label: t('common.undo'), undo: true, handler: () => tasks.undoAdvance(saved) },
+        });
       } else if (completing) {
         toast.info(t('tasks.toast.completed', { title: task.title }), {
           action: { label: t('common.undo'), undo: true, handler: () => tasks.setCompleted(saved, false) },

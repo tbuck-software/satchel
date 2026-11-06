@@ -30,6 +30,7 @@ vi.mock('@/services/backend/tasks', () => ({
   backendSetTaskCompleted: vi.fn(),
   backendDeleteTask: vi.fn(async () => undefined),
   backendRestoreTask: vi.fn(),
+  backendUndoTaskAdvance: vi.fn(),
   backendSyncTasks: vi.fn(),
   backendCreateTaskList: vi.fn(),
   backendRenameTaskList: vi.fn(),

@@ -22,6 +22,10 @@ export type TaskSyncSummary = {
      */
     read_only_dropped: number;
     /**
+     * New tasks a read-only list refused; kept as local tasks.
+     */
+    read_only_kept: number;
+    /**
      * Unsent edits of tasks the server deleted, kept as local tasks.
      */
     kept_local: number;

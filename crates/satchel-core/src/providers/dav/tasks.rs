@@ -131,6 +131,33 @@ fn remote_error(error: DavWriteError) -> RemoteError {
     }
 }
 
+/// After `If-None-Match: *` failed: take over the resource at the task's
+/// UID-derived name if it is this task (an earlier PUT that landed before the
+/// app recorded it). Another resource there, or none any more (it went between
+/// the PUT and the look), is a failure to retry, never a conflict that would
+/// throw the new task away.
+pub(crate) fn adopt_existing(
+    uid: &str,
+    url: &str,
+    existing: Option<RemoteItem>,
+) -> Result<Written, RemoteError> {
+    let Some(existing) = existing else {
+        return Err(other(format!(
+            "{url} refused the new task but holds nothing"
+        )));
+    };
+    if !vtodo::parse(&existing.payload).is_some_and(|fields| fields.uid == uid) {
+        return Err(other(format!("{url} already holds another resource")));
+    }
+    Ok(Written {
+        remote_id: url.to_string(),
+        version: existing
+            .version
+            .filter(|version| !version.trim().is_empty()),
+        adopted: true,
+    })
+}
+
 fn calendar_multiget_body(hrefs: &[Url]) -> String {
     let mut body = String::from(
         r#"<?xml version="1.0" encoding="utf-8"?>
@@ -241,15 +268,22 @@ impl TaskRemote for CalDavTaskRemote {
                 .map_err(|err| other(err.to_string()))?,
         };
         let create = remote_id.is_none();
+        let version = version.map(str::trim).filter(|value| !value.is_empty());
+        if !create && version.is_none() {
+            // A replacement without a precondition would overwrite blind.
+            return Err(other(
+                "a replacement needs the version it was edited against",
+            ));
+        }
         match dav_put(&self.client, &self.config, &url, payload, create, version).await {
-            Ok(Some(etag)) => Ok(Written {
+            Ok(Some(etag)) if !etag.trim().is_empty() => Ok(Written {
                 remote_id: url.to_string(),
                 version: Some(etag),
                 adopted: false,
             }),
             // Some servers answer a PUT without an ETag (they rewrote the
             // resource). Ask for it now, so the next edit has a precondition.
-            Ok(None) => Ok(Written {
+            Ok(_) => Ok(Written {
                 remote_id: url.to_string(),
                 version: self.etag_of(&url).await,
                 adopted: false,
@@ -263,17 +297,8 @@ impl TaskRemote for CalDavTaskRemote {
                     .fetch(collection.as_str(), &[url.to_string()])
                     .await?
                     .into_iter()
-                    .next()
-                    .ok_or(RemoteError::Conflict)?;
-                if vtodo::parse(&existing.payload).is_some_and(|fields| fields.uid == uid) {
-                    Ok(Written {
-                        remote_id: url.to_string(),
-                        version: existing.version,
-                        adopted: true,
-                    })
-                } else {
-                    Err(other(format!("{url} already holds another resource")))
-                }
+                    .next();
+                adopt_existing(uid, url.as_str(), existing)
             }
             Err(error) => Err(remote_error(error)),
         }
@@ -335,6 +360,35 @@ mod tests {
             ]
         );
         assert_eq!(lists[0].color.as_deref(), Some("#00aaff"));
+    }
+
+    fn item(uid: &str) -> RemoteItem {
+        RemoteItem {
+            remote_id: "https://dav.example.test/t/u.ics".into(),
+            version: Some("\"7\"".into()),
+            payload: vtodo::build(&TaskFields {
+                uid: uid.into(),
+                title: "x".into(),
+                ..Default::default()
+            }),
+        }
+    }
+
+    #[test]
+    fn a_refused_create_adopts_only_the_same_task() {
+        let url = "https://dav.example.test/t/u.ics";
+        let adopted = adopt_existing("u", url, Some(item("u"))).unwrap();
+        assert!(adopted.adopted);
+        assert_eq!(adopted.version.as_deref(), Some("\"7\""));
+        assert!(matches!(
+            adopt_existing("u", url, Some(item("someone-else"))),
+            Err(RemoteError::Other(_))
+        ));
+        // Gone between the PUT and the look: retry later, do not drop the task.
+        assert!(matches!(
+            adopt_existing("u", url, None),
+            Err(RemoteError::Other(_))
+        ));
     }
 
     #[test]

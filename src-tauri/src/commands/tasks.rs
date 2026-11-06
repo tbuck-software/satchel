@@ -255,6 +255,18 @@ pub async fn delete_task(
     Ok(())
 }
 
+/// Undo completing a repeating task: back to the occurrence it moved on from.
+#[tauri::command]
+pub async fn undo_task_advance(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, SqlitePool>,
+    id: String,
+) -> CommandResult<TaskRecord> {
+    let task = TaskRepository::new(pool.inner()).undo_advance(&id).await?;
+    push_soon(&app, pool.inner(), &task.list_id).await;
+    Ok(task)
+}
+
 /// Undo a deletion that has not reached the server yet.
 #[tauri::command]
 pub async fn restore_task(
@@ -312,7 +324,13 @@ pub async fn sync_tasks(
     app: tauri::AppHandle,
     pool: tauri::State<'_, SqlitePool>,
     account_id: Option<String>,
+    manual: Option<bool>,
 ) -> CommandResult<TasksSyncResult> {
+    // "Sync tasks" by hand retries what is backing off and lists a refused
+    // write made read-only; opening the view does not.
+    let options = sync::SyncOptions {
+        manual: manual.unwrap_or(false),
+    };
     let accounts = sqlx::query_as::<_, (String, String)>(
         "SELECT id, email FROM accounts WHERE is_active = 1 AND (? IS NULL OR id = ?)",
     )
@@ -336,7 +354,7 @@ pub async fn sync_tasks(
                 continue;
             }
         };
-        match sync::sync_account(pool.inner(), &account_id, remote.as_ref()).await {
+        match sync::sync_account_with(pool.inner(), &account_id, remote.as_ref(), options).await {
             Ok(summary) => result.summary.merge(&summary),
             Err(error) => {
                 tracing::warn!(%error, %account_id, "task sync failed");

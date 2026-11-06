@@ -829,6 +829,7 @@ pub fn run() {
             commands::tasks::set_task_completed,
             commands::tasks::delete_task,
             commands::tasks::restore_task,
+            commands::tasks::undo_task_advance,
             commands::tasks::create_task_list,
             commands::tasks::rename_task_list,
             commands::tasks::delete_task_list,

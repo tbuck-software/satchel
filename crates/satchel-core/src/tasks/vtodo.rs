@@ -8,7 +8,8 @@
 //! instead of ending its series (`super::recurrence`).
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 
-use crate::email::calendar::{local_to_utc, normalize_ics_dt};
+use crate::email::calendar::{local_to_utc, normalize_ics_dt, normalize_tzid};
+use crate::tasks::recurrence::{ZONE_FLOATING, ZONE_UTC};
 
 /// The fields of a task that live in its iCalendar resource.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -28,6 +29,9 @@ pub struct TaskFields {
     pub message_id: Option<String>,
     /// DTSTART, in the same two forms as `due_at`.
     pub start_at: Option<String>,
+    /// How DUE was written, for stepping a repeating task on the right clock:
+    /// its TZID, `UTC` for a `Z` stamp, `floating`, or None for a date.
+    pub due_tz: Option<String>,
     /// The RRULE value, verbatim.
     pub rrule: Option<String>,
     /// EXDATE, RDATE or overridden instances next to the RRULE: a series
@@ -193,9 +197,54 @@ fn consistent_start(start: Option<&str>, due: Option<&str>) -> Option<String> {
     Some(start.to_string())
 }
 
-/// `NAME;VALUE=DATE:…`, or a date-time in `zone` when the property had one
-/// (so an untouched TZID survives a moved due date), else in UTC.
-fn date_line(name: &str, value: &str, zone: Option<&str>) -> Option<String> {
+/// How a date-time property is written, kept when its value changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Form {
+    Utc,
+    Floating,
+    Zone(String),
+}
+
+impl Form {
+    fn of(line: &Line) -> Self {
+        match line.param("TZID") {
+            Some(tzid) => Self::Zone(tzid.to_string()),
+            None if line.value.trim().ends_with('Z') => Self::Utc,
+            None => Self::Floating,
+        }
+    }
+
+    /// From `TaskFields::due_tz`, for a property the resource did not have.
+    fn stored(due_tz: Option<&str>) -> Self {
+        match due_tz {
+            None | Some(ZONE_UTC) => Self::Utc,
+            Some(ZONE_FLOATING) => Self::Floating,
+            Some(tzid) => Self::Zone(tzid.to_string()),
+        }
+    }
+}
+
+/// How a DUE line was written, as `TaskFields::due_tz` records it.
+fn due_zone(line: &Line) -> Option<String> {
+    let value = line.value.trim();
+    if line
+        .param("VALUE")
+        .is_some_and(|kind| kind.eq_ignore_ascii_case("DATE"))
+        || value.len() == 8
+    {
+        return None;
+    }
+    Some(match Form::of(line) {
+        Form::Utc => ZONE_UTC.to_string(),
+        Form::Floating => ZONE_FLOATING.to_string(),
+        Form::Zone(tzid) => tzid,
+    })
+}
+
+/// `NAME;VALUE=DATE:…`, or a date-time in the property's own form: in its
+/// TZID (so a moved due date keeps its zone), floating (wall time where the
+/// user is, as it was read), or UTC.
+fn date_line(name: &str, value: &str, form: &Form) -> Option<String> {
     if is_date(value) {
         let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()?;
         return Some(format!("{name};VALUE=DATE:{}", date.format("%Y%m%d")));
@@ -203,13 +252,24 @@ fn date_line(name: &str, value: &str, zone: Option<&str>) -> Option<String> {
     let instant = DateTime::parse_from_rfc3339(value)
         .ok()?
         .with_timezone(&Utc);
-    if let Some((tzid, tz)) =
-        zone.and_then(|tzid| tzid.parse::<chrono_tz::Tz>().ok().map(|tz| (tzid, tz)))
-    {
-        return Some(format!(
-            "{name};TZID={tzid}:{}",
-            instant.with_timezone(&tz).format("%Y%m%dT%H%M%S")
-        ));
+    match form {
+        Form::Zone(tzid) => {
+            if let Ok(tz) = normalize_tzid(tzid).parse::<chrono_tz::Tz>() {
+                return Some(format!(
+                    "{name};TZID={tzid}:{}",
+                    instant.with_timezone(&tz).format("%Y%m%dT%H%M%S")
+                ));
+            }
+        }
+        Form::Floating => {
+            return Some(format!(
+                "{name}:{}",
+                instant
+                    .with_timezone(&chrono::Local)
+                    .format("%Y%m%dT%H%M%S")
+            ));
+        }
+        Form::Utc => {}
     }
     Some(format!("{name}:{}", instant.format("%Y%m%dT%H%M%SZ")))
 }
@@ -319,8 +379,13 @@ fn display_alarms(lines: &[String], todo: &Todo) -> Vec<(usize, usize)> {
         .collect()
 }
 
-fn reminder_from_alarms(lines: &[String], todo: &Todo, due: Option<&str>) -> Option<String> {
-    let start = property(lines, todo, "DTSTART").and_then(|line| date_value(&line));
+/// The reminder the DISPLAY alarms give for this due date and start.
+fn reminder_from_alarms(
+    lines: &[String],
+    todo: &Todo,
+    due: Option<&str>,
+    start: Option<&str>,
+) -> Option<String> {
     for (begin, end) in display_alarms(lines, todo) {
         let Some(trigger) = lines[begin + 1..end]
             .iter()
@@ -346,11 +411,7 @@ fn reminder_from_alarms(lines: &[String], todo: &Todo, due: Option<&str>) -> Opt
         let related_end = trigger
             .param("RELATED")
             .is_some_and(|value| value.eq_ignore_ascii_case("END"));
-        let anchor = if related_end {
-            due
-        } else {
-            start.as_deref().or(due)
-        };
+        let anchor = if related_end { due } else { start.or(due) };
         if let Some(base) = anchor.and_then(due_instant) {
             return Some(format_utc(base + offset));
         }
@@ -374,6 +435,7 @@ pub fn parse(raw: &str) -> Option<TaskFields> {
     };
     let uid = text("UID")?;
     let due_at = property(&lines, &todo, "DUE").and_then(|line| date_value(&line));
+    let start_at = property(&lines, &todo, "DTSTART").and_then(|line| date_value(&line));
     let status = text("STATUS").map(|value| value.to_ascii_uppercase());
     let completed_at = property(&lines, &todo, "COMPLETED")
         .and_then(|line| normalize_ics_dt(line.value.trim(), line.param("TZID"), false))
@@ -405,8 +467,9 @@ pub fn parse(raw: &str) -> Option<TaskFields> {
                 .is_some_and(|line| matches!(line.name.as_str(), "EXDATE" | "RDATE"))
         });
     Some(TaskFields {
-        reminder_at: reminder_from_alarms(&lines, &todo, due_at.as_deref()),
-        start_at: property(&lines, &todo, "DTSTART").and_then(|line| date_value(&line)),
+        reminder_at: reminder_from_alarms(&lines, &todo, due_at.as_deref(), start_at.as_deref()),
+        due_tz: property(&lines, &todo, "DUE").and_then(|line| due_zone(&line)),
+        start_at,
         rrule: property(&lines, &todo, "RRULE")
             .map(|line| line.value.trim().to_string())
             .filter(|value| !value.is_empty()),
@@ -467,14 +530,14 @@ pub fn build(fields: &TaskFields) -> String {
         lines.push(format!("DESCRIPTION:{}", escape_text(notes)));
     }
     if let Some(start) = consistent_start(fields.start_at.as_deref(), fields.due_at.as_deref())
-        .and_then(|start| date_line("DTSTART", &start, None))
+        .and_then(|start| date_line("DTSTART", &start, &Form::stored(fields.due_tz.as_deref())))
     {
         lines.push(start);
     }
     if let Some(due) = fields
         .due_at
         .as_deref()
-        .and_then(|due| date_line("DUE", due, None))
+        .and_then(|due| date_line("DUE", due, &Form::stored(fields.due_tz.as_deref())))
     {
         lines.push(due);
     }
@@ -550,12 +613,14 @@ pub fn patch(original: &str, fields: &TaskFields) -> String {
             line.into_iter().collect(),
         );
     }
-    let zone_of = |name: &str| {
-        property(&lines, &todo, name).and_then(|line| line.param("TZID").map(str::to_string))
-    };
+    let due_form = property(&lines, &todo, "DUE")
+        .map(|line| Form::of(&line))
+        .unwrap_or_else(|| Form::stored(fields.due_tz.as_deref()));
+    let start_form = property(&lines, &todo, "DTSTART")
+        .map(|line| Form::of(&line))
+        .unwrap_or_else(|| due_form.clone());
     if fields.due_at != before.due_at {
         // DUE and DURATION are exclusive.
-        let zone = zone_of("DUE");
         replace(
             &mut drop,
             &mut added,
@@ -563,7 +628,7 @@ pub fn patch(original: &str, fields: &TaskFields) -> String {
             fields
                 .due_at
                 .as_deref()
-                .and_then(|due| date_line("DUE", due, zone.as_deref()))
+                .and_then(|due| date_line("DUE", due, &due_form))
                 .into_iter()
                 .collect(),
         );
@@ -571,14 +636,13 @@ pub fn patch(original: &str, fields: &TaskFields) -> String {
     if fields.due_at != before.due_at || fields.start_at != before.start_at {
         let start = consistent_start(fields.start_at.as_deref(), fields.due_at.as_deref());
         if start != before.start_at {
-            let zone = zone_of("DTSTART");
             replace(
                 &mut drop,
                 &mut added,
                 &["DTSTART"],
                 start
                     .as_deref()
-                    .and_then(|start| date_line("DTSTART", start, zone.as_deref()))
+                    .and_then(|start| date_line("DTSTART", start, &start_form))
                     .into_iter()
                     .collect(),
             );
@@ -613,6 +677,27 @@ pub fn patch(original: &str, fields: &TaskFields) -> String {
             status_lines(fields),
         );
     }
+    // A repeating task that moved on starts its next occurrence afresh.
+    let advanced = fields.rrule.is_some()
+        && fields.completed_at.is_none()
+        && before.completed_at.is_none()
+        && fields.due_at != before.due_at;
+    if advanced {
+        let in_progress = todo.properties.iter().any(|&index| {
+            Line::parse(&lines[index]).is_some_and(|line| {
+                (line.name == "STATUS" && line.value.trim().eq_ignore_ascii_case("IN-PROCESS"))
+                    || line.name == "PERCENT-COMPLETE"
+            })
+        });
+        if in_progress {
+            replace(
+                &mut drop,
+                &mut added,
+                &["STATUS", "PERCENT-COMPLETE"],
+                vec!["STATUS:NEEDS-ACTION".to_string()],
+            );
+        }
+    }
     if fields.message_id != before.message_id {
         let line = fields
             .message_id
@@ -626,7 +711,12 @@ pub fn patch(original: &str, fields: &TaskFields) -> String {
         );
     }
     let changed = !added.is_empty() || drop.iter().any(|value| *value);
-    let reminder_changed = fields.reminder_at != before.reminder_at;
+    // A relative alarm that still gives the new reminder (the task moved and
+    // the reminder with it) stays as it is, offset and RELATED included.
+    let start = consistent_start(fields.start_at.as_deref(), fields.due_at.as_deref());
+    let reminder_changed = fields.reminder_at != before.reminder_at
+        && reminder_from_alarms(&lines, &todo, fields.due_at.as_deref(), start.as_deref())
+            != fields.reminder_at;
     if !changed && !reminder_changed {
         return join(&lines);
     }
@@ -719,6 +809,7 @@ mod tests {
             completed_at: None,
             message_id: Some("<m1@example.test>".into()),
             start_at: None,
+            due_tz: Some(ZONE_UTC.into()),
             rrule: Some("FREQ=WEEKLY;COUNT=3".into()),
             rrule_extras: false,
         };
@@ -856,6 +947,72 @@ mod tests {
         let first = parse(raw).unwrap();
         assert_eq!(first.completed_at.as_deref(), Some("1970-01-01T00:00:00Z"));
         assert_eq!(parse(raw).unwrap(), first);
+    }
+
+    /// Host-independent: run under `TZ=UTC` and `TZ=Europe/Berlin`.
+    #[test]
+    fn an_advanced_new_york_task_stays_at_nine_in_new_york() {
+        use crate::tasks::recurrence::{advance, classify, Recurrence, Zone};
+        let raw = "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:ny\r\nSUMMARY:Standup notes\r\nDUE;TZID=America/New_York:20261028T090000\r\nRRULE:FREQ=WEEKLY\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:x\r\nTRIGGER;RELATED=END:-PT30M\r\nEND:VALARM\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+        let mut fields = parse(raw).unwrap();
+        assert_eq!(fields.due_tz.as_deref(), Some("America/New_York"));
+        let Recurrence::Simple(rule) =
+            classify(fields.rrule.as_deref(), false, fields.due_at.as_deref())
+        else {
+            panic!("weekly is simple");
+        };
+        let next = advance(
+            &rule,
+            "FREQ=WEEKLY",
+            fields.due_at.as_deref().unwrap(),
+            None,
+            fields.reminder_at.as_deref(),
+            Zone::from_stored(fields.due_tz.as_deref()),
+        )
+        .unwrap();
+        fields.due_at = Some(next.due_at);
+        fields.reminder_at = next.reminder_at;
+        let patched = patch(raw, &fields);
+        assert!(
+            patched.contains("DUE;TZID=America/New_York:20261104T090000\r\n"),
+            "{patched}"
+        );
+        // The alarm still sits 30 minutes before the (new) due time: untouched.
+        assert!(
+            patched.contains("TRIGGER;RELATED=END:-PT30M\r\n"),
+            "{patched}"
+        );
+        assert!(!patched.contains("VALUE=DATE-TIME"));
+    }
+
+    #[test]
+    fn a_floating_due_date_stays_floating_when_it_moves() {
+        use crate::tasks::recurrence::{advance, classify, Recurrence, Zone};
+        let raw = "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:f\r\nSUMMARY:Water plants\r\nDTSTART:20261110T080000\r\nDUE:20261110T090000\r\nRRULE:FREQ=WEEKLY\r\nSTATUS:IN-PROCESS\r\nPERCENT-COMPLETE:40\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+        let mut fields = parse(raw).unwrap();
+        assert_eq!(fields.due_tz.as_deref(), Some(ZONE_FLOATING));
+        let Recurrence::Simple(rule) =
+            classify(fields.rrule.as_deref(), false, fields.due_at.as_deref())
+        else {
+            panic!("weekly is simple");
+        };
+        let next = advance(
+            &rule,
+            "FREQ=WEEKLY",
+            fields.due_at.as_deref().unwrap(),
+            fields.start_at.as_deref(),
+            None,
+            Zone::from_stored(fields.due_tz.as_deref()),
+        )
+        .unwrap();
+        fields.due_at = Some(next.due_at);
+        fields.start_at = next.start_at;
+        let patched = patch(raw, &fields);
+        assert!(patched.contains("DUE:20261117T090000\r\n"), "{patched}");
+        assert!(patched.contains("DTSTART:20261117T080000\r\n"), "{patched}");
+        // The next occurrence starts afresh.
+        assert!(patched.contains("STATUS:NEEDS-ACTION\r\n"));
+        assert!(!patched.contains("PERCENT-COMPLETE") && !patched.contains("IN-PROCESS"));
     }
 
     #[test]

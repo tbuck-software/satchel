@@ -20,6 +20,11 @@ CREATE TABLE task_lists (
     name TEXT NOT NULL DEFAULT '',
     color TEXT,
     read_only INTEGER NOT NULL DEFAULT 0 CHECK (read_only IN (0, 1)),
+    -- Why: 'server' (its privilege set says so), 'refused' (a write got 403;
+    -- tried again after a day or on a manual sync), 'gone' (dropped by the
+    -- server; lifted if it comes back).
+    read_only_reason TEXT CHECK (read_only_reason IS NULL OR read_only_reason IN ('server', 'refused', 'gone')),
+    read_only_since TEXT,
     -- The collection also holds events (a Nextcloud or Fastmail calendar).
     -- Such a list stays out of sight until it holds a task.
     mixed INTEGER NOT NULL DEFAULT 0 CHECK (mixed IN (0, 1)),
@@ -45,6 +50,9 @@ CREATE TABLE tasks (
     notes TEXT,
     -- 'YYYY-MM-DD' for a due date, RFC 3339 UTC for a due date-time.
     due_at TEXT,
+    -- How DUE was written: its TZID, 'UTC', 'floating', or NULL (a date, or
+    -- a time Satchel set). A repeating task steps on that clock.
+    due_tz TEXT,
     -- DTSTART, in the same two forms.
     start_at TEXT,
     -- RRULE verbatim, and whether Satchel can step it ('simple': completing
@@ -70,6 +78,9 @@ CREATE TABLE tasks (
     -- refused task does not hold up the rest of its list.
     push_failures INTEGER NOT NULL DEFAULT 0,
     push_retry_at TEXT,
+    -- The occurrence a repeating task left when it was completed here, as
+    -- JSON, so Undo can put it back. Cleared by any other change.
+    advanced_from TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

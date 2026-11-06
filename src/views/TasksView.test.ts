@@ -41,6 +41,7 @@ vi.mock('@/services/backend/tasks', () => ({
   }),
   backendDeleteTask: vi.fn(async () => undefined),
   backendRestoreTask: vi.fn(),
+  backendUndoTaskAdvance: vi.fn(async (id: string) => ({ ...harness.tasks.find((item) => item.id === id)! })),
   backendCreateTaskList: vi.fn(),
   backendRenameTaskList: vi.fn(),
   backendDeleteTaskList: vi.fn(),
@@ -143,7 +144,12 @@ describe('tasks view', () => {
     await flushPromises();
     expect(tasksBackend.backendSetTaskCompleted).toHaveBeenCalledWith('weekly', true);
     expect(confirms.asked).not.toHaveBeenCalled();
-    expect(useToast().state.toasts.at(-1)?.message).toContain('Next: “weekly”');
+    const receipt = useToast().state.toasts.at(-1);
+    expect(receipt?.message).toContain('Next: “weekly”');
+    // Undo puts the occurrence back, here and on the server.
+    expect(receipt?.action?.undo).toBe(true);
+    await receipt?.action?.handler();
+    expect(tasksBackend.backendUndoTaskAdvance).toHaveBeenCalledWith('weekly');
 
     // The weekly task moved to 8 January, so the monthly one is first now.
     press('x');

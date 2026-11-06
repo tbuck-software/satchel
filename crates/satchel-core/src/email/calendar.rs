@@ -491,7 +491,7 @@ fn resolve_in_zone(
 ///
 /// Exchange and Outlook still emit Windows zone names, and some servers prefix
 /// the identifier with a solidus per RFC 5545's "globally unique" form.
-fn normalize_tzid(tzid: &str) -> String {
+pub(crate) fn normalize_tzid(tzid: &str) -> String {
     let trimmed = tzid.trim().trim_start_matches('/');
     let candidate = trimmed
         .strip_prefix("Customized Time Zone/")

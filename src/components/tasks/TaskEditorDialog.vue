@@ -187,7 +187,9 @@ async function submit() {
     if (original) {
       const saved = await tasks.update(original, fields);
       if (completing && !saved.completed_at && saved.due_at) {
-        toast.info(t('tasks.toast.nextOccurrence', { title: saved.title, due: dueReceipt(saved.due_at) }));
+        toast.info(t('tasks.toast.nextOccurrence', { title: saved.title, due: dueReceipt(saved.due_at) }), {
+          action: { label: t('common.undo'), undo: true, handler: () => tasks.undoAdvance(saved) },
+        });
       }
     } else {
       await tasks.create(fields, { listId: listId.value, threadId: threadId.value });

@@ -15,6 +15,7 @@ import {
   backendRestoreTask,
   backendSetTaskCompleted,
   backendSyncTasks,
+  backendUndoTaskAdvance,
   backendUpdateTask,
   type BackendTask,
   type BackendTaskFields,
@@ -44,6 +45,7 @@ export function syncNotices(summary: TaskSyncSummary): string[] {
   add(summary.conflicts, 'tasks.notices.conflicts');
   add(summary.restored, 'tasks.notices.restored');
   add(summary.read_only_dropped, 'tasks.notices.readOnlyDropped');
+  add(summary.read_only_kept, 'tasks.notices.readOnlyKept');
   add(summary.kept_local, 'tasks.notices.keptLocal');
   add(summary.lists_gone, 'tasks.notices.listsGone');
   return notices;
@@ -94,12 +96,12 @@ export const useTasksStore = defineStore('tasks', () => {
   }
 
   /** Push and pull remote lists, then reload. Returns the encoded errors. */
-  async function sync(): Promise<string[]> {
+  async function sync(manual = false): Promise<string[]> {
     if (!backendCommandsAvailable() || syncing.value) return [];
     syncing.value = true;
     lastSyncAt = Date.now();
     try {
-      const result = await backendSyncTasks();
+      const result = await backendSyncTasks({ manual });
       await load();
       return result.errors;
     } finally {
@@ -156,6 +158,13 @@ export const useTasksStore = defineStore('tasks', () => {
       put(before);
       throw error;
     }
+  }
+
+  /** Undo of completing a repeating task. */
+  async function undoAdvance(task: Task) {
+    const restored = await loader.mutate(() => backendUndoTaskAdvance(task.id));
+    put(restored);
+    return restored;
   }
 
   async function remove(task: Task) {
@@ -235,6 +244,7 @@ export const useTasksStore = defineStore('tasks', () => {
     create,
     update,
     setCompleted,
+    undoAdvance,
     remove,
     restore,
     createList,

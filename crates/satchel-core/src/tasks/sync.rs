@@ -124,6 +124,8 @@ pub struct TaskSyncSummary {
     pub failed: usize,
     /// Local changes to lists the server refused as read-only; dropped.
     pub read_only_dropped: usize,
+    /// New tasks a read-only list refused; kept as local tasks.
+    pub read_only_kept: usize,
     /// Unsent edits of tasks the server deleted, kept as local tasks.
     pub kept_local: usize,
     /// Lists the server dropped that stay, read-only, for their unsent work.
@@ -140,6 +142,7 @@ impl TaskSyncSummary {
         self.restored += other.restored;
         self.failed += other.failed;
         self.read_only_dropped += other.read_only_dropped;
+        self.read_only_kept += other.read_only_kept;
         self.kept_local += other.kept_local;
         self.lists_gone += other.lists_gone;
     }
@@ -152,6 +155,7 @@ impl TaskSyncSummary {
             + self.restored
             + self.conflicts
             + self.read_only_dropped
+            + self.read_only_kept
             + self.lists_gone
             > 0
     }
@@ -188,9 +192,23 @@ fn fields_of(task: &PendingTask) -> TaskFields {
         completed_at: task.completed_at.clone(),
         message_id: task.message_id.clone(),
         start_at: task.start_at.clone(),
+        due_tz: task.due_tz.clone(),
         rrule: task.rrule.clone(),
         rrule_extras: false,
     }
+}
+
+/// An ETag that is only whitespace is no ETag.
+fn version(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+/// How a sync was asked for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SyncOptions {
+    /// The person pressed "Sync tasks": retry tasks that are backing off and
+    /// lists a refused write made read-only.
+    pub manual: bool,
 }
 
 fn write_of(fields: &TaskFields) -> TaskWrite {
@@ -210,6 +228,15 @@ pub async fn sync_account(
     account_id: &str,
     remote: &dyn TaskRemote,
 ) -> Result<TaskSyncSummary, SyncError> {
+    sync_account_with(pool, account_id, remote, SyncOptions::default()).await
+}
+
+pub async fn sync_account_with(
+    pool: &SqlitePool,
+    account_id: &str,
+    remote: &dyn TaskRemote,
+    options: SyncOptions,
+) -> Result<TaskSyncSummary, SyncError> {
     let _gate = SYNC_GATE.lock().await;
     let repo = TaskRepository::new(pool);
     let lists = remote.lists().await?;
@@ -224,6 +251,7 @@ pub async fn sync_account(
                 color: list.color.as_deref(),
                 read_only: list.read_only,
                 mixed: list.mixed,
+                reprobe: options.manual,
             })
             .await?,
             list.remote_id.clone(),
@@ -242,7 +270,7 @@ pub async fn sync_account(
     let mut first_error = None;
     for (list_id, remote_list) in &ids {
         // A push that failed part-way does not keep the server's changes out.
-        let pushed = push_list(&repo, remote, list_id, remote_list, &mut summary).await;
+        let pushed = push_list(&repo, remote, list_id, remote_list, options, &mut summary).await;
         let pulled = pull_list(&repo, remote, list_id, remote_list, &mut summary).await;
         let result = pushed.and(pulled);
         let result = match result {
@@ -282,7 +310,15 @@ pub async fn push_account(
     .await?;
     let mut summary = TaskSyncSummary::default();
     for (list_id, remote_list) in &lists {
-        push_list(&repo, remote, list_id, remote_list, &mut summary).await?;
+        push_list(
+            &repo,
+            remote,
+            list_id,
+            remote_list,
+            SyncOptions::default(),
+            &mut summary,
+        )
+        .await?;
     }
     Ok(summary)
 }
@@ -294,11 +330,12 @@ async fn push_list(
     remote: &dyn TaskRemote,
     list_id: &str,
     remote_list: &str,
+    options: SyncOptions,
     summary: &mut TaskSyncSummary,
 ) -> Result<(), SyncError> {
-    for task in repo.pending(list_id).await? {
+    for task in repo.pending_due(list_id, options.manual).await? {
         let creating = task.remote_id.is_none();
-        if !creating && task.remote_version.is_none() {
+        if !creating && version(task.remote_version.as_deref()).is_none() {
             // A server copy without a known version: the pull learns it first.
             continue;
         }
@@ -306,7 +343,7 @@ async fn push_list(
         let outcome = match (deleting, task.remote_id.as_deref()) {
             (true, Some(remote_id)) => {
                 match remote
-                    .delete(remote_id, task.remote_version.as_deref())
+                    .delete(remote_id, version(task.remote_version.as_deref()))
                     .await
                 {
                     Ok(()) | Err(RemoteError::Gone) => {
@@ -328,7 +365,7 @@ async fn push_list(
                         remote_list,
                         &task.uid,
                         remote_id,
-                        task.remote_version.as_deref(),
+                        version(task.remote_version.as_deref()),
                         &payload,
                     )
                     .await
@@ -364,9 +401,15 @@ async fn push_list(
                 repo.keep_as_local(&task.id).await?;
             }
             Err(RemoteError::Forbidden) => {
-                summary.read_only_dropped += 1;
                 repo.mark_list_read_only(list_id).await?;
-                repo.yield_to_server(&task.id).await?;
+                if creating {
+                    // A new task the list will not take stays on this device.
+                    summary.read_only_kept += 1;
+                    repo.keep_as_local(&task.id).await?;
+                } else {
+                    summary.read_only_dropped += 1;
+                    repo.yield_to_server(&task.id).await?;
+                }
             }
             Err(RemoteError::Other(error)) => {
                 tracing::info!(%error, task = %task.id, "task push failed, will retry");
@@ -439,6 +482,7 @@ async fn pull_list(
                         fields: &write,
                         message_id: fields.message_id.as_deref(),
                         start_at: fields.start_at.as_deref(),
+                        due_tz: fields.due_tz.as_deref(),
                         rrule: fields.rrule.as_deref(),
                         recurrence: recurrence.stored(),
                     },
@@ -697,23 +741,114 @@ mod tests {
             .unwrap();
         server.forbidden = true;
         let summary = sync_account(&pool, "acc", &server).await.unwrap();
-        assert_eq!(summary.read_only_dropped, 2);
-        let lists = repo.list_lists().await.unwrap();
-        assert!(
+        // The edit of a server task is dropped; the new task is kept locally.
+        assert_eq!((summary.read_only_dropped, summary.read_only_kept), (1, 1));
+        let read_only = |lists: Vec<crate::db::tasks::TaskListRecord>| {
             lists
-                .iter()
+                .into_iter()
                 .find(|list| list.id == list_id())
                 .unwrap()
                 .read_only
-        );
-        let titles = repo
-            .list_tasks(false)
+        };
+        assert!(read_only(repo.list_lists().await.unwrap()));
+        let tasks = repo.list_tasks(false).await.unwrap();
+        let shared = tasks.iter().find(|task| task.title == "Shared").unwrap();
+        assert_eq!(shared.list_id, list_id());
+        let kept = tasks.iter().find(|task| task.title == "New here").unwrap();
+        assert_eq!(kept.list_id, crate::db::tasks::DEFAULT_LOCAL_LIST_ID);
+        assert!(!kept.pending);
+
+        // A periodic sync leaves the learnt read-only alone ...
+        sync_account(&pool, "acc", &server).await.unwrap();
+        assert!(read_only(repo.list_lists().await.unwrap()));
+        // ... a manual one tries the list again.
+        server.forbidden = false;
+        sync_account_with(&pool, "acc", &server, SyncOptions { manual: true })
             .await
+            .unwrap();
+        assert!(!read_only(repo.list_lists().await.unwrap()));
+    }
+
+    #[tokio::test]
+    async fn a_taken_over_create_still_sends_the_local_change() {
+        let pool = pool().await;
+        let server = AdoptingServer(FakeServer::with_list());
+        sync_account(&pool, "acc", &server.0).await.unwrap();
+        let repo = TaskRepository::new(&pool);
+        let task = repo
+            .create(&list_id(), &new_task("Written twice"), None, None)
+            .await
+            .unwrap();
+        let uid = sqlx::query_scalar::<_, String>("SELECT uid FROM tasks WHERE id = ?")
+            .bind(&task.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        // The earlier PUT landed with an older title before the app recorded it.
+        server
+            .0
+            .seed(&format!("/tasks/{uid}.ics"), &todo(&uid, "Older title"));
+        push_account(&pool, "acc", &server).await.unwrap();
+        let pending = repo.pending(&list_id()).await.unwrap();
+        assert_eq!(pending.len(), 1, "adopted, so the change still goes out");
+        assert_eq!(pending[0].pending_op, "update");
+        assert_eq!(pending[0].remote_version.as_deref(), Some("1"));
+        push_account(&pool, "acc", &server).await.unwrap();
+        assert!(server
+            .0
+            .payload(&format!("/tasks/{uid}.ics"))
             .unwrap()
-            .into_iter()
-            .map(|task| task.title)
-            .collect::<Vec<_>>();
-        assert_eq!(titles, ["Shared"]);
+            .contains("Written twice"));
+    }
+
+    /// A server whose creation hits an existing resource of the same UID and
+    /// is taken over, as `CalDavTaskRemote::put` does after a 412.
+    struct AdoptingServer(FakeServer);
+
+    #[async_trait]
+    impl TaskRemote for AdoptingServer {
+        fn provider(&self) -> &'static str {
+            self.0.provider()
+        }
+        async fn lists(&self) -> Result<Vec<RemoteList>, RemoteError> {
+            self.0.lists().await
+        }
+        async fn versions(&self, list: &str) -> Result<Vec<(String, Option<String>)>, RemoteError> {
+            self.0.versions(list).await
+        }
+        async fn fetch(&self, list: &str, ids: &[String]) -> Result<Vec<RemoteItem>, RemoteError> {
+            self.0.fetch(list, ids).await
+        }
+        async fn put(
+            &self,
+            list: &str,
+            uid: &str,
+            remote_id: Option<&str>,
+            version: Option<&str>,
+            payload: &str,
+        ) -> Result<Written, RemoteError> {
+            match self.0.put(list, uid, remote_id, version, payload).await {
+                Err(RemoteError::Conflict) if remote_id.is_none() => {
+                    let id = format!("{list}{uid}.ics");
+                    let existing = self.0.fetch(list, std::slice::from_ref(&id)).await?;
+                    crate::providers::dav::tasks::adopt_existing(
+                        uid,
+                        &id,
+                        existing.into_iter().next(),
+                    )
+                }
+                other => other,
+            }
+        }
+        async fn delete(&self, remote_id: &str, version: Option<&str>) -> Result<(), RemoteError> {
+            self.0.delete(remote_id, version).await
+        }
+        fn decode(&self, payload: &str) -> Option<TaskFields> {
+            self.0.decode(payload)
+        }
+        fn encode(&self, task: &TaskFields, previous: Option<&str>) -> String {
+            self.0.encode(task, previous)
+        }
     }
 
     #[tokio::test]

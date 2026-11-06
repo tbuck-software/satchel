@@ -133,7 +133,7 @@ async function refresh() {
 
 async function syncNow(force = true) {
   try {
-    const errors = force ? await tasks.sync() : await tasks.syncIfStale();
+    const errors = force ? await tasks.sync(true) : await tasks.syncIfStale();
     if (errors.length > 0) toast.error(backendErrorLabel(errors[0]));
   } catch (error) {
     toast.error(backendErrorLabel(error));

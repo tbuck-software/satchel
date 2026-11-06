@@ -11,7 +11,64 @@
 //! UI asks before it completes the whole series.
 use chrono::{Datelike, Duration, Months, NaiveDate, NaiveDateTime, TimeZone, Utc, Weekday};
 
-use crate::email::calendar::local_to_utc;
+use crate::email::calendar::{local_to_utc, normalize_tzid};
+
+/// `tasks.due_tz` for a DUE written in UTC (`…Z`): it repeats at that UTC time.
+pub const ZONE_UTC: &str = "UTC";
+/// `tasks.due_tz` for a floating DUE (no `Z`, no TZID): local to whoever reads it.
+pub const ZONE_FLOATING: &str = "floating";
+
+/// The clock a repeating date-time keeps its wall time on.
+///
+/// `DUE;TZID=America/New_York:…T090000` repeats at 09:00 New York time
+/// wherever Satchel runs; a floating time at 09:00 where the user is; a UTC
+/// stamp at the same UTC time; a due time Satchel set itself at the user's
+/// local time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Zone {
+    Host,
+    Utc,
+    Named(chrono_tz::Tz),
+}
+
+impl Zone {
+    /// From `tasks.due_tz`: None (Satchel's own value) and floating step on
+    /// the host clock; an unknown TZID falls back to it too.
+    pub fn from_stored(due_tz: Option<&str>) -> Self {
+        match due_tz {
+            None => Self::Host,
+            Some(ZONE_FLOATING) => Self::Host,
+            Some(ZONE_UTC) => Self::Utc,
+            Some(tzid) => normalize_tzid(tzid)
+                .parse::<chrono_tz::Tz>()
+                .map_or(Self::Host, Self::Named),
+        }
+    }
+
+    fn local(self, instant: chrono::DateTime<Utc>) -> NaiveDateTime {
+        match self {
+            Self::Host => instant.with_timezone(&chrono::Local).naive_local(),
+            Self::Utc => instant.naive_utc(),
+            Self::Named(tz) => instant.with_timezone(&tz).naive_local(),
+        }
+    }
+
+    fn utc(self, local: NaiveDateTime) -> Option<chrono::DateTime<Utc>> {
+        match self {
+            Self::Host => local_to_utc(local),
+            Self::Utc => Some(Utc.from_utc_datetime(&local)),
+            Self::Named(tz) => tz
+                .from_local_datetime(&local)
+                .earliest()
+                // A wall time in the spring-forward gap: the hour after it.
+                .or_else(|| {
+                    tz.from_local_datetime(&(local + Duration::hours(1)))
+                        .earliest()
+                })
+                .map(|instant| instant.with_timezone(&Utc)),
+        }
+    }
+}
 
 /// The stored classification; `None` means the task does not repeat.
 pub const SIMPLE: &str = "simple";
@@ -79,6 +136,7 @@ pub fn classify(rrule: Option<&str>, extras: bool, due: Option<&str>) -> Recurre
     let mut count = None;
     let mut until = None;
     let mut by_day = None;
+    let mut week_start: Option<String> = None;
     for part in rrule.split(';').filter(|part| !part.is_empty()) {
         let Some((key, value)) = part.split_once('=') else {
             return Recurrence::Complex;
@@ -113,7 +171,9 @@ pub fn classify(rrule: Option<&str>, extras: bool, due: Option<&str>) -> Recurre
                 None => return Recurrence::Complex,
             },
             // The week start only matters for rules Satchel does not step.
-            "WKST" => {}
+            // The week start shapes only rules with weeks between occurrences
+            // and a weekday; Satchel counts such weeks from Monday.
+            "WKST" => week_start = Some(value),
             _ => return Recurrence::Complex,
         }
     }
@@ -121,6 +181,9 @@ pub fn classify(rrule: Option<&str>, extras: bool, due: Option<&str>) -> Recurre
         return Recurrence::Complex;
     };
     if by_day.is_some() && frequency != Frequency::Weekly {
+        return Recurrence::Complex;
+    }
+    if by_day.is_some() && interval > 1 && week_start.as_deref().is_some_and(|day| day != "MO") {
         return Recurrence::Complex;
     }
     Recurrence::Simple(SimpleRule {
@@ -152,32 +215,28 @@ fn until_bound(value: &str) -> Option<Bound> {
     })
 }
 
-/// A due or start value as Satchel stores it: a date, or a UTC instant shown
-/// on the local wall clock.
+/// A due or start value: a date, or a date-time as the wall clock of the
+/// series' zone shows it.
 #[derive(Debug, Clone, Copy)]
 enum When {
     Date(NaiveDate),
     Local(NaiveDateTime),
 }
 
-fn parse_when(value: &str) -> Option<When> {
+fn parse_when(value: &str, zone: Zone) -> Option<When> {
     if value.len() == 10 {
         return NaiveDate::parse_from_str(value, "%Y-%m-%d")
             .ok()
             .map(When::Date);
     }
     let instant = chrono::DateTime::parse_from_rfc3339(value).ok()?;
-    Some(When::Local(
-        instant.with_timezone(&chrono::Local).naive_local(),
-    ))
+    Some(When::Local(zone.local(instant.with_timezone(&Utc))))
 }
 
-fn format_when(value: When) -> Option<String> {
+fn format_when(value: When, zone: Zone) -> Option<String> {
     Some(match value {
         When::Date(date) => date.format("%Y-%m-%d").to_string(),
-        When::Local(local) => local_to_utc(local)?
-            .format("%Y-%m-%dT%H:%M:%SZ")
-            .to_string(),
+        When::Local(local) => zone.utc(local)?.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
     })
 }
 
@@ -241,13 +300,13 @@ impl SimpleRule {
         }
     }
 
-    fn ends_before(&self, next: When) -> bool {
+    fn ends_before(&self, next: When, zone: Zone) -> bool {
         match self.until.as_deref().and_then(until_bound) {
             None => false,
             Some(Bound::Date(until)) => next.date() > until,
             Some(Bound::Instant(until)) => match next {
-                When::Date(date) => date > until.with_timezone(&chrono::Local).date_naive(),
-                When::Local(local) => local_to_utc(local).is_some_and(|instant| instant > until),
+                When::Date(date) => date > zone.local(until).date(),
+                When::Local(local) => zone.utc(local).is_some_and(|instant| instant > until),
             },
         }
     }
@@ -265,27 +324,32 @@ pub struct Advance {
 
 /// The next occurrence, or `None` when the one completed was the last
 /// (COUNT reached, or the next one falls after UNTIL): then the series ends.
+///
+/// Date-times step on `zone`'s wall clock (see [`Zone`]); the start and the
+/// reminder move by the same number of days on the same clock, so a relative
+/// alarm still lands where its offset puts it.
 pub fn advance(
     rule: &SimpleRule,
     rrule: &str,
     due: &str,
     start: Option<&str>,
     reminder: Option<&str>,
+    zone: Zone,
 ) -> Option<Advance> {
     if rule.count.is_some_and(|count| count <= 1) {
         return None;
     }
-    let current = parse_when(due)?;
+    let current = parse_when(due, zone)?;
     let next_date = rule.next_date(current.date())?;
     let days = (next_date - current.date()).num_days();
     let next = current.shifted(days);
-    if rule.ends_before(next) {
+    if rule.ends_before(next, zone) {
         return None;
     }
     let shift = |value: Option<&str>| -> Option<String> {
         value
-            .and_then(parse_when)
-            .and_then(|when| format_when(when.shifted(days)))
+            .and_then(|value| parse_when(value, zone))
+            .and_then(|when| format_when(when.shifted(days), zone))
     };
     let rrule = match rule.count {
         Some(count) => rrule
@@ -305,7 +369,7 @@ pub fn advance(
         None => rrule.to_string(),
     };
     Some(Advance {
-        due_at: format_when(next)?,
+        due_at: format_when(next, zone)?,
         start_at: shift(start),
         reminder_at: shift(reminder),
         rrule,
@@ -324,7 +388,7 @@ mod tests {
     }
 
     fn next_due(rrule: &str, due: &str) -> Option<String> {
-        advance(&simple(rrule), rrule, due, None, None).map(|next| next.due_at)
+        advance(&simple(rrule), rrule, due, None, None, Zone::Host).map(|next| next.due_at)
     }
 
     #[test]
@@ -412,7 +476,7 @@ mod tests {
     #[test]
     fn counts_down_and_stops_at_until() {
         let rule = "FREQ=DAILY;COUNT=3;WKST=MO";
-        let next = advance(&simple(rule), rule, "2026-11-06", None, None).unwrap();
+        let next = advance(&simple(rule), rule, "2026-11-06", None, None, Zone::Host).unwrap();
         assert_eq!(next.rrule, "FREQ=DAILY;COUNT=2;WKST=MO");
         assert_eq!(next_due("FREQ=DAILY;COUNT=1", "2026-11-06"), None);
         assert_eq!(next_due("FREQ=WEEKLY;UNTIL=20261110", "2026-11-06"), None);
@@ -449,6 +513,7 @@ mod tests {
             &due,
             Some("2026-10-19"),
             Some(&reminder),
+            Zone::Host,
         )
         .unwrap();
         let local = |value: &str| {
@@ -469,5 +534,61 @@ mod tests {
             chrono::NaiveTime::from_hms_opt(8, 30, 0).unwrap()
         );
         assert_eq!(next.start_at.as_deref(), Some("2026-10-26"));
+    }
+
+    /// The same answer whatever zone the host is in (run under `TZ=UTC` and
+    /// `TZ=Europe/Berlin`): New York leaves daylight saving on 1 November,
+    /// Berlin a week earlier, and the task stays at 09:00 New York time.
+    #[test]
+    fn steps_on_the_wall_clock_of_the_due_dates_zone() {
+        let zone = Zone::from_stored(Some("America/New_York"));
+        assert!(matches!(zone, Zone::Named(_)));
+        // 28 Oct 2026 09:00 EDT = 13:00Z; 4 Nov 09:00 EST = 14:00Z.
+        let next = advance(
+            &simple("FREQ=WEEKLY"),
+            "FREQ=WEEKLY",
+            "2026-10-28T13:00:00Z",
+            Some("2026-10-28T12:00:00Z"),
+            Some("2026-10-28T12:30:00Z"),
+            zone,
+        )
+        .unwrap();
+        assert_eq!(next.due_at, "2026-11-04T14:00:00Z");
+        assert_eq!(next.start_at.as_deref(), Some("2026-11-04T13:00:00Z"));
+        assert_eq!(next.reminder_at.as_deref(), Some("2026-11-04T13:30:00Z"));
+    }
+
+    #[test]
+    fn a_utc_stamp_repeats_at_the_same_utc_time() {
+        let next = advance(
+            &simple("FREQ=WEEKLY"),
+            "FREQ=WEEKLY",
+            "2026-10-28T09:00:00Z",
+            None,
+            None,
+            Zone::from_stored(Some(ZONE_UTC)),
+        )
+        .unwrap();
+        assert_eq!(next.due_at, "2026-11-04T09:00:00Z");
+    }
+
+    #[test]
+    fn a_week_start_other_than_monday_with_weeks_between_is_not_stepped() {
+        assert!(matches!(
+            classify(
+                Some("FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;WKST=SU"),
+                false,
+                Some("2026-11-06")
+            ),
+            Recurrence::Complex
+        ));
+        assert!(matches!(
+            classify(
+                Some("FREQ=WEEKLY;BYDAY=TU;WKST=SU"),
+                false,
+                Some("2026-11-06")
+            ),
+            Recurrence::Simple(_)
+        ));
     }
 }

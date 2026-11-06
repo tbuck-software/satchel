@@ -3835,6 +3835,7 @@
       "keptLocal": "Eine auf dem Server gelöschte Aufgabe behält deine Änderung und liegt jetzt in „Meine Aufgaben“. | {count} auf dem Server gelöschte Aufgaben behalten deine Änderungen und liegen jetzt in „Meine Aufgaben“.",
       "listsGone": "Eine Aufgabenliste wurde auf dem Server entfernt. Bis du die Liste löschst, bleibt sie hier schreibgeschützt. | {count} Aufgabenlisten wurden auf dem Server entfernt. Bis du die Listen löschst, bleiben sie hier schreibgeschützt.",
       "readOnlyDropped": "Eine Änderung wurde nicht gespeichert: Die Liste ist auf dem Server schreibgeschützt. | {count} Änderungen wurden nicht gespeichert: Die Liste ist auf dem Server schreibgeschützt.",
+      "readOnlyKept": "Eine neue Aufgabe ließ sich nicht in eine schreibgeschützte Liste eintragen; sie liegt in „Meine Aufgaben“. | {count} neue Aufgaben ließen sich nicht in eine schreibgeschützte Liste eintragen; sie liegen in „Meine Aufgaben“.",
       "restored": "Eine gelöschte Aufgabe ist zurück, weil jemand sie auf dem Server geändert hatte. | {count} gelöschte Aufgaben sind zurück, weil jemand sie auf dem Server geändert hatte."
     },
     "openMail": "E-Mail öffnen",

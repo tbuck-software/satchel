@@ -166,6 +166,7 @@ const COMMANDS: &[&str] = &[
     "set_task_completed",
     "delete_task",
     "restore_task",
+    "undo_task_advance",
     "create_task_list",
     "rename_task_list",
     "delete_task_list",

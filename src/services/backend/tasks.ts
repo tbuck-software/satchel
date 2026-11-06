@@ -68,7 +68,19 @@ export async function backendDeleteTaskList(id: string): Promise<void> {
   return invoke<void>('delete_task_list', { id });
 }
 
-/** Push local changes and pull remote ones for every account with task lists. */
-export async function backendSyncTasks(accountId?: string): Promise<BackendTasksSyncResult> {
-  return invoke<BackendTasksSyncResult>('sync_tasks', { accountId: accountId ?? null });
+/**
+ * Push local changes and pull remote ones for every account with task lists.
+ * `manual` (the Sync tasks button) also retries tasks that are backing off and
+ * lists a refused write made read-only.
+ */
+export async function backendSyncTasks(options: { accountId?: string; manual?: boolean } = {}): Promise<BackendTasksSyncResult> {
+  return invoke<BackendTasksSyncResult>('sync_tasks', {
+    accountId: options.accountId ?? null,
+    manual: options.manual ?? false,
+  });
+}
+
+/** Undo completing a repeating task: back to the occurrence it moved on from. */
+export async function backendUndoTaskAdvance(id: string): Promise<BackendTask> {
+  return invoke<BackendTask>('undo_task_advance', { id });
 }

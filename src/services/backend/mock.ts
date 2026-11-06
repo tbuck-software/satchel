@@ -808,6 +808,8 @@ const tasks: BackendTask[] = [
 ];
 /** The step of each simple mock series, in days. */
 const mockSeriesStep = new Map<string, number>([['task-seed-6', 7]]);
+/** The due date a series moved on from, for `undo_task_advance`. */
+const mockAdvancedFrom = new Map<string, string | null>();
 const deletedRemoteTasks = new Map<string, BackendTask>();
 
 function taskListDto(list: Omit<BackendTaskList, 'open_count'>): BackendTaskList {
@@ -1178,7 +1180,7 @@ const handlers: Record<string, Handler> = {
     tasks_synced: 0,
     task_summary: {
       lists: 0, pulled: 0, pushed: 0, removed: 0, conflicts: 0, restored: 0, failed: 0,
-      read_only_dropped: 0, kept_local: 0, lists_gone: 0,
+      read_only_dropped: 0, read_only_kept: 0, kept_local: 0, lists_gone: 0,
     },
     errors: [],
   }),
@@ -2273,18 +2275,31 @@ const handlers: Record<string, Handler> = {
     }
     const fields = mockTaskFields(scope.fields);
     const next = fields.completed_at && !task.completed_at ? mockNextOccurrence(task, fields.due_at) : null;
+    mockAdvancedFrom.delete(task.id);
+    if (next) mockAdvancedFrom.set(task.id, fields.due_at);
     return touchTask(task, next ? { ...fields, due_at: next, completed_at: null } : fields);
   },
   set_task_completed: (payload) => {
     const task = mockTaskById(payload.id);
     const next = payload.completed && !task.completed_at ? mockNextOccurrence(task, task.due_at) : null;
-    if (next) return touchTask(task, { due_at: next });
+    mockAdvancedFrom.delete(task.id);
+    if (next) {
+      mockAdvancedFrom.set(task.id, task.due_at);
+      return touchTask(task, { due_at: next });
+    }
     return touchTask(task, { completed_at: payload.completed ? new Date().toISOString() : null });
   },
   delete_task: (payload) => {
     const task = mockTaskById(payload.id);
     tasks.splice(tasks.indexOf(task), 1);
     if (mockTaskList(task.list_id).provider !== 'local') deletedRemoteTasks.set(task.id, task);
+  },
+  undo_task_advance: (payload) => {
+    const task = mockTaskById(payload.id);
+    if (!mockAdvancedFrom.has(task.id)) throw new Error('backend.errors.taskChanged');
+    const due = mockAdvancedFrom.get(task.id) ?? null;
+    mockAdvancedFrom.delete(task.id);
+    return touchTask(task, { due_at: due });
   },
   restore_task: (payload) => {
     const task = deletedRemoteTasks.get(String(payload.id));
@@ -2325,7 +2340,7 @@ const handlers: Record<string, Handler> = {
     return {
       summary: {
         lists: lists.length, pulled: 0, pushed, removed: 0, conflicts: 0, restored: 0, failed: 0,
-        read_only_dropped: 0, kept_local: 0, lists_gone: 0,
+        read_only_dropped: 0, read_only_kept: 0, kept_local: 0, lists_gone: 0,
       },
       errors: [],
     };

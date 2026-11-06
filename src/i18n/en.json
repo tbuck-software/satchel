@@ -3835,6 +3835,7 @@
       "keptLocal": "A task deleted on the server kept your change and is now in My tasks. | {count} tasks deleted on the server kept your changes and are now in My tasks.",
       "listsGone": "A task list was removed on the server. It stays here, read-only, until you delete it. | {count} task lists were removed on the server. They stay here, read-only, until you delete them.",
       "readOnlyDropped": "A change was not saved: the list is read-only on the server. | {count} changes were not saved: the list is read-only on the server.",
+      "readOnlyKept": "A new task could not be added to a read-only list; it is in My tasks. | {count} new tasks could not be added to a read-only list; they are in My tasks.",
       "restored": "A task you deleted came back: it had been changed on the server. | {count} tasks you deleted came back: they had been changed on the server."
     },
     "openMail": "Open mail",

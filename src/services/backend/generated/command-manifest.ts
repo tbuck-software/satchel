@@ -2553,6 +2553,15 @@ export default {
                             "kind": "value"
                         }
                     }
+                },
+                "manual": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
                 }
             }
         },
@@ -2704,6 +2713,17 @@ export default {
             }
         },
         "undo_outbox_send": {
+            "kind": "object",
+            "fields": {
+                "id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "undo_task_advance": {
             "kind": "object",
             "fields": {
                 "id": {
