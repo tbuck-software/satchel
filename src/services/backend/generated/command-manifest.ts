@@ -3809,6 +3809,15 @@ export default {
                     "shape": {
                         "kind": "value"
                     }
+                },
+                "expected_active": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
                 }
             }
         },

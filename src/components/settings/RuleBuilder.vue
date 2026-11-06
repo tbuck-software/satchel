@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useConfirm } from '@/composables/useConfirm';
 import {
@@ -109,10 +109,16 @@ async function loadPlacements() {
 }
 
 /** A saved rule reaches the server in the background; look again shortly. */
+let placementTimer: number | undefined;
+
+/** Edits reach the servers a few seconds after the last one; look again then. */
 function refreshPlacementsSoon() {
   if (!serverRulesOn.value) return;
-  window.setTimeout(() => void loadPlacements(), 3000);
+  window.clearTimeout(placementTimer);
+  placementTimer = window.setTimeout(() => void loadPlacements(), 6000);
 }
+
+onBeforeUnmount(() => window.clearTimeout(placementTimer));
 
 const serverRulesOn = computed(() => serverRules.value?.accounts.some((account) => account.enabled) ?? false);
 

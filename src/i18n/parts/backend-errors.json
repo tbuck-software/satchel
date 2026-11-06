@@ -265,23 +265,24 @@
         "spamFilterUnavailable": "The spam filter settings could not be read or saved.",
         "serverRules": {
           "unreachable": "The filter server could not be reached.",
-          "tls": "The filter server offers no secure connection, so Satchel did not sign in.",
-          "noMechanism": "The filter server offers no sign-in method Satchel supports.",
-          "authFailed": "The filter server did not accept the account's password.",
-          "quota": "The filter script does not fit into the space the server allows.",
+          "tls": "The filter server offers no secure connection.",
+          "noMechanism": "The filter server offers no supported sign-in method.",
+          "authFailed": "The filter server refused the account's password.",
+          "quota": "The filter script exceeds the server's space.",
           "refused": "The filter server rejected the script.",
-          "protocol": "The filter server answered in a way Satchel does not understand.",
-          "nameTaken": "A script of yours on the server already uses Satchel's name. Rename it to let Satchel write its rules.",
+          "protocol": "The filter server sent an unexpected reply.",
+          "nameTaken": "A script of yours already uses Satchel's name. Rename it first.",
           "includeUnavailable": "This server cannot run two scripts side by side.",
-          "unverified": "The server did not confirm that Satchel's rules are active.",
-          "notConfigured": "Check the server first, or enter its address.",
-          "persistence": "The server rule settings could not be saved.",
+          "unverified": "The server did not confirm Satchel's script as active.",
+          "notConfigured": "Check the server first, or enter it manually.",
+          "persistence": "Server rule settings could not be saved.",
           "invalidHost": "Enter a valid host name.",
           "invalidPort": "Enter a valid port.",
           "invalidTls": "Choose STARTTLS or TLS.",
-          "invalidChoice": "Unknown choice for the active script.",
-          "consentNeeded": "Another filter script is active on the server. Choose what to do with it under Settings → Accounts → Server rules.",
-          "vacationUnsupported": "This server cannot send the reply as set up. Remove the dates or set it in your provider's webmail."
+          "invalidChoice": "Unknown choice.",
+          "turnOffFirst": "Turn server rules off before changing the server.",
+          "consentNeeded": "Another filter script is active. Choose under Settings → Accounts → Server rules.",
+          "vacationUnsupported": "This server cannot send the reply as set up."
         }
       }
     }
@@ -552,23 +553,24 @@
         "spamFilterUnavailable": "Die Einstellungen des Spamfilters ließen sich nicht lesen oder speichern.",
         "serverRules": {
           "unreachable": "Der Filter-Server war nicht erreichbar.",
-          "tls": "Der Filter-Server bietet keine sichere Verbindung, deshalb hat Satchel sich nicht angemeldet.",
-          "noMechanism": "Der Filter-Server bietet kein Anmeldeverfahren, das Satchel unterstützt.",
-          "authFailed": "Der Filter-Server hat das Passwort des Kontos nicht angenommen.",
-          "quota": "Das Filterskript passt nicht in den Platz, den der Server erlaubt.",
+          "tls": "Der Filter-Server bietet keine sichere Verbindung.",
+          "noMechanism": "Der Filter-Server bietet kein unterstütztes Anmeldeverfahren.",
+          "authFailed": "Der Filter-Server hat das Passwort des Kontos abgelehnt.",
+          "quota": "Das Filterskript überschreitet den Platz auf dem Server.",
           "refused": "Der Filter-Server hat das Skript abgelehnt.",
-          "protocol": "Der Filter-Server hat in einer Form geantwortet, die Satchel nicht versteht.",
-          "nameTaken": "Ein eigenes Skript auf dem Server trägt schon Satchels Namen. Benenne es um, damit Satchel seine Regeln schreiben kann.",
+          "protocol": "Der Filter-Server hat unerwartet geantwortet.",
+          "nameTaken": "Ein eigenes Skript trägt schon Satchels Namen. Benenne es zuerst um.",
           "includeUnavailable": "Dieser Server kann keine zwei Skripte nebeneinander ausführen.",
-          "unverified": "Der Server hat nicht bestätigt, dass Satchels Regeln aktiv sind.",
-          "notConfigured": "Prüfe zuerst den Server oder trage seine Adresse ein.",
-          "persistence": "Die Einstellungen für Server-Regeln konnten nicht gespeichert werden.",
+          "unverified": "Der Server hat Satchels Skript nicht als aktiv bestätigt.",
+          "notConfigured": "Prüfe zuerst den Server oder trage ihn ein.",
+          "persistence": "Die Einstellungen für Server-Regeln ließen sich nicht speichern.",
           "invalidHost": "Gib einen gültigen Hostnamen ein.",
           "invalidPort": "Gib einen gültigen Port ein.",
           "invalidTls": "Wähle STARTTLS oder TLS.",
-          "invalidChoice": "Unbekannte Wahl für das aktive Skript.",
-          "consentNeeded": "Auf dem Server ist ein anderes Filterskript aktiv. Entscheide unter Einstellungen → Konten → Server-Regeln, was damit geschehen soll.",
-          "vacationUnsupported": "Dieser Server kann die Antwort so nicht senden. Entferne die Daten oder richte sie im Webmail deines Anbieters ein."
+          "invalidChoice": "Unbekannte Wahl.",
+          "turnOffFirst": "Schalte die Server-Regeln aus, bevor du den Server änderst.",
+          "consentNeeded": "Ein anderes Filterskript ist aktiv. Entscheide unter Einstellungen → Konten → Server-Regeln.",
+          "vacationUnsupported": "Dieser Server kann die Antwort so nicht senden."
         }
       }
     }

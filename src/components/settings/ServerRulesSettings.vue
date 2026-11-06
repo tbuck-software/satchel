@@ -78,8 +78,22 @@ function endpointText(state: BackendServerRulesAccount): string | null {
   return t('settings.serverRules.endpoint', { host: state.host, port: state.port ?? 4190, tls });
 }
 
+/** Wrapper and Replace answer for the script shown; the backend asks again if it changed. */
 function enable(state: BackendServerRulesAccount, choice: BackendServerRulesChoice) {
-  void run(state.account_id, () => backendEnableServerRules(state.account_id, choice));
+  const expected = choice === 'ask' ? null : state.consent_script;
+  void run(state.account_id, () => backendEnableServerRules(state.account_id, choice, expected));
+}
+
+/** Autoconfig named a server on another domain: only a yes sends the password there. */
+function acceptSuggested(state: BackendServerRulesAccount) {
+  if (!state.suggested_host) return;
+  const host = state.suggested_host;
+  const port = state.suggested_port;
+  const tls = state.suggested_tls === 'tls' ? 'tls' : 'starttls';
+  void run(state.account_id, async () => {
+    await backendSetServerRulesEndpoint({ accountId: state.account_id, host, port, tls });
+    return backendDetectServerRules(state.account_id);
+  });
 }
 
 async function useWrapper(state: BackendServerRulesAccount) {
@@ -210,6 +224,21 @@ defineExpose({ load });
         </div>
       </div>
 
+      <!-- Autoconfig pointed somewhere else than the mail domain: ask first. -->
+      <div v-if="state.suggested_host && !state.enabled" class="setting-row setting-row--single">
+        <AppBanner
+          tone="info"
+          :title="$t('settings.serverRules.suggestedTitle', { host: state.suggested_host, port: state.suggested_port ?? 4190 })"
+          :detail="$t('settings.serverRules.suggestedDetail')"
+        >
+          <template #actions>
+            <AppButton size="sm" :disabled="busy === state.account_id" @click="acceptSuggested(state)">
+              {{ $t('settings.serverRules.useSuggested') }}
+            </AppButton>
+          </template>
+        </AppBanner>
+      </div>
+
       <!-- The person's own script is active: nothing was written; they pick. -->
       <div v-if="state.consent_script" class="setting-row setting-row--single">
         <AppBanner
@@ -233,7 +262,8 @@ defineExpose({ load });
         </AppBanner>
       </div>
 
-      <div class="setting-row setting-row--single">
+      <!-- The server cannot change under a running script: turn off first. -->
+      <div v-if="!state.enabled" class="setting-row setting-row--single">
         <form v-if="editing === state.account_id" class="endpoint" @submit.prevent="saveEndpoint(state)">
           <label class="field">
             <span>{{ $t('settings.serverRules.host') }}</span>

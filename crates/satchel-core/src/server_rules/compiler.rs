@@ -82,12 +82,11 @@ impl RuleCompilation {
     }
 }
 
-const CONDITION_KEYS: [&str; 4] = [
-    "from_contains",
-    "to_contains",
-    "subject_contains",
-    "body_contains",
-];
+/// Conditions with a Sieve form. `body_contains` is not among them yet: the
+/// local engine searches the stored plain text, Sieve's `body :text` the raw
+/// text parts (HTML-only mail, quoted-printable, signatures differ), and that
+/// has not been checked against a real server.
+const CONDITION_KEYS: [&str; 3] = ["from_contains", "to_contains", "subject_contains"];
 
 /// Compile one rule against the server's extension list (lower case).
 pub fn compile_rule(rule: &RuleSpec, extensions: &[String]) -> RuleCompilation {
@@ -111,9 +110,17 @@ pub fn compile_rule(rule: &RuleSpec, extensions: &[String]) -> RuleCompilation {
         if key == "match" {
             continue;
         }
-        let Some(needle) = value.as_str().map(str::trim).filter(|v| !v.is_empty()) else {
+        // A line break cannot be part of a header match; the local engine
+        // compares against unfolded text, so it reads as a space.
+        let Some(needle) = value
+            .as_str()
+            .map(|v| v.replace("\r\n", " ").replace(['\r', '\n'], " "))
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+        else {
             continue;
         };
+        let needle = needle.as_str();
         if !CONDITION_KEYS.contains(&key.as_str()) {
             return RuleCompilation::Local(LocalReason::Condition(key.clone()));
         }
@@ -140,13 +147,6 @@ pub fn compile_rule(rule: &RuleSpec, extensions: &[String]) -> RuleCompilation {
                 format!("address :all {comparator}:contains [\"to\", \"cc\"] {needle}")
             }
             "subject_contains" => format!("header {comparator}:contains \"subject\" {needle}"),
-            "body_contains" => {
-                if !has("body") {
-                    return RuleCompilation::Local(LocalReason::Extension("body".to_string()));
-                }
-                requires.insert("body".to_string());
-                format!("body :text {comparator}:contains {needle}")
-            }
             _ => unreachable!("checked against CONDITION_KEYS"),
         };
         tests.push((
@@ -217,6 +217,9 @@ pub struct VacationSpec {
     pub addresses: Vec<String>,
 }
 
+/// How often one sender gets the reply again (RFC 5230 `:days`).
+pub const VACATION_DAYS: u32 = 7;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VacationCompilation {
     /// No reply configured.
@@ -263,7 +266,8 @@ pub fn compile_vacation(vacation: &VacationSpec, extensions: &[String]) -> Vacat
             ));
         }
     }
-    let mut command = String::from("vacation");
+    // Once a week per sender, stated rather than left to the server's default.
+    let mut command = format!("vacation :days {VACATION_DAYS}");
     if let Some(subject) = vacation
         .subject
         .as_deref()

@@ -2,11 +2,14 @@
 --
 -- Detection (`detected_*`, `availability`, `extensions`) is what the last
 -- probe found; the `*_override` columns are what the person typed in and win
--- over detection. `enabled` is the person's wish, `server_active` whether
--- Satchel's script is verifiably the one running. Only while both are set
--- does the local engine skip the rules listed in `pushed_rules`
--- (rule id -> fingerprint and the moment that version went live), and only
--- for mail that arrived after that moment.
+-- over detection. `suggested_*` is a server autoconfig named on another
+-- domain than the IMAP host: shown, never logged into without a yes.
+-- `enabled` is the person's wish, `server_active` whether Satchel's script was
+-- verified active by the last push. `activation_mode` and
+-- `previous_active_script` are written before SETACTIVE, so turning off can
+-- restore the person's script even after a push that broke off.
+-- `pushed_rules` (rule id -> fingerprint) is for display only: the local
+-- engine runs every rule regardless.
 CREATE TABLE IF NOT EXISTS managesieve_accounts (
     account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
     host_override TEXT,
@@ -16,6 +19,9 @@ CREATE TABLE IF NOT EXISTS managesieve_accounts (
     detected_port INTEGER,
     detected_tls TEXT,
     detected_source TEXT,
+    suggested_host TEXT,
+    suggested_port INTEGER,
+    suggested_tls TEXT,
     availability TEXT NOT NULL DEFAULT 'unknown',
     implementation TEXT,
     extensions TEXT NOT NULL DEFAULT '[]',

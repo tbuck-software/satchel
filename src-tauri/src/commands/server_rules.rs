@@ -32,6 +32,11 @@ pub struct ServerRulesAccountDto {
     pub host_override: Option<String>,
     pub port_override: Option<u16>,
     pub tls_override: Option<String>,
+    /// A server autoconfig names on another domain than the IMAP host; never
+    /// logged into until the person accepts it as the override.
+    pub suggested_host: Option<String>,
+    pub suggested_port: Option<u16>,
+    pub suggested_tls: Option<String>,
     pub implementation: Option<String>,
     pub extensions: Vec<String>,
     pub checked_at: Option<String>,
@@ -108,13 +113,17 @@ pub struct ServerRulesEndpointInput {
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
 #[cfg_attr(
     feature = "ipc-types",
-    ts(export, export_to = "app/commands/server_rules/")
+    ts(export, export_to = "app/commands/server_rules/", optional_fields = nullable)
 )]
 pub struct EnableServerRulesInput {
     pub account_id: String,
     /// `ask` never takes over another active script; `wrapper` and
     /// `replace` are the person's explicit answer to that question.
     pub choice: String,
+    /// The active script the person saw when choosing. If another one is
+    /// active by now, the push stops and asks again.
+    #[serde(default)]
+    pub expected_active: Option<String>,
 }
 
 fn account_dto(
@@ -145,6 +154,15 @@ fn account_dto(
         host_override: state.host_override.clone(),
         port_override: state.port_override,
         tls_override: state.tls_override.map(|tls| tls.as_str().to_string()),
+        suggested_host: state
+            .suggested
+            .as_ref()
+            .map(|endpoint| endpoint.host.clone()),
+        suggested_port: state.suggested.as_ref().map(|endpoint| endpoint.port),
+        suggested_tls: state
+            .suggested
+            .as_ref()
+            .map(|endpoint| endpoint.tls.as_str().to_string()),
         implementation: state.implementation.clone(),
         extensions: state.extensions.clone(),
         checked_at: state.checked_at.clone(),
@@ -277,7 +295,7 @@ pub async fn set_server_rules_endpoint(
         let plausible = host.len() <= 253
             && host
                 .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | ':' | '[' | ']'));
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-'));
         if !plausible {
             return Err(CommandError::new("backend.errors.serverRules.invalidHost"));
         }
@@ -316,9 +334,14 @@ pub async fn enable_server_rules(
             ))
         }
     };
-    service::push_account(pool.inner(), &input.account_id, choice)
-        .await
-        .map_err(service_error)?;
+    service::push_account(
+        pool.inner(),
+        &input.account_id,
+        choice,
+        input.expected_active.as_deref(),
+    )
+    .await
+    .map_err(service_error)?;
     overview(pool.inner()).await
 }
 
@@ -331,6 +354,20 @@ pub async fn disable_server_rules(
         .await
         .map_err(service_error)?;
     overview(pool.inner()).await
+}
+
+/// Retries pushes that did not land: an account with server rules on whose
+/// script is not verified active (server down, the app quit mid-push). Shortly
+/// after start, then every half hour. Accounts waiting for the person's choice
+/// stay waiting.
+pub fn spawn_retry_worker(pool: SqlitePool) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(45)).await;
+        loop {
+            service::push_pending_accounts(&pool).await;
+            tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
+        }
+    });
 }
 
 /// The vacation reply of an IMAP account rides in its Satchel script. With
@@ -347,7 +384,7 @@ pub async fn push_vacation(
     if !state.as_ref().is_some_and(|state| state.enabled) {
         return Ok(());
     }
-    let state = service::push_account(pool, account_id, ActivationChoice::Ask)
+    let state = service::push_account(pool, account_id, ActivationChoice::Ask, None)
         .await
         .map_err(service_error)?;
     if state.consent_script.is_some() {
@@ -366,20 +403,13 @@ pub async fn push_vacation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use satchel_core::db::server_rules::PushedRule;
 
     #[test]
     fn account_dto_reports_override_and_extension_flags() {
         let mut state = ServerRulesState::empty("acc");
         state.host_override = Some("sieve.example.com".into());
         state.extensions = vec!["include".into(), "vacation".into(), "date".into()];
-        state.pushed_rules.insert(
-            "rule-1".into(),
-            PushedRule {
-                fingerprint: "f".into(),
-                since: "2026-01-01T00:00:00Z".into(),
-            },
-        );
+        state.pushed_rules.insert("rule-1".into(), "f".into());
         let dto = account_dto(state, "Work".into(), "me@example.com".into());
         assert_eq!(dto.host.as_deref(), Some("sieve.example.com"));
         assert_eq!(dto.port, Some(4190));

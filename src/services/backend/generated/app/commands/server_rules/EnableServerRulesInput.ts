@@ -6,4 +6,9 @@ export type EnableServerRulesInput = {
      * `replace` are the person's explicit answer to that question.
      */
     choice: string;
+    /**
+     * The active script the person saw when choosing. If another one is
+     * active by now, the push stops and asks again.
+     */
+    expected_active?: string | null;
 };

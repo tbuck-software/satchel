@@ -1,3 +1,4 @@
+use super::compiler::wrapper_script;
 use super::compiler::{compile_script, RuleSpec, VacationSpec, SCRIPT_MARKER};
 use super::*;
 use crate::providers::managesieve_fake::{connected, shared, FakeState};
@@ -33,7 +34,7 @@ fn with_scripts(scripts: &[(&str, &str)], active: Option<&str>) -> FakeState {
 async fn activates_directly_when_nothing_is_active() {
     let state = shared(FakeState::default());
     let mut client = connected(state.clone()).await;
-    let outcome = push(&mut client, &compiled(), ActivationChoice::Ask, None)
+    let outcome = push(&mut client, &compiled(), ActivationChoice::Ask, None, None)
         .await
         .unwrap();
     assert!(matches!(
@@ -67,7 +68,7 @@ async fn activates_directly_when_nothing_is_active() {
 async fn asks_before_touching_a_foreign_active_script() {
     let state = shared(with_scripts(&[("roundcube", "keep;")], Some("roundcube")));
     let mut client = connected(state.clone()).await;
-    let outcome = push(&mut client, &compiled(), ActivationChoice::Ask, None)
+    let outcome = push(&mut client, &compiled(), ActivationChoice::Ask, None, None)
         .await
         .unwrap();
     match outcome {
@@ -93,9 +94,15 @@ async fn asks_before_touching_a_foreign_active_script() {
 async fn the_wrapper_keeps_the_other_script_running() {
     let state = shared(with_scripts(&[("roundcube", "keep;")], Some("roundcube")));
     let mut client = connected(state.clone()).await;
-    let outcome = push(&mut client, &compiled(), ActivationChoice::Wrapper, None)
-        .await
-        .unwrap();
+    let outcome = push(
+        &mut client,
+        &compiled(),
+        ActivationChoice::Wrapper,
+        None,
+        Some("roundcube"),
+    )
+    .await
+    .unwrap();
     assert!(matches!(
         outcome,
         PushOutcome::Activated { mode: ActivationMode::Wrapper, previous_active: Some(ref name), .. } if name == "roundcube"
@@ -116,6 +123,7 @@ async fn the_wrapper_keeps_the_other_script_running() {
         &compiled(),
         ActivationChoice::Ask,
         Some("roundcube".into()),
+        None,
     )
     .await
     .unwrap();
@@ -141,7 +149,7 @@ async fn the_wrapper_needs_include() {
     fake.extensions.retain(|ext| *ext != "include");
     let state = shared(fake);
     let mut client = connected(state.clone()).await;
-    match push(&mut client, &compiled(), ActivationChoice::Ask, None)
+    match push(&mut client, &compiled(), ActivationChoice::Ask, None, None)
         .await
         .unwrap()
     {
@@ -150,9 +158,15 @@ async fn the_wrapper_needs_include() {
         } => assert!(!include_available),
         other => panic!("unexpected {other:?}"),
     }
-    let error = push(&mut client, &compiled(), ActivationChoice::Wrapper, None)
-        .await
-        .unwrap_err();
+    let error = push(
+        &mut client,
+        &compiled(),
+        ActivationChoice::Wrapper,
+        None,
+        Some("main"),
+    )
+    .await
+    .unwrap_err();
     assert!(matches!(error, PushError::IncludeUnavailable));
 }
 
@@ -160,9 +174,15 @@ async fn the_wrapper_needs_include() {
 async fn replacing_records_what_to_restore() {
     let state = shared(with_scripts(&[("main", "keep;")], Some("main")));
     let mut client = connected(state.clone()).await;
-    let outcome = push(&mut client, &compiled(), ActivationChoice::Replace, None)
-        .await
-        .unwrap();
+    let outcome = push(
+        &mut client,
+        &compiled(),
+        ActivationChoice::Replace,
+        None,
+        Some("main"),
+    )
+    .await
+    .unwrap();
     assert!(matches!(
         outcome,
         PushOutcome::Activated { mode: ActivationMode::Direct, previous_active: Some(ref name), .. } if name == "main"
@@ -176,6 +196,7 @@ async fn replacing_records_what_to_restore() {
         &compiled(),
         ActivationChoice::Ask,
         Some("main".into()),
+        None,
     )
     .await
     .unwrap();
@@ -195,9 +216,15 @@ async fn replacing_records_what_to_restore() {
 async fn a_foreign_script_named_satchel_is_never_overwritten() {
     let state = shared(with_scripts(&[(OWN_SCRIPT, "# mine\r\nkeep;")], None));
     let mut client = connected(state.clone()).await;
-    let error = push(&mut client, &compiled(), ActivationChoice::Replace, None)
-        .await
-        .unwrap_err();
+    let error = push(
+        &mut client,
+        &compiled(),
+        ActivationChoice::Replace,
+        None,
+        Some("main"),
+    )
+    .await
+    .unwrap_err();
     assert!(matches!(error, PushError::NameTaken(ref name) if name == OWN_SCRIPT));
     assert_eq!(error.message_key(), "backend.errors.serverRules.nameTaken");
     assert_eq!(state.lock().unwrap().scripts[OWN_SCRIPT], "# mine\r\nkeep;");
@@ -217,7 +244,7 @@ async fn a_script_the_server_rejects_is_not_stored() {
     let mut client = connected(state.clone()).await;
     let mut bad = compiled();
     bad.content = format!("{SCRIPT_MARKER}\r\nSYNTAX-ERROR;\r\n");
-    let error = push(&mut client, &bad, ActivationChoice::Ask, None)
+    let error = push(&mut client, &bad, ActivationChoice::Ask, None, None)
         .await
         .unwrap_err();
     assert_eq!(error.message_key(), "backend.errors.serverRules.refused");
@@ -233,7 +260,7 @@ async fn quota_is_checked_before_writing() {
         ..FakeState::default()
     });
     let mut client = connected(state.clone()).await;
-    let error = push(&mut client, &compiled(), ActivationChoice::Ask, None)
+    let error = push(&mut client, &compiled(), ActivationChoice::Ask, None, None)
         .await
         .unwrap_err();
     assert_eq!(error.message_key(), "backend.errors.serverRules.quota");
@@ -247,7 +274,7 @@ async fn servers_without_version_skip_checkscript() {
         ..FakeState::default()
     });
     let mut client = connected(state.clone()).await;
-    push(&mut client, &compiled(), ActivationChoice::Ask, None)
+    push(&mut client, &compiled(), ActivationChoice::Ask, None, None)
         .await
         .unwrap();
     assert!(!state
@@ -262,7 +289,7 @@ async fn servers_without_version_skip_checkscript() {
 async fn removal_without_a_previous_script_deactivates() {
     let state = shared(FakeState::default());
     let mut client = connected(state.clone()).await;
-    push(&mut client, &compiled(), ActivationChoice::Ask, None)
+    push(&mut client, &compiled(), ActivationChoice::Ask, None, None)
         .await
         .unwrap();
     let mut client = connected(state.clone()).await;
@@ -270,4 +297,134 @@ async fn removal_without_a_previous_script_deactivates() {
     let state = state.lock().unwrap();
     assert!(state.active.is_none());
     assert!(state.scripts.is_empty());
+}
+
+#[tokio::test]
+async fn consent_is_bound_to_the_script_the_person_saw() {
+    let state = shared(with_scripts(
+        &[("old", "keep;"), ("new", "keep;")],
+        Some("new"),
+    ));
+    let mut client = connected(state.clone()).await;
+    // They answered for "old"; "new" became active in the meantime.
+    let outcome = push(
+        &mut client,
+        &compiled(),
+        ActivationChoice::Replace,
+        None,
+        Some("old"),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        outcome,
+        PushOutcome::NeedsConsent { ref active_script, .. } if active_script == "new"
+    ));
+    assert_eq!(state.lock().unwrap().active.as_deref(), Some("new"));
+    assert!(!state.lock().unwrap().scripts.contains_key(OWN_SCRIPT));
+}
+
+#[tokio::test]
+async fn a_stale_own_wrapper_is_replaced_not_refused() {
+    let wrapper = wrapper_script(OWN_SCRIPT, "deleted-meanwhile");
+    let state = shared(with_scripts(
+        &[(WRAPPER_SCRIPT, &wrapper)],
+        Some(WRAPPER_SCRIPT),
+    ));
+    let mut client = connected(state.clone()).await;
+    let outcome = push(&mut client, &compiled(), ActivationChoice::Ask, None, None)
+        .await
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        PushOutcome::Activated {
+            mode: ActivationMode::Direct,
+            previous_active: None,
+            ..
+        }
+    ));
+    let state = state.lock().unwrap();
+    assert_eq!(state.active.as_deref(), Some(OWN_SCRIPT));
+    assert!(!state.scripts.contains_key(WRAPPER_SCRIPT));
+}
+
+#[tokio::test]
+async fn a_foreign_active_wrapper_name_cannot_be_replaced() {
+    let state = shared(with_scripts(
+        &[(WRAPPER_SCRIPT, "keep;")],
+        Some(WRAPPER_SCRIPT),
+    ));
+    let mut client = connected(state.clone()).await;
+    let error = push(
+        &mut client,
+        &compiled(),
+        ActivationChoice::Replace,
+        None,
+        Some(WRAPPER_SCRIPT),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(error, PushError::NameTaken(ref name) if name == WRAPPER_SCRIPT));
+    let state = state.lock().unwrap();
+    assert_eq!(state.active.as_deref(), Some(WRAPPER_SCRIPT));
+    assert!(!state.scripts.contains_key(OWN_SCRIPT));
+}
+
+#[tokio::test]
+async fn removal_recovers_the_wrapped_script_without_a_record() {
+    let state = shared(with_scripts(&[("roundcube", "keep;")], Some("roundcube")));
+    let mut client = connected(state.clone()).await;
+    push(
+        &mut client,
+        &compiled(),
+        ActivationChoice::Wrapper,
+        None,
+        Some("roundcube"),
+    )
+    .await
+    .unwrap();
+    let mut client = connected(state.clone()).await;
+    remove(&mut client, None).await.unwrap();
+    let state = state.lock().unwrap();
+    assert_eq!(state.active.as_deref(), Some("roundcube"));
+    assert_eq!(state.scripts.keys().collect::<Vec<_>>(), vec!["roundcube"]);
+}
+
+#[tokio::test]
+async fn a_push_broken_off_after_setactive_can_still_be_undone() {
+    // The read-back after SETACTIVE never answers.
+    let mut fake = with_scripts(&[("main", "keep;")], Some("main"));
+    fake.drop_on = Some(("LISTSCRIPTS", 2));
+    let state = shared(fake);
+    let mut client = connected(state.clone()).await;
+    let Planned::Ready(planned) = plan(&mut client, ActivationChoice::Replace, None, Some("main"))
+        .await
+        .unwrap()
+    else {
+        panic!("expected a plan");
+    };
+    // What the service records before writing anything.
+    assert_eq!(planned.mode(), ActivationMode::Direct);
+    assert_eq!(planned.previous_active().as_deref(), Some("main"));
+    assert!(apply(&mut client, &planned, &compiled()).await.is_err());
+    assert_eq!(state.lock().unwrap().active.as_deref(), Some(OWN_SCRIPT));
+
+    state.lock().unwrap().drop_on = None;
+    let mut client = connected(state.clone()).await;
+    remove(&mut client, planned.previous_active().as_deref())
+        .await
+        .unwrap();
+    let state = state.lock().unwrap();
+    assert_eq!(state.active.as_deref(), Some("main"));
+    assert!(!state.scripts.contains_key(OWN_SCRIPT));
+}
+
+#[tokio::test]
+async fn removal_reports_a_broken_connection_instead_of_success() {
+    let mut fake = with_scripts(&[(OWN_SCRIPT, &compiled().content)], Some(OWN_SCRIPT));
+    fake.drop_on = Some(("GETSCRIPT", 1));
+    let state = shared(fake);
+    let mut client = connected(state.clone()).await;
+    assert!(remove(&mut client, None).await.is_err());
+    assert_eq!(state.lock().unwrap().active.as_deref(), Some(OWN_SCRIPT));
 }

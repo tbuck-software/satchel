@@ -1849,18 +1849,21 @@ const handlers: Record<string, Handler> = {
   set_server_rules_endpoint: ({ input: raw }) => {
     const input = raw as { account_id: string; host?: string | null; port?: number | null; tls?: string | null };
     const sieve = mockSieve(input.account_id);
+    if (sieve.enabled) throw new Error('backend.errors.serverRules.turnOffFirst');
     const host = input.host?.trim().toLowerCase() || null;
+    // What was learned about the old server no longer applies.
     Object.assign(sieve, {
       hostOverride: host,
       portOverride: host ? input.port ?? null : null,
       tlsOverride: host ? input.tls ?? null : null,
       availability: 'unknown',
+      detected: false,
     });
     return mockServerRulesOverview();
   },
   enable_server_rules: ({ input: raw }) => {
-    const input = raw as { account_id: string; choice: string };
-    return mockEnableServerRules(input.account_id, input.choice);
+    const input = raw as { account_id: string; choice: string; expected_active?: string | null };
+    return mockEnableServerRules(input.account_id, input.choice, input.expected_active ?? null);
   },
   disable_server_rules: ({ accountId }) => mockDisableServerRules(String(accountId)),
   list_certificate_exceptions: () => certificateExceptions.filter((exception) => Date.parse(exception.expires_at) > Date.now()),
@@ -1956,6 +1959,9 @@ function mockServerRulesOverview() {
         host_override: sieve.hostOverride,
         port_override: sieve.portOverride,
         tls_override: sieve.tlsOverride,
+        suggested_host: null,
+        suggested_port: null,
+        suggested_tls: null,
         implementation: sieve.availability === 'available' ? 'Mock Sieve' : null,
         extensions,
         checked_at: sieve.availability === 'unknown' ? null : new Date().toISOString(),
@@ -1978,7 +1984,7 @@ function mockServerRulesOverview() {
   };
 }
 
-function mockEnableServerRules(accountId: string, choice: string) {
+function mockEnableServerRules(accountId: string, choice: string, expectedActive: string | null) {
   const sieve = mockSieve(accountId);
   if (sieve.availability !== 'available') throw new Error('backend.errors.serverRules.notConfigured');
   const { server } = sieve;
@@ -1989,18 +1995,19 @@ function mockEnableServerRules(accountId: string, choice: string) {
     mode = 'direct';
   } else if (server.active === 'satchel-main') {
     mode = 'wrapper';
+  } else if (choice === 'ask' || expectedActive !== server.active) {
+    // An answer counts only for the script the person was shown.
+    sieve.serverActive = false;
+    sieve.consent = server.active;
+    return mockServerRulesOverview();
   } else if (choice === 'wrapper') {
     if (!server.extensions.includes('include')) throw new Error('backend.errors.serverRules.includeUnavailable');
     previous = server.active;
     server.scripts['satchel-main'] = `include :personal "satchel";\ninclude :personal "${server.active}";`;
     mode = 'wrapper';
-  } else if (choice === 'replace') {
+  } else {
     previous = server.active;
     mode = 'direct';
-  } else {
-    sieve.serverActive = false;
-    sieve.consent = server.active;
-    return mockServerRulesOverview();
   }
   server.scripts.satchel = '# Satchel-managed script';
   server.active = mode === 'wrapper' ? 'satchel-main' : 'satchel';

@@ -85,26 +85,30 @@ fn any_becomes_anyof() {
 }
 
 #[test]
-fn body_needs_the_body_extension() {
-    let config = serde_json::json!({"body_contains": "unsubscribe"});
-    let (text, requires) = fragment(compile_rule(
-        &rule(config.clone(), &["mark_read"]),
+fn body_stays_local_until_verified_on_a_server() {
+    // Stored plain text locally, raw text parts in Sieve: not the same match.
+    assert_eq!(
+        compile_rule(
+            &rule(
+                serde_json::json!({"body_contains": "unsubscribe"}),
+                &["mark_read"]
+            ),
+            &all_extensions()
+        ),
+        RuleCompilation::Local(LocalReason::Condition("body_contains".into()))
+    );
+}
+
+#[test]
+fn line_breaks_in_a_needle_read_as_spaces() {
+    let (text, _) = fragment(compile_rule(
+        &rule(
+            serde_json::json!({"subject_contains": "two\r\nlines"}),
+            &["mark_read"],
+        ),
         &all_extensions(),
     ));
-    assert!(
-        text.contains("body :text :contains \"unsubscribe\""),
-        "{text}"
-    );
-    assert!(requires.contains("body"));
-
-    let without_body: Vec<String> = all_extensions()
-        .into_iter()
-        .filter(|ext| ext != "body")
-        .collect();
-    assert_eq!(
-        compile_rule(&rule(config, &["mark_read"]), &without_body),
-        RuleCompilation::Local(LocalReason::Extension("body".into()))
-    );
+    assert!(text.contains("\"subject\" \"two lines\""), "{text}");
 }
 
 #[test]
@@ -240,7 +244,7 @@ fn the_script_carries_marker_requires_and_rules_in_order() {
     };
     let compiled = compile_script(
         &[
-            rule(serde_json::json!({"body_contains": "a"}), &["mark_read"]),
+            rule(serde_json::json!({"to_contains": "a"}), &["mark_read"]),
             second,
             local,
         ],
@@ -249,9 +253,7 @@ fn the_script_carries_marker_requires_and_rules_in_order() {
     );
     assert!(compiled.content.starts_with(SCRIPT_MARKER));
     assert!(is_satchel_script(&compiled.content));
-    assert!(compiled
-        .content
-        .contains("require [\"body\", \"imap4flags\"];\r\n"));
+    assert!(compiled.content.contains("require [\"imap4flags\"];\r\n"));
     assert!(
         compiled.content.find("# Rule: Billing").unwrap()
             < compiled.content.find("# Rule: Second").unwrap()
@@ -291,7 +293,7 @@ fn vacation_without_a_window() {
     };
     assert_eq!(requires, BTreeSet::from(["vacation".to_string()]));
     assert!(fragment.contains(
-        "vacation :subject \"Away \\\"now\\\"\" :addresses [\"me@example.com\"] \"Back on Monday.\r\nRegards\";"
+        "vacation :days 7 :subject \"Away \\\"now\\\"\" :addresses [\"me@example.com\"] \"Back on Monday.\r\nRegards\";"
     ), "{fragment}");
     assert!(!fragment.contains("currentdate"));
 }

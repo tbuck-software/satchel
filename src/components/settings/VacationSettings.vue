@@ -166,6 +166,10 @@ async function save() {
         <textarea v-model="body" rows="6" />
       </label>
       <p v-if="!showWindow" class="hint">{{ $t('settings.vacation.imapNoWindow') }}</p>
+      <!-- Run both: Satchel's script goes first, so its reply is the one sent. -->
+      <p v-if="serverVacation && sieve?.activation_mode === 'wrapper'" class="hint">
+        {{ $t('settings.vacation.imapWrapperOrder', { script: sieve.previous_active_script ?? '' }) }}
+      </p>
       <div v-if="showWindow" class="pair">
         <label class="field">
           <span>{{ $t('common.from') }}</span>

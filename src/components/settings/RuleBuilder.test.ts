@@ -78,8 +78,9 @@ it('marks each active rule as running on the server or staying local, with the r
   const wrapper = mount(RuleBuilder);
   await flushPromises();
   const badges = wrapper.findAll('[data-testid="rule-placement"]');
-  expect(badges.map((badge) => badge.text())).toEqual(['Runs on server', 'Local only']);
-  expect(badges[0]!.attributes('title')).toBe('Runs on the server for Work');
+  expect(badges.map((badge) => badge.text())).toEqual(['Also runs on server', 'Local only']);
+  expect(badges[0]!.attributes('title')).toContain('Also runs on the server for Work');
+  expect(badges[0]!.attributes('title')).toContain('whole conversation');
   expect(badges[1]!.attributes('title')).toBe('“Set status” exists only in Satchel.');
 });
 

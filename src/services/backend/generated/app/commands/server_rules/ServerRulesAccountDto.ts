@@ -20,6 +20,13 @@ export type ServerRulesAccountDto = {
     host_override: string | null;
     port_override: number | null;
     tls_override: string | null;
+    /**
+     * A server autoconfig names on another domain than the IMAP host; never
+     * logged into until the person accepts it as the override.
+     */
+    suggested_host: string | null;
+    suggested_port: number | null;
+    suggested_tls: string | null;
     implementation: string | null;
     extensions: Array<string>;
     checked_at: string | null;

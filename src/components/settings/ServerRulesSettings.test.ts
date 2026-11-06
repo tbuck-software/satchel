@@ -28,6 +28,9 @@ function account(overrides: Record<string, unknown> = {}) {
     host_override: null,
     port_override: null,
     tls_override: null,
+    suggested_host: null,
+    suggested_port: null,
+    suggested_tls: null,
     implementation: 'Dovecot',
     extensions: ['include', 'imap4flags', 'vacation'],
     checked_at: null,
@@ -71,8 +74,8 @@ it('turns server rules on without taking over another script', async () => {
 
   await button(wrapper, 'Turn on').trigger('click');
   await flushPromises();
-  expect(backend.backendEnableServerRules).toHaveBeenCalledWith('acc', 'ask');
-  expect(wrapper.text()).toContain('Your script “roundcube” is active on the server');
+  expect(backend.backendEnableServerRules).toHaveBeenCalledWith('acc', 'ask', null);
+  expect(wrapper.text()).toContain('Your script “roundcube” is active');
   expect(wrapper.text()).toContain('Needs your choice');
 });
 
@@ -96,10 +99,11 @@ it('runs both scripts only after an explicit confirmation', async () => {
   confirm.ask.mockResolvedValueOnce(true);
   await button(wrapper, 'Run both').trigger('click');
   await flushPromises();
-  expect(backend.backendEnableServerRules).toHaveBeenCalledWith('acc', 'wrapper');
+  expect(backend.backendEnableServerRules).toHaveBeenCalledWith('acc', 'wrapper', 'roundcube');
   expect(wrapper.text()).toContain('Active on server');
-  expect(wrapper.text()).toContain('2 rules run on the server');
-  expect(wrapper.text()).toContain('alongside your script “roundcube”');
+  expect(wrapper.text()).toContain('2 rules on the server');
+  expect(wrapper.text()).toContain('after Satchel\'s: “roundcube”');
+  expect(wrapper.findAll('button').some((b) => b.text() === 'Enter server manually')).toBe(false);
 });
 
 it('offers no wrapper when the server lacks include, and keeps rules local on request', async () => {
@@ -148,4 +152,37 @@ it('shows a stored push error as text', async () => {
   const wrapper = mount(ServerRulesSettings);
   await flushPromises();
   expect(wrapper.text()).toContain('Password refused.');
+});
+
+it('signs in to a server on another domain only after the person accepts it', async () => {
+  backend.backendGetServerRulesOverview.mockResolvedValue({
+    accounts: [account({ availability: 'unavailable', suggested_host: 'sieve.hoster.net', suggested_port: 4190, suggested_tls: 'starttls' })],
+    rules: [],
+  });
+  backend.backendSetServerRulesEndpoint.mockResolvedValue({ accounts: [account()], rules: [] });
+  backend.backendDetectServerRules.mockResolvedValue({ accounts: [account({ host: 'sieve.hoster.net', source: 'override' })], rules: [] });
+  const wrapper = mount(ServerRulesSettings);
+  await flushPromises();
+  expect(wrapper.text()).toContain('Autoconfig names sieve.hoster.net:4190');
+  expect(backend.backendDetectServerRules).not.toHaveBeenCalled();
+  await button(wrapper, 'Use this server').trigger('click');
+  await flushPromises();
+  expect(backend.backendSetServerRulesEndpoint).toHaveBeenCalledWith({
+    accountId: 'acc', host: 'sieve.hoster.net', port: 4190, tls: 'starttls',
+  });
+  expect(backend.backendDetectServerRules).toHaveBeenCalledWith('acc');
+});
+
+it('replaces only the script that was shown', async () => {
+  backend.backendGetServerRulesOverview.mockResolvedValue({
+    accounts: [account({ enabled: true, consent_script: 'main' })],
+    rules: [],
+  });
+  backend.backendEnableServerRules.mockResolvedValue({ accounts: [account({ enabled: true, server_active: true })], rules: [] });
+  confirm.ask.mockResolvedValueOnce(true);
+  const wrapper = mount(ServerRulesSettings);
+  await flushPromises();
+  await button(wrapper, 'Use Satchel\'s instead').trigger('click');
+  await flushPromises();
+  expect(backend.backendEnableServerRules).toHaveBeenCalledWith('acc', 'replace', 'main');
 });

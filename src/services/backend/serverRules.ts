@@ -34,12 +34,17 @@ export async function backendSetServerRulesEndpoint(input: {
   });
 }
 
+/**
+ * `expectedActive` is the script the person saw when choosing `wrapper` or
+ * `replace`; if another one is active by now, the server rules ask again.
+ */
 export async function backendEnableServerRules(
   accountId: string,
   choice: BackendServerRulesChoice,
+  expectedActive: string | null = null,
 ): Promise<BackendServerRulesOverview> {
   return invoke<BackendServerRulesOverview>('enable_server_rules', {
-    input: { account_id: accountId, choice },
+    input: { account_id: accountId, choice, expected_active: expectedActive },
   });
 }
 

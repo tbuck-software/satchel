@@ -4,7 +4,6 @@ use sqlx::{FromRow, SqlitePool};
 use crate::commands::error::CommandResult;
 use crate::sync::queue::SyncQueue;
 use crate::workflow::states::WorkflowState;
-use satchel_core::server_rules::compiler::rule_fingerprint;
 
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
@@ -92,13 +91,25 @@ pub async fn upsert_rule(
     Ok(rule)
 }
 
-/// A changed rule set goes to every account whose server runs Satchel's
-/// rules. In the background: the save must not wait on a mail server, and
-/// until the push lands the edited rule simply runs locally (its fingerprint
-/// no longer matches the pushed one).
+/// How long rule edits settle before the rule set goes to the servers.
+const SERVER_PUSH_SETTLE: std::time::Duration = std::time::Duration::from_secs(3);
+static SERVER_PUSH_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A changed rule set goes to every account with server rules on. In the
+/// background, so the save never waits on a mail server, and coalesced: a
+/// burst of edits (toggling several rules) becomes one push per account
+/// after the last of them, instead of one push each queued behind the lock.
+///
+/// Local rules run regardless; the server copy only adds runs while
+/// Satchel is closed.
 fn spawn_server_rules_push(pool: SqlitePool) {
+    use std::sync::atomic::Ordering;
+    let generation = SERVER_PUSH_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     tauri::async_runtime::spawn(async move {
-        satchel_core::server_rules::service::push_enabled_accounts(&pool).await;
+        tokio::time::sleep(SERVER_PUSH_SETTLE).await;
+        if SERVER_PUSH_GENERATION.load(Ordering::SeqCst) == generation {
+            satchel_core::server_rules::service::push_enabled_accounts(&pool).await;
+        }
     });
 }
 
@@ -294,21 +305,12 @@ async fn run_rules_for_thread_tx(
     .await
     .map_err(|err| err.to_string())?;
 
-    // Rules the account's server already ran on this delivery.
-    let server_handled = match message_id {
-        Some(message_id) => satchel_core::db::server_rules::server_handled_rules(tx, message_id)
-            .await
-            .map_err(|err| err.to_string())?,
-        None => Default::default(),
-    };
-
+    // Every rule runs here, also those the account's server runs too: the
+    // only server action today (`mark_read`) is idempotent. A future
+    // non-idempotent one (fileinto, redirect) needs an exact gate first; see
+    // `satchel_core::server_rules`.
     let mut applied = Vec::new();
     for row in rows {
-        if server_handled.get(&row.id).is_some_and(|fingerprint| {
-            *fingerprint == rule_fingerprint(&row.trigger_type, &row.trigger_config, &row.actions)
-        }) {
-            continue;
-        }
         let trigger_config =
             serde_json::from_str::<serde_json::Value>(&row.trigger_config).unwrap_or_default();
         if !matches_rule(&row.trigger_type, &trigger_config, &ctx) {
@@ -611,8 +613,8 @@ mod tests {
     const ACTIONS: &str = r#"["add_tag:billing"]"#;
 
     /// One IMAP account, one rule, one newly received inbox message waiting
-    /// for the ingest rules; `pushed` is the account's server-rules record.
-    async fn seeded(pushed: Option<(&str, &str)>, server_active: bool) -> SqlitePool {
+    /// for the ingest rules, and the account's server running that rule.
+    async fn seeded_with_server_rule() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
@@ -645,69 +647,35 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        if let Some((fingerprint, since)) = pushed {
-            let pushed =
-                serde_json::json!({ "rule-1": { "fingerprint": fingerprint, "since": since } });
-            sqlx::query(
-                "INSERT INTO managesieve_accounts (account_id, enabled, server_active, pushed_rules, updated_at)
-                 VALUES ('acc', 1, ?, ?, '2026-01-01')",
-            )
-            .bind(i64::from(server_active))
-            .bind(pushed.to_string())
-            .execute(&pool)
-            .await
-            .unwrap();
-        }
+        let fingerprint =
+            satchel_core::server_rules::compiler::rule_fingerprint("on_receive", CONFIG, ACTIONS);
+        sqlx::query(
+            "INSERT INTO managesieve_accounts (account_id, enabled, server_active, pushed_rules, updated_at)
+             VALUES ('acc', 1, 1, ?, '2026-01-01')",
+        )
+        .bind(serde_json::json!({ "rule-1": fingerprint }).to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
         pool
     }
 
-    async fn ran_locally(pool: &SqlitePool) -> bool {
-        super::run_pending_ingest_rules(pool, &[("msg".into(), "th".into())])
+    #[tokio::test]
+    async fn a_rule_the_server_also_runs_still_runs_locally() {
+        let pool = seeded_with_server_rule().await;
+        super::run_pending_ingest_rules(&pool, &[("msg".into(), "th".into())])
             .await
             .unwrap();
         let count: i64 = sqlx::query_scalar("SELECT trigger_count FROM rules WHERE id = 'rule-1'")
-            .fetch_one(pool)
+            .fetch_one(&pool)
             .await
             .unwrap();
-        count == 1
-    }
-
-    fn fingerprint() -> String {
-        super::rule_fingerprint("on_receive", CONFIG, ACTIONS)
-    }
-
-    #[tokio::test]
-    async fn a_rule_the_server_runs_is_skipped_locally() {
-        let pool = seeded(Some((&fingerprint(), "2026-05-01T00:00:00Z")), true).await;
-        assert!(!ran_locally(&pool).await);
+        assert_eq!(count, 1);
         let tagged: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM thread_tags")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(tagged, 0);
-    }
-
-    #[tokio::test]
-    async fn local_rules_run_without_server_rules() {
-        assert!(ran_locally(&seeded(None, false).await).await);
-    }
-
-    #[tokio::test]
-    async fn an_inactive_server_script_hands_the_rule_back() {
-        let pool = seeded(Some((&fingerprint(), "2026-05-01T00:00:00Z")), false).await;
-        assert!(ran_locally(&pool).await);
-    }
-
-    #[tokio::test]
-    async fn an_edited_rule_runs_locally_until_pushed() {
-        let pool = seeded(Some(("stale-fingerprint", "2026-05-01T00:00:00Z")), true).await;
-        assert!(ran_locally(&pool).await);
-    }
-
-    #[tokio::test]
-    async fn mail_that_arrived_before_the_push_is_handled_locally() {
-        let pool = seeded(Some((&fingerprint(), "2026-06-02T00:00:00Z")), true).await;
-        assert!(ran_locally(&pool).await);
+        assert_eq!(tagged, 1);
     }
 
     fn context() -> ThreadRuleContext {

@@ -355,6 +355,7 @@ pub fn run() {
             sync::maintenance::spawn_checkpoint_worker(checkpoint_pool.clone());
             sync::maintenance::spawn_maintenance_worker(pool.clone(), checkpoint_pool, app_handle.clone());
             sync::maintenance::spawn_snooze_worker(pool.clone(), app_handle.clone());
+            commands::server_rules::spawn_retry_worker(pool.clone());
             sync::maintenance::spawn_followup_worker(pool.clone(), app_handle.clone());
             sync::maintenance::spawn_webhook_worker(pool.clone());
 

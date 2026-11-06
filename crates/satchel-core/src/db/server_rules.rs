@@ -1,19 +1,10 @@
 //! Persistence for server-side rules (ManageSieve), one row per IMAP account.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, SqliteConnection, SqlitePool};
+use sqlx::{FromRow, SqlitePool};
 
 use crate::providers::managesieve::{SieveEndpoint, SieveTls, DEFAULT_PORT};
-
-/// The version of a rule that went live on the server, and when.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PushedRule {
-    pub fingerprint: String,
-    /// RFC 3339. Mail that arrived earlier was never seen by this version.
-    pub since: String,
-}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServerRulesState {
@@ -23,6 +14,9 @@ pub struct ServerRulesState {
     pub tls_override: Option<SieveTls>,
     pub detected: Option<SieveEndpoint>,
     pub detected_source: Option<String>,
+    /// A server autoconfig named on another domain than the IMAP host. Not
+    /// probed: the password would go to it. Shown for the person to accept.
+    pub suggested: Option<SieveEndpoint>,
     /// `unknown`, `available` or `unavailable`.
     pub availability: String,
     pub implementation: Option<String>,
@@ -34,7 +28,9 @@ pub struct ServerRulesState {
     pub previous_active_script: Option<String>,
     /// The foreign active script a push stopped at, waiting for a choice.
     pub consent_script: Option<String>,
-    pub pushed_rules: BTreeMap<String, PushedRule>,
+    /// Rule id -> fingerprint of the version in the active script. Display
+    /// only; the local engine never skips a rule because of it.
+    pub pushed_rules: BTreeMap<String, String>,
     pub pushed_vacation: bool,
     pub last_push_at: Option<String>,
     /// A message key.
@@ -72,6 +68,9 @@ struct Row {
     detected_port: Option<i64>,
     detected_tls: Option<String>,
     detected_source: Option<String>,
+    suggested_host: Option<String>,
+    suggested_port: Option<i64>,
+    suggested_tls: Option<String>,
     availability: String,
     implementation: Option<String>,
     extensions: String,
@@ -105,8 +104,21 @@ impl From<Row> for ServerRulesState {
             }),
             _ => None,
         };
+        let suggested = match (row.suggested_host, port(row.suggested_port)) {
+            (Some(host), Some(port)) => Some(SieveEndpoint {
+                host,
+                port,
+                tls: row
+                    .suggested_tls
+                    .as_deref()
+                    .and_then(SieveTls::parse)
+                    .unwrap_or(SieveTls::Starttls),
+            }),
+            _ => None,
+        };
         Self {
             account_id: row.account_id,
+            suggested,
             host_override: row.host_override,
             port_override: port(row.port_override),
             tls_override: row.tls_override.as_deref().and_then(SieveTls::parse),
@@ -130,7 +142,7 @@ impl From<Row> for ServerRulesState {
 }
 
 const COLUMNS: &str = "account_id, host_override, port_override, tls_override, detected_host, \
-    detected_port, detected_tls, detected_source, availability, implementation, extensions, \
+    detected_port, detected_tls, detected_source, suggested_host, suggested_port, suggested_tls, availability, implementation, extensions, \
     checked_at, enabled, server_active, activation_mode, previous_active_script, consent_script, \
     pushed_rules, pushed_vacation, last_push_at, last_error";
 
@@ -174,10 +186,11 @@ impl<'a> ServerRulesRepository<'a> {
         let now = chrono::Utc::now().to_rfc3339();
         sqlx::query(
             "INSERT INTO managesieve_accounts (account_id, host_override, port_override, tls_override,
-                 detected_host, detected_port, detected_tls, detected_source, availability, implementation,
+                 detected_host, detected_port, detected_tls, detected_source, suggested_host, suggested_port,
+                 suggested_tls, availability, implementation,
                  extensions, checked_at, enabled, server_active, activation_mode, previous_active_script,
                  consent_script, pushed_rules, pushed_vacation, last_push_at, last_error, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(account_id) DO UPDATE SET
                  host_override = excluded.host_override,
                  port_override = excluded.port_override,
@@ -186,6 +199,9 @@ impl<'a> ServerRulesRepository<'a> {
                  detected_port = excluded.detected_port,
                  detected_tls = excluded.detected_tls,
                  detected_source = excluded.detected_source,
+                 suggested_host = excluded.suggested_host,
+                 suggested_port = excluded.suggested_port,
+                 suggested_tls = excluded.suggested_tls,
                  availability = excluded.availability,
                  implementation = excluded.implementation,
                  extensions = excluded.extensions,
@@ -209,6 +225,9 @@ impl<'a> ServerRulesRepository<'a> {
         .bind(state.detected.as_ref().map(|endpoint| i64::from(endpoint.port)))
         .bind(state.detected.as_ref().map(|endpoint| endpoint.tls.as_str()))
         .bind(&state.detected_source)
+        .bind(state.suggested.as_ref().map(|endpoint| endpoint.host.clone()))
+        .bind(state.suggested.as_ref().map(|endpoint| i64::from(endpoint.port)))
+        .bind(state.suggested.as_ref().map(|endpoint| endpoint.tls.as_str()))
         .bind(&state.availability)
         .bind(&state.implementation)
         .bind(serde_json::to_string(&state.extensions).unwrap_or_else(|_| "[]".into()))
@@ -229,50 +248,43 @@ impl<'a> ServerRulesRepository<'a> {
     }
 }
 
-/// Rule ids (with their pushed fingerprint) the server already ran for the
-/// newly received message `message_id`, which the local engine must skip.
-///
-/// Empty unless the account's script is verifiably active. A rule counts only
-/// for mail that arrived after its pushed version went live: earlier mail was
-/// delivered before the server knew the rule.
-pub async fn server_handled_rules(
-    conn: &mut SqliteConnection,
-    message_id: &str,
-) -> Result<HashMap<String, String>, sqlx::Error> {
-    let row = sqlx::query_as::<_, (String, Option<f64>)>(
-        "SELECT s.pushed_rules, julianday(COALESCE(m.received_at, m.date))
-         FROM ingest_effects e
-         JOIN managesieve_accounts s ON s.account_id = e.account_id
-         JOIN messages m ON m.id = e.message_id
-         WHERE e.message_id = ? AND s.enabled = 1 AND s.server_active = 1",
-    )
-    .bind(message_id)
-    .fetch_optional(&mut *conn)
-    .await?;
-    let Some((pushed, Some(arrived))) = row else {
-        return Ok(HashMap::new());
-    };
-    let pushed: BTreeMap<String, PushedRule> = serde_json::from_str(&pushed).unwrap_or_default();
-    Ok(pushed
-        .into_iter()
-        .filter(|(_, rule)| julian_day(&rule.since).is_some_and(|since| arrived >= since))
-        .map(|(id, rule)| (id, rule.fingerprint))
-        .collect())
-}
-
-/// SQLite's `julianday()` for an RFC 3339 timestamp.
-fn julian_day(value: &str) -> Option<f64> {
-    let parsed = chrono::DateTime::parse_from_rfc3339(value).ok()?;
-    Some(parsed.timestamp_millis() as f64 / 86_400_000.0 + 2_440_587.5)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn julian_day_matches_sqlite_epoch() {
-        assert_eq!(julian_day("1970-01-01T00:00:00Z"), Some(2_440_587.5));
-        assert!(julian_day("not a date").is_none());
+    #[tokio::test]
+    async fn a_state_round_trips() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES ('acc', 'Me', 'me@example.com', 'imap', '{}', '', '2026-01-01', '2026-01-01')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let repo = ServerRulesRepository::new(&pool);
+        assert!(repo.get("acc").await.unwrap().is_none());
+        let mut state = ServerRulesState::empty("acc");
+        state.host_override = Some("sieve.example.com".into());
+        state.port_override = Some(2000);
+        state.tls_override = Some(SieveTls::Implicit);
+        state.suggested = Some(SieveEndpoint {
+            host: "sieve.other.example".into(),
+            port: 4190,
+            tls: SieveTls::Starttls,
+        });
+        state.extensions = vec!["vacation".into()];
+        state.enabled = true;
+        state.activation_mode = Some("wrapper".into());
+        state.previous_active_script = Some("roundcube".into());
+        state.pushed_rules.insert("rule-1".into(), "abc".into());
+        repo.save(&state).await.unwrap();
+        assert_eq!(repo.get("acc").await.unwrap(), Some(state.clone()));
+        assert_eq!(repo.list().await.unwrap(), vec![state]);
     }
 }

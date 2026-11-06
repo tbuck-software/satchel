@@ -1,17 +1,19 @@
 //! Detect, push and remove server rules for an account: credentials from the
 //! account, rules and the vacation reply from the database, state back into
 //! `managesieve_accounts`.
-
-use std::collections::BTreeMap;
+//!
+//! The local engine runs every rule whatever happens here; see the module
+//! documentation of [`super`] for why, and for what a non-idempotent action
+//! would need first.
 
 use sqlx::SqlitePool;
 
 use super::compiler::{
     compile_script, LocalReason, RuleCompilation, RuleSpec, VacationCompilation, VacationSpec,
 };
-use super::{push, remove, ActivationChoice, PushError, PushOutcome};
+use super::{apply, plan, remove, ActivationChoice, Planned, PushError};
 use crate::db::accounts::{AccountError, AccountRepository};
-use crate::db::server_rules::{PushedRule, ServerRulesRepository, ServerRulesState};
+use crate::db::server_rules::{ServerRulesRepository, ServerRulesState};
 use crate::db::vacation::VacationRepository;
 use crate::providers::imap::ImapProvider;
 use crate::providers::managesieve::{
@@ -31,6 +33,8 @@ pub enum ServiceError {
     NotImap,
     #[error("no ManageSieve server is known for the account")]
     NotConfigured,
+    #[error("the server cannot change while server rules are on")]
+    TurnOffFirst,
     #[error("account credentials: {0}")]
     Credentials(String),
     #[error(transparent)]
@@ -51,6 +55,7 @@ impl ServiceError {
             Self::NotFound => "backend.errors.accountNotFound",
             Self::NotImap => "backend.errors.accountNotImap",
             Self::NotConfigured => "backend.errors.serverRules.notConfigured",
+            Self::TurnOffFirst => "backend.errors.serverRules.turnOffFirst",
             Self::Credentials(_) => "backend.errors.accountCredentialAccessFailed",
             Self::Push(error) => error.message_key(),
             Self::Db(_) => "backend.errors.serverRules.persistence",
@@ -62,7 +67,8 @@ struct Credentials {
     imap_host: String,
     username: String,
     password: String,
-    email: String,
+    /// The account address first, then its aliases.
+    addresses: Vec<String>,
 }
 
 async fn credentials(pool: &SqlitePool, account_id: &str) -> Result<Credentials, ServiceError> {
@@ -87,14 +93,31 @@ async fn credentials(pool: &SqlitePool, account_id: &str) -> Result<Credentials,
     let config = provider
         .config
         .ok_or_else(|| ServiceError::Credentials("missing IMAP config".into()))?;
+    let aliases: Vec<String> = sqlx::query_scalar(
+        "SELECT email FROM account_aliases WHERE account_id = ? ORDER BY is_default DESC, email",
+    )
+    .bind(account_id)
+    .fetch_all(pool)
+    .await?;
+    let mut addresses = vec![email];
+    for alias in aliases {
+        if !addresses
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(&alias))
+        {
+            addresses.push(alias);
+        }
+    }
     Ok(Credentials {
         imap_host: config.host,
         username: config.username,
         password: config.password,
-        email,
+        addresses,
     })
 }
 
+/// Connect, sign in, and ask for the capabilities again: RFC 5804 lets a
+/// server show more after authentication (Dovecot's per-user extensions).
 async fn open(
     endpoint: &SieveEndpoint,
     creds: &Credentials,
@@ -103,22 +126,50 @@ async fn open(
     client
         .authenticate(&creds.username, &creds.password)
         .await?;
+    client.refresh_capabilities().await?;
     Ok(client)
 }
 
+/// Second-level labels under which a country code hands out names, so that
+/// `example.co.uk` counts as the site and not `co.uk`. Without a public
+/// suffix list this errs towards "different site", which only means asking.
+const SECOND_LEVEL_SUFFIXES: [&str; 11] = [
+    "co", "com", "net", "org", "ac", "gov", "edu", "gv", "or", "ne", "go",
+];
+
+fn site(host: &str) -> String {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let labels: Vec<&str> = host.split('.').collect();
+    let take = match labels.as_slice() {
+        [.., second, tld] if tld.len() == 2 && SECOND_LEVEL_SUFFIXES.contains(second) => 3,
+        _ => 2,
+    };
+    labels[labels.len().saturating_sub(take)..].join(".")
+}
+
+/// Whether two hosts belong to the same registrable domain.
+pub fn same_site(a: &str, b: &str) -> bool {
+    site(a) == site(b)
+}
+
 /// Where to look, in order: the person's override alone if there is one;
-/// otherwise what autoconfig advertised, then the IMAP host on 4190.
+/// otherwise what autoconfig advertised on the IMAP host's own domain, then
+/// the IMAP host on 4190. An autoconfig server on another domain is returned
+/// separately: logging in there would hand it the password unasked.
 fn candidates(
     state: &ServerRulesState,
     imap_host: &str,
     autoconfig: &[SieveEndpoint],
-) -> Vec<(SieveEndpoint, &'static str)> {
+) -> (Vec<(SieveEndpoint, &'static str)>, Option<SieveEndpoint>) {
     if let Some(endpoint) = state.override_endpoint() {
-        return vec![(endpoint, "override")];
+        return (vec![(endpoint, "override")], None);
     }
-    let mut list: Vec<(SieveEndpoint, &'static str)> = autoconfig
+    let (same, foreign): (Vec<_>, Vec<_>) = autoconfig
         .iter()
         .cloned()
+        .partition(|endpoint| same_site(&endpoint.host, imap_host));
+    let mut list: Vec<(SieveEndpoint, &'static str)> = same
+        .into_iter()
         .map(|endpoint| (endpoint, "autoconfig"))
         .collect();
     let guess = SieveEndpoint {
@@ -129,7 +180,7 @@ fn candidates(
     if !list.iter().any(|(endpoint, _)| *endpoint == guess) {
         list.push((guess, "imap_host"));
     }
-    list
+    (list, foreign.into_iter().next())
 }
 
 /// Probe for a ManageSieve server and record what was found.
@@ -142,10 +193,11 @@ pub async fn detect(
     let creds = credentials(pool, account_id).await?;
     let repo = ServerRulesRepository::new(pool);
     let mut state = repo.get_or_empty(account_id).await?;
-    let now = chrono::Utc::now().to_rfc3339();
-    state.checked_at = Some(now);
+    state.checked_at = Some(chrono::Utc::now().to_rfc3339());
+    let (probes, suggested) = candidates(&state, &creds.imap_host, autoconfig);
+    state.suggested = suggested;
     let mut last_error = None;
-    for (endpoint, source) in candidates(&state, &creds.imap_host, autoconfig) {
+    for (endpoint, source) in probes {
         match open(&endpoint, &creds).await {
             Ok(client) => {
                 let capabilities = client.capabilities().clone();
@@ -156,6 +208,8 @@ pub async fn detect(
                 state.implementation = capabilities.implementation;
                 state.extensions = capabilities.sieve;
                 state.last_error = None;
+                // Found on the mail domain itself; nothing left to ask about.
+                state.suggested = None;
                 repo.save(&state).await?;
                 return Ok(state);
             }
@@ -179,8 +233,10 @@ pub async fn detect(
     Ok(state)
 }
 
-/// Save (or clear, with `host: None`) the endpoint the person typed in. The
-/// next detection uses it alone.
+/// Save (or clear, with `host: None`) the endpoint the person typed in. What
+/// was learned about the old server no longer applies and is dropped; while
+/// Satchel's script runs on the old server the endpoint cannot change, or
+/// turning off would talk to the wrong one.
 pub async fn set_override(
     pool: &SqlitePool,
     account_id: &str,
@@ -191,14 +247,17 @@ pub async fn set_override(
     let _guard = LOCK.lock().await;
     let repo = ServerRulesRepository::new(pool);
     let mut state = repo.get_or_empty(account_id).await?;
+    if state.enabled {
+        return Err(ServiceError::TurnOffFirst);
+    }
     let host = host
         .map(|host| host.trim().trim_end_matches('.').to_ascii_lowercase())
         .filter(|host| !host.is_empty());
-    state.port_override = host.as_ref().and(port);
-    state.tls_override = host.as_ref().and(tls);
-    state.host_override = host;
-    state.availability = "unknown".into();
-    state.last_error = None;
+    let mut fresh = ServerRulesState::empty(account_id);
+    fresh.port_override = host.as_ref().and(port);
+    fresh.tls_override = host.as_ref().and(tls);
+    fresh.host_override = host;
+    state = fresh;
     repo.save(&state).await?;
     Ok(state)
 }
@@ -228,7 +287,7 @@ pub async fn load_rules(pool: &SqlitePool) -> Result<Vec<RuleSpec>, sqlx::Error>
 async fn load_vacation(
     pool: &SqlitePool,
     account_id: &str,
-    email: &str,
+    addresses: &[String],
 ) -> Result<VacationSpec, ServiceError> {
     let record = VacationRepository::new(pool)
         .get(account_id)
@@ -248,18 +307,23 @@ async fn load_vacation(
             body: record.body.clone(),
             starts_at: parse(record.starts_at.as_deref()),
             ends_at: parse(record.ends_at.as_deref()),
-            addresses: vec![email.to_string()],
+            addresses: addresses.to_vec(),
         },
         None => VacationSpec::default(),
     })
 }
 
-/// Compile and push the account's script. `choice` decides what happens when
-/// another script is active; background pushes pass [`ActivationChoice::Ask`].
+/// Compile and push the account's script.
+///
+/// `choice` decides what happens when another script is active; background
+/// pushes pass [`ActivationChoice::Ask`]. `expected_active` is the script the
+/// person saw when they chose: if a different one is active now, they are
+/// asked again.
 pub async fn push_account(
     pool: &SqlitePool,
     account_id: &str,
     choice: ActivationChoice,
+    expected_active: Option<&str>,
 ) -> Result<ServerRulesState, ServiceError> {
     let _guard = LOCK.lock().await;
     let repo = ServerRulesRepository::new(pool);
@@ -285,84 +349,87 @@ pub async fn push_account(
     state.extensions = client.capabilities().sieve.clone();
 
     let rules = load_rules(pool).await?;
-    let vacation = load_vacation(pool, account_id, &creds.email).await?;
+    let vacation = load_vacation(pool, account_id, &creds.addresses).await?;
     let compiled = compile_script(&rules, &vacation, &state.extensions);
 
-    let result = push(
+    let planned = match plan(
         &mut client,
-        &compiled,
         choice,
         state.previous_active_script.clone(),
+        expected_active,
     )
-    .await;
-    let _ = client.logout().await;
-    let now = chrono::Utc::now().to_rfc3339();
-    match result {
-        Ok(PushOutcome::Activated {
-            mode,
-            previous_active,
-            warnings,
-        }) => {
+    .await
+    {
+        Ok(Planned::Ready(planned)) => planned,
+        Ok(Planned::NeedsConsent { active_script, .. }) => {
+            let _ = client.logout().await;
+            // Nothing was written; the rules run in Satchel as always.
+            state.server_active = false;
+            state.pushed_rules.clear();
+            state.pushed_vacation = false;
+            state.consent_script = Some(active_script);
+            state.last_error = None;
+            repo.save(&state).await?;
+            return Ok(state);
+        }
+        Err(error) => return fail(&repo, state, error).await,
+    };
+
+    // Recorded before anything is written: a push that breaks off after
+    // SETACTIVE must still let turning off find and restore the right script.
+    state.activation_mode = Some(planned.mode().as_str().to_string());
+    state.previous_active_script = planned.previous_active();
+    state.consent_script = None;
+    state.server_active = false;
+    repo.save(&state).await?;
+
+    match apply(&mut client, &planned, &compiled).await {
+        Ok(warnings) => {
+            let _ = client.logout().await;
             if let Some(warnings) = warnings {
                 tracing::info!(%warnings, "managesieve accepted the script with warnings");
             }
-            let previous = std::mem::take(&mut state.pushed_rules);
             state.pushed_rules = compiled
                 .server_rules()
-                .map(|(id, fingerprint)| {
-                    let since = previous
-                        .get(id)
-                        .filter(|pushed| pushed.fingerprint == fingerprint && state.server_active)
-                        .map(|pushed| pushed.since.clone())
-                        .unwrap_or_else(|| now.clone());
-                    (
-                        id.to_string(),
-                        PushedRule {
-                            fingerprint: fingerprint.to_string(),
-                            since,
-                        },
-                    )
-                })
-                .collect::<BTreeMap<_, _>>();
+                .map(|(id, fingerprint)| (id.to_string(), fingerprint.to_string()))
+                .collect();
             state.server_active = true;
-            state.activation_mode = Some(mode.as_str().to_string());
-            state.previous_active_script = previous_active;
-            state.consent_script = None;
             state.pushed_vacation = matches!(compiled.vacation, VacationCompilation::Server { .. });
-            state.last_push_at = Some(now);
+            state.last_push_at = Some(chrono::Utc::now().to_rfc3339());
             state.last_error = match &compiled.vacation {
                 VacationCompilation::Unsupported(_) => {
                     Some("backend.errors.serverRules.vacationUnsupported".to_string())
                 }
                 _ => None,
             };
-        }
-        Ok(PushOutcome::NeedsConsent { active_script, .. }) => {
-            // Nothing was written; the rules run locally until a choice is made.
-            state.server_active = false;
-            state.pushed_rules.clear();
-            state.pushed_vacation = false;
-            state.consent_script = Some(active_script);
-            state.last_error = None;
-        }
-        Err(error) => {
-            // A push that broke off may have replaced the script already:
-            // the local engine takes every rule back rather than skip one
-            // the server no longer runs.
-            state.server_active = false;
-            state.pushed_rules.clear();
-            state.pushed_vacation = false;
-            state.last_error = Some(error.message_key().to_string());
             repo.save(&state).await?;
-            return Err(error.into());
+            Ok(state)
         }
+        Err(error) => fail(&repo, state, error).await,
     }
+}
+
+/// Record a push that failed after connecting. The connection is dropped,
+/// not logged out: after a timeout or a broken reply it is out of step.
+/// `activation_mode` and `previous_active_script` stay, so turning off still
+/// cleans up whatever got written.
+async fn fail(
+    repo: &ServerRulesRepository<'_>,
+    mut state: ServerRulesState,
+    error: PushError,
+) -> Result<ServerRulesState, ServiceError> {
+    state.server_active = false;
+    state.pushed_rules.clear();
+    state.pushed_vacation = false;
+    state.last_error = Some(error.message_key().to_string());
     repo.save(&state).await?;
-    Ok(state)
+    Err(error.into())
 }
 
 /// Turn server rules off: restore what was active before, delete Satchel's
-/// scripts, and hand every rule back to the local engine.
+/// scripts. Runs against the server whenever server rules were on, even if no
+/// push ever finished: removal touches only scripts carrying Satchel's marker
+/// and is safe to repeat.
 pub async fn disable(
     pool: &SqlitePool,
     account_id: &str,
@@ -370,17 +437,14 @@ pub async fn disable(
     let _guard = LOCK.lock().await;
     let repo = ServerRulesRepository::new(pool);
     let mut state = repo.get_or_empty(account_id).await?;
-    if state.activation_mode.is_some() {
-        let endpoint = state
-            .override_endpoint()
-            .or_else(|| state.detected.clone())
-            .ok_or(ServiceError::NotConfigured)?;
+    let endpoint = state.override_endpoint().or_else(|| state.detected.clone());
+    if let (true, Some(endpoint)) = (state.enabled || state.activation_mode.is_some(), endpoint) {
         let creds = credentials(pool, account_id).await?;
         let outcome = async {
             let mut client = open(&endpoint, &creds).await?;
-            let result = remove(&mut client, state.previous_active_script.as_deref()).await;
+            remove(&mut client, state.previous_active_script.as_deref()).await?;
             let _ = client.logout().await;
-            result
+            Ok::<_, PushError>(())
         }
         .await;
         if let Err(error) = outcome {
@@ -402,9 +466,7 @@ pub async fn disable(
     Ok(state)
 }
 
-/// Re-push every account that has server rules on, after a rule changed.
-/// Never takes over a script: a push that finds a foreign one stops and asks.
-pub async fn push_enabled_accounts(pool: &SqlitePool) {
+async fn push_where(pool: &SqlitePool, wanted: impl Fn(&ServerRulesState) -> bool) {
     let states = match ServerRulesRepository::new(pool).list().await {
         Ok(states) => states,
         Err(error) => {
@@ -412,22 +474,38 @@ pub async fn push_enabled_accounts(pool: &SqlitePool) {
             return;
         }
     };
-    for state in states.into_iter().filter(|state| state.enabled) {
-        if let Err(error) = push_account(pool, &state.account_id, ActivationChoice::Ask).await {
+    for state in states.into_iter().filter(|state| wanted(state)) {
+        if let Err(error) = push_account(pool, &state.account_id, ActivationChoice::Ask, None).await
+        {
             tracing::warn!(%error, account_id = %state.account_id, "server rules push failed");
         }
     }
+}
+
+/// Re-push every account that has server rules on, after rules changed.
+/// Never takes over a script: a push that finds a foreign one stops and asks.
+pub async fn push_enabled_accounts(pool: &SqlitePool) {
+    push_where(pool, |state| state.enabled).await;
+}
+
+/// Retry accounts whose last push did not land (server down, app quit
+/// mid-push). Accounts waiting for the person's choice are left waiting.
+pub async fn push_pending_accounts(pool: &SqlitePool) {
+    push_where(pool, |state| {
+        state.enabled && !state.server_active && state.consent_script.is_none()
+    })
+    .await;
 }
 
 /// Where a rule runs, for the badge next to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RulePlacement {
     pub rule_id: String,
-    /// Accounts whose server runs exactly this version of the rule.
+    /// Accounts whose server also runs exactly this version of the rule.
     pub server_account_ids: Vec<String>,
     /// Why it stays local on an account with server rules on, if it does.
     pub local_reason: Option<LocalReason>,
-    /// Compilable, but the server still has an older version (or none).
+    /// Compilable, but the server does not have this version (yet).
     pub pending: bool,
 }
 
@@ -440,12 +518,7 @@ pub fn placements(rules: &[RuleSpec], states: &[ServerRulesState]) -> Vec<RulePl
             let server_account_ids: Vec<String> = enabled
                 .iter()
                 .filter(|state| state.server_active)
-                .filter(|state| {
-                    state
-                        .pushed_rules
-                        .get(&rule.id)
-                        .is_some_and(|pushed| pushed.fingerprint == fingerprint)
-                })
+                .filter(|state| state.pushed_rules.get(&rule.id) == Some(&fingerprint))
                 .map(|state| state.account_id.clone())
                 .collect();
             let mut local_reason = None;
@@ -472,4 +545,50 @@ pub fn placements(rules: &[RuleSpec], states: &[ServerRulesState]) -> Vec<RulePl
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn endpoint(host: &str) -> SieveEndpoint {
+        SieveEndpoint {
+            host: host.into(),
+            port: DEFAULT_PORT,
+            tls: SieveTls::Starttls,
+        }
+    }
+
+    #[test]
+    fn sites_compare_registrable_domains() {
+        assert!(same_site("sieve.example.com", "imap.example.com"));
+        assert!(same_site("example.com", "mail.example.com."));
+        assert!(same_site("sieve.example.co.uk", "imap.example.co.uk"));
+        assert!(!same_site("sieve.other.co.uk", "imap.example.co.uk"));
+        assert!(!same_site("sieve.example.net", "imap.example.com"));
+        assert!(same_site("sieve.gmx.de", "imap.gmx.de"));
+    }
+
+    #[test]
+    fn autoconfig_on_another_domain_is_suggested_not_probed() {
+        let state = ServerRulesState::empty("acc");
+        let (probes, suggested) = candidates(
+            &state,
+            "imap.example.com",
+            &[endpoint("sieve.example.com"), endpoint("sieve.hoster.net")],
+        );
+        let hosts: Vec<&str> = probes.iter().map(|(e, _)| e.host.as_str()).collect();
+        assert_eq!(hosts, vec!["sieve.example.com", "imap.example.com"]);
+        assert_eq!(suggested, Some(endpoint("sieve.hoster.net")));
+    }
+
+    #[test]
+    fn an_override_is_probed_alone() {
+        let mut state = ServerRulesState::empty("acc");
+        state.host_override = Some("manual.example.org".into());
+        let (probes, suggested) = candidates(&state, "imap.example.com", &[endpoint("x.y.net")]);
+        assert_eq!(probes.len(), 1);
+        assert_eq!(probes[0].1, "override");
+        assert!(suggested.is_none());
+    }
 }

@@ -21,6 +21,8 @@ pub struct FakeState {
     pub log: Vec<String>,
     /// HAVESPACE refuses scripts larger than this.
     pub quota: usize,
+    /// Hang up without answering the n-th (1-based) command with this verb.
+    pub drop_on: Option<(&'static str, usize)>,
 }
 
 impl Default for FakeState {
@@ -42,6 +44,7 @@ impl Default for FakeState {
             password: "pass".into(),
             log: Vec::new(),
             quota: 64 * 1024,
+            drop_on: None,
         }
     }
 }
@@ -143,7 +146,18 @@ async fn serve(stream: DuplexStream, state: Shared) {
         let reply = {
             let mut state = state.lock().unwrap();
             state.log.push(verb.clone());
-            handle(&mut state, &verb, &args[1..])
+            let seen = state.log.iter().filter(|logged| **logged == verb).count();
+            if state
+                .drop_on
+                .is_some_and(|(drop_verb, nth)| drop_verb == verb && nth == seen)
+            {
+                None
+            } else {
+                Some(handle(&mut state, &verb, &args[1..]))
+            }
+        };
+        let Some(reply) = reply else {
+            return;
         };
         if reader.get_mut().write_all(reply.as_bytes()).await.is_err() {
             return;
