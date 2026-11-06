@@ -8,6 +8,7 @@
       "contactsAction": "Mail merge to one contact… | Mail merge to {count} contacts…",
       "started": "Mail merge started: one copy is on its way. | Mail merge started: {count} copies go out one by one.",
       "viewProgress": "View progress",
+      "notForReplies": "Mail merge works with a new message, not with a reply or forward.",
       "bar": {
         "title": "Mail merge",
         "recipients": "one recipient from {source} | {count} recipients from {source}",
@@ -38,6 +39,7 @@
           "windows1252": "Windows-1252"
         },
         "truncated": "The file has more rows. Only the first {count} were read.",
+        "windows1252Hint": "The file was read as Windows-1252. If umlauts or accents look wrong, save it as \"CSV UTF-8\" and choose it again.",
         "emailColumn": "Email address column",
         "emailColumnPick": "Choose a column",
         "emailColumnRequired": "Choose the column that holds the email addresses.",
@@ -57,7 +59,7 @@
         "overLimitDetail": "Split the list into parts of at most {limit} and send each as its own mail merge.",
         "unknownFields": "No field of the list is called {fields}.",
         "unknownFieldsDetail": "Fields in the list: {fields}. Rows without a fallback for these are skipped.",
-        "encrypted": "Each copy is encrypted for its recipient. If a key is missing for anyone, nothing is sent and you are told who.",
+        "encrypted": "Each copy is encrypted for its recipient. Before the first one goes, every recipient's key and your own are checked; a key that goes missing later stops that copy, which is then not sent unencrypted.",
         "previewLabel": "Preview",
         "previous": "Previous recipient",
         "next": "Next recipient",
@@ -92,6 +94,7 @@
           "running": "Sending",
           "paused": "Paused",
           "pausedFailures": "Paused after repeated failures",
+          "pausedRestart": "Paused when Satchel restarted",
           "cancelled": "Cancelled",
           "completed": "Finished"
         },
@@ -132,6 +135,7 @@
       "contactsAction": "Serienmail an einen Kontakt … | Serienmail an {count} Kontakte …",
       "started": "Serienmail gestartet: eine Nachricht ist unterwegs. | Serienmail gestartet: {count} Nachrichten gehen nacheinander raus.",
       "viewProgress": "Fortschritt ansehen",
+      "notForReplies": "Eine Serienmail geht nur als neue Nachricht, nicht als Antwort oder Weiterleitung.",
       "bar": {
         "title": "Serienmail",
         "recipients": "ein Empfänger aus {source} | {count} Empfänger aus {source}",
@@ -142,7 +146,7 @@
       },
       "source": {
         "title": "Serienmail",
-        "lead": "Jeder Empfänger bekommt eine eigene Nachricht, nur an ihn adressiert. Felder aus der Liste füllen die Platzhalter in Betreff und Text.",
+        "lead": "Jede Person auf der Liste bekommt eine eigene Nachricht, nur an sie adressiert. Felder aus der Liste füllen die Platzhalter in Betreff und Text.",
         "kindLabel": "Woher die Empfänger kommen",
         "csv": "CSV-Datei",
         "contacts": "Kontakte",
@@ -162,6 +166,7 @@
           "windows1252": "Windows-1252"
         },
         "truncated": "Die Datei hat mehr Zeilen. Gelesen wurden nur die ersten {count}.",
+        "windows1252Hint": "Die Datei wurde als Windows-1252 gelesen. Sehen Umlaute falsch aus, speichere sie als „CSV UTF-8“ und wähle sie erneut.",
         "emailColumn": "Spalte mit der E-Mail-Adresse",
         "emailColumnPick": "Spalte wählen",
         "emailColumnRequired": "Wähle die Spalte mit den E-Mail-Adressen.",
@@ -181,7 +186,7 @@
         "overLimitDetail": "Teile die Liste in Teile mit höchstens {limit} Zeilen und sende jeden als eigene Serienmail.",
         "unknownFields": "Kein Feld der Liste heißt {fields}.",
         "unknownFieldsDetail": "Felder der Liste: {fields}. Zeilen ohne Ersatzwert dafür werden übersprungen.",
-        "encrypted": "Jede Nachricht wird für ihren Empfänger verschlüsselt. Fehlt für jemanden ein Schlüssel, geht nichts raus, und du erfährst, für wen.",
+        "encrypted": "Jede Nachricht wird für ihren Empfänger verschlüsselt. Vor der ersten werden die Schlüssel aller Empfänger und dein eigener geprüft; fehlt später ein Schlüssel, scheitert diese Nachricht und geht nicht unverschlüsselt raus.",
         "previewLabel": "Vorschau",
         "previous": "Vorheriger Empfänger",
         "next": "Nächster Empfänger",
@@ -204,7 +209,7 @@
       },
       "confirm": {
         "title": "Eine persönliche Nachricht senden? | {count} persönliche Nachrichten senden?",
-        "body": "Von {address} ({account}), eine Nachricht je Empfänger, jede nur an ihn adressiert.",
+        "body": "Von {address} ({account}), eine Nachricht je Person, jede nur an diese Person adressiert.",
         "detail": "Die Nachrichten gehen einzeln über den Postausgang raus. Dort kannst du den Rest anhalten oder abbrechen.",
         "send": "Senden"
       },
@@ -216,6 +221,7 @@
           "running": "Wird gesendet",
           "paused": "Angehalten",
           "pausedFailures": "Nach wiederholten Fehlern angehalten",
+          "pausedRestart": "Beim Neustart von Satchel angehalten",
           "cancelled": "Abgebrochen",
           "completed": "Fertig"
         },

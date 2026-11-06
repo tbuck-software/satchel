@@ -7,7 +7,7 @@ import { expect, test } from './mock-contract.fixture';
  * job in the Outbox. Runs at desktop and phone width.
  */
 
-const CSV = 'Vorname;Nachname;E-Mail\nAnna;Meier;anna@example.com\nBen;;not-an-address\nCem;Kaya;cem@example.com\n';
+const CSV = 'Vorname;Nachname;E-Mail\nAnna;Meier;anna@example.test\nBen;;not-an-address\nCem;Kaya;cem@example.test\n';
 
 async function openMergeComposer(page: Page) {
   await page.goto('/');
@@ -97,4 +97,32 @@ test('mail merge keeps the field picker and review reachable by keyboard', async
   await page.keyboard.press('Escape');
   await expect(review).toBeHidden();
   await expect(composer.getByTestId('mail-merge-bar')).toBeVisible();
+});
+
+test('mail merge says when a list was read as Windows-1252, and refuses an oversized file', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByText('Staging login 500 after deployment', { exact: true }).first()).toBeVisible();
+  const composer = page.getByRole('dialog', { name: 'Compose email' });
+  await expect(async () => {
+    if (!(await composer.isVisible())) await page.getByRole('button', { name: 'New message', exact: true }).first().click({ timeout: 2_000 });
+    await expect(composer).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  await composer.getByLabel('More options', { exact: true }).click();
+  await composer.getByTestId('compose-mail-merge').click();
+  const source = page.getByTestId('mail-merge-source');
+  // "Jürgen" with ü as the single Windows-1252 byte 0xFC.
+  await source.getByTestId('mail-merge-file').setInputFiles({
+    name: 'excel.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from([...Buffer.from('Name;E-Mail\nJ'), 0xfc, ...Buffer.from('rgen;j@example.test\n')]),
+  });
+  await expect(source.getByTestId('mail-merge-encoding-hint')).toContainText('Windows-1252');
+  await expect(source).toContainText('Windows-1252');
+
+  await source.getByTestId('mail-merge-file').setInputFiles({
+    name: 'huge.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.alloc(5 * 1024 * 1024 + 1, 'a'),
+  });
+  await expect(source).toContainText('larger than 5 MB');
 });

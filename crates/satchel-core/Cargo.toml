@@ -33,6 +33,8 @@ futures = "0.3"
 # Request bodies that report when their last byte reached the transport.
 http-body = "1"
 icalendar = "0.16"
+# Mail merge addresses: an internationalised domain is checked as its punycode form.
+idna = "1"
 lettre = { version = "0.11", default-features = false, features = ["builder", "ring", "smtp-transport", "tokio1-rustls"] }
 postroom = { git = "https://github.com/tbuck-software/postroom.git", rev = "0a670a2b709d3ae2ed62a1ba2a3090b2a0748b58" }
 postroom-rfc5322 = { git = "https://github.com/tbuck-software/postroom.git", rev = "0a670a2b709d3ae2ed62a1ba2a3090b2a0748b58" }

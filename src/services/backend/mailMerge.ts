@@ -8,6 +8,7 @@ import type {
   BackendMergeJobDetail,
   BackendMergeList,
   BackendMergePreview,
+  BackendMergeSignature,
   BackendMergeTemplate,
 } from '@/types/mailMerge';
 
@@ -27,6 +28,8 @@ export async function backendPreviewMailMerge(input: {
   template: BackendMergeTemplate;
   list: BackendMergeList;
   index: number | null;
+  /** The composer's signature choice; the preview then shows what `create` appends. */
+  signature?: BackendMergeSignature | null;
 }): Promise<BackendMergePreview> {
   return invoke<BackendMergePreview>('preview_mail_merge', {
     input: {
@@ -36,6 +39,13 @@ export async function backendPreviewMailMerge(input: {
       email_field: input.list.emailField,
       rows: input.list.rows,
       index: input.index,
+      signature: input.signature ? {
+        from_address: input.signature.fromAddress ?? null,
+        signature_id: input.signature.signatureId ?? null,
+        signature_variant: input.signature.signatureVariant ?? null,
+        signature_override_text: input.signature.signatureOverrideText ?? null,
+        signature_override_html: input.signature.signatureOverrideHtml ?? null,
+      } : null,
     },
   });
 }
@@ -46,6 +56,8 @@ export async function backendCreateMailMergeJob(input: {
   sourceLabel: string;
   delaySeconds: number;
   list: BackendMergeList;
+  /** Same token on a retried start: the backend returns the job it made. */
+  requestId: string;
 }): Promise<BackendMergeJob> {
   return invoke<BackendMergeJob>('create_mail_merge_job', {
     input: {
@@ -56,6 +68,7 @@ export async function backendCreateMailMergeJob(input: {
       fields: input.list.fields,
       email_field: input.list.emailField,
       rows: input.list.rows,
+      request_id: input.requestId,
     },
   });
 }

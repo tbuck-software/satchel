@@ -33,6 +33,8 @@ const { t, locale } = useI18n();
 const contactsStore = useContactsStore();
 const mailMerge = useMailMergeStore();
 const emailFieldId = useId();
+/** `satchel_core::mail_merge::csv::MAX_CSV_BYTES`. */
+const MAX_CSV_BYTES = 5 * 1024 * 1024;
 
 const mode = ref<'csv' | 'contacts'>(props.current?.kind ?? 'csv');
 const modeOptions = computed(() => [
@@ -69,6 +71,13 @@ async function onFileChosen(event: Event) {
   const file = input.files?.[0];
   input.value = '';
   if (!file) return;
+  // The backend refuses more than 5 MiB as well; reading it first would only
+  // hold a large file in memory twice to hear that.
+  if (file.size > MAX_CSV_BYTES) {
+    parsed.value = null;
+    csvError.value = t('backend.errors.mailMergeCsvTooLarge');
+    return;
+  }
   reading.value = true;
   csvError.value = '';
   try {
@@ -217,6 +226,7 @@ useDismissableOnTop(() => true, close);
               {{ $t('mailMerge.source.rows', { count: parsed.rows.length }, parsed.rows.length) }}
               <template v-if="delimiterLabel"> · {{ delimiterLabel }} · {{ encodingLabel }}</template>
             </p>
+            <p v-if="parsed.encoding === 'windows1252'" class="merge-source__hint" data-testid="mail-merge-encoding-hint">{{ $t('mailMerge.source.windows1252Hint') }}</p>
             <AppBanner v-if="parsed.truncated" tone="warning" :title="$t('mailMerge.source.truncated', { count: parsed.rows.length })" />
             <div class="merge-source__field">
               <label :for="emailFieldId">{{ $t('mailMerge.source.emailColumn') }}</label>

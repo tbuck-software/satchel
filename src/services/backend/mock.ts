@@ -1279,7 +1279,7 @@ const MOCK_MERGE_LIMIT = 500;
 interface MockMergeRow { line: number | null; values: Record<string, string> }
 interface MockMergeTemplate { subject: string; body: string; body_html: string | null }
 interface MockMergeJob {
-  id: string; account_id: string; status: string; pause_reason: string | null; subject: string;
+  id: string; request_id: string | null; account_id: string; status: string; pause_reason: string | null; subject: string;
   source_label: string; delay_seconds: number; created_at: string; updated_at: string;
   finished_at: string | null; started_ms: number; sent_before_pause: number;
   recipients: Array<{ id: string; position: number; email: string; status: string; error: string | null; attempts: number; sent_at: string | null }>;
@@ -1357,6 +1357,7 @@ function mockParseCsv(base64: string) {
   const records = mockCsvRecords(text, delimiter);
   const head = records.shift();
   if (!head) throw new Error('backend.errors.mailMergeCsvEmpty');
+  if (head.cells.length > 200) throw new Error('backend.errors.mailMergeCsvTooManyColumns');
   const fields: string[] = [];
   head.cells.forEach((raw, index) => {
     const base = raw.replace(/[{}|]/g, '').trim() || `Column${index + 1}`;
@@ -2779,9 +2780,17 @@ const handlers: Record<string, Handler> = {
   },
   create_mail_merge_job: (payload) => {
     const scope = input(payload) as unknown as {
-      account_id: string; message: { subject: string; body: string; body_html: string | null; draft_id: string | null };
+      account_id: string;
+      message: {
+        subject: string; body: string; body_html: string | null; draft_id: string | null;
+        thread_id?: string | null; reply_to_message_id?: string | null;
+      };
       source_label: string; delay_seconds: number; fields: string[]; email_field: string; rows: MockMergeRow[];
+      request_id?: string | null;
     };
+    const repeated = scope.request_id ? mergeJobs.find((entry) => entry.request_id === scope.request_id) : undefined;
+    if (repeated) return mergeJobSummary(repeated);
+    if (scope.message.thread_id || scope.message.reply_to_message_id) throw new Error('backend.errors.mailMergeReplyNotAllowed');
     if (!(scope.delay_seconds >= 1 && scope.delay_seconds <= 3600)) throw new Error('backend.errors.mailMergeDelayInvalid');
     const template = { subject: scope.message.subject, body: scope.message.body, body_html: scope.message.body_html ?? null };
     const plan = mockMergePlan(template, scope.fields, scope.email_field, scope.rows);
@@ -2790,7 +2799,7 @@ const handlers: Record<string, Handler> = {
     if (ready.length > MOCK_MERGE_LIMIT) throw new Error('backend.errors.mailMergeTooManyRecipients');
     const now = new Date().toISOString();
     const job: MockMergeJob = {
-      id: `merge-${++nextMergeJob}`, account_id: scope.account_id, status: 'running', pause_reason: null,
+      id: `merge-${++nextMergeJob}`, request_id: scope.request_id ?? null, account_id: scope.account_id, status: 'running', pause_reason: null,
       subject: scope.message.subject, source_label: scope.source_label, delay_seconds: scope.delay_seconds,
       created_at: now, updated_at: now, finished_at: null, started_ms: Date.now(), sent_before_pause: 0,
       recipients: ready.map((row, position) => ({

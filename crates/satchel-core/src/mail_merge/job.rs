@@ -1,18 +1,21 @@
 //! Persisted mail merge jobs and the step that moves them forward.
 //!
 //! [`tick`] is the whole runner: it settles rows whose outbox action has
-//! finished, then hands the next due row of each running job to the outbox.
-//! A job has at most one row in the outbox at a time, and the next one goes
-//! `delay_seconds` after the previous one was handed over. Everything lives
-//! in the database, so a restart continues where the last run stopped.
+//! finished, releases what finished jobs no longer need, then hands the next
+//! due row to the outbox. The pace is per account: an account has at most one
+//! merge copy in the outbox, and the next one goes `delay_seconds` after the
+//! account's latest hand-over in any of its jobs. Everything lives in the
+//! database; after a restart running jobs come back paused
+//! ([`pause_after_restart`]) and wait for the user.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde::Serialize;
 use sqlx::{FromRow, SqlitePool};
 
 use super::plan::{render_message, MergeTemplate, MAX_JOB_RECIPIENTS};
+use super::template::placeholders;
 use crate::drafts::{outgoing::OutgoingMessageInput, send_queue::SendActionPayload};
 use crate::sync::queue::{QueuedAction, SyncQueue, ACTION_SEND_MESSAGE};
 
@@ -25,6 +28,10 @@ pub const MAX_DELAY_SECONDS: i64 = 3600;
 pub const AUTO_PAUSE_FAILURES: i64 = 3;
 
 pub const PAUSE_REASON_FAILURES: &str = "failures";
+/// The app quit while the job was running; the user resumes it.
+pub const PAUSE_REASON_RESTART: &str = "restart";
+/// Finished jobs are removed this long after they finished.
+pub const FINISHED_RETENTION_DAYS: i64 = 30;
 /// Error key a row carries when its outbox action was removed by hand.
 pub const ERROR_REMOVED_FROM_OUTBOX: &str = "backend.errors.mailMergeRemovedFromOutbox";
 const ERROR_MISSING_VALUES: &str = "backend.errors.mailMergeMissingValues";
@@ -41,6 +48,8 @@ pub enum MailMergeError {
     DelayInvalid,
     #[error("mail merge job cannot do that in its current state")]
     InvalidState,
+    #[error("a mail merge cannot answer or forward a conversation")]
+    ReplyNotAllowed,
     #[error("mail merge queue failed: {0}")]
     Queue(String),
     #[error("mail merge persistence failed")]
@@ -82,6 +91,9 @@ pub struct NewMailMergeJob {
     pub message: OutgoingMessageInput,
     pub source_label: String,
     pub delay_seconds: i64,
+    /// The client's token for this create. The same token returns the job
+    /// it already made instead of a second one.
+    pub request_id: Option<String>,
     /// Address and field values per recipient, already checked by
     /// [`super::plan::plan`].
     pub recipients: Vec<(String, BTreeMap<String, String>)>,
@@ -145,8 +157,15 @@ pub struct TickReport {
     pub in_flight: bool,
 }
 
+/// Fixed-width UTC timestamps, so SQLite can compare them as text.
 fn ts(now: DateTime<Utc>) -> String {
-    now.to_rfc3339()
+    now.to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+fn parse_ts(value: Option<&str>) -> Option<DateTime<Utc>> {
+    value
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc))
 }
 
 pub fn validate_delay(delay_seconds: i64) -> MailMergeResult<i64> {
@@ -166,7 +185,8 @@ pub fn merge_template(message: &OutgoingMessageInput) -> MergeTemplate {
     }
 }
 
-/// Stores the job and its rows. It starts running at once.
+/// Stores the job and its rows. It starts running at once. A `request_id`
+/// seen before returns that job instead of storing a second one.
 pub async fn create_job(
     pool: &SqlitePool,
     job: NewMailMergeJob,
@@ -182,25 +202,43 @@ pub async fn create_job(
     }
     let delay = validate_delay(job.delay_seconds)?;
     let mut message = job.message;
-    // Every copy is a new message to one person; nothing of a shared
-    // conversation or a shared header may travel along.
+    // A copy to everyone on a list is never an answer: In-Reply-To and the
+    // quoted conversation would go to people who were not part of it.
+    if message.thread_id.is_some() || message.reply_to_message_id.is_some() {
+        return Err(MailMergeError::ReplyNotAllowed);
+    }
+    // Every copy is addressed to one person; no shared header travels along.
     message.to.clear();
     message.cc.clear();
     message.bcc.clear();
-    message.thread_id = None;
-    message.reply_to_message_id = None;
     message.draft_id = None;
     message.scheduled_for = None;
     message.follow_up_at = None;
     let template = serde_json::to_string(&message)?;
     let id = uuid::Uuid::new_v4().to_string();
     let now_text = ts(now);
+    let request_id = job
+        .request_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
 
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    if let Some(request_id) = request_id.as_deref() {
+        let existing: Option<String> =
+            sqlx::query_scalar("SELECT id FROM mail_merge_jobs WHERE request_id = ?")
+                .bind(request_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        if let Some(existing) = existing {
+            tx.rollback().await?;
+            return Ok(existing);
+        }
+    }
     sqlx::query(
         "INSERT INTO mail_merge_jobs
-         (id, account_id, status, subject, source_label, template, delay_seconds, next_send_at, created_at, updated_at)
-         VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)",
+         (id, account_id, status, subject, source_label, template, delay_seconds, next_send_at,
+          request_id, created_at, updated_at)
+         VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&job.account_id)
@@ -209,6 +247,7 @@ pub async fn create_job(
     .bind(&template)
     .bind(delay)
     .bind(&now_text)
+    .bind(request_id.as_deref())
     .bind(&now_text)
     .bind(&now_text)
     .execute(&mut *tx)
@@ -304,20 +343,45 @@ pub async fn pause_job(pool: &SqlitePool, id: &str, now: DateTime<Utc>) -> MailM
     require_changed(pool, id, changed).await
 }
 
+/// Runs a paused job again. The slot it was waiting for stays: pausing and
+/// resuming is no way past the pace. Only after an auto-pause for failures
+/// may it go at once; the account's own pace still applies in [`tick`].
 pub async fn resume_job(pool: &SqlitePool, id: &str, now: DateTime<Utc>) -> MailMergeResult<()> {
+    let now_text = ts(now);
     let changed = sqlx::query(
         "UPDATE mail_merge_jobs
-         SET status = 'running', pause_reason = NULL, consecutive_failures = 0,
-             next_send_at = ?, updated_at = ?
+         SET status = 'running', consecutive_failures = 0,
+             next_send_at = CASE
+                 WHEN pause_reason = ? OR next_send_at IS NULL OR next_send_at < ? THEN ?
+                 ELSE next_send_at END,
+             pause_reason = NULL, updated_at = ?
          WHERE id = ? AND status = 'paused'",
     )
-    .bind(ts(now))
-    .bind(ts(now))
+    .bind(PAUSE_REASON_FAILURES)
+    .bind(&now_text)
+    .bind(&now_text)
+    .bind(&now_text)
     .bind(id)
     .execute(pool)
     .await?
     .rows_affected();
     require_changed(pool, id, changed).await
+}
+
+/// After a start, a job the last run left running waits for the user: a
+/// list that starts sending on its own when the laptop opens is a surprise.
+pub async fn pause_after_restart(
+    pool: &SqlitePool,
+    now: DateTime<Utc>,
+) -> MailMergeResult<Vec<String>> {
+    Ok(sqlx::query_scalar(
+        "UPDATE mail_merge_jobs SET status = 'paused', pause_reason = ?, updated_at = ?
+         WHERE status = 'running' RETURNING id",
+    )
+    .bind(PAUSE_REASON_RESTART)
+    .bind(ts(now))
+    .fetch_all(pool)
+    .await?)
 }
 
 /// Stops the job. Rows not yet handed over are cancelled; one waiting in the
@@ -377,13 +441,16 @@ pub async fn cancel_job(pool: &SqlitePool, id: &str, now: DateTime<Utc>) -> Mail
         }
     }
     tx.commit().await?;
+    release_finished(pool, now).await?;
     Ok(())
 }
 
 /// Puts failed rows back in line and runs the job again. Their old outbox
 /// actions go; the rows keep their Message-ID, so a message that did leave
-/// after all is recognised instead of sent twice.
+/// after all is recognised instead of sent twice. The slot the job waits for
+/// stays, as on a resume.
 pub async fn retry_failed(pool: &SqlitePool, id: &str, now: DateTime<Utc>) -> MailMergeResult<u64> {
+    let now_text = ts(now);
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
     let status: Option<String> =
         sqlx::query_scalar("SELECT status FROM mail_merge_jobs WHERE id = ?")
@@ -408,7 +475,7 @@ pub async fn retry_failed(pool: &SqlitePool, id: &str, now: DateTime<Utc>) -> Ma
         "UPDATE mail_merge_recipients SET status = 'pending', error = NULL, updated_at = ?
          WHERE job_id = ? AND status = 'failed'",
     )
-    .bind(ts(now))
+    .bind(&now_text)
     .bind(id)
     .execute(&mut *tx)
     .await?
@@ -417,11 +484,14 @@ pub async fn retry_failed(pool: &SqlitePool, id: &str, now: DateTime<Utc>) -> Ma
         sqlx::query(
             "UPDATE mail_merge_jobs
              SET status = 'running', pause_reason = NULL, consecutive_failures = 0,
-                 finished_at = NULL, next_send_at = ?, updated_at = ?
+                 finished_at = NULL,
+                 next_send_at = CASE WHEN next_send_at IS NULL OR next_send_at < ? THEN ? ELSE next_send_at END,
+                 updated_at = ?
              WHERE id = ?",
         )
-        .bind(ts(now))
-        .bind(ts(now))
+        .bind(&now_text)
+        .bind(&now_text)
+        .bind(&now_text)
         .bind(id)
         .execute(&mut *tx)
         .await?;
@@ -444,10 +514,98 @@ pub async fn delete_job(pool: &SqlitePool, id: &str) -> MailMergeResult<()> {
     require_changed(pool, id, changed).await
 }
 
+/// Removes jobs that finished more than [`FINISHED_RETENTION_DAYS`] ago.
+/// The maintenance worker calls it; a job with a copy still in the outbox
+/// stays until that copy settles.
+pub async fn delete_expired_jobs(pool: &SqlitePool, now: DateTime<Utc>) -> MailMergeResult<u64> {
+    let cutoff = ts(now - Duration::days(FINISHED_RETENTION_DAYS));
+    Ok(sqlx::query(
+        "DELETE FROM mail_merge_jobs
+         WHERE status IN ('completed', 'cancelled') AND finished_at IS NOT NULL AND finished_at < ?
+           AND NOT EXISTS (SELECT 1 FROM mail_merge_recipients r
+                           WHERE r.job_id = mail_merge_jobs.id AND r.status = 'queued')",
+    )
+    .bind(cutoff)
+    .execute(pool)
+    .await?
+    .rows_affected())
+}
+
+/// Drops what a finished job no longer needs: the attachments in its stored
+/// message, and every field value the message does not use. A job is done
+/// with them once it is cancelled, or completed with nothing left to retry
+/// or settle; until then a retry must send what the first attempt sent.
+pub async fn release_finished(
+    pool: &SqlitePool,
+    now: DateTime<Utc>,
+) -> MailMergeResult<Vec<String>> {
+    let finished: Vec<(String, String)> = sqlx::query_as(
+        "SELECT j.id, j.template FROM mail_merge_jobs j
+         WHERE j.released_at IS NULL AND j.status IN ('completed', 'cancelled')
+           AND NOT EXISTS (
+               SELECT 1 FROM mail_merge_recipients r WHERE r.job_id = j.id
+                 AND (r.status = 'queued'
+                      OR (j.status = 'completed' AND r.status IN ('pending', 'failed', 'unknown'))))",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut released = Vec::new();
+    for (job_id, template) in finished {
+        let mut message: OutgoingMessageInput = serde_json::from_str(&template)?;
+        message.attachments.clear();
+        let used = used_fields(&merge_template(&message));
+        let rows: Vec<(String, String)> =
+            sqlx::query_as("SELECT id, fields FROM mail_merge_recipients WHERE job_id = ?")
+                .bind(&job_id)
+                .fetch_all(pool)
+                .await?;
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+        for (row_id, fields) in rows {
+            let values: BTreeMap<String, String> = serde_json::from_str(&fields)?;
+            let kept: BTreeMap<String, String> = values
+                .into_iter()
+                .filter(|(field, _)| used.contains(&field.trim().to_lowercase()))
+                .collect();
+            sqlx::query("UPDATE mail_merge_recipients SET fields = ? WHERE id = ?")
+                .bind(serde_json::to_string(&kept)?)
+                .bind(&row_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        sqlx::query(
+            "UPDATE mail_merge_jobs SET template = ?, released_at = ?, updated_at = ?
+             WHERE id = ? AND released_at IS NULL",
+        )
+        .bind(serde_json::to_string(&message)?)
+        .bind(ts(now))
+        .bind(ts(now))
+        .bind(&job_id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        released.push(job_id);
+    }
+    Ok(released)
+}
+
+/// The field names the message's placeholders name, lower-cased.
+fn used_fields(template: &MergeTemplate) -> HashSet<String> {
+    [
+        template.subject.as_str(),
+        template.body.as_str(),
+        template.body_html.as_deref().unwrap_or(""),
+    ]
+    .into_iter()
+    .flat_map(placeholders)
+    .map(|placeholder| placeholder.name.trim().to_lowercase())
+    .collect()
+}
+
 #[derive(FromRow)]
-struct QueuedRow {
+struct OpenRow {
     id: String,
     job_id: String,
+    status: String,
     queue_id: Option<String>,
     message_id_header: String,
 }
@@ -465,7 +623,9 @@ enum Settled {
     Removed,
 }
 
-async fn settle(pool: &SqlitePool, row: &QueuedRow) -> MailMergeResult<Option<Settled>> {
+/// What the outbox did with a row's copy, or `None` while it is still on its
+/// way (or, for an unconfirmed row, still unconfirmed).
+async fn settle(pool: &SqlitePool, row: &OpenRow) -> MailMergeResult<Option<Settled>> {
     let state = match row.queue_id.as_deref() {
         Some(queue_id) => {
             sqlx::query_as::<_, QueueState>(
@@ -482,7 +642,9 @@ async fn settle(pool: &SqlitePool, row: &QueuedRow) -> MailMergeResult<Option<Se
             "failed" => Some(Settled::Failed(state.last_error)),
             // Sent; only the local copy is missing. The outbox shows that.
             "delivered" => Some(Settled::Sent),
-            "delivery_unknown" => Some(Settled::Unknown(state.last_error)),
+            "delivery_unknown" if row.status == "queued" => {
+                Some(Settled::Unknown(state.last_error))
+            }
             _ => None,
         },
         None => {
@@ -512,8 +674,32 @@ fn earliest(current: Option<DateTime<Utc>>, candidate: DateTime<Utc>) -> Option<
     Some(current.map_or(candidate, |current| current.min(candidate)))
 }
 
-/// Settles finished rows, then hands each running job's next due row to the
-/// outbox. Safe to call at any time and as often as needed.
+/// Counts a copy that did not go out (failed, or delivery unconfirmed) and
+/// pauses the job once [`AUTO_PAUSE_FAILURES`] came in a row.
+async fn count_failure(pool: &SqlitePool, job_id: &str, now_text: &str) -> MailMergeResult<()> {
+    sqlx::query(
+        "UPDATE mail_merge_jobs SET consecutive_failures = consecutive_failures + 1, updated_at = ? WHERE id = ?",
+    )
+    .bind(now_text)
+    .bind(job_id)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "UPDATE mail_merge_jobs SET status = 'paused', pause_reason = ?, updated_at = ?
+         WHERE id = ? AND status = 'running' AND consecutive_failures >= ?",
+    )
+    .bind(PAUSE_REASON_FAILURES)
+    .bind(now_text)
+    .bind(job_id)
+    .bind(AUTO_PAUSE_FAILURES)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Settles open rows, releases finished jobs, then hands the next due row of
+/// each account to the outbox. Safe to call at any time and as often as
+/// needed.
 pub async fn tick(
     pool: &SqlitePool,
     queue: &SyncQueue,
@@ -522,10 +708,10 @@ pub async fn tick(
     let mut report = TickReport::default();
     let now_text = ts(now);
 
-    // A failed message the user retried from the Outbox is on its way again.
+    // A copy the user retried from the Outbox is on its way again.
     let revived: Vec<String> = sqlx::query_scalar(
         "UPDATE mail_merge_recipients SET status = 'queued', error = NULL, updated_at = ?
-         WHERE status = 'failed' AND queue_id IN (
+         WHERE status IN ('failed', 'unknown') AND queue_id IN (
              SELECT id FROM sync_queue WHERE action_type = ? AND status IN ('pending', 'scheduled', 'sending'))
          RETURNING job_id",
     )
@@ -537,20 +723,26 @@ pub async fn tick(
         push_changed(&mut report, &job_id);
     }
 
-    let queued = sqlx::query_as::<_, QueuedRow>(
-        "SELECT id, job_id, queue_id, message_id_header FROM mail_merge_recipients WHERE status = 'queued'",
+    // Copies on their way, and unconfirmed ones the Outbox may since have
+    // resolved (sent after all, failed for good, or discarded).
+    let open = sqlx::query_as::<_, OpenRow>(
+        "SELECT id, job_id, status, queue_id, message_id_header FROM mail_merge_recipients
+         WHERE status IN ('queued', 'unknown')",
     )
     .fetch_all(pool)
     .await?;
-    for row in queued {
+    for row in open {
         let Some(outcome) = settle(pool, &row).await? else {
-            report.in_flight = true;
+            if row.status == "queued" {
+                report.in_flight = true;
+            }
             continue;
         };
+        let first_outcome = row.status == "queued";
         let (status, error, failure) = match outcome {
             Settled::Sent => ("sent", None, Some(false)),
             Settled::Failed(error) => ("failed", error, Some(true)),
-            Settled::Unknown(error) => ("unknown", error, None),
+            Settled::Unknown(error) => ("unknown", error, Some(true)),
             Settled::Removed => (
                 "cancelled",
                 Some(ERROR_REMOVED_FROM_OUTBOX.to_string()),
@@ -560,7 +752,7 @@ pub async fn tick(
         sqlx::query(
             "UPDATE mail_merge_recipients
              SET status = ?, error = ?, sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END, updated_at = ?
-             WHERE id = ? AND status = 'queued'",
+             WHERE id = ? AND status = ?",
         )
         .bind(status)
         .bind(error)
@@ -568,58 +760,45 @@ pub async fn tick(
         .bind(&now_text)
         .bind(&now_text)
         .bind(&row.id)
+        .bind(&row.status)
         .execute(pool)
         .await?;
-        match failure {
-            Some(true) => {
-                sqlx::query(
-                    "UPDATE mail_merge_jobs SET consecutive_failures = consecutive_failures + 1, updated_at = ? WHERE id = ?",
-                )
-                .bind(&now_text)
-                .bind(&row.job_id)
-                .execute(pool)
-                .await?;
-                sqlx::query(
-                    "UPDATE mail_merge_jobs SET status = 'paused', pause_reason = ?, updated_at = ?
-                     WHERE id = ? AND status = 'running' AND consecutive_failures >= ?",
-                )
-                .bind(PAUSE_REASON_FAILURES)
-                .bind(&now_text)
-                .bind(&row.job_id)
-                .bind(AUTO_PAUSE_FAILURES)
-                .execute(pool)
-                .await?;
+        // Only the first outcome of a hand-over counts toward the streak; an
+        // unconfirmed copy that later fails was counted when it went unconfirmed.
+        if first_outcome {
+            match failure {
+                Some(true) => count_failure(pool, &row.job_id, &now_text).await?,
+                Some(false) => {
+                    sqlx::query(
+                        "UPDATE mail_merge_jobs SET consecutive_failures = 0, updated_at = ? WHERE id = ?",
+                    )
+                    .bind(&now_text)
+                    .bind(&row.job_id)
+                    .execute(pool)
+                    .await?;
+                }
+                None => {}
             }
-            Some(false) => {
-                sqlx::query(
-                    "UPDATE mail_merge_jobs SET consecutive_failures = 0, updated_at = ? WHERE id = ?",
-                )
-                .bind(&now_text)
-                .bind(&row.job_id)
-                .execute(pool)
-                .await?;
-            }
-            None => {}
         }
         push_changed(&mut report, &row.job_id);
     }
 
     let running: Vec<(String, String, String, i64, Option<String>)> = sqlx::query_as(
-        "SELECT id, account_id, template, delay_seconds, next_send_at FROM mail_merge_jobs WHERE status = 'running'",
+        "SELECT id, account_id, template, delay_seconds, next_send_at FROM mail_merge_jobs
+         WHERE status = 'running' ORDER BY created_at, rowid",
     )
     .fetch_all(pool)
     .await?;
+    // Accounts that already have a merge copy in the outbox, this tick included.
+    let mut busy_accounts: HashSet<String> = sqlx::query_scalar(
+        "SELECT DISTINCT j.account_id FROM mail_merge_recipients r
+         JOIN mail_merge_jobs j ON j.id = r.job_id WHERE r.status = 'queued'",
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .collect();
     for (job_id, account_id, template, delay, next_send_at) in running {
-        let busy: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM mail_merge_recipients WHERE job_id = ? AND status = 'queued'",
-        )
-        .bind(&job_id)
-        .fetch_one(pool)
-        .await?;
-        if busy > 0 {
-            report.in_flight = true;
-            continue;
-        }
         let next: Option<(String, String, String, String)> = sqlx::query_as(
             "SELECT id, email, fields, message_id_header FROM mail_merge_recipients
              WHERE job_id = ? AND status = 'pending' ORDER BY position LIMIT 1",
@@ -628,6 +807,16 @@ pub async fn tick(
         .fetch_optional(pool)
         .await?;
         let Some((row_id, email, fields, message_id_header)) = next else {
+            let own_queued: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM mail_merge_recipients WHERE job_id = ? AND status = 'queued'",
+            )
+            .bind(&job_id)
+            .fetch_one(pool)
+            .await?;
+            if own_queued > 0 {
+                report.in_flight = true;
+                continue;
+            }
             sqlx::query(
                 "UPDATE mail_merge_jobs SET status = 'completed', finished_at = ?, updated_at = ?
                  WHERE id = ? AND status = 'running'",
@@ -640,10 +829,23 @@ pub async fn tick(
             push_changed(&mut report, &job_id);
             continue;
         };
-        let due = next_send_at
-            .as_deref()
-            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-            .map(|value| value.with_timezone(&Utc));
+        if busy_accounts.contains(&account_id) {
+            report.in_flight = true;
+            continue;
+        }
+        // The account's pace: `delay` after its latest hand-over in any job.
+        let last_hand_over: Option<String> = sqlx::query_scalar(
+            "SELECT MAX(r.handed_over_at) FROM mail_merge_recipients r
+             JOIN mail_merge_jobs j ON j.id = r.job_id WHERE j.account_id = ?",
+        )
+        .bind(&account_id)
+        .fetch_one(pool)
+        .await?;
+        let paced = parse_ts(last_hand_over.as_deref()).map(|at| at + Duration::seconds(delay));
+        let due = [parse_ts(next_send_at.as_deref()), paced]
+            .into_iter()
+            .flatten()
+            .max();
         if let Some(due) = due.filter(|due| *due > now) {
             report.next_due = earliest(report.next_due, due);
             continue;
@@ -700,10 +902,12 @@ pub async fn tick(
         .rows_affected();
         let claimed = sqlx::query(
             "UPDATE mail_merge_recipients
-             SET status = 'queued', queue_id = ?, attempts = attempts + 1, updated_at = ?
+             SET status = 'queued', queue_id = ?, attempts = attempts + 1,
+                 handed_over_at = ?, updated_at = ?
              WHERE id = ? AND status = 'pending'",
         )
         .bind(&action.id)
+        .bind(&now_text)
         .bind(&now_text)
         .bind(&row_id)
         .execute(&mut *tx)
@@ -719,7 +923,12 @@ pub async fn tick(
             .map_err(MailMergeError::Queue)?;
         tx.commit().await?;
         queue.wake_worker();
+        busy_accounts.insert(account_id);
         report.in_flight = true;
+        push_changed(&mut report, &job_id);
+    }
+
+    for job_id in release_finished(pool, now).await? {
         push_changed(&mut report, &job_id);
     }
     Ok(report)
@@ -728,7 +937,13 @@ pub async fn tick(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
     use sqlx::sqlite::SqlitePoolOptions;
+
+    /// Whole seconds: stored timestamps keep milliseconds.
+    fn start() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 11, 6, 12, 0, 0).unwrap()
+    }
 
     async fn pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
@@ -739,7 +954,8 @@ mod tests {
         crate::db::init(&pool).await.expect("migrations");
         sqlx::query(
             "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
-             VALUES ('acc', 'Me', 'me@example.com', 'imap', '{}', '', '', '');
+             VALUES ('acc', 'Me', 'me@example.test', 'imap', '{}', '', '', ''),
+                    ('other', 'Other', 'other@example.test', 'imap', '{}', '', '', '');
              INSERT INTO folders (id, account_id, name, full_path, remote_id, folder_type, created_at, updated_at)
              VALUES ('sent', 'acc', 'Sent', 'Sent', 'Sent', 'sent', '', '')",
         )
@@ -751,9 +967,9 @@ mod tests {
 
     fn message() -> OutgoingMessageInput {
         serde_json::from_value(serde_json::json!({
-            "to": ["shared@example.com"],
-            "cc": ["cc@example.com"],
-            "bcc": ["bcc@example.com"],
+            "to": ["shared@example.test"],
+            "cc": ["cc@example.test"],
+            "bcc": ["bcc@example.test"],
             "subject": "Hello {{FirstName|there}}",
             "body": "Dear {{FirstName|friend}},",
             "body_html": "<p>Dear {{FirstName|friend}},</p>",
@@ -769,27 +985,33 @@ mod tests {
             BTreeMap::from([
                 ("Email".to_string(), email.to_string()),
                 ("FirstName".to_string(), first.to_string()),
+                ("Unused".to_string(), "private note".to_string()),
             ]),
         )
     }
 
+    fn new_job_input(account: &str, prefix: &str, count: usize) -> NewMailMergeJob {
+        NewMailMergeJob {
+            account_id: account.into(),
+            message: message(),
+            source_label: "list.csv".into(),
+            delay_seconds: 10,
+            request_id: None,
+            recipients: (0..count)
+                .map(|index| {
+                    recipient(
+                        &format!("{prefix}{index}@example.test"),
+                        &format!("P{index}"),
+                    )
+                })
+                .collect(),
+        }
+    }
+
     async fn new_job(pool: &SqlitePool, now: DateTime<Utc>, count: usize) -> String {
-        let recipients = (0..count)
-            .map(|index| recipient(&format!("p{index}@example.com"), &format!("P{index}")))
-            .collect();
-        create_job(
-            pool,
-            NewMailMergeJob {
-                account_id: "acc".into(),
-                message: message(),
-                source_label: "list.csv".into(),
-                delay_seconds: 10,
-                recipients,
-            },
-            now,
-        )
-        .await
-        .expect("job")
+        create_job(pool, new_job_input("acc", "p", count), now)
+            .await
+            .expect("job")
     }
 
     async fn queue_rows(pool: &SqlitePool) -> Vec<(String, String, String)> {
@@ -810,7 +1032,7 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_str(&payload).expect("json");
         sqlx::query(
             "INSERT INTO messages (id, account_id, folder_id, remote_id, from_address, to_addresses, subject, date, created_at, updated_at, is_sent, message_id_header)
-             VALUES (?, 'acc', 'sent', '', 'me@example.com', '[]', '', '', '', '', 1, ?)",
+             VALUES (?, 'acc', 'sent', '', 'me@example.test', '[]', '', '', '', '', 1, ?)",
         )
         .bind(uuid::Uuid::new_v4().to_string())
         .bind(payload["message_id_header"].as_str())
@@ -824,19 +1046,26 @@ mod tests {
             .expect("complete");
     }
 
-    async fn outbox_fails(pool: &SqlitePool, queue_id: &str) {
-        sqlx::query("UPDATE sync_queue SET status = 'failed', last_error = 'backend.errors.smtpRejected' WHERE id = ?")
+    async fn outbox_marks(pool: &SqlitePool, queue_id: &str, status: &str) {
+        sqlx::query("UPDATE sync_queue SET status = ?, last_error = 'backend.errors.smtpRejected' WHERE id = ?")
+            .bind(status)
             .bind(queue_id)
             .execute(pool)
             .await
-            .expect("fail");
+            .expect("mark");
+    }
+
+    async fn sole_queue_id(pool: &SqlitePool) -> String {
+        let rows = queue_rows(pool).await;
+        assert_eq!(rows.len(), 1, "one copy in the outbox");
+        rows[0].0.clone()
     }
 
     #[tokio::test]
     async fn sends_one_personal_copy_at_a_time_with_the_delay_between() {
         let pool = pool().await;
         let queue = SyncQueue::new();
-        let start = Utc::now();
+        let start = start();
         let job = new_job(&pool, start, 2).await;
 
         let report = tick(&pool, &queue, start).await.expect("tick");
@@ -845,7 +1074,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         let payload: serde_json::Value = serde_json::from_str(&rows[0].2).expect("json");
         let input = &payload["input"];
-        assert_eq!(input["to"], serde_json::json!(["p0@example.com"]));
+        assert_eq!(input["to"], serde_json::json!(["p0@example.test"]));
         assert_eq!(input["cc"], serde_json::json!([]));
         assert_eq!(input["bcc"], serde_json::json!([]));
         assert_eq!(input["subject"], "Hello P0");
@@ -873,7 +1102,7 @@ mod tests {
             .expect("tick");
         let rows = queue_rows(&pool).await;
         assert_eq!(rows.len(), 1);
-        assert!(rows[0].2.contains("p1@example.com"));
+        assert!(rows[0].2.contains("p1@example.test"));
         outbox_sends(&pool, &rows[0].0).await;
         tick(&pool, &queue, start + Duration::seconds(11))
             .await
@@ -885,25 +1114,40 @@ mod tests {
         assert!(detail.recipients.iter().all(|row| row.sent_at.is_some()));
     }
 
-    /// The job lives in the database: a new process (new queue, new tick)
-    /// picks up where the old one stopped, without sending anything twice.
+    /// After a start, a job the last run left running waits for the user;
+    /// resuming it continues without sending anything twice.
     #[tokio::test]
-    async fn resumes_after_a_restart_without_resending() {
+    async fn comes_back_paused_after_a_restart_and_resumes_without_resending() {
         let pool = pool().await;
-        let start = Utc::now();
+        let start = start();
         let job = new_job(&pool, start, 3).await;
         tick(&pool, &SyncQueue::new(), start).await.expect("tick");
-        let first = queue_rows(&pool).await[0].0.clone();
+        let first = sole_queue_id(&pool).await;
         outbox_sends(&pool, &first).await;
 
-        // "Restart": a fresh queue handle and a later clock.
+        // "Restart": the runner pauses what was running, with a fresh queue.
         let queue = SyncQueue::new();
+        let paused = pause_after_restart(&pool, start + Duration::seconds(30))
+            .await
+            .expect("restart");
+        assert_eq!(paused, vec![job.clone()]);
         tick(&pool, &queue, start + Duration::seconds(30))
+            .await
+            .expect("tick");
+        assert!(queue_rows(&pool).await.is_empty());
+        let summary = job_summary(&pool, &job).await.expect("job");
+        assert_eq!(summary.status, "paused");
+        assert_eq!(summary.pause_reason.as_deref(), Some(PAUSE_REASON_RESTART));
+
+        resume_job(&pool, &job, start + Duration::seconds(40))
+            .await
+            .expect("resume");
+        tick(&pool, &queue, start + Duration::seconds(40))
             .await
             .expect("tick");
         let rows = queue_rows(&pool).await;
         assert_eq!(rows.len(), 1);
-        assert!(rows[0].2.contains("p1@example.com"));
+        assert!(rows[0].2.contains("p1@example.test"));
         let detail = job_detail(&pool, &job).await.expect("detail");
         assert_eq!(
             (detail.job.sent, detail.job.queued, detail.job.pending),
@@ -911,11 +1155,104 @@ mod tests {
         );
     }
 
+    /// Pausing and resuming is no way past the pace.
+    #[tokio::test]
+    async fn resume_keeps_the_slot_the_job_was_waiting_for() {
+        let pool = pool().await;
+        let queue = SyncQueue::new();
+        let start = start();
+        let job = new_job(&pool, start, 3).await;
+        tick(&pool, &queue, start).await.expect("tick");
+        outbox_sends(&pool, &sole_queue_id(&pool).await).await;
+
+        pause_job(&pool, &job, start + Duration::seconds(2))
+            .await
+            .expect("pause");
+        resume_job(&pool, &job, start + Duration::seconds(3))
+            .await
+            .expect("resume");
+        let summary = job_summary(&pool, &job).await.expect("job");
+        assert_eq!(
+            parse_ts(summary.next_send_at.as_deref()),
+            Some(start + Duration::seconds(10))
+        );
+        let report = tick(&pool, &queue, start + Duration::seconds(3))
+            .await
+            .expect("tick");
+        assert!(queue_rows(&pool).await.is_empty());
+        assert_eq!(report.next_due, Some(start + Duration::seconds(10)));
+
+        // Retrying failed copies keeps the slot as well.
+        tick(&pool, &queue, start + Duration::seconds(10))
+            .await
+            .expect("tick");
+        outbox_marks(&pool, &sole_queue_id(&pool).await, "failed").await;
+        tick(&pool, &queue, start + Duration::seconds(11))
+            .await
+            .expect("tick");
+        assert_eq!(
+            retry_failed(&pool, &job, start + Duration::seconds(12))
+                .await
+                .expect("retry"),
+            1
+        );
+        let report = tick(&pool, &queue, start + Duration::seconds(12))
+            .await
+            .expect("tick");
+        assert!(queue_rows(&pool).await.is_empty());
+        assert_eq!(report.next_due, Some(start + Duration::seconds(20)));
+    }
+
+    /// Two jobs on one account share its pace instead of doubling it.
+    #[tokio::test]
+    async fn two_jobs_on_one_account_share_the_pace() {
+        let pool = pool().await;
+        let queue = SyncQueue::new();
+        let start = start();
+        let first = create_job(&pool, new_job_input("acc", "a", 2), start)
+            .await
+            .expect("first");
+        let second = create_job(&pool, new_job_input("acc", "b", 2), start)
+            .await
+            .expect("second");
+        let elsewhere = create_job(&pool, new_job_input("other", "c", 2), start)
+            .await
+            .expect("other account");
+
+        tick(&pool, &queue, start).await.expect("tick");
+        let rows = queue_rows(&pool).await;
+        // One copy for `acc` (the older job), one for the other account.
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().any(|row| row.2.contains("a0@example.test")));
+        assert!(rows.iter().any(|row| row.2.contains("c0@example.test")));
+        for row in &rows {
+            outbox_sends(&pool, &row.0).await;
+        }
+
+        // The second job's first copy waits for the account's slot.
+        let report = tick(&pool, &queue, start + Duration::seconds(5))
+            .await
+            .expect("tick");
+        assert!(queue_rows(&pool).await.is_empty());
+        assert_eq!(report.next_due, Some(start + Duration::seconds(10)));
+
+        tick(&pool, &queue, start + Duration::seconds(10))
+            .await
+            .expect("tick");
+        let rows = queue_rows(&pool).await;
+        let for_acc: Vec<_> = rows
+            .iter()
+            .filter(|row| !row.2.contains("c1@example.test"))
+            .collect();
+        assert_eq!(for_acc.len(), 1, "still one copy per account");
+        let _ = (first, second, elsewhere);
+    }
+
     #[tokio::test]
     async fn pause_resume_and_cancel() {
         let pool = pool().await;
         let queue = SyncQueue::new();
-        let start = Utc::now();
+        let start = start();
         let job = new_job(&pool, start, 3).await;
 
         pause_job(&pool, &job, start).await.expect("pause");
@@ -951,12 +1288,12 @@ mod tests {
     async fn pauses_itself_after_repeated_failures_and_retries_them() {
         let pool = pool().await;
         let queue = SyncQueue::new();
-        let mut now = Utc::now();
+        let mut now = start();
         let job = new_job(&pool, now, 5).await;
         for _ in 0..AUTO_PAUSE_FAILURES {
             tick(&pool, &queue, now).await.expect("tick");
             let id = queue_rows(&pool).await.last().expect("row").0.clone();
-            outbox_fails(&pool, &id).await;
+            outbox_marks(&pool, &id, "failed").await;
             now += Duration::seconds(10);
         }
         tick(&pool, &queue, now).await.expect("tick");
@@ -987,7 +1324,7 @@ mod tests {
         tick(&pool, &queue, now).await.expect("tick");
         let rows = queue_rows(&pool).await;
         assert_eq!(rows.len(), 1);
-        assert!(rows[0].2.contains("p0@example.com"));
+        assert!(rows[0].2.contains("p0@example.test"));
         assert!(rows[0].2.contains(&old_mid));
         assert_eq!(
             job_summary(&pool, &job).await.expect("job").status,
@@ -995,11 +1332,63 @@ mod tests {
         );
     }
 
+    /// An unconfirmed delivery counts toward the auto-pause, and its row
+    /// follows the Outbox when the user resolves it there.
+    #[tokio::test]
+    async fn unconfirmed_copies_count_and_settle_later() {
+        let pool = pool().await;
+        let queue = SyncQueue::new();
+        let mut now = start();
+        let job = new_job(&pool, now, 5).await;
+        let mut unknown_ids = Vec::new();
+        for _ in 0..AUTO_PAUSE_FAILURES {
+            tick(&pool, &queue, now).await.expect("tick");
+            let id = queue_rows(&pool)
+                .await
+                .into_iter()
+                .find(|row| row.1 == "pending")
+                .expect("row")
+                .0;
+            outbox_marks(&pool, &id, "delivery_unknown").await;
+            unknown_ids.push(id);
+            now += Duration::seconds(10);
+        }
+        tick(&pool, &queue, now).await.expect("tick");
+        let summary = job_summary(&pool, &job).await.expect("job");
+        assert_eq!(summary.unknown, 3);
+        assert_eq!(summary.status, "paused");
+        assert_eq!(summary.pause_reason.as_deref(), Some(PAUSE_REASON_FAILURES));
+
+        // Resolved in the Outbox: one turned out sent, one failed, one was
+        // discarded. A later failure is not counted twice.
+        outbox_sends(&pool, &unknown_ids[0]).await;
+        outbox_marks(&pool, &unknown_ids[1], "failed").await;
+        sqlx::query("DELETE FROM sync_queue WHERE id = ?")
+            .bind(&unknown_ids[2])
+            .execute(&pool)
+            .await
+            .expect("discard");
+        tick(&pool, &queue, now).await.expect("tick");
+        let detail = job_detail(&pool, &job).await.expect("detail");
+        let statuses: Vec<&str> = detail.recipients[..3]
+            .iter()
+            .map(|row| row.status.as_str())
+            .collect();
+        assert_eq!(statuses, ["sent", "failed", "cancelled"]);
+        let streak: i64 =
+            sqlx::query_scalar("SELECT consecutive_failures FROM mail_merge_jobs WHERE id = ?")
+                .bind(&job)
+                .fetch_one(&pool)
+                .await
+                .expect("streak");
+        assert_eq!(streak, 3);
+    }
+
     #[tokio::test]
     async fn a_message_removed_from_the_outbox_counts_as_cancelled() {
         let pool = pool().await;
         let queue = SyncQueue::new();
-        let now = Utc::now();
+        let now = start();
         let job = new_job(&pool, now, 1).await;
         tick(&pool, &queue, now).await.expect("tick");
         sqlx::query("DELETE FROM sync_queue")
@@ -1016,18 +1405,105 @@ mod tests {
         assert_eq!(detail.job.status, "completed");
     }
 
+    async fn stored(pool: &SqlitePool, job: &str) -> (serde_json::Value, Vec<String>) {
+        let template: String =
+            sqlx::query_scalar("SELECT template FROM mail_merge_jobs WHERE id = ?")
+                .bind(job)
+                .fetch_one(pool)
+                .await
+                .expect("template");
+        let fields: Vec<String> = sqlx::query_scalar(
+            "SELECT fields FROM mail_merge_recipients WHERE job_id = ? ORDER BY position",
+        )
+        .bind(job)
+        .fetch_all(pool)
+        .await
+        .expect("fields");
+        (serde_json::from_str(&template).expect("json"), fields)
+    }
+
+    /// A finished job keeps neither the attachments nor field values the
+    /// message never used; one with failures keeps them until retried.
     #[tokio::test]
-    async fn refuses_empty_and_oversized_jobs_and_bad_delays() {
+    async fn finished_jobs_drop_attachments_and_unused_values() {
         let pool = pool().await;
-        let now = Utc::now();
+        let queue = SyncQueue::new();
+        let now = start();
+        let job = new_job(&pool, now, 1).await;
+        tick(&pool, &queue, now).await.expect("tick");
+        outbox_marks(&pool, &sole_queue_id(&pool).await, "failed").await;
+        tick(&pool, &queue, now + Duration::seconds(1))
+            .await
+            .expect("tick");
+        assert_eq!(job_summary(&pool, &job).await.unwrap().status, "completed");
+        let (template, fields) = stored(&pool, &job).await;
+        assert_eq!(template["attachments"].as_array().map(Vec::len), Some(1));
+        assert!(fields[0].contains("private note"));
+
+        retry_failed(&pool, &job, now + Duration::seconds(20))
+            .await
+            .expect("retry");
+        tick(&pool, &queue, now + Duration::seconds(20))
+            .await
+            .expect("tick");
+        outbox_sends(&pool, &sole_queue_id(&pool).await).await;
+        tick(&pool, &queue, now + Duration::seconds(21))
+            .await
+            .expect("tick");
+        let (template, fields) = stored(&pool, &job).await;
+        assert_eq!(template["attachments"], serde_json::json!([]));
+        assert_eq!(fields[0], r#"{"FirstName":"P0"}"#);
+
+        // A cancelled job lets go at once.
+        let cancelled = new_job(&pool, now, 2).await;
+        cancel_job(&pool, &cancelled, now).await.expect("cancel");
+        let (template, _) = stored(&pool, &cancelled).await;
+        assert_eq!(template["attachments"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn finished_jobs_go_after_thirty_days() {
+        let pool = pool().await;
+        let now = start();
+        let old = new_job(&pool, now, 1).await;
+        cancel_job(&pool, &old, now).await.expect("cancel");
+        let running = new_job(&pool, now, 1).await;
+        let later = now + Duration::days(FINISHED_RETENTION_DAYS);
+        assert_eq!(delete_expired_jobs(&pool, later).await.expect("purge"), 0);
+        assert_eq!(
+            delete_expired_jobs(&pool, later + Duration::seconds(1))
+                .await
+                .expect("purge"),
+            1
+        );
+        assert!(matches!(
+            job_summary(&pool, &old).await,
+            Err(MailMergeError::NotFound)
+        ));
+        assert!(job_summary(&pool, &running).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_repeated_create_returns_the_job_it_made() {
+        let pool = pool().await;
+        let now = start();
+        let mut input = new_job_input("acc", "p", 2);
+        input.request_id = Some("req-1".into());
+        let first = create_job(&pool, input, now).await.expect("first");
+        let mut again = new_job_input("acc", "p", 2);
+        again.request_id = Some("req-1".into());
+        let second = create_job(&pool, again, now).await.expect("again");
+        assert_eq!(first, second);
+        assert_eq!(list_jobs(&pool).await.expect("jobs").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn refuses_replies_empty_and_oversized_jobs_and_bad_delays() {
+        let pool = pool().await;
+        let now = start();
         let build = |count: usize, delay: i64| NewMailMergeJob {
-            account_id: "acc".into(),
-            message: message(),
-            source_label: String::new(),
             delay_seconds: delay,
-            recipients: (0..count)
-                .map(|index| recipient(&format!("p{index}@example.com"), "x"))
-                .collect(),
+            ..new_job_input("acc", "p", count)
         };
         assert!(matches!(
             create_job(&pool, build(0, 10), now).await,
@@ -1043,6 +1519,15 @@ mod tests {
             create_job(&pool, build(1, 0), now).await,
             Err(MailMergeError::DelayInvalid)
         ));
+        for (thread, reply) in [(Some("th-1"), None), (None, Some("msg-1"))] {
+            let mut reply_job = build(1, 10);
+            reply_job.message.thread_id = thread.map(str::to_string);
+            reply_job.message.reply_to_message_id = reply.map(str::to_string);
+            assert!(matches!(
+                create_job(&pool, reply_job, now).await,
+                Err(MailMergeError::ReplyNotAllowed)
+            ));
+        }
         assert!(create_job(&pool, build(MAX_JOB_RECIPIENTS, 10), now)
             .await
             .is_ok());
@@ -1050,10 +1535,10 @@ mod tests {
 
     #[test]
     fn picks_a_slower_pace_for_gmail() {
-        assert_eq!(default_delay_seconds("gmail", "a@company.com"), 15);
+        assert_eq!(default_delay_seconds("gmail", "a@company.test"), 15);
         assert_eq!(default_delay_seconds("imap", "a@googlemail.com"), 15);
-        assert_eq!(default_delay_seconds("outlook", "a@company.com"), 10);
+        assert_eq!(default_delay_seconds("outlook", "a@company.test"), 10);
         assert_eq!(default_delay_seconds("imap", "a@hotmail.de"), 10);
-        assert_eq!(default_delay_seconds("imap", "a@example.org"), 20);
+        assert_eq!(default_delay_seconds("imap", "a@example.test"), 20);
     }
 }

@@ -17,13 +17,15 @@ import AppIcon from '@/components/ui/AppIcon.vue';
 import IsolatedEmailDocument from '@/components/mail/IsolatedEmailDocument.vue';
 import { useDismissableOnTop } from '@/composables/useDismissable';
 import { useMailMergeStore } from '@/stores/mailMerge';
-import type { BackendMergePreview, BackendMergeRowIssue, BackendMergeTemplate } from '@/types/mailMerge';
+import type { BackendMergePreview, BackendMergeRowIssue, BackendMergeSignature, BackendMergeTemplate } from '@/types/mailMerge';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { mergeDurationMinutes, type MailMergeSource } from '@/utils/mailMerge';
 
 const props = defineProps<{
   source: MailMergeSource;
   template: BackendMergeTemplate;
+  /** The composer's signature choice; the preview shows the signature too. */
+  signature?: BackendMergeSignature | null;
   accountId: string;
   /** The address the copies leave from. */
   fromAddress: string;
@@ -58,6 +60,7 @@ async function load() {
       template: props.template,
       list: props.source,
       index: index.value,
+      signature: props.signature ?? null,
     });
     if (current !== request) return;
     preview.value = next;

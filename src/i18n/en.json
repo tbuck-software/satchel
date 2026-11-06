@@ -315,6 +315,7 @@
       "mailMergeCsvEmpty": "The file is empty.",
       "mailMergeCsvNoRows": "The file has a header row but no recipients.",
       "mailMergeCsvTooLarge": "The file is larger than 5 MB. That is not a recipient list.",
+      "mailMergeCsvTooManyColumns": "The file has more than {limit} columns. That is not a recipient list.",
       "mailMergeCsvUnreadable": "The file could not be read.",
       "mailMergeCsvUnterminatedQuote": "A quotation mark in row {line} is never closed.",
       "mailMergeDelayInvalid": "Choose between 1 and 3600 seconds between messages.",
@@ -325,6 +326,8 @@
       "mailMergeNoRecipients": "No row of the list can be sent.",
       "mailMergePersistenceFailed": "The mail merge could not be saved.",
       "mailMergeRemovedFromOutbox": "Removed from the Outbox before it was sent.",
+      "mailMergeReplyNotAllowed": "A mail merge is a new message. It cannot answer or forward a conversation.",
+      "mailMergeSmimeSigningUnavailable": "The S/MIME signing certificate is locked or missing. Unlock it and start again.",
       "mailMergeTooManyRecipients": "One mail merge sends at most {limit} messages. Split the list.",
       "mailMovePending": "The server move is still being finalized. Try again shortly.",
       "mailUndoUnavailable": "This action can no longer be undone.",
@@ -1829,18 +1832,20 @@
         "completed": "Finished",
         "paused": "Paused",
         "pausedFailures": "Paused after repeated failures",
+        "pausedRestart": "Paused when Satchel restarted",
         "running": "Sending"
       },
       "title": "Mail merge",
       "unknown": "one unconfirmed | {count} unconfirmed"
     },
     "menuItem": "Mail merge…",
+    "notForReplies": "Mail merge works with a new message, not with a reply or forward.",
     "review": {
       "delay": "Time between messages",
       "delayHint": "A slower pace keeps the provider from flagging the account; Gmail and Microsoft are strict.",
       "delayInvalid": "Choose between 1 and 3600 seconds.",
       "duration": "Sends right away. | Takes about a minute. | Takes about {minutes} minutes.",
-      "encrypted": "Each copy is encrypted for its recipient. If a key is missing for anyone, nothing is sent and you are told who.",
+      "encrypted": "Each copy is encrypted for its recipient. Before the first one goes, every recipient's key and your own are checked; a key that goes missing later stops that copy, which is then not sent unencrypted.",
       "issue": {
         "duplicate": "The address appears in an earlier row",
         "invalidEmail": "No valid email address",
@@ -1896,7 +1901,8 @@
       "selectAll": "Select the one shown | Select all {count} shown",
       "selectNone": "Clear selection",
       "title": "Mail merge",
-      "truncated": "The file has more rows. Only the first {count} were read."
+      "truncated": "The file has more rows. Only the first {count} were read.",
+      "windows1252Hint": "The file was read as Windows-1252. If umlauts or accents look wrong, save it as \"CSV UTF-8\" and choose it again."
     },
     "started": "Mail merge started: one copy is on its way. | Mail merge started: {count} copies go out one by one.",
     "viewProgress": "View progress"

@@ -29,7 +29,7 @@ import ComposerThreadContext from '@/components/mail/ComposerThreadContext.vue';
 import ComposerSenderField from '@/components/mail/ComposerSenderField.vue';
 import MailMergeBar from '@/components/mail/MailMergeBar.vue';
 import { useMailMergeStore } from '@/stores/mailMerge';
-import { contactsMergeSource, mergeToken, type MailMergeSource } from '@/utils/mailMerge';
+import { contactsMergeSource, mergeDurationMinutes, mergeToken, type MailMergeSource } from '@/utils/mailMerge';
 import type { ComposerMailMergeSeed } from '@/stores/composer';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import AppBanner from '@/components/ui/AppBanner.vue';
@@ -198,6 +198,8 @@ const mergeError = ref<string | null>(null);
 /** Where a picked field goes: the field the caret was in last. */
 const mergeInsertTarget = ref<'subject' | 'body'>('body');
 const subjectInputRef = ref<HTMLInputElement | null>(null);
+/** One token per review: a start sent again after a lost answer finds its job. */
+const mergeRequestId = ref('');
 
 function openSendLater(event: MouseEvent | KeyboardEvent) {
   const trigger = event.currentTarget as HTMLElement;
@@ -1082,6 +1084,7 @@ async function send() {
   // A mail merge never sends from here: the review comes first.
   if (mergeSource.value) {
     mergeError.value = null;
+    mergeRequestId.value = crypto.randomUUID();
     showMergeReview.value = true;
     return;
   }
@@ -1216,6 +1219,15 @@ async function insertMergeField(field: string) {
   richEditorRef.value?.insertText(token);
 }
 
+/** What `create` appends as the signature, so the preview shows it too. */
+const mergeSignature = computed(() => ({
+  fromAddress: aliasEmail.value,
+  signatureId: selectedSignatureId.value,
+  signatureVariant: signatureVariant.value,
+  signatureOverrideText: signatureOverrideText.value,
+  signatureOverrideHtml: plainTextCompose.value ? null : signatureOverrideHtml.value,
+}));
+
 const mergeTemplate = computed(() => ({
   subject: subject.value.trim() || t('compose.noSubject'),
   body: body.value,
@@ -1227,13 +1239,14 @@ const mergeTemplate = computed(() => ({
  * the draft's place, so persistence pauses as it does for a send.
  */
 async function startMailMerge(delaySeconds: number, count: number) {
+  const minutes = mergeDurationMinutes(count, delaySeconds);
   const source = mergeSource.value;
   const account = activeAccount.value;
   if (!source || !account || mergeBusy.value) return;
   const confirmed = await confirm.ask({
     title: t('mailMerge.confirm.title', { count }, count),
     body: t('mailMerge.confirm.body', { address: fromAddress.value, account: account.displayName || account.email }),
-    detail: t('mailMerge.confirm.detail'),
+    detail: `${t('mailMerge.review.duration', { minutes }, minutes)} ${t('mailMerge.confirm.detail')}`,
     confirmLabel: t('mailMerge.confirm.send'),
   });
   if (!confirmed) return;
@@ -1247,6 +1260,7 @@ async function startMailMerge(delaySeconds: number, count: number) {
       sourceLabel: source.label,
       delaySeconds,
       list: source,
+      requestId: mergeRequestId.value || crypto.randomUUID(),
     });
     committed = true;
     finishDraftPersistence();
@@ -1272,8 +1286,15 @@ async function startMailMerge(delaySeconds: number, count: number) {
   }
 }
 
+// The palette asks whichever composer is open. A reply or forward is no
+// mail merge: the conversation's quote would reach everyone on the list.
 watch(() => props.mailMergeRequests, (next, previous) => {
-  if (next > (previous ?? 0)) openMailMerge();
+  if (next <= (previous ?? 0)) return;
+  if (contextThreadId.value || replyToMessageId.value || props.mode !== 'new') {
+    status.value = { tone: 'warning', text: t('mailMerge.notForReplies') };
+    return;
+  }
+  openMailMerge();
 });
 
 function formatScheduled(value: string | null): string {
@@ -1903,6 +1924,7 @@ defineExpose({
       v-if="showMergeReview && mergeSource && activeAccount"
       :source="mergeSource"
       :template="mergeTemplate"
+      :signature="mergeSignature"
       :account-id="activeAccount.id"
       :from-address="fromAddress"
       :encrypt="pgpEncrypt || smimeEncrypt"

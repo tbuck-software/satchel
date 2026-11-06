@@ -42,6 +42,9 @@ pub(crate) fn mail_merge_error(error: MailMergeError) -> CommandError {
         }
         MailMergeError::DelayInvalid => CommandError::new("backend.errors.mailMergeDelayInvalid"),
         MailMergeError::InvalidState => CommandError::new("backend.errors.mailMergeInvalidState"),
+        MailMergeError::ReplyNotAllowed => {
+            CommandError::new("backend.errors.mailMergeReplyNotAllowed")
+        }
         error @ (MailMergeError::Queue(_)
         | MailMergeError::Persistence(_)
         | MailMergeError::Encoding(_)) => {
@@ -62,6 +65,10 @@ fn csv_error(error: CsvError) -> CommandError {
         CsvError::Empty => CommandError::new("backend.errors.mailMergeCsvEmpty"),
         CsvError::TooLarge => CommandError::new("backend.errors.mailMergeCsvTooLarge"),
         CsvError::NoRows => CommandError::new("backend.errors.mailMergeCsvNoRows"),
+        CsvError::TooManyColumns { limit } => {
+            CommandError::new("backend.errors.mailMergeCsvTooManyColumns")
+                .with_param("limit", limit as u64)
+        }
         CsvError::UnterminatedQuote { line } => {
             CommandError::new("backend.errors.mailMergeCsvUnterminatedQuote")
                 .with_param("line", line)
@@ -105,6 +112,26 @@ pub struct PreviewMailMergeInput {
     /// The row to render; out of range renders nothing.
     #[serde(default)]
     pub index: Option<u32>,
+    /// The composer's signature choice, so the preview shows the signature
+    /// `create_mail_merge_job` appends. Without a variant there is none.
+    #[serde(default)]
+    pub signature: Option<MergeSignatureInput>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/mail_merge/", optional_fields = nullable))]
+pub struct MergeSignatureInput {
+    #[serde(default)]
+    pub from_address: Option<String>,
+    #[serde(default)]
+    pub signature_id: Option<String>,
+    #[serde(default)]
+    pub signature_variant: Option<String>,
+    #[serde(default)]
+    pub signature_override_text: Option<String>,
+    #[serde(default)]
+    pub signature_override_html: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -135,6 +162,12 @@ pub(crate) async fn preview_mail_merge_inner(
     pool: &SqlitePool,
     input: PreviewMailMergeInput,
 ) -> CommandResult<MailMergePreview> {
+    let mut input = input;
+    if let (Some(account_id), Some(signature)) =
+        (input.account_id.as_deref(), input.signature.take())
+    {
+        input.template = with_signature(pool, account_id, &input.template, signature).await?;
+    }
     let plan = plan(
         &input.template,
         &input.fields,
@@ -159,6 +192,28 @@ pub(crate) async fn preview_mail_merge_inner(
         max_recipients: MAX_JOB_RECIPIENTS as u32,
         default_delay_seconds,
     })
+}
+
+/// The template with the signature `create_mail_merge_job` would append.
+async fn with_signature(
+    pool: &SqlitePool,
+    account_id: &str,
+    template: &MergeTemplate,
+    signature: MergeSignatureInput,
+) -> CommandResult<MergeTemplate> {
+    let mut message = OutgoingMessageInput {
+        subject: template.subject.clone(),
+        body: template.body.clone(),
+        body_html: template.body_html.clone(),
+        from_address: signature.from_address,
+        signature_id: signature.signature_id,
+        signature_variant: signature.signature_variant,
+        signature_override_text: signature.signature_override_text,
+        signature_override_html: signature.signature_override_html,
+        ..OutgoingMessageInput::default()
+    };
+    apply_selected_signature(pool, account_id, &mut message).await?;
+    Ok(merge_template(&message))
 }
 
 async fn account_default_delay(pool: &SqlitePool, account_id: &str) -> CommandResult<i64> {
@@ -187,6 +242,10 @@ pub struct CreateMailMergeJobInput {
     pub fields: Vec<String>,
     pub email_field: String,
     pub rows: Vec<MergeRecipientInput>,
+    /// The client's token for this start. Sent again after a lost answer, it
+    /// returns the job already made instead of a second one.
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
 #[tauri::command]
@@ -205,8 +264,14 @@ pub async fn create_mail_merge_job(
         fields,
         email_field,
         rows,
+        request_id,
     } = input;
     let mut message = message;
+    // A merge is a new message; the conversation's quote and In-Reply-To
+    // would reach people who were never part of it.
+    if message.thread_id.is_some() || message.reply_to_message_id.is_some() {
+        return Err(MailMergeError::ReplyNotAllowed.into());
+    }
     ensure_attachments_within_limit(&message.attachments)?;
     // The same sender rules as `send_message`: the chosen alias or the
     // account's own address, stored in the template so every copy, its queue
@@ -224,7 +289,7 @@ pub async fn create_mail_merge_job(
     message.signature_override_html = None;
 
     let recipients = ready_recipients(&merge_template(&message), &fields, &email_field, &rows)?;
-    ensure_encryption_keys(&app, pool, &message, &recipients).await?;
+    ensure_crypto_ready(&app, &state, pool, &account_id, &message, &recipients).await?;
 
     let job_id = job::create_job(
         pool,
@@ -233,6 +298,7 @@ pub async fn create_mail_merge_job(
             message,
             source_label: source_label.trim().chars().take(200).collect(),
             delay_seconds,
+            request_id,
             recipients,
         },
         chrono::Utc::now(),
@@ -276,29 +342,103 @@ fn ready_recipients(
     Ok(ready)
 }
 
-/// With encryption on, every recipient needs a key before the first copy
-/// leaves; finding the gap at message 40 would leave a job half sent.
-async fn ensure_encryption_keys(
+/// What the outbox will need for every copy, checked before the first one
+/// leaves: the signing key or certificate unlocked, a key for every
+/// recipient, and the sender's own key, since the Sent copy is encrypted to
+/// it too. Finding the gap at copy 40 would leave a job half sent. A key
+/// removed or locked mid-job still fails that copy in the outbox; nothing
+/// goes out unencrypted.
+async fn ensure_crypto_ready(
     app: &AppHandle,
+    state: &AppState,
     pool: &SqlitePool,
+    account_id: &str,
     message: &OutgoingMessageInput,
     recipients: &[(String, BTreeMap<String, String>)],
 ) -> CommandResult<()> {
+    let pgp = message.pgp_sign_with_key_id.is_some() || message.pgp_encrypt_to_recipients;
+    let smime = message.smime_sign_with_cert_id.is_some() || message.smime_encrypt_to_recipients;
+    if !pgp && !smime {
+        return Ok(());
+    }
+    if pgp && smime {
+        return Err(CommandError::new("backend.errors.pgpSmimeConflict"));
+    }
+    let own_address = own_address(pool, account_id, message).await?;
     let emails: Vec<String> = recipients.iter().map(|(email, _)| email.clone()).collect();
-    let missing = if message.pgp_encrypt_to_recipients {
-        crate::commands::pgp::missing_recipient_public_keys(pool, app, &emails)
+
+    if let Some(key_id) = message.pgp_sign_with_key_id.as_deref() {
+        crate::commands::pgp::load_private_signing_key(app, state, pool, key_id)
             .await
-            .map_err(CommandError::unexpected)?
-    } else if message.smime_encrypt_to_recipients {
+            .map_err(|_| CommandError::new("backend.errors.pgpSigningKeyUnavailable"))?;
+    }
+    if message.pgp_encrypt_to_recipients {
+        let missing = crate::commands::pgp::missing_recipient_public_keys(pool, app, &emails)
+            .await
+            .map_err(CommandError::unexpected)?;
+        missing_keys(&missing)?;
+        let own = crate::commands::pgp::missing_recipient_public_keys(
+            pool,
+            app,
+            std::slice::from_ref(&own_address),
+        )
+        .await
+        .map_err(CommandError::unexpected)?;
+        if !own.is_empty() {
+            return Err(CommandError::new("backend.errors.pgpOwnKeyMissing"));
+        }
+    }
+
+    if let Some(cert_id) = message.smime_sign_with_cert_id.as_deref() {
+        crate::commands::smime::load_private_signing_material(app, state, pool, cert_id)
+            .await
+            .map_err(|_| CommandError::new("backend.errors.mailMergeSmimeSigningUnavailable"))?;
+    }
+    if message.smime_encrypt_to_recipients {
         match crate::commands::smime::resolve_recipient_certs(pool, &emails).await {
-            Ok(_) => Vec::new(),
+            Ok(_) => {}
             Err(SmimeRepositoryError::MissingRecipients { recipients })
-            | Err(SmimeRepositoryError::AmbiguousRecipients { recipients }) => recipients,
+            | Err(SmimeRepositoryError::AmbiguousRecipients { recipients }) => {
+                missing_keys(&recipients)?
+            }
             Err(error) => return Err(CommandError::from(error)),
         }
-    } else {
-        return Ok(());
-    };
+        match crate::commands::smime::resolve_recipient_certs(pool, &[own_address]).await {
+            Ok(_) => {}
+            Err(SmimeRepositoryError::MissingRecipients { .. }) => {
+                return Err(CommandError::new(
+                    "backend.errors.smimeOwnCertificateMissing",
+                ))
+            }
+            Err(error) => return Err(CommandError::from(error)),
+        }
+    }
+    Ok(())
+}
+
+/// The address the copies leave from, as the outbox resolves `From`.
+async fn own_address(
+    pool: &SqlitePool,
+    account_id: &str,
+    message: &OutgoingMessageInput,
+) -> CommandResult<String> {
+    if let Some(address) = message
+        .from_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|address| !address.is_empty())
+    {
+        return Ok(address.to_string());
+    }
+    sqlx::query_scalar::<_, String>("SELECT email FROM accounts WHERE id = ?")
+        .bind(account_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(CommandError::unexpected)?
+        .ok_or_else(|| CommandError::new("backend.errors.accountNotFound"))
+}
+
+fn missing_keys(missing: &[String]) -> CommandResult<()> {
     if missing.is_empty() {
         return Ok(());
     }
@@ -419,8 +559,12 @@ mod tests {
                 },
                 fields: vec!["Email".into(), "FirstName".into()],
                 email_field: "Email".into(),
-                rows: vec![row("a@x.de", "Anna"), row("b@x.de", "")],
+                rows: vec![row("a@example.test", "Anna"), row("b@example.test", "")],
                 index: Some(1),
+                signature: Some(MergeSignatureInput {
+                    signature_variant: Some("none".into()),
+                    ..MergeSignatureInput::default()
+                }),
             },
         )
         .await
@@ -444,11 +588,15 @@ mod tests {
             &template,
             &fields,
             "Email",
-            &[row("A@X.DE", "Anna"), row("bad", "Ben"), row("c@x.de", "")],
+            &[
+                row("A@EXAMPLE.TEST", "Anna"),
+                row("bad", "Ben"),
+                row("c@example.test", ""),
+            ],
         )
         .unwrap();
         assert_eq!(ready.len(), 1);
-        assert_eq!(ready[0].0, "A@x.de");
+        assert_eq!(ready[0].0, "A@example.test");
         let error =
             ready_recipients(&template, &fields, "Email", &[row("bad", "Ben")]).unwrap_err();
         assert_eq!(error.key, "backend.errors.mailMergeNoRecipients");
@@ -461,5 +609,29 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.key, "backend.errors.mailMergeJobNotFound");
+    }
+
+    #[tokio::test]
+    async fn refuses_a_wide_csv_and_names_the_limit() {
+        let header = (0..=200)
+            .map(|i| format!("F{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let error = parse_mail_merge_csv(ParseMailMergeCsvInput {
+            content_base64: base64::engine::general_purpose::STANDARD
+                .encode(format!("{header}\n1\n")),
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(error.key, "backend.errors.mailMergeCsvTooManyColumns");
+        assert_eq!(error.params.get("limit"), Some(&serde_json::json!(200)));
+    }
+
+    #[test]
+    fn a_reply_is_refused_with_its_own_key() {
+        assert_eq!(
+            mail_merge_error(MailMergeError::ReplyNotAllowed).key,
+            "backend.errors.mailMergeReplyNotAllowed"
+        );
     }
 }

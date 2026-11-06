@@ -81,7 +81,12 @@ pub struct MergePlan {
 }
 
 /// One address, lower-cased in the domain, or `None`. A cell like
-/// `Anna <anna@x.de>` counts; two addresses in one cell do not.
+/// `Anna <anna@example.test>` counts; two addresses in one cell do not.
+///
+/// The domain must be a hostname: letters, digits and hyphens per label, or
+/// an internationalised name, which comes back in its punycode form. An
+/// encoded word (`=?`) or a direction or zero-width mark has no business in
+/// an address and would show one thing while mail goes to another.
 pub fn normalize_address(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     let candidate = match (trimmed.rfind('<'), trimmed.ends_with('>')) {
@@ -91,9 +96,11 @@ pub fn normalize_address(raw: &str) -> Option<String> {
     .trim();
     if candidate.is_empty()
         || candidate.len() > 254
+        || candidate.contains("=?")
         || candidate.chars().any(|c| {
             c.is_whitespace()
                 || c.is_control()
+                || is_invisible_mark(c)
                 || matches!(
                     c,
                     '<' | '>' | ',' | ';' | '"' | '(' | ')' | '[' | ']' | '\\'
@@ -103,18 +110,57 @@ pub fn normalize_address(raw: &str) -> Option<String> {
         return None;
     }
     let (local, domain) = candidate.rsplit_once('@')?;
-    if local.is_empty() || local.contains('@') || local.starts_with('.') || local.ends_with('.') {
-        return None;
-    }
-    let labels: Vec<&str> = domain.split('.').collect();
-    if labels.len() < 2
-        || labels
-            .iter()
-            .any(|label| label.is_empty() || label.starts_with('-') || label.ends_with('-'))
+    if local.is_empty()
+        || local.len() > 64
+        || local.contains('@')
+        || local.starts_with('.')
+        || local.ends_with('.')
+        || local.contains("..")
     {
         return None;
     }
-    Some(format!("{local}@{}", domain.to_ascii_lowercase()))
+    let domain = ascii_domain(domain)?;
+    Some(format!("{local}@{domain}"))
+}
+
+/// Bidi controls and zero-width characters: format characters that
+/// `char::is_control` does not cover.
+fn is_invisible_mark(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061C}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2069}'
+            | '\u{FEFF}'
+    )
+}
+
+/// The domain as lower-case ASCII (punycode for an internationalised one), if
+/// it is a hostname with at least two labels and a non-numeric top level.
+fn ascii_domain(domain: &str) -> Option<String> {
+    let ascii = if domain.is_ascii() {
+        domain.to_ascii_lowercase()
+    } else {
+        idna::domain_to_ascii(domain).ok()?
+    };
+    if ascii.is_empty() || ascii.len() > 253 {
+        return None;
+    }
+    let labels: Vec<&str> = ascii.split('.').collect();
+    let ldh = |label: &&str| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    };
+    let top_level_is_numeric = labels
+        .last()
+        .is_some_and(|label| label.bytes().all(|byte| byte.is_ascii_digit()));
+    (labels.len() >= 2 && labels.iter().all(ldh) && !top_level_is_numeric).then_some(ascii)
 }
 
 /// Checks every row against the template. Rows keep their order; issues are
@@ -259,22 +305,34 @@ mod tests {
     #[test]
     fn accepts_one_address_per_cell() {
         assert_eq!(
-            normalize_address(" a.b@Example.COM "),
-            Some("a.b@example.com".into())
+            normalize_address(" a.b@Example.TEST "),
+            Some("a.b@example.test".into())
+        );
+        // An internationalised domain comes back as punycode.
+        assert_eq!(
+            normalize_address("jürgen@bücher.example"),
+            Some("jürgen@xn--bcher-kva.example".into())
         );
         assert_eq!(
-            normalize_address("Anna <anna@x.de>"),
-            Some("anna@x.de".into())
+            normalize_address("Anna <anna@example.test>"),
+            Some("anna@example.test".into())
         );
         for bad in [
             "",
             "anna",
             "a@b",
             "a@b.",
-            "a @b.de",
-            "a@b.de, c@d.de",
-            "@x.de",
-            "a@-x.de",
+            "a @b.example.test",
+            "a@b.example.test, c@d.example.test",
+            "@example.test",
+            "a@-x.example.test",
+            "a@ex_ample.test",
+            "a@example.123",
+            "a..b@example.test",
+            "=?utf-8?q?a?=@example.test",
+            "a@exa\u{202E}mple.test",
+            "a\u{200B}@example.test",
+            "a@exa\u{0007}mple.test",
         ] {
             assert_eq!(normalize_address(bad), None, "{bad}");
         }
@@ -284,10 +342,10 @@ mod tests {
     fn skips_invalid_duplicate_and_incomplete_rows_and_keeps_the_rest() {
         let fields = vec!["Email".to_string(), "FirstName".to_string()];
         let rows = vec![
-            input(&[("Email", "anna@x.de"), ("FirstName", "Anna")]),
+            input(&[("Email", "anna@example.test"), ("FirstName", "Anna")]),
             input(&[("Email", "not-an-address"), ("FirstName", "Ben")]),
-            input(&[("Email", "ANNA@X.DE"), ("FirstName", "Anna again")]),
-            input(&[("Email", "cem@x.de"), ("FirstName", "")]),
+            input(&[("Email", "ANNA@EXAMPLE.TEST"), ("FirstName", "Anna again")]),
+            input(&[("Email", "cem@example.test"), ("FirstName", "")]),
         ];
         let plan = plan(
             &template("Hi {{FirstName}}", "Dear {{FirstName}}"),
@@ -311,7 +369,7 @@ mod tests {
     #[test]
     fn a_fallback_lets_an_incomplete_row_through() {
         let fields = vec!["Email".to_string(), "FirstName".to_string()];
-        let rows = vec![input(&[("Email", "cem@x.de")])];
+        let rows = vec![input(&[("Email", "cem@example.test")])];
         let plan = plan(
             &template("Hi", "Dear {{FirstName|friend}}"),
             &fields,

@@ -13,4 +13,9 @@ export type CreateMailMergeJobInput = {
     fields: Array<string>;
     email_field: string;
     rows: Array<MergeRecipientInput>;
+    /**
+     * The client's token for this start. Sent again after a lost answer, it
+     * returns the job already made instead of a second one.
+     */
+    request_id?: string | null;
 };

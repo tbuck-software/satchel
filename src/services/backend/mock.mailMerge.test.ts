@@ -19,7 +19,7 @@ describe('mock mail merge', () => {
   it('reads a semicolon list and plans each row', async () => {
     const { sendCommand } = await import('./mock');
     const csv = await sendCommand<BackendMergeCsv>('parse_mail_merge_csv', { input: {
-      content_base64: encode('﻿Vorname;E-Mail\nAnna;anna@example.com\nBen;kaputt\n;cem@example.com\n'),
+      content_base64: encode('﻿Vorname;E-Mail\nAnna;anna@example.test\nBen;kaputt\n;cem@example.test\n'),
     } });
     expect(csv.delimiter).toBe(';');
     expect(csv.encoding).toBe('utf8_bom');
@@ -42,9 +42,9 @@ describe('mock mail merge', () => {
   it('starts a job with the ready rows and steers it', async () => {
     const { sendCommand } = await import('./mock');
     const rows = [
-      { line: 2, values: { Email: 'a@example.com', Name: 'A' } },
-      { line: 3, values: { Email: 'b@example.com', Name: '' } },
-      { line: 4, values: { Email: 'c@example.com', Name: 'C' } },
+      { line: 2, values: { Email: 'a@example.test', Name: 'A' } },
+      { line: 3, values: { Email: 'b@example.test', Name: '' } },
+      { line: 4, values: { Email: 'c@example.test', Name: 'C' } },
     ];
     const job = await sendCommand<BackendMergeJob>('create_mail_merge_job', { input: {
       account_id: 'acc-1',
@@ -54,8 +54,17 @@ describe('mock mail merge', () => {
       fields: ['Email', 'Name'],
       email_field: 'Email',
       rows,
+      request_id: 'req-1',
     } });
     expect(job.total).toBe(2);
+    // A start sent again after a lost answer finds the job it made.
+    const again = await sendCommand<BackendMergeJob>('create_mail_merge_job', { input: {
+      account_id: 'acc-1',
+      message: { to: [], subject: 'Hi {{Name}}', body: 'x', body_html: null, draft_id: null },
+      source_label: 'list.csv', delay_seconds: 60, fields: ['Email', 'Name'], email_field: 'Email', rows,
+      request_id: 'req-1',
+    } });
+    expect(again.id).toBe(job.id);
     expect(job.sent).toBe(1);
 
     const paused = await sendCommand<BackendMergeJob>('control_mail_merge_job', { id: job.id, action: 'pause' });

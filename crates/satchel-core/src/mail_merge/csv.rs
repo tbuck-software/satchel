@@ -4,7 +4,7 @@
 //! older Excel saves Windows-1252 unless told otherwise. The header row names
 //! the fields; nothing else about the file is assumed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
 
@@ -13,6 +13,9 @@ pub const MAX_CSV_BYTES: usize = 5 * 1024 * 1024;
 /// Rows read from one file. More than the job limit, so the user sees that the
 /// list is too long instead of a silently cut one.
 pub const MAX_CSV_ROWS: usize = 5000;
+/// A recipient list with more columns is a data export, not a list; every
+/// row would carry thousands of values into the job.
+pub const MAX_CSV_COLUMNS: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
@@ -60,6 +63,8 @@ pub enum CsvError {
     NoRows,
     #[error("a quoted value is not closed")]
     UnterminatedQuote { line: u32 },
+    #[error("the file has too many columns")]
+    TooManyColumns { limit: usize },
 }
 
 /// Decodes the bytes, finds the delimiter, and reads header and rows.
@@ -79,6 +84,11 @@ pub fn parse_csv(bytes: &[u8]) -> Result<ParsedCsv, CsvError> {
     let Some((_, header)) = records.next() else {
         return Err(CsvError::Empty);
     };
+    if header.len() > MAX_CSV_COLUMNS {
+        return Err(CsvError::TooManyColumns {
+            limit: MAX_CSV_COLUMNS,
+        });
+    }
     let fields = field_names(&header);
 
     let mut rows = Vec::new();
@@ -240,6 +250,10 @@ fn split_records(text: &str, delimiter: char) -> Result<Vec<(u32, Vec<String>)>,
 /// `Email_2`, so every field can still be told apart in a placeholder.
 fn field_names(header: &[String]) -> Vec<String> {
     let mut names: Vec<String> = Vec::with_capacity(header.len());
+    // Taken names, and the next suffix to try per base, both case-blind:
+    // each header costs a set lookup instead of a scan of all before it.
+    let mut taken: HashSet<String> = HashSet::with_capacity(header.len());
+    let mut next_suffix: HashMap<String, usize> = HashMap::new();
     for (index, raw) in header.iter().enumerate() {
         let base = sanitize_field_name(raw);
         let base = if base.is_empty() {
@@ -247,15 +261,19 @@ fn field_names(header: &[String]) -> Vec<String> {
         } else {
             base
         };
+        let key = base.to_ascii_lowercase();
         let mut name = base.clone();
-        let mut suffix = 2;
-        while names
-            .iter()
-            .any(|existing| existing.eq_ignore_ascii_case(&name))
-        {
-            name = format!("{base}_{suffix}");
-            suffix += 1;
+        if taken.contains(&key) {
+            let suffix = next_suffix.entry(key).or_insert(2);
+            loop {
+                name = format!("{base}_{suffix}");
+                *suffix += 1;
+                if !taken.contains(&name.to_ascii_lowercase()) {
+                    break;
+                }
+            }
         }
+        taken.insert(name.to_ascii_lowercase());
         names.push(name);
     }
     names
@@ -327,7 +345,7 @@ mod tests {
 
     #[test]
     fn reads_comma_separated_utf8() {
-        let parsed = parse_csv(b"FirstName,Email\nAnna,anna@example.com\nBen,ben@example.com\n")
+        let parsed = parse_csv(b"FirstName,Email\nAnna,anna@example.test\nBen,ben@example.test\n")
             .expect("parse");
         assert_eq!(parsed.fields, ["FirstName", "Email"]);
         assert_eq!(parsed.delimiter, ",");
@@ -339,9 +357,10 @@ mod tests {
 
     #[test]
     fn reads_semicolons_and_the_utf8_bom_excel_writes() {
-        let parsed =
-            parse_csv("\u{feff}Vorname;Nachname;E-Mail\r\nJürgen;Groß;j@example.de\r\n".as_bytes())
-                .expect("parse");
+        let parsed = parse_csv(
+            "\u{feff}Vorname;Nachname;E-Mail\r\nJürgen;Groß;j@example.test\r\n".as_bytes(),
+        )
+        .expect("parse");
         assert_eq!(parsed.delimiter, ";");
         assert_eq!(parsed.encoding, CsvEncoding::Utf8Bom);
         assert_eq!(parsed.fields, ["Vorname", "Nachname", "E-Mail"]);
@@ -352,7 +371,7 @@ mod tests {
     #[test]
     fn falls_back_to_windows_1252() {
         // "Jürgen;Müller" as Windows-1252: ü is 0xFC, not valid UTF-8 alone.
-        let bytes = b"Name;Mail\nJ\xFCrgen M\xFCller;j@example.de\n";
+        let bytes = b"Name;Mail\nJ\xFCrgen M\xFCller;j@example.test\n";
         let parsed = parse_csv(bytes).expect("parse");
         assert_eq!(parsed.encoding, CsvEncoding::Windows1252);
         assert_eq!(value(&parsed, 0, "Name"), "Jürgen Müller");
@@ -361,7 +380,7 @@ mod tests {
 
     #[test]
     fn reads_utf16_with_tabs() {
-        let text = "Name\tEmail\r\nZoë\tz@example.com\r\n";
+        let text = "Name\tEmail\r\nZoë\tz@example.test\r\n";
         let mut bytes = vec![0xFF, 0xFE];
         for unit in text.encode_utf16() {
             bytes.extend_from_slice(&unit.to_le_bytes());
@@ -375,7 +394,7 @@ mod tests {
     #[test]
     fn quoted_cells_keep_delimiters_quotes_and_line_breaks() {
         let parsed = parse_csv(
-            b"Name,Company,Email\n\"Meier, Anna\",\"ACME \"\"Tools\"\"\nBerlin\",a@x.de\nBen,,b@x.de\n",
+            b"Name,Company,Email\n\"Meier, Anna\",\"ACME \"\"Tools\"\"\nBerlin\",a@example.test\nBen,,b@example.test\n",
         )
         .expect("parse");
         assert_eq!(parsed.rows.len(), 2);
@@ -389,7 +408,8 @@ mod tests {
     #[test]
     fn names_empty_and_repeated_headers_and_skips_blank_lines() {
         let parsed =
-            parse_csv(b"Email,,email,{Name}\n\na@x.de,1,b@x.de,Anna\n;;;\n").expect("parse");
+            parse_csv(b"Email,,email,{Name}\n\na@example.test,1,b@example.test,Anna\n;;;\n")
+                .expect("parse");
         assert_eq!(parsed.fields, ["Email", "Column2", "email_2", "Name"]);
         // `;;;` is one non-empty cell under a comma delimiter, so it stays a row.
         assert_eq!(parsed.rows.len(), 2);
@@ -399,7 +419,7 @@ mod tests {
 
     #[test]
     fn finds_the_address_column_by_its_values() {
-        let parsed = parse_csv(b"Who,Contact\nAnna,anna@example.com\nBen,\n").expect("parse");
+        let parsed = parse_csv(b"Who,Contact\nAnna,anna@example.test\nBen,\n").expect("parse");
         assert_eq!(parsed.email_field.as_deref(), Some("Contact"));
         let none = parse_csv(b"Who,Where\nAnna,Berlin\n").expect("parse");
         assert_eq!(none.email_field, None);
@@ -410,7 +430,7 @@ mod tests {
         assert_eq!(parse_csv(b"  \n"), Err(CsvError::Empty));
         assert_eq!(parse_csv(b"Name,Email\n"), Err(CsvError::NoRows));
         assert_eq!(
-            parse_csv(b"Name,Email\n\"Anna,a@x.de\n"),
+            parse_csv(b"Name,Email\n\"Anna,a@example.test\n"),
             Err(CsvError::UnterminatedQuote { line: 2 })
         );
         assert_eq!(
@@ -420,10 +440,45 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_header_wider_than_the_column_limit() {
+        let wide = (0..=MAX_CSV_COLUMNS)
+            .map(|index| format!("F{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(
+            parse_csv(format!("{wide}\n1\n").as_bytes()),
+            Err(CsvError::TooManyColumns {
+                limit: MAX_CSV_COLUMNS
+            })
+        );
+        // At the limit, every repeated name still gets its own suffix.
+        let repeated = vec!["Email"; MAX_CSV_COLUMNS].join(",");
+        let parsed = parse_csv(format!("{repeated}\na@example.test\n").as_bytes()).expect("parse");
+        assert_eq!(parsed.fields.len(), MAX_CSV_COLUMNS);
+        assert_eq!(parsed.fields[1], "Email_2");
+        assert_eq!(
+            parsed.fields[MAX_CSV_COLUMNS - 1],
+            format!("Email_{MAX_CSV_COLUMNS}")
+        );
+        let unique: HashSet<_> = parsed
+            .fields
+            .iter()
+            .map(|f| f.to_ascii_lowercase())
+            .collect();
+        assert_eq!(unique.len(), MAX_CSV_COLUMNS);
+    }
+
+    #[test]
+    fn a_suffix_never_collides_with_a_real_column() {
+        let parsed = parse_csv(b"Email,Email_2,email\na@example.test,b,c\n").expect("parse");
+        assert_eq!(parsed.fields, ["Email", "Email_2", "email_3"]);
+    }
+
+    #[test]
     fn stops_reading_at_the_row_limit() {
         let mut text = String::from("Email\n");
         for index in 0..=MAX_CSV_ROWS {
-            text.push_str(&format!("p{index}@example.com\n"));
+            text.push_str(&format!("p{index}@example.test\n"));
         }
         let parsed = parse_csv(text.as_bytes()).expect("parse");
         assert_eq!(parsed.rows.len(), MAX_CSV_ROWS);

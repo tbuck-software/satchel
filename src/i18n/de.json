@@ -315,6 +315,7 @@
       "mailMergeCsvEmpty": "Die Datei ist leer.",
       "mailMergeCsvNoRows": "Die Datei hat eine Kopfzeile, aber keine Empfänger.",
       "mailMergeCsvTooLarge": "Die Datei ist größer als 5 MB. Das ist keine Empfängerliste.",
+      "mailMergeCsvTooManyColumns": "Die Datei hat mehr als {limit} Spalten. Das ist keine Empfängerliste.",
       "mailMergeCsvUnreadable": "Die Datei konnte nicht gelesen werden.",
       "mailMergeCsvUnterminatedQuote": "Ein Anführungszeichen in Zeile {line} wird nie geschlossen.",
       "mailMergeDelayInvalid": "Wähle zwischen 1 und 3600 Sekunden Abstand.",
@@ -325,6 +326,8 @@
       "mailMergeNoRecipients": "Keine Zeile der Liste lässt sich senden.",
       "mailMergePersistenceFailed": "Die Serienmail konnte nicht gespeichert werden.",
       "mailMergeRemovedFromOutbox": "Vor dem Senden aus dem Postausgang entfernt.",
+      "mailMergeReplyNotAllowed": "Eine Serienmail ist eine neue Nachricht und kann keine Unterhaltung beantworten oder weiterleiten.",
+      "mailMergeSmimeSigningUnavailable": "Das S/MIME-Signaturzertifikat ist gesperrt oder fehlt. Entsperre es und starte erneut.",
       "mailMergeTooManyRecipients": "Eine Serienmail sendet höchstens {limit} Nachrichten. Teile die Liste.",
       "mailMovePending": "Die Verschiebung auf dem Server wird noch abgeschlossen. Bitte gleich erneut versuchen.",
       "mailUndoUnavailable": "Diese Aktion kann nicht mehr rückgängig gemacht werden.",
@@ -1791,7 +1794,7 @@
     "command": "Serienmail …",
     "commandKeywords": "serienmail serienbrief seriendruck mail merge personalisiert csv liste",
     "confirm": {
-      "body": "Von {address} ({account}), eine Nachricht je Empfänger, jede nur an ihn adressiert.",
+      "body": "Von {address} ({account}), eine Nachricht je Person, jede nur an diese Person adressiert.",
       "detail": "Die Nachrichten gehen einzeln über den Postausgang raus. Dort kannst du den Rest anhalten oder abbrechen.",
       "send": "Senden",
       "title": "Eine persönliche Nachricht senden? | {count} persönliche Nachrichten senden?"
@@ -1829,18 +1832,20 @@
         "completed": "Fertig",
         "paused": "Angehalten",
         "pausedFailures": "Nach wiederholten Fehlern angehalten",
+        "pausedRestart": "Beim Neustart von Satchel angehalten",
         "running": "Wird gesendet"
       },
       "title": "Serienmail",
       "unknown": "einer unbestätigt | {count} unbestätigt"
     },
     "menuItem": "Serienmail …",
+    "notForReplies": "Eine Serienmail geht nur als neue Nachricht, nicht als Antwort oder Weiterleitung.",
     "review": {
       "delay": "Abstand zwischen den Nachrichten",
       "delayHint": "Langsamer verhindert, dass der Anbieter das Konto sperrt; Gmail und Microsoft sind streng.",
       "delayInvalid": "Wähle zwischen 1 und 3600 Sekunden.",
       "duration": "Geht sofort raus. | Dauert etwa eine Minute. | Dauert etwa {minutes} Minuten.",
-      "encrypted": "Jede Nachricht wird für ihren Empfänger verschlüsselt. Fehlt für jemanden ein Schlüssel, geht nichts raus, und du erfährst, für wen.",
+      "encrypted": "Jede Nachricht wird für ihren Empfänger verschlüsselt. Vor der ersten werden die Schlüssel aller Empfänger und dein eigener geprüft; fehlt später ein Schlüssel, scheitert diese Nachricht und geht nicht unverschlüsselt raus.",
       "issue": {
         "duplicate": "Die Adresse steht schon in einer früheren Zeile",
         "invalidEmail": "Keine gültige E-Mail-Adresse",
@@ -1888,7 +1893,7 @@
       },
       "fields": "Felder: {fields}",
       "kindLabel": "Woher die Empfänger kommen",
-      "lead": "Jeder Empfänger bekommt eine eigene Nachricht, nur an ihn adressiert. Felder aus der Liste füllen die Platzhalter in Betreff und Text.",
+      "lead": "Jede Person auf der Liste bekommt eine eigene Nachricht, nur an sie adressiert. Felder aus der Liste füllen die Platzhalter in Betreff und Text.",
       "noContacts": "Noch keine Kontakte",
       "rows": "Eine Zeile | {count} Zeilen",
       "searchContacts": "Kontakte durchsuchen",
@@ -1896,7 +1901,8 @@
       "selectAll": "Den angezeigten auswählen | Alle {count} angezeigten auswählen",
       "selectNone": "Auswahl aufheben",
       "title": "Serienmail",
-      "truncated": "Die Datei hat mehr Zeilen. Gelesen wurden nur die ersten {count}."
+      "truncated": "Die Datei hat mehr Zeilen. Gelesen wurden nur die ersten {count}.",
+      "windows1252Hint": "Die Datei wurde als Windows-1252 gelesen. Sehen Umlaute falsch aus, speichere sie als „CSV UTF-8“ und wähle sie erneut."
     },
     "started": "Serienmail gestartet: eine Nachricht ist unterwegs. | Serienmail gestartet: {count} Nachrichten gehen nacheinander raus.",
     "viewProgress": "Fortschritt ansehen"

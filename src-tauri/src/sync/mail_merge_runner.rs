@@ -3,7 +3,8 @@
 //!
 //! The runner sleeps until the next job is due, looks every few seconds while
 //! a message sits in the outbox, and wakes at once when a command changed a
-//! job. Nothing is kept in memory that a restart would lose.
+//! job. Nothing is kept in memory that a restart would lose; at start it
+//! pauses whatever the last run left running, so the user decides.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -33,6 +34,17 @@ pub fn wake() {
 
 pub fn spawn_mail_merge_runner(state: AppState, pool: SqlitePool, app: AppHandle) {
     tauri::async_runtime::spawn(async move {
+        // A job the last run left running waits for the user to resume it.
+        match satchel_core::mail_merge::job::pause_after_restart(&pool, chrono::Utc::now()).await {
+            Ok(paused) if !paused.is_empty() => {
+                let _ = app.emit(
+                    "mail-merge:updated",
+                    serde_json::json!({ "job_ids": paused }),
+                );
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!(error = ?error, "mail merge restart pause failed"),
+        }
         loop {
             let sleep =
                 match satchel_core::mail_merge::job::tick(&pool, &state.queue, chrono::Utc::now())

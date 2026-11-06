@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn lists_each_missing_field_once() {
-        let values = row(&[("Email", "a@x.de")]);
+        let values = row(&[("Email", "a@example.test")]);
         assert_eq!(
             render(
                 "{{FirstName}} {{LastName}} {{firstname}} {{Email}}",
@@ -240,10 +240,10 @@ mod tests {
 
     #[test]
     fn keeps_a_value_from_breaking_the_subject_header() {
-        let values = row(&[("Name", "Anna\r\nBcc: evil@example.com")]);
+        let values = row(&[("Name", "Anna\r\nBcc: evil@example.test")]);
         assert_eq!(
             render("Offer for {{Name}}", &values, RenderContext::Header),
-            Ok("Offer for Anna  Bcc: evil@example.com".into())
+            Ok("Offer for Anna  Bcc: evil@example.test".into())
         );
     }
 

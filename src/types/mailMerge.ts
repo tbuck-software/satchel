@@ -19,6 +19,15 @@ export type BackendMergeJobDetail = MailMergeJobDetail;
 export type BackendMergeJobRecipient = MailMergeRecipientRow;
 export type BackendMergeJobAction = MailMergeJobAction;
 
+/** The composer's signature choice, as the preview applies it. */
+export interface BackendMergeSignature {
+  fromAddress?: string | null;
+  signatureId?: string | null;
+  signatureVariant?: 'auto' | 'long' | 'short' | 'none' | null;
+  signatureOverrideText?: string | null;
+  signatureOverrideHtml?: string | null;
+}
+
 export interface BackendMergeList {
   fields: string[];
   emailField: string;

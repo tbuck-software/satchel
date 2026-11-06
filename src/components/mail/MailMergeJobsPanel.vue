@@ -37,7 +37,9 @@ function done(job: BackendMergeJob): number {
 
 function statusLabel(job: BackendMergeJob): string {
   if (job.status === 'paused') {
-    return job.pause_reason === 'failures' ? t('mailMerge.jobs.status.pausedFailures') : t('mailMerge.jobs.status.paused');
+    if (job.pause_reason === 'failures') return t('mailMerge.jobs.status.pausedFailures');
+    if (job.pause_reason === 'restart') return t('mailMerge.jobs.status.pausedRestart');
+    return t('mailMerge.jobs.status.paused');
   }
   if (job.status === 'cancelled') return t('mailMerge.jobs.status.cancelled');
   if (job.status === 'completed') return t('mailMerge.jobs.status.completed');

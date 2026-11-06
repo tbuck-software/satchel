@@ -324,7 +324,10 @@
         "mailMergeNoRecipients": "No row of the list can be sent.",
         "mailMergePersistenceFailed": "The mail merge could not be saved.",
         "mailMergeRemovedFromOutbox": "Removed from the Outbox before it was sent.",
-        "mailMergeTooManyRecipients": "One mail merge sends at most {limit} messages. Split the list."
+        "mailMergeTooManyRecipients": "One mail merge sends at most {limit} messages. Split the list.",
+        "mailMergeCsvTooManyColumns": "The file has more than {limit} columns. That is not a recipient list.",
+        "mailMergeReplyNotAllowed": "A mail merge is a new message. It cannot answer or forward a conversation.",
+        "mailMergeSmimeSigningUnavailable": "The S/MIME signing certificate is locked or missing. Unlock it and start again."
       }
     }
   },
@@ -653,7 +656,10 @@
         "mailMergeNoRecipients": "Keine Zeile der Liste lässt sich senden.",
         "mailMergePersistenceFailed": "Die Serienmail konnte nicht gespeichert werden.",
         "mailMergeRemovedFromOutbox": "Vor dem Senden aus dem Postausgang entfernt.",
-        "mailMergeTooManyRecipients": "Eine Serienmail sendet höchstens {limit} Nachrichten. Teile die Liste."
+        "mailMergeTooManyRecipients": "Eine Serienmail sendet höchstens {limit} Nachrichten. Teile die Liste.",
+        "mailMergeCsvTooManyColumns": "Die Datei hat mehr als {limit} Spalten. Das ist keine Empfängerliste.",
+        "mailMergeReplyNotAllowed": "Eine Serienmail ist eine neue Nachricht und kann keine Unterhaltung beantworten oder weiterleiten.",
+        "mailMergeSmimeSigningUnavailable": "Das S/MIME-Signaturzertifikat ist gesperrt oder fehlt. Entsperre es und starte erneut."
       }
     }
   }
