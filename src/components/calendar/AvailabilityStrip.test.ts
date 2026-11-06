@@ -16,6 +16,7 @@ vi.mock('@/services/backend/transport', () => ({ backendCommandsAvailable: () =>
 
 import AvailabilityStrip from './AvailabilityStrip.vue';
 import { useUiStore } from '@/stores/ui';
+import { formatTime } from '@/utils/calendarGrid';
 
 enableAutoUnmount(afterEach);
 beforeEach(() => {
@@ -179,26 +180,43 @@ describe('AvailabilityStrip while a new report is on its way', () => {
   });
 });
 
-describe('AvailabilityStrip on a DST day', () => {
-  const zone = process.env.TZ;
-  afterEach(() => {
-    if (zone === undefined) delete process.env.TZ;
-    else process.env.TZ = zone;
-  });
+/**
+ * A day on which this machine's own zone skips an hour, or a plain day in a
+ * zone without DST. Vitest runs files in worker threads, where changing
+ * `process.env.TZ` does not change the zone `Date` uses, so the test takes
+ * the host's zone as it is (CI runs in UTC; locally it is wherever you are)
+ * and asserts against what the strip itself draws.
+ */
+function springForwardDay(): Date {
+  for (let day = new Date(2026, 0, 1); day.getFullYear() === 2026; day = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1)) {
+    const next = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+    if (next.getTime() - day.getTime() < 24 * 3_600_000) return day;
+  }
+  return new Date(2026, 2, 29);
+}
 
+describe('AvailabilityStrip on a DST day', () => {
   it('moves the slot to the time under the pointer, not an hour away', async () => {
-    process.env.TZ = 'Europe/Berlin';
-    // 29 March 2026: clocks go from 02:00 to 03:00 in Berlin.
-    const view = await mountStrip(new Date(2026, 2, 29, 10), new Date(2026, 2, 29, 11));
+    const day = springForwardDay();
+    const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 10);
+    const view = await mountStrip(start, new Date(start.getTime() + 60 * 60_000));
     const track = view.findAll('.strip__track')[0]!;
-    track.element.getBoundingClientRect = () => ({ left: 0, width: 200, top: 0, height: 20, right: 200, bottom: 20, x: 0, y: 0, toJSON: () => ({}) });
-    // The timeline runs 09:00–19:00 (an hour either side of 10:00–18:00 work and slot).
-    expect(view.findAll('.strip__tick').map((tick) => tick.text())[0]).toBe('09:00');
-    const press = new MouseEvent('pointerdown', { clientX: 100, bubbles: true });
-    track.element.dispatchEvent(press);
-    const [start, end] = view.emitted('move')![0] as [Date, Date];
-    expect(start.getTime()).toBe(new Date(2026, 2, 29, 14).getTime());
-    expect(end.getTime() - start.getTime()).toBe(60 * 60_000);
+    const width = 200;
+    track.element.getBoundingClientRect = () => ({ left: 0, width, top: 0, height: 20, right: width, bottom: 20, x: 0, y: 0, toJSON: () => ({}) });
+
+    // A click right on an hour mark starts the slot at the time that mark is
+    // labelled with. Past a skipped hour, mapping the click through the wall
+    // clock instead of real time lands an hour off the label.
+    const ticks = view.findAll('.strip__tick');
+    expect(ticks.length).toBeGreaterThan(2);
+    for (const tick of ticks.slice(1)) {
+      const left = Number.parseFloat((tick.element as HTMLElement).style.left);
+      track.element.dispatchEvent(new MouseEvent('pointerdown', { clientX: (left / 100) * width, bubbles: true }));
+      const [moved, end] = view.emitted('move')!.at(-1) as [Date, Date];
+      expect(formatTime(moved)).toBe(tick.text());
+      expect(moved.getDate()).toBe(day.getDate());
+      expect(end.getTime() - moved.getTime()).toBe(60 * 60_000);
+    }
   });
 });
 
