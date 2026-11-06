@@ -208,6 +208,7 @@ pub fn registered_repairs() -> &'static [DataRepair] {
         MESSAGE_ADDRESSES,
         FTS_PREFIX,
         super::signed_attachments::SIGNED_ENTITY_ATTACHMENTS,
+        crate::spam::bootstrap::SPAM_BOOTSTRAP,
     ]
 }
 

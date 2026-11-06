@@ -22,6 +22,9 @@ import { scheduleIdleWork } from '@/utils/idleWork';
 import { saveTextExport } from '@/utils/saveTextExport';
 import { showInFolderAction } from '@/utils/showInFolderAction';
 import ErrorState from '@/components/ui/ErrorState.vue';
+import AppBanner from '@/components/ui/AppBanner.vue';
+import { useShortcutHints } from '@/composables/useShortcutHints';
+import { offersNotSpam } from '@/utils/threadList';
 import ThreadMessageList from './ThreadMessageList.vue';
 import ThreadSelectionSummary from './ThreadSelectionSummary.vue';
 import ThreadPaneSkeleton from './ThreadPaneSkeleton.vue';
@@ -741,6 +744,18 @@ async function markSpam() {
   await threadActions.markSpam(actionIds.value);
 }
 
+const { hint: shortcutHint } = useShortcutHints();
+const canMarkNotSpam = computed(() =>
+  actionIds.value.some((id) => {
+    const target = threadsStore.find(id);
+    return target ? offersNotSpam(target, threadsStore.mailboxFilter) : false;
+  }));
+
+async function markNotSpam() {
+  if (!thread.value) return;
+  await threadActions.markNotSpam(actionIds.value);
+}
+
 async function togglePin() {
   if (!thread.value) return;
   if (selectionCount.value) await threadActions.setPinned(actionIds.value, !actionPinned.value);
@@ -992,6 +1007,7 @@ function showEntireThread() {
         :is-aside="!selectionCount && thread.workflowState === 'aside'"
         :is-done="actionDone"
         :is-muted="actionIds.every(id => threadsStore.find(id)?.isMuted)"
+        :can-mark-not-spam="canMarkNotSpam"
         :show-back="showBack"
         :position="props.position ?? 0"
         :total="props.total ?? 0"
@@ -1010,6 +1026,7 @@ function showEntireThread() {
         @delete="deleteThread"
         @toggle-muted="toggleMuted"
         @spam="markSpam"
+        @not-spam="markNotSpam"
         @block="blockSender"
         @print="printThread"
         :attachment-count="downloadableAttachments.length"
@@ -1086,6 +1103,21 @@ function showEntireThread() {
               {{ $t('common.done') }}
             </span>
           </div>
+          <!-- The filter's verdict, with its answer next to it: one key or
+               one click and the mark is gone. -->
+          <AppBanner
+            v-if="(thread.likelySpam || thread.spamMoved) && !showSelectionSummary"
+            class="thread-spam-banner"
+            tone="warning"
+            :title="thread.spamMoved ? $t('thread.spam.movedBannerTitle') : $t('thread.spam.bannerTitle')"
+            :detail="thread.spamMoved ? $t('thread.spam.movedBannerDetail') : $t('thread.spam.bannerDetail')"
+          >
+            <template #actions>
+              <AppButton size="sm" variant="secondary" :shortcut="shortcutHint('markNotSpam')" @click="markNotSpam">
+                {{ $t('thread.actions.notSpam') }}
+              </AppButton>
+            </template>
+          </AppBanner>
           <TopicMembershipState v-if="threadId" item-type="thread" :item-ids="[threadId]" />
           <div v-if="threadTopics.length > 0" :class="[ui.isMobile ? 'mt-1.5' : 'mt-2', 'flex flex-wrap items-center gap-1.5']">
             <TopicChip
@@ -1220,6 +1252,12 @@ function showEntireThread() {
 </template>
 
 <style scoped>
+.thread-spam-banner {
+  margin-top: var(--space-sm);
+  border: var(--border-muted);
+  border-radius: var(--radius-md);
+}
+
 .thread-reading-content {
   padding: var(--space-xl) calc(var(--space-5) * 2) var(--space-2xl);
 }

@@ -798,6 +798,10 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "get_spam_filter_status": {
+            "kind": "object",
+            "fields": {}
+        },
         "get_thread": {
             "kind": "object",
             "fields": {
@@ -1306,6 +1310,18 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "app::commands::messages::LoadThreadMessagesInput"
+                    }
+                }
+            }
+        },
+        "mark_threads_not_spam": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::thread_actions::SpamThreadsInput"
                     }
                 }
             }
@@ -1983,6 +1999,18 @@ export default {
                 }
             }
         },
+        "set_spam_filter_mode": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::thread_actions::SetSpamFilterModeInput"
+                    }
+                }
+            }
+        },
         "set_start_minimized": {
             "kind": "object",
             "fields": {
@@ -2283,6 +2311,18 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "undo_not_spam": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::thread_actions::UndoNotSpamInput"
                     }
                 }
             }
@@ -4273,6 +4313,17 @@ export default {
                 }
             }
         },
+        "app::commands::thread_actions::SetSpamFilterModeInput": {
+            "kind": "object",
+            "fields": {
+                "mode": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "app::commands::thread_actions::SpamThreadsInput": {
             "kind": "object",
             "fields": {
@@ -4283,6 +4334,18 @@ export default {
                         "item": {
                             "kind": "value"
                         }
+                    }
+                }
+            }
+        },
+        "app::commands::thread_actions::UndoNotSpamInput": {
+            "kind": "object",
+            "fields": {
+                "receipt": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "core::mail_actions::NotSpamReceipt"
                     }
                 }
             }
@@ -5739,6 +5802,56 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "core::mail_actions::NotSpamReceipt": {
+            "kind": "object",
+            "fields": {
+                "move_receipts": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "moved_thread_ids": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "restored_thread_ids": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "thread_ids": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "undo_token": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
                         "item": {
                             "kind": "value"
                         }

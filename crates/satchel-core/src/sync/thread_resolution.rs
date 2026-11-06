@@ -1055,6 +1055,7 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
             attachments: Vec::new(),
         }
     }

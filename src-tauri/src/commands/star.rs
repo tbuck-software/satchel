@@ -29,5 +29,20 @@ pub async fn set_threads_starred(
         None,
     )
     .await?;
+    // A starred message is wanted: a weak ham example for the spam filter,
+    // which never overrides a label the user gave.
+    if input.starred {
+        if let Err(error) = satchel_core::spam::train_threads(
+            pool.inner(),
+            &input.thread_ids,
+            satchel_core::spam::Label::Ham,
+            satchel_core::spam::Signal::Weak,
+            None,
+        )
+        .await
+        {
+            tracing::warn!(%error, "spam filter training failed after starring");
+        }
+    }
     Ok(())
 }

@@ -91,6 +91,9 @@ struct StoredMessage {
     message_id: String,
     thread_id: String,
     was_pre_existing: bool,
+    /// First seen after the account's notification cutoff: new mail, not a
+    /// first sync, a re-sync or a UIDVALIDITY reset replaying old mail.
+    newly_seen: bool,
     message_is_draft: bool,
     message_is_sent: bool,
     attachment_ids: Vec<String>,
@@ -983,6 +986,7 @@ async fn persist_provider_message(
         message_id,
         thread_id,
         was_pre_existing,
+        newly_seen,
         message_is_draft,
         message_is_sent,
         attachment_ids,
@@ -1007,6 +1011,7 @@ async fn finish_provider_message(
         message_id,
         thread_id,
         was_pre_existing,
+        newly_seen,
         message_is_draft,
         message_is_sent,
         attachment_ids,
@@ -1166,6 +1171,41 @@ async fn finish_provider_message(
         }
     }
 
+    // The local spam filter judges new, unread Inbox mail before its
+    // notification is published. Only mail past the notification cutoff
+    // counts as new: adding an account, a re-sync or a UIDVALIDITY reset
+    // replays a backlog the user has long sorted, and Move must not file old
+    // mail in a Spam folder the server purges. With the filter on Move, the
+    // provider move is queued through the same durable queue as the
+    // blocked-sender move above, and the moved message's notification is
+    // dismissed.
+    if newly_seen
+        && !message.is_read
+        && !sender_is_blocked
+        && folder_type == "inbox"
+        && !message_is_sent
+        && !message_is_draft
+    {
+        match satchel_core::spam::classify_incoming(
+            pool,
+            blocked_sender_queue.as_ref(),
+            satchel_core::spam::IncomingMessage {
+                provider: provider_kind,
+                message_id: &message_id,
+                thread_id: &thread_id,
+                from_address: &message.from_address,
+                hint_headers: message.spam_hint_headers.as_deref(),
+            },
+        )
+        .await
+        {
+            Ok(outcome) => tracing::debug!(?outcome, account_id, "spam filter classified new mail"),
+            Err(error) => {
+                tracing::warn!(%error, account_id, "spam filter classification deferred");
+            }
+        }
+    }
+
     // Detect calendar invitations: prefer the standalone text/calendar part if
     // the IMAP parser pulled one out, otherwise scan body text/html (Outlook/Gmail
     // often inline the invite).
@@ -1307,6 +1347,7 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
             attachments: Vec::new(),
         }
     }
@@ -2236,6 +2277,160 @@ mod tests {
             .unwrap();
         assert_eq!(ids.len(), 2, "{ids:?}");
         assert!(ids.contains(&decrypted), "{ids:?}");
+    }
+
+    /// New, unread IMAP mail is judged by the local spam filter once it has
+    /// learned enough. A backlog replayed by a first sync, a re-sync or a
+    /// UIDVALIDITY reset is not judged, and neither is mail already read —
+    /// in Move mode least of all: old mail must not land in a Spam folder
+    /// the server purges.
+    #[tokio::test]
+    async fn the_spam_filter_judges_new_unread_mail_and_never_a_backlog() {
+        let pool = ingest_pool().await;
+        sqlx::query(
+            "INSERT INTO folders
+             (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES ('spam', 'account', 'Spam', 'Spam', 'spam', 'Spam', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .expect("spam folder");
+        let cutoff = (chrono::Utc::now() - chrono::TimeDelta::hours(1)).to_rfc3339();
+        sqlx::query("UPDATE accounts SET last_sync_at = ?")
+            .bind(&cutoff)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut examples = Vec::new();
+        for n in 0..200 {
+            let mut spam = envelope(&format!("s{n}"));
+            spam.from_address = format!("winner{n}@lottery{}.example", n % 7);
+            spam.subject = format!("You won the lottery jackpot {n}");
+            spam.body_text = Some("Claim your jackpot prize, wire the processing fee".into());
+            spam.date_rfc3339 = now.clone();
+            examples.push(spam);
+            let mut ham = envelope(&format!("h{n}"));
+            ham.from_address = format!("colleague{n}@work{}.example", n % 5);
+            ham.subject = format!("Agenda for the project meeting {n}");
+            ham.body_text = Some("Please review the agenda and the minutes".into());
+            ham.date_rfc3339 = now.clone();
+            examples.push(ham);
+        }
+        for result in ingest_many(&pool, &examples).await {
+            result.expect("example");
+        }
+        let examples: Vec<(String, String)> =
+            sqlx::query_as("SELECT id, from_address FROM messages")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        for (id, from) in examples {
+            let label = if from.contains("lottery") {
+                satchel_core::spam::Label::Spam
+            } else {
+                satchel_core::spam::Label::Ham
+            };
+            satchel_core::spam::train_messages(
+                &pool,
+                &[id],
+                label,
+                satchel_core::spam::Signal::Explicit,
+                None,
+            )
+            .await
+            .unwrap();
+        }
+        sqlx::query("DELETE FROM app_settings WHERE key = 'data_repair.spam_bootstrap'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let incoming = |id: &str, date: &str, read: bool| {
+            let mut message = envelope(id);
+            message.from_address = format!("boss-{id}@lottery3.example");
+            message.subject = format!("Lottery jackpot winner {id}");
+            message.body_text = Some("Claim your jackpot prize, wire the processing fee".into());
+            message.spam_hint_headers = Some("X-Spam-Flag: YES".into());
+            message.date_rfc3339 = date.to_string();
+            message.received_at_rfc3339 = Some(date.to_string());
+            message.is_read = read;
+            message
+        };
+        ingest(&pool, "inbox", &incoming("new", &now, false))
+            .await
+            .expect("new mail");
+        ingest(
+            &pool,
+            "inbox",
+            &incoming("old", "2025-06-01T08:00:00Z", false),
+        )
+        .await
+        .expect("backlog");
+        ingest(&pool, "inbox", &incoming("read", &now, true))
+            .await
+            .expect("read mail");
+
+        let verdict = |remote: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_as::<_, (String, Option<String>)>(
+                    "SELECT v.verdict, v.hint_headers FROM spam_verdicts v
+                     JOIN messages m ON m.id = v.message_id WHERE m.remote_id = ?",
+                )
+                .bind(remote)
+                .fetch_optional(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            verdict("new").await,
+            Some(("spam".to_string(), Some("X-Spam-Flag: YES".to_string())))
+        );
+        assert_eq!(verdict("old").await, None, "a backlog is never judged");
+        assert_eq!(verdict("read").await, None, "read mail is never judged");
+        // Mark is the default: the likely spam stays in the Inbox.
+        let pending: Option<String> =
+            sqlx::query_scalar("SELECT pending_folder_id FROM messages WHERE remote_id = 'new'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pending, None);
+
+        // Move: new unread mail goes to Spam, a backlog and read mail stay.
+        satchel_core::spam::set_mode(&pool, satchel_core::spam::SpamFilterMode::Move)
+            .await
+            .unwrap();
+        ingest(&pool, "inbox", &incoming("new-move", &now, false))
+            .await
+            .expect("new mail in Move mode");
+        ingest(
+            &pool,
+            "inbox",
+            &incoming("old-move", "2025-06-01T08:00:00Z", false),
+        )
+        .await
+        .expect("backlog in Move mode");
+        ingest(&pool, "inbox", &incoming("read-move", &now, true))
+            .await
+            .expect("read mail in Move mode");
+        let pending = |remote: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT pending_folder_id FROM messages WHERE remote_id = ?",
+                )
+                .bind(remote)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(pending("new-move").await.as_deref(), Some("spam"));
+        assert_eq!(pending("old-move").await, None, "a backlog is never moved");
+        assert_eq!(pending("read-move").await, None, "read mail is never moved");
+        assert_eq!(verdict("old-move").await, None);
     }
 
     /// A `Date` far in the future used to win the `last_message_date >= …`
@@ -3463,6 +3658,7 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
             attachments: Vec::new(),
         };
         upsert_provider_message(
@@ -3652,6 +3848,7 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
             attachments: Vec::new(),
         };
         upsert_provider_message(
@@ -3745,6 +3942,7 @@ mod tests {
             auth_spf: None,
             auth_dkim: None,
             auth_dmarc: None,
+            spam_hint_headers: None,
             attachments: vec![RemoteAttachment {
                 remote_part_id: "mime-1".to_string(),
                 filename: Some("note.txt".to_string()),

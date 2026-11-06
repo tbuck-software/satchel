@@ -4742,6 +4742,7 @@ fn envelope_from_fetch(
         auth_spf,
         auth_dkim,
         auth_dmarc,
+        spam_hint_headers: crate::spam::tokenizer::extract_hint_headers(&header),
         attachments,
     }
 }

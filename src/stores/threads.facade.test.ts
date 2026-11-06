@@ -20,7 +20,7 @@ const STORE_KEYS = [
   'contactSummaries', 'deselectThreads', 'discardThread', 'endThreadLeave', 'ensureThreadLoaded', 'find',
   'focusNeighborThread', 'frequentContactSummaries', 'getSenderPreference', 'hasPreviousThreads', 'hasMoreThreads', 'leavingThreadIds',
   'leavingThreadStates', 'listEntries', 'load', 'loadPrevious', 'loadPreviousFailed', 'loadMore', 'loadMoreFailed', 'loadingMoreThreads',
-  'mailboxFilter', 'markRead', 'markThreadsSpam', 'newSenderStack', 'nextThread', 'openContact',
+  'mailboxFilter', 'markRead', 'markThreadsNotSpam', 'markThreadsSpam', 'newSenderStack', 'nextThread', 'openContact',
   'openSimilarGroup', 'openSmartBucket', 'pinnedContactSummaries',
   'prevThread', 'refreshHead', 'refreshThreads', 'releaseRetainedThread', 'retryLoadMore',
   'scopedVisibleThreads',

@@ -25,6 +25,7 @@ import {
 } from '@/config/keybindings';
 import { KEYBINDING_SPECS, viewLabelKey, type KeybindingContext } from '@/config/keybindingDefaults';
 import { openView } from '@/router/mailViews';
+import { offersNotSpam } from '@/utils/threadList';
 import {
   leaveListKeyboardLevel,
   listKeyboardSharesSelection,
@@ -483,6 +484,17 @@ export function useKeyboard() {
       const ids = targetIds();
       if (ids.length === 0) return false;
       void actions.markSpam(ids);
+      return true;
+    }
+
+    if (matches(event, 'markNotSpam')) {
+      // Like the menus: only where the filter marked the mail or it sits in Spam.
+      const ids = targetIds().filter((id) => {
+        const thread = threads.find(id);
+        return thread ? offersNotSpam(thread, threads.mailboxFilter) : false;
+      });
+      if (ids.length === 0) return false;
+      void actions.markNotSpam(ids);
       return true;
     }
 

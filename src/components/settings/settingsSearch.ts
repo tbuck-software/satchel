@@ -41,7 +41,7 @@ const SECTION_KEYS: Record<SettingsSection, readonly string[]> = {
     'settings.backup',
   ],
   vacation: ['settings.vacation'],
-  senders: ['settings.blocked', 'settings.images'],
+  senders: ['settings.spamFilter', 'settings.blocked', 'settings.images'],
   'smart-folders': ['settings.smartFolders'],
   templates: ['settings.templates'],
   rules: ['settings.rules'],

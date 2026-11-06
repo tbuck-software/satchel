@@ -121,6 +121,7 @@ function reasonLabel(value: string | null): string {
     case 'filter_already_read': return t('settings.diagnostics.outbox.reasons.filter_already_read');
     case 'filter_muted_thread': return t('settings.diagnostics.outbox.reasons.filter_muted_thread');
     case 'filter_muted_sender': return t('settings.diagnostics.outbox.reasons.filter_muted_sender');
+    case 'filter_spam_moved': return t('settings.diagnostics.outbox.reasons.filter_spam_moved');
     case 'filter_no_date': return t('settings.diagnostics.outbox.reasons.filter_no_date');
     case 'filter_before_session': return t('settings.diagnostics.outbox.reasons.filter_before_session');
     case 'filter_too_old': return t('settings.diagnostics.outbox.reasons.filter_too_old');

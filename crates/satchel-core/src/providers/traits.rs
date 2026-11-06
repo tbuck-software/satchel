@@ -122,6 +122,11 @@ pub struct MessageEnvelope {
     /// DMARC verdict from the receiving provider's Authentication-Results header (RFC 8601).
     #[serde(default)]
     pub auth_dmarc: Option<String>,
+    /// The spam-relevant headers the message row does not keep
+    /// (`X-Spam-Status`, `List-Id`, …), as `spam::tokenizer` extracts them.
+    /// Only providers that see the raw header block fill it.
+    #[serde(default)]
+    pub spam_hint_headers: Option<String>,
     #[serde(default)]
     pub attachments: Vec<RemoteAttachment>,
 }

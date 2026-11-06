@@ -103,6 +103,13 @@ pub struct ThreadRecord {
     pub has_invite: bool,
     pub invite_status: Option<String>,
     pub invite_cancelled: bool,
+    /// The local spam filter judged a message of this thread spam and nobody
+    /// has said Not spam since.
+    #[serde(default)]
+    pub likely_spam: bool,
+    /// The filter moved mail of this thread to Spam (Move mode).
+    #[serde(default)]
+    pub spam_moved: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1572,6 +1579,8 @@ struct ThreadRow {
     has_invite: i64,
     invite_status: Option<String>,
     invite_cancelled: i64,
+    likely_spam: i64,
+    spam_moved: i64,
 }
 
 /// Default page size. Small enough that the first paint is fast on a large
@@ -6144,6 +6153,28 @@ const THREAD_RECORD_SQL: &str = "
             ) AS invite_cancelled,
             EXISTS (
               SELECT 1
+              FROM messages spam_messages
+              JOIN spam_verdicts ON spam_verdicts.message_id = spam_messages.id
+              WHERE spam_messages.thread_id = threads.id
+                AND spam_verdicts.verdict = 'spam'
+                -- Not spam trains one example per sender and thread: a ham
+                -- example from the same sender in the thread clears them all.
+                AND NOT EXISTS (
+                  SELECT 1 FROM spam_training
+                  WHERE spam_training.label = 'ham'
+                    AND (spam_training.message_id = spam_messages.id
+                         OR (spam_training.thread_id = threads.id
+                             AND spam_training.sender = LOWER(TRIM(COALESCE(spam_messages.from_address, '')))))
+                )
+            ) AS likely_spam,
+            EXISTS (
+              SELECT 1
+              FROM messages moved_messages
+              JOIN spam_verdicts moved_verdicts ON moved_verdicts.message_id = moved_messages.id
+              WHERE moved_messages.thread_id = threads.id AND moved_verdicts.moved_at IS NOT NULL
+            ) AS spam_moved,
+            EXISTS (
+              SELECT 1
               FROM messages sent
               JOIN folders sent_folders ON sent_folders.id = COALESCE(sent.pending_folder_id, sent.folder_id)
               WHERE sent.thread_id = threads.id
@@ -6247,6 +6278,8 @@ fn thread_record_from_row(row: ThreadRow) -> ThreadRecord {
         has_invite: row.has_invite > 0,
         invite_status: row.invite_status,
         invite_cancelled: row.invite_cancelled > 0,
+        likely_spam: row.likely_spam > 0,
+        spam_moved: row.spam_moved > 0,
     }
 }
 
@@ -6728,6 +6761,28 @@ fn thread_list_query(
             ) AS invite_cancelled,
             EXISTS (
               SELECT 1
+              FROM messages spam_messages
+              JOIN spam_verdicts ON spam_verdicts.message_id = spam_messages.id
+              WHERE spam_messages.thread_id = threads.id
+                AND spam_verdicts.verdict = 'spam'
+                -- Not spam trains one example per sender and thread: a ham
+                -- example from the same sender in the thread clears them all.
+                AND NOT EXISTS (
+                  SELECT 1 FROM spam_training
+                  WHERE spam_training.label = 'ham'
+                    AND (spam_training.message_id = spam_messages.id
+                         OR (spam_training.thread_id = threads.id
+                             AND spam_training.sender = LOWER(TRIM(COALESCE(spam_messages.from_address, '')))))
+                )
+            ) AS likely_spam,
+            EXISTS (
+              SELECT 1
+              FROM messages moved_messages
+              JOIN spam_verdicts moved_verdicts ON moved_verdicts.message_id = moved_messages.id
+              WHERE moved_messages.thread_id = threads.id AND moved_verdicts.moved_at IS NOT NULL
+            ) AS spam_moved,
+            EXISTS (
+              SELECT 1
               FROM messages sent
               JOIN folders sent_folders ON sent_folders.id = COALESCE(sent.pending_folder_id, sent.folder_id)
               WHERE sent.thread_id = threads.id
@@ -6860,6 +6915,8 @@ async fn list_threads_inner(
             has_invite: row.has_invite > 0,
             invite_status: row.invite_status,
             invite_cancelled: row.invite_cancelled > 0,
+            likely_spam: row.likely_spam > 0,
+            spam_moved: row.spam_moved > 0,
         })
         .collect();
 

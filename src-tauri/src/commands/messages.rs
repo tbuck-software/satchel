@@ -2610,6 +2610,20 @@ pub async fn persist_sent_message_record(
             CommandError::new("backend.errors.sentMessagePersistenceFailed")
         })?;
 
+    // Answering a thread says its mail was wanted: a weak ham example for the
+    // spam filter, never overriding a label the user gave.
+    if let Err(error) = satchel_core::spam::train_threads(
+        pool,
+        std::slice::from_ref(&persisted.thread_id),
+        satchel_core::spam::Label::Ham,
+        satchel_core::spam::Signal::Weak,
+        None,
+    )
+    .await
+    {
+        tracing::warn!(%error, "spam filter training failed after a reply");
+    }
+
     FollowUpRepository::new(pool)
         .create_for_sent_message(
             account_id,

@@ -29,12 +29,19 @@ struct MessageSnapshot {
 
 /// Accept Undo durably even if the provider has already claimed the delivery.
 /// The worker completes reconciliation before resolving the reverse refs.
+///
+/// A Spam receipt also carries what the spam filter learned from the action;
+/// accepting the Undo unlearns it.
 pub async fn undo_trash(
     pool: &SqlitePool,
     queue: &SyncQueue,
     receipt_id: &str,
 ) -> Result<(), String> {
-    apply(pool, queue, receipt_id, false).await
+    apply(pool, queue, receipt_id, false).await?;
+    if let Err(error) = crate::spam::untrain_receipt(pool, receipt_id).await {
+        tracing::warn!(%error, "spam filter untraining failed after Undo");
+    }
+    Ok(())
 }
 
 pub async fn execute_queued_undo(
@@ -75,8 +82,9 @@ async fn apply(
     let threads: Vec<ThreadSnapshot> = sqlx::query_as("SELECT thread_id, account_id, workflow_state, board_column, snooze_until, action_at FROM mail_action_threads WHERE receipt_id = ?")
         .bind(receipt_id).fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
     // A later user operation owns its own state. Never overwrite it with an old receipt.
+    // Filing actions leave the thread Done; Not spam's move back leaves it in the Inbox.
     for snapshot in &threads {
-        let unchanged: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM threads WHERE id = ? AND workflow_state = 'done' AND workflow_changed_at = ?)")
+        let unchanged: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM threads WHERE id = ? AND workflow_state IN ('done', 'inbox') AND workflow_changed_at = ?)")
             .bind(&snapshot.thread_id).bind(&snapshot.action_at).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
         if !unchanged {
             return invalidate(tx, receipt_id).await;
@@ -250,6 +258,9 @@ pub async fn remap_message_in_transaction(
 ) -> Result<(), String> {
     sqlx::query("UPDATE mail_action_messages SET message_id = ? WHERE message_id = ? AND receipt_id IN (SELECT id FROM mail_action_receipts WHERE state IN ('available', 'requested'))")
         .bind(target_id).bind(source_id).execute(&mut **tx).await.map_err(|e| e.to_string())?;
+    crate::spam::store::remap_message(tx, source_id, target_id)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 

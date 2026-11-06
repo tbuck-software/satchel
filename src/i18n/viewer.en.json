@@ -185,6 +185,10 @@
         "keywords": "done archive",
         "label": "Mark as done"
       },
+      "markNotSpam": {
+        "keywords": "not spam ham wanted",
+        "label": "Not spam"
+      },
       "markSpam": {
         "keywords": "spam junk",
         "label": "Mark as spam"

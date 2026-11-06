@@ -113,6 +113,50 @@ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search)
 }
 const trashReceipts = new Map<string, Thread[]>();
 let nextTrashReceipt = 0;
+
+/*
+ * The local spam filter, as far as the UI can see it: a mode, how many
+ * messages of each class it learned, and which receipt taught what. Spam
+ * trains under its receipt and Undo untrains it, like `spam_training`.
+ */
+const SPAM_MIN_PER_CLASS = 50;
+const SPAM_MOVE_MIN_PER_CLASS = 200;
+const SPAM_MAX_CLASS_RATIO = 4;
+let spamFilterMode: 'off' | 'mark' | 'move' = 'mark';
+const spamTraining = new Map<string, 'spam' | 'ham'>();
+const spamReceiptThreads = new Map<string, string[]>();
+/** Not spam receipts: the label each thread had before, and what moved. */
+const notSpamReceipts = new Map<string, Array<{ thread: Thread; label?: 'spam' | 'ham'; folders: string[]; state: Thread['workflowState']; likely: boolean; moved: boolean }>>();
+let nextNotSpamReceipt = 0;
+const SPAM_FOLDER_NAME = /^(spam|junk|junk e-?mail|bulk mail)$/i;
+
+/** More `[spam, ham]` examples to reach `floor` of each, the classes at most 4:1. */
+function spamNeeded(spam: number, ham: number, floor: number): [number, number] {
+  const spamTarget = Math.max(floor, Math.ceil(ham / SPAM_MAX_CLASS_RATIO));
+  const hamTarget = Math.max(floor, Math.ceil(spam / SPAM_MAX_CLASS_RATIO));
+  return [Math.max(0, spamTarget - spam), Math.max(0, hamTarget - ham)];
+}
+
+function spamFilterStatus() {
+  const labels = [...spamTraining.values()];
+  const spam = labels.filter((label) => label === 'spam').length;
+  const ham = labels.length - spam;
+  const [spamNeededForVerdicts, hamNeededForVerdicts] = spamNeeded(spam, ham, SPAM_MIN_PER_CLASS);
+  const [spamNeededForMove, hamNeededForMove] = spamNeeded(spam, ham, SPAM_MOVE_MIN_PER_CLASS);
+  return {
+    mode: spamFilterMode,
+    spam_messages: spam,
+    ham_messages: ham,
+    tokens: 0,
+    ready: spamNeededForVerdicts === 0 && hamNeededForVerdicts === 0,
+    bootstrap_pending: false,
+    spam_needed: spamNeededForVerdicts,
+    ham_needed: hamNeededForVerdicts,
+    move_ready: spamNeededForMove === 0 && hamNeededForMove === 0,
+    move_spam_needed: spamNeededForMove,
+    move_ham_needed: hamNeededForMove,
+  };
+}
 const outbox: BackendOutboxItem[] = mockOutboxItems.map((item) => ({
   ...item,
   last_error: item.id === 'failed-move' ? 'backend.errors.queueFolderChanged'
@@ -527,6 +571,8 @@ function threadDto(thread: Thread) {
     has_invite: Boolean(thread.hasInvite),
     invite_status: thread.inviteStatus ?? null,
     invite_cancelled: Boolean(thread.inviteCancelled),
+    likely_spam: Boolean(thread.likelySpam),
+    spam_moved: Boolean(thread.spamMoved),
   };
 }
 
@@ -968,6 +1014,9 @@ const handlers: Record<string, Handler> = {
     const restored = trashReceipts.get(token) ?? [];
     for (const thread of restored) if (!findThread(thread.id)) threads.push(thread);
     trashReceipts.delete(token);
+    // Undoing Spam unlearns what it taught, as the backend's ledger does.
+    for (const id of spamReceiptThreads.get(token) ?? []) spamTraining.delete(id);
+    spamReceiptThreads.delete(token);
   },
   mark_threads_spam: (payload) => {
     const removed: Thread[] = [];
@@ -978,7 +1027,63 @@ const handlers: Record<string, Handler> = {
     // Same receipt shape and Undo path as the backend, which reuses trash receipts.
     const token = `spam-${++nextTrashReceipt}`;
     trashReceipts.set(token, removed);
+    const learned = removed.map((thread) => thread.id).filter((id) => spamTraining.get(id) !== 'spam');
+    for (const id of learned) spamTraining.set(id, 'spam');
+    spamReceiptThreads.set(token, learned);
     return { undo_token: token, undo_thread_ids: removed.map((thread) => thread.id), permanently_deleted: [] };
+  },
+  mark_threads_not_spam: (payload) => {
+    const threadIds = [...new Set(ids(payload).map((id) => id.trim()).filter(Boolean))];
+    const moved: string[] = [];
+    const restored: string[] = [];
+    const token = `not-spam-${++nextNotSpamReceipt}`;
+    const before: NonNullable<ReturnType<typeof notSpamReceipts.get>> = [];
+    for (const id of threadIds) {
+      const thread = findThread(id);
+      if (!thread) continue;
+      before.push({
+        thread, label: spamTraining.get(id), folders: [...thread.mailboxNames], state: thread.workflowState,
+        likely: Boolean(thread.likelySpam), moved: Boolean(thread.spamMoved),
+      });
+      spamTraining.set(id, 'ham');
+      thread.likelySpam = false;
+      if (thread.spamMoved) restored.push(id);
+      thread.spamMoved = false;
+      const folders = thread.mailboxNames ?? [];
+      if (folders.some((name) => SPAM_FOLDER_NAME.test(name.split('/').at(-1)?.trim() ?? ''))) {
+        thread.mailboxNames = ['INBOX'];
+        thread.workflowState = 'inbox';
+        thread.workflowChangedAt = new Date().toISOString();
+        moved.push(id);
+      }
+    }
+    notSpamReceipts.set(token, before);
+    return {
+      thread_ids: threadIds,
+      moved_thread_ids: moved,
+      undo_token: token,
+      move_receipts: [],
+      restored_thread_ids: restored,
+    };
+  },
+  undo_not_spam: (payload) => {
+    const receipt = input(payload).receipt as { undo_token?: string | null } | undefined;
+    const token = receipt?.undo_token ?? '';
+    for (const entry of notSpamReceipts.get(token) ?? []) {
+      if (entry.label) spamTraining.set(entry.thread.id, entry.label);
+      else spamTraining.delete(entry.thread.id);
+      entry.thread.mailboxNames = entry.folders;
+      entry.thread.workflowState = entry.state;
+      entry.thread.likelySpam = entry.likely;
+      entry.thread.spamMoved = entry.moved;
+    }
+    notSpamReceipts.delete(token);
+  },
+  get_spam_filter_status: () => spamFilterStatus(),
+  set_spam_filter_mode: (payload) => {
+    const mode = input(payload).mode as string;
+    if (mode !== 'off' && mode !== 'mark' && mode !== 'move') throw new Error('backend.errors.spamFilterUnavailable');
+    spamFilterMode = mode;
   },
   move_threads_to_folder: () => undefined,
   dismiss_mobile_notifications: () => undefined,
