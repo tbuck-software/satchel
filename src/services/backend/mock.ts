@@ -956,10 +956,10 @@ const translationState = {
   }>,
 };
 let nextTranslationLog = 0;
-// `?mockTranslation=ready`: DeepL set up with a free key and German as the
+// `?mockTranslation=ready`: DeepL set up with a Pro key and German as the
 // target, no account allowed yet, so the reader asks before the first send.
 if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mockTranslation') === 'ready') {
-  Object.assign(translationState, { engine: 'deepl', target: 'DE', key: 'mock-key:fx' });
+  Object.assign(translationState, { engine: 'deepl', target: 'DE', key: 'mock-key' });
 }
 const MOCK_TRANSLATION_LANGUAGES = ['DE', 'EN-GB', 'EN-US', 'ES', 'FR', 'IT', 'JA', 'NL', 'PL', 'PT-BR', 'PT-PT', 'ZH-HANS'];
 
@@ -1013,10 +1013,10 @@ function mockTranslate(content: string, html: boolean, target: string): string {
 
 /** The same refusals as `service::refusal`, in the same order. */
 function mockTranslationRefusal(source: ReturnType<typeof mockTranslationSource>): string | null {
+  // A free key takes no mail at all (DeepL's terms rule out personal data).
+  if (translationState.engine && translationState.key?.endsWith(':fx')) return 'backend.errors.translation.freePlanNotForMail';
   if (source.encrypted) return 'backend.errors.translation.encrypted';
   if (!source.html && !source.text) return 'backend.errors.translation.nothingToTranslate';
-  const provider = accounts.find((account) => account.id === source.accountId)?.provider;
-  if (provider === 'gmail' && translationState.key?.endsWith(':fx')) return 'backend.errors.translation.gmailNeedsPro';
   return null;
 }
 

@@ -50,12 +50,12 @@ Translation is off until you add a DeepL API key and allow an account. When
 you translate a message from an allowed account, its body (text and
 formatting) is sent to DeepL with your key. Link and image addresses are
 replaced by placeholders before sending and restored on your device; sender,
-recipients, subject, attachments and encrypted mail are not sent. With a
-DeepL API Pro key, DeepL keeps the text only as long as the translation takes
-(up to 72 hours when an error occurs) and does not use it to improve its
-service. With a DeepL API Free key, DeepL's terms reserve the right to store
-the text permanently and ask that no personal data be sent, so mail from
-Gmail accounts is never sent with a Free key (sources:
+recipients, subject, attachments and encrypted mail are not sent. Translation
+needs a DeepL API Pro key: DeepL then keeps the text only as long as the
+translation takes (up to 72 hours when an error occurs) and does not use it to
+improve its service. A DeepL API Free key can be saved and tested, but no mail
+is sent with it, because DeepL's terms forbid personal data on the free API
+and reserve the right to store what it is sent permanently (sources:
 [DeepL Pro terms](https://www.deepl.com/en/pro-license), sections 3.1.2,
 3.1.4, 3.3.2 and 8.3.11; [DeepL privacy policy](https://www.deepl.com/en/privacy),
 section 4; read 6 November 2026). Translations are stored locally, and a local

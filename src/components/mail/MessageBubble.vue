@@ -377,14 +377,11 @@ const translationStore = useTranslationStore();
 async function requestTranslationConsent(accountId: string): Promise<boolean> {
   const account = accountsStore.accounts.find((entry) => entry.id === accountId);
   const name = account?.email || account?.displayName || accountId;
-  const free = translationStore.plan === 'free';
+  // Only a Pro key gets this far: a free key is refused before any question.
   const allowed = await confirm.ask({
     title: t('translation.consent.title'),
-    body: t('translation.consent.body', {
-      account: name,
-      plan: free ? t('settings.translation.planFree') : t('settings.translation.planPro'),
-    }),
-    detail: `${free ? t('settings.translation.termsFree') : t('settings.translation.termsPro')} ${t('translation.consent.detail')}`,
+    body: t('translation.consent.body', { account: name, plan: t('settings.translation.planPro') }),
+    detail: `${t('settings.translation.termsPro')} ${t('translation.consent.detail')}`,
     confirmLabel: t('translation.consent.confirm'),
   });
   if (!allowed) return false;

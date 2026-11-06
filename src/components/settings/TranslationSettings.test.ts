@@ -101,16 +101,36 @@ describe('Translation settings', () => {
     expect(wrapper.get('[data-testid="translation-log-text"]').text()).toBe('Hola a todos');
   });
 
-  it('keeps Gmail accounts off with a free key and says why', async () => {
-    useTranslationStore().apply(settings({ engine: 'deepl', engines: [{ id: 'deepl', has_key: true, plan: 'free', local: false }] }));
-    useAccountsStore().accounts = [
-      { id: 'acc-g', displayName: '', email: 'me@gmail.test', provider: 'gmail', kind: 'email', color: '#000000' },
-    ] as never;
+  it('keeps a free key but no account on, and says why', async () => {
+    useTranslationStore().apply(settings({
+      engine: 'deepl',
+      engines: [{ id: 'deepl', has_key: true, plan: 'free', local: false }],
+      consents: [{ engine: 'deepl', account_id: 'acc-1', granted_at: '2026-11-06T00:00:00Z' }],
+    }));
+    backend.check.mockResolvedValue({ used: 10, limit: 500000, unit: 'characters' });
     wrapper = mount(TranslationSettings);
     await flushPromises();
-    expect(wrapper.get('[data-testid="translation-gmail-acc-g"]').text()).toContain('DeepL Pro key');
-    const toggle = wrapper.get<HTMLInputElement>('[data-testid="translation-consent-acc-g"] input[role="switch"]');
+    expect(wrapper.get('[data-testid="translation-free-refused"]').text())
+      .toContain("DeepL API Free keys can't be used for mail");
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="translation-consent-acc-1"] input[role="switch"]');
     expect(toggle.element.disabled).toBe(true);
+    expect(toggle.element.checked).toBe(false);
+    expect(wrapper.find('[data-testid="translation-terms-free"]').exists()).toBe(true);
+
+    // Test still works, so the plan and allowance can be seen.
+    await wrapper.get('[data-testid="translation-test"]').trigger('click');
+    await flushPromises();
+    expect(backend.check).toHaveBeenCalledWith('deepl');
+    expect(wrapper.get('[data-testid="translation-usage"]').text()).toContain('500,000');
+  });
+
+  it('shows no refusal with a Pro key', async () => {
+    useTranslationStore().apply(settings({ engine: 'deepl', engines: [{ id: 'deepl', has_key: true, plan: 'pro', local: false }] }));
+    wrapper = mount(TranslationSettings);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="translation-free-refused"]').exists()).toBe(false);
+    const toggle = wrapper.get<HTMLInputElement>('[data-testid="translation-consent-acc-1"] input[role="switch"]');
+    expect(toggle.element.disabled).toBe(false);
   });
 
   it('sends the key once, forgets it and switches DeepL on', async () => {

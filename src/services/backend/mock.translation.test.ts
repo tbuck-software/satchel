@@ -48,6 +48,14 @@ describe('mock translation', () => {
     await send('save_translation_settings', { input: { engine: 'deepl', target_language: null, log_sent_text: false } });
     const input = { message_id: id, target_language: 'FR' };
 
+    // A free key is saved, but no mail goes to it, whatever the account.
+    await send('set_translation_consent', { input: { engine: 'deepl', account_id: accountId, granted: true } });
+    await expect(send('translate_message', { input })).rejects.toThrow('backend.errors.translation.freePlanNotForMail');
+    expect((await send<BackendMessageTranslationOffer>('message_translation_offer', { input })).refusal)
+      .toBe('backend.errors.translation.freePlanNotForMail');
+    await send('set_translation_consent', { input: { engine: 'deepl', account_id: accountId, granted: false } });
+    await send('set_translation_api_key', { input: { engine: 'deepl', api_key: 'k' } });
+
     await expect(send('translate_message', { input })).rejects.toThrow('backend.errors.translation.consentRequired');
     expect((await send<BackendMessageTranslationOffer>('message_translation_offer', { input })).consented).toBe(false);
 

@@ -69,12 +69,14 @@ impl DeepLPlan {
         }
     }
 
-    /// DeepL's Pro T&C (https://www.deepl.com/en/pro-license, 3.3.2) reserve
-    /// the right to store everything sent to the free API perpetually. Pro
-    /// texts are kept only as long as the translation needs (3.1.2) and not
-    /// used to improve the service (https://www.deepl.com/en/privacy, 4).
-    pub fn may_retain_text(self) -> bool {
-        matches!(self, DeepLPlan::Free)
+    /// Whether mail may go through this plan at all. DeepL's Pro T&C
+    /// (https://www.deepl.com/en/pro-license) say not to process personal
+    /// data with the free API (8.3.11) and reserve the right to store what it
+    /// is sent perpetually (3.3.2). Pro keeps texts only as long as the
+    /// translation needs (3.1.2) and does not use them to improve the service
+    /// (https://www.deepl.com/en/privacy, 4).
+    pub fn accepts_personal_data(self) -> bool {
+        matches!(self, DeepLPlan::Pro)
     }
 
     fn endpoint(self) -> &'static str {
@@ -366,8 +368,8 @@ impl TranslationEngine for DeepL {
         !matches!(translate_body(request), Err(TranslationError::TooLarge))
     }
 
-    fn may_retain_text(&self) -> bool {
-        self.plan.may_retain_text()
+    fn accepts_personal_data(&self) -> bool {
+        self.plan.accepts_personal_data()
     }
 
     async fn translate(

@@ -170,8 +170,8 @@ pub enum TranslationError {
     NothingToTranslate,
     #[error("encrypted mail is not sent for translation")]
     Encrypted,
-    #[error("Gmail mail needs an engine that keeps nothing")]
-    GmailNeedsRetentionFreeEngine,
+    #[error("the engine's plan does not allow personal data")]
+    PlanNotForMail,
     #[error("the credential key is unavailable")]
     CredentialsUnavailable,
     #[error("translation storage failed: {0}")]
@@ -200,9 +200,7 @@ impl TranslationError {
             TranslationError::MessageNotFound => "backend.errors.translation.messageNotFound",
             TranslationError::NothingToTranslate => "backend.errors.translation.nothingToTranslate",
             TranslationError::Encrypted => "backend.errors.translation.encrypted",
-            TranslationError::GmailNeedsRetentionFreeEngine => {
-                "backend.errors.translation.gmailNeedsPro"
-            }
+            TranslationError::PlanNotForMail => "backend.errors.translation.freePlanNotForMail",
             TranslationError::CredentialsUnavailable => {
                 "backend.errors.translation.credentialsUnavailable"
             }
@@ -236,10 +234,10 @@ pub trait TranslationEngine: Send + Sync {
     /// before sending, so a body that is too large never leaves the device.
     fn fits(&self, request: &TranslationRequest) -> bool;
 
-    /// Whether the engine's terms let it keep what it is sent beyond the
-    /// translation, or use it to improve its service. DeepL API Free does
-    /// (Pro T&C 3.3.2); mail from Google accounts is then refused (ADR 0018).
-    fn may_retain_text(&self) -> bool;
+    /// Whether the engine's terms allow personal data, which every mail is.
+    /// DeepL API Free does not (Pro T&C 8.3.11); with it, no mail is sent
+    /// (ADR 0018).
+    fn accepts_personal_data(&self) -> bool;
 
     async fn translate(&self, request: &TranslationRequest)
         -> Result<Translated, TranslationError>;

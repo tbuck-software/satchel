@@ -18,7 +18,7 @@ const SETTINGS_ERRORS = new Set([
   'backend.errors.translation.invalidKey',
   'backend.errors.translation.credentialsUnavailable',
   'backend.errors.translation.consentRequired',
-  'backend.errors.translation.gmailNeedsPro',
+  'backend.errors.translation.freePlanNotForMail',
 ]);
 
 /**

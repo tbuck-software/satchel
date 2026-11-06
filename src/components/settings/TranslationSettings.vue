@@ -9,6 +9,7 @@
  */
 import { computed, onMounted, ref, shallowRef } from 'vue';
 import { useI18n } from 'vue-i18n';
+import AppBanner from '@/components/ui/AppBanner.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
@@ -198,10 +199,12 @@ function setTarget(event: Event) {
 
 const mailAccounts = computed(() => accounts.emailAccounts);
 
-/** Google's Limited Use rules: no Gmail mail to a plan that may keep it. */
-function refusedForPlan(provider: string): boolean {
-  return provider === 'gmail' && deepl.value?.plan === 'free';
-}
+/**
+ * A saved key whose plan takes no mail (DeepL API Free). The key stays, so
+ * Test still shows its plan and allowance; translation stays off until a
+ * Pro key replaces it.
+ */
+const planRefused = computed(() => Boolean(deepl.value?.has_key) && deepl.value?.plan !== 'pro');
 
 function consented(accountId: string): boolean {
   return Boolean(settings.value?.consents.some((consent) => consent.engine === ENGINE && consent.account_id === accountId));
@@ -291,6 +294,10 @@ async function toggleEntry(id: number) {
           :aria-label="$t('settings.translation.engineAria')"
           @update:model-value="setEngine"
         />
+      </div>
+
+      <div v-if="planRefused" class="setting-row setting-row--single" data-testid="translation-free-refused">
+        <AppBanner tone="warning" :title="$t('backend.errors.translation.freePlanNotForMail')" />
       </div>
 
       <form class="setting-row setting-row--single translation-settings__key" @submit.prevent="saveKey">
@@ -386,13 +393,10 @@ async function toggleEntry(id: number) {
           <div class="setting-info">
             <span class="setting-label">{{ account.displayName || account.email }}</span>
             <span v-if="account.displayName" class="setting-hint">{{ account.email }}</span>
-            <span v-if="refusedForPlan(account.provider)" class="setting-hint" :data-testid="`translation-gmail-${account.id}`">
-              {{ $t('backend.errors.translation.gmailNeedsPro') }}
-            </span>
           </div>
           <ToggleSwitch
-            :model-value="consented(account.id) && !refusedForPlan(account.provider)"
-            :disabled="refusedForPlan(account.provider)"
+            :model-value="consented(account.id) && !planRefused"
+            :disabled="planRefused"
             :label="$t('settings.translation.consentAria', { account: account.email })"
             :data-testid="`translation-consent-${account.id}`"
             @update:model-value="setConsent(account.id, $event)"

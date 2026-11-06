@@ -33,9 +33,6 @@ use crate::email::sanitizer::{
 /// The feature name translation requests carry in the request log.
 pub const FEATURE: &str = "translation";
 
-/// The provider of accounts whose mail Satchel reads through Google's API.
-const GOOGLE_PROVIDER: &str = "gmail";
-
 /// A message's body in another language, ready for the reader.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
@@ -74,7 +71,7 @@ pub struct MessageTranslationOffer {
     /// The message's account may send mail to the active engine.
     pub consented: bool,
     /// Why the active engine would not get this message, as a message key:
-    /// encrypted, no text, or Gmail mail with an engine that keeps text.
+    /// a plan that allows no personal data, encrypted, or no text.
     pub refusal: Option<String>,
 }
 
@@ -137,13 +134,13 @@ pub async fn active_engine(pool: &SqlitePool) -> Result<EngineKind, TranslationE
         .ok_or(TranslationError::NotConfigured)
 }
 
-/// [`TranslationEngine::may_retain_text`] for a stored key's plan, without
-/// building the engine. An unknown plan counts as keeping text.
-fn plan_may_retain_text(kind: EngineKind, plan: Option<&str>) -> bool {
+/// [`TranslationEngine::accepts_personal_data`] for a stored key's plan,
+/// without building the engine. An unknown plan does not.
+fn plan_accepts_personal_data(kind: EngineKind, plan: Option<&str>) -> bool {
     match kind {
         EngineKind::DeepL => plan
             .and_then(DeepLPlan::parse)
-            .is_none_or(DeepLPlan::may_retain_text),
+            .is_some_and(DeepLPlan::accepts_personal_data),
     }
 }
 
@@ -169,7 +166,13 @@ fn is_encrypted(source: &MessageSourceRecord) -> bool {
 }
 
 /// Why `source` must not go to an engine with these terms, if it must not.
-fn refusal(source: &MessageSourceRecord, retains_text: bool) -> Option<TranslationError> {
+fn refusal(source: &MessageSourceRecord, accepts_personal_data: bool) -> Option<TranslationError> {
+    // Every mail is personal data. A plan whose terms rule that out gets no
+    // mail at all (ADR 0018); an owner decision that can be loosened if the
+    // terms change.
+    if !accepts_personal_data {
+        return Some(TranslationError::PlanNotForMail);
+    }
     if is_encrypted(source) {
         return Some(TranslationError::Encrypted);
     }
@@ -177,12 +180,6 @@ fn refusal(source: &MessageSourceRecord, retains_text: bool) -> Option<Translati
         && non_empty(source.body_text.as_deref()).is_none()
     {
         return Some(TranslationError::NothingToTranslate);
-    }
-    // Google's Limited Use rules forbid handing Gmail data to a party that
-    // may keep it or learn from it (ADR 0018). An owner decision; it can be
-    // loosened once a free plan's terms allow it.
-    if retains_text && source.provider == GOOGLE_PROVIDER {
-        return Some(TranslationError::GmailNeedsRetentionFreeEngine);
     }
     None
 }
@@ -284,7 +281,7 @@ pub async fn send(
 ) -> Result<MessageTranslation, TranslationError> {
     let repo = TranslationRepository::new(pool);
     let engine_id = engine.kind().as_str();
-    if let Some(refused) = refusal(&pending.source, engine.may_retain_text()) {
+    if let Some(refused) = refusal(&pending.source, engine.accepts_personal_data()) {
         return Err(refused);
     }
     if !repo
@@ -423,14 +420,16 @@ pub async fn offer(
         .engine
         .as_deref()
         .and_then(EngineKind::parse);
-    let (consented, retains_text) = match engine {
+    let (consented, accepts_personal_data) = match engine {
         Some(kind) => (
             repo.has_consent(kind.as_str(), &source.account_id).await?,
-            plan_may_retain_text(kind, repo.plan(kind.as_str()).await?.as_deref()),
+            plan_accepts_personal_data(kind, repo.plan(kind.as_str()).await?.as_deref()),
         ),
-        None => (false, false),
+        // Nothing would be sent; the offer says only what the body allows.
+        None => (false, true),
     };
-    let refused = refusal(&source, retains_text).map(|error| error.message_key().to_owned());
+    let refused =
+        refusal(&source, accepts_personal_data).map(|error| error.message_key().to_owned());
     let target_for_guess = target.clone();
     let (detected_language, cached) = blocking(move || {
         let hashes = BodyHashes::of(&source);
@@ -470,7 +469,7 @@ mod tests {
     /// `echo`, with what it was sent.
     struct FakeEngine {
         html: bool,
-        retains: bool,
+        personal_data: bool,
         max_chars: usize,
         echo: bool,
         sent: Arc<Mutex<Vec<TranslationRequest>>>,
@@ -481,7 +480,7 @@ mod tests {
         fn answering(answer: Result<&str, TranslationError>) -> Self {
             Self {
                 html: true,
-                retains: false,
+                personal_data: true,
                 max_chars: usize::MAX,
                 echo: false,
                 sent: Arc::default(),
@@ -511,8 +510,8 @@ mod tests {
         fn fits(&self, request: &TranslationRequest) -> bool {
             request.content.as_str().chars().count() <= self.max_chars
         }
-        fn may_retain_text(&self) -> bool {
-            self.retains
+        fn accepts_personal_data(&self) -> bool {
+            self.personal_data
         }
         async fn translate(
             &self,
@@ -563,6 +562,16 @@ mod tests {
             .await
             .unwrap();
         save(&pool, false).await;
+        crate::utils::crypto::seed_master_key_for_tests();
+        TranslationRepository::new(&pool)
+            .set_key(
+                "deepl",
+                Some("pro-key"),
+                Some("pro"),
+                "2026-11-06T00:00:00Z",
+            )
+            .await
+            .unwrap();
         pool
     }
 
@@ -782,21 +791,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gmail_mail_does_not_go_to_an_engine_that_keeps_text() {
+    async fn no_mail_goes_to_a_plan_that_allows_no_personal_data() {
         let pool = setup(None).await;
         consent(&pool).await;
-        sqlx::query("UPDATE accounts SET provider = 'gmail' WHERE id = 'acc'")
-            .execute(&pool)
-            .await
-            .unwrap();
         let mut free = FakeEngine::answering(Ok("Hallo"));
-        free.retains = true;
+        free.personal_data = false;
         assert_eq!(
             translate(&pool, &free, "DE").await.unwrap_err(),
-            TranslationError::GmailNeedsRetentionFreeEngine
+            TranslationError::PlanNotForMail
         );
         assert!(free.requests().is_empty());
+        assert!(log_rows(&pool).await.is_empty());
 
+        // The offer reads the plan stored with the key, for every account.
         crate::utils::crypto::seed_master_key_for_tests();
         let repo = TranslationRepository::new(&pool);
         repo.set_key("deepl", Some("k:fx"), Some("free"), "2026-11-06T00:00:00Z")
@@ -806,7 +813,7 @@ mod tests {
         assert!(!offer_free.offered);
         assert_eq!(
             offer_free.refusal.as_deref(),
-            Some("backend.errors.translation.gmailNeedsPro")
+            Some("backend.errors.translation.freePlanNotForMail")
         );
         repo.set_key("deepl", Some("k"), Some("pro"), "2026-11-06T00:00:00Z")
             .await
@@ -815,6 +822,13 @@ mod tests {
 
         let pro = FakeEngine::answering(Ok("Hallo"));
         assert!(translate(&pool, &pro, "DE").await.is_ok());
+    }
+
+    #[test]
+    fn only_deepl_pro_takes_mail() {
+        assert!(plan_accepts_personal_data(EngineKind::DeepL, Some("pro")));
+        assert!(!plan_accepts_personal_data(EngineKind::DeepL, Some("free")));
+        assert!(!plan_accepts_personal_data(EngineKind::DeepL, None));
     }
 
     #[tokio::test]

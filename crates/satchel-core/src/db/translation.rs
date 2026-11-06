@@ -85,8 +85,6 @@ pub struct NewRequestLogEntry<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct MessageSourceRecord {
     pub account_id: String,
-    /// The account's provider; `gmail` is mail read through Google's API.
-    pub provider: String,
     pub body_text: Option<String>,
     pub body_html: Option<String>,
     /// S/MIME enveloped, or a PGP/MIME `multipart/encrypted` container.
@@ -288,11 +286,11 @@ impl<'a> TranslationRepository<'a> {
         message_id: &str,
     ) -> Result<Option<MessageSourceRecord>, sqlx::Error> {
         sqlx::query_as(
-            "SELECT m.account_id, a.provider, m.body_text, m.body_html,
+            "SELECT m.account_id, m.body_text, m.body_html,
                     (m.smime_encrypted IS NOT NULL
                      OR LOWER(COALESCE(m.raw_headers, '')) LIKE '%multipart/encrypted%')
                         AS encrypted_container
-             FROM messages m JOIN accounts a ON a.id = m.account_id
+             FROM messages m
              WHERE m.id = ?",
         )
         .bind(message_id)

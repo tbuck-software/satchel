@@ -57,7 +57,7 @@ function settings(consented: boolean): BackendTranslationSettings {
     engine: 'deepl',
     target_language: 'DE',
     log_sent_text: false,
-    engines: [{ id: 'deepl', has_key: true, plan: 'free', local: false }],
+    engines: [{ id: 'deepl', has_key: true, plan: 'pro', local: false }],
     consents: consented ? [{ engine: 'deepl', account_id: 'acc-1', granted_at: '2026-11-06T00:00:00Z' }] : [],
   };
 }
@@ -159,14 +159,14 @@ describe('translating a message', () => {
     await view.get('.message-translate-trigger').trigger('click');
     await flushPromises();
     const question = ask.mock.calls[0]![0] as { body: string; detail: string };
-    expect(question.body).toContain('DeepL API Free');
-    expect(question.detail).toContain('permanently');
+    expect(question.body).toContain('DeepL API Pro');
+    expect(question.detail).toContain('72 hours');
   });
 
   it('says why instead of asking when the message is refused', async () => {
     backend.offer.mockResolvedValue({
       detected_language: 'ES', offered: false, cached: false, cached_source_language: null, consented: false,
-      refusal: 'backend.errors.translation.gmailNeedsPro',
+      refusal: 'backend.errors.translation.encrypted',
     });
     const view = await render(false);
     expect(view.find('.message-translate-trigger').exists()).toBe(false);
@@ -174,7 +174,7 @@ describe('translating a message', () => {
     await flushPromises();
     expect(ask).not.toHaveBeenCalled();
     expect(backend.translate).not.toHaveBeenCalled();
-    expect(useToast().state.toasts.at(-1)?.message).toBe('Gmail mail can only be translated with a DeepL Pro key.');
+    expect(useToast().state.toasts.at(-1)?.message).toBe('Encrypted mail is not sent for translation.');
   });
 
   it('asks nothing for a folded message and leaves it to T only when open', async () => {
@@ -199,6 +199,22 @@ describe('translating a message', () => {
     await flushPromises();
     expect(backend.translate).toHaveBeenCalledWith('m-1', 'DE');
     expect(view.getComponent(EmailRenderer).props('html')).toBe(TRANSLATION.body_html);
+  });
+
+  it('offers nothing with a DeepL API Free key, for any account', async () => {
+    useTranslationStore().apply({
+      ...settings(true),
+      engines: [{ id: 'deepl', has_key: true, plan: 'free', local: false }],
+    });
+    wrapper = mount(MessageBubble, {
+      attachTo: document.body,
+      props: { message: message(), canReply: true },
+      global: { stubs: { SenderFilingMenu: true } },
+    });
+    await flushPromises();
+    expect(backend.offer).not.toHaveBeenCalled();
+    expect(wrapper.find('.message-translate-trigger').exists()).toBe(false);
+    expect(toggleMessageTranslation('m-1')).toBe(false);
   });
 
   it('offers nothing while no engine is set up', async () => {

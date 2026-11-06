@@ -50,16 +50,22 @@ export const useTranslationStore = defineStore('translation', () => {
 
   const engine = computed(() => (settings.value?.engine ?? null) as BackendTranslationEngineId | null);
 
-  /** An engine is switched on and has a key: Translate can work. */
-  const ready = computed(() => {
-    const id = engine.value;
-    return id !== null && Boolean(settings.value?.engines.find((entry) => entry.id === id)?.has_key);
-  });
-
   /** The stored key's plan (DeepL `free` / `pro`), or null without one. */
   const plan = computed(() => {
     const id = engine.value;
     return settings.value?.engines.find((entry) => entry.id === id)?.plan ?? null;
+  });
+
+  /**
+   * An engine is switched on and has a key whose plan allows mail: Translate
+   * can work. A DeepL API Free key does not (its terms rule out personal
+   * data); the backend refuses it too.
+   */
+  const ready = computed(() => {
+    const id = engine.value;
+    return id !== null
+      && Boolean(settings.value?.engines.find((entry) => entry.id === id)?.has_key)
+      && plan.value === 'pro';
   });
 
   const targetLanguage = computed(() => settings.value?.target_language ?? uiTargetLanguage(currentLocale()));

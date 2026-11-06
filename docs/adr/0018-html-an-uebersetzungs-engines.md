@@ -62,14 +62,16 @@ am 2026-11-06.
   keinen Eintrag.
 - Betreff, Absender, Empfänger und Anhänge gehen nicht mit. Verschlüsselte
   Mails (S/MIME, PGP inline und PGP/MIME) gehen nie, auch nicht entschlüsselt.
-- **Gmail und kostenlose Tarife:** Mails aus Google-Konten (über die Gmail-API
-  gelesen) gehen nicht an eine Engine, deren Bedingungen erlauben, den Text
-  zu behalten oder damit zu lernen (`may_retain_text()`). Bei DeepL ist das
-  die kostenlose API. Googles Limited-Use-Regeln erlauben die Weitergabe von
-  Gmail-Daten nicht an einen Dritten, der sie behalten darf. Mails anderer
-  Konten bleiben mit einem kostenlosen Schlüssel übersetzbar, nach einer
-  Zustimmung, die den Tarif nennt. Das ist eine Entscheidung des Maintainers
-  und darf gelockert werden, wenn sich die Bedingungen ändern.
+- **Kostenlose Tarife:** Keine Mail geht an eine Engine, deren Bedingungen
+  personenbezogene Daten ausschließen (`accepts_personal_data()`), für kein
+  Konto. Jede Mail enthält personenbezogene Daten, mindestens die des
+  Absenders. Bei DeepL betrifft das die kostenlose API (8.3.11, dazu das
+  vorbehaltene dauerhafte Speichern in 3.3.2). Ein solcher Schlüssel lässt
+  sich speichern und testen, damit der Nutzer Tarif und Kontingent sieht.
+  Übersetzt wird erst, wenn ein Pro-Schlüssel ihn ersetzt. Damit fällt auch
+  der Konflikt mit Googles Limited-Use-Regeln für Gmail-Daten weg, ohne
+  Sonderfall. Das ist eine Entscheidung des Maintainers und darf gelockert
+  werden, wenn sich die Bedingungen ändern.
 
 ## Konsequenzen
 

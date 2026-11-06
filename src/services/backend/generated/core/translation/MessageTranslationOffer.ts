@@ -27,7 +27,7 @@ export type MessageTranslationOffer = {
     consented: boolean;
     /**
      * Why the active engine would not get this message, as a message key:
-     * encrypted, no text, or Gmail mail with an engine that keeps text.
+     * a plan that allows no personal data, encrypted, or no text.
      */
     refusal: string | null;
 };
