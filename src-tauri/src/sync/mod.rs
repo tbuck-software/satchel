@@ -11,6 +11,7 @@ pub mod gmail_reconcile;
 pub mod idle;
 pub mod imap_workflow_target;
 pub mod leases;
+pub mod mail_merge_runner;
 pub mod mailbox_sync;
 pub mod maintenance;
 pub mod message_ingest;

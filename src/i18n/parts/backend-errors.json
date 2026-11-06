@@ -310,7 +310,21 @@
         "taskListNameRequired": "A list needs a name.",
         "taskChanged": "This task changed in the meantime.",
         "taskPersistenceFailed": "The task could not be saved.",
-        "taskCompletedInvalid": "The completion time could not be read."
+        "taskCompletedInvalid": "The completion time could not be read.",
+        "mailMergeCsvEmpty": "The file is empty.",
+        "mailMergeCsvNoRows": "The file has a header row but no recipients.",
+        "mailMergeCsvTooLarge": "The file is larger than 5 MB. That is not a recipient list.",
+        "mailMergeCsvUnreadable": "The file could not be read.",
+        "mailMergeCsvUnterminatedQuote": "A quotation mark in row {line} is never closed.",
+        "mailMergeDelayInvalid": "Choose between 1 and 3600 seconds between messages.",
+        "mailMergeInvalidState": "The mail merge cannot do that right now. It may have changed in the meantime.",
+        "mailMergeJobNotFound": "This mail merge no longer exists.",
+        "mailMergeMissingKeys": "Recipients without an encryption key: {count} ({addresses}). Nothing was sent.",
+        "mailMergeMissingValues": "A placeholder had no value for this recipient.",
+        "mailMergeNoRecipients": "No row of the list can be sent.",
+        "mailMergePersistenceFailed": "The mail merge could not be saved.",
+        "mailMergeRemovedFromOutbox": "Removed from the Outbox before it was sent.",
+        "mailMergeTooManyRecipients": "One mail merge sends at most {limit} messages. Split the list."
       }
     }
   },
@@ -625,7 +639,21 @@
         "taskListNameRequired": "Eine Liste braucht einen Namen.",
         "taskChanged": "Diese Aufgabe wurde inzwischen geändert.",
         "taskPersistenceFailed": "Die Aufgabe konnte nicht gespeichert werden.",
-        "taskCompletedInvalid": "Der Erledigt-Zeitpunkt ist nicht lesbar."
+        "taskCompletedInvalid": "Der Erledigt-Zeitpunkt ist nicht lesbar.",
+        "mailMergeCsvEmpty": "Die Datei ist leer.",
+        "mailMergeCsvNoRows": "Die Datei hat eine Kopfzeile, aber keine Empfänger.",
+        "mailMergeCsvTooLarge": "Die Datei ist größer als 5 MB. Das ist keine Empfängerliste.",
+        "mailMergeCsvUnreadable": "Die Datei konnte nicht gelesen werden.",
+        "mailMergeCsvUnterminatedQuote": "Ein Anführungszeichen in Zeile {line} wird nie geschlossen.",
+        "mailMergeDelayInvalid": "Wähle zwischen 1 und 3600 Sekunden Abstand.",
+        "mailMergeInvalidState": "Das geht bei dieser Serienmail gerade nicht. Vielleicht hat sie sich inzwischen geändert.",
+        "mailMergeJobNotFound": "Diese Serienmail gibt es nicht mehr.",
+        "mailMergeMissingKeys": "Empfänger ohne Schlüssel: {count} ({addresses}). Es wurde nichts gesendet.",
+        "mailMergeMissingValues": "Ein Platzhalter hatte für diesen Empfänger keinen Wert.",
+        "mailMergeNoRecipients": "Keine Zeile der Liste lässt sich senden.",
+        "mailMergePersistenceFailed": "Die Serienmail konnte nicht gespeichert werden.",
+        "mailMergeRemovedFromOutbox": "Vor dem Senden aus dem Postausgang entfernt.",
+        "mailMergeTooManyRecipients": "Eine Serienmail sendet höchstens {limit} Nachrichten. Teile die Liste."
       }
     }
   }

@@ -361,6 +361,11 @@ pub fn run() {
             sync::maintenance::spawn_followup_worker(pool.clone(), app_handle.clone());
             sync::maintenance::spawn_task_reminder_worker(pool.clone(), app_handle.clone());
             sync::maintenance::spawn_webhook_worker(pool.clone());
+            sync::mail_merge_runner::spawn_mail_merge_runner(
+                state.clone(),
+                pool.clone(),
+                app_handle.clone(),
+            );
 
             // Bridge AppEvent -> Tauri events for the frontend.
             let event_app = app_handle.clone();
@@ -863,6 +868,12 @@ pub fn run() {
             commands::blocked_senders::list_blocked_senders,
             commands::blocked_senders::block_sender,
             commands::blocked_senders::unblock_sender,
+            commands::mail_merge::parse_mail_merge_csv,
+            commands::mail_merge::preview_mail_merge,
+            commands::mail_merge::create_mail_merge_job,
+            commands::mail_merge::list_mail_merge_jobs,
+            commands::mail_merge::get_mail_merge_job,
+            commands::mail_merge::control_mail_merge_job,
             commands::sender_sweep::list_cleanup_senders,
             commands::sender_sweep::list_sender_sweep_targets,
             commands::sender_sweep::sender_sweep_summary,

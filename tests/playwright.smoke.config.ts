@@ -6,7 +6,7 @@ const smokeBaseUrl = `http://127.0.0.1:${smokePort}`;
 
 export default defineConfig({
   testDir: '.',
-  testMatch: ['account-visibility.pw.ts', 'composer.pw.ts', 'core-flows.pw.ts', 'email-rendering.pw.ts', 'mail-keyboard.pw.ts', 'thread-print.pw.ts', 'a11y.pw.ts', 'sheet-interactions.pw.ts', 'responsive-shell.pw.ts', 'responsive-search.pw.ts', 'failure-visibility.pw.ts', 'topic-memberships.pw.ts', 'i18n-chunks.pw.ts', 'translation.pw.ts', 'tasks.pw.ts', 'free-busy.pw.ts'],
+  testMatch: ['account-visibility.pw.ts', 'composer.pw.ts', 'core-flows.pw.ts', 'email-rendering.pw.ts', 'mail-keyboard.pw.ts', 'thread-print.pw.ts', 'a11y.pw.ts', 'sheet-interactions.pw.ts', 'responsive-shell.pw.ts', 'responsive-search.pw.ts', 'failure-visibility.pw.ts', 'topic-memberships.pw.ts', 'i18n-chunks.pw.ts', 'translation.pw.ts', 'tasks.pw.ts', 'free-busy.pw.ts', 'mail-merge.pw.ts'],
   fullyParallel: false,
   workers: 1,
   reporter: 'line',

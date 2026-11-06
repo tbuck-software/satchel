@@ -9,6 +9,7 @@ import { useRoute, useRouter } from 'vue-router';
 import type {
   BackendDraft,
   BackendOutgoingAttachment,
+  BackendSendMessagePayload,
   BackendSendMessageResult,
 } from '@/types/composer';
 import { useAccountsStore } from '@/stores/accounts';
@@ -26,6 +27,10 @@ import RichTextEditor from '@/components/mail/RichTextEditor.vue';
 import ComposerSignature from '@/components/mail/ComposerSignature.vue';
 import ComposerThreadContext from '@/components/mail/ComposerThreadContext.vue';
 import ComposerSenderField from '@/components/mail/ComposerSenderField.vue';
+import MailMergeBar from '@/components/mail/MailMergeBar.vue';
+import { useMailMergeStore } from '@/stores/mailMerge';
+import { contactsMergeSource, mergeToken, type MailMergeSource } from '@/utils/mailMerge';
+import type { ComposerMailMergeSeed } from '@/stores/composer';
 import SegmentedControl from '@/components/ui/SegmentedControl.vue';
 import AppBanner from '@/components/ui/AppBanner.vue';
 import AppButton from '@/components/ui/AppButton.vue';
@@ -78,6 +83,8 @@ import type { ComposerBackup, ComposerBackupContent } from '@/persistence/compos
 const SendLaterMenu = defineAsyncComponent(() => import('@/components/mail/SendLaterMenu.vue'));
 // Free slots and their text load the first time someone asks for them.
 const InsertAvailabilityDialog = defineAsyncComponent(() => import('@/components/mail/InsertAvailabilityDialog.vue'));
+const MailMergeSourceDialog = defineAsyncComponent(() => import('@/components/mail/MailMergeSourceDialog.vue'));
+const MailMergeReviewDialog = defineAsyncComponent(() => import('@/components/mail/MailMergeReviewDialog.vue'));
 
 const props = withDefaults(defineProps<{
   embedded?: boolean;
@@ -90,6 +97,10 @@ const props = withDefaults(defineProps<{
   initialSubject?: string;
   initialBody?: string;
   initialBodyHtml?: string | null;
+  /** Start in mail merge mode, with these contacts as the list when given. */
+  initialMailMerge?: ComposerMailMergeSeed | null;
+  /** Bumped by the palette's "Mail merge…" while this composer is open. */
+  mailMergeRequests?: number;
 }>(), {
   embedded: false,
   mode: 'new',
@@ -101,6 +112,8 @@ const props = withDefaults(defineProps<{
   initialSubject: '',
   initialBody: '',
   initialBodyHtml: null,
+  initialMailMerge: null,
+  mailMergeRequests: 0,
 });
 
 const emit = defineEmits<{
@@ -132,6 +145,7 @@ const attachmentActions = useAttachmentActions();
 const composerTransport = useComposerTransport();
 const toast = useToast();
 const confirm = useConfirm();
+const mailMergeStore = useMailMergeStore();
 const supportsBackend = composerTransport.commandsAvailable();
 
 const accountId = ref<string>('');
@@ -164,6 +178,26 @@ const showTemplatePicker = ref(false);
 const showAvailability = ref(false);
 const showSendLater = ref(false);
 const sendLaterAnchor = ref<AnchorBox | null>(null);
+
+/*
+ * Mail merge: the list replaces To/Cc/Bcc, Send opens the review, and the
+ * review starts a job that sends one copy per recipient through the outbox.
+ */
+const mergeSource = ref<MailMergeSource | null>(
+  props.initialMailMerge?.contacts?.length
+    ? contactsMergeSource(
+      props.initialMailMerge.contacts,
+      props.initialMailMerge.label ?? t('mailMerge.source.contactsLabel', { count: props.initialMailMerge.contacts.length }, props.initialMailMerge.contacts.length),
+    )
+    : null,
+);
+const showMergeSource = ref(Boolean(props.initialMailMerge) && !mergeSource.value);
+const showMergeReview = ref(false);
+const mergeBusy = ref(false);
+const mergeError = ref<string | null>(null);
+/** Where a picked field goes: the field the caret was in last. */
+const mergeInsertTarget = ref<'subject' | 'body'>('body');
+const subjectInputRef = ref<HTMLInputElement | null>(null);
 
 function openSendLater(event: MouseEvent | KeyboardEvent) {
   const trigger = event.currentTarget as HTMLElement;
@@ -493,6 +527,7 @@ const sendBlocker = computed(() => composerSendBlocker({
   body: body.value,
   attachmentCount: attachments.value.length,
   scheduledFor: scheduledFor.value,
+  mergeRecipients: mergeSource.value ? mergeSource.value.rows.length : null,
 }, scheduleClock.now.value));
 const canSend = computed(() => sendBlocker.value === null);
 /** What the sender can do about a disabled Send button, if anything. */
@@ -1004,6 +1039,39 @@ function announceAfterClose(tone: 'success' | 'info' | 'warning', text: string, 
   else toast.info(text, options);
 }
 
+/** The message as Send hands it over; a mail merge sends the same. */
+function sendPayload(account: { id: string; displayName: string }): BackendSendMessagePayload {
+  return {
+    accountId: account.id,
+    to: to.value,
+    cc: cc.value,
+    bcc: bcc.value,
+    subject: subject.value.trim() || t('compose.noSubject'),
+    body: body.value,
+    bodyHtml: plainTextCompose.value
+      ? null
+      : composerInlineAttachments.serializeInlineImages(bodyHtml.value ?? composerHtmlFromText(body.value)),
+    threadId: contextThreadId.value,
+    replyToMessageId: replyToMessageId.value,
+    attachments: attachments.value,
+    fromAddress: fromAddress.value,
+    fromName: account.displayName,
+    replyTo: replyTo.value,
+    draftId: draftId.value,
+    scheduledFor: scheduledFor.value,
+    followUpAt: followUpAt.value,
+    smimeSignWithCertId: smimeSignCertId.value,
+    smimeEncryptToRecipients: smimeEncrypt.value,
+    pgpSignWithKeyId: pgpSignKeyId.value,
+    pgpEncryptToRecipients: pgpEncrypt.value,
+    priority: priority.value,
+    signatureId: selectedSignatureId.value,
+    signatureVariant: signatureVariant.value,
+    signatureOverrideText: signatureOverrideText.value,
+    signatureOverrideHtml: plainTextCompose.value ? null : signatureOverrideHtml.value,
+  };
+}
+
 async function send() {
   scheduleClock.refresh();
   if (!canSend.value || !activeAccount.value) {
@@ -1011,40 +1079,18 @@ async function send() {
     if (sendBlockedHint.value) status.value = { tone: 'warning', text: sendBlockedHint.value };
     return;
   }
+  // A mail merge never sends from here: the review comes first.
+  if (mergeSource.value) {
+    mergeError.value = null;
+    showMergeReview.value = true;
+    return;
+  }
   sending.value = true;
   let sendCommitted = false;
   try {
     await pauseDraftPersistence();
     status.value = null;
-    const result = await composerTransport.sendMessage({
-      accountId: activeAccount.value.id,
-      to: to.value,
-      cc: cc.value,
-      bcc: bcc.value,
-      subject: subject.value.trim() || t('compose.noSubject'),
-      body: body.value,
-      bodyHtml: plainTextCompose.value
-        ? null
-        : composerInlineAttachments.serializeInlineImages(bodyHtml.value ?? composerHtmlFromText(body.value)),
-      threadId: contextThreadId.value,
-      replyToMessageId: replyToMessageId.value,
-      attachments: attachments.value,
-      fromAddress: fromAddress.value,
-      fromName: activeAccount.value.displayName,
-      replyTo: replyTo.value,
-      draftId: draftId.value,
-      scheduledFor: scheduledFor.value,
-      followUpAt: followUpAt.value,
-      smimeSignWithCertId: smimeSignCertId.value,
-      smimeEncryptToRecipients: smimeEncrypt.value,
-      pgpSignWithKeyId: pgpSignKeyId.value,
-      pgpEncryptToRecipients: pgpEncrypt.value,
-      priority: priority.value,
-      signatureId: selectedSignatureId.value,
-      signatureVariant: signatureVariant.value,
-      signatureOverrideText: signatureOverrideText.value,
-      signatureOverrideHtml: plainTextCompose.value ? null : signatureOverrideHtml.value,
-    });
+    const result = await composerTransport.sendMessage(sendPayload(activeAccount.value));
     sendCommitted = true;
     finishDraftPersistence();
     localBackup.clear();
@@ -1114,6 +1160,121 @@ async function send() {
     sending.value = false;
   }
 }
+
+function openMailMerge() {
+  if (moreSettingsRef.value) moreSettingsRef.value.open = false;
+  showMergeSource.value = true;
+}
+
+function applyMergeSource(source: MailMergeSource) {
+  mergeSource.value = source;
+  showMergeSource.value = false;
+  // Copies are addressed one by one; nothing typed into To/Cc/Bcc goes along.
+  to.value = [];
+  cc.value = [];
+  bcc.value = [];
+  scheduledFor.value = null;
+  followUpAt.value = null;
+  showCcBcc.value = false;
+  mergeError.value = null;
+}
+
+function stopMailMerge() {
+  mergeSource.value = null;
+  showMergeReview.value = false;
+}
+
+function changeMergeList() {
+  showMergeReview.value = false;
+  showMergeSource.value = true;
+}
+
+/** Puts `{{Field}}` where the caret was: the subject, or the body. */
+async function insertMergeField(field: string) {
+  const token = mergeToken(field);
+  if (mergeInsertTarget.value === 'subject' && subjectInputRef.value) {
+    const input = subjectInputRef.value;
+    const start = input.selectionStart ?? subject.value.length;
+    const end = input.selectionEnd ?? start;
+    subject.value = `${subject.value.slice(0, start)}${token}${subject.value.slice(end)}`;
+    await nextTick();
+    input.focus();
+    input.setSelectionRange(start + token.length, start + token.length);
+    return;
+  }
+  if (plainTextCompose.value && writingTextarea.value) {
+    const area = writingTextarea.value;
+    const start = area.selectionStart ?? writingText.value.length;
+    const end = area.selectionEnd ?? start;
+    writingText.value = `${writingText.value.slice(0, start)}${token}${writingText.value.slice(end)}`;
+    bodyHtml.value = null;
+    await nextTick();
+    area.focus();
+    area.setSelectionRange(start + token.length, start + token.length);
+    return;
+  }
+  richEditorRef.value?.insertText(token);
+}
+
+const mergeTemplate = computed(() => ({
+  subject: subject.value.trim() || t('compose.noSubject'),
+  body: body.value,
+  body_html: plainTextCompose.value ? null : (bodyHtml.value ?? composerHtmlFromText(body.value)),
+}));
+
+/**
+ * Starts the job once the user confirmed count and account. The job takes
+ * the draft's place, so persistence pauses as it does for a send.
+ */
+async function startMailMerge(delaySeconds: number, count: number) {
+  const source = mergeSource.value;
+  const account = activeAccount.value;
+  if (!source || !account || mergeBusy.value) return;
+  const confirmed = await confirm.ask({
+    title: t('mailMerge.confirm.title', { count }, count),
+    body: t('mailMerge.confirm.body', { address: fromAddress.value, account: account.displayName || account.email }),
+    detail: t('mailMerge.confirm.detail'),
+    confirmLabel: t('mailMerge.confirm.send'),
+  });
+  if (!confirmed) return;
+  mergeBusy.value = true;
+  mergeError.value = null;
+  let committed = false;
+  try {
+    await pauseDraftPersistence();
+    const job = await mailMergeStore.createJob({
+      message: { ...sendPayload(account), to: [], cc: [], bcc: [], scheduledFor: null, followUpAt: null },
+      sourceLabel: source.label,
+      delaySeconds,
+      list: source,
+    });
+    committed = true;
+    finishDraftPersistence();
+    localBackup.clear();
+    editorClaim.release();
+    showMergeReview.value = false;
+    const text = t('mailMerge.started', { count: job.total }, job.total);
+    if (props.embedded) {
+      toast.info(text, { action: { label: t('mailMerge.viewProgress'), handler: () => router.push({ name: 'outbox' }) } });
+    } else {
+      status.value = { tone: 'info', text };
+    }
+    emit('sent');
+    if (props.embedded) return;
+    if (isPopout()) await closePopout();
+    else await router.push({ name: 'outbox' });
+  } catch (err) {
+    if (!committed) mergeError.value = translateBackendError(err) ?? (err instanceof Error ? err.message : String(err));
+    else console.warn('post-merge navigation failed', err);
+  } finally {
+    if (!committed) resumeDraftPersistence();
+    mergeBusy.value = false;
+  }
+}
+
+watch(() => props.mailMergeRequests, (next, previous) => {
+  if (next > (previous ?? 0)) openMailMerge();
+});
 
 function formatScheduled(value: string | null): string {
   return value ? formatTimestamp(value) : '';
@@ -1361,7 +1522,15 @@ defineExpose({
       />
     </div>
 
-    <div class="row recipient-row">
+    <MailMergeBar
+      v-if="mergeSource"
+      :source="mergeSource"
+      :disabled="sending || mergeBusy"
+      @insert="insertMergeField"
+      @change="showMergeSource = true"
+      @stop="stopMailMerge"
+    />
+    <div v-else class="row recipient-row">
       <label class="label" :for="toFieldId">{{ $t('common.to') }}</label>
       <RecipientChips ref="toFieldRef" v-model="to" :input-id="toFieldId" :label="$t('common.to')" :placeholder="$t('compose.recipients.toPlaceholder')" class="field" @submit="send" />
       <AppButton v-if="!isPhone" size="sm" variant="ghost" class="cc-link"
@@ -1383,7 +1552,7 @@ defineExpose({
       @click="openPhoneFold"
     >
       <!-- One line, so the name reads "Cc/Bcc, From: address". -->
-      <span class="label">{{ $t('compose.recipients.ccBccFrom') }}</span> <span class="compose-fold-from">{{ fromAddress }}</span>
+      <span class="label">{{ mergeSource ? $t('common.from') : $t('compose.recipients.ccBccFrom') }}</span> <span class="compose-fold-from">{{ fromAddress }}</span>
       <!-- Says the row opens; as bare text it read like a caption. -->
       <AppIcon class="compose-fold-chevron"><path d="m4.5 6.5 3.5 3.5 3.5-3.5" /></AppIcon>
     </AppButton>
@@ -1395,11 +1564,11 @@ defineExpose({
       :inert="phoneFoldClosed || undefined"
       data-testid="compose-fold"
     >
-      <div class="row">
+      <div v-if="!mergeSource" class="row">
         <label class="label" :for="ccFieldId">{{ $t('common.cc') }}</label>
         <RecipientChips ref="ccFieldRef" v-model="cc" :input-id="ccFieldId" :label="$t('common.cc')" :placeholder="$t('compose.recipients.ccPlaceholder')" class="field" @submit="send" />
       </div>
-      <div class="row">
+      <div v-if="!mergeSource" class="row">
         <label class="label" :for="bccFieldId">{{ $t('common.bcc') }}</label>
         <RecipientChips v-model="bcc" :input-id="bccFieldId" :label="$t('common.bcc')" :placeholder="$t('compose.recipients.bccPlaceholder')" class="field" @submit="send" />
       </div>
@@ -1419,16 +1588,18 @@ defineExpose({
       <label class="label" :for="subjectFieldId">{{ $t('common.subject') }}</label>
       <input
         :id="subjectFieldId"
+        ref="subjectInputRef"
         v-model="subject"
         class="compose-subject"
         :aria-label="$t('common.subject')"
+        @focus="mergeInsertTarget = 'subject'"
         :placeholder="$t('compose.subject.placeholder')"
         @keydown.meta.enter.prevent="send"
         @keydown.ctrl.enter.prevent="send"
       />
     </div>
 
-    <div class="body" :class="{ 'body--with-history': plainTextCompose ? historyText : historyHtml }" @click="focusComposeBody">
+    <div class="body" :class="{ 'body--with-history': plainTextCompose ? historyText : historyHtml }" @click="focusComposeBody" @focusin="mergeInsertTarget = 'body'">
       <textarea
         v-if="plainTextCompose"
         ref="writingTextarea"
@@ -1648,6 +1819,13 @@ defineExpose({
                 <small v-if="cryptoHint" class="panel-note">{{ cryptoHint }}</small>
               </div>
             </div>
+            <template v-if="supportsBackend && !contextThreadId && !mergeSource">
+              <div class="panel-sep" role="separator" />
+              <AppButton size="sm" variant="ghost" class="panel-merge" :disabled="sending" data-testid="compose-mail-merge" @click="openMailMerge">
+                <template #icon><AppIcon><path d="M2 4.5h8M2 8h8M2 11.5h5" /><path d="m11 9.5 3 2-3 2" /></AppIcon></template>
+                {{ $t('mailMerge.menuItem') }}
+              </AppButton>
+            </template>
             <template v-if="draftId">
               <div class="panel-sep" role="separator" />
               <AppButton size="sm" variant="danger"
@@ -1671,7 +1849,19 @@ defineExpose({
           {{ $t('common.save') }}
         </AppButton>
         <!-- A disabled button gets no hover of its own; the wrapper carries the tooltip. -->
-        <span class="send-wrap" :title="sendBlockedHint ?? undefined" data-testid="compose-send-wrap">
+        <span v-if="mergeSource" class="send-wrap" :title="sendBlockedHint ?? undefined">
+          <AppButton
+            variant="primary"
+            :disabled="!canSend || mergeBusy"
+            :shortcut="canSend ? sendShortcut : null"
+            data-testid="compose-merge-review"
+            @click="send"
+          >
+            <template #icon><AppIcon><path d="m14 2-4.5 12L7 9 2 6.5 14 2ZM7 9l4-4"/></AppIcon></template>
+            {{ $t('mailMerge.reviewAndSend') }}
+          </AppButton>
+        </span>
+        <span v-else class="send-wrap" :title="sendBlockedHint ?? undefined" data-testid="compose-send-wrap">
           <SplitButton
             :secondary-label="$t('compose.sendLater.title')"
             :expanded="showSendLater"
@@ -1703,6 +1893,25 @@ defineExpose({
 
     </template>
 
+    <MailMergeSourceDialog
+      v-if="showMergeSource"
+      :current="mergeSource"
+      @apply="applyMergeSource"
+      @close="showMergeSource = false"
+    />
+    <MailMergeReviewDialog
+      v-if="showMergeReview && mergeSource && activeAccount"
+      :source="mergeSource"
+      :template="mergeTemplate"
+      :account-id="activeAccount.id"
+      :from-address="fromAddress"
+      :encrypt="pgpEncrypt || smimeEncrypt"
+      :busy="mergeBusy"
+      :error="mergeError"
+      @start="startMailMerge"
+      @change-list="changeMergeList"
+      @close="showMergeReview = false"
+    />
     <TemplatePicker
       v-if="showTemplatePicker"
       @apply="onTemplateApply"
@@ -2255,6 +2464,10 @@ textarea:focus {
   color: var(--text-tertiary);
   font-size: var(--font-size-xs);
   line-height: 1.45;
+}
+
+.panel-merge {
+  justify-self: start;
 }
 
 .panel-signature {

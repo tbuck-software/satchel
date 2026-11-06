@@ -1,0 +1,250 @@
+{
+  "en": {
+    "mailMerge": {
+      "menuItem": "Mail merge…",
+      "command": "Mail merge…",
+      "commandKeywords": "mail merge serial letter personalised copies bulk csv list",
+      "reviewAndSend": "Review and send…",
+      "contactsAction": "Mail merge to one contact… | Mail merge to {count} contacts…",
+      "started": "Mail merge started: one copy is on its way. | Mail merge started: {count} copies go out one by one.",
+      "viewProgress": "View progress",
+      "bar": {
+        "title": "Mail merge",
+        "recipients": "one recipient from {source} | {count} recipients from {source}",
+        "insertField": "Insert field",
+        "insertFieldHint": "Inserts the field where the cursor was, in the subject or the message",
+        "change": "Change list",
+        "stop": "Stop mail merge"
+      },
+      "source": {
+        "title": "Mail merge",
+        "lead": "Each recipient gets a copy addressed to them alone. Fields from the list fill the placeholders in subject and message.",
+        "kindLabel": "Where the recipients come from",
+        "csv": "CSV file",
+        "contacts": "Contacts",
+        "chooseFile": "Choose CSV file…",
+        "chooseOther": "Choose another file…",
+        "csvHint": "The first row names the fields. Comma or semicolon, UTF-8 or Windows-1252, as Excel and LibreOffice save it.",
+        "rows": "One row | {count} rows",
+        "delimiter": {
+          "comma": "comma-separated",
+          "semicolon": "semicolon-separated",
+          "tab": "tab-separated"
+        },
+        "encoding": {
+          "utf8": "UTF-8",
+          "utf8Bom": "UTF-8 (BOM)",
+          "utf16": "UTF-16",
+          "windows1252": "Windows-1252"
+        },
+        "truncated": "The file has more rows. Only the first {count} were read.",
+        "emailColumn": "Email address column",
+        "emailColumnPick": "Choose a column",
+        "emailColumnRequired": "Choose the column that holds the email addresses.",
+        "fields": "Fields: {fields}",
+        "searchContacts": "Search contacts",
+        "noContacts": "No contacts yet",
+        "selectAll": "Select the one shown | Select all {count} shown",
+        "selectNone": "Clear selection",
+        "contactsLabel": "one contact | {count} contacts",
+        "sectionLabel": "{section} (one contact) | {section} ({count} contacts)",
+        "apply": "Use one recipient | Use {count} recipients"
+      },
+      "review": {
+        "title": "Review mail merge",
+        "summary": "One of {total} rows in {source} will be sent. | {count} of {total} rows in {source} will be sent.",
+        "overLimit": "{count} recipients is more than one job may send ({limit}).",
+        "overLimitDetail": "Split the list into parts of at most {limit} and send each as its own mail merge.",
+        "unknownFields": "No field of the list is called {fields}.",
+        "unknownFieldsDetail": "Fields in the list: {fields}. Rows without a fallback for these are skipped.",
+        "encrypted": "Each copy is encrypted for its recipient. If a key is missing for anyone, nothing is sent and you are told who.",
+        "previewLabel": "Preview",
+        "previous": "Previous recipient",
+        "next": "Next recipient",
+        "position": "{index} of {total}",
+        "rowSkipped": "This row is skipped",
+        "issue": {
+          "invalidEmail": "No valid email address",
+          "duplicate": "The address appears in an earlier row",
+          "missing": "No value for {fields}"
+        },
+        "skipped": "One row is skipped | {count} rows are skipped",
+        "line": "Row {line}",
+        "noAddress": "No address",
+        "delay": "Time between messages",
+        "seconds": "seconds",
+        "duration": "Sends right away. | Takes about a minute. | Takes about {minutes} minutes.",
+        "delayInvalid": "Choose between 1 and 3600 seconds.",
+        "delayHint": "A slower pace keeps the provider from flagging the account; Gmail and Microsoft are strict.",
+        "start": "Send one message from {address} | Send {count} messages from {address}"
+      },
+      "confirm": {
+        "title": "Send one personalised message? | Send {count} personalised messages?",
+        "body": "From {address} ({account}), one copy per recipient, each addressed to them alone.",
+        "detail": "The messages leave through the Outbox one at a time. You can pause or cancel the rest there.",
+        "send": "Send"
+      },
+      "jobs": {
+        "title": "Mail merge",
+        "loadFailed": "Could not load the mail merge jobs.",
+        "noSource": "list",
+        "status": {
+          "running": "Sending",
+          "paused": "Paused",
+          "pausedFailures": "Paused after repeated failures",
+          "cancelled": "Cancelled",
+          "completed": "Finished"
+        },
+        "sent": "{count} of {total} sent",
+        "failed": "one failed | {count} failed",
+        "unknown": "one unconfirmed | {count} unconfirmed",
+        "cancelledCount": "one not sent | {count} not sent",
+        "next": "Next message at {time}",
+        "progressLabel": "Progress of {subject}",
+        "pause": "Pause",
+        "resume": "Resume",
+        "cancel": "Cancel the rest",
+        "retry": "Retry the failed one | Retry {count} failed",
+        "remove": "Remove",
+        "showRecipients": "Show recipients",
+        "hideRecipients": "Hide recipients",
+        "cancelConfirm": {
+          "title": "Cancel this mail merge?",
+          "body": "Nothing is left to send. | The remaining message is not sent. | The remaining {count} messages are not sent. Messages already sent stay sent."
+        },
+        "row": {
+          "pending": "Waiting",
+          "queued": "In the Outbox",
+          "sent": "Sent",
+          "failed": "Failed",
+          "unknown": "Delivery unconfirmed",
+          "cancelled": "Not sent"
+        }
+      }
+    }
+  },
+  "de": {
+    "mailMerge": {
+      "menuItem": "Serienmail …",
+      "command": "Serienmail …",
+      "commandKeywords": "serienmail serienbrief seriendruck mail merge personalisiert csv liste",
+      "reviewAndSend": "Prüfen und senden …",
+      "contactsAction": "Serienmail an einen Kontakt … | Serienmail an {count} Kontakte …",
+      "started": "Serienmail gestartet: eine Nachricht ist unterwegs. | Serienmail gestartet: {count} Nachrichten gehen nacheinander raus.",
+      "viewProgress": "Fortschritt ansehen",
+      "bar": {
+        "title": "Serienmail",
+        "recipients": "ein Empfänger aus {source} | {count} Empfänger aus {source}",
+        "insertField": "Feld einfügen",
+        "insertFieldHint": "Fügt das Feld dort ein, wo der Cursor zuletzt stand, im Betreff oder in der Nachricht",
+        "change": "Liste ändern",
+        "stop": "Serienmail beenden"
+      },
+      "source": {
+        "title": "Serienmail",
+        "lead": "Jeder Empfänger bekommt eine eigene Nachricht, nur an ihn adressiert. Felder aus der Liste füllen die Platzhalter in Betreff und Text.",
+        "kindLabel": "Woher die Empfänger kommen",
+        "csv": "CSV-Datei",
+        "contacts": "Kontakte",
+        "chooseFile": "CSV-Datei wählen …",
+        "chooseOther": "Andere Datei wählen …",
+        "csvHint": "Die erste Zeile benennt die Felder. Komma oder Semikolon, UTF-8 oder Windows-1252, so wie Excel und LibreOffice speichern.",
+        "rows": "Eine Zeile | {count} Zeilen",
+        "delimiter": {
+          "comma": "kommagetrennt",
+          "semicolon": "semikolongetrennt",
+          "tab": "tabulatorgetrennt"
+        },
+        "encoding": {
+          "utf8": "UTF-8",
+          "utf8Bom": "UTF-8 (BOM)",
+          "utf16": "UTF-16",
+          "windows1252": "Windows-1252"
+        },
+        "truncated": "Die Datei hat mehr Zeilen. Gelesen wurden nur die ersten {count}.",
+        "emailColumn": "Spalte mit der E-Mail-Adresse",
+        "emailColumnPick": "Spalte wählen",
+        "emailColumnRequired": "Wähle die Spalte mit den E-Mail-Adressen.",
+        "fields": "Felder: {fields}",
+        "searchContacts": "Kontakte durchsuchen",
+        "noContacts": "Noch keine Kontakte",
+        "selectAll": "Den angezeigten auswählen | Alle {count} angezeigten auswählen",
+        "selectNone": "Auswahl aufheben",
+        "contactsLabel": "ein Kontakt | {count} Kontakte",
+        "sectionLabel": "{section} (ein Kontakt) | {section} ({count} Kontakte)",
+        "apply": "Einen Empfänger übernehmen | {count} Empfänger übernehmen"
+      },
+      "review": {
+        "title": "Serienmail prüfen",
+        "summary": "Eine von {total} Zeilen aus {source} wird gesendet. | {count} von {total} Zeilen aus {source} werden gesendet.",
+        "overLimit": "{count} Empfänger sind mehr, als ein Auftrag senden darf ({limit}).",
+        "overLimitDetail": "Teile die Liste in Teile mit höchstens {limit} Zeilen und sende jeden als eigene Serienmail.",
+        "unknownFields": "Kein Feld der Liste heißt {fields}.",
+        "unknownFieldsDetail": "Felder der Liste: {fields}. Zeilen ohne Ersatzwert dafür werden übersprungen.",
+        "encrypted": "Jede Nachricht wird für ihren Empfänger verschlüsselt. Fehlt für jemanden ein Schlüssel, geht nichts raus, und du erfährst, für wen.",
+        "previewLabel": "Vorschau",
+        "previous": "Vorheriger Empfänger",
+        "next": "Nächster Empfänger",
+        "position": "{index} von {total}",
+        "rowSkipped": "Diese Zeile wird übersprungen",
+        "issue": {
+          "invalidEmail": "Keine gültige E-Mail-Adresse",
+          "duplicate": "Die Adresse steht schon in einer früheren Zeile",
+          "missing": "Kein Wert für {fields}"
+        },
+        "skipped": "Eine Zeile wird übersprungen | {count} Zeilen werden übersprungen",
+        "line": "Zeile {line}",
+        "noAddress": "Keine Adresse",
+        "delay": "Abstand zwischen den Nachrichten",
+        "seconds": "Sekunden",
+        "duration": "Geht sofort raus. | Dauert etwa eine Minute. | Dauert etwa {minutes} Minuten.",
+        "delayInvalid": "Wähle zwischen 1 und 3600 Sekunden.",
+        "delayHint": "Langsamer verhindert, dass der Anbieter das Konto sperrt; Gmail und Microsoft sind streng.",
+        "start": "Eine Nachricht von {address} senden | {count} Nachrichten von {address} senden"
+      },
+      "confirm": {
+        "title": "Eine persönliche Nachricht senden? | {count} persönliche Nachrichten senden?",
+        "body": "Von {address} ({account}), eine Nachricht je Empfänger, jede nur an ihn adressiert.",
+        "detail": "Die Nachrichten gehen einzeln über den Postausgang raus. Dort kannst du den Rest anhalten oder abbrechen.",
+        "send": "Senden"
+      },
+      "jobs": {
+        "title": "Serienmail",
+        "loadFailed": "Die Serienmail-Aufträge konnten nicht geladen werden.",
+        "noSource": "Liste",
+        "status": {
+          "running": "Wird gesendet",
+          "paused": "Angehalten",
+          "pausedFailures": "Nach wiederholten Fehlern angehalten",
+          "cancelled": "Abgebrochen",
+          "completed": "Fertig"
+        },
+        "sent": "{count} von {total} gesendet",
+        "failed": "einer fehlgeschlagen | {count} fehlgeschlagen",
+        "unknown": "einer unbestätigt | {count} unbestätigt",
+        "cancelledCount": "einer nicht gesendet | {count} nicht gesendet",
+        "next": "Nächste Nachricht um {time}",
+        "progressLabel": "Fortschritt von {subject}",
+        "pause": "Anhalten",
+        "resume": "Fortsetzen",
+        "cancel": "Rest abbrechen",
+        "retry": "Fehlgeschlagene erneut senden | {count} fehlgeschlagene erneut senden",
+        "remove": "Entfernen",
+        "showRecipients": "Empfänger zeigen",
+        "hideRecipients": "Empfänger ausblenden",
+        "cancelConfirm": {
+          "title": "Diese Serienmail abbrechen?",
+          "body": "Es ist nichts mehr zu senden. | Die verbleibende Nachricht wird nicht gesendet. | Die verbleibenden {count} Nachrichten werden nicht gesendet. Bereits gesendete bleiben gesendet."
+        },
+        "row": {
+          "pending": "Wartet",
+          "queued": "Im Postausgang",
+          "sent": "Gesendet",
+          "failed": "Fehlgeschlagen",
+          "unknown": "Zustellung unbestätigt",
+          "cancelled": "Nicht gesendet"
+        }
+      }
+    }
+  }
+}

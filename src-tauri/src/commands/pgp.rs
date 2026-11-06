@@ -1643,6 +1643,29 @@ pub async fn resolve_recipient_public_keys(
     app: &AppHandle,
     emails: &[String],
 ) -> Result<Vec<String>, String> {
+    let (keys, missing) = match_recipient_public_keys(pool, app, emails).await?;
+    if !missing.is_empty() {
+        return Err(format!("no public PGP key for: {}", missing.join(", ")));
+    }
+    Ok(keys)
+}
+
+/// The addresses among `emails` that no usable public key speaks for. Mail
+/// merge asks this up front, so a job does not stop at the first recipient
+/// without a key after the first copies went out.
+pub async fn missing_recipient_public_keys(
+    pool: &SqlitePool,
+    app: &AppHandle,
+    emails: &[String],
+) -> Result<Vec<String>, String> {
+    Ok(match_recipient_public_keys(pool, app, emails).await?.1)
+}
+
+async fn match_recipient_public_keys(
+    pool: &SqlitePool,
+    app: &AppHandle,
+    emails: &[String],
+) -> Result<(Vec<String>, Vec<String>), String> {
     prepare_pgp_key_storage(pool, app).await?;
     let rows = sqlx::query_as::<_, PgpKeySecretRow>(
         "SELECT id, key_type, armored_key, passphrase
@@ -1695,11 +1718,7 @@ pub async fn resolve_recipient_public_keys(
         }
     }
 
-    if !missing.is_empty() {
-        return Err(format!("no public PGP key for: {}", missing.join(", ")));
-    }
-
-    Ok(keys)
+    Ok((keys, missing))
 }
 
 fn user_id_matches_email(user_id: &str, email: &str) -> bool {

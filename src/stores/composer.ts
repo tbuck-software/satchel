@@ -21,6 +21,16 @@ export interface ComposerRequest {
    * it before a replacement, even while the form reports it untouched.
    */
   unsavedBody?: boolean;
+  /**
+   * Opens the composer for a mail merge. `contacts` comes from the contacts
+   * view and becomes the recipient list; without it the composer asks.
+   */
+  mailMerge?: ComposerMailMergeSeed | null;
+}
+
+export interface ComposerMailMergeSeed {
+  contacts?: Array<{ email: string; name: string }>;
+  label?: string;
 }
 
 /** The message key of the heading a composer opened in `mode` carries. */
@@ -128,6 +138,7 @@ export const useComposerStore = defineStore('composer', () => {
       body: next.body ?? '',
       bodyHtml: next.bodyHtml ?? null,
       ...(next.unsavedBody ? { unsavedBody: true } : {}),
+      ...(next.mailMerge ? { mailMerge: { ...next.mailMerge, contacts: next.mailMerge.contacts?.map((c) => ({ ...c })) } } : {}),
     };
     // One request at a time, in arrival order. A second one waits for the
     // answer to the first instead of taking its question away, then meets the
@@ -205,6 +216,19 @@ export const useComposerStore = defineStore('composer', () => {
     return open({ mode: 'resend', threadId });
   }
 
+  /**
+   * Asks the open composer to start a mail merge (the palette's entry), or
+   * opens a new one that does.
+   */
+  const mailMergeRequests = ref(0);
+  function openMailMerge(seed: ComposerMailMergeSeed = {}) {
+    if (request.value && !seed.contacts) {
+      mailMergeRequests.value += 1;
+      return Promise.resolve(true);
+    }
+    return open({ mode: 'new', mailMerge: seed });
+  }
+
   function setTitle(value: string) {
     const next = value.trim();
     if (next) titleOverride.value = next;
@@ -228,6 +252,8 @@ export const useComposerStore = defineStore('composer', () => {
     openReply,
     openForward,
     openResend,
+    openMailMerge,
+    mailMergeRequests,
     setTitle,
     adoptDraftMode,
     close,
