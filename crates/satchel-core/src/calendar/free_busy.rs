@@ -153,6 +153,35 @@ pub struct ProviderAnswers {
     pub refused: Vec<String>,
 }
 
+impl ProviderAnswers {
+    /// How long what was learned about `address` is kept: a failure briefly,
+    /// a refusal for an hour, an answer (or the provider not knowing them)
+    /// for a few minutes.
+    fn ttl(&self, address: &str) -> StdDuration {
+        if self.failed.iter().any(|failed| failed == address) {
+            FAILURE_TTL
+        } else if self.refused.iter().any(|refused| refused == address) {
+            REFUSED_TTL
+        } else {
+            ANSWER_TTL
+        }
+    }
+}
+
+/// Whether a provider's error answer to a free/busy request is a lasting
+/// refusal, cached for an hour, rather than a passing failure retried after a
+/// minute. Expired credentials (401), timeouts (408), throttling (429) and
+/// server errors pass; so does a 403 unless the provider said it is not about
+/// rate or quota (`permanent_403`).
+pub fn is_refusal(status: u16, permanent_403: bool) -> bool {
+    match status {
+        401 | 408 | 429 => false,
+        403 => permanent_403,
+        400..=499 => true,
+        _ => false,
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum FreeBusyError {
     #[error(transparent)]
@@ -416,13 +445,7 @@ async fn attendee_busy(
         let mut cache = CACHE.lock().ok();
         for address in missing {
             let busy = answers_from_provider.known.get(&address).cloned();
-            let ttl = if answers_from_provider.failed.contains(&address) {
-                FAILURE_TTL
-            } else if answers_from_provider.refused.contains(&address) {
-                REFUSED_TTL
-            } else {
-                ANSWER_TTL
-            };
+            let ttl = answers_from_provider.ttl(&address);
             if let Some(cache) = cache.as_mut() {
                 cache.insert(
                     key(&address),

@@ -893,15 +893,13 @@ pub async fn schedules(
             "endTime": at(end),
             "availabilityViewInterval": 30,
         });
-        let response = match send_waiting_out_throttling(
-            || {
-                graph
-                    .request(reqwest::Method::POST, url.clone())
-                    .json(&body)
-            },
-            "schedule",
-        )
-        .await
+        // Asked while someone waits in the editor: a throttled answer is
+        // "unknown" now and asked again on the next refresh, not slept through.
+        let response = match graph
+            .request(reqwest::Method::POST, url.clone())
+            .json(&body)
+            .send()
+            .await
         {
             Ok(response) => response,
             Err(error) => {
@@ -919,7 +917,8 @@ pub async fn schedules(
                 status = status.as_u16(),
                 "outlook schedule refused"
             );
-            if status.is_client_error() {
+            // Graph throttles with 429 alone, so a 403 is a lasting refusal.
+            if crate::calendar::free_busy::is_refusal(status.as_u16(), true) {
                 answers.refused.extend_from_slice(chunk);
             } else {
                 answers.failed.extend_from_slice(chunk);

@@ -265,12 +265,15 @@ pub async fn free_busy(
         };
         let status = response.status();
         if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            let permanent = permanent_refusal(&body);
             tracing::warn!(
                 account_id,
                 status = status.as_u16(),
+                permanent,
                 "google free/busy refused"
             );
-            if status.is_client_error() && status.as_u16() != 429 {
+            if crate::calendar::free_busy::is_refusal(status.as_u16(), permanent) {
                 answers.refused.extend_from_slice(chunk);
             } else {
                 answers.failed.extend_from_slice(chunk);
@@ -286,6 +289,29 @@ pub async fn free_busy(
         }
     }
     Ok(answers)
+}
+
+/// Whether a Google error body names only lasting reasons (`forbidden`,
+/// `notFound`, `accessNotConfigured`, …). Rate and quota reasons pass within
+/// minutes, and a body without reasons proves nothing either way.
+fn permanent_refusal(body: &str) -> bool {
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    let reasons = parsed["error"]["errors"]
+        .as_array()
+        .map(|errors| {
+            errors
+                .iter()
+                .filter_map(|error| error["reason"].as_str())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    !reasons.is_empty()
+        && reasons.iter().all(|reason| {
+            let reason = reason.to_ascii_lowercase();
+            !reason.contains("ratelimit") && !reason.contains("quota")
+        })
 }
 
 /// The answered addresses of one `freeBusy` response. Google keys calendars
@@ -740,6 +766,23 @@ mod tests {
         assert!(!mapped.all_day);
         assert_eq!(mapped.attendees_json, r#"["a@example.com"]"#);
         assert!(!mapped.transparent);
+    }
+
+    #[test]
+    fn rate_and_quota_403s_are_not_lasting_refusals() {
+        let body = |reason: &str| {
+            format!(
+                r#"{{"error":{{"code":403,"errors":[{{"domain":"usageLimits","reason":"{reason}"}}]}}}}"#
+            )
+        };
+        assert!(!permanent_refusal(&body("rateLimitExceeded")));
+        assert!(!permanent_refusal(&body("userRateLimitExceeded")));
+        assert!(!permanent_refusal(&body("quotaExceeded")));
+        assert!(permanent_refusal(&body("forbidden")));
+        assert!(permanent_refusal(&body("notFound")));
+        // No reasons, or no JSON: nothing proves it lasts.
+        assert!(!permanent_refusal(r#"{"error":{"code":403}}"#));
+        assert!(!permanent_refusal("<html>Forbidden</html>"));
     }
 
     #[test]

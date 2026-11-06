@@ -729,6 +729,26 @@ impl<'a> CalendarRepository<'a> {
     ) -> Result<(), CalendarError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let now = chrono::Utc::now().to_rfc3339();
+        // An incremental pass started from a stored cursor. If that cursor is
+        // gone now, something asked for a fresh listing while the pass ran
+        // (the `outlook_calendar_resync` repair); saving the pass's new link
+        // would quietly undo that, so the next pass starts over instead.
+        let cursor = if delta.complete {
+            delta.cursor
+        } else {
+            let stored: Option<Option<String>> = sqlx::query_scalar(
+                "SELECT sync_cursor FROM calendar_sources
+                 WHERE account_id = ? AND source = 'outlook' AND remote_id = ?",
+            )
+            .bind(account_id)
+            .bind(delta.calendar_id)
+            .fetch_optional(&mut *transaction)
+            .await?;
+            match stored {
+                Some(None) => None,
+                _ => delta.cursor,
+            }
+        };
         sqlx::query(
             "INSERT INTO calendar_sources (account_id, source, remote_id, name, updated_at, sync_cursor)
              VALUES (?, 'outlook', ?, ?, ?, ?)
@@ -741,7 +761,7 @@ impl<'a> CalendarRepository<'a> {
         .bind(delta.calendar_id)
         .bind(delta.calendar_name)
         .bind(&now)
-        .bind(delta.cursor)
+        .bind(cursor)
         .execute(&mut *transaction)
         .await?;
         for removed in delta.removed {
@@ -1380,6 +1400,107 @@ mod tests {
             repository.list_events(Some("account")).await.unwrap()[0].id,
             "old-event"
         );
+    }
+
+    #[tokio::test]
+    async fn an_incremental_pass_does_not_restore_a_cursor_cleared_meanwhile() {
+        let pool = pool().await;
+        account(&pool, "account", "2026-01-01").await;
+        let repository = CalendarRepository::new(&pool);
+        let delta = |cursor: &'static str, complete: bool| OutlookCalendarDelta {
+            calendar_id: "cal",
+            calendar_name: "Calendar",
+            changed: &[],
+            removed: &[],
+            complete,
+            cursor: Some(cursor),
+        };
+        let stored = || async {
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT sync_cursor FROM calendar_sources WHERE remote_id = 'cal'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        };
+        repository
+            .apply_outlook_delta("account", delta("first", true))
+            .await
+            .unwrap();
+        repository
+            .apply_outlook_delta("account", delta("second", false))
+            .await
+            .unwrap();
+        assert_eq!(stored().await.as_deref(), Some("second"));
+
+        // The resync repair clears the cursor while an incremental pass runs.
+        sqlx::query("UPDATE calendar_sources SET sync_cursor = NULL WHERE source = 'outlook'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        repository
+            .apply_outlook_delta("account", delta("third", false))
+            .await
+            .unwrap();
+        assert_eq!(
+            stored().await,
+            None,
+            "the next pass must list the calendar whole"
+        );
+        // That full pass stores its cursor again.
+        repository
+            .apply_outlook_delta("account", delta("fourth", true))
+            .await
+            .unwrap();
+        assert_eq!(stored().await.as_deref(), Some("fourth"));
+    }
+
+    #[tokio::test]
+    async fn a_series_takes_its_free_or_declined_flag_from_its_main_event() {
+        let pool = pool().await;
+        account(&pool, "account", "2026-01-01").await;
+        let repository = CalendarRepository::new(&pool);
+        // Overrides first: one cancelled, one the account declined. The
+        // series itself is an ordinary busy meeting.
+        let series = |main_extra: &str| {
+            format!(
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n\
+                 BEGIN:VEVENT\r\nUID:s@example.test\r\nRECURRENCE-ID:20260911T100000Z\r\n\
+                 DTSTART:20260911T100000Z\r\nDTEND:20260911T110000Z\r\nSTATUS:CANCELLED\r\nEND:VEVENT\r\n\
+                 BEGIN:VEVENT\r\nUID:s@example.test\r\nRECURRENCE-ID:20260912T100000Z\r\n\
+                 DTSTART:20260912T100000Z\r\nDTEND:20260912T110000Z\r\n\
+                 ATTENDEE;PARTSTAT=DECLINED:mailto:account@example.test\r\nEND:VEVENT\r\n\
+                 BEGIN:VEVENT\r\nUID:s@example.test\r\nSUMMARY:Daily\r\n\
+                 DTSTART:20260910T100000Z\r\nDTEND:20260910T110000Z\r\nRRULE:FREQ=DAILY\r\n\
+                 {main_extra}END:VEVENT\r\nEND:VCALENDAR\r\n"
+            )
+        };
+        let transparent = || async {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT transparent FROM calendar_events WHERE source = 'caldav'",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        };
+        repository
+            .upsert_caldav_event("account", "/cal/", "/cal/s.ics", Some("1"), &series(""))
+            .await
+            .unwrap();
+        assert_eq!(transparent().await, 0);
+        repository
+            .upsert_caldav_event(
+                "account",
+                "/cal/",
+                "/cal/s.ics",
+                Some("2"),
+                &series(
+                    "ATTENDEE;CN=\"Me: Account\";PARTSTAT=DECLINED:mailto:account@example.test\r\n",
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(transparent().await, 1);
     }
 
     #[tokio::test]

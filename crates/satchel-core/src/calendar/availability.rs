@@ -254,8 +254,11 @@ fn gaps(
     windows
 }
 
-/// The top-level property lines of the first VEVENT in `raw`, unfolded, with
-/// nested components (VALARM, …) left out.
+/// The top-level property lines of the main VEVENT in `raw`, unfolded, with
+/// nested components (VALARM, …) left out. The main VEVENT is the one without
+/// RECURRENCE-ID: overrides may come first in a resource, and their answer
+/// or cancellation is theirs alone, not the series'. A lone override (as the
+/// expander hands one over) is its own main VEVENT.
 fn event_lines(raw: &str) -> Vec<String> {
     let mut unfolded: Vec<String> = Vec::new();
     for line in raw.lines() {
@@ -266,20 +269,22 @@ fn event_lines(raw: &str) -> Vec<String> {
             unfolded.push(line.to_string());
         }
     }
-    let mut in_event = false;
+    let mut events: Vec<Vec<String>> = Vec::new();
+    let mut current: Option<Vec<String>> = None;
     let mut nested = 0_usize;
-    let mut lines = Vec::new();
     for line in unfolded {
         let upper = line.trim().to_ascii_uppercase();
         if upper == "BEGIN:VEVENT" {
-            in_event = true;
+            current = Some(Vec::new());
+            nested = 0;
             continue;
         }
-        if !in_event {
+        let Some(lines) = current.as_mut() else {
             continue;
-        }
+        };
         if upper == "END:VEVENT" {
-            break;
+            events.extend(current.take());
+            continue;
         }
         if upper.starts_with("BEGIN:") {
             nested += 1;
@@ -293,7 +298,66 @@ fn event_lines(raw: &str) -> Vec<String> {
             lines.push(line.trim().to_string());
         }
     }
-    lines
+    events.extend(current);
+    let is_override = |lines: &Vec<String>| {
+        lines.iter().any(|line| {
+            property(line).is_some_and(|parsed| parsed.name.eq_ignore_ascii_case("RECURRENCE-ID"))
+        })
+    };
+    if events.is_empty() {
+        return Vec::new();
+    }
+    let main = events
+        .iter()
+        .position(|lines| !is_override(lines))
+        .unwrap_or(0);
+    events.swap_remove(main)
+}
+
+/// One content line split into name, parameters and value. A `:` or `;`
+/// inside a quoted parameter value (`CN="Doe; Jane: Ops"`) belongs to it.
+struct Property<'a> {
+    name: &'a str,
+    params: Vec<(&'a str, &'a str)>,
+    value: &'a str,
+}
+
+fn property(line: &str) -> Option<Property<'_>> {
+    let mut quoted = false;
+    let mut cuts = Vec::new();
+    let mut value_at = None;
+    for (index, ch) in line.char_indices() {
+        match ch {
+            '"' => quoted = !quoted,
+            ';' if !quoted => cuts.push(index),
+            ':' if !quoted => {
+                value_at = Some(index);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let value_at = value_at?;
+    let mut bounds = vec![0];
+    bounds.extend(cuts.iter().map(|cut| cut + 1));
+    let mut ends = cuts.clone();
+    ends.push(value_at);
+    let mut parts = bounds
+        .iter()
+        .zip(&ends)
+        .map(|(start, end)| &line[*start..*end]);
+    let name = parts.next()?.trim();
+    let params = parts
+        .filter_map(|param| {
+            let (key, value) = param.split_once('=')?;
+            Some((key.trim(), value.trim().trim_matches('"')))
+        })
+        .collect();
+    Some(Property {
+        name,
+        params,
+        value: line[value_at + 1..].trim(),
+    })
 }
 
 /// Whether an iCalendar event leaves its time free: TRANSP:TRANSPARENT, or
@@ -301,52 +365,41 @@ fn event_lines(raw: &str) -> Vec<String> {
 /// (RFC 5545 §3.8.2.7, default OPAQUE): a "Vacation" without it blocks the
 /// days. Calendars of birthdays or holidays are switched off as a whole.
 pub fn ics_transparent(raw: &str) -> bool {
-    event_lines(raw).iter().any(|line| {
-        let upper = line.to_ascii_uppercase();
-        let Some((name, value)) = upper.split_once(':') else {
-            return false;
-        };
-        let name = name.split(';').next().unwrap_or(name);
-        matches!(
-            (name, value.trim()),
-            ("STATUS", "CANCELLED") | ("TRANSP", "TRANSPARENT")
-        )
-    })
+    event_lines(raw)
+        .iter()
+        .filter_map(|line| property(line))
+        .any(|parsed| {
+            let value = parsed.value.to_ascii_uppercase();
+            matches!(
+                (parsed.name.to_ascii_uppercase().as_str(), value.as_str()),
+                ("STATUS", "CANCELLED") | ("TRANSP", "TRANSPARENT")
+            )
+        })
 }
 
 /// Whether one of `addresses` is an ATTENDEE of the event with
 /// PARTSTAT=DECLINED: a meeting the owner said no to takes none of their time.
 pub fn ics_declined_by(raw: &str, addresses: &[String]) -> bool {
-    event_lines(raw).iter().any(|line| {
-        let Some((header, value)) = line.split_once(':') else {
-            return false;
-        };
-        let mut params = header.split(';');
-        if !params
-            .next()
-            .is_some_and(|name| name.trim().eq_ignore_ascii_case("ATTENDEE"))
-        {
-            return false;
-        }
-        let declined = params.any(|param| {
-            param.split_once('=').is_some_and(|(key, value)| {
-                key.trim().eq_ignore_ascii_case("PARTSTAT")
-                    && value
-                        .trim()
-                        .trim_matches('"')
-                        .eq_ignore_ascii_case("DECLINED")
-            })
-        });
-        let address = value.trim();
-        let address = address
-            .get(..7)
-            .filter(|scheme| scheme.eq_ignore_ascii_case("mailto:"))
-            .map_or(address, |_| &address[7..]);
-        declined
-            && addresses
-                .iter()
-                .any(|own| own.eq_ignore_ascii_case(address.trim()))
-    })
+    event_lines(raw)
+        .iter()
+        .filter_map(|line| property(line))
+        .any(|attendee| {
+            if !attendee.name.eq_ignore_ascii_case("ATTENDEE") {
+                return false;
+            }
+            let declined = attendee.params.iter().any(|(key, value)| {
+                key.eq_ignore_ascii_case("PARTSTAT") && value.eq_ignore_ascii_case("DECLINED")
+            });
+            let address = attendee
+                .value
+                .get(..7)
+                .filter(|scheme| scheme.eq_ignore_ascii_case("mailto:"))
+                .map_or(attendee.value, |_| &attendee.value[7..]);
+            declined
+                && addresses
+                    .iter()
+                    .any(|own| own.eq_ignore_ascii_case(address.trim()))
+        })
 }
 
 /// Every address the account answers to: its own and its aliases.
@@ -478,18 +531,17 @@ pub async fn own_busy(
         if is_edited {
             continue;
         }
-        let occurrences = row
-            .raw_ics
-            .as_deref()
-            .map(|raw| {
-                crate::email::calendar::upcoming_recurrence_occurrences(
-                    raw,
-                    start - Duration::days(1),
-                    MAX_OCCURRENCES,
-                )
-            })
-            .unwrap_or_default();
-        if occurrences.is_empty() {
+        // `None`: not a series, or one the expander cannot follow; the
+        // event's own slot stands for it. `Some`, even empty, is the truth:
+        // a series whose every occurrence is excluded or cancelled is free.
+        let occurrences = row.raw_ics.as_deref().and_then(|raw| {
+            crate::email::calendar::recurrence_occurrences(
+                raw,
+                start - Duration::days(1),
+                MAX_OCCURRENCES,
+            )
+        });
+        let Some(occurrences) = occurrences else {
             keep(block(
                 &row.starts_at,
                 &row.ends_at,
@@ -497,24 +549,24 @@ pub async fn own_busy(
                 zone,
                 false,
             ));
-        } else {
-            for occurrence in occurrences {
-                // A moved occurrence carries its own TRANSP, STATUS and answer.
-                if occurrence
-                    .override_event
-                    .as_deref()
-                    .is_some_and(|event| ics_transparent(event) || ics_declined_by(event, &own))
-                {
-                    continue;
-                }
-                keep(block(
-                    &occurrence.starts_at,
-                    &occurrence.ends_at,
-                    row.all_day,
-                    zone,
-                    false,
-                ));
+            continue;
+        };
+        for occurrence in occurrences {
+            // A moved occurrence carries its own TRANSP, STATUS and answer.
+            if occurrence
+                .override_event
+                .as_deref()
+                .is_some_and(|event| ics_transparent(event) || ics_declined_by(event, &own))
+            {
+                continue;
             }
+            keep(block(
+                &occurrence.starts_at,
+                &occurrence.ends_at,
+                row.all_day,
+                zone,
+                false,
+            ));
         }
     }
     for invite in invites {

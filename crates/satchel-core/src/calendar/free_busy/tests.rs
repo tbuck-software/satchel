@@ -330,3 +330,31 @@ async fn invalid_ranges_durations_and_zones_are_refused_with_keys() {
         FreeBusyError::Invalid(AvailabilityError::Range)
     ));
 }
+
+#[test]
+fn refusals_are_kept_an_hour_failures_a_minute_answers_five() {
+    let answers = ProviderAnswers {
+        known: [("known@example.com".to_string(), Vec::new())].into(),
+        failed: vec!["failed@example.com".into()],
+        refused: vec!["refused@example.com".into()],
+    };
+    assert_eq!(answers.ttl("refused@example.com"), REFUSED_TTL);
+    assert_eq!(REFUSED_TTL, StdDuration::from_secs(3600));
+    assert_eq!(answers.ttl("failed@example.com"), FAILURE_TTL);
+    assert_eq!(answers.ttl("known@example.com"), ANSWER_TTL);
+    // Not answered for at all: unknown, asked again with the answers.
+    assert_eq!(answers.ttl("silent@example.com"), ANSWER_TTL);
+}
+
+#[test]
+fn only_lasting_errors_count_as_refusals() {
+    for status in [400, 404, 410] {
+        assert!(is_refusal(status, false), "{status}");
+    }
+    // A 403 only when the provider said it is not about rate or quota.
+    assert!(is_refusal(403, true));
+    assert!(!is_refusal(403, false));
+    for status in [401, 408, 429, 500, 502, 503] {
+        assert!(!is_refusal(status, true), "{status}");
+    }
+}

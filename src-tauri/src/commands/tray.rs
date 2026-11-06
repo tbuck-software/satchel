@@ -689,18 +689,13 @@ async fn load_upcoming_calendar_events_at(
         } else {
             now
         };
-        let recurrences = row
-            .raw_ics
-            .as_deref()
-            .map(|raw| {
-                crate::email::calendar::upcoming_recurrence_occurrences(
-                    raw,
-                    recurrence_now,
-                    MAX_UPCOMING_EVENTS,
-                )
-            })
-            .unwrap_or_default();
-        if !recurrences.is_empty() {
+        // `Some`, even empty, is the series as it stands (an empty list: every
+        // upcoming occurrence excluded or cancelled). `None` is no series, or
+        // one the expander cannot follow: the row's own slot stands for it.
+        let recurrences = row.raw_ics.as_deref().and_then(|raw| {
+            crate::email::calendar::recurrence_occurrences(raw, recurrence_now, MAX_UPCOMING_EVENTS)
+        });
+        if let Some(recurrences) = recurrences {
             events.extend(
                 recurrences
                     .into_iter()

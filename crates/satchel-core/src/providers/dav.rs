@@ -890,7 +890,8 @@ pub async fn free_busy(
         .await
         .map_err(|err| format!("CalDAV free/busy request failed: {err}"))?;
     let status = response.status();
-    if status.is_client_error() && status.as_u16() != 429 {
+    // A DAV server that throttles says 429 or 503; a 403 means no scheduling here.
+    if crate::calendar::free_busy::is_refusal(status.as_u16(), true) {
         // The server will not schedule for this user; asking every minute won't change it.
         tracing::warn!(status = status.as_u16(), "CalDAV free/busy refused");
         return Ok(ProviderAnswers {

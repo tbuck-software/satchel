@@ -33,6 +33,15 @@ describe('availability text', () => {
     expect(lines.days[1]).toMatch(/day=Wed,? 11 Nov,times=09:00\s*[–-]\s*17:00/);
   });
 
+  it('writes plain spaces, never the thin or narrow ones ICU puts around ranges and AM/PM', () => {
+    for (const locale of ['en', 'en-US', 'de']) {
+      const lines = availabilityLines(report, { t, locale, durationMinutes: 30 })!;
+      for (const line of [lines.intro, ...lines.days]) {
+        expect(line).not.toMatch(/[\u00a0\u2009\u202f]/);
+      }
+    }
+  });
+
   it('reads whole hours as hours', () => {
     expect(durationText(t, 60)).toBe('availability.text.hours#1(count=1)');
     expect(durationText(t, 90)).toBe('availability.text.minutes#90(count=90)');

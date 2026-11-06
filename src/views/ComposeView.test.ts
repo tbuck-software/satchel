@@ -161,6 +161,10 @@ vi.mock('@/composables/useComposerTransport', () => ({
     undoSend: harness.undoSend,
   }),
 }));
+vi.mock('@/services/backend/availability', () => ({
+  backendFindFreeSlots: vi.fn(async () => ({ time_zone: 'UTC', unknown: [], days: [] })),
+  backendQueryFreeBusy: vi.fn(),
+}));
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({
     error: harness.toastError,
@@ -171,6 +175,7 @@ vi.mock('@/composables/useToast', () => ({
 }));
 
 import ComposeView from './ComposeView.vue';
+import InsertAvailabilityDialog from '@/components/mail/InsertAvailabilityDialog.vue';
 import { useUiStore } from '@/stores/ui';
 
 const DRAFT_BODY = 'The quarterly figures are attached.';
@@ -1078,3 +1083,40 @@ describe('phone composer', () => {
     wrapper.unmount();
   });
 });
+
+describe('insert my availability', () => {
+  const content = { text: "I'm free:\n- Mon: 09:00-10:00", html: "<p>I'm free:</p><ul><li><p>Mon: 09:00-10:00</p></li></ul>" };
+
+  async function openAndInsert(wrapper: ReturnType<typeof render>) {
+    await wrapper.get('[data-testid="compose-insert-availability"]').trigger('click');
+    await flushPromises();
+    await vi.dynamicImportSettled();
+    await flushPromises();
+    wrapper.findComponent(InsertAvailabilityDialog).vm.$emit('insert', content);
+    await flushPromises();
+  }
+
+  it('says so when the rich editor cannot take the text', async () => {
+    harness.composePlainText = false;
+    harness.realEditor = false;
+    harness.toastError.mockClear();
+    const wrapper = render();
+    await flushPromises();
+    await openAndInsert(wrapper);
+    expect(harness.toastError).toHaveBeenCalledWith('The availability could not be inserted. Click into the message and try again.');
+    expect(wrapper.findComponent(InsertAvailabilityDialog).exists()).toBe(false);
+  });
+
+  it('puts the text at the caret of a plain-text message', async () => {
+    harness.composePlainText = true;
+    harness.toastError.mockClear();
+    const wrapper = render();
+    await flushPromises();
+    const area = wrapper.get('textarea.plain-editor');
+    (area.element as HTMLTextAreaElement).setSelectionRange(0, 0);
+    await openAndInsert(wrapper);
+    expect((area.element as HTMLTextAreaElement).value).toContain(`${content.text}\n${DRAFT_BODY}`);
+    expect(harness.toastError).not.toHaveBeenCalled();
+  });
+});
+

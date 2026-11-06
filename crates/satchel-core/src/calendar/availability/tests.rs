@@ -360,6 +360,15 @@ fn a_meeting_the_owner_declined_is_recognised_by_any_of_their_addresses() {
         &event("ATTENDEE;PARTSTAT=ACCEPTED:mailto:me@example.com\r\n"),
         &own
     ));
+    // A quoted name may hold `:` and `;`.
+    assert!(ics_declined_by(
+        &event("ATTENDEE;CN=\"Doe; Jane: Ops\";PARTSTAT=DECLINED:mailto:me@example.com\r\n"),
+        &own
+    ));
+    assert!(!ics_declined_by(
+        &event("ATTENDEE;CN=\"PARTSTAT=DECLINED:\";PARTSTAT=ACCEPTED:mailto:me@example.com\r\n"),
+        &own
+    ));
     // Someone else declining changes nothing for the owner.
     assert!(!ics_declined_by(
         &event("ATTENDEE;PARTSTAT=DECLINED:mailto:other2@example.com\r\n"),
@@ -706,5 +715,65 @@ async fn moved_skipped_and_declined_occurrences_count_where_they_now_are() {
                 "2026-12-07T09:30:00+00:00".to_string()
             ),
         ]
+    );
+}
+
+#[tokio::test]
+async fn a_series_with_every_occurrence_excluded_takes_no_time() {
+    let pool = pool().await;
+    let series = concat!(
+        "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:gone\r\n",
+        "DTSTART:20261109T090000Z\r\nDTEND:20261109T100000Z\r\n",
+        "RRULE:FREQ=DAILY;COUNT=2\r\nEXDATE:20261109T090000Z\r\n",
+        "END:VEVENT\r\n",
+        "BEGIN:VEVENT\r\nUID:gone\r\nRECURRENCE-ID:20261110T090000Z\r\n",
+        "DTSTART:20261110T090000Z\r\nDTEND:20261110T100000Z\r\nSTATUS:CANCELLED\r\nEND:VEVENT\r\n",
+        "END:VCALENDAR\r\n",
+    );
+    event(
+        &pool,
+        "gone",
+        "caldav",
+        Some("https://dav.example/cal/"),
+        "2026-11-09T09:00:00Z",
+        "2026-11-09T10:00:00Z",
+        false,
+        false,
+        Some(series),
+    )
+    .await;
+    // A rule the expander does not follow still counts its first occurrence.
+    let unsupported = concat!(
+        "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:last-weekday\r\n",
+        "DTSTART:20261109T130000Z\r\nDTEND:20261109T140000Z\r\n",
+        "RRULE:FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1\r\n",
+        "END:VEVENT\r\nEND:VCALENDAR\r\n",
+    );
+    event(
+        &pool,
+        "last-weekday",
+        "caldav",
+        Some("https://dav.example/cal/"),
+        "2026-11-09T13:00:00Z",
+        "2026-11-09T14:00:00Z",
+        false,
+        false,
+        Some(unsupported),
+    )
+    .await;
+
+    let blocks = own_busy(
+        &pool,
+        at("2026-11-09T00:00:00Z"),
+        at("2026-11-12T00:00:00Z"),
+        berlin(),
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        blocks.iter().map(|block| block.start).collect::<Vec<_>>(),
+        vec![at("2026-11-09T13:00:00Z")]
     );
 }

@@ -23,7 +23,7 @@ export function zoneLabel(zone: string, locale: string, at: Date): string {
       const name = new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: style })
         .formatToParts(at)
         .find((part) => part.type === 'timeZoneName')?.value;
-      if (name && name !== zone) return `${name}, ${zone}`;
+      if (name && name !== zone) return plainSpaces(`${name}, ${zone}`);
     } catch {
       // An engine without the style tries the next one.
     }
@@ -37,11 +37,21 @@ function timeFormat(locale: string, zone: string): Intl.DateTimeFormat {
   return new Intl.DateTimeFormat(locale, { ...(app as Intl.DateTimeFormatOptions), timeZone: zone });
 }
 
+/**
+ * ICU puts thin and narrow no-break spaces around range dashes and before
+ * AM/PM. Plain-text mail shows them as gaps of odd width, or as boxes in
+ * older clients and fonts; plain spaces read the same everywhere. The en
+ * dash stays: it is ordinary UTF-8 text in every client that shows mail.
+ */
+function plainSpaces(text: string): string {
+  return text.replace(/[\u00a0\u2009\u202f]/g, ' ');
+}
+
 function timeRange(locale: string, zone: string, start: Date, end: Date): string {
   const format = timeFormat(locale, zone);
-  return typeof format.formatRange === 'function'
+  return plainSpaces(typeof format.formatRange === 'function'
     ? format.formatRange(start, end)
-    : `${format.format(start)} – ${format.format(end)}`;
+    : `${format.format(start)} – ${format.format(end)}`);
 }
 
 /**
@@ -62,7 +72,7 @@ export function availabilityLines(
       const times = day.windows
         .map((window) => timeRange(locale, zone, new Date(window.starts_at), new Date(window.ends_at)))
         .join(', ');
-      return t('availability.text.day', { day: dayFormat.format(first), times });
+      return t('availability.text.day', { day: plainSpaces(dayFormat.format(first)), times });
     });
   if (days.length === 0) return null;
   const firstStart = new Date(report.days.find((day) => day.windows.length > 0)!.windows[0]!.starts_at);

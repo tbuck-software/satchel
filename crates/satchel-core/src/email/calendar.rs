@@ -669,10 +669,23 @@ pub fn upcoming_recurrence_occurrences(
     after: chrono::DateTime<chrono::Utc>,
     limit: usize,
 ) -> Vec<RecurrenceOccurrence> {
+    recurrence_occurrences(raw_ics, after, limit).unwrap_or_default()
+}
+
+/// [`upcoming_recurrence_occurrences`], telling apart a series that has no
+/// occurrence left (`Some` of an empty list: every one is past, excluded or
+/// cancelled) from one this expander cannot follow (`None`: no RRULE, or a
+/// rule part or RDATE it does not support). Only for `None` should a caller
+/// fall back to the event's own DTSTART.
+pub fn recurrence_occurrences(
+    raw_ics: &str,
+    after: chrono::DateTime<chrono::Utc>,
+    limit: usize,
+) -> Option<Vec<RecurrenceOccurrence>> {
     use chrono::{Datelike, Duration};
 
     if limit == 0 {
-        return Vec::new();
+        return Some(Vec::new());
     }
     let unfolded = unfold_ics(raw_ics);
     let blocks = event_blocks(&unfolded);
@@ -682,20 +695,14 @@ pub fn upcoming_recurrence_occurrences(
         .copied()
         .find(|block| find_dt_property(block, "RECURRENCE-ID").is_none())
         .unwrap_or_else(|| first_event_block(&unfolded));
-    let Some(rrule) = event.lines().find_map(|line| {
+    let rrule = event.lines().find_map(|line| {
         line.trim()
             .strip_prefix("RRULE:")
             .or_else(|| line.trim().strip_prefix("rrule:"))
-    }) else {
-        return Vec::new();
-    };
-    let Some(start_prop) = find_dt_property(event, "DTSTART") else {
-        return Vec::new();
-    };
+    })?;
+    let start_prop = find_dt_property(event, "DTSTART")?;
     let all_day = start_prop.value.len() == 8;
-    let Some(anchor) = parse_ics_naive(start_prop.value, all_day) else {
-        return Vec::new();
-    };
+    let anchor = parse_ics_naive(start_prop.value, all_day)?;
     let duration = event_span(event, anchor, all_day);
     let excluded = exdates(event);
     let mut replaced = Excluded::default();
@@ -764,14 +771,29 @@ pub fn upcoming_recurrence_occurrences(
             "BYMONTHDAY" => {
                 by_month_days.extend(value.split(',').filter_map(|day| day.parse::<i32>().ok()));
             }
-            _ => {}
+            // The week start only matters to rules this expander does not follow.
+            "WKST" => {}
+            // BYSETPOS, BYMONTH, BYWEEKNO, BYYEARDAY, BYHOUR, BYMINUTE,
+            // BYSECOND and anything newer change which dates match. Ignoring
+            // them would invent occurrences ("last weekday of the month"
+            // would become every weekday), so the series is not expanded.
+            _ => return None,
         }
     }
-    if !matches!(
-        freq.to_ascii_uppercase().as_str(),
-        "DAILY" | "WEEKLY" | "MONTHLY"
-    ) {
-        return Vec::new();
+    // Extra dates of a series are not followed either.
+    if event.lines().any(|line| {
+        let upper = line.trim().to_ascii_uppercase();
+        upper.starts_with("RDATE") && matches!(upper.as_bytes().get(5), Some(b';' | b':'))
+    }) {
+        return None;
+    }
+    let freq_upper = freq.to_ascii_uppercase();
+    // BYMONTHDAY narrows a monthly rule only; elsewhere it is not followed.
+    if !by_month_days.is_empty() && freq_upper != "MONTHLY" {
+        return None;
+    }
+    if !matches!(freq_upper.as_str(), "DAILY" | "WEEKLY" | "MONTHLY") {
+        return None;
     }
 
     let anchor_date = anchor.date();
@@ -784,7 +806,15 @@ pub fn upcoming_recurrence_occurrences(
         let months = (date.year() - anchor_date.year()) as i64 * 12 + date.month() as i64
             - anchor_date.month() as i64;
         let matches = match freq.to_ascii_uppercase().as_str() {
-            "DAILY" => days >= 0 && days % interval == 0,
+            // "Every weekday" is DAILY narrowed by BYDAY.
+            "DAILY" => {
+                days >= 0
+                    && days % interval == 0
+                    && (by_days.is_empty()
+                        || by_days
+                            .iter()
+                            .any(|(_, weekday)| *weekday == date.weekday()))
+            }
             "WEEKLY" => {
                 days >= 0
                     && (days / 7) % interval == 0
@@ -855,7 +885,7 @@ pub fn upcoming_recurrence_occurrences(
     occurrences.extend(overrides);
     occurrences.sort_by(|a, b| a.starts_at.cmp(&b.starts_at));
     occurrences.truncate(limit);
-    occurrences
+    Some(occurrences)
 }
 
 fn parse_ics_naive(value: &str, all_day: bool) -> Option<chrono::NaiveDateTime> {
@@ -1206,15 +1236,78 @@ mod tests {
             .contains("TRANSP:OPAQUE"));
     }
 
+    fn series(rule_and_more: &str) -> String {
+        format!(
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:s@example.com\r\n\
+             DTSTART:20261102T090000Z\r\nDTEND:20261102T100000Z\r\n{rule_and_more}\
+             END:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+    }
+
     #[test]
-    fn unsupported_rules_expand_to_nothing() {
-        let yearly = concat!(
-            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:y@example.com\r\n",
-            "DTSTART:20261109T090000Z\r\nDTEND:20261109T100000Z\r\n",
-            "RRULE:FREQ=YEARLY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+    fn rules_with_parts_the_expander_does_not_follow_are_not_expanded() {
+        let after = after("2026-11-01T00:00:00Z");
+        for rule in [
+            "RRULE:FREQ=YEARLY\r\n",
+            // Last weekday of the month: not every weekday.
+            "RRULE:FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1\r\n",
+            "RRULE:FREQ=WEEKLY;BYMONTH=1,7\r\n",
+            "RRULE:FREQ=DAILY;BYWEEKNO=20\r\n",
+            "RRULE:FREQ=DAILY;BYYEARDAY=100\r\n",
+            "RRULE:FREQ=DAILY;BYHOUR=9,15\r\n",
+            "RRULE:FREQ=DAILY;BYMINUTE=30\r\n",
+            "RRULE:FREQ=WEEKLY;BYMONTHDAY=1\r\n",
+            "RRULE:FREQ=WEEKLY\r\nRDATE:20261104T150000Z\r\n",
+            "RRULE:FREQ=WEEKLY\r\nRDATE;VALUE=DATE:20261104\r\n",
+        ] {
+            assert_eq!(
+                recurrence_occurrences(&series(rule), after, 50),
+                None,
+                "{rule}"
+            );
+            assert!(
+                upcoming_recurrence_occurrences(&series(rule), after, 50).is_empty(),
+                "{rule}"
+            );
+        }
+        // No series at all is not "nothing left" either.
+        assert_eq!(recurrence_occurrences(&series(""), after, 50), None);
+    }
+
+    #[test]
+    fn every_weekday_is_daily_narrowed_by_byday() {
+        let occurrences = recurrence_occurrences(
+            &series("RRULE:FREQ=DAILY;COUNT=7;BYDAY=MO,TU,WE,TH,FR;WKST=MO\r\n"),
+            after("2026-11-01T00:00:00Z"),
+            50,
+        )
+        .unwrap();
+        let days = occurrences
+            .iter()
+            .map(|occurrence| &occurrence.starts_at[..10])
+            .collect::<Vec<_>>();
+        // Monday 2 Nov to Tuesday 10 Nov, the weekend left out.
+        assert_eq!(
+            days,
+            vec![
+                "2026-11-02",
+                "2026-11-03",
+                "2026-11-04",
+                "2026-11-05",
+                "2026-11-06",
+                "2026-11-09",
+                "2026-11-10",
+            ]
         );
-        assert!(
-            upcoming_recurrence_occurrences(yearly, after("2026-11-01T00:00:00Z"), 3).is_empty()
+    }
+
+    #[test]
+    fn a_series_with_every_occurrence_excluded_has_nothing_left() {
+        let excluded =
+            series("RRULE:FREQ=DAILY;COUNT=2\r\nEXDATE:20261102T090000Z,20261103T090000Z\r\n");
+        assert_eq!(
+            recurrence_occurrences(&excluded, after("2026-11-01T00:00:00Z"), 10),
+            Some(Vec::new())
         );
     }
 

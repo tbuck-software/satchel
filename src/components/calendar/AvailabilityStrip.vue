@@ -148,6 +148,8 @@ const slot = computed(() => ({
 interface Row {
   key: string;
   label: string;
+  /** False while loading or after a failed load: nothing definite to say. */
+  settled: boolean;
   known: boolean;
   blocks: Array<{ key: string; left: number; width: number; tentative: boolean }>;
   conflict: boolean;
@@ -194,6 +196,7 @@ function row(key: string, label: string, known: boolean, blocks: BackendBusyBloc
   return {
     key,
     label,
+    settled: true,
     known,
     conflict,
     summary,
@@ -211,14 +214,16 @@ function row(key: string, label: string, known: boolean, blocks: BackendBusyBloc
 
 const rows = computed<Row[]>(() => {
   // While a report is stale its people and busy time are not drawn as if they were today's.
-  if (stale.value) {
+  // A failed load says so once, in the status line; its rows claim nothing.
+  if (stale.value || failed.value) {
     return [t('availability.strip.you'), ...props.attendees].map((label, index) => ({
       key: index === 0 ? 'you' : label,
       label,
+      settled: false,
       known: true,
       blocks: [],
       conflict: false,
-      summary: t('availability.strip.loading'),
+      summary: failed.value ? '' : t('availability.strip.loading'),
     }));
   }
   const data = report.value;
@@ -311,12 +316,12 @@ const canSearch = computed(() => durationMinutes.value >= 5 && durationMinutes.v
     </p>
 
     <ul v-if="ui.isMobile" class="strip__list">
-      <li v-for="entry in rows" :key="entry.key" class="strip__list-row" :class="{ 'strip__list-row--conflict': entry.conflict, 'strip__list-row--unknown': !entry.known }">
+      <li v-for="entry in rows" :key="entry.key" class="strip__list-row" :class="{ 'strip__list-row--conflict': entry.conflict, 'strip__list-row--unknown': !entry.known, 'strip__list-row--pending': !entry.settled }">
         <span class="strip__name">{{ entry.label }}</span>
-        <span class="strip__verdict">
+        <span v-if="entry.settled" class="strip__verdict">
           {{ !entry.known ? $t('availability.strip.unknown') : entry.conflict ? $t('availability.strip.busyThen') : $t('availability.strip.freeThen') }}
         </span>
-        <span v-if="entry.known" class="strip__times">{{ entry.summary }}</span>
+        <span v-if="entry.settled && entry.known" class="strip__times">{{ entry.summary }}</span>
       </li>
     </ul>
 
@@ -330,10 +335,10 @@ const canSearch = computed(() => durationMinutes.value >= 5 && durationMinutes.v
         <div
           class="strip__track"
           :class="{ 'strip__track--unknown': !entry.known }"
-          :title="`${entry.label}: ${entry.summary}`"
+          :title="entry.summary ? `${entry.label}: ${entry.summary}` : entry.label"
           @pointerdown="moveToPointer"
         >
-          <span class="sr-only">{{ entry.label }}: {{ entry.summary }}</span>
+          <span class="sr-only">{{ entry.summary ? `${entry.label}: ${entry.summary}` : entry.label }}</span>
           <span
             v-for="block in entry.blocks"
             :key="block.key"
@@ -517,7 +522,8 @@ const canSearch = computed(() => durationMinutes.value >= 5 && durationMinutes.v
   border-left-color: var(--accent-red);
 }
 
-.strip__list-row--unknown {
+.strip__list-row--unknown,
+.strip__list-row--pending {
   border-left-color: var(--border-color);
 }
 

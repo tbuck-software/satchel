@@ -15,6 +15,7 @@ vi.mock('@/services/backend/availability', () => ({
 vi.mock('@/services/backend/transport', () => ({ backendCommandsAvailable: () => true }));
 
 import AvailabilityStrip from './AvailabilityStrip.vue';
+import { useUiStore } from '@/stores/ui';
 
 enableAutoUnmount(afterEach);
 beforeEach(() => {
@@ -200,3 +201,34 @@ describe('AvailabilityStrip on a DST day', () => {
     expect(end.getTime() - start.getTime()).toBe(60 * 60_000);
   });
 });
+
+describe('AvailabilityStrip at phone width', () => {
+  it('gives no verdict while loading or after a failed load', async () => {
+    let resolve!: (value: unknown) => void;
+    backend.query.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    useUiStore().isMobile = true;
+    const view = mount(AvailabilityStrip, {
+      props: { accountId: 'acc', attendees: ['lena@example.com'], start: new Date(2026, 10, 9, 10), end: new Date(2026, 10, 9, 11) },
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(view.findAll('.strip__list-row')).toHaveLength(2);
+    expect(view.findAll('.strip__verdict')).toHaveLength(0);
+    expect(view.text()).not.toContain('Free then');
+    expect(view.findAll('.strip__list-row--pending')).toHaveLength(2);
+
+    resolve({ own: [], attendees: [{ address: 'lena@example.com', known: true, busy: [] }] });
+    await flushPromises();
+    expect(view.findAll('.strip__verdict').map((verdict) => verdict.text())).toEqual(['Free then', 'Free then']);
+
+    // The next day fails: the status says so, the rows say nothing definite.
+    backend.query.mockRejectedValueOnce(new Error('offline'));
+    await view.setProps({ start: new Date(2026, 10, 10, 10), end: new Date(2026, 10, 10, 11) });
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+    expect(view.find('.strip__status').text()).toBe('Availability could not be loaded.');
+    expect(view.findAll('.strip__verdict')).toHaveLength(0);
+    expect(view.findAll('.strip__times')).toHaveLength(0);
+    expect(view.text()).not.toContain('Free then');
+  });
+});
+
