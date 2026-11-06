@@ -2022,11 +2022,11 @@ impl MailProvider for ImapProvider {
             return Ok(WorkflowMarkerReport::refused(targets.len()));
         }
         let plan = plan_marker_writes(targets);
-        let mut tally = MarkerTally::new(targets.len());
+        let wanted = marker.imap_keywords();
+        let mut tally = MarkerTally::new(targets.len(), !wanted.is_empty());
         if plan.is_empty() {
             return Ok(tally.report());
         }
-        let wanted = marker.imap_keywords();
         let mut session = self.login_session().await?;
         // One session for every thread of the row, one SELECT per folder.
         for (folder, group) in plan {
@@ -4811,15 +4811,19 @@ struct MarkerTally {
     skipped: Vec<bool>,
     refused_in_inbox: bool,
     applied_in_inbox: bool,
+    /// The write adds keywords. Only an accepted `+FLAGS` in INBOX shows the
+    /// server takes them; a pure clear says nothing about that.
+    adds_keywords: bool,
 }
 
 impl MarkerTally {
-    fn new(targets: usize) -> Self {
+    fn new(targets: usize, adds_keywords: bool) -> Self {
         Self {
             applied: vec![false; targets],
             skipped: vec![false; targets],
             refused_in_inbox: false,
             applied_in_inbox: false,
+            adds_keywords,
         }
     }
 
@@ -4836,7 +4840,10 @@ impl MarkerTally {
                 }
             }
             MarkerFolderOutcome::Written { skipped } => {
-                if folder.eq_ignore_ascii_case("INBOX") && skipped.len() < group.copies.len() {
+                if self.adds_keywords
+                    && folder.eq_ignore_ascii_case("INBOX")
+                    && skipped.len() < group.copies.len()
+                {
                     self.applied_in_inbox = true;
                 }
                 for copy in &group.copies {
@@ -4880,18 +4887,24 @@ enum StoreAnswer {
 }
 
 /// RFC 5530 codes for a refusal that says nothing about keyword support.
-/// imap-proto does not parse them, so they arrive in the response text.
+/// imap-proto does not parse them, so they arrive as the bracketed start of
+/// the response text (`code: None, info: Some("[INUSE] …")`). Only a code in
+/// that position counts; the same word later in the text says nothing.
 fn refusal_is_temporary(reason: &str) -> bool {
-    let reason = reason.to_ascii_uppercase();
-    [
-        "[UNAVAILABLE",
-        "[INUSE",
-        "[SERVERBUG",
-        "[EXPUNGEISSUED",
-        "[CORRUPTION",
-    ]
-    .iter()
-    .any(|code| reason.contains(code))
+    let info = reason
+        .split_once("info: Some(\"")
+        .map_or(reason, |(_, rest)| rest)
+        .trim_start();
+    let Some(code) = info
+        .strip_prefix('[')
+        .and_then(|rest| rest.split([']', ' ']).next())
+    else {
+        return false;
+    };
+    matches!(
+        code.to_ascii_uppercase().as_str(),
+        "UNAVAILABLE" | "INUSE" | "SERVERBUG" | "EXPUNGEISSUED" | "CORRUPTION"
+    )
 }
 
 /// `UID STORE` for a marker write, with the server's verdict. async-imap's
@@ -7261,7 +7274,7 @@ Content-Type: text/html\r\n\r\n\
             .await;
             assert_eq!(outcome, super::MarkerFolderOutcome::Unavailable, "{reply}");
         }
-        let mut tally = super::MarkerTally::new(1);
+        let mut tally = super::MarkerTally::new(1, true);
         tally.add(
             "INBOX",
             &inbox_copy(7, None),
@@ -7272,6 +7285,69 @@ Content-Type: text/html\r\n\r\n\
         assert_eq!(
             report.targets,
             vec![crate::providers::traits::WorkflowMarkerWrite::Skipped]
+        );
+    }
+
+    #[test]
+    fn only_a_leading_response_code_marks_a_refusal_as_temporary() {
+        for code in [
+            "UNAVAILABLE",
+            "INUSE",
+            "SERVERBUG",
+            "EXPUNGEISSUED",
+            "CORRUPTION",
+        ] {
+            let reason = format!("code: None, info: Some(\"[{code}] try later\")");
+            assert!(super::refusal_is_temporary(&reason), "{code}");
+            assert!(super::refusal_is_temporary(&format!(
+                "[{}]",
+                code.to_lowercase()
+            )));
+        }
+        // The word elsewhere in the text, or another code, is a refusal.
+        assert!(!super::refusal_is_temporary(
+            "code: None, info: Some(\"keyword table full, not [INUSE]\")"
+        ));
+        assert!(!super::refusal_is_temporary(
+            "code: None, info: Some(\"[LIMIT] too many user flags\")"
+        ));
+        assert!(!super::refusal_is_temporary("code: None, info: None"));
+        assert!(!super::refusal_is_temporary(
+            "code: None, info: Some(\"[INUSEFUL]\")"
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_expunge_or_corruption_answer_skips_the_folder() {
+        for reply in [
+            "NO [EXPUNGEISSUED] some messages gone",
+            "NO [CORRUPTION] index broken",
+        ] {
+            let (outcome, _) = write_marker(
+                "\\Seen \\*",
+                "",
+                reply,
+                inbox_copy(7, None),
+                crate::workflow::remote_marker::WorkflowMarker::Done,
+            )
+            .await;
+            assert_eq!(outcome, super::MarkerFolderOutcome::Unavailable, "{reply}");
+        }
+    }
+
+    #[test]
+    fn an_accepted_clear_does_not_vouch_for_keyword_support() {
+        let mut clear = super::MarkerTally::new(1, false);
+        clear.add(
+            "INBOX",
+            &inbox_copy(7, None),
+            super::MarkerFolderOutcome::Written { skipped: vec![] },
+        );
+        let report = clear.report();
+        assert!(!report.applied_in_inbox);
+        assert_eq!(
+            report.targets,
+            vec![crate::providers::traits::WorkflowMarkerWrite::Applied]
         );
     }
 
@@ -7296,7 +7372,7 @@ Content-Type: text/html\r\n\r\n\
 
     #[test]
     fn only_a_definite_inbox_refusal_and_an_inbox_store_reach_the_account() {
-        let mut refused = super::MarkerTally::new(1);
+        let mut refused = super::MarkerTally::new(1, true);
         refused.add(
             "INBOX",
             &inbox_copy(7, None),
@@ -7304,7 +7380,7 @@ Content-Type: text/html\r\n\r\n\
         );
         assert!(refused.report().refused_in_inbox);
 
-        let mut elsewhere = super::MarkerTally::new(1);
+        let mut elsewhere = super::MarkerTally::new(1, true);
         elsewhere.add(
             "Archive",
             &inbox_copy(7, None),
@@ -7312,7 +7388,7 @@ Content-Type: text/html\r\n\r\n\
         );
         assert!(!elsewhere.report().refused_in_inbox);
 
-        let mut written = super::MarkerTally::new(1);
+        let mut written = super::MarkerTally::new(1, true);
         written.add(
             "INBOX",
             &inbox_copy(7, None),
@@ -7427,7 +7503,7 @@ Content-Type: text/html\r\n\r\n\
                 .collect::<Vec<_>>(),
             vec![(0, 1), (1, 2)]
         );
-        let mut tally = super::MarkerTally::new(3);
+        let mut tally = super::MarkerTally::new(3, true);
         tally.add(
             "INBOX",
             &plan["INBOX"],

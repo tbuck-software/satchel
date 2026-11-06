@@ -363,6 +363,15 @@ struct SnapshotProgress {
     deferred: BTreeMap<String, SnapshotDeferral>,
 }
 
+/// Whether a folder's initial download has finished: it has a cursor and
+/// no backfill left. Until then, the marker baseline waits.
+fn inbox_download_complete(state: &ImapSyncState, folder_id: &str) -> bool {
+    state
+        .cursors
+        .get(folder_id)
+        .is_some_and(|cursor| !backfill_pending(cursor))
+}
+
 /// A provider returns Some only after every snapshot page has succeeded.
 /// Keep the obligation on None, network failure, or a stale IMAP generation.
 async fn reconcile_folder_snapshot(
@@ -417,7 +426,12 @@ async fn reconcile_folder_snapshot(
                 .await?;
             // From the first complete INBOX snapshot on, IMAP snoozes set on
             // other devices are adopted; the ones it found were only seen.
-            if inbox && !changes.skipped_stale_generation {
+            // Complete means the initial download too: older INBOX mail the
+            // backfill still has to bring can carry a keyword years old.
+            if inbox
+                && !changes.skipped_stale_generation
+                && inbox_download_complete(state, context.folder_id)
+            {
                 satchel_core::sync::workflow_markers::mark_snapshot_baseline(pool, account_id)
                     .await?;
             }

@@ -845,13 +845,37 @@ async fn many_threads(pool: &SqlitePool, count: usize) -> Vec<String> {
     ids
 }
 
+/// Counts writes to `sync_queue` on this (single) connection.
+async fn count_queue_writes(pool: &SqlitePool) {
+    for sql in [
+        "CREATE TEMP TABLE queue_writes (kind TEXT NOT NULL)",
+        "CREATE TEMP TRIGGER count_queue_inserts AFTER INSERT ON main.sync_queue
+         BEGIN INSERT INTO queue_writes VALUES ('insert'); END",
+        "CREATE TEMP TRIGGER count_queue_updates AFTER UPDATE ON main.sync_queue
+         BEGIN INSERT INTO queue_writes VALUES ('update'); END",
+    ] {
+        sqlx::query(sql).execute(pool).await.unwrap();
+    }
+}
+
+async fn queue_writes(pool: &SqlitePool) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM temp.queue_writes")
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 /// Queueing Done for 2000 threads in one transaction (a rule archiving a
-/// backlog) once re-read and rewrote every waiting row per thread while
-/// holding the write lock; one pass writes each row once.
+/// backlog) once joined and rewrote the waiting row per thread while holding
+/// the write lock. One pass writes each row it touches once: the guard is
+/// the number of writes, not the clock.
 #[tokio::test]
-async fn queueing_two_thousand_threads_at_once_is_one_pass() {
+async fn queueing_two_thousand_threads_at_once_writes_each_row_once() {
     let pool = pool("imap").await;
     let ids = many_threads(&pool, 2000).await;
+    // One row already waiting with room: the batch fills it, then opens more.
+    push(&pool, WorkflowMarker::Done).await;
+    count_queue_writes(&pool).await;
     let started = std::time::Instant::now();
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
     enqueue_workflow_markers_in_transaction(
@@ -866,8 +890,17 @@ async fn queueing_two_thousand_threads_at_once_is_one_pass() {
     tx.commit().await.unwrap();
     let elapsed = started.elapsed();
     let rows = queued(&pool).await;
-    assert_eq!(rows.len(), 2000 / THREADS_PER_ROW);
-    assert_eq!(rows.iter().map(|row| row.2.len()).sum::<usize>(), 2000);
+    assert_eq!(rows.iter().map(|row| row.2.len()).sum::<usize>(), 2001);
+    assert_eq!(rows.len(), 2001_usize.div_ceil(THREADS_PER_ROW));
+    // Per-thread joining would be about 2000 writes; one pass is one per row
+    // (the filled row once, each new row once).
+    assert_eq!(queue_writes(&pool).await, rows.len() as i64);
+    assert!(
+        queue_writes(&pool).await <= rows.len() as i64,
+        "{} writes for {} rows",
+        queue_writes(&pool).await,
+        rows.len()
+    );
     assert!(
         elapsed < std::time::Duration::from_secs(3),
         "took {elapsed:?}"

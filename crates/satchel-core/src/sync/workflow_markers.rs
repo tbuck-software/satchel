@@ -749,13 +749,19 @@ async fn local_change_pending(
     {
         return Ok(true);
     }
+    // The thread's id as the move payloads serialize it: a byte search skips
+    // every other move before any JSON is read.
+    let id = serde_json::to_string(thread_id).map_err(|err| err.to_string())?;
     let payloads = sqlx::query_scalar::<_, String>(
         "SELECT payload FROM sync_queue
          WHERE action_type = ? AND status IN ('pending', 'scheduled', 'sending')
+           AND (instr(payload, ?) > 0 OR instr(payload, ?) > 0)
            AND CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END
                IN ('workflow_move', 'blocked_move')",
     )
     .bind(ACTION_REMOTE_MUTATION)
+    .bind(format!("\"workflow_thread_id\":{id}"))
+    .bind(format!("\"blocked_thread_id\":{id}"))
     .fetch_all(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;

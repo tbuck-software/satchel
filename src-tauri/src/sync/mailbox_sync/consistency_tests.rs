@@ -2806,3 +2806,71 @@ async fn gmail_label_names_are_listed_once_per_token() {
     assert_eq!(requests.lock().unwrap().len(), 2);
     task.abort();
 }
+
+/// The marker baseline waits for the initial download: older INBOX mail the
+/// backfill still brings can carry a `$Satchel-Snoozed` a lost device left
+/// years ago, and before the baseline such a snooze is only seen.
+#[tokio::test]
+async fn the_marker_baseline_waits_for_the_inbox_backfill() {
+    use satchel_core::workflow::remote_marker::{Snooze, WorkflowMarker};
+    let mut state = ImapSyncState::default();
+    assert!(!inbox_download_complete(&state, "inbox"), "not synced yet");
+    state.cursors.insert(
+        "inbox".into(),
+        r#"{"high_uid":900,"backfill_next_seq":400,"backfill_total_seq":900}"#.into(),
+    );
+    assert!(
+        !inbox_download_complete(&state, "inbox"),
+        "backfill pending"
+    );
+
+    // Meanwhile the backfill brings an old copy with a stale snooze keyword.
+    let pool = pool().await;
+    sqlx::query(
+        "INSERT INTO threads (id, account_id, subject, last_message_date, workflow_state, board_column, created_at, updated_at)
+         VALUES ('old', 'account', 'Old', '2019-01-01', 'inbox', 'inbox', '', '')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let folder: String = sqlx::query_scalar(
+        "SELECT id FROM folders WHERE account_id = 'account' AND folder_type = 'inbox' LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let stale = WorkflowMarker::Snoozed(Snooze {
+        wake: None,
+        generation: 1,
+    });
+    sqlx::query(
+        "INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, date, remote_id, remote_workflow_marker, created_at, updated_at)
+         VALUES ('old-copy', 'account', ?, 'old', 'a@example.test', '[]', '2019-01-01', '7', ?, '', '')",
+    )
+    .bind(&folder)
+    .bind(stale.as_column())
+    .execute(&pool)
+    .await
+    .unwrap();
+    satchel_core::sync::workflow_markers::reconcile_remote_workflow_markers(
+        &pool,
+        &HashSet::from(["old".to_string()]),
+    )
+    .await
+    .unwrap();
+    let state_now: String =
+        sqlx::query_scalar("SELECT workflow_state FROM threads WHERE id = 'old'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(state_now, "inbox", "seen during the download, not adopted");
+
+    state.cursors.insert(
+        "inbox".into(),
+        r#"{"high_uid":900,"backfill_next_seq":0,"backfill_total_seq":900}"#.into(),
+    );
+    assert!(
+        inbox_download_complete(&state, "inbox"),
+        "download finished"
+    );
+}

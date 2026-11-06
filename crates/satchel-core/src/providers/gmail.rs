@@ -2968,16 +2968,16 @@ type LabelCache =
 static LABEL_NAMES: std::sync::LazyLock<std::sync::Mutex<LabelCache>> =
     std::sync::LazyLock::new(Default::default);
 const LABEL_CACHE_ACCOUNTS: usize = 64;
+static LABEL_CACHE_CLOCK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn remember_in_cache(
     key: &str,
     update: impl FnOnce(&mut std::collections::HashMap<String, String>),
 ) {
-    static CLOCK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let Ok(mut cache) = LABEL_NAMES.lock() else {
         return;
     };
-    let now = CLOCK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let now = LABEL_CACHE_CLOCK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let entry = cache.entry(key.to_string()).or_default();
     entry.0 = now;
     update(&mut entry.1);
@@ -2993,12 +2993,12 @@ fn remember_in_cache(
     }
 }
 
+/// A read counts as use, so an account that keeps reading stays cached.
 fn cached_label_names(key: &str) -> Option<std::collections::HashMap<String, String>> {
-    LABEL_NAMES
-        .lock()
-        .ok()?
-        .get(key)
-        .map(|(_, names)| names.clone())
+    let mut cache = LABEL_NAMES.lock().ok()?;
+    let entry = cache.get_mut(key)?;
+    entry.0 = LABEL_CACHE_CLOCK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Some(entry.1.clone())
 }
 
 fn remember_label_names(
@@ -3851,6 +3851,33 @@ mod tests {
         assert_eq!(plain.workflow_marker, Some(WorkflowMarker::None));
         assert!(super::gmail_label_is_user_label("Label_12"));
         assert!(!super::gmail_label_is_user_label("CATEGORY_UPDATES"));
+    }
+
+    #[test]
+    fn the_label_cache_keeps_the_accounts_in_use_and_no_more() {
+        let label = |id: &str| super::GmailLabel {
+            id: id.into(),
+            name: format!("name {id}"),
+            kind: Some("user".into()),
+        };
+        // Keys unique to this test: the cache is process-wide.
+        let key = |n: usize| format!("cap-test|account:{n}");
+        for n in 0..super::LABEL_CACHE_ACCOUNTS {
+            super::remember_label_names(&key(n), &[label("Label_1")]);
+        }
+        // Reading the oldest makes it the most recent; the next one goes.
+        assert!(super::cached_label_names(&key(0)).is_some());
+        super::remember_label_names(&key(super::LABEL_CACHE_ACCOUNTS), &[label("Label_1")]);
+        let cache = super::LABEL_NAMES.lock().unwrap();
+        assert!(cache.len() <= super::LABEL_CACHE_ACCOUNTS);
+        assert!(cache.contains_key(&key(0)), "read entry kept");
+        assert!(cache.contains_key(&key(super::LABEL_CACHE_ACCOUNTS)));
+        drop(cache);
+        // Whatever was evicted, the cap holds; key 1 was the least recent of ours.
+        let ours = (0..=super::LABEL_CACHE_ACCOUNTS)
+            .filter(|n| super::LABEL_NAMES.lock().unwrap().contains_key(&key(*n)))
+            .count();
+        assert!(ours <= super::LABEL_CACHE_ACCOUNTS);
     }
 
     #[test]

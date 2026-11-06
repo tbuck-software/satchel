@@ -213,9 +213,9 @@ Done und Snooze reisen als IMAP-Keyword bzw. Gmail-Label mit (ADR 0009,
   der Server zuletzt angenommen oder gezeigt hat (`NULL` = kein Marker, ein
   Postfach ohne Marker wird nie beschrieben). Eine noch nicht gesendete lokale
   Änderung gewinnt. Konten mit `local_only` (`account_workflow_sync`) werden
-  weder beschrieben noch gelesen. Vor dem ersten vollständigen
-  INBOX-Snapshot eines Geräts (`baseline_at`) werden fremde IMAP-Snoozes
-  nur notiert, nicht übernommen.
+  weder beschrieben noch gelesen. Bis zum ersten vollständigen
+  INBOX-Snapshot eines Geräts **nach abgeschlossenem Backfill**
+  (`baseline_at`) werden fremde IMAP-Snoozes nur notiert, nicht übernommen.
 - Markierungen werden pro Thread eingereiht, Lookups macht SQLite über die
   Payload (`instr` + `json_each`): Kein Pfad darf je Thread alle wartenden
   Zeilen parsen. Viele Threads in einer Transaktion gehen über
