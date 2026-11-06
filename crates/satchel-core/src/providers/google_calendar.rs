@@ -292,7 +292,7 @@ pub async fn free_busy(
 }
 
 /// Whether a Google error body names only lasting reasons (`forbidden`,
-/// `notFound`, `accessNotConfigured`, …). Rate and quota reasons pass within
+/// `notFound`, `accessNotConfigured`, …). Rate, concurrency and quota reasons pass within
 /// minutes, and a body without reasons proves nothing either way.
 fn permanent_refusal(body: &str) -> bool {
     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body) else {
@@ -310,7 +310,9 @@ fn permanent_refusal(body: &str) -> bool {
     !reasons.is_empty()
         && reasons.iter().all(|reason| {
             let reason = reason.to_ascii_lowercase();
-            !reason.contains("ratelimit") && !reason.contains("quota")
+            // rateLimitExceeded, userRateLimitExceeded, concurrentLimitExceeded,
+            // quotaExceeded, …: all pass within minutes.
+            !reason.contains("limit") && !reason.contains("quota")
         })
 }
 
@@ -778,6 +780,7 @@ mod tests {
         assert!(!permanent_refusal(&body("rateLimitExceeded")));
         assert!(!permanent_refusal(&body("userRateLimitExceeded")));
         assert!(!permanent_refusal(&body("quotaExceeded")));
+        assert!(!permanent_refusal(&body("concurrentLimitExceeded")));
         assert!(permanent_refusal(&body("forbidden")));
         assert!(permanent_refusal(&body("notFound")));
         // No reasons, or no JSON: nothing proves it lasts.
