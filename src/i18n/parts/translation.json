@@ -71,7 +71,7 @@
         "targetHint": "Mail already in this language gets no Translate button.",
         "targetFollowUi": "App language ({language})",
         "sentTitle": "What is sent?",
-        "sentBody": "When you translate a message, its body goes to DeepL: the text and its formatting. Every web address and link in it, whether in a link, an image, a style, another attribute or the text itself, is replaced by a placeholder before it leaves and put back on this device. E-mail addresses written out in the text go along as part of the text. Sender, recipients, subject and attachments stay here. Encrypted mail is never sent.",
+        "sentBody": "When you translate a message, its body goes to DeepL: the text and its formatting. Every link and every address starting with http(s)://, //, www. or mailto: is held back, in links, images, styles, other attributes and the text, in HTML and plain-text mail; Satchel puts them back on this device. Host names written without those prefixes, and e-mail addresses in the text, are sent as text. Sender, recipients, subject and attachments stay here. Encrypted mail is never sent.",
         "sentCache": "Each translation is stored on this device, so opening the message again sends nothing.",
         "termsFree": "DeepL's terms forbid personal data on the free API and reserve the right to keep what it is sent permanently. Satchel therefore sends no mail with a free key; Test still shows the key's plan and allowance.",
         "termsPro": "DeepL keeps text sent with a Pro key only as long as the translation takes and does not use it to improve its service. When an error occurs, it may keep the text for up to 72 hours to find the cause.",
@@ -106,7 +106,7 @@
       },
       "consent": {
         "title": "Send this message to DeepL?",
-        "body": "To translate it, Satchel sends the body of this message to DeepL ({plan}): the text and its formatting, with every web address and link replaced by a placeholder. E-mail addresses written out in the text go along. Sender, recipients, subject and attachments stay here. This applies to all mail of {account} on this device.",
+        "body": "To translate it, Satchel sends the body of this message to DeepL ({plan}): the text and its formatting. Every link and every address starting with http(s)://, //, www. or mailto: is held back; host names written without those prefixes, and e-mail addresses in the text, go along as text. Sender, recipients, subject and attachments stay here. This applies to all mail of {account} on this device.",
         "detail": "You can withdraw it in Settings → Translation, where the request log shows what was sent.",
         "confirm": "Allow and translate"
       }
@@ -184,7 +184,7 @@
         "targetHint": "Mails, die schon in dieser Sprache sind, bekommen keinen Übersetzen-Knopf.",
         "targetFollowUi": "App-Sprache ({language})",
         "sentTitle": "Was wird gesendet?",
-        "sentBody": "Wenn du eine Nachricht übersetzt, geht ihr Inhalt an DeepL: der Text und seine Formatierung. Jede Webadresse und jeder Link darin, ob in einem Link, einem Bild, einem Stil, einem anderen Attribut oder im Text selbst, wird vorher durch einen Platzhalter ersetzt und auf diesem Gerät wieder eingesetzt. E-Mail-Adressen, die im Text ausgeschrieben sind, gehen als Teil des Textes mit. Absender, Empfänger, Betreff und Anhänge bleiben hier. Verschlüsselte Mails werden nie gesendet.",
+        "sentBody": "Wenn du eine Nachricht übersetzt, geht ihr Inhalt an DeepL: der Text und seine Formatierung. Jeder Link und jede Adresse, die mit http(s)://, //, www. oder mailto: beginnt, wird zurückgehalten, in Links, Bildern, Stilen, anderen Attributen und im Text, in HTML- wie in reinen Text-Mails; Satchel setzt sie auf diesem Gerät wieder ein. Hostnamen ohne diese Anfänge und E-Mail-Adressen im Text gehen als Text mit. Absender, Empfänger, Betreff und Anhänge bleiben hier. Verschlüsselte Mails werden nie gesendet.",
         "sentCache": "Jede Übersetzung wird auf diesem Gerät gespeichert. Wer die Nachricht erneut öffnet, sendet nichts.",
         "termsFree": "Die Bedingungen von DeepL verbieten personenbezogene Daten über die kostenlose API und behalten sich vor, Gesendetes dauerhaft zu speichern. Satchel sendet mit einem kostenlosen Schlüssel deshalb keine Mails; „Testen“ zeigt trotzdem Tarif und Kontingent des Schlüssels.",
         "termsPro": "Mit einem Pro-Schlüssel bewahrt DeepL den Text nur so lange auf, wie die Übersetzung dauert, und nutzt ihn nicht, um den Dienst zu verbessern. Bei einem Fehler darf DeepL ihn bis zu 72 Stunden behalten, um die Ursache zu finden.",
@@ -219,7 +219,7 @@
       },
       "consent": {
         "title": "Diese Nachricht an DeepL senden?",
-        "body": "Zum Übersetzen sendet Satchel den Inhalt dieser Nachricht an DeepL ({plan}): den Text und seine Formatierung, jede Webadresse und jeden Link durch einen Platzhalter ersetzt. E-Mail-Adressen, die im Text ausgeschrieben sind, gehen mit. Absender, Empfänger, Betreff und Anhänge bleiben hier. Das gilt für alle Mails von {account} auf diesem Gerät.",
+        "body": "Zum Übersetzen sendet Satchel den Inhalt dieser Nachricht an DeepL ({plan}): den Text und seine Formatierung. Jeder Link und jede Adresse, die mit http(s)://, //, www. oder mailto: beginnt, wird zurückgehalten; Hostnamen ohne diese Anfänge und E-Mail-Adressen im Text gehen als Text mit. Absender, Empfänger, Betreff und Anhänge bleiben hier. Das gilt für alle Mails von {account} auf diesem Gerät.",
         "detail": "Du kannst das unter Einstellungen → Übersetzung zurücknehmen. Dort zeigt das Anfrage-Protokoll, was gesendet wurde.",
         "confirm": "Erlauben und übersetzen"
       }

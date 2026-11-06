@@ -3435,7 +3435,7 @@
       "removeKey": "Remove key",
       "replaceKey": "Replace key",
       "saveKey": "Save key",
-      "sentBody": "When you translate a message, its body goes to DeepL: the text and its formatting. Every web address and link in it, whether in a link, an image, a style, another attribute or the text itself, is replaced by a placeholder before it leaves and put back on this device. E-mail addresses written out in the text go along as part of the text. Sender, recipients, subject and attachments stay here. Encrypted mail is never sent.",
+      "sentBody": "When you translate a message, its body goes to DeepL: the text and its formatting. Every link and every address starting with http(s)://, //, www. or mailto: is held back, in links, images, styles, other attributes and the text, in HTML and plain-text mail; Satchel puts them back on this device. Host names written without those prefixes, and e-mail addresses in the text, are sent as text. Sender, recipients, subject and attachments stay here. Encrypted mail is never sent.",
       "sentCache": "Each translation is stored on this device, so opening the message again sends nothing.",
       "sentTerms": "From DeepL's terms (deepl.com/pro-license, 3.1.2 and 3.3.2) and privacy policy (deepl.com/privacy, section 4), as read in November 2026.",
       "sentTitle": "What is sent?",
@@ -4127,7 +4127,7 @@
   },
   "translation": {
     "consent": {
-      "body": "To translate it, Satchel sends the body of this message to DeepL ({plan}): the text and its formatting, with every web address and link replaced by a placeholder. E-mail addresses written out in the text go along. Sender, recipients, subject and attachments stay here. This applies to all mail of {account} on this device.",
+      "body": "To translate it, Satchel sends the body of this message to DeepL ({plan}): the text and its formatting. Every link and every address starting with http(s)://, //, www. or mailto: is held back; host names written without those prefixes, and e-mail addresses in the text, go along as text. Sender, recipients, subject and attachments stay here. This applies to all mail of {account} on this device.",
       "confirm": "Allow and translate",
       "detail": "You can withdraw it in Settings → Translation, where the request log shows what was sent.",
       "title": "Send this message to DeepL?"

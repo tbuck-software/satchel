@@ -40,26 +40,41 @@ am 2026-11-06.
   HTML. Eine KI-Engine nach 0016 sagt `false` und bekommt den Text-Body.
   Ihre Antwort wird als Text gezeigt. Für Sprachmodelle ändert dieses ADR
   nichts.
-- **URLs gehen nicht mit.** Vor dem Senden ersetzt Satchel durch Platzhalter
-  der Form `#satchel-<Nonce>-a3-end`:
-  - den ganzen Wert von `src`, `srcset`, `href`, `background`, `poster` und
-    `cite`, was immer er enthält (auch `cid:`, `data:` und relative Pfade);
+- **URLs gehen nicht mit.** Jeder Link und jede Adresse, die mit
+  `http(s)://` (oder einem anderen `schema://`), `//`, `www.` oder `mailto:`
+  beginnt, wird zurückgehalten: in Links, Bildern, Styles, anderen Attributen
+  und im Text, in HTML- wie in reinen Text-Mails. Hostnamen ohne diese
+  Anfänge und E-Mail-Adressen im Text gehen als Text mit; sie sind Inhalt der
+  Mail, und Satchel rät keine nackten Domains aus Fließtext. Im Einzelnen
+  ersetzt Satchel durch Platzhalter der Form `#satchel-<Nonce>-a3-end`:
+  - den ganzen Wert von `src`, `srcset`, `href`, `background`, `poster`,
+    `cite`, jedes `data-*`, `id`, `name` und `summary`, was immer er enthält
+    (auch `cid:`, `data:`, relative Pfade und JSON mit `https:\/\/`);
+    seiteninterne Anker (`#…`) in `href` bleiben stehen;
   - den Inhalt jedes `url(…)` in Style-Attributen und `<style>`-Blöcken;
-  - jede Web- oder Mail-Adresse an jeder anderen Stelle: in weiteren
-    Attributen (`data-*`, `alt`, `title`), in CSS-Strings wie
-    `image-set('…')` und im Text selbst, Linktext eingeschlossen. Als Adresse
-    gilt `schema://…`, `//host.tld…`, `www.…` und `mailto:…`.
+  - jede Adresse an jeder anderen Stelle: in weiteren Attributen (`alt`,
+    `title`), in CSS-Strings wie `image-set('…')` und im Text selbst,
+    Linktext eingeschlossen, auch JSON-escaped (`https:\/\/`, `\/\/host`).
+    Eine Adresse endet erst an Leerraum, `>`, `"`, `&nbsp;`, `&quot;` oder
+    einem `<`; `<wbr>` und leere Inline-Elemente (`<span></span>`), mit denen
+    Absender lange Links umbrechen, gehören dazu. Klammern, Anführungszeichen
+    und IPv6-Hosts (`[2001:db8::1]`) im Link bleiben Teil der Adresse.
+    Satzzeichen am Ende bleiben im Text, außer einer schließenden Klammer,
+    die eine im Link geöffnete schließt.
 
-  Seiteninterne Anker (`#…`) bleiben stehen, ebenso E-Mail-Adressen, die im
-  Text ausgeschrieben sind: Sie sind Inhalt der Mail, kein Tracker. Nach der
-  Übersetzung setzt Satchel die Adressen auf dem Gerät byte-genau wieder ein.
-  Das gilt für Links wie für Bilder: Ein Klick-Link trägt dasselbe Token wie
-  ein Pixel, und eine Übersetzung braucht keine einzige URL.
+  **Text-Weg:** Der Text-Body (reine Text-Mails und der Ausweichweg für zu
+  großes HTML) läuft durch denselben Scanner wie der Text einer HTML-Mail.
+  Auch der aufbewahrte gesendete Text im Anfrage-Protokoll enthält deshalb
+  nur Platzhalter.
 
-  Die Nonce wird je Anfrage neu gezogen. Ein Platzhalter, den die Mail selbst
-  enthält oder den die Engine erfindet, passt deshalb auf keine gespeicherte
-  Adresse und wird nie zu einer echten URL. Entfernt die Engine einen
-  Platzhalter, bleibt die Stelle ohne Adresse.
+  Nach der Übersetzung setzt Satchel alles auf dem Gerät byte-genau wieder
+  ein, in einem Durchgang. Das gilt für Links wie für Bilder: Ein Klick-Link
+  trägt dasselbe Token wie ein Pixel, und eine Übersetzung braucht keine
+  einzige URL. Die Nonce wird je Anfrage neu gezogen. Ein Platzhalter, den die
+  Mail selbst enthält, den die Engine erfindet, umnummeriert oder in
+  Großbuchstaben setzt, passt auf keine gespeicherte Adresse und bleibt
+  wirkungslos. Entfernt die Engine einen Platzhalter, bleibt die Stelle ohne
+  Adresse.
 - Was die Engine zurückgibt, läuft erneut durch den E-Mail-Sanitizer
   (`sanitize_stored_email_html`), wird gespeichert und beim Lesen noch
   einmal bereinigt. Es rendert im selben `iframe` wie das Original: gleiche
@@ -91,6 +106,12 @@ anfasst und Platzhalter im Text als nicht übersetzbares Wort stehen lässt.
 Für Attribute ist das die Grundlage von `tag_handling=html`. Ob es auch im
 Text hält, prüft der erste Test mit einem echten Schlüssel. Fehlt danach
 etwas, fehlt eine URL, kein Text.
+
+Bewusst hingenommen: Ein Absender kann eine Adresse so schreiben, dass der
+Scanner sie nicht erkennt, etwa mit CSS-Escapes (`\68ttps`) oder
+Prozent-Kodierung des Schemas. Damit gibt er nur sein eigenes Token an
+DeepL weiter, das er selbst vergeben hat. Satchel verfolgt solche Umgehungen
+nicht weiter.
 
 Die Platzhalter machen das gesendete HTML kleiner. Mehr Newsletter passen so
 in eine Anfrage.

@@ -3435,7 +3435,7 @@
       "removeKey": "Schlüssel entfernen",
       "replaceKey": "Schlüssel ersetzen",
       "saveKey": "Schlüssel speichern",
-      "sentBody": "Wenn du eine Nachricht übersetzt, geht ihr Inhalt an DeepL: der Text und seine Formatierung. Jede Webadresse und jeder Link darin, ob in einem Link, einem Bild, einem Stil, einem anderen Attribut oder im Text selbst, wird vorher durch einen Platzhalter ersetzt und auf diesem Gerät wieder eingesetzt. E-Mail-Adressen, die im Text ausgeschrieben sind, gehen als Teil des Textes mit. Absender, Empfänger, Betreff und Anhänge bleiben hier. Verschlüsselte Mails werden nie gesendet.",
+      "sentBody": "Wenn du eine Nachricht übersetzt, geht ihr Inhalt an DeepL: der Text und seine Formatierung. Jeder Link und jede Adresse, die mit http(s)://, //, www. oder mailto: beginnt, wird zurückgehalten, in Links, Bildern, Stilen, anderen Attributen und im Text, in HTML- wie in reinen Text-Mails; Satchel setzt sie auf diesem Gerät wieder ein. Hostnamen ohne diese Anfänge und E-Mail-Adressen im Text gehen als Text mit. Absender, Empfänger, Betreff und Anhänge bleiben hier. Verschlüsselte Mails werden nie gesendet.",
       "sentCache": "Jede Übersetzung wird auf diesem Gerät gespeichert. Wer die Nachricht erneut öffnet, sendet nichts.",
       "sentTerms": "Aus den Bedingungen von DeepL (deepl.com/pro-license, 3.1.2 und 3.3.2) und der Datenschutzerklärung (deepl.com/privacy, Abschnitt 4), Stand November 2026.",
       "sentTitle": "Was wird gesendet?",
@@ -4127,7 +4127,7 @@
   },
   "translation": {
     "consent": {
-      "body": "Zum Übersetzen sendet Satchel den Inhalt dieser Nachricht an DeepL ({plan}): den Text und seine Formatierung, jede Webadresse und jeden Link durch einen Platzhalter ersetzt. E-Mail-Adressen, die im Text ausgeschrieben sind, gehen mit. Absender, Empfänger, Betreff und Anhänge bleiben hier. Das gilt für alle Mails von {account} auf diesem Gerät.",
+      "body": "Zum Übersetzen sendet Satchel den Inhalt dieser Nachricht an DeepL ({plan}): den Text und seine Formatierung. Jeder Link und jede Adresse, die mit http(s)://, //, www. oder mailto: beginnt, wird zurückgehalten; Hostnamen ohne diese Anfänge und E-Mail-Adressen im Text gehen als Text mit. Absender, Empfänger, Betreff und Anhänge bleiben hier. Das gilt für alle Mails von {account} auf diesem Gerät.",
       "confirm": "Erlauben und übersetzen",
       "detail": "Du kannst das unter Einstellungen → Übersetzung zurücknehmen. Dort zeigt das Anfrage-Protokoll, was gesendet wurde.",
       "title": "Diese Nachricht an DeepL senden?"

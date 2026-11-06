@@ -27,7 +27,7 @@ use crate::db::translation::{
     TranslationRepository,
 };
 use crate::email::sanitizer::{
-    restore_references, sanitize_stored_email_html, withhold_references,
+    restore_references, sanitize_stored_email_html, withhold_references, withhold_text_references,
 };
 
 /// The feature name translation requests carry in the request log.
@@ -320,15 +320,20 @@ pub async fn send(
                     TranslationError::NothingToTranslate
                 });
             };
+            // Plain-text mail and the large-HTML fallback: the same scanner
+            // as the text of an HTML body, so no address goes out here either.
+            let text = text.to_owned();
+            let (withheld_text, withheld) =
+                blocking(move || withhold_text_references(&text)).await?;
             let request = TranslationRequest {
-                content: TranslationContent::Text(text.to_owned()),
+                content: TranslationContent::Text(withheld_text),
                 source_language: None,
                 target_language: pending.target.clone(),
             };
             if !engine.fits(&request) {
                 return Err(TranslationError::TooLarge);
             }
-            (request, None, hash)
+            (request, Some(withheld), hash)
         }
     };
 
@@ -365,14 +370,15 @@ pub async fn send(
     let is_html = request.content.is_html();
     let content = translated.content;
     let (body_html, body_text) = blocking(move || {
-        if !is_html {
-            return (None, Some(content));
-        }
         let restored = match withheld {
             Some(withheld) => restore_references(&content, &withheld),
             None => content,
         };
-        (Some(sanitize_stored_email_html(&restored)), None)
+        if is_html {
+            (Some(sanitize_stored_email_html(&restored)), None)
+        } else {
+            (None, Some(restored))
+        }
     })
     .await?;
     let record = CachedTranslationRecord {
