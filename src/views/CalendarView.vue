@@ -296,6 +296,13 @@ const guestsNeedInvites = computed(() => {
     (source) => source.source === 'outlook' && source.account_id === accountId);
 });
 
+/** The account the open editor's event belongs to, or goes to when new. */
+const editorAccountId = computed(() => {
+  const id = editorDraft.value?.id;
+  return (id ? invites.events.find((event) => event.id === id)?.account_id : undefined)
+    ?? newEventAccountId.value ?? null;
+});
+
 async function saveEvent(payload: EventEditorPayload): Promise<boolean> {
   if (saving.value) return false;
   const draft = editorDraft.value;
@@ -499,6 +506,7 @@ function onKeydown(event: KeyboardEvent) {
       :draft="editorDraft"
       :saving="saving"
       :guests-need-invites="guestsNeedInvites"
+      :account-id="editorAccountId"
       @close="editorDraft = null"
       @save="saveEvent"
     />

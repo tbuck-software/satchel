@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import AppButton from '@/components/ui/AppButton.vue';
 import NavItem from '@/components/ui/NavItem.vue';
 import GoogleConnections from '@/components/settings/GoogleConnections.vue';
+import AvailabilitySettings from '@/components/settings/AvailabilitySettings.vue';
 import { useCalendarUiStore } from '@/stores/calendarUi';
 import { useInvitesStore } from '@/stores/invites';
 import { translateBackendError } from '@/services/backend';
@@ -114,6 +115,9 @@ async function syncNow() {
     </div>
 
     <p v-if="syncMessage" class="sync-message" role="status">{{ syncMessage }}</p>
+
+    <!-- Invitations are not a calendar: one accepted counts until a calendar mirrors it. -->
+    <AvailabilitySettings :sources="sources.filter((source) => source.key !== 'invites')" />
   </section>
 </template>
 

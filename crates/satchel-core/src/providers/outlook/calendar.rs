@@ -45,7 +45,7 @@ const PAGE_SIZE: u32 = 100;
 /// The fields a listing asks for. `body` stays: the mirror shows the
 /// description and must know whether it is formatted.
 const LISTING_SELECT: &str = "id,iCalUId,changeKey,subject,body,location,start,end,isAllDay,\
-isCancelled,attendees,isOrganizer,type";
+isCancelled,attendees,isOrganizer,type,showAs";
 /// Same ids as mail: an event moved between calendars keeps its id.
 const PREFER_IMMUTABLE_IDS: &str = "IdType=\"ImmutableId\"";
 /// Times come back as UTC, whatever zone the event was created in.
@@ -119,6 +119,10 @@ struct GraphEvent {
     /// `singleInstance`, `occurrence`, `exception` or `seriesMaster`.
     #[serde(rename = "type")]
     event_type: Option<String>,
+    /// `free`, `tentative`, `busy`, `oof`, `workingElsewhere` or `unknown`.
+    /// Absent counts as busy, Graph's default.
+    #[serde(rename = "showAs")]
+    show_as: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -785,6 +789,7 @@ fn map_event(
             Some("occurrence" | "exception")
         ),
         rich_description,
+        transparent: show_as_free(event.show_as.as_deref()),
     };
     let attendees = event
         .attendees
@@ -817,6 +822,131 @@ fn map_event(
         ends_at,
         all_day,
         attendees_json: serde_json::to_string(&attendees).unwrap_or_else(|_| "[]".to_string()),
+    })
+}
+
+/// `getSchedule` answers for at most this many people per request.
+const SCHEDULE_BATCH: usize = 20;
+
+#[derive(Debug, Deserialize)]
+struct ScheduleInformation {
+    #[serde(rename = "scheduleId")]
+    schedule_id: String,
+    #[serde(rename = "scheduleItems", default)]
+    schedule_items: Vec<ScheduleItem>,
+    /// Set when Graph will not say: an outside address, no permission.
+    error: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScheduleItem {
+    status: Option<String>,
+    start: GraphDateTime,
+    end: GraphDateTime,
+}
+
+/// Busy time of `addresses` from `/me/calendar/getSchedule`. The calendar
+/// grant (`Calendars.ReadWrite`) covers it; an account without the grant
+/// answers for nobody. People Graph will not answer for are left out, which
+/// makes them unknown.
+pub async fn schedules(
+    pool: &SqlitePool,
+    account_id: &str,
+    addresses: &[String],
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+) -> Result<std::collections::HashMap<String, Vec<crate::calendar::availability::Busy>>, String> {
+    let mut known = std::collections::HashMap::new();
+    if !stored_calendar_grant(pool, account_id).await? {
+        return Ok(known);
+    }
+    let Some(graph) = Graph::connect(pool, account_id)
+        .await
+        .map_err(|err| err.encoded())?
+    else {
+        return Ok(known);
+    };
+    let url = graph
+        .url(&["me", "calendar", "getSchedule"])
+        .map_err(|err| err.encoded())?;
+    let at = |time: chrono::DateTime<chrono::Utc>| json!({ "dateTime": time.format("%Y-%m-%dT%H:%M:%S").to_string(), "timeZone": "UTC" });
+    for chunk in addresses.chunks(SCHEDULE_BATCH) {
+        let body = json!({
+            "schedules": chunk,
+            "startTime": at(start),
+            "endTime": at(end),
+            "availabilityViewInterval": 30,
+        });
+        let response = send_throttled(
+            || {
+                graph
+                    .request(reqwest::Method::POST, url.clone())
+                    .json(&body)
+            },
+            "schedule",
+        )
+        .await
+        .map_err(|err| err.encoded())?;
+        let page: Page<ScheduleInformation> = parse(response, "schedule")
+            .await
+            .map_err(|err| err.encoded())?;
+        known.extend(map_schedules(page.value, chunk));
+    }
+    Ok(known)
+}
+
+fn map_schedules(
+    schedules: Vec<ScheduleInformation>,
+    asked: &[String],
+) -> std::collections::HashMap<String, Vec<crate::calendar::availability::Busy>> {
+    let instant = |time: &GraphDateTime| {
+        let text = normalize_time(time, false)?;
+        chrono::DateTime::parse_from_rfc3339(&text)
+            .ok()
+            .map(|time| time.with_timezone(&chrono::Utc))
+    };
+    let mut known = std::collections::HashMap::new();
+    for schedule in schedules {
+        let Some(address) = asked
+            .iter()
+            .find(|address| address.eq_ignore_ascii_case(&schedule.schedule_id))
+        else {
+            continue;
+        };
+        if schedule.error.is_some() {
+            continue;
+        }
+        let busy = schedule
+            .schedule_items
+            .iter()
+            .filter(|item| {
+                !show_as_free(item.status.as_deref())
+                    && !item
+                        .status
+                        .as_deref()
+                        .is_some_and(|status| status.eq_ignore_ascii_case("unknown"))
+            })
+            .filter_map(|item| {
+                Some(crate::calendar::availability::Busy {
+                    start: instant(&item.start)?,
+                    end: instant(&item.end)?,
+                    tentative: item
+                        .status
+                        .as_deref()
+                        .is_some_and(|status| status.eq_ignore_ascii_case("tentative")),
+                })
+            })
+            .collect();
+        known.insert(address.clone(), busy);
+    }
+    known
+}
+
+/// Whether Graph's `showAs` leaves the time free. Working elsewhere is
+/// working: Outlook's scheduling assistant does not block it either.
+pub(crate) fn show_as_free(show_as: Option<&str>) -> bool {
+    show_as.is_some_and(|value| {
+        value.eq_ignore_ascii_case("free") || value.eq_ignore_ascii_case("workingElsewhere")
     })
 }
 

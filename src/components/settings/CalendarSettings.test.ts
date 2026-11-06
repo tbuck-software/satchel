@@ -16,6 +16,10 @@ vi.mock('@/stores/calendarUi', () => ({
   useCalendarUiStore: () => ({
     isSourceHidden: vi.fn(() => false),
     toggleSource: vi.fn(),
+    workingHours: { startMinute: 540, endMinute: 1020, weekdays: [1, 2, 3, 4, 5] },
+    countsForAvailability: vi.fn(() => true),
+    toggleAvailability: vi.fn(),
+    setWorkingHours: vi.fn(),
   }),
 }));
 

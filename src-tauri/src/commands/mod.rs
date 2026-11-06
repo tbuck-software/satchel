@@ -2,6 +2,7 @@ pub mod accounts;
 pub mod aliases;
 pub mod app_update;
 pub mod attachments;
+pub mod availability;
 pub mod background_sync;
 pub mod backup;
 pub mod blocked_senders;

@@ -149,6 +149,58 @@
       "version": "Version {version}"
     }
   },
+  "availability": {
+    "insert": {
+      "button": "Insert my availability",
+      "duration": "Meeting length",
+      "failed": "Free time could not be found: {error}",
+      "hoursHint": "Working hours: {hours}. Change them under Settings → Calendar.",
+      "hoursShort": "{count} h",
+      "insert": "Insert",
+      "loading": "Finding free time…",
+      "minutesShort": "{count} min",
+      "none": "No free time within working hours in the next working day. | No free time within working hours in the next {count} working days.",
+      "range": "Within the next",
+      "title": "Insert my availability",
+      "workingDays": "{count} working day | {count} working days"
+    },
+    "settings": {
+      "calendars": "Calendars that make you busy",
+      "description": "Your working hours and the calendars that make you busy. “Insert my availability” in the composer and “Next time everyone is free” in the event editor use them.",
+      "invalidHours": "The working day has to end after it starts.",
+      "title": "Availability",
+      "workDays": "Working days",
+      "workEnd": "Working day ends",
+      "workStart": "Working day starts"
+    },
+    "strip": {
+      "allFreeAt": "Everyone known is free at {time}.",
+      "busyThen": "Busy then",
+      "busyTimes": "Busy {times}",
+      "conflicts": "{count} person is busy at {time}. | {count} people are busy at {time}.",
+      "freeAllDay": "Free all day",
+      "freeThen": "Free then",
+      "loadFailed": "Availability could not be loaded.",
+      "loading": "Loading availability…",
+      "nextDay": "Next day",
+      "nextFree": "Next time everyone is free",
+      "noneFree": "No time when everyone is free in the next {count} working days.",
+      "notCounted": "Not counted, their availability is unknown: {people}",
+      "previousDay": "Previous day",
+      "searchFailed": "Free time could not be found: {error}",
+      "searching": "Looking…",
+      "title": "Availability",
+      "unknown": "Availability unknown",
+      "unknownHint": "Striped rows: their calendar does not share free/busy with this account.",
+      "you": "You"
+    },
+    "text": {
+      "day": "{day}: {times}",
+      "hours": "{count} hour | {count} hours",
+      "intro": "I'm free for {duration} at these times ({zone}):",
+      "minutes": "{count} minute | {count} minutes"
+    }
+  },
   "backend": {
     "errors": {
       "accountAvatarInvalid": "The picture must be a small PNG, JPEG or WebP image.",
@@ -173,6 +225,10 @@
       "attachmentExecutableNotConfirmed": "\"{filename}\" is a program (.{extension}), not a document. Satchel will not hand it to the operating system without your confirmation.",
       "attachmentNotBase64": "\"{filename}\" could not be attached: its data is damaged. Remove the attachment and add the file again.",
       "attachmentPayloadMissing": "The attachment could not be read: Satchel received neither its content nor a path to it.",
+      "availabilityDurationInvalid": "Choose a meeting length between 5 minutes and 24 hours.",
+      "availabilityRangeInvalid": "That time range cannot be checked for free time.",
+      "availabilityTimeZoneInvalid": "This device's time zone is not known to Satchel.",
+      "availabilityWorkingHoursInvalid": "Working hours need a start before their end and at least one working day.",
       "backupPassphraseOrAcknowledgementRequired": "Set a passphrase for the master key, or confirm that the backup folder may hold it unprotected.",
       "backupPassphraseRejected": "That passphrase does not open this backup's master key.",
       "backupPassphraseRequired": "This backup's master key is wrapped. Enter the passphrase it was created with.",

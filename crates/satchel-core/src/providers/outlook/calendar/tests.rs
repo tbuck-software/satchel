@@ -1754,3 +1754,65 @@ async fn a_mail_only_outlook_account_keeps_creating_local_events() {
     assert_eq!(created.source, "local");
     assert!(graph.requests().is_empty());
 }
+
+#[test]
+fn get_schedule_maps_busy_items_and_leaves_refused_people_unknown() {
+    let schedules: Vec<ScheduleInformation> = serde_json::from_value(json!([
+        {
+            "scheduleId": "Lena@Example.com",
+            "scheduleItems": [
+                { "status": "busy",
+                  "start": { "dateTime": "2026-11-09T09:00:00.0000000", "timeZone": "UTC" },
+                  "end": { "dateTime": "2026-11-09T10:00:00.0000000", "timeZone": "UTC" } },
+                { "status": "tentative",
+                  "start": { "dateTime": "2026-11-09T13:00:00.0000000", "timeZone": "UTC" },
+                  "end": { "dateTime": "2026-11-09T13:30:00.0000000", "timeZone": "UTC" } },
+                { "status": "free",
+                  "start": { "dateTime": "2026-11-09T15:00:00.0000000", "timeZone": "UTC" },
+                  "end": { "dateTime": "2026-11-09T16:00:00.0000000", "timeZone": "UTC" } },
+                { "status": "workingElsewhere",
+                  "start": { "dateTime": "2026-11-09T16:00:00.0000000", "timeZone": "UTC" },
+                  "end": { "dateTime": "2026-11-09T17:00:00.0000000", "timeZone": "UTC" } }
+            ]
+        },
+        {
+            "scheduleId": "outside@elsewhere.test",
+            "error": { "message": "Not found", "responseCode": "ErrorMailRecipientNotFound" }
+        }
+    ]))
+    .unwrap();
+    let asked = [
+        "lena@example.com".to_string(),
+        "outside@elsewhere.test".to_string(),
+    ];
+    let known = map_schedules(schedules, &asked);
+    assert_eq!(known.len(), 1);
+    let lena = &known["lena@example.com"];
+    assert_eq!(lena.len(), 2);
+    assert_eq!(lena[0].start.to_rfc3339(), "2026-11-09T09:00:00+00:00");
+    assert!(!lena[0].tentative);
+    assert!(lena[1].tentative);
+}
+
+#[test]
+fn show_as_free_leaves_an_event_out_of_free_busy() {
+    let event = |show_as: Option<&str>| {
+        let mut raw = json!({
+            "id": "e1",
+            "subject": "Focus",
+            "start": { "dateTime": "2026-11-09T09:00:00.0000000", "timeZone": "UTC" },
+            "end": { "dateTime": "2026-11-09T10:00:00.0000000", "timeZone": "UTC" },
+            "isOrganizer": true
+        });
+        if let Some(value) = show_as {
+            raw["showAs"] = json!(value);
+        }
+        let event: GraphEvent = serde_json::from_value(raw).unwrap();
+        map_event("acc", true, event).unwrap().flags.transparent
+    };
+    assert!(event(Some("free")));
+    assert!(event(Some("workingElsewhere")));
+    assert!(!event(Some("busy")));
+    assert!(!event(Some("tentative")));
+    assert!(!event(None));
+}

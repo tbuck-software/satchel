@@ -155,6 +155,8 @@ const COMMANDS: &[&str] = &[
     "delete_calendar_event",
     "sync_google_calendar",
     "sync_outlook_calendar",
+    "query_free_busy",
+    "find_free_slots",
     "import_ics",
     "import_ics_path",
     "configure_groupware",

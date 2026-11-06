@@ -76,6 +76,8 @@ import { composerDraftInput, composerDraftSnapshot, composerRecoveryContent, typ
 import type { ComposerBackup, ComposerBackupContent } from '@/persistence/composerBackup';
 
 const SendLaterMenu = defineAsyncComponent(() => import('@/components/mail/SendLaterMenu.vue'));
+// Free slots and their text load the first time someone asks for them.
+const InsertAvailabilityDialog = defineAsyncComponent(() => import('@/components/mail/InsertAvailabilityDialog.vue'));
 
 const props = withDefaults(defineProps<{
   embedded?: boolean;
@@ -159,6 +161,7 @@ const scheduledFor = ref<string | null>(null);
 const scheduleClock = useActionClock(() => scheduledFor.value !== null);
 const followUpAt = ref<string | null>(null);
 const showTemplatePicker = ref(false);
+const showAvailability = ref(false);
 const showSendLater = ref(false);
 const sendLaterAnchor = ref<AnchorBox | null>(null);
 
@@ -1194,6 +1197,30 @@ function onTemplateApply(rendered: {
   showTemplatePicker.value = false;
 }
 
+/** Put the availability text where the caret is, in either editor. */
+function onAvailabilityInsert(content: { text: string; html: string }) {
+  showAvailability.value = false;
+  if (!plainTextCompose.value) {
+    richEditorRef.value?.insertHtml(content.html);
+    return;
+  }
+  const area = writingTextarea.value;
+  const value = writingText.value;
+  const from = area?.selectionStart ?? value.length;
+  const to = area?.selectionEnd ?? from;
+  const before = value.slice(0, from);
+  const after = value.slice(to);
+  const lead = before && !before.endsWith('\n') ? '\n' : '';
+  const trail = after && !after.startsWith('\n') ? '\n' : '';
+  writingText.value = `${before}${lead}${content.text}${trail}${after}`;
+  bodyHtml.value = null;
+  const caret = before.length + lead.length + content.text.length;
+  void nextTick(() => {
+    area?.focus();
+    area?.setSelectionRange(caret, caret);
+  });
+}
+
 function onSendLaterChosen(value: string | null) {
   scheduledFor.value = value;
   showSendLater.value = false;
@@ -1213,6 +1240,11 @@ const signatureName = computed(() =>
   availableSignatures.value.find((signature) => signature.id === selectedSignatureId.value)?.name
     ?? t('compose.signature.none'),
 );
+
+function openAvailabilityFromPanel() {
+  if (moreSettingsRef.value) moreSettingsRef.value.open = false;
+  showAvailability.value = true;
+}
 
 function openSignatureMenu() {
   if (moreSettingsRef.value) moreSettingsRef.value.open = false;
@@ -1527,6 +1559,9 @@ defineExpose({
         <IconButton size="lg" v-if="supportsBackend" :title="$t('compose.toolbar.template')" :aria-label="$t('compose.toolbar.template')" @click="showTemplatePicker = true">
           <AppIcon size="lg"><path d="M3 1.5h7l3 3v10H3z"/><path d="M10 1.5v3h3M5.5 8h5M5.5 11h4"/></AppIcon>
         </IconButton>
+        <IconButton size="lg" v-if="supportsBackend && !isPhone" :title="$t('availability.insert.button')" :aria-label="$t('availability.insert.button')" :disabled="sending" data-testid="compose-insert-availability" @click="showAvailability = true">
+          <AppIcon size="lg"><rect x="2" y="3" width="12" height="11" rx="1.5"/><path d="M5 1.5v3M11 1.5v3M2 6.5h12M5.5 10l1.5 1.5 3-3"/></AppIcon>
+        </IconButton>
         <details ref="moreSettingsRef" class="more-settings">
           <summary class="more-summary" :title="$t('compose.toolbar.more')" :aria-label="$t('compose.toolbar.more')">
             <AppIcon size="lg"><circle cx="3" cy="8" r=".75" fill="currentColor" /><circle cx="8" cy="8" r=".75" fill="currentColor" /><circle cx="13" cy="8" r=".75" fill="currentColor" /></AppIcon><span v-if="advancedActive" class="tool-dot" aria-hidden="true" />
@@ -1545,6 +1580,19 @@ defineExpose({
               >
                 <span class="panel-signature-name">{{ signatureName }}</span>
                 <AppIcon size="sm"><path d="m4 6 4 4 4-4" /></AppIcon>
+              </AppButton>
+            </div>
+            <!-- A phone gets the words, not just an icon in the dock. -->
+            <div v-if="isPhone && supportsBackend" class="panel-row">
+              <AppButton
+                variant="ghost"
+                class="panel-signature"
+                :disabled="sending"
+                data-testid="compose-insert-availability-panel"
+                @click="openAvailabilityFromPanel"
+              >
+                <template #icon><AppIcon><rect x="2" y="3" width="12" height="11" rx="1.5"/><path d="M5 1.5v3M11 1.5v3M2 6.5h12M5.5 10l1.5 1.5 3-3"/></AppIcon></template>
+                {{ $t('availability.insert.button') }}
               </AppButton>
             </div>
             <div class="panel-row">
@@ -1658,6 +1706,11 @@ defineExpose({
       v-if="showTemplatePicker"
       @apply="onTemplateApply"
       @close="showTemplatePicker = false"
+    />
+    <InsertAvailabilityDialog
+      v-if="showAvailability"
+      @insert="onAvailabilityInsert"
+      @close="showAvailability = false"
     />
     <SendLaterMenu
       v-if="sendLaterAnchor"

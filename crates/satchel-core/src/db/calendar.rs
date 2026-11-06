@@ -123,12 +123,15 @@ pub struct CalendarEventWrite<'a> {
 }
 
 /// What a provider says about an event beyond its fields. Local, CalDAV and
-/// Google rows keep the defaults.
+/// Google rows keep the defaults, apart from `transparent`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EventFlags {
     pub read_only: bool,
     pub recurrence_instance: bool,
     pub rich_description: bool,
+    /// The event leaves its time free (TRANSP:TRANSPARENT, Google's
+    /// `transparency`, Graph's `showAs: free`). Free/busy skips it.
+    pub transparent: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +152,8 @@ pub struct GoogleCalendarEvent<'a> {
     pub all_day: bool,
     pub attendees_json: &'a str,
     pub calendar_id: &'a str,
+    /// Google's `transparency: transparent`, or an invitation the account declined.
+    pub transparent: bool,
 }
 
 /// One event of an Outlook calendar as Graph reported it.
@@ -522,8 +527,9 @@ impl<'a> CalendarRepository<'a> {
             "INSERT INTO calendar_events
                 (id, account_id, uid, title, description, location, starts_at, ends_at, all_day,
                  attendees_json, source, remote_href, remote_etag, collection_href, raw_ics,
-                 read_only, recurrence_instance, rich_description, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 read_only, recurrence_instance, rich_description, transparent, created_at,
+                 updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                 uid = excluded.uid,
                 title = excluded.title,
@@ -541,6 +547,7 @@ impl<'a> CalendarRepository<'a> {
                 read_only = excluded.read_only,
                 recurrence_instance = excluded.recurrence_instance,
                 rich_description = excluded.rich_description,
+                transparent = excluded.transparent,
                 updated_at = CASE WHEN
                     (calendar_events.uid, calendar_events.title, calendar_events.description,
                      calendar_events.location, calendar_events.starts_at, calendar_events.ends_at,
@@ -548,13 +555,13 @@ impl<'a> CalendarRepository<'a> {
                      calendar_events.remote_href, calendar_events.remote_etag,
                      calendar_events.collection_href, calendar_events.raw_ics,
                      calendar_events.read_only, calendar_events.recurrence_instance,
-                     calendar_events.rich_description)
+                     calendar_events.rich_description, calendar_events.transparent)
                     IS (excluded.uid, excluded.title, excluded.description, excluded.location,
                         excluded.starts_at, excluded.ends_at, excluded.all_day,
                         excluded.attendees_json, excluded.source, excluded.remote_href,
                         excluded.remote_etag, excluded.collection_href, excluded.raw_ics,
                         excluded.read_only, excluded.recurrence_instance,
-                        excluded.rich_description)
+                        excluded.rich_description, excluded.transparent)
                     THEN calendar_events.updated_at ELSE excluded.updated_at END
              WHERE calendar_events.account_id = excluded.account_id",
         )
@@ -576,6 +583,7 @@ impl<'a> CalendarRepository<'a> {
         .bind(i64::from(event.flags.read_only))
         .bind(i64::from(event.flags.recurrence_instance))
         .bind(i64::from(event.flags.rich_description))
+        .bind(i64::from(event.flags.transparent))
         .bind(&now)
         .bind(&now)
         .execute(&mut *connection)
@@ -672,8 +680,9 @@ impl<'a> CalendarRepository<'a> {
             sqlx::query(
                 "INSERT INTO calendar_events
                     (id, account_id, uid, title, description, location, starts_at, ends_at,
-                     all_day, attendees_json, source, collection_href, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'google', ?, ?, ?)",
+                     all_day, attendees_json, source, collection_href, transparent, created_at,
+                     updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'google', ?, ?, ?, ?)",
             )
             .bind(event.id)
             .bind(account_id)
@@ -686,6 +695,7 @@ impl<'a> CalendarRepository<'a> {
             .bind(if event.all_day { 1_i64 } else { 0_i64 })
             .bind(event.attendees_json)
             .bind(event.calendar_id)
+            .bind(i64::from(event.transparent))
             .bind(&now)
             .bind(&now)
             .execute(&mut *transaction)
@@ -874,7 +884,10 @@ impl<'a> CalendarRepository<'a> {
             remote_etag: etag,
             collection_href: Some(collection_href),
             raw_ics: Some(raw_ics),
-            flags: EventFlags::default(),
+            flags: EventFlags {
+                transparent: crate::calendar::availability::ics_transparent(raw_ics, event.all_day),
+                ..EventFlags::default()
+            },
         })
         .await?;
         Ok(true)
@@ -1342,6 +1355,7 @@ mod tests {
                     all_day: false,
                     attendees_json: "[]",
                     calendar_id: "old",
+                    transparent: false,
                 }],
             )
             .await

@@ -498,6 +498,11 @@ function focusEditor() {
   editor.value?.commands.focus();
 }
 
+/** Insert ready-made, already escaped HTML at the caret. */
+function insertHtml(html: string) {
+  editor.value?.chain().focus().insertContent(html).run();
+}
+
 function shortcutHint(binding: string): ShortcutHint {
   return { label: formatBinding(binding), keys: bindingKeycaps(binding), aria: ariaKeyshortcuts(binding) };
 }
@@ -607,7 +612,7 @@ function removeQuotedHistory() {
   transaction.run();
 }
 
-defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, removeQuotedHistory });
+defineExpose({ focusEditor, insertHtml, insertAttachmentImage, removeAttachmentImage, removeQuotedHistory });
 </script>
 
 <template>
