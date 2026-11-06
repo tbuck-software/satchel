@@ -138,7 +138,7 @@
       "notForReplies": "Eine Serienmail geht nur als neue Nachricht, nicht als Antwort oder Weiterleitung.",
       "bar": {
         "title": "Serienmail",
-        "recipients": "ein Empfänger aus {source} | {count} Empfänger aus {source}",
+        "recipients": "eine Person aus {source} | {count} Personen aus {source}",
         "insertField": "Feld einfügen",
         "insertFieldHint": "Fügt das Feld dort ein, wo der Cursor zuletzt stand, im Betreff oder in der Nachricht",
         "change": "Liste ändern",
@@ -147,7 +147,7 @@
       "source": {
         "title": "Serienmail",
         "lead": "Jede Person auf der Liste bekommt eine eigene Nachricht, nur an sie adressiert. Felder aus der Liste füllen die Platzhalter in Betreff und Text.",
-        "kindLabel": "Woher die Empfänger kommen",
+        "kindLabel": "Woher die Liste kommt",
         "csv": "CSV-Datei",
         "contacts": "Kontakte",
         "chooseFile": "CSV-Datei wählen …",
@@ -177,19 +177,19 @@
         "selectNone": "Auswahl aufheben",
         "contactsLabel": "ein Kontakt | {count} Kontakte",
         "sectionLabel": "{section} (ein Kontakt) | {section} ({count} Kontakte)",
-        "apply": "Einen Empfänger übernehmen | {count} Empfänger übernehmen"
+        "apply": "Eine Person übernehmen | {count} Personen übernehmen"
       },
       "review": {
         "title": "Serienmail prüfen",
         "summary": "Eine von {total} Zeilen aus {source} wird gesendet. | {count} von {total} Zeilen aus {source} werden gesendet.",
-        "overLimit": "{count} Empfänger sind mehr, als ein Auftrag senden darf ({limit}).",
+        "overLimit": "{count} Adressen sind mehr, als ein Auftrag senden darf ({limit}).",
         "overLimitDetail": "Teile die Liste in Teile mit höchstens {limit} Zeilen und sende jeden als eigene Serienmail.",
         "unknownFields": "Kein Feld der Liste heißt {fields}.",
         "unknownFieldsDetail": "Felder der Liste: {fields}. Zeilen ohne Ersatzwert dafür werden übersprungen.",
-        "encrypted": "Jede Nachricht wird für ihren Empfänger verschlüsselt. Vor der ersten werden die Schlüssel aller Empfänger und dein eigener geprüft; fehlt später ein Schlüssel, scheitert diese Nachricht und geht nicht unverschlüsselt raus.",
+        "encrypted": "Jede Nachricht wird für die jeweilige Person verschlüsselt. Vor der ersten werden alle Schlüssel der Liste und dein eigener geprüft; fehlt später ein Schlüssel, scheitert diese Nachricht und geht nicht unverschlüsselt raus.",
         "previewLabel": "Vorschau",
-        "previous": "Vorheriger Empfänger",
-        "next": "Nächster Empfänger",
+        "previous": "Vorherige Person",
+        "next": "Nächste Person",
         "position": "{index} von {total}",
         "rowSkipped": "Diese Zeile wird übersprungen",
         "issue": {
@@ -236,8 +236,8 @@
         "cancel": "Rest abbrechen",
         "retry": "Fehlgeschlagene erneut senden | {count} fehlgeschlagene erneut senden",
         "remove": "Entfernen",
-        "showRecipients": "Empfänger zeigen",
-        "hideRecipients": "Empfänger ausblenden",
+        "showRecipients": "Adressen zeigen",
+        "hideRecipients": "Adressen ausblenden",
         "cancelConfirm": {
           "title": "Diese Serienmail abbrechen?",
           "body": "Es ist nichts mehr zu senden. | Die verbleibende Nachricht wird nicht gesendet. | Die verbleibenden {count} Nachrichten werden nicht gesendet. Bereits gesendete bleiben gesendet."

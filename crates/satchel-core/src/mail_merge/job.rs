@@ -32,6 +32,9 @@ pub const PAUSE_REASON_FAILURES: &str = "failures";
 pub const PAUSE_REASON_RESTART: &str = "restart";
 /// Finished jobs are removed this long after they finished.
 pub const FINISHED_RETENTION_DAYS: i64 = 30;
+/// Outbox ids of merge copies start with this. Startup recovery leaves them
+/// to the job, which decides whether its copies go.
+pub const QUEUE_ID_PREFIX: &str = "mail-merge-";
 /// Error key a row carries when its outbox action was removed by hand.
 pub const ERROR_REMOVED_FROM_OUTBOX: &str = "backend.errors.mailMergeRemovedFromOutbox";
 const ERROR_MISSING_VALUES: &str = "backend.errors.mailMergeMissingValues";
@@ -370,18 +373,58 @@ pub async fn resume_job(pool: &SqlitePool, id: &str, now: DateTime<Utc>) -> Mail
 
 /// After a start, a job the last run left running waits for the user: a
 /// list that starts sending on its own when the laptop opens is a surprise.
+///
+/// The copy such a job had waiting in the outbox goes back to the job, or the
+/// outbox would send it on its own. `before_outbox` says the outbox worker has
+/// not started yet, so a row still marked `sending` without a submission is a
+/// leftover of the last run and comes back too; once the worker runs, such a
+/// row may be its own and stays.
 pub async fn pause_after_restart(
     pool: &SqlitePool,
     now: DateTime<Utc>,
+    before_outbox: bool,
 ) -> MailMergeResult<Vec<String>> {
-    Ok(sqlx::query_scalar(
+    let now_text = ts(now);
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let paused: Vec<String> = sqlx::query_scalar(
         "UPDATE mail_merge_jobs SET status = 'paused', pause_reason = ?, updated_at = ?
          WHERE status = 'running' RETURNING id",
     )
     .bind(PAUSE_REASON_RESTART)
-    .bind(ts(now))
-    .fetch_all(pool)
-    .await?)
+    .bind(&now_text)
+    .fetch_all(&mut *tx)
+    .await?;
+    let waiting: Vec<(String, String)> = sqlx::query_as(
+        "SELECT r.id, r.queue_id FROM mail_merge_recipients r
+         JOIN mail_merge_jobs j ON j.id = r.job_id
+         JOIN sync_queue q ON q.id = r.queue_id
+         WHERE j.status = 'paused' AND j.pause_reason = ? AND r.status = 'queued'
+           AND q.action_type = ? AND q.submission_started_at IS NULL
+           AND (q.status IN ('pending', 'scheduled') OR (? AND q.status = 'sending'))",
+    )
+    .bind(PAUSE_REASON_RESTART)
+    .bind(ACTION_SEND_MESSAGE)
+    .bind(before_outbox)
+    .fetch_all(&mut *tx)
+    .await?;
+    for (row_id, queue_id) in waiting {
+        sqlx::query("DELETE FROM sync_queue WHERE id = ? AND submission_started_at IS NULL")
+            .bind(&queue_id)
+            .execute(&mut *tx)
+            .await?;
+        // Back in line with its Message-ID; it does not count as an attempt.
+        sqlx::query(
+            "UPDATE mail_merge_recipients
+             SET status = 'pending', queue_id = NULL, attempts = MAX(attempts - 1, 0), updated_at = ?
+             WHERE id = ? AND status = 'queued'",
+        )
+        .bind(&now_text)
+        .bind(&row_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(paused)
 }
 
 /// Stops the job. Rows not yet handed over are cancelled; one waiting in the
@@ -457,11 +500,24 @@ pub async fn retry_failed(pool: &SqlitePool, id: &str, now: DateTime<Utc>) -> Ma
             .bind(id)
             .fetch_optional(&mut *tx)
             .await?;
+    let pause_reason: Option<String> =
+        sqlx::query_scalar("SELECT pause_reason FROM mail_merge_jobs WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .flatten();
     match status.as_deref() {
         None => return Err(MailMergeError::NotFound),
         Some("cancelled") => return Err(MailMergeError::InvalidState),
         _ => {}
     }
+    // Retrying is not resuming: a job the user paused, or a restart paused,
+    // keeps waiting for Resume. Only the pause for failures ends with a retry
+    // of those failures, and a finished job runs again for them.
+    let run_again = match status.as_deref() {
+        Some("paused") => pause_reason.as_deref() == Some(PAUSE_REASON_FAILURES),
+        _ => true,
+    };
     sqlx::query(
         "DELETE FROM sync_queue WHERE action_type = ? AND status IN ('failed', 'pending', 'scheduled')
            AND id IN (SELECT queue_id FROM mail_merge_recipients
@@ -480,7 +536,7 @@ pub async fn retry_failed(pool: &SqlitePool, id: &str, now: DateTime<Utc>) -> Ma
     .execute(&mut *tx)
     .await?
     .rows_affected();
-    if retried > 0 {
+    if retried > 0 && run_again {
         sqlx::query(
             "UPDATE mail_merge_jobs
              SET status = 'running', pause_reason = NULL, consecutive_failures = 0,
@@ -684,7 +740,7 @@ async fn count_failure(pool: &SqlitePool, job_id: &str, now_text: &str) -> MailM
     .bind(job_id)
     .execute(pool)
     .await?;
-    sqlx::query(
+    let paused = sqlx::query(
         "UPDATE mail_merge_jobs SET status = 'paused', pause_reason = ?, updated_at = ?
          WHERE id = ? AND status = 'running' AND consecutive_failures >= ?",
     )
@@ -693,7 +749,23 @@ async fn count_failure(pool: &SqlitePool, job_id: &str, now_text: &str) -> MailM
     .bind(job_id)
     .bind(AUTO_PAUSE_FAILURES)
     .execute(pool)
-    .await?;
+    .await?
+    .rows_affected();
+    if paused > 0 {
+        // The account is what keeps rejecting; its other jobs would only
+        // collect the same failures.
+        sqlx::query(
+            "UPDATE mail_merge_jobs SET status = 'paused', pause_reason = ?, updated_at = ?
+             WHERE status = 'running' AND id <> ?
+               AND account_id = (SELECT account_id FROM mail_merge_jobs WHERE id = ?)",
+        )
+        .bind(PAUSE_REASON_FAILURES)
+        .bind(now_text)
+        .bind(job_id)
+        .bind(job_id)
+        .execute(pool)
+        .await?;
+    }
     Ok(())
 }
 
@@ -833,15 +905,29 @@ pub async fn tick(
             report.in_flight = true;
             continue;
         }
-        // The account's pace: `delay` after its latest hand-over in any job.
-        let last_hand_over: Option<String> = sqlx::query_scalar(
-            "SELECT MAX(r.handed_over_at) FROM mail_merge_recipients r
-             JOIN mail_merge_jobs j ON j.id = r.job_id WHERE j.account_id = ?",
+        // The account's pace: after its latest hand-over, the larger of this
+        // job's delay and that of every job that handed over, so a fast job
+        // cannot undercut a slow one on the same account.
+        let hand_overs: Vec<(Option<String>, i64)> = sqlx::query_as(
+            "SELECT MAX(r.handed_over_at), j.delay_seconds FROM mail_merge_recipients r
+             JOIN mail_merge_jobs j ON j.id = r.job_id
+             WHERE j.account_id = ? AND r.handed_over_at IS NOT NULL GROUP BY j.id",
         )
         .bind(&account_id)
-        .fetch_one(pool)
+        .fetch_all(pool)
         .await?;
-        let paced = parse_ts(last_hand_over.as_deref()).map(|at| at + Duration::seconds(delay));
+        let latest = hand_overs
+            .iter()
+            .filter_map(|(at, _)| parse_ts(at.as_deref()))
+            .max();
+        let paced = hand_overs
+            .iter()
+            .filter_map(|(at, job_delay)| {
+                let at = parse_ts(at.as_deref())?;
+                Some(at + Duration::seconds(*job_delay))
+            })
+            .chain(latest.map(|at| at + Duration::seconds(delay)))
+            .max();
         let due = [parse_ts(next_send_at.as_deref()), paced]
             .into_iter()
             .flatten()
@@ -886,7 +972,7 @@ pub async fn tick(
             ACTION_SEND_MESSAGE,
             serde_json::to_value(&payload)?,
         );
-        action.id = format!("mail-merge-{row_id}");
+        action.id = format!("{QUEUE_ID_PREFIX}{row_id}");
 
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
         let next_at = now + Duration::seconds(delay);
@@ -1127,7 +1213,7 @@ mod tests {
 
         // "Restart": the runner pauses what was running, with a fresh queue.
         let queue = SyncQueue::new();
-        let paused = pause_after_restart(&pool, start + Duration::seconds(30))
+        let paused = pause_after_restart(&pool, start + Duration::seconds(30), true)
             .await
             .expect("restart");
         assert_eq!(paused, vec![job.clone()]);
@@ -1531,6 +1617,242 @@ mod tests {
         assert!(create_job(&pool, build(MAX_JOB_RECIPIENTS, 10), now)
             .await
             .is_ok());
+    }
+
+    /// Hand over the next copy and let the outbox fail it; returns its id.
+    async fn hand_over_and_fail(
+        pool: &SqlitePool,
+        queue: &SyncQueue,
+        now: DateTime<Utc>,
+    ) -> String {
+        tick(pool, queue, now).await.expect("tick");
+        let id = queue_rows(pool)
+            .await
+            .into_iter()
+            .find(|row| row.1 == "pending")
+            .expect("copy in the outbox")
+            .0;
+        outbox_marks(pool, &id, "failed").await;
+        tick(pool, queue, now + Duration::seconds(1))
+            .await
+            .expect("tick");
+        id
+    }
+
+    /// Retry failed copies is not Resume: a job the user or a restart paused
+    /// stays paused; the pause for failures and a finished job run again.
+    #[tokio::test]
+    async fn retry_failed_leaves_a_user_or_restart_pause_alone() {
+        for reason in [
+            None,
+            Some(PAUSE_REASON_RESTART),
+            Some(PAUSE_REASON_FAILURES),
+        ] {
+            let pool = pool().await;
+            let queue = SyncQueue::new();
+            let now = start();
+            let job = new_job(&pool, now, 3).await;
+            hand_over_and_fail(&pool, &queue, now).await;
+            sqlx::query(
+                "UPDATE mail_merge_jobs SET status = 'paused', pause_reason = ? WHERE id = ?",
+            )
+            .bind(reason)
+            .bind(&job)
+            .execute(&pool)
+            .await
+            .expect("pause");
+
+            assert_eq!(
+                retry_failed(&pool, &job, now + Duration::seconds(20))
+                    .await
+                    .expect("retry"),
+                1
+            );
+            let summary = job_summary(&pool, &job).await.expect("job");
+            assert_eq!(summary.failed, 0, "{reason:?}");
+            assert_eq!(summary.pending, 3, "{reason:?}");
+            if reason == Some(PAUSE_REASON_FAILURES) {
+                assert_eq!(summary.status, "running");
+                assert_eq!(summary.pause_reason, None);
+            } else {
+                assert_eq!(summary.status, "paused", "{reason:?}");
+                assert_eq!(summary.pause_reason.as_deref(), reason);
+                tick(&pool, &queue, now + Duration::seconds(60))
+                    .await
+                    .expect("tick");
+                // The failed copy's outbox action went; nothing new was handed over.
+                assert!(
+                    queue_rows(&pool).await.is_empty(),
+                    "nothing handed over while paused: {reason:?}"
+                );
+            }
+        }
+
+        // A job that finished with a failed copy runs again for it.
+        let pool = pool().await;
+        let queue = SyncQueue::new();
+        let now = start();
+        let job = new_job(&pool, now, 1).await;
+        hand_over_and_fail(&pool, &queue, now).await;
+        assert_eq!(job_summary(&pool, &job).await.unwrap().status, "completed");
+        retry_failed(&pool, &job, now + Duration::seconds(20))
+            .await
+            .expect("retry");
+        assert_eq!(job_summary(&pool, &job).await.unwrap().status, "running");
+    }
+
+    /// A failed copy the user retried from the Outbox is on its way again,
+    /// without a second copy and without the next row slipping past it.
+    #[tokio::test]
+    async fn a_copy_retried_from_the_outbox_goes_back_in_flight() {
+        let pool = pool().await;
+        let queue = SyncQueue::new();
+        let now = start();
+        let job = new_job(&pool, now, 3).await;
+        let failed = hand_over_and_fail(&pool, &queue, now).await;
+        assert_eq!(job_summary(&pool, &job).await.unwrap().failed, 1);
+
+        // Outbox → Retry. The next copy would be due, but the account is busy.
+        queue
+            .requeue_mail(&pool, &failed)
+            .await
+            .expect("outbox retry");
+        let report = tick(&pool, &queue, now + Duration::seconds(30))
+            .await
+            .expect("tick");
+        assert!(report.in_flight);
+        let rows = queue_rows(&pool).await;
+        assert_eq!(rows.len(), 1, "no extra copy");
+        assert_eq!(rows[0].0, failed);
+        let summary = job_summary(&pool, &job).await.expect("job");
+        assert_eq!((summary.queued, summary.failed, summary.pending), (1, 0, 2));
+
+        outbox_sends(&pool, &failed).await;
+        tick(&pool, &queue, now + Duration::seconds(31))
+            .await
+            .expect("tick");
+        let detail = job_detail(&pool, &job).await.expect("detail");
+        assert_eq!(detail.recipients[0].status, "sent");
+        assert_eq!(detail.recipients[0].attempts, 1);
+    }
+
+    /// The copy a running job had waiting in the outbox comes back with the
+    /// restart pause; the outbox does not send it on its own.
+    #[tokio::test]
+    async fn the_restart_pause_takes_the_waiting_copy_back() {
+        let pool = pool().await;
+        let queue = SyncQueue::new();
+        let now = start();
+        let job = new_job(&pool, now, 2).await;
+        tick(&pool, &queue, now).await.expect("tick");
+        let mid: String = sqlx::query_scalar(
+            "SELECT message_id_header FROM mail_merge_recipients WHERE job_id = ? AND position = 0",
+        )
+        .bind(&job)
+        .fetch_one(&pool)
+        .await
+        .expect("mid");
+        // The last run died while the outbox held the copy as `sending`.
+        sqlx::query("UPDATE sync_queue SET status = 'sending'")
+            .execute(&pool)
+            .await
+            .expect("sending");
+
+        // Once the outbox worker runs, a `sending` row may be its own: kept.
+        pause_after_restart(&pool, now, false).await.expect("pause");
+        assert_eq!(queue_rows(&pool).await.len(), 1);
+        sqlx::query("UPDATE mail_merge_jobs SET status = 'running'")
+            .execute(&pool)
+            .await
+            .expect("running again");
+
+        // Before the outbox worker, it is a leftover and comes back.
+        pause_after_restart(&pool, now, true).await.expect("pause");
+        assert!(queue_rows(&pool).await.is_empty());
+        let detail = job_detail(&pool, &job).await.expect("detail");
+        assert_eq!(detail.job.status, "paused");
+        assert_eq!(detail.recipients[0].status, "pending");
+        assert_eq!(detail.recipients[0].attempts, 0);
+
+        resume_job(&pool, &job, now + Duration::seconds(30))
+            .await
+            .expect("resume");
+        tick(&pool, &queue, now + Duration::seconds(30))
+            .await
+            .expect("tick");
+        let rows = queue_rows(&pool).await;
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].2.contains(&mid), "same Message-ID");
+    }
+
+    /// A fast job waits for the slowest delay among the account's jobs.
+    #[tokio::test]
+    async fn a_fast_job_does_not_undercut_a_slow_one_on_the_account() {
+        let pool = pool().await;
+        let queue = SyncQueue::new();
+        let now = start();
+        let slow = NewMailMergeJob {
+            delay_seconds: 60,
+            ..new_job_input("acc", "s", 2)
+        };
+        create_job(&pool, slow, now).await.expect("slow");
+        create_job(&pool, new_job_input("acc", "f", 2), now)
+            .await
+            .expect("fast");
+        tick(&pool, &queue, now).await.expect("tick");
+        let rows = queue_rows(&pool).await;
+        assert!(rows[0].2.contains("s0@example.test"));
+        outbox_sends(&pool, &rows[0].0).await;
+
+        let report = tick(&pool, &queue, now + Duration::seconds(15))
+            .await
+            .expect("tick");
+        assert!(queue_rows(&pool).await.is_empty());
+        assert_eq!(report.next_due, Some(now + Duration::seconds(60)));
+    }
+
+    /// Failures pause the account's other jobs too: it is the account that
+    /// keeps rejecting.
+    #[tokio::test]
+    async fn an_auto_pause_stops_the_accounts_other_jobs() {
+        let pool = pool().await;
+        let queue = SyncQueue::new();
+        let mut now = start();
+        let first = create_job(&pool, new_job_input("acc", "a", 5), now)
+            .await
+            .expect("first");
+        let sibling = create_job(&pool, new_job_input("acc", "b", 5), now)
+            .await
+            .expect("sibling");
+        let elsewhere = create_job(&pool, new_job_input("other", "c", 5), now)
+            .await
+            .expect("other account");
+        for _ in 0..AUTO_PAUSE_FAILURES {
+            tick(&pool, &queue, now).await.expect("tick");
+            for row in queue_rows(&pool).await {
+                if row.1 == "pending" && row.2.contains("[\"a") {
+                    outbox_marks(&pool, &row.0, "failed").await;
+                } else if row.1 == "pending" {
+                    outbox_sends(&pool, &row.0).await;
+                }
+            }
+            now += Duration::seconds(10);
+        }
+        tick(&pool, &queue, now).await.expect("tick");
+        let status = |summary: MailMergeJobSummary| (summary.status, summary.pause_reason);
+        let failures = Some(PAUSE_REASON_FAILURES.to_string());
+        assert_eq!(
+            status(job_summary(&pool, &first).await.unwrap()),
+            ("paused".into(), failures.clone())
+        );
+        assert_eq!(
+            status(job_summary(&pool, &sibling).await.unwrap()),
+            ("paused".into(), failures)
+        );
+        assert_eq!(
+            job_summary(&pool, &elsewhere).await.unwrap().status,
+            "running"
+        );
     }
 
     #[test]

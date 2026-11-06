@@ -2838,13 +2838,17 @@ const handlers: Record<string, Handler> = {
         job.finished_at = new Date().toISOString();
         for (const row of job.recipients) if (row.status === 'pending') row.status = 'cancelled';
         break;
-      case 'retry_failed':
+      case 'retry_failed': {
         if (job.status === 'cancelled') throw new Error('backend.errors.mailMergeInvalidState');
         for (const row of job.recipients) if (row.status === 'failed') { row.status = 'pending'; row.error = null; }
+        // Retrying is not resuming: a pause other than for failures stays.
+        if (job.status === 'paused' && job.pause_reason !== 'failures') break;
         job.status = 'running';
+        job.pause_reason = null;
         job.started_ms = Date.now();
         job.sent_before_pause = sent;
         break;
+      }
       case 'delete': {
         if (job.status !== 'completed' && job.status !== 'cancelled') throw new Error('backend.errors.mailMergeInvalidState');
         mergeJobs.splice(mergeJobs.indexOf(job), 1);

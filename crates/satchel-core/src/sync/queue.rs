@@ -629,10 +629,17 @@ impl SyncQueue {
     /// Recover old retry-budget failures at startup. Explicit rejections and
     /// ambiguous deliveries stay terminal. The status/error guard prevents a
     /// concurrent manual retry or edit from being overwritten.
+    ///
+    /// Mail merge copies are left out: their job comes back paused after a
+    /// restart, and its Retry failed is how they go again.
     pub async fn requeue_failed_transient(&self, pool: &SqlitePool) -> Result<u64, String> {
         let rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT id, last_error FROM sync_queue WHERE status = 'failed' AND last_error IS NOT NULL"
-        ).fetch_all(pool).await.map_err(|err| err.to_string())?;
+            "SELECT id, last_error FROM sync_queue WHERE status = 'failed' AND last_error IS NOT NULL
+               AND substr(id, 1, length(?)) <> ?"
+        )
+        .bind(crate::mail_merge::job::QUEUE_ID_PREFIX)
+        .bind(crate::mail_merge::job::QUEUE_ID_PREFIX)
+        .fetch_all(pool).await.map_err(|err| err.to_string())?;
         let mut changed = 0;
         for (id, error) in rows {
             if !super::errors::SyncError::recoverable_stored_failure(&error) {
@@ -1965,6 +1972,8 @@ mod tests {
                 r#"{"key":"backend.errors.queueActionFailed","params":{"message":"DNS lookup failed"}}"#,
             ),
             ("offline-move", "failed", "connection reset"),
+            // A mail merge copy waits for its job's Retry failed instead.
+            ("mail-merge-row-1", "failed", "connection reset"),
             ("rejected", "failed", "invalid recipient"),
             ("revoked", "failed", "invalid_grant"),
             ("unknown", "delivery_unknown", "connection reset"),

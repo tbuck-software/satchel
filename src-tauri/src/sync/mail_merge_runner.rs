@@ -32,18 +32,60 @@ pub fn wake() {
     notify().notify_one();
 }
 
-pub fn spawn_mail_merge_runner(state: AppState, pool: SqlitePool, app: AppHandle) {
+/// First wait between attempts at the restart pause; it doubles up to a minute.
+const RESTART_PAUSE_RETRY: Duration = Duration::from_secs(1);
+
+/// Repeats the restart pause until it went through. Nothing may tick before:
+/// a job the last run left running would otherwise go on without the user.
+async fn retry_until_paused<F, Fut>(pause: F, initial_delay: Duration) -> Vec<String>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = satchel_core::mail_merge::job::MailMergeResult<Vec<String>>>,
+{
+    let mut pause = pause;
+    satchel_core::sync::worker::retry_with_backoff(
+        "mail merge restart pause",
+        initial_delay,
+        Duration::from_secs(60),
+        move || {
+            let attempt = pause();
+            async move { attempt.await.map_err(|error| error.to_string()) }
+        },
+    )
+    .await
+}
+
+/// `restart_pause` is the attempt `lib.rs` makes before the outbox worker
+/// starts. When it failed, the runner repeats it before its first tick.
+pub fn spawn_mail_merge_runner(
+    state: AppState,
+    pool: SqlitePool,
+    app: AppHandle,
+    restart_pause: Result<Vec<String>, String>,
+) {
     tauri::async_runtime::spawn(async move {
-        // A job the last run left running waits for the user to resume it.
-        match satchel_core::mail_merge::job::pause_after_restart(&pool, chrono::Utc::now()).await {
-            Ok(paused) if !paused.is_empty() => {
-                let _ = app.emit(
-                    "mail-merge:updated",
-                    serde_json::json!({ "job_ids": paused }),
-                );
+        let paused = match restart_pause {
+            Ok(paused) => paused,
+            Err(error) => {
+                tracing::warn!(%error, "mail merge restart pause failed; retrying before sending");
+                retry_until_paused(
+                    || {
+                        satchel_core::mail_merge::job::pause_after_restart(
+                            &pool,
+                            chrono::Utc::now(),
+                            false,
+                        )
+                    },
+                    RESTART_PAUSE_RETRY,
+                )
+                .await
             }
-            Ok(_) => {}
-            Err(error) => tracing::warn!(error = ?error, "mail merge restart pause failed"),
+        };
+        if !paused.is_empty() {
+            let _ = app.emit(
+                "mail-merge:updated",
+                serde_json::json!({ "job_ids": paused }),
+            );
         }
         loop {
             let sleep =
@@ -80,4 +122,36 @@ pub fn spawn_mail_merge_runner(state: AppState, pool: SqlitePool, app: AppHandle
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use satchel_core::mail_merge::job::MailMergeError;
+
+    use super::*;
+
+    /// A pause that fails once (a locked database at startup) is repeated,
+    /// and the runner gets past it only once it went through.
+    #[tokio::test]
+    async fn repeats_a_failed_restart_pause_until_it_goes_through() {
+        let attempts = AtomicUsize::new(0);
+        let paused = retry_until_paused(
+            || {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if attempt == 0 {
+                        Err(MailMergeError::Persistence(sqlx::Error::PoolTimedOut))
+                    } else {
+                        Ok(vec!["job-1".to_string()])
+                    }
+                }
+            },
+            Duration::from_millis(1),
+        )
+        .await;
+        assert_eq!(paused, vec!["job-1".to_string()]);
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
 }

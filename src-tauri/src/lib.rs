@@ -342,6 +342,14 @@ pub fn run() {
                 }
             });
 
+            // Before the outbox worker: a mail merge job the last run left
+            // running comes back paused, and its waiting copy with it, so the
+            // outbox cannot send it first. A failed attempt is repeated by the
+            // runner before its first tick.
+            let mail_merge_restart = tauri::async_runtime::block_on(
+                satchel_core::mail_merge::job::pause_after_restart(&pool, chrono::Utc::now(), true),
+            )
+            .map_err(|error| error.to_string());
             sync::queue_worker::spawn_queue_worker(
                 state.clone(),
                 pool.clone(),
@@ -365,6 +373,7 @@ pub fn run() {
                 state.clone(),
                 pool.clone(),
                 app_handle.clone(),
+                mail_merge_restart,
             );
 
             // Bridge AppEvent -> Tauri events for the frontend.

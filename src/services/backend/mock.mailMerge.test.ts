@@ -69,6 +69,9 @@ describe('mock mail merge', () => {
 
     const paused = await sendCommand<BackendMergeJob>('control_mail_merge_job', { id: job.id, action: 'pause' });
     expect(paused.status).toBe('paused');
+    // Retry failed copies is not Resume: a paused job stays paused.
+    const retried = await sendCommand<BackendMergeJob>('control_mail_merge_job', { id: job.id, action: 'retry_failed' });
+    expect(retried.status).toBe('paused');
     const cancelled = await sendCommand<BackendMergeJob>('control_mail_merge_job', { id: job.id, action: 'cancel' });
     expect(cancelled.cancelled).toBe(1);
     const detail = await sendCommand<BackendMergeJobDetail>('get_mail_merge_job', { id: job.id });

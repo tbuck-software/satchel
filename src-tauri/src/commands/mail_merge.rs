@@ -527,7 +527,7 @@ mod tests {
             .unwrap();
         sqlx::query(
             "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
-             VALUES ('acc', '', 'me@gmail.com', 'gmail', '{}', '', '', '')",
+             VALUES ('acc', '', 'me@example.test', 'gmail', '{}', '', '', '')",
         )
         .execute(&pool)
         .await
