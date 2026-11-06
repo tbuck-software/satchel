@@ -384,10 +384,12 @@ async fn pool() -> SqlitePool {
         .await
         .unwrap();
     crate::db::init(&pool).await.unwrap();
+    let config = crate::accounts::encrypt_account_config("a", "{}").unwrap();
     sqlx::query(
         "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, sync_state, color, is_active, created_at, updated_at)
-         VALUES ('a', 'Me', 'me@example.com', 'imap', '{}', '', '{}', '', 1, 'now', 'now')",
+         VALUES ('a', 'Me', 'me@example.com', 'imap', ?, '', '{}', '', 1, 'now', 'now')",
     )
+    .bind(config)
     .execute(&pool)
     .await
     .unwrap();
