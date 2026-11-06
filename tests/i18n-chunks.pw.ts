@@ -23,10 +23,6 @@ function keyPaths(value: unknown, trail: string[] = []): string[] {
 const en = JSON.parse(readFileSync(new URL('../src/i18n/en.json', import.meta.url), 'utf8'));
 const catalogue = new Set(keyPaths(en));
 
-/** Every settings section with a name in the catalogue. */
-const SETTINGS_SECTIONS = Object.entries(en.settings.sections as Record<string, unknown>)
-  .filter(([, value]) => typeof value === 'object' && value !== null && 'label' in value)
-  .map(([section]) => section);
 const VIEWS = ['/inbox', '/later', '/calendar', '/contacts', '/outbox', '/drafts', '/cleanup', '/new-senders', '/search', '/compose'];
 
 /** A message chunk request: `/src/i18n/chunks/<id>.<locale>.json` in dev, `<id>.<locale>-<hash>.js` built. */
@@ -72,12 +68,24 @@ for (const locale of ['en', 'de'] as const) {
     test.beforeEach(async ({ page }) => startIn(page, locale));
 
     test('settings sections show no raw keys', async ({ page }) => {
+      test.setTimeout(240_000);
       const { missing } = watch(page);
+      await page.goto('/settings');
+      const dialog = page.getByRole('dialog').first();
+      await expect(dialog).toBeVisible();
+      // Every section the sidebar offers here; the ones a platform hides are
+      // not reachable anyway.
+      const sections = dialog.getByRole('navigation').first().getByRole('listitem').getByRole('button');
+      // The sidebar is lazy itself; count once it is there.
+      await expect(sections.first()).toBeVisible();
+      const count = await sections.count();
+      expect(count).toBeGreaterThan(10);
       const found: string[] = [];
-      for (const section of SETTINGS_SECTIONS) {
-        await page.goto(`/settings?section=${section}`);
-        await expect(page.getByRole('dialog').first()).toBeVisible();
-        found.push(...await rawKeys(page, section));
+      for (let index = 0; index < count; index += 1) {
+        const section = sections.nth(index);
+        const name = (await section.textContent())?.trim() ?? String(index);
+        await section.click();
+        found.push(...await rawKeys(page, name));
       }
       expect(found).toEqual([]);
       expect(missing).toEqual([]);
