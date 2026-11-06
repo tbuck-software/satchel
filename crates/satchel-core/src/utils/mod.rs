@@ -1,6 +1,7 @@
 pub mod config;
 pub mod crypto;
 pub mod filename;
+pub mod hex;
 pub mod http;
 pub mod mime;
 pub mod network;

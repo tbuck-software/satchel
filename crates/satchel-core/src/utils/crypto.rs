@@ -600,7 +600,10 @@ fn profile_keyring_account(profile_dir: &Path) -> String {
             hash.update(unit.to_le_bytes());
         }
     }
-    format!("{KEYRING_ACCOUNT}:{:x}", hash.finalize())
+    format!(
+        "{KEYRING_ACCOUNT}:{}",
+        crate::utils::hex::lower_hex(&hash.finalize())
+    )
 }
 
 #[cfg(desktop)]

@@ -862,7 +862,9 @@ fn parse_feed(xml: &str) -> Vec<IngestItem> {
         let id = xml_value(block, "guid")
             .or_else(|| xml_value(block, "id"))
             .or_else(|| link.clone())
-            .unwrap_or_else(|| format!("{:x}", Sha256::digest(block.as_bytes())));
+            .unwrap_or_else(|| {
+                satchel_core::utils::hex::lower_hex(&Sha256::digest(block.as_bytes()))
+            });
         let body = xml_value(block, "description")
             .or_else(|| xml_value(block, "summary"))
             .or_else(|| xml_value(block, "content"));
@@ -950,7 +952,7 @@ fn slug(v: &str) -> String {
 }
 
 fn stable_key(value: &str) -> String {
-    format!("{:x}", Sha256::digest(value.as_bytes()))
+    satchel_core::utils::hex::lower_hex(&Sha256::digest(value.as_bytes()))
         .chars()
         .take(24)
         .collect()
