@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const trashMock = vi.fn();
 const spamMock = vi.fn();
+const notSpamMock = vi.fn();
+const undoNotSpamMock = vi.fn();
 const readMock = vi.fn();
 const moveMock = vi.fn();
 const undoTrashMock = vi.fn();
@@ -57,6 +59,7 @@ const threadState = {
   // Owns the optimistic removal and its rollback.
   trashThreads: (...args: unknown[]) => trashMock(...args),
   markThreadsSpam: (...args: unknown[]) => spamMock(...args),
+  markThreadsNotSpam: (...args: unknown[]) => notSpamMock(...args),
   setThreadsRead: (...args: unknown[]) => readMock(...args),
   // Owns the optimistic star and its rollback.
   setThreadsStarred: (...args: [string[], boolean]) => starMock(...args),
@@ -88,6 +91,7 @@ vi.mock('@/services/backend', () => ({
   backendBlockSender: (...args: unknown[]) => blockMock(...args),
   backendMoveThreadsToFolder: (...args: unknown[]) => moveMock(...args),
   backendUndoTrash: (...args: unknown[]) => undoTrashMock(...args),
+  backendUndoNotSpam: (...args: unknown[]) => undoNotSpamMock(...args),
   backendCommandsAvailable: () => true,
   backendSupportsNativeCommands: () => true,
 }));
@@ -657,6 +661,28 @@ describe('useThreadActions', () => {
     expect(toast).toMatchObject({ tone: 'success', message: 'Thread marked as spam' });
     await toast!.action!.handler();
     expect(undoTrashMock).toHaveBeenCalledWith('spam-receipt');
+    expect(refreshHeadMock).toHaveBeenCalled();
+  });
+
+  it('answers Not spam with a toast whose Undo hands the receipt back', async () => {
+    const receipt = {
+      thread_ids: ['thread-1'],
+      moved_thread_ids: ['thread-1'],
+      undo_token: 'not-spam:1',
+      move_receipts: ['move-1'],
+      restored_thread_ids: [],
+    };
+    notSpamMock.mockResolvedValueOnce(receipt);
+    undoNotSpamMock.mockResolvedValueOnce(undefined);
+
+    await useThreadActions().markNotSpam(['thread-1', 'thread-1']);
+
+    expect(notSpamMock).toHaveBeenCalledWith(['thread-1']);
+    const toast = toasts.at(-1);
+    expect(toast).toMatchObject({ tone: 'success', message: 'Thread moved back to the Inbox' });
+    expect(toast!.action).toBeDefined();
+    await toast!.action!.handler();
+    expect(undoNotSpamMock).toHaveBeenCalledWith(receipt);
     expect(refreshHeadMock).toHaveBeenCalled();
   });
 

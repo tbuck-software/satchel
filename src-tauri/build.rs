@@ -176,6 +176,7 @@ const COMMANDS: &[&str] = &[
     "set_thread_muted",
     "mark_threads_spam",
     "mark_threads_not_spam",
+    "undo_not_spam",
     "get_spam_filter_status",
     "set_spam_filter_mode",
     "set_threads_starred",

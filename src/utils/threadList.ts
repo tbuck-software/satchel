@@ -1304,6 +1304,7 @@ export function toThreadModel(input: BackendThread, accounts: readonly Account[]
     inviteStatus: input.invite_status ?? undefined,
     inviteCancelled: Boolean(input.invite_cancelled),
     likelySpam: Boolean(input.likely_spam),
+    spamMoved: Boolean(input.spam_moved),
   };
 }
 

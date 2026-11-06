@@ -1,6 +1,7 @@
 //! The local spam filter end to end over a migrated database: training,
-//! untraining through Undo, relabelling, weak signals, pruning, the bootstrap,
-//! classification of new mail and Not spam.
+//! untraining through Undo, relabelling, weak signals, pruning, the gates
+//! before any verdict and before Move, the bootstrap, classification of new
+//! mail and Not spam.
 
 use satchel_core::mail_actions::{self, undo};
 use satchel_core::spam::{
@@ -17,62 +18,125 @@ async fn pool(provider: &str) -> SqlitePool {
         .await
         .expect("pool");
     satchel_core::db::init(&pool).await.expect("migrations");
+    add_account(&pool, "acc", "me@example.test", provider).await;
+    pool
+}
+
+async fn add_account(pool: &SqlitePool, id: &str, email: &str, provider: &str) {
     sqlx::query(
         "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
-         VALUES ('acc', 'Me', 'me@example.test', ?, '{}', '', '2026-01-01', '2026-01-01')",
+         VALUES (?, 'Me', ?, ?, '{}', '', '2026-01-01', '2026-01-01')",
     )
+    .bind(id)
+    .bind(email)
     .bind(provider)
-    .execute(&pool)
+    .execute(pool)
     .await
     .expect("account");
-    for (id, kind, remote) in [
-        ("inbox", "inbox", "INBOX"),
-        ("spam", "spam", "Spam"),
-        ("sent", "sent", "Sent"),
-        ("work", "custom", "Work"),
+    for (kind, remote) in [
+        ("inbox", "INBOX"),
+        ("spam", "Spam"),
+        ("sent", "Sent"),
+        ("archive", "Archive"),
     ] {
+        let folder = if id == "acc" {
+            kind.to_string()
+        } else {
+            format!("{id}-{kind}")
+        };
         sqlx::query(
             "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, uidvalidity, created_at, updated_at)
-             VALUES (?, 'acc', ?, ?, ?, ?, 7, '2026-01-01', '2026-01-01')",
+             VALUES (?, ?, ?, ?, ?, ?, 7, '2026-01-01', '2026-01-01')",
         )
+        .bind(folder)
         .bind(id)
         .bind(remote)
         .bind(remote)
         .bind(kind)
         .bind(remote)
-        .execute(&pool)
+        .execute(pool)
         .await
         .expect("folder");
     }
-    pool
 }
 
-/// One single-message thread `t-<id>` holding message `m-<id>`.
-async fn message(pool: &SqlitePool, id: &str, folder: &str, from: &str, subject: &str, body: &str) {
+/// Let the model judge: the bootstrap marker gone, as after its run.
+async fn finish_bootstrap(pool: &SqlitePool) {
+    sqlx::query("DELETE FROM app_settings WHERE key = ?")
+        .bind(store::BOOTSTRAP_MARKER)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+#[derive(Clone)]
+struct Mail {
+    id: String,
+    account: &'static str,
+    thread: String,
+    folder: String,
+    from: String,
+    subject: String,
+    body: String,
+    unsubscribe: bool,
+    dmarc: Option<&'static str>,
+}
+
+impl Mail {
+    fn new(id: &str, folder: &str, from: &str, subject: &str, body: &str) -> Self {
+        Self {
+            id: format!("m-{id}"),
+            account: "acc",
+            thread: format!("t-{id}"),
+            folder: folder.into(),
+            from: from.into(),
+            subject: subject.into(),
+            body: body.into(),
+            unsubscribe: false,
+            dmarc: None,
+        }
+    }
+
+    fn in_thread(mut self, thread: &str) -> Self {
+        self.thread = thread.into();
+        self
+    }
+}
+
+async fn insert(pool: &SqlitePool, mail: &Mail) {
     sqlx::query(
         "INSERT INTO threads (id, account_id, subject, workflow_state, board_column, last_message_date, created_at, updated_at)
-         VALUES (?, 'acc', ?, 'inbox', 'inbox', '2026-01-01', '2026-01-01', '2026-01-01')
+         VALUES (?, ?, ?, 'inbox', 'inbox', '2026-01-01', '2026-01-01', '2026-01-01')
          ON CONFLICT(id) DO NOTHING",
     )
-    .bind(format!("t-{id}"))
-    .bind(subject)
+    .bind(&mail.thread)
+    .bind(mail.account)
+    .bind(&mail.subject)
     .execute(pool)
     .await
     .expect("thread");
     sqlx::query(
-        "INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, body_text, date, remote_id, is_read, created_at, updated_at)
-         VALUES (?, 'acc', ?, ?, ?, '[\"me@example.test\"]', ?, ?, '2026-01-01', ?, 1, '2026-01-01', '2026-01-01')",
+        "INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, body_text,
+                               list_unsubscribe, auth_dmarc, date, remote_id, is_read, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, '[\"me@example.test\"]', ?, ?, ?, ?, '2026-01-01', ?, 1, '2026-01-01', '2026-01-01')",
     )
-    .bind(format!("m-{id}"))
-    .bind(folder)
-    .bind(format!("t-{id}"))
-    .bind(from)
-    .bind(subject)
-    .bind(body)
-    .bind(format!("uid-{id}"))
+    .bind(&mail.id)
+    .bind(mail.account)
+    .bind(&mail.folder)
+    .bind(&mail.thread)
+    .bind(&mail.from)
+    .bind(&mail.subject)
+    .bind(&mail.body)
+    .bind(mail.unsubscribe.then_some("<mailto:leave@list.example>"))
+    .bind(mail.dmarc)
+    .bind(format!("uid-{}", mail.id))
     .execute(pool)
     .await
     .expect("message");
+}
+
+async fn message(pool: &SqlitePool, id: &str, folder: &str, from: &str, subject: &str, body: &str) {
+    insert(pool, &Mail::new(id, folder, from, subject, body)).await;
 }
 
 async fn totals(pool: &SqlitePool) -> (i64, i64) {
@@ -96,50 +160,243 @@ async fn spam_count(pool: &SqlitePool, token: &str) -> i64 {
         .expect("token")
 }
 
-/// Ten spams about lotteries and ten hams about meetings: enough for the
-/// model to be ready.
-async fn trained_model(pool: &SqlitePool) {
-    for n in 0..10 {
-        let id = format!("s{n}");
-        message(
-            pool,
-            &id,
-            "inbox",
-            &format!("winner{n}@lottery.example"),
-            "You won the lottery jackpot",
-            "Claim your jackpot prize now, wire the processing fee today",
-        )
-        .await;
-        spam::train_messages(
-            pool,
-            &[format!("m-{id}")],
-            Label::Spam,
-            Signal::Explicit,
-            None,
-        )
+async fn folder_of(pool: &SqlitePool, message_id: &str) -> (String, Option<String>) {
+    sqlx::query_as("SELECT folder_id, pending_folder_id FROM messages WHERE id = ?")
+        .bind(message_id)
+        .fetch_one(pool)
         .await
-        .expect("train spam");
-        let id = format!("h{n}");
-        message(
-            pool,
-            &id,
-            "inbox",
-            &format!("colleague{n}@work.example"),
-            "Agenda for the project meeting",
-            "Please review the agenda and the minutes before our meeting on Tuesday",
-        )
-        .await;
-        spam::train_messages(
-            pool,
-            &[format!("m-{id}")],
-            Label::Ham,
-            Signal::Explicit,
-            None,
-        )
-        .await
-        .expect("train ham");
+        .expect("message folder")
+}
+
+async fn classify(pool: &SqlitePool, queue: &SyncQueue, mail: &Mail) -> ClassifyOutcome {
+    spam::classify_incoming(
+        pool,
+        queue,
+        IncomingMessage {
+            provider: "imap",
+            message_id: &mail.id,
+            thread_id: &mail.thread,
+            from_address: &mail.from,
+            hint_headers: None,
+        },
+    )
+    .await
+    .expect("classify")
+}
+
+/* ------------------------------------------------------------------------ */
+/* A small, realistic corpus                                                */
+/* ------------------------------------------------------------------------ */
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Kind {
+    Spam,
+    Personal,
+    Newsletter,
+    Receipt,
+}
+
+/// Deterministic, so a failure is reproducible.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> usize {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (self.0 >> 33) as usize
+    }
+
+    fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
+        items[self.next() % items.len()]
+    }
+
+    fn sentences(&mut self, items: &[&str], count: usize) -> String {
+        (0..count)
+            .map(|_| self.pick(items))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
+
+fn sample(rng: &mut Rng, kind: Kind, n: usize, tag: &str) -> Mail {
+    let id = format!("{tag}-{kind:?}-{n}");
+    let (from, subject, body, unsubscribe) = match kind {
+        Kind::Spam => (
+            format!(
+                "{}{n}@{}{}.{}",
+                rng.pick(&["info", "support", "winner", "admin", "promo", "service"]),
+                rng.pick(&["cash", "prize", "secure-login", "deal", "crypto", "pharma"]),
+                n % 17,
+                rng.pick(&["biz", "top", "xyz", "info"])
+            ),
+            rng.pick(&[
+                "You have been selected for a cash prize",
+                "Final notice: claim your reward",
+                "Exclusive offer just for you",
+                "Your account will be suspended",
+                "Earn money from home fast",
+                "Cheap medication without prescription",
+                "Double your crypto in 24 hours",
+                "Urgent business proposal",
+            ])
+            .to_string(),
+            rng.sentences(
+                &[
+                    "Click the link below to claim your reward immediately.",
+                    "This offer expires in 24 hours, act now.",
+                    "Send your bank details and a small processing fee.",
+                    "Verify your password to avoid account suspension.",
+                    "Guaranteed returns with zero risk investment.",
+                    "Order discount pills online, no prescription needed.",
+                    "Dear beneficiary, the transfer of funds awaits your reply.",
+                    "You are the lucky winner of our international lottery.",
+                    "Limited time: earn thousands of dollars weekly.",
+                    "Confidential: kindly reply with your full name and phone number.",
+                ],
+                5,
+            ),
+            false,
+        ),
+        Kind::Personal => (
+            format!(
+                "{}@{}",
+                rng.pick(&["anna", "ben", "clara", "david", "eva", "felix", "greta", "hannes"]),
+                rng.pick(&["work.example", "family.example", "club.example"])
+            ),
+            rng.pick(&[
+                "Notes from today's meeting",
+                "Lunch on Thursday?",
+                "Draft of the quarterly report",
+                "Can you review my pull request",
+                "Weekend plans",
+                "Updated project timeline",
+                "Question about the budget",
+                "Photos from the trip",
+            ])
+            .to_string(),
+            rng.sentences(
+                &[
+                    "I attached the notes from our meeting this morning.",
+                    "Could you take a look before Friday?",
+                    "Let me know if Thursday works for lunch.",
+                    "The timeline moved by a week because of the review.",
+                    "Thanks again for your help with the slides.",
+                    "Do you have time for a quick call tomorrow?",
+                    "Here are the photos from the weekend.",
+                    "I updated the budget sheet with the new numbers.",
+                    "See you at the office on Monday.",
+                    "The kids are looking forward to the visit.",
+                ],
+                4,
+            ),
+            false,
+        ),
+        Kind::Newsletter => (
+            format!(
+                "{}@{}",
+                rng.pick(&["news", "digest", "updates", "hello"]),
+                rng.pick(&[
+                    "opensource.example",
+                    "product.example",
+                    "magazine.example",
+                    "meetup.example"
+                ])
+            ),
+            rng.pick(&[
+                "This week in open source",
+                "Your monthly product update",
+                "New articles you might like",
+                "Release notes for version 4",
+                "Community digest",
+                "Events near you this month",
+            ])
+            .to_string(),
+            rng.sentences(
+                &[
+                    "Here are the most read articles of the week.",
+                    "We shipped new features based on your feedback.",
+                    "Read the full release notes on our blog.",
+                    "Join the community call next Tuesday.",
+                    "You are receiving this because you subscribed to our newsletter.",
+                    "Manage your email preferences or unsubscribe at any time.",
+                    "Our editors picked these stories for you.",
+                    "Thank you for being part of the community.",
+                ],
+                4,
+            ),
+            true,
+        ),
+        Kind::Receipt => (
+            format!(
+                "{}@{}",
+                rng.pick(&["orders", "billing", "noreply", "service"]),
+                rng.pick(&[
+                    "shop.example",
+                    "rail.example",
+                    "books.example",
+                    "energy.example"
+                ])
+            ),
+            rng.pick(&[
+                "Your order has shipped",
+                "Receipt for your payment",
+                "Invoice for October",
+                "Order confirmation",
+                "Your package was delivered",
+                "Booking confirmation",
+            ])
+            .to_string(),
+            rng.sentences(
+                &[
+                    "Thank you for your order.",
+                    "Your payment of 42.90 EUR was received.",
+                    "Track your package with the tracking number below.",
+                    "The invoice is attached as a PDF.",
+                    "Your order will arrive on Wednesday.",
+                    "View your order details in your account.",
+                    "Questions? Contact our customer service.",
+                    "Your booking reference is ABC123.",
+                ],
+                4,
+            ),
+            false,
+        ),
+    };
+    let mut mail = Mail::new(&id, "inbox", &from, &subject, &body);
+    mail.unsubscribe = unsubscribe;
+    mail
+}
+
+/// Train `spam` spams and `ham` hams — a third of the hams newsletters, a
+/// third receipts — each its own thread.
+async fn train_corpus(pool: &SqlitePool, seed: u64, spam: usize, ham: usize) {
+    let mut rng = Rng(seed);
+    let mut spam_ids = Vec::new();
+    let mut ham_ids = Vec::new();
+    for n in 0..spam {
+        let mail = sample(&mut rng, Kind::Spam, n, &format!("train{seed}"));
+        insert(pool, &mail).await;
+        spam_ids.push(mail.id);
+    }
+    for n in 0..ham {
+        let kind = [Kind::Personal, Kind::Newsletter, Kind::Receipt][n % 3];
+        let mail = sample(&mut rng, kind, n, &format!("train{seed}"));
+        insert(pool, &mail).await;
+        ham_ids.push(mail.id);
+    }
+    spam::train_messages(pool, &spam_ids, Label::Spam, Signal::Explicit, None)
+        .await
+        .expect("train spam");
+    spam::train_messages(pool, &ham_ids, Label::Ham, Signal::Explicit, None)
+        .await
+        .expect("train ham");
+}
+
+/* ------------------------------------------------------------------------ */
+/* Training                                                                 */
+/* ------------------------------------------------------------------------ */
 
 #[tokio::test]
 async fn mark_as_spam_trains_and_its_undo_untrains() {
@@ -219,6 +476,52 @@ async fn relabelling_moves_the_example_and_undo_restores_the_old_label() {
 }
 
 #[tokio::test]
+async fn an_explicit_label_upgrades_a_weak_one_and_its_undo_restores_it() {
+    let pool = pool("imap").await;
+    message(
+        &pool,
+        "1",
+        "inbox",
+        "friend@home.example",
+        "Dinner",
+        "See you at dinner",
+    )
+    .await;
+    let ids = vec!["m-1".to_string()];
+    spam::train_messages(&pool, &ids, Label::Ham, Signal::Weak, None)
+        .await
+        .unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(!store::rescued_sender(&mut conn, "friend@home.example")
+        .await
+        .unwrap());
+    drop(conn);
+
+    spam::train_messages(&pool, &ids, Label::Ham, Signal::Explicit, Some("r"))
+        .await
+        .unwrap();
+    assert_eq!(totals(&pool).await, (0, 1), "the count does not double");
+    let mut conn = pool.acquire().await.unwrap();
+    assert!(store::rescued_sender(&mut conn, "Friend@Home.example")
+        .await
+        .unwrap());
+    drop(conn);
+
+    spam::untrain_receipt(&pool, "r").await.unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    let label = store::trained_label(&mut conn, "m-1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!((label.label, label.source), (Label::Ham, Signal::Weak));
+    assert!(!store::rescued_sender(&mut conn, "friend@home.example")
+        .await
+        .unwrap());
+    drop(conn);
+    assert_eq!(totals(&pool).await, (0, 1));
+}
+
+#[tokio::test]
 async fn weak_signals_never_override_a_label() {
     let pool = pool("imap").await;
     message(
@@ -230,8 +533,7 @@ async fn weak_signals_never_override_a_label() {
         "A great offer",
     )
     .await;
-    let ids = vec!["m-1".to_string()];
-    spam::train_messages(&pool, &ids, Label::Spam, Signal::Explicit, None)
+    spam::train_messages(&pool, &["m-1".into()], Label::Spam, Signal::Explicit, None)
         .await
         .unwrap();
     // Starring or replying to mail already called spam teaches nothing.
@@ -253,6 +555,56 @@ async fn weak_signals_never_override_a_label() {
         .await
         .unwrap();
     assert_eq!(totals(&pool).await, (1, 1));
+}
+
+#[tokio::test]
+async fn a_thread_is_one_example_per_sender() {
+    let pool = pool("imap").await;
+    for n in 0..5 {
+        insert(
+            &pool,
+            &Mail::new(
+                &format!("a{n}"),
+                "inbox",
+                "flood@promo.example",
+                "Offer",
+                "Buy now",
+            )
+            .in_thread("t-long"),
+        )
+        .await;
+    }
+    insert(
+        &pool,
+        &Mail::new("b", "inbox", "other@promo.example", "Re: Offer", "Also buy")
+            .in_thread("t-long"),
+    )
+    .await;
+    spam::train_threads(
+        &pool,
+        &["t-long".into()],
+        Label::Spam,
+        Signal::Explicit,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        totals(&pool).await,
+        (2, 0),
+        "five messages from one sender are one example"
+    );
+    // The relabel reaches the same two examples.
+    spam::train_threads(
+        &pool,
+        &["t-long".into()],
+        Label::Ham,
+        Signal::Explicit,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(totals(&pool).await, (0, 2));
 }
 
 #[tokio::test]
@@ -310,111 +662,193 @@ async fn pruning_drops_the_weakest_tokens_first() {
     assert_eq!(left, vec![1, 4], "once-seen tokens go, oldest first");
 }
 
+/* ------------------------------------------------------------------------ */
+/* The gates before any verdict                                             */
+/* ------------------------------------------------------------------------ */
+
 #[tokio::test]
-async fn new_mail_is_scored_once_the_model_is_ready() {
+async fn a_thin_model_gives_no_verdict() {
     let pool = pool("imap").await;
     let queue = SyncQueue::new();
-    message(
-        &pool,
-        "early",
-        "inbox",
-        "a@lottery.example",
-        "Jackpot",
-        "jackpot prize",
-    )
-    .await;
-    let outcome = spam::classify_incoming(
-        &pool,
-        &queue,
-        IncomingMessage {
-            provider: "imap",
-            message_id: "m-early",
-            thread_id: "t-early",
-            from_address: "a@lottery.example",
-            hint_headers: Some("X-Spam-Flag: YES"),
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(outcome, ClassifyOutcome::Unscored, "too little training");
+    train_corpus(&pool, 1, 10, 10).await;
+    finish_bootstrap(&pool).await;
+    let mail = sample(&mut Rng(99), Kind::Spam, 0, "new");
+    insert(&pool, &mail).await;
+    assert_eq!(
+        classify(&pool, &queue, &mail).await,
+        ClassifyOutcome::Unscored
+    );
+    let status = spam::status(&pool).await.unwrap();
+    assert!(!status.ready);
+    assert_eq!((status.spam_needed, status.ham_needed), (40, 40));
+}
 
-    trained_model(&pool).await;
-    message(
-        &pool,
-        "new",
-        "inbox",
-        "boss@lottery.example",
-        "Lottery jackpot winner",
-        "Claim your prize, pay the fee",
-    )
-    .await;
-    let outcome = spam::classify_incoming(
-        &pool,
-        &queue,
-        IncomingMessage {
-            provider: "imap",
-            message_id: "m-new",
-            thread_id: "t-new",
-            from_address: "boss@lottery.example",
-            hint_headers: None,
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(outcome, ClassifyOutcome::Scored(Verdict::Spam));
-    // Classified once: a second look is a no-op.
-    let again = spam::classify_incoming(
-        &pool,
-        &queue,
-        IncomingMessage {
-            provider: "imap",
-            message_id: "m-new",
-            thread_id: "t-new",
-            from_address: "boss@lottery.example",
-            hint_headers: None,
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(again, ClassifyOutcome::Skipped);
+#[tokio::test]
+async fn nothing_is_judged_before_the_bootstrap_has_finished() {
+    let pool = pool("imap").await;
+    let queue = SyncQueue::new();
+    train_corpus(&pool, 2, 60, 60).await;
+    let mail = sample(&mut Rng(98), Kind::Spam, 0, "new");
+    insert(&pool, &mail).await;
+    assert_eq!(
+        classify(&pool, &queue, &mail).await,
+        ClassifyOutcome::Unscored
+    );
+    assert!(spam::status(&pool).await.unwrap().bootstrap_pending);
 
-    // Mark only: the thread stays where it is, with the mark on it.
-    let folder: String = sqlx::query_scalar(
-        "SELECT COALESCE(pending_folder_id, folder_id) FROM messages WHERE id = 'm-new'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(folder, "inbox");
-    let thread = satchel_core::db::threads::ThreadRepository::new(&pool)
-        .get("t-new")
+    finish_bootstrap(&pool).await;
+    let next = sample(&mut Rng(97), Kind::Spam, 1, "new");
+    insert(&pool, &next).await;
+    assert_eq!(
+        classify(&pool, &queue, &next).await,
+        ClassifyOutcome::Scored(Verdict::Spam)
+    );
+}
+
+#[tokio::test]
+async fn a_lopsided_model_never_calls_wanted_mail_spam() {
+    let pool = pool("imap").await;
+    let queue = SyncQueue::new();
+    train_corpus(&pool, 3, 1_000, 30).await;
+    finish_bootstrap(&pool).await;
+    let status = spam::status(&pool).await.unwrap();
+    assert!(!status.ready, "1000:30 is worse than 4:1");
+    assert_eq!(status.ham_needed, 220);
+
+    let mut rng = Rng(96);
+    for (n, kind) in [Kind::Personal, Kind::Newsletter, Kind::Receipt]
+        .into_iter()
+        .enumerate()
+    {
+        let mail = sample(&mut rng, kind, n, "wanted");
+        insert(&pool, &mail).await;
+        let outcome = classify(&pool, &queue, &mail).await;
+        assert_ne!(outcome, ClassifyOutcome::Scored(Verdict::Spam), "{kind:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_realistic_corpus_stays_under_the_false_positive_ceiling() {
+    let pool = pool("imap").await;
+    let queue = SyncQueue::new();
+    train_corpus(&pool, 4, 60, 60).await;
+    finish_bootstrap(&pool).await;
+
+    // 48 unseen messages: 16 spam, 16 personal, 16 newsletters and receipts.
+    let mut rng = Rng(2026);
+    let mut false_positives = Vec::new();
+    let mut caught = 0;
+    for n in 0..48 {
+        let kind = match n % 6 {
+            0 | 1 => Kind::Spam,
+            2 | 3 => Kind::Personal,
+            4 => Kind::Newsletter,
+            _ => Kind::Receipt,
+        };
+        let mail = sample(&mut rng, kind, n, "held-out");
+        insert(&pool, &mail).await;
+        let outcome = classify(&pool, &queue, &mail).await;
+        let spam = outcome == ClassifyOutcome::Scored(Verdict::Spam);
+        if kind == Kind::Spam {
+            caught += usize::from(spam);
+        } else if spam {
+            false_positives.push((kind, mail.subject.clone()));
+        }
+    }
+    assert!(
+        false_positives.len() <= 1,
+        "at most 1 of 32 wanted mails marked: {false_positives:?}"
+    );
+    assert!(
+        caught >= 12,
+        "the filter still catches spam: {caught} of 16"
+    );
+}
+
+/* ------------------------------------------------------------------------ */
+/* Classification and Move                                                  */
+/* ------------------------------------------------------------------------ */
+
+#[tokio::test]
+async fn hint_headers_count_only_once_both_classes_carried_them() {
+    let pool = pool("imap").await;
+    train_corpus(&pool, 5, 60, 60).await;
+    finish_bootstrap(&pool).await;
+    let mut rng = Rng(95);
+    // A message the body words say nothing about, so one hint would show.
+    let probe = Mail::new("probe", "inbox", "someone@unknown.example", "Hello", "text");
+    insert(&pool, &probe).await;
+    let mut conn = pool.acquire().await.unwrap();
+    let plain = store::features_for_message(&mut conn, &probe.id)
         .await
-        .expect("thread");
-    assert!(thread.likely_spam);
+        .unwrap()
+        .unwrap();
+    let mut flagged = plain.clone();
+    flagged.hint_headers = Some("X-Spam-Flag: YES".into());
+    drop(conn);
 
-    message(
-        &pool,
-        "meet",
-        "inbox",
-        "pm@work.example",
-        "Meeting agenda",
-        "Review the minutes before the meeting",
-    )
-    .await;
-    let ham = spam::classify_incoming(
-        &pool,
-        &queue,
-        IncomingMessage {
-            provider: "imap",
-            message_id: "m-meet",
-            thread_id: "t-meet",
-            from_address: "pm@work.example",
-            hint_headers: None,
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(ham, ClassifyOutcome::Scored(Verdict::Ham));
+    // Fifty hinted examples of each class, the flag set on the spams only.
+    let mut ids = (Vec::new(), Vec::new());
+    for n in 0..50 {
+        for (kind, flag) in [(Kind::Spam, "YES"), (Kind::Personal, "NO")] {
+            let mail = sample(&mut rng, kind, n, "hinted");
+            insert(&pool, &mail).await;
+            sqlx::query(
+                "INSERT INTO spam_verdicts (message_id, score, verdict, hint_headers, classified_at)
+                 VALUES (?, 0.5, 'none', ?, '')",
+            )
+            .bind(&mail.id)
+            .bind(format!("X-Spam-Flag: {flag}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+            if kind == Kind::Spam {
+                ids.0.push(mail.id);
+            } else {
+                ids.1.push(mail.id);
+            }
+        }
+        if n == 48 {
+            // One short of the threshold: the hint still says nothing.
+            spam::train_messages(&pool, &ids.0, Label::Spam, Signal::Explicit, None)
+                .await
+                .unwrap();
+            spam::train_messages(&pool, &ids.1, Label::Ham, Signal::Explicit, None)
+                .await
+                .unwrap();
+            let mut conn = pool.acquire().await.unwrap();
+            let with = store::score_message(&mut conn, &flagged)
+                .await
+                .unwrap()
+                .unwrap();
+            let without = store::score_message(&mut conn, &plain)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(with.score, without.score);
+            ids = (Vec::new(), Vec::new());
+        }
+    }
+    spam::train_messages(&pool, &ids.0, Label::Spam, Signal::Explicit, None)
+        .await
+        .unwrap();
+    spam::train_messages(&pool, &ids.1, Label::Ham, Signal::Explicit, None)
+        .await
+        .unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    assert_eq!(
+        store::hint_totals(&mut conn).await.unwrap(),
+        spam::classifier::ModelTotals { spam: 50, ham: 50 }
+    );
+    let with = store::score_message(&mut conn, &flagged)
+        .await
+        .unwrap()
+        .unwrap();
+    let without = store::score_message(&mut conn, &plain)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(with.score > without.score, "{with:?} vs {without:?}");
 }
 
 #[tokio::test]
@@ -445,21 +879,15 @@ async fn hint_headers_reach_training_through_the_verdict() {
 async fn providers_with_their_own_filter_and_the_off_mode_are_left_alone() {
     let pool = pool("gmail").await;
     let queue = SyncQueue::new();
-    trained_model(&pool).await;
-    message(
-        &pool,
-        "new",
-        "inbox",
-        "boss@lottery.example",
-        "Lottery jackpot winner",
-        "Claim your prize",
-    )
-    .await;
+    train_corpus(&pool, 6, 60, 60).await;
+    finish_bootstrap(&pool).await;
+    let mail = sample(&mut Rng(94), Kind::Spam, 0, "new");
+    insert(&pool, &mail).await;
     let incoming = IncomingMessage {
         provider: "gmail",
-        message_id: "m-new",
-        thread_id: "t-new",
-        from_address: "boss@lottery.example",
+        message_id: &mail.id,
+        thread_id: &mail.thread,
+        from_address: &mail.from,
         hint_headers: None,
     };
     assert_eq!(
@@ -480,35 +908,39 @@ async fn providers_with_their_own_filter_and_the_off_mode_are_left_alone() {
 }
 
 #[tokio::test]
-async fn move_mode_files_spam_remote_first_and_not_spam_undoes_it() {
+async fn move_behaves_like_mark_until_the_model_is_large_enough() {
     let pool = pool("imap").await;
     let queue = SyncQueue::new();
-    trained_model(&pool).await;
+    train_corpus(&pool, 7, 60, 60).await;
+    finish_bootstrap(&pool).await;
     spam::set_mode(&pool, SpamFilterMode::Move).await.unwrap();
-    message(
-        &pool,
-        "new",
-        "inbox",
-        "boss@lottery.example",
-        "Lottery jackpot winner",
-        "Claim your jackpot prize, wire the fee",
-    )
-    .await;
+    let mail = sample(&mut Rng(93), Kind::Spam, 0, "new");
+    insert(&pool, &mail).await;
+    assert_eq!(
+        classify(&pool, &queue, &mail).await,
+        ClassifyOutcome::Scored(Verdict::Spam)
+    );
+    assert_eq!(folder_of(&pool, &mail.id).await, ("inbox".into(), None));
+    let status = spam::status(&pool).await.unwrap();
+    assert!(status.ready && !status.move_ready);
+    assert_eq!(
+        (status.move_spam_needed, status.move_ham_needed),
+        (140, 140)
+    );
+}
+
+#[tokio::test]
+async fn move_files_spam_remote_first_and_not_spam_undoes_it() {
+    let pool = pool("imap").await;
+    let queue = SyncQueue::new();
+    train_corpus(&pool, 8, 200, 200).await;
+    finish_bootstrap(&pool).await;
+    spam::set_mode(&pool, SpamFilterMode::Move).await.unwrap();
+    let mail = sample(&mut Rng(92), Kind::Spam, 0, "new");
+    insert(&pool, &mail).await;
     let before = totals(&pool).await;
 
-    let outcome = spam::classify_incoming(
-        &pool,
-        &queue,
-        IncomingMessage {
-            provider: "imap",
-            message_id: "m-new",
-            thread_id: "t-new",
-            from_address: "boss@lottery.example",
-            hint_headers: None,
-        },
-    )
-    .await
-    .unwrap();
+    let outcome = classify(&pool, &queue, &mail).await;
     let ClassifyOutcome::Moved {
         receipt_id: Some(receipt_id),
     } = outcome
@@ -516,14 +948,9 @@ async fn move_mode_files_spam_remote_first_and_not_spam_undoes_it() {
         panic!("expected a move with a receipt, got {outcome:?}");
     };
     // The provider move is queued and the local copy waits for it.
-    let (folder, pending): (String, Option<String>) =
-        sqlx::query_as("SELECT folder_id, pending_folder_id FROM messages WHERE id = 'm-new'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
     assert_eq!(
-        (folder.as_str(), pending.as_deref()),
-        ("inbox", Some("spam"))
+        folder_of(&pool, &mail.id).await,
+        ("inbox".into(), Some("spam".into()))
     );
     let moves: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_move'",
@@ -532,48 +959,99 @@ async fn move_mode_files_spam_remote_first_and_not_spam_undoes_it() {
     .await
     .unwrap();
     assert_eq!(moves, 1);
-    let stored: Option<String> =
-        sqlx::query_scalar("SELECT receipt_id FROM spam_verdicts WHERE message_id = 'm-new'")
+    let (stored, moved_at): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT receipt_id, moved_at FROM spam_verdicts WHERE message_id = ?")
+            .bind(&mail.id)
             .fetch_one(&pool)
             .await
             .unwrap();
     assert_eq!(stored.as_deref(), Some(receipt_id.as_str()));
+    assert!(moved_at.is_some());
     assert_eq!(
         totals(&pool).await,
         before,
         "the filter's own verdict is not an example"
     );
-
-    let outcome = mail_actions::mark_threads_not_spam(&pool, &queue, &["t-new".into()])
+    let thread = satchel_core::db::threads::ThreadRepository::new(&pool)
+        .get(&mail.thread)
         .await
         .unwrap();
-    assert_eq!(outcome.moved_thread_ids, vec!["t-new".to_string()]);
-    let (folder, pending): (String, Option<String>) =
-        sqlx::query_as("SELECT folder_id, pending_folder_id FROM messages WHERE id = 'm-new'")
-            .fetch_one(&pool)
+    assert!(thread.likely_spam && thread.spam_moved);
+
+    let outcome =
+        mail_actions::mark_threads_not_spam(&pool, &queue, std::slice::from_ref(&mail.thread))
             .await
             .unwrap();
-    assert_eq!((folder.as_str(), pending), ("inbox", None));
-    let state: String = sqlx::query_scalar("SELECT workflow_state FROM threads WHERE id = 't-new'")
+    assert_eq!(outcome.moved_thread_ids, vec![mail.thread.clone()]);
+    assert_eq!(outcome.restored_thread_ids, vec![mail.thread.clone()]);
+    assert_eq!(folder_of(&pool, &mail.id).await, ("inbox".into(), None));
+    let state: String = sqlx::query_scalar("SELECT workflow_state FROM threads WHERE id = ?")
+        .bind(&mail.thread)
         .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(state, "inbox");
-    assert_eq!(ledger(&pool, "m-new").await.as_deref(), Some("ham"));
+    assert_eq!(ledger(&pool, &mail.id).await.as_deref(), Some("ham"));
     assert_eq!(totals(&pool).await, (before.0, before.1 + 1));
     let thread = satchel_core::db::threads::ThreadRepository::new(&pool)
-        .get("t-new")
+        .get(&mail.thread)
         .await
         .unwrap();
-    assert!(!thread.likely_spam, "Not spam clears the mark");
+    assert!(
+        !thread.likely_spam && !thread.spam_moved,
+        "Not spam clears both marks"
+    );
+}
+
+#[tokio::test]
+async fn mail_rescued_with_not_spam_is_never_moved_back() {
+    let pool = pool("imap").await;
+    let queue = SyncQueue::new();
+    train_corpus(&pool, 9, 200, 200).await;
+    finish_bootstrap(&pool).await;
+    let mut rng = Rng(91);
+    // Marked, then rescued.
+    let first = sample(&mut rng, Kind::Spam, 0, "rescued");
+    insert(&pool, &first).await;
+    assert_eq!(
+        classify(&pool, &queue, &first).await,
+        ClassifyOutcome::Scored(Verdict::Spam)
+    );
+    mail_actions::mark_threads_not_spam(&pool, &queue, std::slice::from_ref(&first.thread))
+        .await
+        .unwrap();
+
+    spam::set_mode(&pool, SpamFilterMode::Move).await.unwrap();
+    // A spam reply from someone else in the same thread marks, but does not
+    // take the rescued message back to Spam.
+    let mut reply = sample(&mut rng, Kind::Spam, 1, "reply");
+    reply.thread = first.thread.clone();
+    insert(&pool, &reply).await;
+    assert_eq!(
+        classify(&pool, &queue, &reply).await,
+        ClassifyOutcome::Scored(Verdict::Spam)
+    );
+    assert_eq!(folder_of(&pool, &first.id).await, ("inbox".into(), None));
+    assert_eq!(folder_of(&pool, &reply.id).await, ("inbox".into(), None));
+
+    // The rescued sender is marked again in a new thread, never moved.
+    let mut again = sample(&mut rng, Kind::Spam, 2, "again");
+    again.from = first.from.clone();
+    insert(&pool, &again).await;
+    assert_eq!(
+        classify(&pool, &queue, &again).await,
+        ClassifyOutcome::Scored(Verdict::Spam)
+    );
+    assert_eq!(folder_of(&pool, &again.id).await, ("inbox".into(), None));
 }
 
 #[tokio::test]
 async fn senders_the_user_wrote_to_are_never_judged() {
     let pool = pool("imap").await;
     let queue = SyncQueue::new();
-    trained_model(&pool).await;
-    spam::set_mode(&pool, SpamFilterMode::Move).await.unwrap();
+    train_corpus(&pool, 10, 60, 60).await;
+    finish_bootstrap(&pool).await;
+    let mail = sample(&mut Rng(90), Kind::Spam, 0, "new");
     // A message the user sent to the address.
     sqlx::query(
         "INSERT INTO threads (id, account_id, subject, last_message_date, created_at, updated_at)
@@ -584,44 +1062,55 @@ async fn senders_the_user_wrote_to_are_never_judged() {
     .unwrap();
     sqlx::query(
         "INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, date, is_sent, created_at, updated_at)
-         VALUES ('m-out', 'acc', 'sent', 't-out', 'me@example.test', '[\"Boss@Lottery.example\"]', '2026-01-01', 1, '2026-01-01', '2026-01-01')",
+         VALUES ('m-out', 'acc', 'sent', 't-out', 'me@example.test', json_array(?), '2026-01-01', 1, '2026-01-01', '2026-01-01')",
     )
+    .bind(mail.from.to_uppercase())
     .execute(&pool)
     .await
     .unwrap();
-    message(
-        &pool,
-        "new",
-        "inbox",
-        "boss@lottery.example",
-        "Lottery jackpot winner",
-        "Claim your jackpot prize",
-    )
-    .await;
-    let outcome = spam::classify_incoming(
-        &pool,
-        &queue,
-        IncomingMessage {
-            provider: "imap",
-            message_id: "m-new",
-            thread_id: "t-new",
-            from_address: "boss@lottery.example",
-            hint_headers: None,
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(outcome, ClassifyOutcome::Unscored);
-    let pending: Option<String> =
-        sqlx::query_scalar("SELECT pending_folder_id FROM messages WHERE id = 'm-new'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(pending, None);
+    insert(&pool, &mail).await;
+    assert_eq!(
+        classify(&pool, &queue, &mail).await,
+        ClassifyOutcome::Unscored
+    );
 }
 
 #[tokio::test]
-async fn not_spam_brings_mail_back_from_spam_without_a_receipt() {
+async fn an_unverified_own_address_is_marked_but_never_moved() {
+    let pool = pool("imap").await;
+    let queue = SyncQueue::new();
+    train_corpus(&pool, 11, 200, 200).await;
+    finish_bootstrap(&pool).await;
+    spam::set_mode(&pool, SpamFilterMode::Move).await.unwrap();
+    let mut rng = Rng(89);
+
+    // Sextortion "from" the user's own address, DMARC failed.
+    let mut forged = sample(&mut rng, Kind::Spam, 0, "forged");
+    forged.from = "me@example.test".into();
+    forged.dmarc = Some("fail");
+    insert(&pool, &forged).await;
+    assert_eq!(
+        classify(&pool, &queue, &forged).await,
+        ClassifyOutcome::Scored(Verdict::Spam)
+    );
+    assert_eq!(folder_of(&pool, &forged.id).await, ("inbox".into(), None));
+
+    // Without Authentication-Results the address is taken at its word.
+    let mut plain = sample(&mut rng, Kind::Spam, 1, "plain");
+    plain.from = "me@example.test".into();
+    insert(&pool, &plain).await;
+    assert_eq!(
+        classify(&pool, &queue, &plain).await,
+        ClassifyOutcome::Unscored
+    );
+}
+
+/* ------------------------------------------------------------------------ */
+/* Not spam                                                                 */
+/* ------------------------------------------------------------------------ */
+
+#[tokio::test]
+async fn not_spam_brings_mail_back_from_spam_and_its_undo_returns_it() {
     let pool = pool("pop3").await;
     let queue = SyncQueue::new();
     message(
@@ -640,23 +1129,189 @@ async fn not_spam_brings_mail_back_from_spam_without_a_receipt() {
     .await
     .unwrap();
 
-    let outcome = mail_actions::mark_threads_not_spam(&pool, &queue, &["t-1".into(), "t-1".into()])
+    let receipt = mail_actions::mark_threads_not_spam(&pool, &queue, &["t-1".into(), "t-1".into()])
         .await
         .unwrap();
-    assert_eq!(outcome.thread_ids, vec!["t-1".to_string()]);
-    assert_eq!(outcome.moved_thread_ids, vec!["t-1".to_string()]);
+    assert_eq!(receipt.thread_ids, vec!["t-1".to_string()]);
+    assert_eq!(receipt.moved_thread_ids, vec!["t-1".to_string()]);
+    assert!(receipt.undo_token.is_some());
+    assert_eq!(receipt.move_receipts.len(), 1);
     // POP3 has no server folders: the move is local and immediate.
-    let folder: String = sqlx::query_scalar("SELECT folder_id FROM messages WHERE id = 'm-1'")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(folder, "inbox");
+    assert_eq!(folder_of(&pool, "m-1").await, ("inbox".into(), None));
     let state: String = sqlx::query_scalar("SELECT workflow_state FROM threads WHERE id = 't-1'")
         .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(state, "inbox");
     assert_eq!(totals(&pool).await, (0, 1));
+
+    mail_actions::undo_not_spam(&pool, &queue, &receipt)
+        .await
+        .unwrap();
+    assert_eq!(folder_of(&pool, "m-1").await, ("spam".into(), None));
+    let state: String = sqlx::query_scalar("SELECT workflow_state FROM threads WHERE id = 't-1'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(state, "done");
+    assert_eq!(totals(&pool).await, (0, 0));
+    assert_eq!(ledger(&pool, "m-1").await, None);
+}
+
+#[tokio::test]
+async fn not_spam_restores_a_thread_the_filter_moved_twice() {
+    let pool = pool("pop3").await;
+    let queue = SyncQueue::new();
+    insert(
+        &pool,
+        &Mail::new("a", "inbox", "x@promo.example", "Offer", "Buy").in_thread("t-x"),
+    )
+    .await;
+    let first = mail_actions::move_spam_with_receipt(&pool, &queue, &["t-x".into()])
+        .await
+        .unwrap();
+    insert(
+        &pool,
+        &Mail::new("b", "inbox", "y@promo.example", "Re: Offer", "Buy more").in_thread("t-x"),
+    )
+    .await;
+    let second = mail_actions::move_spam_with_receipt(&pool, &queue, &["t-x".into()])
+        .await
+        .unwrap();
+    for (id, receipt) in [("m-a", &first), ("m-b", &second)] {
+        sqlx::query(
+            "INSERT INTO spam_verdicts (message_id, score, verdict, receipt_id, moved_at, classified_at)
+             VALUES (?, 0.995, 'spam', ?, '2026-01-01', '')",
+        )
+        .bind(id)
+        .bind(receipt.undo_token.as_deref())
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    assert_eq!(folder_of(&pool, "m-a").await.0, "spam");
+    assert_eq!(folder_of(&pool, "m-b").await.0, "spam");
+
+    let receipt = mail_actions::mark_threads_not_spam(&pool, &queue, &["t-x".into()])
+        .await
+        .unwrap();
+    assert_eq!(receipt.moved_thread_ids, vec!["t-x".to_string()]);
+    assert_eq!(folder_of(&pool, "m-a").await.0, "inbox");
+    assert_eq!(folder_of(&pool, "m-b").await.0, "inbox");
+}
+
+/* ------------------------------------------------------------------------ */
+/* Bootstrap and bookkeeping                                                */
+/* ------------------------------------------------------------------------ */
+
+#[tokio::test]
+async fn bootstrap_learns_from_spam_and_from_mail_the_user_acted_on() {
+    let pool = pool("imap").await;
+    add_account(&pool, "acc2", "me@second.test", "imap").await;
+    for n in 0..3 {
+        message(
+            &pool,
+            &format!("s{n}"),
+            "spam",
+            "x@promo.example",
+            "Offer",
+            "Cheap offer",
+        )
+        .await;
+    }
+    let mut other = Mail::new("s-other", "acc2-spam", "y@promo.example", "Offer", "Cheap");
+    other.account = "acc2";
+    insert(&pool, &other).await;
+    // Acted on: starred, archived, Done, answered.
+    message(
+        &pool,
+        "starred",
+        "inbox",
+        "a@work.example",
+        "Agenda",
+        "Meeting agenda",
+    )
+    .await;
+    sqlx::query("UPDATE messages SET is_starred = 1 WHERE id = 'm-starred'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    message(
+        &pool,
+        "archived",
+        "archive",
+        "b@work.example",
+        "Minutes",
+        "Meeting minutes",
+    )
+    .await;
+    message(
+        &pool,
+        "done",
+        "inbox",
+        "c@work.example",
+        "Plan",
+        "Project plan",
+    )
+    .await;
+    sqlx::query("UPDATE threads SET workflow_state = 'done' WHERE id = 't-done'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    message(
+        &pool,
+        "answered",
+        "inbox",
+        "d@work.example",
+        "Lunch",
+        "Lunch today?",
+    )
+    .await;
+    insert(
+        &pool,
+        &Mail::new("answer", "sent", "me@example.test", "Re: Lunch", "Yes").in_thread("t-answered"),
+    )
+    .await;
+    sqlx::query("UPDATE messages SET is_sent = 1 WHERE id = 'm-answer'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    // Merely read Inbox mail and the user's own mail are not examples.
+    message(&pool, "read", "inbox", "e@shop.example", "Sale", "Big sale").await;
+    message(
+        &pool,
+        "own",
+        "inbox",
+        "me@example.test",
+        "Note to self",
+        "Remember",
+    )
+    .await;
+
+    assert!(
+        satchel_core::db::data_repairs::is_pending(&pool, &bootstrap::SPAM_BOOTSTRAP)
+            .await
+            .unwrap()
+    );
+    satchel_core::db::data_repairs::run_repair(&pool, &bootstrap::SPAM_BOOTSTRAP, 2, None, |_| {})
+        .await
+        .unwrap();
+    assert!(
+        !satchel_core::db::data_repairs::is_pending(&pool, &bootstrap::SPAM_BOOTSTRAP)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        totals(&pool).await,
+        (4, 4),
+        "both accounts' Spam, four acted-on mails"
+    );
+    for id in ["m-starred", "m-archived", "m-done", "m-answered"] {
+        assert_eq!(ledger(&pool, id).await.as_deref(), Some("ham"), "{id}");
+    }
+    assert_eq!(ledger(&pool, "m-read").await, None);
+    assert_eq!(ledger(&pool, "m-own").await, None);
+    assert_eq!(ledger(&pool, "m-s-other").await.as_deref(), Some("spam"));
 }
 
 #[tokio::test]
@@ -688,71 +1343,6 @@ async fn an_imap_move_carries_the_ledger_to_the_new_local_id() {
     assert_eq!(ledger(&pool, "m-1-moved").await.as_deref(), Some("spam"));
     assert_eq!(spam::untrain_receipt(&pool, "r").await.unwrap(), 1);
     assert_eq!(totals(&pool).await, (0, 0));
-}
-
-#[tokio::test]
-async fn bootstrap_learns_from_the_spam_folder_and_read_inbox_mail() {
-    let pool = pool("imap").await;
-    for n in 0..3 {
-        message(
-            &pool,
-            &format!("s{n}"),
-            "spam",
-            "x@promo.example",
-            "Offer",
-            "Cheap offer",
-        )
-        .await;
-        message(
-            &pool,
-            &format!("h{n}"),
-            "inbox",
-            "pm@work.example",
-            "Agenda",
-            "Meeting agenda",
-        )
-        .await;
-    }
-    // Unread Inbox mail and the user's own mail are not examples.
-    message(
-        &pool,
-        "unread",
-        "inbox",
-        "pm@work.example",
-        "Agenda",
-        "Meeting agenda",
-    )
-    .await;
-    sqlx::query("UPDATE messages SET is_read = 0 WHERE id = 'm-unread'")
-        .execute(&pool)
-        .await
-        .unwrap();
-    message(
-        &pool,
-        "own",
-        "inbox",
-        "me@example.test",
-        "Note to self",
-        "Remember",
-    )
-    .await;
-
-    assert!(
-        satchel_core::db::data_repairs::is_pending(&pool, &bootstrap::SPAM_BOOTSTRAP)
-            .await
-            .unwrap()
-    );
-    satchel_core::db::data_repairs::run_repair(&pool, &bootstrap::SPAM_BOOTSTRAP, 2, None, |_| {})
-        .await
-        .unwrap();
-    assert_eq!(totals(&pool).await, (3, 3));
-    assert!(
-        !satchel_core::db::data_repairs::is_pending(&pool, &bootstrap::SPAM_BOOTSTRAP)
-            .await
-            .unwrap()
-    );
-    assert_eq!(ledger(&pool, "m-unread").await, None);
-    assert_eq!(ledger(&pool, "m-own").await, None);
 }
 
 #[tokio::test]

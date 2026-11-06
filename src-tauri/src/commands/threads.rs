@@ -53,6 +53,9 @@ pub struct ThreadDto {
     /// reader offer Not spam.
     #[serde(default)]
     pub likely_spam: bool,
+    /// The filter moved it to Spam: the Spam folder says so.
+    #[serde(default)]
+    pub spam_moved: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
@@ -203,6 +206,7 @@ impl From<ThreadRecord> for ThreadDto {
             invite_status: record.invite_status,
             invite_cancelled: record.invite_cancelled,
             likely_spam: record.likely_spam,
+            spam_moved: record.spam_moved,
         }
     }
 }
@@ -843,6 +847,7 @@ mod tests {
             invite_status: None,
             invite_cancelled: false,
             likely_spam: false,
+            spam_moved: false,
         };
         let dto = serde_json::to_value(ThreadDto::from(record)).unwrap();
         assert_eq!(dto["subject"], "SV: Odp: Antw: Quarterly Plan");

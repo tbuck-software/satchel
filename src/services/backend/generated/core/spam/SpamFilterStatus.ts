@@ -9,11 +9,23 @@ export type SpamFilterStatus = {
     ham_messages: number;
     tokens: number;
     /**
-     * Whether the model has seen enough of both classes to classify.
+     * Whether the filter gives verdicts at all.
      */
     ready: boolean;
     /**
-     * Messages of each class the model needs before it classifies.
+     * The one-time pass over existing mail has not finished yet.
      */
-    min_per_class: number;
+    bootstrap_pending: boolean;
+    /**
+     * More examples of each class it needs before it gives verdicts: the
+     * floor of [`classifier::MIN_TRAINED_PER_CLASS`] and the class ratio.
+     */
+    spam_needed: number;
+    ham_needed: number;
+    /**
+     * Whether Move may move mail; until then Move behaves like Mark.
+     */
+    move_ready: boolean;
+    move_spam_needed: number;
+    move_ham_needed: number;
 };

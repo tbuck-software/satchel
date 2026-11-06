@@ -58,6 +58,25 @@ pub async fn mark_threads_not_spam(
         .map_err(Into::into)
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ipc-types", ts(export, export_to = "app/commands/thread_actions/", optional_fields = nullable))]
+pub struct UndoNotSpamInput {
+    pub receipt: satchel_core::mail_actions::NotSpamReceipt,
+}
+
+/// Undo a Not spam: unlearn it and put the threads back in Spam.
+#[tauri::command]
+pub async fn undo_not_spam(
+    pool: tauri::State<'_, SqlitePool>,
+    state: tauri::State<'_, AppState>,
+    input: UndoNotSpamInput,
+) -> CommandResult<()> {
+    satchel_core::mail_actions::undo_not_spam(pool.inner(), &state.queue, &input.receipt)
+        .await
+        .map_err(Into::into)
+}
+
 #[tauri::command]
 pub async fn get_spam_filter_status(
     pool: tauri::State<'_, SqlitePool>,

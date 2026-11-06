@@ -78,6 +78,12 @@ describe('likely spam in the thread list', () => {
     wrapper.unmount();
   });
 
+  it('says the filter moved it, in the Spam folder', () => {
+    const wrapper = mountRow(thread({ likelySpam: true, spamMoved: true, mailboxNames: ['Spam'] }));
+    expect(wrapper.find('.spam-label').text()).toBe('Moved by filter');
+    wrapper.unmount();
+  });
+
   it('shows no mark on ordinary mail', () => {
     const wrapper = mountRow(thread());
     expect(wrapper.find('.spam-label').exists()).toBe(false);

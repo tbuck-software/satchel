@@ -37,4 +37,8 @@ export type ThreadDto = {
      * reader offer Not spam.
      */
     likely_spam: boolean;
+    /**
+     * The filter moved it to Spam: the Spam folder says so.
+     */
+    spam_moved: boolean;
 };

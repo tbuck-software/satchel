@@ -186,7 +186,8 @@
         "inLater": "Waiting in Later",
         "notSpam": "Thread marked as not spam | {count} threads marked as not spam",
         "notSpamMoved": "Thread moved back to the Inbox | {count} threads moved back to the Inbox",
-        "notSpamFailed": "Marking as not spam failed."
+        "notSpamFailed": "Marking as not spam failed.",
+        "notSpamUndoFailed": "Undoing Not spam failed."
       },
       "row": {
         "draftPrefix": "Draft,",
@@ -260,6 +261,10 @@
       "spam": {
         "likely": "Likely spam",
         "rowHint": "The spam filter on this device flagged this thread",
+        "moved": "Moved by filter",
+        "movedHint": "The spam filter on this device moved this thread to Spam",
+        "movedBannerTitle": "Moved to Spam by Satchel's filter",
+        "movedBannerDetail": "The spam filter on this device was sure this is spam. If it is wanted mail, say so: it goes back to the Inbox and the filter learns from it.",
         "bannerTitle": "This looks like spam",
         "bannerDetail": "The spam filter on this device flagged it. If it is wanted mail, say so and the filter learns from it."
       }
@@ -455,7 +460,8 @@
         "inLater": "Wartet in „Später“",
         "notSpam": "Thread als kein Spam markiert | {count} Threads als kein Spam markiert",
         "notSpamMoved": "Thread zurück in den Posteingang verschoben | {count} Threads zurück in den Posteingang verschoben",
-        "notSpamFailed": "Als kein Spam markieren fehlgeschlagen."
+        "notSpamFailed": "Als kein Spam markieren fehlgeschlagen.",
+        "notSpamUndoFailed": "Kein Spam rückgängig machen fehlgeschlagen."
       },
       "row": {
         "draftPrefix": "Entwurf,",
@@ -529,6 +535,10 @@
       "spam": {
         "likely": "Vermutlich Spam",
         "rowHint": "Der Spamfilter auf diesem Gerät hat diesen Thread markiert",
+        "moved": "Vom Filter verschoben",
+        "movedHint": "Der Spamfilter auf diesem Gerät hat diesen Thread in Spam verschoben",
+        "movedBannerTitle": "Von Satchels Filter in Spam verschoben",
+        "movedBannerDetail": "Der Spamfilter auf diesem Gerät war sich sicher, dass das Spam ist. Ist sie erwünscht, sag es ihm – dann kommt sie zurück in den Posteingang, und er lernt daraus.",
         "bannerTitle": "Das sieht nach Spam aus",
         "bannerDetail": "Der Spamfilter auf diesem Gerät hat sie markiert. Ist sie erwünscht, sag es ihm – er lernt daraus."
       }

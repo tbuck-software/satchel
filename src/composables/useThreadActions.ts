@@ -5,6 +5,7 @@ import type { WorkflowState } from '@/types/workflow';
 import {
   backendBlockSender,
   backendMoveThreadsToFolder,
+  backendUndoNotSpam,
   backendUndoTrash,
   type BackendTrashReceipt,
 } from '@/services/backend';
@@ -472,15 +473,39 @@ export function useThreadActions() {
     const ids = Array.from(new Set(threadIds.map((id) => id.trim()).filter(Boolean)));
     if (ids.length === 0) return;
     return queue.run(ids, async () => {
+      let receipt: Awaited<ReturnType<typeof threads.markThreadsNotSpam>>;
       try {
-        const receipt = await threads.markThreadsNotSpam(ids);
-        const moved = receipt.moved_thread_ids.length;
-        toast.success(moved > 0
-          ? tc('thread.result.notSpamMoved', moved)
-          : tc('thread.result.notSpam', ids.length));
+        receipt = await threads.markThreadsNotSpam(ids);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t('thread.result.notSpamFailed'));
+        return;
       }
+      const moved = receipt.moved_thread_ids.length;
+      const message = moved > 0
+        ? tc('thread.result.notSpamMoved', moved)
+        : tc('thread.result.notSpam', ids.length);
+      if (!receipt.undo_token) {
+        toast.success(message);
+        return;
+      }
+      // Undo unlearns the example and puts what moved back in Spam.
+      toast.success(message, {
+        timeout: UNDO_TIMEOUT_MS,
+        action: {
+          label: t('thread.actions.undo'),
+          present: 'fab',
+          handler: () => queue.run(ids, async () => {
+            try {
+              await backendUndoNotSpam(receipt);
+              await refreshLists();
+              return true;
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : t('thread.result.notSpamUndoFailed'));
+              return false;
+            }
+          }),
+        },
+      });
     });
   }
 

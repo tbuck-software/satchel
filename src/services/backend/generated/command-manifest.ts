@@ -2315,6 +2315,18 @@ export default {
                 }
             }
         },
+        "undo_not_spam": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::thread_actions::UndoNotSpamInput"
+                    }
+                }
+            }
+        },
         "undo_outbox_send": {
             "kind": "object",
             "fields": {
@@ -4326,6 +4338,18 @@ export default {
                 }
             }
         },
+        "app::commands::thread_actions::UndoNotSpamInput": {
+            "kind": "object",
+            "fields": {
+                "receipt": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "core::mail_actions::NotSpamReceipt"
+                    }
+                }
+            }
+        },
         "app::commands::threads::ListThreadsInput": {
             "kind": "object",
             "fields": {
@@ -5778,6 +5802,56 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "core::mail_actions::NotSpamReceipt": {
+            "kind": "object",
+            "fields": {
+                "move_receipts": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "moved_thread_ids": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "restored_thread_ids": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "thread_ids": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "undo_token": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
                         "item": {
                             "kind": "value"
                         }

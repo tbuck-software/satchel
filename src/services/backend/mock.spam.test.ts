@@ -22,7 +22,10 @@ describe('mock spam filter', () => {
   it('reports the filter like the backend: Mark by default, not ready untrained', async () => {
     const { sendCommand } = await import('./mock');
     const status = await sendCommand<BackendSpamFilterStatus>('get_spam_filter_status');
-    expect(status).toMatchObject({ mode: 'mark', spam_messages: 0, ham_messages: 0, ready: false, min_per_class: 10 });
+    expect(status).toMatchObject({
+      mode: 'mark', spam_messages: 0, ham_messages: 0, ready: false, bootstrap_pending: false,
+      spam_needed: 50, ham_needed: 50, move_ready: false, move_spam_needed: 200, move_ham_needed: 200,
+    });
 
     await sendCommand('set_spam_filter_mode', { input: { mode: 'move' } });
     expect((await sendCommand<BackendSpamFilterStatus>('get_spam_filter_status')).mode).toBe('move');
@@ -52,7 +55,8 @@ describe('mock spam filter', () => {
     const receipt = await sendCommand<BackendNotSpamReceipt>('mark_threads_not_spam', {
       input: { thread_ids: [marked.id, filed.id, marked.id] },
     });
-    expect(receipt).toEqual({ thread_ids: [marked.id, filed.id], moved_thread_ids: [filed.id] });
+    expect(receipt).toMatchObject({ thread_ids: [marked.id, filed.id], moved_thread_ids: [filed.id] });
+    expect(receipt.undo_token).toBeTruthy();
 
     const markedDto = await sendCommand<BackendThread>('get_thread', { threadId: marked.id });
     expect(markedDto.likely_spam).toBe(false);
@@ -60,5 +64,13 @@ describe('mock spam filter', () => {
     expect(JSON.parse(filedDto.mailbox_names)).toEqual(['INBOX']);
     expect(filedDto.workflow_state).toBe('inbox');
     expect((await sendCommand<BackendSpamFilterStatus>('get_spam_filter_status')).ham_messages).toBe(2);
+
+    // Undo unlearns it and puts the mark and the Spam folder back.
+    await sendCommand('undo_not_spam', { input: { receipt } });
+    expect((await sendCommand<BackendThread>('get_thread', { threadId: marked.id })).likely_spam).toBe(true);
+    const back = await sendCommand<BackendThread>('get_thread', { threadId: filed.id });
+    expect(JSON.parse(back.mailbox_names)).toEqual(['Spam']);
+    expect(back.workflow_state).toBe('done');
+    expect((await sendCommand<BackendSpamFilterStatus>('get_spam_filter_status')).ham_messages).toBe(0);
   });
 });

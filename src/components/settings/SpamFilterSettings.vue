@@ -30,13 +30,30 @@ const modeHint = computed(() => ({
 const trainingLine = computed(() => {
   const current = status.value;
   if (!current) return '';
-  const counts = {
+  return t('settings.spamFilter.trained', {
     spam: n(current.spam_messages),
     ham: n(current.ham_messages),
-  };
-  return current.ready
-    ? t('settings.spamFilter.trained', counts)
-    : t('settings.spamFilter.learning', { ...counts, needed: n(current.min_per_class) });
+  });
+});
+
+/** What stands between the filter and a verdict, or between Mark and Move. */
+const readinessLine = computed(() => {
+  const current = status.value;
+  if (!current) return '';
+  if (current.bootstrap_pending) return t('settings.spamFilter.bootstrapping');
+  if (!current.ready) {
+    return t('settings.spamFilter.needsMore', {
+      spam: n(current.spam_needed),
+      ham: n(current.ham_needed),
+    });
+  }
+  if (mode.value === 'move' && !current.move_ready) {
+    return t('settings.spamFilter.moveNeedsMore', {
+      spam: n(current.move_spam_needed),
+      ham: n(current.move_ham_needed),
+    });
+  }
+  return t('settings.spamFilter.judging');
 });
 
 async function load() {
@@ -86,6 +103,7 @@ async function setMode(value: string) {
         <div class="setting-info">
           <span class="setting-label">{{ $t('settings.spamFilter.trainingLabel') }}</span>
           <span class="setting-hint" data-testid="spam-filter-training">{{ trainingLine }}</span>
+          <span class="setting-hint" data-testid="spam-filter-readiness">{{ readinessLine }}</span>
         </div>
       </div>
     </div>

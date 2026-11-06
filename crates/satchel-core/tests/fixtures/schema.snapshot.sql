@@ -57,6 +57,8 @@ index idx_signatures_account_default: CREATE UNIQUE INDEX idx_signatures_account
 index idx_smime_cert_email: CREATE INDEX idx_smime_cert_email ON smime_certificates(LOWER(subject_email))
 index idx_smime_cert_fingerprint: CREATE UNIQUE INDEX idx_smime_cert_fingerprint ON smime_certificates(fingerprint, cert_type)
 index idx_spam_training_receipt: CREATE INDEX idx_spam_training_receipt ON spam_training(receipt_id) WHERE receipt_id IS NOT NULL
+index idx_spam_training_rescued: CREATE INDEX idx_spam_training_rescued ON spam_training(sender) WHERE label = 'ham' AND source = 'explicit'
+index idx_spam_training_thread_sender: CREATE INDEX idx_spam_training_thread_sender ON spam_training(thread_id, sender)
 index idx_sync_queue_account: CREATE INDEX idx_sync_queue_account ON sync_queue(account_id)
 index idx_sync_queue_scheduled: CREATE INDEX idx_sync_queue_scheduled ON sync_queue(scheduled_for) WHERE scheduled_for IS NOT NULL
 index idx_sync_queue_status_due: CREATE INDEX idx_sync_queue_status_due ON sync_queue(status, next_retry_at)
@@ -123,10 +125,10 @@ table signature_suggestions (id TEXT PK1, account_id TEXT NOT NULL, identity_ema
 table signatures (id TEXT PK1, account_id TEXT NOT NULL, name TEXT NOT NULL, body_text TEXT NOT NULL DEFAULT '', body_html TEXT, is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, short_body_text TEXT NOT NULL DEFAULT '', short_body_html TEXT)
 table smart_folders (id TEXT PK1, name TEXT NOT NULL, icon TEXT, query TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)
 table smime_certificates (id TEXT PK1, label TEXT NOT NULL, cert_type TEXT NOT NULL, fingerprint TEXT NOT NULL, subject_email TEXT, subject_cn TEXT, issuer_cn TEXT, not_before TEXT, not_after TEXT, pem_certificate TEXT NOT NULL, pem_private_key_encrypted TEXT, has_passphrase INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, trust_origin TEXT NOT NULL DEFAULT 'manual')
-table spam_model (id INTEGER PK1, spam_messages INTEGER NOT NULL DEFAULT 0, ham_messages INTEGER NOT NULL DEFAULT 0, updated_at TEXT)
+table spam_model (id INTEGER PK1, spam_messages INTEGER NOT NULL DEFAULT 0, ham_messages INTEGER NOT NULL DEFAULT 0, hint_spam_messages INTEGER NOT NULL DEFAULT 0, hint_ham_messages INTEGER NOT NULL DEFAULT 0, updated_at TEXT)
 table spam_tokens (token INTEGER PK1, spam_count INTEGER NOT NULL DEFAULT 0, ham_count INTEGER NOT NULL DEFAULT 0, last_seen TEXT NOT NULL)
-table spam_training (message_id TEXT NOT NULL PK1, label TEXT NOT NULL, previous_label TEXT, receipt_id TEXT, tokens BLOB NOT NULL, trained_at TEXT NOT NULL)
-table spam_verdicts (message_id TEXT NOT NULL PK1, score REAL NOT NULL, verdict TEXT NOT NULL, hint_headers TEXT, receipt_id TEXT, classified_at TEXT NOT NULL)
+table spam_training (message_id TEXT NOT NULL PK1, label TEXT NOT NULL, source TEXT NOT NULL, previous_label TEXT, previous_source TEXT, receipt_id TEXT, tokens BLOB NOT NULL, hinted INTEGER NOT NULL DEFAULT 0, sender TEXT NOT NULL DEFAULT '', thread_id TEXT, trained_at TEXT NOT NULL)
+table spam_verdicts (message_id TEXT NOT NULL PK1, score REAL NOT NULL, verdict TEXT NOT NULL, hint_headers TEXT, receipt_id TEXT, moved_at TEXT, classified_at TEXT NOT NULL)
 table sync_quarantine (account_id TEXT NOT NULL PK1, folder_id TEXT NOT NULL PK2, remote_id TEXT NOT NULL PK3, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, first_failed_at TEXT NOT NULL, last_failed_at TEXT NOT NULL)
 table sync_queue (id TEXT PK1, account_id TEXT NOT NULL, action_type TEXT NOT NULL, payload TEXT NOT NULL, status TEXT DEFAULT 'pending', retry_count INTEGER DEFAULT 0, last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, next_retry_at TEXT, scheduled_for TEXT, updated_at_ms INTEGER, submission_started_at TEXT, rate_limit_rounds INTEGER NOT NULL DEFAULT 0, sending_session TEXT)
 table sync_queue_dependencies (action_id TEXT NOT NULL PK1, depends_on TEXT NOT NULL PK2)

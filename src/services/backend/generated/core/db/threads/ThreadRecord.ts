@@ -45,4 +45,8 @@ export type ThreadRecord = {
      * has said Not spam since.
      */
     likely_spam: boolean;
+    /**
+     * The filter moved mail of this thread to Spam (Move mode).
+     */
+    spam_moved: boolean;
 };

@@ -18,7 +18,12 @@ function status(overrides: Record<string, unknown> = {}) {
     ham_messages: 12,
     tokens: 420,
     ready: false,
-    min_per_class: 10,
+    bootstrap_pending: false,
+    spam_needed: 47,
+    ham_needed: 38,
+    move_ready: false,
+    move_spam_needed: 197,
+    move_ham_needed: 188,
     ...overrides,
   };
 }
@@ -36,8 +41,9 @@ describe('spam filter settings', () => {
 
     const active = wrapper.find('.segmented__option--active');
     expect(active.text()).toBe('Mark');
-    expect(wrapper.get('[data-testid="spam-filter-training"]').text())
-      .toBe('3 spam and 12 wanted messages. It judges new mail once it knows 10 of each.');
+    expect(wrapper.get('[data-testid="spam-filter-training"]').text()).toBe('3 spam and 12 wanted messages.');
+    expect(wrapper.get('[data-testid="spam-filter-readiness"]').text())
+      .toBe('It judges new mail once it has learned 47 more spam and 38 more wanted messages.');
   });
 
   it('saves a new mode and keeps the old one when saving fails', async () => {
@@ -58,10 +64,32 @@ describe('spam filter settings', () => {
     expect(wrapper.text()).toContain('nope');
   });
 
-  it('says it is ready once it knows enough of both', async () => {
-    backend.backendGetSpamFilterStatus.mockResolvedValue(status({ spam_messages: 40, ham_messages: 200, ready: true }));
+  it('waits for the bootstrap before anything else', async () => {
+    backend.backendGetSpamFilterStatus.mockResolvedValue(status({ bootstrap_pending: true }));
     const wrapper = mount(SpamFilterSettings);
     await flushPromises();
-    expect(wrapper.get('[data-testid="spam-filter-training"]').text()).toBe('40 spam and 200 wanted messages.');
+    expect(wrapper.get('[data-testid="spam-filter-readiness"]').text())
+      .toBe('It is still learning from the mail you have already sorted, and judges nothing until it is done.');
+  });
+
+  it('says Move only marks until the model is large enough', async () => {
+    backend.backendGetSpamFilterStatus.mockResolvedValue(status({
+      mode: 'move', spam_messages: 60, ham_messages: 200, ready: true, spam_needed: 0, ham_needed: 0,
+      move_spam_needed: 140, move_ham_needed: 0,
+    }));
+    const wrapper = mount(SpamFilterSettings);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="spam-filter-readiness"]').text())
+      .toBe('Until it has learned 140 more spam and 0 more wanted messages, Move only marks.');
+    expect(wrapper.text()).toContain('Your server may delete mail in Spam after a while.');
+  });
+
+  it('says it judges once every gate is met', async () => {
+    backend.backendGetSpamFilterStatus.mockResolvedValue(status({
+      spam_messages: 60, ham_messages: 200, ready: true, spam_needed: 0, ham_needed: 0,
+    }));
+    const wrapper = mount(SpamFilterSettings);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="spam-filter-readiness"]').text()).toBe('It judges new mail as it arrives.');
   });
 });

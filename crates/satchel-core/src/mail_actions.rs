@@ -38,8 +38,8 @@ pub enum MoveTarget<'a> {
     Inbox,
 }
 
-/// What Not spam did.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+/// What Not spam did, and what its Undo hands back.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ipc-types", ts(export, export_to = "core/mail_actions/"))]
 pub struct NotSpamReceipt {
@@ -47,6 +47,13 @@ pub struct NotSpamReceipt {
     pub thread_ids: Vec<String>,
     /// Threads that were in Spam and are on their way back to the Inbox.
     pub moved_thread_ids: Vec<String>,
+    /// The training receipt; Undo unlearns it.
+    pub undo_token: Option<String>,
+    /// Receipts of the moves back to the Inbox; Undo replays them.
+    pub move_receipts: Vec<String>,
+    /// Threads the filter had moved, restored through its own receipt; Undo
+    /// files them in Spam again.
+    pub restored_thread_ids: Vec<String>,
 }
 
 #[derive(FromRow)]
@@ -400,12 +407,14 @@ pub async fn move_spam_with_receipt(
         .map(|(_, receipt)| receipt)
 }
 
-/// Not spam: teach the filter these threads are wanted, and bring any that
-/// sit in Spam back to the Inbox.
+/// Not spam: teach the filter these threads are wanted, and bring whatever
+/// of them sits in Spam back to the Inbox.
 ///
-/// A thread the filter moved itself is restored through its move receipt —
-/// the ordinary Undo, exact folder and workflow state included. Anything else
-/// in Spam (moved by the user or by the provider) moves back to the Inbox.
+/// Every receipt of the filter's own moves is replayed through the ordinary
+/// Undo — exact folder and workflow state included, however many times the
+/// filter moved parts of the thread. Whatever is still in Spam after that
+/// (moved by the user or by the provider) moves back to the Inbox under a
+/// receipt of its own, so the Not spam itself can be undone.
 pub async fn mark_threads_not_spam(
     pool: &SqlitePool,
     queue: &SyncQueue,
@@ -421,62 +430,112 @@ pub async fn mark_threads_not_spam(
     if ids.is_empty() {
         return Ok(outcome);
     }
-    let mut remaining = Vec::new();
     for id in &ids {
-        let receipt: Option<String> = sqlx::query_scalar(
-            "SELECT v.receipt_id FROM spam_verdicts v JOIN messages m ON m.id = v.message_id
-             WHERE m.thread_id = ? AND v.receipt_id IS NOT NULL LIMIT 1",
+        let receipts: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT v.receipt_id FROM spam_verdicts v JOIN messages m ON m.id = v.message_id
+             WHERE m.thread_id = ? AND v.receipt_id IS NOT NULL ORDER BY v.receipt_id",
         )
         .bind(id)
-        .fetch_optional(pool)
+        .fetch_all(pool)
         .await
         .map_err(|e| e.to_string())?;
-        let restored = match receipt {
-            Some(receipt) => undo::undo_trash(pool, queue, &receipt).await.is_ok(),
-            None => false,
-        };
+        let mut restored = false;
+        for receipt in receipts {
+            restored |= undo::undo_trash(pool, queue, &receipt).await.is_ok();
+        }
         sqlx::query(
-            "UPDATE spam_verdicts SET receipt_id = NULL
+            "UPDATE spam_verdicts SET receipt_id = NULL, moved_at = NULL
              WHERE message_id IN (SELECT id FROM messages WHERE thread_id = ?)",
         )
         .bind(id)
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?;
-        if restored {
-            outcome.moved_thread_ids.push(id.clone());
-        } else {
-            remaining.push(id.clone());
-        }
-    }
-    let in_spam: Vec<String> = {
-        let mut in_spam = Vec::new();
-        for id in remaining {
-            if !crate::spam::spam_folder_messages(pool, std::slice::from_ref(&id))
-                .await
-                .map_err(|e| e.to_string())?
-                .is_empty()
+        let still_in_spam = !crate::spam::spam_folder_messages(pool, std::slice::from_ref(id))
+            .await
+            .map_err(|e| e.to_string())?
+            .is_empty();
+        if still_in_spam {
+            match move_threads_with_receipt(
+                pool,
+                queue,
+                std::slice::from_ref(id),
+                MoveTarget::Inbox,
+                true,
+            )
+            .await
             {
-                in_spam.push(id);
+                Ok((_, receipt)) => {
+                    outcome.move_receipts.extend(receipt.undo_token);
+                    outcome.moved_thread_ids.push(id.clone());
+                }
+                // A replayed receipt whose provider move is still running
+                // owns the thread; its reversal is queued and finishes it.
+                Err(error) if restored && error == "backend.errors.mailMovePending" => {
+                    outcome.moved_thread_ids.push(id.clone());
+                }
+                Err(error) => return Err(error),
             }
+        } else if restored {
+            outcome.moved_thread_ids.push(id.clone());
         }
-        in_spam
-    };
-    if !in_spam.is_empty() {
-        move_threads_with_receipt(pool, queue, &in_spam, MoveTarget::Inbox, false).await?;
-        outcome.moved_thread_ids.extend(in_spam);
+        if restored {
+            outcome.restored_thread_ids.push(id.clone());
+        }
     }
+    let token = format!("not-spam:{}", uuid::Uuid::new_v4());
     crate::spam::train_threads(
         pool,
         &ids,
         crate::spam::Label::Ham,
         crate::spam::Signal::Explicit,
-        None,
+        Some(&token),
     )
     .await
     .map_err(|e| e.to_string())?;
     outcome.thread_ids = ids;
+    outcome.undo_token = Some(token);
     Ok(outcome)
+}
+
+/// Undo a Not spam: unlearn it, return the threads it moved to Spam, and file
+/// the ones the filter had moved there again.
+pub async fn undo_not_spam(
+    pool: &SqlitePool,
+    queue: &SyncQueue,
+    receipt: &NotSpamReceipt,
+) -> Result<(), String> {
+    if let Some(token) = receipt.undo_token.as_deref() {
+        crate::spam::untrain_receipt(pool, token)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    for move_receipt in &receipt.move_receipts {
+        undo::undo_trash(pool, queue, move_receipt).await?;
+    }
+    let mut seen = std::collections::HashSet::new();
+    let refile: Vec<String> = receipt
+        .restored_thread_ids
+        .iter()
+        .filter(|id| seen.insert(id.as_str()))
+        .cloned()
+        .collect();
+    if !refile.is_empty() {
+        let moved = move_spam_with_receipt(pool, queue, &refile).await?;
+        for id in &refile {
+            sqlx::query(
+                "UPDATE spam_verdicts SET receipt_id = ?, moved_at = ?
+                 WHERE verdict = 'spam' AND message_id IN (SELECT id FROM messages WHERE thread_id = ?)",
+            )
+            .bind(moved.undo_token.as_deref())
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(id)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 pub async fn move_threads(

@@ -82,8 +82,9 @@ async fn apply(
     let threads: Vec<ThreadSnapshot> = sqlx::query_as("SELECT thread_id, account_id, workflow_state, board_column, snooze_until, action_at FROM mail_action_threads WHERE receipt_id = ?")
         .bind(receipt_id).fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
     // A later user operation owns its own state. Never overwrite it with an old receipt.
+    // Filing actions leave the thread Done; Not spam's move back leaves it in the Inbox.
     for snapshot in &threads {
-        let unchanged: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM threads WHERE id = ? AND workflow_state = 'done' AND workflow_changed_at = ?)")
+        let unchanged: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM threads WHERE id = ? AND workflow_state IN ('done', 'inbox') AND workflow_changed_at = ?)")
             .bind(&snapshot.thread_id).bind(&snapshot.action_at).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
         if !unchanged {
             return invalidate(tx, receipt_id).await;

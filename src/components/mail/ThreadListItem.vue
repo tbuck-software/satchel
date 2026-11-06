@@ -573,16 +573,16 @@ function onDragStart(event: DragEvent) {
         <!-- The filter's verdict reads as words, not a colour: it is the one
              thing on the row the user may have to answer. -->
         <span
-          v-if="props.thread.likelySpam"
+          v-if="props.thread.likelySpam || props.thread.spamMoved"
           class="spam-label"
-          :title="$t('thread.spam.rowHint')"
+          :title="props.thread.spamMoved ? $t('thread.spam.movedHint') : $t('thread.spam.rowHint')"
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M8 1.5l5 2.9v7.2L8 14.5l-5-2.9V4.4L8 1.5Z" />
             <path d="M8 5.1v3.5" />
             <path d="M8 11h.01" />
           </svg>
-          {{ $t('thread.spam.likely') }}
+          {{ props.thread.spamMoved ? $t('thread.spam.moved') : $t('thread.spam.likely') }}
         </span>
         <span
           v-if="followUp || laterLabel"

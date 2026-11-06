@@ -835,6 +835,7 @@ pub fn run() {
             commands::thread_actions::set_thread_muted,
             commands::thread_actions::mark_threads_spam,
             commands::thread_actions::mark_threads_not_spam,
+            commands::thread_actions::undo_not_spam,
             commands::thread_actions::get_spam_filter_status,
             commands::thread_actions::set_spam_filter_mode,
             commands::star::set_threads_starred,

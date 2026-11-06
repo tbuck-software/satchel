@@ -15,7 +15,7 @@ import { invoke } from './core';
 import type { ThreadSmartBucket } from '@/types/mail';
 import type { BatchTransitionInput, BatchTransitionResult } from './misc';
 
-export type BackendThread = RefinedWireFields<OptionalWireFields<WireThreadDto, 'sort_date' | 'has_draft' | 'draft_snippet' | 'board_position' | 'tags' | 'assignee' | 'shared_with' | 'sent_participants' | 'category' | 'smart_bucket' | 'is_muted' | 'is_starred' | 'snooze_until' | 'workflow_changed_at' | 'sender_known' | 'has_invite' | 'invite_status' | 'invite_cancelled' | 'likely_spam'>, { smart_bucket?: ThreadSmartBucket }>;
+export type BackendThread = RefinedWireFields<OptionalWireFields<WireThreadDto, 'sort_date' | 'has_draft' | 'draft_snippet' | 'board_position' | 'tags' | 'assignee' | 'shared_with' | 'sent_participants' | 'category' | 'smart_bucket' | 'is_muted' | 'is_starred' | 'snooze_until' | 'workflow_changed_at' | 'sender_known' | 'has_invite' | 'invite_status' | 'invite_cancelled' | 'likely_spam' | 'spam_moved'>, { smart_bucket?: ThreadSmartBucket }>;
 
 
 export type BackendThreadCursor = WireThreadCursor;
@@ -178,6 +178,12 @@ export type BackendSpamFilterStatus = SpamFilterStatus;
 /** Teaches the local filter the threads are wanted and brings any in Spam back to the Inbox. */
 export async function backendMarkThreadsNotSpam(threadIds: string[]): Promise<BackendNotSpamReceipt> {
   return invoke<BackendNotSpamReceipt>('mark_threads_not_spam', { input: { thread_ids: threadIds } });
+}
+
+
+/** Unlearns a Not spam and puts the threads it moved back in Spam. */
+export async function backendUndoNotSpam(receipt: BackendNotSpamReceipt): Promise<void> {
+  return invoke<void>('undo_not_spam', { input: { receipt } });
 }
 
 

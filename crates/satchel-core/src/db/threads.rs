@@ -107,6 +107,9 @@ pub struct ThreadRecord {
     /// has said Not spam since.
     #[serde(default)]
     pub likely_spam: bool,
+    /// The filter moved mail of this thread to Spam (Move mode).
+    #[serde(default)]
+    pub spam_moved: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1577,6 +1580,7 @@ struct ThreadRow {
     invite_status: Option<String>,
     invite_cancelled: i64,
     likely_spam: i64,
+    spam_moved: i64,
 }
 
 /// Default page size. Small enough that the first paint is fast on a large
@@ -6160,6 +6164,12 @@ const THREAD_RECORD_SQL: &str = "
             ) AS likely_spam,
             EXISTS (
               SELECT 1
+              FROM messages moved_messages
+              JOIN spam_verdicts moved_verdicts ON moved_verdicts.message_id = moved_messages.id
+              WHERE moved_messages.thread_id = threads.id AND moved_verdicts.moved_at IS NOT NULL
+            ) AS spam_moved,
+            EXISTS (
+              SELECT 1
               FROM messages sent
               JOIN folders sent_folders ON sent_folders.id = COALESCE(sent.pending_folder_id, sent.folder_id)
               WHERE sent.thread_id = threads.id
@@ -6264,6 +6274,7 @@ fn thread_record_from_row(row: ThreadRow) -> ThreadRecord {
         invite_status: row.invite_status,
         invite_cancelled: row.invite_cancelled > 0,
         likely_spam: row.likely_spam > 0,
+        spam_moved: row.spam_moved > 0,
     }
 }
 
@@ -6756,6 +6767,12 @@ fn thread_list_query(
             ) AS likely_spam,
             EXISTS (
               SELECT 1
+              FROM messages moved_messages
+              JOIN spam_verdicts moved_verdicts ON moved_verdicts.message_id = moved_messages.id
+              WHERE moved_messages.thread_id = threads.id AND moved_verdicts.moved_at IS NOT NULL
+            ) AS spam_moved,
+            EXISTS (
+              SELECT 1
               FROM messages sent
               JOIN folders sent_folders ON sent_folders.id = COALESCE(sent.pending_folder_id, sent.folder_id)
               WHERE sent.thread_id = threads.id
@@ -6889,6 +6906,7 @@ async fn list_threads_inner(
             invite_status: row.invite_status,
             invite_cancelled: row.invite_cancelled > 0,
             likely_spam: row.likely_spam > 0,
+            spam_moved: row.spam_moved > 0,
         })
         .collect();
 

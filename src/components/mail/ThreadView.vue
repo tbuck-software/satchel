@@ -1106,11 +1106,11 @@ function showEntireThread() {
           <!-- The filter's verdict, with its answer next to it: one key or
                one click and the mark is gone. -->
           <AppBanner
-            v-if="thread.likelySpam && !showSelectionSummary"
+            v-if="(thread.likelySpam || thread.spamMoved) && !showSelectionSummary"
             class="thread-spam-banner"
             tone="warning"
-            :title="$t('thread.spam.bannerTitle')"
-            :detail="$t('thread.spam.bannerDetail')"
+            :title="thread.spamMoved ? $t('thread.spam.movedBannerTitle') : $t('thread.spam.bannerTitle')"
+            :detail="thread.spamMoved ? $t('thread.spam.movedBannerDetail') : $t('thread.spam.bannerDetail')"
           >
             <template #actions>
               <AppButton size="sm" variant="secondary" :shortcut="shortcutHint('markNotSpam')" @click="markNotSpam">

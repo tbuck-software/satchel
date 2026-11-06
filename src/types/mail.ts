@@ -148,6 +148,8 @@ export interface Thread {
   inviteCancelled?: boolean;
   /** The local spam filter judged it spam and nobody has said Not spam since. */
   likelySpam?: boolean;
+  /** The filter moved it to Spam (Move mode). */
+  spamMoved?: boolean;
 }
 
 export interface Account {

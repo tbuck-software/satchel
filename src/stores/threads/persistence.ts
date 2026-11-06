@@ -454,10 +454,12 @@ export function createThreadPersistence({
    */
   async function markThreadsNotSpam(threadIds: string[]): Promise<BackendNotSpamReceipt> {
     const normalized = Array.from(new Set(threadIds.map((id) => id.trim()).filter(Boolean)));
-    let receipt: BackendNotSpamReceipt = { thread_ids: [], moved_thread_ids: [] };
+    let receipt: BackendNotSpamReceipt = {
+      thread_ids: [], moved_thread_ids: [], undo_token: null, move_receipts: [], restored_thread_ids: [],
+    };
     if (normalized.length === 0) return receipt;
     await writeOptimistically(
-      normalized.map((id) => ({ id, values: { likelySpam: false } })),
+      normalized.map((id) => ({ id, values: { likelySpam: false, spamMoved: false } })),
       async () => { receipt = await backendMarkThreadsNotSpam(normalized); },
     );
     await Promise.allSettled([refreshHead(), reloadMailboxes()]);

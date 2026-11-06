@@ -170,7 +170,9 @@ pub mod reason {
     pub const FILTER_ALREADY_READ: &str = "filter_already_read";
     pub const FILTER_MUTED_THREAD: &str = "filter_muted_thread";
     pub const FILTER_MUTED_SENDER: &str = "filter_muted_sender";
-    pub const FILTER_LIKELY_SPAM: &str = "filter_likely_spam";
+    /// The local spam filter moved the message to Spam. A message it only
+    /// marked still notifies: a false positive must stay visible.
+    pub const FILTER_SPAM_MOVED: &str = "filter_spam_moved";
     /// Trigger-only (migration 0060); listed here so the pane's label set is
     /// complete.
     pub const FILTER_NO_DATE: &str = "filter_no_date";
@@ -574,12 +576,12 @@ const DISMISSAL_RULES: &[DismissalRule<'static>] = &[
                       WHERE m.id = notification_outbox.message_id)",
     },
     DismissalRule {
-        code: reason::FILTER_LIKELY_SPAM,
-        detail: "(SELECT printf('%.2f', v.score) FROM spam_verdicts v
+        code: reason::FILTER_SPAM_MOVED,
+        detail: "(SELECT printf('%.3f', v.score) FROM spam_verdicts v
                   WHERE v.message_id = notification_outbox.message_id)",
         predicate: "EXISTS (SELECT 1 FROM spam_verdicts v
                             WHERE v.message_id = notification_outbox.message_id
-                              AND v.verdict = 'spam')",
+                              AND v.moved_at IS NOT NULL)",
     },
 ];
 
@@ -1666,15 +1668,15 @@ mod tests {
         .await;
 
         for id in [
-            "read", "moved", "sent", "muted", "blocked", "spam", "gone", "kept",
+            "read", "moved", "sent", "muted", "blocked", "spam", "marked", "gone", "kept",
         ] {
             insert_message(&pool, id, &fresh()).await;
             assert_eq!(outbox(&pool, id).await.unwrap().0, "pending", "{id}");
         }
         exec(
             &pool,
-            "INSERT INTO spam_verdicts (message_id, score, verdict, classified_at)
-             VALUES ('spam', 0.97, 'spam', '')",
+            "INSERT INTO spam_verdicts (message_id, score, verdict, moved_at, classified_at)
+             VALUES ('spam', 0.995, 'spam', '2026-01-01', ''), ('marked', 0.95, 'spam', NULL, '')",
         )
         .await;
         exec(&pool, "UPDATE messages SET is_read = 1 WHERE id = 'read'").await;
@@ -1708,7 +1710,8 @@ mod tests {
                 .iter()
                 .map(|n| n.event_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["kept"]
+            // Likely spam the filter only marked still notifies.
+            vec!["marked", "kept"]
         );
 
         assert_eq!(reason_of(&pool, "read").await, reason::FILTER_ALREADY_READ);
@@ -1719,7 +1722,7 @@ mod tests {
             reason_of(&pool, "blocked").await,
             reason::FILTER_MUTED_SENDER
         );
-        assert_eq!(reason_of(&pool, "spam").await, reason::FILTER_LIKELY_SPAM);
+        assert_eq!(reason_of(&pool, "spam").await, reason::FILTER_SPAM_MOVED);
         assert_eq!(reason_of(&pool, "gone").await, reason::FILTER_MESSAGE_GONE);
     }
 

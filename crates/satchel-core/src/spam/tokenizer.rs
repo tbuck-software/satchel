@@ -39,7 +39,6 @@ pub const HINT_HEADERS: &[&str] = &[
 /// ingest or from a stored `messages` row when training later.
 #[derive(Debug, Clone, Default)]
 pub struct SpamFeatures {
-    pub account_id: String,
     pub from_address: String,
     pub from_name: Option<String>,
     pub reply_to: Option<String>,
@@ -121,6 +120,7 @@ pub fn extract_hint_headers(raw: &str) -> Option<String> {
 struct TokenSet {
     seen: HashSet<i64>,
     ordered: Vec<i64>,
+    limit: usize,
 }
 
 impl TokenSet {
@@ -128,11 +128,12 @@ impl TokenSet {
         Self {
             seen: HashSet::new(),
             ordered: Vec::new(),
+            limit: MAX_TOKENS_PER_MESSAGE,
         }
     }
 
     fn push(&mut self, token: impl AsRef<str>) {
-        if self.ordered.len() >= MAX_TOKENS_PER_MESSAGE {
+        if self.ordered.len() >= self.limit {
             return;
         }
         let hash = token_hash(token.as_ref());
@@ -142,13 +143,45 @@ impl TokenSet {
     }
 
     fn full(&self) -> bool {
-        self.ordered.len() >= MAX_TOKENS_PER_MESSAGE
+        self.ordered.len() >= self.limit
+    }
+}
+
+/// The tokens of one message, the forgeable header hints kept apart: the
+/// classifier leaves them out until enough examples carried them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TokenParts {
+    pub main: Vec<i64>,
+    /// `hdr:*` tokens from [`HINT_HEADERS`]. `X-Spam-*` is whatever the last
+    /// server — or the sender — wrote, and mail stored before this filter
+    /// existed never had them kept.
+    pub hints: Vec<i64>,
+}
+
+impl TokenParts {
+    /// All tokens, hints last, as a training example stores them.
+    pub fn all(&self) -> Vec<i64> {
+        let mut all = self.main.clone();
+        all.extend(self.hints.iter().copied());
+        all
     }
 }
 
 /// The distinct tokens of one message, in a stable order.
 pub fn tokenize(features: &SpamFeatures) -> Vec<i64> {
+    tokenize_parts(features).all()
+}
+
+pub fn tokenize_parts(features: &SpamFeatures) -> TokenParts {
+    let mut hints = TokenSet::new();
+    if let Some(headers) = features.hint_headers.as_deref() {
+        for token in hint_tokens(headers) {
+            hints.push(token);
+        }
+    }
     let mut tokens = TokenSet::new();
+    tokens.seen = hints.seen.clone();
+    tokens.limit = MAX_TOKENS_PER_MESSAGE.saturating_sub(hints.ordered.len());
     for token in header_tokens(features) {
         tokens.push(token);
     }
@@ -162,15 +195,15 @@ pub fn tokenize(features: &SpamFeatures) -> Vec<i64> {
         }
         tokens.push(word);
     }
-    tokens.ordered
+    TokenParts {
+        main: tokens.ordered,
+        hints: hints.ordered,
+    }
 }
 
 /// The readable tokens before hashing. Tests and diagnostics read these.
 pub fn header_tokens(features: &SpamFeatures) -> Vec<String> {
     let mut out = Vec::new();
-    if !features.account_id.trim().is_empty() {
-        out.push(format!("acct:{}", features.account_id.trim()));
-    }
     let from = features.from_address.trim().to_lowercase();
     let from_domain = domain_of(&from);
     if !from.is_empty() {
@@ -275,13 +308,10 @@ pub fn header_tokens(features: &SpamFeatures) -> Vec<String> {
             out.push("html:hidden-text".into());
         }
     }
-    if let Some(headers) = features.hint_headers.as_deref() {
-        out.extend(hint_tokens(headers));
-    }
     out
 }
 
-fn hint_tokens(headers: &str) -> Vec<String> {
+pub fn hint_tokens(headers: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in headers.lines() {
         let Some((name, value)) = line.split_once(':') else {
@@ -505,7 +535,6 @@ mod tests {
 
     fn features() -> SpamFeatures {
         SpamFeatures {
-            account_id: "acc".into(),
             from_address: "Deals@Mail.Shop.Example.com".into(),
             from_name: Some("Mega Deals".into()),
             subject: "WIN A FREE CRUISE NOW!".into(),
@@ -519,7 +548,6 @@ mod tests {
     fn header_tokens_are_namespaced_and_normalized() {
         let tokens = header_tokens(&features());
         for expected in [
-            "acct:acc",
             "from:deals@mail.shop.example.com",
             "from-domain:mail.shop.example.com",
             "from-domain:example.com",
@@ -552,7 +580,7 @@ mod tests {
         let unique: HashSet<_> = tokens.iter().collect();
         assert_eq!(unique.len(), tokens.len());
         // Headers come first and survive the cap.
-        assert_eq!(tokens[0], token_hash("acct:acc"));
+        assert_eq!(tokens[0], token_hash("from:deals@mail.shop.example.com"));
     }
 
     #[test]
@@ -585,6 +613,18 @@ mod tests {
         assert!(tokens.contains(&"hdr:x-spam-test:bayes_99".to_string()));
         assert!(tokens.contains(&"hdr:x-spam-test:uribl_black".to_string()));
         assert!(!tokens.iter().any(|token| token.contains("autolearn")));
+    }
+
+    #[test]
+    fn hint_tokens_are_kept_apart_and_the_account_is_not_a_token() {
+        let mut with_hints = features();
+        with_hints.hint_headers = Some("X-Spam-Flag: YES".into());
+        let parts = tokenize_parts(&with_hints);
+        assert_eq!(parts.hints, vec![token_hash("hdr:x-spam-flag:yes")]);
+        assert_eq!(parts.main, tokenize_parts(&features()).main);
+        assert!(!header_tokens(&features())
+            .iter()
+            .any(|token| token.starts_with("acct:")));
     }
 
     #[test]

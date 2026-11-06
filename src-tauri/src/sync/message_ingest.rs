@@ -91,6 +91,9 @@ struct StoredMessage {
     message_id: String,
     thread_id: String,
     was_pre_existing: bool,
+    /// First seen after the account's notification cutoff: new mail, not a
+    /// first sync, a re-sync or a UIDVALIDITY reset replaying old mail.
+    newly_seen: bool,
     message_is_draft: bool,
     message_is_sent: bool,
     attachment_ids: Vec<String>,
@@ -983,6 +986,7 @@ async fn persist_provider_message(
         message_id,
         thread_id,
         was_pre_existing,
+        newly_seen,
         message_is_draft,
         message_is_sent,
         attachment_ids,
@@ -1007,6 +1011,7 @@ async fn finish_provider_message(
         message_id,
         thread_id,
         was_pre_existing,
+        newly_seen,
         message_is_draft,
         message_is_sent,
         attachment_ids,
@@ -1166,11 +1171,16 @@ async fn finish_provider_message(
         }
     }
 
-    // The local spam filter judges new Inbox mail before its notification is
-    // published; a likely-spam message is dismissed there. With the filter on
-    // Move, the provider move is queued through the same durable queue as the
-    // blocked-sender move above.
-    if !was_pre_existing
+    // The local spam filter judges new, unread Inbox mail before its
+    // notification is published. Only mail past the notification cutoff
+    // counts as new: adding an account, a re-sync or a UIDVALIDITY reset
+    // replays a backlog the user has long sorted, and Move must not file old
+    // mail in a Spam folder the server purges. With the filter on Move, the
+    // provider move is queued through the same durable queue as the
+    // blocked-sender move above, and the moved message's notification is
+    // dismissed.
+    if newly_seen
+        && !message.is_read
         && !sender_is_blocked
         && folder_type == "inbox"
         && !message_is_sent
@@ -2269,34 +2279,36 @@ mod tests {
         assert!(ids.contains(&decrypted), "{ids:?}");
     }
 
-    /// New IMAP mail is judged by the local spam filter once it has learned
-    /// enough, and with the filter on Move it is filed in Spam through the
-    /// durable queue — the provider move first, the local copy waiting on it.
+    /// New, unread IMAP mail is judged by the local spam filter once it has
+    /// learned enough. A backlog replayed by a first sync, a re-sync or a
+    /// UIDVALIDITY reset is not judged, and neither is mail already read.
     #[tokio::test]
-    async fn new_imap_mail_is_classified_and_moved_by_the_spam_filter() {
+    async fn the_spam_filter_judges_new_unread_mail_and_never_a_backlog() {
         let pool = ingest_pool().await;
-        sqlx::query(
-            "INSERT INTO folders
-             (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
-             VALUES ('spam', 'account', 'Spam', 'Spam', 'spam', 'Spam', '', '')",
-        )
-        .execute(&pool)
-        .await
-        .expect("spam folder");
-        let now = chrono::Utc::now();
-        for n in 0..10 {
+        let cutoff = (chrono::Utc::now() - chrono::TimeDelta::hours(1)).to_rfc3339();
+        sqlx::query("UPDATE accounts SET last_sync_at = ?")
+            .bind(&cutoff)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut examples = Vec::new();
+        for n in 0..60 {
             let mut spam = envelope(&format!("s{n}"));
-            spam.from_address = format!("winner{n}@lottery.example");
-            spam.subject = "You won the lottery jackpot".into();
+            spam.from_address = format!("winner{n}@lottery{}.example", n % 7);
+            spam.subject = format!("You won the lottery jackpot {n}");
             spam.body_text = Some("Claim your jackpot prize, wire the processing fee".into());
-            spam.date_rfc3339 = now.to_rfc3339();
-            ingest(&pool, "inbox", &spam).await.expect("spam example");
+            spam.date_rfc3339 = now.clone();
+            examples.push(spam);
             let mut ham = envelope(&format!("h{n}"));
-            ham.from_address = format!("colleague{n}@work.example");
-            ham.subject = "Agenda for the project meeting".into();
+            ham.from_address = format!("colleague{n}@work{}.example", n % 5);
+            ham.subject = format!("Agenda for the project meeting {n}");
             ham.body_text = Some("Please review the agenda and the minutes".into());
-            ham.date_rfc3339 = now.to_rfc3339();
-            ingest(&pool, "inbox", &ham).await.expect("ham example");
+            ham.date_rfc3339 = now.clone();
+            examples.push(ham);
+        }
+        for result in ingest_many(&pool, &examples).await {
+            result.expect("example");
         }
         let examples: Vec<(String, String)> =
             sqlx::query_as("SELECT id, from_address FROM messages")
@@ -2319,50 +2331,62 @@ mod tests {
             .await
             .unwrap();
         }
-        satchel_core::spam::set_mode(&pool, satchel_core::spam::SpamFilterMode::Move)
+        sqlx::query("DELETE FROM app_settings WHERE key = 'data_repair.spam_bootstrap'")
+            .execute(&pool)
             .await
             .unwrap();
 
-        let mut incoming = envelope("new");
-        incoming.from_address = "boss@lottery.example".into();
-        incoming.subject = "Lottery jackpot winner".into();
-        incoming.body_text = Some("Claim your jackpot prize now".into());
-        incoming.spam_hint_headers = Some("X-Spam-Flag: YES".into());
-        incoming.date_rfc3339 = now.to_rfc3339();
-        ingest(&pool, "inbox", &incoming).await.expect("new mail");
-
-        let (verdict, hints, receipt): (String, Option<String>, Option<String>) = sqlx::query_as(
-            "SELECT v.verdict, v.hint_headers, v.receipt_id FROM spam_verdicts v
-             JOIN messages m ON m.id = v.message_id WHERE m.remote_id = 'new'",
+        let incoming = |id: &str, date: &str, read: bool| {
+            let mut message = envelope(id);
+            message.from_address = "boss@lottery3.example".into();
+            message.subject = "Lottery jackpot winner".into();
+            message.body_text = Some("Claim your jackpot prize, wire the processing fee".into());
+            message.spam_hint_headers = Some("X-Spam-Flag: YES".into());
+            message.date_rfc3339 = date.to_string();
+            message.received_at_rfc3339 = Some(date.to_string());
+            message.is_read = read;
+            message
+        };
+        ingest(&pool, "inbox", &incoming("new", &now, false))
+            .await
+            .expect("new mail");
+        ingest(
+            &pool,
+            "inbox",
+            &incoming("old", "2025-06-01T08:00:00Z", false),
         )
-        .fetch_one(&pool)
         .await
-        .expect("verdict");
-        assert_eq!(verdict, "spam");
-        assert_eq!(hints.as_deref(), Some("X-Spam-Flag: YES"));
-        assert!(receipt.is_some(), "the move left an undo receipt");
+        .expect("backlog");
+        ingest(&pool, "inbox", &incoming("read", &now, true))
+            .await
+            .expect("read mail");
+
+        let verdict = |remote: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_as::<_, (String, Option<String>)>(
+                    "SELECT v.verdict, v.hint_headers FROM spam_verdicts v
+                     JOIN messages m ON m.id = v.message_id WHERE m.remote_id = ?",
+                )
+                .bind(remote)
+                .fetch_optional(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            verdict("new").await,
+            Some(("spam".to_string(), Some("X-Spam-Flag: YES".to_string())))
+        );
+        assert_eq!(verdict("old").await, None, "a backlog is never judged");
+        assert_eq!(verdict("read").await, None, "read mail is never judged");
+        // Mark is the default: the likely spam stays in the Inbox.
         let pending: Option<String> =
             sqlx::query_scalar("SELECT pending_folder_id FROM messages WHERE remote_id = 'new'")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(pending.as_deref(), Some("spam"));
-        let moves: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_move'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!(moves, 1);
-
-        // The examples arrived before training and stay unjudged; only the
-        // new message was scored.
-        let scored: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM spam_verdicts WHERE verdict <> 'none'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(scored, 1);
+        assert_eq!(pending, None);
     }
 
     /// A `Date` far in the future used to win the `last_message_date >= …`
