@@ -692,6 +692,97 @@ mod tests {
         assert_eq!(log_rows(&pool).await.len(), 1, "the refusal is not logged");
     }
 
+    /// Anything that looks like an address or the probe's tracker.
+    fn url_leaks(sent: &str) -> Vec<&'static str> {
+        let lower = sent.to_ascii_lowercase();
+        ["http", "www.", "mailto:", "//", "click.example", "u=4711"]
+            .into_iter()
+            .filter(|needle| lower.contains(needle))
+            .collect()
+    }
+
+    /// A plain-text newsletter with an address in every shape the scanner
+    /// knows, including a boundary-prefixed and a hard-wrapped one.
+    const NEWSLETTER_TEXT: &str =
+        "Hi everyone, our offer [https://click.example/r?u=4711&l=7] ends Friday.\n\
+        Unsubscribe at <https://click.example/u?u=4711> or www.click.example/x?u=4711.\n\
+        Also _https://click.example/t?u=4711_ and https://click.example/w?u=\n\
+        4711 here, or \"https://click.example/q?u=4711\".";
+
+    /// The serialized request and the kept log row hold no address.
+    async fn assert_no_address_left(pool: &SqlitePool, engine: &FakeEngine) {
+        let request = &engine.requests()[0];
+        let body =
+            String::from_utf8(crate::translation::deepl::translate_body(request).unwrap()).unwrap();
+        assert_eq!(url_leaks(&body), Vec::<&str>::new(), "{body}");
+        let logged: Vec<Option<String>> =
+            sqlx::query_scalar("SELECT sent_text FROM outbound_request_log")
+                .fetch_all(pool)
+                .await
+                .unwrap();
+        let logged: Vec<String> = logged.into_iter().flatten().collect();
+        assert_eq!(logged.len(), 1, "the sent text is kept");
+        assert_eq!(url_leaks(&logged[0]), Vec::<&str>::new(), "{}", logged[0]);
+    }
+
+    async fn set_body(pool: &SqlitePool, text: &str) {
+        sqlx::query("UPDATE messages SET body_text = ? WHERE id = 't1-m'")
+            .bind(text)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn plain_text_mail_keeps_its_addresses_and_gets_them_back() {
+        let pool = setup(None).await;
+        set_body(&pool, NEWSLETTER_TEXT).await;
+        consent(&pool).await;
+        save(&pool, true).await;
+        let mut engine = FakeEngine::answering(Ok(""));
+        engine.echo = true;
+        let translation = translate(&pool, &engine, "DE").await.unwrap();
+        assert_no_address_left(&pool, &engine).await;
+        assert_eq!(
+            translation.body_text.as_deref(),
+            Some(NEWSLETTER_TEXT.replace("Hi", "Hallo").as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn the_large_html_fallback_keeps_its_addresses_too() {
+        let pool = setup(Some(&format!("<p>{}</p>", "Hi ".repeat(400)))).await;
+        set_body(&pool, NEWSLETTER_TEXT).await;
+        consent(&pool).await;
+        save(&pool, true).await;
+        let mut engine = FakeEngine::answering(Ok(""));
+        engine.echo = true;
+        engine.max_chars = NEWSLETTER_TEXT.chars().count();
+        let translation = translate(&pool, &engine, "DE").await.unwrap();
+        assert!(
+            !engine.requests()[0].content.is_html(),
+            "the text went, not the HTML"
+        );
+        assert_no_address_left(&pool, &engine).await;
+        assert_eq!(translation.body_html, None);
+        assert!(translation
+            .body_text
+            .unwrap()
+            .contains("https://click.example/r?u=4711&l=7"));
+    }
+
+    #[tokio::test]
+    async fn the_kept_html_text_holds_no_address_either() {
+        let html = r#"<p>Hi <a href="https://click.example/r?u=4711">https://click.example/r?u=4711</a> and _https://click.example/t?u=4711_ or https://click.example/a<span>u=4711</span></p>"#;
+        let pool = setup(Some(html)).await;
+        consent(&pool).await;
+        save(&pool, true).await;
+        let mut engine = FakeEngine::answering(Ok(""));
+        engine.echo = true;
+        translate(&pool, &engine, "DE").await.unwrap();
+        assert_no_address_left(&pool, &engine).await;
+    }
+
     #[tokio::test]
     async fn a_changed_body_makes_the_cached_translation_stale() {
         let pool = setup(None).await;

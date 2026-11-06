@@ -398,19 +398,20 @@ pub fn withhold_references(input: &str) -> (String, WithheldReferences) {
         raw: Vec::new(),
     };
     let html = withhold_css_urls(&cleaned, &mut withheld);
-    let html = withhold_addresses(&html, &mut withheld);
+    let html = withhold_addresses(&html, &mut withheld, Scan::Html);
     (html, withheld)
 }
 
-/// A plain-text body with every address replaced by a placeholder, by the
-/// same rules as the text of an HTML body. [`restore_references`] puts them
-/// back byte for byte.
+/// A plain-text body with every address replaced by a placeholder, as the
+/// text of an HTML body, with plain-text ends (white space, `<`, `>`) and
+/// hard-wrapped links followed across a line break. [`restore_references`]
+/// puts them back byte for byte.
 pub fn withhold_text_references(text: &str) -> (String, WithheldReferences) {
     let mut withheld = WithheldReferences {
         nonce: fresh_nonce(text),
         ..Default::default()
     };
-    let withheld_text = withhold_addresses(text, &mut withheld);
+    let withheld_text = withhold_addresses(text, &mut withheld, Scan::PlainText);
     (withheld_text, withheld)
 }
 
@@ -455,15 +456,26 @@ fn double_slash(rest: &[u8]) -> Option<usize> {
     }
 }
 
+/// What the scanner reads: serialized HTML (tags, entities) or plain text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Scan {
+    Html,
+    PlainText,
+}
+
 /// Where a web or mail address starts at byte `at`, if one does.
+///
+/// A scheme is the run of ASCII letters directly before `://`; anything else
+/// before it (`_`, a digit, `@`, `*`) is a boundary, so `_https://…` and
+/// `1https://…` are found. `www.` and `mailto:` continue a word only after a
+/// letter or a dot.
 fn address_starts_at(bytes: &[u8], at: usize) -> bool {
     let rest = &bytes[at..];
     let lower =
         |len: usize| -> Vec<u8> { rest.iter().take(len).map(u8::to_ascii_lowercase).collect() };
     let prev = at.checked_sub(1).map(|index| bytes[index]);
-    let at_boundary =
-        prev.is_none_or(|byte| !(byte.is_ascii_alphanumeric() || b"+-._@".contains(&byte)));
-    if at_boundary && (lower(7) == b"mailto:" || lower(4) == b"www.") {
+    let continues_word = prev.is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'.');
+    if !continues_word && (lower(7) == b"mailto:" || lower(4) == b"www.") {
         return true;
     }
     // `//host`: protocol-relative, a host with a dot right after the
@@ -487,68 +499,178 @@ fn address_starts_at(bytes: &[u8], at: usize) -> bool {
             }
         }
     }
-    if !at_boundary || !rest.first().is_some_and(u8::is_ascii_alphabetic) {
+    if !rest.first().is_some_and(u8::is_ascii_alphabetic)
+        || prev.is_some_and(|byte| byte.is_ascii_alphabetic())
+    {
         return false;
     }
-    let scheme = rest
+    let letters = rest
         .iter()
         .take(32)
-        .take_while(|byte| byte.is_ascii_alphanumeric() || b"+.-".contains(byte))
+        .take_while(|byte| byte.is_ascii_alphabetic())
         .count();
-    rest[scheme..].starts_with(b":") && double_slash(&rest[scheme + 1..]).is_some()
+    rest[letters..].starts_with(b":") && double_slash(&rest[letters + 1..]).is_some()
 }
 
-/// The length of a tag that does not end an address when it sits inside one:
-/// `<wbr>`, `<wbr/>`, `<wbr />`, or an empty inline element such as
-/// `<span></span>`. Senders split long links with them.
-fn inert_tag_len(rest: &str) -> Option<usize> {
-    let lower = rest.get(..rest.len().min(64))?.to_ascii_lowercase();
-    for wbr in ["<wbr>", "<wbr/>", "<wbr />"] {
-        if lower.starts_with(wbr) {
-            return Some(wbr.len());
-        }
+/// Inline elements a sender may wrap part of a link in.
+const INLINE_TAGS: &[&str] = &[
+    "span", "font", "b", "i", "u", "em", "strong", "a", "sup", "sub",
+];
+
+/// One tag at the start of `rest`: whether it closes, its lower-case name,
+/// and its length up to and including `>`.
+fn tag_at(rest: &str) -> Option<(bool, String, usize)> {
+    let bytes = rest.as_bytes();
+    if bytes.first() != Some(&b'<') {
+        return None;
     }
-    let name_len = lower[1..]
-        .bytes()
-        .take_while(u8::is_ascii_alphanumeric)
+    let closing = bytes.get(1) == Some(&b'/');
+    let name_start = 1 + usize::from(closing);
+    let name_len = bytes[name_start..]
+        .iter()
+        .take_while(|byte| byte.is_ascii_alphanumeric())
         .count();
     if name_len == 0 {
         return None;
     }
-    let name = &lower[1..1 + name_len];
-    let open_end = lower.find('>')?;
-    if lower[1 + name_len..open_end].contains('<') {
+    let close = rest.find('>')?;
+    if rest[1..close].contains('<') {
         return None;
     }
-    let close = format!("</{name}>");
-    lower[open_end + 1..]
-        .starts_with(&close)
-        .then_some(open_end + 1 + close.len())
+    let name = rest[name_start..name_start + name_len].to_ascii_lowercase();
+    Some((closing, name, close + 1))
 }
 
-/// Where the address that starts at `start` ends: at ASCII white space, `>`,
-/// `"`, `&nbsp;`, `&quot;`, or a `<` that is not an inert tag. Trailing
-/// sentence punctuation stays in the text, except a closing bracket that
-/// pairs with an opening one inside the address.
-fn address_end(text: &str, start: usize) -> usize {
+/// Content that renders as nothing: white space, `&nbsp;`, zero-width marks.
+fn renders_empty(content: &str) -> bool {
+    let mut rest = content;
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix("&nbsp;") {
+            rest = after;
+            continue;
+        }
+        let mut chars = rest.chars();
+        let c = chars.next().unwrap_or(' ');
+        if !(c.is_whitespace() || matches!(c, '\u{200b}'..='\u{200d}' | '\u{2060}' | '\u{feff}')) {
+            return false;
+        }
+        rest = chars.as_str();
+    }
+    true
+}
+
+/// The length of one tag that a link may run through: `<wbr>` in any form,
+/// an element whose content renders as nothing (`<span></span>`,
+/// `<span>&nbsp;</span>`), or the opening or closing tag of an inline
+/// element. `true` with it when it is of the last kind, which only counts
+/// if the link goes on right after it.
+fn link_tag_len(rest: &str) -> Option<(usize, bool)> {
+    let (closing, name, len) = tag_at(rest)?;
+    if name == "wbr" && !closing {
+        return Some((len, false));
+    }
+    if !closing {
+        let after = &rest[len..];
+        if let Some(content_end) = after.find('<') {
+            let close = format!("</{name}>");
+            if renders_empty(&after[..content_end])
+                && after[content_end..]
+                    .get(..close.len())
+                    .is_some_and(|tag| tag.eq_ignore_ascii_case(&close))
+            {
+                return Some((len + content_end + close.len(), false));
+            }
+        }
+    }
+    INLINE_TAGS.contains(&name.as_str()).then_some((len, true))
+}
+
+/// A character a link goes on with.
+fn continues_link(byte: u8) -> bool {
+    !(byte.is_ascii_whitespace() || b"<>\"".contains(&byte))
+}
+
+/// The tags at `rest` a link runs through, if it goes on after them.
+fn link_tag_chain_len(rest: &str) -> Option<usize> {
+    let mut len = 0;
+    while let Some((tag_len, _inline)) = link_tag_len(&rest[len..]) {
+        len += tag_len;
+        if rest.as_bytes().get(len) != Some(&b'<') {
+            break;
+        }
+    }
+    (len > 0
+        && rest
+            .as_bytes()
+            .get(len)
+            .is_some_and(|&byte| continues_link(byte)))
+    .then_some(len)
+}
+
+/// A plain-text line break the link goes on across: right after `://` or
+/// `www.`, or after a line ending in `=`, `&`, `?` or `/`.
+fn wraps_on(span: &str) -> bool {
+    span.ends_with("://")
+        || span.ends_with(r":\/\/")
+        || span.eq_ignore_ascii_case("www.")
+        || span.ends_with(['=', '&', '?', '/'])
+}
+
+/// Where the address that starts at `start` ends.
+///
+/// HTML: at ASCII white space, `>`, `&nbsp;`, `&quot;`, a `"` inside a tag
+/// (the attribute's own quote; in text a `"` is part of the link), or a `<`
+/// that is not a tag the link runs through. Plain text: at white space, `<`
+/// and `>` only, across a hard-wrapped line break (see [`wraps_on`]).
+/// Trailing sentence punctuation stays in the text, except a closing bracket
+/// that pairs with an opening one inside the address.
+fn address_end(text: &str, start: usize, scan: Scan, in_tag: bool) -> usize {
     let bytes = text.as_bytes();
     let mut end = start;
     while end < bytes.len() {
         let byte = bytes[end];
-        if byte.is_ascii_whitespace() || byte == b'>' || byte == b'"' {
+        if scan == Scan::PlainText && (byte == b'\n' || byte == b'\r') {
+            let newline = if text[end..].starts_with("\r\n") {
+                2
+            } else {
+                1
+            };
+            if wraps_on(&text[start..end])
+                && bytes
+                    .get(end + newline)
+                    .is_some_and(|&next| !next.is_ascii_whitespace())
+            {
+                end += newline;
+                continue;
+            }
             break;
         }
-        if byte == b'&' && (text[end..].starts_with("&nbsp;") || text[end..].starts_with("&quot;"))
-        {
+        if byte.is_ascii_whitespace() || byte == b'>' {
             break;
         }
-        if byte == b'<' {
-            match inert_tag_len(&text[end..]) {
-                Some(len) => {
-                    end += len;
-                    continue;
+        match scan {
+            Scan::PlainText => {
+                if byte == b'<' {
+                    break;
                 }
-                None => break,
+            }
+            Scan::Html => {
+                // Bytes, not `text[end..]`: `end` may sit inside a character.
+                if (in_tag && byte == b'"')
+                    || bytes[end..].starts_with(b"&nbsp;")
+                    || bytes[end..].starts_with(b"&quot;")
+                {
+                    break;
+                }
+                if byte == b'<' {
+                    match link_tag_chain_len(&text[end..]) {
+                        Some(len) => {
+                            end += len;
+                            continue;
+                        }
+                        None => break,
+                    }
+                }
             }
         }
         end += 1;
@@ -559,7 +681,7 @@ fn address_end(text: &str, start: usize) -> usize {
             b')' => Some(b'('),
             b']' => Some(b'['),
             b'}' => Some(b'{'),
-            b'.' | b',' | b';' | b':' | b'!' | b'?' | b'\'' => None,
+            b'.' | b',' | b';' | b':' | b'!' | b'?' | b'\'' | b'"' => None,
             _ => break,
         };
         if let Some(opener) = opener {
@@ -577,37 +699,51 @@ fn address_end(text: &str, start: usize) -> usize {
 
 /// Every web or mail address left in the serialized HTML or plain text,
 /// wherever it sits.
-fn withhold_addresses(html: &str, withheld: &mut WithheldReferences) -> String {
-    let bytes = html.as_bytes();
-    let mut out = String::with_capacity(html.len());
+fn withhold_addresses(text: &str, withheld: &mut WithheldReferences, scan: Scan) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
     let mut cursor = 0;
     let mut at = 0;
+    let mut in_tag = false;
     while at < bytes.len() {
-        if !html.is_char_boundary(at) || !address_starts_at(bytes, at) {
+        if scan == Scan::Html {
+            match bytes[at] {
+                b'<' if bytes
+                    .get(at + 1)
+                    .is_some_and(|&next| next.is_ascii_alphabetic() || b"/!".contains(&next)) =>
+                {
+                    in_tag = true
+                }
+                b'>' => in_tag = false,
+                _ => {}
+            }
+        }
+        if !text.is_char_boundary(at) || !address_starts_at(bytes, at) {
             at += 1;
             continue;
         }
-        let end = address_end(html, at);
-        if end <= at || !html.is_char_boundary(end) {
+        let end = address_end(text, at, scan, in_tag);
+        if end <= at || !text.is_char_boundary(end) {
             at += 1;
             continue;
         }
-        out.push_str(&html[cursor..at]);
+        out.push_str(&text[cursor..at]);
         out.push_str(&withheld.raw_token(withheld.raw.len()));
-        withheld.raw.push(html[at..end].to_owned());
+        withheld.raw.push(text[at..end].to_owned());
         cursor = end;
         at = end;
     }
-    out.push_str(&html[cursor..]);
+    out.push_str(&text[cursor..]);
     out
 }
 
 /// Puts the withheld references back into a translation of
 /// [`withhold_references`]' or [`withhold_text_references`]' output, in one
-/// pass. Only this request's placeholders match, exactly as written (an
-/// uppercased or renumbered one stays inert); ones the engine dropped stay
-/// dropped. Run the email sanitizer over restored HTML before anything
-/// renders it.
+/// pass. Only this request's placeholders match, exactly as written: the
+/// right nonce, `a` or `r`, an index without leading zeros, `-end`. An
+/// uppercased, renumbered or otherwise altered one stays inert; ones the
+/// engine dropped stay dropped. Run the email sanitizer over restored HTML
+/// before anything renders it.
 pub fn restore_references(text: &str, withheld: &WithheldReferences) -> String {
     let prefix = withheld.prefix();
     let mut out = String::with_capacity(text.len());
@@ -615,15 +751,19 @@ pub fn restore_references(text: &str, withheld: &WithheldReferences) -> String {
     while let Some(found) = text[cursor..].find(&prefix) {
         let at = cursor + found;
         out.push_str(&text[cursor..at]);
-        let rest = &text[at + prefix.len()..];
-        let parsed = rest.as_bytes().first().and_then(|kind| {
-            let digits = rest[1..].bytes().take_while(u8::is_ascii_digit).count();
-            let index: usize = rest.get(1..1 + digits)?.parse().ok()?;
-            rest[1 + digits..].starts_with(TOKEN_END).then_some((
-                *kind,
-                index,
-                1 + digits + TOKEN_END.len(),
-            ))
+        let rest = &text.as_bytes()[at + prefix.len()..];
+        let parsed = rest.first().and_then(|&kind| {
+            let digits = rest[1..].iter().take_while(|b| b.is_ascii_digit()).count();
+            if digits == 0 || (digits > 1 && rest[1] == b'0') {
+                return None;
+            }
+            let index: usize = std::str::from_utf8(&rest[1..1 + digits])
+                .ok()?
+                .parse()
+                .ok()?;
+            rest[1 + digits..]
+                .starts_with(TOKEN_END.as_bytes())
+                .then_some((kind, index, 1 + digits + TOKEN_END.len()))
         });
         let replacement = parsed.and_then(|(kind, index, consumed)| match kind {
             b'a' => withheld
@@ -1146,6 +1286,145 @@ mod withheld_reference_tests {
         withhold_text_references(text)
     }
 
+    /// The address scan as it runs over the text of serialized HTML.
+    fn withheld_markup(markup: &str) -> (String, WithheldReferences) {
+        let mut withheld = WithheldReferences {
+            nonce: fresh_nonce(markup),
+            ..Default::default()
+        };
+        let out = withhold_addresses(markup, &mut withheld, Scan::Html);
+        (out, withheld)
+    }
+
+    /// The JSON DeepL would get for this content.
+    fn serialized(content: crate::translation::TranslationContent) -> String {
+        let request = crate::translation::TranslationRequest {
+            content,
+            source_language: None,
+            target_language: "DE".into(),
+        };
+        String::from_utf8(crate::translation::deepl::translate_body(&request).unwrap()).unwrap()
+    }
+
+    /// Runs `body` through the HTML path (stored sanitizer, withholding) and
+    /// asserts that the serialized request holds neither `needle` nor an
+    /// address, and that restoring gives back the stored bytes.
+    fn assert_html_probe(body: &str, needle: &str) {
+        let stored = sanitize_stored_email_html(body);
+        let (sent, withheld) = withhold_references(&stored);
+        let request = serialized(crate::translation::TranslationContent::Html(sent.clone()));
+        assert!(!request.contains(needle), "{body}\n-> {request}");
+        assert_eq!(leaks(&request), Vec::<&str>::new(), "{body}\n-> {request}");
+        assert_eq!(restore_references(&sent, &withheld), stored, "{body}");
+    }
+
+    /// The same through the plain-text path.
+    fn assert_text_probe(body: &str, needle: &str) {
+        let (sent, withheld) = withhold_text_references(body);
+        let request = serialized(crate::translation::TranslationContent::Text(sent.clone()));
+        assert!(!request.contains(needle), "{body:?}\n-> {request}");
+        assert_eq!(
+            leaks(&request),
+            Vec::<&str>::new(),
+            "{body:?}\n-> {request}"
+        );
+        assert_eq!(restore_references(&sent, &withheld), body, "{body:?}");
+    }
+
+    #[test]
+    fn any_character_but_a_letter_before_a_scheme_is_a_boundary() {
+        for body in [
+            "_https://x.example/trk_",
+            "_www.x.example/trk",
+            "1https://x.example/trk",
+            "@https://x.example/trk",
+            "*https://x.example/trk*",
+        ] {
+            assert_text_probe(&format!("Hello {body} bye"), "trk");
+            assert_html_probe(&format!("<p>Hello {body} bye</p>"), "trk");
+        }
+        // A letter run is the scheme: `xhttps://…` is one address.
+        let (_, withheld) = withheld_text("see xhttps://x.example/trk now");
+        assert_eq!(withheld.raw, ["xhttps://x.example/trk"]);
+    }
+
+    #[test]
+    fn inline_tags_inside_a_link_do_not_end_it() {
+        let long_style = format!("<span style=\"color: red; {}\"></span>", "x".repeat(120));
+        for body in [
+            "https://x.example/a<span>u=trk</span>".to_owned(),
+            "https://x.example/a<b>?u=</b><i>trk</i>".to_owned(),
+            "https://x.example/a<span> </span>b?u=trk".to_owned(),
+            "https://x.example/a<span>&nbsp;</span>b?u=trk".to_owned(),
+            "https://x.example/a<span>\u{200b}</span>b?u=trk".to_owned(),
+            format!("https://x.example/a{long_style}b?u=trk"),
+            "https://x.example/é<span>ü</span>?u=trk".to_owned(),
+        ] {
+            assert_html_probe(&format!("<p>Go {body} now</p>"), "trk");
+        }
+        // The token still stops at white space after the tags.
+        let (out, withheld) = withheld_markup("https://x.example/a<span>u=1</span> and more");
+        // A closing tag followed by white space is not part of the link.
+        assert_eq!(withheld.raw, ["https://x.example/a<span>u=1"]);
+        assert!(out.ends_with("</span> and more"));
+    }
+
+    #[test]
+    fn a_quote_ends_an_address_only_where_it_closes_an_attribute() {
+        assert_html_probe(r#"<p>See https://x.example/a"b?u=trk now</p>"#, "trk");
+        // Inside an attribute the quote is the attribute's own and ends it.
+        let (_, withheld) = withheld_markup(r#"<p title="see https://x.example/t?u=1">x</p>"#);
+        assert_eq!(withheld.raw, ["https://x.example/t?u=1"]);
+    }
+
+    #[test]
+    fn plain_text_ends_only_at_white_space_and_angle_brackets() {
+        for body in [
+            r#"See https://x.example/a"b?u=trk now"#,
+            "See https://x.example/a&nbsp;b?u=trk now",
+            "See https://x.example/a&quot;b?u=trk now",
+            "See <https://x.example/a?u=trk> now",
+        ] {
+            assert_text_probe(body, "trk");
+        }
+    }
+
+    #[test]
+    fn hard_wrapped_plain_text_links_are_followed() {
+        for body in [
+            "Open https://\nx.example/a?u=trk today",
+            "Open www.\nx.example/a?u=trk today",
+            "Open https://x.example/a?\nu=trk today",
+            "Open https://x.example/a?u=\ntrk today",
+            "Open https://x.example/a?b=1&\nu=trk today",
+            "Open https://x.example/a/\ntrk?u=1 today",
+            "Open https://x.example/a?u=\r\ntrk today",
+        ] {
+            assert_text_probe(body, "trk");
+        }
+        // A line that does not end in one of those ends the link.
+        let (_, withheld) = withheld_text("Open https://x.example/a\nNext line");
+        assert_eq!(withheld.raw, ["https://x.example/a"]);
+    }
+
+    #[test]
+    fn a_malformed_placeholder_neither_panics_nor_restores() {
+        let (sent, withheld) = withheld_text("go to https://x.example/a?u=tok now");
+        let prefix = withheld.prefix();
+        for forged in [
+            format!("{prefix}é0-end"),
+            format!("{prefix}r00-end"),
+            format!("{prefix}r-end"),
+            format!("{prefix}r0"),
+            prefix.clone(),
+            format!("{prefix}r0-en"),
+        ] {
+            let restored = restore_references(&forged, &withheld);
+            assert_eq!(restored, forged);
+        }
+        assert!(restore_references(&sent, &withheld).contains("x.example"));
+    }
+
     #[test]
     fn addresses_are_taken_whole_however_they_are_written() {
         for (input, address) in [
@@ -1198,7 +1477,7 @@ mod withheld_reference_tests {
                 "\\/\\/cdn.example\\/z?u=tok",
             ),
         ] {
-            let (sent, withheld) = withheld_text(input);
+            let (sent, withheld) = withheld_markup(input);
             assert_eq!(withheld.raw, [address], "{input}");
             assert!(!sent.contains("tok"), "{input} -> {sent}");
             assert_eq!(restore_references(&sent, &withheld), input);
@@ -1207,7 +1486,7 @@ mod withheld_reference_tests {
 
     #[test]
     fn an_address_ends_where_the_markup_does() {
-        let (sent, withheld) = withheld_text(
+        let (sent, withheld) = withheld_markup(
             "<a>https://x.example/r?u=tok</a> and &quot;https://y.example/q&quot; done",
         );
         assert_eq!(
@@ -1254,6 +1533,7 @@ mod withheld_reference_tests {
         let out = withhold_addresses(
             "Mail me@example.test or visit https://x.example/a?b=1&amp;c=2. Done; ratio 1//2, a//b and ftp://f.example",
             &mut withheld,
+            Scan::Html,
         );
         assert_eq!(
             withheld.raw,

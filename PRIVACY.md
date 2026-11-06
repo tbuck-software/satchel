@@ -48,11 +48,12 @@ GitHub, whose servers receive normal request metadata such as your IP address.
 
 Translation is off until you add a DeepL API key and allow an account. When
 you translate a message from an allowed account, its body (text and
-formatting) is sent to DeepL with your key. Every link and every address
-starting with `http(s)://`, `//`, `www.` or `mailto:` is held back, in links,
-images, styles, other attributes and the text, in HTML and plain-text mail,
-and restored on your device. Host names written without those prefixes, and
-e-mail addresses in the text, are sent as text. Sender, recipients,
+formatting) is sent to DeepL with your key. Links and every address starting
+with `http(s)://`, `//`, `www.` or `mailto:`, as Satchel recognises them, are
+held back in links, images, styles, other attributes and the text, in HTML and
+plain-text mail, and restored on your device. A link broken across several
+lines of a plain-text mail may be sent in part. Host names written without
+those prefixes, and e-mail addresses in the text, are sent as text. Sender, recipients,
 subject, attachments and encrypted mail are not sent. Translation
 needs a DeepL API Pro key: DeepL then keeps the text only as long as the
 translation takes (up to 72 hours when an error occurs) and does not use it to

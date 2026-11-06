@@ -42,8 +42,8 @@ am 2026-11-06.
   nichts.
 - **URLs gehen nicht mit.** Jeder Link und jede Adresse, die mit
   `http(s)://` (oder einem anderen `schema://`), `//`, `www.` oder `mailto:`
-  beginnt, wird zurückgehalten: in Links, Bildern, Styles, anderen Attributen
-  und im Text, in HTML- wie in reinen Text-Mails. Hostnamen ohne diese
+  beginnt, wird zurückgehalten, so wie Satchel sie erkennt: in Links, Bildern,
+  Styles, anderen Attributen und im Text, in HTML- wie in reinen Text-Mails. Hostnamen ohne diese
   Anfänge und E-Mail-Adressen im Text gehen als Text mit; sie sind Inhalt der
   Mail, und Satchel rät keine nackten Domains aus Fließtext. Im Einzelnen
   ersetzt Satchel durch Platzhalter der Form `#satchel-<Nonce>-a3-end`:
@@ -55,12 +55,21 @@ am 2026-11-06.
   - jede Adresse an jeder anderen Stelle: in weiteren Attributen (`alt`,
     `title`), in CSS-Strings wie `image-set('…')` und im Text selbst,
     Linktext eingeschlossen, auch JSON-escaped (`https:\/\/`, `\/\/host`).
-    Eine Adresse endet erst an Leerraum, `>`, `"`, `&nbsp;`, `&quot;` oder
-    einem `<`; `<wbr>` und leere Inline-Elemente (`<span></span>`), mit denen
-    Absender lange Links umbrechen, gehören dazu. Klammern, Anführungszeichen
-    und IPv6-Hosts (`[2001:db8::1]`) im Link bleiben Teil der Adresse.
-    Satzzeichen am Ende bleiben im Text, außer einer schließenden Klammer,
-    die eine im Link geöffnete schließt.
+    Als Schema gilt nur die Folge von Buchstaben direkt vor `://`; jedes
+    andere Zeichen davor (`_`, Ziffer, `@`, `*`) ist eine Grenze. `www.` und
+    `mailto:` setzen ein Wort nur nach einem Buchstaben oder Punkt fort.
+    In HTML endet eine Adresse an Leerraum, `>`, `&nbsp;`, `&quot;`, einem
+    `"` innerhalb eines Tags (im Text gehört `"` zum Link) oder einem `<`,
+    das kein Tag ist, durch das der Link läuft: `<wbr>`, Elemente ohne
+    sichtbaren Inhalt (Leerraum, `&nbsp;`, Nullbreite) und Inline-Elemente
+    (`span`, `font`, `b`, `i`, `u`, `em`, `strong`, `a`, `sup`, `sub`), wenn
+    der Link direkt dahinter weitergeht. In reinem Text endet sie nur an
+    Leerraum, `<` und `>`; über einen Zeilenumbruch geht sie weiter, wenn
+    direkt davor `://` oder `www.` steht oder die Zeile auf `=`, `&`, `?`
+    oder `/` endet. Klammern, Anführungszeichen und IPv6-Hosts
+    (`[2001:db8::1]`) im Link bleiben Teil der Adresse. Satzzeichen am Ende
+    bleiben im Text, außer einer schließenden Klammer, die eine im Link
+    geöffnete schließt.
 
   **Text-Weg:** Der Text-Body (reine Text-Mails und der Ausweichweg für zu
   großes HTML) läuft durch denselben Scanner wie der Text einer HTML-Mail.
@@ -106,6 +115,10 @@ anfasst und Platzhalter im Text als nicht übersetzbares Wort stehen lässt.
 Für Attribute ist das die Grundlage von `tag_handling=html`. Ob es auch im
 Text hält, prüft der erste Test mit einem echten Schlüssel. Fehlt danach
 etwas, fehlt eine URL, kein Text.
+
+Ein Link, der in einer reinen Text-Mail anders als oben beschrieben über
+mehrere Zeilen umbrochen ist, kann teilweise mitgehen; die Texte in den
+Einstellungen und in der Zustimmung sagen das.
 
 Bewusst hingenommen: Ein Absender kann eine Adresse so schreiben, dass der
 Scanner sie nicht erkennt, etwa mit CSS-Escapes (`\68ttps`) oder
