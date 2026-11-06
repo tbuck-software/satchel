@@ -18,7 +18,8 @@ export default defineConfig({
   workers: 1,
   reporter: 'line',
   timeout: 120_000,
-  retries: 1,
+  // No retries: a missing key that shows up only sometimes is a race worth seeing.
+  retries: 0,
   outputDir: process.env.SATCHEL_I18N_OUTPUT_DIR ?? fileURLToPath(new URL('../output/playwright/i18n', import.meta.url)),
   use: {
     baseURL: `http://127.0.0.1:${port}`,

@@ -68,7 +68,7 @@ Modulgraphen ihres Einstiegs abgeleitet.
 
 ## Konsequenzen
 
-- Gemessen 2026-11-06: erster Frame 247,2 → 209,5 KiB gzip; Start-Katalog
+- Gemessen 2026-11-06: erster Frame 247,2 → 209,6 KiB gzip; Start-Katalog
   1.027 von 3.340 Schlüsseln (Deutsch 21,5 statt 60,0 KiB gzip), kein Chunk
   vor dem ersten Frame. Sobald die Inbox benutzbar ist, wärmt `bootstrap.ts`
   Leser und Palette vor; mit deren Chunks sind es 31,8 KiB Katalog. Das

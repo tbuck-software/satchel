@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { keyIndex, mentionsInSource, messageKeys, repoRoot } from '../../scripts/i18n-graph.mjs';
@@ -120,6 +121,9 @@ describe('startup catalogue split', () => {
     ["prefix + '.title'", 'key built with + (write a template with a literal head instead)'],
     ["'outbox.status.' + status", 'key built with + (write a template with a literal head instead)'],
     ['ok ? `${p}.a` : "x.y"', 'template without a literal key head'],
+    ["['settings', id].join('.')", 'key built with join/concat (write a template with a literal head instead)'],
+    ["'settings.'.concat(id)", 'key built with join/concat (write a template with a literal head instead)'],
+    ['labels.joined', null],
   ])('judges the key argument %s', (argument, reason) => {
     expect(unanchoredReason(argument)).toBe(reason);
   });
@@ -147,6 +151,29 @@ describe('key mentions', () => {
     'mail.attachment.many',
     'ok',
   ]);
+
+  /*
+   * Settings section ids hold `-` (`provider-features`). A key regex without
+   * it once let such a key used at startup pass every check.
+   */
+  it('sees keys whose segments hold a hyphen', () => {
+    const hyphen = keyIndex(['settings.sections.provider-features.label', 'settings.sections.smart-folders.label']);
+    const source = `t('settings.sections.provider-features.label'); const k = 'settings.sections.smart-folders.label';`;
+    expect([...mentionsInSource(source, hyphen)].sort())
+      .toEqual(['settings.sections.provider-features.label', 'settings.sections.smart-folders.label']);
+    const file = path.join(mkdtempSync(path.join(tmpdir(), 'satchel-keys-')), 'startup.ts');
+    writeFileSync(file, source);
+    expect([...messageKeys([file])]).toEqual(['settings.sections.provider-features.label']);
+    expect(unanchoredReason("'settings.sections.' + id")).not.toBeNull();
+    expect(unanchoredReason('`settings.sections.${id}.label`')).toBeNull();
+  });
+
+  it('places every hyphenated catalogue key', () => {
+    const lazy = new Set([...split.chunks.values()].flatMap((chunk) => chunk.keys));
+    const hyphenated = allKeys.filter((key) => key.includes('-'));
+    expect(hyphenated.length).toBeGreaterThan(0);
+    expect(hyphenated.filter((key) => !startup.has(key) && !lazy.has(key))).toEqual([]);
+  });
 
   it('counts a key kept in a table', () => {
     expect([...mentionsInSource(`const s = { labelKey: 'folders.inbox' };`, fixture)]).toEqual(['folders.inbox']);

@@ -139,7 +139,7 @@ function rustFiles(dir) {
   return out;
 }
 
-const RUST_KEY_RE = /"([a-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+\.?)(?:"|(\{))/g;
+const RUST_KEY_RE = /"([a-z][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)+\.?)(?:"|(\{))/g;
 
 /** @param {ReturnType<typeof keyIndex>} index */
 function rustKeys(index) {
@@ -263,7 +263,7 @@ export function computeSplit(allKeys, options = {}) {
 /** A call of `t`, `tc`, `te` or `$t`, bare or as a method (`i18n.global.t(`). */
 const KEY_CALL_RE = /(?:\$t|(?<![\w$])(?:t|tc|te))\(/g;
 /** A key head: at least one segment and a dot, e.g. `thread.state.`. */
-const KEY_HEAD_RE = /^[a-z][A-Za-z0-9_]*\./;
+const KEY_HEAD_RE = /^[a-z][A-Za-z0-9_-]*\./;
 
 /**
  * The first argument of a call whose `(` ends at `start`, as source text.
@@ -316,8 +316,8 @@ function templateEnd(source, open) {
  * not. A string literal or a template with a literal head names the key
  * itself. An identifier, member, table lookup, helper call or ternary carries
  * a literal written somewhere else, where the mention scan finds it. What is
- * left is a key assembled here from parts that are not a head: `p + '.title'`
- * or `` `${p}.title` ``.
+ * left is a key assembled here from parts that are not a head: `p + '.title'`,
+ * `` `${p}.title` ``, `[p, 'title'].join('.')`.
  *
  * @param {string} argument
  * @returns {string | null}
@@ -340,6 +340,7 @@ export function unanchoredReason(argument) {
       continue;
     }
     if (char === '+' && argument[index + 1] !== '+' && argument[index - 1] !== '+') return 'key built with + (write a template with a literal head instead)';
+    if (char === '.' && /^\.(?:join|concat)\(/.test(argument.slice(index))) return 'key built with join/concat (write a template with a literal head instead)';
     index += 1;
   }
   return null;

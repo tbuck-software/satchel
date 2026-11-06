@@ -50,7 +50,7 @@ async function rawKeys(page: Page, where: string): Promise<string[]> {
     }
     return parts.join('\n');
   });
-  return [...new Set(text.match(/[a-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+/g) ?? [])]
+  return [...new Set(text.match(/[a-z][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)+/g) ?? [])]
     .filter((token) => catalogue.has(token))
     .map((key) => `${where}: ${key}`);
 }

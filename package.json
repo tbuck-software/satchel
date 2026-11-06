@@ -21,7 +21,7 @@
     "plugins:build:debug": "node ./scripts/build-plugins.mjs",
     "ipc:generate": "node ./scripts/ipc-generate.mjs",
     "ipc:check": "node ./scripts/ipc-generate.mjs --check",
-    "check": "pnpm run ipc:check && pnpm run lint && pnpm run scripts:any:check && pnpm run i18n:check && pnpm exec vue-tsc -b && vitest run && cargo test -p satchel -p satchel-core --quiet && pnpm run test:smoke && pnpm run test:csp",
+    "check": "pnpm run ipc:check && pnpm run lint && pnpm run scripts:any:check && pnpm run i18n:check && pnpm exec vue-tsc -b && vitest run && cargo test -p satchel -p satchel-core --quiet && pnpm run test:smoke && pnpm run test:csp && pnpm run test:i18n",
     "i18n:build": "node ./scripts/i18n-merge.mjs",
     "i18n:extract": "node ./scripts/i18n-extract.mjs",
     "i18n:check": "node ./scripts/i18n-merge.mjs --check && node ./scripts/i18n-extract.mjs --check",

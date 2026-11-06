@@ -229,7 +229,7 @@ function scanTemplateExpression(expression, offset, source, findings, file) {
 const ERROR_CONSTRUCTION_RE = /\bnew\s+\w*Error\s*\($/;
 
 /** `backend.errors.desktopUnavailable` — a key, not a sentence. */
-const MESSAGE_KEY_RE = /^[a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)+$/;
+const MESSAGE_KEY_RE = /^[a-z][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)+$/;
 
 /**
  * Findings for one piece of script source. Exported so the rules can be tested

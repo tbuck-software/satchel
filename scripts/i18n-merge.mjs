@@ -99,7 +99,7 @@ export const SUBSETS = {
   },
 };
 
-const BACKEND_KEY_RE = /backend\.errors\.[A-Za-z0-9_]+/g;
+const BACKEND_KEY_RE = /backend\.errors\.[A-Za-z0-9_-]+/g;
 
 function backendErrorKeys(files) {
   const keys = new Set();

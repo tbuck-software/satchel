@@ -6,13 +6,14 @@ Rust + Tauri 2 im Backend, SQLite mit FTS5 als Speicher.
 ## Vor jedem Commit
 
 ```bash
-make check     # vitest + cargo test + playwright smoke
+make check     # vitest + cargo test + playwright smoke + test:i18n
 ```
 
 CI (`.github/workflows/ci.yml`) erzwingt zusätzlich:
 
 ```bash
 npx vue-tsc -b
+pnpm run test:i18n     # Raw-Key-Crawl über den Mock-Produktionsbuild (ADR 0017)
 cargo fmt --all --check
 cargo clippy -p satchel -p satchel-core --all-targets -- -D warnings
 ```

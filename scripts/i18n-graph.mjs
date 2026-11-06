@@ -58,7 +58,8 @@ export function moduleGraph(entries) {
   return [...seen].sort();
 }
 
-const KEY_RE = /(?:\$t|\btc?)\(\s*(['"])([a-zA-Z][\w.]*)\1/g;
+// Segments may hold `-` (`settings.sections.provider-features.label`).
+const KEY_RE = /(?:\$t|\btc?)\(\s*(['"])([a-zA-Z][\w.-]*)\1/g;
 
 /** @param {string[]} files */
 export function messageKeys(files) {
@@ -132,7 +133,7 @@ export function staticClosure(files) {
  * or the static head of a template literal `` `settings.sections.${id}` ``.
  * Group 3 is set when the literal continues with an interpolation.
  */
-const KEY_LITERAL_RE = /(['"`])([a-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*\.?)(?:\1|(\$\{))/g;
+const KEY_LITERAL_RE = /(['"`])([a-z][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*\.?)(?:\1|(\$\{))/g;
 
 /** @type {Map<string, Set<string>>} */
 const mentionCache = new Map();
