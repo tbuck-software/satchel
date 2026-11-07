@@ -9,7 +9,7 @@
       "asOf": "As of {time}",
       "warning": "Almost full. Once it is full, new mail bounces.",
       "critical": "Full or nearly full. New mail may already bounce.",
-      "freeUp": "Deleting large messages and emptying Trash makes room.",
+      "freeUp": "Deleting large messages, emptying Trash or clearing out a sender's mail makes room.",
       "sidebarWarning": "{account}: mailbox {percent} full. Open account settings.",
       "sidebarCritical": "{account}: mailbox {percent} full, new mail may bounce. Open account settings."
     }
@@ -24,7 +24,7 @@
       "asOf": "Stand: {time}",
       "warning": "Fast voll. Ist es voll, kommen neue Mails zurück.",
       "critical": "Voll oder fast voll. Neue Mails kommen womöglich schon zurück.",
-      "freeUp": "Große Mails löschen und den Papierkorb leeren schafft Platz.",
+      "freeUp": "Große Mails löschen, den Papierkorb leeren oder die Mails eines Absenders aufräumen schafft Platz.",
       "sidebarWarning": "{account}: Postfach zu {percent} voll. Kontoeinstellungen öffnen.",
       "sidebarCritical": "{account}: Postfach zu {percent} voll, neue Mails kommen womöglich zurück. Kontoeinstellungen öffnen."
     }

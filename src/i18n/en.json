@@ -25,7 +25,7 @@
   "accountQuota": {
     "asOf": "As of {time}",
     "critical": "Full or nearly full. New mail may already bounce.",
-    "freeUp": "Deleting large messages and emptying Trash makes room.",
+    "freeUp": "Deleting large messages, emptying Trash or clearing out a sender's mail makes room.",
     "messagesMeter": "Messages in the mailbox",
     "messagesUsed": "{used} of {limit} messages",
     "sidebarCritical": "{account}: mailbox {percent} full, new mail may bounce. Open account settings.",

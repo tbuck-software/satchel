@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createMemoryHistory, createRouter } from 'vue-router';
 import { applyLocalePreference } from '@/i18n/runtime';
 import { useAccountQuotaStore } from '@/stores/accountQuota';
+import { useUiStore } from '@/stores/ui';
 import type { BackendAccountQuota } from '@/services/backend';
 import AccountQuotaSettings from './AccountQuotaSettings.vue';
 
@@ -44,6 +46,29 @@ describe('the quota on the account card', () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.get('[role="meter"]').classes()).toContain('usage-meter--danger');
     expect(wrapper.get('.quota-settings__note').classes()).toContain('quota-settings__note--critical');
+  });
+
+  it('offers the cleanup assistant for this account once the mailbox is nearly full', async () => {
+    const store = useAccountQuotaStore();
+    store.quotas = [quota({ storage_used_bytes: 50, storage_limit_bytes: 100 })];
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/cleanup', name: 'cleanup', component: { template: '<div />' } },
+      ],
+    });
+    const push = vi.spyOn(router, 'push');
+    const closeSettings = vi.spyOn(useUiStore(), 'closeSettings');
+    const wrapper = mount(AccountQuotaSettings, { props: { accountId: 'acc-work' }, global: { plugins: [router] } });
+    expect(wrapper.find('.quota-settings__cleanup').exists()).toBe(false);
+
+    store.quotas = [quota({ storage_used_bytes: 95, storage_limit_bytes: 100 })];
+    await wrapper.vm.$nextTick();
+    await wrapper.get('.quota-settings__cleanup').trigger('click');
+
+    expect(closeSettings).toHaveBeenCalled();
+    expect(push).toHaveBeenCalledWith({ name: 'cleanup', query: { account: 'acc-work' } });
   });
 
   it('shows a message limit next to storage when the server sets both', () => {
