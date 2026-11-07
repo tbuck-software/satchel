@@ -15,8 +15,7 @@ use tauri::{AppHandle, State};
 
 use crate::commands::error::{CommandError, CommandResult};
 use crate::commands::messages::{
-    apply_selected_signature, ensure_attachments_within_limit, resolve_sender,
-    OutgoingMessageInput,
+    apply_selected_signature, ensure_attachments_within_limit, resolve_sender, OutgoingMessageInput,
 };
 use crate::AppState;
 use satchel_core::db::smime::SmimeRepositoryError;

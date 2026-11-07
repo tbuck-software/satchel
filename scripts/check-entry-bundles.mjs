@@ -90,11 +90,16 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * 211.3 KiB and 32.9 KiB after prefetch (was 104.5 / 210.3 / 32.6), the
  * entry carrying the task keys, palette commands, sidebar button and editor
  * state, and the Today card (FIRST_PAINT) its due-task line with the store
- * it reads; the view, editor and their strings load on first use. */
+ * it reads; the view, editor and their strings load on first use.
+ * Main 213 and viewer 129 KiB since 2026-11-07: mail merge measured 105.2 /
+ * 212.1 and viewer 128.2 KiB on main's 105.1 / 211.4 and 127.7, from its
+ * backend.errors copy in the startup catalogue (German 22.6 → 23.1 KiB) and,
+ * in the viewer, the mail document helpers splitting into a chunk of their
+ * own now that the merge preview also renders through IsolatedEmailDocument. */
 const budgets = {
-  'index.html': { entryGzip: 106 * 1024, initialGzip: 212 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
+  'index.html': { entryGzip: 106 * 1024, initialGzip: 213 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
-  'viewer.html': { entryGzip: 5 * 1024, initialGzip: 128 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
+  'viewer.html': { entryGzip: 5 * 1024, initialGzip: 129 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };
 
 /* The startup catalogue plus the reader's and palette's chunks, which load
