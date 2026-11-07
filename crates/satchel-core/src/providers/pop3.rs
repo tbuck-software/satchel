@@ -512,6 +512,8 @@ fn envelope_from_raw(uidl: &str, raw: &[u8], receiver: &str) -> MessageEnvelope 
         auth_dmarc: auth_results.as_ref().and_then(|results| results.2.clone()),
         spam_hint_headers: crate::spam::tokenizer::extract_hint_headers(&header),
         satchel_marks: Vec::new(),
+        chat: crate::chat::parse_chat_headers(&header),
+        autocrypt_headers: crate::chat::header_values(&header, "Autocrypt"),
         attachments: parsed_body.attachments,
     }
 }

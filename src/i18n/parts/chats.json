@@ -1,0 +1,84 @@
+{
+  "en": {
+    "backend": {
+      "errors": {
+        "chatNotAChat": "This is not a chat.",
+        "chatNoRecipient": "This chat has no one to send to."
+      }
+    },
+    "chats": {
+      "title": "Chats",
+      "allAccounts": "All accounts",
+      "list": "Chats",
+      "loadFailed": "The chats could not be loaded.",
+      "empty": {
+        "title": "No chats yet",
+        "description": "Messages from Delta Chat appear here as they arrive."
+      },
+      "select": {
+        "title": "Pick a chat",
+        "description": "Its messages show as bubbles, with a reply field below."
+      },
+      "members": "{count} member | {count} members",
+      "unread": "{count} unread",
+      "encrypted": "End-to-end encrypted",
+      "notEncrypted": "Not encrypted",
+      "notEncryptedNoKey": "Replies go out unencrypted: there is no OpenPGP key for {address}.",
+      "notEncryptedNoPeerKey": "Replies go out unencrypted until every member has sent an Autocrypt key.",
+      "showAsMail": "Show as mail",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "messagesLoadFailed": "The messages could not be loaded.",
+      "composer": {
+        "label": "Message",
+        "placeholder": "Message {name}…",
+        "send": "Send",
+        "hint": "Enter sends, Shift+Enter adds a line",
+        "sending": "Sending…",
+        "sendFailed": "The message could not be sent.",
+        "queued": "Queued. It goes out when the connection is back."
+      }
+    }
+  },
+  "de": {
+    "backend": {
+      "errors": {
+        "chatNotAChat": "Das ist kein Chat.",
+        "chatNoRecipient": "Dieser Chat hat keinen Empfänger."
+      }
+    },
+    "chats": {
+      "title": "Chats",
+      "allAccounts": "Alle Konten",
+      "list": "Chats",
+      "loadFailed": "Die Chats konnten nicht geladen werden.",
+      "empty": {
+        "title": "Noch keine Chats",
+        "description": "Nachrichten aus Delta Chat erscheinen hier, sobald sie ankommen."
+      },
+      "select": {
+        "title": "Chat auswählen",
+        "description": "Die Nachrichten erscheinen als Sprechblasen, darunter das Antwortfeld."
+      },
+      "members": "{count} Mitglied | {count} Mitglieder",
+      "unread": "{count} ungelesen",
+      "encrypted": "Ende-zu-Ende-verschlüsselt",
+      "notEncrypted": "Unverschlüsselt",
+      "notEncryptedNoKey": "Antworten gehen unverschlüsselt raus: Für {address} gibt es keinen OpenPGP-Schlüssel.",
+      "notEncryptedNoPeerKey": "Antworten gehen unverschlüsselt raus, bis alle Mitglieder einen Autocrypt-Schlüssel geschickt haben.",
+      "showAsMail": "Als Mail anzeigen",
+      "today": "Heute",
+      "yesterday": "Gestern",
+      "messagesLoadFailed": "Die Nachrichten konnten nicht geladen werden.",
+      "composer": {
+        "label": "Nachricht",
+        "placeholder": "Nachricht an {name} …",
+        "send": "Senden",
+        "hint": "Enter sendet, Umschalt+Enter fügt eine Zeile ein",
+        "sending": "Wird gesendet …",
+        "sendFailed": "Die Nachricht konnte nicht gesendet werden.",
+        "queued": "In der Warteschlange. Geht raus, sobald die Verbindung wieder da ist."
+      }
+    }
+  }
+}

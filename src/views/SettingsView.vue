@@ -34,6 +34,7 @@ const ContactAvatarSettings = defineAsyncComponent(() => import('@/components/se
 const DiagnosticsPane = defineAsyncComponent(() => import('@/components/settings/DiagnosticsPane.vue'));
 const InlineImageBackfill = defineAsyncComponent(() => import('@/components/settings/InlineImageBackfill.vue'));
 const KeybindingEditor = defineAsyncComponent(() => import('@/components/settings/KeybindingEditor.vue'));
+const LabsSettings = defineAsyncComponent(() => import('@/components/settings/LabsSettings.vue'));
 const MobileSyncSettings = defineAsyncComponent(() => import('@/components/settings/MobileSyncSettings.vue'));
 const NotificationSettings = defineAsyncComponent(() => import('@/components/settings/NotificationSettings.vue'));
 const PluginManager = defineAsyncComponent(() => import('@/components/settings/PluginManager.vue'));
@@ -96,7 +97,7 @@ const sectionTones: Record<SettingsSection, string> = {
   rules: 'purple', 'smart-folders': 'purple', swipes: 'purple',
   senders: 'red', encryption: 'green', translation: 'cyan',
   calendar: 'green', contacts: 'pink',
-  shortcuts: 'purple', plugins: 'pink', storage: 'cyan', diagnostics: 'amber', about: 'blue',
+  shortcuts: 'purple', plugins: 'pink', storage: 'cyan', diagnostics: 'amber', labs: 'green', about: 'blue',
 };
 
 /** Sections made of several editors get one page header of their own. */
@@ -242,6 +243,7 @@ onBeforeUnmount(() => unregisterFilter?.());
         </template>
         <TranslationSettings v-else-if="activeSection === 'translation'" />
         <DiagnosticsPane v-else-if="activeSection === 'diagnostics'" />
+        <LabsSettings v-else-if="activeSection === 'labs'" />
       </div>
     </div>
   </section>

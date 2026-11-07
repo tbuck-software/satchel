@@ -1,0 +1,42 @@
+# 0019 Labs: Experimente hinter einem Schalter pro Gerät
+
+Status: vorgeschlagen 2026-11-07
+
+## Kontext
+
+Delta-Chat-Kompatibilität soll ausprobierbar sein, bevor sie fertig ist, ohne
+dass sie für alle mitläuft. Satchel hatte keine Feature-Flags. Der Start ist
+eng budgetiert (`scripts/check-entry-bundles.mjs`, 0017): ein ausgeschaltetes
+Experiment darf dort weder Code noch Texte kosten.
+
+## Entscheidung
+
+- Ein Flag steht in einer festen Liste, zweimal: `src/labs/flags.ts` (Id,
+  Vorgabe aus, „wirkt nach Neustart“) und `db::labs::LABS_FLAGS`. Das Backend
+  lehnt unbekannte Ids ab. Titel und Beschreibung stehen in
+  `src/labs/flagCopy.ts`, das nur der Abschnitt Einstellungen → Labs lädt;
+  `satisfies` hält beide Hälften gleich.
+- Der Zustand liegt pro Gerät in `labs_flags` (Migration 0165); keine Zeile
+  heißt aus. Gelesen wird über **einen** Store (`useLabsStore`, fragt
+  `backendCommandsAvailable()`).
+- Der Start hält von Labs nur einen leeren Platz für Seitenleisten-Zeilen
+  (`src/labs/state.ts`) und einen dynamischen Import von `src/labs/runtime.ts`.
+  Der lädt die Flags und startet für jedes eingeschaltete Flag dessen
+  Aktivierung (`src/labs/activation.ts`). Eine Aktivierung bringt alles mit,
+  was das Experiment der App hinzufügt (Route per `router.addRoute`,
+  Seitenleisten-Zeile, `g`-Tastenfolge über `registerViewShortcut`) und gibt
+  eine Funktion zurück, die es wieder entfernt.
+- Ein Backend-Pfad, der nur für ein Experiment läuft, fragt das Flag selbst
+  (`db::labs::is_enabled_in`), wie die Autocrypt-Verarbeitung beim Ingest.
+  Daten, die ohnehin anfallen (der `Chat-Version`-Header), werden unabhängig
+  vom Schalter gespeichert, damit Einschalten vorhandene Mail zeigt.
+
+## Folgen
+
+- Ein neues Experiment: Eintrag in beiden Listen, Texte in einem eigenen
+  Part, eine Aktivierung. Startkosten: keine, außer `backend.errors.*`.
+- Eine Tastenfolge aus einer Aktivierung ist nicht umbelegbar und steht nicht
+  im Kürzel-Editor; die Hinweiszeile der Folge nennt sie.
+- Ein Experiment, das fertig wird, verlässt Labs: Flag aus beiden Listen
+  nehmen, die Aktivierung in den normalen Code ziehen. Die Zeile in
+  `labs_flags` bleibt liegen und wird nicht mehr gelesen.

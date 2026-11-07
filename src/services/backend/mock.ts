@@ -22,6 +22,7 @@ import {
   mockCalendarEvents,
   mockCalendarInvites,
   mockCalendarSources,
+  mockChatThreads,
   mockDrafts,
   mockMessagesByThread,
   mockOutboxItems,
@@ -95,6 +96,44 @@ function accountVisible(accountId: string, now = new Date()): boolean {
   const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   return policy.mode === 'schedule' && policy.weekdays.includes(now.getDay())
     && time >= (policy.from ?? '00:00') && time < (policy.to ?? '24:00');
+}
+/*
+ * Labs flags as `labs_flags` holds them, per browser profile. Chats brings
+ * its fixture threads along: Inbox mail that carries `Chat-Version`.
+ */
+const LABS_FLAG_IDS = ['chats'] as const;
+const labsSlot = createPersistedSlot<Record<string, boolean>>('satchel.mock.labs', {
+  fallback: () => ({}),
+  decode: raw => JSON.parse(raw),
+  encode: value => JSON.stringify(value),
+});
+const labsFlags = persistence.read(labsSlot);
+const chatThreads = new Map<string, { groupId: string | null; groupName: string | null; encrypted: boolean }>();
+function seedChats() {
+  if (chatThreads.size > 0) return;
+  for (const chat of mockChatThreads()) {
+    chatThreads.set(chat.thread.id, { groupId: chat.groupId, groupName: chat.groupName, encrypted: chat.encrypted });
+    threads.push({ ...chat.thread });
+    messages[chat.thread.id] = chat.messages.map((message) => ({ ...message }));
+  }
+}
+if (labsFlags.chats || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockChats'))) {
+  seedChats();
+}
+/** Who a chat line goes to, as `db::chats` works it out. */
+function chatRecipients(threadId: string, own: string): string[] {
+  const list = (messages[threadId] ?? []).filter((message) => !message.isDraft);
+  const latest = list.at(-1);
+  const isOwn = (email: string) => email.toLowerCase() === own.toLowerCase();
+  const candidates = chatThreads.get(threadId)?.groupId
+    ? [latest?.from, ...(latest?.to ?? []), ...(latest?.cc ?? [])]
+    : [[...list].reverse().find((message) => !isOwn(message.from.email))?.from ?? latest?.to[0]];
+  const out: string[] = [];
+  for (const person of candidates) {
+    const email = person?.email.toLowerCase();
+    if (email && !isOwn(email) && !out.includes(email)) out.push(email);
+  }
+  return out;
 }
 // 96px PNG, a rowing boat at sunset: an account picture the user chose.
 const MOCK_CLUB_AVATAR = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAAASFBMVEX/8Mj+w278wm/7wW/6wHD5v3D4v3H3vnH1vXL0vHPzu3PyunTwuXXvuHXut3bttnbstnfrtXfqtHjos3nnsnlGgrQmXIwoHh7S40JTAAABZklEQVR42u2T21LDMAwFxb2QFGhx7P//Ux6apmAf2YosM03xvmlG3m3SmO4aQz1QDNw3pgfKgYfGtA88NuYGAk+NaR94bkxtgE5kFl5qoAvsio2eT5CZnynQTgulwDVDPyxcbYBIWKBXHUwALJr6QYHeVLCBdHP7gUEFG0g3/2tgkPoHGnUwAbA4WhbGLQVGmX+kvZrEj7f2ZgVm6b2GH3p2JSsIIZTmvD4fCCfEMw588MwC8Qyhon8xlGYm8MmyCIQzhg4si0A4YzKBw+V8EM36wPwrS7M6cD5fmnHgyLO85CCbIaKAcFYHpDMOfPHM58Uz5AYCjmcWiGcIAWM9XMDZ+6OAM/fHAWftd+Qjqv2RLwl4Wz8IeFM/CnhL/zkw/cLQbxvwfMDkFXlhIF4F81Qk/5nW+zMBgd+vgRr7wROsnIWB8rvU8leBdigC01T1mV5BYPv/Qb8H/R70e9DvQb8H/R6s5xsUyBEGcUIQNgAAAABJRU5ErkJggg==';
@@ -748,6 +787,7 @@ function inThreadList(thread: Thread, scope: Record<string, unknown>): boolean {
   if (scope.workflow_state && !matchesWorkflowFilter(thread.workflowState, scope.workflow_state as WorkflowFilter)) return false;
   if (contact && !thread.participants.some(person => person.email.toLowerCase() === contact)) return false;
   const folders = thread.mailboxNames ?? [];
+  if (scope.mailbox_kind === 'chat' && !chatThreads.has(thread.id)) return false;
   if (scope.mailbox_kind === 'folder' && mailbox && !folders.includes(mailbox)) return false;
   if (scope.mailbox_kind === 'section') {
     if (mailbox === 'inbox' && (!['inbox', 'todo'].includes(thread.workflowState)
@@ -1668,6 +1708,72 @@ const handlers: Record<string, Handler> = {
         },
       ]),
     ),
+
+  /* --- labs ----------------------------------------------------------- */
+  list_labs_flags: () => LABS_FLAG_IDS.map((id) => ({ id, enabled: Boolean(labsFlags[id]) })),
+  set_labs_flag: (payload) => {
+    const { id, enabled } = input(payload) as { id: string; enabled: boolean };
+    if (!(LABS_FLAG_IDS as readonly string[]).includes(id)) throw new Error('backend.errors.unexpected');
+    labsFlags[id] = enabled;
+    persistence.write(labsSlot, labsFlags);
+    if (id === 'chats' && enabled) seedChats();
+    return { id, enabled };
+  },
+
+  /* --- chats (Labs) --------------------------------------------------- */
+  get_chat_meta: (payload) => {
+    const threadId = payload.threadId as string;
+    const thread = findThread(threadId);
+    if (!thread) throw new Error('backend.errors.threadNotFound');
+    const chat = chatThreads.get(threadId);
+    if (!chat) throw new Error('backend.errors.chatNotAChat');
+    const own = accounts.find((account) => account.id === thread.accountId)?.email ?? '';
+    const names = new Map((messages[threadId] ?? []).flatMap((message) => [message.from, ...message.to])
+      .map((person) => [person.email.toLowerCase(), person.name] as const));
+    return {
+      thread_id: threadId,
+      account_id: thread.accountId,
+      own_address: own,
+      group_id: chat.groupId,
+      group_name: chat.groupName,
+      members: chatRecipients(threadId, own).map((address) => ({
+        address,
+        name: names.get(address) ?? null,
+        encryption: chat.encrypted ? 'encrypt' : 'disable',
+      })),
+      own_key: chat.encrypted,
+      encrypts: chat.encrypted,
+    };
+  },
+  send_chat_message: (payload) => {
+    const { thread_id: threadId, text } = input(payload) as { thread_id: string; text: string };
+    if (!text.trim()) throw new Error('backend.errors.unexpected');
+    const thread = findThread(threadId);
+    const chat = chatThreads.get(threadId);
+    if (!thread || !chat) throw new Error('backend.errors.chatNotAChat');
+    const account = accounts.find((entry) => entry.id === thread.accountId);
+    const own = account?.email ?? '';
+    const now = new Date().toISOString();
+    const messageId = nextId('msg');
+    const sent: Message = {
+      id: messageId,
+      threadId,
+      from: { name: account?.displayName ?? '', email: own },
+      to: chatRecipients(threadId, own).map((email) => ({ name: email, email })),
+      subject: chat.groupName ? `Chat: ${chat.groupName}` : `Message from ${account?.displayName ?? own}`,
+      bodyText: text.trimEnd(),
+      bodyLoaded: true,
+      timestamp: now,
+      isRead: true,
+      attachments: [],
+    };
+    messages[threadId] = [...(messages[threadId] ?? []), sent];
+    thread.lastMessageAt = now;
+    thread.lastMessageAtMs = Date.parse(now);
+    thread.messageCount += 1;
+    thread.snippet = sent.bodyText.slice(0, 180);
+    return { status: 'sent', thread_id: threadId, message_id: messageId, queued_id: null, undo_until: null };
+  },
 
   /* --- threads -------------------------------------------------------- */
   list_threads: (payload) => {

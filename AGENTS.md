@@ -126,6 +126,16 @@ Finder noch für Mails auf dem Composer. Im Dev-Server und in Playwright bleibt
 dabei alles grün. Was Satchel selbst zieht (Threads, einzelne Nachrichten,
 Empfänger), läuft über `src/utils/appDrag.ts`.
 
+### Labs (Experimente)
+
+Ein Experiment hängt an einem Flag in `src/labs/flags.ts` **und**
+`db::labs::LABS_FLAGS` (ADR 0019). Der Start kennt davon nur
+`src/labs/state.ts` und den Import von `src/labs/runtime.ts`: Store, Route,
+Seitenleisten-Zeile und Tastenfolge bringt die Aktivierung des Flags mit
+(`src/labs/activation.ts`). Wer `@/stores/labs` oder Code des Experiments in
+den Startgraphen zieht, bezahlt ihn für alle, eingeschaltet oder nicht —
+`pnpm bundle:check` meldet es.
+
 ### Kommandos und ACL
 
 Jedes `#[tauri::command]` gehört an **zwei** Stellen: in `generate_handler!`

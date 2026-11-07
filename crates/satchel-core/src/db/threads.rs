@@ -218,6 +218,7 @@ impl ThreadListScope {
                 (Some("section"), Some(section)) => {
                     section != "inbox" && mailbox_section_predicate(section).is_none()
                 }
+                (Some(CHAT_MAILBOX_KIND), _) => false,
                 _ => true,
             }
     }
@@ -314,9 +315,20 @@ pub(crate) fn push_thread_scope_filters(
                 query.push(" AND threads.workflow_state IN ('inbox', 'todo')");
             }
         }
+        // Delta Chat: threads with at least one message that carries
+        // `Chat-Version`. The mail stays in its folders; this is a view.
+        (Some(CHAT_MAILBOX_KIND), _) => {
+            query.push(
+                " AND threads.id IN (SELECT chat_messages.thread_id FROM messages chat_messages
+                    WHERE chat_messages.chat_version IS NOT NULL)",
+            );
+        }
         _ => {}
     }
 }
+
+/// `mailbox_kind` of the Chats list (Labs).
+pub const CHAT_MAILBOX_KIND: &str = "chat";
 
 /// Opens `EXISTS (… WHERE <a message of this thread is in mailbox_folders>`;
 /// the caller appends the folder predicate and the closing parenthesis.
@@ -2078,6 +2090,82 @@ mod tests {
         .execute(pool)
         .await
         .expect("thread");
+    }
+
+    #[tokio::test]
+    async fn the_chat_list_holds_threads_with_a_chat_message_and_nothing_moves() {
+        let pool = migrated_pool().await;
+        sqlx::query(
+            "INSERT INTO accounts(id, display_name, email, provider, config, credentials_ref, is_active, created_at, updated_at)
+             VALUES('acc', 'A', 'a@example.test', 'imap', ?, '', 1, '2026-01-01', '2026-01-01')",
+        )
+        .bind(crate::accounts::encrypt_account_config("acc", "{}").unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO folders(id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES('inbox', 'acc', 'INBOX', 'INBOX', 'inbox', 'INBOX', '2026-01-01', '2026-01-01')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for thread in ["mail", "chat"] {
+            insert_thread(&pool, thread, "acc").await;
+            insert_message(
+                &pool,
+                &format!("{thread}-m"),
+                thread,
+                "inbox",
+                None,
+                thread,
+                "2026-08-01T00:00:00Z",
+                false,
+                false,
+                false,
+                false,
+                "Subject",
+                "",
+            )
+            .await;
+        }
+        sqlx::query("UPDATE messages SET chat_version = '1.0' WHERE id = 'chat-m'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let repository = ThreadRepository::new(&pool);
+        let ids = |page: ThreadPageRecord| {
+            let mut ids = page
+                .threads
+                .into_iter()
+                .map(|thread| thread.id)
+                .collect::<Vec<_>>();
+            ids.sort();
+            ids
+        };
+        let chats = repository
+            .list(ThreadListRequest {
+                mailbox_kind: Some(CHAT_MAILBOX_KIND.into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(ids(chats), vec!["chat".to_string()]);
+        // The chat stays in the Inbox, next to the mail.
+        let inbox = repository
+            .list(ThreadListRequest {
+                mailbox_kind: Some("section".into()),
+                mailbox_value: Some("inbox".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(ids(inbox), vec!["chat".to_string(), "mail".to_string()]);
+        assert!(!ThreadListScope {
+            mailbox_kind: Some(CHAT_MAILBOX_KIND.into()),
+            ..Default::default()
+        }
+        .is_unbounded());
     }
 
     async fn insert_trash_folder(pool: &sqlx::SqlitePool, id: &str, folder_type: &str) {

@@ -173,6 +173,11 @@ fn build_rfc822_inner(
             &sanitize_header_text(&message.references.join(" ")),
         ));
     }
+    for (name, value) in &message.extra_headers {
+        if extra_header_allowed(name) {
+            headers.push(fold_header(name, &encode_header_value(value)));
+        }
+    }
     headers.push("MIME-Version: 1.0".to_string());
 
     let body_section = build_body_section(message)?;
@@ -496,6 +501,32 @@ pub fn is_content_header(header: &str) -> bool {
 /// line. Without this, a subject decoded from an incoming mail's RFC2047 header
 /// (e.g. "Foo\r\nBcc: attacker@evil.com") would inject attacker-controlled
 /// headers into the victim's reply.
+/// A caller-supplied header name: a plain token, and none of the headers the
+/// builder writes itself, so an extra header cannot add a second `From:` or
+/// replace the MIME structure.
+fn extra_header_allowed(name: &str) -> bool {
+    const RESERVED: &[&str] = &[
+        "from",
+        "to",
+        "cc",
+        "bcc",
+        "reply-to",
+        "subject",
+        "date",
+        "message-id",
+        "in-reply-to",
+        "references",
+        "mime-version",
+        "content-type",
+        "content-transfer-encoding",
+    ];
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        && !RESERVED.contains(&name.to_ascii_lowercase().as_str())
+}
+
 fn sanitize_header_text(value: &str) -> String {
     value
         .chars()
@@ -738,6 +769,45 @@ mod tests {
             }],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn extra_headers_are_written_folded_and_cannot_replace_builder_headers() {
+        let message = OutgoingMessage {
+            from_address: Some("me@example.test".to_owned()),
+            to: vec!["lena@example.test".to_owned()],
+            subject: "Message from Me".to_owned(),
+            body: "hi".to_owned(),
+            extra_headers: vec![
+                ("Chat-Version".to_owned(), "1.0".to_owned()),
+                ("Chat-Group-Name".to_owned(), "Familié".to_owned()),
+                (
+                    "Autocrypt".to_owned(),
+                    format!(
+                        "addr=me@example.test; keydata={}",
+                        "QUJD ".repeat(60).trim_end()
+                    ),
+                ),
+                ("From".to_owned(), "evil@example.test".to_owned()),
+                ("Bad Name".to_owned(), "x".to_owned()),
+            ],
+            ..Default::default()
+        };
+        let raw = build_rfc822(&message, None, None).unwrap();
+        let (headers, _) = raw.split_once("\r\n\r\n").unwrap();
+        assert!(headers.contains("\r\nChat-Version: 1.0\r\n"));
+        assert!(headers.contains("Chat-Group-Name: =?UTF-8?"));
+        assert_eq!(headers.matches("From:").count(), 1);
+        assert!(!headers.contains("evil@example.test"));
+        assert!(!headers.contains("Bad Name"));
+        for line in headers.split("\r\n") {
+            assert!(line.len() <= HARD_LIMIT_OCTETS, "{line}");
+        }
+        let names = split_logical_headers(headers)
+            .into_iter()
+            .map(|header| header.split_once(':').unwrap().0.to_owned())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"Autocrypt".to_owned()));
     }
 
     fn message_with_bcc() -> OutgoingMessage {

@@ -157,6 +157,17 @@ pub async fn execute_send_action(
             .unwrap_or_else(|| account.email.clone());
         outgoing.request_read_receipt_to = Some(rr_addr);
     }
+    if payload.input.chat.is_some() {
+        apply_chat_autocrypt(
+            pool,
+            app,
+            state,
+            &mut outgoing,
+            &payload.account_id,
+            &account.email,
+        )
+        .await?;
+    }
     apply_pgp_send_transform(
         pool,
         app,
@@ -374,6 +385,12 @@ async fn build_outgoing_message(
         pgp_encrypt_to_recipients: input.pgp_encrypt_to_recipients,
         priority: input.priority.clone(),
         auto_submitted: input.auto_submitted.clone(),
+        extra_headers: input
+            .chat
+            .as_ref()
+            .map(satchel_core::chat::chat_extra_headers)
+            .unwrap_or_default(),
+        recipient_public_keys: Vec::new(),
     })
 }
 
@@ -427,9 +444,15 @@ async fn apply_pgp_send_transform(
 
     if encrypt {
         let recipients = crypto_recipients(outgoing);
-        let mut keys = pgp::resolve_recipient_public_keys(pool, app, &recipients)
-            .await
-            .map_err(|_| "backend.errors.pgpRecipientKeyMissing".to_string())?;
+        // Autocrypt peers arrive with their keys; everyone else's come from
+        // the keyring.
+        let mut keys = if outgoing.recipient_public_keys.is_empty() {
+            pgp::resolve_recipient_public_keys(pool, app, &recipients)
+                .await
+                .map_err(|_| "backend.errors.pgpRecipientKeyMissing".to_string())?
+        } else {
+            outgoing.recipient_public_keys.clone()
+        };
 
         // Encrypt to self as well. The Sent copy is the ciphertext that went on
         // the wire; without our own key it is an archive we cannot read.
@@ -460,6 +483,55 @@ async fn apply_pgp_send_transform(
 
     if let Some(sig) = signature {
         outgoing.raw_rfc822_override = Some(crate::email::pgp_mime::build_signed(&original, &sig));
+    }
+    Ok(())
+}
+
+/// Autocrypt Level 1 for a Delta Chat message ("Header injection in outbound
+/// mail", "Message encryption"): our `Autocrypt:` header when we hold a key
+/// for the From address, and PGP/MIME encryption to the peers' Autocrypt keys
+/// and our own when the recommendation for every recipient is "encrypt". The
+/// message is signed when the key is unlocked; a locked key still encrypts,
+/// unsigned, rather than holding the message for a passphrase.
+async fn apply_chat_autocrypt(
+    pool: &SqlitePool,
+    app: &tauri::AppHandle,
+    state: &AppState,
+    outgoing: &mut OutgoingMessage,
+    account_id: &str,
+    fallback_from_address: &str,
+) -> Result<(), String> {
+    let from = sender_identity(outgoing, fallback_from_address);
+    let recipients = crypto_recipients(outgoing);
+    let plan =
+        crate::commands::chats::chat_encryption_plan(pool, app, account_id, &from, &recipients)
+            .await?;
+    let Some((key_id, armored)) = plan.own_key.as_ref() else {
+        return Ok(());
+    };
+    let Ok(keydata) = crate::utils::pgp_engine::autocrypt_keydata(armored, &from) else {
+        return Ok(());
+    };
+    outgoing.extra_headers.push((
+        "Autocrypt".to_string(),
+        satchel_core::autocrypt::format_header(
+            &from,
+            crate::commands::chats::OWN_PREFER_ENCRYPT,
+            &keydata,
+        ),
+    ));
+    // Crypto the sender picked by hand wins; chats never pick S/MIME.
+    if outgoing.pgp_encrypt_to_recipients
+        || outgoing.smime_encrypt_to_recipients
+        || outgoing.smime_sign_with_cert_id.is_some()
+        || !plan.encrypts()
+    {
+        return Ok(());
+    }
+    outgoing.pgp_encrypt_to_recipients = true;
+    outgoing.recipient_public_keys = plan.peer_keys.clone();
+    if pgp::key_is_unlocked(state, key_id).await {
+        outgoing.pgp_sign_with_key_id = Some(key_id.clone());
     }
     Ok(())
 }
