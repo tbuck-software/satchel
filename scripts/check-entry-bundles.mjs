@@ -101,8 +101,9 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * shortcuts that lazy code registers, the sidebar's slot for Labs rows and
  * the import of `labs/runtime`. Flags, store and the whole of Chats (route,
  * row, `g h`, views) load behind it; their only startup strings are the
- * `backend.errors.chat*` messages (not a chat, no recipient, key locked,
- * confirmation needed: 210.7 / 32.8 KiB on top of mail translation). */
+ * `backend.errors.chatConfirmationNeeded`; the palette names the Labs
+ * section (105.5 / 211.6 KiB on top of tasks, after prefetch 5 B under
+ * 33 KiB). */
 const budgets = {
   'index.html': { entryGzip: 106 * 1024, initialGzip: 213 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },

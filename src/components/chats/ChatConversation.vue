@@ -239,7 +239,7 @@ async function prepareSend(): Promise<ChatSendChoices | null> {
   return { ...choices, allowUnsigned: unsigned };
 }
 
-const RETRY_ERRORS = new Set(['backend.errors.chatKeyLocked', 'backend.errors.chatConfirmationNeeded']);
+const RETRY_ERRORS = new Set(['backend.errors.pgpSigningKeyUnavailable', 'backend.errors.chatConfirmationNeeded']);
 
 async function send(text: string) {
   const id = threadId.value;

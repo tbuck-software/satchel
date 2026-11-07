@@ -81,7 +81,8 @@ impl From<ChatError> for CommandError {
     fn from(error: ChatError) -> Self {
         match error {
             ChatError::NotFound => Self::new("backend.errors.threadNotFound"),
-            ChatError::NotAChat => Self::new("backend.errors.chatNotAChat"),
+            // The Chats list offers only chats; another thread here is not found as one.
+            ChatError::NotAChat => Self::new("backend.errors.threadNotFound"),
             ChatError::Persistence(error) => {
                 tracing::error!(error = ?error, "chat persistence failed");
                 Self::new("backend.errors.threadPersistenceFailed")
@@ -133,7 +134,7 @@ pub(crate) fn signing_decision(
     if allow_unsigned {
         return Ok(false);
     }
-    Err("backend.errors.chatKeyLocked")
+    Err("backend.errors.pgpSigningKeyUnavailable")
 }
 
 const CONFIRMATION_NEEDED: &str = "backend.errors.chatConfirmationNeeded";
@@ -312,7 +313,8 @@ pub async fn send_chat_message(
         .thread(&input.thread_id)
         .await?;
     if chat.recipients.is_empty() {
-        return Err(CommandError::new("backend.errors.chatNoRecipient"));
+        // A chat always has someone on the other side; none is a bug.
+        return Err(CommandError::new("backend.errors.unexpected"));
     }
     // Ask before queueing, not after: a reply held back in the outbox for a
     // passphrase is one the sender thinks has gone.
@@ -430,7 +432,7 @@ mod tests {
         // Encrypted, locked: held back with a key the frontend answers with an unlock.
         assert_eq!(
             signing_decision(true, false, false),
-            Err("backend.errors.chatKeyLocked")
+            Err("backend.errors.pgpSigningKeyUnavailable")
         );
         // The sender declined to unlock and chose unsigned.
         assert_eq!(signing_decision(true, false, true), Ok(false));
