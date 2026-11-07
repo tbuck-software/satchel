@@ -215,14 +215,19 @@ async function confirmDelivery(): Promise<ChatSendChoices | null> {
   const current = meta.value;
   if (!current) return null;
   const recipients = current.members.map((member) => member.address);
-  // A group you have not written in yet: its members are whoever its first
-  // message named, so the first reply shows them, as a change would.
-  const askRecipients = current.recipients_changed || current.first_group_reply;
+  // Until you have replied in a chat, who it goes to is read from mail anyone
+  // can send: the first reply always shows its recipients (ADR 0020).
+  const askRecipients = current.recipients_changed || current.first_reply;
   if (askRecipients) {
-    const firstReply = current.first_group_reply && !current.recipients_changed;
+    const firstReply = current.first_reply && !current.recipients_changed;
+    const group = Boolean(current.group_id);
     const yes = await confirm({
-      title: firstReply ? t('chats.confirm.firstGroupTitle') : t('chats.confirm.recipientsTitle'),
-      body: firstReply ? t('chats.confirm.firstGroupBody') : t('chats.confirm.recipientsBody'),
+      title: !firstReply
+        ? t('chats.confirm.recipientsTitle')
+        : group ? t('chats.confirm.firstGroupTitle') : t('chats.confirm.firstTitle'),
+      body: !firstReply
+        ? t('chats.confirm.recipientsBody')
+        : group ? t('chats.confirm.firstGroupBody') : t('chats.confirm.firstBody'),
       detail: current.members.map((member) => member.name ? `${member.name} <${member.address}>` : member.address).join(', '),
       confirmLabel: t('chats.confirm.send'),
     });

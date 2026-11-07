@@ -60,7 +60,9 @@
         "plainBody": "This chat was end-to-end encrypted. This reply would go out in plain text, because not every recipient has an Autocrypt key.",
         "sendPlain": "Send unencrypted",
         "firstGroupTitle": "Reply to this group?",
-        "firstGroupBody": "This is your first reply in this group. It goes to:"
+        "firstGroupBody": "This is your first reply in this group. It goes to:",
+        "firstTitle": "Send your first reply?",
+        "firstBody": "This is your first reply in this chat. It goes to:"
       },
       "notMember": "{name} · not in this chat"
     }
@@ -126,7 +128,9 @@
         "plainBody": "Dieser Chat war Ende-zu-Ende-verschlüsselt. Diese Antwort ginge unverschlüsselt raus, weil nicht alle Empfänger einen Autocrypt-Schlüssel haben.",
         "sendPlain": "Unverschlüsselt senden",
         "firstGroupTitle": "Dieser Gruppe antworten?",
-        "firstGroupBody": "Das ist deine erste Antwort in dieser Gruppe. Empfänger:"
+        "firstGroupBody": "Das ist deine erste Antwort in dieser Gruppe. Empfänger:",
+        "firstTitle": "Deine erste Antwort senden?",
+        "firstBody": "Das ist deine erste Antwort in diesem Chat. Empfänger:"
       },
       "notMember": "{name} · nicht in diesem Chat"
     }

@@ -787,8 +787,10 @@
       "sending": "Wird gesendet …"
     },
     "confirm": {
+      "firstBody": "Das ist deine erste Antwort in diesem Chat. Empfänger:",
       "firstGroupBody": "Das ist deine erste Antwort in dieser Gruppe. Empfänger:",
       "firstGroupTitle": "Dieser Gruppe antworten?",
+      "firstTitle": "Deine erste Antwort senden?",
       "plainBody": "Dieser Chat war Ende-zu-Ende-verschlüsselt. Diese Antwort ginge unverschlüsselt raus, weil nicht alle Empfänger einen Autocrypt-Schlüssel haben.",
       "plainTitle": "Ohne Verschlüsselung senden?",
       "recipientsBody": "Die Empfänger haben sich seit deiner letzten Antwort oder seit Beginn des Chats geändert.",

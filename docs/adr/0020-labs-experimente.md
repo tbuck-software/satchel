@@ -46,6 +46,22 @@ Experiment darf dort weder Code noch Texte kosten.
   Wer Chats einschaltet, hat für einen Kontakt also erst nach dessen nächster
   Nachricht einen Schlüssel.
 
+- **Wohin eine Chat-Antwort geht, bestätigt der Nutzer, solange er im Chat
+  noch keine vertrauenswürdige eigene Antwort hat** (im Gesendet-Ordner, oder
+  mit DMARC-pass, den der empfangende Anbieter verbürgt). Die erste Antwort in
+  **jedem** Chat, eins zu eins wie Gruppe, zeigt deshalb ihre genauen
+  Empfänger und wartet auf ein Ja. Danach ist die letzte vertrauenswürdige
+  eigene Antwort die Grundlinie, und jede Abweichung fragt wieder. Grund: Jede
+  Mail kann sich in einen Chat einfädeln und dabei älter aussehen als sein
+  echter Anfang (Thread-Merge, Provider-Konversation, Abrufreihenfolge, eine
+  erfundene `In-Reply-To`). Den Anfang eines Chats aus solchen Spuren
+  abzuleiten bleibt eine Heuristik; sie darf Empfänger vorschlagen, aber nie
+  ohne Bestätigung festlegen. Zusätzlich verschiebt weder der Reply-Merge noch
+  ein erneutes Einlesen eine gespeicherte Nachricht in einen Chat hinein oder
+  aus ihm heraus; ein Chat, der zerfiel, weil eine Antwort vor ihrer
+  Vorgängerin abgerufen wurde, heilt nur, wenn alle Absender schon Mitglieder
+  sind.
+
 ## Folgen
 
 - Ein neues Experiment: Eintrag in beiden Listen, Texte in einem eigenen

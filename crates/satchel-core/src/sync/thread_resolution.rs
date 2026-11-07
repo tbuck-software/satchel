@@ -185,7 +185,23 @@ pub async fn resolve_provider_thread_tx(
     if message.remote_thread_id.is_none() {
         if let Some(parent) = resolve_reply_thread_connection(&mut *tx, account_id, message).await?
         {
-            thread_id = parent;
+            // A stored row never moves into or out of a chat on a re-ingest:
+            // a stranger's earlier message that claims a reply relation
+            // would otherwise join the chat (or leave it) on its next fetch.
+            let moves_chat_row = match prior_thread_id.filter(|prior| *prior != parent) {
+                Some(prior) => {
+                    crate::db::chats::holds_chat(&mut *tx, prior)
+                        .await
+                        .map_err(|e| e.to_string())?
+                        || crate::db::chats::holds_chat(&mut *tx, &parent)
+                            .await
+                            .map_err(|e| e.to_string())?
+                }
+                None => false,
+            };
+            if !moves_chat_row {
+                thread_id = parent;
+            }
         } else if provider.eq_ignore_ascii_case("imap") {
             if let Some(subject) =
                 resolve_imap_subject_thread_connection(&mut *tx, account_id, account_email, message)
@@ -894,6 +910,11 @@ const REPLY_MERGE_CANDIDATES: &str = "
 /// Merge one reply's thread into its parent's. `Ok(None)` when there is
 /// nothing to merge, `Ok(Some(0))` when the merge was deferred.
 async fn merge_reply_into_parent(pool: &SqlitePool, reply_id: &str) -> Result<Option<u64>, String> {
+    // Decide and merge on one snapshot: the chat check reads what the merge moves.
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|err| err.to_string())?;
     let pair = sqlx::query_as::<_, (String, String)>(
         "SELECT child.thread_id, parent.thread_id
          FROM messages child
@@ -904,27 +925,28 @@ async fn merge_reply_into_parent(pool: &SqlitePool, reply_id: &str) -> Result<Op
              AND thread_id LIKE 'th-imap-%' ORDER BY id LIMIT 1
          )
          WHERE child.id = ? AND NULLIF(TRIM(child.in_reply_to), '') IS NOT NULL
-           AND child.thread_id LIKE 'th-imap-%' AND child.thread_id != parent.thread_id
-           -- A chat is never merged into or out of: an invented In-Reply-To
-           -- could otherwise pull a stranger's older thread in as its start.
-           AND NOT EXISTS (
-             SELECT 1 FROM messages chat_messages
-             WHERE chat_messages.thread_id IN (child.thread_id, parent.thread_id)
-               AND chat_messages.chat_version IS NOT NULL
-           )",
+           AND child.thread_id LIKE 'th-imap-%' AND child.thread_id != parent.thread_id",
     )
     .bind(reply_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
     let Some((child, parent)) = pair else {
         return Ok(None);
     };
-    ThreadRepository::new(pool)
-        .merge_into(&child, &parent)
+    // An invented In-Reply-To must not pull a stranger's thread into a chat;
+    // a chat that split because a reply came before its parent still heals.
+    if !crate::db::chats::join_allowed(&mut tx, &child, &parent)
         .await
-        .map(Some)
-        .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?
+    {
+        return Ok(None);
+    }
+    let moved = crate::db::threads::merge_threads_tx(&mut tx, &child, &parent)
+        .await
+        .map_err(|err| err.to_string())?;
+    tx.commit().await.map_err(|err| err.to_string())?;
+    Ok(Some(moved))
 }
 
 async fn save_reply_merge_state(pool: &SqlitePool, state: &ReplyMergeState) -> Result<(), String> {

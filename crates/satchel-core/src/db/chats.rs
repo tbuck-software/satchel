@@ -68,9 +68,10 @@ pub struct ChatThread {
     /// Messages that count for nothing here: from neither the user nor a
     /// member. The chat view marks them.
     pub untrusted_message_ids: Vec<String>,
-    /// A group the user has not written in yet. Its members come from the
-    /// first message, which anyone can send, so the first reply asks.
-    pub first_group_reply: bool,
+    /// The user has no trusted reply in this chat yet (none in Sent, none
+    /// with a provider-vouched DMARC pass). Who the first reply goes to is
+    /// read from mail anyone can send, so it always asks.
+    pub first_reply: bool,
     /// Display names the trusted messages gave, keyed by lowercased address.
     pub names: BTreeMap<String, String>,
     /// The newest trusted message: the next one is its reply.
@@ -93,8 +94,6 @@ struct ChatMessageRow {
     /// The verdicts came through the receiving provider's trust boundary
     /// (`MessageTrust::auth_verified`); older rows have none.
     auth_verified: i64,
-    /// The first chat message of the thread when it was stored (migration 0166).
-    chat_origin: i64,
     /// In Trash or Spam: counts for nothing but can still be the origin.
     binned: i64,
 }
@@ -123,55 +122,129 @@ impl<'a> ChatRepository<'a> {
     }
 
     pub async fn thread(&self, thread_id: &str) -> Result<ChatThread, ChatError> {
-        let account: Option<(String, String, String)> = sqlx::query_as(
-            "SELECT accounts.id, accounts.email, accounts.display_name
-             FROM threads JOIN accounts ON accounts.id = threads.account_id
-             WHERE threads.id = ?",
-        )
-        .bind(thread_id)
-        .fetch_optional(self.pool)
-        .await?;
-        let (account_id, account_email, account_name) = account.ok_or(ChatError::NotFound)?;
-        let mut own: Vec<String> = sqlx::query_scalar(
-            "SELECT email FROM account_aliases WHERE account_id = ? ORDER BY is_default DESC, email",
-        )
-        .bind(&account_id)
-        .fetch_all(self.pool)
-        .await?
-        .into_iter()
-        .map(|email: String| lower(&email))
-        .collect();
-        own.insert(0, lower(&account_email));
-
-        let trash = mailbox_section_predicate("trash").unwrap_or("0");
-        let spam = mailbox_section_predicate("spam").unwrap_or("0");
-        let rows: Vec<ChatMessageRow> = sqlx::query_as(&format!(
-            "SELECT messages.id, messages.from_address, messages.from_name,
-                    messages.to_addresses, messages.cc_addresses,
-                    messages.chat_version, messages.chat_group_id, messages.chat_group_name,
-                    COALESCE(json_extract(messages.trust_metadata, '$.root_encryption'), 0) AS encrypted,
-                    COALESCE(messages.is_sent, 0) AS is_sent, messages.auth_dmarc,
-                    COALESCE(json_extract(messages.trust_metadata, '$.auth_verified'), 0) AS auth_verified,
-                    messages.chat_origin,
-                    (COALESCE({trash}, 0) OR COALESCE({spam}, 0)) AS binned
-             FROM messages
-             LEFT JOIN folders mailbox_folders
-               ON mailbox_folders.id = COALESCE(messages.pending_folder_id, messages.folder_id)
-             WHERE messages.thread_id = ? AND messages.is_draft = 0
-             ORDER BY julianday(COALESCE(messages.received_at, messages.created_at)) ASC,
-                      messages.id ASC"
-        ))
-        .bind(thread_id)
-        .fetch_all(self.pool)
-        .await?;
-        if !rows
-            .iter()
-            .any(|row| row.chat_version.is_some() && row.binned == 0)
-        {
-            return Err(ChatError::NotAChat);
-        }
-        Ok(summarize(thread_id, account_id, account_name, &own, &rows))
+        let mut conn = self.pool.acquire().await?;
+        chat_thread_in(&mut conn, thread_id).await
     }
+}
+
+/// The user's addresses for an account: the primary first, then aliases.
+async fn own_addresses(
+    conn: &mut sqlx::SqliteConnection,
+    account_id: &str,
+    account_email: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    let mut own: Vec<String> = sqlx::query_scalar(
+        "SELECT email FROM account_aliases WHERE account_id = ? ORDER BY is_default DESC, email",
+    )
+    .bind(account_id)
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(|email: String| lower(&email))
+    .collect();
+    own.insert(0, lower(account_email));
+    Ok(own)
+}
+
+/// [`ChatRepository::thread`] on a connection, so a transaction (the reply
+/// merge) can decide on the same snapshot it changes.
+pub async fn chat_thread_in(
+    conn: &mut sqlx::SqliteConnection,
+    thread_id: &str,
+) -> Result<ChatThread, ChatError> {
+    let account: Option<(String, String, String)> = sqlx::query_as(
+        "SELECT accounts.id, accounts.email, accounts.display_name
+         FROM threads JOIN accounts ON accounts.id = threads.account_id
+         WHERE threads.id = ?",
+    )
+    .bind(thread_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let (account_id, account_email, account_name) = account.ok_or(ChatError::NotFound)?;
+    let own = own_addresses(conn, &account_id, &account_email).await?;
+
+    let trash = mailbox_section_predicate("trash").unwrap_or("0");
+    let spam = mailbox_section_predicate("spam").unwrap_or("0");
+    let rows: Vec<ChatMessageRow> = sqlx::query_as(&format!(
+        "SELECT messages.id, messages.from_address, messages.from_name,
+                messages.to_addresses, messages.cc_addresses,
+                messages.chat_version, messages.chat_group_id, messages.chat_group_name,
+                COALESCE(json_extract(messages.trust_metadata, '$.root_encryption'), 0) AS encrypted,
+                COALESCE(messages.is_sent, 0) AS is_sent, messages.auth_dmarc,
+                COALESCE(json_extract(messages.trust_metadata, '$.auth_verified'), 0) AS auth_verified,
+                (COALESCE({trash}, 0) OR COALESCE({spam}, 0)) AS binned
+         FROM messages
+         LEFT JOIN folders mailbox_folders
+           ON mailbox_folders.id = COALESCE(messages.pending_folder_id, messages.folder_id)
+         WHERE messages.thread_id = ? AND messages.is_draft = 0
+         ORDER BY julianday(COALESCE(messages.received_at, messages.created_at)) ASC,
+                  messages.id ASC"
+    ))
+    .bind(thread_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    if !rows
+        .iter()
+        .any(|row| row.chat_version.is_some() && row.binned == 0)
+    {
+        return Err(ChatError::NotAChat);
+    }
+    Ok(summarize(thread_id, account_id, account_name, &own, &rows))
+}
+
+/// Whether the thread holds a chat message.
+pub async fn holds_chat(
+    conn: &mut sqlx::SqliteConnection,
+    thread_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let found: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM messages WHERE thread_id = ? AND chat_version IS NOT NULL LIMIT 1",
+    )
+    .bind(thread_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(found.is_some())
+}
+
+/// Whether the thread `child` may be merged into `parent` (the reply merge).
+///
+/// Mail threads merge freely. A chat merges only to heal one that split
+/// because a reply was fetched before its parent: into a chat, and only when
+/// every sender in `child` is the user or already a trusted member of
+/// `parent`. A stranger's thread is never pulled into a chat, and a chat is
+/// never folded into plain mail.
+pub async fn join_allowed(
+    conn: &mut sqlx::SqliteConnection,
+    child: &str,
+    parent: &str,
+) -> Result<bool, ChatError> {
+    let child_chat = holds_chat(conn, child).await?;
+    let parent_chat = holds_chat(conn, parent).await?;
+    if !child_chat && !parent_chat {
+        return Ok(true);
+    }
+    if !parent_chat {
+        return Ok(false);
+    }
+    let chat = match chat_thread_in(conn, parent).await {
+        Ok(chat) => chat,
+        Err(ChatError::NotAChat) => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    let account_email: String = sqlx::query_scalar("SELECT email FROM accounts WHERE id = ?")
+        .bind(&chat.account_id)
+        .fetch_one(&mut *conn)
+        .await?;
+    let own = own_addresses(conn, &chat.account_id, &account_email).await?;
+    let senders: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT LOWER(TRIM(from_address)) FROM messages WHERE thread_id = ?",
+    )
+    .bind(child)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(senders
+        .iter()
+        .all(|sender| own.contains(sender) || chat.recipients.contains(sender)))
 }
 
 /// `From`, `To` and `Cc` of a message, lowercased, in header order.
@@ -231,16 +304,13 @@ fn summarize(
     let last_own = rows
         .iter()
         .rposition(|row| visible(row) && own_trusted(row));
-    // Where the chat started: the message stamped as its origin when it was
-    // stored, even if it is in the Trash now. Rows from before that stamp
-    // fall back to the first chat message; plain mail never starts a chat.
+    // Where the chat started: its earliest received chat message, even if it
+    // is in the Trash now. Plain mail never starts a chat. This is a hint for
+    // the first reply only, which always asks (`first_reply`): any mail that
+    // threads in can be older than the real start.
     let origin = rows
         .iter()
-        .position(|row| row.chat_origin != 0 && !spoofed_own(row))
-        .or_else(|| {
-            rows.iter()
-                .position(|row| visible(row) && row.chat_version.is_some() && !spoofed_own(row))
-        });
+        .position(|row| row.chat_version.is_some() && !spoofed_own(row));
 
     // A group if the user's last reply or the origin says so.
     let group_id = last_own
@@ -301,8 +371,9 @@ fn summarize(
         now.dedup();
         before != now
     };
-    let first_group_reply =
-        group_id.is_some() && !last_own.is_some_and(|index| rows[index].chat_group_id == group_id);
+    // Owner decision (ADR 0020): until the user has a trusted reply in the
+    // chat, every reply asks first, showing its recipients.
+    let first_reply = last_own.is_none();
 
     let trusted = |row: &ChatMessageRow| {
         visible(row)
@@ -366,7 +437,7 @@ fn summarize(
         recipients_changed,
         encrypted_before,
         untrusted_message_ids,
-        first_group_reply,
+        first_reply,
         names,
         reply_to_message_id,
     }
@@ -1151,11 +1222,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_stored_origin_wins_over_anything_older_in_the_thread() {
+    async fn an_older_strangers_chat_message_in_the_thread_needs_a_confirmed_first_reply() {
         let pool = pool().await;
         // However the stranger's message got into the thread (an older
-        // provider conversation, a merge before this guard), it is older
-        // than the chat's origin and still does not start the chat.
+        // provider conversation, a merge before the guard), it is older than
+        // the chat's real start. Satchel cannot tell, so the first reply asks.
         linked(
             &pool,
             "a1",
@@ -1180,7 +1251,46 @@ mod tests {
             Some(None),
         )
         .await;
-        sqlx::query("UPDATE messages SET chat_origin = 1 WHERE id = 'y'")
+        let chat = ChatRepository::new(&pool)
+            .thread("th-imap-B")
+            .await
+            .unwrap();
+        assert!(chat.first_reply, "confirmation required");
+    }
+
+    #[tokio::test]
+    async fn a_one_to_one_first_reply_asks_and_then_follows_the_trusted_reply() {
+        let pool = pool().await;
+        linked(
+            &pool,
+            "y",
+            "th-imap-B",
+            "<y>",
+            None,
+            "2026-08-01T10:00:00Z",
+            "lena@example.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        let chat = ChatRepository::new(&pool)
+            .thread("th-imap-B")
+            .await
+            .unwrap();
+        assert!(chat.first_reply);
+        linked(
+            &pool,
+            "r",
+            "th-imap-B",
+            "<r>",
+            Some("<y>"),
+            "2026-08-01T11:00:00Z",
+            "tom@example.test",
+            &["lena@example.test"],
+            Some(None),
+        )
+        .await;
+        sqlx::query("UPDATE messages SET folder_id = 'sent', is_sent = 1 WHERE id = 'r'")
             .execute(&pool)
             .await
             .unwrap();
@@ -1188,9 +1298,93 @@ mod tests {
             .thread("th-imap-B")
             .await
             .unwrap();
-        assert_eq!(chat.group_id, None);
+        assert!(!chat.first_reply);
         assert_eq!(chat.recipients, vec!["lena@example.test"]);
-        assert_eq!(chat.untrusted_message_ids, vec!["a1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_chat_heals_only_with_its_own_members() {
+        let pool = pool().await;
+        // Lena's reply was fetched before her first message: two threads.
+        linked(
+            &pool,
+            "m1",
+            "th-imap-R",
+            "<m1>",
+            Some("<m0>"),
+            "2026-08-02T10:00:00Z",
+            "lena@example.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        linked(
+            &pool,
+            "m0",
+            "th-imap-P",
+            "<m0>",
+            None,
+            "2026-08-01T10:00:00Z",
+            "lena@example.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        let mut conn = pool.acquire().await.unwrap();
+        assert!(join_allowed(&mut conn, "th-imap-R", "th-imap-P")
+            .await
+            .unwrap());
+        // A stranger's chat thread does not join, nor does a chat fold into mail.
+        drop(conn);
+        linked(
+            &pool,
+            "s",
+            "th-imap-S",
+            "<s>",
+            Some("<m0>"),
+            "2026-08-02T11:00:00Z",
+            "attacker@evil.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        linked(
+            &pool,
+            "plain",
+            "th-imap-M",
+            "<plain>",
+            None,
+            "2026-08-01T09:00:00Z",
+            "lena@example.test",
+            &["tom@example.test"],
+            None,
+        )
+        .await;
+        let mut conn = pool.acquire().await.unwrap();
+        assert!(!join_allowed(&mut conn, "th-imap-S", "th-imap-P")
+            .await
+            .unwrap());
+        assert!(!join_allowed(&mut conn, "th-imap-R", "th-imap-M")
+            .await
+            .unwrap());
+        // Plain mail merges as before.
+        drop(conn);
+        linked(
+            &pool,
+            "plain2",
+            "th-imap-N",
+            "<plain2>",
+            Some("<plain>"),
+            "2026-08-01T09:30:00Z",
+            "x@example.test",
+            &["tom@example.test"],
+            None,
+        )
+        .await;
+        let mut conn = pool.acquire().await.unwrap();
+        assert!(join_allowed(&mut conn, "th-imap-N", "th-imap-M")
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
@@ -1244,7 +1438,7 @@ mod tests {
             Some(Some("abcDEF123_-x")),
         )
         .await;
-        sqlx::query("UPDATE messages SET chat_origin = 1, folder_id = 'trash' WHERE id = 'g1'")
+        sqlx::query("UPDATE messages SET folder_id = 'trash' WHERE id = 'g1'")
             .execute(&pool)
             .await
             .unwrap();
@@ -1295,7 +1489,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(chat.recipients, vec!["attacker@evil.test"]);
-        assert!(!chat.first_group_reply);
+        // The first reply to someone who wrote first still asks.
+        assert!(chat.first_reply, "confirmation required");
     }
 
     #[tokio::test]
@@ -1321,7 +1516,7 @@ mod tests {
             chat.recipients,
             vec!["attacker@evil.test", "victim@evil.test"]
         );
-        assert!(chat.first_group_reply);
+        assert!(chat.first_reply);
         // Once the user has replied in the group, the next reply does not.
         linked(
             &pool,
@@ -1343,7 +1538,7 @@ mod tests {
             .thread("th-imap-B")
             .await
             .unwrap();
-        assert!(!chat.first_group_reply);
+        assert!(!chat.first_reply);
     }
 
     #[tokio::test]

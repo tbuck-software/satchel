@@ -55,9 +55,9 @@ pub struct ChatMetaDto {
     pub untrusted_message_ids: Vec<String>,
     /// The members differ from the last reply; the reply field asks first.
     pub recipients_changed: bool,
-    /// The user has not written in this group yet: the members come from its
-    /// first message, which anyone can send, so the first reply asks.
-    pub first_group_reply: bool,
+    /// The user has no trusted reply in this chat yet: the first reply
+    /// always asks, showing its recipients (ADR 0020).
+    pub first_reply: bool,
     /// The chat was encrypted and the next message would not be; the reply
     /// field asks first.
     pub encryption_downgrade: bool,
@@ -171,7 +171,7 @@ pub(crate) fn confirmation_decision(
     if !same_set(&input.expected_recipients, &chat.recipients) {
         return Err(CONFIRMATION_NEEDED);
     }
-    if (chat.recipients_changed || chat.first_group_reply) && !input.confirm_recipients {
+    if (chat.recipients_changed || chat.first_reply) && !input.confirm_recipients {
         return Err(CONFIRMATION_NEEDED);
     }
     if chat.encrypted_before && !encrypts && !input.allow_plaintext {
@@ -257,7 +257,7 @@ fn meta_dto(chat: ChatThread, plan: &ChatEncryptionPlan, key_unlocked: bool) -> 
         baseline_recipients: chat.baseline_recipients,
         untrusted_message_ids: chat.untrusted_message_ids,
         recipients_changed: chat.recipients_changed,
-        first_group_reply: chat.first_group_reply,
+        first_reply: chat.first_reply,
         encryption_downgrade: chat.encrypted_before && !plan.encrypts(),
     }
 }
@@ -386,7 +386,7 @@ mod tests {
             recipients_changed: false,
             encrypted_before: false,
             untrusted_message_ids: Vec::new(),
-            first_group_reply: false,
+            first_reply: false,
         }
     }
 
@@ -522,7 +522,7 @@ mod tests {
     #[test]
     fn the_first_reply_in_a_group_waits_for_a_yes() {
         let group = ChatThread {
-            first_group_reply: true,
+            first_reply: true,
             ..chat(Some(("abcDEF123_-x", "Family")))
         };
         assert_eq!(
