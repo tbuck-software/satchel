@@ -7,8 +7,10 @@ import {
   backendMoveThreadsToFolder,
   backendUndoNotSpam,
   backendUndoTrash,
+  type BackendStoppedEarly,
   type BackendTrashReceipt,
 } from '@/services/backend';
+import { translateBackendError } from '@/utils/backendErrors';
 import { useMailboxesStore } from '@/stores/mailboxes';
 import { useThreadsStore } from '@/stores/threads';
 import { useTopicsStore } from '@/stores/topics';
@@ -205,6 +207,15 @@ export function useThreadActions() {
     await Promise.all([threads.refreshHead(), mailboxes.load()]);
   }
 
+  /** The counts and reason a stopped move's message names. */
+  function stoppedCounts(stopped: BackendStoppedEarly) {
+    return {
+      applied: stopped.applied.length,
+      total: stopped.applied.length + stopped.remaining.length,
+      reason: translateBackendError(stopped.reason_key) ?? '',
+    };
+  }
+
   /** Move threads to a workflow state with undo. */
   /**
    * Single pane: a thread you just filed is no longer a place to stand.
@@ -375,15 +386,20 @@ export function useThreadActions() {
         // The command resolves and queues provider references before changing
         // its local rows. Keep the frontend projection untouched until that
         // remote-first operation succeeds as well.
-        await backendMoveThreadsToFolder({
+        const stopped = await backendMoveThreadsToFolder({
           threadIds: normalizedThreadIds,
           targetFolderId,
         });
         await Promise.all([threads.load(), mailboxes.load()]);
-        toast.success(t('thread.move.moved', {
-          folder: targetLabel || t('thread.move.fallbackFolder'),
-        }));
+        const folder = targetLabel || t('thread.move.fallbackFolder');
+        if (stopped) {
+          toast.warning(t('thread.move.partlyMoved', { ...stoppedCounts(stopped), folder }));
+        } else {
+          toast.success(t('thread.move.moved', { folder }));
+        }
       } catch (error) {
+        // Nothing moved; the lists show that again, whatever they showed meanwhile.
+        await Promise.allSettled([threads.load(), mailboxes.load()]);
         toast.error(t('thread.move.failed', {
           error: error instanceof Error ? error.message : String(error),
         }));
@@ -420,25 +436,36 @@ export function useThreadActions() {
         // instead of after a full reload of a large mailbox.
         receipt = await file(threadIds);
       } catch (err) {
+        // Nothing was filed; the store put the rows back, a refresh confirms them.
+        await Promise.allSettled([refreshLists()]);
         toast.error(err instanceof Error ? err.message : messages.failed);
         return;
       }
 
-      threads.deselectThreads(threadIds);
-      continueTriageAfterFiling(threadIds);
+      // A move a later batch stopped filed only its first batches; the rest
+      // stays listed and selected, and Undo covers exactly what moved.
+      const stopped = receipt.stopped_early;
+      const filed = stopped ? stopped.applied : threadIds;
+      threads.deselectThreads(filed);
+      continueTriageAfterFiling(filed);
 
       if (receipt.permanently_deleted.length > 0) {
         toast.info(tc('thread.result.permanentlyDeleted', receipt.permanently_deleted.length));
       }
-      if (receipt.undo_thread_ids.length === 0) return;
-      const message = messages.result(receipt.undo_thread_ids.length);
+      const message = stopped
+        ? t('thread.result.partlyFiled', stoppedCounts(stopped))
+        : messages.result(receipt.undo_thread_ids.length);
+      if (receipt.undo_thread_ids.length === 0) {
+        if (stopped) toast.warning(message);
+        return;
+      }
       const undoToken = receipt.undo_token;
       if (!undoToken) {
-        toast.info(message, { timeout: UNDO_TIMEOUT_MS });
+        (stopped ? toast.warning : toast.info)(message, { timeout: UNDO_TIMEOUT_MS });
         return;
       }
 
-      toast.success(message, {
+      (stopped ? toast.warning : toast.success)(message, {
         timeout: UNDO_TIMEOUT_MS,
         action: {
           label: t('thread.actions.undo'),

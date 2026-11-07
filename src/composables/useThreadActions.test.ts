@@ -135,6 +135,9 @@ vi.mock('@/composables/useToast', () => ({
     info: (message: string, opts?: Record<string, unknown>) => {
       toasts.push({ message, tone: 'info', action: opts?.action as never });
     },
+    warning: (message: string, opts?: Record<string, unknown>) => {
+      toasts.push({ message, tone: 'warning', action: opts?.action as never });
+    },
     error: (message: string) => {
       toasts.push({ message, tone: 'error' });
     },
@@ -554,6 +557,59 @@ describe('useThreadActions', () => {
     expect(toasts.at(-1)).toMatchObject({ tone: 'success', message: 'Moved to “Work”.' });
   });
 
+  it('reports a move a later batch stopped with its counts and reason', async () => {
+    threadState.threads = [seedThread(), seedThread({ id: 'thread-2' }), seedThread({ id: 'thread-3' })];
+    moveMock.mockResolvedValueOnce({
+      applied: ['thread-1'],
+      remaining: ['thread-2', 'thread-3'],
+      reason_key: 'backend.errors.mailMoveInterrupted',
+    });
+
+    await useThreadActions().moveToFolder(['thread-1', 'thread-2', 'thread-3'], 'folder-work', 'Work');
+
+    expect(loadThreadsMock).toHaveBeenCalledOnce();
+    expect(toasts.at(-1)).toMatchObject({
+      tone: 'warning',
+      message: 'Moved 1 of 3 to “Work”; the rest could not be moved. The move was interrupted before it finished. Try again.',
+    });
+  });
+
+  it('reloads both projections after a refused folder move', async () => {
+    moveMock.mockRejectedValueOnce(new Error('offline'));
+
+    await useThreadActions().moveToFolder(['thread-1'], 'folder-work', 'Work');
+
+    expect(loadThreadsMock).toHaveBeenCalledOnce();
+    expect(loadMailboxesMock).toHaveBeenCalledOnce();
+    expect(toasts.at(-1)?.tone).toBe('error');
+  });
+
+  it('files only what a stopped trash moved, and its Undo covers exactly that', async () => {
+    threadState.threads = [seedThread(), seedThread({ id: 'thread-2' }), seedThread({ id: 'thread-3' })];
+    trashMock.mockResolvedValueOnce({
+      undo_token: 'partial-receipt',
+      undo_thread_ids: ['thread-1'],
+      permanently_deleted: [],
+      stopped_early: {
+        applied: ['thread-1'],
+        remaining: ['thread-2', 'thread-3'],
+        reason_key: 'backend.errors.mailMovePending',
+      },
+    });
+
+    await useThreadActions().trash(['thread-1', 'thread-2', 'thread-3']);
+
+    expect(threadState.deselectThreads).toHaveBeenCalledWith(['thread-1']);
+    const toast = toasts.at(-1);
+    expect(toast?.tone).toBe('warning');
+    expect(toast?.message).toBe(
+      'Moved 1 of 3; the rest could not be moved. The server move is still being finalized. Try again shortly.',
+    );
+    expect(toast?.action?.label).toBe('Undo');
+    await toast!.action!.handler();
+    expect(undoTrashMock).toHaveBeenCalledWith('partial-receipt');
+  });
+
   it('blocks a sender before focusing and refreshing its originating threads', async () => {
     const events: string[] = [];
     blockMock.mockImplementationOnce(async (input: unknown) => {
@@ -607,6 +663,9 @@ describe('useThreadActions', () => {
     await actions.trash(['thread-1']);
 
     expect(toasts.at(-1)).toMatchObject({ tone: 'error', message: 'offline' });
+    // The lists show again what the backend holds.
+    expect(refreshHeadMock).toHaveBeenCalledOnce();
+    expect(loadMailboxesMock).toHaveBeenCalledOnce();
   });
 
   it('delegates pinning to the store instead of calling the backend itself', async () => {

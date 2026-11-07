@@ -329,6 +329,7 @@
       "mailMergeReplyNotAllowed": "A mail merge is a new message. It cannot answer or forward a conversation.",
       "mailMergeSmimeSigningUnavailable": "The S/MIME signing certificate is locked or missing. Unlock it and start again.",
       "mailMergeTooManyRecipients": "One mail merge sends at most {limit} messages. Split the list.",
+      "mailMoveInterrupted": "The move was interrupted before it finished. Try again.",
       "mailMovePending": "The server move is still being finalized. Try again shortly.",
       "mailUndoUnavailable": "This action can no longer be undone.",
       "messageBodyProviderUnsupported": "Loading message bodies is not supported for {provider} accounts.",
@@ -4236,7 +4237,8 @@
     "move": {
       "failed": "Moving failed: {error}",
       "fallbackFolder": "folder",
-      "moved": "Moved to “{folder}”."
+      "moved": "Moved to “{folder}”.",
+      "partlyMoved": "Moved {applied} of {total} to “{folder}”; the rest could not be moved. {reason}"
     },
     "newSenders": {
       "acceptExisting": "Allow {count} sender | Allow all {count} senders",
@@ -4279,6 +4281,7 @@
       "notSpamFailed": "Marking as not spam failed.",
       "notSpamMoved": "Thread moved back to the Inbox | {count} threads moved back to the Inbox",
       "notSpamUndoFailed": "Undoing Not spam failed.",
+      "partlyFiled": "Moved {applied} of {total}; the rest could not be moved. {reason}",
       "permanentlyDeleted": "Thread permanently deleted | {count} threads permanently deleted",
       "pinChanged": "Pin updated",
       "pinFailed": "Pinning failed.",

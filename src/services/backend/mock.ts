@@ -1890,7 +1890,7 @@ const handlers: Record<string, Handler> = {
     if (mode !== 'off' && mode !== 'mark' && mode !== 'move') throw new Error('backend.errors.spamFilterUnavailable');
     spamFilterMode = mode;
   },
-  move_threads_to_folder: () => undefined,
+  move_threads_to_folder: () => null,
   dismiss_mobile_notifications: () => undefined,
   get_sender_preference: (payload) => {
     const email = (payload.senderEmail as string) ?? '';

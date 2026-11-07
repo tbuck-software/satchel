@@ -31,7 +31,8 @@ use crate::providers::traits::{
 };
 use crate::sync::queue::{QueuedAction, SyncQueue};
 use crate::sync::remote_mutations::{
-    remote_move_thread_id_from_json, stable_queue_id, RemoteMutationPayload, ACTION_REMOTE_MUTATION,
+    remote_move_thread_id_from_json, stable_queue_id, RemoteMutationPayload,
+    ACTION_REMOTE_MUTATION, QUEUED_MOVE_THREAD_ID,
 };
 use crate::workflow::remote_marker::{
     pull_decision, same_on_server, thread_marker, MarkerCopy, PullDecision, Snooze, WorkflowMarker,
@@ -246,13 +247,6 @@ where
     .map_err(|err| err.to_string())
 }
 
-#[derive(sqlx::FromRow)]
-struct CopyRow {
-    remote_id: Option<String>,
-    source_folder: String,
-    source_uidvalidity: Option<i64>,
-}
-
 #[derive(Debug, Clone)]
 struct MarkerThreadRow {
     account_id: String,
@@ -300,6 +294,49 @@ async fn marker_thread(
     }))
 }
 
+/// [`marker_thread`] for many threads in one query, in the given order.
+async fn marker_threads(
+    tx: &mut Transaction<'_, Sqlite>,
+    thread_ids: &[String],
+    local_only: &mut HashMap<String, bool>,
+) -> Result<Vec<(String, MarkerThreadRow)>, String> {
+    let rows = sqlx::query_as::<_, (String, String, String, String, Option<String>)>(
+        "SELECT t.id, t.account_id, a.provider, a.kind, t.remote_workflow_marker
+         FROM json_each(?) j JOIN threads t ON t.id = j.value
+         JOIN accounts a ON a.id = t.account_id
+         ORDER BY j.key",
+    )
+    .bind(serde_json::to_string(thread_ids).map_err(|err| err.to_string())?)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|err| err.to_string())?;
+    let mut threads = Vec::with_capacity(rows.len());
+    for (thread_id, account_id, provider, kind, recorded) in rows {
+        if kind != "email" || !provider_carries_markers(&provider) {
+            continue;
+        }
+        let excluded = match local_only.get(&account_id) {
+            Some(excluded) => *excluded,
+            None => {
+                let excluded = account_is_local_only(&mut **tx, &account_id).await?;
+                local_only.insert(account_id.clone(), excluded);
+                excluded
+            }
+        };
+        if !excluded {
+            threads.push((
+                thread_id,
+                MarkerThreadRow {
+                    account_id,
+                    provider,
+                    recorded: WorkflowMarker::from_column(recorded.as_deref()),
+                },
+            ));
+        }
+    }
+    Ok(threads)
+}
+
 /// Marker rows in these states that list any of `thread_ids`, found by
 /// SQLite without parsing the others.
 async fn marker_rows_with_threads(
@@ -323,7 +360,7 @@ async fn marker_rows_with_threads(
     let wanted = serde_json::to_string(thread_ids).map_err(|err| err.to_string())?;
     let rows = sqlx::query_as::<_, (String, String)>(&format!(
         "SELECT id, payload FROM sync_queue
-         WHERE action_type = ? AND status IN ({statuses})
+         WHERE action_type = 'remote_mutation' AND +status IN ({statuses})
            AND (? IS NULL OR instr(payload, ?) > 0)
            AND CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END = 'workflow_marker'
            AND EXISTS (
@@ -332,7 +369,6 @@ async fn marker_rows_with_threads(
            )
          ORDER BY rowid"
     ))
-    .bind(ACTION_REMOTE_MUTATION)
     .bind(needle.as_deref())
     .bind(needle.as_deref())
     .bind(wanted)
@@ -415,7 +451,7 @@ async fn joinable_row(
 ) -> Result<Option<(String, RemoteMutationPayload)>, String> {
     let row = sqlx::query_as::<_, (String, String)>(
         "SELECT id, payload FROM sync_queue
-         WHERE account_id = ? AND action_type = ? AND status = 'pending'
+         WHERE account_id = ? AND action_type = 'remote_mutation' AND +status = 'pending'
            AND retry_count = 0 AND next_retry_at IS NULL AND id NOT LIKE 'notification:%'
            AND CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END = 'workflow_marker'
            AND json_extract(payload, '$.marker') = ?
@@ -423,7 +459,6 @@ async fn joinable_row(
          ORDER BY rowid DESC LIMIT 1",
     )
     .bind(account_id)
-    .bind(ACTION_REMOTE_MUTATION)
     .bind(marker.as_db_value())
     .bind(THREADS_PER_ROW as i64)
     .fetch_optional(&mut **tx)
@@ -432,31 +467,36 @@ async fn joinable_row(
     Ok(row.and_then(|(id, payload)| serde_json::from_str(&payload).ok().map(|p| (id, p))))
 }
 
-async fn thread_refs(
+/// The server copies of each thread, in message order. Local-only folders
+/// have none.
+async fn threads_refs(
     tx: &mut Transaction<'_, Sqlite>,
-    thread_id: &str,
-) -> Result<Vec<MessageRef>, String> {
-    Ok(sqlx::query_as::<_, CopyRow>(
-        "SELECT m.remote_id, COALESCE(f.remote_id, f.full_path) AS source_folder,
+    thread_ids: &[&str],
+) -> Result<HashMap<String, Vec<MessageRef>>, String> {
+    let rows = sqlx::query_as::<_, (String, Option<String>, String, Option<i64>)>(
+        "SELECT m.thread_id, m.remote_id, COALESCE(f.remote_id, f.full_path) AS source_folder,
                 f.uidvalidity AS source_uidvalidity
-         FROM messages m JOIN folders f ON f.id = m.folder_id
-         WHERE m.thread_id = ? AND f.folder_type != 'local'
-         ORDER BY m.id",
+         FROM json_each(?) j JOIN messages m ON m.thread_id = j.value
+         JOIN folders f ON f.id = m.folder_id
+         WHERE f.folder_type != 'local'
+         ORDER BY j.key, m.id",
     )
-    .bind(thread_id)
+    .bind(serde_json::to_string(thread_ids).map_err(|err| err.to_string())?)
     .fetch_all(&mut **tx)
     .await
-    .map_err(|err| err.to_string())?
-    .into_iter()
-    .filter_map(|row| {
-        let remote_id = row.remote_id.filter(|id| !id.trim().is_empty())?;
-        Some(MessageRef {
+    .map_err(|err| err.to_string())?;
+    let mut refs = HashMap::<String, Vec<MessageRef>>::new();
+    for (thread_id, remote_id, source_folder, source_uidvalidity) in rows {
+        let Some(remote_id) = remote_id.filter(|id| !id.trim().is_empty()) else {
+            continue;
+        };
+        refs.entry(thread_id).or_default().push(MessageRef {
             remote_id,
-            source_folder: Some(row.source_folder),
-            source_uidvalidity: row.source_uidvalidity.and_then(|n| u32::try_from(n).ok()),
-        })
-    })
-    .collect())
+            source_folder: Some(source_folder),
+            source_uidvalidity: source_uidvalidity.and_then(|n| u32::try_from(n).ok()),
+        });
+    }
+    Ok(refs)
 }
 
 /// One thread to queue: its account, the marker and an optional guard.
@@ -479,8 +519,12 @@ async fn write_planned(
     let mut groups = BTreeMap::<(usize, String, String), Vec<MarkedThread>>::new();
     let mut order = HashMap::<(String, String), usize>::new();
     let mut markers = HashMap::<String, WorkflowMarker>::new();
+    let mut thread_ids: Vec<&str> = planned.iter().map(|plan| plan.thread_id.as_str()).collect();
+    thread_ids.sort_unstable();
+    thread_ids.dedup();
+    let refs = threads_refs(tx, &thread_ids).await?;
     for plan in planned {
-        let refs = thread_refs(tx, &plan.thread_id).await?;
+        let refs = refs.get(&plan.thread_id).cloned().unwrap_or_default();
         if refs.is_empty() {
             continue;
         }
@@ -581,13 +625,7 @@ pub async fn enqueue_workflow_markers_in_transaction(
         .filter(|id| seen.insert(id.as_str()))
         .cloned()
         .collect::<Vec<_>>();
-    let mut local_only = HashMap::new();
-    let mut threads = Vec::with_capacity(thread_ids.len());
-    for thread_id in thread_ids {
-        if let Some(row) = marker_thread(tx, &thread_id, &mut local_only).await? {
-            threads.push((thread_id, row));
-        }
-    }
+    let threads = marker_threads(tx, &thread_ids, &mut HashMap::new()).await?;
     let ids = threads.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
     withdraw_unsent(tx, &ids).await?;
     let in_flight = markers_in_flight(tx, &ids).await?;
@@ -749,19 +787,14 @@ async fn local_change_pending(
     {
         return Ok(true);
     }
-    // The thread's id as the move payloads serialize it: a byte search skips
-    // every other move before any JSON is read.
-    let id = serde_json::to_string(thread_id).map_err(|err| err.to_string())?;
-    let payloads = sqlx::query_scalar::<_, String>(
+    // The thread index (migration 0160) finds its moves without reading
+    // any other payload.
+    let payloads = sqlx::query_scalar::<_, String>(&format!(
         "SELECT payload FROM sync_queue
-         WHERE action_type = ? AND status IN ('pending', 'scheduled', 'sending')
-           AND (instr(payload, ?) > 0 OR instr(payload, ?) > 0)
-           AND CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END
-               IN ('workflow_move', 'blocked_move')",
-    )
-    .bind(ACTION_REMOTE_MUTATION)
-    .bind(format!("\"workflow_thread_id\":{id}"))
-    .bind(format!("\"blocked_thread_id\":{id}"))
+         WHERE action_type = 'remote_mutation' AND +status IN ('pending', 'scheduled', 'sending')
+           AND {QUEUED_MOVE_THREAD_ID} = ?"
+    ))
+    .bind(thread_id)
     .fetch_all(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;

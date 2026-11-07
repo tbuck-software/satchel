@@ -472,14 +472,23 @@ pub(crate) async fn archive_threads_inner(
     state: &AppState,
     input: ThreadIdsInput,
 ) -> CommandResult<Vec<String>> {
-    satchel_core::mail_actions::move_threads(
+    // A move a later batch stopped still archived its first batches; the
+    // quick action reports those, so their `thread:updated` goes out.
+    let outcome = satchel_core::mail_actions::move_threads_reporting(
         pool,
         &state.queue,
         &normalize_thread_ids(input.thread_ids),
         satchel_core::mail_actions::MoveTarget::Archive,
     )
-    .await
-    .map_err(Into::into)
+    .await?;
+    if let Some(stopped) = &outcome.stopped_early {
+        tracing::warn!(
+            remaining = stopped.remaining.len(),
+            reason = %stopped.reason_key,
+            "Done from a notification archived only part of its threads"
+        );
+    }
+    Ok(outcome.queued)
 }
 
 #[tauri::command]
@@ -971,6 +980,91 @@ mod tests {
             vec![
                 ("msg-a".to_string(), "archive".to_string()),
                 ("msg-b".to_string(), "archive".to_string()),
+            ]
+        );
+    }
+
+    /// Done from a notification on threads a later batch stops: what was
+    /// archived stays archived and is reported, so its `thread:updated`
+    /// goes out; the rest stays in the Inbox.
+    #[tokio::test]
+    async fn a_notification_done_a_later_batch_stops_reports_what_it_archived() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("pool");
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .expect("migrations");
+        sqlx::raw_sql(
+            "INSERT INTO accounts
+             (id, display_name, email, provider, config, credentials_ref, created_at, updated_at)
+             VALUES('account', 'Account', 'me@example.test', 'imap', '{}', '', '2026-01-01', '2026-01-01');
+             INSERT INTO folders
+             (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES('inbox', 'account', 'Inbox', 'INBOX', 'inbox', 'INBOX', '2026-01-01', '2026-01-01'),
+                   ('archive', 'account', 'Archiv', 'Archive', 'archive', 'Archive', '2026-01-01', '2026-01-01');
+             INSERT INTO threads
+             (id, account_id, subject, last_message_date, message_count, unread_count,
+              created_at, updated_at)
+             VALUES('thread-a', 'account', 'A', '2026-01-01', 1, 1, '2026-01-01', '2026-01-01'),
+                   ('thread-b', 'account', 'B', '2026-01-01', 1, 1, '2026-01-01', '2026-01-01');
+             INSERT INTO messages
+             (id, account_id, folder_id, thread_id, from_address, to_addresses, subject,
+              date, is_read, remote_id, created_at, updated_at)
+             VALUES('msg-a', 'account', 'inbox', 'thread-a', 'sender@example.test', '[]', 'A',
+                    '2026-01-01', 0, '41', '2026-01-01', '2026-01-01'),
+                   ('msg-b', 'account', 'inbox', 'thread-b', 'sender@example.test', '[]', 'B',
+                    '2026-01-01', 0, '42', '2026-01-01', '2026-01-01');
+             CREATE TRIGGER stop_bulk_move BEFORE UPDATE ON messages WHEN new.thread_id = 'thread-b'
+             BEGIN SELECT RAISE(ABORT, 'database is locked'); END;",
+        )
+        .execute(&pool)
+        .await
+        .expect("fixture");
+
+        satchel_core::mail_actions::set_move_batch_threads_for_tests(Some(1));
+        let queued = archive_threads_inner(
+            &pool,
+            &AppState::default(),
+            ThreadIdsInput {
+                thread_ids: vec!["thread-a".into(), "thread-b".into()],
+            },
+        )
+        .await;
+        satchel_core::mail_actions::set_move_batch_threads_for_tests(None);
+
+        let queued = queued.expect("the first batch committed");
+        let queued_threads: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT thread FROM (
+                 SELECT COALESCE(json_extract(payload, '$.workflow_thread_id'), t.value ->> '$.thread_id') AS thread
+                 FROM sync_queue LEFT JOIN json_each(payload, '$.threads') t)
+             WHERE thread IS NOT NULL ORDER BY 1",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("queue");
+        assert_eq!(
+            queued_threads,
+            ["thread-a"],
+            "nothing is queued for thread-b"
+        );
+        assert!(
+            !queued.is_empty(),
+            "the archived thread's provider work is reported"
+        );
+        let states: Vec<(String, String)> =
+            sqlx::query_as("SELECT id, COALESCE(workflow_state, '') FROM threads ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .expect("threads");
+        assert_eq!(
+            states,
+            vec![
+                ("thread-a".to_string(), "done".to_string()),
+                ("thread-b".to_string(), "inbox".to_string()),
             ]
         );
     }

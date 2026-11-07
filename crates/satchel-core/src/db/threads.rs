@@ -1422,6 +1422,73 @@ pub async fn refresh_thread_projections_tx(
     Ok(())
 }
 
+/// The key under which copies of one mail count once, as in
+/// [`refresh_thread_projection_tx`].
+macro_rules! message_dedupe_key {
+    () => {
+        "CASE
+            WHEN id LIKE 'm-imap-%' THEN COALESCE(
+                NULLIF(TRIM(CASE
+                    WHEN LOWER(COALESCE(message_id_header, '')) LIKE '%@imap.satchel.local>' OR LOWER(COALESCE(message_id_header, '')) LIKE '%@imap.flowmail.local>' THEN ''
+                    ELSE COALESCE(message_id_header, '')
+                END), ''),
+                COALESCE(NULLIF(TRIM(folder_id), ''), '') || ':' || COALESCE(NULLIF(TRIM(remote_id), ''), id)
+            )
+            ELSE COALESCE(NULLIF(TRIM(message_id_header), ''), NULLIF(TRIM(remote_id), ''), id)
+         END"
+    };
+}
+
+/// [`refresh_thread_projection_tx`] for many threads in a constant number of
+/// statements. Threads left without messages go the single way: they are
+/// removed with their tags, events and topic links.
+pub(crate) async fn refresh_thread_projections_batch_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    thread_ids: &[String],
+    now: &str,
+) -> Result<(), ThreadError> {
+    if thread_ids.is_empty() {
+        return Ok(());
+    }
+    let ids = serde_json::to_string(thread_ids)?;
+    let empty: Vec<String> = sqlx::query_scalar(
+        "SELECT j.value FROM json_each(?) j
+         WHERE NOT EXISTS (SELECT 1 FROM messages WHERE thread_id = j.value)
+         ORDER BY j.key",
+    )
+    .bind(&ids)
+    .fetch_all(&mut **tx)
+    .await?;
+    for thread_id in &empty {
+        refresh_thread_projection_tx(tx, thread_id, now).await?;
+    }
+    sqlx::query(concat!(
+        "UPDATE threads
+         SET message_count = (SELECT COUNT(DISTINCT ",
+        message_dedupe_key!(),
+        ") FROM messages WHERE thread_id = threads.id),
+             unread_count = (SELECT COUNT(DISTINCT ",
+        message_dedupe_key!(),
+        ") FROM messages WHERE thread_id = threads.id AND is_read = 0),
+             is_starred = (SELECT COALESCE(MAX(is_starred), 0) FROM messages WHERE thread_id = threads.id),
+             has_attachments = (SELECT COALESCE(MAX(has_attachments), 0) FROM messages WHERE thread_id = threads.id),
+             subject = COALESCE((SELECT subject FROM messages WHERE thread_id = threads.id
+                                 ORDER BY is_draft ASC, date DESC, id DESC LIMIT 1), subject),
+             snippet = COALESCE((SELECT snippet FROM messages WHERE thread_id = threads.id
+                                 ORDER BY is_draft ASC, date DESC, id DESC LIMIT 1), snippet),
+             last_message_date = COALESCE((SELECT date FROM messages WHERE thread_id = threads.id
+                                 ORDER BY is_draft ASC, date DESC, id DESC LIMIT 1), last_message_date),
+             updated_at = ?
+         WHERE id IN (SELECT value FROM json_each(?))
+           AND EXISTS (SELECT 1 FROM messages WHERE thread_id = threads.id)"
+    ))
+    .bind(now)
+    .bind(&ids)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 pub(crate) async fn refresh_thread_projection_tx(
     tx: &mut Transaction<'_, Sqlite>,
     thread_id: &str,

@@ -10,6 +10,7 @@ import {
 } from '@/services/backend';
 import { useThreadsStore } from './threads';
 import { useMailboxesStore } from './mailboxes';
+import { useSettingsStore } from './settings';
 
 vi.mock('@/services/backend', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/backend')>();
@@ -184,6 +185,74 @@ describe('thread organization persistence', () => {
     await expect(store.trashThreads(['newer'])).rejects.toThrow('offline');
 
     expect(store.threads.map((thread) => thread.id)).toEqual(['newer', 'older']);
+  });
+
+  it('keeps a sender none of whose mail a stopped trash moved in the new-sender stack', async () => {
+    listThreadsMock.mockResolvedValueOnce({
+      threads: [
+        backendThread({
+          id: 'moved',
+          participants: '[{"name":"Mara","email":"mara@example.test"}]',
+          last_message_date: '2026-07-16T10:00:00Z',
+        }),
+        backendThread({
+          id: 'stayed',
+          participants: '[{"name":"Jonas","email":"jonas@example.test"}]',
+          last_message_date: '2026-07-15T10:00:00Z',
+        }),
+      ],
+      next_cursor: null,
+      has_more: false,
+    });
+    vi.mocked(backendTrashThreads).mockResolvedValueOnce({
+      undo_token: 'receipt',
+      undo_thread_ids: ['moved'],
+      permanently_deleted: [],
+      stopped_early: { applied: ['moved'], remaining: ['stayed'], reason_key: 'backend.errors.mailMoveInterrupted' },
+    });
+    vi.mocked(backendDismissMobileNotifications).mockResolvedValueOnce();
+    const store = useThreadsStore();
+    await store.load();
+    expect(store.newSenderStack?.senders.map((sender) => sender.senderEmail))
+      .toEqual(['mara@example.test', 'jonas@example.test']);
+    listThreadsMock.mockRejectedValueOnce(new Error('offline'));
+
+    await store.trashThreads(['moved', 'stayed']);
+
+    const dismissed = useSettingsStore().dismissedNewSenders;
+    expect(dismissed['mara@example.test']).toBeDefined();
+    expect(dismissed['jonas@example.test']).toBeUndefined();
+    expect(store.newSenderStack?.senders.map((sender) => sender.senderEmail)).toEqual(['jonas@example.test']);
+  });
+
+  it.each(['trash', 'spam'] as const)('puts back what a stopped %s left where it was', async (action) => {
+    listThreadsMock.mockResolvedValueOnce({
+      threads: [
+        backendThread({ id: 'newer', last_message_date: '2026-07-16T10:00:00Z' }),
+        backendThread({ id: 'older', last_message_date: '2026-07-15T10:00:00Z' }),
+      ],
+      next_cursor: null,
+      has_more: false,
+    });
+    const receipt = {
+      undo_token: 'receipt',
+      undo_thread_ids: ['newer'],
+      permanently_deleted: [],
+      stopped_early: { applied: ['newer'], remaining: ['older'], reason_key: 'backend.errors.mailMoveInterrupted' },
+    };
+    vi.mocked(action === 'trash' ? backendTrashThreads : backendMarkThreadsSpam).mockResolvedValueOnce(receipt);
+    vi.mocked(backendDismissMobileNotifications).mockResolvedValueOnce();
+    const store = useThreadsStore();
+    await store.load();
+    // The refresh fails, so the list shows the store's own rollback.
+    listThreadsMock.mockRejectedValueOnce(new Error('offline'));
+
+    const filed = action === 'trash'
+      ? store.trashThreads(['newer', 'older'])
+      : store.markThreadsSpam(['newer', 'older']);
+    await expect(filed).resolves.toEqual(receipt);
+
+    expect(store.threads.map((thread) => thread.id)).toEqual(['older']);
   });
 });
 

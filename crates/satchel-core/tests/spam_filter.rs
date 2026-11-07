@@ -1485,3 +1485,124 @@ async fn deleting_a_message_drops_its_spam_rows() {
     // What the model learned stays learned.
     assert_eq!(totals(&pool).await, (1, 0));
 }
+
+/* ------------------------------------------------------------------------ */
+/* A bulk move a later batch stops                                          */
+/* ------------------------------------------------------------------------ */
+
+/// Every message write of `thread` fails, as a locked database would.
+async fn fail_writes_of(pool: &SqlitePool, thread: &str) {
+    sqlx::query(&format!(
+        "CREATE TRIGGER stop_bulk_move BEFORE UPDATE ON messages WHEN new.thread_id = '{thread}'
+         BEGIN SELECT RAISE(ABORT, 'database is locked'); END"
+    ))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn mark_as_spam_a_later_batch_stops_teaches_only_what_moved() {
+    let pool = pool("pop3").await;
+    let queue = SyncQueue::new();
+    message(
+        &pool,
+        "1",
+        "inbox",
+        "promo@deal.example",
+        "Offer",
+        "Buy now",
+    )
+    .await;
+    message(
+        &pool,
+        "2",
+        "inbox",
+        "other@deal.example",
+        "Offer",
+        "Buy now",
+    )
+    .await;
+    fail_writes_of(&pool, "t-2").await;
+
+    mail_actions::set_move_batch_threads_for_tests(Some(1));
+    let receipt = mail_actions::mark_threads_spam(&pool, &queue, &["t-1".into(), "t-2".into()])
+        .await
+        .expect("the first batch committed");
+    mail_actions::set_move_batch_threads_for_tests(None);
+
+    assert_eq!(receipt.stopped_early.expect("stopped").remaining, ["t-2"]);
+    assert_eq!(folder_of(&pool, "m-1").await, ("spam".into(), None));
+    assert_eq!(folder_of(&pool, "m-2").await, ("inbox".into(), None));
+    assert_eq!(ledger(&pool, "m-1").await.as_deref(), Some("spam"));
+    assert_eq!(
+        ledger(&pool, "m-2").await,
+        None,
+        "mail that stayed teaches nothing"
+    );
+}
+
+/// A refile a later batch stops keeps the lesson and reports the reason; a
+/// retry files the rest and only then unlearns.
+#[tokio::test]
+async fn undo_of_not_spam_a_later_batch_stops_keeps_the_lesson_until_a_retry() {
+    let pool = pool("pop3").await;
+    let queue = SyncQueue::new();
+    message(
+        &pool,
+        "1",
+        "inbox",
+        "news@shop.example",
+        "Your order",
+        "Order shipped",
+    )
+    .await;
+    message(
+        &pool,
+        "2",
+        "inbox",
+        "info@shop.example",
+        "Your order",
+        "Order shipped",
+    )
+    .await;
+    let mut receipt =
+        mail_actions::mark_threads_not_spam(&pool, &queue, &["t-1".into(), "t-2".into()])
+            .await
+            .unwrap();
+    // As if the filter had moved both to Spam before Not spam brought them back.
+    receipt.restored_thread_ids = vec!["t-1".into(), "t-2".into()];
+    fail_writes_of(&pool, "t-2").await;
+
+    mail_actions::set_move_batch_threads_for_tests(Some(1));
+    let stopped = mail_actions::undo_not_spam(&pool, &queue, &receipt).await;
+    mail_actions::set_move_batch_threads_for_tests(None);
+
+    assert_eq!(
+        stopped,
+        Err("backend.errors.mailMoveInterrupted".to_string())
+    );
+    assert_eq!(folder_of(&pool, "m-1").await, ("spam".into(), None));
+    assert_eq!(folder_of(&pool, "m-2").await, ("inbox".into(), None));
+    assert_eq!(
+        ledger(&pool, "m-1").await.as_deref(),
+        Some("ham"),
+        "still learned"
+    );
+    assert_eq!(
+        ledger(&pool, "m-2").await.as_deref(),
+        Some("ham"),
+        "still learned"
+    );
+
+    sqlx::query("DROP TRIGGER stop_bulk_move")
+        .execute(&pool)
+        .await
+        .unwrap();
+    mail_actions::undo_not_spam(&pool, &queue, &receipt)
+        .await
+        .expect("the retry finishes");
+    assert_eq!(folder_of(&pool, "m-2").await, ("spam".into(), None));
+    assert_eq!(ledger(&pool, "m-1").await, None);
+    assert_eq!(ledger(&pool, "m-2").await, None);
+}
