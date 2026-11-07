@@ -3582,6 +3582,12 @@ export default {
         "app::commands::chats::SendChatMessageInput": {
             "kind": "object",
             "fields": {
+                "allow_unsigned": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
                 "text": {
                     "required": true,
                     "shape": {
@@ -6334,6 +6340,12 @@ export default {
         "core::chat::ChatSendOptions": {
             "kind": "object",
             "fields": {
+                "allow_unsigned": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
                 "group_id": {
                     "required": false,
                     "shape": {

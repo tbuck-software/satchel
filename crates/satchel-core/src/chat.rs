@@ -119,6 +119,10 @@ pub struct ChatSendOptions {
     pub group_id: Option<String>,
     #[serde(default)]
     pub group_name: Option<String>,
+    /// The sender chose to send encrypted but unsigned because the own key
+    /// stays locked. Without it a locked key holds the reply back.
+    #[serde(default)]
+    pub allow_unsigned: bool,
 }
 
 /// `Chat-Version`, and the group headers when the chat is a group. Values are
@@ -255,6 +259,7 @@ Chat-Group-Name: =?utf-8?q?Famili=C3=A9?=\r\n\
         let group = chat_extra_headers(&ChatSendOptions {
             group_id: Some("abcDEF123_-x".into()),
             group_name: Some("Family".into()),
+            ..Default::default()
         });
         assert_eq!(group.len(), 3);
         assert_eq!(group[1], ("Chat-Group-ID".into(), "abcDEF123_-x".into()));
@@ -262,6 +267,7 @@ Chat-Group-Name: =?utf-8?q?Famili=C3=A9?=\r\n\
         let invalid = chat_extra_headers(&ChatSendOptions {
             group_id: Some("bad id".into()),
             group_name: Some("Family".into()),
+            ..Default::default()
         });
         assert_eq!(invalid.len(), 1);
     }

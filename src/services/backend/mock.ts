@@ -109,6 +109,13 @@ const labsSlot = createPersistedSlot<Record<string, boolean>>('satchel.mock.labs
 });
 const labsFlags = persistence.read(labsSlot);
 const chatThreads = new Map<string, { groupId: string | null; groupName: string | null; encrypted: boolean }>();
+/*
+ * The account's own OpenPGP key for chats. `?mockChatKeyLocked` starts it
+ * locked, behind the passphrase below, as after a restart.
+ */
+const MOCK_CHAT_KEY_ID = 'pgp-own-chat';
+const MOCK_CHAT_KEY_PASSPHRASE = 'correct horse';
+let chatKeyUnlocked = !(typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockChatKeyLocked'));
 function seedChats() {
   if (chatThreads.size > 0) return;
   for (const chat of mockChatThreads()) {
@@ -1742,15 +1749,19 @@ const handlers: Record<string, Handler> = {
         encryption: chat.encrypted ? 'encrypt' : 'disable',
       })),
       own_key: chat.encrypted,
+      own_key_id: chat.encrypted ? MOCK_CHAT_KEY_ID : null,
+      own_key_unlocked: chat.encrypted && chatKeyUnlocked,
       encrypts: chat.encrypted,
     };
   },
   send_chat_message: (payload) => {
-    const { thread_id: threadId, text } = input(payload) as { thread_id: string; text: string };
+    const { thread_id: threadId, text, allow_unsigned: allowUnsigned } = input(payload) as { thread_id: string; text: string; allow_unsigned?: boolean };
     if (!text.trim()) throw new Error('backend.errors.unexpected');
     const thread = findThread(threadId);
     const chat = chatThreads.get(threadId);
     if (!thread || !chat) throw new Error('backend.errors.chatNotAChat');
+    // Like `signing_decision`: an encrypted reply waits for the key or an explicit unsigned send.
+    if (chat.encrypted && !chatKeyUnlocked && !allowUnsigned) throw new Error('backend.errors.chatKeyLocked');
     const account = accounts.find((entry) => entry.id === thread.accountId);
     const own = account?.email ?? '';
     const now = new Date().toISOString();
@@ -2466,6 +2477,15 @@ const handlers: Record<string, Handler> = {
   list_aliases: () => [],
   list_smime_certificates: () => [],
   list_pgp_keys: () => [],
+  // Only the chat fixture's own key: without a passphrase it stays locked.
+  unlock_pgp_keys: (payload) => {
+    const { key_id: keyId, passphrase } = input(payload) as { key_id: string | null; passphrase: string | null };
+    if (keyId === MOCK_CHAT_KEY_ID && passphrase === MOCK_CHAT_KEY_PASSPHRASE) {
+      chatKeyUnlocked = true;
+      return { unlocked: 1, key_ids: [MOCK_CHAT_KEY_ID] };
+    }
+    throw new Error(passphrase ? 'backend.errors.pgpPassphraseMismatch' : 'backend.errors.pgpNoPrivateKeys');
+  },
   pgp_engine_status: () => ({
     available: false, engine: 'sequoia', can_decrypt: false, can_sign: false, can_encrypt: false,
   }),

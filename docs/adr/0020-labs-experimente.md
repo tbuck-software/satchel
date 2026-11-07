@@ -1,4 +1,4 @@
-# 0019 Labs: Experimente hinter einem Schalter pro Gerät
+# 0020 Labs: Experimente hinter einem Schalter pro Gerät
 
 Status: vorgeschlagen 2026-11-07
 

@@ -157,7 +157,7 @@ pub async fn execute_send_action(
             .unwrap_or_else(|| account.email.clone());
         outgoing.request_read_receipt_to = Some(rr_addr);
     }
-    if payload.input.chat.is_some() {
+    if let Some(chat) = payload.input.chat.as_ref() {
         apply_chat_autocrypt(
             pool,
             app,
@@ -165,6 +165,7 @@ pub async fn execute_send_action(
             &mut outgoing,
             &payload.account_id,
             &account.email,
+            chat.allow_unsigned,
         )
         .await?;
     }
@@ -491,8 +492,10 @@ async fn apply_pgp_send_transform(
 /// mail", "Message encryption"): our `Autocrypt:` header when we hold a key
 /// for the From address, and PGP/MIME encryption to the peers' Autocrypt keys
 /// and our own when the recommendation for every recipient is "encrypt". The
-/// message is signed when the key is unlocked; a locked key still encrypts,
-/// unsigned, rather than holding the message for a passphrase.
+/// message is signed. A key locked again since the send was queued (a
+/// restart) holds it in the Outbox with `chatKeyLocked`, a retryable error,
+/// until the key is unlocked, unless the sender chose unsigned
+/// (`commands::chats::signing_decision`).
 async fn apply_chat_autocrypt(
     pool: &SqlitePool,
     app: &tauri::AppHandle,
@@ -500,6 +503,7 @@ async fn apply_chat_autocrypt(
     outgoing: &mut OutgoingMessage,
     account_id: &str,
     fallback_from_address: &str,
+    allow_unsigned: bool,
 ) -> Result<(), String> {
     let from = sender_identity(outgoing, fallback_from_address);
     let recipients = crypto_recipients(outgoing);
@@ -528,9 +532,12 @@ async fn apply_chat_autocrypt(
     {
         return Ok(());
     }
+    let unlocked = pgp::key_is_unlocked(state, key_id).await;
+    let sign = crate::commands::chats::signing_decision(true, unlocked, allow_unsigned)
+        .map_err(str::to_string)?;
     outgoing.pgp_encrypt_to_recipients = true;
     outgoing.recipient_public_keys = plan.peer_keys.clone();
-    if pgp::key_is_unlocked(state, key_id).await {
+    if sign {
         outgoing.pgp_sign_with_key_id = Some(key_id.clone());
     }
     Ok(())

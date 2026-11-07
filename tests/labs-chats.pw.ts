@@ -82,6 +82,51 @@ test.describe('desktop', () => {
   });
 });
 
+test.describe('locked own key', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('asks to unlock before an encrypted reply, and sends unsigned only when chosen', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('satchel.mock.labs', JSON.stringify({ chats: true })));
+    await page.goto('/?mockChatKeyLocked=1');
+    await sidebarChats(page).click();
+    await page.locator('[data-chat-row]', { hasText: 'Lena Brandt' }).click();
+    const chat = page.getByRole('region', { name: 'Lena Brandt', exact: true });
+    const own = chat.locator('[data-chat-bubble="own"]');
+    await expect(own).toHaveCount(2);
+    const input = chat.locator('[data-chat-input]');
+    const unlock = page.getByRole('dialog', { name: 'Unlock your key to send' });
+    const unsigned = page.getByRole('dialog', { name: 'Send without your signature?' });
+
+    // A wrong passphrase asks again; declining both questions keeps the text and sends nothing.
+    await input.fill('Bin gleich da');
+    await input.press('Enter');
+    await unlock.getByLabel('Passphrase').fill('wrong');
+    await unlock.getByRole('button', { name: 'Unlock and send' }).click();
+    await expect(page.getByText('That passphrase does not unlock the key.')).toBeVisible();
+    await unlock.getByRole('button', { name: 'Cancel' }).click();
+    await unsigned.getByRole('button', { name: 'Cancel' }).click();
+    await expect(own).toHaveCount(2);
+    await expect(input).toHaveValue('Bin gleich da');
+
+    // The right passphrase unlocks the key and the reply goes out (signed).
+    await input.press('Enter');
+    await unlock.getByLabel('Passphrase').fill('correct horse');
+    await unlock.getByRole('button', { name: 'Unlock and send' }).click();
+    await expect(own).toHaveCount(3);
+    await expect(input).toHaveValue('');
+
+    // Locked again (a restart): declining the unlock and choosing unsigned sends it.
+    await page.goto('/?mockChatKeyLocked=1');
+    await sidebarChats(page).click();
+    await page.locator('[data-chat-row]', { hasText: 'Lena Brandt' }).click();
+    await chat.locator('[data-chat-input]').fill('Ohne Signatur');
+    await chat.locator('[data-chat-input]').press('Enter');
+    await unlock.getByRole('button', { name: 'Cancel' }).click();
+    await unsigned.getByRole('button', { name: 'Send unsigned' }).click();
+    await expect(chat.locator('[data-chat-bubble="own"]').last()).toContainText('Ohne Signatur');
+  });
+});
+
 test.describe('phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 

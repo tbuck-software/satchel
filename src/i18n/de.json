@@ -260,6 +260,7 @@
       "calendarRichDescriptionReadOnly": "Diese Beschreibung ist in Outlook formatiert und verlöre hier Links und Layout. Bearbeite sie in Outlook.",
       "calendarTimeInvalid": "Gib eine gültige Terminzeit ein.",
       "calendarTitleRequired": "Gib einen Termintitel ein.",
+      "chatKeyLocked": "Entsperre deinen OpenPGP-Schlüssel, um diese verschlüsselte Antwort zu senden.",
       "chatNoRecipient": "Dieser Chat hat keinen Empfänger.",
       "chatNotAChat": "Das ist kein Chat.",
       "composeWindowUnsupported": "Ein eigenes Schreibfenster gibt es nur auf dem Desktop.",
@@ -804,7 +805,20 @@
     "showAsMail": "Als Mail anzeigen",
     "title": "Chats",
     "today": "Heute",
+    "unlock": {
+      "body": "Diese Antwort wird Ende-zu-Ende-verschlüsselt und mit deinem OpenPGP-Schlüssel für {address} signiert.",
+      "confirm": "Entsperren und senden",
+      "failed": "Der Schlüssel konnte nicht entsperrt werden.",
+      "label": "Passphrase",
+      "title": "Schlüssel entsperren, um zu senden",
+      "wrong": "Diese Passphrase entsperrt den Schlüssel nicht."
+    },
     "unread": "{count} ungelesen",
+    "unsigned": {
+      "body": "Dein Schlüssel bleibt gesperrt. Die Antwort ist trotzdem Ende-zu-Ende-verschlüsselt, aber die Empfänger können nicht prüfen, dass sie von dir kommt.",
+      "confirm": "Unsigniert senden",
+      "title": "Ohne deine Signatur senden?"
+    },
     "yesterday": "Gestern"
   },
   "cleanup": {
