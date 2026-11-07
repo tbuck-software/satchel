@@ -382,6 +382,28 @@
       "topicNoteContentEmpty": "Enter note content.",
       "topicPersistenceFailed": "The topic could not be saved. Please try again.",
       "topicStatusInvalid": "The topic status is invalid.",
+      "translation": {
+        "consentRequired": "Mail from this account may not be sent for translation yet.",
+        "credentialsUnavailable": "The key store is locked, so the API key cannot be read or saved.",
+        "encrypted": "Encrypted mail is not sent for translation.",
+        "engineUnknown": "Unknown translation engine.",
+        "freePlanNotForMail": "DeepL API Free keys can't be used for mail: DeepL forbids personal data on the free API, and every mail contains some. Translating needs a Pro key.",
+        "invalidKey": "DeepL did not accept the API key. Check it in Settings → Translation.",
+        "invalidResponse": "DeepL's answer could not be read.",
+        "keyMalformed": "That does not look like an API key. Paste the key without spaces or line breaks.",
+        "keyMissing": "No API key is saved for the translation engine.",
+        "messageNotFound": "This message is not stored on this device.",
+        "network": "DeepL could not be reached. Check the connection.",
+        "notConfigured": "Translation is not set up. Choose an engine in Settings → Translation.",
+        "nothingToTranslate": "This message has no text to translate.",
+        "persistenceFailed": "The translation could not be saved on this device.",
+        "quotaExceeded": "The DeepL character allowance is used up for this billing period.",
+        "rateLimited": "DeepL is getting too many requests. Try again in a minute.",
+        "rejected": "DeepL refused the request.",
+        "tooLarge": "This message is too long to translate in one go.",
+        "unavailable": "DeepL is not available right now. Try again later.",
+        "unsupportedLanguage": "The translation engine does not translate into this language."
+      },
       "trayDestinationInvalid": "This tray destination is not available.",
       "trayMessageNotFound": "This email is no longer available.",
       "trayThreadInvalid": "This tray email reference is invalid.",
@@ -1150,6 +1172,10 @@
       "toggleSelection": {
         "keywords": "select toggle",
         "label": "Toggle selection"
+      },
+      "translateMessage": {
+        "keywords": "translate translation deepl language original",
+        "label": "Translate message"
       },
       "trash": {
         "keywords": "delete trash",

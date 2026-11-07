@@ -382,6 +382,28 @@
       "topicNoteContentEmpty": "Gib einen Notizinhalt ein.",
       "topicPersistenceFailed": "Das Thema konnte nicht gespeichert werden. Bitte versuche es erneut.",
       "topicStatusInvalid": "Der Themenstatus ist ungültig.",
+      "translation": {
+        "consentRequired": "Mails dieses Kontos dürfen noch nicht zur Übersetzung gesendet werden.",
+        "credentialsUnavailable": "Der Schlüsselbund ist gesperrt, der API-Schlüssel kann nicht gelesen oder gespeichert werden.",
+        "encrypted": "Verschlüsselte Mails werden nicht zur Übersetzung gesendet.",
+        "engineUnknown": "Unbekannte Übersetzungs-Engine.",
+        "freePlanNotForMail": "Kostenlose DeepL-API-Schlüssel taugen nicht für Mails: DeepL verbietet über die kostenlose API personenbezogene Daten, und jede Mail enthält welche. Für Übersetzungen braucht es einen Pro-Schlüssel.",
+        "invalidKey": "DeepL hat den API-Schlüssel nicht angenommen. Prüfe ihn unter Einstellungen → Übersetzung.",
+        "invalidResponse": "Die Antwort von DeepL konnte nicht gelesen werden.",
+        "keyMalformed": "Das sieht nicht nach einem API-Schlüssel aus. Füge den Schlüssel ohne Leerzeichen und Zeilenumbrüche ein.",
+        "keyMissing": "Für die Übersetzungs-Engine ist kein API-Schlüssel gespeichert.",
+        "messageNotFound": "Diese Nachricht ist auf diesem Gerät nicht gespeichert.",
+        "network": "DeepL konnte nicht erreicht werden. Prüfe die Verbindung.",
+        "notConfigured": "Übersetzung ist nicht eingerichtet. Wähle eine Engine unter Einstellungen → Übersetzung.",
+        "nothingToTranslate": "Diese Nachricht hat keinen Text zum Übersetzen.",
+        "persistenceFailed": "Die Übersetzung konnte auf diesem Gerät nicht gespeichert werden.",
+        "quotaExceeded": "Das DeepL-Zeichenkontingent ist für diesen Abrechnungszeitraum aufgebraucht.",
+        "rateLimited": "DeepL bekommt gerade zu viele Anfragen. Versuche es in einer Minute erneut.",
+        "rejected": "DeepL hat die Anfrage abgelehnt.",
+        "tooLarge": "Diese Nachricht ist zu lang, um sie in einem Stück zu übersetzen.",
+        "unavailable": "DeepL ist gerade nicht erreichbar. Versuche es später erneut.",
+        "unsupportedLanguage": "Die Übersetzungs-Engine übersetzt nicht in diese Sprache."
+      },
       "trayDestinationInvalid": "Dieses Tray-Ziel ist nicht verfügbar.",
       "trayMessageNotFound": "Diese E-Mail ist nicht mehr verfügbar.",
       "trayThreadInvalid": "Diese Tray-E-Mail-Referenz ist ungültig.",
@@ -1150,6 +1172,10 @@
       "toggleSelection": {
         "keywords": "select toggle auswählen",
         "label": "Auswahl umschalten"
+      },
+      "translateMessage": {
+        "keywords": "übersetzen übersetzung deepl sprache original translate",
+        "label": "Nachricht übersetzen"
       },
       "trash": {
         "keywords": "delete trash löschen",

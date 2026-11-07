@@ -73,6 +73,13 @@ const TRANSLATION = {
   created_at: '2026-11-06T10:00:00Z',
 };
 
+/** A click, then the lazy consent question and the backend calls after it. */
+async function settle() {
+  await flushPromises();
+  await vi.dynamicImportSettled();
+  await flushPromises();
+}
+
 async function render(consented = true, collapsed = false) {
   useTranslationStore().apply(settings(consented));
   vi.spyOn(useThreadsStore(), 'find').mockReturnValue({ id: 'thread-1', accountId: 'acc-1' } as never);
@@ -142,13 +149,13 @@ describe('translating a message', () => {
     ask.mockResolvedValueOnce(false);
     const view = await render(false);
     await view.get('.message-translate-trigger').trigger('click');
-    await flushPromises();
+    await settle();
     expect(ask).toHaveBeenCalledTimes(1);
     expect(backend.consent).not.toHaveBeenCalled();
     expect(backend.translate).not.toHaveBeenCalled();
 
     await view.get('.message-translate-trigger').trigger('click');
-    await flushPromises();
+    await settle();
     expect(backend.consent).toHaveBeenCalledWith('deepl', 'acc-1', true);
     expect(backend.translate).toHaveBeenCalledTimes(1);
   });
@@ -157,7 +164,7 @@ describe('translating a message', () => {
     ask.mockResolvedValueOnce(false);
     const view = await render(false);
     await view.get('.message-translate-trigger').trigger('click');
-    await flushPromises();
+    await settle();
     const question = ask.mock.calls[0]![0] as { body: string; detail: string };
     expect(question.body).toContain('DeepL API Pro');
     expect(question.detail).toContain('72 hours');

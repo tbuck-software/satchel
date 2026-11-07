@@ -46,8 +46,6 @@ import { summarizeAuthentication } from '@/utils/messageAuthentication';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 import { useMessageSecurityActions } from '@/composables/useMessageSecurityActions';
 import { useMessageTranslation } from '@/composables/useMessageTranslation';
-import { useConfirm } from '@/composables/useConfirm';
-import { useTranslationStore } from '@/stores/translation';
 import { languageName } from '@/utils/languageName';
 import MessageBodyViewSwitch from './MessageBodyViewSwitch.vue';
 import { BODY_VIEW_SWITCH } from './bodyViewSwitch';
@@ -371,26 +369,11 @@ provide(IMAGE_GUARD_CHOICES, imageGuard);
  * in the same isolated frame as the original, through the same CSP; only
  * the HTML handed to the renderer changes.
  */
-const confirm = useConfirm();
-const translationStore = useTranslationStore();
 
+/** The consent question loads with its copy only when it is asked. */
 async function requestTranslationConsent(accountId: string): Promise<boolean> {
-  const account = accountsStore.accounts.find((entry) => entry.id === accountId);
-  const name = account?.email || account?.displayName || accountId;
-  // Only a Pro key gets this far: a free key is refused before any question.
-  const allowed = await confirm.ask({
-    title: t('translation.consent.title'),
-    body: t('translation.consent.body', { account: name, plan: t('settings.translation.planPro') }),
-    detail: `${t('settings.translation.termsPro')} ${t('translation.consent.detail')}`,
-    confirmLabel: t('translation.consent.confirm'),
-  });
-  if (!allowed) return false;
-  try {
-    await translationStore.setConsent(accountId, true);
-    return true;
-  } catch {
-    return false;
-  }
+  const { askTranslationConsent } = await import('./translationConsent');
+  return askTranslationConsent(accountId);
 }
 
 const messageTranslation = useMessageTranslation(
