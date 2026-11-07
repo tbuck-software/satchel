@@ -97,6 +97,9 @@ struct StoredMessage {
     message_is_draft: bool,
     message_is_sent: bool,
     attachment_ids: Vec<String>,
+    /// The server reported another workflow marker for this copy than the
+    /// stored one.
+    workflow_marker_changed: bool,
 }
 
 pub(crate) const INGEST_BATCH_SIZE: usize = 100;
@@ -499,13 +502,20 @@ async fn persist_provider_message(
     } else {
         provider_message_id
     };
-    let prior_message = sqlx::query_as::<_, (Option<String>, Option<String>)>(
-        "SELECT thread_id, message_id_header FROM messages WHERE id = ?",
+    let prior_message = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
+        "SELECT thread_id, message_id_header, remote_workflow_marker FROM messages WHERE id = ?",
     )
     .bind(&message_id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(|error| error.to_string())?;
+    // Only a marker that changed on this copy is worth the thread's
+    // reconciliation; a mailbox without markers costs nothing extra.
+    let workflow_marker_changed = message.workflow_marker.is_some_and(|marker| {
+        satchel_core::workflow::remote_marker::WorkflowMarker::from_column(
+            prior_message.as_ref().and_then(|row| row.2.as_deref()),
+        ) != marker
+    });
     let prior_thread_id = prior_message
         .as_ref()
         .and_then(|row| row.0.as_deref())
@@ -750,8 +760,8 @@ async fn persist_provider_message(
     // without its parts is missing information, not reporting a message that
     // lost its attachments — mail is immutable on the server.
     sqlx::query(
-        "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, in_reply_to, references_header, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, date, body_text, body_html, original_body_html, original_source, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, remote_uid, remote_id, raw_size, raw_headers, remote_draft_id, category, provider_labels, list_unsubscribe, list_unsubscribe_post, auth_spf, auth_dkim, auth_dmarc, smime_encrypted, smime_signed, pgp_signed, trust_metadata, created_at, updated_at, received_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, in_reply_to, references_header, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, date, body_text, body_html, original_body_html, original_source, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, remote_uid, remote_id, raw_size, raw_headers, remote_draft_id, category, provider_labels, list_unsubscribe, list_unsubscribe_post, auth_spf, auth_dkim, auth_dmarc, smime_encrypted, smime_signed, pgp_signed, trust_metadata, created_at, updated_at, received_at, remote_workflow_marker)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             folder_id = excluded.folder_id,
             thread_id = excluded.thread_id,
@@ -791,6 +801,7 @@ async fn persist_provider_message(
             pgp_signed = excluded.pgp_signed,
             trust_metadata = excluded.trust_metadata,
             remote_draft_id = COALESCE(excluded.remote_draft_id, messages.remote_draft_id),
+            remote_workflow_marker = CASE WHEN ? THEN excluded.remote_workflow_marker ELSE messages.remote_workflow_marker END,
             draft_attachments_json = CASE
                 WHEN excluded.is_draft = 1 THEN NULL
                 ELSE messages.draft_attachments_json
@@ -845,10 +856,14 @@ async fn persist_provider_message(
     .bind(&now)
     .bind(&now)
     .bind(message.received_at_rfc3339.as_deref())
-    // The two guards of the conflict clause; its placeholders come after every
-    // one of the inserted values.
+    // `NULL` is no marker.
+    .bind(message.workflow_marker.and_then(|marker| marker.as_column()))
+    // The guards of the conflict clause; their placeholders come after every
+    // one of the inserted values. A provider that does not report markers
+    // keeps the stored one.
     .bind(flags_locked)
     .bind(flags_locked)
+    .bind(message.workflow_marker.is_some())
     .execute(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;
@@ -974,8 +989,23 @@ async fn persist_provider_message(
             sqlx::query("UPDATE follow_up_reminders SET status = 'resolved', resolved_at = ?, updated_at = ? WHERE thread_id = ? AND status = 'pending'")
                 .bind(&now).bind(&now).bind(&thread_id).execute(&mut **tx).await.map_err(|error| error.to_string())?;
             if folder_type == "inbox" {
-                sqlx::query("UPDATE threads SET workflow_state = 'inbox', board_column = 'inbox', snooze_until = NULL, workflow_changed_at = ?, updated_at = ? WHERE id = ? AND workflow_state IN ('snoozed', 'aside', 'done', 'waiting')")
-                    .bind(&now).bind(&now).bind(&thread_id).execute(&mut **tx).await.map_err(|error| error.to_string())?;
+                let resurfaced = sqlx::query("UPDATE threads SET workflow_state = 'inbox', board_column = 'inbox', snooze_until = NULL, workflow_changed_at = ?, updated_at = ? WHERE id = ? AND workflow_state IN ('snoozed', 'aside', 'done', 'waiting')")
+                    .bind(&now).bind(&now).bind(&thread_id).execute(&mut **tx).await.map_err(|error| error.to_string())?
+                    .rows_affected() > 0;
+                // The reply brought the thread back: its old Done or Snooze
+                // keyword comes off, so other clients stop showing it. Nothing
+                // is queued when the server holds no marker for it. The worker
+                // picks the row up on its next pass.
+                if resurfaced {
+                    satchel_core::sync::workflow_markers::enqueue_workflow_marker_in_transaction(
+                        tx,
+                        &SyncQueue::new(),
+                        &thread_id,
+                        &satchel_core::workflow::remote_marker::WorkflowMarker::None,
+                        None,
+                    )
+                    .await?;
+                }
                 sqlx::query("INSERT OR IGNORE INTO ingest_effects (message_id, thread_id, account_id, run_rules, created_at) VALUES (?, ?, ?, 1, ?)")
                     .bind(&message_id).bind(&thread_id).bind(account_id).bind(&now)
                     .execute(&mut **tx).await.map_err(|error| error.to_string())?;
@@ -990,6 +1020,7 @@ async fn persist_provider_message(
         message_is_draft,
         message_is_sent,
         attachment_ids,
+        workflow_marker_changed,
     })
 }
 
@@ -1015,10 +1046,25 @@ async fn finish_provider_message(
         message_is_draft,
         message_is_sent,
         attachment_ids,
+        workflow_marker_changed,
     } = stored;
     // Provider downloads and event publishing follow the committed rows.
     if folder_type == "archive" || folder_type == "aside" || is_snooze_folder(folder_remote_id) {
         reconcile_external_workflow_states(pool, &HashSet::from([thread_id.clone()])).await?;
+    }
+    // Done or Snooze set on another device or client travels as a keyword
+    // or label on the copy just stored.
+    if workflow_marker_changed {
+        let changed = satchel_core::sync::workflow_markers::reconcile_remote_workflow_markers(
+            pool,
+            &HashSet::from([thread_id.clone()]),
+        )
+        .await?;
+        if let Some(events) = events.filter(|_| !changed.is_empty()) {
+            events.publish(crate::events::bus::AppEvent::ThreadsUpdated(
+                changed.into_iter().collect(),
+            ));
+        }
     }
 
     // Calendar parts and inline images are downloaded from the provider, so
@@ -1337,6 +1383,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,
@@ -2075,6 +2122,112 @@ mod tests {
             .fetch_one(pool)
             .await
             .expect("is_read")
+    }
+
+    /// Snoozed on another device: the copy arrives with the IMAP keyword,
+    /// and this device snoozes the thread for the fallback day (the wake
+    /// time does not travel on IMAP), so its own snooze worker wakes it. A
+    /// later sync from a provider that does not report markers leaves it.
+    #[tokio::test]
+    async fn a_snooze_keyword_from_another_device_snoozes_the_thread_here() {
+        use satchel_core::workflow::remote_marker::{Snooze, WorkflowMarker};
+        let pool = ingest_pool().await;
+        // After the first INBOX snapshot; before it a found snooze is only seen.
+        satchel_core::sync::workflow_markers::mark_snapshot_baseline(&pool, "account")
+            .await
+            .unwrap();
+        let snoozed = WorkflowMarker::Snoozed(Snooze {
+            wake: None,
+            generation: 1,
+        });
+        let mut message = envelope("41");
+        message.workflow_marker = Some(snoozed);
+        ingest(&pool, "inbox", &message).await.expect("ingest");
+        let (state, until): (String, Option<String>) =
+            sqlx::query_as("SELECT workflow_state, snooze_until FROM threads")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(state, "snoozed");
+        let until = chrono::DateTime::parse_from_rfc3339(&until.unwrap()).unwrap();
+        assert!(
+            until.with_timezone(&chrono::Utc) > chrono::Utc::now() + chrono::Duration::hours(23)
+        );
+
+        message.workflow_marker = None;
+        ingest(&pool, "inbox", &message).await.expect("re-ingest");
+        let (state, marker): (String, Option<String>) = sqlx::query_as(
+            "SELECT t.workflow_state, m.remote_workflow_marker FROM threads t JOIN messages m ON m.thread_id = t.id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(state, "snoozed");
+        assert_eq!(marker, snoozed.as_column());
+    }
+
+    /// A reply brings a snoozed thread back; its keyword comes off on the
+    /// server too, so other clients stop showing it as snoozed.
+    #[tokio::test]
+    async fn a_reply_to_a_snoozed_thread_queues_the_keyword_off() {
+        use satchel_core::workflow::remote_marker::{Snooze, WorkflowMarker};
+        let pool = ingest_pool().await;
+        sqlx::query("UPDATE folders SET uidvalidity = 7")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut parent = envelope("parent");
+        parent.message_id_header = Some("<parent@example.test>".into());
+        parent.date_rfc3339 = "2026-01-01T08:00:00Z".into();
+        ingest(&pool, "inbox", &parent).await.unwrap();
+        let snoozed = WorkflowMarker::Snoozed(Snooze {
+            wake: Some(chrono::Utc::now() + chrono::Duration::hours(4)),
+            generation: 1,
+        });
+        sqlx::query(
+            "UPDATE threads SET workflow_state = 'snoozed', snooze_until = '2026-12-01T00:00:00Z', remote_workflow_marker = ?",
+        )
+        .bind(snoozed.as_column())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE accounts SET last_sync_at = '2026-01-01T12:00:00Z'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut reply = envelope("overnight");
+        reply.in_reply_to = parent.message_id_header.clone();
+        reply.from_address = "external@example.test".into();
+        reply.date_rfc3339 = "2026-01-02T03:00:00Z".into();
+        ingest(&pool, "inbox", &reply).await.unwrap();
+        let (state, markers): (String, i64) = sqlx::query_as(
+            "SELECT (SELECT workflow_state FROM threads LIMIT 1),
+                    (SELECT COUNT(*) FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_marker' AND json_extract(payload, '$.marker') = '')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(state, "inbox");
+        assert_eq!(markers, 1);
+    }
+
+    /// The first sync after the upgrade: every copy reports "no marker".
+    /// Nothing is written for it, on the message or on the thread.
+    #[tokio::test]
+    async fn a_mailbox_without_markers_writes_no_marker_columns() {
+        use satchel_core::workflow::remote_marker::WorkflowMarker;
+        let pool = ingest_pool().await;
+        let mut message = envelope("43");
+        message.workflow_marker = Some(WorkflowMarker::None);
+        ingest(&pool, "inbox", &message).await.expect("ingest");
+        ingest(&pool, "inbox", &message).await.expect("re-ingest");
+        let (message_marker, thread_marker): (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT m.remote_workflow_marker, t.remote_workflow_marker FROM messages m JOIN threads t ON t.id = m.thread_id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!((message_marker, thread_marker), (None, None));
     }
 
     /// The user marked the thread read; the mutation is queued and has not
@@ -3648,6 +3801,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,
@@ -3838,6 +3992,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,
@@ -3932,6 +4087,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,
@@ -4014,6 +4170,7 @@ mod tests {
                 remote_id: "replacement-message".to_string(),
                 is_read: None,
                 is_starred: None,
+                workflow_marker: None,
             }],
             // Gmail: neither side names a generation.
             None,

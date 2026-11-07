@@ -1152,6 +1152,10 @@ export default {
                 }
             }
         },
+        "list_local_only_workflow_accounts": {
+            "kind": "object",
+            "fields": {}
+        },
         "list_mailboxes": {
             "kind": "object",
             "fields": {}

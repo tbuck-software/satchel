@@ -9,6 +9,7 @@ import { useUiStore } from '@/stores/ui';
 import { useSettingsLocation } from '@/composables/useSettingsLocation';
 import { useCertificateTrustStore } from '@/stores/certificateTrust';
 import { useAccountQuotaStore } from '@/stores/accountQuota';
+import { useWorkflowSyncStore } from '@/stores/workflowSync';
 import { certificateShort, formatCertificateMoment } from '@/utils/certificateLabels';
 import {
   backendAutoconfigureGroupware,
@@ -27,6 +28,7 @@ import { transportErrorLabel, transportErrorText } from '@/utils/transportLabels
 import AccountVisibilitySettings from './AccountVisibilitySettings.vue';
 import AccountAppearanceSettings from './AccountAppearanceSettings.vue';
 import AccountQuotaSettings from './AccountQuotaSettings.vue';
+import AccountWorkflowSyncNote from './AccountWorkflowSyncNote.vue';
 import AccountAvatar from '@/components/common/AccountAvatar.vue';
 import AppButton from '@/components/ui/AppButton.vue';
 
@@ -40,6 +42,9 @@ const certificates = useCertificateTrustStore();
 const quotas = useAccountQuotaStore();
 // The numbers change at most every few hours; one read per visit is plenty.
 onMounted(() => void quotas.load());
+const workflowSync = useWorkflowSyncStore();
+// Settles on the first sync after an account is added; one read per visit.
+onMounted(() => void workflowSync.load());
 
 /** A rejected certificate or a running exception, as one line that opens the details. */
 function certificateLine(accountId: string): string | null {
@@ -563,6 +568,7 @@ async function removeAccount(accountId: string, email: string) {
           </AppButton>
         </div>
         <AccountQuotaSettings :account-id="account.id" />
+        <AccountWorkflowSyncNote :account-id="account.id" />
         <AccountAppearanceSettings :account-id="account.id" />
         <AccountVisibilitySettings :account-id="account.id" />
         <!-- Removal last and on its own, away from the everyday actions. -->

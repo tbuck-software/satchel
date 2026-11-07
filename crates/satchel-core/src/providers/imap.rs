@@ -1863,6 +1863,12 @@ impl MailProvider for ImapProvider {
         folder: &str,
     ) -> crate::sync::errors::SyncResult<Option<crate::providers::traits::RemoteMessageStateSnapshot>>
     {
+        // Markers are not written to Gmail's IMAP (`set_workflow_marker`);
+        // the snapshot says so, and the account shows as local-only.
+        let gmail_free = !self
+            .config
+            .as_ref()
+            .is_some_and(|config| is_gmail_imap_host(&config.host));
         let mut session = self.login_session().await?;
         let mailbox = timeout(Self::op_timeout(), session.select(folder))
             .await
@@ -1884,6 +1890,7 @@ impl MailProvider for ImapProvider {
             return Ok(Some(crate::providers::traits::RemoteMessageStateSnapshot {
                 states: Vec::new(),
                 remote_uidvalidity: Some(remote_uidvalidity),
+                custom_keywords: Some(keyword_support(gmail_free, &mailbox.permanent_flags)),
             }));
         }
 
@@ -1910,6 +1917,7 @@ impl MailProvider for ImapProvider {
                             .flags()
                             .any(|flag| matches!(flag, async_imap::types::Flag::Flagged)),
                     ),
+                    workflow_marker: Some(workflow_marker_from_flags(entry.flags())),
                 })
             })
             .collect();
@@ -1918,6 +1926,7 @@ impl MailProvider for ImapProvider {
         Ok(Some(crate::providers::traits::RemoteMessageStateSnapshot {
             states,
             remote_uidvalidity: Some(remote_uidvalidity),
+            custom_keywords: Some(keyword_support(gmail_free, &mailbox.permanent_flags)),
         }))
     }
 
@@ -1994,6 +2003,45 @@ impl MailProvider for ImapProvider {
 
         let _ = timeout(Self::op_timeout(), session.logout()).await;
         Ok(())
+    }
+
+    async fn set_workflow_marker(
+        &self,
+        targets: &[crate::providers::traits::MarkerTarget],
+        marker: &crate::providers::traits::WorkflowMarker,
+    ) -> crate::sync::errors::SyncResult<crate::providers::traits::WorkflowMarkerReport> {
+        use crate::providers::traits::WorkflowMarkerReport;
+        // Gmail's IMAP turns keywords into labels of its own; the Gmail API
+        // path carries markers for Gmail. An IMAP account on Gmail's host
+        // keeps them on the device.
+        if self
+            .config
+            .as_ref()
+            .is_some_and(|config| is_gmail_imap_host(&config.host))
+        {
+            return Ok(WorkflowMarkerReport::refused(targets.len()));
+        }
+        let plan = plan_marker_writes(targets);
+        let wanted = marker.imap_keywords();
+        let mut tally = MarkerTally::new(targets.len(), !wanted.is_empty());
+        if plan.is_empty() {
+            return Ok(tally.report());
+        }
+        let mut session = self.login_session().await?;
+        // One session for every thread of the row, one SELECT per folder.
+        for (folder, group) in plan {
+            match store_workflow_marker(&mut session, &folder, &group, &wanted, Self::op_timeout())
+                .await
+            {
+                Ok(outcome) => tally.add(&folder, &group, outcome),
+                Err(error) => {
+                    let _ = timeout(Self::op_timeout(), session.logout()).await;
+                    return Err(error.into());
+                }
+            }
+        }
+        let _ = timeout(Self::op_timeout(), session.logout()).await;
+        Ok(tally.report())
     }
 
     async fn create_folder(&self, path: &str) -> crate::sync::errors::SyncResult<()> {
@@ -4658,6 +4706,380 @@ fn extracted_fallback_could_help(parsed: &ParsedBody) -> bool {
         || (!parsed.trust.root_crypto && (parsed.text.is_none() || parsed.html.is_none()))
 }
 
+/// What a mailbox says about Satchel's keywords, for the account verdict.
+fn keyword_support(
+    gmail_free: bool,
+    permanent_flags: &[async_imap::types::Flag<'_>],
+) -> crate::providers::traits::KeywordSupport {
+    use crate::providers::traits::KeywordSupport;
+    if !gmail_free {
+        KeywordSupport::GmailHost
+    } else if allows_custom_keywords(permanent_flags) {
+        KeywordSupport::Allowed
+    } else {
+        KeywordSupport::NotAllowed
+    }
+}
+
+/// Gmail's IMAP hosts. Keywords there become Gmail labels with Gmail's own
+/// semantics, so markers are not written over IMAP to them.
+pub(crate) fn is_gmail_imap_host(host: &str) -> bool {
+    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    host == "imap.gmail.com" || host == "imap.googlemail.com" || host.ends_with(".googlemail.com")
+}
+
+/// One copy in a folder's marker write.
+#[derive(Debug, Clone)]
+struct MarkerCopyRef {
+    target: usize,
+    uid: u32,
+    expected: Option<crate::providers::traits::WorkflowMarker>,
+}
+
+#[derive(Debug, Clone)]
+struct MarkerFolderWrite {
+    uidvalidity: u32,
+    copies: Vec<MarkerCopyRef>,
+}
+
+/// Group every target's copies by folder. A copy without a usable UID or
+/// generation is left out: best effort, never a reason to fail the row.
+fn plan_marker_writes(
+    targets: &[crate::providers::traits::MarkerTarget],
+) -> std::collections::BTreeMap<String, MarkerFolderWrite> {
+    let mut plan = std::collections::BTreeMap::<String, MarkerFolderWrite>::new();
+    for (index, target) in targets.iter().enumerate() {
+        for reference in &target.refs {
+            let Some(folder) = reference
+                .source_folder
+                .as_deref()
+                .map(str::trim)
+                .filter(|folder| !folder.is_empty())
+            else {
+                continue;
+            };
+            let (Some(uid), Some(uidvalidity)) = (
+                reference
+                    .remote_id
+                    .trim()
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|uid| *uid > 0),
+                reference.source_uidvalidity.filter(|value| *value != 0),
+            ) else {
+                continue;
+            };
+            let entry = plan
+                .entry(folder.to_string())
+                .or_insert_with(|| MarkerFolderWrite {
+                    uidvalidity,
+                    copies: Vec::new(),
+                });
+            // Copies of another generation of the same folder cannot be
+            // addressed in this SELECT; they are stale refs anyway.
+            if entry.uidvalidity == uidvalidity {
+                entry.copies.push(MarkerCopyRef {
+                    target: index,
+                    uid,
+                    expected: target.expected,
+                });
+            }
+        }
+    }
+    plan
+}
+
+/// What one folder did with its copies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MarkerFolderOutcome {
+    /// A definite `NO`/`BAD` on the keyword STORE. In INBOX this turns the
+    /// account local-only for a while.
+    Refused,
+    /// Not written this time, and no verdict on the account: a SELECT the
+    /// server refused, a busy mailbox (`[UNAVAILABLE]`, `[INUSE]`, …), a
+    /// changed UIDVALIDITY, no `\*` in this session. The snapshot decides
+    /// about `\*`; the row settles either way.
+    Unavailable,
+    /// Written; these targets had a copy whose marker was not the expected
+    /// one and was left alone.
+    Written { skipped: Vec<usize> },
+}
+
+/// Per-target outcome across folders.
+struct MarkerTally {
+    applied: Vec<bool>,
+    skipped: Vec<bool>,
+    refused_in_inbox: bool,
+    applied_in_inbox: bool,
+    /// The write adds keywords. Only an accepted `+FLAGS` in INBOX shows the
+    /// server takes them; a pure clear says nothing about that.
+    adds_keywords: bool,
+}
+
+impl MarkerTally {
+    fn new(targets: usize, adds_keywords: bool) -> Self {
+        Self {
+            applied: vec![false; targets],
+            skipped: vec![false; targets],
+            refused_in_inbox: false,
+            applied_in_inbox: false,
+            adds_keywords,
+        }
+    }
+
+    fn add(&mut self, folder: &str, group: &MarkerFolderWrite, outcome: MarkerFolderOutcome) {
+        match outcome {
+            MarkerFolderOutcome::Refused => {
+                if folder.eq_ignore_ascii_case("INBOX") {
+                    self.refused_in_inbox = true;
+                }
+            }
+            MarkerFolderOutcome::Unavailable => {
+                for copy in &group.copies {
+                    self.skipped[copy.target] = true;
+                }
+            }
+            MarkerFolderOutcome::Written { skipped } => {
+                if self.adds_keywords
+                    && folder.eq_ignore_ascii_case("INBOX")
+                    && skipped.len() < group.copies.len()
+                {
+                    self.applied_in_inbox = true;
+                }
+                for copy in &group.copies {
+                    if skipped.contains(&copy.target) {
+                        self.skipped[copy.target] = true;
+                    } else {
+                        self.applied[copy.target] = true;
+                    }
+                }
+            }
+        }
+    }
+
+    fn report(self) -> crate::providers::traits::WorkflowMarkerReport {
+        use crate::providers::traits::WorkflowMarkerWrite;
+        crate::providers::traits::WorkflowMarkerReport {
+            targets: self
+                .applied
+                .iter()
+                .zip(&self.skipped)
+                .map(|(applied, skipped)| match (*skipped, *applied) {
+                    (true, _) => WorkflowMarkerWrite::Skipped,
+                    (false, true) => WorkflowMarkerWrite::Applied,
+                    (false, false) => WorkflowMarkerWrite::Refused,
+                })
+                .collect(),
+            refused_in_inbox: self.refused_in_inbox,
+            applied_in_inbox: self.applied_in_inbox,
+        }
+    }
+}
+
+/// How a server answered a marker STORE.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StoreAnswer {
+    Accepted,
+    /// `NO`/`BAD` without a sign that it is temporary.
+    Refused,
+    /// A `NO` with an RFC 5530 code saying the refusal is temporary.
+    Busy,
+}
+
+/// RFC 5530 codes for a refusal that says nothing about keyword support.
+/// imap-proto does not parse them, so they arrive as the bracketed start of
+/// the response text (`code: None, info: Some("[INUSE] …")`). Only a code in
+/// that position counts; the same word later in the text says nothing.
+fn refusal_is_temporary(reason: &str) -> bool {
+    let info = reason
+        .split_once("info: Some(\"")
+        .map_or(reason, |(_, rest)| rest)
+        .trim_start();
+    let Some(code) = info
+        .strip_prefix('[')
+        .and_then(|rest| rest.split([']', ' ']).next())
+    else {
+        return false;
+    };
+    matches!(
+        code.to_ascii_uppercase().as_str(),
+        "UNAVAILABLE" | "INUSE" | "SERVERBUG" | "EXPUNGEISSUED" | "CORRUPTION"
+    )
+}
+
+/// `UID STORE` for a marker write, with the server's verdict. async-imap's
+/// `uid_store` stream ends at the tagged reply and drops its status, so a
+/// `NO` there would read as success; `run_command_and_check_ok` reports it.
+/// `Ok(false)`: refused (`NO`/`BAD`), an outcome, not a failure. Transport
+/// errors and timeouts stay errors and are retried like any other.
+async fn marker_store<T>(
+    session: &mut async_imap::Session<T>,
+    command: String,
+    op_timeout: Duration,
+) -> Result<StoreAnswer, String>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    match timeout(op_timeout, session.run_command_and_check_ok(&command)).await {
+        Err(_) => Err("imap UID STORE timed out".into()),
+        Ok(Ok(())) => Ok(StoreAnswer::Accepted),
+        Ok(Err(async_imap::error::Error::No(reason))) if refusal_is_temporary(&reason) => {
+            tracing::info!(%reason, "server is busy; workflow keyword STORE skipped");
+            Ok(StoreAnswer::Busy)
+        }
+        Ok(Err(async_imap::error::Error::No(reason) | async_imap::error::Error::Bad(reason))) => {
+            tracing::info!(%reason, "server refused a workflow keyword STORE");
+            Ok(StoreAnswer::Refused)
+        }
+        Ok(Err(error)) => Err(format!("imap UID STORE failed: {error}")),
+    }
+}
+
+/// A fetch for a marker write: `Ok(None)` when the server refused it.
+async fn marker_command<F, S, T>(
+    op_timeout: Duration,
+    command: F,
+    operation: &str,
+) -> Result<Option<Vec<T>>, String>
+where
+    F: std::future::Future<Output = Result<S, async_imap::error::Error>>,
+    S: futures::TryStream<Ok = T, Error = async_imap::error::Error>,
+{
+    match timeout(op_timeout, async { command.await?.try_collect().await }).await {
+        Err(_) => Err(format!("imap {operation} timed out")),
+        Ok(Ok(items)) => Ok(Some(items)),
+        Ok(Err(async_imap::error::Error::No(reason) | async_imap::error::Error::Bad(reason))) => {
+            tracing::info!(operation, %reason, "server refused a workflow keyword write");
+            Ok(None)
+        }
+        Ok(Err(error)) => Err(format!("imap {operation} failed: {error}")),
+    }
+}
+
+/// Write a workflow marker onto one mailbox's copies: drop the Satchel
+/// keywords the marker does not keep, then add its own. Other keywords stay.
+/// The vocabulary is fixed, so this needs no FETCH, except for a
+/// compare-and-clear, which first reads the copies it may touch.
+async fn store_workflow_marker<T>(
+    session: &mut async_imap::Session<T>,
+    folder: &str,
+    group: &MarkerFolderWrite,
+    wanted: &[String],
+    op_timeout: Duration,
+) -> Result<MarkerFolderOutcome, String>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    let mailbox = match timeout(op_timeout, session.select(folder)).await {
+        Err(_) => return Err(format!("imap SELECT {folder} timed out")),
+        Ok(Ok(mailbox)) => mailbox,
+        Ok(Err(async_imap::error::Error::No(_) | async_imap::error::Error::Bad(_))) => {
+            return Ok(MarkerFolderOutcome::Unavailable)
+        }
+        Ok(Err(error)) => return Err(format!("imap SELECT {folder} failed: {error}")),
+    };
+    // Stale UIDs would name other messages. A marker is not worth a
+    // permanent failure in the outbox: the folder simply does not count.
+    if mailbox.uid_validity.filter(|value| *value != 0) != Some(group.uidvalidity) {
+        return Ok(MarkerFolderOutcome::Unavailable);
+    }
+    // Removing needs no permission; adding a keyword the server will not
+    // keep succeeds silently on some servers and fails on others. Ask
+    // PERMANENTFLAGS instead of finding out.
+    if !wanted.is_empty() && !allows_custom_keywords(&mailbox.permanent_flags) {
+        return Ok(MarkerFolderOutcome::Unavailable);
+    }
+
+    let mut skipped = Vec::new();
+    let guarded = group
+        .copies
+        .iter()
+        .filter(|copy| copy.expected.is_some())
+        .map(|copy| copy.uid)
+        .collect::<Vec<_>>();
+    if !guarded.is_empty() {
+        let Some(current) = marker_command(
+            op_timeout,
+            session.uid_fetch(ImapProvider::uid_set(&guarded), "(UID FLAGS)"),
+            "UID FETCH workflow keywords",
+        )
+        .await?
+        else {
+            return Ok(MarkerFolderOutcome::Unavailable);
+        };
+        let markers = current
+            .iter()
+            .filter_map(|entry| Some((entry.uid?, workflow_marker_from_flags(entry.flags()))))
+            .collect::<std::collections::HashMap<_, _>>();
+        for copy in &group.copies {
+            let Some(expected) = copy.expected else {
+                continue;
+            };
+            // A copy the FETCH did not answer for cannot be compared, so it
+            // is not touched.
+            let unchanged = markers.get(&copy.uid).is_some_and(|found| {
+                *found == crate::workflow::remote_marker::WorkflowMarker::None
+                    || crate::workflow::remote_marker::same_on_server(found, &expected)
+            });
+            if !unchanged && !skipped.contains(&copy.target) {
+                skipped.push(copy.target);
+            }
+        }
+    }
+    let uids = group
+        .copies
+        .iter()
+        .filter(|copy| !skipped.contains(&copy.target))
+        .map(|copy| copy.uid)
+        .collect::<Vec<_>>();
+    if uids.is_empty() {
+        return Ok(MarkerFolderOutcome::Written { skipped });
+    }
+    let uid_set = ImapProvider::uid_set(&uids);
+    let unwanted = crate::workflow::remote_marker::IMAP_KEYWORDS
+        .iter()
+        .filter(|keyword| !wanted.iter().any(|kept| kept.eq_ignore_ascii_case(keyword)))
+        .map(|keyword| keyword.to_string())
+        .collect::<Vec<_>>();
+    for (sign, keywords) in [("-", &unwanted), ("+", &wanted.to_vec())] {
+        if keywords.is_empty() {
+            continue;
+        }
+        let command = format!(
+            "UID STORE {uid_set} {sign}FLAGS.SILENT ({})",
+            keywords.join(" ")
+        );
+        match marker_store(session, command, op_timeout).await? {
+            StoreAnswer::Accepted => {}
+            StoreAnswer::Refused => return Ok(MarkerFolderOutcome::Refused),
+            StoreAnswer::Busy => return Ok(MarkerFolderOutcome::Unavailable),
+        }
+    }
+    Ok(MarkerFolderOutcome::Written { skipped })
+}
+
+/// Satchel's workflow marker among a message's IMAP flags.
+fn workflow_marker_from_flags<'a>(
+    flags: impl Iterator<Item = async_imap::types::Flag<'a>>,
+) -> crate::providers::traits::WorkflowMarker {
+    let keywords = flags
+        .filter_map(|flag| match flag {
+            async_imap::types::Flag::Custom(name) => Some(name.into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    crate::workflow::remote_marker::marker_from_imap_keywords(keywords.iter().map(String::as_str))
+}
+
+/// Whether a mailbox lets a client create keywords of its own: `\*` in
+/// PERMANENTFLAGS (RFC 3501 7.1). A server that omits PERMANENTFLAGS, or lists
+/// only system flags (Exchange does), keeps Done and Snooze local.
+pub(crate) fn allows_custom_keywords(permanent_flags: &[async_imap::types::Flag<'_>]) -> bool {
+    permanent_flags
+        .iter()
+        .any(|flag| matches!(flag, async_imap::types::Flag::MayCreate))
+}
+
 /// One `UID FETCH (UID FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT])`
 /// entry as an envelope. `body` is the entry's `BODY[TEXT]` or, for a backfill
 /// that fetched bodies separately, what that fetch returned.
@@ -4721,6 +5143,7 @@ fn envelope_from_fetch(
     let is_starred = entry
         .flags()
         .any(|flag| matches!(flag, async_imap::types::Flag::Flagged));
+    let workflow_marker = Some(workflow_marker_from_flags(entry.flags()));
 
     let list_unsubscribe = parse_header_value(&header, "List-Unsubscribe");
     let list_unsubscribe_post = parse_header_value(&header, "List-Unsubscribe-Post");
@@ -4751,6 +5174,7 @@ fn envelope_from_fetch(
         body_html: parsed_body.html,
         is_read,
         is_starred,
+        workflow_marker,
         body_calendar: parsed_body.calendar,
         smime_encrypted: parsed_body.smime_encrypted,
         smime_signed: parsed_body.smime_signed,
@@ -6650,5 +7074,473 @@ Content-Type: text/html\r\n\r\n\
             "UID FETCH 1,2,3 (UID FLAGS INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT])"
         ));
         assert!(commands[1].contains("UID FETCH 4,5 "));
+    }
+
+    /// A scripted IMAP server for workflow keywords: SELECT reports the given
+    /// PERMANENTFLAGS and UIDVALIDITY 7, `UID FETCH` the given flags on UID
+    /// 41, `UID STORE` answers `store_reply`. Returns the commands it saw.
+    async fn keyword_server(
+        permanent_flags: &'static str,
+        flags: &'static str,
+        store_reply: &'static str,
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<Vec<String>>) {
+        keyword_server_with_select(
+            permanent_flags,
+            flags,
+            store_reply,
+            "OK [READ-WRITE] selected",
+        )
+        .await
+    }
+
+    async fn keyword_server_with_select(
+        permanent_flags: &'static str,
+        flags: &'static str,
+        store_reply: &'static str,
+        select_reply: &'static str,
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<Vec<String>>) {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (reader, mut writer) = socket.into_split();
+            let mut reader = tokio::io::BufReader::new(reader);
+            writer.write_all(b"* OK ready\r\n").await.unwrap();
+            let mut commands = Vec::new();
+            let mut line = String::new();
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).await.unwrap() == 0 {
+                    break;
+                }
+                let command = line.trim_end().to_string();
+                let tag = command.split_whitespace().next().unwrap().to_string();
+                let verb = command
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_ascii_uppercase();
+                let reply = match verb.as_str() {
+                    "SELECT" => format!(
+                        "* FLAGS (\\Seen \\Flagged)\r\n* OK [PERMANENTFLAGS ({permanent_flags})] ok\r\n* 1 EXISTS\r\n* OK [UIDVALIDITY 7] ok\r\n{tag} {select_reply}\r\n"
+                    ),
+                    "UID" if command.contains(" FETCH ") => format!(
+                        "* 1 FETCH (UID 41 FLAGS ({flags}))\r\n{tag} OK fetched\r\n"
+                    ),
+                    "UID" if command.contains(" STORE ") => format!("{tag} {store_reply} store\r\n"),
+                    "LOGOUT" => format!("* BYE\r\n{tag} OK bye\r\n"),
+                    _ => format!("{tag} OK done\r\n"),
+                };
+                commands.push(command);
+                writer.write_all(reply.as_bytes()).await.unwrap();
+                if verb == "LOGOUT" {
+                    break;
+                }
+            }
+            commands
+        });
+        (address, server)
+    }
+
+    fn inbox_copy(
+        uidvalidity: u32,
+        expected: Option<crate::workflow::remote_marker::WorkflowMarker>,
+    ) -> super::MarkerFolderWrite {
+        super::MarkerFolderWrite {
+            uidvalidity,
+            copies: vec![super::MarkerCopyRef {
+                target: 0,
+                uid: 41,
+                expected,
+            }],
+        }
+    }
+
+    fn stores(commands: &[String]) -> Vec<String> {
+        commands
+            .iter()
+            .filter(|command| command.contains("STORE"))
+            .map(|command| command.split_once(' ').unwrap().1.to_string())
+            .collect()
+    }
+
+    async fn write_marker(
+        permanent_flags: &'static str,
+        flags: &'static str,
+        store_reply: &'static str,
+        group: super::MarkerFolderWrite,
+        marker: crate::workflow::remote_marker::WorkflowMarker,
+    ) -> (super::MarkerFolderOutcome, Vec<String>) {
+        let (address, server) = keyword_server(permanent_flags, flags, store_reply).await;
+        let mut session = chunk_session(address).await;
+        let outcome = super::store_workflow_marker(
+            &mut session,
+            "INBOX",
+            &group,
+            &marker.imap_keywords(),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("a marker write never fails on a server answer");
+        session.logout().await.unwrap();
+        (outcome, server.await.unwrap())
+    }
+
+    fn snooze(
+        generation: u8,
+        wake: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> crate::workflow::remote_marker::WorkflowMarker {
+        crate::workflow::remote_marker::WorkflowMarker::Snoozed(
+            crate::workflow::remote_marker::Snooze { wake, generation },
+        )
+    }
+
+    #[tokio::test]
+    async fn a_snooze_writes_only_the_fixed_keywords_and_reads_nothing_first() {
+        let (outcome, commands) = write_marker(
+            "\\Seen \\Flagged \\*",
+            "",
+            "OK",
+            inbox_copy(7, None),
+            snooze(2, Some(chrono::Utc::now())),
+        )
+        .await;
+        assert_eq!(
+            outcome,
+            super::MarkerFolderOutcome::Written { skipped: vec![] }
+        );
+        assert!(!commands.iter().any(|command| command.contains("FETCH")));
+        assert_eq!(
+            stores(&commands),
+            vec![
+                "UID STORE 41 -FLAGS.SILENT ($Satchel-Done)",
+                "UID STORE 41 +FLAGS.SILENT ($Satchel-Snoozed $Satchel-Snooze2)",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_server_without_custom_keywords_is_reported_not_written() {
+        let (outcome, commands) = write_marker(
+            "\\Seen \\Flagged \\Deleted",
+            "",
+            "OK",
+            inbox_copy(7, None),
+            crate::workflow::remote_marker::WorkflowMarker::Done,
+        )
+        .await;
+        // Only the snapshot's PERMANENTFLAGS speak for the account; a push
+        // just skips the folder.
+        assert_eq!(outcome, super::MarkerFolderOutcome::Unavailable);
+        assert!(stores(&commands).is_empty());
+    }
+
+    /// The blocker this guards: a `NO` on `UID STORE` (a full keyword table,
+    /// a read-only folder) once became a transient error that retried forever
+    /// at the head of the account's queue, holding every move behind it.
+    #[tokio::test]
+    async fn a_refused_store_is_an_outcome_not_an_error() {
+        for reply in ["NO [LIMIT] too many user flags in mailbox", "BAD no"] {
+            let (outcome, commands) = write_marker(
+                "\\Seen \\*",
+                "",
+                reply,
+                inbox_copy(7, None),
+                crate::workflow::remote_marker::WorkflowMarker::Done,
+            )
+            .await;
+            assert_eq!(outcome, super::MarkerFolderOutcome::Refused, "{reply}");
+            assert_eq!(stores(&commands).len(), 1, "stops at the first refusal");
+        }
+    }
+
+    /// RFC 5530 codes that say the refusal is temporary skip the folder and
+    /// say nothing about keyword support; the account stays as it was.
+    #[tokio::test]
+    async fn a_busy_store_skips_the_folder_without_a_verdict() {
+        for reply in [
+            "NO [UNAVAILABLE] try again later",
+            "NO [INUSE] mailbox in use",
+            "NO [SERVERBUG] oops",
+        ] {
+            let (outcome, _) = write_marker(
+                "\\Seen \\*",
+                "",
+                reply,
+                inbox_copy(7, None),
+                crate::workflow::remote_marker::WorkflowMarker::Done,
+            )
+            .await;
+            assert_eq!(outcome, super::MarkerFolderOutcome::Unavailable, "{reply}");
+        }
+        let mut tally = super::MarkerTally::new(1, true);
+        tally.add(
+            "INBOX",
+            &inbox_copy(7, None),
+            super::MarkerFolderOutcome::Unavailable,
+        );
+        let report = tally.report();
+        assert!(!report.refused_in_inbox);
+        assert_eq!(
+            report.targets,
+            vec![crate::providers::traits::WorkflowMarkerWrite::Skipped]
+        );
+    }
+
+    #[test]
+    fn only_a_leading_response_code_marks_a_refusal_as_temporary() {
+        for code in [
+            "UNAVAILABLE",
+            "INUSE",
+            "SERVERBUG",
+            "EXPUNGEISSUED",
+            "CORRUPTION",
+        ] {
+            let reason = format!("code: None, info: Some(\"[{code}] try later\")");
+            assert!(super::refusal_is_temporary(&reason), "{code}");
+            assert!(super::refusal_is_temporary(&format!(
+                "[{}]",
+                code.to_lowercase()
+            )));
+        }
+        // The word elsewhere in the text, or another code, is a refusal.
+        assert!(!super::refusal_is_temporary(
+            "code: None, info: Some(\"keyword table full, not [INUSE]\")"
+        ));
+        assert!(!super::refusal_is_temporary(
+            "code: None, info: Some(\"[LIMIT] too many user flags\")"
+        ));
+        assert!(!super::refusal_is_temporary("code: None, info: None"));
+        assert!(!super::refusal_is_temporary(
+            "code: None, info: Some(\"[INUSEFUL]\")"
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_expunge_or_corruption_answer_skips_the_folder() {
+        for reply in [
+            "NO [EXPUNGEISSUED] some messages gone",
+            "NO [CORRUPTION] index broken",
+        ] {
+            let (outcome, _) = write_marker(
+                "\\Seen \\*",
+                "",
+                reply,
+                inbox_copy(7, None),
+                crate::workflow::remote_marker::WorkflowMarker::Done,
+            )
+            .await;
+            assert_eq!(outcome, super::MarkerFolderOutcome::Unavailable, "{reply}");
+        }
+    }
+
+    #[test]
+    fn an_accepted_clear_does_not_vouch_for_keyword_support() {
+        let mut clear = super::MarkerTally::new(1, false);
+        clear.add(
+            "INBOX",
+            &inbox_copy(7, None),
+            super::MarkerFolderOutcome::Written { skipped: vec![] },
+        );
+        let report = clear.report();
+        assert!(!report.applied_in_inbox);
+        assert_eq!(
+            report.targets,
+            vec![crate::providers::traits::WorkflowMarkerWrite::Applied]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_select_skips_the_folder() {
+        let (address, server) =
+            keyword_server_with_select("\\*", "", "OK", "NO [UNAVAILABLE] mailbox busy").await;
+        let mut session = chunk_session(address).await;
+        let outcome = super::store_workflow_marker(
+            &mut session,
+            "INBOX",
+            &inbox_copy(7, None),
+            &crate::workflow::remote_marker::WorkflowMarker::Done.imap_keywords(),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("not an error");
+        session.logout().await.unwrap();
+        assert_eq!(outcome, super::MarkerFolderOutcome::Unavailable);
+        assert!(stores(&server.await.unwrap()).is_empty());
+    }
+
+    #[test]
+    fn only_a_definite_inbox_refusal_and_an_inbox_store_reach_the_account() {
+        let mut refused = super::MarkerTally::new(1, true);
+        refused.add(
+            "INBOX",
+            &inbox_copy(7, None),
+            super::MarkerFolderOutcome::Refused,
+        );
+        assert!(refused.report().refused_in_inbox);
+
+        let mut elsewhere = super::MarkerTally::new(1, true);
+        elsewhere.add(
+            "Archive",
+            &inbox_copy(7, None),
+            super::MarkerFolderOutcome::Refused,
+        );
+        assert!(!elsewhere.report().refused_in_inbox);
+
+        let mut written = super::MarkerTally::new(1, true);
+        written.add(
+            "INBOX",
+            &inbox_copy(7, None),
+            super::MarkerFolderOutcome::Written { skipped: vec![] },
+        );
+        assert!(written.report().applied_in_inbox);
+    }
+
+    #[tokio::test]
+    async fn clearing_the_marker_needs_no_keyword_permission() {
+        let (outcome, commands) = write_marker(
+            "\\Seen",
+            "",
+            "OK",
+            inbox_copy(7, None),
+            crate::workflow::remote_marker::WorkflowMarker::None,
+        )
+        .await;
+        assert_eq!(
+            outcome,
+            super::MarkerFolderOutcome::Written { skipped: vec![] }
+        );
+        assert_eq!(
+            stores(&commands),
+            vec!["UID STORE 41 -FLAGS.SILENT ($Satchel-Done $Satchel-Snoozed $Satchel-Snooze2)"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_changed_uidvalidity_skips_the_folder_instead_of_failing() {
+        let (outcome, commands) = write_marker(
+            "\\*",
+            "",
+            "OK",
+            inbox_copy(8, None),
+            crate::workflow::remote_marker::WorkflowMarker::Done,
+        )
+        .await;
+        assert_eq!(outcome, super::MarkerFolderOutcome::Unavailable);
+        assert!(stores(&commands).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_wake_clears_its_own_snooze_but_not_a_newer_one() {
+        let own = snooze(1, Some(chrono::Utc::now()));
+        let (outcome, commands) = write_marker(
+            "\\*",
+            "\\Seen $Satchel-Snoozed",
+            "OK",
+            inbox_copy(7, Some(own)),
+            crate::workflow::remote_marker::WorkflowMarker::None,
+        )
+        .await;
+        assert_eq!(
+            outcome,
+            super::MarkerFolderOutcome::Written { skipped: vec![] }
+        );
+        assert_eq!(stores(&commands).len(), 1);
+
+        // Another device snoozed again meanwhile: the second generation.
+        let (outcome, commands) = write_marker(
+            "\\*",
+            "\\Seen $Satchel-Snoozed $Satchel-Snooze2",
+            "OK",
+            inbox_copy(7, Some(own)),
+            crate::workflow::remote_marker::WorkflowMarker::None,
+        )
+        .await;
+        assert_eq!(
+            outcome,
+            super::MarkerFolderOutcome::Written { skipped: vec![0] }
+        );
+        assert!(stores(&commands).is_empty());
+    }
+
+    #[test]
+    fn copies_of_many_threads_are_planned_per_folder() {
+        let reference = |uid: &str, folder: &str, generation: Option<u32>| {
+            crate::providers::traits::MessageRef {
+                remote_id: uid.into(),
+                source_folder: Some(folder.into()),
+                source_uidvalidity: generation,
+            }
+        };
+        let targets = vec![
+            crate::providers::traits::MarkerTarget {
+                refs: vec![
+                    reference("1", "INBOX", Some(7)),
+                    reference("9", "Sent", Some(3)),
+                ],
+                expected: None,
+            },
+            crate::providers::traits::MarkerTarget {
+                refs: vec![
+                    reference("2", "INBOX", Some(7)),
+                    reference("x", "INBOX", Some(7)),
+                ],
+                expected: None,
+            },
+            crate::providers::traits::MarkerTarget {
+                refs: vec![reference("3", "INBOX", None)],
+                expected: None,
+            },
+        ];
+        let plan = super::plan_marker_writes(&targets);
+        assert_eq!(plan.keys().collect::<Vec<_>>(), vec!["INBOX", "Sent"]);
+        assert_eq!(
+            plan["INBOX"]
+                .copies
+                .iter()
+                .map(|c| (c.target, c.uid))
+                .collect::<Vec<_>>(),
+            vec![(0, 1), (1, 2)]
+        );
+        let mut tally = super::MarkerTally::new(3, true);
+        tally.add(
+            "INBOX",
+            &plan["INBOX"],
+            super::MarkerFolderOutcome::Written { skipped: vec![] },
+        );
+        tally.add("Sent", &plan["Sent"], super::MarkerFolderOutcome::Refused);
+        let report = tally.report();
+        use crate::providers::traits::WorkflowMarkerWrite::*;
+        assert_eq!(report.targets, vec![Applied, Applied, Refused]);
+        assert!(!report.refused_in_inbox);
+    }
+
+    #[test]
+    fn gmail_imap_hosts_are_recognised() {
+        assert!(super::is_gmail_imap_host("imap.gmail.com"));
+        assert!(super::is_gmail_imap_host("IMAP.GoogleMail.com."));
+        assert!(!super::is_gmail_imap_host("imap.fastmail.com"));
+        assert!(!super::is_gmail_imap_host("gmail.com.example.net"));
+    }
+
+    #[test]
+    fn keywords_on_a_fetched_copy_become_its_marker() {
+        use async_imap::types::Flag;
+        let flags = vec![
+            Flag::Seen,
+            Flag::Custom("$Satchel-Done".into()),
+            Flag::Custom("$Forwarded".into()),
+        ];
+        assert_eq!(
+            super::workflow_marker_from_flags(flags.into_iter()),
+            crate::workflow::remote_marker::WorkflowMarker::Done
+        );
+        assert!(super::allows_custom_keywords(&[
+            Flag::Seen,
+            Flag::MayCreate
+        ]));
+        assert!(!super::allows_custom_keywords(&[Flag::Seen, Flag::Flagged]));
+        assert!(!super::allows_custom_keywords(&[]));
     }
 }

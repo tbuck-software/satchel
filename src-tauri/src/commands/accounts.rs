@@ -402,6 +402,41 @@ pub struct AccountQuotaDto {
     pub fetched_at: Option<String>,
 }
 
+/// An account that keeps Done and Snooze on this device, and why:
+/// `no_custom_keywords` (the server keeps no keywords of its own),
+/// `gmail_imap` (Gmail over IMAP) or `store_refused` (the server refused the
+/// last write; tried again later).
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "ipc-types", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ipc-types",
+    ts(export, export_to = "app/commands/accounts/")
+)]
+pub struct LocalOnlyWorkflowAccountDto {
+    pub account_id: String,
+    pub reason: String,
+}
+
+/// Accounts whose mail server does not hold Done and Snooze right now, so
+/// they stay on this device. Shown as a note in the account's settings;
+/// every other account syncs them through the server.
+#[tauri::command]
+pub async fn list_local_only_workflow_accounts(
+    pool: tauri::State<'_, crate::db::ReadPool>,
+) -> CommandResult<Vec<LocalOnlyWorkflowAccountDto>> {
+    Ok(
+        satchel_core::sync::workflow_markers::list_local_only_accounts(pool.inner().as_ref())
+            .await
+            .map_err(CommandError::unexpected)?
+            .into_iter()
+            .map(|account| LocalOnlyWorkflowAccountDto {
+                account_id: account.account_id,
+                reason: account.reason,
+            })
+            .collect(),
+    )
+}
+
 #[tauri::command]
 pub async fn list_account_quotas(
     pool: tauri::State<'_, crate::db::ReadPool>,

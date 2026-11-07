@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::sync::errors::SyncResult;
+pub use crate::workflow::remote_marker::WorkflowMarker;
 
 pub use postroom::SourceCheckpoint as SyncCheckpoint;
 
@@ -26,6 +27,10 @@ pub struct RemoteMessageState {
     /// locally known flag state.
     pub is_read: Option<bool>,
     pub is_starred: Option<bool>,
+    /// Satchel's Done/Snooze marker on this copy (IMAP keywords). `None`:
+    /// the snapshot does not say, and the stored marker stays.
+    #[serde(default)]
+    pub workflow_marker: Option<WorkflowMarker>,
 }
 
 /// A presence/flag snapshot plus the identity generation in which its remote
@@ -35,6 +40,10 @@ pub struct RemoteMessageState {
 pub struct RemoteMessageStateSnapshot {
     pub states: Vec<RemoteMessageState>,
     pub remote_uidvalidity: Option<u32>,
+    /// Whether the folder lets Satchel create its own keywords
+    /// (`PERMANENTFLAGS` with `\*`). `None` for providers without keywords.
+    #[serde(default)]
+    pub custom_keywords: Option<KeywordSupport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -88,6 +97,11 @@ pub struct MessageEnvelope {
     pub is_read: bool,
     #[serde(default)]
     pub is_starred: bool,
+    /// Satchel's Done/Snooze marker as the server holds it for this copy
+    /// (IMAP keywords, Gmail labels). `None`: the provider does not say, and
+    /// the stored marker stays.
+    #[serde(default)]
+    pub workflow_marker: Option<WorkflowMarker>,
     /// Raw VCALENDAR text extracted from a `text/calendar` MIME part. Used by the
     /// ingest pipeline to populate `calendar_invites` even when the calendar is
     /// not embedded in the visible body. Defaults to None for providers that don't
@@ -378,6 +392,61 @@ pub struct FlagUpdate {
     pub starred: Option<bool>,
 }
 
+/// What a mailbox says about Satchel's keywords.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KeywordSupport {
+    /// `\*` in PERMANENTFLAGS.
+    Allowed,
+    /// No `\*`: the server keeps only the flags it lists.
+    NotAllowed,
+    /// Gmail's IMAP host, where keywords become Gmail labels.
+    GmailHost,
+}
+
+/// One thread's copies in a workflow marker write.
+#[derive(Debug, Clone)]
+pub struct MarkerTarget {
+    pub refs: Vec<MessageRef>,
+    /// Compare-and-clear: only go ahead while the copies still carry this.
+    pub expected: Option<WorkflowMarker>,
+}
+
+/// What became of one target of a workflow marker write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkflowMarkerWrite {
+    Applied,
+    /// No folder of the target took the keywords: a definite refusal, or
+    /// the server cannot store markers at all. Never an error.
+    Refused,
+    /// Compare-and-clear found another marker, or a folder could not be
+    /// written this time (a busy or changed mailbox). Nothing recorded.
+    Skipped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowMarkerReport {
+    /// One entry per target, in order.
+    pub targets: Vec<WorkflowMarkerWrite>,
+    /// INBOX answered a keyword STORE with a definite refusal: the account
+    /// keeps Done and Snooze on the device for a while.
+    pub refused_in_inbox: bool,
+    /// INBOX accepted a keyword write; lifts an earlier refusal.
+    pub applied_in_inbox: bool,
+}
+
+impl WorkflowMarkerReport {
+    /// Nothing written, and no verdict on the account (that comes from the
+    /// snapshot, or from a definite STORE refusal).
+    pub fn refused(targets: usize) -> Self {
+        Self {
+            targets: vec![WorkflowMarkerWrite::Refused; targets],
+            refused_in_inbox: false,
+            applied_in_inbox: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MailEvent {
     // Boxed: the envelope is ~580 bytes while every other variant is under 30,
@@ -459,6 +528,18 @@ pub trait MailProvider: Send + Sync {
     }
 
     async fn set_flags(&self, messages: &[MessageRef], flags: FlagUpdate) -> SyncResult<()>;
+    /// Replace Satchel's Done/Snooze marker on these threads' copies with
+    /// `marker`, leaving every other keyword or label alone, in one session.
+    /// A server that refuses is reported, not returned as an error: marker
+    /// writes must never hold up the account's queue. Providers without a
+    /// place for markers keep this default.
+    async fn set_workflow_marker(
+        &self,
+        targets: &[MarkerTarget],
+        _marker: &WorkflowMarker,
+    ) -> SyncResult<WorkflowMarkerReport> {
+        Ok(WorkflowMarkerReport::refused(targets.len()))
+    }
     async fn move_messages(&self, messages: &[MessageRef], target: &str) -> SyncResult<()>;
     async fn delete_messages(&self, messages: &[MessageRef]) -> SyncResult<()>;
 

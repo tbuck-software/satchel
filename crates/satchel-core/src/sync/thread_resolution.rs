@@ -1045,6 +1045,7 @@ mod tests {
             body_html: None,
             is_read: true,
             is_starred: false,
+            workflow_marker: None,
             body_calendar: None,
             smime_encrypted: None,
             smime_signed: None,

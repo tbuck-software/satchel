@@ -4112,5 +4112,11 @@
     "noPath": "Kein Dateipfad übergeben.",
     "openFailed": "Nachricht konnte nicht gelesen werden",
     "untitled": "Nachricht"
+  },
+  "workflowSync": {
+    "gmailImapBody": "Dieses Konto ist per IMAP mit Gmail verbunden; dort würden Satchels Schlüsselwörter zu Gmail-Labels. Erledigt und Wiedervorlage bleiben deshalb auf diesem Gerät; mit einer Google-Anmeldung werden sie synchronisiert. Erledigte Mails landen weiterhin im Archiv.",
+    "localOnlyBody": "Dieser Mailserver speichert keine eigenen Schlüsselwörter. Andere Geräte und Mail-Apps sehen deshalb nicht, was du als erledigt markiert oder auf Wiedervorlage gelegt hast. Erledigte Mails landen weiterhin im Archiv.",
+    "localOnlyTitle": "Erledigt und Wiedervorlage bleiben auf diesem Gerät",
+    "storeRefusedBody": "Der Mailserver hat Satchels Schlüsselwörter abgelehnt. Andere Geräte und Mail-Apps sehen deshalb vorerst nicht, was du als erledigt markiert oder auf Wiedervorlage gelegt hast. Satchel versucht es in einigen Stunden erneut. Erledigte Mails landen weiterhin im Archiv."
   }
 }

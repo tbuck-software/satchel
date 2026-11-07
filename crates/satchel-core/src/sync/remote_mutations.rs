@@ -108,6 +108,14 @@ pub enum RemoteMutationPayload {
     DeleteFolder {
         path: String,
     },
+    /// Satchel's Done/Snooze marker for the listed threads (ADR 0009).
+    /// Absolute: the provider replaces whatever Satchel marker the copies
+    /// carry with this one, so a newer marker for a thread takes it out of an
+    /// unsent row (`workflow_markers::enqueue_workflow_marker_in_transaction`).
+    WorkflowMarker {
+        threads: Vec<crate::sync::workflow_markers::MarkedThread>,
+        marker: crate::workflow::remote_marker::WorkflowMarker,
+    },
     /// File the copy of a mail that has already been delivered.
     ///
     /// Only ever appends: the message left over SMTP before this row existed,
@@ -607,6 +615,19 @@ pub async fn execute_remote_mutation(
 ) -> crate::sync::errors::SyncResult<()> {
     let mutation: RemoteMutationPayload =
         serde_json::from_value(payload).map_err(|err| format!("decode remote mutation: {err}"))?;
+    let mutation = match mutation {
+        RemoteMutationPayload::WorkflowMarker { threads, marker } => {
+            // Compare-and-clear entries whose thread moved on are dropped
+            // before any network work, like superseded flags below.
+            let threads =
+                crate::sync::workflow_markers::retain_current_entries(pool, threads).await?;
+            if threads.is_empty() {
+                return Ok(());
+            }
+            RemoteMutationPayload::WorkflowMarker { threads, marker }
+        }
+        other => other,
+    };
     if let RemoteMutationPayload::Flags {
         refs,
         read,
@@ -719,6 +740,16 @@ pub async fn execute_remote_mutation(
             provider.rename_folder(&from_path, &to_path).await
         }
         RemoteMutationPayload::DeleteFolder { path } => provider.delete_folder(&path).await,
+        RemoteMutationPayload::WorkflowMarker { threads, marker } => {
+            crate::sync::workflow_markers::execute_marker_write(
+                pool,
+                account_id,
+                provider.as_ref(),
+                &threads,
+                &marker,
+            )
+            .await
+        }
         RemoteMutationPayload::AppendSent {
             raw_base64,
             folder_hint,

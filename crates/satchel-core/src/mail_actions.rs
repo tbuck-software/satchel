@@ -574,6 +574,22 @@ async fn move_threads_with_receipt(
     }
     let now = chrono::Utc::now().to_rfc3339();
     let mut queued = Vec::new();
+    // Rules and the notification's Done archive here; the server learns Done
+    // as from a workflow transition. Queued for all threads at once, ahead of
+    // every move below, so MOVE carries the keyword along. A thread already
+    // outside the Inbox gets Done too, which it is.
+    if matches!(target, MoveTarget::Archive) {
+        queued.extend(
+            crate::sync::workflow_markers::enqueue_workflow_markers_in_transaction(
+                &mut tx,
+                queue,
+                ids,
+                &crate::workflow::remote_marker::WorkflowMarker::Done,
+                None,
+            )
+            .await?,
+        );
+    }
     let mut receipt = TrashReceipt::default();
     let receipt_id = uuid::Uuid::new_v4().to_string();
     if record_undo {

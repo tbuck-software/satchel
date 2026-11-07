@@ -185,6 +185,42 @@ im App-Crate lautet der Pfad `"../crates/satchel-core/src/db/migrations"`.
   arbeitet und seinen Cursor mit jedem Block speichert. Die sechs bereits
   ausgelieferten Daten-Migrationen bleiben, wie sie sind.
 
+### Erledigt und Wiedervorlage auf dem Server
+
+Done und Snooze reisen als IMAP-Keyword bzw. Gmail-Label mit (ADR 0009,
+`workflow::remote_marker`). Was einzeln lautlos bricht:
+
+- IMAP hat ein **festes Vokabular aus drei Keywords** (`$Satchel-Done`,
+  `$Satchel-Snoozed`, `$Satchel-Snooze2`). Nie einen Zeitpunkt in einen
+  Keyword-Namen schreiben: Cyrus vergibt höchstens 128 User-Flags pro
+  Postfach und gibt sie nie frei, Dovecot-Maildir kodiert nur 26 im
+  Dateinamen. Die Weckzeit reist nur über Gmail-Labels (löschbar).
+- Die `workflow_marker`-Mutation wird **vor** dem Archiv-Move eingereiht:
+  MOVE nimmt Keywords mit, die Quell-UID existiert danach nicht mehr.
+- Marker sind best effort: `NO`/`BAD` auf STORE ist ein Ergebnis, kein
+  Fehler, sonst blockiert die Zeile die Queue des Kontos. async-imaps
+  `uid_store`-Stream verwirft den Status der getaggten Antwort — für STORE
+  `run_command_and_check_ok` nehmen. Nur ein **eindeutiges** `NO`/`BAD` auf
+  den INBOX-STORE macht das Konto `local_only` (`store_refused`), und auch
+  das nur für einige Stunden und bis zum Neustart; `[UNAVAILABLE]`/`[INUSE]`,
+  ein abgelehntes SELECT oder eine neue UIDVALIDITY überspringen nur die
+  Zeile. Über `\*` entscheidet allein der INBOX-Snapshot.
+- Gmail-Labels `Satchel/Done`, `Satchel/Snoozed`, `Satchel/Wake/<Zeit>` sind
+  Markierungen, keine Ordner (nur exakt diese Namen; `Satchel/Invoices` gehört
+  dem Nutzer). Der Provider nimmt sie aus `mailbox_ids` heraus; landen sie
+  dort, legt die Sync für jede Label-ID einen Ordner an.
+- Pull wendet nur **Flanken** an: `threads.remote_workflow_marker` hält, was
+  der Server zuletzt angenommen oder gezeigt hat (`NULL` = kein Marker, ein
+  Postfach ohne Marker wird nie beschrieben). Eine noch nicht gesendete lokale
+  Änderung gewinnt. Konten mit `local_only` (`account_workflow_sync`) werden
+  weder beschrieben noch gelesen. Bis zum ersten vollständigen
+  INBOX-Snapshot eines Geräts **nach abgeschlossenem Backfill**
+  (`baseline_at`) werden fremde IMAP-Snoozes nur notiert, nicht übernommen.
+- Markierungen werden pro Thread eingereiht, Lookups macht SQLite über die
+  Payload (`instr` + `json_each`): Kein Pfad darf je Thread alle wartenden
+  Zeilen parsen. Viele Threads in einer Transaktion gehen über
+  `enqueue_workflow_markers_in_transaction`.
+
 ### Mobile (Android/iOS)
 
 Ein Bundle, drei Plattformen. Was der Shell kann, wird **erfragt**, nicht geraten:

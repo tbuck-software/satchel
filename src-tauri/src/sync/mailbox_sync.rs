@@ -356,7 +356,20 @@ impl ImapSyncState {
 #[derive(Debug, Default)]
 struct SnapshotProgress {
     changed: HashSet<String>,
+    /// Threads whose workflow followed a server marker. Kept apart from
+    /// `changed`: folder reconciliation would put a snoozed Inbox thread
+    /// straight back into the Inbox.
+    markers_applied: HashSet<String>,
     deferred: BTreeMap<String, SnapshotDeferral>,
+}
+
+/// Whether a folder's initial download has finished: it has a cursor and
+/// no backfill left. Until then, the marker baseline waits.
+fn inbox_download_complete(state: &ImapSyncState, folder_id: &str) -> bool {
+    state
+        .cursors
+        .get(folder_id)
+        .is_some_and(|cursor| !backfill_pending(cursor))
 }
 
 /// A provider returns Some only after every snapshot page has succeeded.
@@ -388,6 +401,14 @@ async fn reconcile_folder_snapshot(
                 false,
             )
         } else {
+            // INBOX speaks for the account: every Done and Snooze starts there.
+            let inbox = remote_folder_id.eq_ignore_ascii_case("INBOX");
+            if let Some(support) = snapshot.custom_keywords.filter(|_| inbox) {
+                satchel_core::sync::workflow_markers::record_inbox_keyword_support(
+                    pool, account_id, support,
+                )
+                .await?;
+            }
             let changes = reconcile_imap_folder_snapshot(
                 pool,
                 account_id,
@@ -397,9 +418,27 @@ async fn reconcile_folder_snapshot(
                 snapshot.remote_uidvalidity,
             )
             .await?;
+            let markers_applied =
+                satchel_core::sync::workflow_markers::reconcile_remote_workflow_markers(
+                    pool,
+                    &changes.marker_threads,
+                )
+                .await?;
+            // From the first complete INBOX snapshot on, IMAP snoozes set on
+            // other devices are adopted; the ones it found were only seen.
+            // Complete means the initial download too: older INBOX mail the
+            // backfill still has to bring can carry a keyword years old.
+            if inbox
+                && !changes.skipped_stale_generation
+                && inbox_download_complete(state, context.folder_id)
+            {
+                satchel_core::sync::workflow_markers::mark_snapshot_baseline(pool, account_id)
+                    .await?;
+            }
             (
                 SnapshotProgress {
                     changed: changes.relocated_threads,
+                    markers_applied,
                     ..SnapshotProgress::default()
                 },
                 changes.skipped_stale_generation,
@@ -1334,6 +1373,7 @@ pub(crate) async fn sync_mailboxes(
             let mut owed_folders = Vec::<(String, String, String)>::new();
             let mut snapshot_sync_complete = true;
             let mut externally_changed_threads = HashSet::new();
+            let mut marker_changed_threads = HashSet::<String>::new();
             let mut folder_fetch_failures = Vec::<String>::new();
             let mut blocked_folders = Vec::<String>::new();
             let mut blocked_messages = 0usize;
@@ -1616,7 +1656,10 @@ pub(crate) async fn sync_mailboxes(
                     match result {
                         // Deferred IDs stay owed; the folder itself synced.
                         // Their holds wait in the state for a full sync.
-                        Ok(progress) => externally_changed_threads.extend(progress.changed),
+                        Ok(progress) => {
+                            externally_changed_threads.extend(progress.changed);
+                            marker_changed_threads.extend(progress.markers_applied);
+                        }
                         Err(err) => summary.failures.push(encoded_folder_sync_failure(
                             &account.email, &folder_name, err,
                         )),
@@ -1657,8 +1700,12 @@ pub(crate) async fn sync_mailboxes(
                 repair_stale_done_threads_in_inbox(pool, &account.id).await?;
             }
             if let Some(events) = events {
-                if !externally_changed_threads.is_empty() {
-                    events.publish(AppEvent::ThreadsUpdated(externally_changed_threads.iter().cloned().collect()));
+                let updated = externally_changed_threads
+                    .union(&marker_changed_threads)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !updated.is_empty() {
+                    events.publish(AppEvent::ThreadsUpdated(updated));
                 }
             }
 

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
 
 use crate::sync::queue::SyncQueue;
+use crate::sync::workflow_markers::enqueue_workflow_marker_in_transaction;
 use crate::sync::{
     queue::QueuedAction,
     remote_mutations::{
@@ -10,7 +11,9 @@ use crate::sync::{
         PreparedWorkflowMove,
     },
 };
-use crate::workflow::{engine::WorkflowEngine, states::WorkflowState};
+use crate::workflow::{
+    engine::WorkflowEngine, remote_marker::WorkflowMarker, states::WorkflowState,
+};
 
 // The UI exposes Undo for nine seconds. Six seconds of backend margin prevent
 // timer jitter or a briefly suspended mobile webview from racing the worker.
@@ -428,6 +431,19 @@ async fn transition_thread_configured(
     } else {
         Vec::new()
     };
+    // Done and Snooze go to the server as a keyword or label (ADR 0009),
+    // queued ahead of the moves: MOVE carries a keyword along, while the
+    // source UID it is set on stops existing once the move ran.
+    queued_ids.extend(
+        enqueue_workflow_marker_in_transaction(
+            &mut tx,
+            queue,
+            &input.thread_id,
+            &WorkflowMarker::for_state(input.to, snooze_until),
+            queue_prefix,
+        )
+        .await?,
+    );
     for plan in selected {
         let account_id = plan.account_id.clone();
         let mut action: QueuedAction = plan.into_action(&input.thread_id, scheduled_for)?;
@@ -591,6 +607,117 @@ mod tests {
             .expect("message");
         }
         pool
+    }
+
+    async fn queued_kinds(pool: &SqlitePool) -> Vec<(String, String)> {
+        sqlx::query_as(
+            "SELECT json_extract(payload, '$.kind'), status FROM sync_queue ORDER BY rowid",
+        )
+        .fetch_all(pool)
+        .await
+        .expect("queue")
+    }
+
+    #[tokio::test]
+    async fn done_queues_its_keyword_before_the_archive_move_and_undo_takes_both_back() {
+        let pool = seeded_pool().await;
+        let queue = SyncQueue::new();
+        transition_thread_inner(
+            &pool,
+            &queue,
+            TransitionInput {
+                thread_id: "thread".into(),
+                from: WorkflowState::Inbox,
+                to: WorkflowState::Done,
+                snooze_until: None,
+            },
+        )
+        .await
+        .expect("done");
+        assert_eq!(
+            queued_kinds(&pool).await,
+            vec![
+                ("flags".into(), "pending".into()),
+                ("workflow_marker".into(), "pending".into()),
+                ("workflow_move".into(), "scheduled".into()),
+            ]
+        );
+
+        // Undo inside the window: the move is cancelled and the marker that
+        // never left is withdrawn; the server is never told.
+        transition_thread_inner(
+            &pool,
+            &queue,
+            TransitionInput {
+                thread_id: "thread".into(),
+                from: WorkflowState::Done,
+                to: WorkflowState::Inbox,
+                snooze_until: None,
+            },
+        )
+        .await
+        .expect("undo");
+        let kinds = queued_kinds(&pool).await;
+        assert!(!kinds.iter().any(|(kind, _)| kind == "workflow_move"));
+        assert!(!kinds.iter().any(|(kind, _)| kind == "workflow_marker"));
+    }
+
+    #[tokio::test]
+    async fn snooze_carries_its_wake_time_to_the_server() {
+        let pool = seeded_pool().await;
+        let queue = SyncQueue::new();
+        transition_thread_inner(
+            &pool,
+            &queue,
+            TransitionInput {
+                thread_id: "thread".into(),
+                from: WorkflowState::Inbox,
+                to: WorkflowState::Snoozed,
+                snooze_until: Some("2030-01-02T09:00:00+01:00".into()),
+            },
+        )
+        .await
+        .expect("snooze");
+        let (marker, refs): (String, i64) = sqlx::query_as(
+            "SELECT json_extract(payload, '$.marker'), json_array_length(json_extract(payload, '$.threads[0].refs'))
+             FROM sync_queue WHERE json_extract(payload, '$.kind') = 'workflow_marker'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("marker");
+        // IMAP carries the snooze, its first generation; the time stays in
+        // the row for this device's own wake.
+        assert_eq!(marker, "snoozed:1:2030-01-02T08:00:00+00:00");
+        // Inbox, Sent and Drafts copies: every copy another client may show.
+        assert_eq!(refs, 3);
+        // Recorded once the server accepts it, not when queued.
+        let seen: Option<String> =
+            sqlx::query_scalar("SELECT remote_workflow_marker FROM threads WHERE id = 'thread'")
+                .fetch_one(&pool)
+                .await
+                .expect("thread");
+        assert_eq!(seen, None);
+    }
+
+    #[tokio::test]
+    async fn archiving_from_a_rule_or_sweep_marks_the_thread_done_on_the_server() {
+        let pool = seeded_pool().await;
+        let queue = SyncQueue::new();
+        crate::mail_actions::move_threads(
+            &pool,
+            &queue,
+            &["thread".to_string()],
+            crate::mail_actions::MoveTarget::Archive,
+        )
+        .await
+        .expect("archive");
+        let kinds = queued_kinds(&pool)
+            .await
+            .into_iter()
+            .map(|(kind, _)| kind)
+            .collect::<Vec<_>>();
+        // Done for the whole batch first, then each thread's read and move.
+        assert_eq!(kinds, vec!["workflow_marker", "flags", "workflow_move"]);
     }
 
     #[tokio::test]

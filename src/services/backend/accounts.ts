@@ -277,3 +277,13 @@ export type BackendAccountQuota = import('./generated/app/commands/accounts/Acco
 export function backendListAccountQuotas(): Promise<BackendAccountQuota[]> {
   return invoke('list_account_quotas');
 }
+
+export type BackendLocalOnlyWorkflowAccount = import('./generated/app/commands/accounts/LocalOnlyWorkflowAccountDto').LocalOnlyWorkflowAccountDto;
+
+/**
+ * Accounts whose mail server does not hold Done and Snooze right now, so
+ * those states stay on this device, with the reason.
+ */
+export function backendListLocalOnlyWorkflowAccounts(): Promise<BackendLocalOnlyWorkflowAccount[]> {
+  return invoke('list_local_only_workflow_accounts');
+}

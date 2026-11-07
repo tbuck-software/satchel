@@ -258,7 +258,8 @@ mod tests {
                     .any(|r| r["remote_id"] == "101" && r["source_folder"] == "INBOX"));
             }
         }
-        assert_eq!(kinds, vec!["flags", "workflow_move"]);
+        // Read, then the Done keyword, then the move that carries it along.
+        assert_eq!(kinds, vec!["flags", "workflow_marker", "workflow_move"]);
     }
 
     /// The client's check-off used to send a separate read request after the
@@ -293,7 +294,8 @@ mod tests {
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(kinds, vec!["flags", "workflow_move"]);
+        // Read, then the Done keyword, then the move that carries it along.
+        assert_eq!(kinds, vec!["flags", "workflow_marker", "workflow_move"]);
     }
 
     #[tokio::test]
@@ -871,10 +873,14 @@ mod tests {
         )
         .await
         .expect("restore inbox");
-        let payload: String = sqlx::query_scalar("SELECT payload FROM sync_queue LIMIT 1")
-            .fetch_one(&pool)
-            .await
-            .expect("reverse move");
+        // The keyword comes off the Archive copy first; the move follows.
+        let payload: String = sqlx::query_scalar(
+            "SELECT payload FROM sync_queue
+             WHERE json_extract(payload, '$.kind') <> 'workflow_marker' ORDER BY rowid LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("reverse move");
         match serde_json::from_str::<RemoteMutationPayload>(&payload).expect("payload") {
             RemoteMutationPayload::WorkflowMove { refs, .. } => {
                 assert_eq!(refs.len(), 1);
