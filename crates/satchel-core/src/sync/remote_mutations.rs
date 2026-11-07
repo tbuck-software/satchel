@@ -142,6 +142,22 @@ pub fn remote_move_thread_id(payload: &RemoteMutationPayload) -> Option<&str> {
     }
 }
 
+/// SQL over a `sync_queue` row: the thread of a queued provider move, as
+/// [`remote_move_thread_id_from_json`] reads it from `payload`, NULL for any
+/// other row. Migration 0160 indexes it, so guards find a thread's moves
+/// without parsing every queued payload; a query must spell it exactly like
+/// this for SQLite to use the index.
+pub(crate) const QUEUED_MOVE_THREAD_ID: &str = "CASE WHEN json_valid(payload) THEN
+    CASE json_extract(payload, '$.kind')
+        WHEN 'workflow_move' THEN json_extract(payload, '$.workflow_thread_id')
+        WHEN 'blocked_move' THEN json_extract(payload, '$.blocked_thread_id')
+    END END";
+
+/// SQL over a `sync_queue` row: the payload's `kind`, NULL for a payload that
+/// is not JSON. Migration 0160 indexes it, with the account.
+pub(crate) const QUEUED_KIND: &str =
+    "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END";
+
 /// Parse and extract a durable remote-move thread id. Malformed and unrelated
 /// queue payloads are intentionally ignored by lifecycle guards.
 pub fn remote_move_thread_id_from_json(payload: &str) -> Option<String> {
@@ -338,11 +354,12 @@ pub async fn cancel_scheduled_workflow_moves_in_transaction(
     thread_id: &str,
     target_folder_type: &str,
 ) -> Result<Vec<PreparedWorkflowMove>, String> {
-    let rows = sqlx::query_as::<_, (String, String, String)>(
+    let rows = sqlx::query_as::<_, (String, String, String)>(&format!(
         "SELECT id, account_id, payload FROM sync_queue
-         WHERE action_type = ? AND status = 'scheduled'",
-    )
-    .bind(ACTION_REMOTE_MUTATION)
+             WHERE action_type = 'remote_mutation' AND +status = 'scheduled'
+               AND {QUEUED_MOVE_THREAD_ID} = ?"
+    ))
+    .bind(thread_id)
     .fetch_all(&mut **tx)
     .await
     .map_err(|err| err.to_string())?;

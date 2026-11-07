@@ -217,6 +217,7 @@
       "mailMergeReplyNotAllowed": "Eine Serienmail ist eine neue Nachricht und kann keine Unterhaltung beantworten oder weiterleiten.",
       "mailMergeSmimeSigningUnavailable": "Das S/MIME-Signaturzertifikat ist gesperrt oder fehlt. Entsperre es und starte erneut.",
       "mailMergeTooManyRecipients": "Eine Serienmail sendet höchstens {limit} Nachrichten. Teile die Liste.",
+      "mailMoveInterrupted": "Das Verschieben wurde unterbrochen, bevor es fertig war. Bitte erneut versuchen.",
       "mailMovePending": "Die Verschiebung auf dem Server wird noch abgeschlossen. Bitte gleich erneut versuchen.",
       "mailUndoUnavailable": "Diese Aktion kann nicht mehr rückgängig gemacht werden.",
       "messageBodyProviderUnsupported": "Das Nachladen von Nachrichten wird für {provider}-Konten nicht unterstützt.",
@@ -1349,7 +1350,8 @@
     "move": {
       "failed": "Verschieben fehlgeschlagen: {error}",
       "fallbackFolder": "Ordner",
-      "moved": "Nach „{folder}“ verschoben."
+      "moved": "Nach „{folder}“ verschoben.",
+      "partlyMoved": "{applied} von {total} nach „{folder}“ verschoben; der Rest ließ sich nicht verschieben. {reason}"
     },
     "newSenders": {
       "acceptExisting": "{count} Absender zulassen | Alle {count} Absender zulassen",
@@ -1379,6 +1381,7 @@
       "notSpamFailed": "Als kein Spam markieren fehlgeschlagen.",
       "notSpamMoved": "Thread zurück in den Posteingang verschoben | {count} Threads zurück in den Posteingang verschoben",
       "notSpamUndoFailed": "Kein Spam rückgängig machen fehlgeschlagen.",
+      "partlyFiled": "{applied} von {total} verschoben; der Rest ließ sich nicht verschieben. {reason}",
       "permanentlyDeleted": "Thread endgültig gelöscht | {count} Threads endgültig gelöscht",
       "pinChanged": "Markierung geändert",
       "pinFailed": "Anheften fehlgeschlagen.",

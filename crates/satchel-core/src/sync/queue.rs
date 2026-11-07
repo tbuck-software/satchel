@@ -143,6 +143,30 @@ impl QueueRow {
     }
 }
 
+/// Rows per INSERT of a batch enqueue; bounds the size of one bound JSON text.
+const BATCH_INSERT_ROWS: usize = 500;
+
+/// No queue row has any of these ids, and no id repeats.
+async fn all_new(
+    tx: &mut Transaction<'_, Sqlite>,
+    actions: &[QueuedAction],
+) -> Result<bool, String> {
+    let mut ids: Vec<&str> = actions.iter().map(|a| a.id.as_str()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.len() != actions.len() {
+        return Ok(false);
+    }
+    let existing: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sync_queue WHERE id IN (SELECT value FROM json_each(?)))",
+    )
+    .bind(serde_json::to_string(&ids).map_err(|e| e.to_string())?)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(!existing)
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct SyncQueue {
     /// Wakes the outbox worker as soon as an action is enqueued/requeued, so a
@@ -309,6 +333,67 @@ impl SyncQueue {
         .execute(&mut **tx)
         .await
         .map_err(|err| err.to_string())?;
+        Ok(())
+    }
+
+    /// Insert actions in order as part of a caller-owned transaction, with the
+    /// same result as [`Self::enqueue_in_transaction`] for each in turn.
+    ///
+    /// New ids — the common case of a bulk move — take a constant number of
+    /// statements for the whole batch. A batch that names an existing row, or
+    /// one id twice, goes through the single path, which knows how to merge
+    /// into a row.
+    pub async fn enqueue_batch_in_transaction(
+        &self,
+        tx: &mut Transaction<'_, Sqlite>,
+        actions: &[QueuedAction],
+    ) -> Result<(), String> {
+        if actions.len() < 2 || !all_new(tx, actions).await? {
+            for action in actions {
+                self.enqueue_in_transaction(tx, action).await?;
+            }
+            return Ok(());
+        }
+        let planned = super::flag_intents::plan_batch(tx, actions).await?;
+        let now_ms = Utc::now().timestamp_millis();
+        let rows: Vec<serde_json::Value> = actions
+            .iter()
+            .zip(planned)
+            .filter_map(|(action, planned)| match planned {
+                super::flag_intents::Planned::Insert(payload) => Some(serde_json::json!([
+                    action.id,
+                    action.account_id,
+                    action.action_type,
+                    payload,
+                    action.status,
+                    action.retry_count,
+                    action.last_error,
+                    action.created_at,
+                    action.updated_at,
+                    action.next_retry_at,
+                    action.scheduled_for,
+                    now_ms,
+                    action.submission_started_at,
+                    (action.status == "sending").then(sending_session),
+                ])),
+                super::flag_intents::Planned::Superseded => None,
+            })
+            .collect();
+        for chunk in rows.chunks(BATCH_INSERT_ROWS) {
+            sqlx::query(
+                "INSERT INTO sync_queue (id, account_id, action_type, payload, status, retry_count, last_error, created_at, updated_at, next_retry_at, scheduled_for, updated_at_ms, submission_started_at, sending_session)
+                 SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'),
+                        json_extract(value, '$[3]'), json_extract(value, '$[4]'), json_extract(value, '$[5]'),
+                        json_extract(value, '$[6]'), json_extract(value, '$[7]'), json_extract(value, '$[8]'),
+                        json_extract(value, '$[9]'), json_extract(value, '$[10]'), json_extract(value, '$[11]'),
+                        json_extract(value, '$[12]'), json_extract(value, '$[13]')
+                 FROM json_each(?) ORDER BY key",
+            )
+            .bind(serde_json::Value::from(chunk.to_vec()).to_string())
+            .execute(&mut **tx)
+            .await
+            .map_err(|err| err.to_string())?;
+        }
         Ok(())
     }
 

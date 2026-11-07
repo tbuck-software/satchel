@@ -21,6 +21,7 @@ index idx_invites_message: CREATE INDEX idx_invites_message ON calendar_invites(
 index idx_invites_uid: CREATE UNIQUE INDEX idx_invites_uid ON calendar_invites(account_id, uid, recurrence_id)
 index idx_known_senders_account: CREATE INDEX idx_known_senders_account ON known_senders(account_id)
 index idx_mail_action_messages_current: CREATE INDEX idx_mail_action_messages_current ON mail_action_messages(message_id)
+index idx_mail_action_threads_thread: CREATE INDEX idx_mail_action_threads_thread ON mail_action_threads(thread_id)
 index idx_mail_merge_jobs_account: CREATE INDEX idx_mail_merge_jobs_account ON mail_merge_jobs(account_id, status)
 index idx_mail_merge_jobs_request: CREATE UNIQUE INDEX idx_mail_merge_jobs_request ON mail_merge_jobs(request_id) WHERE request_id IS NOT NULL
 index idx_mail_merge_jobs_status: CREATE INDEX idx_mail_merge_jobs_status ON mail_merge_jobs(status, next_send_at)
@@ -70,6 +71,8 @@ index idx_spam_training_receipt: CREATE INDEX idx_spam_training_receipt ON spam_
 index idx_spam_training_rescued: CREATE INDEX idx_spam_training_rescued ON spam_training(sender) WHERE label = 'ham' AND source = 'explicit'
 index idx_spam_training_thread_sender: CREATE INDEX idx_spam_training_thread_sender ON spam_training(thread_id, sender)
 index idx_sync_queue_account: CREATE INDEX idx_sync_queue_account ON sync_queue(account_id)
+index idx_sync_queue_kind_account: CREATE INDEX idx_sync_queue_kind_account ON sync_queue((CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') END), account_id) WHERE action_type = 'remote_mutation'
+index idx_sync_queue_move_thread: CREATE INDEX idx_sync_queue_move_thread ON sync_queue((CASE WHEN json_valid(payload) THEN CASE json_extract(payload, '$.kind') WHEN 'workflow_move' THEN json_extract(payload, '$.workflow_thread_id') WHEN 'blocked_move' THEN json_extract(payload, '$.blocked_thread_id') END END)) WHERE action_type = 'remote_mutation'
 index idx_sync_queue_scheduled: CREATE INDEX idx_sync_queue_scheduled ON sync_queue(scheduled_for) WHERE scheduled_for IS NOT NULL
 index idx_sync_queue_status_due: CREATE INDEX idx_sync_queue_status_due ON sync_queue(status, next_retry_at)
 index idx_task_lists_remote: CREATE UNIQUE INDEX idx_task_lists_remote ON task_lists(account_id, remote_id) WHERE remote_id IS NOT NULL
