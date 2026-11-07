@@ -1,0 +1,1377 @@
+{
+  "accountAppearance": {
+    "saveFailed": "Die Darstellung des Kontos konnte nicht gespeichert werden."
+  },
+  "accountQuota": {
+    "sidebarCritical": "{account}: Postfach zu {percent} voll, neue Mails kommen womöglich zurück. Kontoeinstellungen öffnen.",
+    "sidebarWarning": "{account}: Postfach zu {percent} voll. Kontoeinstellungen öffnen."
+  },
+  "accountVisibility": {
+    "accounts": "Konten",
+    "openAccount": "{account} öffnen, auch ruhende Mails",
+    "resting": "Ruht",
+    "restingHint": "{account} ruht: keine Zähler, keine Mitteilungen. Klick schaut hinein, Rechtsklick blendet es bis Mitternacht ein.",
+    "saveFailed": "Die Sichtbarkeit des Kontos konnte nicht gespeichert werden.",
+    "scopeResting": "{accounts} ruht | {accounts} ruhen",
+    "statePeek": "Bis Mitternacht eingeblendet"
+  },
+  "app": {
+    "crash": {
+      "copied": "Absturzbericht kopiert",
+      "copyFailed": "Absturzbericht konnte nicht kopiert werden",
+      "copyReport": "Bericht kopieren",
+      "crashed": "Satchel ist beim letzten Start abgestürzt.",
+      "notResponding": "Satchel hat beim letzten Lauf nicht reagiert."
+    },
+    "dataRepair": {
+      "running": "Satchel räumt gespeicherte Mails im Hintergrund auf. Alles bleibt dabei benutzbar."
+    },
+    "errors": {
+      "showDiagnostics": "Diagnose",
+      "unexpected": "Etwas ist schiefgelaufen. Die Details stehen im Log."
+    },
+    "followUps": {
+      "due": "{count} Nachfassen fällig | {count} Nachfassen fällig"
+    },
+    "ics": {
+      "fileFailed": "{name}: {error}",
+      "importFailed": "ICS-Import fehlgeschlagen: {error}",
+      "imported": "Termin importiert: {name}"
+    },
+    "language": {
+      "nativeUpdateFailed": "Systemmenüs und Benachrichtigungen konnten nicht aktualisiert werden.",
+      "nativeUpdateRolledBack": "Die Sprache konnte nicht auf Systemmenüs und Benachrichtigungen angewendet werden. Die vorherige Sprache wurde wiederhergestellt."
+    },
+    "mail": {
+      "cancelFailed": "Abbrechen fehlgeschlagen: {error}",
+      "sendCancelled": "Senden abgebrochen.",
+      "sent": "Mail gesendet.",
+      "undo": "Rückgängig",
+      "undoWindow": "Sende in {seconds}s — Rückgängig möglich"
+    },
+    "notifications": {
+      "actionFailed": "Die Aktion aus der Benachrichtigung ließ sich nicht abschließen. Versuche es in Satchel noch einmal.",
+      "mailGone": "Die E-Mail aus dieser Benachrichtigung liegt nicht mehr in Satchel.",
+      "read": "Gelesen",
+      "replyPlaceholder": "Antwort schreiben …",
+      "replyWaiting": "Deine Antwort aus der Benachrichtigung bleibt erhalten. Satchel bietet sie wieder an, sobald der offene Dialog oder Entwurf geschlossen ist."
+    },
+    "outbox": {
+      "needsAttention": "{count} E-Mail im Postausgang benötigt Aufmerksamkeit. | {count} E-Mails im Postausgang benötigen Aufmerksamkeit.",
+      "sendFailed": "{count} E-Mail konnte nicht gesendet werden. | {count} E-Mails konnten nicht gesendet werden."
+    },
+    "plugins": {
+      "autoDisabled": "Das Plugin {plugin} lief wiederholt in Zeitüberschreitungen und wurde abgeschaltet. Unter Einstellungen → Integrationen lässt es sich wieder einschalten."
+    },
+    "signatures": {
+      "discovered": "{count} Signatur in gesendeten Nachrichten gefunden. | {count} Signaturen in gesendeten Nachrichten gefunden."
+    },
+    "sync": {
+      "failures": {
+        "label": "{count} Eintrag benötigt Aufmerksamkeit | {count} Einträge benötigen Aufmerksamkeit",
+        "review": "Probleme prüfen"
+      },
+      "mutationsFailed": "{count} Änderung ist nicht beim Server angekommen. | {count} Änderungen sind nicht beim Server angekommen.",
+      "retryFailed": "Erneuter Abgleich fehlgeschlagen: {error}",
+      "retryQueued": "{count} Änderung wird erneut abgeglichen. | {count} Änderungen werden erneut abgeglichen.",
+      "status": {
+        "lastSynced": "Zuletzt synchronisiert {time}",
+        "never": "Noch nicht synchronisiert",
+        "offline": "Offline — keine Verbindung",
+        "syncing": "Wird synchronisiert …"
+      }
+    },
+    "update": {
+      "available": "Update verfügbar",
+      "downloading": "Wird heruntergeladen: {progress}%",
+      "failedRetry": "Update fehlgeschlagen, erneut versuchen",
+      "ready": "Satchel {version} ist geladen. Zum Aktualisieren neu starten.",
+      "restart": "Zum Aktualisieren neu starten",
+      "restartNow": "Jetzt neu starten"
+    }
+  },
+  "backend": {
+    "errors": {
+      "accountAvatarInvalid": "Das Bild muss ein kleines PNG-, JPEG- oder WebP-Bild sein.",
+      "accountColorInvalid": "Wähle eine Farbe im Format #rrggbb.",
+      "accountConfigNotEncrypted": "Die gespeicherte Anmeldung dieses Kontos stammt nicht von Satchel und wird nicht verwendet. Konto entfernen und neu hinzufügen.",
+      "accountConfigurationInvalid": "Die Kontokonfiguration ist ungültig.",
+      "accountCredentialAccessFailed": "Auf die gespeicherten Zugangsdaten des Kontos konnte nicht zugegriffen werden. Bitte versuche es erneut.",
+      "accountHasNoPassword": "Dieses Konto meldet sich über seinen Anbieter an und hat kein Passwort, das sich ändern ließe.",
+      "accountNotFound": "Das Konto wurde nicht gefunden.",
+      "accountNotImap": "Dieses Konto verwendet kein IMAP.",
+      "accountPasswordRequired": "Gib das Kontopasswort ein.",
+      "accountPasswordUnavailable": "Für dieses Konto ist kein wiederverwendbares Passwort gespeichert.",
+      "accountPersistenceFailed": "Kontodaten sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "accountSyncFailed": "Die Synchronisierung für {account} ist fehlgeschlagen: {message}",
+      "accountVisibilityInvalid": "Wähle gültige Wochentage und ein Zeitfenster, das am selben Tag später endet.",
+      "aliasPersistenceFailed": "Aliase sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "asideFolderCreatedRefreshFailed": "Der Aside-Ordner für {account} wurde angelegt, aber die Ordnerliste konnte noch nicht aktualisiert werden: {message}",
+      "asideFolderCreatedRefreshPending": "Der Aside-Ordner für {account} wurde angelegt, wird aber vom Anbieter noch nicht in der Ordnerliste zurückgegeben.",
+      "asideFolderMissing": "Der serverseitige Ordner \"Aside\" ist noch nicht eingerichtet. Synchronisiere das Konto und versuche es erneut.",
+      "asideFolderUnavailable": "Der Aside-Ordner für {account} ist momentan nicht verfügbar: {message}",
+      "attachmentExecutableDisguisedNotConfirmed": "\"{filename}\" sieht aus wie ein Dokument, endet aber auf .{extension}, und das führt das Betriebssystem aus. Satchel übergibt es ohne deine Bestätigung nicht.",
+      "attachmentExecutableNotConfirmed": "\"{filename}\" ist ein Programm (.{extension}), kein Dokument. Satchel übergibt es ohne deine Bestätigung nicht an das Betriebssystem.",
+      "attachmentNotBase64": "\"{filename}\" ließ sich nicht anhängen: Die Daten sind beschädigt. Den Anhang entfernen und die Datei erneut hinzufügen.",
+      "attachmentPayloadMissing": "Der Anhang ließ sich nicht lesen: Satchel hat weder seinen Inhalt noch einen Pfad dorthin bekommen.",
+      "backupPassphraseOrAcknowledgementRequired": "Setze eine Passphrase für den Master-Key oder bestätige, dass der Sicherungsordner ihn ungeschützt enthalten darf.",
+      "backupPassphraseRejected": "Diese Passphrase öffnet den Master-Key dieser Sicherung nicht.",
+      "backupPassphraseRequired": "Der Master-Key dieser Sicherung ist umschlossen. Gib die Passphrase ein, mit der sie erstellt wurde.",
+      "backupPassphraseTooShort": "Verwende mindestens 12 Zeichen für die Sicherungs-Passphrase.",
+      "backupPublicationFailed": "Die Sicherung konnte nicht abgeschlossen werden. Vorhandene Sicherungen wurden beibehalten.",
+      "blockedSenderOwnAddress": "Die eigene Adresse oder Domain lässt sich nicht blockieren.",
+      "blockedSenderPatternEmpty": "Gib eine E-Mail-Adresse oder Domain zum Blockieren ein.",
+      "blockedSenderPersistenceFailed": "Blockierte Absender sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "browserWindowBlocked": "Der Browser hat das neue Fenster blockiert. Erlaube Pop-ups für Satchel und versuche es erneut.",
+      "browserWindowUnavailable": "Es steht kein Browserfenster zum Öffnen zur Verfügung.",
+      "calendarEditUnsupported": "Dieser Termin lässt sich hier nicht sicher bearbeiten. Ändere Serientermine, Gäste oder nicht unterstützte Termine bei deinem Kalenderanbieter.",
+      "calendarEventChanged": "Dieser Termin wurde während der Bearbeitung geändert. Aktualisiere den Kalender und öffne den Termin erneut, um die neueste Version zu prüfen.",
+      "calendarEventEndInvalid": "Der Termin muss nach seinem Beginn enden.",
+      "calendarEventNotFound": "Der Kalendertermin wurde nicht gefunden.",
+      "calendarEventOwnership": "Dieser Kalendertermin gehört zu einem anderen Konto.",
+      "calendarEventReadOnly": "Outlook erlaubt diesem Konto keine Änderung am Termin: Du nimmst nur teil, oder der Kalender ist schreibgeschützt.",
+      "calendarFileReadFailed": "Die Kalenderdatei konnte nicht gelesen werden.",
+      "calendarInviteCancelled": "Eine abgesagte Einladung kann nicht beantwortet werden.",
+      "calendarInviteInvalid": "Die gespeicherte Einladung ist ungültig.",
+      "calendarInviteNotFound": "Die Kalendereinladung wurde nicht gefunden.",
+      "calendarOrganizerMissing": "Die Einladung enthält keinen Organisator.",
+      "calendarPayloadInvalid": "Die Kalenderdaten sind ungültig.",
+      "calendarPersistenceFailed": "Kalenderdaten sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "calendarRemoteSavedSyncRequired": "Der Termin wurde auf dem Kalenderserver gespeichert, aber die lokale Kopie konnte nicht aktualisiert werden. Synchronisiere den Kalender vor einem erneuten Versuch.",
+      "calendarRemoteUnavailable": "Synchronisiere diesen Kalender vor dem Ändern. Die entfernte Version des Termins ist nicht verfügbar.",
+      "calendarRemoteWriteFailed": "Der Kalenderserver konnte die Änderung nicht bestätigen. Synchronisiere den Kalender vor einem erneuten Versuch.",
+      "calendarResponseInvalid": "Wähle eine gültige Antwort auf die Einladung.",
+      "calendarRichDescriptionReadOnly": "Diese Beschreibung ist in Outlook formatiert und verlöre hier Links und Layout. Bearbeite sie in Outlook.",
+      "calendarTimeInvalid": "Gib eine gültige Terminzeit ein.",
+      "calendarTitleRequired": "Gib einen Termintitel ein.",
+      "composeWindowUnsupported": "Ein eigenes Schreibfenster gibt es nur auf dem Desktop.",
+      "contactAvatarFallbackSyncFailed": "Ersatz-Kontaktbilder konnten nicht synchronisiert werden.",
+      "contactAvatarLocalSyncFailed": "Lokale Kontaktbilder konnten nicht synchronisiert werden.",
+      "contactAvatarProviderSyncFailed": "Kontaktbilder des Anbieters konnten nicht synchronisiert werden.",
+      "contactEmailInvalid": "Gib eine gültige Kontakt-E-Mail-Adresse ein.",
+      "contactPersistenceFailed": "Kontakte sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "decryptedAttachmentUnavailable": "Dieser Anhang stammt aus einer verschlüsselten Nachricht, und seine entschlüsselte Kopie ist nicht mehr gespeichert. Öffne die Nachricht, um ihn erneut zu entschlüsseln.",
+      "desktopUnavailable": "Das Desktop-Backend ist nicht verfügbar. Starte Satchel mit `pnpm tauri:dev`.",
+      "directorySelectionUnavailable": "Die Ordnerauswahl ist auf dieser Plattform nicht verfügbar.",
+      "draftChangedElsewhere": "Dieser Entwurf wurde in einem anderen Fenster geändert. Dein Text hier ist nicht gespeichert.",
+      "draftGoneElsewhere": "Dieser Entwurf wurde in einem anderen Fenster gesendet oder verworfen. Dein Text hier ist nicht gespeichert.",
+      "draftSendPending": "Dieser Entwurf hat einen aktiven Versand. Öffne ihn unter Entwürfe, um den Versand vor dem Bearbeiten abzubrechen.",
+      "draftSyncQueueInvalid": "Der gespeicherte Auftrag zur Entwurfssynchronisierung ist ungültig.",
+      "draftSyncTimedOut": "Der Anbieter hat die Entwurfssynchronisierung nicht rechtzeitig abgeschlossen.",
+      "emailInvalid": "Gib eine gültige E-Mail-Adresse ein.",
+      "exportAttachmentListUnavailable": "Für eine Nachricht fehlen lokale Angaben zu ihren Anhängen. Gleiche die Nachricht ab und versuche den Export erneut.",
+      "exportAttachmentMetadataInvalid": "Die Anhangsdaten eines gespeicherten Entwurfs sind beschädigt. Öffne den Entwurf erneut und hänge die Dateien noch einmal an.",
+      "exportAttachmentUnavailable": "\"{filename}\" kann nicht exportiert werden, weil die lokale Kopie fehlt oder nicht verifiziert werden kann. Lade den Anhang herunter und versuche es erneut.",
+      "exportMailboxChanged": "Während des Exports wurden Nachrichten entfernt oder ersetzt, deshalb wurde nichts gespeichert. Starte den Export erneut.",
+      "exportOriginalUnavailable": "\"{subject}\" kann nicht exportiert werden, weil die vollständige Originalnachricht nicht verfügbar ist. Verbinde das Konto und versuche es erneut. Es wird keine unvollständige Nachricht exportiert.",
+      "folderAccountMismatch": "Wähle einen Ordner desselben Kontos.",
+      "folderContainsChildren": "Der Ordner \"{name}\" enthält noch Unterordner ({count}).",
+      "folderContainsMessages": "Der Ordner \"{name}\" enthält noch Nachrichten ({count}). Verschiebe oder lösche sie zuerst.",
+      "folderExists": "Ein Ordner namens \"{path}\" existiert bereits.",
+      "folderIngestBlocked": "In {folders} konnten für {account} zu viele Nachrichten nicht gespeichert werden ({count}). Der Ordner wird an derselben Stelle erneut geholt.",
+      "folderNameContainsSeparator": "Ordnernamen dürfen keine Schrägstriche enthalten.",
+      "folderNameEmpty": "Gib einen Ordnernamen ein.",
+      "folderNameInvalidCharacters": "Der Ordnername enthält ungültige Zeichen.",
+      "folderNameTooLong": "Der Ordnername darf höchstens {max} Zeichen lang sein.",
+      "folderNotFound": "Der Ordner wurde nicht gefunden.",
+      "folderSyncFailed": "Der Ordner {folder} für {account} konnte nicht synchronisiert werden: {message}",
+      "followUpPersistenceFailed": "Nachfassen ist momentan nicht verfügbar. Bitte versuche es erneut.",
+      "followUpTimestampInvalid": "Gib eine gültige Zeit zum Nachfassen ein.",
+      "googleCalendarSyncFailed": "Google Calendar für {account} konnte nicht synchronisiert werden.",
+      "groupwareCalendarSyncFailed": "Kalender für {account} konnten nicht synchronisiert werden.",
+      "groupwareContactSyncFailed": "Kontakte für {account} konnten nicht synchronisiert werden.",
+      "groupwareCredentialsRejected": "Kein CalDAV- oder CardDAV-Dienst hat die gespeicherten Zugangsdaten akzeptiert.",
+      "groupwareSyncFailed": "Groupware für {account} konnte nicht synchronisiert werden.",
+      "imapConnectionFailed": "Es konnte keine sichere IMAP-Verbindung hergestellt werden. Letzter Versuch: {reason}. Du kannst den Server unter \"Erweitert\" von Hand eintragen.",
+      "imapCredentialsRejected": "Keine sichere IMAP-Konfiguration hat diese Zugangsdaten akzeptiert. Prüfe den Benutzernamen oder trage den Server von Hand ein.",
+      "imapDraftUidWithoutValidity": "Für diesen älteren Entwurf in \"{folder}\" fehlt eine bestätigte Serverkennung. Seine Serverkopie wurde nicht verändert.",
+      "imapMixedUidValidity": "Diese Aktion enthält Nachrichten aus verschiedenen Versionen des IMAP-Ordners \"{folder}\". Synchronisiere den Ordner und versuche es erneut.",
+      "imapMutationInvalidRef": "Für diese vorgemerkte IMAP-Aktion ist die Nachrichtenkennung unvollständig. Synchronisiere den Ordner und versuche es erneut.",
+      "imapPresetLoginRejected": "{provider} wurde erkannt, hat die Anmeldung aber abgelehnt. Prüfe, ob IMAP freigeschaltet ist oder ein App-Passwort benötigt wird.",
+      "imapUidValidityChanged": "Der IMAP-Ordner \"{folder}\" hat sich auf dem Server geändert. Die Aktion wurde gestoppt, um andere Nachrichten zu schützen. Synchronisiere den Ordner und versuche es erneut.",
+      "imapUidValidityMissing": "Für den IMAP-Ordner \"{folder}\" fehlt eine bestätigte Postfachkennung. Synchronisiere den Ordner, bevor du die Aktion erneut versuchst.",
+      "importCancelled": "Der Import wurde abgebrochen. Es wurde nichts geschrieben.",
+      "importFileTooLarge": "Diese Datei ist {megabytes} MB groß. Satchel liest eine Datei dieser Art am Stück und hört bei {limit} MB auf.",
+      "inlineBackfillAlreadyRunning": "Der Abgleich der Inline-Bilder läuft bereits.",
+      "logsFolderUnavailable": "Der Log-Ordner konnte nicht geöffnet werden.",
+      "mailActionFailed": "Die Mail-Aktion konnte nicht gespeichert werden. Bitte erneut versuchen.",
+      "mailMovePending": "Die Verschiebung auf dem Server wird noch abgeschlossen. Bitte gleich erneut versuchen.",
+      "mailUndoUnavailable": "Diese Aktion kann nicht mehr rückgängig gemacht werden.",
+      "messageBodyProviderUnsupported": "Das Nachladen von Nachrichten wird für {provider}-Konten nicht unterstützt.",
+      "messageDeliveryStatusUnknown": "Satchel wurde beim Senden unterbrochen. Prüfe den Gesendet-Ordner beim Anbieter, bevor du etwas weiter unternimmst.",
+      "messageNotAvailableLocally": "Diese Nachricht ist auf diesem Gerät nicht mehr verfügbar.",
+      "messageNotAvailableRemotely": "Diese Nachricht ist auf dem Server nicht mehr verfügbar.",
+      "messageReadFailed": "Die Nachricht konnte nicht geladen werden. Bitte versuche es erneut.",
+      "messageSearchFailed": "Die Nachrichtensuche ist fehlgeschlagen. Bitte versuche es erneut.",
+      "messagesQuarantined": "{count} Nachrichten in {folder} konnten für {account} nicht gespeichert werden. Die Synchronisierung läuft mit den übrigen weiter.",
+      "messagesSkipped": "{count} Nachrichten in {folder} konnten für {account} auch nach mehreren Versuchen nicht gespeichert werden. Die Synchronisierung überspringt sie und läuft weiter.",
+      "noActiveAccount": "Richte zuerst ein aktives Konto ein.",
+      "notAMessageFile": "So lassen sich nur .eml- und .msg-Dateien öffnen.",
+      "notificationReplyWaiting": "Eine Antwort aus einer Benachrichtigung ließ sich nicht öffnen. Satchel behält sie, bis du es erneut versuchst.",
+      "oauthAccountConflict": "Diese Adresse gehört bereits zu einem IMAP-Konto und kann nicht durch OAuth ersetzt werden.",
+      "oauthAccountMismatch": "Bitte wähle das Google-Konto aus, das du verbinden möchtest. Dein bestehendes Konto wurde nicht verändert.",
+      "oauthAuthorizationCancelled": "Die Anmeldung wurde abgebrochen.",
+      "oauthBrowserOpenFailed": "Die Anmeldeseite konnte nicht automatisch geöffnet werden.",
+      "oauthCalendarPermissionRequired": "Der Zugriff auf Google Kalender wurde nicht freigegeben. Bitte erlaube den Kalender-Zugriff, um Kalender zu synchronisieren.",
+      "oauthCallbackInvalid": "Die Anmeldeantwort ist ungültig. Bitte starte erneut.",
+      "oauthCallbackTimedOut": "Die Anmeldung hat zu lange gedauert. Bitte starte erneut.",
+      "oauthCallbackUnavailable": "Der Anmelderückruf ist nicht verfügbar. Bitte versuche es erneut.",
+      "oauthConfigurationInvalid": "OAuth ist für diesen Anbieter nicht korrekt konfiguriert.",
+      "oauthContactsPermissionRequired": "Der Zugriff auf Google Kontakte wurde nicht freigegeben. Bitte erlaube den Kontakte-Zugriff, um Profilbilder zu verwenden.",
+      "oauthCredentialAccessFailed": "Auf den geschützten Anmeldestatus konnte nicht zugegriffen werden. Bitte starte erneut.",
+      "oauthFlowInvalid": "Der gespeicherte Anmeldestatus ist ungültig. Bitte starte erneut.",
+      "oauthFlowNotFound": "Die Anmeldung ist abgelaufen oder wurde bereits abgeschlossen. Bitte starte erneut.",
+      "oauthIdentityMismatch": "Die angemeldete Adresse stimmt nicht mit dem ausgewählten Konto überein.",
+      "oauthIdentityMissing": "Der Anbieter hat keine E-Mail-Adresse für dieses Konto zurückgegeben.",
+      "oauthMailPermissionRequired": "Der Gmail-Zugriff wurde nicht freigegeben. Bitte verbinde das Konto erneut und erlaube den Mail-Zugriff. Dein bestehendes Konto wurde nicht verändert.",
+      "oauthPersistenceFailed": "Der Anmeldestatus konnte nicht gespeichert werden. Bitte versuche es erneut.",
+      "oauthProviderRequestFailed": "Der Anbieter konnte die Anmeldung nicht abschließen. Bitte versuche es erneut.",
+      "oauthReloadRequired": "Die Anmeldung des Kontos hat sich währenddessen geändert. Bitte versuche es erneut.",
+      "oauthUrlRejected": "Satchel hat eine unerwartete Anmeldeadresse abgelehnt.",
+      "outboxActionCannotBeDiscarded": "Dieser Eintrag im Postausgang kann nicht sicher verworfen werden.",
+      "outlookCalendarAccessMissing": "Der Kalender-Zugriff für dieses Outlook-Konto ist nicht verbunden. Verbinde ihn unter Einstellungen → Kalender.",
+      "outlookCalendarSyncFailed": "Der Outlook-Kalender für {account} konnte nicht synchronisiert werden.",
+      "outlookEventChangedRemotely": "Dieser Termin wurde in Outlook geändert. Der Kalender wurde aktualisiert; öffne den Termin erneut und versuche es noch einmal.",
+      "passwordCheckFailed": "Die Anmeldung mit dem neuen Passwort ist fehlgeschlagen: {reason}",
+      "pgpDecodeFailed": "Der entschlüsselte OpenPGP-Inhalt konnte nicht gelesen werden.",
+      "pgpDecryptFailed": "Die OpenPGP-Nachricht konnte mit den entsperrten Schlüsseln nicht entschlüsselt werden.",
+      "pgpEmailInvalid": "Gib eine gültige E-Mail-Adresse für den OpenPGP-Schlüssel ein.",
+      "pgpEncryptFailed": "Die Nachricht konnte nicht mit OpenPGP verschlüsselt werden.",
+      "pgpKeyBlockInvalid": "Gib einen gültigen ASCII-kodierten OpenPGP-Schlüssel ein.",
+      "pgpKeyNotFound": "Dieser OpenPGP-Schlüssel ist nicht mehr vorhanden.",
+      "pgpMalformedMime": "Der entschlüsselte OpenPGP-Inhalt hat eine unvollständige oder fehlerhafte MIME-Struktur.",
+      "pgpMalformedSigned": "Die Signaturstruktur im entschlüsselten OpenPGP-Inhalt ist unvollständig oder fehlerhaft.",
+      "pgpNameRequired": "Gib einen Namen für den OpenPGP-Schlüssel ein.",
+      "pgpNestingLimit": "Der entschlüsselte OpenPGP-Inhalt enthält zu viele verschachtelte Ebenen.",
+      "pgpNoKeyBlocks": "In den importierten Daten wurden keine OpenPGP-Schlüssel gefunden.",
+      "pgpNoPrivateKeys": "Es sind keine privaten OpenPGP-Schlüssel zum Entsperren vorhanden.",
+      "pgpOwnKeyMissing": "Der eigene OpenPGP-Schlüssel fehlt. Importiere oder erzeuge einen Schlüssel für dieses Konto, sonst lässt sich die Kopie im Gesendet-Ordner nicht für dich verschlüsseln.",
+      "pgpPassphraseMismatch": "Die Passphrase entsperrt den ausgewählten privaten OpenPGP-Schlüssel nicht.",
+      "pgpPassphraseRequired": "Gib die OpenPGP-Passphrase ein.",
+      "pgpPrivateKeyRequired": "Nur private OpenPGP-Schlüssel können entsperrt werden.",
+      "pgpRecipientKeyMissing": "Für mindestens einen Empfänger fehlt ein aktueller OpenPGP-Verschlüsselungsschlüssel.",
+      "pgpRemainingEncryption": "Der entschlüsselte OpenPGP-Inhalt enthält eine weitere verschlüsselte Ebene, die nicht geöffnet werden konnte.",
+      "pgpSeveralEncryptedBlocks": "Die Nachricht enthält mehrere OpenPGP-Blöcke. Satchel entschlüsselt nur Nachrichten mit einem einzigen verschlüsselten Block.",
+      "pgpSignFailed": "Die Nachricht konnte nicht mit OpenPGP signiert werden.",
+      "pgpSigningKeyUnavailable": "Der gewählte OpenPGP-Signaturschlüssel ist nicht verfügbar oder gesperrt.",
+      "pgpSmimeConflict": "PGP und S/MIME können nicht in derselben Nachricht verwendet werden.",
+      "pgpStoredPassphraseRejected": "Die gespeicherte OpenPGP-Passphrase wurde abgelehnt.",
+      "pgpUndecodedPart": "Der entschlüsselte OpenPGP-Inhalt enthält einen Teil, den Satchel nicht anzeigen kann.",
+      "pgpVerificationFailed": "Die OpenPGP-Signatur konnte nicht geprüft werden.",
+      "pluginCapabilityMissing": "Dieses Plugin führt die Funktion \"{capability}\" nicht auf, die sein Kommando braucht.",
+      "pluginCapabilityNotGranted": "Die Funktion \"{capability}\" ist diesem Plugin nicht erlaubt.",
+      "pluginCommandUnknown": "Das Plugin-Kommando \"{command}\" wird von dieser App nicht vergeben.",
+      "pluginDisabled": "Das Plugin \"{plugin}\" ist deaktiviert: {reason}",
+      "pluginNotRegistered": "Das Plugin \"{plugin}\" ist nicht registriert.",
+      "pluginPermissionPersistenceFailed": "Plugin-Berechtigungen sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "pluginsFolderUnavailable": "Der Plugin-Ordner konnte nicht geöffnet werden.",
+      "pop3CredentialsRejected": "Keine POP3-Konfiguration hat diese Zugangsdaten akzeptiert. Prüfe den Benutzernamen oder trage den Server von Hand ein.",
+      "pop3PlaintextRejected": "Dieses POP3-Konto steht auf Port 110 ohne Verschlüsselung. Satchel sendet das Passwort nicht im Klartext: stelle das Konto auf Port 995 mit TLS um.",
+      "queueActionFailed": "Die vorgemerkte Aktion ist fehlgeschlagen: {message}",
+      "queueAuthentication": "Der Server akzeptiert deine Anmeldung nicht mehr. Verbinde das Konto in den Einstellungen erneut.",
+      "queueFolderChanged": "Der Ordner hat sich geändert oder existiert nicht mehr. Synchronisiere die Ordner und wähle das Ziel erneut.",
+      "queueMessageTooLarge": "Die Nachricht ist für den Server zu groß. Entferne Anhänge vor dem erneuten Senden.",
+      "queueRateLimited": "Der Server begrenzt weiterhin die Anfragen. Versuche es später erneut.",
+      "queueRecipientRejected": "Der Server hat einen Empfänger abgelehnt. Prüfe die E-Mail-Adresse vor dem erneuten Senden.",
+      "queueRejected": "Der Server hat diese Aktion abgelehnt. Prüfe die Details vor einem erneuten Versuch.",
+      "queueTemporary": "Der Server ist vorübergehend nicht erreichbar. Satchel versucht es automatisch erneut.",
+      "queuedDraftNotRestorable": "Diese Nachricht lässt sich nicht mehr als Entwurf öffnen, weil sich ihr Entwurf nach dem Einreihen geändert hat. Im Postausgang kannst du sie noch ansehen oder vor dem Senden verwerfen.",
+      "recipientAddressInvalid": "Das ist keine gültige Empfängeradresse: {value}",
+      "replyContextLoadFailed": "Der Antwortkontext konnte nicht geladen werden. Die Nachricht wurde noch nicht gesendet.",
+      "replyThreadNotFound": "Die Unterhaltung für diese Antwort ist nicht mehr verfügbar.",
+      "restoreActiveKeyChanged": "Der aktive Schlüssel wurde geändert. Merke die Sicherung erneut vor.",
+      "restoreDatabaseInvalid": "Die Datenbank der Sicherung hat die Integritätsprüfung nicht bestanden.",
+      "restoreKeyMismatch": "Die Zugangsdaten der Sicherung lassen sich mit den mitgelieferten Schlüsseln nicht entschlüsseln.",
+      "restoreKeyUnavailable": "Der aktive Schlüssel ist nicht verfügbar. Entsperre den Systemschlüsselbund und versuche es erneut.",
+      "restoreRecoveryInProgress": "Die Wiederherstellung läuft. Starte die App neu, um sie abzuschließen.",
+      "restoreSchemaTooNew": "Diese Sicherung stammt aus einer neueren Satchel-Version (Datenbankschema {backupSchema}; dieser Build kennt {appSchema}). Aktualisiere Satchel, bevor du sie zurückspielst.",
+      "restoreSearchIndexInvalid": "Der Suchindex der Sicherung passt nicht zu ihren Nachrichten. Lege lieber eine frische Sicherung an, statt diese zurückzuspielen.",
+      "restoreStagingChanged": "Die vorgemerkte Sicherung ist unvollständig oder wurde verändert. Merke die Sicherung erneut vor.",
+      "revealTargetBlocked": "Dieses Ziel kann nicht im Dateimanager geöffnet werden.",
+      "scheduledTimeInvalid": "Wähle einen gültigen Sendezeitpunkt in der Zukunft.",
+      "senderAddressNotOwned": "\"{address}\" ist weder die Adresse dieses Kontos noch einer seiner Aliase. Wähle einen anderen Absender.",
+      "senderPreferenceAccountInvalid": "Das Konto für diese Absenderpräferenz ist ungültig.",
+      "senderPreferenceCategoryInvalid": "Wähle eine gültige Absenderkategorie.",
+      "senderPreferenceEmailInvalid": "Gib eine gültige Absender-E-Mail-Adresse ein.",
+      "senderPreferencePersistenceFailed": "Absenderpräferenzen sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "senderSweepAccountInvalid": "Dieses Konto lässt sich nicht aufräumen.",
+      "senderSweepActionInvalid": "Unbekannte Aufräum-Aktion.",
+      "senderSweepDaysInvalid": "Wähle zwischen 0 und 3650 Tagen.",
+      "senderSweepFolderInvalid": "Wähle einen Ordner dieses Kontos.",
+      "senderSweepOwnAddress": "Die eigene Adresse lässt sich nicht aufräumen.",
+      "senderSweepPersistenceFailed": "Die Aufräum-Regel konnte nicht gespeichert werden.",
+      "senderSweepRuleNotFound": "Diese Regel gibt es nicht mehr.",
+      "senderSweepSenderInvalid": "Das ist keine Absenderadresse.",
+      "senderSweepTrashNeedsAge": "Eine Regel, die Mails in den Papierkorb verschiebt, braucht ein Alter von mindestens einem Tag.",
+      "sentMessagePersistenceFailed": "Die Nachricht wurde gesendet, aber der lokale Gesendet-Eintrag konnte nicht gespeichert werden. Sende sie nicht erneut.",
+      "sentMessagePostProcessingFailed": "Die Nachricht wurde gesendet, aber die lokale Nachbereitung konnte nicht abgeschlossen werden. Sende sie nicht erneut.",
+      "serverHostAndPortRequired": "Gib Serveradresse und Port ein.",
+      "serverRules": {
+        "authFailed": "Der Filter-Server hat das Passwort des Kontos abgelehnt.",
+        "consentNeeded": "Ein anderes Filterskript ist aktiv. Entscheide unter Einstellungen → Konten → Server-Regeln.",
+        "includeUnavailable": "Dieser Server kann keine zwei Skripte nebeneinander ausführen.",
+        "invalidChoice": "Unbekannte Wahl.",
+        "invalidHost": "Gib einen gültigen Hostnamen ein.",
+        "invalidPort": "Gib einen gültigen Port ein.",
+        "invalidTls": "Wähle STARTTLS oder TLS.",
+        "nameTaken": "Ein eigenes Skript trägt schon Satchels Namen. Benenne es zuerst um.",
+        "noMechanism": "Der Filter-Server bietet kein unterstütztes Anmeldeverfahren.",
+        "notConfigured": "Prüfe zuerst den Server oder trage ihn ein.",
+        "persistence": "Die Einstellungen für Server-Regeln ließen sich nicht speichern.",
+        "protocol": "Der Filter-Server hat unerwartet geantwortet.",
+        "quota": "Das Filterskript überschreitet den Platz auf dem Server.",
+        "refused": "Der Filter-Server hat das Skript abgelehnt.",
+        "tls": "Der Filter-Server bietet keine sichere Verbindung.",
+        "turnOffFirst": "Schalte die Server-Regeln aus, bevor du den Server änderst.",
+        "unreachable": "Der Filter-Server war nicht erreichbar.",
+        "unverified": "Der Server hat Satchels Skript nicht als aktiv bestätigt.",
+        "vacationUnsupported": "Dieser Server kann die Antwort so nicht senden."
+      },
+      "signatureAccountMismatch": "Diese Signatur gehört zu einem anderen Konto.",
+      "signatureAssetContentIdDuplicate": "Jedes Signaturbild benötigt eine eindeutige Content-ID.",
+      "signatureAssetContentInvalid": "Ein Signaturbild konnte nicht dekodiert werden.",
+      "signatureAssetIdentityInvalid": "Jedes Signaturbild benötigt einen sicheren Dateinamen und eine Content-ID.",
+      "signatureAssetMimeInvalid": "Signaturanhänge müssen Bilder sein.",
+      "signatureAssetTooLarge": "Ein Signaturbild darf höchstens {max} Bytes groß sein.",
+      "signatureAssetsTooLarge": "Die Signaturbilder dürfen zusammen höchstens {max} Bytes groß sein.",
+      "signatureFirstContactModeInvalid": "Wähle einen gültigen Signaturmodus für Erstkontakte.",
+      "signatureIdentityEmailInvalid": "Gib eine gültige E-Mail-Adresse für die Signaturidentität ein.",
+      "signatureIdentityNotOwned": "Diese Identität gehört nicht zum ausgewählten Konto.",
+      "signatureNameRequired": "Gib einen Namen für die Signatur ein.",
+      "signatureNotFound": "Die Signatur wurde für dieses Konto nicht gefunden.",
+      "signaturePersistenceFailed": "Signaturen sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "signatureSuggestionStatusInvalid": "Wähle einen gültigen Status für den Signaturvorschlag.",
+      "signatureVariantInvalid": "Wähle eine gültige Signaturvariante.",
+      "signedContentUnavailable": "Der signierte Inhalt dieser Nachricht kann nicht angezeigt werden, deshalb wird auch keine Signatur angezeigt.",
+      "signedMessageMalformed": "Die Signatur kann nicht geprüft werden, weil der Aufbau der Nachricht sie nicht eindeutig an den angezeigten Inhalt bindet.",
+      "smartFolderPersistenceFailed": "Der intelligente Ordner konnte nicht gespeichert werden. Bitte versuche es erneut.",
+      "smimeCertificateExists": "Dieses S/MIME-Zertifikat wurde bereits importiert.",
+      "smimeCertificateNotFound": "Dieses S/MIME-Zertifikat ist nicht mehr vorhanden.",
+      "smimeCertificatePersistenceFailed": "S/MIME-Zertifikate sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "smimeDecodeFailed": "Der entschlüsselte S/MIME-Inhalt konnte nicht gelesen werden.",
+      "smimeDecryptFailed": "Die S/MIME-Nachricht konnte nicht entschlüsselt werden.",
+      "smimeMalformedMime": "Der entschlüsselte S/MIME-Inhalt hat eine unvollständige oder fehlerhafte MIME-Struktur.",
+      "smimeMalformedSigned": "Die S/MIME-Signaturstruktur ist unvollständig oder fehlerhaft.",
+      "smimeNestingLimit": "Die S/MIME-Nachricht enthält zu viele verschachtelte Ebenen.",
+      "smimeOwnCertificateMissing": "Das eigene S/MIME-Zertifikat fehlt. Importiere ein Zertifikat für dieses Konto, sonst lässt sich die Kopie im Gesendet-Ordner nicht für dich verschlüsseln.",
+      "smimeRecipientCertificateAmbiguous": "Für folgende Adresse liegen mehrere gleichrangige S/MIME-Zertifikate vor: {recipients}. Lösche das veraltete und sende erneut.",
+      "smimeRecipientCertificateMissing": "Für folgende Adresse wurde kein S/MIME-Zertifikat gefunden: {recipients}",
+      "smimeRemainingEncryption": "Die S/MIME-Nachricht enthält eine weitere verschlüsselte Ebene, die nicht geöffnet werden konnte.",
+      "smimeUndecodedPart": "Der entschlüsselte S/MIME-Inhalt enthält einen Teil, den Satchel nicht anzeigen kann.",
+      "smimeVerificationFailed": "Die S/MIME-Signatur konnte nicht überprüft werden.",
+      "snapshotMessagesHeld": "{count} Nachrichten in {folder} konnten für {account} nicht vom Server aktualisiert werden und bleiben vorerst, wo sie sind. Satchel versucht es in einem Tag erneut.",
+      "spamFilterUnavailable": "Die Einstellungen des Spamfilters ließen sich nicht lesen oder speichern.",
+      "systemFolderImmutable": "\"{name}\" ist ein Systemordner und kann nicht geändert werden.",
+      "templateNotFound": "Die Vorlage wurde nicht gefunden.",
+      "templatePersistenceFailed": "Vorlagen sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "threadMetadataInvalid": "Die Organisationsangaben der Unterhaltung sind ungültig.",
+      "threadNotFound": "Die Unterhaltung wurde nicht gefunden.",
+      "threadPersistenceFailed": "Auf die Unterhaltungsdaten konnte nicht zugegriffen werden. Bitte versuche es erneut.",
+      "threadSmartBucketInvalid": "Der Smart-Inbox-Bucket ist ungültig.",
+      "tlsCertificateRejected": "Das Zertifikat von {host} wurde nicht akzeptiert.",
+      "tlsExceptionCertificateChanged": "Der Server zeigt inzwischen ein anderes Zertifikat. Sieh dir die Details erneut an, bevor du ihm vertraust.",
+      "tlsExceptionNoRejection": "Satchel hat den Server nicht erreicht, um das Zertifikat erneut zu prüfen. Versuch es gleich noch einmal.",
+      "tlsExceptionNotAllowed": "Dieses Zertifikat hat ein Problem über das Ablaufdatum hinaus, deshalb bietet Satchel keine Ausnahme an.",
+      "tlsExceptionPersistenceFailed": "Die Zertifikatsausnahme ließ sich nicht speichern.",
+      "topicAddedByInvalid": "Die Themenzuordnung ist ungültig.",
+      "topicFileContentInvalid": "Die Themendatei konnte nicht dekodiert werden.",
+      "topicFileNotFound": "Die Themendatei wurde nicht gefunden.",
+      "topicFilenameEmpty": "Gib einen Dateinamen ein.",
+      "topicItemTypeInvalid": "Der Themenobjekttyp ist ungültig.",
+      "topicNameEmpty": "Gib einen Themennamen ein.",
+      "topicNoteContentEmpty": "Gib einen Notizinhalt ein.",
+      "topicPersistenceFailed": "Das Thema konnte nicht gespeichert werden. Bitte versuche es erneut.",
+      "topicStatusInvalid": "Der Themenstatus ist ungültig.",
+      "trayDestinationInvalid": "Dieses Tray-Ziel ist nicht verfügbar.",
+      "trayMessageNotFound": "Diese E-Mail ist nicht mehr verfügbar.",
+      "trayThreadInvalid": "Diese Tray-E-Mail-Referenz ist ungültig.",
+      "unexpected": "Ein unerwarteter Backend-Fehler ist aufgetreten.",
+      "unsubscribeBrowserOpenFailed": "Die Abmeldeseite konnte nicht geöffnet werden: {message}",
+      "unsubscribeHeaderMissing": "Diese E-Mail enthält keine Abmeldeadresse.",
+      "unsubscribeMessageNotFound": "Diese E-Mail ist nicht mehr verfügbar.",
+      "unsubscribeNoTarget": "Diese E-Mail enthält keine verwendbare Abmeldeadresse.",
+      "unsubscribePostFailed": "Die Abmeldung ist fehlgeschlagen: {message}",
+      "unsubscribeTargetBlocked": "Der Abmeldelink zeigt auf eine Adresse, die nicht öffentlich erreichbar ist. Satchel ruft sie nicht auf. Melde dich stattdessen auf der Website des Newsletters ab.",
+      "updateCheckFailed": "Updates konnten nicht geprüft werden. Versuche es später erneut.",
+      "updateDownloadFailed": "Das Update konnte nicht geladen werden oder seine Signatur ist ungültig. Versuche es erneut.",
+      "updateDraftsUnsaved": "Das Update wurde angehalten, weil ein offener Entwurf nicht gespeichert werden konnte. Speichere ihn und versuche es erneut.",
+      "updateInstallFailed": "Das Update konnte nicht installiert werden. Versuche es erneut.",
+      "updateInstallLocationRequired": "Öffne Satchel aus dem Programme-Ordner, bevor du ein Update installierst.",
+      "updateRestartPreparationFailed": "Das geprüfte Update ist installiert, aber macOS konnte den Neustart nicht vorbereiten. Versuche es erneut.",
+      "updateUnavailable": "Für diesen Build ist kein Update verfügbar.",
+      "vacationPersistenceFailed": "Die Abwesenheitseinstellungen konnten nicht gespeichert werden. Bitte versuche es erneut.",
+      "vacationRemoteUpdateFailed": "Die Abwesenheitseinstellungen konnten beim Anbieter nicht aktualisiert werden. Bitte versuche es erneut.",
+      "webhookPersistenceFailed": "Webhooks sind momentan nicht verfügbar. Bitte versuche es erneut.",
+      "webhookUrlInvalid": "Gib für den Webhook eine HTTPS-URL oder eine lokale HTTP-URL ein.",
+      "writeDestinationNotChosen": "Satchel schreibt nur an einen Ort, der im eigenen Speicherdialog gewählt wurde. Bitte den Speicherort für {path} erneut wählen."
+    }
+  },
+  "calendar": {
+    "event": {
+      "allDay": "Ganztägig",
+      "deleteConfirmAttendees": "Der Termin wird im Kalender auf dem Server gelöscht, und die Teilnehmenden werden benachrichtigt. Das lässt sich nicht rückgängig machen.",
+      "deleteConfirmBody": "Der Termin wird aus deinem Kalender entfernt. Das lässt sich nicht rückgängig machen.",
+      "deleteConfirmOccurrence": "Nur dieser Termin der Serie wird im Kalender auf dem Server gelöscht; die übrigen bleiben. Das lässt sich nicht rückgängig machen.",
+      "deleteConfirmOccurrenceAttendees": "Nur dieser Termin der Serie wird im Kalender auf dem Server gelöscht, und die Teilnehmenden werden benachrichtigt; die übrigen bleiben. Das lässt sich nicht rückgängig machen.",
+      "deleteConfirmRemote": "Der Termin wird auch im Kalender auf dem Server gelöscht. Das lässt sich nicht rückgängig machen.",
+      "untitled": "(ohne Titel)"
+    },
+    "hint": "Klick auf einen freien Tag oder eine freie Uhrzeit legt einen Termin an. Auto-erkannt werden Termine aus Mails mit {ics}-Anhang.",
+    "range": {
+      "allDayMulti": "{start} – {end}, ganztägig",
+      "allDaySingle": "{day}, ganztägig",
+      "dayTime": "{day}, {time} Uhr",
+      "sameDay": "{day}, {start}–{end} Uhr",
+      "span": "{start} – {end}",
+      "weekSameMonth": "{first}.–{last}. {monthYear}"
+    },
+    "source": {
+      "caldav": "CalDAV",
+      "googlePrimary": "Hauptkalender",
+      "invites": "Einladungen",
+      "local": "Lokal",
+      "outlook": "Outlook-Kalender"
+    }
+  },
+  "certificates": {
+    "banner": {
+      "detail": {
+        "expired": "{host} zeigt seit {since} ein abgelaufenes Zertifikat. Das muss die IT deines Mailservers beheben. Deine Mails bleiben lesbar, Satchel versucht es weiter.",
+        "nameMismatch": "Das Zertifikat, das {host} zeigt, ist für einen anderen Namen ausgestellt. Satchel verbindet sich nicht, weil jemand anderes antworten könnte.",
+        "notYetValid": "{host} zeigt ein Zertifikat, das erst ab {from} gilt. Prüfe zuerst Datum und Uhrzeit dieses Geräts.",
+        "other": "Satchel hat das Zertifikat von {host} nicht akzeptiert.",
+        "unknownIssuer": "{host} zeigt ein Zertifikat eines Ausstellers, dem Satchel nicht vertraut. Frag die IT deines Mailservers, welches Zertifikat er zeigen sollte."
+      },
+      "details": "Details",
+      "hide": "Ausblenden",
+      "title": {
+        "expired": "{account}: Das Zertifikat des Mailservers ist abgelaufen",
+        "nameMismatch": "{account}: Das Zertifikat gehört zu einem anderen Server",
+        "notYetValid": "{account}: Das Zertifikat des Mailservers ist noch nicht gültig",
+        "other": "{account}: Das Zertifikat des Mailservers wurde abgelehnt",
+        "unknownIssuer": "{account}: Dem Zertifikat des Mailservers wird nicht vertraut"
+      }
+    },
+    "dialog": {
+      "noteBody": "Hallo,\n\nmein Mailprogramm kann sich nicht mit {host}:{port} ({protocol}) verbinden: {problem}.\n\nZertifikat: {subject}\nGültig ab: {notBefore}\nGültig bis: {notAfter}\nAussteller: {issuer}\nSHA-256: {fingerprint}\n\nKönnt ihr euch das ansehen?",
+      "unknown": "Unbekannt"
+    },
+    "exceptionShort": "Ausnahme bis {until}, Zertifikat abgelaufen",
+    "short": {
+      "expired": "Zertifikat abgelaufen seit {since}",
+      "nameMismatch": "Zertifikat für einen anderen Server",
+      "notYetValid": "Zertifikat noch nicht gültig",
+      "other": "Zertifikat abgelehnt",
+      "unknownIssuer": "Zertifikat nicht vertrauenswürdig"
+    },
+    "sidebar": {
+      "exception": "{account}: {problem}",
+      "problem": "{account}: {problem}"
+    }
+  },
+  "commands": {
+    "syncDone": "Synchronisierung abgeschlossen.",
+    "syncFailed": "Synchronisierung fehlgeschlagen.",
+    "syncFailedCause": "Synchronisierung fehlgeschlagen: {cause}",
+    "syncMail": "E-Mails synchronisieren"
+  },
+  "common": {
+    "add": "Hinzufügen",
+    "all": "Alle",
+    "back": "Zurück",
+    "block": "Blockieren",
+    "cancel": "Abbrechen",
+    "confirm": "Bestätigen",
+    "delete": "Löschen",
+    "disabled": "Inaktiv",
+    "done": "Erledigt",
+    "download": "Herunterladen",
+    "forward": "Weiterleiten",
+    "hide": "Ausblenden",
+    "loading": "Wird geladen…",
+    "more": "Mehr",
+    "no": "Nein",
+    "off": "Aus",
+    "ok": "OK",
+    "on": "An",
+    "previous": "Zurück",
+    "reply": "Antworten",
+    "retry": "Erneut versuchen",
+    "search": "Suchen",
+    "select": "Auswählen",
+    "settings": "Einstellungen",
+    "show": "Anzeigen",
+    "today": "Heute",
+    "todayAt": "heute, {time}",
+    "unknown": "Unbekannt",
+    "yes": "Ja",
+    "yesterday": "Gestern",
+    "you": "Du"
+  },
+  "compose": {
+    "quit": {
+      "blocked": "Satchel bleibt geöffnet: Ein Entwurf konnte nicht gespeichert werden."
+    },
+    "status": {
+      "saveFailed": "Speichern fehlgeschlagen: {error}"
+    },
+    "templates": {
+      "button": "Vorlage…"
+    },
+    "title": {
+      "new": "Neue Nachricht",
+      "resend": "Erneut senden"
+    }
+  },
+  "errors": {
+    "attachmentEmpty": "Der Anhang kam ohne Daten zurück.",
+    "backendUnknown": "Unbekannter Backend-Fehler",
+    "banner": {
+      "accountOutage": "{account} gleicht seit {since} nicht ab",
+      "openAccount": "Kontoeinstellungen",
+      "outageShort": "{account}: kein Abgleich seit {since}",
+      "passwordRejected": "{account} hat das Passwort nicht angenommen.",
+      "retrying": "Wird wiederholt …",
+      "serverResponse": "Antwort des Servers",
+      "signInAgain": "Erneut anmelden",
+      "signingIn": "Anmeldung läuft …",
+      "syncAgain": "Erneut abgleichen",
+      "updatePassword": "Passwort ändern"
+    },
+    "inlineImageUnavailable": "Bild nicht verfügbar",
+    "messageLoadFailed": "Die Nachricht konnte nicht geladen werden.",
+    "messageLoadTimeout": "Das Nachladen der Nachricht hat zu lange gedauert.",
+    "messageReferenceChanged": "Die Postfachkennung der Nachricht hat sich geändert. Synchronisiere ihren Ordner und versuche es erneut.",
+    "oauth": {
+      "missingConfig": "OAuth-Konfiguration fehlt. Bitte Satchel neu installieren oder die lokale .env prüfen."
+    },
+    "source": {
+      "accounts": "Deine Konten konnten nicht geladen werden",
+      "connection": "Satchel erreicht sein Backend nicht",
+      "drafts": "Deine Entwürfe konnten nicht geladen werden",
+      "mailboxes": "Deine Postfächer konnten nicht geladen werden",
+      "messages": "Die Nachrichten konnten nicht geladen werden",
+      "notifications": "Die Verarbeitung von Benachrichtigungen ist fehlgeschlagen",
+      "outbox": "Der Postausgang konnte nicht geladen werden",
+      "smartFolders": "Deine intelligenten Ordner konnten nicht geladen werden",
+      "sync": "Der Mail-Abgleich ist fehlgeschlagen",
+      "templates": "Deine Vorlagen konnten nicht geladen werden",
+      "threads": "Die Konversationen konnten nicht geladen werden",
+      "topicMemberships": "Themenzuordnungen konnten nicht geladen werden",
+      "topics": "Themen konnten nicht geladen werden",
+      "unknown": "In Satchel hat etwas aufgehört zu funktionieren"
+    },
+    "transport": {
+      "appPasswordRequired": "Dieses Konto braucht ein App-Passwort statt des normalen. Erzeuge eines in den Sicherheitseinstellungen deines Anbieters und trage es hier ein.",
+      "connectionRefused": "Der Server hat die Verbindung abgewiesen. Hostnamen und Port prüfen.",
+      "credentialsRejected": "Der Server hat Benutzernamen und Passwort abgelehnt. Beides prüfen — manche Anbieter erwarten die vollständige E-Mail-Adresse als Benutzernamen.",
+      "dns": "Der Servername ließ sich nicht auflösen. Hostnamen und Netzverbindung prüfen.",
+      "genericProvider": "Der Mailserver",
+      "oauthCancelled": "Die Anmeldung wurde vor dem Abschluss geschlossen. Starte sie erneut, um das Konto zu verbinden.",
+      "oauthExpired": "Der gespeicherte Login wird nicht mehr akzeptiert. Bitte erneut anmelden.",
+      "offline": "Keine Verbindung zum Server. Satchel versucht es erneut, sobald das Netz wieder da ist.",
+      "quota": "Das Kontingent dieses Kontos ist aufgebraucht. Es geht weiter, sobald der Anbieter es wieder zulässt.",
+      "rateLimit": "{provider} weist gerade Anfragen ab. Bitte in ein paar Minuten erneut versuchen.",
+      "recipientRejected": "Der Server hat einen Empfänger abgelehnt. Bitte die Adressen prüfen.",
+      "tls": "Die verschlüsselte Verbindung kam nicht zustande. Port prüfen und ob das Zertifikat des Servers gültig ist."
+    },
+    "unsupportedRuntime": {
+      "android": "Auf Android aktualisierst du die Engine über <strong>Android System WebView</strong> im Play Store. Danach reicht ein Neustart von Satchel.",
+      "body": "Satchel braucht eine neuere Browser-Engine, als auf diesem Gerät läuft. Ohne sie werden Farben und Bedienelemente nicht gezeichnet — Schaltflächen wären unsichtbar statt nur anders.",
+      "title": "Diese Version ist zu alt für Satchel"
+    }
+  },
+  "folders": {
+    "allAccounts": "Alle Konten",
+    "allMail": "All Mail",
+    "archive": "Archiviert",
+    "aside": "Beiseitegelegt",
+    "blocked": "Blockiert",
+    "drafts": "Entwürfe",
+    "inbox": "Inbox",
+    "notifications": "Benachrichtigungen",
+    "sent": "Gesendet",
+    "snoozed": "Wiedervorlage",
+    "snoozedLong": "Auf Wiedervorlage",
+    "spam": "Spam",
+    "todo": "Todo",
+    "trash": "Papierkorb",
+    "waiting": "Wartet",
+    "waitingForReply": "Warten auf Antwort"
+  },
+  "inbox": {
+    "bundleDone": "Alle abhaken",
+    "bundleDoneTitle": "Alle Mails abhaken und zurück",
+    "bundleToInbox": "Alle in die Inbox",
+    "bundleToInboxTitle": "Alle Mails zurück in die Inbox legen und zurückgehen",
+    "category": {
+      "personal": "Persönlich",
+      "promotions": "Werbung",
+      "social": "Social",
+      "updates": "Updates"
+    },
+    "classifiedToast": "{count} Mail eingeordnet | {count} Mails eingeordnet",
+    "classify": "Einordnen",
+    "classifyAs": "Einordnen als",
+    "conversationCount": "{count} Konversation | {count} Konversationen",
+    "empty": {
+      "aside": {
+        "description": "Beiseitegelegte Mails haben keinen Termin und bleiben hier, bis du sie brauchst.",
+        "title": "Nichts beiseitegelegt"
+      },
+      "later": {
+        "description": "Mails auf Wiedervorlage kommen zur gewählten Zeit zurück, wartende Mails, sobald die Antwort da ist.",
+        "title": "Nichts für später"
+      }
+    },
+    "filterAccounts": "Konto",
+    "filterMenu": "Filtern und Ansicht",
+    "filterStrip": "Liste filtern",
+    "listSearch": {
+      "advanced": "Erweitert",
+      "advancedTitle": "Vollständige Suche mit Operatoren und Serversuche öffnen",
+      "clear": "Suche leeren",
+      "label": "Diese Liste durchsuchen",
+      "loadedResultCount": "{count}+ Treffer | {count}+ Treffer",
+      "noResultsIn": "In {mailbox} passt nichts. Durchsuche alle E-Mails, um weiterzusuchen.",
+      "placeholder": "{mailbox} durchsuchen …",
+      "resultCount": "{count} Treffer | {count} Treffer",
+      "results": "Suchergebnisse",
+      "scope": "Suchen in",
+      "searchAllMail": "Alle E-Mails durchsuchen"
+    },
+    "mailCount": "{count} Mail | {count} Mails",
+    "markedReadToast": "{count} Mail gelesen | {count} Mails gelesen",
+    "newsletter": "Newsletter",
+    "rememberSender": "Absender merken",
+    "resizeList": "Breite der Nachrichtenliste anpassen",
+    "smartFolder": "Smart Folder",
+    "snooze": "Auf Wiedervorlage",
+    "topics": {
+      "createFailed": "Thema konnte nicht erstellt werden.",
+      "due": "Fällig",
+      "empty": "Noch keine Themen — leg mit „+\" eins an.",
+      "items": "{count} Eintrag | {count} Einträge",
+      "new": "Neues Thema",
+      "newName": "Neues Thema",
+      "notes": "{count} Notiz | {count} Notizen",
+      "title": "Themen"
+    },
+    "view": "Ansicht",
+    "viewGrouped": "Gruppiert",
+    "viewList": "Liste"
+  },
+  "mail": {
+    "message": {
+      "source": "Quelltext",
+      "sourceTitle": "Kopfzeilen und Rohdaten dieser Nachricht anzeigen"
+    },
+    "pgp": {
+      "passphrasePrompt": "Passphrase für diesen PGP-Schlüssel (optional):"
+    },
+    "smime": {
+      "passphrasePrompt": "Passphrase für das S/MIME-Zertifikat (optional):",
+      "signerLabel": "Signiert von"
+    },
+    "source": {
+      "defaultFilename": "Nachricht",
+      "desktopOnly": "Der Quelltext ist nur in der Desktop-App verfügbar.",
+      "fileType": "E-Mail-Nachricht",
+      "loadFailed": "Quelltext konnte nicht geladen werden."
+    },
+    "spoofing": {
+      "auth": "Absenderauthentifizierung fehlgeschlagen ({mechanisms}). Vorsicht bei Links und Anhängen.",
+      "brand": "Der Name nennt „{brand}“, die Adresse gehört aber zu {domain}. Möglicher Phishing-Versuch.",
+      "domain": "Die Absender-Domain ähnelt {brand}, aber {domain} ist keine offizielle Domain. Möglicher Phishing-Versuch.",
+      "mechanismJoin": " und "
+    }
+  },
+  "nativeUi": {
+    "composeWindowTitle": "Neue Nachricht — Satchel",
+    "dock": {
+      "calendar": "Kalender öffnen",
+      "closeOtherWindows": "Alle weiteren Fenster schließen",
+      "compose": "Neue E-Mail",
+      "settings": "Einstellungen…",
+      "sync": "E-Mails synchronisieren"
+    },
+    "notifications": {
+      "actionFailedMessage": "{action} wurde lokal gespeichert. Der Serverabgleich wird weiter versucht.",
+      "actionFailedTitle": "Aktion konnte nicht ausgeführt werden",
+      "actionNotAppliedMessage": "{action} wurde nicht ausgeführt. Bitte Satchel öffnen und erneut versuchen.",
+      "archive": "Erledigt",
+      "backgroundSyncChannel": "Hintergrund-Synchronisierung",
+      "backgroundSyncDescription": "Hält die Verbindung für neue E-Mails offen",
+      "backgroundSyncText": "Neue E-Mails werden im Hintergrund abgerufen",
+      "channelDescription": "Benachrichtigungen über neue E-Mails",
+      "channelName": "Neue E-Mails",
+      "followUpDue": "Nachfassen fällig",
+      "newMessage": "Neue Nachricht",
+      "noSubject": "(ohne Betreff)",
+      "read": "Gelesen",
+      "reply": "Antworten",
+      "sendFailed": "Mail konnte nicht gesendet werden",
+      "summary": "{count} neue E-Mails",
+      "syncFailed": "Remote-Abgleich fehlgeschlagen",
+      "syncing": "Inhalte werden synchronisiert",
+      "trash": "Löschen"
+    },
+    "oauth": {
+      "cancelledMessage": "Die Anmeldung wurde vom Anbieter nicht abgeschlossen.",
+      "cancelledTitle": "OAuth abgebrochen",
+      "closeHint": "Du kannst dieses Fenster jetzt schließen.",
+      "connectedMessage": "{provider} ist jetzt mit Satchel verbunden.",
+      "connectedTitle": "Satchel verbunden",
+      "failedMessage": "Satchel konnte die Anmeldung nicht abschließen. Details findest du in der App.",
+      "failedTitle": "OAuth fehlgeschlagen",
+      "invalidCallback": "Satchel konnte die Rückleitung nicht verarbeiten.",
+      "invalidState": "Satchel hat einen ungültigen Statuswert erhalten.",
+      "invalidTitle": "OAuth-Rückruf ungültig",
+      "missingCode": "Der Anbieter hat keinen Autorisierungscode geliefert.",
+      "providerFallback": "Das Konto"
+    },
+    "tray": {
+      "briefing": "Satchel Briefing",
+      "hide": "Ausblenden",
+      "quit": "Beenden",
+      "show": "Satchel öffnen"
+    }
+  },
+  "nav": {
+    "agenda": {
+      "allDayCount": "{count} Einträge",
+      "more": "+{count} weitere",
+      "now": "Jetzt",
+      "title": "Heute"
+    },
+    "calendar": "Kalender",
+    "commandPalette": "Suche & Befehle",
+    "composeMessage": "Neue Nachricht schreiben",
+    "composeNewWindow": "Neue E-Mail (Shift+Klick für eigenes Fenster)",
+    "contactLabel": "{name}, {count} Konversationen",
+    "contactPinned": "Angepinnt",
+    "contactSummary": "{name} <{email}> · {count} Konversationen",
+    "contacts": "Kontakte",
+    "feedsAndSources": "Feeds & Quellen",
+    "folders": {
+      "all": "Alle Ordner",
+      "aside": "Beiseitegelegt",
+      "blocked": "Blockiert",
+      "done": "Erledigt",
+      "drafts": "Entwürfe",
+      "inbox": "Inbox",
+      "later": "Später",
+      "notifications": "Benachrichtigungen",
+      "outbox": "Postausgang",
+      "sent": "Gesendet",
+      "spam": "Spam",
+      "title": "Ordner",
+      "trash": "Papierkorb"
+    },
+    "frequent": "Häufig",
+    "mail": "E-Mail",
+    "mailboxes": {
+      "current": "{mailbox}, Postfach wechseln"
+    },
+    "modules": "Bereiche",
+    "newMessage": "Neue E-Mail",
+    "pinContact": "Kontakt anpinnen",
+    "pinContactNamed": "{name} anpinnen",
+    "smartFolders": "Smart Folders",
+    "toggleSection": "{name} auf- oder zuklappen",
+    "unpinContact": "Kontakt loslösen",
+    "unpinContactNamed": "{name} loslösen"
+  },
+  "newSenders": {
+    "block": "Absender blockieren",
+    "blockConfirm": "Absender {email} blockieren? Bestehende und zukünftige Mails werden aus der Inbox entfernt und nach Abuse oder Spam verschoben.",
+    "blockFailed": "{email} konnte nicht blockiert werden. Der Absender bleibt in der Prüfliste.",
+    "blockTitle": "Diesen Absender blockieren?",
+    "domainAllowedToast": "Alle Absender von {'@'}{domain} zugelassen",
+    "title": "Neue Absender"
+  },
+  "notifications": {
+    "actions": {
+      "archive": "Erledigt",
+      "markRead": "Gelesen",
+      "trash": "Löschen"
+    },
+    "newMail": {
+      "body": "{from}: {subject}",
+      "title": "Neue E-Mail"
+    },
+    "newMailMany": {
+      "body": "in {account}",
+      "title": "{count} neue E-Mail | {count} neue E-Mails"
+    }
+  },
+  "onboarding": {
+    "preferences": {
+      "keyboardNav": "Tastatur-Navigation",
+      "keyboardNavHint": "Mit {j} und {k} navigieren, mit einem Tastendruck sortieren."
+    },
+    "services": {
+      "calendar": "Kalender",
+      "contacts": "Kontakte",
+      "mail": "E-Mail empfangen",
+      "smtp": "E-Mail senden"
+    }
+  },
+  "outbox": {
+    "action": {
+      "appendSent": "Gesendete Kopie ablegen",
+      "createFolder": "Ordner anlegen",
+      "delete": "Löschen",
+      "deleteDraft": "Entwurf auf dem Server löschen",
+      "deleteFolder": "Ordner löschen",
+      "flags": "Gelesen- oder Stern-Status",
+      "move": "Verschieben",
+      "remoteMutation": "Serverabgleich",
+      "renameFolder": "Ordner umbenennen",
+      "sendMessage": "Senden",
+      "syncDraft": "Entwurf auf dem Server speichern",
+      "undoTrash": "Aus dem Papierkorb wiederherstellen"
+    },
+    "attempts": "{count} Versuch | {count} Versuche",
+    "changeDiscardHint": "Verwerfen beendet die Wiederholungen dieser Änderung. Der Server behält seinen Stand.",
+    "deleteDiscardHint": "Verwerfen beendet die Löschversuche. Bereits von diesem Gerät entfernte Mails werden dabei nicht wiederhergestellt. Noch vorhandene Serverkopien bleiben erhalten.",
+    "draftDiscardHint": "Verwerfen beendet das Hochladen dieses Entwurfs. Der Entwurf bleibt auf diesem Gerät.",
+    "error": {
+      "auth": "Die Anmeldung dieses Kontos ist abgelaufen. Bitte das Konto in den Einstellungen neu verbinden.",
+      "network": "Keine Verbindung zum Mailserver. Satchel versucht es erneut, sobald das Netz wieder da ist.",
+      "quota": "Das Sendekontingent dieses Kontos ist aufgebraucht. Es geht weiter, sobald der Anbieter wieder freigibt.",
+      "rateLimit": "{provider} nimmt gerade keine weiteren Mails an (Sendelimit). Satchel versucht es automatisch erneut.",
+      "recipientRejected": "Der Server hat einen Empfänger abgelehnt. Bitte die Adressen prüfen."
+    },
+    "moveDiscardHint": "Verwerfen beendet die Wiederholungen dieses Verschiebens und zeigt die Unterhaltung im zuletzt bestätigten Ordner. Es löscht keine E-Mails.",
+    "retry": {
+      "again": "Erneut senden",
+      "now": "Jetzt senden"
+    },
+    "sentCopyHint": "Diese gesendete E-Mail liegt womöglich nur in diesem Eintrag vor. Deshalb lässt sich der Eintrag erneut versuchen, aber nicht verwerfen.",
+    "status": {
+      "delivered": "Gesendet · lokal nicht gespeichert",
+      "deliveryUnknown": "Zustellung unklar",
+      "failed": "Fehlgeschlagen",
+      "pending": "In der Warteschlange",
+      "scheduled": "Geplant",
+      "sending": "Wird gesendet"
+    },
+    "time": {
+      "delivered": "Gesendet",
+      "lastAttempt": "Letzter Sendeversuch",
+      "nextRetry": "Nächster Versuch",
+      "overdueSince": "Überfällig seit",
+      "queued": "Eingereiht",
+      "scheduledFor": "Geplant für",
+      "started": "Gestartet"
+    }
+  },
+  "settings": {
+    "accounts": {
+      "allAccounts": "Alle Konten",
+      "reauth": {
+        "failed": "Anmeldung fehlgeschlagen: {error}"
+      },
+      "reconnect": {
+        "cancelled": "Die Anmeldung wurde abgebrochen.",
+        "doneCalendar": "Neu verbunden: {email}. {count} Google-Termine synchronisiert.",
+        "doneCalendarError": "Neu verbunden: {email}. Kalender: {error}",
+        "timeout": "Die Anmeldung hat zu lange gedauert. Bitte erneut versuchen."
+      },
+      "sync": {
+        "syncImapNow": "IMAP jetzt synchronisieren"
+      }
+    },
+    "aliases": {
+      "title": "Absenderadressen"
+    },
+    "api": {
+      "copiedToClipboard": "In die Zwischenablage kopiert.",
+      "copyFailed": "Kopieren fehlgeschlagen: {error}",
+      "copyNow": "Jetzt kopieren – dieser Token wird nur einmal angezeigt.",
+      "copyToken": "Token kopieren",
+      "createToken": "Token erzeugen",
+      "defaultTokenName": "Lokaler Zugriff",
+      "descriptionAfter": ". LLM-Profile besitzen keine Berechtigung zum Versenden von E-Mails; Ingest-Tokens für Webhooks erzeugst du direkt an der Quelle unter „Feeds & Quellen“.",
+      "descriptionBefore": "Tokens für die lokale API unter",
+      "empty": "Noch keine Tokens erzeugt.",
+      "fullAccessConfirm": "Vollzugriff erlaubt alle lokalen API-Aktionen. Token wirklich erzeugen?",
+      "profile": "Profil",
+      "profiles": {
+        "full": "Vollzugriff",
+        "organizer": "LLM: lesen & organisieren",
+        "readonly": "LLM: nur lesen"
+      },
+      "recentAccess": "Letzte API-Zugriffe",
+      "revoke": "Widerrufen",
+      "title": "API- & LLM-Zugriff"
+    },
+    "backup": {
+      "exportPlatform": "Plattformdaten exportieren…",
+      "importPlatform": "Plattformdaten importieren…"
+    },
+    "blocked": {
+      "exampleDomain": "spam.example.com",
+      "hintAfter": ". Treffer landen automatisch im Archiv beim Eingang.",
+      "hintBefore": "E-Mail-Adresse oder Domain-Pattern, zum Beispiel"
+    },
+    "images": {
+      "title": "Externe Bilder"
+    },
+    "mobileSync": {
+      "apnsEnvironment": "APNs-Umgebung",
+      "apnsProduction": "Produktion",
+      "apnsSandbox": "Entwicklung / Sandbox",
+      "clearConfiguration": "Konfiguration entfernen",
+      "deviceRegistered": "Relay-Gerät registriert",
+      "keychainIos": "iOS-Keychain",
+      "keystoreAndroid": "Android-Keystore",
+      "reconcileNow": "Jetzt abgleichen",
+      "relayAccountId": "Relay-Konto-ID",
+      "relayAccountIdPlaceholder": "UUID aus der Relay-Konfiguration",
+      "relayDescription": "Verbindet Satchel mit deinem selbst gehosteten Relay für Push-Hinweise und Hintergrundabgleich.",
+      "relayTitle": "Mobiler Hintergrundabgleich",
+      "relayUrl": "Relay-URL",
+      "relayUrlPlaceholder": "https://relay.example.de",
+      "setupRelay": "Relay einrichten",
+      "setupToken": "Einrichtungstoken",
+      "setupTokenPlaceholder": "Mindestens 32 Zeichen",
+      "statusCleared": "Relay-Konfiguration und lokale Zugangsdaten wurden entfernt.",
+      "statusConfigured": "Mobiler Hintergrundabgleich wurde eingerichtet.",
+      "statusConfiguredNoPush": "Hintergrundabgleich wurde eingerichtet. Für Push fehlt noch die FCM-Projektkonfiguration.",
+      "statusConfiguredPush": "Hintergrundabgleich und Push wurden eingerichtet.",
+      "statusReconciled": "Abgleich mit dem Relay abgeschlossen.",
+      "tokenStorageNote": "Wird nach der Übergabe aus dem Formular entfernt und im geschützten {store} gespeichert."
+    },
+    "notifications": {
+      "days": "Tage",
+      "scopeAll": "Alle neuen Mails",
+      "scopeInbox": "Nur persönliche Inbox",
+      "seconds": "Sek.",
+      "sendingTitle": "Senden"
+    },
+    "pgp": {
+      "noPassphraseStoredEnter": "Keine Passphrase gespeichert. Passphrase eingeben, um diesen Schlüssel zu entsperren.",
+      "title": "OpenPGP"
+    },
+    "plugins": {
+      "bearerToken": "Bearer {token}",
+      "localApiTitle": "Local API / MCP",
+      "noContent": "Kein Inhalt.",
+      "title": "Integrationen"
+    },
+    "providerFeatures": {
+      "title": "Provider-Features"
+    },
+    "rules": {
+      "empty": "Noch keine Regeln angelegt.",
+      "title": "Automatische Regeln"
+    },
+    "signatures": {
+      "title": "Signaturen"
+    },
+    "smartFolders": {
+      "loadFailed": "Intelligente Ordner konnten nicht geladen werden. Bitte erneut versuchen.",
+      "title": "Smart Folders (gespeicherte Suchen)"
+    },
+    "smime": {
+      "title": "S/MIME-Zertifikate"
+    },
+    "sources": {
+      "copiedToClipboard": "In die Zwischenablage kopiert.",
+      "copyCurl": "curl kopieren",
+      "copyFailed": "Kopieren fehlgeschlagen: {error}",
+      "copyUrl": "URL kopieren",
+      "createToken": "Zugang erzeugen",
+      "identifier": "Kennung",
+      "identifierPlaceholder": "eindeutiger-quellenname",
+      "title": "Feeds",
+      "tokenOnce": "Jetzt kopieren – dieser Token wird nur einmal angezeigt.",
+      "typeScript": "Script",
+      "typeWebhook": "Webhook"
+    },
+    "swipes": {
+      "title": "Wischgesten"
+    },
+    "templates": {
+      "title": "Vorlagen",
+      "variablesHint": "Variablen {recipient}, {myName} und {date} werden beim Einfügen ersetzt."
+    },
+    "theme": {
+      "vim": "Vim-Navigation",
+      "vimHint": "Mit j/k navigieren und Nachrichten per Tastatur bearbeiten."
+    },
+    "tray": {
+      "title": "Hintergrundbetrieb"
+    },
+    "vacation": {
+      "title": "Out of Office / Abwesenheit"
+    }
+  },
+  "shortcuts": {
+    "actions": {
+      "addToTopic": {
+        "keywords": "topic thema",
+        "label": "Zu einem Thema hinzufügen"
+      },
+      "archive": {
+        "keywords": "archive archivieren erledigt done",
+        "label": "Als erledigt markieren (Zweittaste)"
+      },
+      "cleanupKeepLatest": {
+        "keywords": "aufräumen neueste behalten rest archivieren",
+        "label": "Neueste behalten, Rest archivieren"
+      },
+      "cleanupRule": {
+        "keywords": "aufräumen regel ab jetzt",
+        "label": "Regel für den Absender festlegen"
+      },
+      "cleanupUnsubscribe": {
+        "keywords": "aufräumen abmelden newsletter",
+        "label": "Beim Absender abmelden"
+      },
+      "clearSelection": {
+        "keywords": "clear selection leeren",
+        "label": "Auswahl aufheben"
+      },
+      "compose": {
+        "keywords": "new compose schreiben",
+        "label": "Neue E-Mail verfassen"
+      },
+      "copyLink": {
+        "keywords": "link url teilen",
+        "label": "Link zu dieser E-Mail kopieren"
+      },
+      "fileTo": {
+        "keywords": "ablegen verschieben ordner thema label file move",
+        "label": "In Ordner oder Thema ablegen"
+      },
+      "forward": {
+        "keywords": "forward weiterleiten",
+        "label": "Weiterleiten"
+      },
+      "help": {
+        "keywords": "help shortcuts hilfe",
+        "label": "Tastaturhilfe anzeigen"
+      },
+      "leaveItem": {
+        "keywords": "back escape zurück",
+        "label": "Eine Ebene zurück"
+      },
+      "markDone": {
+        "keywords": "done archive erledigt",
+        "label": "Als erledigt markieren"
+      },
+      "markNotSpam": {
+        "keywords": "kein spam erwünscht",
+        "label": "Kein Spam"
+      },
+      "markSpam": {
+        "keywords": "spam junk werbung",
+        "label": "Als Spam markieren"
+      },
+      "moveInbox": {
+        "keywords": "move inbox posteingang",
+        "label": "In die Inbox verschieben"
+      },
+      "moveSnoozed": {
+        "keywords": "reminder snooze wiedervorlage",
+        "label": "Auf Wiedervorlage legen"
+      },
+      "moveWaiting": {
+        "keywords": "waiting warten",
+        "label": "Auf Antwort warten"
+      },
+      "nextThread": {
+        "keywords": "next down weiter",
+        "label": "Nächster Eintrag"
+      },
+      "openCommandPalette": {
+        "keywords": "command palette search suche",
+        "label": "Suche & Befehle öffnen"
+      },
+      "openItem": {
+        "keywords": "open enter öffnen",
+        "label": "Fokussiertes Element öffnen"
+      },
+      "pin": {
+        "keywords": "pin star anheften",
+        "label": "Anheften / lösen"
+      },
+      "prevThread": {
+        "keywords": "previous up zurück",
+        "label": "Vorheriger Eintrag"
+      },
+      "previewAttachment": {
+        "keywords": "attachment preview quick look anhang vorschau schnellansicht",
+        "label": "Fokussierten Anhang ansehen"
+      },
+      "print": {
+        "keywords": "drucken print pdf",
+        "label": "Unterhaltung drucken"
+      },
+      "reply": {
+        "keywords": "reply antwort",
+        "label": "Antworten"
+      },
+      "replyAll": {
+        "keywords": "reply all allen antworten",
+        "label": "Allen antworten"
+      },
+      "selectAll": {
+        "keywords": "select all alle",
+        "label": "Alle sichtbaren E-Mails auswählen"
+      },
+      "setAside": {
+        "keywords": "aside beiseite",
+        "label": "Beiseitelegen"
+      },
+      "sweepSender": {
+        "keywords": "aufräumen absender archivieren löschen älter sweep",
+        "label": "E-Mails vom Absender aufräumen"
+      },
+      "toggleAllMessages": {
+        "keywords": "all messages collapse expand alle nachrichten klappen",
+        "label": "Alle Nachrichten ein- / ausklappen"
+      },
+      "toggleMessage": {
+        "keywords": "message open collapse expand nachricht klappen",
+        "label": "Fokussierte Nachricht ein- / ausklappen"
+      },
+      "toggleMute": {
+        "keywords": "stumm stummschalten mute",
+        "label": "Unterhaltung stummschalten / wieder laut"
+      },
+      "toggleRead": {
+        "keywords": "read unread gelesen ungelesen",
+        "label": "Gelesen / ungelesen umschalten"
+      },
+      "toggleSelection": {
+        "keywords": "select toggle auswählen",
+        "label": "Auswahl umschalten"
+      },
+      "trash": {
+        "keywords": "delete trash löschen",
+        "label": "Löschen"
+      },
+      "undo": {
+        "keywords": "rückgängig undo",
+        "label": "Letzte Aktion rückgängig machen"
+      }
+    },
+    "contexts": {
+      "cleanup": "Aufräumen",
+      "global": "Immer",
+      "mail": "E-Mail fokussiert",
+      "mailbox": "Mailbox fokussiert",
+      "navigation": "Navigation"
+    },
+    "goTo": "{view} öffnen",
+    "groups": {
+      "navigation": "Navigation",
+      "triage": "Triage"
+    }
+  },
+  "sweep": {
+    "noSender": "In dieser Unterhaltung schreibst nur du; es gibt keinen Absender zum Aufräumen.",
+    "result": {
+      "archivedOf": "{count} von {total} Unterhaltungen erledigt",
+      "failed": "Die Mails dieses Absenders konnten nicht aufgeräumt werden.",
+      "nothing": "Im Posteingang gibt es nichts von {sender} aufzuräumen.",
+      "trashed": "Eine Unterhaltung in den Papierkorb verschoben | {count} Unterhaltungen in den Papierkorb verschoben",
+      "trashedOf": "{count} von {total} Unterhaltungen in den Papierkorb verschoben"
+    }
+  },
+  "swipe": {
+    "aside": "Beiseitelegen",
+    "done": "Erledigt",
+    "none": "Keine Aktion",
+    "pin": "Anheften",
+    "toggleRead": "Gelesen / ungelesen",
+    "trash": "Löschen"
+  },
+  "thread": {
+    "actions": {
+      "aside": "Beiseite",
+      "blockSender": "Absender blockieren",
+      "fileTo": "Ablegen …",
+      "inbox": "Inbox",
+      "markRead": "Als gelesen markieren",
+      "markUnread": "Als ungelesen markieren",
+      "moveToInbox": "Zurück in die Inbox",
+      "none": "Keine Aktion",
+      "notSpam": "Kein Spam",
+      "pin": "Anheften",
+      "priority": "Priorität",
+      "read": "Gelesen",
+      "setAside": "Beiseitelegen",
+      "snooze": "Auf Wiedervorlage",
+      "undo": "Rückgängig",
+      "unpin": "Lösen",
+      "unpinMenu": "Nicht mehr anheften",
+      "unread": "Ungelesen"
+    },
+    "attachments": {
+      "filenameFallback": "anhang"
+    },
+    "bucket": {
+      "invitations": "Termine",
+      "newsletter": "Newsletter",
+      "notifications": "Benachrichtigungen",
+      "other": "Weitere",
+      "personal": "Persönlich",
+      "pinned": "Angeheftet",
+      "priority": "Priorität"
+    },
+    "bundle": {
+      "checkAllAria": "Alle {count} Mails in diesem Stack abhaken",
+      "checkAllTitle": "Alle {count} Mails abhaken",
+      "ciProject": "{project} · CI",
+      "label": "{count} Mail gebündelt | {count} Mails gebündelt"
+    },
+    "followUp": {
+      "change": "Nachfassen ändern …",
+      "done": "Nachfassen erledigt",
+      "due": "Nachfassen fällig",
+      "failed": "Nachfassen konnte nicht gespeichert werden: {detail}",
+      "on": "Nachfassen {date}",
+      "scheduled": "Nachfassen für {date} gesetzt",
+      "set": "Nachfassen …"
+    },
+    "link": {
+      "copied": "Link kopiert.",
+      "copy": "Link kopieren",
+      "copyFailed": "Link konnte nicht kopiert werden: {error}",
+      "notFound": "Diese E-Mail liegt nicht in Satchel."
+    },
+    "list": {
+      "ariaLabel": "Nachrichtenliste",
+      "backfill": "Postfach wird geladen — {done} von {total}",
+      "backfillPlain": "Postfach wird geladen — noch {remaining}",
+      "checkAll": "Alle abhaken",
+      "checkAllInSection": "Alle E-Mails aus „{label}“ abhaken",
+      "emptyGroup": "Keine Threads in dieser Gruppe.",
+      "emptyView": "Keine Threads in dieser Ansicht.",
+      "folderAria": "{label}, {count} Mail | {label}, {count} Mails",
+      "folderAriaUnread": "{label}, {count} Mail, {unread} ungelesen | {label}, {count} Mails, {unread} ungelesen",
+      "folderMore": "+{count}",
+      "loadFailed": "Die E-Mails konnten nicht geladen werden.",
+      "loadMoreFailed": "Ältere E-Mails konnten nicht geladen werden, die Liste endet deshalb hier.",
+      "loadPrevious": "Neuere E-Mails laden",
+      "loadPreviousFailed": "Neuere E-Mails konnten nicht geladen werden.",
+      "loading": "E-Mails werden geladen",
+      "markAllRead": "Alle gelesen",
+      "morePriority": "+{count} weitere E-Mail | +{count} weitere E-Mails",
+      "morePriorityRow": "{count} weitere Prioritäts-E-Mail | {count} weitere Prioritäts-E-Mails",
+      "showAllPriority": "Alle Prioritäts-E-Mails anzeigen",
+      "smartGroups": "Smart Inbox Gruppen",
+      "unreadCount": "{count} ungelesen"
+    },
+    "move": {
+      "failed": "Verschieben fehlgeschlagen: {error}",
+      "fallbackFolder": "Ordner",
+      "moved": "Nach „{folder}“ verschoben."
+    },
+    "newSenders": {
+      "acceptExisting": "{count} Absender zulassen | Alle {count} Absender zulassen",
+      "acceptExistingTitle": "Alle bisherigen Absender als bekannt übernehmen",
+      "allow": "Zulassen",
+      "allowDomain": "Alle von {'@'}{domain} zulassen",
+      "allowDomainTitle": "Alle bisherigen und künftigen Mails von {'@'}{domain} zulassen",
+      "allowTitle": "Absender künftig zulassen",
+      "collapse": "Absenderzeilen ausblenden",
+      "expand": "Neueste Absender hier anzeigen",
+      "moreSenders": "+{count} weiterer Absender | +{count} weitere Absender",
+      "review": "Prüfen",
+      "senderCount": "{count} Absender | {count} Absender",
+      "showAll": "Alle neuen Absender anzeigen",
+      "title": "Neue Absender"
+    },
+    "result": {
+      "addToTopicFailed": "Zuordnung fehlgeschlagen.",
+      "addedToTopic": "Thread zu Thema „{topic}“ hinzugefügt | {count} Threads zu Thema „{topic}“ hinzugefügt",
+      "aside": "E-Mail beiseitegelegt | {count} E-Mails beiseitegelegt",
+      "done": "Als erledigt markiert | {count} als erledigt markiert",
+      "fallback": "{label} | {count} E-Mails → {label}",
+      "inLater": "Wartet in „Später“",
+      "inbox": "E-Mail in der Inbox | {count} E-Mails in der Inbox",
+      "muteChanged": "Stummschaltung geändert",
+      "notSpam": "Thread als kein Spam markiert | {count} Threads als kein Spam markiert",
+      "notSpamFailed": "Als kein Spam markieren fehlgeschlagen.",
+      "notSpamMoved": "Thread zurück in den Posteingang verschoben | {count} Threads zurück in den Posteingang verschoben",
+      "notSpamUndoFailed": "Kein Spam rückgängig machen fehlgeschlagen.",
+      "permanentlyDeleted": "Thread endgültig gelöscht | {count} Threads endgültig gelöscht",
+      "pinChanged": "Markierung geändert",
+      "pinFailed": "Anheften fehlgeschlagen.",
+      "priorityFailed": "Priorität konnte nicht geändert werden.",
+      "readChanged": "Lesestatus geändert",
+      "removeFromTopicFailed": "Entfernen fehlgeschlagen.",
+      "removedFromTopic": "Aus Thema „{topic}“ entfernt",
+      "removedFromTopicPartially": "{count} aus Thema „{topic}“ entfernt; {failed} konnten nicht entfernt werden.",
+      "restoreEmpty": "Keine Konversation konnte wiederhergestellt werden.",
+      "restoreFailed": "Wiederherstellen fehlgeschlagen.",
+      "snoozed": "E-Mail auf Wiedervorlage | {count} E-Mails auf Wiedervorlage",
+      "spamFailed": "Als Spam markieren fehlgeschlagen.",
+      "spammed": "Thread als Spam markiert | {count} Threads als Spam markiert",
+      "trashFailed": "Löschen fehlgeschlagen.",
+      "trashed": "Thread gelöscht | Threads gelöscht",
+      "waiting": "E-Mail wartet auf Antwort | {count} E-Mails warten auf Antwort"
+    },
+    "row": {
+      "back": "Zurück {time}",
+      "draftPrefix": "Entwurf,",
+      "hasAttachment": "mit Anhang",
+      "hasDraft": "Entwurf vorhanden",
+      "menuLabel": "Aktionen für diese Mail",
+      "messages": "{count} Nachricht | {count} Nachrichten",
+      "noSubject": "(kein Betreff)",
+      "pinned": "angeheftet",
+      "sender": "Absender einordnen …",
+      "senderMenuLabel": "Absender {email} einordnen …",
+      "senderToRecipient": "{sender} an {recipient}",
+      "waitingSince": "Seit {time}"
+    },
+    "spam": {
+      "likely": "Vermutlich Spam",
+      "moved": "Vom Filter verschoben",
+      "movedHint": "Der Spamfilter auf diesem Gerät hat diesen Thread in Spam verschoben",
+      "rowHint": "Der Spamfilter auf diesem Gerät hat diesen Thread markiert"
+    },
+    "state": {
+      "aside": "Beiseitegelegt",
+      "done": "Erledigt",
+      "inbox": "Inbox",
+      "snoozed": "Wiedervorlage",
+      "todo": "Aufgabe",
+      "waiting": "Wartet"
+    },
+    "view": {
+      "loading": "Konversation wird geladen"
+    },
+    "workflow": {
+      "failedMany": "{count} E-Mails konnten nicht als „{label}“ markiert werden: {detail}",
+      "failedOne": "{label} fehlgeschlagen: {detail}"
+    }
+  },
+  "time": {
+    "lastWeek": "Letzte Woche"
+  },
+  "topics": {
+    "card": {
+      "empty": "Noch keine Themen — leg mit „+\" eins an.",
+      "label": "Themen, {count} Themen, {unread} ungelesen",
+      "new": "Neues Thema",
+      "unread": "{name} — {count} ungelesen"
+    },
+    "picker": {
+      "title": "Zu Thema hinzufügen"
+    },
+    "title": "Themen"
+  },
+  "ui": {
+    "resizeSidebar": "Seitenleistenbreite ändern",
+    "send": "Senden",
+    "undoKeyHint": "{key} macht rückgängig"
+  }
+}
