@@ -359,6 +359,7 @@ pub fn run() {
             sync::maintenance::spawn_snooze_worker(pool.clone(), app_handle.clone());
             commands::server_rules::spawn_retry_worker(pool.clone());
             sync::maintenance::spawn_followup_worker(pool.clone(), app_handle.clone());
+            sync::maintenance::spawn_task_reminder_worker(pool.clone(), app_handle.clone());
             sync::maintenance::spawn_webhook_worker(pool.clone());
 
             // Bridge AppEvent -> Tauri events for the frontend.
@@ -821,6 +822,18 @@ pub fn run() {
             commands::calendar::import_ics_path,
             commands::groupware::configure_groupware,
             commands::groupware::sync_groupware,
+            commands::tasks::list_task_lists,
+            commands::tasks::list_tasks,
+            commands::tasks::create_task,
+            commands::tasks::update_task,
+            commands::tasks::set_task_completed,
+            commands::tasks::delete_task,
+            commands::tasks::restore_task,
+            commands::tasks::undo_task_advance,
+            commands::tasks::create_task_list,
+            commands::tasks::rename_task_list,
+            commands::tasks::delete_task_list,
+            commands::tasks::sync_tasks,
             commands::outbox::list_outbox,
             commands::outbox::retry_outbox_action,
             commands::outbox::retry_failed_sync_actions,

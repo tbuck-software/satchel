@@ -11,6 +11,7 @@ import { useMessageLinks } from '@/composables/useMessageLinks';
 import { useShortcutHints, type ShortcutHint } from '@/composables/useShortcutHints';
 import { activeThreadReaderCommands } from '@/composables/useThreadReaderCommands';
 import { useSenderSweep } from '@/composables/useSenderSweep';
+import { useTaskEditor } from '@/composables/useTaskEditor';
 import { listKeyboardTargets } from '@/composables/useListKeyboardNavigation';
 import { useUndo } from '@/composables/useUndo';
 import { useToast } from '@/composables/useToast';
@@ -41,6 +42,7 @@ const VIEW_ICONS: Partial<Record<string, CommandIconName>> = {
   'new-senders': 'account',
   calendar: 'calendar',
   contacts: 'account',
+  tasks: 'task',
   trash: 'trash',
   spam: 'spam',
   notifications: 'envelope',
@@ -82,6 +84,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
   const { hint } = useShortcutHints();
   const undo = useUndo();
   const senderSweep = useSenderSweep();
+  const taskEditor = useTaskEditor();
 
   // A list with its own targets (search page, topic, sender review) is what
   // the palette acts on, like the keys; otherwise the store's selection.
@@ -467,8 +470,25 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         run: () => void threadActions.markNotSpam(notSpamTargets()),
       }] : []),
       ...sweepCommand(),
+      ...(currentId() ? [{
+        id: 'thread:add-task',
+        icon: 'task' as const,
+        title: t('commands.addTask'),
+        context: 'mail' as const,
+        shortcut: hint('createTask'),
+        keywords: t('shortcuts.actions.createTask.keywords'),
+        run: () => taskEditor.openForThread(currentId(), threads.find(currentId())?.subject),
+      }] : []),
       ...readerCommands(),
     ] : []),
+    {
+      id: 'task:new',
+      icon: 'task',
+      title: t('commands.newTask'),
+      context: 'app',
+      keywords: t('commands.keywords.newTask'),
+      run: () => taskEditor.openNew(),
+    },
     {
       id: 'view:cleanup',
       icon: 'sweep',

@@ -394,6 +394,7 @@ pub async fn discover_account(input: DiscoverAccountInput) -> CommandResult<Acco
 
 #[tauri::command]
 pub async fn autoconfigure_groupware(
+    app: tauri::AppHandle,
     pool: tauri::State<'_, SqlitePool>,
     account_id: String,
 ) -> CommandResult<DavAutoconfigureDto> {
@@ -458,6 +459,8 @@ pub async fn autoconfigure_groupware(
         )
         .await?;
     let summary = dav::sync_groupware_account(pool.inner(), &account.id, &config).await?;
+    // The first sync may already have brought task lists.
+    crate::commands::tasks::announce(&app, &summary.task_summary);
 
     Ok(DavAutoconfigureDto {
         caldav_server: caldav.map(|value| value.0),

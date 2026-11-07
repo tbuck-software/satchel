@@ -182,6 +182,7 @@
       "groupwareContactSyncFailed": "Kontakte für {account} konnten nicht synchronisiert werden.",
       "groupwareCredentialsRejected": "Kein CalDAV- oder CardDAV-Dienst hat die gespeicherten Zugangsdaten akzeptiert.",
       "groupwareSyncFailed": "Groupware für {account} konnte nicht synchronisiert werden.",
+      "groupwareTaskSyncFailed": "Aufgaben für {account} konnten nicht synchronisiert werden.",
       "imapConnectionFailed": "Es konnte keine sichere IMAP-Verbindung hergestellt werden. Letzter Versuch: {reason}. Du kannst den Server unter \"Erweitert\" von Hand eintragen.",
       "imapCredentialsRejected": "Keine sichere IMAP-Konfiguration hat diese Zugangsdaten akzeptiert. Prüfe den Benutzernamen oder trage den Server von Hand ein.",
       "imapDraftUidWithoutValidity": "Für diesen älteren Entwurf in \"{folder}\" fehlt eine bestätigte Serverkennung. Seine Serverkopie wurde nicht verändert.",
@@ -363,6 +364,18 @@
       "snapshotMessagesHeld": "{count} Nachrichten in {folder} konnten für {account} nicht vom Server aktualisiert werden und bleiben vorerst, wo sie sind. Satchel versucht es in einem Tag erneut.",
       "spamFilterUnavailable": "Die Einstellungen des Spamfilters ließen sich nicht lesen oder speichern.",
       "systemFolderImmutable": "\"{name}\" ist ein Systemordner und kann nicht geändert werden.",
+      "taskChanged": "Diese Aufgabe wurde inzwischen geändert.",
+      "taskCompletedInvalid": "Der Erledigt-Zeitpunkt ist nicht lesbar.",
+      "taskDueInvalid": "Das Fälligkeitsdatum ist nicht lesbar.",
+      "taskListNameRequired": "Eine Liste braucht einen Namen.",
+      "taskListNotFound": "Diese Aufgabenliste gibt es nicht mehr.",
+      "taskListNotLocal": "Listen eines Kontos werden auf dessen Server umbenannt und gelöscht.",
+      "taskListReadOnly": "Diese Aufgabenliste ist schreibgeschützt.",
+      "taskNotFound": "Diese Aufgabe gibt es nicht mehr.",
+      "taskPersistenceFailed": "Die Aufgabe konnte nicht gespeichert werden.",
+      "taskPriorityInvalid": "Diese Priorität kennt Satchel nicht.",
+      "taskReminderInvalid": "Die Erinnerungszeit ist nicht lesbar.",
+      "taskTitleRequired": "Eine Aufgabe braucht einen Titel.",
       "templateNotFound": "Die Vorlage wurde nicht gefunden.",
       "templatePersistenceFailed": "Vorlagen sind momentan nicht verfügbar. Bitte versuche es erneut.",
       "threadMetadataInvalid": "Die Organisationsangaben der Unterhaltung sind ungültig.",
@@ -447,6 +460,13 @@
       "sameDay": "{day}, {start}–{end} Uhr",
       "span": "{start} – {end}",
       "weekSameMonth": "{first}.–{last}. {monthYear}"
+    },
+    "reminder": {
+      "nextMonth": "Nächsten Monat",
+      "nextWeek": "Nächste Woche",
+      "set": "Auf Wiedervorlage legen",
+      "thisAfternoon": "Heute Nachmittag",
+      "tomorrowMorning": "Morgen früh"
     },
     "source": {
       "caldav": "CalDAV",
@@ -737,6 +757,7 @@
       "summary": "{count} neue E-Mails",
       "syncFailed": "Remote-Abgleich fehlgeschlagen",
       "syncing": "Inhalte werden synchronisiert",
+      "taskDue": "Aufgabe fällig",
       "trash": "Löschen"
     },
     "oauth": {
@@ -765,6 +786,7 @@
       "allDayCount": "{count} Einträge",
       "more": "+{count} weitere",
       "now": "Jetzt",
+      "tasksDue": "{count} Aufgabe fällig | {count} Aufgaben fällig",
       "title": "Heute"
     },
     "calendar": "Kalender",
@@ -801,6 +823,7 @@
     "pinContact": "Kontakt anpinnen",
     "pinContactNamed": "{name} anpinnen",
     "smartFolders": "Smart Folders",
+    "tasks": "Aufgaben",
     "toggleSection": "{name} auf- oder zuklappen",
     "unpinContact": "Kontakt loslösen",
     "unpinContactNamed": "{name} loslösen"
@@ -1065,6 +1088,10 @@
       "copyLink": {
         "keywords": "link url teilen",
         "label": "Link zu dieser E-Mail kopieren"
+      },
+      "createTask": {
+        "keywords": "aufgabe todo",
+        "label": "E-Mail als Aufgabe anlegen"
       },
       "fileTo": {
         "keywords": "ablegen verschieben ordner thema label file move",

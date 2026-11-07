@@ -78,6 +78,7 @@ const emit = defineEmits<{
   notSpam: [];
   block: [scope: 'address' | 'domain'];
   sweep: [];
+  addTask: [];
   print: [scope: MessageScope];
   copyMarkdown: [scope: MessageScope];
   copyLink: [];
@@ -168,6 +169,11 @@ function run(action: 'toggleRead' | 'togglePin' | 'setAside' | 'forward' | 'togg
 function runSweep() {
   closeMenu();
   emit('sweep');
+}
+
+function runAddTask() {
+  closeMenu();
+  emit('addTask');
 }
 
 function runBlock(scope: 'address' | 'domain') {
@@ -372,6 +378,15 @@ function runExport(format: ExportFormat) {
       >
         <template #icon><AppIcon :grid="20"><path d="M13.5 3 9 10" /><path d="M5 10h7l1.5 7h-10z" /><path d="M7.5 13.5v3M10.5 13.5v3" /></AppIcon></template>
         <template v-if="hint('sweepSender')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('sweepSender')?.label }}</kbd></template>
+      </MenuItem>
+      <MenuItem
+        :label="$t('thread.actions.addTask')"
+        :aria-keyshortcuts="hint('createTask')?.aria"
+        @mouseenter="closeSubmenu"
+        @select="runAddTask"
+      >
+        <template #icon><AppIcon :grid="20"><path d="M10 3.5a6.5 6.5 0 1 1 0 13a6.5 6.5 0 1 1 0-13Z" /><path d="M7 10.2l2.2 2.2L13.3 8" /></AppIcon></template>
+        <template v-if="hint('createTask')" #trailing><kbd class="menu-shortcut" aria-hidden="true">{{ hint('createTask')?.label }}</kbd></template>
       </MenuItem>
       <MenuItem
         :label="$t('common.block')"

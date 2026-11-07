@@ -191,6 +191,20 @@ const PORTABLE_TABLES: &[PortableTable] = &[
         primary_key: &["id"],
         redacted_columns: &[],
     },
+    // Local task lists exist nowhere else, and a task created for a remote
+    // list may not have reached its server. Everything else of a remote list
+    // comes back through sync; see `portable_rows`. Lists before tasks, for
+    // the foreign key.
+    PortableTable {
+        name: "task_lists",
+        primary_key: &["id"],
+        redacted_columns: &[],
+    },
+    PortableTable {
+        name: "tasks",
+        primary_key: &["id"],
+        redacted_columns: &[],
+    },
     PortableTable {
         name: "provider_labels",
         primary_key: &["id"],
@@ -217,6 +231,23 @@ const PORTABLE_TABLES: &[PortableTable] = &[
         redacted_columns: &["secret"],
     },
 ];
+
+/// Which rows of a table travel. Remote tasks stay behind: their ids differ
+/// between devices (a task created here keeps its own id, the same task pulled
+/// elsewhere gets one derived from its href), so importing them would collide
+/// with `idx_tasks_remote` on a device that already synced the account.
+fn portable_rows(table: &str) -> &'static str {
+    match table {
+        "task_lists" => {
+            " WHERE provider = 'local' OR id IN (SELECT list_id FROM tasks WHERE pending_op = 'create')"
+        }
+        "tasks" => {
+            " WHERE list_id IN (SELECT id FROM task_lists WHERE provider = 'local')
+               OR (pending_op = 'create' AND remote_id IS NULL)"
+        }
+        _ => "",
+    }
+}
 
 /// Column names of one portable table, in schema order.
 ///
@@ -1026,7 +1057,11 @@ async fn export_portable_table(
         .map(|column| format!("CAST(\"{column}\" AS TEXT) AS \"{column}\""))
         .collect::<Vec<_>>()
         .join(", ");
-    let sql = format!("SELECT {selections} FROM {}", table.name);
+    let sql = format!(
+        "SELECT {selections} FROM {}{}",
+        table.name,
+        portable_rows(table.name)
+    );
     let rows = sqlx::query(&sql)
         .fetch_all(pool)
         .await
@@ -2462,6 +2497,90 @@ mod tests {
                 .expect("read account");
         assert_eq!(kind, "calendar", "an omitted column keeps its local value");
         assert_eq!(name, "Renamed");
+    }
+
+    #[tokio::test]
+    async fn local_tasks_travel_with_the_portable_export() {
+        let source = migrated_pool().await;
+        for statement in [
+            "INSERT INTO task_lists (id, account_id, provider, remote_id, name, created_at, updated_at)
+             VALUES ('tasks-local-default', NULL, 'local', NULL, '', '', '')",
+            "INSERT INTO tasks (id, list_id, uid, title, due_at, priority, thread_id, message_id,
+                created_at, updated_at)
+             VALUES ('task', 'tasks-local-default', 'uid', 'Renew passport', '2026-12-01', 1,
+                'thread', '<m@example.test>', '', '')",
+        ] {
+            sqlx::query(statement)
+                .execute(&source)
+                .await
+                .expect("seed a local task");
+        }
+        let (export, _) = collect_platform_export(&source, false)
+            .await
+            .expect("export platform data");
+        let target = migrated_pool().await;
+        apply_platform_export(None, &target, &export)
+            .await
+            .expect("import platform data");
+        let (title, due, message_id): (String, Option<String>, Option<String>) =
+            sqlx::query_as("SELECT title, due_at, message_id FROM tasks WHERE id = 'task'")
+                .fetch_one(&target)
+                .await
+                .expect("read the task back");
+        assert_eq!(title, "Renew passport");
+        assert_eq!(due.as_deref(), Some("2026-12-01"));
+        assert_eq!(message_id.as_deref(), Some("<m@example.test>"));
+    }
+
+    #[tokio::test]
+    async fn remote_tasks_stay_behind_and_the_import_meets_a_synced_device() {
+        async fn seed(pool: &SqlitePool, own_task_id: &str) {
+            for statement in [
+                "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref,
+                    sync_state, color, is_active, created_at, updated_at)
+                 VALUES ('acc', 'Acc', 'acc@example.test', 'imap', '{}', '', '{}', '#123456', 1, '', '')",
+                "INSERT INTO task_lists (id, account_id, provider, remote_id, name, created_at, updated_at)
+                 VALUES ('tl-remote', 'acc', 'caldav', 'https://dav.example.test/tasks/', 'Work', '', '')",
+            ] {
+                sqlx::query(statement).execute(pool).await.expect("seed");
+            }
+            // The same server task: created here (own id) or pulled (derived id).
+            sqlx::query(
+                "INSERT INTO tasks (id, list_id, uid, title, remote_id, remote_version, created_at, updated_at)
+                 VALUES (?, 'tl-remote', 'u1', 'Synced', 'https://dav.example.test/tasks/u1.ics', 'e1', '', '')",
+            )
+            .bind(own_task_id)
+            .execute(pool)
+            .await
+            .expect("seed the synced task");
+        }
+        let source = migrated_pool().await;
+        seed(&source, "task-made-here").await;
+        for statement in [
+            "INSERT INTO task_lists (id, account_id, provider, remote_id, name, created_at, updated_at)
+             VALUES ('tasks-local-default', NULL, 'local', NULL, '', '', '')",
+            "INSERT INTO tasks (id, list_id, uid, title, created_at, updated_at)
+             VALUES ('local', 'tasks-local-default', 'u2', 'Local only', '', '')",
+            "INSERT INTO tasks (id, list_id, uid, title, pending_op, created_at, updated_at)
+             VALUES ('unsent', 'tl-remote', 'u3', 'Not on the server yet', 'create', '', '')",
+        ] {
+            sqlx::query(statement).execute(&source).await.expect("seed");
+        }
+        let (export, _) = collect_platform_export(&source, false)
+            .await
+            .expect("export platform data");
+        assert_eq!(export.tables["tasks"].len(), 2, "only local work travels");
+
+        let target = migrated_pool().await;
+        seed(&target, "task-pulled-there").await;
+        apply_platform_export(None, &target, &export)
+            .await
+            .expect("import next to a synced account");
+        let titles: Vec<String> = sqlx::query_scalar("SELECT title FROM tasks ORDER BY title")
+            .fetch_all(&target)
+            .await
+            .expect("read tasks");
+        assert_eq!(titles, ["Local only", "Not on the server yet", "Synced"]);
     }
 
     #[tokio::test]

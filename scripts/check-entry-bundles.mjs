@@ -85,9 +85,14 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * backend.errors.translation messages ship at startup like every backend.*
  * key (+0.7 KiB first paint), and the reader's Translate strings ride in the
  * prefetched ThreadView and OmniSearch chunks, while the consent question,
- * the Translation page and the settings search part load on use. */
+ * the Translation page and the settings search part load on use.
+ * Main 106 / 212 KiB since 2026-11-07: with tasks main measured 105.1 /
+ * 211.3 KiB and 32.9 KiB after prefetch (was 104.5 / 210.3 / 32.6), the
+ * entry carrying the task keys, palette commands, sidebar button and editor
+ * state, and the Today card (FIRST_PAINT) its due-task line with the store
+ * it reads; the view, editor and their strings load on first use. */
 const budgets = {
-  'index.html': { entryGzip: 105 * 1024, initialGzip: 211 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
+  'index.html': { entryGzip: 106 * 1024, initialGzip: 212 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 128 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };

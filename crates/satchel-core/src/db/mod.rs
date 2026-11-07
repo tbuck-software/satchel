@@ -30,6 +30,7 @@ pub mod smart_folders;
 pub mod smime;
 pub mod storage;
 pub mod sync_quarantine;
+pub mod tasks;
 pub mod templates;
 pub mod threads;
 pub mod tls_exceptions;

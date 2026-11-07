@@ -65,6 +65,13 @@ index idx_spam_training_thread_sender: CREATE INDEX idx_spam_training_thread_sen
 index idx_sync_queue_account: CREATE INDEX idx_sync_queue_account ON sync_queue(account_id)
 index idx_sync_queue_scheduled: CREATE INDEX idx_sync_queue_scheduled ON sync_queue(scheduled_for) WHERE scheduled_for IS NOT NULL
 index idx_sync_queue_status_due: CREATE INDEX idx_sync_queue_status_due ON sync_queue(status, next_retry_at)
+index idx_task_lists_remote: CREATE UNIQUE INDEX idx_task_lists_remote ON task_lists(account_id, remote_id) WHERE remote_id IS NOT NULL
+index idx_tasks_list: CREATE INDEX idx_tasks_list ON tasks(list_id, completed_at)
+index idx_tasks_open_due: CREATE INDEX idx_tasks_open_due ON tasks(due_at) WHERE completed_at IS NULL
+index idx_tasks_pending: CREATE INDEX idx_tasks_pending ON tasks(list_id) WHERE pending_op IS NOT NULL
+index idx_tasks_reminder: CREATE INDEX idx_tasks_reminder ON tasks(reminder_at) WHERE reminder_at IS NOT NULL AND reminded_at IS NULL AND completed_at IS NULL
+index idx_tasks_remote: CREATE UNIQUE INDEX idx_tasks_remote ON tasks(list_id, remote_id) WHERE remote_id IS NOT NULL
+index idx_tasks_thread: CREATE INDEX idx_tasks_thread ON tasks(thread_id) WHERE thread_id IS NOT NULL
 index idx_templates_account: CREATE INDEX idx_templates_account ON templates(account_id)
 index idx_templates_shortcut: CREATE INDEX idx_templates_shortcut ON templates(shortcut) WHERE shortcut IS NOT NULL
 index idx_thread_folders_thread: CREATE INDEX idx_thread_folders_thread ON thread_folders(thread_id, folder_id)
@@ -143,6 +150,8 @@ table sync_quarantine (account_id TEXT NOT NULL PK1, folder_id TEXT NOT NULL PK2
 table sync_queue (id TEXT PK1, account_id TEXT NOT NULL, action_type TEXT NOT NULL, payload TEXT NOT NULL, status TEXT DEFAULT 'pending', retry_count INTEGER DEFAULT 0, last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, next_retry_at TEXT, scheduled_for TEXT, updated_at_ms INTEGER, submission_started_at TEXT, rate_limit_rounds INTEGER NOT NULL DEFAULT 0, sending_session TEXT)
 table sync_queue_dependencies (action_id TEXT NOT NULL PK1, depends_on TEXT NOT NULL PK2)
 table tags (id TEXT PK1, name TEXT NOT NULL, color TEXT, icon TEXT, is_system INTEGER DEFAULT 0, sort_order INTEGER DEFAULT 0)
+table task_lists (id TEXT NOT NULL PK1, account_id TEXT, provider TEXT NOT NULL, remote_id TEXT, name TEXT NOT NULL DEFAULT '', color TEXT, read_only INTEGER NOT NULL DEFAULT 0, read_only_reason TEXT, read_only_since TEXT, mixed INTEGER NOT NULL DEFAULT 0, gone INTEGER NOT NULL DEFAULT 0, sync_cursor TEXT, last_synced_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)
+table tasks (id TEXT NOT NULL PK1, list_id TEXT NOT NULL, uid TEXT NOT NULL, title TEXT NOT NULL, notes TEXT, due_at TEXT, due_tz TEXT, start_at TEXT, rrule TEXT, recurrence TEXT, reminder_at TEXT, reminded_at TEXT, priority INTEGER NOT NULL DEFAULT 0, completed_at TEXT, thread_id TEXT, message_id TEXT, remote_id TEXT, remote_version TEXT, remote_payload TEXT, pending_op TEXT, push_failures INTEGER NOT NULL DEFAULT 0, push_retry_at TEXT, advanced_from TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)
 table templates (id TEXT PK1, account_id TEXT, name TEXT NOT NULL, subject TEXT, body_text TEXT NOT NULL DEFAULT '', body_html TEXT, shortcut TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, cc_json TEXT, bcc_json TEXT, attachments_json TEXT)
 table thread_folders (folder_id TEXT NOT NULL PK1, thread_id TEXT NOT NULL PK2, message_count INTEGER NOT NULL, unread_count INTEGER NOT NULL, visible INTEGER NOT NULL)
 table thread_list_snapshots (cache_key TEXT NOT NULL PK1, page_json TEXT NOT NULL, updated_at TEXT NOT NULL)

@@ -32,7 +32,8 @@
         "unpinMenu": "Remove pin",
         "unread": "Unread",
         "fileTo": "File…",
-        "notSpam": "Not spam"
+        "notSpam": "Not spam",
+        "addTask": "Add as task"
       },
       "attachments": {
         "filenameFallback": "attachment",
@@ -306,7 +307,8 @@
         "unpinMenu": "Nicht mehr anheften",
         "unread": "Ungelesen",
         "fileTo": "Ablegen …",
-        "notSpam": "Kein Spam"
+        "notSpam": "Kein Spam",
+        "addTask": "Als Aufgabe anlegen"
       },
       "attachments": {
         "filenameFallback": "anhang",

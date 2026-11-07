@@ -1,5 +1,6 @@
 import { createPersistedSlot, persistence } from '@/persistence';
 import type { BackendAccountQuota, BackendAccountVisibilityPolicy } from './accounts';
+import type { BackendTask, BackendTaskList } from './tasks';
 import { splitSubjectPrefixes } from '@/utils/composerText';
 import { bytesToBase64 } from '@/utils/base64';
 import { joinComposerTextHistory, splitComposerTextHistory, splitComposerHtmlHistory } from '@/utils/composerHistory';
@@ -765,6 +766,106 @@ interface MockSweepRule {
 }
 
 const sweepRules: MockSweepRule[] = [];
+
+/* Tasks, as `db::tasks` keeps them: a default local list that needs no
+ * account, and one CalDAV VTODO list of the work account. Changes to the
+ * remote list are marked pending until `sync_tasks` "pushes" them. */
+function mockDay(offset: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+function mockAt(offsetDays: number, hour: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  date.setHours(hour, 0, 0, 0);
+  return date.toISOString();
+}
+const MOCK_LOCAL_TASK_LIST = 'tasks-local-default';
+const MOCK_CALDAV_TASK_LIST = 'tl-mock-caldav';
+const taskLists: Array<Omit<BackendTaskList, 'open_count'>> = [
+  { id: MOCK_LOCAL_TASK_LIST, account_id: null, provider: 'local', name: '', color: null, read_only: false, gone: false, last_synced_at: null },
+  { id: MOCK_CALDAV_TASK_LIST, account_id: 'acc-work', provider: 'caldav', name: 'Work', color: '#2f7de1', read_only: false, gone: false, last_synced_at: null },
+];
+const mockTaskStamp = new Date(Date.now() - 86_400_000).toISOString();
+function mockTask(id: string, list_id: string, title: string, extra: Partial<BackendTask> = {}): BackendTask {
+  return {
+    id, list_id, title, notes: null, due_at: null, reminder_at: null, priority: 0, completed_at: null,
+    recurrence: null, thread_id: null, message_id: null, pending: false, created_at: mockTaskStamp,
+    updated_at: mockTaskStamp, ...extra,
+  };
+}
+const tasks: BackendTask[] = [
+  mockTask('task-seed-1', MOCK_LOCAL_TASK_LIST, 'Renew passport', { due_at: mockDay(-1), priority: 1 }),
+  mockTask('task-seed-2', MOCK_CALDAV_TASK_LIST, 'Reply with the quarterly numbers', { due_at: mockAt(0, 23), thread_id: 'th-1' }),
+  mockTask('task-seed-3', MOCK_LOCAL_TASK_LIST, 'Book train to Hamburg', { due_at: mockDay(2), reminder_at: mockAt(1, 9) }),
+  mockTask('task-seed-4', MOCK_LOCAL_TASK_LIST, 'Sort out old photos'),
+  mockTask('task-seed-5', MOCK_CALDAV_TASK_LIST, 'Send slides to Jonas', { completed_at: mockTaskStamp }),
+  // FREQ=WEEKLY: completing moves it a week on, as `tasks::recurrence` does.
+  mockTask('task-seed-6', MOCK_CALDAV_TASK_LIST, 'Put the bins out', { due_at: mockDay(3), recurrence: 'simple' }),
+  // FREQ=MONTHLY;BYDAY=1FR: Satchel does not step this one, so completing ends the series.
+  mockTask('task-seed-7', MOCK_CALDAV_TASK_LIST, 'Prepare the board meeting', { due_at: mockDay(5), recurrence: 'complex' }),
+];
+/** The step of each simple mock series, in days. */
+const mockSeriesStep = new Map<string, number>([['task-seed-6', 7]]);
+/** The due date a series moved on from, for `undo_task_advance`. */
+const mockAdvancedFrom = new Map<string, string | null>();
+const deletedRemoteTasks = new Map<string, BackendTask>();
+
+function taskListDto(list: Omit<BackendTaskList, 'open_count'>): BackendTaskList {
+  return { ...list, open_count: tasks.filter((task) => task.list_id === list.id && !task.completed_at).length };
+}
+
+function mockTaskFields(raw: unknown): Pick<BackendTask, 'title' | 'notes' | 'due_at' | 'reminder_at' | 'priority' | 'completed_at'> {
+  const fields = (raw ?? {}) as Record<string, unknown>;
+  const title = String(fields.title ?? '').trim();
+  if (!title) throw new Error('backend.errors.taskTitleRequired');
+  const due = (fields.due_at as string | null | undefined)?.trim() || null;
+  if (due && (due.length === 10 ? !/^\d{4}-\d{2}-\d{2}$/.test(due) : Number.isNaN(Date.parse(due)))) {
+    throw new Error('backend.errors.taskDueInvalid');
+  }
+  const reminder = (fields.reminder_at as string | null | undefined)?.trim() || null;
+  if (reminder && Number.isNaN(Date.parse(reminder))) throw new Error('backend.errors.taskReminderInvalid');
+  const priority = Number(fields.priority ?? 0);
+  if (!Number.isInteger(priority) || priority < 0 || priority > 9) throw new Error('backend.errors.taskPriorityInvalid');
+  const completed = (fields.completed_at as string | null | undefined)?.trim() || null;
+  if (completed && Number.isNaN(Date.parse(completed))) throw new Error('backend.errors.taskCompletedInvalid');
+  return {
+    title,
+    notes: (fields.notes as string | null | undefined)?.trim() || null,
+    due_at: due && due.length !== 10 ? new Date(due).toISOString() : due,
+    reminder_at: reminder ? new Date(reminder).toISOString() : null,
+    priority,
+    completed_at: completed ? new Date(completed).toISOString() : null,
+  };
+}
+
+/** A simple series moves on instead of completing, as `tasks::recurrence` does. */
+function mockNextOccurrence(task: BackendTask, due: string | null): string | null {
+  const step = mockSeriesStep.get(task.id);
+  if (task.recurrence !== 'simple' || !step || due?.length !== 10) return null;
+  const [year, month, day] = due.split('-').map(Number);
+  const next = new Date(year!, month! - 1, day! + step);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
+}
+
+function mockTaskList(id: string) {
+  const list = taskLists.find((item) => item.id === id);
+  if (!list) throw new Error('backend.errors.taskListNotFound');
+  return list;
+}
+
+function mockTaskById(id: unknown): BackendTask {
+  const task = tasks.find((item) => item.id === id);
+  if (!task) throw new Error('backend.errors.taskNotFound');
+  return task;
+}
+
+function touchTask(task: BackendTask, changes: Partial<BackendTask>): BackendTask {
+  const remote = mockTaskList(task.list_id).provider !== 'local';
+  Object.assign(task, changes, { pending: remote, updated_at: new Date().toISOString() });
+  return { ...task };
+}
 let nextSweepRule = 0;
 
 /** The Inbox list's own test, as `sender_sweep.rs` reuses the list predicate. */
@@ -1075,6 +1176,12 @@ const handlers: Record<string, Handler> = {
     events_synced: 0,
     address_books_found: 0,
     contacts_synced: 0,
+    task_lists_found: 0,
+    tasks_synced: 0,
+    task_summary: {
+      lists: 0, pulled: 0, pushed: 0, removed: 0, conflicts: 0, restored: 0, failed: 0,
+      read_only_dropped: 0, read_only_kept: 0, kept_local: 0, lists_gone: 0,
+    },
     errors: [],
   }),
   inline_image_cache_status: () => ({
@@ -2133,6 +2240,110 @@ const handlers: Record<string, Handler> = {
     const first = list.find((message) => !message.isDraft && !ownAddress(thread.accountId, message.from.email))?.from
       ?? (list.length === 0 ? thread.participants.find((person) => !ownAddress(thread.accountId, person.email)) : undefined);
     return first ? { account_id: thread.accountId, email: first.email.trim().toLowerCase(), name: first.name?.trim() || null } : null;
+  },
+  list_task_lists: () => {
+    if (!taskLists.some((list) => list.provider === 'local')) {
+      taskLists.unshift({ id: MOCK_LOCAL_TASK_LIST, account_id: null, provider: 'local', name: '', color: null, read_only: false, gone: false, last_synced_at: null });
+    }
+    return taskLists.map(taskListDto);
+  },
+  list_tasks: (payload) => {
+    const open = tasks.filter((task) => !task.completed_at);
+    const done = payload.includeCompleted ? tasks.filter((task) => task.completed_at) : [];
+    return [...open, ...done].map((task) => ({ ...task }));
+  },
+  create_task: (payload) => {
+    const scope = input(payload);
+    const list = mockTaskList(String(scope.list_id ?? ''));
+    if (list.read_only) throw new Error('backend.errors.taskListReadOnly');
+    const now = new Date().toISOString();
+    const task = mockTask(nextId('task'), list.id, '', {
+      ...mockTaskFields(scope.fields),
+      thread_id: (scope.thread_id as string | null | undefined) ?? null,
+      pending: list.provider !== 'local',
+      created_at: now,
+      updated_at: now,
+    });
+    tasks.push(task);
+    return { ...task };
+  },
+  update_task: (payload) => {
+    const scope = input(payload);
+    const task = mockTaskById(scope.id);
+    if (scope.expected_updated_at && scope.expected_updated_at !== task.updated_at) {
+      throw new Error('backend.errors.taskChanged');
+    }
+    const fields = mockTaskFields(scope.fields);
+    const next = fields.completed_at && !task.completed_at ? mockNextOccurrence(task, fields.due_at) : null;
+    mockAdvancedFrom.delete(task.id);
+    if (next) mockAdvancedFrom.set(task.id, fields.due_at);
+    return touchTask(task, next ? { ...fields, due_at: next, completed_at: null } : fields);
+  },
+  set_task_completed: (payload) => {
+    const task = mockTaskById(payload.id);
+    const next = payload.completed && !task.completed_at ? mockNextOccurrence(task, task.due_at) : null;
+    mockAdvancedFrom.delete(task.id);
+    if (next) {
+      mockAdvancedFrom.set(task.id, task.due_at);
+      return touchTask(task, { due_at: next });
+    }
+    return touchTask(task, { completed_at: payload.completed ? new Date().toISOString() : null });
+  },
+  delete_task: (payload) => {
+    const task = mockTaskById(payload.id);
+    tasks.splice(tasks.indexOf(task), 1);
+    if (mockTaskList(task.list_id).provider !== 'local') deletedRemoteTasks.set(task.id, task);
+  },
+  undo_task_advance: (payload) => {
+    const task = mockTaskById(payload.id);
+    if (!mockAdvancedFrom.has(task.id)) throw new Error('backend.errors.taskChanged');
+    const due = mockAdvancedFrom.get(task.id) ?? null;
+    mockAdvancedFrom.delete(task.id);
+    return touchTask(task, { due_at: due });
+  },
+  restore_task: (payload) => {
+    const task = deletedRemoteTasks.get(String(payload.id));
+    if (!task) throw new Error('backend.errors.taskNotFound');
+    deletedRemoteTasks.delete(task.id);
+    tasks.push(task);
+    return touchTask(task, {});
+  },
+  create_task_list: (payload) => {
+    const name = String(payload.name ?? '').trim();
+    if (!name) throw new Error('backend.errors.taskListNameRequired');
+    const list = { id: nextId('tl'), account_id: null, provider: 'local', name, color: null, read_only: false, gone: false, last_synced_at: null };
+    taskLists.push(list);
+    return taskListDto(list);
+  },
+  rename_task_list: (payload) => {
+    const list = mockTaskList(String(payload.id ?? ''));
+    if (list.provider !== 'local') throw new Error('backend.errors.taskListNotLocal');
+    const name = String(payload.name ?? '').trim();
+    if (!name) throw new Error('backend.errors.taskListNameRequired');
+    list.name = name;
+    return taskListDto(list);
+  },
+  delete_task_list: (payload) => {
+    const list = mockTaskList(String(payload.id ?? ''));
+    if (list.provider !== 'local' && !list.gone) throw new Error('backend.errors.taskListNotLocal');
+    taskLists.splice(taskLists.indexOf(list), 1);
+    for (let index = tasks.length - 1; index >= 0; index -= 1) {
+      if (tasks[index]!.list_id === list.id) tasks.splice(index, 1);
+    }
+  },
+  sync_tasks: () => {
+    const pushed = tasks.filter((task) => task.pending).length + deletedRemoteTasks.size;
+    for (const task of tasks) task.pending = false;
+    deletedRemoteTasks.clear();
+    const lists = taskLists.filter((list) => list.provider !== 'local');
+    for (const list of lists) list.last_synced_at = new Date().toISOString();
+    return {
+      summary: {
+        lists: lists.length, pulled: 0, pushed, removed: 0, conflicts: 0, restored: 0, failed: 0,
+        read_only_dropped: 0, read_only_kept: 0, kept_local: 0, lists_gone: 0,
+      },
+      errors: [],
+    };
   },
   list_sweep_rules: () => sweepRules.map((rule) => ({ ...rule })),
   upsert_sweep_rule: (payload) => {

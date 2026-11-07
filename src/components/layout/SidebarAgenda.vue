@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
+import ListRowButton from '@/components/ui/ListRowButton.vue';
 import { useInvitesStore } from '@/stores/invites';
+import { useTasksStore } from '@/stores/tasks';
+import { followTaskSyncs } from '@/composables/taskEvents';
+import { dueState } from '@/utils/tasks';
 import {
   filterInvitesWithoutMirroredEvents,
   formatTime,
@@ -13,7 +18,13 @@ import {
 import { todayAgenda } from '@/utils/todayAgenda';
 
 const invites = useInvitesStore();
+const tasks = useTasksStore();
+const router = useRouter();
 const { locale } = useI18n();
+
+/** Tasks follow remote edits on this pace; their own view reloads on open. */
+const TASK_REFRESH_TICKS = 5;
+let ticks = 0;
 
 /** Timed rows; the all-day line comes below them. */
 const MAX_TIMED_ROWS = 3;
@@ -25,9 +36,15 @@ let clock: ReturnType<typeof setInterval> | null = null;
 // calls standing between the app starting and the first thread row.
 onMounted(() => {
   void invites.load();
+  // A sync that changed tasks reloads them at once; the interval below is
+  // only the fallback for a missed event.
+  followTaskSyncs();
+  void tasks.load().catch(() => undefined);
   // What is "now" and what is over moves with the clock.
   clock = setInterval(() => {
     now.value = new Date();
+    ticks += 1;
+    if (ticks % TASK_REFRESH_TICKS === 0) void tasks.load().catch(() => undefined);
   }, 60_000);
 });
 
@@ -59,7 +76,22 @@ const allDayLabel = computed(() =>
   ),
 );
 
-const visible = computed(() => agenda.value.allDay.length > 0 || agenda.value.timed.length > 0);
+/** Open tasks due today or earlier: today's to-do next to today's appointments. */
+const dueTasks = computed(() =>
+  tasks.tasks.filter((task) => {
+    if (task.completed_at) return false;
+    const state = dueState(task, now.value);
+    return state === 'today' || state === 'overdue';
+  }));
+const overdueCount = computed(() => dueTasks.value.filter((task) => dueState(task, now.value) === 'overdue').length);
+const dueTasksLabel = computed(() =>
+  new Intl.ListFormat(locale.value, { style: 'narrow', type: 'conjunction' }).format(
+    dueTasks.value.map((task) => task.title),
+  ),
+);
+
+const visible = computed(() =>
+  agenda.value.allDay.length > 0 || agenda.value.timed.length > 0 || dueTasks.value.length > 0);
 </script>
 
 <template>
@@ -99,6 +131,20 @@ const visible = computed(() => agenda.value.allDay.length > 0 || agenda.value.ti
         </span>
       </div>
     </div>
+    <ListRowButton
+      v-if="dueTasks.length > 0"
+      class="agenda__tasks"
+      :title="dueTasksLabel"
+      data-testid="agenda-tasks"
+      @click="router.push({ name: 'tasks' })"
+    >
+      <span class="agenda__tasks-count" :class="{ 'agenda__tasks-count--overdue': overdueCount > 0 }">
+        {{ $t('nav.agenda.tasksDue', { count: dueTasks.length }, dueTasks.length) }}
+      </span>
+      <span class="agenda__label agenda__label--all-day">
+        <span class="agenda__label-text">{{ dueTasksLabel }}</span>
+      </span>
+    </ListRowButton>
     <span v-if="agenda.moreTimed > 0" class="agenda__more">
       {{ $t('nav.agenda.more', { count: agenda.moreTimed }) }}
     </span>
@@ -192,6 +238,30 @@ const visible = computed(() => agenda.value.allDay.length > 0 || agenda.value.ti
   color: var(--text-tertiary);
   font-size: var(--font-size-2xs);
   font-variant-numeric: tabular-nums;
+}
+
+.agenda__tasks {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-sm);
+  min-width: 0;
+  margin: 0 calc(-1 * var(--space-xs));
+  padding: var(--space-2xs) var(--space-xs);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  text-align: start;
+}
+
+.agenda__tasks-count {
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.agenda__tasks-count--overdue {
+  color: var(--accent-red);
 }
 
 .agenda__more {

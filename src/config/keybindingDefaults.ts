@@ -28,6 +28,7 @@ const VIEW_LABEL_KEYS: Readonly<Record<string, string>> = {
   'new-senders': 'newSenders.title',
   calendar: 'nav.calendar',
   contacts: 'nav.contacts',
+  tasks: 'nav.tasks',
 };
 
 /** The name a view shares with the sidebar; the mail lists are `nav.folders.<route>`. */
@@ -76,6 +77,7 @@ export const KEYBINDING_SPECS: readonly KeybindingSpec[] = [
   { action: 'markNotSpam', defaultBinding: 'I', context: 'mail' },
   { action: 'sweepSender', defaultBinding: 'E', context: 'mail' },
   { action: 'translateMessage', defaultBinding: 'L', context: 'mail' },
+  { action: 'createTask', defaultBinding: 'T', context: 'mail' },
   { action: 'cleanupKeepLatest', defaultBinding: 'p', context: 'cleanup' },
   { action: 'cleanupUnsubscribe', defaultBinding: 'U', context: 'cleanup' },
   { action: 'cleanupRule', defaultBinding: 'R', context: 'cleanup' },
@@ -90,6 +92,7 @@ export const KEYBINDING_SPECS: readonly KeybindingSpec[] = [
   { action: 'goNewSenders', defaultBinding: 'g n', context: 'navigation', view: 'new-senders' },
   { action: 'goCalendar', defaultBinding: 'g c', context: 'navigation', view: 'calendar' },
   { action: 'goContacts', defaultBinding: 'g p', context: 'navigation', view: 'contacts' },
+  { action: 'goTasks', defaultBinding: 'g k', context: 'navigation', view: 'tasks' },
 ] as const;
 
 export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string>> = Object.freeze(

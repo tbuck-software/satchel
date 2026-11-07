@@ -177,6 +177,10 @@
         "keywords": "link url share",
         "label": "Copy link to this email"
       },
+      "createTask": {
+        "keywords": "task todo",
+        "label": "Add mail as task"
+      },
       "fileTo": {
         "keywords": "file move folder topic label",
         "label": "File in a folder or topic"

@@ -177,6 +177,10 @@
         "keywords": "link url teilen",
         "label": "Link zu dieser E-Mail kopieren"
       },
+      "createTask": {
+        "keywords": "aufgabe todo",
+        "label": "E-Mail als Aufgabe anlegen"
+      },
       "fileTo": {
         "keywords": "ablegen verschieben ordner thema label file move",
         "label": "In Ordner oder Thema ablegen"

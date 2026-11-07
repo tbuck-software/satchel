@@ -9,6 +9,7 @@ import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 import { usePrompt } from '@/composables/usePrompt';
 import { useSenderSweep } from '@/composables/useSenderSweep';
+import { useTaskEditor } from '@/composables/useTaskEditor';
 import { useTopicsStore } from '@/stores/topics';
 import { useSettingsStore } from '@/stores/settings';
 import { SIDEBAR_WIDTH_LIMITS, useUiStore } from '@/stores/ui';
@@ -39,6 +40,7 @@ watch(() => toast.state.toasts.length, (count) => { if (count > 0) toastMounted.
 const { state: confirmState } = useConfirm();
 const { state: promptState } = usePrompt();
 const { state: senderSweepState } = useSenderSweep();
+const { state: taskEditorState } = useTaskEditor();
 const standaloneCompose = computed(() =>
   route.name === 'compose' && route.query.standalone === '1',
 );
@@ -88,6 +90,8 @@ const SettingsModal = defineAsyncComponent(() => import('@/components/settings/S
 const ConfirmDialog = defineAsyncComponent(() => import('@/components/ui/ConfirmDialog.vue'));
 const PromptDialog = defineAsyncComponent(() => import('@/components/ui/PromptDialog.vue'));
 const SenderSweepDialog = defineAsyncComponent(() => import('@/components/mail/SenderSweepDialog.vue'));
+// The editor brings the tasks store with it; neither is parsed before a task is opened.
+const TaskEditorDialog = defineAsyncComponent(() => import('@/components/tasks/TaskEditorDialog.vue'));
 
 watch(() => route.fullPath, () => {
   if (ui.mailboxSwitcherOpen) {
@@ -175,6 +179,7 @@ if (standaloneCompose.value) {
     <ToastStack v-if="toastMounted" />
     <ConfirmDialog v-if="confirmState.pending" />
     <SenderSweepDialog v-if="senderSweepState.request" />
+    <TaskEditorDialog v-if="taskEditorState.request" />
     <PromptDialog v-if="promptState.pending" />
     <UndoFab v-if="toastMounted" :variant="ui.isSinglePane ? 'floating' : 'docked'" />
   </div>
