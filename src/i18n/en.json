@@ -787,6 +787,8 @@
       "sending": "Sending…"
     },
     "confirm": {
+      "firstGroupBody": "This is your first reply in this group. It goes to:",
+      "firstGroupTitle": "Reply to this group?",
       "plainBody": "This chat was end-to-end encrypted. This reply would go out in plain text, because not every recipient has an Autocrypt key.",
       "plainTitle": "Send without encryption?",
       "recipientsBody": "The recipients changed since your last reply, or since the chat began.",

@@ -215,10 +215,14 @@ async function confirmDelivery(): Promise<ChatSendChoices | null> {
   const current = meta.value;
   if (!current) return null;
   const recipients = current.members.map((member) => member.address);
-  if (current.recipients_changed) {
+  // A group you have not written in yet: its members are whoever its first
+  // message named, so the first reply shows them, as a change would.
+  const askRecipients = current.recipients_changed || current.first_group_reply;
+  if (askRecipients) {
+    const firstReply = current.first_group_reply && !current.recipients_changed;
     const yes = await confirm({
-      title: t('chats.confirm.recipientsTitle'),
-      body: t('chats.confirm.recipientsBody'),
+      title: firstReply ? t('chats.confirm.firstGroupTitle') : t('chats.confirm.recipientsTitle'),
+      body: firstReply ? t('chats.confirm.firstGroupBody') : t('chats.confirm.recipientsBody'),
       detail: current.members.map((member) => member.name ? `${member.name} <${member.address}>` : member.address).join(', '),
       confirmLabel: t('chats.confirm.send'),
     });
@@ -235,7 +239,7 @@ async function confirmDelivery(): Promise<ChatSendChoices | null> {
   }
   return {
     expectedRecipients: recipients,
-    confirmRecipients: current.recipients_changed,
+    confirmRecipients: askRecipients,
     allowPlaintext: current.encryption_downgrade,
     allowUnsigned: false,
   };

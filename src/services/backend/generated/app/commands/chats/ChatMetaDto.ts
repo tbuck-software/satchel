@@ -42,6 +42,11 @@ export type ChatMetaDto = {
      */
     recipients_changed: boolean;
     /**
+     * The user has not written in this group yet: the members come from its
+     * first message, which anyone can send, so the first reply asks.
+     */
+    first_group_reply: boolean;
+    /**
      * The chat was encrypted and the next message would not be; the reply
      * field asks first.
      */

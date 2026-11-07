@@ -68,6 +68,9 @@ pub struct ChatThread {
     /// Messages that count for nothing here: from neither the user nor a
     /// member. The chat view marks them.
     pub untrusted_message_ids: Vec<String>,
+    /// A group the user has not written in yet. Its members come from the
+    /// first message, which anyone can send, so the first reply asks.
+    pub first_group_reply: bool,
     /// Display names the trusted messages gave, keyed by lowercased address.
     pub names: BTreeMap<String, String>,
     /// The newest trusted message: the next one is its reply.
@@ -87,6 +90,13 @@ struct ChatMessageRow {
     encrypted: i64,
     is_sent: i64,
     auth_dmarc: Option<String>,
+    /// The verdicts came through the receiving provider's trust boundary
+    /// (`MessageTrust::auth_verified`); older rows have none.
+    auth_verified: i64,
+    /// The first chat message of the thread when it was stored (migration 0166).
+    chat_origin: i64,
+    /// In Trash or Spam: counts for nothing but can still be the origin.
+    binned: i64,
 }
 
 fn lower(value: &str) -> String {
@@ -140,19 +150,24 @@ impl<'a> ChatRepository<'a> {
                     messages.to_addresses, messages.cc_addresses,
                     messages.chat_version, messages.chat_group_id, messages.chat_group_name,
                     COALESCE(json_extract(messages.trust_metadata, '$.root_encryption'), 0) AS encrypted,
-                    COALESCE(messages.is_sent, 0) AS is_sent, messages.auth_dmarc
+                    COALESCE(messages.is_sent, 0) AS is_sent, messages.auth_dmarc,
+                    COALESCE(json_extract(messages.trust_metadata, '$.auth_verified'), 0) AS auth_verified,
+                    messages.chat_origin,
+                    (COALESCE({trash}, 0) OR COALESCE({spam}, 0)) AS binned
              FROM messages
              LEFT JOIN folders mailbox_folders
                ON mailbox_folders.id = COALESCE(messages.pending_folder_id, messages.folder_id)
              WHERE messages.thread_id = ? AND messages.is_draft = 0
-               AND NOT COALESCE({trash}, 0) AND NOT COALESCE({spam}, 0)
              ORDER BY julianday(COALESCE(messages.received_at, messages.created_at)) ASC,
                       messages.id ASC"
         ))
         .bind(thread_id)
         .fetch_all(self.pool)
         .await?;
-        if !rows.iter().any(|row| row.chat_version.is_some()) {
+        if !rows
+            .iter()
+            .any(|row| row.chat_version.is_some() && row.binned == 0)
+        {
             return Err(ChatError::NotAChat);
         }
         Ok(summarize(thread_id, account_id, account_name, &own, &rows))
@@ -183,23 +198,26 @@ fn push_unique(list: &mut Vec<String>, addr: String) {
     }
 }
 
-/// `rows` are oldest first, by receipt time, without Trash and Spam.
+/// `rows` are oldest first, by receipt time; rows in Trash or Spam are
+/// flagged `binned` and count only as the chat's stored origin.
 fn summarize(
     thread_id: &str,
     account_id: String,
     account_name: String,
     own: &[String],
-    rows: &[ChatMessageRow],
+    all_rows: &[ChatMessageRow],
 ) -> ChatThread {
     let is_own = |addr: &str| own.contains(&lower(addr));
-    // The user's own: sent from here, or delivered with a DMARC pass.
+    // The user's own: sent from here, or delivered with a DMARC pass the
+    // receiving provider vouched for.
     let own_trusted = |row: &ChatMessageRow| {
         is_own(&row.from_address)
             && (row.is_sent != 0
-                || row
-                    .auth_dmarc
-                    .as_deref()
-                    .is_some_and(|verdict| verdict.trim().eq_ignore_ascii_case("pass")))
+                || (row.auth_verified != 0
+                    && row
+                        .auth_dmarc
+                        .as_deref()
+                        .is_some_and(|verdict| verdict.trim().eq_ignore_ascii_case("pass"))))
     };
     let spoofed_own = |row: &ChatMessageRow| is_own(&row.from_address) && !own_trusted(row);
     let others = |row: &ChatMessageRow| {
@@ -208,14 +226,26 @@ fn summarize(
             .filter(|addr| !is_own(addr))
             .collect::<Vec<_>>()
     };
-    let last_own = rows.iter().rposition(&own_trusted);
-    // The message that opened the chat, leaving out own-address mail that is not the user's.
-    let first = rows.iter().position(|row| !spoofed_own(row));
+    let visible = |row: &ChatMessageRow| row.binned == 0;
+    let rows = all_rows;
+    let last_own = rows
+        .iter()
+        .rposition(|row| visible(row) && own_trusted(row));
+    // Where the chat started: the message stamped as its origin when it was
+    // stored, even if it is in the Trash now. Rows from before that stamp
+    // fall back to the first chat message; plain mail never starts a chat.
+    let origin = rows
+        .iter()
+        .position(|row| row.chat_origin != 0 && !spoofed_own(row))
+        .or_else(|| {
+            rows.iter()
+                .position(|row| visible(row) && row.chat_version.is_some() && !spoofed_own(row))
+        });
 
-    // A group if the user's last reply or the first message says so.
+    // A group if the user's last reply or the origin says so.
     let group_id = last_own
         .and_then(|index| rows[index].chat_group_id.clone())
-        .or_else(|| first.and_then(|index| rows[index].chat_group_id.clone()));
+        .or_else(|| origin.and_then(|index| rows[index].chat_group_id.clone()));
 
     let mut recipients: Vec<String> = Vec::new();
     let mut baseline: Vec<String> = Vec::new();
@@ -224,13 +254,16 @@ fn summarize(
             let in_group = |row: &ChatMessageRow| row.chat_group_id.as_deref() == Some(group);
             let base = last_own
                 .filter(|index| in_group(&rows[*index]))
-                .or_else(|| first.filter(|index| in_group(&rows[*index])));
+                .or_else(|| origin.filter(|index| in_group(&rows[*index])));
             if let Some(base) = base {
                 for addr in others(&rows[base]) {
                     push_unique(&mut recipients, addr);
                 }
                 baseline = recipients.clone();
-                for row in rows[base + 1..].iter().filter(|row| in_group(row)) {
+                for row in rows[base + 1..]
+                    .iter()
+                    .filter(|row| visible(row) && in_group(row))
+                {
                     // Only a member can bring others in.
                     if !spoofed_own(row) && recipients.contains(&lower(&row.from_address)) {
                         for addr in others(row) {
@@ -243,7 +276,7 @@ fn summarize(
         None => {
             let peer = match last_own {
                 Some(index) => others(&rows[index]).into_iter().next(),
-                None => first.and_then(|index| {
+                None => origin.and_then(|index| {
                     let first = &rows[index];
                     if is_own(&first.from_address) {
                         others(first).into_iter().next()
@@ -268,10 +301,13 @@ fn summarize(
         now.dedup();
         before != now
     };
+    let first_group_reply =
+        group_id.is_some() && !last_own.is_some_and(|index| rows[index].chat_group_id == group_id);
 
     let trusted = |row: &ChatMessageRow| {
-        own_trusted(row)
-            || (!is_own(&row.from_address) && recipients.contains(&lower(&row.from_address)))
+        visible(row)
+            && (own_trusted(row)
+                || (!is_own(&row.from_address) && recipients.contains(&lower(&row.from_address))))
     };
     let trusted_rows = rows.iter().filter(|row| trusted(row)).collect::<Vec<_>>();
     let latest_trusted = trusted_rows.last().copied();
@@ -297,7 +333,8 @@ fn summarize(
         .iter()
         .rev()
         .filter(|row| row.chat_group_id == group_id)
-        .find_map(|row| row.chat_group_name.clone());
+        .find_map(|row| row.chat_group_name.clone())
+        .or_else(|| origin.and_then(|index| rows[index].chat_group_name.clone()));
 
     // The address the user last wrote from, or the one the peer wrote to.
     let own_address = last_own
@@ -314,7 +351,7 @@ fn summarize(
     let reply_to_message_id = latest_trusted.map(|row| row.id.clone());
     let untrusted_message_ids = rows
         .iter()
-        .filter(|row| !trusted(row))
+        .filter(|row| visible(row) && !trusted(row))
         .map(|row| row.id.clone())
         .collect();
     ChatThread {
@@ -329,6 +366,7 @@ fn summarize(
         recipients_changed,
         encrypted_before,
         untrusted_message_ids,
+        first_group_reply,
         names,
         reply_to_message_id,
     }
@@ -864,7 +902,7 @@ mod tests {
         }
         .inbox(&pool)
         .await;
-        sqlx::query("UPDATE messages SET auth_dmarc = 'pass' WHERE id = 'g2'")
+        sqlx::query("UPDATE messages SET auth_dmarc = 'pass', trust_metadata = '{\"auth_verified\":true}' WHERE id = 'g2'")
             .execute(&pool)
             .await
             .unwrap();
@@ -883,6 +921,482 @@ mod tests {
         assert_eq!(chat.baseline_recipients, vec!["lena@example.test"]);
         assert!(!chat.recipients_changed);
         assert_eq!(chat.untrusted_message_ids, vec!["x".to_string()]);
+    }
+
+    // ---- third review: probe cases (zz_review_chat_probe.rs) ----
+
+    /// A row with Message-ID and In-Reply-To, in any thread, for merge cases.
+    #[allow(clippy::too_many_arguments)]
+    async fn linked(
+        pool: &SqlitePool,
+        id: &str,
+        thread: &str,
+        mid: &str,
+        irt: Option<&str>,
+        received: &str,
+        from: &str,
+        to: &[&str],
+        chat: Option<Option<&str>>,
+    ) {
+        sqlx::query(
+            "INSERT INTO threads(id, account_id, subject, last_message_date, message_count, unread_count, created_at, updated_at)
+             VALUES(?, 'acc', 'Chat', '2026-08-01T00:00:00Z', 1, 0, '', '') ON CONFLICT(id) DO NOTHING",
+        )
+        .bind(thread)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO messages(id, account_id, folder_id, thread_id, message_id_header, in_reply_to,
+                from_address, from_name, to_addresses, subject, date, received_at, remote_id,
+                created_at, updated_at, chat_version, chat_group_id, chat_group_name, trust_metadata)
+             VALUES(?, 'acc', 'inbox', ?, ?, ?, ?, ?, ?, 'Message from Lena', ?, ?, ?, ?, '', ?, ?, ?, '{}')",
+        )
+        .bind(id)
+        .bind(thread)
+        .bind(mid)
+        .bind(irt)
+        .bind(from)
+        .bind(from)
+        .bind(serde_json::to_string(to).unwrap())
+        .bind(received)
+        .bind(received)
+        .bind(id)
+        .bind(received)
+        .bind(chat.map(|_| "1.0"))
+        .bind(chat.flatten())
+        .bind(chat.flatten().map(|_| "G"))
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn thread_of(pool: &SqlitePool, id: &str) -> String {
+        sqlx::query_scalar("SELECT thread_id FROM messages WHERE id = ?")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_reply_merge_never_pulls_a_strangers_older_thread_into_a_chat() {
+        let pool = pool().await;
+        // The attacker's older chat message, "replying" to an invented <x>.
+        linked(
+            &pool,
+            "a1",
+            "th-imap-A",
+            "<a1>",
+            Some("<x>"),
+            "2026-07-01T09:00:00Z",
+            "attacker@evil.test",
+            &["tom@example.test", "victim@evil.test"],
+            Some(Some("EVILGROUP123")),
+        )
+        .await;
+        linked(
+            &pool,
+            "y",
+            "th-imap-B",
+            "<y>",
+            None,
+            "2026-08-01T10:00:00Z",
+            "lena@example.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        // M carries Message-ID <x> and answers Lena's <y>.
+        linked(
+            &pool,
+            "m",
+            "th-imap-B",
+            "<x>",
+            Some("<y>"),
+            "2026-08-01T11:00:00Z",
+            "attacker@evil.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        crate::sync::thread_resolution::merge_reply_split_threads(&pool)
+            .await
+            .unwrap();
+        assert_eq!(thread_of(&pool, "a1").await, "th-imap-A");
+        let chat = ChatRepository::new(&pool)
+            .thread("th-imap-B")
+            .await
+            .unwrap();
+        assert_eq!(chat.group_id, None);
+        assert_eq!(chat.recipients, vec!["lena@example.test"]);
+        assert_eq!(chat.untrusted_message_ids, vec!["m".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_reply_merge_never_pulls_older_plain_mail_into_a_chat() {
+        let pool = pool().await;
+        linked(
+            &pool,
+            "a1",
+            "th-imap-A",
+            "<a1>",
+            Some("<x>"),
+            "2026-07-01T09:00:00Z",
+            "attacker@evil.test",
+            &["tom@example.test"],
+            None,
+        )
+        .await;
+        linked(
+            &pool,
+            "y",
+            "th-imap-B",
+            "<y>",
+            None,
+            "2026-08-01T10:00:00Z",
+            "lena@example.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        linked(
+            &pool,
+            "m",
+            "th-imap-B",
+            "<x>",
+            Some("<y>"),
+            "2026-08-01T11:00:00Z",
+            "attacker@evil.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        crate::sync::thread_resolution::merge_reply_split_threads(&pool)
+            .await
+            .unwrap();
+        assert_eq!(thread_of(&pool, "a1").await, "th-imap-A");
+        let chat = ChatRepository::new(&pool)
+            .thread("th-imap-B")
+            .await
+            .unwrap();
+        assert_eq!(chat.recipients, vec!["lena@example.test"]);
+    }
+
+    #[tokio::test]
+    async fn after_the_users_reply_a_merge_attempt_changes_nothing() {
+        let pool = pool().await;
+        linked(
+            &pool,
+            "a1",
+            "th-imap-A",
+            "<a1>",
+            Some("<x>"),
+            "2026-07-01T09:00:00Z",
+            "attacker@evil.test",
+            &["tom@example.test", "victim@evil.test"],
+            Some(Some("EVILGROUP123")),
+        )
+        .await;
+        linked(
+            &pool,
+            "y",
+            "th-imap-B",
+            "<y>",
+            None,
+            "2026-08-01T10:00:00Z",
+            "lena@example.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        linked(
+            &pool,
+            "r",
+            "th-imap-B",
+            "<r>",
+            Some("<y>"),
+            "2026-08-01T10:30:00Z",
+            "tom@example.test",
+            &["lena@example.test"],
+            Some(None),
+        )
+        .await;
+        sqlx::query("UPDATE messages SET folder_id = 'sent', is_sent = 1 WHERE id = 'r'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        linked(
+            &pool,
+            "m",
+            "th-imap-B",
+            "<x>",
+            Some("<y>"),
+            "2026-08-01T11:00:00Z",
+            "attacker@evil.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        crate::sync::thread_resolution::merge_reply_split_threads(&pool)
+            .await
+            .unwrap();
+        let chat = ChatRepository::new(&pool)
+            .thread("th-imap-B")
+            .await
+            .unwrap();
+        assert_eq!(chat.group_id, None);
+        assert_eq!(chat.recipients, vec!["lena@example.test"]);
+        assert!(!chat.recipients_changed);
+    }
+
+    #[tokio::test]
+    async fn the_stored_origin_wins_over_anything_older_in_the_thread() {
+        let pool = pool().await;
+        // However the stranger's message got into the thread (an older
+        // provider conversation, a merge before this guard), it is older
+        // than the chat's origin and still does not start the chat.
+        linked(
+            &pool,
+            "a1",
+            "th-imap-B",
+            "<a1>",
+            None,
+            "2026-07-01T09:00:00Z",
+            "attacker@evil.test",
+            &["tom@example.test", "victim@evil.test"],
+            Some(Some("EVILGROUP123")),
+        )
+        .await;
+        linked(
+            &pool,
+            "y",
+            "th-imap-B",
+            "<y>",
+            None,
+            "2026-08-01T10:00:00Z",
+            "lena@example.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        sqlx::query("UPDATE messages SET chat_origin = 1 WHERE id = 'y'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let chat = ChatRepository::new(&pool)
+            .thread("th-imap-B")
+            .await
+            .unwrap();
+        assert_eq!(chat.group_id, None);
+        assert_eq!(chat.recipients, vec!["lena@example.test"]);
+        assert_eq!(chat.untrusted_message_ids, vec!["a1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn older_plain_mail_in_the_same_conversation_does_not_start_the_chat() {
+        let pool = pool().await;
+        // Gmail/Graph conversation: plain mail with the same subject is older.
+        linked(
+            &pool,
+            "p",
+            "th-gmail-c",
+            "<p>",
+            None,
+            "2026-07-01T09:00:00Z",
+            "attacker@evil.test",
+            &["tom@example.test"],
+            None,
+        )
+        .await;
+        linked(
+            &pool,
+            "y",
+            "th-gmail-c",
+            "<y>",
+            None,
+            "2026-08-01T10:00:00Z",
+            "lena@example.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        let chat = ChatRepository::new(&pool)
+            .thread("th-gmail-c")
+            .await
+            .unwrap();
+        assert_eq!(chat.recipients, vec!["lena@example.test"]);
+        assert_eq!(chat.untrusted_message_ids, vec!["p".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_trashed_origin_still_defines_the_chat() {
+        let pool = pool().await;
+        linked(
+            &pool,
+            "g1",
+            "th-imap-G",
+            "<g1>",
+            None,
+            "2026-08-01T10:00:00Z",
+            "lena@example.test",
+            &["tom@example.test", "jonas@example.test"],
+            Some(Some("abcDEF123_-x")),
+        )
+        .await;
+        sqlx::query("UPDATE messages SET chat_origin = 1, folder_id = 'trash' WHERE id = 'g1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        linked(
+            &pool,
+            "e",
+            "th-imap-G",
+            "<e>",
+            Some("<g1>"),
+            "2026-08-01T11:00:00Z",
+            "attacker@evil.test",
+            &["tom@example.test", "victim@evil.test"],
+            Some(Some("abcDEF123_-x")),
+        )
+        .await;
+        let chat = ChatRepository::new(&pool)
+            .thread("th-imap-G")
+            .await
+            .unwrap();
+        assert_eq!(
+            chat.recipients,
+            vec!["lena@example.test", "jonas@example.test"]
+        );
+        assert_eq!(chat.untrusted_message_ids, vec!["e".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn an_unsolicited_one_to_one_goes_back_to_its_sender_only() {
+        let pool = pool().await;
+        linked(
+            &pool,
+            "f1",
+            "th-imap-B",
+            "<f1>",
+            None,
+            "2026-08-01T10:00:00Z",
+            "attacker@evil.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        sqlx::query("UPDATE messages SET cc_addresses = '[\"victim@evil.test\"]' WHERE id = 'f1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let chat = ChatRepository::new(&pool)
+            .thread("th-imap-B")
+            .await
+            .unwrap();
+        assert_eq!(chat.recipients, vec!["attacker@evil.test"]);
+        assert!(!chat.first_group_reply);
+    }
+
+    #[tokio::test]
+    async fn the_first_reply_in_a_group_always_asks() {
+        let pool = pool().await;
+        linked(
+            &pool,
+            "f1",
+            "th-imap-B",
+            "<f1>",
+            None,
+            "2026-08-01T10:00:00Z",
+            "attacker@evil.test",
+            &["tom@example.test", "victim@evil.test"],
+            Some(Some("EVILGROUP123")),
+        )
+        .await;
+        let chat = ChatRepository::new(&pool)
+            .thread("th-imap-B")
+            .await
+            .unwrap();
+        assert_eq!(
+            chat.recipients,
+            vec!["attacker@evil.test", "victim@evil.test"]
+        );
+        assert!(chat.first_group_reply);
+        // Once the user has replied in the group, the next reply does not.
+        linked(
+            &pool,
+            "r",
+            "th-imap-B",
+            "<r>",
+            Some("<f1>"),
+            "2026-08-01T11:00:00Z",
+            "tom@example.test",
+            &["attacker@evil.test", "victim@evil.test"],
+            Some(Some("EVILGROUP123")),
+        )
+        .await;
+        sqlx::query("UPDATE messages SET folder_id = 'sent', is_sent = 1 WHERE id = 'r'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let chat = ChatRepository::new(&pool)
+            .thread("th-imap-B")
+            .await
+            .unwrap();
+        assert!(!chat.first_group_reply);
+    }
+
+    #[tokio::test]
+    async fn a_dmarc_pass_counts_only_when_the_provider_vouched_for_it() {
+        let pool = pool().await;
+        linked(
+            &pool,
+            "y",
+            "th-imap-B",
+            "<y>",
+            None,
+            "2026-08-01T10:00:00Z",
+            "lena@example.test",
+            &["tom@example.test"],
+            Some(None),
+        )
+        .await;
+        // An old row: auth_dmarc says pass, trust_metadata says nothing.
+        linked(
+            &pool,
+            "s",
+            "th-imap-B",
+            "<s>",
+            Some("<y>"),
+            "2026-08-01T11:00:00Z",
+            "tom@example.test",
+            &["attacker@evil.test"],
+            None,
+        )
+        .await;
+        sqlx::query("UPDATE messages SET auth_dmarc = 'pass' WHERE id = 's'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let chat = ChatRepository::new(&pool)
+            .thread("th-imap-B")
+            .await
+            .unwrap();
+        assert_eq!(chat.recipients, vec!["lena@example.test"]);
+        assert_eq!(chat.baseline_recipients, vec!["lena@example.test"]);
+        assert_eq!(chat.untrusted_message_ids, vec!["s".to_string()]);
+        // The same verdict through the provider's trust boundary counts.
+        sqlx::query(
+            "UPDATE messages SET trust_metadata = '{\"auth_verified\":true}' WHERE id = 's'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let chat = ChatRepository::new(&pool)
+            .thread("th-imap-B")
+            .await
+            .unwrap();
+        assert_eq!(chat.recipients, vec!["attacker@evil.test"]);
     }
 
     #[tokio::test]

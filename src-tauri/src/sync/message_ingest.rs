@@ -874,6 +874,25 @@ async fn persist_provider_message(
     .await
     .map_err(|err| err.to_string())?;
 
+    // The first chat message of its thread is the chat's origin (`db::chats`);
+    // later mail, merged threads or provider conversations do not move it.
+    if message.chat.is_some() {
+        sqlx::query(
+            "UPDATE messages SET chat_origin = 1
+             WHERE id = ? AND chat_origin = 0
+               AND NOT EXISTS (
+                 SELECT 1 FROM messages other
+                 WHERE other.thread_id = ? AND other.id != ? AND other.chat_version IS NOT NULL
+               )",
+        )
+        .bind(&message_id)
+        .bind(&thread_id)
+        .bind(&message_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+
     // Stamp the generation from the fetched envelope, never from current folder state.
     sqlx::query("UPDATE messages SET remote_uidvalidity = ? WHERE id = ?")
         .bind(message.remote_uidvalidity.map(i64::from))
@@ -1519,6 +1538,49 @@ mod tests {
             autocrypt_eligible: false,
             attachments: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn only_the_first_chat_message_of_a_thread_is_its_origin() {
+        let pool = ingest_pool().await;
+        let chat = Some(satchel_core::chat::ChatHeaders {
+            version: "1.0".into(),
+            ..Default::default()
+        });
+        let mut first = envelope("chat-1");
+        first.message_id_header = Some("<chat-1@example.test>".into());
+        first.from_address = "lena@example.test".into();
+        first.subject = "Message from Lena".into();
+        first.chat = chat.clone();
+        ingest(&pool, "inbox", &first).await.unwrap();
+        let mut reply = envelope("chat-2");
+        reply.message_id_header = Some("<chat-2@example.test>".into());
+        reply.in_reply_to = Some("<chat-1@example.test>".into());
+        reply.references = vec!["<chat-1@example.test>".into()];
+        reply.from_address = "lena@example.test".into();
+        reply.subject = "Message from Lena".into();
+        reply.date_rfc3339 = "2026-08-02T10:00:00+00:00".into();
+        reply.chat = chat;
+        ingest(&pool, "inbox", &reply).await.unwrap();
+        // Ingesting the first one again does not take the origin away or add one.
+        ingest(&pool, "inbox", &first).await.unwrap();
+        let rows: Vec<(String, String, i64)> = sqlx::query_as(
+            "SELECT message_id_header, thread_id, chat_origin FROM messages ORDER BY message_id_header",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0].1, rows[1].1,
+            "the reply threads with the first message"
+        );
+        assert_eq!(
+            rows.iter()
+                .map(|row| (row.0.as_str(), row.2))
+                .collect::<Vec<_>>(),
+            vec![("<chat-1@example.test>", 1), ("<chat-2@example.test>", 0)]
+        );
     }
 
     #[tokio::test]

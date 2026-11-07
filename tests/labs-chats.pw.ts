@@ -146,8 +146,13 @@ test.describe('who a reply goes to', () => {
     await expect(group.getByText('4 members', { exact: true })).toBeVisible();
     await group.locator('[data-chat-input]').fill('Danke!');
     await group.locator('[data-chat-input]').press('Enter');
+    // Your first reply in a group names who gets it; the stranger is not among them.
+    const first = page.getByRole('dialog', { name: 'Reply to this group?' });
+    await expect(first.getByText('mia@chat.example.test', { exact: false })).toBeVisible();
+    await expect(first.getByText('spam@evil.test', { exact: false })).toHaveCount(0);
+    await expect(first.getByText('victim@example.test', { exact: false })).toHaveCount(0);
+    await first.getByRole('button', { name: 'Send', exact: true }).click();
     await expect(group.locator('[data-chat-bubble="own"]').last()).toContainText('Danke!');
-    await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 
   test('new recipients and plain text in an encrypted chat wait for a yes', async ({ page }) => {

@@ -153,7 +153,7 @@ if (labsFlags.chats || (typeof window !== 'undefined' && new URLSearchParams(win
  * with, and the messages from neither you nor a member. The fixture's own
  * messages count as sent from here.
  */
-function chatRecipients(threadId: string, own: string): { recipients: string[]; baseline: string[]; untrusted: string[] } {
+function chatRecipients(threadId: string, own: string): { recipients: string[]; baseline: string[]; untrusted: string[]; firstGroupReply: boolean } {
   const list = (messages[threadId] ?? []).filter((message) => !message.isDraft);
   const isOwn = (email: string) => email.toLowerCase() === own.toLowerCase();
   const others = (message: Message) => [message.from, ...message.to, ...(message.cc ?? [])]
@@ -179,7 +179,7 @@ function chatRecipients(threadId: string, own: string): { recipients: string[]; 
   const untrusted = list
     .filter((message) => !isOwn(message.from.email) && !recipients.includes(message.from.email.toLowerCase()))
     .map((message) => message.id);
-  return { recipients, baseline, untrusted };
+  return { recipients, baseline, untrusted, firstGroupReply: Boolean(chatThreads.get(threadId)?.groupId) && lastOwn < 0 };
 }
 const sameSet = (a: string[], b: string[]) => [...new Set(a)].sort().join() === [...new Set(b)].sort().join();
 // 96px PNG, a rowing boat at sunset: an account picture the user chose.
@@ -1777,7 +1777,7 @@ const handlers: Record<string, Handler> = {
     const own = accounts.find((account) => account.id === thread.accountId)?.email ?? '';
     const names = new Map((messages[threadId] ?? []).flatMap((message) => [message.from, ...message.to])
       .map((person) => [person.email.toLowerCase(), person.name] as const));
-    const { recipients, baseline, untrusted } = chatRecipients(threadId, own);
+    const { recipients, baseline, untrusted, firstGroupReply } = chatRecipients(threadId, own);
     return {
       thread_id: threadId,
       account_id: thread.accountId,
@@ -1796,6 +1796,7 @@ const handlers: Record<string, Handler> = {
       baseline_recipients: baseline,
       untrusted_message_ids: untrusted,
       recipients_changed: !sameSet(baseline, recipients),
+      first_group_reply: firstGroupReply,
       encryption_downgrade: chat.encryptedBefore && !chat.encrypted,
     };
   },
@@ -1810,8 +1811,8 @@ const handlers: Record<string, Handler> = {
     const account = accounts.find((entry) => entry.id === thread.accountId);
     const own = account?.email ?? '';
     // Like `confirmation_decision`: only to the recipients shown, and changes or plain text only when confirmed.
-    const { recipients, baseline } = chatRecipients(threadId, own);
-    const changed = !sameSet(baseline, recipients);
+    const { recipients, baseline, firstGroupReply } = chatRecipients(threadId, own);
+    const changed = !sameSet(baseline, recipients) || firstGroupReply;
     if (!sameSet(scope.expected_recipients ?? [], recipients)
       || (changed && !scope.confirm_recipients)
       || (chat.encryptedBefore && !chat.encrypted && !scope.allow_plaintext)) {

@@ -904,7 +904,14 @@ async fn merge_reply_into_parent(pool: &SqlitePool, reply_id: &str) -> Result<Op
              AND thread_id LIKE 'th-imap-%' ORDER BY id LIMIT 1
          )
          WHERE child.id = ? AND NULLIF(TRIM(child.in_reply_to), '') IS NOT NULL
-           AND child.thread_id LIKE 'th-imap-%' AND child.thread_id != parent.thread_id",
+           AND child.thread_id LIKE 'th-imap-%' AND child.thread_id != parent.thread_id
+           -- A chat is never merged into or out of: an invented In-Reply-To
+           -- could otherwise pull a stranger's older thread in as its start.
+           AND NOT EXISTS (
+             SELECT 1 FROM messages chat_messages
+             WHERE chat_messages.thread_id IN (child.thread_id, parent.thread_id)
+               AND chat_messages.chat_version IS NOT NULL
+           )",
     )
     .bind(reply_id)
     .fetch_optional(pool)
