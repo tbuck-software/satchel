@@ -1503,6 +1503,39 @@ mod tests {
         assert_eq!(transparent().await, 1);
     }
 
+    /// A task in a mixed collection (Nextcloud, Fastmail) is a task, not an
+    /// event: it is neither mirrored as one nor makes anyone busy.
+    #[tokio::test]
+    async fn a_vtodo_resource_is_no_calendar_event_and_takes_no_time() {
+        let pool = pool().await;
+        account(&pool, "account", "2026-01-01").await;
+        let repository = CalendarRepository::new(&pool);
+        let task = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:task@example.test\r\n\
+                    SUMMARY:File the report\r\nDTSTART:20261109T090000Z\r\nDUE:20261109T170000Z\r\n\
+                    END:VTODO\r\nEND:VCALENDAR\r\n";
+        assert!(!repository
+            .upsert_caldav_event("account", "/cal/", "/cal/task.ics", Some("1"), task)
+            .await
+            .unwrap());
+        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM calendar_events")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 0);
+        let at = |text: &str| chrono::DateTime::parse_from_rfc3339(text).unwrap().to_utc();
+        let busy = crate::calendar::availability::own_busy(
+            &pool,
+            at("2026-11-09T00:00:00Z"),
+            at("2026-11-10T00:00:00Z"),
+            chrono_tz::UTC,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(busy.is_empty());
+    }
+
     #[tokio::test]
     async fn caldav_projection_keeps_stable_identity_and_updates_etag() {
         let pool = pool().await;
