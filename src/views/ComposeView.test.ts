@@ -414,6 +414,21 @@ it('keeps edits to the quoted history when switching between plain text and HTML
   wrapper.unmount();
 });
 
+it('sends a reply from the address the composer shows, also for the primary identity', async () => {
+  harness.getByThread.mockReturnValue([{
+    id: 'original', threadId: 'thread-1',
+    from: { name: 'Client', email: 'client@example.com' }, to: [],
+    subject: 'Project update', bodyText: 'Original conversation history',
+    timestamp: '2026-10-13T10:00:00Z', isRead: true, attachments: [],
+  }]);
+  harness.sendMessage.mockResolvedValue({ status: 'sent', thread_id: 'thread-1', message_id: 'new' });
+  const wrapper = render(undefined, true, { mode: 'reply', threadId: 'thread-1', initialBody: 'Thanks' });
+  await flushPromises();
+  await send(wrapper);
+  expect(harness.sendMessage.mock.calls[0]![0].fromAddress).toBe('me@example.com');
+  wrapper.unmount();
+});
+
 /**
  * One rejected side load used to leave `initialized` false for good: no dirty
  * tracking, no autosave, no close guard, and ten minutes of typing gone.

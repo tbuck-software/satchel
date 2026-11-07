@@ -289,6 +289,7 @@
       "restoreStagingChanged": "The staged backup is incomplete or has changed. Stage the backup again.",
       "revealTargetBlocked": "This target cannot be opened in the file manager.",
       "scheduledTimeInvalid": "Choose a valid send time in the future.",
+      "senderAddressMissing": "This account has no sender address. Add one in Settings → Accounts, then send again.",
       "senderAddressNotOwned": "\"{address}\" is neither this account's address nor one of its aliases. Pick a different sender.",
       "senderPreferenceAccountInvalid": "The account for this sender preference is invalid.",
       "senderPreferenceCategoryInvalid": "Choose a valid sender category.",
