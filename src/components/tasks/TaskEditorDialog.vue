@@ -21,7 +21,7 @@ import { useToast } from '@/composables/useToast';
 import { useTasksStore, fieldsOf, type Task } from '@/stores/tasks';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { backendErrorKey } from '@/utils/backendErrors';
-import { splitSubjectPrefixes } from '@/utils/composerText';
+import { splitSubjectPrefixes } from '@/utils/subjectPrefixes';
 import { isDateOnly, localDateKey, priorityLevel, PRIORITY_VALUES, type TaskPriorityLevel } from '@/utils/tasks';
 import { listLabel } from './taskLabels';
 import { confirmSeriesEnd, dueReceipt, useTaskActions } from './taskActions';
