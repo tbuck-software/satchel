@@ -2,10 +2,7 @@
   "en": {
     "backend": {
       "errors": {
-        "chatNotAChat": "This is not a chat.",
-        "chatNoRecipient": "This chat has no one to send to.",
-        "chatKeyLocked": "Unlock your OpenPGP key to send this encrypted reply.",
-        "chatConfirmationNeeded": "This chat changed. Check who the reply goes to and send it again."
+        "chatConfirmationNeeded": "The chat changed. Send again."
       }
     },
     "chats": {
@@ -67,10 +64,7 @@
   "de": {
     "backend": {
       "errors": {
-        "chatNotAChat": "Das ist kein Chat.",
-        "chatNoRecipient": "Dieser Chat hat keinen Empfänger.",
-        "chatKeyLocked": "Entsperre deinen OpenPGP-Schlüssel, um diese verschlüsselte Antwort zu senden.",
-        "chatConfirmationNeeded": "Der Chat hat sich geändert. Prüfe, an wen die Antwort geht, und sende sie erneut."
+        "chatConfirmationNeeded": "Chat geändert. Erneut senden."
       }
     },
     "chats": {

@@ -1763,7 +1763,7 @@ const handlers: Record<string, Handler> = {
     const thread = findThread(threadId);
     if (!thread) throw new Error('backend.errors.threadNotFound');
     const chat = chatThreads.get(threadId);
-    if (!chat) throw new Error('backend.errors.chatNotAChat');
+    if (!chat) throw new Error('backend.errors.threadNotFound');
     const own = accounts.find((account) => account.id === thread.accountId)?.email ?? '';
     const names = new Map((messages[threadId] ?? []).flatMap((message) => [message.from, ...message.to])
       .map((person) => [person.email.toLowerCase(), person.name] as const));
@@ -1795,7 +1795,7 @@ const handlers: Record<string, Handler> = {
     if (!text.trim()) throw new Error('backend.errors.unexpected');
     const thread = findThread(threadId);
     const chat = chatThreads.get(threadId);
-    if (!thread || !chat) throw new Error('backend.errors.chatNotAChat');
+    if (!thread || !chat) throw new Error('backend.errors.threadNotFound');
     const account = accounts.find((entry) => entry.id === thread.accountId);
     const own = account?.email ?? '';
     // Like `confirmation_decision`: only to the recipients shown, and changes or plain text only when confirmed.
@@ -1807,7 +1807,7 @@ const handlers: Record<string, Handler> = {
       throw new Error('backend.errors.chatConfirmationNeeded');
     }
     // Like `signing_decision`: an encrypted reply waits for the key or an explicit unsigned send.
-    if (chat.encrypted && !chatKeyUnlocked && !allowUnsigned) throw new Error('backend.errors.chatKeyLocked');
+    if (chat.encrypted && !chatKeyUnlocked && !allowUnsigned) throw new Error('backend.errors.pgpSigningKeyUnavailable');
     const now = new Date().toISOString();
     const messageId = nextId('msg');
     const sent: Message = {

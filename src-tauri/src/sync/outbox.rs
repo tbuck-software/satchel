@@ -541,7 +541,7 @@ fn protected_chat_parts(outgoing: &OutgoingMessage) -> Option<(Vec<String>, Outg
 /// for the From address, and PGP/MIME encryption to the peers' Autocrypt keys
 /// and our own when the recommendation for every recipient is "encrypt". The
 /// message is signed. A key locked again since the send was queued (a
-/// restart) holds it in the Outbox with `chatKeyLocked`, a retryable error,
+/// restart) holds it in the Outbox with `pgpSigningKeyUnavailable`, a retryable error,
 /// until the key is unlocked, unless the sender chose unsigned
 /// (`commands::chats::signing_decision`).
 async fn apply_chat_autocrypt(
