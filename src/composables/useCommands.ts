@@ -3,6 +3,7 @@ import { useRouter } from 'vue-router';
 import { useThreadsStore } from '@/stores/threads';
 import { useAccountsStore } from '@/stores/accounts';
 import { useComposerStore } from '@/stores/composer';
+import { openDraftTarget } from '@/composables/openDraftTarget';
 import { useThreadReply } from '@/composables/useThreadReply';
 import { useSettingsStore } from '@/stores/settings';
 import { useTopicsStore } from '@/stores/topics';
@@ -122,6 +123,23 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       shortcut: hint('sweepSender'),
       keywords: t('shortcuts.actions.sweepSender.keywords'),
       run: () => senderSweep.openForThread(id),
+    }];
+  }
+
+  /**
+   * With a draft open in this window, the selected mail goes onto it as an
+   * `.eml` each: what dragging the rows onto the composer does.
+   */
+  function draftCommands(): OmniCommand[] {
+    const target = openDraftTarget.value;
+    const ids = targetIds();
+    if (!target || ids.length === 0) return [];
+    return [{
+      id: 'draft:attach-mail',
+      icon: 'attach',
+      title: t('composeDrop.attach'),
+      context: 'mail',
+      run: () => target.attach({ kind: 'threads', ids }),
     }];
   }
 
@@ -487,6 +505,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         keywords: t('shortcuts.actions.createTask.keywords'),
         run: () => taskEditor.openForThread(currentId(), threads.find(currentId())?.subject),
       }] : []),
+      ...draftCommands(),
       ...readerCommands(),
     ] : []),
     {

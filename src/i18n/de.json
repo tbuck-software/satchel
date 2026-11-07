@@ -1205,6 +1205,11 @@
       "restore": "Fenster verkleinern"
     }
   },
+  "composeDrop": {
+    "add": "Zum Entwurf hinzufügen",
+    "addToTo": "Loslassen, um unter „An“ hinzuzufügen",
+    "attach": "An Entwurf anhängen"
+  },
   "contacts": {
     "add": {
       "email": "E-Mail-Adresse",

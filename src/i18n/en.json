@@ -1205,6 +1205,11 @@
       "restore": "Restore window"
     }
   },
+  "composeDrop": {
+    "add": "Add to draft",
+    "addToTo": "Drop to add to To",
+    "attach": "Attach to draft"
+  },
   "contacts": {
     "add": {
       "email": "Email address",

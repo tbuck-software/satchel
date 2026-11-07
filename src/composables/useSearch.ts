@@ -23,6 +23,8 @@ export interface SearchResult {
   fromAddress: string;
   date: string;
   isRead: boolean;
+  /** An unsent draft: it opens in the composer and cannot be attached. */
+  isDraft: boolean;
   /** Translated label for where the hit lives; an empty string means inbox. */
   location: string;
 }
@@ -215,6 +217,7 @@ export function useSearch(options?: {
       fromAddress: hit.from_address,
       date: hit.date,
       isRead: hit.is_read,
+      isDraft: hit.is_draft,
       location: locationLabel(hit.folder_type, hit.workflow_state),
     };
   }

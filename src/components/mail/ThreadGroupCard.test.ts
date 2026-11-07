@@ -122,7 +122,7 @@ describe('group card actions', () => {
     await wrapper.get('.bundle-card').trigger('dragstart', {
       dataTransfer: { setData, effectAllowed: '' },
     });
-    expect(setData).toHaveBeenCalledWith('application/x-satchel-thread-ids', 't-1,t-2');
+    expect(setData).toHaveBeenCalledWith('application/x-satchel-thread-ids', JSON.stringify({ kind: 'threads', ids: ['t-1', 't-2'] }));
   });
 
   it('commits a long right swipe as done for the whole stack', async () => {

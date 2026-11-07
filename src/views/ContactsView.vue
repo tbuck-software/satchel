@@ -23,6 +23,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useThreadsStore } from '@/stores/threads';
 import { useComposerStore } from '@/stores/composer';
 import { useI18n } from 'vue-i18n';
+import { startContactDrag } from '@/utils/contactDrag';
 
 interface ContactRow {
   email: string;
@@ -259,6 +260,8 @@ function openContact(email: string) {
             v-for="contact in group.contacts"
             class="contact-row"
             :key="contact.email"
+            :draggable="!ui.isMobile"
+            @dragstart="startContactDrag($event, [{ email: contact.email, name: contact.name }])"
             @click="openContact(contact.email)"
           >
             <Avatar :name="contact.name" :email="contact.email" :size="36" />

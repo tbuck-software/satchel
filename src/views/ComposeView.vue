@@ -52,6 +52,9 @@ import {
 } from '@/composables/useComposerCrypto';
 import { useComposerInlineAttachments, type ComposerInlineAttachmentEditor } from '@/composables/useComposerInlineAttachments';
 import { useThreadEmlDrop } from '@/composables/useThreadEmlDrop';
+import { useRecipientDrop } from '@/composables/useRecipientDrop';
+import { openDraftTarget, type OpenDraftTarget } from '@/composables/openDraftTarget';
+import type { RecipientField } from '@/utils/appDrag';
 import { useComposerLocalBackup } from '@/composables/useComposerLocalBackup';
 import { useDraftEditorClaim } from '@/composables/useDraftEditorClaim';
 import { useComposerSignature } from '@/composables/useComposerSignature';
@@ -314,6 +317,81 @@ const threadEmlDrop = useThreadEmlDrop(
   },
   () => sending.value,
 );
+
+// Contacts and chips dragged onto the composer. The id tells this
+// composer's chips (a move between its fields) from anyone else's.
+const composerDragId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+  ? crypto.randomUUID()
+  : `composer-${Math.random().toString(36).slice(2)}`;
+
+function recipientsOf(field: RecipientField) {
+  return field === 'to' ? to : field === 'cc' ? cc : bcc;
+}
+
+function addRecipients(field: RecipientField, addresses: string[]) {
+  const list = recipientsOf(field);
+  const next = [...list.value];
+  for (const address of addresses) if (!next.includes(address)) next.push(address);
+  if (next.length !== list.value.length) list.value = next;
+}
+
+function removeRecipients(field: RecipientField, addresses: string[]) {
+  const list = recipientsOf(field);
+  list.value = list.value.filter((value) => !addresses.includes(value));
+}
+
+// Cc and Bcc open while a recipient hovers the composer, so either can take
+// it, and fold away again if the drop left them empty.
+let ccBccOpenedForDrag = false;
+const recipientDrop = useRecipientDrop({
+  composerId: composerDragId,
+  addToTo: (addresses) => addRecipients('to', addresses),
+  // A mail merge has no recipient fields: its list comes from the merge source.
+  disabled: () => sending.value || mergeSource.value !== null,
+  onActiveChange: (active) => {
+    if (active) {
+      if (!showCcBcc.value && !isPhone.value) {
+        showCcBcc.value = true;
+        ccBccOpenedForDrag = true;
+      }
+      return;
+    }
+    if (!ccBccOpenedForDrag) return;
+    ccBccOpenedForDrag = false;
+    if (cc.value.length === 0 && bcc.value.length === 0) showCcBcc.value = false;
+  },
+});
+
+function onComposerDragEnter(event: DragEvent) {
+  threadEmlDrop.onDragEnter(event);
+  recipientDrop.onDragEnter(event);
+}
+function onComposerDragOver(event: DragEvent) {
+  threadEmlDrop.onDragOver(event);
+  recipientDrop.onDragOver(event);
+}
+function onComposerDragLeave(event: DragEvent) {
+  threadEmlDrop.onDragLeave(event);
+  recipientDrop.onDragLeave(event);
+}
+function onComposerDrop(event: DragEvent) {
+  threadEmlDrop.onDrop(event);
+  recipientDrop.onDrop(event);
+}
+
+// What a drop does, offered to the keyboard: the palette's "Attach to draft",
+// a contact's "Add to draft".
+const draftTarget: OpenDraftTarget = {
+  attach: (source) => threadEmlDrop.attach(source),
+  canAddRecipients: () => mergeSource.value === null,
+  addRecipients: (addresses) => {
+    if (mergeSource.value === null) addRecipients('to', addresses);
+  },
+};
+openDraftTarget.value = draftTarget;
+onBeforeUnmount(() => {
+  if (openDraftTarget.value === draftTarget) openDraftTarget.value = null;
+});
 const initialized = ref(false);
 /** Failed draft loads must not persist or send an empty replacement. */
 const draftLoadFailed = ref(false);
@@ -1457,13 +1535,16 @@ defineExpose({
 <template>
   <section
     :class="['compose', { 'compose--embedded': props.embedded, 'compose--phone': isPhone }]"
-    @dragenter.capture="threadEmlDrop.onDragEnter"
-    @dragover.capture="threadEmlDrop.onDragOver"
-    @dragleave.capture="threadEmlDrop.onDragLeave"
-    @drop.capture="threadEmlDrop.onDrop"
+    @dragenter.capture="onComposerDragEnter"
+    @dragover.capture="onComposerDragOver"
+    @dragleave.capture="onComposerDragLeave"
+    @drop.capture="onComposerDrop"
   >
     <div v-if="threadEmlDrop.dropActive.value" class="compose-eml-drop" aria-hidden="true">
       <span>{{ $t('compose.emlDrop.hint') }}</span>
+    </div>
+    <div v-else-if="recipientDrop.overBody.value" class="compose-recipient-drop" aria-hidden="true">
+      {{ $t('composeDrop.addToTo') }}
     </div>
     <!-- The header carries the title alone. Template and Save live in the
          footer beside Send, Discard in the options panel. -->
@@ -1553,7 +1634,20 @@ defineExpose({
     />
     <div v-else class="row recipient-row">
       <label class="label" :for="toFieldId">{{ $t('common.to') }}</label>
-      <RecipientChips ref="toFieldRef" v-model="to" :input-id="toFieldId" :label="$t('common.to')" :placeholder="$t('compose.recipients.toPlaceholder')" class="field" @submit="send" />
+      <RecipientChips
+        ref="toFieldRef"
+        v-model="to"
+        :input-id="toFieldId"
+        :label="$t('common.to')"
+        :placeholder="$t('compose.recipients.toPlaceholder')"
+        field="to"
+        :composer-id="composerDragId"
+        :drop-ready="recipientDrop.dragActive.value"
+        :drop-fallback="recipientDrop.overBody.value"
+        class="field"
+        @submit="send"
+        @move-from="removeRecipients"
+      />
       <AppButton v-if="!isPhone" size="sm" variant="ghost" class="cc-link"
         :aria-expanded="showCcBcc"
         :title="showCcBcc ? $t('compose.recipients.collapseCcBcc') : $t('compose.recipients.showCcBcc')"
@@ -1587,11 +1681,34 @@ defineExpose({
     >
       <div v-if="!mergeSource" class="row">
         <label class="label" :for="ccFieldId">{{ $t('common.cc') }}</label>
-        <RecipientChips ref="ccFieldRef" v-model="cc" :input-id="ccFieldId" :label="$t('common.cc')" :placeholder="$t('compose.recipients.ccPlaceholder')" class="field" @submit="send" />
+        <RecipientChips
+          ref="ccFieldRef"
+          v-model="cc"
+          :input-id="ccFieldId"
+          :label="$t('common.cc')"
+          :placeholder="$t('compose.recipients.ccPlaceholder')"
+          field="cc"
+          :composer-id="composerDragId"
+          :drop-ready="recipientDrop.dragActive.value"
+          class="field"
+          @submit="send"
+          @move-from="removeRecipients"
+        />
       </div>
       <div v-if="!mergeSource" class="row">
         <label class="label" :for="bccFieldId">{{ $t('common.bcc') }}</label>
-        <RecipientChips v-model="bcc" :input-id="bccFieldId" :label="$t('common.bcc')" :placeholder="$t('compose.recipients.bccPlaceholder')" class="field" @submit="send" />
+        <RecipientChips
+          v-model="bcc"
+          :input-id="bccFieldId"
+          :label="$t('common.bcc')"
+          :placeholder="$t('compose.recipients.bccPlaceholder')"
+          field="bcc"
+          :composer-id="composerDragId"
+          :drop-ready="recipientDrop.dragActive.value"
+          class="field"
+          @submit="send"
+          @move-from="removeRecipients"
+        />
       </div>
       <div v-if="isPhone" class="row sender-row">
         <label class="label" :for="senderFieldId">{{ $t('common.from') }}</label>
@@ -2181,6 +2298,28 @@ textarea:focus {
 
 .compose--embedded {
   height: 100%;
+}
+
+/* A contact over the body: it goes to To, which lights up as well. A pill,
+   not a cover, so the recipient fields stay visible as the other targets. */
+.compose-recipient-drop {
+  position: absolute;
+  inset-inline: 0;
+  bottom: var(--space-xl);
+  z-index: 5;
+  justify-self: center;
+  width: max-content;
+  max-width: calc(100% - 2 * var(--space-md));
+  margin-inline: auto;
+  padding: var(--space-xs) var(--space-md);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--bg-surface));
+  color: var(--accent-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
 }
 
 /* Covers the composer while a thread from the list hovers it; events pass

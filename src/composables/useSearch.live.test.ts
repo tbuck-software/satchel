@@ -32,6 +32,7 @@ function hit(id: string) {
     from_address: 'no-reply@wisprflow.ai',
     date: '2026-08-01T10:00:00Z',
     is_read: false,
+    is_draft: false,
     workflow_state: 'todo',
     folder_type: 'inbox',
   };

@@ -17,7 +17,7 @@ import AppIcon from '@/components/ui/AppIcon.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
 import { outboxVisibleCount } from '@/utils/outboxLabels';
 import { activeMailboxNavNode } from '@/utils/mailboxNav';
-import { draggedThreadIds, isThreadDrag } from '@/utils/threadDrag';
+import { draggedThreadIds, isThreadDrag } from '@/utils/appDrag';
 
 type ResolvedSection = SectionSpec & {
   total: number;

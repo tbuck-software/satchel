@@ -1,6 +1,6 @@
 import { ref, type Ref } from 'vue';
 import { t, tc } from '@/i18n/runtime';
-import { backendThreadEmlAttachments } from '@/services/backend/composer';
+import { backendMessageEmlAttachments, backendThreadEmlAttachments } from '@/services/backend/emlAttachments';
 import type { BackendOutgoingAttachment } from '@/types/composer';
 import {
   attachmentsSize,
@@ -10,7 +10,7 @@ import {
 } from '@/utils/attachmentLimits';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
 import { formatBytes } from '@/utils/formatBytes';
-import { draggedThreadIds, isThreadDrag } from '@/utils/threadDrag';
+import { appDragKind, finishAppDrag, readAppDrag } from '@/utils/appDragTarget';
 
 export interface ThreadEmlDropFeedback {
   /** The originals are on their way; shown until `done` or `error`. */
@@ -19,14 +19,18 @@ export interface ThreadEmlDropFeedback {
   error(text: string): void;
 }
 
+/** What a drop or a command hands the composer to attach. */
+export type EmlSource = { kind: 'threads' | 'messages'; ids: string[] };
+
 /**
- * Lets the composer take threads dragged out of the list: each one arrives as
- * the original message, attached as an `.eml` file.
+ * Lets the composer take mail dragged onto it: a thread out of a list arrives
+ * as its newest message, a message (a search hit, one message of a thread) as
+ * itself, each attached as the original `.eml` file.
  *
  * The handlers belong on the composer's root in the capture phase. They stop
- * thread drags there, so the editor does not paste the drag and the file drop
- * zone does not light up for something that is not a file; every other drag
- * passes through untouched.
+ * mail drags there, over the recipient fields too, so the editor does not
+ * paste the drag and the file drop zone does not light up for something that
+ * is not a file; every other drag passes through untouched.
  */
 export function useThreadEmlDrop(
   attachments: Ref<BackendOutgoingAttachment[]>,
@@ -40,7 +44,8 @@ export function useThreadEmlDrop(
   let depth = 0;
 
   function claim(event: DragEvent): boolean {
-    if (!isThreadDrag(event)) return false;
+    const kind = appDragKind(event);
+    if (kind !== 'threads' && kind !== 'messages') return false;
     event.preventDefault();
     event.stopPropagation();
     return true;
@@ -67,16 +72,21 @@ export function useThreadEmlDrop(
     if (!claim(event)) return;
     depth = 0;
     dropActive.value = false;
-    const threadIds = draggedThreadIds(event);
-    if (threadIds.length === 0 || disabled() || attaching.value) return;
-    void attach(threadIds);
+    const drag = readAppDrag(event);
+    finishAppDrag();
+    if (!drag || drag.kind === 'recipients') return;
+    void attach(drag);
   }
 
-  async function attach(threadIds: string[]) {
+  /** Attaches the originals; the keyboard path ("Attach to draft") lands here too. */
+  async function attach(source: EmlSource) {
+    if (source.ids.length === 0 || disabled() || attaching.value) return;
     attaching.value = true;
     feedback.loading(t('compose.emlDrop.loading'));
     try {
-      const fetched = await backendThreadEmlAttachments(threadIds);
+      const fetched = source.kind === 'messages'
+        ? await backendMessageEmlAttachments(source.ids)
+        : await backendThreadEmlAttachments(source.ids);
       // Read after the await: attachments added or removed meanwhile stay.
       let used = attachmentsSize(attachments.value);
       const added: BackendOutgoingAttachment[] = [];
@@ -102,7 +112,7 @@ export function useThreadEmlDrop(
         used += size;
       }
       if (added.length) attachments.value = [...attachments.value, ...added];
-      const missing = new Set(threadIds).size - fetched.length;
+      const missing = new Set(source.ids).size - fetched.length;
       if (missing > 0) refused.unshift(tc('compose.emlDrop.unavailable', missing));
       if (refused.length) feedback.error(refused.join(' '));
       else feedback.done();
@@ -116,6 +126,7 @@ export function useThreadEmlDrop(
   return {
     dropActive,
     attaching,
+    attach,
     onDragEnter,
     onDragOver,
     onDragLeave,

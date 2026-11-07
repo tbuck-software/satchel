@@ -41,6 +41,7 @@ export const COMMAND_ICONS = {
   sweep: { grid: 16, paths: ['M11 2.5 7.5 8', 'M4 8h6l1 5.5H3z'] },
   translate: { grid: 16, paths: ['M2.5 3.5h6M5.5 2v1.5M4 3.5c.4 2.3 1.9 4.2 4 5.2M7.5 3.5c-.5 2.6-2.4 4.8-5 5.8', 'm8.5 14 2.75-6.5L14 14M9.4 12h3.7'] },
   merge: { grid: 16, paths: ['M2 4.5h8M2 8h8M2 11.5h5', 'm11 9.5 3 2-3 2'] },
+  attach: { grid: 16, paths: ['M10.5 5.5 6.2 9.8a1.4 1.4 0 0 0 2 2l4.6-4.6a2.8 2.8 0 0 0-4-4L4.2 7.8a4.2 4.2 0 0 0 6 6l3.3-3.3'] },
   folder: { grid: 16, paths: ['M2 4.5h4l1.2 1.5H14v6.5a1 1 0 01-1 1H3a1 1 0 01-1-1z'] },
   topic: {
     grid: 16,

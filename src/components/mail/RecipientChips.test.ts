@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { backendSearchContacts } from '@/services/backend';
 import type { BackendContact } from '@/types/contacts';
 import RecipientChips from './RecipientChips.vue';
+import { RECIPIENT_DRAG_TYPE, THREAD_DRAG_TYPE, startAppDrag } from '@/utils/appDrag';
+import { resetAppDragForTests } from '@/utils/appDragTarget';
 
 vi.mock('@/services/backend', () => ({
   backendListContacts: vi.fn(),
@@ -253,4 +255,114 @@ it('activates a suggestion through semantic click without committing the search 
   expect(wrapper.emitted('update:modelValue')).toEqual([[['Alice <alice@example.com>']]]);
   wrapper.unmount();
   vi.useRealTimers();
+});
+
+describe('RecipientChips drag and drop', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  afterEach(() => {
+    resetAppDragForTests();
+  });
+
+  function drop(type: string, data: Record<string, string>, altKey = false) {
+    const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent;
+    Object.defineProperty(event, 'altKey', { value: altKey });
+    Object.defineProperty(event, 'dataTransfer', {
+      value: { types: Object.keys(data), getData: (key: string) => data[key] ?? '', dropEffect: 'none' },
+    });
+    return event;
+  }
+
+  function chipPayload(addresses: string[], source: { composer: string; field: string } | null) {
+    return { [RECIPIENT_DRAG_TYPE]: JSON.stringify({ kind: 'recipients', addresses, source }) };
+  }
+
+  function field(modelValue: string[] = []) {
+    return mount(RecipientChips, {
+      props: { label: 'Cc', modelValue, field: 'cc', composerId: 'me' },
+    });
+  }
+
+  it('adds a dropped contact', async () => {
+    const wrapper = field(['bo@example.test']);
+    const event = drop('drop', chipPayload(['Ana <ana@example.test>'], null));
+    wrapper.get('[data-recipient-field]').element.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toEqual(['bo@example.test', 'Ana <ana@example.test>']);
+    expect(wrapper.emitted('moveFrom')).toBeUndefined();
+  });
+
+  it('copies with Ctrl, the copy modifier off the Mac', () => {
+    const wrapper = field();
+    const event = drop('drop', chipPayload(['ana@example.test'], { composer: 'me', field: 'to' }));
+    Object.defineProperty(event, 'ctrlKey', { value: true });
+    wrapper.get('[data-recipient-field]').element.dispatchEvent(event);
+    expect(wrapper.emitted('update:modelValue')).toHaveLength(1);
+    expect(wrapper.emitted('moveFrom')).toBeUndefined();
+  });
+
+  it('moves a chip from another field of the same composer, and copies with Alt', async () => {
+    const wrapper = field();
+    wrapper.get('[data-recipient-field]').element.dispatchEvent(
+      drop('drop', chipPayload(['ana@example.test'], { composer: 'me', field: 'to' })),
+    );
+    expect(wrapper.emitted('moveFrom')?.[0]).toEqual(['to', ['ana@example.test']]);
+
+    wrapper.get('[data-recipient-field]').element.dispatchEvent(
+      drop('drop', chipPayload(['bo@example.test'], { composer: 'me', field: 'to' }), true),
+    );
+    expect(wrapper.emitted('moveFrom')).toHaveLength(1);
+    expect(wrapper.emitted('update:modelValue')).toHaveLength(2);
+  });
+
+  it('lights up while a recipient hovers and offers a move for its own chips', async () => {
+    const wrapper = field();
+    startAppDrag(
+      { dataTransfer: { setData: () => {}, effectAllowed: '' }, target: null } as unknown as DragEvent,
+      { kind: 'recipients', addresses: ['ana@example.test'], source: { composer: 'me', field: 'to' } },
+    );
+    const over = drop('dragover', { [RECIPIENT_DRAG_TYPE]: '' });
+    wrapper.get('[data-recipient-field]').element.dispatchEvent(drop('dragenter', { [RECIPIENT_DRAG_TYPE]: '' }));
+    wrapper.get('[data-recipient-field]').element.dispatchEvent(over);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.get('.chips').classes()).toContain('chips--drop-over');
+    expect(over.dataTransfer?.dropEffect).toBe('move');
+  });
+
+  it('leaves a chip dropped back on its own field where it is', () => {
+    const wrapper = field(['ana@example.test']);
+    wrapper.get('[data-recipient-field]').element.dispatchEvent(
+      drop('drop', chipPayload(['ana@example.test'], { composer: 'me', field: 'cc' })),
+    );
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+    expect(wrapper.emitted('moveFrom')).toBeUndefined();
+  });
+
+  it('lets mail drags through to the composer', () => {
+    const wrapper = field();
+    const event = drop('drop', { [THREAD_DRAG_TYPE]: JSON.stringify({ kind: 'threads', ids: ['th-1'] }) });
+    wrapper.get('[data-recipient-field]').element.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('drags a chip out with its field', () => {
+    const wrapper = field(['ana@example.test']);
+    const data = new Map<string, string>();
+    const event = new Event('dragstart', { bubbles: true }) as DragEvent;
+    Object.defineProperty(event, 'dataTransfer', {
+      value: { setData: (key: string, value: string) => data.set(key, value), effectAllowed: '' },
+    });
+    wrapper.get('.chip').element.dispatchEvent(event);
+
+    expect(JSON.parse(data.get(RECIPIENT_DRAG_TYPE) ?? '{}')).toEqual({
+      kind: 'recipients',
+      addresses: ['ana@example.test'],
+      source: { composer: 'me', field: 'cc' },
+    });
+    expect(data.get('text/plain')).toBe('ana@example.test');
+  });
 });

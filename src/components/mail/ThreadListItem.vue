@@ -21,7 +21,7 @@ import { useFollowUpsStore } from '@/stores/followUps';
 import { isOwnEmail, participantDisplayName } from '@/utils/mailIdentity';
 import { transportErrorLabel } from '@/utils/transportLabels';
 import type { AnchorBox } from '@/utils/popoverPlacement';
-import { startThreadDrag } from '@/utils/threadDrag';
+import { startThreadDrag } from '@/utils/appDrag';
 import { offersNotSpam } from '@/utils/threadList';
 
 const SnoozePicker = defineAsyncComponent(() => import('@/components/navigation/SnoozePicker.vue'));

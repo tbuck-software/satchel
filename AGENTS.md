@@ -116,6 +116,16 @@ Container-Queries dürfen nur das Innere der Zeile ändern, nie die Wrapper-Höh
 Kein `deep: true` auf `props.items` — der Store erzeugt bei jeder Änderung ein
 neues Array.
 
+### Drag & Drop
+
+Alle Fenster laufen ohne Tauris Drag-Drop-Handler
+(`.disable_drag_drop_handler()` in `utils::navigation::guard`). Mit Handler
+beantwortet wry auf macOS jeden Drag selbst und reicht ihn nie an WKWebView
+weiter: Die Seite sieht kein `dragover`/`drop`, weder für Dateien aus dem
+Finder noch für Mails auf dem Composer. Im Dev-Server und in Playwright bleibt
+dabei alles grün. Was Satchel selbst zieht (Threads, einzelne Nachrichten,
+Empfänger), läuft über `src/utils/appDrag.ts`.
+
 ### Kommandos und ACL
 
 Jedes `#[tauri::command]` gehört an **zwei** Stellen: in `generate_handler!`
