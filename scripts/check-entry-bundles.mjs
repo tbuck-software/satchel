@@ -101,8 +101,8 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * the import of `labs/runtime`. Flags, store and the whole of Chats (route,
  * row, `g h`, views) load behind it; their only startup strings are the
  * `backend.errors.chatConfirmationNeeded` and `chatEncryptionLost`; the
- * palette names the Labs section. Main 107 / 214 KiB since then: on #121's
- * 105.7 / 212.6 KiB the Labs slots measured 106.0 / 213.0 (+343 / +420 B). */
+ * palette names the Labs section. Main 107 / 214 KiB since then: on #124's
+ * 106.0 / 212.9 KiB the Labs slots measure 106.3 / 213.4 (+352 / +430 B). */
 const budgets = {
   'index.html': { entryGzip: 107 * 1024, initialGzip: 214 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
