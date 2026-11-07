@@ -1042,7 +1042,7 @@ async fn persist_provider_message(
         .map_err(|error| error.to_string())?;
     }
     if newly_seen && !message_is_draft && !sender_is_account {
-        apply_autocrypt_header(tx, account_id, message).await?;
+        apply_autocrypt_header(tx, account_id, folder_type, message).await?;
     }
     Ok(StoredMessage {
         message_id,
@@ -1056,17 +1056,48 @@ async fn persist_provider_message(
     })
 }
 
+/// Whether a message may change a peer's Autocrypt state at all. The spec
+/// ignores `multipart/report`, mail with several `From` addresses and spam
+/// ("Updating Autocrypt Peer State"); Satchel also ignores Trash and mail
+/// whose DMARC check failed, where the `From` is the least trustworthy.
+fn autocrypt_applies(
+    folder_type: &str,
+    message: &crate::providers::traits::MessageEnvelope,
+) -> bool {
+    let folder = folder_type.trim().to_ascii_lowercase();
+    message.autocrypt_eligible
+        && message.from_address.contains('@')
+        && !matches!(folder.as_str(), "spam" | "junk" | "trash")
+        && !message
+            .auth_dmarc
+            .as_deref()
+            .is_some_and(|verdict| verdict.trim().eq_ignore_ascii_case("fail"))
+}
+
 /// Autocrypt Level 1 peer state from an incoming message, while the Chats
 /// experiment is on in Labs. Off, Satchel keeps no key it was not given.
 async fn apply_autocrypt_header(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     account_id: &str,
+    folder_type: &str,
     message: &crate::providers::traits::MessageEnvelope,
 ) -> Result<(), String> {
     let enabled = satchel_core::db::labs::is_enabled_in(&mut **tx, satchel_core::db::labs::CHATS)
         .await
         .map_err(|error| error.to_string())?;
-    if !enabled || !message.from_address.contains('@') {
+    if !enabled || !autocrypt_applies(folder_type, message) {
+        return Ok(());
+    }
+    // The user's own aliases are not peers (the primary address never gets here).
+    let own_alias: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM account_aliases WHERE account_id = ? AND LOWER(TRIM(email)) = LOWER(TRIM(?))",
+    )
+    .bind(account_id)
+    .bind(&message.from_address)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    if own_alias.is_some() {
         return Ok(());
     }
     let parse = |value: &str| {
@@ -1417,8 +1448,8 @@ fn provider_message_is_draft(folder_type: &str, mailbox_ids: &[String]) -> bool 
 #[cfg(test)]
 mod tests {
     use super::{
-        persist_blocked_sender_diagnostic, provider_message_db_id, provider_message_is_draft,
-        should_check_blocked_sender, upsert_provider_message,
+        autocrypt_applies, persist_blocked_sender_diagnostic, provider_message_db_id,
+        provider_message_is_draft, should_check_blocked_sender, upsert_provider_message,
     };
     use crate::providers::traits::{MessageEnvelope, RemoteAttachment, RemoteMessageState};
     use crate::sync::folder_reconcile::reconcile_imap_folder_snapshot;
@@ -1426,6 +1457,24 @@ mod tests {
     use crate::sync::queue::SyncQueue;
     use crate::sync::thread_resolution::{merge_reply_split_threads, standalone_thread_key};
     use sqlx::sqlite::SqlitePoolOptions;
+
+    #[test]
+    fn autocrypt_skips_spam_trash_reports_and_failed_dmarc() {
+        let mut message = envelope("1");
+        message.from_address = "lena@example.test".into();
+        message.autocrypt_eligible = true;
+        assert!(autocrypt_applies("inbox", &message));
+        assert!(!autocrypt_applies("spam", &message));
+        assert!(!autocrypt_applies("Junk", &message));
+        assert!(!autocrypt_applies("trash", &message));
+        message.auth_dmarc = Some("fail".into());
+        assert!(!autocrypt_applies("inbox", &message));
+        message.auth_dmarc = Some("pass".into());
+        assert!(autocrypt_applies("inbox", &message));
+        // A report, or mail from several people, as the provider judged it.
+        message.autocrypt_eligible = false;
+        assert!(!autocrypt_applies("inbox", &message));
+    }
 
     fn envelope(remote_id: &str) -> MessageEnvelope {
         MessageEnvelope {
@@ -1467,6 +1516,7 @@ mod tests {
             satchel_marks: Vec::new(),
             chat: None,
             autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: Vec::new(),
         }
     }
@@ -4024,6 +4074,7 @@ mod tests {
             satchel_marks: Vec::new(),
             chat: None,
             autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: Vec::new(),
         };
         upsert_provider_message(
@@ -4218,6 +4269,7 @@ mod tests {
             satchel_marks: Vec::new(),
             chat: None,
             autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: Vec::new(),
         };
         upsert_provider_message(
@@ -4316,6 +4368,7 @@ mod tests {
             satchel_marks: Vec::new(),
             chat: None,
             autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: vec![RemoteAttachment {
                 remote_part_id: "mime-1".to_string(),
                 filename: Some("note.txt".to_string()),

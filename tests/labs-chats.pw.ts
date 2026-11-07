@@ -127,6 +127,50 @@ test.describe('locked own key', () => {
   });
 });
 
+test.describe('who a reply goes to', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  async function openFamily(page: Page, param: string) {
+    await page.addInitScript(() => localStorage.setItem('satchel.mock.labs', JSON.stringify({ chats: true })));
+    await page.goto(`/?${param}=1`);
+    await sidebarChats(page).click();
+    await page.locator('[data-chat-row]', { hasText: 'Familie' }).click();
+    return page.getByRole('region', { name: 'Familie', exact: true });
+  }
+
+  test('a crafted message in the group changes nothing', async ({ page }) => {
+    const group = await openFamily(page, 'mockChatHijack');
+    await expect(group.getByText('Neue Gruppe, bitte hier antworten')).toBeVisible();
+    await expect(group.getByText('4 members', { exact: true })).toBeVisible();
+    await group.locator('[data-chat-input]').fill('Danke!');
+    await group.locator('[data-chat-input]').press('Enter');
+    await expect(group.locator('[data-chat-bubble="own"]').last()).toContainText('Danke!');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+
+  test('new recipients and plain text in an encrypted chat wait for a yes', async ({ page }) => {
+    const group = await openFamily(page, 'mockChatNewMember');
+    const input = group.locator('[data-chat-input]');
+    const own = group.locator('[data-chat-bubble="own"]');
+    await expect(own).toHaveCount(1);
+    const recipients = page.getByRole('dialog', { name: 'Send to these people?' });
+    const plain = page.getByRole('dialog', { name: 'Send without encryption?' });
+
+    await input.fill('Willkommen, Noah');
+    await input.press('Enter');
+    await expect(recipients.getByText('noah@example.test', { exact: false })).toBeVisible();
+    await recipients.getByRole('button', { name: 'Cancel' }).click();
+    await expect(own).toHaveCount(1);
+    await expect(input).toHaveValue('Willkommen, Noah');
+
+    await input.press('Enter');
+    await recipients.getByRole('button', { name: 'Send', exact: true }).click();
+    await plain.getByRole('button', { name: 'Send unencrypted' }).click();
+    await expect(own).toHaveCount(2);
+    await expect(own.last()).toContainText('Willkommen, Noah');
+  });
+});
+
 test.describe('phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 

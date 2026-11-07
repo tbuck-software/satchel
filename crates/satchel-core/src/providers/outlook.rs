@@ -1860,6 +1860,10 @@ fn map_graph_message(message: GraphMessage) -> MessageEnvelope {
         satchel_marks: Vec::new(),
         chat,
         autocrypt_headers,
+        autocrypt_eligible: crate::chat::autocrypt_eligible(
+            header_value("From").as_deref(),
+            header_value("Content-Type").as_deref(),
+        ),
         attachments,
     }
 }

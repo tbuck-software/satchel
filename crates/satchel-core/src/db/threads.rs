@@ -315,13 +315,18 @@ pub(crate) fn push_thread_scope_filters(
                 query.push(" AND threads.workflow_state IN ('inbox', 'todo')");
             }
         }
-        // Delta Chat: threads with at least one message that carries
-        // `Chat-Version`. The mail stays in its folders; this is a view.
+        // Delta Chat: threads with a message that carries `Chat-Version` and
+        // is not in Trash or Spam. The mail stays in its folders; this is a view.
         (Some(CHAT_MAILBOX_KIND), _) => {
-            query.push(
+            let trash = mailbox_section_predicate("trash").unwrap_or("0");
+            let spam = mailbox_section_predicate("spam").unwrap_or("0");
+            query.push(format!(
                 " AND threads.id IN (SELECT chat_messages.thread_id FROM messages chat_messages
-                    WHERE chat_messages.chat_version IS NOT NULL)",
-            );
+                    LEFT JOIN folders mailbox_folders
+                      ON mailbox_folders.id = COALESCE(chat_messages.pending_folder_id, chat_messages.folder_id)
+                    WHERE chat_messages.chat_version IS NOT NULL
+                      AND NOT COALESCE({trash}, 0) AND NOT COALESCE({spam}, 0))"
+            ));
         }
         _ => {}
     }
@@ -2110,13 +2115,20 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        for thread in ["mail", "chat"] {
+        sqlx::query(
+            "INSERT INTO folders(id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES('trash', 'acc', 'Trash', 'Trash', 'trash', 'Trash', '2026-01-01', '2026-01-01')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for (thread, folder) in [("mail", "inbox"), ("chat", "inbox"), ("binned", "trash")] {
             insert_thread(&pool, thread, "acc").await;
             insert_message(
                 &pool,
                 &format!("{thread}-m"),
                 thread,
-                "inbox",
+                folder,
                 None,
                 thread,
                 "2026-08-01T00:00:00Z",
@@ -2129,7 +2141,8 @@ mod tests {
             )
             .await;
         }
-        sqlx::query("UPDATE messages SET chat_version = '1.0' WHERE id = 'chat-m'")
+        // A chat whose only message is in the Trash is not listed.
+        sqlx::query("UPDATE messages SET chat_version = '1.0' WHERE id IN ('chat-m', 'binned-m')")
             .execute(&pool)
             .await
             .unwrap();

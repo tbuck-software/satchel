@@ -9,7 +9,7 @@ import IconButton from '@/components/ui/IconButton.vue';
 import SkeletonRow from '@/components/ui/SkeletonRow.vue';
 import Avatar from '@/components/common/Avatar.vue';
 import { useAccountsStore } from '@/stores/accounts';
-import { useChatsStore, type ChatMeta } from '@/stores/chats';
+import { useChatsStore, type ChatMeta, type ChatSendChoices } from '@/stores/chats';
 import { useAliasesStore } from '@/stores/aliases';
 import { useMessagesStore } from '@/stores/messages';
 import { useUiStore } from '@/stores/ui';
@@ -195,22 +195,69 @@ async function prepareSignature(): Promise<boolean | null> {
   return unsigned ? true : null;
 }
 
+/**
+ * Any mail can thread into a chat. A reply whose recipients differ from the
+ * last one, or that would leave an encrypted chat in plain text, waits for a
+ * yes, and goes only to the recipients shown. `null` keeps the text.
+ */
+async function confirmDelivery(): Promise<ChatSendChoices | null> {
+  const current = meta.value;
+  if (!current) return null;
+  const recipients = current.members.map((member) => member.address);
+  if (current.recipients_changed) {
+    const yes = await confirm({
+      title: t('chats.confirm.recipientsTitle'),
+      body: t('chats.confirm.recipientsBody'),
+      detail: current.members.map((member) => member.name ? `${member.name} <${member.address}>` : member.address).join(', '),
+      confirmLabel: t('chats.confirm.send'),
+    });
+    if (!yes) return null;
+  }
+  if (current.encryption_downgrade) {
+    const yes = await confirm({
+      title: t('chats.confirm.plainTitle'),
+      body: t('chats.confirm.plainBody'),
+      confirmLabel: t('chats.confirm.sendPlain'),
+      tone: 'danger',
+    });
+    if (!yes) return null;
+  }
+  return {
+    expectedRecipients: recipients,
+    confirmRecipients: current.recipients_changed,
+    allowPlaintext: current.encryption_downgrade,
+    allowUnsigned: false,
+  };
+}
+
+/** Both questions, in order: who and how in the clear, then the key. */
+async function prepareSend(): Promise<ChatSendChoices | null> {
+  const choices = await confirmDelivery();
+  if (!choices) return null;
+  const unsigned = await prepareSignature();
+  if (unsigned === null) return null;
+  return { ...choices, allowUnsigned: unsigned };
+}
+
+const RETRY_ERRORS = new Set(['backend.errors.chatKeyLocked', 'backend.errors.chatConfirmationNeeded']);
+
 async function send(text: string) {
   const id = threadId.value;
   sending.value = true;
   try {
-    let unsigned = await prepareSignature();
-    if (unsigned === null) return;
+    let choices = await prepareSend();
+    if (!choices) return;
     let result;
     try {
-      result = await chatsStore.send(id, text, unsigned);
+      result = await chatsStore.send(id, text, choices);
     } catch (error) {
-      // Locked since the chat opened (another window, a restart): ask now.
-      if (backendErrorKey(error) !== 'backend.errors.chatKeyLocked') throw error;
+      // The chat changed since it was read (a new member, a key locked in
+      // another window): read it again and ask again, once.
+      if (!RETRY_ERRORS.has(backendErrorKey(error) ?? '')) throw error;
       await loadMeta(id);
-      unsigned = await prepareSignature();
-      if (unsigned === null) return;
-      result = await chatsStore.send(id, text, unsigned);
+      choices = await prepareSend();
+      if (!choices) return;
+      result = await chatsStore.send(id, text, choices);
     }
     drafts.delete(id);
     if (id === threadId.value) draft.value = '';
@@ -290,6 +337,15 @@ defineExpose({ focusInput: () => composer.value?.focus() });
           >
             <p v-if="isGroup && !bubble.own && !bubble.continued" class="chat-bubble__sender">{{ bubble.senderName }}</p>
             <p class="chat-bubble__text">{{ bubble.text }}</p>
+            <AppButton
+              v-if="bubble.cut"
+              variant="link"
+              size="sm"
+              class="chat-bubble__hidden"
+              @click="showAsMail"
+            >
+              {{ $t('chats.partHidden') }}
+            </AppButton>
             <time class="chat-bubble__time" :datetime="bubble.timestamp">{{ $d(new Date(bubble.timestamp), 'time') }}</time>
           </div>
         </section>
@@ -451,6 +507,15 @@ defineExpose({ focusInput: () => composer.value?.focus() });
   line-height: 1.45;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.chat-bubble__hidden {
+  display: block;
+  padding: 0;
+  color: inherit;
+  font-size: var(--font-size-xs);
+  opacity: 0.8;
+  text-decoration: underline;
 }
 
 .chat-bubble__time {

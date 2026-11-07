@@ -62,7 +62,6 @@ const CONTEXT_BY_ACTION: ReadonlyMap<string, KeybindingContext> = new Map(
   KEYBINDING_SPECS.map((spec) => [spec.action, spec.context]),
 );
 
-/** True while focus sits on a button/link that should keep Enter and Space. */
 /**
  * A `g` sequence that code loaded later brings along, such as a Labs view.
  * It is not rebindable and not listed in the shortcut editor; the sequence
@@ -85,6 +84,7 @@ export function registerViewShortcut(shortcut: ViewShortcut): () => void {
   };
 }
 
+/** True while focus sits on a button/link that should keep Enter and Space. */
 function isActivatableTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el) return false;

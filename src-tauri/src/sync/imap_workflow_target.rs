@@ -1085,6 +1085,7 @@ mod tests {
             satchel_marks: Vec::new(),
             chat: None,
             autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: Vec::new(),
         }
     }

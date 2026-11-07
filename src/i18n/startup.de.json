@@ -148,6 +148,7 @@
       "calendarRichDescriptionReadOnly": "Diese Beschreibung ist in Outlook formatiert und verlöre hier Links und Layout. Bearbeite sie in Outlook.",
       "calendarTimeInvalid": "Gib eine gültige Terminzeit ein.",
       "calendarTitleRequired": "Gib einen Termintitel ein.",
+      "chatConfirmationNeeded": "Der Chat hat sich geändert. Prüfe, an wen die Antwort geht, und sende sie erneut.",
       "chatKeyLocked": "Entsperre deinen OpenPGP-Schlüssel, um diese verschlüsselte Antwort zu senden.",
       "chatNoRecipient": "Dieser Chat hat keinen Empfänger.",
       "chatNotAChat": "Das ist kein Chat.",
