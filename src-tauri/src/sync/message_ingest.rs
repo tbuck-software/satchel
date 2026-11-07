@@ -1009,8 +1009,31 @@ async fn persist_provider_message(
                 sqlx::query("INSERT OR IGNORE INTO ingest_effects (message_id, thread_id, account_id, run_rules, created_at) VALUES (?, ?, ?, 1, ?)")
                     .bind(&message_id).bind(&thread_id).bind(account_id).bind(&now)
                     .execute(&mut **tx).await.map_err(|error| error.to_string())?;
+            } else if satchel_core::rules::has_filed_mark(&message.satchel_marks)
+                && !matches!(folder_type, "sent" | "drafts" | "spam" | "trash")
+            {
+                // Satchel's server script filed it away from the Inbox. The
+                // rules that run only here have not seen it yet; the ones the
+                // server ran find it where they would have put it.
+                sqlx::query("INSERT OR IGNORE INTO ingest_effects (message_id, thread_id, account_id, run_rules, created_at) VALUES (?, ?, ?, 1, ?)")
+                    .bind(&message_id).bind(&thread_id).bind(account_id).bind(&now)
+                    .execute(&mut **tx).await.map_err(|error| error.to_string())?;
             }
         }
+    }
+    // The server forwarded it under a rule: recorded before any rule runs
+    // here, so a rule the server runs does not send it a second time.
+    if satchel_core::rules::has_forward_mark(&message.satchel_marks) {
+        sqlx::query(
+            "INSERT OR IGNORE INTO rule_server_marks (account_id, message_key, created_at)
+             VALUES (?, ?, ?)",
+        )
+        .bind(account_id)
+        .bind(&message_id_header)
+        .bind(&now)
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| error.to_string())?;
     }
     Ok(StoredMessage {
         message_id,
@@ -1395,6 +1418,7 @@ mod tests {
             auth_dkim: None,
             auth_dmarc: None,
             spam_hint_headers: None,
+            satchel_marks: Vec::new(),
             attachments: Vec::new(),
         }
     }
@@ -1891,6 +1915,142 @@ mod tests {
                 .await
                 .unwrap(),
             0
+        );
+    }
+
+    /// Persist `message` as newly arrived in `folder` (`folder_type`).
+    async fn persist_new(
+        pool: &sqlx::SqlitePool,
+        folder: &str,
+        folder_type: &str,
+        message: &MessageEnvelope,
+    ) {
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        super::persist_provider_message(
+            &mut tx,
+            "imap",
+            "account",
+            "account@example.com",
+            "Account",
+            folder,
+            folder,
+            folder_type,
+            message,
+            None,
+            &super::PendingFlagLocks::default(),
+            Some("2026-01-01T00:00:00Z"),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mail_the_server_filed_away_still_meets_the_local_rules() {
+        let pool = ingest_pool().await;
+        sqlx::query(
+            "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES ('lists', 'account', 'Lists', 'Lists', 'custom', 'Lists', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO rules (id, name, trigger_type, trigger_config, actions, is_active, priority, created_at, updated_at) VALUES ('rule', 'Tag', 'on_receive', '{\"from_contains\":\"external\"}', '[\"add_tag:lists\"]', 1, 1, '', '')")
+            .execute(&pool).await.unwrap();
+        let mut filed = envelope("filed");
+        filed.from_address = "external@example.test".into();
+        filed.date_rfc3339 = "2026-01-02T03:00:00Z".into();
+        filed.satchel_marks = vec!["$satchelfiled".into()];
+        persist_new(&pool, "lists", "custom", &filed).await;
+        let mut moved_by_hand = envelope("by-hand");
+        moved_by_hand.from_address = "external@example.test".into();
+        moved_by_hand.date_rfc3339 = "2026-01-02T04:00:00Z".into();
+        persist_new(&pool, "lists", "custom", &moved_by_hand).await;
+        sqlx::query(
+            "INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
+             VALUES ('junk', 'account', 'Junk', 'Junk', 'spam', 'Junk', '', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut filed_as_spam = envelope("spam");
+        filed_as_spam.from_address = "external@example.test".into();
+        filed_as_spam.date_rfc3339 = "2026-01-02T05:00:00Z".into();
+        filed_as_spam.satchel_marks = vec!["$satchelfiled".into()];
+        persist_new(&pool, "junk", "spam", &filed_as_spam).await;
+        let pending: Vec<String> =
+            sqlx::query_scalar("SELECT message_id FROM ingest_effects WHERE run_rules = 1")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            pending.len(),
+            1,
+            "only the mail Satchel's script filed, and not into Spam"
+        );
+        super::replay_ingest_effects(&pool, "account")
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM thread_tags")
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_forward_the_server_sent_is_recorded_before_the_rules_run() {
+        let pool = ingest_pool().await;
+        sqlx::query("INSERT INTO rules (id, name, trigger_type, trigger_config, actions, is_active, priority, created_at, updated_at) VALUES ('rule-1', 'Books', 'on_receive', '{\"from_contains\":\"external\"}', '[\"forward:books@example.test\"]', 1, 1, '', '')")
+            .execute(&pool).await.unwrap();
+        // The server runs this version of the rule, since long before.
+        let fingerprint = satchel_core::server_rules::compiler::rule_fingerprint(
+            "on_receive",
+            r#"{"from_contains":"external"}"#,
+            r#"["forward:books@example.test"]"#,
+        );
+        sqlx::query(
+            "INSERT INTO managesieve_accounts (account_id, enabled, server_active, pushed_rules, pushed_forwards, updated_at)
+             VALUES ('account', 1, 1, ?, ?, '')",
+        )
+        .bind(serde_json::json!({ "rule-1": fingerprint }).to_string())
+        .bind(
+            serde_json::json!({ "rule-1": {
+                "trigger_type": "on_receive",
+                "trigger_config": r#"{"from_contains":"external"}"#,
+                "to": "books@example.test",
+                "since": ""
+            }})
+            .to_string(),
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut message = envelope("forwarded");
+        message.from_address = "external@example.test".into();
+        message.message_id_header = Some("<invoice@example.test>".into());
+        message.date_rfc3339 = "2026-01-02T03:00:00Z".into();
+        message.satchel_marks = satchel_core::rules::satchel_marks(["$SatchelFwd"]);
+        persist_new(&pool, "inbox", "inbox", &message).await;
+        let marks: Vec<String> = sqlx::query_scalar("SELECT message_key FROM rule_server_marks")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(marks, vec!["<invoice@example.test>".to_string()]);
+        super::replay_ingest_effects(&pool, "account")
+            .await
+            .unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM sync_queue WHERE action_type = 'rule_forward'"
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            0,
+            "not sent a second time"
         );
     }
 
@@ -3813,6 +3973,7 @@ mod tests {
             auth_dkim: None,
             auth_dmarc: None,
             spam_hint_headers: None,
+            satchel_marks: Vec::new(),
             attachments: Vec::new(),
         };
         upsert_provider_message(
@@ -4004,6 +4165,7 @@ mod tests {
             auth_dkim: None,
             auth_dmarc: None,
             spam_hint_headers: None,
+            satchel_marks: Vec::new(),
             attachments: Vec::new(),
         };
         upsert_provider_message(
@@ -4099,6 +4261,7 @@ mod tests {
             auth_dkim: None,
             auth_dmarc: None,
             spam_hint_headers: None,
+            satchel_marks: Vec::new(),
             attachments: vec![RemoteAttachment {
                 remote_part_id: "mime-1".to_string(),
                 filename: Some("note.txt".to_string()),

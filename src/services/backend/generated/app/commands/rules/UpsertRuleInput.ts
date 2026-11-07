@@ -9,4 +9,5 @@ export type UpsertRuleInput = {
     actions: Array<string>;
     is_active: boolean;
     priority: number;
+    account_id?: string | null;
 };

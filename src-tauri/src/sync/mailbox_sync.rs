@@ -1206,6 +1206,12 @@ pub(crate) async fn sync_mailboxes(
         .execute(pool)
         .await;
 
+        // Before new mail meets the rules: is Satchel's Sieve script still the
+        // one the server runs? A forward Satchel leaves to the server depends
+        // on it. At most every few minutes, and never holding the sync up long.
+        if account.provider == "imap" {
+            satchel_core::server_rules::service::verify_if_due(pool, &account.id).await;
+        }
         let account_sync_result: Result<(usize, usize, bool, usize, usize), String> = async {
             replay_ingest_effects(pool, &account.id).await?;
             let config = crate::utils::oauth::refresh_account_config(pool, &account.id, &account.provider, &account.config).await.map_err(|err| err.encoded())?;

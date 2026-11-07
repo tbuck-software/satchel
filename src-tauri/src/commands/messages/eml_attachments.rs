@@ -142,7 +142,7 @@ async fn eml_message(
         .await
 }
 
-fn eml_attachment(subject: Option<&str>, raw: &[u8]) -> OutgoingAttachmentInput {
+pub(crate) fn eml_attachment(subject: Option<&str>, raw: &[u8]) -> OutgoingAttachmentInput {
     OutgoingAttachmentInput {
         filename: eml_filename(subject),
         mime_type: "message/rfc822".to_string(),

@@ -2376,6 +2376,8 @@ pub async fn send_message(
     input: OutgoingMessageInput,
 ) -> CommandResult<SendMessageResult> {
     let mut input = input;
+    // Only Satchel's own sends (a rule's forward) are automatic.
+    input.auto_submitted = None;
     // Any of To, Cc and Bcc is enough: all three go into the envelope.
     let has_recipient = !normalize_recipients(&input.to)?.is_empty()
         || !normalize_recipients(&input.cc)?.is_empty()
@@ -4827,7 +4829,7 @@ struct RemoteMessageSourceTarget {
 
 /// Reads on `read_pool`. Only a refresh that must persist rotated OAuth
 /// credentials takes one of the writer's connections.
-pub(super) async fn fetch_remote_message_source(
+pub(crate) async fn fetch_remote_message_source(
     read_pool: &SqlitePool,
     write_pool: &SqlitePool,
     message_id: &str,

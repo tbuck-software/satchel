@@ -147,6 +147,20 @@ fn build_rfc822_inner(
             if importance == "high" { "High" } else { "Low" }
         ));
     }
+    // RFC 3834: a rule's forward is not answered or forwarded again.
+    if let Some(value) = message
+        .auto_submitted
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        // A token (`auto-generated`); anything else would be a header injection.
+        let token: String = value
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-')
+            .collect();
+        headers.push(format!("Auto-Submitted: {token}"));
+    }
     if let Some(in_reply_to) = &message.in_reply_to {
         headers.push(fold_header(
             "In-Reply-To",
@@ -1000,6 +1014,27 @@ mod tests {
             assert!(word.len() <= MAX_ENCODED_WORD, "{word}");
         }
         assert!(header.ends_with("<juergen@beispiel.test>"));
+    }
+
+    #[test]
+    fn an_automatic_send_says_so_and_a_normal_one_does_not() {
+        let mut message = OutgoingMessage {
+            to: vec!["books@example.test".to_owned()],
+            subject: "Fwd: Invoice".to_owned(),
+            auto_submitted: Some("auto-generated".to_owned()),
+            ..Default::default()
+        };
+        let raw = build_rfc822(&message, Some("me@example.test"), None).unwrap();
+        assert_eq!(
+            header_value(&raw, "Auto-Submitted:"),
+            "Auto-Submitted: auto-generated"
+        );
+        message.auto_submitted = Some("auto-generated\r\nBcc: x@example.test".to_owned());
+        let raw = build_rfc822(&message, Some("me@example.test"), None).unwrap();
+        assert!(!raw.contains("\r\nBcc:"), "no header injection: {raw}");
+        message.auto_submitted = None;
+        let raw = build_rfc822(&message, Some("me@example.test"), None).unwrap();
+        assert!(!raw.contains("Auto-Submitted"));
     }
 
     fn message_with_attachment(filename: &str) -> OutgoingMessage {

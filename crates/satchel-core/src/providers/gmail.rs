@@ -2728,6 +2728,7 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         auth_dkim,
         auth_dmarc,
         spam_hint_headers: None,
+        satchel_marks: Vec::new(),
         attachments,
     }
 }

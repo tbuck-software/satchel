@@ -8,12 +8,15 @@
 //! and the rules keep running locally.
 //!
 //! The server script is an addition, not a replacement: every rule keeps
-//! running in Satchel too, so it also fires while the app is closed. That is
-//! safe because every action compiled today (`mark_read`) is idempotent. An
-//! action that is not (`fileinto`, `redirect`) must not be added before the
-//! local engine has an exact gate for skipping what the server already did:
-//! a content hash of the active script, a read-back verification and a safety
-//! margin around the moment it went live.
+//! running in Satchel too, so it also fires while the app is closed. Flags
+//! (`mark_read`, `star`) are idempotent. A move is too: mail the server filed
+//! away from the Inbox carries the `$SatchelFiled` keyword, Satchel runs its
+//! rules on it once more, and a move into the folder it is already in does
+//! nothing. A forward is not idempotent: the local engine leaves a message
+//! to the server when a forward of the rule to the same address, with a
+//! trigger that matches the message, may have run there when it arrived (kept through failed and unfinished pushes,
+//! settled by [`service::verify`]), and the server marks what it forwarded
+//! (`$SatchelFwd`). The whole gate is described in [`crate::rules`].
 
 pub mod compiler;
 pub mod service;

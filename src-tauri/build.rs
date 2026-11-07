@@ -108,6 +108,7 @@ const COMMANDS: &[&str] = &[
     "delete_rule",
     "run_rules_for_thread",
     "run_rules_for_threads",
+    "resume_rule_forwarding",
     "get_source_capabilities",
     "list_sources",
     "create_source",

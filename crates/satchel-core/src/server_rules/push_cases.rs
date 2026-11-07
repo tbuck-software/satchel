@@ -10,6 +10,7 @@ fn compiled() -> CompiledScript {
         trigger_type: "on_receive".into(),
         trigger_config: r#"{"from_contains":"noreply@"}"#.into(),
         actions: r#"["mark_read"]"#.into(),
+        account_id: None,
     };
     let extensions = FakeState::default()
         .extensions

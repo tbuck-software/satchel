@@ -2,16 +2,22 @@
 //! account, rules and the vacation reply from the database, state back into
 //! `managesieve_accounts`.
 //!
-//! The local engine runs every rule whatever happens here; see the module
-//! documentation of [`super`] for why, and for what a non-idempotent action
-//! would need first.
+//! The local engine runs every rule whatever happens here, except that a
+//! forward the server already sent is not sent again; see [`crate::rules`].
 
 use sqlx::SqlitePool;
 
+use std::collections::BTreeMap;
+
+use super::compiler::is_satchel_script;
 use super::compiler::{
-    compile_script, LocalReason, RuleCompilation, RuleSpec, VacationCompilation, VacationSpec,
+    compile_script_for, CompiledScript, LocalReason, RuleCompilation, RuleSpec, Target,
+    VacationCompilation, VacationSpec,
 };
-use super::{apply, plan, remove, ActivationChoice, Planned, PushError};
+use super::{
+    active_name, apply, exists, plan, remove, ActivationChoice, Planned, PushError, OWN_SCRIPT,
+    WRAPPER_SCRIPT,
+};
 use crate::db::accounts::{AccountError, AccountRepository};
 use crate::db::server_rules::{ServerRulesRepository, ServerRulesState};
 use crate::db::vacation::VacationRepository;
@@ -270,8 +276,8 @@ pub async fn set_override(
 
 /// The active rules in local priority order.
 pub async fn load_rules(pool: &SqlitePool) -> Result<Vec<RuleSpec>, sqlx::Error> {
-    let rows = sqlx::query_as::<_, (String, String, String, String, String)>(
-        "SELECT id, name, trigger_type, trigger_config, actions
+    let rows = sqlx::query_as::<_, (String, String, String, String, String, Option<String>)>(
+        "SELECT id, name, trigger_type, trigger_config, actions, account_id
          FROM rules WHERE is_active = 1 ORDER BY priority DESC, created_at ASC",
     )
     .fetch_all(pool)
@@ -279,15 +285,62 @@ pub async fn load_rules(pool: &SqlitePool) -> Result<Vec<RuleSpec>, sqlx::Error>
     Ok(rows
         .into_iter()
         .map(
-            |(id, name, trigger_type, trigger_config, actions)| RuleSpec {
+            |(id, name, trigger_type, trigger_config, actions, account_id)| RuleSpec {
                 id,
                 name,
                 trigger_type,
                 trigger_config,
                 actions,
+                account_id,
             },
         )
         .collect())
+}
+
+/// Folder id -> IMAP mailbox name of every folder of an account, the names
+/// a `fileinto` can use.
+pub async fn load_folders(
+    pool: &SqlitePool,
+    account_id: &str,
+) -> Result<BTreeMap<String, String>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT id, COALESCE(remote_id, full_path) FROM folders WHERE account_id = ?",
+    )
+    .bind(account_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().collect())
+}
+
+/// `since` per server rule after a push that started at `started`: a version
+/// the server may already have run (verified, or written by an unverified
+/// push) keeps its earliest start, every other one starts now. Whether the
+/// last push was verified does not matter: an unchanged rule never "starts"
+/// again.
+fn rules_since(
+    previous: &ServerRulesState,
+    pushed: &BTreeMap<String, String>,
+    started: &str,
+) -> BTreeMap<String, String> {
+    pushed
+        .iter()
+        .map(|(id, fingerprint)| {
+            let kept = previous
+                .live_since(id, fingerprint)
+                .map(|since| since.to_rfc3339());
+            (id.clone(), kept.unwrap_or_else(|| started.to_string()))
+        })
+        .collect()
+}
+
+/// Identifies one script's content, to recognize it when read back.
+pub fn script_hash(content: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(content.as_bytes())
+        .iter()
+        .take(16)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 async fn load_vacation(
@@ -355,8 +408,20 @@ pub async fn push_account(
     state.extensions = client.capabilities().sieve.clone();
 
     let rules = load_rules(pool).await?;
+    let folders = load_folders(pool, account_id).await?;
     let vacation = load_vacation(pool, account_id, &creds.addresses).await?;
-    let compiled = compile_script(&rules, &vacation, &state.extensions);
+    let compiled = compile_script_for(
+        &rules,
+        &vacation,
+        &Target {
+            extensions: &state.extensions,
+            account_id: Some(account_id),
+            folders: &folders,
+        },
+    );
+    // Before anything is written: the script may run from SETACTIVE on.
+    let started = chrono::Utc::now().to_rfc3339();
+    let previous = state.clone();
 
     let planned = match plan(
         &mut client,
@@ -369,9 +434,10 @@ pub async fn push_account(
         Ok(Planned::Ready(planned)) => planned,
         Ok(Planned::NeedsConsent { active_script, .. }) => {
             let _ = client.logout().await;
-            // Nothing was written; the rules run in Satchel as always.
+            // Nothing was written, and another script is active: none of
+            // Satchel's runs on the server. The rules run in Satchel alone.
             state.server_active = false;
-            state.pushed_rules.clear();
+            state.clear_live();
             state.pushed_vacation = false;
             state.consent_script = Some(active_script);
             state.last_error = None;
@@ -387,6 +453,7 @@ pub async fn push_account(
     state.previous_active_script = planned.previous_active();
     state.consent_script = None;
     state.server_active = false;
+    let new_hash = mark_in_flight(&mut state, &compiled, &started);
     repo.save(&state).await?;
 
     match apply(&mut client, &planned, &compiled).await {
@@ -395,11 +462,7 @@ pub async fn push_account(
             if let Some(warnings) = warnings {
                 tracing::info!(%warnings, "managesieve accepted the script with warnings");
             }
-            state.pushed_rules = compiled
-                .server_rules()
-                .map(|(id, fingerprint)| (id.to_string(), fingerprint.to_string()))
-                .collect();
-            state.server_active = true;
+            mark_verified(&mut state, &previous, &compiled, &started, new_hash);
             state.pushed_vacation = matches!(compiled.vacation, VacationCompilation::Server { .. });
             state.last_push_at = Some(chrono::Utc::now().to_rfc3339());
             state.last_error = match &compiled.vacation {
@@ -413,17 +476,100 @@ pub async fn push_account(
     }
 }
 
+/// From PUTSCRIPT on, the new script may run. Until it is read back, the
+/// server may run either version of a rule: the verified ones stay recorded
+/// and the new ones join them as possibly live. Returns the new script's hash.
+fn mark_in_flight(
+    state: &mut ServerRulesState,
+    compiled: &CompiledScript,
+    started: &str,
+) -> String {
+    let hash = script_hash(&compiled.content);
+    let versions: Vec<_> = compiled
+        .server_rules()
+        .map(
+            |(rule_id, fingerprint)| crate::db::server_rules::LiveVersion {
+                rule_id: rule_id.to_string(),
+                fingerprint: fingerprint.to_string(),
+                // A version that may run already keeps its start: adopting this
+                // push later must not make an unchanged rule "new".
+                since: state
+                    .live_since(rule_id, fingerprint)
+                    .map(|since| since.to_rfc3339())
+                    .unwrap_or_else(|| started.to_string()),
+                script: hash.clone(),
+                forward: compiled
+                    .forwards
+                    .get(rule_id)
+                    .map(|forward| forward_with_since(state, rule_id, forward, started)),
+            },
+        )
+        .collect();
+    for version in versions {
+        if !state.possibly_live.contains(&version) {
+            state.possibly_live.push(version);
+        }
+    }
+    hash
+}
+
+/// `forward` with the start of an identical forward that may already run,
+/// else `started`.
+fn forward_with_since(
+    state: &ServerRulesState,
+    rule_id: &str,
+    forward: &crate::db::server_rules::LiveForward,
+    started: &str,
+) -> crate::db::server_rules::LiveForward {
+    crate::db::server_rules::LiveForward {
+        since: state
+            .forward_since(rule_id, forward)
+            .unwrap_or_else(|| started.to_string()),
+        ..forward.clone()
+    }
+}
+
+/// The push was read back active: only its script runs now.
+fn mark_verified(
+    state: &mut ServerRulesState,
+    previous: &ServerRulesState,
+    compiled: &CompiledScript,
+    started: &str,
+    hash: String,
+) {
+    state.pushed_rules = compiled
+        .server_rules()
+        .map(|(id, fingerprint)| (id.to_string(), fingerprint.to_string()))
+        .collect();
+    state.pushed_rules_since = rules_since(previous, &state.pushed_rules, started);
+    state.pushed_forwards = compiled
+        .forwards
+        .iter()
+        .map(|(rule_id, forward)| {
+            (
+                rule_id.clone(),
+                forward_with_since(previous, rule_id, forward, started),
+            )
+        })
+        .collect();
+    state.possibly_live.clear();
+    state.script_hash = Some(hash);
+    state.verified_at = Some(chrono::Utc::now().to_rfc3339());
+    state.server_active = true;
+}
+
 /// Record a push that failed after connecting. The connection is dropped,
 /// not logged out: after a timeout or a broken reply it is out of step.
 /// `activation_mode` and `previous_active_script` stay, so turning off still
-/// cleans up whatever got written.
+/// cleans up whatever got written. What the server may run stays recorded
+/// too: the old script, and the new one if the failure came after it was
+/// written. Only reading the script back ([`verify`]) narrows that down.
 async fn fail(
     repo: &ServerRulesRepository<'_>,
     mut state: ServerRulesState,
     error: PushError,
 ) -> Result<ServerRulesState, ServiceError> {
     state.server_active = false;
-    state.pushed_rules.clear();
     state.pushed_vacation = false;
     state.last_error = Some(error.message_key().to_string());
     repo.save(&state).await?;
@@ -469,11 +615,237 @@ pub async fn disable(
     state.activation_mode = None;
     state.previous_active_script = None;
     state.consent_script = None;
-    state.pushed_rules.clear();
+    if force {
+        // The server was not asked: Satchel's script may still run there, so
+        // its versions stay "possibly live" and their forwards stay the
+        // server's. Turning server rules on and off again clears them.
+        let hash = state.script_hash.clone().unwrap_or_default();
+        let verified: Vec<_> = state
+            .pushed_rules
+            .iter()
+            .map(
+                |(rule_id, fingerprint)| crate::db::server_rules::LiveVersion {
+                    rule_id: rule_id.clone(),
+                    fingerprint: fingerprint.clone(),
+                    since: state
+                        .pushed_rules_since
+                        .get(rule_id)
+                        .cloned()
+                        .unwrap_or_default(),
+                    script: hash.clone(),
+                    forward: state.pushed_forwards.get(rule_id).cloned(),
+                },
+            )
+            .collect();
+        state.possibly_live.extend(verified);
+        state.pushed_rules.clear();
+        state.pushed_forwards.clear();
+        state.pushed_rules_since.clear();
+    } else {
+        state.clear_live();
+    }
     state.pushed_vacation = false;
     state.last_error = None;
     repo.save(&state).await?;
     Ok(state)
+}
+
+/// What [`verify`] found on the server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verified {
+    /// Satchel's verified script is the active one.
+    Current,
+    /// An unverified push's script is active; it is the verified one now.
+    Adopted,
+    /// None of Satchel's scripts is active (someone switched it off or
+    /// activated another): Satchel runs every rule itself again.
+    NotActive,
+    /// Satchel's script is active with content it did not write. Recorded
+    /// versions stay; the next push replaces it.
+    Unknown,
+    /// The server could not be asked; nothing changed.
+    Unreachable,
+    /// Server rules are off, or another check holds the lock.
+    Skipped,
+}
+
+/// Read the active script back and bring what Satchel believes runs on the
+/// server in line with it: the gate for forwards ([`crate::rules`]) is only
+/// as good as that belief. Afterwards, a rule set that would compile to a
+/// different script than the verified one (a rule or a target folder changed
+/// on another path) is pushed again.
+pub async fn verify(pool: &SqlitePool, account_id: &str) -> Result<Verified, ServiceError> {
+    let outcome = {
+        let Ok(_guard) = LOCK.try_lock() else {
+            return Ok(Verified::Skipped);
+        };
+        let repo = ServerRulesRepository::new(pool);
+        let mut state = repo.get_or_empty(account_id).await?;
+        let Some(endpoint) = state.override_endpoint().or_else(|| state.detected.clone()) else {
+            return Ok(Verified::Skipped);
+        };
+        if !state.enabled && state.possibly_live.is_empty() {
+            return Ok(Verified::Skipped);
+        }
+        let creds = credentials(pool, account_id).await?;
+        let read = async {
+            let mut client = open(&endpoint, &creds).await?;
+            let scripts = client.list_scripts().await?;
+            let active = active_name(&scripts);
+            let own = match active.as_deref() {
+                Some(OWN_SCRIPT) => Some(client.get_script(OWN_SCRIPT).await?),
+                Some(WRAPPER_SCRIPT) => {
+                    let wrapper = client.get_script(WRAPPER_SCRIPT).await?;
+                    let includes_own = is_satchel_script(&wrapper)
+                        && wrapper.contains(&format!(
+                            "include :personal {};",
+                            super::compiler::sieve_string(OWN_SCRIPT)
+                        ));
+                    if includes_own && exists(&scripts, OWN_SCRIPT) {
+                        Some(client.get_script(OWN_SCRIPT).await?)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            let _ = client.logout().await;
+            Ok::<_, PushError>(own.filter(|content| is_satchel_script(content)))
+        }
+        .await;
+        let outcome = match read {
+            Err(error) => {
+                tracing::info!(%error, %account_id, "server rules could not be read back");
+                return Ok(Verified::Unreachable);
+            }
+            Ok(active) => read_back(&mut state, active.as_deref()),
+        };
+        state.verified_at = Some(chrono::Utc::now().to_rfc3339());
+        repo.save(&state).await?;
+        outcome
+    };
+    if outcome != Verified::NotActive {
+        if let Ok(true) = script_is_stale(pool, account_id).await {
+            push_account(pool, account_id, ActivationChoice::Ask, None).await?;
+        }
+    }
+    Ok(outcome)
+}
+
+/// Bring the record in line with Satchel's script as the server has it
+/// active (`None`: none of Satchel's scripts is active).
+fn read_back(state: &mut ServerRulesState, active: Option<&str>) -> Verified {
+    let Some(content) = active else {
+        state.clear_live();
+        state.server_active = false;
+        state.pushed_vacation = false;
+        return Verified::NotActive;
+    };
+    let hash = script_hash(content);
+    if state.script_hash.as_deref() == Some(hash.as_str()) {
+        state.possibly_live.clear();
+        state.server_active = state.enabled;
+        return Verified::Current;
+    }
+    if !state
+        .possibly_live
+        .iter()
+        .any(|version| version.script == hash)
+    {
+        // Edited by hand, or written by a push Satchel has no record of:
+        // everything recorded may run; the next push replaces it.
+        state.server_active = false;
+        return Verified::Unknown;
+    }
+    let adopted: Vec<_> = state
+        .possibly_live
+        .iter()
+        .filter(|version| version.script == hash)
+        .cloned()
+        .collect();
+    state.pushed_rules = adopted
+        .iter()
+        .map(|version| (version.rule_id.clone(), version.fingerprint.clone()))
+        .collect();
+    state.pushed_rules_since = adopted
+        .iter()
+        .map(|version| (version.rule_id.clone(), version.since.clone()))
+        .collect();
+    state.pushed_forwards = adopted
+        .iter()
+        .filter_map(|version| {
+            version
+                .forward
+                .clone()
+                .map(|forward| (version.rule_id.clone(), forward))
+        })
+        .collect();
+    state.possibly_live.clear();
+    state.script_hash = Some(hash);
+    state.server_active = state.enabled;
+    Verified::Adopted
+}
+
+/// Whether the rules would compile to another script than the verified one.
+async fn script_is_stale(pool: &SqlitePool, account_id: &str) -> Result<bool, ServiceError> {
+    let state = ServerRulesRepository::new(pool)
+        .get_or_empty(account_id)
+        .await?;
+    if !state.enabled || state.consent_script.is_some() {
+        return Ok(false);
+    }
+    let rules = load_rules(pool).await?;
+    let folders = load_folders(pool, account_id).await?;
+    let addresses: Vec<String> = sqlx::query_scalar(
+        "SELECT email FROM accounts WHERE id = ?1
+         UNION ALL SELECT email FROM account_aliases WHERE account_id = ?1",
+    )
+    .bind(account_id)
+    .fetch_all(pool)
+    .await?;
+    let vacation = load_vacation(pool, account_id, &addresses).await?;
+    let compiled = compile_script_for(
+        &rules,
+        &vacation,
+        &Target {
+            extensions: &state.extensions,
+            account_id: Some(account_id),
+            folders: &folders,
+        },
+    );
+    Ok(state.script_hash.as_deref() != Some(script_hash(&compiled.content).as_str()))
+}
+
+/// How often a sync reads the server's script back ([`verify_if_due`]).
+/// Mail that arrives after someone switched Satchel's script off is left to
+/// the server for at most this long.
+pub const VERIFY_EVERY: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+/// A read-back that takes longer is abandoned; the sync goes on.
+const VERIFY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// [`verify`], at most every [`VERIFY_EVERY`] per account. Called when a
+/// mailbox sync starts, before new mail meets the rules.
+pub async fn verify_if_due(pool: &SqlitePool, account_id: &str) {
+    static LAST: std::sync::Mutex<Option<std::collections::HashMap<String, std::time::Instant>>> =
+        std::sync::Mutex::new(None);
+    {
+        let Ok(mut last) = LAST.lock() else {
+            return;
+        };
+        let map = last.get_or_insert_with(Default::default);
+        if map
+            .get(account_id)
+            .is_some_and(|at| at.elapsed() < VERIFY_EVERY)
+        {
+            return;
+        }
+        map.insert(account_id.to_string(), std::time::Instant::now());
+    }
+    match tokio::time::timeout(VERIFY_TIMEOUT, verify(pool, account_id)).await {
+        Ok(Ok(outcome)) => tracing::debug!(%account_id, ?outcome, "server rules read back"),
+        Ok(Err(error)) => tracing::info!(%error, %account_id, "server rules check failed"),
+        Err(_) => tracing::info!(%account_id, "server rules check timed out"),
+    }
 }
 
 async fn push_where(pool: &SqlitePool, wanted: impl Fn(&ServerRulesState) -> bool) {
@@ -529,41 +901,112 @@ pub struct RulePlacement {
     pub local_reason: Option<LocalReason>,
     /// Compilable, but the server does not have this version (yet).
     pub pending: bool,
+    /// Per action, in the rule's order. Empty when no account the rule
+    /// applies to has server rules on.
+    pub actions: Vec<ActionPlacement>,
 }
 
-pub fn placements(rules: &[RuleSpec], states: &[ServerRulesState]) -> Vec<RulePlacement> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionPlacement {
+    /// Runs on the server of every account the rule applies to.
+    Server,
+    /// Could run there, but this version is not verified on every one yet.
+    Pending,
+    /// Runs in Satchel only: this action has no Sieve form on one of the
+    /// accounts, or another action keeps the whole rule local.
+    Local(LocalReason),
+}
+
+static NO_FOLDERS: BTreeMap<String, String> = BTreeMap::new();
+
+fn folders_of<'a>(
+    folders: &'a BTreeMap<String, BTreeMap<String, String>>,
+    account_id: &str,
+) -> &'a BTreeMap<String, String> {
+    folders.get(account_id).unwrap_or(&NO_FOLDERS)
+}
+
+/// Compile `rule` for one account's server.
+fn compile_on(
+    rule: &RuleSpec,
+    state: &ServerRulesState,
+    folders: &BTreeMap<String, BTreeMap<String, String>>,
+) -> RuleCompilation {
+    super::compiler::compile_rule_for(
+        rule,
+        &Target {
+            extensions: &state.extensions,
+            account_id: Some(&state.account_id),
+            folders: folders_of(folders, &state.account_id),
+        },
+    )
+}
+
+/// `folders` is [`load_folders`] per account id.
+pub fn placements(
+    rules: &[RuleSpec],
+    states: &[ServerRulesState],
+    folders: &BTreeMap<String, BTreeMap<String, String>>,
+) -> Vec<RulePlacement> {
     let enabled: Vec<&ServerRulesState> = states.iter().filter(|state| state.enabled).collect();
     rules
         .iter()
         .map(|rule| {
-            let fingerprint = rule.fingerprint();
-            let server_account_ids: Vec<String> = enabled
+            let in_scope: Vec<&ServerRulesState> = enabled
+                .iter()
+                .copied()
+                .filter(|state| rule.applies_to(&state.account_id))
+                .collect();
+            let server_account_ids: Vec<String> = in_scope
                 .iter()
                 .filter(|state| state.server_active)
-                .filter(|state| state.pushed_rules.get(&rule.id) == Some(&fingerprint))
+                .filter(|state| {
+                    state.pushed_rules.get(&rule.id)
+                        == Some(&rule.fingerprint_for(folders_of(folders, &state.account_id)))
+                })
                 .map(|state| state.account_id.clone())
                 .collect();
-            let mut local_reason = None;
-            let mut pending = false;
-            if server_account_ids.is_empty() {
-                for state in &enabled {
-                    match super::compiler::compile_rule(rule, &state.extensions) {
-                        RuleCompilation::Local(reason) => {
-                            local_reason = Some(reason);
-                            break;
+            let local_reason =
+                in_scope
+                    .iter()
+                    .find_map(|state| match compile_on(rule, state, folders) {
+                        RuleCompilation::Local(reason) => Some(reason),
+                        RuleCompilation::Server { .. } => None,
+                    });
+            let everywhere = !in_scope.is_empty() && server_account_ids.len() == in_scope.len();
+            let pending = local_reason.is_none() && !in_scope.is_empty() && !everywhere;
+            let actions = if in_scope.is_empty() {
+                Vec::new()
+            } else {
+                serde_json::from_str::<Vec<String>>(&rule.actions)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|action| {
+                        let alone = RuleSpec {
+                            actions: serde_json::json!([action]).to_string(),
+                            ..rule.clone()
+                        };
+                        let own = in_scope.iter().find_map(|state| {
+                            match compile_on(&alone, state, folders) {
+                                RuleCompilation::Local(reason) => Some(reason),
+                                RuleCompilation::Server { .. } => None,
+                            }
+                        });
+                        match (own, &local_reason) {
+                            (Some(reason), _) => ActionPlacement::Local(reason),
+                            (None, Some(reason)) => ActionPlacement::Local(reason.clone()),
+                            (None, None) if everywhere => ActionPlacement::Server,
+                            (None, None) => ActionPlacement::Pending,
                         }
-                        RuleCompilation::Server { .. } => pending = true,
-                    }
-                }
-                if local_reason.is_some() {
-                    pending = false;
-                }
-            }
+                    })
+                    .collect()
+            };
             RulePlacement {
                 rule_id: rule.id.clone(),
                 server_account_ids,
                 local_reason,
                 pending,
+                actions,
             }
         })
         .collect()
@@ -630,6 +1073,296 @@ mod tests {
             after.detected,
             Some(endpoint("gone.invalid")),
             "detection stays"
+        );
+    }
+
+    #[test]
+    fn a_rule_keeps_its_live_time_while_the_server_runs_the_same_version() {
+        let mut previous = ServerRulesState::empty("acc");
+        previous.server_active = true;
+        previous.pushed_rules = BTreeMap::from([
+            ("same".to_string(), "v1".to_string()),
+            ("edited".to_string(), "v1".to_string()),
+        ]);
+        previous.pushed_rules_since = BTreeMap::from([
+            ("same".to_string(), "2026-01-01T00:00:00+00:00".to_string()),
+            (
+                "edited".to_string(),
+                "2026-01-01T00:00:00+00:00".to_string(),
+            ),
+        ]);
+        let pushed = BTreeMap::from([
+            ("same".to_string(), "v1".to_string()),
+            ("edited".to_string(), "v2".to_string()),
+            ("new".to_string(), "v1".to_string()),
+        ]);
+        let since = rules_since(&previous, &pushed, "2026-06-01T00:00:00+00:00");
+        assert_eq!(since["same"], "2026-01-01T00:00:00+00:00");
+        assert_eq!(since["edited"], "2026-06-01T00:00:00+00:00");
+        assert_eq!(since["new"], "2026-06-01T00:00:00+00:00");
+        // A failed push in between does not restart an unchanged rule.
+        previous.server_active = false;
+        let since = rules_since(&previous, &pushed, "2026-06-01T00:00:00+00:00");
+        assert_eq!(since["same"], "2026-01-01T00:00:00+00:00");
+        // A version an unverified push may have written keeps its start too.
+        previous
+            .possibly_live
+            .push(crate::db::server_rules::LiveVersion {
+                forward: None,
+                rule_id: "edited".into(),
+                fingerprint: "v2".into(),
+                since: "2026-03-01T00:00:00+00:00".into(),
+                script: "h".into(),
+            });
+        let since = rules_since(&previous, &pushed, "2026-06-01T00:00:00+00:00");
+        assert_eq!(since["edited"], "2026-03-01T00:00:00+00:00");
+    }
+
+    fn forwarding(rule_id: &str, to: &str) -> RuleSpec {
+        RuleSpec {
+            id: rule_id.into(),
+            name: "Books".into(),
+            trigger_type: "on_receive".into(),
+            trigger_config: r#"{"from_contains":"billing@"}"#.into(),
+            actions: serde_json::json!([format!("forward:{to}")]).to_string(),
+            account_id: None,
+        }
+    }
+
+    fn compiled_for(rules: &[RuleSpec]) -> CompiledScript {
+        let extensions: Vec<String> = ["imap4flags", "copy"].map(String::from).to_vec();
+        super::super::compiler::compile_script(rules, &VacationSpec::default(), &extensions)
+    }
+
+    /// A verified push of v1, then an edit to v2 whose push is in flight or
+    /// failed after it may have written.
+    fn after_v1_then_v2_in_flight() -> (ServerRulesState, RuleSpec, RuleSpec) {
+        let v1 = forwarding("rule-1", "books@example.test");
+        let v2 = forwarding("rule-1", "accounting@example.test");
+        let mut state = enabled("acc", &["imap4flags", "copy"]);
+        let first = compiled_for(std::slice::from_ref(&v1));
+        let hash = mark_in_flight(&mut state, &first, "2026-01-01T00:00:00+00:00");
+        let previous = state.clone();
+        mark_verified(
+            &mut state,
+            &previous,
+            &first,
+            "2026-01-01T00:00:00+00:00",
+            hash,
+        );
+        // The next push records itself, then breaks off (or is still running).
+        state.server_active = false;
+        let second = compiled_for(std::slice::from_ref(&v2));
+        mark_in_flight(&mut state, &second, "2026-06-01T00:00:00+00:00");
+        (state, v1, v2)
+    }
+
+    #[test]
+    fn a_push_in_flight_or_failed_leaves_both_versions_live() {
+        let (state, v1, v2) = after_v1_then_v2_in_flight();
+        assert!(!state.server_active, "not verified");
+        assert!(
+            state.live_since(&v1.id, &v1.fingerprint()).is_some(),
+            "the old script may still run"
+        );
+        assert!(
+            state.live_since(&v2.id, &v2.fingerprint()).is_some(),
+            "the new one may already run"
+        );
+        assert_eq!(
+            state
+                .live_since(&v1.id, &v1.fingerprint())
+                .unwrap()
+                .to_rfc3339(),
+            "2026-01-01T00:00:00+00:00",
+            "an unchanged version keeps its start"
+        );
+    }
+
+    #[test]
+    fn reading_the_script_back_settles_which_version_runs() {
+        let (mut state, v1, v2) = after_v1_then_v2_in_flight();
+        let old = compiled_for(std::slice::from_ref(&v1)).content;
+        let new = compiled_for(std::slice::from_ref(&v2)).content;
+
+        let mut kept_old = state.clone();
+        assert_eq!(read_back(&mut kept_old, Some(&old)), Verified::Current);
+        assert!(kept_old.live_since(&v1.id, &v1.fingerprint()).is_some());
+        assert!(kept_old.live_since(&v2.id, &v2.fingerprint()).is_none());
+
+        let mut took_new = state.clone();
+        assert_eq!(read_back(&mut took_new, Some(&new)), Verified::Adopted);
+        assert!(took_new.live_since(&v1.id, &v1.fingerprint()).is_none());
+        assert!(took_new.live_since(&v2.id, &v2.fingerprint()).is_some());
+        assert!(took_new.server_active);
+
+        let mut edited = state.clone();
+        assert_eq!(
+            read_back(&mut edited, Some("# Satchel-managed script. Edits here are replaced on the next push.\r\nkeep;\r\n")),
+            Verified::Unknown
+        );
+        assert!(edited.live_since(&v1.id, &v1.fingerprint()).is_some());
+        assert!(edited.live_since(&v2.id, &v2.fingerprint()).is_some());
+
+        // Switched off on the server (webmail activated another script):
+        // Satchel takes the forwards over.
+        assert_eq!(read_back(&mut state, None), Verified::NotActive);
+        assert!(state.live_since(&v1.id, &v1.fingerprint()).is_none());
+        assert!(state.live_since(&v2.id, &v2.fingerprint()).is_none());
+    }
+
+    #[test]
+    fn an_adopted_push_keeps_the_start_of_unchanged_rules_and_forwards() {
+        let books = forwarding("rule-1", "books@example.test");
+        let mut state = enabled("acc", &["imap4flags", "copy"]);
+        let first = compiled_for(std::slice::from_ref(&books));
+        let hash = mark_in_flight(&mut state, &first, "2026-01-01T00:00:00+00:00");
+        let previous = state.clone();
+        mark_verified(
+            &mut state,
+            &previous,
+            &first,
+            "2026-01-01T00:00:00+00:00",
+            hash,
+        );
+        assert_eq!(
+            state.pushed_forwards["rule-1"].since,
+            "2026-01-01T00:00:00+00:00"
+        );
+
+        // The same rule plus a pin, and a new rule; the push breaks off and
+        // the read-back finds its script active.
+        let pinned = RuleSpec {
+            actions: r#"["star","forward:books@example.test"]"#.into(),
+            ..books.clone()
+        };
+        let other = forwarding("rule-2", "accounting@example.test");
+        let second = compiled_for(&[pinned.clone(), other.clone()]);
+        mark_in_flight(&mut state, &second, "2026-06-01T00:00:00+00:00");
+        assert_eq!(
+            read_back(&mut state, Some(&second.content)),
+            Verified::Adopted
+        );
+        assert_eq!(
+            state.pushed_forwards["rule-1"].since, "2026-01-01T00:00:00+00:00",
+            "the forward did not change"
+        );
+        assert_eq!(
+            state.pushed_forwards["rule-2"].since,
+            "2026-06-01T00:00:00+00:00"
+        );
+        assert_eq!(
+            state.pushed_rules_since["rule-2"],
+            "2026-06-01T00:00:00+00:00"
+        );
+
+        // An unchanged rule through an adopted push keeps its start too.
+        let third = compiled_for(&[pinned.clone(), other.clone()]);
+        let mut again = state.clone();
+        mark_in_flight(&mut again, &third, "2026-09-01T00:00:00+00:00");
+        assert_eq!(
+            read_back(&mut again, Some(&third.content)),
+            Verified::Current
+        );
+        let mut renamed = state.clone();
+        let changed = compiled_for(&[pinned, forwarding("rule-3", "x@example.test"), other]);
+        mark_in_flight(&mut renamed, &changed, "2026-09-01T00:00:00+00:00");
+        assert_eq!(
+            read_back(&mut renamed, Some(&changed.content)),
+            Verified::Adopted
+        );
+        assert_eq!(
+            renamed.pushed_rules_since["rule-2"], "2026-06-01T00:00:00+00:00",
+            "unchanged across an adopted push"
+        );
+    }
+
+    fn mixed_rule(account: Option<&str>) -> RuleSpec {
+        RuleSpec {
+            id: "rule-1".into(),
+            name: "Mixed".into(),
+            trigger_type: "on_receive".into(),
+            trigger_config: r#"{"from_contains":"x"}"#.into(),
+            actions: r#"["star","move_to_folder:f-1","forward:a@example.test","add_tag:x"]"#.into(),
+            account_id: account.map(String::from),
+        }
+    }
+
+    fn enabled(account: &str, extensions: &[&str]) -> ServerRulesState {
+        let mut state = ServerRulesState::empty(account);
+        state.enabled = true;
+        state.extensions = extensions.iter().map(|ext| ext.to_string()).collect();
+        state
+    }
+
+    #[test]
+    fn placements_name_each_action_that_stays_local() {
+        let state = enabled("acc", &["imap4flags", "fileinto"]);
+        let rule = mixed_rule(Some("acc"));
+        let folders = BTreeMap::from([(
+            "acc".to_string(),
+            BTreeMap::from([("f-1".to_string(), "Lists".to_string())]),
+        )]);
+        let placement = &placements(
+            std::slice::from_ref(&rule),
+            std::slice::from_ref(&state),
+            &folders,
+        )[0];
+        let copy = LocalReason::Extension("copy".into());
+        assert_eq!(
+            placement.actions,
+            vec![
+                // Compilable alone, but the rule as a whole stays local.
+                ActionPlacement::Local(copy.clone()),
+                ActionPlacement::Local(copy.clone()),
+                ActionPlacement::Local(copy.clone()),
+                ActionPlacement::Local(LocalReason::Action("add_tag".into())),
+            ]
+        );
+        assert_eq!(placement.local_reason, Some(copy));
+        // A rule for another account has no badge on this one.
+        let other = mixed_rule(Some("other"));
+        let placement = &placements(&[other], &[state], &folders)[0];
+        assert!(placement.actions.is_empty() && placement.local_reason.is_none());
+    }
+
+    #[test]
+    fn an_action_says_server_only_once_every_account_runs_this_version() {
+        let rule = RuleSpec {
+            actions: r#"["star"]"#.into(),
+            ..mixed_rule(None)
+        };
+        let folders = BTreeMap::new();
+        let mut first = enabled("a", &["imap4flags"]);
+        let mut second = enabled("b", &["imap4flags"]);
+        let place = |states: &[ServerRulesState]| {
+            placements(std::slice::from_ref(&rule), states, &folders)[0].clone()
+        };
+        assert_eq!(
+            place(&[first.clone(), second.clone()]).actions,
+            vec![ActionPlacement::Pending]
+        );
+        first.server_active = true;
+        first
+            .pushed_rules
+            .insert(rule.id.clone(), rule.fingerprint());
+        let partly = place(&[first.clone(), second.clone()]);
+        assert_eq!(partly.actions, vec![ActionPlacement::Pending], "one of two");
+        assert!(partly.pending);
+        second.server_active = true;
+        second
+            .pushed_rules
+            .insert(rule.id.clone(), rule.fingerprint());
+        let everywhere = place(&[first.clone(), second.clone()]);
+        assert_eq!(everywhere.actions, vec![ActionPlacement::Server]);
+        assert!(!everywhere.pending);
+        // An unscoped rule is checked against every account it applies to.
+        let poor = enabled("c", &["fileinto"]);
+        assert_eq!(
+            place(&[first, second, poor]).actions,
+            vec![ActionPlacement::Local(LocalReason::Extension(
+                "imap4flags".into()
+            ))]
         );
     }
 

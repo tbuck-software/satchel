@@ -1848,6 +1848,7 @@ fn map_graph_message(message: GraphMessage) -> MessageEnvelope {
         auth_dkim,
         auth_dmarc,
         spam_hint_headers: None,
+        satchel_marks: Vec::new(),
         attachments,
     }
 }

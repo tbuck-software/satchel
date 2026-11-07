@@ -422,6 +422,9 @@
       "restoreSearchIndexInvalid": "The backup's search index does not match its messages. Make a fresh backup instead of restoring this one.",
       "restoreStagingChanged": "The staged backup is incomplete or has changed. Stage the backup again.",
       "revealTargetBlocked": "This target cannot be opened in the file manager.",
+      "rules": {
+        "actionsInvalid": "This rule's folder or forward address is not allowed."
+      },
       "scheduledTimeInvalid": "Choose a valid send time in the future.",
       "senderAddressMissing": "This account has no sender address. Add one in Settings → Accounts, then send again.",
       "senderAddressNotOwned": "\"{address}\" is neither this account's address nor one of its aliases. Pick a different sender.",
@@ -3084,6 +3087,46 @@
       "provider": "Provider: {provider}",
       "refreshed": "{count} labels/categories updated.",
       "title": "Provider features"
+    },
+    "ruleActions": {
+      "account": "Account",
+      "accountHint": "A rule that moves mail belongs to the account whose folder it moves to.",
+      "accountMissing": "Account removed: the rule no longer runs",
+      "actionLocal": "Local only",
+      "actionPending": "Not on the server yet",
+      "actionServer": "Server",
+      "actionServerTitle": "This action also runs on the server.",
+      "addressInvalid": "Enter one email address, without a name.",
+      "addressLabel": "Forward address",
+      "addressOwn": "That is one of your own addresses: the mail would come straight back.",
+      "addressPlaceholder": "name{'@'}example.com",
+      "allAccounts": "All accounts",
+      "chooseAccountFirst": "Choose an account above to pick one of its folders.",
+      "folderLabel": "Folder",
+      "folderMissing": "Folder missing: the move does nothing",
+      "folderPlaceholder": "Choose a folder",
+      "forwardHint": "New mail is forwarded once, with the original attached; applying rules to mail you already have forwards nothing. Automatic replies and mailing-list mail are not forwarded.",
+      "forwardPaused": "Forwarding paused: this rule forwarded more than {count} messages within an hour. Check the rule, then resume forwarding. Saving the rule leaves it paused.",
+      "forwardResume": "Resume forwarding",
+      "forwardResumed": "Forwarding resumed.",
+      "forwardSummary": "Forward to {address}",
+      "keepCopy": "Keep a copy on the server",
+      "keepCopyHint": "Without a copy, the server forwards the message and keeps none: if the forward fails (the address bounces), the message is gone from your mailbox. When Satchel forwards it, the original stays either way.",
+      "kinds": {
+        "forward": "Forward to",
+        "moveToFolder": "Move to folder",
+        "star": "Pin"
+      },
+      "moveSummary": "Move to {folder}",
+      "moveSummaryMissing": "Move to a folder that no longer exists",
+      "noCopyConfirm": "On the server, messages this rule forwards are not stored in your mailbox. If the forward fails, they are lost.",
+      "noCopyConfirmAction": "Forward without a copy",
+      "noCopyConfirmTitle": "Forward without keeping a copy?",
+      "noFolders": "This account has no folder to move mail to.",
+      "oneMoveHint": "A message moves once: the first matching rule decides the folder.",
+      "onePerRule": "A rule can move to one folder and forward to one address. Remove the extra action to save.",
+      "reasonFolder": "The server does not know this folder.",
+      "serverSkips": "One forward was left to the server, which ran this rule when the message arrived. | {count} forwards were left to the server, which ran this rule when the messages arrived."
     },
     "rules": {
       "actions": {

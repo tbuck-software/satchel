@@ -5,25 +5,49 @@ import { useConfirm } from '@/composables/useConfirm';
 import {
   backendDeleteRule,
   backendGetServerRulesOverview,
+  backendListMailboxes,
   backendListRules,
+  backendResumeRuleForwarding,
   backendRunRulesForThread,
   backendRunRulesForThreads,
   backendUpsertRule,
+  type BackendMailbox,
   type BackendRule,
   type BackendServerRulesOverview,
 } from '@/services/backend';
+import { useAccountsStore } from '@/stores/accounts';
+import { useAliasesStore } from '@/stores/aliases';
 import { useThreadsStore } from '@/stores/threads';
 import AppButton from '@/components/ui/AppButton.vue';
 import AppIcon from '@/components/ui/AppIcon.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import IconButton from '@/components/ui/IconButton.vue';
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue';
+import { translateBackendError } from '@/utils/backendErrors';
 
 type ConditionField = 'from_contains' | 'to_contains' | 'subject_contains' | 'body_contains';
-type ActionKind = 'set_state' | 'set_priority' | 'set_category' | 'add_tag' | 'mark_read';
+type ActionKind = 'set_state' | 'set_priority' | 'set_category' | 'add_tag' | 'mark_read'
+  | 'star' | 'move_to_folder' | 'forward';
 
 interface ConditionDraft { field: ConditionField; value: string }
-interface ActionDraft { kind: ActionKind; value: string }
+/** `keepCopy` only matters for a forward (`forward` vs `forward_no_copy`). */
+interface ActionDraft { kind: ActionKind; value: string; keepCopy: boolean }
+
+/** Mirrors `satchel_core::rules::FORWARDS_PER_HOUR`, for the notice. */
+const FORWARDS_PER_HOUR = 20;
+/** Actions that take no value of their own. */
+const VALUELESS: ActionKind[] = ['mark_read', 'star'];
+/** Folder types a rule never moves into; the backend checks the same. */
+const NOT_A_MOVE_TARGET = new Set(['inbox', 'sent', 'drafts']);
+/** One plain address, the only form the backend accepts (`is_forward_address`). */
+const FORWARD_ADDRESS = /^[^\s<>()[\]\\,;:"@]{1,64}@(?![.-])[^\s<>()[\]\\,;:"@]*[^\s<>()[\]\\,;:"@.-]$/;
+
+function isForwardAddress(value: string): boolean {
+  const address = value.trim();
+  if (address.length > 254 || !FORWARD_ADDRESS.test(address)) return false;
+  const domain = address.slice(address.lastIndexOf('@') + 1);
+  return domain.includes('.') && !domain.includes('..');
+}
 
 const { t } = useI18n();
 const { ask } = useConfirm();
@@ -40,6 +64,9 @@ const actionKinds: ActionKind[] = [
   'set_category',
   'add_tag',
   'mark_read',
+  'star',
+  'move_to_folder',
+  'forward',
 ];
 
 const conditionLabels = computed<Record<ConditionField, string>>(() => ({
@@ -55,10 +82,17 @@ const actionLabels = computed<Record<ActionKind, string>>(() => ({
   set_category: t('settings.rules.actions.setCategory'),
   add_tag: t('settings.rules.actions.addTag'),
   mark_read: t('settings.rules.actions.markRead'),
+  star: t('settings.ruleActions.kinds.star'),
+  move_to_folder: t('settings.ruleActions.kinds.moveToFolder'),
+  forward: t('settings.ruleActions.kinds.forward'),
 }));
 
 const threads = useThreadsStore();
+const accountsStore = useAccountsStore();
+const aliasesStore = useAliasesStore();
 const rules = ref<BackendRule[]>([]);
+/** Folders of every account, for the move target. */
+const mailboxes = ref<BackendMailbox[]>([]);
 /** Where each rule runs, once an account has server rules (Sieve) on. */
 const serverRules = ref<BackendServerRulesOverview | null>(null);
 const loading = ref(false);
@@ -72,8 +106,54 @@ const description = ref('');
 const matchMode = ref<'all' | 'any'>('all');
 const priority = ref(0);
 const active = ref(true);
+/** The one account the rule applies to; '' for every account. */
+const ruleAccount = ref('');
 const conditions = ref<ConditionDraft[]>([{ field: 'from_contains', value: '' }]);
-const actions = ref<ActionDraft[]>([{ kind: 'set_category', value: 'updates' }]);
+const actions = ref<ActionDraft[]>([draft('set_category', 'updates')]);
+
+function draft(kind: ActionKind, value = '', keepCopy = true): ActionDraft {
+  return { kind, value, keepCopy };
+}
+
+const emailAccounts = computed(() => accountsStore.accounts.filter((account) => account.kind === 'email'));
+/** `me+tag@example.com` reaches `me@example.com`: compared without the tag, like the backend. */
+function mailboxKey(address: string): string {
+  const lower = address.trim().toLowerCase();
+  const at = lower.lastIndexOf('@');
+  if (at < 0) return lower;
+  return `${lower.slice(0, at).split('+')[0]}${lower.slice(at)}`;
+}
+/** Every account address and alias, as the backend refuses them as a target. */
+const ownAddresses = computed(() => new Set([
+  ...emailAccounts.value.map((account) => mailboxKey(account.email)),
+  ...aliasesStore.items.map((alias) => mailboxKey(alias.email)),
+]));
+const folderOptions = computed(() => mailboxes.value.filter((mailbox) =>
+  mailbox.account_id === ruleAccount.value && !NOT_A_MOVE_TARGET.has(mailbox.mailbox_type)));
+const hasMove = computed(() => actions.value.some((action) => action.kind === 'move_to_folder'));
+/** More than one move or forward: Save stays off, and the editor says why. */
+const tooManyTargets = computed(() =>
+  actions.value.filter((action) => action.kind === 'move_to_folder').length > 1
+  || actions.value.filter((action) => action.kind === 'forward').length > 1);
+
+/** Why a forward address cannot be saved, or ''. Empty input is not an error yet. */
+function addressError(action: ActionDraft): string {
+  const value = action.value.trim();
+  if (action.kind !== 'forward' || !value) return '';
+  if (!isForwardAddress(value)) return t('settings.ruleActions.addressInvalid');
+  if (ownAddresses.value.has(mailboxKey(value))) return t('settings.ruleActions.addressOwn');
+  return '';
+}
+
+function actionReady(action: ActionDraft): boolean {
+  if (VALUELESS.includes(action.kind)) return true;
+  if (action.value.trim().length === 0) return false;
+  if (action.kind === 'forward') return addressError(action) === '';
+  if (action.kind === 'move_to_folder') {
+    return folderOptions.value.some((folder) => folder.id === action.value);
+  }
+  return true;
+}
 
 const unusedCondition = computed(() => conditionFields.find((field) =>
   !conditions.value.some((condition) => condition.field === field)));
@@ -83,7 +163,9 @@ const canSave = computed(() =>
   uniqueConditions.value
   && name.value.trim().length > 0
   && conditions.value.some((condition) => condition.value.trim().length > 0)
-  && actions.value.every((action) => action.kind === 'mark_read' || action.value.trim().length > 0),
+  && actions.value.every(actionReady)
+  && actions.value.filter((action) => action.kind === 'move_to_folder').length <= 1
+  && actions.value.filter((action) => action.kind === 'forward').length <= 1,
 );
 
 async function load() {
@@ -91,6 +173,7 @@ async function load() {
   error.value = '';
   try {
     rules.value = await backendListRules();
+    mailboxes.value = (await backendListMailboxes()) ?? [];
   } catch (err) {
     error.value = t('settings.rules.loadFailed', { error: String(err) });
   } finally {
@@ -140,11 +223,19 @@ function placementBadge(rule: BackendRule): RuleBadge | null {
   return { server: false, label: t('settings.rules.placement.local'), title: localReason(placement) };
 }
 
-function localReason(placement: BackendServerRulesOverview['rules'][number] | undefined): string {
+type Placement = BackendServerRulesOverview['rules'][number];
+type LocalReason = NonNullable<Placement['local_reason']>;
+
+function localReason(placement: Placement | undefined): string {
   const reason = placement?.local_reason;
   if (!reason) {
     return placement?.pending ? t('settings.rules.placement.pending') : t('settings.rules.placement.reasonOther');
   }
+  return reasonText(reason);
+}
+
+function reasonText(reason: LocalReason): string {
+  if (reason.kind === 'folder') return t('settings.ruleActions.reasonFolder');
   if (reason.kind === 'action') {
     const kind = reason.detail as ActionKind | null;
     const action = kind && kind in actionLabels.value ? actionLabels.value[kind] : reason.detail ?? '';
@@ -157,6 +248,80 @@ function localReason(placement: BackendServerRulesOverview['rules'][number] | un
   return t('settings.rules.placement.reasonOther');
 }
 
+/**
+ * Whether one action of a saved rule can run on the server, for the badge
+ * beside it in the editor. Only for an action that is still what was saved:
+ * the server's answer is about that version.
+ */
+function actionBadge(index: number): RuleBadge | null {
+  if (!serverRulesOn.value || !editingId.value) return null;
+  const saved = rules.value.find((rule) => rule.id === editingId.value);
+  const action = actions.value[index];
+  if (!saved || !action || saved.actions[index] !== serializeAction(action)) return null;
+  const placement = serverRules.value?.rules.find((entry) => entry.rule_id === saved.id);
+  const entry = placement?.actions[index];
+  if (!entry) return null;
+  if (entry.state === 'server') {
+    return { server: true, label: t('settings.ruleActions.actionServer'), title: t('settings.ruleActions.actionServerTitle') };
+  }
+  if (entry.state === 'pending') {
+    return { server: false, label: t('settings.ruleActions.actionPending'), title: t('settings.rules.placement.pending') };
+  }
+  return {
+    server: false,
+    label: t('settings.ruleActions.actionLocal'),
+    title: entry.reason ? reasonText(entry.reason) : t('settings.rules.placement.reasonOther'),
+  };
+}
+
+/** A move whose folder is gone, or a rule whose account was removed. */
+function brokenReason(rule: BackendRule): string {
+  if (rule.account_id && !emailAccounts.value.some((account) => account.id === rule.account_id)) {
+    return t('settings.ruleActions.accountMissing');
+  }
+  const missing = rule.actions.map(parseAction).some((action) =>
+    action.kind === 'move_to_folder' && !mailboxes.value.some((mailbox) => mailbox.id === action.value));
+  return missing ? t('settings.ruleActions.folderMissing') : '';
+}
+
+/**
+ * Turning the server copy off means the server keeps nothing of a forwarded
+ * message; it is asked once, at the switch.
+ */
+async function confirmNoCopy(next: boolean): Promise<boolean> {
+  if (next) return true;
+  return ask({
+    title: t('settings.ruleActions.noCopyConfirmTitle'),
+    body: t('settings.ruleActions.noCopyConfirm'),
+    confirmLabel: t('settings.ruleActions.noCopyConfirmAction'),
+    tone: 'danger',
+  });
+}
+
+async function resumeForwarding(rule: BackendRule) {
+  try {
+    await backendResumeRuleForwarding(rule.id);
+    notice.value = t('settings.ruleActions.forwardResumed');
+    await load();
+  } catch (err) {
+    error.value = t('settings.rules.saveFailed', { error: translateBackendError(err) ?? String(err) });
+  }
+}
+
+function ruleInput(rule: BackendRule) {
+  return {
+    id: rule.id,
+    name: rule.name,
+    description: rule.description,
+    trigger_type: rule.trigger_type,
+    trigger_config: rule.trigger_config,
+    actions: rule.actions,
+    is_active: rule.is_active,
+    priority: rule.priority,
+    account_id: rule.account_id,
+  };
+}
+
 function resetEditor() {
   editingId.value = null;
   name.value = '';
@@ -164,8 +329,9 @@ function resetEditor() {
   matchMode.value = 'all';
   priority.value = 0;
   active.value = true;
+  ruleAccount.value = '';
   conditions.value = [{ field: 'from_contains', value: '' }];
-  actions.value = [{ kind: 'set_category', value: 'updates' }];
+  actions.value = [draft('set_category', 'updates')];
 }
 
 function startCreate() {
@@ -189,28 +355,45 @@ function editRule(rule: BackendRule) {
   description.value = rule.description ?? '';
   priority.value = rule.priority;
   active.value = rule.is_active;
+  ruleAccount.value = rule.account_id ?? '';
   matchMode.value = rule.trigger_config.match === 'any' ? 'any' : 'all';
   conditions.value = conditionFields
     .filter((field) => typeof rule.trigger_config[field] === 'string')
     .map((field) => ({ field, value: String(rule.trigger_config[field]) }));
   if (conditions.value.length === 0) conditions.value = [{ field: 'from_contains', value: '' }];
   actions.value = rule.actions.map(parseAction);
-  if (actions.value.length === 0) actions.value = [{ kind: 'set_category', value: 'updates' }];
+  if (actions.value.length === 0) actions.value = [draft('set_category', 'updates')];
   editorOpen.value = true;
   notice.value = '';
 }
 
 function parseAction(action: string): ActionDraft {
-  if (action === 'mark_read') return { kind: 'mark_read', value: '' };
+  if (action === 'mark_read' || action === 'star') return draft(action);
   const [kind, ...rest] = action.split(':');
-  if (kind && actionKinds.includes(kind as ActionKind)) {
-    return { kind: kind as ActionKind, value: rest.join(':') };
-  }
-  return { kind: 'add_tag', value: action };
+  const value = rest.join(':');
+  if (kind === 'forward_no_copy') return draft('forward', value, false);
+  if (kind && actionKinds.includes(kind as ActionKind)) return draft(kind as ActionKind, value);
+  return draft('add_tag', action);
 }
 
 function serializeAction(action: ActionDraft): string {
-  return action.kind === 'mark_read' ? 'mark_read' : `${action.kind}:${action.value.trim()}`;
+  if (VALUELESS.includes(action.kind)) return action.kind;
+  if (action.kind === 'forward') {
+    return `${action.keepCopy ? 'forward' : 'forward_no_copy'}:${action.value.trim()}`;
+  }
+  return `${action.kind}:${action.value.trim()}`;
+}
+
+/** The action as the rule list reads it: with its folder or address. */
+function actionSummary(action: ActionDraft): string {
+  if (action.kind === 'move_to_folder') {
+    const folder = mailboxes.value.find((mailbox) => mailbox.id === action.value);
+    return folder
+      ? t('settings.ruleActions.moveSummary', { folder: folder.name })
+      : t('settings.ruleActions.moveSummaryMissing');
+  }
+  if (action.kind === 'forward') return t('settings.ruleActions.forwardSummary', { address: action.value });
+  return actionLabels.value[action.kind];
 }
 
 function actionDefault(kind: ActionKind): string {
@@ -230,7 +413,7 @@ function addCondition() {
 }
 
 function addAction() {
-  actions.value.push({ kind: 'mark_read', value: '' });
+  actions.value.push(draft('mark_read'));
 }
 
 async function save() {
@@ -256,20 +439,21 @@ async function save() {
       actions: actions.value.map(serializeAction),
       is_active: active.value,
       priority: priority.value,
+      account_id: ruleAccount.value || null,
     });
     editorOpen.value = false;
     notice.value = t('settings.rules.saved');
     await load();
     refreshPlacementsSoon();
   } catch (err) {
-    error.value = t('settings.rules.saveFailed', { error: String(err) });
+    error.value = t('settings.rules.saveFailed', { error: translateBackendError(err) ?? String(err) });
   } finally {
     saving.value = false;
   }
 }
 
 async function toggleRule(rule: BackendRule) {
-  await backendUpsertRule({ ...rule, id: rule.id, is_active: !rule.is_active });
+  await backendUpsertRule({ ...ruleInput(rule), is_active: !rule.is_active });
   await load();
   refreshPlacementsSoon();
 }
@@ -330,7 +514,11 @@ function ruleSummary(rule: BackendRule): string {
 
 const hasActiveRule = computed(() => rules.value.some((rule) => rule.is_active));
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  // The forward address check knows the aliases as well as the accounts.
+  if (aliasesStore.items.length === 0) void aliasesStore.load().catch(() => undefined);
+});
 </script>
 
 <template>
@@ -370,14 +558,22 @@ onMounted(load);
               :title="placementBadge(rule)!.title"
               data-testid="rule-placement"
             >{{ placementBadge(rule)!.label }}</span>
+            <span v-if="brokenReason(rule)" class="status broken" data-testid="rule-broken">{{ brokenReason(rule) }}</span>
           </div>
           <div class="rule-flow-preview">
             <span class="flow-kicker condition">{{ $t('settings.rules.when') }}</span>
             <span class="flow-copy">{{ ruleSummary(rule) }}</span>
             <svg class="flow-arrow" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h13m-4-4 4 4-4 4" /></svg>
             <span class="flow-kicker action">{{ $t('settings.rules.then') }}</span>
-            <span class="flow-copy">{{ rule.actions.map(parseAction).map((action) => actionLabels[action.kind]).join(' · ') }}</span>
+            <span class="flow-copy">{{ rule.actions.map(parseAction).map(actionSummary).join(' · ') }}</span>
           </div>
+          <p v-if="rule.forward_paused_at" role="alert" class="rule-notice" data-testid="rule-forward-paused">
+            {{ $t('settings.ruleActions.forwardPaused', { count: FORWARDS_PER_HOUR }) }}
+            <AppButton size="sm" @click="void resumeForwarding(rule)">{{ $t('settings.ruleActions.forwardResume') }}</AppButton>
+          </p>
+          <p v-if="rule.server_forward_skips > 0" class="field-hint" data-testid="rule-server-skips">
+            {{ $t('settings.ruleActions.serverSkips', rule.server_forward_skips) }}
+          </p>
         </div>
         <div class="rule-actions">
           <AppButton size="sm" @click="void toggleRule(rule)">
@@ -397,6 +593,13 @@ onMounted(load);
       <label>{{ $t('common.name') }} <input v-model="name" maxlength="160" required /></label>
       <label>{{ $t('common.description') }} <input v-model="description" maxlength="500" /></label>
       <label>{{ $t('settings.rules.priority') }} <input v-model.number="priority" type="number" min="-1000" max="1000" /></label>
+      <label>{{ $t('settings.ruleActions.account') }}
+        <select v-model="ruleAccount" data-testid="rule-account">
+          <option value="">{{ $t('settings.ruleActions.allAccounts') }}</option>
+          <option v-for="account in emailAccounts" :key="account.id" :value="account.id">{{ account.email }}</option>
+        </select>
+        <span v-if="hasMove" class="field-hint">{{ $t('settings.ruleActions.accountHint') }}</span>
+      </label>
 
       <fieldset>
         <legend>{{ $t('settings.rules.conditionsLegend') }}</legend>
@@ -431,7 +634,44 @@ onMounted(load);
           <select v-else-if="action.kind === 'set_priority'" v-model="action.value"><option value="0">{{ $t('common.none') }}</option><option value="1">{{ $t('settings.rules.priorities.low') }}</option><option value="2">{{ $t('settings.rules.priorities.medium') }}</option><option value="3">{{ $t('settings.rules.priorities.high') }}</option></select>
           <select v-else-if="action.kind === 'set_category'" v-model="action.value"><option value="personal">{{ $t('settings.rules.categories.personal') }}</option><option value="updates">{{ $t('settings.rules.categories.updates') }}</option><option value="promotions">{{ $t('settings.rules.categories.promotions') }}</option><option value="social">{{ $t('settings.rules.categories.social') }}</option><option value="none">{{ $t('common.none') }}</option></select>
           <input v-else-if="action.kind === 'add_tag'" v-model="action.value" maxlength="80" :placeholder="$t('settings.rules.tagPlaceholder')" />
+          <template v-else-if="action.kind === 'move_to_folder'">
+            <select
+              v-if="ruleAccount && folderOptions.length > 0"
+              v-model="action.value"
+              :aria-label="$t('settings.ruleActions.folderLabel')"
+              data-testid="rule-folder"
+            >
+              <option value="" disabled>{{ $t('settings.ruleActions.folderPlaceholder') }}</option>
+              <option v-for="folder in folderOptions" :key="folder.id" :value="folder.id">{{ folder.name }}</option>
+            </select>
+            <span v-else class="action-hint">{{ ruleAccount ? $t('settings.ruleActions.noFolders') : $t('settings.ruleActions.chooseAccountFirst') }}</span>
+          </template>
+          <div v-else-if="action.kind === 'forward'" class="forward-fields">
+            <input
+              v-model="action.value"
+              type="email"
+              inputmode="email"
+              autocomplete="email"
+              maxlength="254"
+              :aria-label="$t('settings.ruleActions.addressLabel')"
+              :aria-invalid="addressError(action) ? 'true' : undefined"
+              :aria-describedby="`rule-forward-hint-${index}`"
+              :placeholder="$t('settings.ruleActions.addressPlaceholder')"
+              data-testid="rule-forward-address"
+            />
+            <p v-if="addressError(action)" role="alert" class="field-error">{{ addressError(action) }}</p>
+            <ToggleSwitch v-model="action.keepCopy" :before-change="confirmNoCopy">{{ $t('settings.ruleActions.keepCopy') }}</ToggleSwitch>
+            <p :id="`rule-forward-hint-${index}`" class="field-hint">
+              {{ $t('settings.ruleActions.forwardHint') }}
+              <template v-if="!action.keepCopy"> {{ $t('settings.ruleActions.keepCopyHint') }}</template>
+            </p>
+          </div>
           <span v-else class="action-hint">{{ $t('settings.rules.noExtraInput') }}</span>
+          <span
+            :class="['status', 'placement', { server: actionBadge(index)?.server }]"
+            :title="actionBadge(index)?.title"
+            data-testid="action-placement"
+          >{{ actionBadge(index)?.label }}</span>
           <IconButton
             :title="$t('settings.rules.removeAction')"
             :disabled="actions.length === 1"
@@ -442,9 +682,11 @@ onMounted(load);
             </svg>
           </IconButton>
         </div>
+        <p v-if="hasMove" class="field-hint">{{ $t('settings.ruleActions.oneMoveHint') }}</p>
         <AppButton size="sm" @click="addAction">{{ $t('settings.rules.addAction') }}</AppButton>
       </fieldset>
 
+      <p v-if="tooManyTargets" class="field-hint save-hint" data-testid="rule-one-target">{{ $t('settings.ruleActions.onePerRule') }}</p>
       <div class="editor-actions">
         <AppButton @click="editorOpen = false">{{ $t('common.cancel') }}</AppButton>
         <AppButton variant="primary" type="submit" :disabled="!canSave || saving">
@@ -497,6 +739,8 @@ input, select { border: 1px solid var(--border-color-muted); border-radius: var(
 .status { padding: 2px 7px; border-radius: var(--radius-full); background: var(--bg-overlay); color: var(--text-tertiary); font-size: var(--font-size-2xs); text-transform: uppercase; }
 .status.active { color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 14%, transparent); }
 .status.placement { text-transform: none; }
+.status.broken { text-transform: none; color: var(--accent-red); background: color-mix(in srgb, var(--accent-red) 12%, transparent); }
+.rule-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 0; color: var(--accent-amber); font-size: var(--font-size-xs); }
 .status.placement.server { color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 14%, transparent); }
 .rule-flow-preview { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto minmax(0, 1fr); align-items: center; gap: 8px; margin-top: 3px; }
 .flow-kicker { padding: 3px 7px; border-radius: var(--radius-full); font-size: var(--font-size-2xs); font-weight: var(--weight-bold); letter-spacing: .035em; text-transform: uppercase; }
@@ -509,7 +753,14 @@ input, select { border: 1px solid var(--border-color-muted); border-radius: var(
 fieldset { display: grid; gap: 9px; margin: 0; padding: 12px; border: 1px solid var(--border-color-muted); border-radius: var(--radius-sm); }
 legend { padding: 0 6px; font-weight: var(--weight-semibold); }
 .inline { justify-content: flex-start; gap: 8px; }
-.flow-row { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(180px, 1fr) auto; gap: 8px; }
+.flow-row { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(180px, 1fr) auto auto; align-items: start; gap: 8px; }
+.flow-row .status.placement:empty { display: none; }
+.flow-row .status.placement { align-self: center; }
+.forward-fields { display: grid; gap: 6px; min-width: 0; }
+.save-hint { text-align: right; }
+.field-hint { margin: 0; color: var(--text-tertiary); font-size: var(--font-size-xs); line-height: 1.45; }
+.field-error { margin: 0; color: var(--accent-red); font-size: var(--font-size-xs); }
+.editor > label > select { width: 100%; }
 .action-hint { padding: 8px 10px; color: var(--text-tertiary); }
 .editor-actions { justify-content: flex-end; }
 .run-actions { display: flex; flex-wrap: wrap; gap: 8px; }

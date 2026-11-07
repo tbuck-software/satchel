@@ -310,6 +310,9 @@
       "restoreSearchIndexInvalid": "Der Suchindex der Sicherung passt nicht zu ihren Nachrichten. Lege lieber eine frische Sicherung an, statt diese zurückzuspielen.",
       "restoreStagingChanged": "Die vorgemerkte Sicherung ist unvollständig oder wurde verändert. Merke die Sicherung erneut vor.",
       "revealTargetBlocked": "Dieses Ziel kann nicht im Dateimanager geöffnet werden.",
+      "rules": {
+        "actionsInvalid": "Ordner oder Weiterleitungsadresse dieser Regel sind nicht erlaubt."
+      },
       "scheduledTimeInvalid": "Wähle einen gültigen Sendezeitpunkt in der Zukunft.",
       "senderAddressMissing": "Dieses Konto hat keine Absenderadresse. Trage sie unter Einstellungen → Konten ein und sende erneut.",
       "senderAddressNotOwned": "\"{address}\" ist weder die Adresse dieses Kontos noch einer seiner Aliase. Wähle einen anderen Absender.",

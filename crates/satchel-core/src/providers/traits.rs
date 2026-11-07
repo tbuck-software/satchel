@@ -141,6 +141,11 @@ pub struct MessageEnvelope {
     /// Only providers that see the raw header block fill it.
     #[serde(default)]
     pub spam_hint_headers: Option<String>,
+    /// Satchel's own IMAP keywords on the message, lower case
+    /// (`$satchelfwd`, `$satchelfiled`): what the account's Sieve
+    /// script did to it. See [`crate::rules`]. Only IMAP fills it.
+    #[serde(default)]
+    pub satchel_marks: Vec<String>,
     #[serde(default)]
     pub attachments: Vec<RemoteAttachment>,
 }
@@ -374,6 +379,11 @@ pub struct OutgoingMessage {
     /// RFC 4021 importance. "high" | "normal" | "low"; None sends no header.
     #[serde(default)]
     pub priority: Option<String>,
+    /// RFC 3834 `Auto-Submitted` value for mail Satchel sends on its own
+    /// (`auto-generated` for a rule's forward), so the receiving side does
+    /// not answer or forward it again. None sends no header.
+    #[serde(default)]
+    pub auto_submitted: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

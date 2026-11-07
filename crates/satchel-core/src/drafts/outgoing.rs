@@ -87,6 +87,11 @@ pub struct OutgoingMessageInput {
     pub signature_override_text: Option<String>,
     #[serde(default)]
     pub signature_override_html: Option<String>,
+    /// RFC 3834 `Auto-Submitted` for mail Satchel sends on its own (a rule's
+    /// forward). Not part of the composer's input: `send_message` drops it.
+    #[serde(default)]
+    #[cfg_attr(feature = "ipc-types", ts(skip))]
+    pub auto_submitted: Option<String>,
 }
 
 /// Reduce recipient entries to the addresses they contain, in order.

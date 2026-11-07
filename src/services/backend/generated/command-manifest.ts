@@ -2040,6 +2040,17 @@ export default {
                 }
             }
         },
+        "resume_rule_forwarding": {
+            "kind": "object",
+            "fields": {
+                "ruleId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "retry_failed_sync_actions": {
             "kind": "object",
             "fields": {}
@@ -4572,6 +4583,15 @@ export default {
         "app::commands::rules::UpsertRuleInput": {
             "kind": "object",
             "fields": {
+                "account_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
                 "actions": {
                     "required": true,
                     "shape": {
@@ -6890,6 +6910,15 @@ export default {
                         "item": {
                             "kind": "ref",
                             "name": "core::drafts::outgoing::OutgoingAttachmentInput"
+                        }
+                    }
+                },
+                "auto_submitted": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
                         }
                     }
                 },

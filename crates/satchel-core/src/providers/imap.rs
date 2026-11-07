@@ -5144,6 +5144,14 @@ fn envelope_from_fetch(
         .flags()
         .any(|flag| matches!(flag, async_imap::types::Flag::Flagged));
     let workflow_marker = Some(workflow_marker_from_flags(entry.flags()));
+    let keywords: Vec<String> = entry
+        .flags()
+        .filter_map(|flag| match flag {
+            async_imap::types::Flag::Custom(keyword) => Some(keyword.to_string()),
+            _ => None,
+        })
+        .collect();
+    let satchel_marks = crate::rules::satchel_marks(keywords.iter().map(String::as_str));
 
     let list_unsubscribe = parse_header_value(&header, "List-Unsubscribe");
     let list_unsubscribe_post = parse_header_value(&header, "List-Unsubscribe-Post");
@@ -5189,6 +5197,7 @@ fn envelope_from_fetch(
         auth_dkim,
         auth_dmarc,
         spam_hint_headers: crate::spam::tokenizer::extract_hint_headers(&header),
+        satchel_marks,
         attachments,
     }
 }

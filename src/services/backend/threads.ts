@@ -73,7 +73,8 @@ export async function backendResolveMessageLink(messageId: string): Promise<stri
 export type BackendRule = ProjectedWireFields<OptionalWireFields<WireRuleDto, 'description'>, { trigger_config: Record<string, unknown> }>;
 
 
-export type BackendRuleInput = Omit<BackendRule, 'id'> & { id?: string | null };
+/** What a save sends; the pause and the skip count are the backend's. */
+export type BackendRuleInput = Omit<BackendRule, 'id' | 'forward_paused_at' | 'server_forward_skips'> & { id?: string | null };
 
 
 export async function backendListRules(): Promise<BackendRule[]> {
@@ -83,6 +84,12 @@ export async function backendListRules(): Promise<BackendRule[]> {
 
 export async function backendUpsertRule(input: BackendRuleInput): Promise<BackendRule> {
   return invoke<BackendRule>('upsert_rule', { input });
+}
+
+
+/** Turn a rule's paused forward back on; saving the rule does not. */
+export async function backendResumeRuleForwarding(ruleId: string): Promise<void> {
+  return invoke<void>('resume_rule_forwarding', { ruleId });
 }
 
 
