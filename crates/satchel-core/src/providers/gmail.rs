@@ -2737,6 +2737,10 @@ fn map_gmail_message(message: GmailMessageResponse) -> MessageEnvelope {
         satchel_marks: Vec::new(),
         chat,
         autocrypt_headers,
+        autocrypt_eligible: crate::chat::autocrypt_eligible(
+            header_value(&headers, "From").as_deref(),
+            header_value(&headers, "Content-Type").as_deref(),
+        ),
         attachments,
     }
 }

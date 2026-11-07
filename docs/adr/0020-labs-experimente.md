@@ -31,6 +31,16 @@ Experiment darf dort weder Code noch Texte kosten.
   Daten, die ohnehin anfallen (der `Chat-Version`-Header), werden unabhängig
   vom Schalter gespeichert, damit Einschalten vorhandene Mail zeigt.
 
+- Das eigene `Autocrypt:`-Header geht **nur mit Chat-Nachrichten** hinaus,
+  nicht mit jeder Mail, und Peer-Schlüssel sammelt Satchel nur bei
+  eingeschalteten Chats (Spam, Papierkorb, `multipart/report`, mehrere
+  Absender, eigene Aliase und DMARC-`fail` zählen nicht). Level 1 empfiehlt das
+  Header in jeder Mail („Header injection in outbound mail“). Folge: Schreibt
+  jemand einem Delta-Chat-Kontakt länger als 35 Tage nur normale Mails, sinkt
+  dessen Empfehlung für uns auf „discourage“ („Recommendation“, Schritt 4),
+  bis die nächste Chat-Nachricht kommt. Bewusst so: ein Experiment soll den
+  normalen Mailverkehr nicht verändern.
+
 ## Folgen
 
 - Ein neues Experiment: Eintrag in beiden Listen, Texte in einem eigenen

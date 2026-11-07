@@ -17,13 +17,21 @@ function message(id: string, email: string, timestamp: string, bodyText: string)
 }
 
 describe('chatBubbleText', () => {
-  it('drops the footer after the "-- " line and quoted lines', () => {
-    expect(chatBubbleText('> earlier\n\nSee you\n-- \nSent with Delta Chat')).toBe('See you');
-    expect(chatBubbleText('Line one\r\nLine two')).toBe('Line one\nLine two');
+  it('drops the footer after the "-- " line and quoted lines, and says so', () => {
+    expect(chatBubbleText('> earlier\n\nSee you\n-- \nSent with Delta Chat')).toEqual({ text: 'See you', cut: true });
+    expect(chatBubbleText('Line one\r\nLine two')).toEqual({ text: 'Line one\nLine two', cut: false });
+  });
+
+  it('starts the footer only at "-- " with its space', () => {
+    expect(chatBubbleText('Score\n--\n3:1')).toEqual({ text: 'Score\n--\n3:1', cut: false });
+  });
+
+  it('keeps the user\'s own quoted lines', () => {
+    expect(chatBubbleText('> as I said\nyes', { keepQuotes: true })).toEqual({ text: '> as I said\nyes', cut: false });
   });
 
   it('keeps a message that is nothing but a quote', () => {
-    expect(chatBubbleText('> only a quote')).toBe('> only a quote');
+    expect(chatBubbleText('> only a quote')).toEqual({ text: '> only a quote', cut: false });
   });
 });
 

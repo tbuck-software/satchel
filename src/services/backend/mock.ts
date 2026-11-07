@@ -108,7 +108,7 @@ const labsSlot = createPersistedSlot<Record<string, boolean>>('satchel.mock.labs
   encode: value => JSON.stringify(value),
 });
 const labsFlags = persistence.read(labsSlot);
-const chatThreads = new Map<string, { groupId: string | null; groupName: string | null; encrypted: boolean }>();
+const chatThreads = new Map<string, { groupId: string | null; groupName: string | null; encrypted: boolean; encryptedBefore: boolean }>();
 /*
  * The account's own OpenPGP key for chats. `?mockChatKeyLocked` starts it
  * locked, behind the passphrase below, as after a restart.
@@ -118,30 +118,60 @@ const MOCK_CHAT_KEY_PASSPHRASE = 'correct horse';
 let chatKeyUnlocked = !(typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockChatKeyLocked'));
 function seedChats() {
   if (chatThreads.size > 0) return;
+  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
   for (const chat of mockChatThreads()) {
-    chatThreads.set(chat.thread.id, { groupId: chat.groupId, groupName: chat.groupName, encrypted: chat.encrypted });
+    const list = chat.messages.map((message) => ({ ...message }));
+    let encryptedBefore = chat.encrypted;
+    if (chat.groupId && params.has('mockChatHijack')) {
+      // A stranger threads into the group with its id and a list of their own.
+      list.push({ ...list.at(-1)!, id: `${chat.thread.id}-evil`, from: { name: 'Mia', email: 'spam@evil.test' },
+        to: [{ name: 'Tom', email: 'tom@satchel.dev' }, { name: 'Victim', email: 'victim@example.test' }],
+        bodyText: 'Neue Gruppe, bitte hier antworten', timestamp: new Date().toISOString() });
+    }
+    if (chat.groupId && params.has('mockChatNewMember')) {
+      // Your last reply went to the three; then Mia brought Noah in. The group was encrypted.
+      list.splice(1, 0, { ...list[0]!, id: `${chat.thread.id}-own`, from: { name: 'Tom', email: 'tom@satchel.dev' },
+        to: list[0]!.to.filter((person) => person.email !== 'tom@satchel.dev').concat([list[0]!.from]),
+        bodyText: 'Super!', timestamp: list[0]!.timestamp });
+      list.push({ ...list.at(-1)!, id: `${chat.thread.id}-noah`, to: [...list.at(-1)!.to, { name: 'Noah', email: 'noah@example.test' }],
+        bodyText: 'Ich hab Noah dazugeholt', timestamp: new Date().toISOString() });
+      encryptedBefore = true;
+    }
+    chatThreads.set(chat.thread.id, { groupId: chat.groupId, groupName: chat.groupName, encrypted: chat.encrypted, encryptedBefore });
     threads.push({ ...chat.thread });
-    messages[chat.thread.id] = chat.messages.map((message) => ({ ...message }));
+    messages[chat.thread.id] = list;
   }
 }
 if (labsFlags.chats || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockChats'))) {
   seedChats();
 }
-/** Who a chat line goes to, as `db::chats` works it out. */
-function chatRecipients(threadId: string, own: string): string[] {
+/**
+ * Who a chat line goes to, as `db::chats` works it out: a group starts from
+ * your last reply (or its first message) and grows only through members; a
+ * one-to-one chat keeps its peer. Returns the recipients of your last reply too.
+ */
+function chatRecipients(threadId: string, own: string): { recipients: string[]; lastReply: string[] | null } {
   const list = (messages[threadId] ?? []).filter((message) => !message.isDraft);
-  const latest = list.at(-1);
   const isOwn = (email: string) => email.toLowerCase() === own.toLowerCase();
-  const candidates = chatThreads.get(threadId)?.groupId
-    ? [latest?.from, ...(latest?.to ?? []), ...(latest?.cc ?? [])]
-    : [[...list].reverse().find((message) => !isOwn(message.from.email))?.from ?? latest?.to[0]];
-  const out: string[] = [];
-  for (const person of candidates) {
-    const email = person?.email.toLowerCase();
-    if (email && !isOwn(email) && !out.includes(email)) out.push(email);
+  const others = (message: Message) => [message.from, ...message.to, ...(message.cc ?? [])]
+    .map((person) => person.email.toLowerCase()).filter((email) => !isOwn(email));
+  const lastOwn = list.map((message) => isOwn(message.from.email)).lastIndexOf(true);
+  const recipients: string[] = [];
+  const add = (email: string) => { if (!recipients.includes(email)) recipients.push(email); };
+  if (chatThreads.get(threadId)?.groupId) {
+    const base = lastOwn >= 0 ? lastOwn : 0;
+    if (list[base]) others(list[base]).forEach(add);
+    for (const message of list.slice(base + 1)) {
+      if (recipients.includes(message.from.email.toLowerCase())) others(message).forEach(add);
+    }
+  } else {
+    const anchor = lastOwn >= 0 ? list[lastOwn] : list[0];
+    const peer = anchor && (isOwn(anchor.from.email) ? others(anchor)[0] : anchor.from.email.toLowerCase());
+    if (peer) add(peer);
   }
-  return out;
+  return { recipients, lastReply: lastOwn >= 0 ? others(list[lastOwn]!) : null };
 }
+const sameSet = (a: string[], b: string[]) => [...new Set(a)].sort().join() === [...new Set(b)].sort().join();
 // 96px PNG, a rowing boat at sunset: an account picture the user chose.
 const MOCK_CLUB_AVATAR = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAAASFBMVEX/8Mj+w278wm/7wW/6wHD5v3D4v3H3vnH1vXL0vHPzu3PyunTwuXXvuHXut3bttnbstnfrtXfqtHjos3nnsnlGgrQmXIwoHh7S40JTAAABZklEQVR42u2T21LDMAwFxb2QFGhx7P//Ux6apmAf2YosM03xvmlG3m3SmO4aQz1QDNw3pgfKgYfGtA88NuYGAk+NaR94bkxtgE5kFl5qoAvsio2eT5CZnynQTgulwDVDPyxcbYBIWKBXHUwALJr6QYHeVLCBdHP7gUEFG0g3/2tgkPoHGnUwAbA4WhbGLQVGmX+kvZrEj7f2ZgVm6b2GH3p2JSsIIZTmvD4fCCfEMw588MwC8Qyhon8xlGYm8MmyCIQzhg4si0A4YzKBw+V8EM36wPwrS7M6cD5fmnHgyLO85CCbIaKAcFYHpDMOfPHM58Uz5AYCjmcWiGcIAWM9XMDZ+6OAM/fHAWftd+Qjqv2RLwl4Wz8IeFM/CnhL/zkw/cLQbxvwfMDkFXlhIF4F81Qk/5nW+zMBgd+vgRr7wROsnIWB8rvU8leBdigC01T1mV5BYPv/Qb8H/R70e9DvQb8H/R6s5xsUyBEGcUIQNgAAAABJRU5ErkJggg==';
 // A second mailbox for visibility walkthroughs; all policy behavior still runs
@@ -1737,13 +1767,14 @@ const handlers: Record<string, Handler> = {
     const own = accounts.find((account) => account.id === thread.accountId)?.email ?? '';
     const names = new Map((messages[threadId] ?? []).flatMap((message) => [message.from, ...message.to])
       .map((person) => [person.email.toLowerCase(), person.name] as const));
+    const { recipients, lastReply } = chatRecipients(threadId, own);
     return {
       thread_id: threadId,
       account_id: thread.accountId,
       own_address: own,
       group_id: chat.groupId,
       group_name: chat.groupName,
-      members: chatRecipients(threadId, own).map((address) => ({
+      members: recipients.map((address) => ({
         address,
         name: names.get(address) ?? null,
         encryption: chat.encrypted ? 'encrypt' : 'disable',
@@ -1752,25 +1783,38 @@ const handlers: Record<string, Handler> = {
       own_key_id: chat.encrypted ? MOCK_CHAT_KEY_ID : null,
       own_key_unlocked: chat.encrypted && chatKeyUnlocked,
       encrypts: chat.encrypted,
+      last_reply_recipients: lastReply,
+      recipients_changed: lastReply !== null && !sameSet(lastReply, recipients),
+      encryption_downgrade: chat.encryptedBefore && !chat.encrypted,
     };
   },
   send_chat_message: (payload) => {
-    const { thread_id: threadId, text, allow_unsigned: allowUnsigned } = input(payload) as { thread_id: string; text: string; allow_unsigned?: boolean };
+    const scope = input(payload) as { thread_id: string; text: string; allow_unsigned?: boolean;
+      expected_recipients?: string[] | null; confirm_recipients?: boolean; allow_plaintext?: boolean };
+    const { thread_id: threadId, text, allow_unsigned: allowUnsigned } = scope;
     if (!text.trim()) throw new Error('backend.errors.unexpected');
     const thread = findThread(threadId);
     const chat = chatThreads.get(threadId);
     if (!thread || !chat) throw new Error('backend.errors.chatNotAChat');
-    // Like `signing_decision`: an encrypted reply waits for the key or an explicit unsigned send.
-    if (chat.encrypted && !chatKeyUnlocked && !allowUnsigned) throw new Error('backend.errors.chatKeyLocked');
     const account = accounts.find((entry) => entry.id === thread.accountId);
     const own = account?.email ?? '';
+    // Like `confirmation_decision`: only to the recipients shown, and changes or plain text only when confirmed.
+    const { recipients, lastReply } = chatRecipients(threadId, own);
+    const changed = lastReply !== null && !sameSet(lastReply, recipients);
+    if ((scope.expected_recipients && !sameSet(scope.expected_recipients, recipients))
+      || (changed && !(scope.confirm_recipients && scope.expected_recipients))
+      || (chat.encryptedBefore && !chat.encrypted && !scope.allow_plaintext)) {
+      throw new Error('backend.errors.chatConfirmationNeeded');
+    }
+    // Like `signing_decision`: an encrypted reply waits for the key or an explicit unsigned send.
+    if (chat.encrypted && !chatKeyUnlocked && !allowUnsigned) throw new Error('backend.errors.chatKeyLocked');
     const now = new Date().toISOString();
     const messageId = nextId('msg');
     const sent: Message = {
       id: messageId,
       threadId,
       from: { name: account?.displayName ?? '', email: own },
-      to: chatRecipients(threadId, own).map((email) => ({ name: email, email })),
+      to: recipients.map((email) => ({ name: email, email })),
       subject: chat.groupName ? `Chat: ${chat.groupName}` : `Message from ${account?.displayName ?? own}`,
       bodyText: text.trimEnd(),
       bodyLoaded: true,

@@ -1,19 +1,32 @@
 import type { Message } from '@/types/mail';
 
+export interface BubbleText {
+  text: string;
+  /** Something of the message is not in the bubble (footer, quote). */
+  cut: boolean;
+}
+
 /**
  * The text a chat bubble shows. Delta Chat sends plain text and "MAY" split
- * off a footer with the line `-- ` ("the user-text-part and a footer-part");
- * "full quotes, footers or sth. like that MUST NOT go to the user-text-part"
- * (chatmail spec.md, "Incoming messages"). Quoted lines go, the footer goes.
- * A message that is nothing but a quote keeps it rather than showing nothing.
+ * off a footer with the line `-- ` — dash, dash, space ("the user-text-part
+ * and a footer-part"); "full quotes, footers or sth. like that MUST NOT go to
+ * the user-text-part" (chatmail spec.md, "Incoming messages"). The footer
+ * goes, and so do a peer's quoted lines; the user's own lines stay as they
+ * were written. A message that is nothing but a quote keeps it rather than
+ * showing nothing. `cut` says the bubble should point to the whole mail.
  */
-export function chatBubbleText(body: string): string {
+export function chatBubbleText(body: string, options: { keepQuotes?: boolean } = {}): BubbleText {
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
-  const footer = lines.findIndex((line) => line === '-- ' || line === '--');
+  const footer = lines.indexOf('-- ');
   const userPart = footer >= 0 ? lines.slice(0, footer) : lines;
-  const unquoted = userPart.filter((line) => !line.trimStart().startsWith('>'));
-  const text = unquoted.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-  return text || userPart.join('\n').trim();
+  const kept = options.keepQuotes
+    ? userPart
+    : userPart.filter((line) => !line.trimStart().startsWith('>'));
+  const text = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  const whole = userPart.join('\n').trim();
+  const shown = text || whole;
+  const original = body.replace(/\r\n?/g, '\n').trim();
+  return { text: shown, cut: shown !== original };
 }
 
 /**
@@ -35,6 +48,8 @@ export interface ChatBubble {
   senderName: string;
   senderEmail: string;
   text: string;
+  /** Part of the message is not shown; the bubble offers the whole mail. */
+  cut: boolean;
   timestamp: string;
   /** The previous bubble came from the same person: no name above this one. */
   continued: boolean;
@@ -68,12 +83,15 @@ export function chatDays(messages: readonly Message[], ownAddresses: ReadonlySet
     }
     const previous = day.bubbles.at(-1);
     const sender = message.from.email.trim().toLowerCase();
+    const own = isOwnMessage(message, ownAddresses);
+    const body = chatBubbleText(message.bodyText, { keepQuotes: own });
     day.bubbles.push({
       id: message.id,
-      own: isOwnMessage(message, ownAddresses),
+      own,
       senderName: message.from.name || message.from.email,
       senderEmail: sender,
-      text: chatBubbleText(message.bodyText),
+      text: body.text,
+      cut: body.cut,
       timestamp: message.timestamp,
       continued: previous?.senderEmail === sender,
     });

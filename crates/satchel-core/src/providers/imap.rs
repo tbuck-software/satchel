@@ -5200,6 +5200,7 @@ fn envelope_from_fetch(
         satchel_marks,
         chat: crate::chat::parse_chat_headers(&header),
         autocrypt_headers: crate::chat::header_values(&header, "Autocrypt"),
+        autocrypt_eligible: crate::chat::autocrypt_eligible_block(&header),
         attachments,
     }
 }

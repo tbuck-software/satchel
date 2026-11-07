@@ -260,6 +260,7 @@
       "calendarRichDescriptionReadOnly": "This description is formatted in Outlook and would lose its links and layout here. Edit it in Outlook.",
       "calendarTimeInvalid": "Enter a valid event time.",
       "calendarTitleRequired": "Enter an event title.",
+      "chatConfirmationNeeded": "This chat changed. Check who the reply goes to and send it again.",
       "chatKeyLocked": "Unlock your OpenPGP key to send this encrypted reply.",
       "chatNoRecipient": "This chat has no one to send to.",
       "chatNotAChat": "This is not a chat.",
@@ -787,6 +788,14 @@
       "sendFailed": "The message could not be sent.",
       "sending": "Sending…"
     },
+    "confirm": {
+      "plainBody": "This chat was end-to-end encrypted. This reply would go out in plain text, because not every recipient has an Autocrypt key.",
+      "plainTitle": "Send without encryption?",
+      "recipientsBody": "The recipients are not the ones of your last reply in this chat.",
+      "recipientsTitle": "Send to these people?",
+      "send": "Send",
+      "sendPlain": "Send unencrypted"
+    },
     "empty": {
       "description": "Messages from Delta Chat appear here as they arrive.",
       "title": "No chats yet"
@@ -799,6 +808,7 @@
     "notEncrypted": "Not encrypted",
     "notEncryptedNoKey": "Replies go out unencrypted: there is no OpenPGP key for {address}.",
     "notEncryptedNoPeerKey": "Replies go out unencrypted until every member has sent an Autocrypt key.",
+    "partHidden": "Part of this message is hidden · Show as mail",
     "select": {
       "description": "Its messages show as bubbles, with a reply field below.",
       "title": "Pick a chat"

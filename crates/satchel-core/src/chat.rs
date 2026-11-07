@@ -148,6 +148,33 @@ pub fn chat_extra_headers(options: &ChatSendOptions) -> Vec<(String, String)> {
     headers
 }
 
+/// Whether a message may update Autocrypt peer state ("Updating Autocrypt
+/// Peer State": ignore `multipart/report` and more than one `From` address).
+pub fn autocrypt_eligible(from: Option<&str>, content_type: Option<&str>) -> bool {
+    let report = content_type.is_some_and(|value| {
+        value
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("multipart/report")
+    });
+    let senders = from.map_or(0, |value| {
+        crate::utils::mime::extract_email_addresses(value).len()
+    });
+    !report && senders <= 1
+}
+
+/// The same, read off a raw header block.
+pub fn autocrypt_eligible_block(header_block: &str) -> bool {
+    autocrypt_eligible(
+        header_values(header_block, "From")
+            .first()
+            .map(String::as_str),
+        header_values(header_block, "Content-Type")
+            .first()
+            .map(String::as_str),
+    )
+}
+
 /// Every value of one header in a raw header block, unfolded, in order.
 /// Header names compare case-insensitively.
 pub fn header_values(header_block: &str, name: &str) -> Vec<String> {
@@ -270,6 +297,28 @@ Chat-Group-Name: =?utf-8?q?Famili=C3=A9?=\r\n\
             ..Default::default()
         });
         assert_eq!(invalid.len(), 1);
+    }
+
+    #[test]
+    fn reports_and_mail_from_several_people_do_not_count_for_autocrypt() {
+        assert!(autocrypt_eligible(
+            Some("Lena <lena@example.test>"),
+            Some("text/plain")
+        ));
+        assert!(!autocrypt_eligible(
+            Some("lena@example.test, mia@example.test"),
+            None
+        ));
+        assert!(!autocrypt_eligible(
+            Some("mailer@example.test"),
+            Some("multipart/report; report-type=delivery-status; boundary=x")
+        ));
+        assert!(autocrypt_eligible_block(
+            "From: lena@example.test\r\nContent-Type: multipart/mixed; boundary=x\r\n\r\n"
+        ));
+        assert!(!autocrypt_eligible_block(
+            "From: a@example.test, b@example.test\r\n\r\n"
+        ));
     }
 
     #[test]

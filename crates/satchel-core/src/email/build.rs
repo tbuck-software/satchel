@@ -501,6 +501,13 @@ pub fn is_content_header(header: &str) -> bool {
 /// line. Without this, a subject decoded from an incoming mail's RFC2047 header
 /// (e.g. "Foo\r\nBcc: attacker@evil.com") would inject attacker-controlled
 /// headers into the victim's reply.
+/// One header line as the builder writes it: encoded words for non-ASCII
+/// text, folded to the line limit. For headers that go inside an encrypted
+/// entity (Delta Chat's protected `Subject`).
+pub fn header_line(name: &str, value: &str) -> String {
+    fold_header(name, &encode_header_value(value))
+}
+
 /// A caller-supplied header name: a plain token, and none of the headers the
 /// builder writes itself, so an extra header cannot add a second `From:` or
 /// replace the MIME structure.

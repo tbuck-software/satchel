@@ -3582,10 +3582,34 @@ export default {
         "app::commands::chats::SendChatMessageInput": {
             "kind": "object",
             "fields": {
+                "allow_plaintext": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
                 "allow_unsigned": {
                     "required": false,
                     "shape": {
                         "kind": "value"
+                    }
+                },
+                "confirm_recipients": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "expected_recipients": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "array",
+                            "item": {
+                                "kind": "value"
+                            }
+                        }
                     }
                 },
                 "text": {

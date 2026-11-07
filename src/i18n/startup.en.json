@@ -148,6 +148,7 @@
       "calendarRichDescriptionReadOnly": "This description is formatted in Outlook and would lose its links and layout here. Edit it in Outlook.",
       "calendarTimeInvalid": "Enter a valid event time.",
       "calendarTitleRequired": "Enter an event title.",
+      "chatConfirmationNeeded": "This chat changed. Check who the reply goes to and send it again.",
       "chatKeyLocked": "Unlock your OpenPGP key to send this encrypted reply.",
       "chatNoRecipient": "This chat has no one to send to.",
       "chatNotAChat": "This is not a chat.",

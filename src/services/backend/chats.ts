@@ -1,5 +1,6 @@
 import type { ChatMetaDto } from './generated/app/commands/chats/ChatMetaDto';
 import type { ChatMemberDto } from './generated/app/commands/chats/ChatMemberDto';
+import type { SendChatMessageInput } from './generated/app/commands/chats/SendChatMessageInput';
 import type { BackendSendMessageResult } from '@/types/composer';
 import { invoke } from './core';
 import { backendUnlockPgpKeys } from './security';
@@ -12,18 +13,20 @@ export async function backendGetChatMeta(threadId: string): Promise<BackendChatM
   return invoke<BackendChatMeta>('get_chat_meta', { threadId });
 }
 
+/** What the sender confirmed for one chat reply (see `SendChatMessageInput`). */
+export type BackendChatSendConfirmation = Omit<SendChatMessageInput, 'thread_id' | 'text'>;
+
 /**
- * Send a chat line now, through the outbox, as a Delta Chat message.
- * `allowUnsigned` only after the sender declined to unlock their key and
- * chose to send encrypted without a signature.
+ * Send a chat line now, through the outbox, as a Delta Chat message, to the
+ * recipients the sender saw and with what they confirmed.
  */
 export async function backendSendChatMessage(
   threadId: string,
   text: string,
-  allowUnsigned = false,
+  confirmation: BackendChatSendConfirmation,
 ): Promise<BackendSendMessageResult> {
   return invoke<BackendSendMessageResult>('send_chat_message', {
-    input: { thread_id: threadId, text, allow_unsigned: allowUnsigned },
+    input: { thread_id: threadId, text, ...confirmation },
   });
 }
 

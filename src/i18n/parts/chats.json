@@ -4,7 +4,8 @@
       "errors": {
         "chatNotAChat": "This is not a chat.",
         "chatNoRecipient": "This chat has no one to send to.",
-        "chatKeyLocked": "Unlock your OpenPGP key to send this encrypted reply."
+        "chatKeyLocked": "Unlock your OpenPGP key to send this encrypted reply.",
+        "chatConfirmationNeeded": "This chat changed. Check who the reply goes to and send it again."
       }
     },
     "chats": {
@@ -51,6 +52,15 @@
         "title": "Send without your signature?",
         "body": "Your key stays locked. The reply is still end-to-end encrypted, but the recipients cannot check that it came from you.",
         "confirm": "Send unsigned"
+      },
+      "partHidden": "Part of this message is hidden · Show as mail",
+      "confirm": {
+        "recipientsTitle": "Send to these people?",
+        "recipientsBody": "The recipients are not the ones of your last reply in this chat.",
+        "send": "Send",
+        "plainTitle": "Send without encryption?",
+        "plainBody": "This chat was end-to-end encrypted. This reply would go out in plain text, because not every recipient has an Autocrypt key.",
+        "sendPlain": "Send unencrypted"
       }
     }
   },
@@ -59,7 +69,8 @@
       "errors": {
         "chatNotAChat": "Das ist kein Chat.",
         "chatNoRecipient": "Dieser Chat hat keinen Empfänger.",
-        "chatKeyLocked": "Entsperre deinen OpenPGP-Schlüssel, um diese verschlüsselte Antwort zu senden."
+        "chatKeyLocked": "Entsperre deinen OpenPGP-Schlüssel, um diese verschlüsselte Antwort zu senden.",
+        "chatConfirmationNeeded": "Der Chat hat sich geändert. Prüfe, an wen die Antwort geht, und sende sie erneut."
       }
     },
     "chats": {
@@ -106,6 +117,15 @@
         "title": "Ohne deine Signatur senden?",
         "body": "Dein Schlüssel bleibt gesperrt. Die Antwort ist trotzdem Ende-zu-Ende-verschlüsselt, aber die Empfänger können nicht prüfen, dass sie von dir kommt.",
         "confirm": "Unsigniert senden"
+      },
+      "partHidden": "Ein Teil der Nachricht ist ausgeblendet · Als Mail anzeigen",
+      "confirm": {
+        "recipientsTitle": "An diese Personen senden?",
+        "recipientsBody": "Die Empfänger sind nicht die deiner letzten Antwort in diesem Chat.",
+        "send": "Senden",
+        "plainTitle": "Ohne Verschlüsselung senden?",
+        "plainBody": "Dieser Chat war Ende-zu-Ende-verschlüsselt. Diese Antwort ginge unverschlüsselt raus, weil nicht alle Empfänger einen Autocrypt-Schlüssel haben.",
+        "sendPlain": "Unverschlüsselt senden"
       }
     }
   }

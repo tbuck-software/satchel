@@ -424,13 +424,22 @@ async fn apply_pgp_send_transform(
         Some(fallback_from_name),
     )
     .map_err(|error| error.encoded())?;
+    // An encrypted Delta Chat message hides what its envelope would tell:
+    // the real Subject and group name ride inside the encrypted entity.
+    let protected = encrypt.then(|| protected_chat_parts(outgoing)).flatten();
+    let entity = match protected.as_ref() {
+        Some((lines, _)) => crate::email::pgp_mime::with_protected_headers(
+            &crate::email::pgp_mime::signable_entity(&original),
+            lines,
+        ),
+        None => crate::email::pgp_mime::signable_entity(&original),
+    };
 
     let signature = match sign_key.as_deref() {
         Some(key_id) => {
             let (armored_key, passphrase) = pgp::load_private_signing_key(app, state, pool, key_id)
                 .await
                 .map_err(|_| "backend.errors.pgpSigningKeyUnavailable".to_string())?;
-            let entity = crate::email::pgp_mime::signable_entity(&original);
             Some(
                 crate::utils::pgp_engine::sign_detached(
                     &armored_key,
@@ -469,14 +478,24 @@ async fn apply_pgp_send_transform(
 
         // Sign-then-encrypt per RFC 3156 §6.2: the signature travels inside the
         // ciphertext, so it is not exposed to anyone who cannot decrypt.
-        let plaintext = match signature.as_deref() {
-            Some(sig) => crate::email::pgp_mime::signed_entity_for_encryption(&original, sig),
-            None => crate::email::pgp_mime::signable_entity(&original),
+        let plaintext = match (signature.as_deref(), protected.is_some()) {
+            (Some(sig), true) => crate::email::pgp_mime::signed_multipart(&entity, sig),
+            (Some(sig), false) => {
+                crate::email::pgp_mime::signed_entity_for_encryption(&original, sig)
+            }
+            (None, _) => entity.clone(),
         };
         let ciphertext = crate::utils::pgp_engine::encrypt_to(&keys, plaintext.as_bytes())
             .map_err(|_| "backend.errors.pgpEncryptFailed".to_string())?;
+        let envelope = match protected.as_ref() {
+            Some((_, outer)) => {
+                build_rfc822(outer, Some(fallback_from_address), Some(fallback_from_name))
+                    .map_err(|error| error.encoded())?
+            }
+            None => original.clone(),
+        };
         outgoing.raw_rfc822_override = Some(crate::email::pgp_mime::build_encrypted(
-            &original,
+            &envelope,
             &ciphertext,
         ));
         return Ok(());
@@ -486,6 +505,35 @@ async fn apply_pgp_send_transform(
         outgoing.raw_rfc822_override = Some(crate::email::pgp_mime::build_signed(&original, &sig));
     }
     Ok(())
+}
+
+/// For an encrypted Delta Chat message: the header lines that go inside the
+/// ciphertext, and the message as its envelope shows it, with a neutral
+/// Subject (`...`, as Delta Chat writes) and no group name. `None` for any
+/// other message. The group id stays outside: groups are matched by it and
+/// by the `Gr.` Message-ID (spec.md "Groups").
+fn protected_chat_parts(outgoing: &OutgoingMessage) -> Option<(Vec<String>, OutgoingMessage)> {
+    let is_chat = outgoing
+        .extra_headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("Chat-Version"));
+    if !is_chat {
+        return None;
+    }
+    let mut lines = vec![crate::email::build::header_line(
+        "Subject",
+        &outgoing.subject,
+    )];
+    let mut outer = outgoing.clone();
+    outer.subject = "...".to_string();
+    outer.extra_headers.retain(|(name, value)| {
+        let hidden = name.eq_ignore_ascii_case("Chat-Group-Name");
+        if hidden {
+            lines.push(crate::email::build::header_line(name, value));
+        }
+        !hidden
+    });
+    Some((lines, outer))
 }
 
 /// Autocrypt Level 1 for a Delta Chat message ("Header injection in outbound
@@ -964,5 +1012,51 @@ mod tests {
             serde_json::json!({ "key": "backend.errors.smimeCertificatePersistenceFailed" })
         );
         assert!(!stored.contains(detail));
+    }
+
+    #[test]
+    fn an_encrypted_chat_hides_subject_and_group_name_in_the_ciphertext() {
+        let chat = OutgoingMessage {
+            from_address: Some("tom@example.test".into()),
+            to: vec!["lena@example.test".into()],
+            subject: "Chat: Family: Meet at the station".into(),
+            body: "Meet at the station".into(),
+            extra_headers: vec![
+                ("Chat-Version".into(), "1.0".into()),
+                ("Chat-Group-ID".into(), "abcDEF123_-x".into()),
+                ("Chat-Group-Name".into(), "Family".into()),
+            ],
+            ..Default::default()
+        };
+        let (lines, outer) = protected_chat_parts(&chat).expect("a chat message");
+        assert_eq!(
+            lines,
+            vec![
+                "Subject: Chat: Family: Meet at the station".to_string(),
+                "Chat-Group-Name: Family".to_string()
+            ]
+        );
+        let envelope = build_rfc822(&outer, None, None).unwrap();
+        let encrypted =
+            crate::email::pgp_mime::build_encrypted(&envelope, "-----BEGIN PGP MESSAGE-----");
+        let (headers, _) = encrypted.split_once("\r\n\r\n").unwrap();
+        assert!(headers.contains("\r\nSubject: ...\r\n"));
+        assert!(!encrypted.contains("Meet at the station"));
+        assert!(!encrypted.contains("Family"));
+        assert!(headers.contains("Chat-Group-ID: abcDEF123_-x"));
+        assert!(headers.contains("Chat-Version: 1.0"));
+
+        let entity = crate::email::pgp_mime::with_protected_headers(
+            &crate::email::pgp_mime::signable_entity(&build_rfc822(&chat, None, None).unwrap()),
+            &lines,
+        );
+        assert!(entity.starts_with("Subject: Chat: Family: Meet at the station\r\nChat-Group-Name: Family\r\nContent-Type:"));
+
+        // Mail that is not a chat keeps its envelope.
+        let mail = OutgoingMessage {
+            extra_headers: Vec::new(),
+            ..chat
+        };
+        assert!(protected_chat_parts(&mail).is_none());
     }
 }

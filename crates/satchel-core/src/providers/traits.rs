@@ -154,6 +154,11 @@ pub struct MessageEnvelope {
     /// valid header for the sender (`autocrypt::select_header`).
     #[serde(default)]
     pub autocrypt_headers: Vec<String>,
+    /// The message may update Autocrypt peer state at all: not a
+    /// `multipart/report`, not more than one `From` address ("Updating
+    /// Autocrypt Peer State"). False when the provider cannot tell.
+    #[serde(default)]
+    pub autocrypt_eligible: bool,
     #[serde(default)]
     pub attachments: Vec<RemoteAttachment>,
 }
