@@ -178,7 +178,7 @@
         "label": "Copy link to this email"
       },
       "createTask": {
-        "keywords": "task todo to-do follow up remember reminder",
+        "keywords": "task todo",
         "label": "Add mail as task"
       },
       "fileTo": {

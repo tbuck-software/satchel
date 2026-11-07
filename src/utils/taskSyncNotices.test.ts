@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { syncNotices } from './tasks';
+import { syncNotices } from '@/utils/taskSyncNotices';
 
 const quiet = {
   lists: 1, pulled: 3, pushed: 2, removed: 0, conflicts: 0, restored: 0, failed: 0,

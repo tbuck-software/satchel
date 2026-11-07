@@ -3533,7 +3533,7 @@
         "label": "Link zu dieser E-Mail kopieren"
       },
       "createTask": {
-        "keywords": "aufgabe todo erledigen erinnern nachfassen",
+        "keywords": "aufgabe todo",
         "label": "E-Mail als Aufgabe anlegen"
       },
       "fileTo": {

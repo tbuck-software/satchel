@@ -23,7 +23,7 @@ function keyPaths(value: unknown, trail: string[] = []): string[] {
 const en = JSON.parse(readFileSync(new URL('../src/i18n/en.json', import.meta.url), 'utf8'));
 const catalogue = new Set(keyPaths(en));
 
-const VIEWS = ['/inbox', '/later', '/calendar', '/contacts', '/outbox', '/drafts', '/cleanup', '/new-senders', '/search', '/compose'];
+const VIEWS = ['/inbox', '/later', '/calendar', '/tasks', '/contacts', '/outbox', '/drafts', '/cleanup', '/new-senders', '/search', '/compose'];
 
 /** A message chunk request: `/src/i18n/chunks/<id>.<locale>.json` in dev, `<id>.<locale>-<hash>.js` built. */
 const CHUNK_URL = /\/([A-Za-z]+\.[\w.]+)\.(en|de)(?:\.json|-[\w-]+\.js)(?:\?|$)/;

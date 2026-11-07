@@ -182,6 +182,7 @@
       "groupwareContactSyncFailed": "Contacts for {account} could not be synchronized.",
       "groupwareCredentialsRejected": "No CalDAV or CardDAV service accepted the saved credentials.",
       "groupwareSyncFailed": "Groupware for {account} could not be synchronized.",
+      "groupwareTaskSyncFailed": "Tasks for {account} could not be synchronized.",
       "imapConnectionFailed": "A secure IMAP connection could not be established. Last attempt: {reason}. You can enter the server manually under Advanced.",
       "imapCredentialsRejected": "No secure IMAP configuration accepted these credentials. Check the username or enter the server manually.",
       "imapDraftUidWithoutValidity": "This older draft in \"{folder}\" has no verified server identity. Its server copy was left untouched.",
@@ -363,6 +364,18 @@
       "snapshotMessagesHeld": "{count} messages in {folder} could not be updated from the server for {account} and stay where they are for now. Satchel tries again in a day.",
       "spamFilterUnavailable": "The spam filter settings could not be read or saved.",
       "systemFolderImmutable": "\"{name}\" is a system folder and cannot be changed.",
+      "taskChanged": "This task changed in the meantime.",
+      "taskCompletedInvalid": "The completion time could not be read.",
+      "taskDueInvalid": "The due date could not be read.",
+      "taskListNameRequired": "A list needs a name.",
+      "taskListNotFound": "This task list no longer exists.",
+      "taskListNotLocal": "Lists from an account are renamed and deleted on its server.",
+      "taskListReadOnly": "This task list is read-only.",
+      "taskNotFound": "This task no longer exists.",
+      "taskPersistenceFailed": "The task could not be saved.",
+      "taskPriorityInvalid": "The priority is not one Satchel knows.",
+      "taskReminderInvalid": "The reminder time could not be read.",
+      "taskTitleRequired": "A task needs a title.",
       "templateNotFound": "The template was not found.",
       "templatePersistenceFailed": "Templates are currently unavailable. Please try again.",
       "threadMetadataInvalid": "The thread organization details are invalid.",
@@ -447,6 +460,13 @@
       "sameDay": "{day}, {start}–{end}",
       "span": "{start} – {end}",
       "weekSameMonth": "{first}–{last} {monthYear}"
+    },
+    "reminder": {
+      "nextMonth": "Next month",
+      "nextWeek": "Next week",
+      "set": "Snooze",
+      "thisAfternoon": "This afternoon",
+      "tomorrowMorning": "Tomorrow morning"
     },
     "source": {
       "caldav": "CalDAV",
@@ -737,6 +757,7 @@
       "summary": "{count} new emails",
       "syncFailed": "Remote sync failed",
       "syncing": "Syncing content",
+      "taskDue": "Task due",
       "trash": "Delete"
     },
     "oauth": {
@@ -765,6 +786,7 @@
       "allDayCount": "{count} entries",
       "more": "+{count} more",
       "now": "Now",
+      "tasksDue": "{count} task due | {count} tasks due",
       "title": "Today"
     },
     "calendar": "Calendar",
@@ -801,6 +823,7 @@
     "pinContact": "Pin contact",
     "pinContactNamed": "Pin {name}",
     "smartFolders": "Smart folders",
+    "tasks": "Tasks",
     "toggleSection": "Toggle {name}",
     "unpinContact": "Unpin contact",
     "unpinContactNamed": "Unpin {name}"
@@ -1065,6 +1088,10 @@
       "copyLink": {
         "keywords": "link url share",
         "label": "Copy link to this email"
+      },
+      "createTask": {
+        "keywords": "task todo",
+        "label": "Add mail as task"
       },
       "fileTo": {
         "keywords": "file move folder topic label",

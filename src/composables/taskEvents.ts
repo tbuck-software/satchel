@@ -2,7 +2,7 @@ import { listenToBackend } from '@/services/appEvents';
 import { backendSupportsNativeCommands } from '@/services/backend/native';
 import type { TaskSyncSummary } from '@/services/backend/generated/core/tasks/sync/TaskSyncSummary';
 import { useToast } from '@/composables/useToast';
-import { syncNotices, useTasksStore } from '@/stores/tasks';
+import { useTasksStore } from '@/stores/tasks';
 
 let subscribed = false;
 
@@ -19,8 +19,10 @@ export function followTaskSyncs() {
   subscribed = true;
   void listenToBackend<TaskSyncSummary>('tasks:changed', (summary) => {
     void useTasksStore().load().catch(() => undefined);
-    const toast = useToast();
-    for (const notice of syncNotices(summary)) toast.info(notice);
+    void import('@/utils/taskSyncNotices').then(({ syncNotices }) => {
+      const toast = useToast();
+      for (const notice of syncNotices(summary)) toast.info(notice);
+    });
   }).catch(() => {
     subscribed = false;
   });

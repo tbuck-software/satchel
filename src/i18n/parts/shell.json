@@ -421,7 +421,7 @@
           "label": "Set a rule for the sender"
         },
         "createTask": {
-          "keywords": "task todo to-do follow up remember reminder",
+          "keywords": "task todo",
           "label": "Add mail as task"
         }
       },
@@ -897,7 +897,7 @@
           "label": "Regel für den Absender festlegen"
         },
         "createTask": {
-          "keywords": "aufgabe todo erledigen erinnern nachfassen",
+          "keywords": "aufgabe todo",
           "label": "E-Mail als Aufgabe anlegen"
         }
       },
