@@ -23,6 +23,7 @@ pub mod folders;
 pub mod followups;
 pub mod groupware;
 pub mod inline_cache;
+pub mod mail_merge;
 pub mod mailboxes;
 pub mod message_body;
 pub mod message_file;

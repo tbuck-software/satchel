@@ -41,8 +41,13 @@ function watch(page: Page) {
   return { missing, chunks };
 }
 
-async function rawKeys(page: Page, where: string): Promise<string[]> {
-  await page.waitForLoadState('networkidle');
+/**
+ * `idle: false` reads the screen as it stands, for a surface whose own
+ * content the caller already waited for: after a sandboxed `srcdoc` frame
+ * attaches, `networkidle` sometimes never fires although no request is open.
+ */
+async function rawKeys(page: Page, where: string, { idle = true } = {}): Promise<string[]> {
+  if (idle) await page.waitForLoadState('networkidle');
   const text = await page.evaluate(() => {
     const parts = [document.body.innerText];
     for (const element of Array.from(document.querySelectorAll('[aria-label], [title], [placeholder]'))) {
@@ -117,6 +122,57 @@ for (const locale of ['en', 'de'] as const) {
       await page.getByTestId('compose-insert-availability').click();
       await expect(page.getByTestId('insert-availability-preview')).toBeVisible();
       found.push(...await rawKeys(page, 'insert availability'));
+      expect(found).toEqual([]);
+      expect(missing).toEqual([]);
+    });
+
+    /*
+     * The mail merge dialogs, bar and Outbox panel are lazy chunks of their
+     * own; the compose window (`compose-*`, the standalone route) has to load
+     * them as the main window does.
+     */
+    test('mail merge in the compose window and the Outbox show no raw keys', async ({ page }) => {
+      const { missing } = watch(page);
+      const found: string[] = [];
+      const csv = {
+        name: 'list.csv',
+        mimeType: 'text/csv',
+        buffer: Buffer.from('FirstName;Email\nAnna;anna@example.test\nBen;nope\n', 'utf8'),
+      };
+      async function mergeUpToReview(where: string) {
+        await page.locator('.more-summary').first().click();
+        await page.getByTestId('compose-mail-merge').click();
+        const source = page.getByTestId('mail-merge-source');
+        await expect(source).toBeVisible();
+        found.push(...await rawKeys(page, `${where} source`));
+        await source.getByTestId('mail-merge-file').setInputFiles(csv);
+        await expect(source.getByTestId('mail-merge-email-field')).toHaveValue('Email');
+        found.push(...await rawKeys(page, `${where} source with list`));
+        await source.getByTestId('mail-merge-source-apply').click();
+        await expect(page.getByTestId('mail-merge-bar')).toBeVisible();
+        await page.locator('.ProseMirror').first().fill('Hi {{FirstName}}');
+        found.push(...await rawKeys(page, `${where} bar`));
+        await page.getByTestId('compose-merge-review').click();
+        // The dialog's strings and the rendered preview are both on screen.
+        await expect(page.getByTestId('mail-merge-position')).toHaveText(locale === 'de' ? '1 von 2' : '1 of 2');
+        await expect(page.getByTestId('mail-merge-preview-body')).toBeVisible();
+        found.push(...await rawKeys(page, `${where} review`, { idle: false }));
+      }
+
+      await page.goto('/compose?standalone=1');
+      await mergeUpToReview('compose window');
+
+      // The page composer starts a job and goes to the Outbox in place.
+      await page.goto('/compose');
+      await mergeUpToReview('compose page');
+      await page.getByTestId('mail-merge-start').click();
+      await page.getByRole('dialog').last().getByRole('button', { name: locale === 'de' ? 'Senden' : 'Send', exact: true }).click();
+      const jobs = page.getByTestId('mail-merge-jobs');
+      await expect(jobs).toBeVisible();
+      found.push(...await rawKeys(page, 'outbox jobs'));
+      await jobs.getByRole('button', { name: locale === 'de' ? 'Adressen zeigen' : 'Show recipients', exact: true }).click();
+      await expect(jobs.getByTestId('mail-merge-job-rows')).toBeVisible();
+      found.push(...await rawKeys(page, 'outbox job rows'));
       expect(found).toEqual([]);
       expect(missing).toEqual([]);
     });

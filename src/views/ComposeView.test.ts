@@ -676,6 +676,17 @@ describe('composer send guard', () => {
     expect(secondary.attributes('aria-describedby')).toBe(describedBy);
   });
 
+  it('refuses the palette\'s mail merge in a reply and keeps the recipients', async () => {
+    const wrapper = render(['boss@example.com'], true, { mode: 'reply', threadId: 'thread-1', mailMergeRequests: 0 });
+    await flushPromises();
+    await wrapper.setProps({ mailMergeRequests: 1 });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('Mail merge works with a new message, not with a reply or forward.');
+    expect(wrapper.find('[data-testid="mail-merge-source"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="mail-merge-bar"]').exists()).toBe(false);
+  });
+
   it('names the invalid address in the hint', async () => {
     const wrapper = render(['"Buck']);
     await flushPromises();

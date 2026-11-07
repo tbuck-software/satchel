@@ -351,6 +351,18 @@ async fn run_once(
                 error = %err, "reply-thread merge skipped"
             ),
         }
+        // Finished mail merge jobs keep their message and list for 30 days.
+        match satchel_core::mail_merge::job::delete_expired_jobs(pool, chrono::Utc::now()).await {
+            Ok(removed) if removed > 0 => info!(
+                target: "satchel::maintenance",
+                removed, "removed finished mail merge jobs"
+            ),
+            Ok(_) => {}
+            Err(err) => info!(
+                target: "satchel::maintenance",
+                error = %err, "mail merge cleanup skipped"
+            ),
+        }
         match TopicRepository::new(pool).cleanup_orphaned_items().await {
             Ok(removed) if removed > 0 => info!(
                 target: "satchel::maintenance",

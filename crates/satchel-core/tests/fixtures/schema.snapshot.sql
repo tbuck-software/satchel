@@ -21,6 +21,10 @@ index idx_invites_message: CREATE INDEX idx_invites_message ON calendar_invites(
 index idx_invites_uid: CREATE UNIQUE INDEX idx_invites_uid ON calendar_invites(account_id, uid, recurrence_id)
 index idx_known_senders_account: CREATE INDEX idx_known_senders_account ON known_senders(account_id)
 index idx_mail_action_messages_current: CREATE INDEX idx_mail_action_messages_current ON mail_action_messages(message_id)
+index idx_mail_merge_jobs_account: CREATE INDEX idx_mail_merge_jobs_account ON mail_merge_jobs(account_id, status)
+index idx_mail_merge_jobs_request: CREATE UNIQUE INDEX idx_mail_merge_jobs_request ON mail_merge_jobs(request_id) WHERE request_id IS NOT NULL
+index idx_mail_merge_jobs_status: CREATE INDEX idx_mail_merge_jobs_status ON mail_merge_jobs(status, next_send_at)
+index idx_mail_merge_recipients_job_status: CREATE INDEX idx_mail_merge_recipients_job_status ON mail_merge_recipients(job_id, status, position)
 index idx_message_addresses_email_thread: CREATE INDEX idx_message_addresses_email_thread ON message_addresses(email, thread_id, message_id)
 index idx_messages_account: CREATE INDEX idx_messages_account ON messages(account_id)
 index idx_messages_account_in_reply_to: CREATE INDEX idx_messages_account_in_reply_to ON messages(account_id, in_reply_to) WHERE in_reply_to IS NOT NULL
@@ -115,6 +119,8 @@ table mail_action_messages (receipt_id TEXT NOT NULL PK1, message_id TEXT NOT NU
 table mail_action_queue (receipt_id TEXT NOT NULL PK1, action_id TEXT NOT NULL PK2)
 table mail_action_receipts (id TEXT PK1, state TEXT NOT NULL DEFAULT 'available', created_at TEXT NOT NULL)
 table mail_action_threads (receipt_id TEXT NOT NULL PK1, thread_id TEXT NOT NULL PK2, account_id TEXT NOT NULL, workflow_state TEXT NOT NULL, board_column TEXT NOT NULL, snooze_until TEXT, action_at TEXT NOT NULL)
+table mail_merge_jobs (id TEXT NOT NULL PK1, account_id TEXT NOT NULL, status TEXT NOT NULL, pause_reason TEXT, subject TEXT NOT NULL, source_label TEXT NOT NULL DEFAULT '', template TEXT NOT NULL, delay_seconds INTEGER NOT NULL, next_send_at TEXT, consecutive_failures INTEGER NOT NULL DEFAULT 0, request_id TEXT, released_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, finished_at TEXT)
+table mail_merge_recipients (id TEXT NOT NULL PK1, job_id TEXT NOT NULL, position INTEGER NOT NULL, email TEXT NOT NULL, fields TEXT NOT NULL, status TEXT NOT NULL, queue_id TEXT, message_id_header TEXT NOT NULL, error TEXT, attempts INTEGER NOT NULL DEFAULT 0, handed_over_at TEXT, sent_at TEXT, updated_at TEXT NOT NULL)
 table managesieve_accounts (account_id TEXT PK1, host_override TEXT, port_override INTEGER, tls_override TEXT, detected_host TEXT, detected_port INTEGER, detected_tls TEXT, detected_source TEXT, suggested_host TEXT, suggested_port INTEGER, suggested_tls TEXT, availability TEXT NOT NULL DEFAULT 'unknown', implementation TEXT, extensions TEXT NOT NULL DEFAULT '[]', checked_at TEXT, enabled INTEGER NOT NULL DEFAULT 0, server_active INTEGER NOT NULL DEFAULT 0, activation_mode TEXT, previous_active_script TEXT, consent_script TEXT, pushed_rules TEXT NOT NULL DEFAULT '{}', pushed_vacation INTEGER NOT NULL DEFAULT 0, last_push_at TEXT, last_error TEXT, updated_at TEXT NOT NULL)
 table message_addresses (message_id TEXT NOT NULL PK1, thread_id TEXT, email TEXT NOT NULL PK2)
 table message_cc_fts: CREATE VIRTUAL TABLE message_cc_fts USING fts5( cc_addresses, content = '', contentless_delete = 1, tokenize = 'unicode61 remove_diacritics 2' )

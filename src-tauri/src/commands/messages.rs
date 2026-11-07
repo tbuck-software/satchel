@@ -2289,7 +2289,9 @@ fn parse_address_json(raw: Option<String>) -> Vec<String> {
 /// HTTP API and the CLI reach `send_message` directly.
 const MAX_TOTAL_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
 
-fn ensure_attachments_within_limit(attachments: &[OutgoingAttachmentInput]) -> Result<(), String> {
+pub(crate) fn ensure_attachments_within_limit(
+    attachments: &[OutgoingAttachmentInput],
+) -> Result<(), String> {
     // base64 expands by 4/3; compare decoded sizes against the budget.
     let total: usize = attachments
         .iter()
@@ -2328,7 +2330,7 @@ fn is_owned_sender(candidate: &str, primary: &str, aliases: &[String]) -> bool {
 /// alias, or the account's own address when none was chosen. Every later step
 /// (draft snapshot, queue payload, SMTP envelope, sent copy) reads this value,
 /// so none of them has to guess and none can store a message without sender.
-async fn resolve_sender(
+pub(crate) async fn resolve_sender(
     pool: &SqlitePool,
     account_id: &str,
     from_address: Option<&str>,
@@ -2677,7 +2679,7 @@ pub async fn persist_sent_message_record(
     })
 }
 
-async fn apply_selected_signature(
+pub(crate) async fn apply_selected_signature(
     pool: &SqlitePool,
     account_id: &str,
     input: &mut OutgoingMessageInput,

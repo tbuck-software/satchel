@@ -505,6 +505,11 @@ function insertHtml(html: string): boolean {
   return current.chain().focus().insertContent(html).run();
 }
 
+/** Inserts plain text at the caret, as typed: a mail merge `{{Field}}`. */
+function insertText(text: string) {
+  editor.value?.chain().focus().insertContent({ type: 'text', text }).run();
+}
+
 function shortcutHint(binding: string): ShortcutHint {
   return { label: formatBinding(binding), keys: bindingKeycaps(binding), aria: ariaKeyshortcuts(binding) };
 }
@@ -614,7 +619,7 @@ function removeQuotedHistory() {
   transaction.run();
 }
 
-defineExpose({ focusEditor, insertHtml, insertAttachmentImage, removeAttachmentImage, removeQuotedHistory });
+defineExpose({ focusEditor, insertHtml, insertText, insertAttachmentImage, removeAttachmentImage, removeQuotedHistory });
 </script>
 
 <template>

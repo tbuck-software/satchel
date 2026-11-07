@@ -8,6 +8,7 @@ const harness = vi.hoisted(() => ({
   route: { query: {} as Record<string, unknown> },
   push: vi.fn(),
   openSettings: vi.fn(),
+  openMailMerge: vi.fn(),
   addressBook: {
     contacts: [] as Array<{
       email: string;
@@ -50,6 +51,10 @@ vi.mock('@/stores/threads', () => ({
 
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: () => harness.settings,
+}));
+
+vi.mock('@/stores/composer', () => ({
+  useComposerStore: () => ({ openMailMerge: harness.openMailMerge }),
 }));
 
 import ContactsView from './ContactsView.vue';
@@ -98,6 +103,19 @@ describe('ContactsView', () => {
     harness.threads.allContactSummaries = [];
     harness.threads.openContact.mockReset();
     harness.settings.pinnedContacts = [];
+    harness.openMailMerge.mockReset();
+  });
+
+  it('starts a mail merge to the contacts on screen', async () => {
+    harness.addressBook.contacts = [
+      { email: 'anna@example.com', display_name: 'Anna Meier' },
+      { email: 'ben@example.com', display_name: 'Ben' },
+    ];
+    const wrapper = render();
+    await wrapper.get('[data-testid="contacts-mail-merge"]').trigger('click');
+    expect(harness.openMailMerge).toHaveBeenCalledTimes(1);
+    const seed = harness.openMailMerge.mock.calls[0]![0] as { contacts: Array<{ email: string }> };
+    expect(seed.contacts.map((contact) => contact.email)).toEqual(['anna@example.com', 'ben@example.com']);
   });
 
   it('offers address-book setup from the header and empty state, and opens contact creation', async () => {

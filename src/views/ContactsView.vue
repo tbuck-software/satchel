@@ -21,6 +21,7 @@ import {
 import { useContactsStore } from '@/stores/contacts';
 import { useSettingsStore } from '@/stores/settings';
 import { useThreadsStore } from '@/stores/threads';
+import { useComposerStore } from '@/stores/composer';
 import { useI18n } from 'vue-i18n';
 
 interface ContactRow {
@@ -38,6 +39,7 @@ const threads = useThreadsStore();
 const addressBook = useContactsStore();
 const settings = useSettingsStore();
 const ui = useUiStore();
+const composer = useComposerStore();
 const addingContact = ref(false);
 const search = ref('');
 
@@ -140,6 +142,20 @@ const contactGroups = computed(() => {
 });
 const filteredCount = computed(() => contactGroups.value.reduce((total, group) => total + group.contacts.length, 0));
 
+/** The contacts on screen, with an address: a mail merge sends to exactly these. */
+const mergeContacts = computed(() => contactGroups.value
+  .flatMap((group) => group.contacts)
+  .filter((contact) => contact.email.includes('@'))
+  .map((contact) => ({ email: contact.email, name: contact.name })));
+
+function startMailMerge() {
+  const count = mergeContacts.value.length;
+  void composer.openMailMerge({
+    contacts: mergeContacts.value,
+    label: t('mailMerge.source.sectionLabel', { section: currentCopy.value.title, count }, count),
+  });
+}
+
 const sectionCopy = computed<Record<ContactsSection, { title: string; subtitle: string; empty: string }>>(() => ({
   all: {
     title: t('contacts.sections.all.title'),
@@ -180,6 +196,26 @@ function openContact(email: string) {
       :count="filteredCount"
     >
       <template #actions>
+        <!-- The list on screen (section and search) is the merge's recipient list. -->
+        <IconButton
+          v-if="ui.isMobile && mergeContacts.length > 0"
+          :title="t('mailMerge.contactsAction', { count: mergeContacts.length }, mergeContacts.length)"
+          :aria-label="t('mailMerge.contactsAction', { count: mergeContacts.length }, mergeContacts.length)"
+          data-testid="contacts-mail-merge"
+          @click="startMailMerge"
+        >
+          <AppIcon><path d="M2 4.5h8M2 8h8M2 11.5h5" /><path d="m11 9.5 3 2-3 2" /></AppIcon>
+        </IconButton>
+        <AppButton
+          v-else-if="mergeContacts.length > 0"
+          variant="secondary"
+          size="sm"
+          data-testid="contacts-mail-merge"
+          @click="startMailMerge"
+        >
+          <template #icon><AppIcon><path d="M2 4.5h8M2 8h8M2 11.5h5" /><path d="m11 9.5 3 2-3 2" /></AppIcon></template>
+          {{ t('mailMerge.contactsAction', { count: mergeContacts.length }, mergeContacts.length) }}
+        </AppButton>
         <!-- On the phone both header actions are bare icons of the same size;
              an outlined pill beside a bare + read as two kinds of control. -->
         <IconButton

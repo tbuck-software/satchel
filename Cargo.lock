@@ -6348,6 +6348,7 @@ dependencies = [
  "futures",
  "http-body",
  "icalendar",
+ "idna",
  "jni 0.21.1",
  "keyring",
  "keyring-core",

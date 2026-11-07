@@ -1264,6 +1264,246 @@ function mockTranslationSource(messageId: string) {
   return { ...found, html, text, encrypted };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Mail merge                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * The same rules as `satchel_core::mail_merge` (CSV reading, placeholders,
+ * row plan), so the browser suite sees what the app shows. Jobs advance by
+ * the clock: one copy per `delay_seconds` since the job started.
+ */
+
+const MOCK_MERGE_LIMIT = 500;
+
+interface MockMergeRow { line: number | null; values: Record<string, string> }
+interface MockMergeTemplate { subject: string; body: string; body_html: string | null }
+interface MockMergeJob {
+  id: string; request_id: string | null; account_id: string; status: string; pause_reason: string | null; subject: string;
+  source_label: string; delay_seconds: number; created_at: string; updated_at: string;
+  finished_at: string | null; started_ms: number; sent_before_pause: number;
+  recipients: Array<{ id: string; position: number; email: string; status: string; error: string | null; attempts: number; sent_at: string | null }>;
+}
+
+const mergeJobs: MockMergeJob[] = [];
+let nextMergeJob = 0;
+
+function mockDecodeCsv(base64: string): { text: string; encoding: string } {
+  const binary = atob(base64);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return { text: new TextDecoder('utf-8').decode(bytes.subarray(3)), encoding: 'utf8_bom' };
+  }
+  try {
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), encoding: 'utf8' };
+  } catch {
+    return { text: new TextDecoder('windows-1252').decode(bytes), encoding: 'windows1252' };
+  }
+}
+
+function mockCsvRecords(text: string, delimiter: string): Array<{ line: number; cells: string[] }> {
+  const records: Array<{ line: number; cells: string[] }> = [];
+  let cells: string[] = [];
+  let cell = '';
+  let quoted = false;
+  let line = 1;
+  let recordLine = 1;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!;
+    if (quoted) {
+      if (character === '"' && text[index + 1] === '"') { cell += '"'; index += 1; }
+      else if (character === '"') quoted = false;
+      else {
+        if (character === '\n') line += 1;
+        if (character !== '\r') cell += character;
+      }
+      continue;
+    }
+    if (character === '"' && cell.trim() === '') { cell = ''; quoted = true; }
+    else if (character === delimiter) { cells.push(cell); cell = ''; }
+    else if (character === '\n' || character === '\r') {
+      if (character === '\r' && text[index + 1] === '\n') index += 1;
+      cells.push(cell);
+      records.push({ line: recordLine, cells });
+      cells = []; cell = ''; line += 1; recordLine = line;
+    } else cell += character;
+  }
+  if (quoted) throw new Error('backend.errors.mailMergeCsvUnterminatedQuote');
+  if (cell || cells.length) { cells.push(cell); records.push({ line: recordLine, cells }); }
+  return records.filter((record) => record.cells.some((value) => value.trim()));
+}
+
+function mockNormalizeAddress(raw: string): string | null {
+  let candidate = raw.trim();
+  const open = candidate.lastIndexOf('<');
+  if (open >= 0 && candidate.endsWith('>')) candidate = candidate.slice(open + 1, -1).trim();
+  if (!candidate || /[\s<>,;"()[\]\\]/.test(candidate)) return null;
+  const at = candidate.lastIndexOf('@');
+  if (at <= 0) return null;
+  const local = candidate.slice(0, at);
+  const domain = candidate.slice(at + 1);
+  if (local.includes('@') || local.startsWith('.') || local.endsWith('.')) return null;
+  const labels = domain.split('.');
+  if (labels.length < 2 || labels.some((label) => !label || label.startsWith('-') || label.endsWith('-'))) return null;
+  return `${local}@${domain.toLowerCase()}`;
+}
+
+function mockParseCsv(base64: string) {
+  const { text, encoding } = mockDecodeCsv(base64);
+  if (!text.trim()) throw new Error('backend.errors.mailMergeCsvEmpty');
+  const header = text.split(/\r?\n|\r/)[0] ?? '';
+  const delimiter = [',', ';', '\t'].reduce((best, candidate) =>
+    header.split(candidate).length > header.split(best).length ? candidate : best, ',');
+  const records = mockCsvRecords(text, delimiter);
+  const head = records.shift();
+  if (!head) throw new Error('backend.errors.mailMergeCsvEmpty');
+  if (head.cells.length > 200) throw new Error('backend.errors.mailMergeCsvTooManyColumns');
+  const fields: string[] = [];
+  head.cells.forEach((raw, index) => {
+    const base = raw.replace(/[{}|]/g, '').trim() || `Column${index + 1}`;
+    let name = base;
+    for (let suffix = 2; fields.some((field) => field.toLowerCase() === name.toLowerCase()); suffix += 1) name = `${base}_${suffix}`;
+    fields.push(name);
+  });
+  const rows = records.slice(0, 5000).map((record) => ({
+    line: record.line,
+    values: Object.fromEntries(fields.map((field, index) => [field, (record.cells[index] ?? '').trim()])),
+  }));
+  if (rows.length === 0) throw new Error('backend.errors.mailMergeCsvNoRows');
+  const byHeader = fields.find((field) => ['email', 'e-mail', 'emailaddress', 'e-mailadresse', 'emailadresse', 'mail', 'mailadresse']
+    .includes(field.replace(/[\s_]/g, '').toLowerCase()));
+  const byValues = fields.find((field) => {
+    const filled = rows.slice(0, 50).map((row) => row.values[field] ?? '').filter(Boolean);
+    return filled.length > 0 && filled.every((value) => mockNormalizeAddress(value));
+  });
+  return { fields, rows, email_field: byHeader ?? byValues ?? null, delimiter, encoding, truncated: records.length > 5000 };
+}
+
+const MOCK_TOKEN = /\{\{([^{}]*)\}\}/g;
+
+/** Control characters become spaces, so a value cannot start a new header line. */
+function mockSingleLine(value: string): string {
+  return [...value].map((character) => {
+    const code = character.charCodeAt(0);
+    return code < 0x20 || code === 0x7f ? ' ' : character;
+  }).join('');
+}
+
+function mockLookup(values: Record<string, string>, name: string): string | null {
+  const wanted = name.trim().toLowerCase();
+  const hit = Object.entries(values).find(([field]) => field.trim().toLowerCase() === wanted);
+  return hit && hit[1].trim() ? hit[1] : null;
+}
+
+function mockRender(template: string, values: Record<string, string>, context: 'text' | 'html' | 'header') {
+  const missing: string[] = [];
+  const out = template.replace(MOCK_TOKEN, (whole, inner: string) => {
+    const bar = inner.indexOf('|');
+    const name = (bar >= 0 ? inner.slice(0, bar) : inner).trim();
+    if (!name) return whole;
+    const value = mockLookup(values, name);
+    if (value !== null) {
+      const trimmed = value.trim();
+      if (context === 'html') return trimmed.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\n/g, '<br>');
+      if (context === 'header') return mockSingleLine(trimmed);
+      return trimmed;
+    }
+    if (bar >= 0) {
+      const fallback = inner.slice(bar + 1);
+      return context === 'header' ? mockSingleLine(fallback) : fallback;
+    }
+    if (!missing.some((field) => field.toLowerCase() === name.toLowerCase())) missing.push(name);
+    return '';
+  });
+  return { out, missing };
+}
+
+function mockRenderMessage(template: MockMergeTemplate, values: Record<string, string>) {
+  const subject = mockRender(template.subject, values, 'header');
+  const body = mockRender(template.body, values, 'text');
+  const html = template.body_html === null ? null : mockRender(template.body_html, values, 'html');
+  const missing: string[] = [];
+  for (const field of [...subject.missing, ...body.missing, ...(html?.missing ?? [])]) {
+    if (!missing.some((name) => name.toLowerCase() === field.toLowerCase())) missing.push(field);
+  }
+  return { missing, rendered: missing.length ? null : { subject: subject.out, body: body.out, body_html: html?.out ?? null } };
+}
+
+function mockMergePlan(template: MockMergeTemplate, fields: string[], emailField: string, rows: MockMergeRow[]) {
+  const seen = new Set<string>();
+  let ready = 0;
+  const planned = rows.map((row, index) => {
+    const raw = row.values[emailField] ?? '';
+    const email = mockNormalizeAddress(raw);
+    let issue: Record<string, unknown> | null = null;
+    if (!email) issue = { kind: 'invalid_email' };
+    else if (seen.has(email.toLowerCase())) issue = { kind: 'duplicate' };
+    else {
+      seen.add(email.toLowerCase());
+      const { missing } = mockRenderMessage(template, row.values);
+      if (missing.length) issue = { kind: 'missing_values', fields: missing };
+    }
+    if (!issue) ready += 1;
+    return { index, line: row.line, email: email ?? raw.trim(), issue };
+  });
+  const unknown: string[] = [];
+  for (const text of [template.subject, template.body, template.body_html ?? '']) {
+    for (const match of text.matchAll(MOCK_TOKEN)) {
+      const name = (match[1] ?? '').split('|')[0]!.trim();
+      if (name && !fields.some((field) => field.trim().toLowerCase() === name.toLowerCase())
+        && !unknown.some((entry) => entry.toLowerCase() === name.toLowerCase())) unknown.push(name);
+    }
+  }
+  return { rows: planned, ready, unknown_fields: unknown };
+}
+
+function mockMergeDelay(accountId: string | null): number {
+  const account = accounts.find((entry) => entry.id === accountId);
+  if (!account) return 0;
+  const domain = account.email.split('@')[1]?.toLowerCase() ?? '';
+  if (account.provider === 'gmail' || domain === 'gmail.com' || domain === 'googlemail.com') return 15;
+  if (account.provider === 'outlook' || /^(outlook|hotmail|live|msn)\./.test(domain)) return 10;
+  return 20;
+}
+
+/** Moves a running job forward to what the clock says it would have sent. */
+function advanceMergeJob(job: MockMergeJob) {
+  if (job.status !== 'running') return;
+  const due = job.sent_before_pause + Math.floor((Date.now() - job.started_ms) / (job.delay_seconds * 1000)) + 1;
+  let sent = 0;
+  for (const row of job.recipients) {
+    if (row.status === 'sent') { sent += 1; continue; }
+    if (row.status !== 'pending' || sent >= due) continue;
+    row.status = 'sent';
+    row.attempts += 1;
+    row.sent_at = new Date().toISOString();
+    sent += 1;
+  }
+  if (job.recipients.every((row) => row.status !== 'pending')) {
+    job.status = 'completed';
+    job.finished_at = new Date().toISOString();
+  }
+}
+
+function mergeJobSummary(job: MockMergeJob) {
+  advanceMergeJob(job);
+  const count = (status: string) => job.recipients.filter((row) => row.status === status).length;
+  return {
+    id: job.id, account_id: job.account_id, status: job.status, pause_reason: job.pause_reason,
+    subject: job.subject, source_label: job.source_label, delay_seconds: job.delay_seconds,
+    next_send_at: job.status === 'running' ? new Date(Date.now() + job.delay_seconds * 1000).toISOString() : null,
+    created_at: job.created_at, updated_at: job.updated_at, finished_at: job.finished_at,
+    total: job.recipients.length, pending: count('pending'), queued: count('queued'), sent: count('sent'),
+    failed: count('failed'), unknown: count('unknown'), cancelled: count('cancelled'),
+  };
+}
+
+function mergeJobById(id: unknown): MockMergeJob {
+  const job = mergeJobs.find((entry) => entry.id === id);
+  if (!job) throw new Error('backend.errors.mailMergeJobNotFound');
+  return job;
+}
+
 const handlers: Record<string, Handler> = {
   oauth_status: (payload) => oauthStatus(String(payload.accountId)),
   start_oauth_flow: (payload) => {
@@ -2520,6 +2760,105 @@ const handlers: Record<string, Handler> = {
     // The backend runs a new rule once right away, too.
     runMockSweepRule(rule);
     return { ...rule };
+  },
+  parse_mail_merge_csv: (payload) => mockParseCsv(String(input(payload).content_base64 ?? '')),
+  preview_mail_merge: (payload) => {
+    const scope = input(payload) as unknown as {
+      account_id: string | null; template: MockMergeTemplate; fields: string[]; email_field: string;
+      rows: MockMergeRow[]; index: number | null;
+    };
+    const template = { ...scope.template, body_html: scope.template.body_html ?? null };
+    const row = scope.index === null ? undefined : scope.rows[scope.index];
+    const rendered = row ? mockRenderMessage(template, row.values) : { missing: [], rendered: null };
+    return {
+      plan: mockMergePlan(template, scope.fields, scope.email_field, scope.rows),
+      rendered: rendered.rendered,
+      missing: rendered.missing,
+      max_recipients: MOCK_MERGE_LIMIT,
+      default_delay_seconds: mockMergeDelay(scope.account_id),
+    };
+  },
+  create_mail_merge_job: (payload) => {
+    const scope = input(payload) as unknown as {
+      account_id: string;
+      message: {
+        subject: string; body: string; body_html: string | null; draft_id: string | null;
+        thread_id?: string | null; reply_to_message_id?: string | null;
+      };
+      source_label: string; delay_seconds: number; fields: string[]; email_field: string; rows: MockMergeRow[];
+      request_id?: string | null;
+    };
+    const repeated = scope.request_id ? mergeJobs.find((entry) => entry.request_id === scope.request_id) : undefined;
+    if (repeated) return mergeJobSummary(repeated);
+    if (scope.message.thread_id || scope.message.reply_to_message_id) throw new Error('backend.errors.mailMergeReplyNotAllowed');
+    if (!(scope.delay_seconds >= 1 && scope.delay_seconds <= 3600)) throw new Error('backend.errors.mailMergeDelayInvalid');
+    const template = { subject: scope.message.subject, body: scope.message.body, body_html: scope.message.body_html ?? null };
+    const plan = mockMergePlan(template, scope.fields, scope.email_field, scope.rows);
+    const ready = plan.rows.filter((row) => !row.issue);
+    if (ready.length === 0) throw new Error('backend.errors.mailMergeNoRecipients');
+    if (ready.length > MOCK_MERGE_LIMIT) throw new Error('backend.errors.mailMergeTooManyRecipients');
+    const now = new Date().toISOString();
+    const job: MockMergeJob = {
+      id: `merge-${++nextMergeJob}`, request_id: scope.request_id ?? null, account_id: scope.account_id, status: 'running', pause_reason: null,
+      subject: scope.message.subject, source_label: scope.source_label, delay_seconds: scope.delay_seconds,
+      created_at: now, updated_at: now, finished_at: null, started_ms: Date.now(), sent_before_pause: 0,
+      recipients: ready.map((row, position) => ({
+        id: `merge-${nextMergeJob}-${position}`, position, email: row.email, status: 'pending', error: null, attempts: 0, sent_at: null,
+      })),
+    };
+    mergeJobs.unshift(job);
+    const draftIndex = drafts.findIndex((draft) => draft.id === scope.message.draft_id);
+    if (draftIndex >= 0) drafts.splice(draftIndex, 1);
+    return mergeJobSummary(job);
+  },
+  list_mail_merge_jobs: () => mergeJobs.map(mergeJobSummary),
+  get_mail_merge_job: (payload) => {
+    const job = mergeJobById(payload.id);
+    return { job: mergeJobSummary(job), recipients: job.recipients.map((row) => ({ ...row })) };
+  },
+  control_mail_merge_job: (payload) => {
+    const job = mergeJobById(payload.id);
+    advanceMergeJob(job);
+    const sent = job.recipients.filter((row) => row.status === 'sent').length;
+    switch (payload.action) {
+      case 'pause':
+        if (job.status !== 'running') throw new Error('backend.errors.mailMergeInvalidState');
+        job.status = 'paused';
+        break;
+      case 'resume':
+        if (job.status !== 'paused') throw new Error('backend.errors.mailMergeInvalidState');
+        job.status = 'running';
+        job.pause_reason = null;
+        job.started_ms = Date.now();
+        job.sent_before_pause = sent;
+        break;
+      case 'cancel':
+        if (job.status !== 'running' && job.status !== 'paused') throw new Error('backend.errors.mailMergeInvalidState');
+        job.status = 'cancelled';
+        job.finished_at = new Date().toISOString();
+        for (const row of job.recipients) if (row.status === 'pending') row.status = 'cancelled';
+        break;
+      case 'retry_failed': {
+        if (job.status === 'cancelled') throw new Error('backend.errors.mailMergeInvalidState');
+        for (const row of job.recipients) if (row.status === 'failed') { row.status = 'pending'; row.error = null; }
+        // Retrying is not resuming: a pause other than for failures stays.
+        if (job.status === 'paused' && job.pause_reason !== 'failures') break;
+        job.status = 'running';
+        job.pause_reason = null;
+        job.started_ms = Date.now();
+        job.sent_before_pause = sent;
+        break;
+      }
+      case 'delete': {
+        if (job.status !== 'completed' && job.status !== 'cancelled') throw new Error('backend.errors.mailMergeInvalidState');
+        mergeJobs.splice(mergeJobs.indexOf(job), 1);
+        return null;
+      }
+      default:
+        throw new Error('backend.errors.mailMergeInvalidState');
+    }
+    job.updated_at = new Date().toISOString();
+    return mergeJobSummary(job);
   },
   delete_sweep_rule: (payload) => {
     const index = sweepRules.findIndex((rule) => rule.id === payload.ruleId);

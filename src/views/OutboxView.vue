@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useUiStore } from '@/stores/ui';
 import { useComposerStore } from '@/stores/composer';
@@ -36,6 +36,8 @@ import SkeletonRow from '@/components/ui/SkeletonRow.vue';
 import Avatar from '@/components/common/Avatar.vue';
 import TimeAgo from '@/components/common/TimeAgo.vue';
 import type { BackendOutboxItem } from '@/types/outbox';
+
+const MailMergeJobsPanel = defineAsyncComponent(() => import('@/components/mail/MailMergeJobsPanel.vue'));
 
 const { locale, t } = useI18n();
 const ui = useUiStore();
@@ -278,6 +280,7 @@ async function cancel(item: BackendOutboxItem) {
     </PaneHeader>
 
     <div class="outbox__body">
+      <MailMergeJobsPanel />
       <SkeletonRow v-if="outbox.loading && outbox.items.length === 0" :count="3" height="76px" />
 
       <!-- A failed list leaves the queue empty. Without this branch the empty

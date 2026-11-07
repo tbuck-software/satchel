@@ -40,33 +40,38 @@ export async function backendSendMessage(
 ): Promise<BackendSendMessageResult> {
   return invoke<BackendSendMessageResult>('send_message', {
     accountId: payload.accountId,
-    input: {
-      to: payload.to,
-      cc: payload.cc ?? [],
-      bcc: payload.bcc ?? [],
-      subject: payload.subject,
-      body: payload.body,
-      body_html: payload.bodyHtml ?? null,
-      thread_id: payload.threadId ?? null,
-      reply_to_message_id: payload.replyToMessageId ?? null,
-      attachments: payload.attachments ?? [],
-      from_address: payload.fromAddress ?? null,
-      from_name: payload.fromName ?? null,
-      reply_to: payload.replyTo ?? null,
-      draft_id: payload.draftId ?? null,
-      scheduled_for: payload.scheduledFor ?? null,
-      follow_up_at: payload.followUpAt ?? null,
-      smime_sign_with_cert_id: payload.smimeSignWithCertId ?? null,
-      smime_encrypt_to_recipients: payload.smimeEncryptToRecipients ?? false,
-      pgp_sign_with_key_id: payload.pgpSignWithKeyId ?? null,
-      pgp_encrypt_to_recipients: payload.pgpEncryptToRecipients ?? false,
-      priority: payload.priority ?? null,
-      signature_id: payload.signatureId ?? null,
-      signature_variant: payload.signatureVariant ?? null,
-      signature_override_text: payload.signatureOverrideText ?? null,
-      signature_override_html: payload.signatureOverrideHtml ?? null,
-    } satisfies DeserializeWireInput<OutgoingMessageInput, 'core::drafts::outgoing::OutgoingMessageInput'>,
+    input: outgoingMessageWire(payload),
   });
+}
+
+/** The composer's message in the shape `send_message` and mail merge read. */
+export function outgoingMessageWire(payload: BackendSendMessagePayload) {
+  return {
+    to: payload.to,
+    cc: payload.cc ?? [],
+    bcc: payload.bcc ?? [],
+    subject: payload.subject,
+    body: payload.body,
+    body_html: payload.bodyHtml ?? null,
+    thread_id: payload.threadId ?? null,
+    reply_to_message_id: payload.replyToMessageId ?? null,
+    attachments: payload.attachments ?? [],
+    from_address: payload.fromAddress ?? null,
+    from_name: payload.fromName ?? null,
+    reply_to: payload.replyTo ?? null,
+    draft_id: payload.draftId ?? null,
+    scheduled_for: payload.scheduledFor ?? null,
+    follow_up_at: payload.followUpAt ?? null,
+    smime_sign_with_cert_id: payload.smimeSignWithCertId ?? null,
+    smime_encrypt_to_recipients: payload.smimeEncryptToRecipients ?? false,
+    pgp_sign_with_key_id: payload.pgpSignWithKeyId ?? null,
+    pgp_encrypt_to_recipients: payload.pgpEncryptToRecipients ?? false,
+    priority: payload.priority ?? null,
+    signature_id: payload.signatureId ?? null,
+    signature_variant: payload.signatureVariant ?? null,
+    signature_override_text: payload.signatureOverrideText ?? null,
+    signature_override_html: payload.signatureOverrideHtml ?? null,
+  } satisfies DeserializeWireInput<OutgoingMessageInput, 'core::drafts::outgoing::OutgoingMessageInput'>;
 }
 
 

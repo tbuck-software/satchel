@@ -308,6 +308,14 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
       keywords: t('commands.keywords.compose'),
       run: () => composer.openNew(),
     },
+    {
+      id: 'compose:mail-merge',
+      icon: 'merge',
+      title: t('mailMerge.command'),
+      context: 'app',
+      keywords: t('mailMerge.commandKeywords'),
+      run: () => composer.openMailMerge(),
+    },
     ...(targetIds().length > 0 ? [
       {
         id: 'thread:reply',
