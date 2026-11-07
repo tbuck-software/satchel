@@ -45,6 +45,8 @@ import { isSmimeSignatureAttachment, isSystemAttachment } from '@/utils/messageA
 import { summarizeAuthentication } from '@/utils/messageAuthentication';
 import type { AnchorBox } from '@/utils/popoverPlacement';
 import { useMessageSecurityActions } from '@/composables/useMessageSecurityActions';
+import { useMessageTranslation } from '@/composables/useMessageTranslation';
+import { languageName } from '@/utils/languageName';
 import MessageBodyViewSwitch from './MessageBodyViewSwitch.vue';
 import { BODY_VIEW_SWITCH } from './bodyViewSwitch';
 import { BODY_VIEW_STATE, type BodyViewState } from './bodyViewState';
@@ -86,7 +88,7 @@ const invitesStore = useInvitesStore();
 const accountsStore = useAccountsStore();
 const bodyCacheKey = computed(() =>
   `${props.message.id}:uidvalidity:${props.message.remoteUidValidity ?? 'local'}`);
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const sourceDialogOpen = ref(false);
 const messageActionsOpen = ref(false);
 const pgpDismissed = ref(false);
@@ -362,6 +364,41 @@ function chooseBodyView(mode: string) {
 const imageGuard = shallowRef<ImageGuardChoices | null>(null);
 provide(IMAGE_GUARD_CHOICES, imageGuard);
 
+/*
+ * Translate, and the way back to the original. The translated body renders
+ * in the same isolated frame as the original, through the same CSP; only
+ * the HTML handed to the renderer changes.
+ */
+
+/** The consent question loads with its copy only when it is asked. */
+async function requestTranslationConsent(accountId: string): Promise<boolean> {
+  const { askTranslationConsent } = await import('./translationConsent');
+  return askTranslationConsent(accountId);
+}
+
+const messageTranslation = useMessageTranslation(
+  () => ({
+    id: props.message.id,
+    accountId: senderAccountId.value,
+    bodyLoaded: bodyLoaded.value && !props.message.bodyLoadError && !props.message.sourcePayload,
+    encrypted: props.message.pgp?.state === 'decrypted' || props.message.smime?.state === 'decrypted',
+    collapsed: props.collapsed,
+  }),
+  requestTranslationConsent,
+);
+const shownTranslation = messageTranslation.shown;
+const translatedFrom = computed(() => {
+  const source = shownTranslation.value?.source_language;
+  return source ? languageName(source, locale.value) : '';
+});
+const rendererHtml = computed(() => (
+  shownTranslation.value ? shownTranslation.value.body_html ?? undefined : props.message.bodyHtml
+));
+const rendererText = computed(() => shownTranslation.value?.body_text ?? visibleBodyText.value);
+const rendererCacheKey = computed(() => (
+  shownTranslation.value ? `${bodyCacheKey.value}:translated:${shownTranslation.value.target_language}` : bodyCacheKey.value
+));
+
 /** Someone besides the sender and us would get a reply all. */
 const canReplyAll = computed(() => {
   const others = new Set(
@@ -380,6 +417,7 @@ function runCommand(command: MessageMenuCommand) {
     case 'topic': topicsStore.openPicker({ itemType: 'message', itemIds: [props.message.id] }); break;
     case 'source': sourceDialogOpen.value = true; break;
     case 'toggleCollapsed': emit('toggleCollapsed'); break;
+    case 'translate': messageTranslation.toggle(); break;
   }
 }
 
@@ -389,6 +427,11 @@ const messageMenu = computed<MessageMenu>(() => ({
   collapsed: props.collapsed,
   bodyView: bodyViewChoices.value,
   images: ui.isMobile && !props.collapsed ? imageGuard.value : null,
+  // The sheet offers it whenever it can work; the language guess only
+  // decides the desktop header button.
+  translation: messageTranslation.available.value || messageTranslation.shown.value !== null
+    ? { shown: messageTranslation.shown.value !== null }
+    : null,
   run: runCommand,
 }));
 
@@ -626,6 +669,18 @@ function openSenderDetails() {
               </IconButton>
             </template>
             <IconButton
+              v-if="messageTranslation.offered.value"
+              class="message-translate-trigger"
+              size="sm"
+              :title="shownTranslation ? $t('translation.reader.showOriginal') : $t('translation.reader.translate')"
+              :aria-pressed="shownTranslation !== null"
+              :active="shownTranslation !== null"
+              :disabled="messageTranslation.busy.value"
+              @click.stop="messageTranslation.toggle()"
+            >
+              <AppIcon size="sm"><path d="M2.5 3.5h6M5.5 2v1.5M4 3.5c.4 2.3 1.9 4.2 4 5.2M7.5 3.5c-.5 2.6-2.4 4.8-5 5.8" /><path d="m8.5 14 2.75-6.5L14 14M9.4 12h3.7" /></AppIcon>
+            </IconButton>
+            <IconButton
               v-if="headerBodyView"
               class="message-view-mode-trigger"
               size="sm"
@@ -774,13 +829,23 @@ function openSenderDetails() {
           :cache-key="bodyCacheKey"
         />
       </template>
+      <template v-else>
+      <p v-if="shownTranslation || messageTranslation.busy.value" class="translation-note mt-3" role="status">
+        <template v-if="shownTranslation">
+          <span>{{ translatedFrom ? $t('translation.reader.translatedFrom', { language: translatedFrom }) : $t('translation.reader.translated') }}</span>
+          <span aria-hidden="true">·</span>
+          <AppButton class="translation-note__back" variant="link" size="sm" @click="messageTranslation.showOriginal()">
+            {{ $t('translation.reader.showOriginal') }}
+          </AppButton>
+        </template>
+        <span v-else>{{ $t('translation.reader.translating') }}</span>
+      </p>
       <EmailRenderer
-        v-else
         class="mt-3 text-secondary leading-relaxed"
-        :html="props.message.bodyHtml"
-        :text="visibleBodyText"
-        :body-segments="props.message.bodySegments"
-        :body-provenance="props.message.bodyProvenance"
+        :html="rendererHtml"
+        :text="rendererText"
+        :body-segments="shownTranslation ? undefined : props.message.bodySegments"
+        :body-provenance="shownTranslation ? undefined : props.message.bodyProvenance"
         :pgp-state="pgpState"
         :can-decrypt="true"
         :decrypting="pgpBusy"
@@ -788,9 +853,10 @@ function openSenderDetails() {
         :trusted-dmarc-pass="props.message.authDmarc === 'pass'"
         :attachments="props.message.attachments"
         :normalize-quotes="settings.collapseQuotedHistory"
-        :cache-key="bodyCacheKey"
+        :cache-key="rendererCacheKey"
         @request-unlock="handleUnlock"
       />
+      </template>
     </div>
     <div
       v-if="!bodyLoaded"
@@ -889,6 +955,21 @@ function openSenderDetails() {
 </template>
 
 <style scoped>
+/* A fact and a way back, in the body-view note's quiet register. */
+.translation-note {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  margin-bottom: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.translation-note__back {
+  color: var(--text-accent);
+  font-weight: var(--weight-medium);
+}
+
 /* The avatar is the affordance, so the button adds only a focus/open ring —
    a bordered wrapper would put a second circle around a circle.
    It must not shrink: `CardButton` allows it, and a long address squeezed

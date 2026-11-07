@@ -17,6 +17,7 @@ function messageMenu(overrides: Partial<MessageMenu> = {}): MessageMenu {
     collapsed: false,
     bodyView: null,
     images: null,
+    translation: null,
     run: vi.fn(),
     ...overrides,
   };

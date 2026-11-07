@@ -931,6 +931,105 @@ let notificationPreferences = {
 /** Expired-certificate exceptions granted in this session. */
 const certificateExceptions: Array<{ account_id: string; host: string; fingerprint: string; expires_at: string; created_at: string }> = [];
 
+
+/* -------------------------------------------------------------------------- */
+/* Translation                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Translation as `commands/translation.rs` keeps it: settings, the key (only
+ * whether one exists and its plan ever leaves), per-account consent, a cache
+ * per message and target, and the request log. The "engine" is deterministic:
+ * every text node gains a `[XX]` marker for the target language, so the
+ * suite can tell a translated body from the original.
+ */
+const translationState = {
+  engine: null as string | null,
+  target: null as string | null,
+  logSentText: false,
+  key: null as string | null,
+  consents: [] as Array<{ engine: string; account_id: string; granted_at: string }>,
+  cache: new Map<string, { source_language: string; body_html: string | null; body_text: string | null; created_at: string }>(),
+  log: [] as Array<{
+    id: number; created_at: string; feature: string; provider: string; model: string | null; account_id: string | null;
+    message_id: string | null; units: number; unit: string; outcome: string; sent_text: string | null;
+  }>,
+};
+let nextTranslationLog = 0;
+// `?mockTranslation=ready`: DeepL set up with a Pro key and German as the
+// target, no account allowed yet, so the reader asks before the first send.
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mockTranslation') === 'ready') {
+  Object.assign(translationState, { engine: 'deepl', target: 'DE', key: 'mock-key' });
+}
+const MOCK_TRANSLATION_LANGUAGES = ['DE', 'EN-GB', 'EN-US', 'ES', 'FR', 'IT', 'JA', 'NL', 'PL', 'PT-BR', 'PT-PT', 'ZH-HANS'];
+
+function translationSettingsDto() {
+  const key = translationState.key;
+  return {
+    engine: translationState.engine,
+    target_language: translationState.target,
+    log_sent_text: translationState.logSentText,
+    engines: [{ id: 'deepl', has_key: key !== null, plan: key === null ? null : key.endsWith(':fx') ? 'free' : 'pro', local: false }],
+    consents: translationState.consents
+      .filter((consent) => accounts.some((account) => account.id === consent.account_id))
+      .map((consent) => ({ ...consent })),
+  };
+}
+
+function translationEngine(engine: unknown): string {
+  if (engine !== 'deepl') throw new Error('backend.errors.translation.engineUnknown');
+  return engine;
+}
+
+function translationTarget(code: unknown): string {
+  const value = String(code ?? '').trim().replace('_', '-').toUpperCase();
+  if (!/^[A-Z]{2,3}(-[A-Z0-9]{2,4})?$/.test(value)) throw new Error('backend.errors.translation.unsupportedLanguage');
+  return value;
+}
+
+function mockFindMessage(messageId: string): { message: Message; accountId: string } | null {
+  for (const [threadId, list] of Object.entries(messages)) {
+    const message = list.find((entry) => entry.id === messageId);
+    if (message) return { message, accountId: threads.find((thread) => thread.id === threadId)?.accountId ?? '' };
+  }
+  return null;
+}
+
+/** A word count, not a model: German if its common words outnumber English ones. */
+function mockDetectLanguage(text: string): string | null {
+  const words = text.toLowerCase().match(/\p{L}+/gu) ?? [];
+  if (words.length < 8) return null;
+  const german = words.filter((word) => ['der', 'die', 'das', 'und', 'ist', 'nicht', 'mit', 'ich', 'sie', 'wir', 'für'].includes(word)).length;
+  const english = words.filter((word) => ['the', 'and', 'is', 'not', 'with', 'you', 'we', 'for', 'to', 'of'].includes(word)).length;
+  if (german === english) return null;
+  return german > english ? 'DE' : 'EN';
+}
+
+function mockTranslate(content: string, html: boolean, target: string): string {
+  const marker = `[${target.split('-')[0]}]`;
+  if (!html) return content.split('\n').map((line) => (line.trim() ? `${marker} ${line}` : line)).join('\n');
+  return content.replace(/>([^<]*\S[^<]*)</g, (_match, text: string) => `>${marker} ${text.trim()}<`);
+}
+
+/** The same refusals as `service::refusal`, in the same order. */
+function mockTranslationRefusal(source: ReturnType<typeof mockTranslationSource>): string | null {
+  // A free key takes no mail at all (DeepL's terms rule out personal data).
+  if (translationState.engine && translationState.key?.endsWith(':fx')) return 'backend.errors.translation.freePlanNotForMail';
+  if (source.encrypted) return 'backend.errors.translation.encrypted';
+  if (!source.html && !source.text) return 'backend.errors.translation.nothingToTranslate';
+  return null;
+}
+
+function mockTranslationSource(messageId: string) {
+  const found = mockFindMessage(messageId);
+  if (!found) throw new Error('backend.errors.translation.messageNotFound');
+  const { message } = found;
+  const html = message.bodyHtml?.trim() ? message.bodyHtml : null;
+  const text = message.bodyText?.trim() ? message.bodyText : null;
+  const encrypted = [html, text].some((value) => value?.includes('-----BEGIN PGP MESSAGE-----'));
+  return { ...found, html, text, encrypted };
+}
+
 const handlers: Record<string, Handler> = {
   oauth_status: (payload) => oauthStatus(String(payload.accountId)),
   start_oauth_flow: (payload) => {
@@ -2069,6 +2168,104 @@ const handlers: Record<string, Handler> = {
     if (index < 0) throw new Error('backend.errors.senderSweepRuleNotFound');
     sweepRules.splice(index, 1);
   },
+  get_translation_settings: () => translationSettingsDto(),
+  save_translation_settings: (payload) => {
+    const scope = input(payload);
+    const engine = scope.engine == null || String(scope.engine).trim() === '' ? null : translationEngine(String(scope.engine).trim());
+    const target = scope.target_language == null || String(scope.target_language).trim() === ''
+      ? null
+      : translationTarget(scope.target_language);
+    Object.assign(translationState, { engine, target, logSentText: Boolean(scope.log_sent_text) });
+    if (!translationState.logSentText) translationState.log.forEach((entry) => { entry.sent_text = null; });
+    return translationSettingsDto();
+  },
+  set_translation_api_key: (payload) => {
+    const scope = input(payload);
+    translationEngine(scope.engine);
+    const key = String(scope.api_key ?? '').trim();
+    if (key && (key.length > 128 || !/^[\x21-\x7e]+$/.test(key))) throw new Error('backend.errors.translation.keyMalformed');
+    translationState.key = key || null;
+    return translationSettingsDto();
+  },
+  check_translation_engine: (payload) => {
+    translationEngine(payload.engine);
+    const key = translationState.key;
+    if (key === null) throw new Error('backend.errors.translation.keyMissing');
+    if (key.startsWith('invalid')) throw new Error('backend.errors.translation.invalidKey');
+    const used = translationState.log.reduce((sum, entry) => sum + (entry.outcome === 'ok' ? entry.units : 0), 0);
+    return { used: 12_345 + used, limit: key.endsWith(':fx') ? 500_000 : null, unit: 'characters' };
+  },
+  list_translation_languages: (payload) => {
+    translationEngine(payload.engine);
+    // `refresh` would ask DeepL; the mock's list is the same either way.
+    return MOCK_TRANSLATION_LANGUAGES.map((code) => ({ code, name: null }));
+  },
+  set_translation_consent: (payload) => {
+    const scope = input(payload);
+    const engine = translationEngine(scope.engine);
+    const accountId = String(scope.account_id ?? '').trim();
+    if (!accounts.some((account) => account.id === accountId)) throw new Error('backend.errors.accountNotFound');
+    translationState.consents = translationState.consents.filter(
+      (consent) => !(consent.engine === engine && consent.account_id === accountId),
+    );
+    if (scope.granted) translationState.consents.push({ engine, account_id: accountId, granted_at: new Date().toISOString() });
+    return translationSettingsDto();
+  },
+  message_translation_offer: (payload) => {
+    const scope = input(payload);
+    const target = translationTarget(scope.target_language);
+    const source = mockTranslationSource(String(scope.message_id ?? ''));
+    const detected = source.text ? mockDetectLanguage(source.text) : null;
+    const cached = translationState.cache.get(`${source.message.id}:${target}`) ?? null;
+    const engine = translationState.engine;
+    const refusal = mockTranslationRefusal(source);
+    return {
+      detected_language: detected,
+      offered: refusal === null && detected !== target.split('-')[0],
+      refusal,
+      cached: cached !== null,
+      cached_source_language: cached?.source_language ?? null,
+      consented: engine !== null && translationState.consents.some(
+        (consent) => consent.engine === engine && consent.account_id === source.accountId,
+      ),
+    };
+  },
+  translate_message: (payload) => {
+    const scope = input(payload);
+    const target = translationTarget(scope.target_language);
+    const source = mockTranslationSource(String(scope.message_id ?? ''));
+    const cacheKey = `${source.message.id}:${target}`;
+    const cached = translationState.cache.get(cacheKey);
+    if (cached) return { message_id: source.message.id, target_language: target, engine: 'deepl', ...cached, cached: true };
+    const engine = translationState.engine;
+    if (!engine) throw new Error('backend.errors.translation.notConfigured');
+    if (!translationState.key) throw new Error('backend.errors.translation.keyMissing');
+    const refusal = mockTranslationRefusal(source);
+    if (refusal) throw new Error(refusal);
+    if (!translationState.consents.some((consent) => consent.engine === engine && consent.account_id === source.accountId)) {
+      throw new Error('backend.errors.translation.consentRequired');
+    }
+    const content = (source.html ?? source.text)!;
+    const now = new Date().toISOString();
+    translationState.log.unshift({
+      id: ++nextTranslationLog, created_at: now, feature: 'translation', provider: engine, model: null,
+      account_id: source.accountId, message_id: source.message.id, units: [...content].length, unit: 'characters',
+      outcome: 'ok', sent_text: translationState.logSentText ? content : null,
+    });
+    const translation = {
+      source_language: (source.text ? mockDetectLanguage(source.text) : null) ?? 'EN',
+      body_html: source.html ? mockTranslate(source.html, true, target) : null,
+      body_text: source.html ? null : mockTranslate(content, false, target),
+      created_at: now,
+    };
+    translationState.cache.set(cacheKey, translation);
+    return { message_id: source.message.id, target_language: target, engine, ...translation, cached: false };
+  },
+  list_outbound_requests: () => translationState.log.map(({ sent_text: text, ...entry }) => ({
+    ...entry, has_sent_text: text !== null,
+  })),
+  outbound_request_text: (payload) => translationState.log.find((entry) => entry.id === payload.id)?.sent_text ?? null,
+  clear_outbound_requests: () => { translationState.log = []; },
   unsubscribe: (payload) => {
     const messageId = String(input(payload).message_id ?? '');
     const message = Object.values(messages).flat().find((entry) => entry.id === messageId);

@@ -285,6 +285,10 @@
         "keywords": "select toggle auswählen",
         "label": "Auswahl umschalten"
       },
+      "translateMessage": {
+        "keywords": "übersetzen übersetzung deepl sprache original translate",
+        "label": "Nachricht übersetzen"
+      },
       "trash": {
         "keywords": "delete trash löschen",
         "label": "Löschen"

@@ -442,6 +442,28 @@
       "topicNoteContentEmpty": "Enter note content.",
       "topicPersistenceFailed": "The topic could not be saved. Please try again.",
       "topicStatusInvalid": "The topic status is invalid.",
+      "translation": {
+        "consentRequired": "Mail from this account may not be sent for translation yet.",
+        "credentialsUnavailable": "The key store is locked, so the API key cannot be read or saved.",
+        "encrypted": "Encrypted mail is not sent for translation.",
+        "engineUnknown": "Unknown translation engine.",
+        "freePlanNotForMail": "DeepL API Free keys can't be used for mail: DeepL forbids personal data on the free API, and every mail contains some. Translating needs a Pro key.",
+        "invalidKey": "DeepL did not accept the API key. Check it in Settings → Translation.",
+        "invalidResponse": "DeepL's answer could not be read.",
+        "keyMalformed": "That does not look like an API key. Paste the key without spaces or line breaks.",
+        "keyMissing": "No API key is saved for the translation engine.",
+        "messageNotFound": "This message is not stored on this device.",
+        "network": "DeepL could not be reached. Check the connection.",
+        "notConfigured": "Translation is not set up. Choose an engine in Settings → Translation.",
+        "nothingToTranslate": "This message has no text to translate.",
+        "persistenceFailed": "The translation could not be saved on this device.",
+        "quotaExceeded": "The DeepL character allowance is used up for this billing period.",
+        "rateLimited": "DeepL is getting too many requests. Try again in a minute.",
+        "rejected": "DeepL refused the request.",
+        "tooLarge": "This message is too long to translate in one go.",
+        "unavailable": "DeepL is not available right now. Try again later.",
+        "unsupportedLanguage": "The translation engine does not translate into this language."
+      },
       "trayDestinationInvalid": "This tray destination is not available.",
       "trayMessageNotFound": "This email is no longer available.",
       "trayThreadInvalid": "This tray email reference is invalid.",
@@ -759,6 +781,7 @@
     "syncFailedCause": "Sync failed: {cause}",
     "syncMail": "Sync email",
     "toggleTheme": "Switch theme (light/dark)",
+    "translateMessage": "Translate message or show the original",
     "trashMany": "Delete {count} emails",
     "undo": "Undo: {label}",
     "waiting": "Wait for a reply"
@@ -3071,6 +3094,10 @@
         "description": "Reusable email texts",
         "label": "Templates"
       },
+      "translation": {
+        "description": "DeepL key, target language and what is sent",
+        "label": "Translation"
+      },
       "tray": {
         "description": "Menu bar and tray behaviour",
         "label": "System tray"
@@ -3373,6 +3400,59 @@
       "vim": "Vim navigation",
       "vimHint": "Navigate with j/k and work through messages from the keyboard."
     },
+    "translation": {
+      "consentAria": "Allow translation for {account}",
+      "consentHint": "Off for every account until you switch it on. Applies to this device only.",
+      "consentTitle": "Accounts that may be translated",
+      "engineAria": "Translation engine",
+      "engineDeepl": "DeepL",
+      "engineHint": "DeepL runs on DeepL's servers. It is never a local engine.",
+      "engineLabel": "Engine",
+      "engineOff": "Off",
+      "keyEncrypted": "Stored encrypted and included in backups; Satchel never shows it again. Switching off keeps the key; Remove key deletes it.",
+      "keyHint": "From your DeepL account under API keys. Satchel needs a DeepL API Pro key; keys ending in :fx are DeepL API Free (also called DeepL API Developer) and can't be used for mail.",
+      "keyLabel": "DeepL API key",
+      "keyPlaceholder": "Paste the API key",
+      "keyRemovedToast": "API key removed",
+      "keySaved": "Key saved on this device ({plan})",
+      "keySavedToast": "API key saved",
+      "logClear": "Clear log",
+      "logClearConfirm": "Clear the request log?",
+      "logClearConfirmBody": "The entries are deleted from this device. Translations stay cached.",
+      "logEmpty": "Nothing has been sent.",
+      "logEntry": "{provider} · {units}",
+      "logHideText": "Hide sent text",
+      "logHint": "Every request that left this device in the last 30 days.",
+      "logKeepText": "Keep the text that was sent",
+      "logKeepTextHint": "Off by default. Turning it off also deletes the text already kept.",
+      "logOk": "Translated",
+      "logShowText": "Show sent text",
+      "logTitle": "Request log",
+      "logUnits": "{count} characters",
+      "noAccounts": "No mail accounts yet.",
+      "planFree": "DeepL API Free",
+      "planPro": "DeepL API Pro",
+      "purpose": "Translate mail into your language with DeepL. Nothing is sent until you translate a message from an account you allowed.",
+      "removeKey": "Remove key",
+      "replaceKey": "Replace key",
+      "saveKey": "Save key",
+      "sentBody": "Translating sends the message body to DeepL: text and formatting. Links and addresses starting with http(s)://, //, www. or mailto: are held back as Satchel recognises them, everywhere in HTML and plain-text mail, and put back on this device; a link broken across lines of a plain-text mail may go in part. Host names without those prefixes and e-mail addresses in the text go as text. Sender, recipients, subject, attachments and encrypted mail are never sent.",
+      "sentCache": "Each translation is stored on this device, so opening the message again sends nothing.",
+      "sentTerms": "Per DeepL's terms (deepl.com/pro-license, 3.1.2, 3.3.2) and privacy policy (deepl.com/privacy, section 4), as of November 2026.",
+      "sentTitle": "What is sent?",
+      "targetFollowUi": "App language ({language})",
+      "targetHint": "Mail already in this language gets no Translate button.",
+      "targetLabel": "Translate into",
+      "termsFree": "DeepL's terms forbid personal data on the free API and allow it to keep what is sent. Satchel sends no mail with a free key; Test still shows its plan and allowance.",
+      "termsPro": "With a Pro key, DeepL keeps the text only for the translation and does not use it to improve its service; up to 72 hours when an error occurs.",
+      "test": "Test",
+      "testHint": "Checks the key with one request and shows the allowance left.",
+      "testing": "Testing…",
+      "title": "Translation",
+      "usage": "{used} of {limit} characters used this billing period",
+      "usageMeter": "DeepL characters used",
+      "usageUnlimited": "{used} characters used this billing period, no limit set"
+    },
     "tray": {
       "autostart": "Start Satchel automatically at login",
       "hint": "While Satchel runs in the background it can receive new mail immediately over IMAP IDLE and show notifications — even when the window is closed.",
@@ -3540,6 +3620,10 @@
       "toggleSelection": {
         "keywords": "select toggle",
         "label": "Toggle selection"
+      },
+      "translateMessage": {
+        "keywords": "translate translation deepl language original",
+        "label": "Translate message"
       },
       "trash": {
         "keywords": "delete trash",
@@ -4040,6 +4124,22 @@
       "reopened": "Topic reopened.",
       "statusFailed": "The status could not be changed.",
       "undo": "Undo"
+    }
+  },
+  "translation": {
+    "consent": {
+      "body": "Satchel sends the body of this message to DeepL ({plan}): text and formatting. Links and addresses starting with http(s)://, //, www. or mailto: are held back as Satchel recognises them; a link broken across lines of a plain-text mail may go in part. Host names without those prefixes and e-mail addresses in the text go as text. Sender, recipients, subject and attachments stay here. Applies to all mail of {account} on this device.",
+      "confirm": "Allow and translate",
+      "detail": "You can withdraw it in Settings → Translation, where the request log shows what was sent.",
+      "title": "Send this message to DeepL?"
+    },
+    "reader": {
+      "openSettings": "Settings",
+      "showOriginal": "Show original",
+      "translate": "Translate",
+      "translated": "Translated",
+      "translatedFrom": "Translated from {language}",
+      "translating": "Translating…"
     }
   },
   "tray": {

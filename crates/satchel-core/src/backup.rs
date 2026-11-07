@@ -200,6 +200,7 @@ async fn rewrap_secrets(
             "armored_key" => crypto::SecretContext::pgp_armored_key(),
             "passphrase" => crypto::SecretContext::pgp_passphrase(),
             "pem_private_key_encrypted" => crypto::SecretContext::smime_private_key(),
+            "encrypted_api_key" => crypto::SecretContext::translation_api_key(row_id),
             _ => crypto::SecretContext::oauth_code_verifier(row_id),
         }
     }
@@ -209,6 +210,7 @@ async fn rewrap_secrets(
         ("pgp_keys", "id", "passphrase"),
         ("smime_certificates", "id", "pem_private_key_encrypted"),
         ("oauth_flow_sessions", "state", "encrypted_code_verifier"),
+        ("translation_engine_keys", "engine", "encrypted_api_key"),
     ] {
         let exists: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?")
@@ -460,6 +462,7 @@ mod tests {
             "armored_key" => crypto::SecretContext::pgp_armored_key(),
             "passphrase" => crypto::SecretContext::pgp_passphrase(),
             "pem_private_key_encrypted" => crypto::SecretContext::smime_private_key(),
+            "encrypted_api_key" => crypto::SecretContext::translation_api_key("row-1"),
             _ => crypto::SecretContext::oauth_code_verifier("row-1"),
         }
     }
@@ -487,6 +490,11 @@ mod tests {
                 "oauth_flow_sessions",
                 "state",
                 vec!["encrypted_code_verifier"],
+            ),
+            (
+                "translation_engine_keys",
+                "engine",
+                vec!["encrypted_api_key"],
             ),
         ] {
             sqlx::query(&format!(
@@ -569,6 +577,7 @@ mod tests {
             ("pgp_keys", "passphrase"),
             ("smime_certificates", "pem_private_key_encrypted"),
             ("oauth_flow_sessions", "encrypted_code_verifier"),
+            ("translation_engine_keys", "encrypted_api_key"),
         ] {
             let value: String = sqlx::query_scalar(&format!("SELECT {column} FROM {table}"))
                 .fetch_one(&pool)

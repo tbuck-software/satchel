@@ -79,16 +79,22 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * files loads on first use. Viewer 127.6 and tray 72.0 KiB (were 127.4 /
  * 71.8): the locale-loader hook in i18n/runtime and the missing-key warning
  * in i18n/create, which they share. After the
- * idle prefetch the German catalogue measures 31.8 KiB (budget below). */
+ * idle prefetch the German catalogue measures 31.8 KiB (budget below).
+ * Main 211 KiB initial and 33 KiB after prefetch since 2026-11-07: mail
+ * translation measured 210.3 / 32.6 KiB on main's 209.6 / 31.8; its twenty
+ * backend.errors.translation messages ship at startup like every backend.*
+ * key (+0.7 KiB first paint), and the reader's Translate strings ride in the
+ * prefetched ThreadView and OmniSearch chunks, while the consent question,
+ * the Translation page and the settings search part load on use. */
 const budgets = {
-  'index.html': { entryGzip: 105 * 1024, initialGzip: 210 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
+  'index.html': { entryGzip: 105 * 1024, initialGzip: 211 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },
   'viewer.html': { entryGzip: 5 * 1024, initialGzip: 128 * 1024, locales: ['src/i18n/viewer.en.json', 'src/i18n/viewer.de.json'] },
 };
 
 /* The startup catalogue plus the reader's and palette's chunks, which load
  * once the Inbox is usable. The first-paint part is inside initialGzip above. */
-const CATALOGUE_AFTER_PREFETCH_GZIP = 32 * 1024;
+const CATALOGUE_AFTER_PREFETCH_GZIP = 33 * 1024;
 
 /**
  * @param {string} entry

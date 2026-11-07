@@ -507,6 +507,10 @@ export function useKeyboard() {
       return true;
     }
 
+    if (matches(event, 'translateMessage')) {
+      return activeThreadReaderCommands()?.toggleTranslation() ?? false;
+    }
+
     if (matches(event, 'print')) {
       const reader = activeThreadReaderCommands();
       if (!reader?.threadId) return false;

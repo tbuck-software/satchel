@@ -1,6 +1,6 @@
 # Satchel privacy and data handling
 
-Updated: 18 October 2026
+Updated: 6 November 2026
 
 Satchel is an open-source mail client maintained by tbuck-software. This notice
 describes the app distributed from [the Satchel repository](https://github.com/tbuck-software/satchel).
@@ -45,6 +45,25 @@ Remote mail content, external links, feeds, integrations and plugins can contact
 their respective services when enabled or used. Plugin permissions and the
 service's own privacy practices apply. Update checks and downloads contact
 GitHub, whose servers receive normal request metadata such as your IP address.
+
+Translation is off until you add a DeepL API key and allow an account. When
+you translate a message from an allowed account, its body (text and
+formatting) is sent to DeepL with your key. Links and every address starting
+with `http(s)://`, `//`, `www.` or `mailto:`, as Satchel recognises them, are
+held back in links, images, styles, other attributes and the text, in HTML and
+plain-text mail, and restored on your device. A link broken across several
+lines of a plain-text mail may be sent in part. Host names written without
+those prefixes, and e-mail addresses in the text, are sent as text. Sender, recipients,
+subject, attachments and encrypted mail are not sent. Translation
+needs a DeepL API Pro key: DeepL then keeps the text only as long as the
+translation takes (up to 72 hours when an error occurs) and does not use it to
+improve its service. A DeepL API Free key can be saved and tested, but no mail
+is sent with it, because DeepL's terms forbid personal data on the free API
+and reserve the right to store what it is sent permanently (sources:
+[DeepL Pro terms](https://www.deepl.com/en/pro-license), sections 3.1.2,
+3.1.4, 3.3.2 and 8.3.11; [DeepL privacy policy](https://www.deepl.com/en/privacy),
+section 4; read 6 November 2026). Translations are stored locally, and a local
+log keeps each request for 30 days.
 
 The distributed app does not upload your mailbox to a tbuck-software server.
 tbuck-software does not sell Google user data, use it for advertising, or use it

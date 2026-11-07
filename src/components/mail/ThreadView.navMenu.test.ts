@@ -140,7 +140,7 @@ const BubbleStub = defineComponent({
     const host = inject(THREAD_MESSAGE_MENU)!;
     const id = () => (props.message as { id: string }).id;
     if (host.hostId.value === id()) {
-      host.menu.value = { canReply: true, canReplyAll: false, collapsed: false, bodyView: null, images: null, run };
+      host.menu.value = { canReply: true, canReplyAll: false, collapsed: false, bodyView: null, images: null, translation: null, run };
     }
     return () => h('article', {
       class: 'bubble-stub',

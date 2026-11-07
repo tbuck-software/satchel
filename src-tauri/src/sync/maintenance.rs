@@ -299,7 +299,7 @@ async fn run_once(
     #[cfg(any(target_os = "android", target_os = "ios"))]
     let _ = checkpoint_pool;
     if should_run("maintenance.last_cleanup_at", CLEANUP_INTERVAL_HOURS, pool).await {
-        let removed = trash_cleanup(pool).await?;
+        let removed = prune_then_clean_trash(pool).await?;
         if removed > 0 {
             info!(
                 target: "satchel::maintenance",
@@ -516,6 +516,41 @@ async fn deliver_due_webhooks_with(pool: &SqlitePool, timeout: Duration) -> Resu
         }
     }
     Ok(())
+}
+
+/// The first steps of a cleanup pass. Pruning goes before the trash, whose
+/// failure ends the pass: what left the device is kept for 30 days
+/// (ADR 0016) even when the trash cannot be emptied, and a translation goes
+/// when no body backs it any more.
+async fn prune_then_clean_trash(pool: &SqlitePool) -> Result<u64, String> {
+    prune_translation_records(pool).await;
+    trash_cleanup(pool).await
+}
+
+async fn prune_translation_records(pool: &SqlitePool) {
+    let repo = satchel_core::db::translation::TranslationRepository::new(pool);
+    match repo.prune_request_log(chrono::Utc::now()).await {
+        Ok(removed) if removed > 0 => info!(
+            target: "satchel::maintenance",
+            removed, "pruned outbound request log"
+        ),
+        Ok(_) => {}
+        Err(err) => warn!(
+            target: "satchel::maintenance",
+            error = %err, "outbound request log pruning skipped"
+        ),
+    }
+    match repo.prune_unreachable_translations().await {
+        Ok(removed) if removed > 0 => info!(
+            target: "satchel::maintenance",
+            removed, "removed translations without a body"
+        ),
+        Ok(_) => {}
+        Err(err) => warn!(
+            target: "satchel::maintenance",
+            error = %err, "translation pruning skipped"
+        ),
+    }
 }
 
 async fn wake_due_snoozes(pool: &SqlitePool, queue: &SyncQueue) -> Result<Vec<String>, String> {
@@ -908,6 +943,36 @@ mod body_window_tests {
             .fetch_one(pool)
             .await
             .expect("row")
+    }
+
+    #[tokio::test]
+    async fn pruning_runs_even_when_the_trash_cleanup_fails() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        let old = (chrono::Utc::now() - chrono::Duration::days(31)).to_rfc3339();
+        sqlx::query(
+            "INSERT INTO outbound_request_log (created_at, feature, provider, units, unit, outcome)
+             VALUES (?, 'translation', 'deepl', 1, 'characters', 'ok')",
+        )
+        .bind(&old)
+        .execute(&pool)
+        .await
+        .unwrap();
+        // The trash pass reads `threads`; without it, it fails.
+        sqlx::query("ALTER TABLE threads RENAME TO threads_elsewhere")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(super::prune_then_clean_trash(&pool).await.is_err());
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM outbound_request_log")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0, "the log was pruned before the trash pass failed");
     }
 
     #[tokio::test]
