@@ -22,6 +22,7 @@ import {
   mockCalendarEvents,
   mockCalendarInvites,
   mockCalendarSources,
+  mockChatThreads,
   mockDrafts,
   mockMessagesByThread,
   mockOutboxItems,
@@ -96,6 +97,91 @@ function accountVisible(accountId: string, now = new Date()): boolean {
   return policy.mode === 'schedule' && policy.weekdays.includes(now.getDay())
     && time >= (policy.from ?? '00:00') && time < (policy.to ?? '24:00');
 }
+/*
+ * Labs flags as `labs_flags` holds them, per browser profile. Chats brings
+ * its fixture threads along: Inbox mail that carries `Chat-Version`.
+ */
+const LABS_FLAG_IDS = ['chats'] as const;
+const labsSlot = createPersistedSlot<Record<string, boolean>>('satchel.mock.labs', {
+  fallback: () => ({}),
+  decode: raw => JSON.parse(raw),
+  encode: value => JSON.stringify(value),
+});
+const labsFlags = persistence.read(labsSlot);
+const chatThreads = new Map<string, { groupId: string | null; groupName: string | null; encrypted: boolean; encryptedBefore: boolean }>();
+/*
+ * The account's own OpenPGP key for chats. `?mockChatKeyLocked` starts it
+ * locked, behind the passphrase below, as after a restart.
+ */
+const MOCK_CHAT_KEY_ID = 'pgp-own-chat';
+const MOCK_CHAT_KEY_PASSPHRASE = 'correct horse';
+let chatKeyUnlocked = !(typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockChatKeyLocked'));
+function seedChats() {
+  if (chatThreads.size > 0) return;
+  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  for (const chat of mockChatThreads()) {
+    const list = chat.messages.map((message) => ({ ...message }));
+    let encryptedBefore = chat.encrypted;
+    if (chat.groupId && params.has('mockChatHijack')) {
+      // A stranger threads into the group with its id and a list of their own.
+      list.push({ ...list.at(-1)!, id: `${chat.thread.id}-evil`, from: { name: 'Mia', email: 'spam@evil.test' },
+        to: [{ name: 'Tom', email: 'tom@satchel.dev' }, { name: 'Victim', email: 'victim@example.test' }],
+        bodyText: 'Neue Gruppe, bitte hier antworten', timestamp: new Date().toISOString() });
+    }
+    if (chat.groupId && params.has('mockChatNewMember')) {
+      // Your last reply went to the three; then Mia brought Noah in. The group was encrypted.
+      list.splice(1, 0, { ...list[0]!, id: `${chat.thread.id}-own`, from: { name: 'Tom', email: 'tom@satchel.dev' },
+        to: list[0]!.to.filter((person) => person.email !== 'tom@satchel.dev').concat([list[0]!.from]),
+        bodyText: 'Super!', timestamp: list[0]!.timestamp });
+      list.push({ ...list.at(-1)!, id: `${chat.thread.id}-noah`, to: [...list.at(-1)!.to, { name: 'Noah', email: 'noah@example.test' }],
+        bodyText: 'Ich hab Noah dazugeholt', timestamp: new Date().toISOString() });
+      encryptedBefore = true;
+    }
+    chatThreads.set(chat.thread.id, { groupId: chat.groupId, groupName: chat.groupName, encrypted: chat.encrypted, encryptedBefore });
+    threads.push({ ...chat.thread });
+    messages[chat.thread.id] = list;
+  }
+}
+if (labsFlags.chats || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockChats'))) {
+  seedChats();
+}
+/**
+ * Who a chat line goes to, as `db::chats` works it out: the chat is what its
+ * first message (or your last reply) says; a group starts from your last
+ * reply (or its first message) and grows only through members; a one-to-one
+ * chat keeps its peer. Also returns the baseline the recipients are compared
+ * with, and the messages from neither you nor a member. The fixture's own
+ * messages count as sent from here.
+ */
+function chatRecipients(threadId: string, own: string): { recipients: string[]; baseline: string[]; untrusted: string[] } {
+  const list = (messages[threadId] ?? []).filter((message) => !message.isDraft);
+  const isOwn = (email: string) => email.toLowerCase() === own.toLowerCase();
+  const others = (message: Message) => [message.from, ...message.to, ...(message.cc ?? [])]
+    .map((person) => person.email.toLowerCase()).filter((email) => !isOwn(email));
+  const lastOwn = list.map((message) => isOwn(message.from.email)).lastIndexOf(true);
+  const recipients: string[] = [];
+  const add = (email: string) => { if (!recipients.includes(email)) recipients.push(email); };
+  let baseline: string[] = [];
+  if (chatThreads.get(threadId)?.groupId) {
+    const base = lastOwn >= 0 ? lastOwn : 0;
+    if (list[base]) others(list[base]).forEach(add);
+    baseline = [...recipients];
+    for (const message of list.slice(base + 1)) {
+      if (recipients.includes(message.from.email.toLowerCase())) others(message).forEach(add);
+    }
+  } else {
+    const anchor = lastOwn >= 0 ? list[lastOwn] : list[0];
+    const peer = anchor && (isOwn(anchor.from.email) ? others(anchor)[0] : anchor.from.email.toLowerCase());
+    if (peer) add(peer);
+    baseline = [...recipients];
+  }
+  if (lastOwn >= 0) baseline = others(list[lastOwn]!);
+  const untrusted = list
+    .filter((message) => !isOwn(message.from.email) && !recipients.includes(message.from.email.toLowerCase()))
+    .map((message) => message.id);
+  return { recipients, baseline, untrusted };
+}
+const sameSet = (a: string[], b: string[]) => [...new Set(a)].sort().join() === [...new Set(b)].sort().join();
 // 96px PNG, a rowing boat at sunset: an account picture the user chose.
 const MOCK_CLUB_AVATAR = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAAASFBMVEX/8Mj+w278wm/7wW/6wHD5v3D4v3H3vnH1vXL0vHPzu3PyunTwuXXvuHXut3bttnbstnfrtXfqtHjos3nnsnlGgrQmXIwoHh7S40JTAAABZklEQVR42u2T21LDMAwFxb2QFGhx7P//Ux6apmAf2YosM03xvmlG3m3SmO4aQz1QDNw3pgfKgYfGtA88NuYGAk+NaR94bkxtgE5kFl5qoAvsio2eT5CZnynQTgulwDVDPyxcbYBIWKBXHUwALJr6QYHeVLCBdHP7gUEFG0g3/2tgkPoHGnUwAbA4WhbGLQVGmX+kvZrEj7f2ZgVm6b2GH3p2JSsIIZTmvD4fCCfEMw588MwC8Qyhon8xlGYm8MmyCIQzhg4si0A4YzKBw+V8EM36wPwrS7M6cD5fmnHgyLO85CCbIaKAcFYHpDMOfPHM58Uz5AYCjmcWiGcIAWM9XMDZ+6OAM/fHAWftd+Qjqv2RLwl4Wz8IeFM/CnhL/zkw/cLQbxvwfMDkFXlhIF4F81Qk/5nW+zMBgd+vgRr7wROsnIWB8rvU8leBdigC01T1mV5BYPv/Qb8H/R70e9DvQb8H/R6s5xsUyBEGcUIQNgAAAABJRU5ErkJggg==';
 // A second mailbox for visibility walkthroughs; all policy behavior still runs
@@ -748,6 +834,7 @@ function inThreadList(thread: Thread, scope: Record<string, unknown>): boolean {
   if (scope.workflow_state && !matchesWorkflowFilter(thread.workflowState, scope.workflow_state as WorkflowFilter)) return false;
   if (contact && !thread.participants.some(person => person.email.toLowerCase() === contact)) return false;
   const folders = thread.mailboxNames ?? [];
+  if (scope.mailbox_kind === 'chat' && !chatThreads.has(thread.id)) return false;
   if (scope.mailbox_kind === 'folder' && mailbox && !folders.includes(mailbox)) return false;
   if (scope.mailbox_kind === 'section') {
     if (mailbox === 'inbox' && (!['inbox', 'todo'].includes(thread.workflowState)
@@ -1669,6 +1756,91 @@ const handlers: Record<string, Handler> = {
       ]),
     ),
 
+  /* --- labs ----------------------------------------------------------- */
+  list_labs_flags: () => LABS_FLAG_IDS.map((id) => ({ id, enabled: Boolean(labsFlags[id]) })),
+  set_labs_flag: (payload) => {
+    const { id, enabled } = input(payload) as { id: string; enabled: boolean };
+    if (!(LABS_FLAG_IDS as readonly string[]).includes(id)) throw new Error('backend.errors.unexpected');
+    labsFlags[id] = enabled;
+    persistence.write(labsSlot, labsFlags);
+    if (id === 'chats' && enabled) seedChats();
+    return { id, enabled };
+  },
+
+  /* --- chats (Labs) --------------------------------------------------- */
+  get_chat_meta: (payload) => {
+    const threadId = payload.threadId as string;
+    const thread = findThread(threadId);
+    if (!thread) throw new Error('backend.errors.threadNotFound');
+    const chat = chatThreads.get(threadId);
+    if (!chat) throw new Error('backend.errors.threadNotFound');
+    const own = accounts.find((account) => account.id === thread.accountId)?.email ?? '';
+    const names = new Map((messages[threadId] ?? []).flatMap((message) => [message.from, ...message.to])
+      .map((person) => [person.email.toLowerCase(), person.name] as const));
+    const { recipients, baseline, untrusted } = chatRecipients(threadId, own);
+    return {
+      thread_id: threadId,
+      account_id: thread.accountId,
+      own_address: own,
+      group_id: chat.groupId,
+      group_name: chat.groupName,
+      members: recipients.map((address) => ({
+        address,
+        name: names.get(address) ?? null,
+        encryption: chat.encrypted ? 'encrypt' : 'disable',
+      })),
+      own_key: chat.encrypted,
+      own_key_id: chat.encrypted ? MOCK_CHAT_KEY_ID : null,
+      own_key_unlocked: chat.encrypted && chatKeyUnlocked,
+      encrypts: chat.encrypted,
+      baseline_recipients: baseline,
+      untrusted_message_ids: untrusted,
+      recipients_changed: !sameSet(baseline, recipients),
+      encryption_downgrade: chat.encryptedBefore && !chat.encrypted,
+    };
+  },
+  send_chat_message: (payload) => {
+    const scope = input(payload) as { thread_id: string; text: string; allow_unsigned?: boolean;
+      expected_recipients: string[]; confirm_recipients?: boolean; allow_plaintext?: boolean };
+    const { thread_id: threadId, text, allow_unsigned: allowUnsigned } = scope;
+    if (!text.trim()) throw new Error('backend.errors.unexpected');
+    const thread = findThread(threadId);
+    const chat = chatThreads.get(threadId);
+    if (!thread || !chat) throw new Error('backend.errors.threadNotFound');
+    const account = accounts.find((entry) => entry.id === thread.accountId);
+    const own = account?.email ?? '';
+    // Like `confirmation_decision`: only to the recipients shown, and changes or plain text only when confirmed.
+    const { recipients, baseline } = chatRecipients(threadId, own);
+    const changed = !sameSet(baseline, recipients);
+    if (!sameSet(scope.expected_recipients ?? [], recipients)
+      || (changed && !scope.confirm_recipients)
+      || (chat.encryptedBefore && !chat.encrypted && !scope.allow_plaintext)) {
+      throw new Error('backend.errors.chatConfirmationNeeded');
+    }
+    // Like `signing_decision`: an encrypted reply waits for the key or an explicit unsigned send.
+    if (chat.encrypted && !chatKeyUnlocked && !allowUnsigned) throw new Error('backend.errors.pgpSigningKeyUnavailable');
+    const now = new Date().toISOString();
+    const messageId = nextId('msg');
+    const sent: Message = {
+      id: messageId,
+      threadId,
+      from: { name: account?.displayName ?? '', email: own },
+      to: recipients.map((email) => ({ name: email, email })),
+      subject: chat.groupName ? `Chat: ${chat.groupName}` : `Message from ${account?.displayName ?? own}`,
+      bodyText: text.trimEnd(),
+      bodyLoaded: true,
+      timestamp: now,
+      isRead: true,
+      attachments: [],
+    };
+    messages[threadId] = [...(messages[threadId] ?? []), sent];
+    thread.lastMessageAt = now;
+    thread.lastMessageAtMs = Date.parse(now);
+    thread.messageCount += 1;
+    thread.snippet = sent.bodyText.slice(0, 180);
+    return { status: 'sent', thread_id: threadId, message_id: messageId, queued_id: null, undo_until: null };
+  },
+
   /* --- threads -------------------------------------------------------- */
   list_threads: (payload) => {
     const scope = input(payload);
@@ -2360,6 +2532,15 @@ const handlers: Record<string, Handler> = {
   list_aliases: () => [],
   list_smime_certificates: () => [],
   list_pgp_keys: () => [],
+  // Only the chat fixture's own key: without a passphrase it stays locked.
+  unlock_pgp_keys: (payload) => {
+    const { key_id: keyId, passphrase } = input(payload) as { key_id: string | null; passphrase: string | null };
+    if (keyId === MOCK_CHAT_KEY_ID && passphrase === MOCK_CHAT_KEY_PASSPHRASE) {
+      chatKeyUnlocked = true;
+      return { unlocked: 1, key_ids: [MOCK_CHAT_KEY_ID] };
+    }
+    throw new Error(passphrase ? 'backend.errors.pgpPassphraseMismatch' : 'backend.errors.pgpNoPrivateKeys');
+  },
   pgp_engine_status: () => ({
     available: false, engine: 'sequoia', can_decrypt: false, can_sign: false, can_encrypt: false,
   }),

@@ -2367,6 +2367,15 @@ pub(crate) async fn resolve_sender(
         .with_param("address", candidate.to_string()))
 }
 
+/// How a send is queued.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SendMode {
+    /// The composer: the account's signature and the Undo Send window apply.
+    Composer,
+    /// A chat line: sent at once, as typed, without a signature.
+    Immediate,
+}
+
 #[tauri::command]
 pub async fn send_message(
     app: tauri::AppHandle,
@@ -2374,6 +2383,25 @@ pub async fn send_message(
     pool: tauri::State<'_, SqlitePool>,
     account_id: String,
     input: OutgoingMessageInput,
+) -> CommandResult<SendMessageResult> {
+    send_message_inner(
+        app,
+        state.inner(),
+        pool.inner(),
+        account_id,
+        input,
+        SendMode::Composer,
+    )
+    .await
+}
+
+pub(crate) async fn send_message_inner(
+    app: tauri::AppHandle,
+    state: &AppState,
+    pool: &SqlitePool,
+    account_id: String,
+    input: OutgoingMessageInput,
+    mode: SendMode,
 ) -> CommandResult<SendMessageResult> {
     let mut input = input;
     // Only Satchel's own sends (a rule's forward) are automatic.
@@ -2387,15 +2415,20 @@ pub async fn send_message(
     }
     ensure_attachments_within_limit(&input.attachments)?;
     input.from_address =
-        Some(resolve_sender(pool.inner(), &account_id, input.from_address.as_deref()).await?);
-    apply_selected_signature(pool.inner(), &account_id, &mut input).await?;
+        Some(resolve_sender(pool, &account_id, input.from_address.as_deref()).await?);
+    if mode == SendMode::Composer {
+        apply_selected_signature(pool, &account_id, &mut input).await?;
+    }
 
     let mut scheduled_for = parse_scheduled_for(input.scheduled_for.as_deref())?;
 
     // Honor the configurable "Undo Send" delay: when the user hasn't picked an
     // explicit Send-Later time, defer the send by N seconds so they can hit Undo
     // before the network call fires.
-    let undo_seconds = read_undo_send_seconds(pool.inner()).await;
+    let undo_seconds = match mode {
+        SendMode::Composer => read_undo_send_seconds(pool).await,
+        SendMode::Immediate => 0,
+    };
     let mut undo_delay_active = false;
     if scheduled_for.is_none() && undo_seconds > 0 {
         scheduled_for = Some(Utc::now() + chrono::Duration::seconds(undo_seconds));
@@ -2408,7 +2441,7 @@ pub async fn send_message(
     let action = build_send_action(account_id.clone(), input.clone(), scheduled_for)?;
     let queued_id = action.id.clone();
 
-    satchel_core::drafts::enqueue_send_with_draft(pool.inner(), &state.queue, &action)
+    satchel_core::drafts::enqueue_send_with_draft(pool, &state.queue, &action)
         .await
         .map_err(CommandError::from)?;
 
@@ -2445,9 +2478,9 @@ pub async fn send_message(
     }
 
     // Try immediately. Worker will retry if this raises a retryable error.
-    match execute_send_action(pool.inner(), &app, &state, &action).await {
+    match execute_send_action(pool, &app, state, &action).await {
         Ok(mut result) => {
-            state.queue.mark_completed(pool.inner(), &queued_id).await?;
+            state.queue.mark_completed(pool, &queued_id).await?;
             state.events.publish(AppEvent::SyncCompleted);
             let _ = tauri::Emitter::emit(
                 &app,
@@ -2464,7 +2497,7 @@ pub async fn send_message(
         Err(err) => {
             use satchel_core::sync::worker::{settle_action, Outcome};
             let failure = err.clone();
-            let outcome = settle_action(pool.inner(), &state.queue, &action, Err(err)).await?;
+            let outcome = settle_action(pool, &state.queue, &action, Err(err)).await?;
             let status = match outcome {
                 Outcome::DeliveryUnknown { error } => {
                     let _ = tauri::Emitter::emit(

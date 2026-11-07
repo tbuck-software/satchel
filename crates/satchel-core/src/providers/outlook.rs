@@ -1720,6 +1720,15 @@ fn map_graph_message(message: GraphMessage) -> MessageEnvelope {
         .unwrap_or_default();
     let list_unsubscribe = header_value("List-Unsubscribe");
     let list_unsubscribe_post = header_value("List-Unsubscribe-Post");
+    let chat = crate::chat::chat_headers_from(header_value);
+    let autocrypt_headers = message
+        .internet_message_headers
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .filter(|header| header.name.eq_ignore_ascii_case("Autocrypt"))
+        .map(|header| header.value.trim().to_string())
+        .collect();
     let (auth_spf, auth_dkim, auth_dmarc) = header_value("Authentication-Results")
         .map(|value| crate::providers::traits::trusted_authentication_results(&value, "outlook"))
         .unwrap_or((None, None, None));
@@ -1849,6 +1858,12 @@ fn map_graph_message(message: GraphMessage) -> MessageEnvelope {
         auth_dmarc,
         spam_hint_headers: None,
         satchel_marks: Vec::new(),
+        chat,
+        autocrypt_headers,
+        autocrypt_eligible: crate::chat::autocrypt_eligible(
+            header_value("From").as_deref(),
+            header_value("Content-Type").as_deref(),
+        ),
         attachments,
     }
 }

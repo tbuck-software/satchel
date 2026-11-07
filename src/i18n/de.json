@@ -260,6 +260,8 @@
       "calendarRichDescriptionReadOnly": "Diese Beschreibung ist in Outlook formatiert und verlöre hier Links und Layout. Bearbeite sie in Outlook.",
       "calendarTimeInvalid": "Gib eine gültige Terminzeit ein.",
       "calendarTitleRequired": "Gib einen Termintitel ein.",
+      "chatConfirmationNeeded": "Chat geändert. Erneut senden.",
+      "chatEncryptionLost": "Diese Antwort sollte verschlüsselt rausgehen und kann es nicht mehr. Bis das wieder geht, bleibt die Antwort im Postausgang.",
       "composeWindowUnsupported": "Ein eigenes Schreibfenster gibt es nur auf dem Desktop.",
       "contactAvatarFallbackSyncFailed": "Ersatz-Kontaktbilder konnten nicht synchronisiert werden.",
       "contactAvatarLocalSyncFailed": "Lokale Kontaktbilder konnten nicht synchronisiert werden.",
@@ -771,6 +773,62 @@
       "exception": "{account}: {problem}",
       "problem": "{account}: {problem}"
     }
+  },
+  "chats": {
+    "allAccounts": "Alle Konten",
+    "composer": {
+      "hint": "Enter sendet, Umschalt+Enter fügt eine Zeile ein",
+      "label": "Nachricht",
+      "placeholder": "Nachricht an {name} …",
+      "queued": "In der Warteschlange. Geht raus, sobald die Verbindung wieder da ist.",
+      "send": "Senden",
+      "sendFailed": "Die Nachricht konnte nicht gesendet werden.",
+      "sending": "Wird gesendet …"
+    },
+    "confirm": {
+      "plainBody": "Dieser Chat war Ende-zu-Ende-verschlüsselt. Diese Antwort ginge unverschlüsselt raus, weil nicht alle Empfänger einen Autocrypt-Schlüssel haben.",
+      "plainTitle": "Ohne Verschlüsselung senden?",
+      "recipientsBody": "Die Empfänger haben sich seit deiner letzten Antwort oder seit Beginn des Chats geändert.",
+      "recipientsTitle": "An diese Personen senden?",
+      "send": "Senden",
+      "sendPlain": "Unverschlüsselt senden"
+    },
+    "empty": {
+      "description": "Nachrichten aus Delta Chat erscheinen hier, sobald sie ankommen.",
+      "title": "Noch keine Chats"
+    },
+    "encrypted": "Ende-zu-Ende-verschlüsselt",
+    "list": "Chats",
+    "loadFailed": "Die Chats konnten nicht geladen werden.",
+    "members": "{count} Mitglied | {count} Mitglieder",
+    "messagesLoadFailed": "Die Nachrichten konnten nicht geladen werden.",
+    "notEncrypted": "Unverschlüsselt",
+    "notEncryptedNoKey": "Antworten gehen unverschlüsselt raus: Für {address} gibt es keinen OpenPGP-Schlüssel.",
+    "notEncryptedNoPeerKey": "Antworten gehen unverschlüsselt raus, bis alle Mitglieder einen Autocrypt-Schlüssel geschickt haben.",
+    "notMember": "{name} · nicht in diesem Chat",
+    "partHidden": "Ein Teil der Nachricht ist ausgeblendet · Als Mail anzeigen",
+    "select": {
+      "description": "Die Nachrichten erscheinen als Sprechblasen, darunter das Antwortfeld.",
+      "title": "Chat auswählen"
+    },
+    "showAsMail": "Als Mail anzeigen",
+    "title": "Chats",
+    "today": "Heute",
+    "unlock": {
+      "body": "Diese Antwort wird Ende-zu-Ende-verschlüsselt und mit deinem OpenPGP-Schlüssel für {address} signiert.",
+      "confirm": "Entsperren und senden",
+      "failed": "Der Schlüssel konnte nicht entsperrt werden.",
+      "label": "Passphrase",
+      "title": "Schlüssel entsperren, um zu senden",
+      "wrong": "Diese Passphrase entsperrt den Schlüssel nicht."
+    },
+    "unread": "{count} ungelesen",
+    "unsigned": {
+      "body": "Dein Schlüssel bleibt gesperrt. Die Antwort ist trotzdem Ende-zu-Ende-verschlüsselt, aber die Empfänger können nicht prüfen, dass sie von dir kommt.",
+      "confirm": "Unsigniert senden",
+      "title": "Ohne deine Signatur senden?"
+    },
+    "yesterday": "Gestern"
   },
   "cleanup": {
     "actions": {
@@ -2857,6 +2915,19 @@
       "title": "Eingebettete Bilder",
       "upfront": "Ein vollständiger Durchlauf dauert mindestens ca. {duration} — frühestens fertig gegen {time} Uhr."
     },
+    "labs": {
+      "experimental": "Experimentell",
+      "flags": {
+        "chats": {
+          "description": "Zeigt Mails aus Delta Chat als Chats: eine Chats-Liste unter dem Posteingang, Nachrichten als Sprechblasen und ein Antwortfeld, das sofort sendet. Die Mails bleiben in deinen Ordnern. Mit einem OpenPGP-Schlüssel für deine Adresse sind Antworten per Autocrypt Ende-zu-Ende-verschlüsselt.",
+          "title": "Chats mit Delta Chat"
+        }
+      },
+      "loadFailed": "Die Labs-Einstellungen konnten nicht geladen werden.",
+      "note": "Diese Funktionen sind nicht fertig: Was du hier einschaltest, kann sich ändern, ausfallen oder in einer späteren Version wegfallen. Jeder Schalter gilt nur für dieses Gerät.",
+      "restart": "Wirkt nach einem Neustart.",
+      "saveFailed": "Der Schalter konnte nicht gespeichert werden."
+    },
     "language": {
       "de": "Deutsch",
       "en": "English",
@@ -3296,6 +3367,10 @@
       "images": {
         "description": "Laden externer Inhalte steuern",
         "label": "Externe Bilder"
+      },
+      "labs": {
+        "description": "Unfertige Funktionen",
+        "label": "Labs"
       },
       "mobile-sync": {
         "description": "Neue E-Mails im Hintergrund abrufen",

@@ -923,6 +923,17 @@ export default {
             "kind": "object",
             "fields": {}
         },
+        "get_chat_meta": {
+            "kind": "object",
+            "fields": {
+                "threadId": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "get_mail_merge_job": {
             "kind": "object",
             "fields": {
@@ -1267,6 +1278,10 @@ export default {
                     }
                 }
             }
+        },
+        "list_labs_flags": {
+            "kind": "object",
+            "fields": {}
         },
         "list_local_only_workflow_accounts": {
             "kind": "object",
@@ -2170,6 +2185,18 @@ export default {
                 }
             }
         },
+        "send_chat_message": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::chats::SendChatMessageInput"
+                    }
+                }
+            }
+        },
         "send_message": {
             "kind": "object",
             "fields": {
@@ -2308,6 +2335,18 @@ export default {
                     "shape": {
                         "kind": "ref",
                         "name": "app::commands::contacts::ContactAvatarOverrideInput"
+                    }
+                }
+            }
+        },
+        "set_labs_flag": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::labs::SetLabsFlagInput"
                     }
                 }
             }
@@ -3608,6 +3647,50 @@ export default {
                 }
             }
         },
+        "app::commands::chats::SendChatMessageInput": {
+            "kind": "object",
+            "fields": {
+                "allow_plaintext": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "allow_unsigned": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "confirm_recipients": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "expected_recipients": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "text": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "thread_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
         "app::commands::contacts::ContactAvatarOverrideInput": {
             "kind": "object",
             "fields": {
@@ -3902,6 +3985,23 @@ export default {
                     }
                 },
                 "username": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::labs::SetLabsFlagInput": {
+            "kind": "object",
+            "fields": {
+                "enabled": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "id": {
                     "required": true,
                     "shape": {
                         "kind": "value"
@@ -6516,6 +6616,41 @@ export default {
                 }
             }
         },
+        "core::chat::ChatSendOptions": {
+            "kind": "object",
+            "fields": {
+                "allow_unsigned": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "encryption_required": {
+                    "required": false,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "group_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "group_name": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
         "core::db::account_visibility::AccountVisibilityPolicy": {
             "kind": "object",
             "fields": {
@@ -6952,6 +7087,16 @@ export default {
                         "kind": "array",
                         "item": {
                             "kind": "value"
+                        }
+                    }
+                },
+                "chat": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "ref",
+                            "name": "core::chat::ChatSendOptions"
                         }
                     }
                 },

@@ -17,8 +17,10 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
 pub mod accounts;
+pub mod autocrypt;
 pub mod backup;
 pub mod calendar;
+pub mod chat;
 pub mod db;
 pub mod drafts;
 pub mod email;

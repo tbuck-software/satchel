@@ -148,6 +148,8 @@
       "calendarRichDescriptionReadOnly": "This description is formatted in Outlook and would lose its links and layout here. Edit it in Outlook.",
       "calendarTimeInvalid": "Enter a valid event time.",
       "calendarTitleRequired": "Enter an event title.",
+      "chatConfirmationNeeded": "The chat changed. Send again.",
+      "chatEncryptionLost": "This reply was to go out encrypted and no longer can. It waits in the Outbox.",
       "composeWindowUnsupported": "A separate compose window is only available on the desktop.",
       "contactAvatarFallbackSyncFailed": "Fallback contact photos could not be synchronized.",
       "contactAvatarLocalSyncFailed": "Local contact photos could not be synchronized.",

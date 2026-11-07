@@ -1364,6 +1364,9 @@ async fn push_draft_to_remote(
         pgp_encrypt_to_recipients: false,
         priority: None,
         auto_submitted: None,
+        // A server draft is mail in progress; chat headers go on at send.
+        extra_headers: Vec::new(),
+        recipient_public_keys: Vec::new(),
     };
     provider
         .upsert_draft(
