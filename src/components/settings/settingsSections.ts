@@ -28,6 +28,7 @@ export type SettingsSection =
   | 'plugins'
   | 'storage'
   | 'diagnostics'
+  | 'labs'
   | 'about';
 
 /**
@@ -100,7 +101,7 @@ const BASE_GROUPS: SettingsSectionGroupDefinition[] = [
   { id: 'organising', items: ['rules', 'smart-folders', 'swipes'] },
   { id: 'privacy', items: ['senders', 'encryption', 'translation'] },
   { id: 'people', items: ['calendar', 'contacts'] },
-  { id: 'app', items: ['shortcuts', 'plugins', 'storage', 'diagnostics', 'about'] },
+  { id: 'app', items: ['shortcuts', 'plugins', 'storage', 'diagnostics', 'labs', 'about'] },
 ];
 
 export const settingsSectionIcons: Record<SettingsSection, string> = {
@@ -117,6 +118,7 @@ export const settingsSectionIcons: Record<SettingsSection, string> = {
   vacation: '<path d="M9 17 4 12l5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
   'smart-folders': '<path d="M10.7 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v4.1"/><circle cx="17" cy="17" r="3"/><path d="m21 21-1.9-1.9"/>',
   diagnostics: '<path d="M3 12h4l3 8 4-16 3 8h4"/>',
+  labs: '<path d="M9 3h6M10 3v6.5L4.6 18.3A1.8 1.8 0 0 0 6.1 21h11.8a1.8 1.8 0 0 0 1.5-2.7L14 9.5V3M7 15h10"/>',
   templates: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7ZM14 2v4a2 2 0 0 0 2 2h4M10 9H8M16 13H8M16 17H8"/>',
   rules: '<path d="M22 3H2l8 9.46V19l4 2v-8.54Z"/>',
   plugins: '<path d="M12 2v5M12 17v5M4.93 4.93l3.54 3.54M15.53 15.53l3.54 3.54M2 12h5M17 12h5M4.93 19.07l3.54-3.54M15.53 8.47l3.54-3.54"/><circle cx="12" cy="12" r="3"/>',

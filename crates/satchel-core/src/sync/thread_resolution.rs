@@ -185,7 +185,23 @@ pub async fn resolve_provider_thread_tx(
     if message.remote_thread_id.is_none() {
         if let Some(parent) = resolve_reply_thread_connection(&mut *tx, account_id, message).await?
         {
-            thread_id = parent;
+            // A stored row never moves into or out of a chat on a re-ingest:
+            // a stranger's earlier message that claims a reply relation
+            // would otherwise join the chat (or leave it) on its next fetch.
+            let moves_chat_row = match prior_thread_id.filter(|prior| *prior != parent) {
+                Some(prior) => {
+                    crate::db::chats::holds_chat(&mut *tx, prior)
+                        .await
+                        .map_err(|e| e.to_string())?
+                        || crate::db::chats::holds_chat(&mut *tx, &parent)
+                            .await
+                            .map_err(|e| e.to_string())?
+                }
+                None => false,
+            };
+            if !moves_chat_row {
+                thread_id = parent;
+            }
         } else if provider.eq_ignore_ascii_case("imap") {
             if let Some(subject) =
                 resolve_imap_subject_thread_connection(&mut *tx, account_id, account_email, message)
@@ -370,6 +386,12 @@ pub async fn resolve_imap_subject_thread_connection(
     if has_real_message_id && !has_reply_ancestry {
         return Ok(None);
     }
+    // Delta Chat subjects are constant ("Message from <name>", "Chat: <group>"),
+    // so a subject joins anyone to a chat. Chats thread only through
+    // In-Reply-To/References and the group's Message-ID, never by subject.
+    if message.chat.is_some() {
+        return Ok(None);
+    }
     let subject = normalized_reply_subject(&message.subject);
     if subject.len() < SUBJECT_FALLBACK_MIN_LEN || subject == "(no subject)" {
         return Ok(None);
@@ -392,6 +414,11 @@ pub async fn resolve_imap_subject_thread_connection(
          WHERE account_id = ? AND LOWER(TRIM(COALESCE(subject, ''))) LIKE '%' || ?
            AND NULLIF(TRIM(thread_id), '') IS NOT NULL
            AND date >= ? AND date <= ?
+           AND NOT EXISTS (
+             SELECT 1 FROM messages chat_messages
+             WHERE chat_messages.thread_id = messages.thread_id
+               AND chat_messages.chat_version IS NOT NULL
+           )
          ORDER BY date DESC, id DESC
          LIMIT 200",
     )
@@ -883,6 +910,11 @@ const REPLY_MERGE_CANDIDATES: &str = "
 /// Merge one reply's thread into its parent's. `Ok(None)` when there is
 /// nothing to merge, `Ok(Some(0))` when the merge was deferred.
 async fn merge_reply_into_parent(pool: &SqlitePool, reply_id: &str) -> Result<Option<u64>, String> {
+    // Decide and merge on one snapshot: the chat check reads what the merge moves.
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .map_err(|err| err.to_string())?;
     let pair = sqlx::query_as::<_, (String, String)>(
         "SELECT child.thread_id, parent.thread_id
          FROM messages child
@@ -896,17 +928,25 @@ async fn merge_reply_into_parent(pool: &SqlitePool, reply_id: &str) -> Result<Op
            AND child.thread_id LIKE 'th-imap-%' AND child.thread_id != parent.thread_id",
     )
     .bind(reply_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .map_err(|err| err.to_string())?;
     let Some((child, parent)) = pair else {
         return Ok(None);
     };
-    ThreadRepository::new(pool)
-        .merge_into(&child, &parent)
+    // An invented In-Reply-To must not pull a stranger's thread into a chat;
+    // a chat that split because a reply came before its parent still heals.
+    if !crate::db::chats::join_allowed(&mut tx, &child, &parent)
         .await
-        .map(Some)
-        .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?
+    {
+        return Ok(None);
+    }
+    let moved = crate::db::threads::merge_threads_tx(&mut tx, &child, &parent)
+        .await
+        .map_err(|err| err.to_string())?;
+    tx.commit().await.map_err(|err| err.to_string())?;
+    Ok(Some(moved))
 }
 
 async fn save_reply_merge_state(pool: &SqlitePool, state: &ReplyMergeState) -> Result<(), String> {
@@ -1058,6 +1098,9 @@ mod tests {
             auth_dmarc: None,
             spam_hint_headers: None,
             satchel_marks: Vec::new(),
+            chat: None,
+            autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: Vec::new(),
         }
     }
@@ -1090,6 +1133,59 @@ mod tests {
         sqlx::query("INSERT INTO threads (id, account_id, subject, last_message_date, workflow_state, message_count, created_at, updated_at) VALUES (?, ?, 'S', '2020-01-01', 'inbox', 1, '', '')").bind(&thread).bind(account).execute(pool).await.unwrap();
         sqlx::query("INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, date, message_id_header, in_reply_to, created_at, updated_at) VALUES (?, ?, ?, ?, 'a@b.test', '[]', 'S', '2020-01-01', ?, ?, '', '')")
             .bind(id).bind(account).bind(folder).bind(thread).bind(format!("<{id}>")).bind(parent.map(|p| format!("<{p}>"))).execute(pool).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_subject_fallback_never_joins_a_delta_chat() {
+        let pool = reply_merge_pool().await;
+        sqlx::query("INSERT INTO threads (id, account_id, subject, last_message_date, workflow_state, message_count, created_at, updated_at) VALUES ('chat-thread', 'a', 'Message from Lena', '2026-08-01', 'inbox', 1, '', '')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO messages (id, account_id, folder_id, thread_id, from_address, to_addresses, subject, date, message_id_header, chat_version, created_at, updated_at) VALUES ('m1', 'a', 'f', 'chat-thread', 'lena@example.test', '[\"a@b.test\"]', 'Message from Lena', '2026-08-01T10:00:00+00:00', '<real@x>', '1.0', '', '')").execute(&pool).await.unwrap();
+        let mut stranger = envelope("evil");
+        stranger.subject = "Message from Lena".into();
+        stranger.from_address = "attacker@evil.test".into();
+        stranger.to_addresses = vec!["a@b.test".into(), "lena@example.test".into()];
+        stranger.date_rfc3339 = "2026-08-02T10:00:00+00:00".into();
+        stranger.message_id_header = None;
+        let mut conn = pool.acquire().await.unwrap();
+        assert_eq!(
+            super::resolve_imap_subject_thread_connection(&mut conn, "a", "a@b.test", &stranger)
+                .await
+                .unwrap(),
+            None,
+            "a stranger joined the chat by its subject"
+        );
+        // From the account owner's address (spoofed), To the peer and the attacker.
+        stranger.from_address = "a@b.test".into();
+        stranger.to_addresses = vec!["lena@example.test".into(), "attacker@evil.test".into()];
+        assert_eq!(
+            super::resolve_imap_subject_thread_connection(&mut conn, "a", "a@b.test", &stranger)
+                .await
+                .unwrap(),
+            None
+        );
+        // A chat message itself never threads by subject either.
+        stranger.chat = Some(crate::chat::ChatHeaders {
+            version: "1.0".into(),
+            ..Default::default()
+        });
+        sqlx::query("UPDATE messages SET chat_version = NULL WHERE id = 'm1'")
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            super::resolve_imap_subject_thread_connection(&mut conn, "a", "a@b.test", &stranger)
+                .await
+                .unwrap(),
+            None
+        );
+        // Plain mail still threads by subject as before.
+        stranger.chat = None;
+        assert_eq!(
+            super::resolve_imap_subject_thread_connection(&mut conn, "a", "a@b.test", &stranger)
+                .await
+                .unwrap(),
+            Some("chat-thread".to_string())
+        );
     }
 
     async fn thread_of(pool: &sqlx::SqlitePool, id: &str) -> String {

@@ -24,7 +24,7 @@ const route = useRoute();
  * Settings, Calendar and Contacts have a primary action of their own that a
  * mail pencil would only compete with.
  */
-const COMPOSE_FAB_HIDDEN_ON = new Set(['thread', 'settings', 'calendar', 'contacts']);
+const COMPOSE_FAB_HIDDEN_ON = new Set(['thread', 'settings', 'calendar', 'contacts', 'chats']);
 /**
  * Screens without the phone's tab bar: pushed details with a Back of their own,
  * and those with their own bottom bar (a thread's actions, the composer's send).
@@ -51,7 +51,9 @@ const tabBarVisible = computed(() =>
   && !standaloneCompose.value
   && !composer.isOpen
   && !keyboardVisible.value
-  && !TAB_BAR_HIDDEN_ON.has(String(route.name)),
+  && !TAB_BAR_HIDDEN_ON.has(String(route.name))
+  // An open chat is a reader with its own field at the bottom (Labs → Chats).
+  && !(route.name === 'chats' && route.query.thread),
 );
 const mailboxSwitcherMounted = ref(false);
 watch(() => ui.mailboxSwitcherOpen, (open) => { if (open) mailboxSwitcherMounted.value = true; });

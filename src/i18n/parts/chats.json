@@ -1,0 +1,138 @@
+{
+  "en": {
+    "backend": {
+      "errors": {
+        "chatConfirmationNeeded": "The chat changed. Send again.",
+        "chatEncryptionLost": "This reply was to go out encrypted and no longer can. It waits in the Outbox."
+      }
+    },
+    "chats": {
+      "title": "Chats",
+      "allAccounts": "All accounts",
+      "list": "Chats",
+      "loadFailed": "The chats could not be loaded.",
+      "empty": {
+        "title": "No chats yet",
+        "description": "Messages from Delta Chat appear here as they arrive."
+      },
+      "select": {
+        "title": "Pick a chat",
+        "description": "Its messages show as bubbles, with a reply field below."
+      },
+      "members": "{count} member | {count} members",
+      "unread": "{count} unread",
+      "encrypted": "End-to-end encrypted",
+      "notEncrypted": "Not encrypted",
+      "notEncryptedNoKey": "Replies go out unencrypted: there is no OpenPGP key for {address}.",
+      "notEncryptedNoPeerKey": "Replies go out unencrypted until every member has sent an Autocrypt key.",
+      "showAsMail": "Show as mail",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "messagesLoadFailed": "The messages could not be loaded.",
+      "composer": {
+        "label": "Message",
+        "placeholder": "Message {name}…",
+        "send": "Send",
+        "hint": "Enter sends, Shift+Enter adds a line",
+        "sending": "Sending…",
+        "sendFailed": "The message could not be sent.",
+        "queued": "Queued. It goes out when the connection is back."
+      },
+      "unlock": {
+        "title": "Unlock your key to send",
+        "body": "This reply is end-to-end encrypted and signed with your OpenPGP key for {address}.",
+        "label": "Passphrase",
+        "confirm": "Unlock and send",
+        "wrong": "That passphrase does not unlock the key.",
+        "failed": "The key could not be unlocked."
+      },
+      "unsigned": {
+        "title": "Send without your signature?",
+        "body": "Your key stays locked. The reply is still end-to-end encrypted, but the recipients cannot check that it came from you.",
+        "confirm": "Send unsigned"
+      },
+      "partHidden": "Part of this message is hidden · Show as mail",
+      "confirm": {
+        "recipientsTitle": "Send to these people?",
+        "recipientsBody": "The recipients changed since your last reply, or since the chat began.",
+        "send": "Send",
+        "plainTitle": "Send without encryption?",
+        "plainBody": "This chat was end-to-end encrypted. This reply would go out in plain text, because not every recipient has an Autocrypt key.",
+        "sendPlain": "Send unencrypted",
+        "firstGroupTitle": "Reply to this group?",
+        "firstGroupBody": "This is your first reply in this group. It goes to:",
+        "firstTitle": "Send your first reply?",
+        "firstBody": "This is your first reply in this chat. It goes to:"
+      },
+      "notMember": "{name} · not in this chat"
+    }
+  },
+  "de": {
+    "backend": {
+      "errors": {
+        "chatConfirmationNeeded": "Chat geändert. Erneut senden.",
+        "chatEncryptionLost": "Diese Antwort sollte verschlüsselt rausgehen und kann es nicht mehr. Bis das wieder geht, bleibt die Antwort im Postausgang."
+      }
+    },
+    "chats": {
+      "title": "Chats",
+      "allAccounts": "Alle Konten",
+      "list": "Chats",
+      "loadFailed": "Die Chats konnten nicht geladen werden.",
+      "empty": {
+        "title": "Noch keine Chats",
+        "description": "Nachrichten aus Delta Chat erscheinen hier, sobald sie ankommen."
+      },
+      "select": {
+        "title": "Chat auswählen",
+        "description": "Die Nachrichten erscheinen als Sprechblasen, darunter das Antwortfeld."
+      },
+      "members": "{count} Mitglied | {count} Mitglieder",
+      "unread": "{count} ungelesen",
+      "encrypted": "Ende-zu-Ende-verschlüsselt",
+      "notEncrypted": "Unverschlüsselt",
+      "notEncryptedNoKey": "Antworten gehen unverschlüsselt raus: Für {address} gibt es keinen OpenPGP-Schlüssel.",
+      "notEncryptedNoPeerKey": "Antworten gehen unverschlüsselt raus, bis alle Mitglieder einen Autocrypt-Schlüssel geschickt haben.",
+      "showAsMail": "Als Mail anzeigen",
+      "today": "Heute",
+      "yesterday": "Gestern",
+      "messagesLoadFailed": "Die Nachrichten konnten nicht geladen werden.",
+      "composer": {
+        "label": "Nachricht",
+        "placeholder": "Nachricht an {name} …",
+        "send": "Senden",
+        "hint": "Enter sendet, Umschalt+Enter fügt eine Zeile ein",
+        "sending": "Wird gesendet …",
+        "sendFailed": "Die Nachricht konnte nicht gesendet werden.",
+        "queued": "In der Warteschlange. Geht raus, sobald die Verbindung wieder da ist."
+      },
+      "unlock": {
+        "title": "Schlüssel entsperren, um zu senden",
+        "body": "Diese Antwort wird Ende-zu-Ende-verschlüsselt und mit deinem OpenPGP-Schlüssel für {address} signiert.",
+        "label": "Passphrase",
+        "confirm": "Entsperren und senden",
+        "wrong": "Diese Passphrase entsperrt den Schlüssel nicht.",
+        "failed": "Der Schlüssel konnte nicht entsperrt werden."
+      },
+      "unsigned": {
+        "title": "Ohne deine Signatur senden?",
+        "body": "Dein Schlüssel bleibt gesperrt. Die Antwort ist trotzdem Ende-zu-Ende-verschlüsselt, aber die Empfänger können nicht prüfen, dass sie von dir kommt.",
+        "confirm": "Unsigniert senden"
+      },
+      "partHidden": "Ein Teil der Nachricht ist ausgeblendet · Als Mail anzeigen",
+      "confirm": {
+        "recipientsTitle": "An diese Personen senden?",
+        "recipientsBody": "Die Empfänger haben sich seit deiner letzten Antwort oder seit Beginn des Chats geändert.",
+        "send": "Senden",
+        "plainTitle": "Ohne Verschlüsselung senden?",
+        "plainBody": "Dieser Chat war Ende-zu-Ende-verschlüsselt. Diese Antwort ginge unverschlüsselt raus, weil nicht alle Empfänger einen Autocrypt-Schlüssel haben.",
+        "sendPlain": "Unverschlüsselt senden",
+        "firstGroupTitle": "Dieser Gruppe antworten?",
+        "firstGroupBody": "Das ist deine erste Antwort in dieser Gruppe. Empfänger:",
+        "firstTitle": "Deine erste Antwort senden?",
+        "firstBody": "Das ist deine erste Antwort in diesem Chat. Empfänger:"
+      },
+      "notMember": "{name} · nicht in diesem Chat"
+    }
+  }
+}

@@ -283,6 +283,11 @@ export function useAppBootstrap(): void {
   useNativeUiStrings();
   useDraftFlushOnExit();
 
+  // Labs: the flags and the experiments' code load behind an import, so a
+  // switched-off experiment costs startup nothing (`@/labs/runtime`).
+  let stopLabs: (() => void) | null = null;
+  onBeforeUnmount(() => stopLabs?.());
+
   function openWaitingForReply() {
     threadsStore.workflowFilter = 'later';
     threadsStore.setMailboxFilter({ kind: 'all', value: null });
@@ -760,6 +765,9 @@ export function useAppBootstrap(): void {
     const notificationRestore = backendSupportsNativeCommands()
       ? (async () => { await restoreBackgroundNotifications(); })()
       : Promise.resolve();
+    void import('@/labs/runtime').then(({ startLabs }) => {
+      if (!bootstrapDisposed) stopLabs = startLabs();
+    }).catch((error) => console.warn('labs failed to start', error));
     const coreStoresLoad = (async () => { await loadCoreStores(); })().catch((error) => {
       console.error('core stores failed to load', error);
       connectionStore.reportBackendError('threads', error);

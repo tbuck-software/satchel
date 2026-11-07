@@ -146,6 +146,19 @@ pub struct MessageEnvelope {
     /// script did to it. See [`crate::rules`]. Only IMAP fills it.
     #[serde(default)]
     pub satchel_marks: Vec<String>,
+    /// Delta Chat headers (`Chat-Version`, `Chat-Group-*`), when the message
+    /// has them. Only providers that see the header block fill it.
+    #[serde(default)]
+    pub chat: Option<crate::chat::ChatHeaders>,
+    /// Every raw `Autocrypt:` header value, in order. The ingest picks the one
+    /// valid header for the sender (`autocrypt::select_header`).
+    #[serde(default)]
+    pub autocrypt_headers: Vec<String>,
+    /// The message may update Autocrypt peer state at all: not a
+    /// `multipart/report`, not more than one `From` address ("Updating
+    /// Autocrypt Peer State"). False when the provider cannot tell.
+    #[serde(default)]
+    pub autocrypt_eligible: bool,
     #[serde(default)]
     pub attachments: Vec<RemoteAttachment>,
 }
@@ -384,6 +397,14 @@ pub struct OutgoingMessage {
     /// not answer or forward it again. None sends no header.
     #[serde(default)]
     pub auto_submitted: Option<String>,
+    /// Headers beyond the ones above, in order: Delta Chat's `Chat-*` and
+    /// `Autocrypt`. The builder skips names it writes itself.
+    #[serde(default)]
+    pub extra_headers: Vec<(String, String)>,
+    /// Recipient keys the caller already resolved (Autocrypt peers). When
+    /// set, the PGP transform encrypts to these instead of looking keys up.
+    #[serde(default)]
+    pub recipient_public_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

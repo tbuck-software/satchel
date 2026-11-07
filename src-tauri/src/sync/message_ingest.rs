@@ -760,8 +760,8 @@ async fn persist_provider_message(
     // without its parts is missing information, not reporting a message that
     // lost its attachments — mail is immutable on the server.
     sqlx::query(
-        "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, in_reply_to, references_header, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, date, body_text, body_html, original_body_html, original_source, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, remote_uid, remote_id, raw_size, raw_headers, remote_draft_id, category, provider_labels, list_unsubscribe, list_unsubscribe_post, auth_spf, auth_dkim, auth_dmarc, smime_encrypted, smime_signed, pgp_signed, trust_metadata, created_at, updated_at, received_at, remote_workflow_marker)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, in_reply_to, references_header, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, date, body_text, body_html, original_body_html, original_source, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, remote_uid, remote_id, raw_size, raw_headers, remote_draft_id, category, provider_labels, list_unsubscribe, list_unsubscribe_post, auth_spf, auth_dkim, auth_dmarc, smime_encrypted, smime_signed, pgp_signed, trust_metadata, created_at, updated_at, received_at, remote_workflow_marker, chat_version, chat_group_id, chat_group_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
             folder_id = excluded.folder_id,
             thread_id = excluded.thread_id,
@@ -800,6 +800,9 @@ async fn persist_provider_message(
             smime_signed = excluded.smime_signed,
             pgp_signed = excluded.pgp_signed,
             trust_metadata = excluded.trust_metadata,
+            chat_version = COALESCE(excluded.chat_version, messages.chat_version),
+            chat_group_id = COALESCE(excluded.chat_group_id, messages.chat_group_id),
+            chat_group_name = COALESCE(excluded.chat_group_name, messages.chat_group_name),
             remote_draft_id = COALESCE(excluded.remote_draft_id, messages.remote_draft_id),
             remote_workflow_marker = CASE WHEN ? THEN excluded.remote_workflow_marker ELSE messages.remote_workflow_marker END,
             draft_attachments_json = CASE
@@ -858,6 +861,9 @@ async fn persist_provider_message(
     .bind(message.received_at_rfc3339.as_deref())
     // `NULL` is no marker.
     .bind(message.workflow_marker.and_then(|marker| marker.as_column()))
+    .bind(message.chat.as_ref().map(|chat| chat.version.as_str()))
+    .bind(message.chat.as_ref().and_then(|chat| chat.group_id.as_deref()))
+    .bind(message.chat.as_ref().and_then(|chat| chat.group_name.as_deref()))
     // The guards of the conflict clause; their placeholders come after every
     // one of the inserted values. A provider that does not report markers
     // keeps the stored one.
@@ -1035,6 +1041,9 @@ async fn persist_provider_message(
         .await
         .map_err(|error| error.to_string())?;
     }
+    if newly_seen && !message_is_draft && !sender_is_account {
+        apply_autocrypt_header(tx, account_id, folder_type, message).await?;
+    }
     Ok(StoredMessage {
         message_id,
         thread_id,
@@ -1045,6 +1054,74 @@ async fn persist_provider_message(
         attachment_ids,
         workflow_marker_changed,
     })
+}
+
+/// Whether a message may change a peer's Autocrypt state at all. The spec
+/// ignores `multipart/report`, mail with several `From` addresses and spam
+/// ("Updating Autocrypt Peer State"); Satchel also ignores Trash and mail
+/// whose DMARC check failed, where the `From` is the least trustworthy.
+fn autocrypt_applies(
+    folder_type: &str,
+    message: &crate::providers::traits::MessageEnvelope,
+) -> bool {
+    let folder = folder_type.trim().to_ascii_lowercase();
+    message.autocrypt_eligible
+        && message.from_address.contains('@')
+        && !matches!(folder.as_str(), "spam" | "junk" | "trash")
+        && !message
+            .auth_dmarc
+            .as_deref()
+            .is_some_and(|verdict| verdict.trim().eq_ignore_ascii_case("fail"))
+}
+
+/// Autocrypt Level 1 peer state from an incoming message, while the Chats
+/// experiment is on in Labs. Off, Satchel keeps no key it was not given.
+async fn apply_autocrypt_header(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    account_id: &str,
+    folder_type: &str,
+    message: &crate::providers::traits::MessageEnvelope,
+) -> Result<(), String> {
+    let enabled = satchel_core::db::labs::is_enabled_in(&mut **tx, satchel_core::db::labs::CHATS)
+        .await
+        .map_err(|error| error.to_string())?;
+    if !enabled || !autocrypt_applies(folder_type, message) {
+        return Ok(());
+    }
+    // The user's own aliases are not peers (the primary address never gets here).
+    let own_alias: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM account_aliases WHERE account_id = ? AND LOWER(TRIM(email)) = LOWER(TRIM(?))",
+    )
+    .bind(account_id)
+    .bind(&message.from_address)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| error.to_string())?;
+    if own_alias.is_some() {
+        return Ok(());
+    }
+    let parse = |value: &str| {
+        chrono::DateTime::parse_from_rfc3339(value)
+            .ok()
+            .map(|time| time.with_timezone(&chrono::Utc))
+    };
+    let received = message
+        .received_at_rfc3339
+        .as_deref()
+        .and_then(parse)
+        .unwrap_or_else(chrono::Utc::now);
+    let effective = satchel_core::autocrypt::effective_date(parse(&message.date_rfc3339), received);
+    let header =
+        satchel_core::autocrypt::select_header(&message.autocrypt_headers, &message.from_address);
+    satchel_core::db::autocrypt_peers::apply_incoming(
+        tx,
+        account_id,
+        &message.from_address,
+        effective,
+        header.as_ref(),
+    )
+    .await
+    .map_err(|error| error.to_string())
 }
 
 async fn finish_provider_message(
@@ -1371,8 +1448,8 @@ fn provider_message_is_draft(folder_type: &str, mailbox_ids: &[String]) -> bool 
 #[cfg(test)]
 mod tests {
     use super::{
-        persist_blocked_sender_diagnostic, provider_message_db_id, provider_message_is_draft,
-        should_check_blocked_sender, upsert_provider_message,
+        autocrypt_applies, persist_blocked_sender_diagnostic, provider_message_db_id,
+        provider_message_is_draft, should_check_blocked_sender, upsert_provider_message,
     };
     use crate::providers::traits::{MessageEnvelope, RemoteAttachment, RemoteMessageState};
     use crate::sync::folder_reconcile::reconcile_imap_folder_snapshot;
@@ -1380,6 +1457,24 @@ mod tests {
     use crate::sync::queue::SyncQueue;
     use crate::sync::thread_resolution::{merge_reply_split_threads, standalone_thread_key};
     use sqlx::sqlite::SqlitePoolOptions;
+
+    #[test]
+    fn autocrypt_skips_spam_trash_reports_and_failed_dmarc() {
+        let mut message = envelope("1");
+        message.from_address = "lena@example.test".into();
+        message.autocrypt_eligible = true;
+        assert!(autocrypt_applies("inbox", &message));
+        assert!(!autocrypt_applies("spam", &message));
+        assert!(!autocrypt_applies("Junk", &message));
+        assert!(!autocrypt_applies("trash", &message));
+        message.auth_dmarc = Some("fail".into());
+        assert!(!autocrypt_applies("inbox", &message));
+        message.auth_dmarc = Some("pass".into());
+        assert!(autocrypt_applies("inbox", &message));
+        // A report, or mail from several people, as the provider judged it.
+        message.autocrypt_eligible = false;
+        assert!(!autocrypt_applies("inbox", &message));
+    }
 
     fn envelope(remote_id: &str) -> MessageEnvelope {
         MessageEnvelope {
@@ -1419,8 +1514,524 @@ mod tests {
             auth_dmarc: None,
             spam_hint_headers: None,
             satchel_marks: Vec::new(),
+            chat: None,
+            autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: Vec::new(),
         }
+    }
+
+    // ---- Chats: who a reply goes to cannot be steered by threading (fourth review) ----
+
+    const OWN: &str = "account@example.com";
+
+    #[allow(clippy::too_many_arguments)]
+    fn chat_envelope(
+        remote: &str,
+        mid: &str,
+        irt: Option<&str>,
+        from: &str,
+        to: &[&str],
+        date: &str,
+        chat: bool,
+        group: Option<&str>,
+    ) -> MessageEnvelope {
+        let mut message = envelope(remote);
+        message.message_id_header = Some(mid.into());
+        message.in_reply_to = irt.map(str::to_string);
+        message.references = irt.map(|value| vec![value.to_string()]).unwrap_or_default();
+        message.from_address = from.into();
+        message.to_addresses = to.iter().map(|addr| addr.to_string()).collect();
+        message.subject = "Message from Lena".into();
+        message.date_rfc3339 = date.into();
+        message.received_at_rfc3339 = Some(date.into());
+        if chat {
+            message.chat = Some(satchel_core::chat::ChatHeaders {
+                version: "1.0".into(),
+                group_id: group.map(str::to_string),
+                group_name: group.map(|_| "G".to_string()),
+            });
+        }
+        message
+    }
+
+    async fn thread_with(pool: &sqlx::SqlitePool, mid: &str) -> String {
+        sqlx::query_scalar("SELECT thread_id FROM messages WHERE message_id_header = ?")
+            .bind(mid)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn chat_of(pool: &sqlx::SqlitePool, mid: &str) -> satchel_core::db::chats::ChatThread {
+        let thread = thread_with(pool, mid).await;
+        satchel_core::db::chats::ChatRepository::new(pool)
+            .thread(&thread)
+            .await
+            .unwrap()
+    }
+
+    /// Lena's chat answered by the attacker with Message-ID `<x>`; the
+    /// attacker's older message claims to reply to `<x>`.
+    async fn seed_reply_relation_attack(
+        pool: &sqlx::SqlitePool,
+        attacker_chat: bool,
+    ) -> MessageEnvelope {
+        let older = chat_envelope(
+            "1",
+            "<a1>",
+            Some("<x>"),
+            "attacker@evil.test",
+            &[OWN, "victim@evil.test"],
+            "2026-07-01T09:00:00+00:00",
+            attacker_chat,
+            attacker_chat.then_some("EVILGROUP123"),
+        );
+        ingest(pool, "inbox", &older).await.unwrap();
+        ingest(
+            pool,
+            "inbox",
+            &chat_envelope(
+                "3",
+                "<y>",
+                None,
+                "lena@example.test",
+                &[OWN],
+                "2026-08-01T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            pool,
+            "inbox",
+            &chat_envelope(
+                "4",
+                "<x>",
+                Some("<y>"),
+                "attacker@evil.test",
+                &[OWN],
+                "2026-08-01T11:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        older
+    }
+
+    #[tokio::test]
+    async fn a_reingested_message_never_moves_into_a_chat() {
+        for attacker_chat in [true, false] {
+            let pool = ingest_pool().await;
+            let older = seed_reply_relation_attack(&pool, attacker_chat).await;
+            merge_reply_split_threads(&pool).await.unwrap();
+            // A flag refresh or envelope refetch stores the older message again.
+            ingest(&pool, "inbox", &older).await.unwrap();
+            assert_ne!(
+                thread_with(&pool, "<a1>").await,
+                thread_with(&pool, "<y>").await,
+                "attacker_chat={attacker_chat}"
+            );
+            let chat = chat_of(&pool, "<y>").await;
+            assert_eq!(
+                chat.recipients,
+                vec!["lena@example.test"],
+                "attacker_chat={attacker_chat}"
+            );
+            assert_eq!(chat.group_id, None);
+            assert!(chat.first_reply, "confirmation required");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reingested_reply_fetched_before_its_parent_does_not_take_over_the_chat() {
+        let pool = ingest_pool().await;
+        let attacker = chat_envelope(
+            "9",
+            "<a>",
+            Some("<y>"),
+            "attacker@evil.test",
+            &[OWN, "victim@evil.test"],
+            "2026-08-01T09:00:00+00:00",
+            true,
+            Some("EVILGROUP123"),
+        );
+        ingest(&pool, "inbox", &attacker).await.unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "3",
+                "<y>",
+                None,
+                "lena@example.test",
+                &[OWN],
+                "2026-08-01T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(&pool, "inbox", &attacker).await.unwrap();
+        assert_ne!(
+            thread_with(&pool, "<a>").await,
+            thread_with(&pool, "<y>").await
+        );
+        let chat = chat_of(&pool, "<y>").await;
+        assert_eq!(chat.recipients, vec!["lena@example.test"]);
+        assert!(chat.first_reply, "confirmation required");
+    }
+
+    #[tokio::test]
+    async fn a_provider_conversation_always_confirms_the_first_reply() {
+        for attacker_first in [true, false] {
+            let pool = ingest_pool().await;
+            sqlx::query("UPDATE accounts SET provider = 'gmail'")
+                .execute(&pool)
+                .await
+                .unwrap();
+            let in_conversation =
+                |remote: &str, mid: &str, irt: Option<&str>, from: &str, date: &str| {
+                    let mut message =
+                        chat_envelope(remote, mid, irt, from, &[OWN], date, true, None);
+                    message.remote_thread_id = Some("conv-1".into());
+                    message.mailbox_ids = vec!["INBOX".into()];
+                    message
+                };
+            let lena = in_conversation(
+                "g-y",
+                "<y>",
+                None,
+                "lena@example.test",
+                "2026-08-01T10:00:00+00:00",
+            );
+            let attacker = in_conversation(
+                "g-a",
+                "<a>",
+                Some("<y>"),
+                "attacker@evil.test",
+                "2026-08-01T11:00:00+00:00",
+            );
+            let order = if attacker_first {
+                [&attacker, &lena]
+            } else {
+                [&lena, &attacker]
+            };
+            for message in order {
+                super::upsert_provider_message(
+                    None,
+                    &pool,
+                    "gmail",
+                    "account",
+                    OWN,
+                    "Account",
+                    &crate::commands::accounts::AccountConfig::from_plaintext("{}"),
+                    "inbox",
+                    "INBOX",
+                    "inbox",
+                    message,
+                    None,
+                )
+                .await
+                .unwrap();
+            }
+            let chat = chat_of(&pool, "<y>").await;
+            // Earliest receipt, not fetch order, names the start; the reply asks either way.
+            assert_eq!(
+                chat.recipients,
+                vec!["lena@example.test"],
+                "attacker_first={attacker_first}"
+            );
+            assert!(chat.first_reply, "confirmation required");
+        }
+    }
+
+    #[tokio::test]
+    async fn without_a_receipt_time_the_first_reply_still_asks() {
+        let pool = ingest_pool().await;
+        let mut attacker = chat_envelope(
+            "9",
+            "<a>",
+            Some("<y>"),
+            "attacker@evil.test",
+            &[OWN],
+            "2026-08-01T11:00:00+00:00",
+            true,
+            None,
+        );
+        attacker.received_at_rfc3339 = None;
+        ingest(&pool, "inbox", &attacker).await.unwrap();
+        let mut lena = chat_envelope(
+            "3",
+            "<y>",
+            None,
+            "lena@example.test",
+            &[OWN],
+            "2026-08-01T10:00:00+00:00",
+            true,
+            None,
+        );
+        lena.received_at_rfc3339 = None;
+        ingest(&pool, "inbox", &lena).await.unwrap();
+        ingest(&pool, "inbox", &attacker).await.unwrap();
+        assert!(
+            chat_of(&pool, "<y>").await.first_reply,
+            "confirmation required"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_chat_split_by_a_reply_fetched_first_heals_with_its_member() {
+        let pool = ingest_pool().await;
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "2",
+                "<m1>",
+                Some("<m0>"),
+                "lena@example.test",
+                &[OWN],
+                "2026-08-02T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "1",
+                "<m0>",
+                None,
+                "lena@example.test",
+                &[OWN],
+                "2026-08-01T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        merge_reply_split_threads(&pool).await.unwrap();
+        assert_eq!(
+            thread_with(&pool, "<m1>").await,
+            thread_with(&pool, "<m0>").await
+        );
+        assert_eq!(
+            chat_of(&pool, "<m0>").await.recipients,
+            vec!["lena@example.test"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_reply_merge_keeps_strangers_out_of_the_chat() {
+        let pool = ingest_pool().await;
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "1",
+                "<a1>",
+                Some("<x>"),
+                "attacker@evil.test",
+                &[OWN, "victim@evil.test"],
+                "2026-07-01T09:00:00+00:00",
+                false,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "2",
+                "<a2>",
+                Some("<x2>"),
+                "attacker@evil.test",
+                &[OWN, "victim@evil.test"],
+                "2026-07-01T09:30:00+00:00",
+                true,
+                Some("EVILGROUP123"),
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "3",
+                "<y>",
+                None,
+                "lena@example.test",
+                &[OWN],
+                "2026-08-01T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "4",
+                "<x>",
+                Some("<y>"),
+                "attacker@evil.test",
+                &[OWN],
+                "2026-08-01T11:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "5",
+                "<x2>",
+                Some("<y>"),
+                "attacker@evil.test",
+                &[OWN],
+                "2026-08-01T11:30:00+00:00",
+                false,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        merge_reply_split_threads(&pool).await.unwrap();
+        for stranger in ["<a1>", "<a2>"] {
+            assert_ne!(
+                thread_with(&pool, stranger).await,
+                thread_with(&pool, "<y>").await,
+                "{stranger}"
+            );
+        }
+        let chat = chat_of(&pool, "<y>").await;
+        assert_eq!(chat.recipients, vec!["lena@example.test"]);
+        assert!(chat.first_reply, "confirmation required");
+        // New mail that answers the attacker's message joins as a reply, and
+        // since it is older than the chat the first reply still asks.
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "6",
+                "<a3>",
+                Some("<x>"),
+                "attacker@evil.test",
+                &[OWN, "victim@evil.test"],
+                "2026-07-02T09:00:00+00:00",
+                true,
+                Some("EVILGROUP123"),
+            ),
+        )
+        .await
+        .unwrap();
+        merge_reply_split_threads(&pool).await.unwrap();
+        assert!(
+            chat_of(&pool, "<y>").await.first_reply,
+            "confirmation required"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_chat_keeps_its_start_across_a_folder_move() {
+        let pool = ingest_pool().await;
+        sqlx::query("INSERT INTO folders (id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at) VALUES ('arch', 'account', 'Archive', 'Archive', 'archive', 'Archive', '', '')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "1",
+                "<m0>",
+                None,
+                "lena@example.test",
+                &[OWN],
+                "2026-08-01T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "2",
+                "<m1>",
+                Some("<m0>"),
+                "lena@example.test",
+                &[OWN],
+                "2026-08-02T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        // The first message moves to the Archive: new UID, same Message-ID
+        // and receipt time; the Inbox copy is expunged.
+        ingest(
+            &pool,
+            "arch",
+            &chat_envelope(
+                "11",
+                "<m0>",
+                None,
+                "lena@example.test",
+                &[OWN],
+                "2026-08-01T10:00:00+00:00",
+                true,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+        sqlx::query(
+            "DELETE FROM messages WHERE folder_id = 'inbox' AND message_id_header = '<m0>'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        ingest(
+            &pool,
+            "inbox",
+            &chat_envelope(
+                "3",
+                "<a>",
+                Some("<m1>"),
+                "attacker@evil.test",
+                &[OWN, "victim@evil.test"],
+                "2026-08-03T10:00:00+00:00",
+                true,
+                Some("EVILGROUP123"),
+            ),
+        )
+        .await
+        .unwrap();
+        let chat = chat_of(&pool, "<m1>").await;
+        assert_eq!(chat.recipients, vec!["lena@example.test"]);
+        assert_eq!(chat.group_id, None);
     }
 
     #[tokio::test]
@@ -3974,6 +4585,9 @@ mod tests {
             auth_dmarc: None,
             spam_hint_headers: None,
             satchel_marks: Vec::new(),
+            chat: None,
+            autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: Vec::new(),
         };
         upsert_provider_message(
@@ -4166,6 +4780,9 @@ mod tests {
             auth_dmarc: None,
             spam_hint_headers: None,
             satchel_marks: Vec::new(),
+            chat: None,
+            autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: Vec::new(),
         };
         upsert_provider_message(
@@ -4262,6 +4879,9 @@ mod tests {
             auth_dmarc: None,
             spam_hint_headers: None,
             satchel_marks: Vec::new(),
+            chat: None,
+            autocrypt_headers: Vec::new(),
+            autocrypt_eligible: false,
             attachments: vec![RemoteAttachment {
                 remote_part_id: "mime-1".to_string(),
                 filename: Some("note.txt".to_string()),

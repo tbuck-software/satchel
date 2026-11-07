@@ -26,3 +26,4 @@ keine Statusquelle.
 | 0017 | Der Katalog des Hauptfensters wird nach Ladezeitpunkt geteilt | angenommen |
 | 0018 | Bereinigtes HTML an Übersetzungs-Engines ohne Sprachmodell | angenommen |
 | 0019 | Regeln verschieben und leiten weiter, lokal und auf dem Server | vorgeschlagen |
+| 0020 | Labs: Experimente hinter einem Schalter pro Gerät | vorgeschlagen |

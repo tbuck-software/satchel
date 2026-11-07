@@ -92,6 +92,10 @@ pub struct OutgoingMessageInput {
     #[serde(default)]
     #[cfg_attr(feature = "ipc-types", ts(skip))]
     pub auto_submitted: Option<String>,
+    /// A Delta Chat message (Labs → Chats): adds `Chat-Version`, the group
+    /// headers and Autocrypt, and encrypts when every peer's key is known.
+    #[serde(default)]
+    pub chat: Option<crate::chat::ChatSendOptions>,
 }
 
 /// Reduce recipient entries to the addresses they contain, in order.
