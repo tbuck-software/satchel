@@ -165,7 +165,7 @@ pub async fn execute_send_action(
             &mut outgoing,
             &payload.account_id,
             &account.email,
-            chat.allow_unsigned,
+            chat,
         )
         .await?;
     }
@@ -509,7 +509,10 @@ async fn apply_pgp_send_transform(
 
 /// For an encrypted Delta Chat message: the header lines that go inside the
 /// ciphertext, and the message as its envelope shows it, with a neutral
-/// Subject (`...`, as Delta Chat writes) and no group name. `None` for any
+/// Subject (`[...]`, the spec's `hcp_chat` policy) and no group name.
+/// `To` stays readable outside: Gmail and Graph take the recipients from the
+/// headers (`RecipientSource::Headers`), and Delta Chat versions without
+/// header protection read the members from the outer `To`. `None` for any
 /// other message. The group id stays outside: groups are matched by it and
 /// by the `Gr.` Message-ID (spec.md "Groups").
 fn protected_chat_parts(outgoing: &OutgoingMessage) -> Option<(Vec<String>, OutgoingMessage)> {
@@ -525,7 +528,7 @@ fn protected_chat_parts(outgoing: &OutgoingMessage) -> Option<(Vec<String>, Outg
         &outgoing.subject,
     )];
     let mut outer = outgoing.clone();
-    outer.subject = "...".to_string();
+    outer.subject = "[...]".to_string();
     outer.extra_headers.retain(|(name, value)| {
         let hidden = name.eq_ignore_ascii_case("Chat-Group-Name");
         if hidden {
@@ -551,13 +554,16 @@ async fn apply_chat_autocrypt(
     outgoing: &mut OutgoingMessage,
     account_id: &str,
     fallback_from_address: &str,
-    allow_unsigned: bool,
+    chat: &satchel_core::chat::ChatSendOptions,
 ) -> Result<(), String> {
     let from = sender_identity(outgoing, fallback_from_address);
     let recipients = crypto_recipients(outgoing);
     let plan =
         crate::commands::chats::chat_encryption_plan(pool, app, account_id, &from, &recipients)
             .await?;
+    // Sent encrypted: a retry never goes out in plain text.
+    crate::commands::chats::encryption_still_possible(chat.encryption_required, plan.encrypts())
+        .map_err(str::to_string)?;
     let Some((key_id, armored)) = plan.own_key.as_ref() else {
         return Ok(());
     };
@@ -581,7 +587,7 @@ async fn apply_chat_autocrypt(
         return Ok(());
     }
     let unlocked = pgp::key_is_unlocked(state, key_id).await;
-    let sign = crate::commands::chats::signing_decision(true, unlocked, allow_unsigned)
+    let sign = crate::commands::chats::signing_decision(true, unlocked, chat.allow_unsigned)
         .map_err(str::to_string)?;
     outgoing.pgp_encrypt_to_recipients = true;
     outgoing.recipient_public_keys = plan.peer_keys.clone();
@@ -1040,7 +1046,7 @@ mod tests {
         let encrypted =
             crate::email::pgp_mime::build_encrypted(&envelope, "-----BEGIN PGP MESSAGE-----");
         let (headers, _) = encrypted.split_once("\r\n\r\n").unwrap();
-        assert!(headers.contains("\r\nSubject: ...\r\n"));
+        assert!(headers.contains("\r\nSubject: [...]\r\n"));
         assert!(!encrypted.contains("Meet at the station"));
         assert!(!encrypted.contains("Family"));
         assert!(headers.contains("Chat-Group-ID: abcDEF123_-x"));

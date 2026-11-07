@@ -261,6 +261,7 @@
       "calendarTimeInvalid": "Gib eine gültige Terminzeit ein.",
       "calendarTitleRequired": "Gib einen Termintitel ein.",
       "chatConfirmationNeeded": "Chat geändert. Erneut senden.",
+      "chatEncryptionLost": "Diese Antwort sollte verschlüsselt rausgehen und kann es nicht mehr. Bis das wieder geht, bleibt die Antwort im Postausgang.",
       "composeWindowUnsupported": "Ein eigenes Schreibfenster gibt es nur auf dem Desktop.",
       "contactAvatarFallbackSyncFailed": "Ersatz-Kontaktbilder konnten nicht synchronisiert werden.",
       "contactAvatarLocalSyncFailed": "Lokale Kontaktbilder konnten nicht synchronisiert werden.",
@@ -787,7 +788,7 @@
     "confirm": {
       "plainBody": "Dieser Chat war Ende-zu-Ende-verschlüsselt. Diese Antwort ginge unverschlüsselt raus, weil nicht alle Empfänger einen Autocrypt-Schlüssel haben.",
       "plainTitle": "Ohne Verschlüsselung senden?",
-      "recipientsBody": "Die Empfänger sind nicht die deiner letzten Antwort in diesem Chat.",
+      "recipientsBody": "Die Empfänger haben sich seit deiner letzten Antwort oder seit Beginn des Chats geändert.",
       "recipientsTitle": "An diese Personen senden?",
       "send": "Senden",
       "sendPlain": "Unverschlüsselt senden"
@@ -804,6 +805,7 @@
     "notEncrypted": "Unverschlüsselt",
     "notEncryptedNoKey": "Antworten gehen unverschlüsselt raus: Für {address} gibt es keinen OpenPGP-Schlüssel.",
     "notEncryptedNoPeerKey": "Antworten gehen unverschlüsselt raus, bis alle Mitglieder einen Autocrypt-Schlüssel geschickt haben.",
+    "notMember": "{name} · nicht in diesem Chat",
     "partHidden": "Ein Teil der Nachricht ist ausgeblendet · Als Mail anzeigen",
     "select": {
       "description": "Die Nachrichten erscheinen als Sprechblasen, darunter das Antwortfeld.",

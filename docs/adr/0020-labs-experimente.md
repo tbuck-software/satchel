@@ -40,6 +40,11 @@ Experiment darf dort weder Code noch Texte kosten.
   dessen Empfehlung für uns auf „discourage“ („Recommendation“, Schritt 4),
   bis die nächste Chat-Nachricht kommt. Bewusst so: ein Experiment soll den
   normalen Mailverkehr nicht verändern.
+- Peer-Schlüssel kommen nur aus Mail, die Satchel **nach** dem Einschalten
+  zum ersten Mal sieht: die Ingest-Pipeline liest das `Autocrypt:`-Header
+  beim ersten Speichern einer Nachricht und behält den Header-Block nicht.
+  Wer Chats einschaltet, hat für einen Kontakt also erst nach dessen nächster
+  Nachricht einen Schlüssel.
 
 ## Folgen
 

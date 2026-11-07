@@ -261,6 +261,7 @@
       "calendarTimeInvalid": "Enter a valid event time.",
       "calendarTitleRequired": "Enter an event title.",
       "chatConfirmationNeeded": "The chat changed. Send again.",
+      "chatEncryptionLost": "This reply was to go out encrypted and no longer can. It waits in the Outbox.",
       "composeWindowUnsupported": "A separate compose window is only available on the desktop.",
       "contactAvatarFallbackSyncFailed": "Fallback contact photos could not be synchronized.",
       "contactAvatarLocalSyncFailed": "Local contact photos could not be synchronized.",
@@ -787,7 +788,7 @@
     "confirm": {
       "plainBody": "This chat was end-to-end encrypted. This reply would go out in plain text, because not every recipient has an Autocrypt key.",
       "plainTitle": "Send without encryption?",
-      "recipientsBody": "The recipients are not the ones of your last reply in this chat.",
+      "recipientsBody": "The recipients changed since your last reply, or since the chat began.",
       "recipientsTitle": "Send to these people?",
       "send": "Send",
       "sendPlain": "Send unencrypted"
@@ -804,6 +805,7 @@
     "notEncrypted": "Not encrypted",
     "notEncryptedNoKey": "Replies go out unencrypted: there is no OpenPGP key for {address}.",
     "notEncryptedNoPeerKey": "Replies go out unencrypted until every member has sent an Autocrypt key.",
+    "notMember": "{name} · not in this chat",
     "partHidden": "Part of this message is hidden · Show as mail",
     "select": {
       "description": "Its messages show as bubbles, with a reply field below.",

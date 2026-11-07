@@ -96,14 +96,13 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
  * backend.errors copy in the startup catalogue (German 22.6 → 23.1 KiB) and,
  * in the viewer, the mail document helpers splitting into a chunk of their
  * own now that the merge preview also renders through IsolatedEmailDocument.
-
  * Labs (2026-11-07) adds 0.3 KiB to the entry: the keyboard's slot for view
  * shortcuts that lazy code registers, the sidebar's slot for Labs rows and
  * the import of `labs/runtime`. Flags, store and the whole of Chats (route,
  * row, `g h`, views) load behind it; their only startup strings are the
- * `backend.errors.chatConfirmationNeeded`; the palette names the Labs
- * section (105.5 / 211.6 KiB on top of tasks, after prefetch 5 B under
- * 33 KiB). */
+ * `backend.errors.chatConfirmationNeeded` and `chatEncryptionLost`; the
+ * palette names the Labs section (105.5 / 212.5 KiB on top of mail merge,
+ * 33.7 KiB after prefetch). */
 const budgets = {
   'index.html': { entryGzip: 106 * 1024, initialGzip: 213 * 1024, locales: ['src/i18n/startup.en.json', 'src/i18n/startup.de.json'] },
   'tray.html': { entryGzip: 5 * 1024, initialGzip: 75 * 1024, locales: ['src/i18n/tray.en.json', 'src/i18n/tray.de.json'] },

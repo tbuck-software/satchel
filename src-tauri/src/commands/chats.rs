@@ -47,8 +47,12 @@ pub struct ChatMetaDto {
     pub own_key_unlocked: bool,
     /// Whether the next message will be end-to-end encrypted.
     pub encrypts: bool,
-    /// Who the user's last reply went to, if there was one.
-    pub last_reply_recipients: Option<Vec<String>>,
+    /// What `recipients_changed` compares with: the user's last reply, or the
+    /// chat's first message before there is one.
+    pub baseline_recipients: Vec<String>,
+    /// Messages in the thread from neither the user nor a member; the chat
+    /// view marks them as not part of the chat.
+    pub untrusted_message_ids: Vec<String>,
     /// The members differ from the last reply; the reply field asks first.
     pub recipients_changed: bool,
     /// The chat was encrypted and the next message would not be; the reply
@@ -66,9 +70,9 @@ pub struct SendChatMessageInput {
     /// Only after the sender declined to unlock it and said so.
     #[serde(default)]
     pub allow_unsigned: bool,
-    /// The recipients the sender saw. A reply goes out only to exactly these.
-    #[serde(default)]
-    pub expected_recipients: Option<Vec<String>>,
+    /// The recipients the sender saw. A reply goes out only to exactly these;
+    /// there is no default, so no caller can skip the check.
+    pub expected_recipients: Vec<String>,
     /// The sender confirmed recipients that differ from the last reply.
     #[serde(default)]
     pub confirm_recipients: bool,
@@ -161,17 +165,26 @@ pub(crate) fn confirmation_decision(
     encrypts: bool,
     input: &SendChatMessageInput,
 ) -> Result<(), &'static str> {
-    if let Some(expected) = input.expected_recipients.as_deref() {
-        if !same_set(expected, &chat.recipients) {
-            return Err(CONFIRMATION_NEEDED);
-        }
+    if !same_set(&input.expected_recipients, &chat.recipients) {
+        return Err(CONFIRMATION_NEEDED);
     }
-    if chat.recipients_changed && !(input.confirm_recipients && input.expected_recipients.is_some())
-    {
+    if chat.recipients_changed && !input.confirm_recipients {
         return Err(CONFIRMATION_NEEDED);
     }
     if chat.encrypted_before && !encrypts && !input.allow_plaintext {
         return Err(CONFIRMATION_NEEDED);
+    }
+    Ok(())
+}
+
+/// A queued chat reply that was encrypted when it was sent stays encrypted:
+/// when its retry can no longer encrypt it, it waits in the Outbox.
+pub(crate) fn encryption_still_possible(
+    required: bool,
+    encrypts: bool,
+) -> Result<(), &'static str> {
+    if required && !encrypts {
+        return Err("backend.errors.chatEncryptionLost");
     }
     Ok(())
 }
@@ -238,7 +251,8 @@ fn meta_dto(chat: ChatThread, plan: &ChatEncryptionPlan, key_unlocked: bool) -> 
         own_key_id: plan.own_key.as_ref().map(|(id, _)| id.clone()),
         own_key_unlocked: plan.own_key.is_some() && key_unlocked,
         encrypts: plan.encrypts(),
-        last_reply_recipients: chat.last_reply_recipients,
+        baseline_recipients: chat.baseline_recipients,
+        untrusted_message_ids: chat.untrusted_message_ids,
         recipients_changed: chat.recipients_changed,
         encryption_downgrade: chat.encrypted_before && !plan.encrypts(),
     }
@@ -273,7 +287,12 @@ pub async fn get_chat_meta(
 }
 
 /// The outgoing message for a quick reply in `chat`.
-fn chat_reply_input(chat: &ChatThread, text: &str, allow_unsigned: bool) -> OutgoingMessageInput {
+fn chat_reply_input(
+    chat: &ChatThread,
+    text: &str,
+    allow_unsigned: bool,
+    encryption_required: bool,
+) -> OutgoingMessageInput {
     let sender = if chat.account_name.trim().is_empty() {
         chat.own_address.as_str()
     } else {
@@ -290,6 +309,7 @@ fn chat_reply_input(chat: &ChatThread, text: &str, allow_unsigned: bool) -> Outg
             group_id: chat.group_id.clone(),
             group_name: chat.group_name.clone(),
             allow_unsigned,
+            encryption_required,
         }),
         ..Default::default()
     }
@@ -330,7 +350,7 @@ pub async fn send_chat_message(
     confirmation_decision(&chat, plan.encrypts(), &input).map_err(CommandError::new)?;
     let unlocked = own_key_unlocked(state.inner(), &plan).await;
     signing_decision(plan.encrypts(), unlocked, input.allow_unsigned).map_err(CommandError::new)?;
-    let outgoing = chat_reply_input(&chat, &text, input.allow_unsigned);
+    let outgoing = chat_reply_input(&chat, &text, input.allow_unsigned, plan.encrypts());
     crate::commands::messages::send_message_inner(
         app,
         state.inner(),
@@ -358,9 +378,10 @@ mod tests {
             recipients: vec!["lena@example.test".into(), "jonas@example.test".into()],
             names: BTreeMap::from([("lena@example.test".to_string(), "Lena".to_string())]),
             reply_to_message_id: Some("m-last".into()),
-            last_reply_recipients: None,
+            baseline_recipients: vec!["lena@example.test".into(), "jonas@example.test".into()],
             recipients_changed: false,
             encrypted_before: false,
+            untrusted_message_ids: Vec::new(),
         }
     }
 
@@ -369,6 +390,7 @@ mod tests {
         let input = chat_reply_input(
             &chat(Some(("abcDEF123_-x", "Family"))),
             "Hello group",
+            false,
             false,
         );
         assert_eq!(input.to, vec!["lena@example.test", "jonas@example.test"]);
@@ -383,7 +405,8 @@ mod tests {
         assert!(input.body_html.is_none());
         assert!(input.signature_id.is_none());
 
-        let one = chat_reply_input(&chat(None), "hi", true);
+        let one = chat_reply_input(&chat(None), "hi", true, true);
+        assert!(one.chat.as_ref().is_some_and(|c| c.encryption_required));
         assert!(one.chat.as_ref().is_some_and(|c| c.allow_unsigned));
         assert_eq!(one.subject, "Message from Tom");
         assert!(one.chat.as_ref().is_some_and(|c| c.group_id.is_none()));
@@ -438,16 +461,12 @@ mod tests {
         assert_eq!(signing_decision(true, false, true), Ok(false));
     }
 
-    fn send_input(
-        expected: Option<&[&str]>,
-        confirm: bool,
-        plaintext: bool,
-    ) -> SendChatMessageInput {
+    fn send_input(expected: &[&str], confirm: bool, plaintext: bool) -> SendChatMessageInput {
         SendChatMessageInput {
             thread_id: "th".into(),
             text: "hi".into(),
             allow_unsigned: false,
-            expected_recipients: expected.map(|list| list.iter().map(|a| a.to_string()).collect()),
+            expected_recipients: expected.iter().map(|a| a.to_string()).collect(),
             confirm_recipients: confirm,
             allow_plaintext: plaintext,
         }
@@ -458,7 +477,7 @@ mod tests {
         let members: &[&str] = &["jonas@example.test", "LENA@example.test"];
         let plain = chat(None);
         assert_eq!(
-            confirmation_decision(&plain, false, &send_input(Some(members), false, false)),
+            confirmation_decision(&plain, false, &send_input(members, false, false)),
             Ok(())
         );
         // Members changed since the meta was read: ask again.
@@ -466,27 +485,44 @@ mod tests {
             confirmation_decision(
                 &plain,
                 false,
-                &send_input(Some(&["lena@example.test"]), false, false)
+                &send_input(&["lena@example.test"], false, false)
             ),
             Err(CONFIRMATION_NEEDED)
         );
 
         let changed = ChatThread {
             recipients_changed: true,
-            last_reply_recipients: Some(vec!["lena@example.test".into()]),
+            baseline_recipients: vec!["lena@example.test".into()],
             ..chat(None)
         };
         assert_eq!(
-            confirmation_decision(&changed, false, &send_input(Some(members), false, false)),
+            confirmation_decision(&changed, false, &send_input(members, false, false)),
+            Err(CONFIRMATION_NEEDED)
+        );
+        // Confirmed, but for another set than the one there is now.
+        assert_eq!(
+            confirmation_decision(
+                &changed,
+                false,
+                &send_input(&["lena@example.test"], true, false)
+            ),
             Err(CONFIRMATION_NEEDED)
         );
         assert_eq!(
-            confirmation_decision(&changed, false, &send_input(None, true, false)),
-            Err(CONFIRMATION_NEEDED)
-        );
-        assert_eq!(
-            confirmation_decision(&changed, false, &send_input(Some(members), true, false)),
+            confirmation_decision(&changed, false, &send_input(members, true, false)),
             Ok(())
+        );
+    }
+
+    const BOTH: &[&str] = &["lena@example.test", "jonas@example.test"];
+
+    #[test]
+    fn a_retry_that_can_no_longer_encrypt_waits() {
+        assert_eq!(encryption_still_possible(true, true), Ok(()));
+        assert_eq!(encryption_still_possible(false, false), Ok(()));
+        assert_eq!(
+            encryption_still_possible(true, false),
+            Err("backend.errors.chatEncryptionLost")
         );
     }
 
@@ -497,15 +533,15 @@ mod tests {
             ..chat(None)
         };
         assert_eq!(
-            confirmation_decision(&encrypted, true, &send_input(None, false, false)),
+            confirmation_decision(&encrypted, true, &send_input(BOTH, false, false)),
             Ok(())
         );
         assert_eq!(
-            confirmation_decision(&encrypted, false, &send_input(None, false, false)),
+            confirmation_decision(&encrypted, false, &send_input(BOTH, false, false)),
             Err(CONFIRMATION_NEEDED)
         );
         assert_eq!(
-            confirmation_decision(&encrypted, false, &send_input(None, false, true)),
+            confirmation_decision(&encrypted, false, &send_input(BOTH, false, true)),
             Ok(())
         );
     }

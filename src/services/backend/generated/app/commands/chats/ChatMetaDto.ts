@@ -28,9 +28,15 @@ export type ChatMetaDto = {
      */
     encrypts: boolean;
     /**
-     * Who the user's last reply went to, if there was one.
+     * What `recipients_changed` compares with: the user's last reply, or the
+     * chat's first message before there is one.
      */
-    last_reply_recipients: Array<string> | null;
+    baseline_recipients: Array<string>;
+    /**
+     * Messages in the thread from neither the user nor a member; the chat
+     * view marks them as not part of the chat.
+     */
+    untrusted_message_ids: Array<string>;
     /**
      * The members differ from the last reply; the reply field asks first.
      */
