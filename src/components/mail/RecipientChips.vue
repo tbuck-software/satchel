@@ -4,6 +4,9 @@ import IconButton from '@/components/ui/IconButton.vue';
 import { computed, nextTick, ref, useId, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useContactsStore } from '@/stores/contacts';
+import { useUiStore } from '@/stores/ui';
+import type { AppDrag, RecipientField } from '@/utils/appDrag';
+import { appDragKind, finishAppDrag, pendingAppDrag, readAppDrag, startRecipientDrag } from '@/utils/appDragTarget';
 import {
   hasOpenRecipientToken,
   isValidRecipient,
@@ -18,17 +21,31 @@ const props = defineProps<{
   label: string;
   inputId?: string;
   placeholder?: string;
+  /**
+   * Which field of which composer this is. With both, chips drag out with
+   * their origin, and a chip dropped here from another field of the same
+   * composer moves (Alt/Option copies).
+   */
+  field?: RecipientField;
+  composerId?: string;
+  /** A recipient drag is over the composer: show this field as a target. */
+  dropReady?: boolean;
+  /** A drop elsewhere on the composer lands here. */
+  dropFallback?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string[]): void;
   /** Cmd/Ctrl+Enter, after the address being typed has become a chip. */
   (e: 'submit'): void;
+  /** Chips dropped here as a move: the composer takes them out of `field`. */
+  (e: 'moveFrom', field: RecipientField, addresses: string[]): void;
 }>();
 
 const { t } = useI18n();
 const draft = ref('');
 const contacts = useContactsStore();
+const ui = useUiStore();
 const inputRef = ref<HTMLInputElement | null>(null);
 const suggestions = ref<BackendContact[]>([]);
 const suggestionOpen = ref(false);
@@ -197,6 +214,73 @@ watch(draft, (value) => {
   }, 120);
 });
 
+/* Drag and drop: contacts and chips land here; chips leave from here. */
+const dropOver = ref(false);
+// dragenter/dragleave fire for every child crossed.
+let dropDepth = 0;
+
+const FIELDS: readonly string[] = ['to', 'cc', 'bcc'];
+
+/** The chip's origin when it comes from a field of this composer. */
+function chipSource(drag: AppDrag | null) {
+  const source = drag?.kind === 'recipients' ? drag.source : null;
+  return props.composerId && source?.composer === props.composerId && FIELDS.includes(source.field)
+    ? source
+    : null;
+}
+
+function fromThisField(drag: AppDrag | null): boolean {
+  return Boolean(props.field) && chipSource(drag)?.field === props.field;
+}
+
+function movesHere(drag: AppDrag | null, event: DragEvent): boolean {
+  return chipSource(drag) !== null && !event.altKey;
+}
+
+/** Takes recipient drags only; mail and files belong to the composer. */
+function claim(event: DragEvent): boolean {
+  if (appDragKind(event) !== 'recipients') return false;
+  event.preventDefault();
+  event.stopPropagation();
+  return true;
+}
+
+function onDragEnter(event: DragEvent) {
+  if (!claim(event)) return;
+  dropDepth += 1;
+  dropOver.value = !fromThisField(pendingAppDrag(event));
+}
+
+function onDragOver(event: DragEvent) {
+  if (!claim(event)) return;
+  const drag = pendingAppDrag(event);
+  if (!event.dataTransfer) return;
+  event.dataTransfer.dropEffect = fromThisField(drag) ? 'none' : movesHere(drag, event) ? 'move' : 'copy';
+}
+
+function onDragLeave(event: DragEvent) {
+  if (!claim(event)) return;
+  dropDepth = Math.max(0, dropDepth - 1);
+  if (dropDepth === 0) dropOver.value = false;
+}
+
+function onDrop(event: DragEvent) {
+  if (!claim(event)) return;
+  dropDepth = 0;
+  dropOver.value = false;
+  const drag = readAppDrag(event);
+  finishAppDrag();
+  if (drag?.kind !== 'recipients' || fromThisField(drag)) return;
+  addTokens(drag.addresses);
+  const source = chipSource(drag);
+  if (source && movesHere(drag, event)) emit('moveFrom', source.field, drag.addresses);
+}
+
+function onChipDragStart(event: DragEvent, value: string) {
+  const source = props.field && props.composerId ? { composer: props.composerId, field: props.field } : null;
+  startRecipientDrag(event, [value], source);
+}
+
 // So a composer that opens with no recipients can start in the field the user
 // has to fill first. The input is inside the chip row and unreachable from
 // outside without this.
@@ -204,14 +288,27 @@ defineExpose({ focus: () => inputRef.value?.focus() });
 </script>
 
 <template>
-  <div class="chips-wrap">
-  <div class="chips" @click="inputRef?.focus()">
+  <div
+    class="chips-wrap"
+    data-recipient-field
+    @dragenter="onDragEnter"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+  >
+  <div
+    class="chips"
+    :class="{ 'chips--drop-ready': props.dropReady, 'chips--drop-over': dropOver || props.dropFallback }"
+    @click="inputRef?.focus()"
+  >
     <span
       v-for="(value, index) in chips"
       :key="value + index"
       class="chip"
       :class="{ 'chip--invalid': !isValidRecipient(value), 'chip--pending-removal': pendingRemoval === index }"
       :title="isValidRecipient(value) ? value : t('compose.recipients.invalid')"
+      :draggable="!ui.isMobile"
+      @dragstart="onChipDragStart($event, value)"
     >
       {{ recipientChipLabel(value) }}
       <span v-if="!isValidRecipient(value)" class="sr-only">{{ t('compose.recipients.invalidMarker') }}</span>
@@ -315,6 +412,24 @@ defineExpose({ focus: () => inputRef.value?.focus() });
 
 .suggestions small {
   color: var(--text-tertiary);
+}
+
+/* A recipient drag is over the composer: every field shows it takes one;
+   the one the drop would land in is filled. */
+.chips--drop-ready {
+  border-style: dashed;
+  border-color: var(--accent-primary);
+}
+
+.chips--drop-over {
+  border-style: solid;
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-surface));
+  box-shadow: var(--focus-ring);
+}
+
+.chip[draggable='true'] {
+  cursor: grab;
 }
 
 .chips:focus-within {

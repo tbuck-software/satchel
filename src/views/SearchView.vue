@@ -20,6 +20,7 @@ import EmptyState from '@/components/ui/EmptyState.vue';
 import ListDetailLayout from '@/components/layout/ListDetailLayout.vue';
 import ThreadView from '@/components/mail/ThreadView.vue';
 import { useI18n } from 'vue-i18n';
+import { startMessageDrag } from '@/utils/appDragTarget';
 
 const route = useRoute();
 const router = useRouter();
@@ -331,6 +332,8 @@ function goBack() {
               <CardButton
                 class="result-row"
                 :class="{ 'result-row--active': result.threadId === selectedThreadId }"
+                :draggable="!ui.isMobile"
+                @dragstart="startMessageDrag($event, [result.messageId])"
                 @click="open(result)"
               >
                 <Avatar :name="result.fromName" :email="result.fromAddress" :size="36" />

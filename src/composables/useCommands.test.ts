@@ -7,6 +7,7 @@ import { registerThreadReaderCommands } from './useThreadReaderCommands';
 import { useCommands } from './useCommands';
 import { COMMAND_ICONS } from '@/components/navigation/commandIcons';
 import { useToast } from './useToast';
+import { useComposerStore } from '@/stores/composer';
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -178,5 +179,20 @@ describe('views in the palette', () => {
     expect(command('thread:topic')).toBeUndefined();
     expect(command('thread:file')?.title).toBe('File…');
     expect(command('thread:file')?.shortcut?.keys).toEqual(['v']);
+  });
+});
+
+describe('attach to the open draft', () => {
+  it('is offered only while a draft is open, and attaches the selected mail', () => {
+    expect(command('draft:attach-mail')).toBeUndefined();
+    const attach = vi.fn(async () => {});
+    const composer = useComposerStore();
+    composer.draftTarget = { attach, addRecipients: vi.fn() };
+
+    command('draft:attach-mail')?.run();
+    expect(attach).toHaveBeenCalledWith({ kind: 'threads', ids: ['thread-1'] });
+
+    composer.draftTarget = null;
+    expect(command('draft:attach-mail')).toBeUndefined();
   });
 });

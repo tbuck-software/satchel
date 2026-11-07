@@ -1,10 +1,11 @@
-//! Turn threads dragged onto the composer into `.eml` attachments.
+//! Turn threads and messages dragged onto the composer into `.eml` attachments.
 //!
 //! The original source is fetched the same way "show source" fetches it, so a
 //! forwarded message keeps its headers, signatures and MIME parts byte for
 //! byte. A thread contributes its newest delivered message: that one carries
 //! the conversation's latest state, and a long thread would otherwise bury the
-//! draft under a dozen near-identical files.
+//! draft under a dozen near-identical files. A message (a search hit, one
+//! message out of an open thread) contributes itself.
 
 use crate::db::remote_content::ContentReference;
 use base64::Engine as _;
@@ -32,15 +33,42 @@ pub async fn thread_eml_attachments(
 ) -> CommandResult<Vec<OutgoingAttachmentInput>> {
     let pool = pool.inner().as_ref();
     let write_pool = write_pool.inner();
-    collect_thread_eml_attachments(pool, thread_ids, |id| async move {
+    collect_eml_attachments(pool, EmlTarget::Thread, thread_ids, |id| async move {
         super::fetch_remote_message_source(pool, write_pool, &id).await
     })
     .await
 }
 
-async fn collect_thread_eml_attachments<F, Fut>(
+/// Original sources of the given messages, as `message/rfc822` attachments in
+/// the order they were given. Drafts and messages whose source cannot be
+/// fetched are left out, as for threads.
+#[tauri::command]
+pub async fn message_eml_attachments(
+    pool: tauri::State<'_, crate::db::ReadPool>,
+    write_pool: tauri::State<'_, SqlitePool>,
+    message_ids: Vec<String>,
+) -> CommandResult<Vec<OutgoingAttachmentInput>> {
+    let pool = pool.inner().as_ref();
+    let write_pool = write_pool.inner();
+    collect_eml_attachments(pool, EmlTarget::Message, message_ids, |id| async move {
+        super::fetch_remote_message_source(pool, write_pool, &id).await
+    })
+    .await
+}
+
+/// What the ids handed to [`collect_eml_attachments`] name.
+#[derive(Clone, Copy)]
+enum EmlTarget {
+    /// A thread; its newest delivered message is attached.
+    Thread,
+    /// One message.
+    Message,
+}
+
+async fn collect_eml_attachments<F, Fut>(
     pool: &SqlitePool,
-    thread_ids: Vec<String>,
+    target: EmlTarget,
+    ids: Vec<String>,
     mut source: F,
 ) -> CommandResult<Vec<OutgoingAttachmentInput>>
 where
@@ -48,9 +76,9 @@ where
     Fut: std::future::Future<Output = Result<Option<Vec<u8>>, String>>,
 {
     let mut references = Vec::new();
-    let mut attachments = Vec::with_capacity(thread_ids.len());
-    for thread_id in dedupe(thread_ids) {
-        let Some(message) = newest_message(pool, &thread_id)
+    let mut attachments = Vec::with_capacity(ids.len());
+    for id in dedupe(ids) {
+        let Some(message) = eml_message(pool, target, &id)
             .await
             .map_err(CommandError::unexpected)?
         else {
@@ -75,10 +103,9 @@ where
     Ok(attachments)
 }
 
-fn dedupe(thread_ids: Vec<String>) -> Vec<String> {
+fn dedupe(ids: Vec<String>) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
-    thread_ids
-        .into_iter()
+    ids.into_iter()
         .filter(|id| seen.insert(id.clone()))
         .collect()
 }
@@ -90,23 +117,29 @@ struct EmlMessage {
     reference: ContentReference,
 }
 
-async fn newest_message(
+const EML_MESSAGE_COLUMNS: &str = "SELECT m.subject, m.id AS message_id, m.account_id,
+     m.folder_id, m.remote_id, m.remote_uidvalidity, m.created_at, a.provider,
+     COALESCE(f.remote_id, f.full_path) AS source_folder, f.uidvalidity AS folder_uidvalidity
+     FROM messages m JOIN accounts a ON a.id = m.account_id
+     LEFT JOIN folders f ON f.id = m.folder_id";
+
+async fn eml_message(
     pool: &SqlitePool,
-    thread_id: &str,
+    target: EmlTarget,
+    id: &str,
 ) -> Result<Option<EmlMessage>, sqlx::Error> {
-    sqlx::query_as(
-        "SELECT m.subject, m.id AS message_id, m.account_id, m.folder_id,
-         m.remote_id, m.remote_uidvalidity, m.created_at, a.provider,
-         COALESCE(f.remote_id, f.full_path) AS source_folder, f.uidvalidity AS folder_uidvalidity
-         FROM messages m JOIN accounts a ON a.id = m.account_id
-         LEFT JOIN folders f ON f.id = m.folder_id
-         WHERE m.thread_id = ? AND COALESCE(m.is_draft, 0) = 0
-         ORDER BY m.date DESC, m.id DESC
-         LIMIT 1",
-    )
-    .bind(thread_id)
-    .fetch_optional(pool)
-    .await
+    let filter = match target {
+        EmlTarget::Thread => {
+            "WHERE m.thread_id = ? AND COALESCE(m.is_draft, 0) = 0
+             ORDER BY m.date DESC, m.id DESC
+             LIMIT 1"
+        }
+        EmlTarget::Message => "WHERE m.id = ? AND COALESCE(m.is_draft, 0) = 0",
+    };
+    sqlx::query_as(&format!("{EML_MESSAGE_COLUMNS} {filter}"))
+        .bind(id)
+        .fetch_optional(pool)
+        .await
 }
 
 fn eml_attachment(subject: Option<&str>, raw: &[u8]) -> OutgoingAttachmentInput {
@@ -199,7 +232,7 @@ mod tests {
                     .await
                     .unwrap();
             }
-            let result = collect_thread_eml_attachments(&pool, vec!["t1".into(), "t2".into(), "t1".into()], |id| {
+            let result = collect_eml_attachments(&pool, EmlTarget::Thread, vec!["t1".into(), "t2".into(), "t1".into()], |id| {
                 let pool = &pool;
                 async move {
                     let source = super::super::fetch_remote_message_source(pool, pool, &id).await?;
@@ -234,6 +267,45 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn messages_attach_themselves_and_drafts_stay_out() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::db::init(&pool).await.unwrap();
+        sqlx::raw_sql("INSERT INTO accounts (id, email, display_name, provider, config, credentials_ref, created_at, updated_at)
+            VALUES ('a', 'me@example.test', 'Me', 'imap', '{}', '', '', '');
+            INSERT INTO folders (id, account_id, name, full_path, folder_type, uidvalidity, created_at, updated_at)
+            VALUES ('f', 'a', 'INBOX', 'INBOX', 'inbox', 7, '', '');
+            INSERT INTO threads (id, account_id, subject, last_message_date, created_at, updated_at)
+            VALUES ('t1', 'a', 'Parcel', '', '', '');
+            INSERT INTO messages (id, account_id, folder_id, thread_id, subject, from_address, to_addresses, date, is_draft, created_at, updated_at)
+            VALUES ('old', 'a', 'f', 't1', 'Parcel shipped', '', '[]', '2026-01-01', 0, '', ''),
+                   ('new', 'a', 'f', 't1', 'Parcel delivered', '', '[]', '2026-01-02', 0, '', ''),
+                   ('draft', 'a', 'f', 't1', 'Re: Parcel', '', '[]', '2026-01-03', 1, '', '');")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut fetched = Vec::new();
+        let attachments = collect_eml_attachments(
+            &pool,
+            EmlTarget::Message,
+            vec!["old".into(), "draft".into(), "missing".into(), "old".into()],
+            |id| {
+                fetched.push(id.clone());
+                async move { Ok(Some(format!("Subject: {id}\r\n\r\n").into_bytes())) }
+            },
+        )
+        .await
+        .unwrap();
+        // The older message itself, not the thread's newest one.
+        assert_eq!(fetched, vec!["old".to_string()]);
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].filename, "Parcel shipped.eml");
     }
 
     #[test]

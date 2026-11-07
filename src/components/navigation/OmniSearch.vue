@@ -25,6 +25,8 @@ import type { Account } from '@/types/mail';
 import Avatar from '@/components/common/Avatar.vue';
 import TimeAgo from '@/components/common/TimeAgo.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
+import { startMessageDrag } from '@/utils/appDragTarget';
+import { startContactDrag } from '@/utils/contactDrag';
 
 const COMMAND_LIMIT_WHILE_TYPING = 5;
 const RECENT_COMMAND_LIMIT = 3;
@@ -295,6 +297,32 @@ function jumpGroup(direction: 1 | -1) {
     [...starts].reverse().find((start) => start < currentStart) ?? (starts.at(-1) ?? activeIndex.value);
 }
 
+/*
+ * A mail or a contact dragged out of the panel is on its way to the composer
+ * or a folder underneath. The panel steps aside for the drag, after the
+ * browser has taken its picture of the row, and closes once it ends.
+ */
+const dragging = ref(false);
+
+function isDraggable(item: OmniItem): boolean {
+  return !ui.isMobile && (item.kind === 'mail' || item.kind === 'contact');
+}
+
+function onItemDragStart(event: DragEvent, item: OmniItem) {
+  if (item.kind === 'mail') startMessageDrag(event, [item.result.messageId]);
+  else if (item.kind === 'contact') startContactDrag(event, [{ email: item.contact.email, name: item.contact.display_name }]);
+  else return;
+  setTimeout(() => { dragging.value = true; }, 0);
+}
+
+function onItemDragEnd() {
+  if (!dragging.value) return;
+  dragging.value = false;
+  close();
+}
+
+watch(() => ui.omniOpen, (open) => { if (!open) dragging.value = false; });
+
 function close() {
   ui.closeOmni();
 }
@@ -371,7 +399,7 @@ function onEnter(event: KeyboardEvent) {
 <template>
   <Teleport to="body">
     <Transition name="fade">
-      <div v-if="ui.omniOpen" class="backdrop" @click.self="close()">
+      <div v-if="ui.omniOpen" class="backdrop" :class="{ 'backdrop--dragging': dragging }" @click.self="close()">
         <section ref="panelRef" class="panel" role="dialog" aria-modal="true" :aria-label="$t('nav.omni.ariaLabel')">
           <div class="search-row">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4" aria-hidden="true">
@@ -431,6 +459,9 @@ function onEnter(event: KeyboardEvent) {
                 :aria-keyshortcuts="item.kind === 'command' ? item.command.shortcut?.aria : undefined"
                 class="row"
                 :class="{ active: group.start + offset === activeIndex, 'row--command': item.kind === 'command', 'row--compact': item.kind === 'command' || item.kind === 'recent', 'row--reminder': item.kind === 'reminder', 'row--footer': item.kind === 'footer' }"
+                :draggable="isDraggable(item)"
+                @dragstart="onItemDragStart($event, item)"
+                @dragend="onItemDragEnd"
                 @click="activate(item)"
                 @mouseenter="activeIndex = group.start + offset"
               >
@@ -559,6 +590,12 @@ function onEnter(event: KeyboardEvent) {
      out above it as half a line of text. */
   padding-top: 64px;
   z-index: 100;
+}
+
+/* Out of the way of a drag that started in it: drops land on what is below. */
+.backdrop--dragging {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .panel {

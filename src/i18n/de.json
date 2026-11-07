@@ -1205,6 +1205,13 @@
       "restore": "Fenster verkleinern"
     }
   },
+  "composeDrop": {
+    "addToDraft": "Zum Entwurf hinzufügen",
+    "addToTo": "Loslassen, um unter „An“ hinzuzufügen",
+    "addedToDraft": "{name} unter „An“ hinzugefügt",
+    "attachKeywords": "anhängen weiterleiten eml entwurf attach forward",
+    "attachToDraft": "An offenen Entwurf anhängen"
+  },
   "contacts": {
     "add": {
       "email": "E-Mail-Adresse",

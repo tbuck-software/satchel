@@ -66,7 +66,16 @@ pub fn guard<'a, M: Manager<tauri::Wry>>(
 ) -> WebviewWindowBuilder<'a, tauri::Wry, M> {
     let origin = app_origin(app);
     let popup_origin = origin.clone();
-    let builder = builder.on_navigation(move |url| route_navigation(url, &origin));
+    // Tauri's drag-drop handler answers every drag itself and never passes it
+    // on to the webview: on macOS wry overrides `draggingEntered:`,
+    // `draggingUpdated:` and `performDragOperation:` of the WKWebView and
+    // skips `super` whenever the handler returns true, which Tauri's always
+    // does. The page then never sees `dragover` or `drop`, for files from the
+    // Finder as much as for a mail dragged onto the composer. Nothing here
+    // listens to Tauri's drag-drop events; the pages use HTML5 drag and drop.
+    let builder = builder
+        .disable_drag_drop_handler()
+        .on_navigation(move |url| route_navigation(url, &origin));
     #[cfg(desktop)]
     let builder = builder.on_new_window(move |url, _| {
         popup(&url, &popup_origin, open_external);
@@ -133,6 +142,17 @@ mod tests {
             assert_eq!(handed_off, vec![external.clone(), external]);
         }
     }
+    #[test]
+    fn the_guard_hands_drags_to_the_page() {
+        let source = include_str!("navigation.rs");
+        let guard = source
+            .split("pub fn guard<")
+            .nth(1)
+            .and_then(|rest| rest.split("#[cfg(test)]").next())
+            .unwrap();
+        assert!(guard.contains(".disable_drag_drop_handler()"));
+    }
+
     #[test]
     fn every_window_builder_uses_the_shared_guard() {
         for source in [

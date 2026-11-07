@@ -53,6 +53,26 @@ type Handler = (payload: Payload) => unknown;
 
 const accounts: Account[] = mockAccounts.map((account) => ({ ...account }));
 const threads: Thread[] = mockThreads.map((thread) => ({ ...thread }));
+/** The `.eml` a dragged thread or message becomes in the composer. */
+function mockEmlAttachment(message: Message) {
+  const raw = [
+    `From: ${message.from.name} <${message.from.email}>`,
+    `To: ${message.to.map((participant) => participant.email).join(', ')}`,
+    `Subject: ${message.subject}`,
+    `Date: ${new Date(message.timestamp).toUTCString()}`,
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    message.bodyText,
+  ].join('\r\n');
+  return {
+    filename: `${message.subject.replace(/[\\/:*?"<>|]/g, '_').trim() || 'message'}.eml`,
+    mime_type: 'message/rfc822',
+    content_base64: bytesToBase64(new TextEncoder().encode(raw)),
+    content_id: null,
+    inline: false,
+  };
+}
+
 const messages: Record<string, Message[]> = Object.fromEntries(
   Object.entries(mockMessagesByThread).map(([id, list]) => [id, list.map((m) => ({ ...m }))]),
 );
@@ -1977,23 +1997,11 @@ const handlers: Record<string, Handler> = {
     const message = (messages[threadId] ?? [])
       .filter((entry) => !entry.isDraft)
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
-    if (!message) return [];
-    const raw = [
-      `From: ${message.from.name} <${message.from.email}>`,
-      `To: ${message.to.map((participant) => participant.email).join(', ')}`,
-      `Subject: ${message.subject}`,
-      `Date: ${new Date(message.timestamp).toUTCString()}`,
-      'Content-Type: text/plain; charset=utf-8',
-      '',
-      message.bodyText,
-    ].join('\r\n');
-    return [{
-      filename: `${message.subject.replace(/[\\/:*?"<>|]/g, '_').trim() || 'message'}.eml`,
-      mime_type: 'message/rfc822',
-      content_base64: bytesToBase64(new TextEncoder().encode(raw)),
-      content_id: null,
-      inline: false,
-    }];
+    return message ? [mockEmlAttachment(message)] : [];
+  }),
+  message_eml_attachments: (payload) => [...new Set(payload.messageIds as string[])].flatMap((messageId) => {
+    const message = Object.values(messages).flat().find((entry) => entry.id === messageId && !entry.isDraft);
+    return message ? [mockEmlAttachment(message)] : [];
   }),
   server_search: (payload) => {
     const request = input(payload);

@@ -85,6 +85,17 @@ export async function backendThreadEmlAttachments(
   return invoke<BackendOutgoingAttachment[]>('thread_eml_attachments', { threadIds });
 }
 
+/**
+ * Original sources of single messages dropped on a composer (a search hit,
+ * one message out of a thread), one `.eml` each. Drafts and messages whose
+ * source cannot be fetched are missing from the result.
+ */
+export async function backendMessageEmlAttachments(
+  messageIds: string[],
+): Promise<BackendOutgoingAttachment[]> {
+  return invoke<BackendOutgoingAttachment[]>('message_eml_attachments', { messageIds });
+}
+
 
 export async function backendSaveDraft(input: BackendDraftInput): Promise<BackendDraft> {
   return invoke<BackendDraft>('save_draft', {

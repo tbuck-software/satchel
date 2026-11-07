@@ -125,6 +125,24 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
     }];
   }
 
+  /**
+   * With a draft open in this window, the selected mail goes onto it as an
+   * `.eml` each: what dragging the rows onto the composer does.
+   */
+  function draftCommands(): OmniCommand[] {
+    const target = composer.draftTarget;
+    const ids = targetIds();
+    if (!target || ids.length === 0) return [];
+    return [{
+      id: 'draft:attach-mail',
+      icon: 'attach',
+      title: t('composeDrop.attachToDraft'),
+      context: 'mail',
+      keywords: t('composeDrop.attachKeywords'),
+      run: () => target.attach({ kind: 'threads', ids }),
+    }];
+  }
+
   /** Reader-only actions, offered while the reader shows the thread the palette acts on. */
   function readerCommands(): OmniCommand[] {
     const reader = activeThreadReaderCommands();
@@ -487,6 +505,7 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
         keywords: t('shortcuts.actions.createTask.keywords'),
         run: () => taskEditor.openForThread(currentId(), threads.find(currentId())?.subject),
       }] : []),
+      ...draftCommands(),
       ...readerCommands(),
     ] : []),
     {

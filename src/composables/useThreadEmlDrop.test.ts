@@ -2,12 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ref } from 'vue';
 import type { BackendOutgoingAttachment } from '@/types/composer';
 import { MAX_TOTAL_ATTACHMENT_BYTES } from '@/utils/attachmentLimits';
-import { THREAD_DRAG_TYPE } from '@/utils/threadDrag';
+import { MESSAGE_DRAG_TYPE, RECIPIENT_DRAG_TYPE, THREAD_DRAG_TYPE } from '@/utils/appDrag';
 
-const harness = vi.hoisted(() => ({ fetch: vi.fn() }));
+const harness = vi.hoisted(() => ({ fetch: vi.fn(), fetchMessages: vi.fn() }));
 
 vi.mock('@/services/backend/composer', () => ({
   backendThreadEmlAttachments: harness.fetch,
+  backendMessageEmlAttachments: harness.fetchMessages,
 }));
 
 import { useThreadEmlDrop } from './useThreadEmlDrop';
@@ -20,6 +21,10 @@ function eml(filename: string, bytes = 3): BackendOutgoingAttachment {
     content_id: null,
     inline: false,
   };
+}
+
+function threads(...ids: string[]) {
+  return JSON.stringify({ kind: 'threads', ids });
 }
 
 function dragEvent(data: Record<string, string>) {
@@ -48,13 +53,14 @@ async function settle() {
 describe('useThreadEmlDrop', () => {
   beforeEach(() => {
     harness.fetch.mockReset();
+    harness.fetchMessages.mockReset();
   });
 
   it('attaches the original of every dropped thread', async () => {
     harness.fetch.mockResolvedValue([eml('Paket.eml'), eml('Rechnung.eml')]);
     const { attachments, feedback, drop } = setup([eml('existing.pdf')]);
 
-    drop.onDrop(dragEvent({ [THREAD_DRAG_TYPE]: 'th-1,th-2' }));
+    drop.onDrop(dragEvent({ [THREAD_DRAG_TYPE]: threads('th-1', 'th-2') }));
     await settle();
 
     expect(harness.fetch).toHaveBeenCalledWith(['th-1', 'th-2']);
@@ -64,11 +70,43 @@ describe('useThreadEmlDrop', () => {
     expect(feedback.error).not.toHaveBeenCalled();
   });
 
+  it('attaches a dropped message itself, not its thread', async () => {
+    harness.fetchMessages.mockResolvedValue([eml('UPS.eml')]);
+    const { attachments, drop } = setup();
+
+    drop.onDrop(dragEvent({ [MESSAGE_DRAG_TYPE]: JSON.stringify({ kind: 'messages', ids: ['msg-7'] }) }));
+    await settle();
+
+    expect(harness.fetchMessages).toHaveBeenCalledWith(['msg-7']);
+    expect(harness.fetch).not.toHaveBeenCalled();
+    expect(attachments.value.map((item) => item.filename)).toEqual(['UPS.eml']);
+  });
+
+  it('attaches on command without a drag', async () => {
+    harness.fetch.mockResolvedValue([eml('Paket.eml')]);
+    const { attachments, drop } = setup();
+
+    await drop.attach({ kind: 'threads', ids: ['th-1'] });
+
+    expect(attachments.value.map((item) => item.filename)).toEqual(['Paket.eml']);
+  });
+
+  it('leaves recipient drags to the recipient drop', () => {
+    const { drop } = setup();
+    const event = dragEvent({ [RECIPIENT_DRAG_TYPE]: '' });
+
+    drop.onDragEnter(event);
+    drop.onDrop(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(drop.dropActive.value).toBe(false);
+  });
+
   it('says so when a thread had no original to attach', async () => {
     harness.fetch.mockResolvedValue([eml('Paket.eml')]);
     const { attachments, feedback, drop } = setup();
 
-    drop.onDrop(dragEvent({ [THREAD_DRAG_TYPE]: 'th-1,th-2' }));
+    drop.onDrop(dragEvent({ [THREAD_DRAG_TYPE]: threads('th-1', 'th-2') }));
     await settle();
 
     expect(attachments.value).toHaveLength(1);
@@ -81,7 +119,7 @@ describe('useThreadEmlDrop', () => {
     harness.fetch.mockResolvedValue([eml('big.eml', MAX_TOTAL_ATTACHMENT_BYTES)]);
     const { attachments, feedback, drop } = setup([eml('existing.pdf', 10)]);
 
-    drop.onDrop(dragEvent({ [THREAD_DRAG_TYPE]: 'th-1' }));
+    drop.onDrop(dragEvent({ [THREAD_DRAG_TYPE]: threads('th-1') }));
     await settle();
 
     expect(attachments.value.map((item) => item.filename)).toEqual(['existing.pdf']);
@@ -92,7 +130,7 @@ describe('useThreadEmlDrop', () => {
     harness.fetch.mockRejectedValue({ key: 'backend.errors.unexpected', params: { message: 'offline' } });
     const { attachments, feedback, drop } = setup([eml('existing.pdf')]);
 
-    drop.onDrop(dragEvent({ [THREAD_DRAG_TYPE]: 'th-1' }));
+    drop.onDrop(dragEvent({ [THREAD_DRAG_TYPE]: threads('th-1') }));
     await settle();
 
     expect(attachments.value).toHaveLength(1);
@@ -130,7 +168,7 @@ describe('useThreadEmlDrop', () => {
 
   it('refuses drops while the message is sending', async () => {
     const { drop } = setup([], true);
-    const event = dragEvent({ [THREAD_DRAG_TYPE]: 'th-1' });
+    const event = dragEvent({ [THREAD_DRAG_TYPE]: threads('th-1') });
 
     drop.onDragEnter(event);
     drop.onDragOver(event);

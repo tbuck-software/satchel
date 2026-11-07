@@ -731,6 +731,7 @@ pub fn run() {
             commands::messages::load_thread_messages,
             commands::messages::get_message_source,
             commands::messages::eml_attachments::thread_eml_attachments,
+            commands::messages::eml_attachments::message_eml_attachments,
             commands::messages::search_message_hits,
             commands::server_search::server_search,
             commands::server_search::fetch_server_search_hit,

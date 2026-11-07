@@ -47,6 +47,9 @@ import type { AnchorBox } from '@/utils/popoverPlacement';
 import { useMessageSecurityActions } from '@/composables/useMessageSecurityActions';
 import { useMessageTranslation } from '@/composables/useMessageTranslation';
 import { languageName } from '@/utils/languageName';
+import { useComposerStore } from '@/stores/composer';
+import { startMessageDrag } from '@/utils/appDragTarget';
+import { startContactDrag } from '@/utils/contactDrag';
 import MessageBodyViewSwitch from './MessageBodyViewSwitch.vue';
 import { BODY_VIEW_SWITCH } from './bodyViewSwitch';
 import { BODY_VIEW_STATE, type BodyViewState } from './bodyViewState';
@@ -441,6 +444,25 @@ const messageMenu = computed<MessageMenu>(() => ({
  */
 const threadMenu = inject(THREAD_MESSAGE_MENU, null);
 const hostsThreadMenu = computed(() => threadMenu?.hostId.value === props.message.id);
+/*
+ * Outlook's drag: the header carries this message onto the composer (an
+ * `.eml` of exactly this one), the sender's name carries the sender as a
+ * recipient. With a draft open the same attach is a button among the actions.
+ */
+const composerStore = useComposerStore();
+const canDragMessage = computed(() => !ui.isMobile && !props.message.isDraft);
+function onHeaderDragStart(event: DragEvent) {
+  startMessageDrag(event, [props.message.id]);
+}
+function onSenderDragStart(event: DragEvent) {
+  // The header's own handler would put the message on top of the sender.
+  event.stopPropagation();
+  startContactDrag(event, [{ email: props.message.from.email, name: senderName.value }]);
+}
+function attachToDraft() {
+  void composerStore.draftTarget?.attach({ kind: 'messages', ids: [props.message.id] });
+}
+
 const showMenuButton = computed(() => !threadMenu || threadMenu.inlineIds.value.has(props.message.id));
 if (threadMenu) {
   watchEffect(() => {
@@ -557,7 +579,11 @@ function openSenderDetails() {
     @click="openFoldedFromClick"
   >
     <!-- Header -->
-    <div class="message-header flex items-start justify-between gap-3">
+    <div
+      class="message-header flex items-start justify-between gap-3"
+      :draggable="canDragMessage"
+      @dragstart="onHeaderDragStart"
+    >
       <div
         class="message-sender-group flex min-w-0 items-center gap-3.5"
         :class="{ 'message-sender-group--target': ui.isMobile && !props.collapsed }"
@@ -581,6 +607,8 @@ function openSenderDetails() {
             <AppButton
               class="sender-identity-trigger sender-name-trigger text-md font-semibold text-primary"
               :aria-label="$t('mail.recipients.showSenderDetails', { name: senderName })"
+              :draggable="!ui.isMobile && Boolean(props.message.from.email)"
+              @dragstart="onSenderDragStart"
               @click.stop="openSenderDetails"
               variant="link"
               size="sm"
@@ -609,6 +637,8 @@ function openSenderDetails() {
               class="message-sender-email sender-identity-trigger"
               :title="props.message.from.email"
               :aria-label="$t('mail.recipients.showSenderDetails', { name: senderName })"
+              :draggable="!ui.isMobile"
+              @dragstart="onSenderDragStart"
               @click.stop="openSenderDetails"
               variant="link"
               size="sm"
@@ -695,6 +725,14 @@ function openSenderDetails() {
                 <path v-else-if="headerBodyView.mode === 'text' || headerBodyView.mode === 'markdown'" d="M3 4h10M3 7.3h10M3 10.6h6.5" />
                 <template v-else><rect x="2.5" y="2.5" width="11" height="11" rx="1.8" /><path d="M2.5 6.5h11M6.5 6.5v7" /></template>
               </AppIcon>
+            </IconButton>
+            <IconButton
+              v-if="composerStore.draftTarget && !props.message.isDraft"
+              size="sm"
+              :title="$t('composeDrop.attachToDraft')"
+              @click="attachToDraft"
+            >
+              <AppIcon size="sm"><path d="M10.5 5.5 6.2 9.8a1.4 1.4 0 0 0 2 2l4.6-4.6a2.8 2.8 0 0 0-4-4L4.2 7.8a4.2 4.2 0 0 0 6 6l3.3-3.3" /></AppIcon>
             </IconButton>
             <IconButton size="sm" :title="$t('mail.message.showSource')" @click="sourceDialogOpen = true">
               <AppIcon size="sm"><path d="M6 4L2.5 8 6 12" /><path d="M10 4l3.5 4L10 12" /></AppIcon>

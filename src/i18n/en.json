@@ -1205,6 +1205,13 @@
       "restore": "Restore window"
     }
   },
+  "composeDrop": {
+    "addToDraft": "Add to draft",
+    "addToTo": "Drop to add to To",
+    "addedToDraft": "{name} added to To",
+    "attachKeywords": "attach forward eml draft composer",
+    "attachToDraft": "Attach to open draft"
+  },
   "contacts": {
     "add": {
       "email": "Email address",

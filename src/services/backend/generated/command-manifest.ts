@@ -1591,6 +1591,20 @@ export default {
                 }
             }
         },
+        "message_eml_attachments": {
+            "kind": "object",
+            "fields": {
+                "messageIds": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
         "message_link_target": {
             "kind": "object",
             "fields": {
