@@ -2,7 +2,7 @@
 import AppIcon from '@/components/ui/AppIcon.vue';
 import CardButton from '@/components/ui/CardButton.vue';
 import KeyCap from '@/components/ui/KeyCap.vue';
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useUiStore } from '@/stores/ui';
@@ -25,7 +25,7 @@ import type { Account } from '@/types/mail';
 import Avatar from '@/components/common/Avatar.vue';
 import TimeAgo from '@/components/common/TimeAgo.vue';
 import SectionHeading from '@/components/ui/SectionHeading.vue';
-import { startMessageDrag } from '@/utils/appDragTarget';
+import { startMessageDrag, watchDragEnd } from '@/utils/appDragTarget';
 import { startContactDrag } from '@/utils/contactDrag';
 
 const COMMAND_LIMIT_WHILE_TYPING = 5;
@@ -300,28 +300,42 @@ function jumpGroup(direction: 1 | -1) {
 /*
  * A mail or a contact dragged out of the panel is on its way to the composer
  * or a folder underneath. The panel steps aside for the drag, after the
- * browser has taken its picture of the row, and closes once it ends.
+ * browser has taken its picture of the row, and closes once it ends. Should
+ * the end never arrive, the panel comes back on the next pointer move or key.
  */
 const dragging = ref(false);
+let stopDragWatch: (() => void) | null = null;
+
+function endDragging() {
+  stopDragWatch?.();
+  stopDragWatch = null;
+  dragging.value = false;
+}
 
 function isDraggable(item: OmniItem): boolean {
-  return !ui.isMobile && (item.kind === 'mail' || item.kind === 'contact');
+  if (ui.isMobile) return false;
+  // A draft opens in the composer; it has no original to attach.
+  return (item.kind === 'mail' && !item.result.isDraft) || item.kind === 'contact';
 }
 
 function onItemDragStart(event: DragEvent, item: OmniItem) {
   if (item.kind === 'mail') startMessageDrag(event, [item.result.messageId]);
   else if (item.kind === 'contact') startContactDrag(event, [{ email: item.contact.email, name: item.contact.display_name }]);
   else return;
-  setTimeout(() => { dragging.value = true; }, 0);
+  setTimeout(() => {
+    dragging.value = true;
+    stopDragWatch = watchDragEnd(endDragging);
+  }, 0);
 }
 
 function onItemDragEnd() {
   if (!dragging.value) return;
-  dragging.value = false;
+  endDragging();
   close();
 }
 
-watch(() => ui.omniOpen, (open) => { if (!open) dragging.value = false; });
+watch(() => ui.omniOpen, (open) => { if (!open) endDragging(); });
+onBeforeUnmount(endDragging);
 
 function close() {
   ui.closeOmni();

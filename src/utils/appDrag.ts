@@ -10,9 +10,10 @@
  * target names its own.
  *
  * The drag is also remembered for as long as it lasts and announced to the
- * app's other windows (`appDragTarget.ts` listens). WebKit shows custom types
- * only to a page of the origin that wrote them; should a webview hide them
- * anyway, a drop still resolves. The data on the drag stays the first source.
+ * app's other windows. WebKit shows custom types only to a page of the origin
+ * that wrote them; should a webview hide them anyway, a drop that carries
+ * neither a Satchel type nor files still resolves (`appDragTarget.ts`). The
+ * data on the drag stays the first source.
  *
  * This half is what drag sources need and sits in the startup bundle; the
  * composer's side lives in `appDragTarget.ts`.
@@ -20,7 +21,6 @@
 export const THREAD_DRAG_TYPE = 'application/x-satchel-thread-ids';
 export const MESSAGE_DRAG_TYPE = 'application/x-satchel-message-ids';
 export const RECIPIENT_DRAG_TYPE = 'application/x-satchel-recipients';
-export const APP_DRAG_CHANNEL = 'satchel:app-drag';
 
 export type RecipientField = 'to' | 'cc' | 'bcc';
 
@@ -43,22 +43,31 @@ export const APP_DRAG_TYPES: Record<AppDragKind, string> = {
   recipients: RECIPIENT_DRAG_TYPE,
 };
 
-let started: AppDrag | null = null;
+/** A drag whose end never arrived (its source unmounted, its window closed) stops counting after this. */
+export const DRAG_TTL_MS = 2 * 60_000;
 
 /** The drag this window started, until it ends. */
-export function startedAppDrag() {
-  return started;
+let started: { drag: AppDrag; at: number } | null = null;
+
+/**
+ * Tells the app's other windows; connected by `appDragChannel.ts`, which
+ * loads with the drop side (any thread, the search page, a composer).
+ */
+let post: ((drag: AppDrag | null) => void) | null = null;
+
+export function connectAppDragChannel(connect: (drag: AppDrag | null) => void) {
+  post = connect;
 }
 
 function announce(drag: AppDrag | null) {
-  started = drag;
-  try {
-    const channel = new BroadcastChannel(APP_DRAG_CHANNEL);
-    channel.postMessage(drag);
-    channel.close();
-  } catch {
-    // Without the channel only another window's fallback is missing.
-  }
+  started = drag ? { drag, at: Date.now() } : null;
+  post?.(drag);
+}
+
+/** The drag this window started, unless it is long over. */
+export function startedAppDrag(): AppDrag | null {
+  if (started && Date.now() - started.at > DRAG_TTL_MS) started = null;
+  return started?.drag ?? null;
 }
 
 /** Puts `drag` on the event and announces it; a move or a copy, as the target decides. */
@@ -68,12 +77,23 @@ export function startAppDrag(event: DragEvent, drag: AppDrag) {
   transfer.setData(APP_DRAG_TYPES[drag.kind], JSON.stringify(drag));
   transfer.effectAllowed = 'copyMove';
   announce(drag);
-  event.target?.addEventListener('dragend', endAppDrag, { once: true });
 }
 
-/** Forgets the drag in progress, in every window. */
+/** Forgets the drag this window started, here and in every window. */
 export function endAppDrag() {
   if (started) announce(null);
+}
+
+/*
+ * Whatever ends a drag ends the memory of it. Any `dragstart` clears it first
+ * (capture runs before the source's own handler): a drag that `startAppDrag`
+ * did not begin, such as text out of the Subject, must never pass for the last
+ * one. A drop clears it once its handlers have read it.
+ */
+if (typeof window !== 'undefined') {
+  window.addEventListener('dragstart', endAppDrag, true);
+  window.addEventListener('dragend', endAppDrag, true);
+  window.addEventListener('drop', () => setTimeout(endAppDrag, 0), true);
 }
 
 export function dragTypes(event: DragEvent): string[] {
@@ -95,8 +115,7 @@ export function isThreadDrag(event: DragEvent): boolean {
 export function draggedThreadIds(event: DragEvent): string[] {
   try {
     const drag = JSON.parse(event.dataTransfer?.getData(THREAD_DRAG_TYPE) || 'null') as Partial<AppDrag> | null;
-    const ids: unknown = drag?.kind === 'threads' ? drag.ids : null;
-    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string' && id !== '') : [];
+    return drag?.kind === 'threads' && Array.isArray(drag.ids) ? drag.ids.filter((id) => typeof id === 'string' && id) : [];
   } catch {
     return [];
   }

@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef } from 'vue';
+import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import { t } from '@/i18n/runtime';
 import { backendCommandsAvailable, backendFocusDraftEditor } from '@/services/backend';
@@ -65,16 +65,6 @@ export type ComposerOpenOutcome = 'opened' | 'focused' | 'kept' | 'unsaved' | 'i
  * open; this only runs out when that chunk never arrives.
  */
 export const REPLACE_GUARD_WAIT_MS = 10_000;
-
-/**
- * The composer open in this window, as the keyboard sees it: what a drag onto
- * it does, offered as commands ("Attach to draft", "Add to draft").
- */
-export interface OpenDraftTarget {
-  attach(source: { kind: 'threads' | 'messages'; ids: string[] }): Promise<void>;
-  /** Adds the recipients to To. */
-  addRecipients(addresses: string[]): void;
-}
 
 export const useComposerStore = defineStore('composer', () => {
   const request = ref<ComposerRequest | null>(null);
@@ -249,9 +239,6 @@ export const useComposerStore = defineStore('composer', () => {
     wakeHostWaiters();
   }
 
-  /** Set by the mounted composer, cleared when it unmounts. */
-  const draftTarget = shallowRef<OpenDraftTarget | null>(null);
-
   return {
     request,
     instance,
@@ -271,6 +258,5 @@ export const useComposerStore = defineStore('composer', () => {
     adoptDraftMode,
     close,
     setReplaceGuard,
-    draftTarget,
   };
 });

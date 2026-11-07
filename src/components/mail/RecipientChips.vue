@@ -24,7 +24,7 @@ const props = defineProps<{
   /**
    * Which field of which composer this is. With both, chips drag out with
    * their origin, and a chip dropped here from another field of the same
-   * composer moves (Alt/Option copies).
+   * composer moves (Option or Ctrl copies).
    */
   field?: RecipientField;
   composerId?: string;
@@ -234,7 +234,8 @@ function fromThisField(drag: AppDrag | null): boolean {
 }
 
 function movesHere(drag: AppDrag | null, event: DragEvent): boolean {
-  return chipSource(drag) !== null && !event.altKey;
+  // Option on the Mac, Ctrl on Windows and Linux: the platforms' copy modifiers.
+  return chipSource(drag) !== null && !event.altKey && !event.ctrlKey;
 }
 
 /** Takes recipient drags only; mail and files belong to the composer. */

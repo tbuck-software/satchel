@@ -2,19 +2,15 @@
   "en": {
     "composeDrop": {
       "addToTo": "Drop to add to To",
-      "attachToDraft": "Attach to open draft",
-      "attachKeywords": "attach forward eml draft composer",
-      "addToDraft": "Add to draft",
-      "addedToDraft": "{name} added to To"
+      "attach": "Attach to draft",
+      "add": "Add to draft"
     }
   },
   "de": {
     "composeDrop": {
       "addToTo": "Loslassen, um unter „An“ hinzuzufügen",
-      "attachToDraft": "An offenen Entwurf anhängen",
-      "attachKeywords": "anhängen weiterleiten eml entwurf attach forward",
-      "addToDraft": "Zum Entwurf hinzufügen",
-      "addedToDraft": "{name} unter „An“ hinzugefügt"
+      "attach": "An Entwurf anhängen",
+      "add": "Zum Entwurf hinzufügen"
     }
   }
 }

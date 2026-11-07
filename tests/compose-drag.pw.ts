@@ -41,6 +41,14 @@ test('a hit on the search page drags onto the composer as an .eml', async ({ pag
   await expect(composer.locator('.compose-attachments')).toContainText('Release notes for 4.2');
 });
 
+test('a draft among the search hits is not draggable', async ({ page }) => {
+  // The only hit for "Staging" in the mock is the thread's unsent draft.
+  await page.goto('/search?q=Staging&global=1');
+  const hit = page.locator('.result-row').first();
+  await expect(hit).toBeVisible({ timeout: 30_000 });
+  await expect(hit).toHaveAttribute('draggable', 'false');
+});
+
 test('a hit of the inline list search drags onto the composer as an .eml', async ({ page }) => {
   await page.goto('/');
   const search = page.getByPlaceholder(/^Search Inbox/);
@@ -58,8 +66,10 @@ test('one message of an open thread drags onto the reply as an .eml', async ({ p
   await page.goto('/');
   await page.getByRole('option').filter({ hasText: 'Staging login 500 after deployment' }).first().click();
   await page.getByRole('region', { name: 'Unsent drafts' }).getByRole('button', { name: 'Discard', exact: true }).click();
-  const header = page.locator('.message-surface .message-header').first();
+  const header = page.locator('.message-surface .message-drag-handle').first();
   await expect(header).toBeVisible();
+  // Only the sender's line is the handle; the date stays selectable text.
+  await expect(page.locator('.message-surface .message-header').first()).not.toHaveAttribute('draggable', 'true');
   await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
   const composer = page.getByRole('dialog', { name: 'Compose email' });
   const writer = composer.locator('.ProseMirror').first();

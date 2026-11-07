@@ -332,7 +332,7 @@ function goBack() {
               <CardButton
                 class="result-row"
                 :class="{ 'result-row--active': result.threadId === selectedThreadId }"
-                :draggable="!ui.isMobile"
+                :draggable="!ui.isMobile && !result.isDraft"
                 @dragstart="startMessageDrag($event, [result.messageId])"
                 @click="open(result)"
               >

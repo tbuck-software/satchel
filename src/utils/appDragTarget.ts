@@ -1,5 +1,4 @@
 import {
-  APP_DRAG_CHANNEL,
   APP_DRAG_TYPES,
   dragTypes,
   endAppDrag,
@@ -9,33 +8,12 @@ import {
   type AppDragKind,
   type RecipientDragSource,
 } from './appDrag';
+import { forgetRemoteAppDrag, remoteAppDrag } from './appDragChannel';
 
 /*
  * The drop side of `appDrag.ts`, for the composer and for drag sources the
  * startup bundle does not hold.
  */
-
-/** A drag whose end nobody announced (its window closed) stops counting after this. */
-const REMOTE_TTL_MS = 2 * 60_000;
-
-let remote: { drag: AppDrag; at: number } | null = null;
-
-// Listen from the first import: a drag can start in another window any time.
-try {
-  const channel = new BroadcastChannel(APP_DRAG_CHANNEL);
-  channel.onmessage = (event: MessageEvent<AppDrag | null>) => {
-    remote = event.data ? { drag: event.data, at: Date.now() } : null;
-  };
-  // Node (the tests) would otherwise stay alive for the listener.
-  (channel as { unref?: () => void }).unref?.();
-} catch {
-  // No channel: drags from other windows rely on their custom types alone.
-}
-
-/** Files and other applications' drags are never ours, whatever is remembered. */
-function mayBeAppDrag(event: DragEvent): boolean {
-  return dragTypes(event).every((type) => type === 'text/plain' || type.startsWith('application/x-satchel-'));
-}
 
 /** The payload as the drag carries it; `null` for anything malformed. */
 function parseAppDrag(kind: AppDragKind, data: string): AppDrag | null {
@@ -49,18 +27,25 @@ function parseAppDrag(kind: AppDragKind, data: string): AppDrag | null {
   }
 }
 
-/** The drag in progress as this window knows it: its own, or one announced by another window. */
-function known(event: DragEvent): AppDrag | null {
-  if (!mayBeAppDrag(event)) return null;
-  const own = startedAppDrag();
-  if (own) return own;
-  if (remote && Date.now() - remote.at > REMOTE_TTL_MS) remote = null;
-  return remote?.drag ?? null;
-}
-
 function typedKind(event: DragEvent): AppDragKind | null {
   const types = dragTypes(event);
   return (Object.keys(APP_DRAG_TYPES) as AppDragKind[]).find((kind) => types.includes(APP_DRAG_TYPES[kind])) ?? null;
+}
+
+/**
+ * What this window remembers of the drag, if it is the one on the event. With
+ * a Satchel type on it the memory only adds what `dragover` cannot read (a
+ * chip's origin), and only for the same kind. Without one it stands in for
+ * hidden types. A drag this window did not start through `startAppDrag` (text
+ * out of the Subject) has already cleared it (see `appDrag.ts`).
+ */
+function known(event: DragEvent): AppDrag | null {
+  const kind = typedKind(event);
+  const drag = startedAppDrag() ?? remoteAppDrag();
+  if (kind) return drag?.kind === kind ? drag : null;
+  // Hidden types leave at most the addresses' text; files or another
+  // application's formats mean the drag is not ours.
+  return dragTypes(event).every((type) => type === 'text/plain') ? drag : null;
 }
 
 /** Which of Satchel's drags this is; readable during `dragover`. */
@@ -85,7 +70,7 @@ export function readAppDrag(event: DragEvent): AppDrag | null {
 
 /** The drop took the drag: forget it here and in the window it came from. */
 export function finishAppDrag() {
-  remote = null;
+  forgetRemoteAppDrag();
   endAppDrag();
 }
 
@@ -105,8 +90,34 @@ export function startMessageDrag(event: DragEvent, messageIds: string[]) {
   startAppDrag(event, { kind: 'messages', ids: messageIds });
 }
 
-/** For tests: forget everything without announcing it. */
+/** A drag past this is over, whether or not its end arrived. */
+const DRAG_WATCHDOG_MS = 60_000;
+
+/**
+ * Calls `recover` when a drag's end never arrives: WKWebView may not deliver
+ * `dragend` once the source has unmounted. While a drag runs the page gets
+ * neither pointer nor key events, so the first of either means it is over.
+ * Returns the function that stops watching.
+ */
+export function watchDragEnd(recover: () => void, timeoutMs = DRAG_WATCHDOG_MS): () => void {
+  const options = { capture: true } as const;
+  const timer = setTimeout(fire, timeoutMs);
+  window.addEventListener('pointermove', fire, options);
+  window.addEventListener('keydown', fire, options);
+  function stop() {
+    clearTimeout(timer);
+    window.removeEventListener('pointermove', fire, options);
+    window.removeEventListener('keydown', fire, options);
+  }
+  function fire() {
+    stop();
+    finishAppDrag();
+    recover();
+  }
+  return stop;
+}
+
+/** For tests: forget everything. */
 export function resetAppDragForTests() {
-  remote = null;
-  endAppDrag();
+  finishAppDrag();
 }

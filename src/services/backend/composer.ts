@@ -7,7 +7,6 @@ import type {
   BackendAlias,
   BackendDraft,
   BackendDraftInput,
-  BackendOutgoingAttachment,
   BackendRenderedTemplate,
   BackendResolvedSignature,
   BackendSendMessagePayload,
@@ -72,28 +71,6 @@ export function outgoingMessageWire(payload: BackendSendMessagePayload) {
     signature_override_text: payload.signatureOverrideText ?? null,
     signature_override_html: payload.signatureOverrideHtml ?? null,
   } satisfies DeserializeWireInput<OutgoingMessageInput, 'core::drafts::outgoing::OutgoingMessageInput'>;
-}
-
-
-/**
- * Original sources of the threads dropped on a composer, one `.eml` per
- * thread. Threads whose source cannot be fetched are missing from the result.
- */
-export async function backendThreadEmlAttachments(
-  threadIds: string[],
-): Promise<BackendOutgoingAttachment[]> {
-  return invoke<BackendOutgoingAttachment[]>('thread_eml_attachments', { threadIds });
-}
-
-/**
- * Original sources of single messages dropped on a composer (a search hit,
- * one message out of a thread), one `.eml` each. Drafts and messages whose
- * source cannot be fetched are missing from the result.
- */
-export async function backendMessageEmlAttachments(
-  messageIds: string[],
-): Promise<BackendOutgoingAttachment[]> {
-  return invoke<BackendOutgoingAttachment[]>('message_eml_attachments', { messageIds });
 }
 
 

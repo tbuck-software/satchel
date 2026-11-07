@@ -3,6 +3,7 @@ import { useRouter } from 'vue-router';
 import { useThreadsStore } from '@/stores/threads';
 import { useAccountsStore } from '@/stores/accounts';
 import { useComposerStore } from '@/stores/composer';
+import { openDraftTarget } from '@/composables/openDraftTarget';
 import { useThreadReply } from '@/composables/useThreadReply';
 import { useSettingsStore } from '@/stores/settings';
 import { useTopicsStore } from '@/stores/topics';
@@ -130,15 +131,14 @@ export function useCommands(): { commands: ComputedRef<OmniCommand[]> } {
    * `.eml` each: what dragging the rows onto the composer does.
    */
   function draftCommands(): OmniCommand[] {
-    const target = composer.draftTarget;
+    const target = openDraftTarget.value;
     const ids = targetIds();
     if (!target || ids.length === 0) return [];
     return [{
       id: 'draft:attach-mail',
       icon: 'attach',
-      title: t('composeDrop.attachToDraft'),
+      title: t('composeDrop.attach'),
       context: 'mail',
-      keywords: t('composeDrop.attachKeywords'),
       run: () => target.attach({ kind: 'threads', ids }),
     }];
   }

@@ -6,7 +6,7 @@ import { MESSAGE_DRAG_TYPE, RECIPIENT_DRAG_TYPE, THREAD_DRAG_TYPE } from '@/util
 
 const harness = vi.hoisted(() => ({ fetch: vi.fn(), fetchMessages: vi.fn() }));
 
-vi.mock('@/services/backend/composer', () => ({
+vi.mock('@/services/backend/emlAttachments', () => ({
   backendThreadEmlAttachments: harness.fetch,
   backendMessageEmlAttachments: harness.fetchMessages,
 }));

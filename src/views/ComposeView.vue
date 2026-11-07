@@ -53,7 +53,7 @@ import {
 import { useComposerInlineAttachments, type ComposerInlineAttachmentEditor } from '@/composables/useComposerInlineAttachments';
 import { useThreadEmlDrop } from '@/composables/useThreadEmlDrop';
 import { useRecipientDrop } from '@/composables/useRecipientDrop';
-import { useComposerStore, type OpenDraftTarget } from '@/stores/composer';
+import { openDraftTarget, type OpenDraftTarget } from '@/composables/openDraftTarget';
 import type { RecipientField } from '@/utils/appDrag';
 import { useComposerLocalBackup } from '@/composables/useComposerLocalBackup';
 import { useDraftEditorClaim } from '@/composables/useDraftEditorClaim';
@@ -380,14 +380,13 @@ function onComposerDrop(event: DragEvent) {
 
 // What a drop does, offered to the keyboard: the palette's "Attach to draft",
 // a contact's "Add to draft".
-const composerStore = useComposerStore();
 const draftTarget: OpenDraftTarget = {
   attach: (source) => threadEmlDrop.attach(source),
   addRecipients: (addresses) => addRecipients('to', addresses),
 };
-composerStore.draftTarget = draftTarget;
+openDraftTarget.value = draftTarget;
 onBeforeUnmount(() => {
-  if (composerStore.draftTarget === draftTarget) composerStore.draftTarget = null;
+  if (openDraftTarget.value === draftTarget) openDraftTarget.value = null;
 });
 const initialized = ref(false);
 /** Failed draft loads must not persist or send an empty replacement. */

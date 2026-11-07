@@ -1,6 +1,6 @@
 import { ref, type Ref } from 'vue';
 import { t, tc } from '@/i18n/runtime';
-import { backendMessageEmlAttachments, backendThreadEmlAttachments } from '@/services/backend/composer';
+import { backendMessageEmlAttachments, backendThreadEmlAttachments } from '@/services/backend/emlAttachments';
 import type { BackendOutgoingAttachment } from '@/types/composer';
 import {
   attachmentsSize,

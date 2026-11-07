@@ -1,7 +1,7 @@
 import type { DataRepairProgress } from './services/backend/generated/app/sync/maintenance/DataRepairProgress';
 import { applyLocalePreference } from '@/i18n/runtime';
 import { listen, type Event } from '@tauri-apps/api/event';
-import { onBeforeUnmount, onMounted, watch } from 'vue';
+import { onBeforeUnmount, onMounted, onScopeDispose, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { bootstrapPersistence } from '@/persistence/bootstrap';
@@ -300,6 +300,7 @@ export function useAppBootstrap(): void {
 
   let icsDragOverHandler: ((event: DragEvent) => void) | null = null;
   let icsDropHandler: ((event: DragEvent) => void) | null = null;
+  let disposeFileDropGuard: (() => void) | null = null;
   /*
    * Every event registration that succeeded, in one place. Thirteen named
    * variables and thirteen `if` blocks in the teardown meant a listener could
@@ -1128,6 +1129,10 @@ export function useAppBootstrap(): void {
       };
       window.addEventListener('dragover', icsDragOverHandler);
       window.addEventListener('drop', icsDropHandler);
+      // After the .ics handlers: it answers only the file drags they left.
+      void import('@/utils/fileDropGuard').then(({ installFileDropGuard }) => {
+        if (!bootstrapDisposed) disposeFileDropGuard = installFileDropGuard();
+      });
     }
 
     if (backendSupportsNativeCommands()) {
@@ -1223,6 +1228,8 @@ export function useAppBootstrap(): void {
         window.removeEventListener('drop', icsDropHandler);
         icsDropHandler = null;
       }
+      disposeFileDropGuard?.();
+      disposeFileDropGuard = null;
     }
   });
 }
@@ -1245,4 +1252,16 @@ export function useComposeWindowBootstrap(): void {
   // The one shared lifetime concern a popout does have: it is where the
   // unsaved draft lives when the user quits.
   useDraftFlushOnExit();
+  // A file dropped beside the composer's attachment zone does nothing.
+  let disposeFileDropGuard: (() => void) | null = null;
+  let disposed = false;
+  if (typeof window !== 'undefined') {
+    void import('@/utils/fileDropGuard').then(({ installFileDropGuard }) => {
+      if (!disposed) disposeFileDropGuard = installFileDropGuard();
+    });
+  }
+  onScopeDispose(() => {
+    disposed = true;
+    disposeFileDropGuard?.();
+  });
 }

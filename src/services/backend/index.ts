@@ -7,6 +7,7 @@ export * from './composer';
 export * from './contacts';
 export * from './core';
 export * from './diagnostics';
+export * from './emlAttachments';
 export * from './mailboxes';
 export * from './messages';
 export * from './misc';

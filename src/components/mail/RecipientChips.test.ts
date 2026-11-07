@@ -295,6 +295,15 @@ describe('RecipientChips drag and drop', () => {
     expect(wrapper.emitted('moveFrom')).toBeUndefined();
   });
 
+  it('copies with Ctrl, the copy modifier off the Mac', () => {
+    const wrapper = field();
+    const event = drop('drop', chipPayload(['ana@example.test'], { composer: 'me', field: 'to' }));
+    Object.defineProperty(event, 'ctrlKey', { value: true });
+    wrapper.get('[data-recipient-field]').element.dispatchEvent(event);
+    expect(wrapper.emitted('update:modelValue')).toHaveLength(1);
+    expect(wrapper.emitted('moveFrom')).toBeUndefined();
+  });
+
   it('moves a chip from another field of the same composer, and copies with Alt', async () => {
     const wrapper = field();
     wrapper.get('[data-recipient-field]').element.dispatchEvent(

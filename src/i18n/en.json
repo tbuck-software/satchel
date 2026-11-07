@@ -1206,11 +1206,9 @@
     }
   },
   "composeDrop": {
-    "addToDraft": "Add to draft",
+    "add": "Add to draft",
     "addToTo": "Drop to add to To",
-    "addedToDraft": "{name} added to To",
-    "attachKeywords": "attach forward eml draft composer",
-    "attachToDraft": "Attach to open draft"
+    "attach": "Attach to draft"
   },
   "contacts": {
     "add": {

@@ -2103,6 +2103,7 @@ const handlers: Record<string, Handler> = {
         from_address: message.from.email,
         date: message.timestamp,
         is_read: message.isRead,
+        is_draft: Boolean(message.isDraft),
         workflow_state: findThread(message.threadId)?.workflowState ?? 'inbox',
         folder_type: '',
       }));

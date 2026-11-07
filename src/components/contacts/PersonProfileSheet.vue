@@ -6,7 +6,7 @@ import type { Participant, Thread } from '@/types/mail';
 import { backendBlockSender } from '@/services/backend';
 import { useAccountsStore } from '@/stores/accounts';
 import { useContactsStore } from '@/stores/contacts';
-import { useComposerStore } from '@/stores/composer';
+import { openDraftTarget } from '@/composables/openDraftTarget';
 import { contactRecipient } from '@/utils/contactDrag';
 import { useListSearchStore } from '@/stores/listSearch';
 import { useSettingsStore } from '@/stores/settings';
@@ -40,12 +40,10 @@ const listSearch = useListSearchStore();
 const settings = useSettingsStore();
 const threads = useThreadsStore();
 const toast = useToast();
-const composerStore = useComposerStore();
 
 /** What dragging the contact onto the open draft does, from the keyboard. */
 function addToDraft() {
-  composerStore.draftTarget?.addRecipients([contactRecipient({ email: props.person.email, name: displayName.value })]);
-  toast.success(t('composeDrop.addedToDraft', { name: displayName.value }));
+  openDraftTarget.value?.addRecipients([contactRecipient({ email: props.person.email, name: displayName.value })]);
   emit('dismiss');
 }
 const notes = ref('');
@@ -175,7 +173,7 @@ async function blockPerson() {
         </div>
 
         <div class="person-profile__actions">
-          <AppButton v-if="composerStore.draftTarget" variant="primary" @click="addToDraft">{{ $t('composeDrop.addToDraft') }}</AppButton>
+          <AppButton v-if="openDraftTarget" variant="primary" @click="addToDraft">{{ $t('composeDrop.add') }}</AppButton>
           <AppButton variant="soft" @click="showAllMail">{{ $t('contacts.profile.allMail') }}</AppButton>
           <AppButton variant="ghost" @click="settings.togglePinnedContact(props.person.email)">
             {{ pinned ? $t('contacts.profile.unpin') : $t('contacts.profile.pin') }}
