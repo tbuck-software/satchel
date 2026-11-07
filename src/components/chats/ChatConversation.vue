@@ -66,7 +66,18 @@ const ownAddresses = computed(() => {
   return own;
 });
 
-const days = computed(() => chatDays(messages.value, ownAddresses.value));
+/**
+ * Mail that threaded into the chat from neither you nor a member (the
+ * backend's `untrusted_message_ids`): shown, but marked, and never as yours,
+ * even when it claims your address.
+ */
+const untrusted = computed(() => new Set(meta.value?.untrusted_message_ids ?? []));
+const days = computed(() => chatDays(messages.value, ownAddresses.value).map((day) => ({
+  ...day,
+  bubbles: day.bubbles.map((bubble) => untrusted.value.has(bubble.id)
+    ? { ...bubble, own: false, continued: false, outsider: true }
+    : { ...bubble, outsider: false }),
+})));
 const isGroup = computed(() => Boolean(meta.value?.group_id));
 const members = computed(() => meta.value?.members ?? []);
 const title = computed(() => {
@@ -335,7 +346,10 @@ defineExpose({ focusInput: () => composer.value?.focus() });
             :class="{ 'chat-bubble--own': bubble.own, 'chat-bubble--continued': bubble.continued }"
             :data-chat-bubble="bubble.own ? 'own' : 'peer'"
           >
-            <p v-if="isGroup && !bubble.own && !bubble.continued" class="chat-bubble__sender">{{ bubble.senderName }}</p>
+            <p v-if="bubble.outsider" class="chat-bubble__sender chat-bubble__sender--outsider" data-chat-outsider>
+              {{ $t('chats.notMember', { name: bubble.senderName }) }}
+            </p>
+            <p v-else-if="isGroup && !bubble.own && !bubble.continued" class="chat-bubble__sender">{{ bubble.senderName }}</p>
             <p class="chat-bubble__text">{{ bubble.text }}</p>
             <AppButton
               v-if="bubble.cut"
@@ -507,6 +521,10 @@ defineExpose({ focusInput: () => composer.value?.focus() });
   line-height: 1.45;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.chat-bubble__sender--outsider {
+  color: var(--accent-red);
 }
 
 .chat-bubble__hidden {

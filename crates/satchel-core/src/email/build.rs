@@ -497,10 +497,6 @@ pub fn is_content_header(header: &str) -> bool {
         || lower.starts_with("mime-version:")
 }
 
-/// Strip CR/LF (and other ASCII control chars) from text destined for a header
-/// line. Without this, a subject decoded from an incoming mail's RFC2047 header
-/// (e.g. "Foo\r\nBcc: attacker@evil.com") would inject attacker-controlled
-/// headers into the victim's reply.
 /// One header line as the builder writes it: encoded words for non-ASCII
 /// text, folded to the line limit. For headers that go inside an encrypted
 /// entity (Delta Chat's protected `Subject`).
@@ -534,6 +530,10 @@ fn extra_header_allowed(name: &str) -> bool {
         && !RESERVED.contains(&name.to_ascii_lowercase().as_str())
 }
 
+/// Strip CR/LF (and other ASCII control chars) from text destined for a header
+/// line. Without this, a subject decoded from an incoming mail's RFC2047 header
+/// (e.g. "Foo\r\nBcc: attacker@evil.com") would inject attacker-controlled
+/// headers into the victim's reply.
 fn sanitize_header_text(value: &str) -> String {
     value
         .chars()

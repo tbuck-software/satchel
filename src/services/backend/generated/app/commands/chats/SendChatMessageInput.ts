@@ -8,9 +8,10 @@ export type SendChatMessageInput = {
      */
     allow_unsigned: boolean;
     /**
-     * The recipients the sender saw. A reply goes out only to exactly these.
+     * The recipients the sender saw. A reply goes out only to exactly these;
+     * there is no default, so no caller can skip the check.
      */
-    expected_recipients: Array<string> | null;
+    expected_recipients: Array<string>;
     /**
      * The sender confirmed recipients that differ from the last reply.
      */

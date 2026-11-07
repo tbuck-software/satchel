@@ -8,9 +8,15 @@
 //! - Messages in Trash or Spam do not count.
 //! - Order is the time Satchel received a message, never its `Date`, which
 //!   the sender writes (a `Date: 2099` would otherwise always be "newest").
-//! - A group starts from the user's own last reply in it, or else from the
-//!   oldest group message, and grows only through messages whose `From` is
-//!   already a member. The spec keeps the member list with
+//! - A message from the user's own address is the user's only when it is in
+//!   Sent or passed DMARC (Delta Chat on another device delivers to the
+//!   Inbox). Anyone can write `From:` with the user's address.
+//! - The chat is what its first message (or the user's last reply) says: a
+//!   group if that one names a group, one-to-one otherwise. A later message
+//!   cannot turn a one-to-one chat into someone's group.
+//! - A group starts from the user's own last reply in it, or else from its
+//!   first message, and grows only through messages whose `From` is already
+//!   a member. The spec keeps the member list with
 //!   `Chat-Group-Member-Added`/`-Removed` ("Add and remove members"); until
 //!   Satchel tracks those, this is the closest list that a stranger cannot
 //!   rewrite.
@@ -18,8 +24,10 @@
 //!   the counterpart of its first message. A newer sender never takes over.
 //!
 //! The quick reply asks before sending when the recipients differ from the
-//! user's last reply or the chat would fall back from encrypted to plain text
-//! (`recipients_changed`, `encrypted_before`).
+//! baseline — the user's last reply, or the chat's first message before there
+//! is one — or the chat would fall back from encrypted to plain text after any
+//! trusted message in it was encrypted (`recipients_changed`,
+//! `encrypted_before`).
 use std::collections::BTreeMap;
 
 use sqlx::SqlitePool;
@@ -49,12 +57,17 @@ pub struct ChatThread {
     pub group_name: Option<String>,
     /// Who the next message goes to, own addresses left out, in header order.
     pub recipients: Vec<String>,
-    /// Who the user's last reply in this chat went to, if there is one.
-    pub last_reply_recipients: Option<Vec<String>>,
-    /// `recipients` is not the set of `last_reply_recipients`.
+    /// What the recipients are compared with: who the user's last reply went
+    /// to, or the members of the chat's first message before there is one.
+    pub baseline_recipients: Vec<String>,
+    /// `recipients` is not the set of `baseline_recipients`.
     pub recipients_changed: bool,
-    /// The latest trusted message of the chat was end-to-end encrypted.
+    /// A trusted message of the chat was end-to-end encrypted. Sticky: a
+    /// later plain message does not lift it.
     pub encrypted_before: bool,
+    /// Messages that count for nothing here: from neither the user nor a
+    /// member. The chat view marks them.
+    pub untrusted_message_ids: Vec<String>,
     /// Display names the trusted messages gave, keyed by lowercased address.
     pub names: BTreeMap<String, String>,
     /// The newest trusted message: the next one is its reply.
@@ -72,6 +85,8 @@ struct ChatMessageRow {
     chat_group_id: Option<String>,
     chat_group_name: Option<String>,
     encrypted: i64,
+    is_sent: i64,
+    auth_dmarc: Option<String>,
 }
 
 fn lower(value: &str) -> String {
@@ -124,7 +139,8 @@ impl<'a> ChatRepository<'a> {
             "SELECT messages.id, messages.from_address, messages.from_name,
                     messages.to_addresses, messages.cc_addresses,
                     messages.chat_version, messages.chat_group_id, messages.chat_group_name,
-                    COALESCE(json_extract(messages.trust_metadata, '$.root_encryption'), 0) AS encrypted
+                    COALESCE(json_extract(messages.trust_metadata, '$.root_encryption'), 0) AS encrypted,
+                    COALESCE(messages.is_sent, 0) AS is_sent, messages.auth_dmarc
              FROM messages
              LEFT JOIN folders mailbox_folders
                ON mailbox_folders.id = COALESCE(messages.pending_folder_id, messages.folder_id)
@@ -176,33 +192,47 @@ fn summarize(
     rows: &[ChatMessageRow],
 ) -> ChatThread {
     let is_own = |addr: &str| own.contains(&lower(addr));
+    // The user's own: sent from here, or delivered with a DMARC pass.
+    let own_trusted = |row: &ChatMessageRow| {
+        is_own(&row.from_address)
+            && (row.is_sent != 0
+                || row
+                    .auth_dmarc
+                    .as_deref()
+                    .is_some_and(|verdict| verdict.trim().eq_ignore_ascii_case("pass")))
+    };
+    let spoofed_own = |row: &ChatMessageRow| is_own(&row.from_address) && !own_trusted(row);
     let others = |row: &ChatMessageRow| {
         addresses_of(row)
             .into_iter()
             .filter(|addr| !is_own(addr))
             .collect::<Vec<_>>()
     };
-    let last_own = rows.iter().rposition(|row| is_own(&row.from_address));
+    let last_own = rows.iter().rposition(&own_trusted);
+    // The message that opened the chat, leaving out own-address mail that is not the user's.
+    let first = rows.iter().position(|row| !spoofed_own(row));
 
-    // The group: the one the user last replied in, or the oldest one named.
+    // A group if the user's last reply or the first message says so.
     let group_id = last_own
         .and_then(|index| rows[index].chat_group_id.clone())
-        .or_else(|| rows.iter().find_map(|row| row.chat_group_id.clone()));
+        .or_else(|| first.and_then(|index| rows[index].chat_group_id.clone()));
 
     let mut recipients: Vec<String> = Vec::new();
+    let mut baseline: Vec<String> = Vec::new();
     match group_id.as_deref() {
         Some(group) => {
             let in_group = |row: &ChatMessageRow| row.chat_group_id.as_deref() == Some(group);
             let base = last_own
                 .filter(|index| in_group(&rows[*index]))
-                .or_else(|| rows.iter().position(in_group));
+                .or_else(|| first.filter(|index| in_group(&rows[*index])));
             if let Some(base) = base {
                 for addr in others(&rows[base]) {
                     push_unique(&mut recipients, addr);
                 }
+                baseline = recipients.clone();
                 for row in rows[base + 1..].iter().filter(|row| in_group(row)) {
                     // Only a member can bring others in.
-                    if recipients.contains(&lower(&row.from_address)) {
+                    if !spoofed_own(row) && recipients.contains(&lower(&row.from_address)) {
                         for addr in others(row) {
                             push_unique(&mut recipients, addr);
                         }
@@ -213,7 +243,8 @@ fn summarize(
         None => {
             let peer = match last_own {
                 Some(index) => others(&rows[index]).into_iter().next(),
-                None => rows.first().and_then(|first| {
+                None => first.and_then(|index| {
+                    let first = &rows[index];
                     if is_own(&first.from_address) {
                         others(first).into_iter().next()
                     } else {
@@ -222,22 +253,25 @@ fn summarize(
                 }),
             };
             recipients.extend(peer);
+            baseline = recipients.clone();
         }
     }
-
-    let last_reply_recipients = last_own.map(|index| others(&rows[index]));
-    let recipients_changed = last_reply_recipients.as_ref().is_some_and(|last| {
-        let mut before = last.clone();
+    if let Some(index) = last_own {
+        baseline = others(&rows[index]);
+    }
+    let recipients_changed = {
+        let mut before = baseline.clone();
         let mut now = recipients.clone();
         before.sort();
         now.sort();
         before.dedup();
         now.dedup();
         before != now
-    });
+    };
 
     let trusted = |row: &ChatMessageRow| {
-        is_own(&row.from_address) || recipients.contains(&lower(&row.from_address))
+        own_trusted(row)
+            || (!is_own(&row.from_address) && recipients.contains(&lower(&row.from_address)))
     };
     let trusted_rows = rows.iter().filter(|row| trusted(row)).collect::<Vec<_>>();
     let latest_trusted = trusted_rows.last().copied();
@@ -276,6 +310,13 @@ fn summarize(
         })
         .unwrap_or_else(|| own.first().cloned().unwrap_or_default());
 
+    let encrypted_before = trusted_rows.iter().any(|row| row.encrypted != 0);
+    let reply_to_message_id = latest_trusted.map(|row| row.id.clone());
+    let untrusted_message_ids = rows
+        .iter()
+        .filter(|row| !trusted(row))
+        .map(|row| row.id.clone())
+        .collect();
     ChatThread {
         thread_id: thread_id.to_string(),
         account_id,
@@ -284,11 +325,12 @@ fn summarize(
         group_id,
         group_name,
         recipients,
-        last_reply_recipients,
+        baseline_recipients: baseline,
         recipients_changed,
-        encrypted_before: latest_trusted.is_some_and(|row| row.encrypted != 0),
+        encrypted_before,
+        untrusted_message_ids,
         names,
-        reply_to_message_id: latest_trusted.map(|row| row.id.clone()),
+        reply_to_message_id,
     }
 }
 
@@ -320,7 +362,12 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        for (id, kind) in [("inbox", "inbox"), ("trash", "trash"), ("spam", "spam")] {
+        for (id, kind) in [
+            ("inbox", "inbox"),
+            ("sent", "sent"),
+            ("trash", "trash"),
+            ("spam", "spam"),
+        ] {
             sqlx::query(
                 "INSERT INTO folders(id, account_id, name, full_path, folder_type, remote_id, created_at, updated_at)
                  VALUES(?, 'acc', ?, ?, ?, ?, '', '')",
@@ -361,8 +408,8 @@ mod tests {
             sqlx::query(
                 "INSERT INTO messages(id, account_id, folder_id, thread_id, from_address, from_name,
                     to_addresses, subject, date, received_at, remote_id, created_at, updated_at,
-                    chat_version, chat_group_id, chat_group_name, trust_metadata)
-                 VALUES(?, 'acc', ?, ?, ?, ?, ?, 'Chat', ?, ?, ?, '', '', '1.0', ?, ?, ?)",
+                    chat_version, chat_group_id, chat_group_name, trust_metadata, is_sent)
+                 VALUES(?, 'acc', ?, ?, ?, ?, ?, 'Chat', ?, ?, ?, '', '', '1.0', ?, ?, ?, ?)",
             )
             .bind(self.id)
             .bind(folder)
@@ -380,6 +427,7 @@ mod tests {
             } else {
                 "{}"
             })
+            .bind(i64::from(folder == "sent"))
             .execute(pool)
             .await
             .unwrap();
@@ -387,6 +435,11 @@ mod tests {
 
         async fn inbox(&self, pool: &SqlitePool) {
             self.store(pool, "inbox", self.received, false).await;
+        }
+
+        /// The user's own reply, as Satchel keeps it: in Sent.
+        async fn sent(&self, pool: &SqlitePool) {
+            self.store(pool, "sent", self.received, false).await;
         }
     }
 
@@ -411,7 +464,7 @@ mod tests {
             to: &["Lena <lena@example.test>"],
             chat: None,
         }
-        .inbox(&pool)
+        .sent(&pool)
         .await;
         let chat = ChatRepository::new(&pool).thread("one").await.unwrap();
         assert_eq!(chat.recipients, vec!["lena@example.test".to_string()]);
@@ -513,7 +566,7 @@ mod tests {
             to: &["lena@example.test", "jonas@example.test"],
             chat: GROUP,
         }
-        .store(&pool, "inbox", "2026-08-01T11:00:00Z", true)
+        .store(&pool, "sent", "2026-08-01T11:00:00Z", true)
         .await;
         // The reviewer's reproduction: same group id, a Date far in the
         // future, a stranger as sender and a new recipient list.
@@ -554,7 +607,7 @@ mod tests {
             to: &["lena@example.test"],
             chat: GROUP,
         }
-        .inbox(&pool)
+        .sent(&pool)
         .await;
         Msg {
             id: "g2",
@@ -572,8 +625,8 @@ mod tests {
             vec!["lena@example.test", "mia@example.test"]
         );
         assert_eq!(
-            chat.last_reply_recipients,
-            Some(vec!["lena@example.test".to_string()])
+            chat.baseline_recipients,
+            vec!["lena@example.test".to_string()]
         );
         assert!(chat.recipients_changed);
     }
@@ -614,6 +667,222 @@ mod tests {
         let chat = ChatRepository::new(&pool).thread("group").await.unwrap();
         assert_eq!(chat.recipients, vec!["lena@example.test"]);
         assert_eq!(chat.reply_to_message_id.as_deref(), Some("g1"));
+    }
+
+    // ---- review repro (expected-safe behaviour; each FAILS on 1429a83) ----
+    /// Unsafe: a stranger is a recipient and nobody is asked. `_case` only
+    /// names the scenario in the call.
+    fn silent(chat: &ChatThread, _case: &str) -> bool {
+        chat.recipients.iter().any(|a| a.ends_with("@evil.test")) && !chat.recipients_changed
+    }
+
+    #[tokio::test]
+    async fn repro_spoofed_own_address_must_not_set_the_baseline() {
+        let pool = pool().await;
+        Msg {
+            id: "g1",
+            thread: "group",
+            received: "2026-08-01T10:00:00Z",
+            from: ("Lena", "lena@example.test"),
+            to: &["tom@example.test", "jonas@example.test"],
+            chat: GROUP,
+        }
+        .inbox(&pool)
+        .await;
+        Msg {
+            id: "selfspoof",
+            thread: "group",
+            received: "2026-08-01T11:00:00Z",
+            from: ("Tom", "tom@example.test"),
+            to: &["attacker@evil.test", "victim@evil.test"],
+            chat: GROUP,
+        }
+        .inbox(&pool)
+        .await;
+        let chat = ChatRepository::new(&pool).thread("group").await.unwrap();
+        assert!(
+            !silent(&chat, "own"),
+            "recipients={:?} changed={}",
+            chat.recipients,
+            chat.recipients_changed
+        );
+    }
+
+    #[tokio::test]
+    async fn repro_first_reply_after_a_member_message_adds_a_stranger_must_ask() {
+        let pool = pool().await;
+        Msg {
+            id: "g1",
+            thread: "group",
+            received: "2026-08-01T10:00:00Z",
+            from: ("Lena", "lena@example.test"),
+            to: &["tom@example.test", "jonas@example.test"],
+            chat: GROUP,
+        }
+        .inbox(&pool)
+        .await;
+        Msg {
+            id: "spoof",
+            thread: "group",
+            received: "2026-08-01T11:00:00Z",
+            from: ("Lena", "lena@example.test"),
+            to: &["tom@example.test", "jonas@example.test", "victim@evil.test"],
+            chat: GROUP,
+        }
+        .inbox(&pool)
+        .await;
+        let chat = ChatRepository::new(&pool).thread("group").await.unwrap();
+        assert!(
+            !silent(&chat, "member"),
+            "recipients={:?} changed={}",
+            chat.recipients,
+            chat.recipients_changed
+        );
+    }
+
+    #[tokio::test]
+    async fn repro_a_one_to_one_must_not_become_a_stranger_group_silently() {
+        let pool = pool().await;
+        Msg {
+            id: "m1",
+            thread: "one",
+            received: "2026-08-01T10:00:00Z",
+            from: ("Lena", "lena@example.test"),
+            to: &["tom@example.test"],
+            chat: None,
+        }
+        .inbox(&pool)
+        .await;
+        Msg {
+            id: "evil",
+            thread: "one",
+            received: "2026-08-01T11:00:00Z",
+            from: ("Lena", "attacker@evil.test"),
+            to: &["tom@example.test", "victim@evil.test"],
+            chat: GROUP,
+        }
+        .inbox(&pool)
+        .await;
+        let chat = ChatRepository::new(&pool).thread("one").await.unwrap();
+        assert!(
+            !silent(&chat, "stranger"),
+            "recipients={:?} changed={}",
+            chat.recipients,
+            chat.recipients_changed
+        );
+    }
+
+    #[tokio::test]
+    async fn repro_a_plain_message_from_a_member_must_not_lift_the_downgrade_guard() {
+        let pool = pool().await;
+        Msg {
+            id: "m1",
+            thread: "one",
+            received: "2026-08-01T10:00:00Z",
+            from: ("Lena", "lena@example.test"),
+            to: &["tom@example.test"],
+            chat: None,
+        }
+        .store(&pool, "inbox", "2026-08-01T10:00:00Z", true)
+        .await;
+        Msg {
+            id: "spoof",
+            thread: "one",
+            received: "2026-08-01T11:00:00Z",
+            from: ("Lena", "lena@example.test"),
+            to: &["tom@example.test"],
+            chat: None,
+        }
+        .inbox(&pool)
+        .await;
+        let chat = ChatRepository::new(&pool).thread("one").await.unwrap();
+        assert!(
+            chat.encrypted_before,
+            "an unauthenticated plain message reset encrypted_before"
+        );
+    }
+
+    #[tokio::test]
+    async fn repro_ordering_follows_receipt_time_not_date() {
+        let pool = pool().await;
+        // Lena's real first message is received at 10:00 with an honest Date.
+        Msg {
+            id: "g1",
+            thread: "group",
+            received: "2026-08-01T10:00:00Z",
+            from: ("Lena", "lena@example.test"),
+            to: &["tom@example.test", "jonas@example.test"],
+            chat: GROUP,
+        }
+        .inbox(&pool)
+        .await;
+        // Jonas (a member) is received later but carries a Date from 2020: with Date ordering
+        // his message would count as the oldest and seed the group.
+        Msg {
+            id: "g2",
+            thread: "group",
+            received: "2026-08-01T11:00:00Z",
+            from: ("Jonas", "jonas@example.test"),
+            to: &["tom@example.test", "lena@example.test", "mia@example.test"],
+            chat: GROUP,
+        }
+        .store(&pool, "inbox", "2020-01-01T00:00:00Z", false)
+        .await;
+        let chat = ChatRepository::new(&pool).thread("group").await.unwrap();
+        // Receipt order: seed {lena, jonas}, then jonas adds mia.
+        assert_eq!(
+            chat.recipients,
+            vec![
+                "lena@example.test",
+                "jonas@example.test",
+                "mia@example.test"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_own_message_counts_when_sent_or_dmarc_passed_and_strangers_are_marked() {
+        let pool = pool().await;
+        Msg {
+            id: "g1",
+            thread: "group",
+            received: "2026-08-01T10:00:00Z",
+            from: ("Lena", "lena@example.test"),
+            to: &["tom@example.test", "jonas@example.test"],
+            chat: GROUP,
+        }
+        .inbox(&pool)
+        .await;
+        // Delta Chat on another device: in the Inbox, but DMARC passed.
+        Msg {
+            id: "g2",
+            thread: "group",
+            received: "2026-08-01T11:00:00Z",
+            from: ("Tom", "tom@example.test"),
+            to: &["lena@example.test"],
+            chat: GROUP,
+        }
+        .inbox(&pool)
+        .await;
+        sqlx::query("UPDATE messages SET auth_dmarc = 'pass' WHERE id = 'g2'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        Msg {
+            id: "x",
+            thread: "group",
+            received: "2026-08-01T12:00:00Z",
+            from: ("Mia", "spam@evil.test"),
+            to: &["tom@example.test"],
+            chat: GROUP,
+        }
+        .inbox(&pool)
+        .await;
+        let chat = ChatRepository::new(&pool).thread("group").await.unwrap();
+        assert_eq!(chat.recipients, vec!["lena@example.test"]);
+        assert_eq!(chat.baseline_recipients, vec!["lena@example.test"]);
+        assert!(!chat.recipients_changed);
+        assert_eq!(chat.untrusted_message_ids, vec!["x".to_string()]);
     }
 
     #[tokio::test]

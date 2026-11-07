@@ -123,6 +123,11 @@ pub struct ChatSendOptions {
     /// stays locked. Without it a locked key holds the reply back.
     #[serde(default)]
     pub allow_unsigned: bool,
+    /// The reply was end-to-end encrypted when the sender sent it. A retry
+    /// whose plan no longer encrypts (a peer key or the own key gone) waits
+    /// in the Outbox instead of going out in plain text.
+    #[serde(default)]
+    pub encryption_required: bool,
 }
 
 /// `Chat-Version`, and the group headers when the chat is a group. Values are

@@ -149,6 +149,7 @@
       "calendarTimeInvalid": "Gib eine gültige Terminzeit ein.",
       "calendarTitleRequired": "Gib einen Termintitel ein.",
       "chatConfirmationNeeded": "Chat geändert. Erneut senden.",
+      "chatEncryptionLost": "Diese Antwort sollte verschlüsselt rausgehen und kann es nicht mehr. Bis das wieder geht, bleibt die Antwort im Postausgang.",
       "composeWindowUnsupported": "Ein eigenes Schreibfenster gibt es nur auf dem Desktop.",
       "contactAvatarFallbackSyncFailed": "Ersatz-Kontaktbilder konnten nicht synchronisiert werden.",
       "contactAvatarLocalSyncFailed": "Lokale Kontaktbilder konnten nicht synchronisiert werden.",

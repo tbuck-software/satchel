@@ -141,6 +141,8 @@ test.describe('who a reply goes to', () => {
   test('a crafted message in the group changes nothing', async ({ page }) => {
     const group = await openFamily(page, 'mockChatHijack');
     await expect(group.getByText('Neue Gruppe, bitte hier antworten')).toBeVisible();
+    // Shown, but marked: the sender is not part of the chat.
+    await expect(group.locator('[data-chat-outsider]')).toHaveText('Mia · not in this chat');
     await expect(group.getByText('4 members', { exact: true })).toBeVisible();
     await group.locator('[data-chat-input]').fill('Danke!');
     await group.locator('[data-chat-input]').press('Enter');

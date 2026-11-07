@@ -528,6 +528,16 @@ pub async fn unlock_pgp_keys(
         ));
     }
 
+    // A send held for a locked signing key (a chat reply queued before a
+    // restart) goes now, not after its backoff.
+    if let Err(error) = state
+        .queue
+        .wake_mail_held_by(pool.inner(), "backend.errors.pgpSigningKeyUnavailable")
+        .await
+    {
+        tracing::warn!(error = %error, "could not wake sends held for a locked key");
+    }
+
     Ok(UnlockPgpKeysResult {
         unlocked: unlocked_key_ids.len(),
         key_ids: unlocked_key_ids,

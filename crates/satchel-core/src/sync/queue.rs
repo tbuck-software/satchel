@@ -1013,6 +1013,34 @@ impl SyncQueue {
         Ok(())
     }
 
+    /// Retry now the sends waiting for a retry because of `error_key` (a key
+    /// that was locked and has just been unlocked). Returns how many.
+    pub async fn wake_mail_held_by(
+        &self,
+        pool: &SqlitePool,
+        error_key: &str,
+    ) -> Result<u64, String> {
+        let now = Utc::now();
+        let woken = sqlx::query(
+            "UPDATE sync_queue
+             SET next_retry_at = NULL, updated_at = ?, updated_at_ms = ?
+             WHERE action_type = ? AND status = 'pending'
+               AND instr(COALESCE(last_error, ''), ?) > 0",
+        )
+        .bind(now.to_rfc3339())
+        .bind(now.timestamp_millis())
+        .bind(ACTION_SEND_MESSAGE)
+        .bind(error_key)
+        .execute(pool)
+        .await
+        .map_err(|err| err.to_string())?
+        .rows_affected();
+        if woken > 0 {
+            self.notify.notify_one();
+        }
+        Ok(woken)
+    }
+
     /// Failed non-send work the user can inspect: every remote mutation and
     /// draft upload. Moves are no longer the only kind that can fail for good.
     pub async fn list_failed_sync_actions(
@@ -1231,6 +1259,54 @@ mod tests {
             .await
             .expect("migrations");
         pool
+    }
+
+    #[tokio::test]
+    async fn unlocking_wakes_only_the_sends_held_for_the_key() {
+        let pool = fresh_pool().await;
+        let queue = SyncQueue::new();
+        let mut held =
+            QueuedAction::new("acc-1".into(), ACTION_SEND_MESSAGE, serde_json::json!({}));
+        held.status = "pending".into();
+        let mut other =
+            QueuedAction::new("acc-1".into(), ACTION_SEND_MESSAGE, serde_json::json!({}));
+        other.status = "pending".into();
+        queue.enqueue(&pool, held.clone()).await.unwrap();
+        queue.enqueue(&pool, other.clone()).await.unwrap();
+        let later = (Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+        for (id, error) in [
+            (&held.id, "backend.errors.pgpSigningKeyUnavailable"),
+            (&other.id, "smtp timeout"),
+        ] {
+            sqlx::query("UPDATE sync_queue SET last_error = ?, next_retry_at = ? WHERE id = ?")
+                .bind(error)
+                .bind(&later)
+                .bind(id)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            queue
+                .wake_mail_held_by(&pool, "backend.errors.pgpSigningKeyUnavailable")
+                .await
+                .unwrap(),
+            1
+        );
+        let next = |id: String| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT next_retry_at FROM sync_queue WHERE id = ?",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(next(held.id.clone()).await, None);
+        assert_eq!(next(other.id.clone()).await, Some(later));
     }
 
     #[tokio::test]

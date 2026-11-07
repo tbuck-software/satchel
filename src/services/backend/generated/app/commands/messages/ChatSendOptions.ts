@@ -10,4 +10,10 @@ export type ChatSendOptions = {
      * stays locked. Without it a locked key holds the reply back.
      */
     allow_unsigned: boolean;
+    /**
+     * The reply was end-to-end encrypted when the sender sent it. A retry
+     * whose plan no longer encrypts (a peer key or the own key gone) waits
+     * in the Outbox instead of going out in plain text.
+     */
+    encryption_required: boolean;
 };
