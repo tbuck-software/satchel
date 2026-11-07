@@ -34,6 +34,7 @@ import type { BackendContact } from '@/types/contacts';
 import type { BackendDraft, BackendSignature, BackendResolvedSignature } from '@/types/composer';
 import type { BackendMessage, BackendMessageBody } from '@/types/messages';
 import type { BackendCalendarEvent, BackendCalendarInvite, BackendCalendarSource } from '@/types/calendar';
+import type { BackendBusyBlock, BackendFreeBusyInput, BackendFreeSlotsInput } from './availability';
 import type { BackendOutboxItem } from '@/types/outbox';
 import type { BackendTopic, BackendTopicTimelineItem } from '@/types/topics';
 import { matchesWorkflowFilter, type WorkflowFilter, type WorkflowState } from '@/types/workflow';
@@ -1016,6 +1017,138 @@ function mirrorOutlookCalendar(accountId: string): number {
     });
   }
   return calendarEvents.filter((event) => event.account_id === accountId && event.source === 'outlook').length;
+}
+
+/*
+ * Free/busy as `free_busy::query` reports it. The owner's time comes from the
+ * mock calendar, minus whatever calendars are switched off for availability;
+ * everyone else's from their address: two or three meetings a weekday, the
+ * same ones on every load. Addresses on reserved `.example`/`.test` domains
+ * stand for people outside the account's organisation, whom no provider
+ * answers for, so they are unknown.
+ */
+function mockSourceKey(event: BackendCalendarEvent): string {
+  if (event.source === 'google') return `google:${event.collection_href ?? 'primary'}`;
+  if (event.source === 'outlook') return `outlook:${event.collection_href ?? 'default'}`;
+  return event.source;
+}
+
+function utcText(time: number): string {
+  return new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+function mockOwnBusy(from: number, to: number, excluded: string[], editingId?: string | null): BackendBusyBlock[] {
+  return calendarEvents
+    .filter((event) => !excluded.includes(mockSourceKey(event)) && event.id !== editingId)
+    .map((event) => {
+      const allDay = event.all_day === 1;
+      const start = allDay ? new Date(`${event.starts_at.slice(0, 10)}T00:00`).getTime() : Date.parse(event.starts_at);
+      const end = allDay ? new Date(`${event.ends_at.slice(0, 10)}T00:00`).getTime() : Date.parse(event.ends_at);
+      return { start, end, allDay };
+    })
+    // Without TRANSP an event is busy, whole-day ones too (RFC 5545 OPAQUE).
+    .filter((event) => event.end > from && event.start < to)
+    .map((event) => ({ starts_at: utcText(event.start), ends_at: utcText(event.end), tentative: false }))
+    .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+}
+
+function mockKnowsFreeBusy(address: string): boolean {
+  const domain = address.split('@')[1] ?? '';
+  return domain !== '' && !/\.(example|test)$/i.test(domain);
+}
+
+function mockPersonBusy(address: string, from: number, to: number): BackendBusyBlock[] {
+  let seed = 0;
+  for (const char of address) seed = (seed * 31 + char.charCodeAt(0)) >>> 0;
+  const blocks: BackendBusyBlock[] = [];
+  const day = new Date(from);
+  day.setHours(0, 0, 0, 0);
+  for (; day.getTime() < to; day.setDate(day.getDate() + 1)) {
+    if (day.getDay() === 0 || day.getDay() === 6) continue;
+    const daySeed = (seed + day.getDate() * 7) >>> 0;
+    // Half-hour starts between 08:30 and 16:30, an hour or less each.
+    for (const [index, length] of [[0, 60], [1, 30], [2, 90]] as const) {
+      if (index === 2 && daySeed % 3 === 0) continue;
+      const slot = 17 + ((daySeed >>> (index * 4)) % 16);
+      const start = new Date(day);
+      start.setHours(0, slot * 30, 0, 0);
+      const end = start.getTime() + length * 60_000;
+      if (end > from && start.getTime() < to) {
+        blocks.push({ starts_at: utcText(start.getTime()), ends_at: utcText(end), tentative: index === 1 && daySeed % 2 === 1 });
+      }
+    }
+  }
+  return blocks.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+}
+
+/** `a@b.c` or `Name <a@b.c>`; anything else is not asked about, as in `free_busy::parse_address`. */
+function mockAddress(value: string): string | null {
+  const trimmed = value.trim();
+  const open = trimmed.lastIndexOf('<');
+  const address = open >= 0 && trimmed.endsWith('>') ? trimmed.slice(open + 1, -1).trim() : trimmed;
+  return /^[^\s<>@",;:\\()[\]]+@[^\s<>@",;:\\()[\]]+\.[^\s<>@",;:\\()[\]]+$/.test(address) ? address.toLowerCase() : null;
+}
+
+function mockAttendees(input: { attendees: string[] }): string[] {
+  const own = accounts.map((account) => account.email.toLowerCase());
+  return [...new Set(input.attendees.map(mockAddress).filter((address): address is string => address !== null))]
+    .filter((address) => !own.includes(address));
+}
+
+/** Busy time that is exactly the edited event's saved slot is that event. */
+function withoutEditedSlot(blocks: BackendBusyBlock[], editing: BackendFreeBusyInput['editing']): BackendBusyBlock[] {
+  if (!editing?.starts_at || !editing.ends_at) return blocks;
+  const start = Date.parse(editing.starts_at);
+  const end = Date.parse(editing.ends_at);
+  return blocks.filter((block) => Date.parse(block.starts_at) !== start || Date.parse(block.ends_at) !== end);
+}
+
+function mockFreeSlots(input: BackendFreeSlotsInput) {
+  const hours = input.working_hours;
+  if (hours.start_minute >= hours.end_minute || hours.end_minute > 1440 || hours.weekdays.length === 0) {
+    throw new Error('backend.errors.availabilityWorkingHoursInvalid');
+  }
+  if (input.duration_minutes < 5 || input.duration_minutes > 1440) throw new Error('backend.errors.availabilityDurationInvalid');
+  if (input.working_days < 1 || input.working_days > 20) throw new Error('backend.errors.availabilityRangeInvalid');
+  const from = Date.parse(input.from);
+  const to = from + (Math.ceil(input.working_days / 5) * 7 + 3) * 86_400_000;
+  const unknown: string[] = [];
+  const busy = mockOwnBusy(from, to, input.excluded_calendars, input.editing?.event_id)
+    .map((block) => [Date.parse(block.starts_at), Date.parse(block.ends_at)]);
+  for (const address of mockAttendees(input)) {
+    if (!mockKnowsFreeBusy(address)) unknown.push(address);
+    else busy.push(...withoutEditedSlot(mockPersonBusy(address, from, to), input.editing)
+      .map((block) => [Date.parse(block.starts_at), Date.parse(block.ends_at)]));
+  }
+  busy.sort((a, b) => a[0]! - b[0]!);
+  const grid = 15 * 60_000;
+  const duration = input.duration_minutes * 60_000;
+  const days: Array<{ date: string; windows: Array<{ starts_at: string; ends_at: string }> }> = [];
+  const day = new Date(from);
+  day.setHours(0, 0, 0, 0);
+  for (let scanned = 0; scanned < 62 && days.length < input.working_days; scanned += 1, day.setDate(day.getDate() + 1)) {
+    if (!hours.weekdays.includes(((day.getDay() + 6) % 7) + 1)) continue;
+    const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, hours.start_minute).getTime();
+    const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, hours.end_minute).getTime();
+    let cursor = Math.max(dayStart, Math.ceil(from / grid) * grid);
+    if (dayEnd - cursor < duration) continue;
+    const windows: Array<{ starts_at: string; ends_at: string }> = [];
+    const push = (start: number, end: number) => {
+      const snappedStart = Math.ceil(start / grid) * grid;
+      const snappedEnd = Math.floor(end / grid) * grid;
+      if (snappedEnd - snappedStart >= duration) windows.push({ starts_at: utcText(snappedStart), ends_at: utcText(snappedEnd) });
+    };
+    for (const [start, end] of busy) {
+      if (end! <= cursor) continue;
+      if (start! >= dayEnd) break;
+      if (start! > cursor) push(cursor, Math.min(start!, dayEnd));
+      cursor = Math.max(cursor, end!);
+    }
+    if (cursor < dayEnd) push(cursor, dayEnd);
+    const date = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+    days.push({ date, windows });
+  }
+  return { time_zone: input.time_zone, days, unknown };
 }
 
 let appUpdateChannel: 'stable' | 'nightly' = 'stable';
@@ -2089,6 +2222,20 @@ const handlers: Record<string, Handler> = {
   list_invites: () => calendarInvites.filter(isInvitation),
   list_calendar_events: () => calendarEvents,
   list_calendar_sources: () => calendarSources,
+  query_free_busy: ({ input: raw }) => {
+    const input = raw as BackendFreeBusyInput;
+    const from = Date.parse(input.starts_at);
+    const to = Date.parse(input.ends_at);
+    if (!(to > from) || to - from > 62 * 86_400_000) throw new Error('backend.errors.availabilityRangeInvalid');
+    if (to - from > 60 * 86_400_000) throw new Error('backend.errors.availabilityRangeInvalid');
+    return {
+      own: mockOwnBusy(from, to, input.excluded_calendars, input.editing?.event_id),
+      attendees: mockAttendees(input).map((address) => mockKnowsFreeBusy(address)
+        ? { address, known: true, busy: withoutEditedSlot(mockPersonBusy(address, from, to), input.editing) }
+        : { address, known: false, busy: [] }),
+    };
+  },
+  find_free_slots: ({ input }) => mockFreeSlots(input as BackendFreeSlotsInput),
   // Like `calendar::save_event`: an edit of an event the provider marked
   // read-only is refused before anything changes; a new event of a connected
   // Outlook account goes to its calendar, every other one stays local.

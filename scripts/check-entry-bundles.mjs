@@ -98,8 +98,12 @@ const budgets = {
 };
 
 /* The startup catalogue plus the reader's and palette's chunks, which load
- * once the Inbox is usable. The first-paint part is inside initialGzip above. */
-const CATALOGUE_AFTER_PREFETCH_GZIP = 33 * 1024;
+ * once the Inbox is usable. The first-paint part is inside initialGzip above.
+ * Free/busy puts only its four backend.errors.availability* messages into the
+ * startup catalogue (every backend.* key ships there) and the rest of its
+ * copy into its lazy chunks: German 32.9 → 33.1 KiB after prefetch, initial
+ * JS 211.3 → 211.4 KiB, entry unchanged at 105.1 KiB. */
+const CATALOGUE_AFTER_PREFETCH_GZIP = 34 * 1024;
 
 /**
  * @param {string} entry

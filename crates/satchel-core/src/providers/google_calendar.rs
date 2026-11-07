@@ -59,6 +59,8 @@ struct GoogleEvent {
     end: Option<GoogleEventTime>,
     #[serde(default)]
     attendees: Vec<GoogleAttendee>,
+    /// `transparent` leaves the time free; absent means `opaque`.
+    transparency: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,6 +74,11 @@ struct GoogleEventTime {
 #[derive(Debug, Deserialize)]
 struct GoogleAttendee {
     email: Option<String>,
+    /// Marks the entry for the account whose calendar this is.
+    #[serde(rename = "self", default)]
+    is_self: bool,
+    #[serde(rename = "responseStatus")]
+    response_status: Option<String>,
 }
 
 /// The calendar grant of the stored Gmail row, without refreshing it. `None`
@@ -109,6 +116,7 @@ struct MappedEvent {
     ends_at: String,
     all_day: bool,
     attendees_json: String,
+    transparent: bool,
 }
 
 /// Sync every visible Google calendar of one Gmail account. Returns the
@@ -175,6 +183,175 @@ pub async fn sync_account(pool: &SqlitePool, account_id: &str) -> Result<usize, 
     let events = dedupe_same_occurrence(events);
     replace_google_mirror(pool, account_id, &calendars, &events).await?;
     Ok(events.len())
+}
+
+/// Google's `freeBusy.query` caps the calendars of one request.
+const FREE_BUSY_BATCH: usize = 50;
+
+#[derive(Debug, Deserialize)]
+struct FreeBusyResponse {
+    #[serde(default)]
+    calendars: std::collections::HashMap<String, FreeBusyCalendar>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FreeBusyCalendar {
+    #[serde(default)]
+    busy: Vec<FreeBusyPeriod>,
+    /// `notFound`, `internalError`, … — Google will not say for this one.
+    #[serde(default)]
+    errors: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FreeBusyPeriod {
+    start: String,
+    end: String,
+}
+
+/// Busy time of `addresses` as this Gmail account's Google Calendar sees it.
+/// The `calendar.readonly` grant covers it; an account without the grant
+/// answers for nobody. Addresses Google does not know or may not show are
+/// left out, which makes them unknown.
+pub async fn free_busy(
+    pool: &SqlitePool,
+    account_id: &str,
+    addresses: &[String],
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+) -> Result<crate::calendar::free_busy::ProviderAnswers, String> {
+    let mut answers = crate::calendar::free_busy::ProviderAnswers::default();
+    if stored_calendar_grant(pool, account_id).await? == Some(false) {
+        return Ok(answers);
+    }
+    let config = crate::utils::oauth::fresh_account_config_for_provider(
+        pool,
+        account_id,
+        OAuthProvider::Gmail,
+    )
+    .await
+    .map_err(|err| err.encoded())?;
+    if crate::utils::oauth::google_scope_granted(
+        &config,
+        crate::utils::oauth::GOOGLE_CALENDAR_SCOPE,
+    ) == Some(false)
+    {
+        return Ok(answers);
+    }
+    let token = access_token_from_account_config(OAuthProvider::Gmail, &config)
+        .await
+        .map_err(|err| err.encoded())?;
+    let client = crate::utils::http::client();
+    // One chunk failing keeps what the others answered.
+    for chunk in addresses.chunks(FREE_BUSY_BATCH) {
+        let body = serde_json::json!({
+            "timeMin": start.to_rfc3339(),
+            "timeMax": end.to_rfc3339(),
+            "items": chunk.iter().map(|id| serde_json::json!({ "id": id })).collect::<Vec<_>>(),
+        });
+        let response = match client
+            .post(format!("{API_BASE}/freeBusy"))
+            .bearer_auth(&token)
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                tracing::warn!(account_id, %error, "google free/busy request failed");
+                answers.failed.extend_from_slice(chunk);
+                continue;
+            }
+        };
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            let permanent = permanent_refusal(&body);
+            tracing::warn!(
+                account_id,
+                status = status.as_u16(),
+                permanent,
+                "google free/busy refused"
+            );
+            if crate::calendar::free_busy::is_refusal(status.as_u16(), permanent) {
+                answers.refused.extend_from_slice(chunk);
+            } else {
+                answers.failed.extend_from_slice(chunk);
+            }
+            continue;
+        }
+        match response.json::<FreeBusyResponse>().await {
+            Ok(parsed) => answers.known.extend(map_free_busy(parsed, chunk)),
+            Err(error) => {
+                tracing::warn!(account_id, %error, "google free/busy response unreadable");
+                answers.failed.extend_from_slice(chunk);
+            }
+        }
+    }
+    Ok(answers)
+}
+
+/// Whether a Google error body names only lasting reasons (`forbidden`,
+/// `notFound`, `accessNotConfigured`, …). Rate, concurrency and quota reasons pass within
+/// minutes, and a body without reasons proves nothing either way.
+fn permanent_refusal(body: &str) -> bool {
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    let reasons = parsed["error"]["errors"]
+        .as_array()
+        .map(|errors| {
+            errors
+                .iter()
+                .filter_map(|error| error["reason"].as_str())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    !reasons.is_empty()
+        && reasons.iter().all(|reason| {
+            let reason = reason.to_ascii_lowercase();
+            // rateLimitExceeded, userRateLimitExceeded, concurrentLimitExceeded,
+            // quotaExceeded, …: all pass within minutes.
+            !reason.contains("limit") && !reason.contains("quota")
+        })
+}
+
+/// The answered addresses of one `freeBusy` response. Google keys calendars
+/// by the id it was asked for, though not always in the same case.
+fn map_free_busy(
+    response: FreeBusyResponse,
+    asked: &[String],
+) -> std::collections::HashMap<String, Vec<crate::calendar::availability::Busy>> {
+    let parse = |value: &str| {
+        chrono::DateTime::parse_from_rfc3339(value)
+            .ok()
+            .map(|time| time.with_timezone(&chrono::Utc))
+    };
+    let mut known = std::collections::HashMap::new();
+    for (id, calendar) in response.calendars {
+        let Some(address) = asked
+            .iter()
+            .find(|address| address.eq_ignore_ascii_case(&id))
+        else {
+            continue;
+        };
+        if !calendar.errors.is_empty() {
+            continue;
+        }
+        let busy = calendar
+            .busy
+            .iter()
+            .filter_map(|period| {
+                Some(crate::calendar::availability::Busy {
+                    start: parse(&period.start)?,
+                    end: parse(&period.end)?,
+                    tentative: false,
+                })
+            })
+            .collect();
+        known.insert(address.clone(), busy);
+    }
+    known
 }
 
 /// The calendars worth mirroring: whatever is ticked visible in the Google
@@ -324,6 +501,11 @@ fn map_event(account_id: &str, calendar_id: &str, event: GoogleEvent) -> Option<
     let ends_at = end
         .and_then(normalize_time)
         .unwrap_or_else(|| starts_at.clone());
+    // A meeting the account declined stays on its calendar but takes no time.
+    let declined = event.attendees.iter().any(|attendee| {
+        attendee.is_self && attendee.response_status.as_deref() == Some("declined")
+    });
+    let transparent = declined || event.transparency.as_deref() == Some("transparent");
 
     Some(MappedEvent {
         // Event ids are only unique per calendar, so the calendar is part of
@@ -350,6 +532,7 @@ fn map_event(account_id: &str, calendar_id: &str, event: GoogleEvent) -> Option<
                 .collect::<Vec<_>>(),
         )
         .unwrap_or_else(|_| "[]".to_string()),
+        transparent,
     })
 }
 
@@ -414,6 +597,7 @@ async fn replace_google_mirror(
             all_day: event.all_day,
             attendees_json: &event.attendees_json,
             calendar_id: &event.calendar_id,
+            transparent: event.transparent,
         })
         .collect::<Vec<_>>();
     crate::db::calendar::CalendarRepository::new(pool)
@@ -530,6 +714,7 @@ mod tests {
             start: Some(timed("2026-07-14T16:00:00Z")),
             end: None,
             attendees: vec![],
+            transparency: None,
         };
         assert!(map_event("acc", "primary", cancelled).is_none());
 
@@ -543,6 +728,7 @@ mod tests {
             start: None,
             end: None,
             attendees: vec![],
+            transparency: None,
         };
         assert!(map_event("acc", "primary", startless).is_none());
     }
@@ -561,9 +747,16 @@ mod tests {
             attendees: vec![
                 GoogleAttendee {
                     email: Some("a@example.com".into()),
+                    is_self: false,
+                    response_status: None,
                 },
-                GoogleAttendee { email: None },
+                GoogleAttendee {
+                    email: None,
+                    is_self: false,
+                    response_status: None,
+                },
             ],
+            transparency: None,
         };
         let mapped = map_event("acc-1", "team@group.calendar.google.com", event).expect("maps");
         assert_eq!(mapped.id, "gcal-acc-1-team@group.calendar.google.com-evt-1");
@@ -574,6 +767,74 @@ mod tests {
         assert_eq!(mapped.ends_at, "2026-07-14T15:00:00Z");
         assert!(!mapped.all_day);
         assert_eq!(mapped.attendees_json, r#"["a@example.com"]"#);
+        assert!(!mapped.transparent);
+    }
+
+    #[test]
+    fn rate_and_quota_403s_are_not_lasting_refusals() {
+        let body = |reason: &str| {
+            format!(
+                r#"{{"error":{{"code":403,"errors":[{{"domain":"usageLimits","reason":"{reason}"}}]}}}}"#
+            )
+        };
+        assert!(!permanent_refusal(&body("rateLimitExceeded")));
+        assert!(!permanent_refusal(&body("userRateLimitExceeded")));
+        assert!(!permanent_refusal(&body("quotaExceeded")));
+        assert!(!permanent_refusal(&body("concurrentLimitExceeded")));
+        assert!(permanent_refusal(&body("forbidden")));
+        assert!(permanent_refusal(&body("notFound")));
+        // No reasons, or no JSON: nothing proves it lasts.
+        assert!(!permanent_refusal(r#"{"error":{"code":403}}"#));
+        assert!(!permanent_refusal("<html>Forbidden</html>"));
+    }
+
+    #[test]
+    fn free_busy_answers_only_for_calendars_without_errors() {
+        let response: FreeBusyResponse = serde_json::from_str(
+            r#"{"kind":"calendar#freeBusy","calendars":{
+                "Lena@Example.com":{"busy":[{"start":"2026-11-09T09:00:00Z","end":"2026-11-09T10:30:00+00:00"}]},
+                "free@example.com":{"busy":[]},
+                "stranger@elsewhere.test":{"errors":[{"domain":"global","reason":"notFound"}],"busy":[]},
+                "not-asked@example.com":{"busy":[]}}}"#,
+        )
+        .unwrap();
+        let asked = [
+            "lena@example.com".to_string(),
+            "free@example.com".to_string(),
+            "stranger@elsewhere.test".to_string(),
+        ];
+        let known = map_free_busy(response, &asked);
+        assert_eq!(known.len(), 2);
+        let lena = &known["lena@example.com"];
+        assert_eq!(lena.len(), 1);
+        assert_eq!(lena[0].start.to_rfc3339(), "2026-11-09T09:00:00+00:00");
+        assert_eq!(lena[0].end.to_rfc3339(), "2026-11-09T10:30:00+00:00");
+        assert!(known["free@example.com"].is_empty());
+        assert!(!known.contains_key("stranger@elsewhere.test"));
+    }
+
+    #[test]
+    fn free_events_and_declined_meetings_leave_the_time_free() {
+        let event: GoogleEvent = serde_json::from_str(
+            r#"{"id":"a","start":{"dateTime":"2026-07-14T16:00:00Z"},"transparency":"transparent"}"#,
+        )
+        .unwrap();
+        assert!(map_event("acc", "primary", event).unwrap().transparent);
+
+        let declined: GoogleEvent = serde_json::from_str(
+            r#"{"id":"b","start":{"dateTime":"2026-07-14T16:00:00Z"},
+                "attendees":[{"email":"boss@example.com","responseStatus":"accepted"},
+                             {"email":"me@example.com","self":true,"responseStatus":"declined"}]}"#,
+        )
+        .unwrap();
+        assert!(map_event("acc", "primary", declined).unwrap().transparent);
+
+        let accepted: GoogleEvent = serde_json::from_str(
+            r#"{"id":"c","start":{"dateTime":"2026-07-14T16:00:00Z"},"transparency":"opaque",
+                "attendees":[{"email":"me@example.com","self":true,"responseStatus":"accepted"}]}"#,
+        )
+        .unwrap();
+        assert!(!map_event("acc", "primary", accepted).unwrap().transparent);
     }
 
     fn entry(id: &str, primary: bool, selected: bool) -> CalendarListEntry {
@@ -632,6 +893,7 @@ mod tests {
                     start: Some(timed("2026-07-14T16:00:00Z")),
                     end: Some(timed("2026-07-14T17:00:00Z")),
                     attendees: vec![],
+                    transparency: None,
                 },
             )
             .expect("maps")
@@ -660,6 +922,7 @@ mod tests {
                     start: Some(timed(start)),
                     end: Some(timed(end)),
                     attendees: vec![],
+                    transparency: None,
                 },
             )
             .expect("maps")

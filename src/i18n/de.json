@@ -149,6 +149,59 @@
       "version": "Version {version}"
     }
   },
+  "availability": {
+    "insert": {
+      "button": "Meine Verfügbarkeit einfügen",
+      "duration": "Termindauer",
+      "failed": "Freie Zeit konnte nicht gefunden werden: {error}",
+      "hoursHint": "Arbeitszeiten: {hours}. Änderbar unter Einstellungen → Kalender.",
+      "hoursShort": "{count} Std.",
+      "insert": "Einfügen",
+      "insertFailed": "Die Verfügbarkeit konnte nicht eingefügt werden. Klicke in die Nachricht und versuche es erneut.",
+      "loading": "Freie Zeit wird gesucht …",
+      "minutesShort": "{count} Min.",
+      "none": "Am nächsten Arbeitstag gibt es in der Arbeitszeit keine freie Zeit. | In den nächsten {count} Arbeitstagen gibt es in der Arbeitszeit keine freie Zeit.",
+      "range": "Innerhalb der nächsten",
+      "title": "Meine Verfügbarkeit einfügen",
+      "workingDays": "{count} Arbeitstag | {count} Arbeitstage"
+    },
+    "settings": {
+      "calendars": "Kalender, die dich belegt machen",
+      "description": "Deine Arbeitszeiten und die Kalender, die dich belegt machen. „Meine Verfügbarkeit einfügen“ im Verfassen-Fenster und „Nächste Zeit, zu der alle frei sind“ im Termineditor richten sich danach.",
+      "invalidHours": "Der Arbeitstag muss nach seinem Beginn enden.",
+      "title": "Verfügbarkeit",
+      "workDays": "Arbeitstage",
+      "workEnd": "Arbeitstag endet",
+      "workStart": "Arbeitstag beginnt"
+    },
+    "strip": {
+      "allFreeAt": "Alle Bekannten sind um {time} frei.",
+      "busyThen": "Dann belegt",
+      "busyTimes": "Belegt {times}",
+      "conflicts": "{count} Person ist um {time} belegt. | {count} Personen sind um {time} belegt.",
+      "freeAllDay": "Den ganzen Tag frei",
+      "freeThen": "Dann frei",
+      "loadFailed": "Die Verfügbarkeit konnte nicht geladen werden.",
+      "loading": "Verfügbarkeit wird geladen …",
+      "nextDay": "Nächster Tag",
+      "nextFree": "Nächste Zeit, zu der alle frei sind",
+      "noneFree": "In den nächsten {count} Arbeitstagen sind nie alle zugleich frei.",
+      "notCounted": "Nicht berücksichtigt, Verfügbarkeit unbekannt: {people}",
+      "previousDay": "Vorheriger Tag",
+      "searchFailed": "Freie Zeit konnte nicht gefunden werden: {error}",
+      "searching": "Wird gesucht …",
+      "title": "Verfügbarkeit",
+      "unknown": "Verfügbarkeit unbekannt",
+      "unknownHint": "Gestreifte Zeilen: Deren Kalender teilt mit diesem Konto keine Frei/Belegt-Zeiten.",
+      "you": "Du"
+    },
+    "text": {
+      "day": "{day}: {times}",
+      "hours": "{count} Stunde | {count} Stunden",
+      "intro": "Ich habe zu diesen Zeiten {duration} Zeit ({zone}):",
+      "minutes": "{count} Minute | {count} Minuten"
+    }
+  },
   "backend": {
     "errors": {
       "accountAvatarInvalid": "Das Bild muss ein kleines PNG-, JPEG- oder WebP-Bild sein.",
@@ -173,6 +226,10 @@
       "attachmentExecutableNotConfirmed": "\"{filename}\" ist ein Programm (.{extension}), kein Dokument. Satchel übergibt es ohne deine Bestätigung nicht an das Betriebssystem.",
       "attachmentNotBase64": "\"{filename}\" ließ sich nicht anhängen: Die Daten sind beschädigt. Den Anhang entfernen und die Datei erneut hinzufügen.",
       "attachmentPayloadMissing": "Der Anhang ließ sich nicht lesen: Satchel hat weder seinen Inhalt noch einen Pfad dorthin bekommen.",
+      "availabilityDurationInvalid": "Wähle eine Termindauer zwischen 5 Minuten und 24 Stunden.",
+      "availabilityRangeInvalid": "Dieser Zeitraum lässt sich nicht auf freie Zeit prüfen.",
+      "availabilityTimeZoneInvalid": "Die Zeitzone dieses Geräts kennt Satchel nicht.",
+      "availabilityWorkingHoursInvalid": "Arbeitszeiten brauchen einen Beginn vor dem Ende und mindestens einen Arbeitstag.",
       "backupPassphraseOrAcknowledgementRequired": "Setze eine Passphrase für den Master-Key oder bestätige, dass der Sicherungsordner ihn ungeschützt enthalten darf.",
       "backupPassphraseRejected": "Diese Passphrase öffnet den Master-Key dieser Sicherung nicht.",
       "backupPassphraseRequired": "Der Master-Key dieser Sicherung ist umschlossen. Gib die Passphrase ein, mit der sie erstellt wurde.",

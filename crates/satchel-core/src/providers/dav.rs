@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::db::contacts::ContactRepository;
+use crate::email::calendar::parse_ics_duration;
 
 const MAX_DAV_RESPONSE_BYTES: usize = 50 * 1024 * 1024;
 const CARDDAV_ADDRESSBOOK_QUERY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -810,6 +811,305 @@ pub async fn delete_calendar_event_remote(
     Err(dav_status_error("CalDAV delete", response).await)
 }
 
+/// Whether the account config carries a CalDAV service.
+pub fn has_caldav(config_json: &crate::accounts::AccountConfig) -> bool {
+    parse_groupware_config(config_json).caldav.is_some()
+}
+
+/// Where a CalDAV server takes free/busy requests (RFC 6638), and as whom.
+#[derive(Debug, Clone)]
+struct ScheduleOutbox {
+    url: Url,
+    /// The first `mailto:` of `calendar-user-address-set`.
+    organizer: Option<String>,
+}
+
+/// Outbox discovery costs three requests; its answer, or that the server has
+/// none, is kept this long per server and user.
+const OUTBOX_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+type OutboxCache = std::collections::HashMap<String, (std::time::Instant, Option<ScheduleOutbox>)>;
+
+static OUTBOXES: std::sync::LazyLock<std::sync::Mutex<OutboxCache>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(OutboxCache::new()));
+
+/// Busy time of `addresses` from the server's scheduling outbox. A server
+/// that does not advertise `calendar-auto-schedule`, or has no outbox,
+/// answers for nobody; recipients it reports a failure for are left out.
+/// Either way they are unknown.
+pub async fn free_busy(
+    config_json: &crate::accounts::AccountConfig,
+    account_email: &str,
+    addresses: &[String],
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+) -> Result<crate::calendar::free_busy::ProviderAnswers, String> {
+    use crate::calendar::free_busy::ProviderAnswers;
+    let Some(config) = parse_groupware_config(config_json).caldav else {
+        return Ok(ProviderAnswers::default());
+    };
+    let client = dav_client()?;
+    let cache_key = format!("{}\u{0}{}", config.server, config.username);
+    let cached = OUTBOXES.lock().ok().and_then(|cache| {
+        cache
+            .get(&cache_key)
+            .filter(|(at, _)| at.elapsed() < OUTBOX_TTL)
+            .map(|(_, outbox)| outbox.clone())
+    });
+    let outbox = match cached {
+        Some(outbox) => outbox,
+        None => {
+            let outbox = discover_schedule_outbox(&client, &config).await?;
+            if let Ok(mut cache) = OUTBOXES.lock() {
+                cache.insert(cache_key, (std::time::Instant::now(), outbox.clone()));
+            }
+            outbox
+        }
+    };
+    let Some(outbox) = outbox else {
+        return Ok(ProviderAnswers::default());
+    };
+    let organizer = outbox.organizer.as_deref().unwrap_or(account_email);
+    let body = free_busy_request(
+        &uuid::Uuid::new_v4().to_string(),
+        organizer,
+        addresses,
+        start,
+        end,
+        chrono::Utc::now(),
+    );
+    let response = client
+        .post(outbox.url.clone())
+        .basic_auth(&config.username, Some(&config.password))
+        .header(
+            header::CONTENT_TYPE,
+            "text/calendar; charset=utf-8; method=REQUEST",
+        )
+        .body(body)
+        .send()
+        .await
+        .map_err(|err| format!("CalDAV free/busy request failed: {err}"))?;
+    let status = response.status();
+    // A DAV server that throttles says 429 or 503; a 403 means no scheduling here.
+    if crate::calendar::free_busy::is_refusal(status.as_u16(), true) {
+        // The server will not schedule for this user; asking every minute won't change it.
+        tracing::warn!(status = status.as_u16(), "CalDAV free/busy refused");
+        return Ok(ProviderAnswers {
+            refused: addresses.to_vec(),
+            ..ProviderAnswers::default()
+        });
+    }
+    if !status.is_success() {
+        return Err(dav_status_error("CalDAV free/busy", response).await);
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("CalDAV free/busy read failed: {err}"))?;
+    if bytes.len() > MAX_DAV_RESPONSE_BYTES {
+        return Err("DAV response exceeds the 50 MB safety limit".to_string());
+    }
+    let xml = String::from_utf8(bytes.to_vec())
+        .map_err(|_| "DAV response is not valid UTF-8".to_string())?;
+    Ok(ProviderAnswers {
+        known: parse_schedule_response(&xml, addresses),
+        ..ProviderAnswers::default()
+    })
+}
+
+async fn discover_schedule_outbox(
+    client: &reqwest::Client,
+    config: &DavConfig,
+) -> Result<Option<ScheduleOutbox>, String> {
+    let server = Url::parse(&config.server).map_err(|err| format!("invalid DAV URL: {err}"))?;
+    let propfind = Method::from_bytes(b"PROPFIND").expect("valid method");
+    let body = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop><d:current-user-principal/><c:schedule-outbox-URL/><c:calendar-user-address-set/><c:calendar-home-set/></d:prop>
+</d:propfind>"#;
+    let root = dav_xml_request(client, config, propfind.clone(), &server, Some("0"), body).await?;
+    let principal = match nested_href(&root, "current-user-principal") {
+        Some(href) => resolve_dav_href(&server, &href)?,
+        None => server.clone(),
+    };
+    let xml = if principal == server {
+        root
+    } else {
+        dav_xml_request(client, config, propfind, &principal, Some("0"), body).await?
+    };
+    let Some(outbox) = nested_href(&xml, "schedule-outbox-URL") else {
+        return Ok(None);
+    };
+    let outbox = resolve_dav_href(&server, &outbox)?;
+    let home = nested_href(&xml, "calendar-home-set")
+        .map(|href| resolve_dav_href(&server, &href))
+        .transpose()?
+        .unwrap_or(principal);
+    // RFC 6638 §2: a server that schedules says so in the DAV header.
+    let options = client
+        .request(Method::OPTIONS, home)
+        .basic_auth(&config.username, Some(&config.password))
+        .send()
+        .await
+        .map_err(|err| format!("DAV OPTIONS failed: {err}"))?;
+    let schedules = options
+        .headers()
+        .get_all("DAV")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|token| token.trim().eq_ignore_ascii_case("calendar-auto-schedule"));
+    if !schedules {
+        return Ok(None);
+    }
+    let organizer = xml_elements(&xml, "calendar-user-address-set")
+        .into_iter()
+        .flat_map(|set| xml_elements(&set, "href"))
+        .map(|href| xml_unescape(href.trim()))
+        .find_map(|href| mailto(&href));
+    Ok(Some(ScheduleOutbox {
+        url: outbox,
+        organizer,
+    }))
+}
+
+fn mailto(uri: &str) -> Option<String> {
+    let uri = uri.trim();
+    let address = uri
+        .get(..7)
+        .filter(|scheme| scheme.eq_ignore_ascii_case("mailto:"))
+        .map(|_| &uri[7..])?;
+    Some(address.trim().to_ascii_lowercase()).filter(|address| address.contains('@'))
+}
+
+/// The VFREEBUSY request of RFC 6638 §3.2.1 for one organizer and many attendees.
+fn free_busy_request(
+    uid: &str,
+    organizer: &str,
+    addresses: &[String],
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let stamp = |time: chrono::DateTime<chrono::Utc>| time.format("%Y%m%dT%H%M%SZ").to_string();
+    let mut lines = vec![
+        "BEGIN:VCALENDAR".to_string(),
+        "VERSION:2.0".to_string(),
+        "PRODID:-//Satchel//EN".to_string(),
+        "METHOD:REQUEST".to_string(),
+        "BEGIN:VFREEBUSY".to_string(),
+        format!("UID:{uid}"),
+        format!("DTSTAMP:{}", stamp(now)),
+        format!("DTSTART:{}", stamp(start)),
+        format!("DTEND:{}", stamp(end)),
+        format!("ORGANIZER:mailto:{organizer}"),
+    ];
+    // Callers pass parsed addresses; a line break here would still smuggle a
+    // property into the request, so anything with one is left out.
+    lines.extend(
+        addresses
+            .iter()
+            .filter(|address| {
+                !address
+                    .chars()
+                    .any(|ch| ch.is_control() || ch.is_whitespace())
+            })
+            .map(|address| format!("ATTENDEE:mailto:{address}")),
+    );
+    lines.push("END:VFREEBUSY".to_string());
+    lines.push("END:VCALENDAR".to_string());
+    format!("{}\r\n", lines.join("\r\n"))
+}
+
+/// Recipients of a `schedule-response` the server answered for (request
+/// status 2.x), with their busy periods.
+fn parse_schedule_response(
+    xml: &str,
+    asked: &[String],
+) -> std::collections::HashMap<String, Vec<crate::calendar::availability::Busy>> {
+    let mut known = std::collections::HashMap::new();
+    for response in xml_elements(xml, "response") {
+        let Some(recipient) = xml_elements(&response, "recipient").into_iter().next() else {
+            continue;
+        };
+        // RFC 6638 wraps the recipient in DAV:href; early drafts did not.
+        let recipient =
+            xml_text(&recipient, "href").unwrap_or_else(|| xml_unescape(recipient.trim()));
+        let Some(address) = mailto(&recipient).and_then(|address| {
+            asked
+                .iter()
+                .find(|asked| asked.eq_ignore_ascii_case(&address))
+        }) else {
+            continue;
+        };
+        let status = xml_text(&response, "request-status").unwrap_or_default();
+        if !status.trim_start().starts_with('2') {
+            continue;
+        }
+        let Some(data) = xml_text(&response, "calendar-data") else {
+            continue;
+        };
+        let data = ["&#13;", "&#xD;", "&#xd;"]
+            .iter()
+            .fold(data, |data, entity| data.replace(entity, ""));
+        known.insert(address.clone(), parse_free_busy_periods(&data));
+    }
+    known
+}
+
+/// The busy periods of a VFREEBUSY reply. FBTYPE defaults to BUSY;
+/// BUSY-TENTATIVE is tentative, FREE is no busy time at all.
+fn parse_free_busy_periods(ics: &str) -> Vec<crate::calendar::availability::Busy> {
+    let parse_time = |value: &str| {
+        chrono::NaiveDateTime::parse_from_str(value.trim().trim_end_matches('Z'), "%Y%m%dT%H%M%S")
+            .ok()
+            .map(|time| time.and_utc())
+    };
+    let mut busy = Vec::new();
+    for line in unfold_lines(ics) {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        let mut parts = name.split(';');
+        if !parts
+            .next()
+            .is_some_and(|property| property.trim().eq_ignore_ascii_case("FREEBUSY"))
+        {
+            continue;
+        }
+        let kind = parts
+            .find_map(|param| {
+                param
+                    .split_once('=')
+                    .filter(|(key, _)| key.eq_ignore_ascii_case("FBTYPE"))
+                    .map(|(_, value)| value.trim().to_ascii_uppercase())
+            })
+            .unwrap_or_else(|| "BUSY".to_string());
+        if kind == "FREE" {
+            continue;
+        }
+        for period in value.split(',') {
+            let Some((from, until)) = period.split_once('/') else {
+                continue;
+            };
+            let Some(start) = parse_time(from) else {
+                continue;
+            };
+            let end =
+                parse_time(until).or_else(|| parse_ics_duration(until).map(|span| start + span));
+            if let Some(end) = end.filter(|end| *end > start) {
+                busy.push(crate::calendar::availability::Busy {
+                    start,
+                    end,
+                    tentative: kind == "BUSY-TENTATIVE",
+                });
+            }
+        }
+    }
+    busy.sort_by_key(|block| (block.start, block.end));
+    busy
+}
+
 async fn dav_xml_request(
     client: &reqwest::Client,
     config: &DavConfig,
@@ -847,15 +1147,12 @@ async fn dav_xml_request(
     String::from_utf8(bytes.to_vec()).map_err(|_| "DAV response is not valid UTF-8".to_string())
 }
 
+/// The status and the size of the answer, never its text: these errors are
+/// logged, and a server's error page can echo attendees, paths or tokens.
 async fn dav_status_error(context: &str, response: reqwest::Response) -> String {
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    let detail = body.chars().take(500).collect::<String>();
-    if detail.trim().is_empty() {
-        format!("{context} failed with status {status}")
-    } else {
-        format!("{context} failed with status {status}: {detail}")
-    }
+    let length = response.bytes().await.map_or(0, |body| body.len());
+    format!("{context} failed with status {status} ({length} bytes of response)")
 }
 
 fn resolve_dav_href(base: &Url, href: &str) -> Result<Url, String> {
@@ -1107,6 +1404,104 @@ fn clean_vcard_value(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn free_busy_request_names_the_organizer_and_every_attendee() {
+        let at = |text: &str| chrono::DateTime::parse_from_rfc3339(text).unwrap().to_utc();
+        let ics = free_busy_request(
+            "uid-1",
+            "me@example.test",
+            &["a@example.test".into(), "b@example.test".into()],
+            at("2026-11-09T00:00:00Z"),
+            at("2026-11-10T00:00:00Z"),
+            at("2026-11-06T12:00:00Z"),
+        );
+        assert!(ics.starts_with("BEGIN:VCALENDAR\r\n"));
+        assert!(ics.contains("\r\nMETHOD:REQUEST\r\nBEGIN:VFREEBUSY\r\n"));
+        assert!(ics.contains("\r\nDTSTART:20261109T000000Z\r\nDTEND:20261110T000000Z\r\n"));
+        assert!(ics.contains("\r\nORGANIZER:mailto:me@example.test\r\n"));
+        assert!(ics
+            .contains("\r\nATTENDEE:mailto:a@example.test\r\nATTENDEE:mailto:b@example.test\r\n"));
+        assert!(ics.ends_with("END:VFREEBUSY\r\nEND:VCALENDAR\r\n"));
+    }
+
+    #[test]
+    fn schedule_response_keeps_answered_recipients_with_their_periods() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<C:schedule-response xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <C:response>
+    <C:recipient><D:href>mailto:Lena@Example.test</D:href></C:recipient>
+    <C:request-status>2.0;Success</C:request-status>
+    <C:calendar-data>BEGIN:VCALENDAR&#13;
+VERSION:2.0&#13;
+METHOD:REPLY&#13;
+BEGIN:VFREEBUSY&#13;
+FREEBUSY;FBTYPE=BUSY:20261109T090000Z/20261109T100000Z,20261109T140000Z/PT30M&#13;
+FREEBUSY;FBTYPE=BUSY-TENTATIVE:20261109T110000Z/20261109T113000Z&#13;
+FREEBUSY;FBTYPE=FREE:20261109T120000Z/20261109T130000Z&#13;
+FREEBUSY:20261109T150000Z/PT1H&#13;
+END:VFREEBUSY&#13;
+END:VCALENDAR&#13;
+</C:calendar-data>
+  </C:response>
+  <C:response>
+    <C:recipient>mailto:nobody@example.test</C:recipient>
+    <C:request-status>3.7;Invalid calendar user</C:request-status>
+  </C:response>
+</C:schedule-response>"#;
+        let asked = [
+            "lena@example.test".to_string(),
+            "nobody@example.test".to_string(),
+        ];
+        let known = parse_schedule_response(xml, &asked);
+        assert_eq!(known.len(), 1);
+        let lena = &known["lena@example.test"];
+        let spans = lena
+            .iter()
+            .map(|block| {
+                (
+                    block.start.format("%H:%M").to_string(),
+                    block.end.format("%H:%M").to_string(),
+                    block.tentative,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            spans,
+            vec![
+                ("09:00".into(), "10:00".into(), false),
+                ("11:00".into(), "11:30".into(), true),
+                ("14:00".into(), "14:30".into(), false),
+                ("15:00".into(), "16:00".into(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn ics_durations_cover_weeks_days_and_times() {
+        assert_eq!(
+            parse_ics_duration("PT1H30M"),
+            Some(chrono::Duration::minutes(90))
+        );
+        assert_eq!(parse_ics_duration("P1D"), Some(chrono::Duration::days(1)));
+        assert_eq!(parse_ics_duration("P1W"), Some(chrono::Duration::weeks(1)));
+        assert_eq!(
+            parse_ics_duration("P1DT2H"),
+            Some(chrono::Duration::hours(26))
+        );
+        assert_eq!(parse_ics_duration("1H"), None);
+        assert_eq!(parse_ics_duration("PT5"), None);
+    }
+
+    #[test]
+    fn mailto_accepts_any_case_and_needs_an_address() {
+        assert_eq!(
+            mailto("MAILTO:Lena@Example.test"),
+            Some("lena@example.test".into())
+        );
+        assert_eq!(mailto("mailto:"), None);
+        assert_eq!(mailto("/principals/lena/"), None);
+    }
 
     #[test]
     fn normalizes_https_server_names() {

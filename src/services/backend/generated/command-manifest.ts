@@ -839,6 +839,18 @@ export default {
                 }
             }
         },
+        "find_free_slots": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::availability::FreeSlotsInput"
+                    }
+                }
+            }
+        },
         "focus_draft_editor": {
             "kind": "object",
             "fields": {
@@ -1760,6 +1772,18 @@ export default {
                     "required": true,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "query_free_busy": {
+            "kind": "object",
+            "fields": {
+                "input": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::availability::FreeBusyInput"
                     }
                 }
             }
@@ -3089,6 +3113,194 @@ export default {
                     "required": false,
                     "shape": {
                         "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::availability::EditingEventInput": {
+            "kind": "object",
+            "fields": {
+                "ends_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "event_id": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "starts_at": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                }
+            }
+        },
+        "app::commands::availability::FreeBusyInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "attendees": {
+                    "required": false,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "editing": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "ref",
+                            "name": "app::commands::availability::EditingEventInput"
+                        }
+                    }
+                },
+                "ends_at": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "excluded_calendars": {
+                    "required": false,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "starts_at": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "time_zone": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                }
+            }
+        },
+        "app::commands::availability::FreeSlotsInput": {
+            "kind": "object",
+            "fields": {
+                "account_id": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "attendees": {
+                    "required": false,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "duration_minutes": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "editing": {
+                    "required": false,
+                    "shape": {
+                        "kind": "optional",
+                        "item": {
+                            "kind": "ref",
+                            "name": "app::commands::availability::EditingEventInput"
+                        }
+                    }
+                },
+                "excluded_calendars": {
+                    "required": false,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
+                    }
+                },
+                "from": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "time_zone": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "working_days": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "working_hours": {
+                    "required": true,
+                    "shape": {
+                        "kind": "ref",
+                        "name": "app::commands::availability::WorkingHoursInput"
+                    }
+                }
+            }
+        },
+        "app::commands::availability::WorkingHoursInput": {
+            "kind": "object",
+            "fields": {
+                "end_minute": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "start_minute": {
+                    "required": true,
+                    "shape": {
+                        "kind": "value"
+                    }
+                },
+                "weekdays": {
+                    "required": true,
+                    "shape": {
+                        "kind": "array",
+                        "item": {
+                            "kind": "value"
+                        }
                     }
                 }
             }

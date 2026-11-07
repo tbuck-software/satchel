@@ -498,6 +498,13 @@ function focusEditor() {
   editor.value?.commands.focus();
 }
 
+/** Insert ready-made, already escaped HTML at the caret. False when there is no editor to take it. */
+function insertHtml(html: string): boolean {
+  const current = editor.value;
+  if (!current || current.isDestroyed) return false;
+  return current.chain().focus().insertContent(html).run();
+}
+
 function shortcutHint(binding: string): ShortcutHint {
   return { label: formatBinding(binding), keys: bindingKeycaps(binding), aria: ariaKeyshortcuts(binding) };
 }
@@ -607,7 +614,7 @@ function removeQuotedHistory() {
   transaction.run();
 }
 
-defineExpose({ focusEditor, insertAttachmentImage, removeAttachmentImage, removeQuotedHistory });
+defineExpose({ focusEditor, insertHtml, insertAttachmentImage, removeAttachmentImage, removeQuotedHistory });
 </script>
 
 <template>

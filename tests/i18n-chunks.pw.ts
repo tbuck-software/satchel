@@ -102,6 +102,25 @@ for (const locale of ['en', 'de'] as const) {
       expect(missing).toEqual([]);
     });
 
+    test('the availability strip and the insert-availability dialog show no raw keys', async ({ page }) => {
+      const { missing } = watch(page);
+      // The event editor's strip and the composer's dialog are lazy chunks of
+      // their own, inside the already lazy calendar and composer.
+      await page.goto('/calendar');
+      await page.getByRole('button', { name: locale === 'en' ? 'New event' : 'Neuer Termin', exact: true }).first().click();
+      await page.getByPlaceholder('person@example.com, team@example.com').fill('lena.vogel@app.io, marco@studio-rossi.example');
+      const strip = page.getByTestId('availability-strip');
+      await expect(strip.locator('.strip__track--unknown')).toHaveCount(1);
+      await strip.getByTestId('availability-next-free').click();
+      const found = await rawKeys(page, 'availability strip');
+      await page.goto('/compose');
+      await page.getByTestId('compose-insert-availability').click();
+      await expect(page.getByTestId('insert-availability-preview')).toBeVisible();
+      found.push(...await rawKeys(page, 'insert availability'));
+      expect(found).toEqual([]);
+      expect(missing).toEqual([]);
+    });
+
     test('the reader, shortcut help and palette show no raw keys', async ({ page }) => {
       const { missing } = watch(page);
       await page.goto('/inbox');

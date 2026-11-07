@@ -689,18 +689,13 @@ async fn load_upcoming_calendar_events_at(
         } else {
             now
         };
-        let recurrences = row
-            .raw_ics
-            .as_deref()
-            .map(|raw| {
-                crate::email::calendar::upcoming_recurrence_occurrences(
-                    raw,
-                    recurrence_now,
-                    MAX_UPCOMING_EVENTS,
-                )
-            })
-            .unwrap_or_default();
-        if !recurrences.is_empty() {
+        // `Some`, even empty, is the series as it stands (an empty list: every
+        // upcoming occurrence excluded or cancelled). `None` is no series, or
+        // one the expander cannot follow: the row's own slot stands for it.
+        let recurrences = row.raw_ics.as_deref().and_then(|raw| {
+            crate::email::calendar::recurrence_occurrences(raw, recurrence_now, MAX_UPCOMING_EVENTS)
+        });
+        if let Some(recurrences) = recurrences {
             events.extend(
                 recurrences
                     .into_iter()
@@ -1339,6 +1334,72 @@ mod tests {
             }
             other => panic!("unexpected payload: {other:?}"),
         }
+    }
+
+    /// The tray shares the series expander with free/busy: a skipped date
+    /// stays out, a moved occurrence shows at its new time, a cancelled one
+    /// not at all.
+    #[tokio::test]
+    async fn upcoming_series_honours_exdate_and_moved_or_cancelled_occurrences() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+        sqlx::query(
+            "CREATE TABLE calendar_events (
+               id TEXT PRIMARY KEY, account_id TEXT, uid TEXT, title TEXT,
+               starts_at TEXT, ends_at TEXT, all_day INTEGER, location TEXT,
+               raw_ics TEXT
+             );
+             CREATE TABLE calendar_invites (
+               id TEXT PRIMARY KEY, account_id TEXT, uid TEXT, summary TEXT,
+               starts_at TEXT, ends_at TEXT, all_day INTEGER, location TEXT,
+               method TEXT, cancelled INTEGER, rsvp_status TEXT
+             );",
+        )
+        .execute(&pool)
+        .await
+        .expect("schema");
+        let series = concat!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n",
+            "BEGIN:VEVENT\r\nUID:daily\r\nSUMMARY:Daily\r\n",
+            "DTSTART:20261109T090000Z\r\nDURATION:PT15M\r\nRRULE:FREQ=DAILY;COUNT=5\r\n",
+            "EXDATE:20261110T090000Z\r\nEND:VEVENT\r\n",
+            "BEGIN:VEVENT\r\nUID:daily\r\nRECURRENCE-ID:20261111T090000Z\r\n",
+            "DTSTART:20261111T130000Z\r\nDTEND:20261111T131500Z\r\nEND:VEVENT\r\n",
+            "BEGIN:VEVENT\r\nUID:daily\r\nRECURRENCE-ID:20261112T090000Z\r\n",
+            "DTSTART:20261112T090000Z\r\nSTATUS:CANCELLED\r\nEND:VEVENT\r\n",
+            "END:VCALENDAR\r\n",
+        );
+        sqlx::query(
+            "INSERT INTO calendar_events
+             (id, account_id, uid, title, starts_at, ends_at, all_day, location, raw_ics)
+             VALUES ('daily', 'account', 'daily', 'Daily', '2026-11-09T09:00:00Z',
+                     '2026-11-09T09:15:00Z', 0, NULL, ?)",
+        )
+        .bind(series)
+        .execute(&pool)
+        .await
+        .expect("series");
+
+        let now = chrono::DateTime::parse_from_rfc3339("2026-11-08T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let events = load_upcoming_calendar_events_at(&pool, now)
+            .await
+            .expect("calendar query");
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| (event.starts_at.as_str(), event.ends_at.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("2026-11-09T09:00:00Z", "2026-11-09T09:15:00Z"),
+                ("2026-11-11T13:00:00Z", "2026-11-11T13:15:00Z"),
+                ("2026-11-13T09:00:00Z", "2026-11-13T09:15:00Z"),
+            ]
+        );
     }
 
     #[tokio::test]

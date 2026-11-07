@@ -8,6 +8,8 @@ use crate::drafts::send_queue::{build_send_action, SendActionPayload};
 use crate::sync::queue::{QueuedAction, SyncQueue};
 use sqlx::SqlitePool;
 
+pub mod availability;
+pub mod free_busy;
 mod ics;
 mod outlook;
 
@@ -241,7 +243,10 @@ pub async fn save_event(
                     remote_etag: remote.as_ref().and_then(|value| value.etag.as_deref()),
                     collection_href: remote.as_ref().map(|value| value.collection_href.as_str()),
                     raw_ics: Some(&ics),
-                    flags: Default::default(),
+                    flags: crate::db::calendar::EventFlags {
+                        transparent: availability::ics_transparent(&ics),
+                        ..Default::default()
+                    },
                 },
             )
             .await?;
