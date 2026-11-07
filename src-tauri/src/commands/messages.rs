@@ -2324,24 +2324,32 @@ fn is_owned_sender(candidate: &str, primary: &str, aliases: &[String]) -> bool {
         .any(|owned| owned.trim().eq_ignore_ascii_case(candidate))
 }
 
-async fn ensure_sender_is_owned(
+/// The address this send goes out under, as the composer shows it: the chosen
+/// alias, or the account's own address when none was chosen. Every later step
+/// (draft snapshot, queue payload, SMTP envelope, sent copy) reads this value,
+/// so none of them has to guess and none can store a message without sender.
+async fn resolve_sender(
     pool: &SqlitePool,
     account_id: &str,
     from_address: Option<&str>,
-) -> CommandResult<()> {
-    let Some(candidate) = from_address
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(());
-    };
+) -> CommandResult<String> {
     let primary =
         sqlx::query_scalar::<_, String>("SELECT email FROM accounts WHERE id = ? LIMIT 1")
             .bind(account_id)
             .fetch_optional(pool)
             .await
             .map_err(CommandError::unexpected)?
-            .unwrap_or_default();
+            .ok_or_else(|| CommandError::new("backend.errors.accountNotFound"))?;
+    let Some(candidate) = from_address
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        let primary = primary.trim();
+        if primary.is_empty() {
+            return Err(CommandError::new("backend.errors.senderAddressMissing"));
+        }
+        return Ok(primary.to_string());
+    };
     let aliases = AliasRepository::new(pool)
         .list(Some(account_id))
         .await
@@ -2351,7 +2359,7 @@ async fn ensure_sender_is_owned(
         .collect::<Vec<_>>();
 
     if is_owned_sender(candidate, &primary, &aliases) {
-        return Ok(());
+        return Ok(candidate.to_string());
     }
     Err(CommandError::new("backend.errors.senderAddressNotOwned")
         .with_param("address", candidate.to_string()))
@@ -2374,7 +2382,8 @@ pub async fn send_message(
         return Err(CommandError::from("missing recipient address"));
     }
     ensure_attachments_within_limit(&input.attachments)?;
-    ensure_sender_is_owned(pool.inner(), &account_id, input.from_address.as_deref()).await?;
+    input.from_address =
+        Some(resolve_sender(pool.inner(), &account_id, input.from_address.as_deref()).await?);
     apply_selected_signature(pool.inner(), &account_id, &mut input).await?;
 
     let mut scheduled_for = parse_scheduled_for(input.scheduled_for.as_deref())?;
@@ -3288,6 +3297,53 @@ mod tests {
         assert!(!is_owned_sender("   ", "max@firma.de", &aliases));
         // A deleted alias stops being owned the moment it leaves the list.
         assert!(!is_owned_sender("sales@firma.de", "max@firma.de", &[]));
+    }
+
+    /// A reply from the account's own address arrives without `from_address`;
+    /// the send must carry the address the composer showed, not nothing.
+    #[tokio::test]
+    async fn a_send_without_a_chosen_identity_goes_out_under_the_account_address() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../crates/satchel-core/src/db/migrations")
+            .run(&pool)
+            .await
+            .unwrap();
+        for sql in [
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at) VALUES ('a', 'Account', 'me@example.test', 'imap', '{}', '', '', '')",
+            "INSERT INTO accounts (id, display_name, email, provider, config, credentials_ref, created_at, updated_at) VALUES ('blank', 'Blank', '  ', 'imap', '{}', '', '', '')",
+            "INSERT INTO account_aliases (id, account_id, email, created_at, updated_at) VALUES ('al', 'a', 'sales@example.test', '', '')",
+        ] {
+            sqlx::query(sql).execute(&pool).await.unwrap();
+        }
+
+        for missing in [None, Some(""), Some("   ")] {
+            assert_eq!(
+                super::resolve_sender(&pool, "a", missing).await.unwrap(),
+                "me@example.test"
+            );
+        }
+        assert_eq!(
+            super::resolve_sender(&pool, "a", Some(" sales@example.test "))
+                .await
+                .unwrap(),
+            "sales@example.test"
+        );
+        let refused = super::resolve_sender(&pool, "a", Some("boss@elsewhere.test"))
+            .await
+            .unwrap_err();
+        assert_eq!(refused.key, "backend.errors.senderAddressNotOwned");
+        let missing = super::resolve_sender(&pool, "blank", None)
+            .await
+            .unwrap_err();
+        assert_eq!(missing.key, "backend.errors.senderAddressMissing");
+        let gone = super::resolve_sender(&pool, "deleted", None)
+            .await
+            .unwrap_err();
+        assert_eq!(gone.key, "backend.errors.accountNotFound");
     }
 
     #[test]

@@ -359,6 +359,7 @@ async fn save_draft_in_transaction(
     cancel_obsolete_draft_deletions(tx, &id, &input.account_id)
         .await
         .map_err(DraftError::unexpected)?;
+    let from_address = draft_sender(tx, input).await?;
 
     sqlx::query(
         "INSERT INTO messages (id, account_id, folder_id, thread_id, message_id_header, in_reply_to, references_header, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, date, body_text, body_html, snippet, is_read, is_starred, is_draft, is_sent, has_attachments, remote_uid, remote_id, raw_size, raw_headers, scheduled_for, remote_draft_id, draft_attachments_json, signature_id, signature_variant, signature_override_text, signature_override_html, created_at, updated_at, draft_revision)
@@ -395,7 +396,7 @@ async fn save_draft_in_transaction(
     .bind(&folder_id)
     .bind(thread_id.as_deref())
     .bind(format!("<{id}@satchel.draft>"))
-    .bind(input.from_address.as_deref())
+    .bind(&from_address)
     .bind(input.from_name.as_deref())
     .bind(&to_json)
     .bind(&cc_json)
@@ -475,6 +476,30 @@ async fn save_draft_in_transaction(
     }
 
     Ok((row.into(), now))
+}
+
+/// The address a draft row is stored under: the identity the composer named,
+/// or the account's own address when it named none. The composer leaves
+/// `from_address` empty for the primary identity, and `messages.from_address`
+/// is `NOT NULL`, so this lookup is what keeps such a save from failing.
+async fn draft_sender(tx: &mut Transaction<'_, Sqlite>, input: &DraftInput) -> DraftResult<String> {
+    if let Some(chosen) = input
+        .from_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(chosen.to_string());
+    }
+    let primary: Option<String> = sqlx::query_scalar("SELECT email FROM accounts WHERE id = ?")
+        .bind(&input.account_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(DraftError::unexpected)?;
+    primary
+        .map(|email| email.trim().to_string())
+        .filter(|email| !email.is_empty())
+        .ok_or(DraftError::SenderAddressMissing)
 }
 
 fn draft_input_for_send(
@@ -1417,6 +1442,38 @@ mod tests {
                     ('B', 'B', 'b@example.test', 'imap', '{}', '', '2026-01-01', '2026-01-01');",
         ).execute(&pool).await.expect("accounts");
         pool
+    }
+
+    #[tokio::test]
+    async fn a_draft_without_a_chosen_identity_is_stored_under_the_account_address() {
+        let pool = draft_test_pool().await;
+        let queue = crate::sync::queue::SyncQueue::new();
+        for from in [None, Some(String::new()), Some("  ".to_string())] {
+            let mut input = draft_input("A", "body");
+            input.from_address = from;
+            let (draft, _) = save(&pool, &queue, &input).await.unwrap();
+            assert_eq!(draft.from_address.as_deref(), Some("a@example.test"));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_draft_whose_account_has_no_address_names_the_missing_sender() {
+        let pool = draft_test_pool().await;
+        let queue = crate::sync::queue::SyncQueue::new();
+        sqlx::query("UPDATE accounts SET email = '' WHERE id = 'A'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut input = draft_input("A", "body");
+        input.from_address = None;
+        let error = save(&pool, &queue, &input).await.unwrap_err();
+        assert!(matches!(error, super::DraftError::SenderAddressMissing));
+        assert_eq!(error.message_key(), "backend.errors.senderAddressMissing");
+        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 0);
     }
 
     #[tokio::test]
@@ -2548,6 +2605,31 @@ mod queued_send_tests {
             Some(chrono::Utc::now() + chrono::Duration::days(1)),
         )
         .unwrap()
+    }
+
+    /// The composer leaves `from_address` empty for the account's own address
+    /// (it only names an alias). A queued send still keeps its draft snapshot,
+    /// and that row needs a sender.
+    #[tokio::test]
+    async fn queued_send_from_the_primary_identity_keeps_a_sender_on_its_draft() {
+        for id in [None, Some("reply-draft")] {
+            let (pool, queue) = fixture().await;
+            let mut action = action(id);
+            action.payload["input"]["from_address"] = serde_json::Value::Null;
+            if id.is_none() {
+                action.payload["input"]["draft_id"] = serde_json::json!("draft-new");
+            }
+            enqueue_send_with_draft(&pool, &queue, &action)
+                .await
+                .unwrap();
+            let draft_id = id.unwrap_or("draft-new");
+            let from: String = sqlx::query_scalar("SELECT from_address FROM messages WHERE id = ?")
+                .bind(draft_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            assert_eq!(from, "a@example.test");
+        }
     }
 
     #[tokio::test]

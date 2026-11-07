@@ -1026,7 +1026,7 @@ async function send() {
       threadId: contextThreadId.value,
       replyToMessageId: replyToMessageId.value,
       attachments: attachments.value,
-      fromAddress: aliasEmail.value,
+      fromAddress: fromAddress.value,
       fromName: activeAccount.value.displayName,
       replyTo: replyTo.value,
       draftId: draftId.value,

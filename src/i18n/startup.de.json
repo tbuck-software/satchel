@@ -289,6 +289,7 @@
       "restoreStagingChanged": "Die vorgemerkte Sicherung ist unvollständig oder wurde verändert. Merke die Sicherung erneut vor.",
       "revealTargetBlocked": "Dieses Ziel kann nicht im Dateimanager geöffnet werden.",
       "scheduledTimeInvalid": "Wähle einen gültigen Sendezeitpunkt in der Zukunft.",
+      "senderAddressMissing": "Dieses Konto hat keine Absenderadresse. Trage sie unter Einstellungen → Konten ein und sende erneut.",
       "senderAddressNotOwned": "\"{address}\" ist weder die Adresse dieses Kontos noch einer seiner Aliase. Wähle einen anderen Absender.",
       "senderPreferenceAccountInvalid": "Das Konto für diese Absenderpräferenz ist ungültig.",
       "senderPreferenceCategoryInvalid": "Wähle eine gültige Absenderkategorie.",
