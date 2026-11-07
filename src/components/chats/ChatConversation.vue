@@ -15,7 +15,10 @@ import { useMessagesStore } from '@/stores/messages';
 import { useUiStore } from '@/stores/ui';
 import { useThreadActions } from '@/composables/useThreadActions';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
+import { usePrompt } from '@/composables/usePrompt';
 import { backendErrorLabel } from '@/utils/backendErrorLabels';
+import { backendErrorKey } from '@/utils/backendErrors';
 import type { Thread } from '@/types/mail';
 import ChatComposer from './ChatComposer.vue';
 import { chatDays, relativeDay } from './chatText';
@@ -37,6 +40,8 @@ const messagesStore = useMessagesStore();
 const chatsStore = useChatsStore();
 const threadActions = useThreadActions();
 const toast = useToast();
+const { ask: confirm } = useConfirm();
+const { ask: prompt } = usePrompt();
 
 const meta = ref<ChatMeta | null>(null);
 const metaFailed = ref(false);
@@ -146,11 +151,67 @@ onBeforeUnmount(() => {
   if (markReadTimer) clearTimeout(markReadTimer);
 });
 
+/**
+ * Owner decision: an encrypted reply is signed. With the key locked, ask to
+ * unlock it first; only when that is declined, offer to send encrypted but
+ * unsigned. Answers whether to send unsigned, or `null` to keep the text.
+ */
+async function prepareSignature(): Promise<boolean | null> {
+  const current = meta.value;
+  if (!current?.encrypts || current.own_key_unlocked || !current.own_key_id) return false;
+  const keyId = current.own_key_id;
+  try {
+    // A key without a passphrase, or one Satchel keeps, unlocks without a question.
+    await chatsStore.unlockKey(keyId);
+    void loadMeta(threadId.value);
+    return false;
+  } catch {
+    // It needs the passphrase.
+  }
+  for (;;) {
+    const passphrase = await prompt({
+      title: t('chats.unlock.title'),
+      body: t('chats.unlock.body', { address: current.own_address }),
+      label: t('chats.unlock.label'),
+      confirmLabel: t('chats.unlock.confirm'),
+      inputType: 'password',
+    });
+    if (passphrase === null) break;
+    try {
+      await chatsStore.unlockKey(keyId, passphrase);
+      void loadMeta(threadId.value);
+      return false;
+    } catch (error) {
+      toast.error(backendErrorKey(error) === 'backend.errors.pgpPassphraseMismatch'
+        ? t('chats.unlock.wrong')
+        : t('chats.unlock.failed'));
+    }
+  }
+  const unsigned = await confirm({
+    title: t('chats.unsigned.title'),
+    body: t('chats.unsigned.body'),
+    confirmLabel: t('chats.unsigned.confirm'),
+  });
+  return unsigned ? true : null;
+}
+
 async function send(text: string) {
   const id = threadId.value;
   sending.value = true;
   try {
-    const result = await chatsStore.send(id, text);
+    let unsigned = await prepareSignature();
+    if (unsigned === null) return;
+    let result;
+    try {
+      result = await chatsStore.send(id, text, unsigned);
+    } catch (error) {
+      // Locked since the chat opened (another window, a restart): ask now.
+      if (backendErrorKey(error) !== 'backend.errors.chatKeyLocked') throw error;
+      await loadMeta(id);
+      unsigned = await prepareSignature();
+      if (unsigned === null) return;
+      result = await chatsStore.send(id, text, unsigned);
+    }
     drafts.delete(id);
     if (id === threadId.value) draft.value = '';
     if (result.status === 'queued' || result.status === 'delivery_unknown') {

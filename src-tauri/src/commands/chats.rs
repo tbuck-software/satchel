@@ -41,6 +41,10 @@ pub struct ChatMetaDto {
     /// Whether this account has an OpenPGP key for `own_address`, which
     /// Autocrypt needs to announce and encrypt.
     pub own_key: bool,
+    /// The own key's id, for unlocking it before an encrypted reply.
+    pub own_key_id: Option<String>,
+    /// Whether the own key is unlocked this session, so it can sign.
+    pub own_key_unlocked: bool,
     /// Whether the next message will be end-to-end encrypted.
     pub encrypts: bool,
 }
@@ -51,6 +55,10 @@ pub struct ChatMetaDto {
 pub struct SendChatMessageInput {
     pub thread_id: String,
     pub text: String,
+    /// Send encrypted without a signature although the own key is locked.
+    /// Only after the sender declined to unlock it and said so.
+    #[serde(default)]
+    pub allow_unsigned: bool,
 }
 
 impl From<ChatError> for CommandError {
@@ -89,6 +97,29 @@ impl ChatEncryptionPlan {
     }
 }
 
+/// Whether an encrypted chat reply may go out, and whether it is signed.
+///
+/// Owner decision (PR #125): Autocrypt messages are "signed by the user's
+/// Autocrypt key" ("Message encryption"), so a locked key holds an encrypted
+/// reply back until it is unlocked. Only a sender who declined to unlock and
+/// then chose it sends encrypted but unsigned. Returns whether to sign.
+pub(crate) fn signing_decision(
+    encrypts: bool,
+    key_unlocked: bool,
+    allow_unsigned: bool,
+) -> Result<bool, &'static str> {
+    if !encrypts {
+        return Ok(false);
+    }
+    if key_unlocked {
+        return Ok(true);
+    }
+    if allow_unsigned {
+        return Ok(false);
+    }
+    Err("backend.errors.chatKeyLocked")
+}
+
 /// Satchel announces `prefer-encrypt=mutual`, as Delta Chat does by default
 /// (spec.md "Encryption": "`prefer-encrypt=mutual` MAY be set by default").
 pub(crate) const OWN_PREFER_ENCRYPT: PreferEncrypt = PreferEncrypt::Mutual;
@@ -124,7 +155,7 @@ pub(crate) async fn chat_encryption_plan(
     })
 }
 
-fn meta_dto(chat: ChatThread, plan: &ChatEncryptionPlan) -> ChatMetaDto {
+fn meta_dto(chat: ChatThread, plan: &ChatEncryptionPlan, key_unlocked: bool) -> ChatMetaDto {
     let members = chat
         .recipients
         .iter()
@@ -148,13 +179,23 @@ fn meta_dto(chat: ChatThread, plan: &ChatEncryptionPlan) -> ChatMetaDto {
         group_name: chat.group_name,
         members,
         own_key: plan.own_key.is_some(),
+        own_key_id: plan.own_key.as_ref().map(|(id, _)| id.clone()),
+        own_key_unlocked: plan.own_key.is_some() && key_unlocked,
         encrypts: plan.encrypts(),
+    }
+}
+
+async fn own_key_unlocked(state: &AppState, plan: &ChatEncryptionPlan) -> bool {
+    match plan.own_key.as_ref() {
+        Some((key_id, _)) => crate::commands::pgp::key_is_unlocked(state, key_id).await,
+        None => false,
     }
 }
 
 #[tauri::command]
 pub async fn get_chat_meta(
     app: AppHandle,
+    state: tauri::State<'_, AppState>,
     pool: tauri::State<'_, SqlitePool>,
     thread_id: String,
 ) -> CommandResult<ChatMetaDto> {
@@ -168,11 +209,12 @@ pub async fn get_chat_meta(
     )
     .await
     .map_err(CommandError::unexpected)?;
-    Ok(meta_dto(chat, &plan))
+    let unlocked = own_key_unlocked(state.inner(), &plan).await;
+    Ok(meta_dto(chat, &plan, unlocked))
 }
 
 /// The outgoing message for a quick reply in `chat`.
-fn chat_reply_input(chat: &ChatThread, text: &str) -> OutgoingMessageInput {
+fn chat_reply_input(chat: &ChatThread, text: &str, allow_unsigned: bool) -> OutgoingMessageInput {
     let sender = if chat.account_name.trim().is_empty() {
         chat.own_address.as_str()
     } else {
@@ -188,6 +230,7 @@ fn chat_reply_input(chat: &ChatThread, text: &str) -> OutgoingMessageInput {
         chat: Some(ChatSendOptions {
             group_id: chat.group_id.clone(),
             group_name: chat.group_name.clone(),
+            allow_unsigned,
         }),
         ..Default::default()
     }
@@ -213,7 +256,20 @@ pub async fn send_chat_message(
     if chat.recipients.is_empty() {
         return Err(CommandError::new("backend.errors.chatNoRecipient"));
     }
-    let outgoing = chat_reply_input(&chat, &text);
+    // Ask before queueing, not after: a reply held back in the outbox for a
+    // passphrase is one the sender thinks has gone.
+    let plan = chat_encryption_plan(
+        pool.inner(),
+        &app,
+        &chat.account_id,
+        &chat.own_address,
+        &chat.recipients,
+    )
+    .await
+    .map_err(CommandError::unexpected)?;
+    let unlocked = own_key_unlocked(state.inner(), &plan).await;
+    signing_decision(plan.encrypts(), unlocked, input.allow_unsigned).map_err(CommandError::new)?;
+    let outgoing = chat_reply_input(&chat, &text, input.allow_unsigned);
     crate::commands::messages::send_message_inner(
         app,
         state.inner(),
@@ -246,7 +302,11 @@ mod tests {
 
     #[test]
     fn a_reply_answers_the_latest_message_with_chat_headers() {
-        let input = chat_reply_input(&chat(Some(("abcDEF123_-x", "Family"))), "Hello group");
+        let input = chat_reply_input(
+            &chat(Some(("abcDEF123_-x", "Family"))),
+            "Hello group",
+            false,
+        );
         assert_eq!(input.to, vec!["lena@example.test", "jonas@example.test"]);
         assert_eq!(input.subject, "Chat: Family: Hello group");
         assert_eq!(input.reply_to_message_id.as_deref(), Some("m-last"));
@@ -259,7 +319,8 @@ mod tests {
         assert!(input.body_html.is_none());
         assert!(input.signature_id.is_none());
 
-        let one = chat_reply_input(&chat(None), "hi");
+        let one = chat_reply_input(&chat(None), "hi", true);
+        assert!(one.chat.as_ref().is_some_and(|c| c.allow_unsigned));
         assert_eq!(one.subject, "Message from Tom");
         assert!(one.chat.as_ref().is_some_and(|c| c.group_id.is_none()));
     }
@@ -274,7 +335,9 @@ mod tests {
             ],
             peer_keys: vec!["lena-key".into()],
         };
-        let dto = meta_dto(chat(None), &plan);
+        let dto = meta_dto(chat(None), &plan, false);
+        assert_eq!(dto.own_key_id.as_deref(), Some("k"));
+        assert!(!dto.own_key_unlocked);
         assert_eq!(dto.members[0].name.as_deref(), Some("Lena"));
         assert_eq!(dto.members[0].encryption, "encrypt");
         assert_eq!(dto.members[1].encryption, "disable");
@@ -294,5 +357,20 @@ mod tests {
             ..all
         };
         assert!(!no_own_key.encrypts());
+    }
+
+    #[test]
+    fn a_locked_key_holds_an_encrypted_reply_unless_unsigned_was_chosen() {
+        // Unencrypted: nothing to sign, nothing to ask.
+        assert_eq!(signing_decision(false, false, false), Ok(false));
+        // Encrypted with the key unlocked: signed.
+        assert_eq!(signing_decision(true, true, false), Ok(true));
+        // Encrypted, locked: held back with a key the frontend answers with an unlock.
+        assert_eq!(
+            signing_decision(true, false, false),
+            Err("backend.errors.chatKeyLocked")
+        );
+        // The sender declined to unlock and chose unsigned.
+        assert_eq!(signing_decision(true, false, true), Ok(false));
     }
 }

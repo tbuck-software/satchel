@@ -3,7 +3,8 @@
     "backend": {
       "errors": {
         "chatNotAChat": "This is not a chat.",
-        "chatNoRecipient": "This chat has no one to send to."
+        "chatNoRecipient": "This chat has no one to send to.",
+        "chatKeyLocked": "Unlock your OpenPGP key to send this encrypted reply."
       }
     },
     "chats": {
@@ -37,6 +38,19 @@
         "sending": "Sending…",
         "sendFailed": "The message could not be sent.",
         "queued": "Queued. It goes out when the connection is back."
+      },
+      "unlock": {
+        "title": "Unlock your key to send",
+        "body": "This reply is end-to-end encrypted and signed with your OpenPGP key for {address}.",
+        "label": "Passphrase",
+        "confirm": "Unlock and send",
+        "wrong": "That passphrase does not unlock the key.",
+        "failed": "The key could not be unlocked."
+      },
+      "unsigned": {
+        "title": "Send without your signature?",
+        "body": "Your key stays locked. The reply is still end-to-end encrypted, but the recipients cannot check that it came from you.",
+        "confirm": "Send unsigned"
       }
     }
   },
@@ -44,7 +58,8 @@
     "backend": {
       "errors": {
         "chatNotAChat": "Das ist kein Chat.",
-        "chatNoRecipient": "Dieser Chat hat keinen Empfänger."
+        "chatNoRecipient": "Dieser Chat hat keinen Empfänger.",
+        "chatKeyLocked": "Entsperre deinen OpenPGP-Schlüssel, um diese verschlüsselte Antwort zu senden."
       }
     },
     "chats": {
@@ -78,6 +93,19 @@
         "sending": "Wird gesendet …",
         "sendFailed": "Die Nachricht konnte nicht gesendet werden.",
         "queued": "In der Warteschlange. Geht raus, sobald die Verbindung wieder da ist."
+      },
+      "unlock": {
+        "title": "Schlüssel entsperren, um zu senden",
+        "body": "Diese Antwort wird Ende-zu-Ende-verschlüsselt und mit deinem OpenPGP-Schlüssel für {address} signiert.",
+        "label": "Passphrase",
+        "confirm": "Entsperren und senden",
+        "wrong": "Diese Passphrase entsperrt den Schlüssel nicht.",
+        "failed": "Der Schlüssel konnte nicht entsperrt werden."
+      },
+      "unsigned": {
+        "title": "Ohne deine Signatur senden?",
+        "body": "Dein Schlüssel bleibt gesperrt. Die Antwort ist trotzdem Ende-zu-Ende-verschlüsselt, aber die Empfänger können nicht prüfen, dass sie von dir kommt.",
+        "confirm": "Unsigniert senden"
       }
     }
   }

@@ -16,6 +16,14 @@ export type ChatMetaDto = {
      */
     own_key: boolean;
     /**
+     * The own key's id, for unlocking it before an encrypted reply.
+     */
+    own_key_id: string | null;
+    /**
+     * Whether the own key is unlocked this session, so it can sign.
+     */
+    own_key_unlocked: boolean;
+    /**
      * Whether the next message will be end-to-end encrypted.
      */
     encrypts: boolean;

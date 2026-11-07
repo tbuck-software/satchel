@@ -5,6 +5,7 @@ import {
   backendGetChatMeta,
   backendListThreads,
   backendSendChatMessage,
+  backendUnlockChatKey,
   type BackendChatMeta,
   type BackendSendMessageResult,
 } from '@/services/backend';
@@ -46,8 +47,8 @@ export const useChatsStore = defineStore('chats', () => {
     return backendGetChatMeta(threadId);
   }
 
-  async function send(threadId: string, text: string): Promise<BackendSendMessageResult> {
-    const result = await loader.mutate(() => backendSendChatMessage(threadId, text));
+  async function send(threadId: string, text: string, allowUnsigned = false): Promise<BackendSendMessageResult> {
+    const result = await loader.mutate(() => backendSendChatMessage(threadId, text, allowUnsigned));
     void load();
     return result;
   }
@@ -58,5 +59,10 @@ export const useChatsStore = defineStore('chats', () => {
     if (chat) chat.unreadCount = 0;
   }
 
-  return { items, loaded, loading, loadFailed, load, meta, send, markRead };
+  /** Unlock the own key for signing; without a passphrase, try what is stored. */
+  async function unlockKey(keyId: string, passphrase?: string): Promise<void> {
+    await backendUnlockChatKey(keyId, passphrase);
+  }
+
+  return { items, loaded, loading, loadFailed, load, meta, send, unlockKey, markRead };
 });

@@ -129,7 +129,7 @@ Empfänger), läuft über `src/utils/appDrag.ts`.
 ### Labs (Experimente)
 
 Ein Experiment hängt an einem Flag in `src/labs/flags.ts` **und**
-`db::labs::LABS_FLAGS` (ADR 0019). Der Start kennt davon nur
+`db::labs::LABS_FLAGS` (ADR 0020). Der Start kennt davon nur
 `src/labs/state.ts` und den Import von `src/labs/runtime.ts`: Store, Route,
 Seitenleisten-Zeile und Tastenfolge bringt die Aktivierung des Flags mit
 (`src/labs/activation.ts`). Wer `@/stores/labs` oder Code des Experiments in

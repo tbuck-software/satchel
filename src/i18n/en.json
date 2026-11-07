@@ -260,6 +260,7 @@
       "calendarRichDescriptionReadOnly": "This description is formatted in Outlook and would lose its links and layout here. Edit it in Outlook.",
       "calendarTimeInvalid": "Enter a valid event time.",
       "calendarTitleRequired": "Enter an event title.",
+      "chatKeyLocked": "Unlock your OpenPGP key to send this encrypted reply.",
       "chatNoRecipient": "This chat has no one to send to.",
       "chatNotAChat": "This is not a chat.",
       "composeWindowUnsupported": "A separate compose window is only available on the desktop.",
@@ -805,7 +806,20 @@
     "showAsMail": "Show as mail",
     "title": "Chats",
     "today": "Today",
+    "unlock": {
+      "body": "This reply is end-to-end encrypted and signed with your OpenPGP key for {address}.",
+      "confirm": "Unlock and send",
+      "failed": "The key could not be unlocked.",
+      "label": "Passphrase",
+      "title": "Unlock your key to send",
+      "wrong": "That passphrase does not unlock the key."
+    },
     "unread": "{count} unread",
+    "unsigned": {
+      "body": "Your key stays locked. The reply is still end-to-end encrypted, but the recipients cannot check that it came from you.",
+      "confirm": "Send unsigned",
+      "title": "Send without your signature?"
+    },
     "yesterday": "Yesterday"
   },
   "cleanup": {
